@@ -50,19 +50,19 @@ let languagePicked = false;
  * language just chosen: each language's words name that language.
  */
 const talkingIn = msg({
-  message: "Great, we’ll talk in English.",
+  message: "Great, we’ll continue in English.",
   comment:
-    "Stephen, as the next step arrives, in the language just chosen. Name your own language, not English: in Dutch “Fijn, dan praten we Nederlands.”",
+    "Stephen, as the next step arrives, in the language just chosen. Name your own language, not English: in Dutch “Helder, dan gaan we verder in het Nederlands.”",
 });
 
 /** What Stephen says of the AI chosen, as the next step arrives. */
 const aiChosen = {
-  grasp: msg`Our own system it is, so the AI is ready to go.`,
-  own: msg`Your own key works, so the AI is ready to go.`,
+  grasp: msg`Great, we’re using our built-in system. The AI is ready.`,
+  own: msg`Your API key is working. The AI is ready.`,
 };
 
 /** What Stephen answers as the admin picks their own key. */
-const ownKey = msg`Sure. Paste your key, and I’ll check that it works.`;
+const ownKey = msg`Sure—paste your key and I’ll check that it works.`;
 
 /**
  * The welcome: the language, chosen from five cards; a press chooses it
@@ -77,12 +77,12 @@ const Welcome = ({ data, onward }: StepProps) => {
   useLeaving(talkingIn);
   return (
     <CalmStep
-      body={t`I’ll set up Grasp with you, one step at a time. Which language would you like?`}
+      body={t`I’ll guide you through setting up Grasp, step by step. Which language do you speak?`}
       centred
       spoken={
         admin === ""
-          ? t`Hi, I’m Stephen. Over the next few minutes we’ll set up Grasp together, and I’ll walk you through every part as we go. First things first: which language shall we talk in?`
-          : t`Hi ${admin}, I’m Stephen. Over the next few minutes we’ll set up Grasp together, and I’ll walk you through every part as we go. First things first: which language shall we talk in?`
+          ? t`Hi, I’m Stephen. I’ll guide you through setting up Grasp—it only takes a few minutes. To start, which language do you speak?`
+          : t`Hi ${admin}, I’m Stephen. I’ll guide you through setting up Grasp—it only takes a few minutes. To start, which language do you speak?`
       }
       title={admin === "" ? t`Hi, I’m Stephen` : t`Hi ${admin}, I’m Stephen`}
     >
@@ -151,23 +151,23 @@ const Ai = ({ data, askedFor, path, go, onward }: StepProps) => {
     }
     onReady();
   };
-  const why = t`Everything Grasp does runs on AI, from reading your documents to every interview.`;
-  let body = `${why} ${t`Paste a key from your provider to connect it. You pay them directly.`}`;
+  const why = t`Everything Grasp does runs on AI—from reading documents to running interviews.`;
+  let body = `${why} ${t`Paste an API key from your provider to connect. You pay them directly.`}`;
   // What Stephen tells about it, as a tutor would: why it's asked, then the
   // choice as it stands on the screen, neither way pressed on them (Ruben:
   // "je moet mensen wel gewoon de keuze altijd geven").
   // Of the language just picked, he has already said a word as the step arrived (talkingIn).
-  const because = t`Everything in Grasp runs on AI: reading your documents, the interviews, the plan. Here you choose which AI that is.`;
+  const because = t`Everything I do—reading your documents, running the interviews, and putting together the plan—runs on AI.`;
   let spoken = `${because} ${t`Paste a key from your company’s provider here. You pay them directly, and I’ll check that it works.`}`;
   if (graspOffered) {
-    body = `${why} ${t`Continue with our own system, or add your own API key if you’d rather.`}`;
-    spoken = `${because} ${t`You can carry on with our own system: it works right away, with nothing to set up. Or, if your company would rather use a provider of its own, you can add your own API key. Either is fine.`}`;
+    body = `${why} ${t`Use our built-in setup, or connect your own API key.`}`;
+    spoken = `${because} ${t`The fastest way is to use our built-in setup; it’s ready right away. If your company prefers its own provider, you can enter your API key here instead.`}`;
   } else if (ready && ai !== null) {
-    body = `${why} ${t`Your own key is connected and works.`}`;
+    body = `${why} ${t`Your API key is connected and ready.`}`;
     spoken = `${because} ${t`Your own key is connected and works. You can keep it, or change it here.`}`;
   } else if (ai === null) {
     // Core couldn't say: no providers are shown, so nothing is asked of them here.
-    body = `${why} ${t`You can set it up later in Settings.`}`;
+    body = `${why} ${t`You can also set this up later in Settings.`}`;
     spoken = `${because} ${t`Don’t let it hold you up, you can set it up later in Settings.`}`;
   }
   const canContinue = ready || way === "own" || graspOffered;
@@ -190,7 +190,7 @@ const Ai = ({ data, askedFor, path, go, onward }: StepProps) => {
         ) : null
       }
       spoken={spoken}
-      title={t`Grasp needs an AI to work`}
+      title={t`Choose your AI`}
     >
       <AiChoice
         ai={ai}

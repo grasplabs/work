@@ -214,7 +214,7 @@ const useWords = (
     return {
       title: t`Connect your work account`,
       body: null,
-      spoken: t`Now let’s get to know your company. If you connect your work account, I can see who works there and in which team, so I know who to talk to later on.`,
+      spoken: t`Next, let’s bring in your company directory. Connect your work account so I can see who works where—that way I’ll know who to reach out to later.`,
     };
   }
   if (suites[0] !== undefined) {
@@ -222,7 +222,7 @@ const useWords = (
     return {
       title: t`Connect your ${signIn} account`,
       body: null,
-      spoken: t`Now let’s get to know your company. If you connect your ${signIn} account, I can see who works there and in which team, so I know who to talk to later on.`,
+      spoken: t`Next, let’s bring in your company directory. Connect your ${signIn} account so I can see who works where—that way I’ll know who to reach out to later.`,
     };
   }
   return {
@@ -277,7 +277,7 @@ const StaffListDrop = ({
         description={
           inUse
             ? t`Your staff list is in. A new one replaces it.`
-            : t`A CSV or Excel file, a row per person`
+            : t`A CSV or Excel file, one row per person`
         }
         disabled={disabled}
         onUpload={onUpload}
@@ -398,8 +398,8 @@ const CompanyError = ({
 
 /** What Stephen says of the company as the next step arrives: known by now, or left for later. */
 const companyLeft = {
-  known: msg`Good, now I know who works where.`,
-  later: msg`No staff list for now, that’s fine. We’ll sort it out together later.`,
+  known: msg`Good, now I have a clear picture of who works where.`,
+  later: msg`No staff list for now—that’s fine. We’ll add it together later.`,
 };
 
 const companyLeftAs = (known: boolean) =>

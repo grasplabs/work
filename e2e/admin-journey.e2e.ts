@@ -208,7 +208,7 @@ test("the admin signs in, gives the staff list, confirms and plans, and the link
   await page.getByRole("button", { name: "Skip for now" }).click();
   await expect(
     page.getByRole("heading", {
-      name: "Do you have anything that explains how you work?",
+      name: "Share documents that explain how you work",
     })
   ).toBeVisible();
   await readOn(page, page.getByRole("button", { name: "Skip for now" }));

@@ -1,11 +1,12 @@
+#
 msgid ""
 msgstr ""
 "POT-Creation-Date: 2026-10-01 20:47+0200\n"
+"Language: de\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=utf-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "X-Generator: @lingui/cli\n"
-"Language: de\n"
 
 #. A statement, quoted. Use the quotation marks of your language.
 #: src/brain/brain.ts
@@ -107,8 +108,8 @@ msgid "{allLeads, plural, one {# lead} other {# leads}}"
 msgstr "{allLeads, plural, one {# Teamleitung} other {# Teamleitungen}}"
 
 #: src/onboarding/leads-step.tsx
-msgid "{allTaking} of {all} take part"
-msgstr "{allTaking} von {all} machen mit"
+msgid "{allTaking} of {all} taking part"
+msgstr "{allTaking} von {all} nehmen teil"
 
 #: src/settings/stephen-card.tsx
 msgid "{answered} of {questions} questions"
@@ -1899,7 +1900,7 @@ msgid "A copy of everything the Brain keeps for you alone: your own sources and 
 msgstr "Eine Kopie von allem, was das Brain nur für Sie aufbewahrt: Ihre eigenen Quellen und was es daraus behält. Nur Sie können sie erstellen und herunterladen, und sie wird mit Ihren Daten gelöscht."
 
 #: src/onboarding/company-step.tsx
-msgid "A CSV or Excel file, a row per person"
+msgid "A CSV or Excel file, one row per person"
 msgstr "Eine CSV- oder Excel-Datei, eine Zeile pro Person"
 
 #: src/drafts/publish-errors.ts
@@ -3642,10 +3643,6 @@ msgstr "Angefragt von {requester} am {date}"
 msgid "Asked by a former member"
 msgstr "Angefragt von einem ehemaligen Mitglied"
 
-#: src/onboarding/sources-step.tsx
-msgid "asked for"
-msgstr "angefragt"
-
 #: src/agents/agent-apps-card.tsx
 #: src/apps/app-access-requests.tsx
 msgid "Asked for"
@@ -4751,7 +4748,7 @@ msgstr "Jede angezeigte {one} auswählen"
 
 #: src/frame/ui-words.tsx
 msgid "Choose files"
-msgstr "Dateien auswählen"
+msgstr "Dateien wählen"
 
 #: src/connections/permissions/permission-choice.tsx
 msgid "Choose myself"
@@ -4773,6 +4770,10 @@ msgstr "Wähle, was Grasp in {app} darf, und melde dich dann dort an."
 msgid "Choose where each line goes. A line you move counts again once you save."
 msgstr "Wählen Sie, wohin jede Zeile geht. Eine Zeile, die Sie verschieben, zählt wieder, sobald Sie speichern."
 
+#: src/onboarding/setup-steps.tsx
+msgid "Choose your AI"
+msgstr "Wähle deine KI"
+
 #: src/onboarding/language-choice.tsx
 msgid "Choose your language"
 msgstr "Wählen Sie Ihre Sprache"
@@ -4788,7 +4789,7 @@ msgstr "Zwischen der KI von Grasp und dem eigenen Schlüssel der Organisation ge
 
 #: src/onboarding/language-cards.tsx
 msgid "Chosen"
-msgstr "Gewählt"
+msgstr "Ausgewählt"
 
 #: src/settings/stephen-audience.tsx
 msgid "Chosen teams"
@@ -5087,9 +5088,13 @@ msgstr "Bestätigt. Mach weiter."
 #: src/connections/app/words.ts
 #: src/connections/integration-item.tsx
 #: src/connections/request-app-dialog.tsx
-#: src/onboarding/ai-choice.tsx
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
+msgid "Connect"
+msgstr "Verbinden"
+
+#: src/onboarding/ai-choice.tsx
+msgctxt "setup"
 msgid "Connect"
 msgstr "Verbinden"
 
@@ -5119,6 +5124,10 @@ msgstr "{name} erneut verbinden"
 #: src/agents/agent-overview.tsx
 msgid "Connect a provider"
 msgstr "Anbieter verbinden"
+
+#: src/onboarding/ai-choice.tsx
+msgid "Connect a provider your company already uses. You pay them directly."
+msgstr "Verbinde einen Anbieter, den dein Unternehmen bereits nutzt. Du zahlst direkt an ihn."
 
 #: src/connections/app/words.ts
 #: src/onboarding/place-picker.tsx
@@ -5150,21 +5159,25 @@ msgstr "Zuerst verbinden: {systems}."
 msgid "Connect the apps your work runs on"
 msgstr "Verbinden Sie die Apps, mit denen Sie arbeiten"
 
+#: src/onboarding/sources-step.tsx
+msgid "Connect the tools where your team keeps files, notes, and internal docs. I’ll only read what you explicitly share."
+msgstr "Verbinde die Tools, in denen dein Team Dateien, Notizen und Dokumente ablegt. Ich lese nur, was du ausdrücklich freigibst."
+
 #: src/onboarding/company-step.tsx
 msgid "Connect your {signIn} account"
-msgstr "Verbinden Sie Ihr {signIn}-Konto"
+msgstr "Verbinde dein {signIn}-Konto"
 
 #: src/onboarding/company-step.tsx
 msgid "Connect your work account"
-msgstr "Verbinden Sie Ihr Arbeitskonto"
+msgstr "Verbinde dein Arbeitskonto"
 
 #: src/onboarding/sources-step.tsx
+msgctxt "setup"
 msgid "connected"
 msgstr "verbunden"
 
 #: src/agents/setup/apps-picker.tsx
 #: src/agents/setup/apps-step.tsx
-#: src/onboarding/ai-choice.tsx
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
 msgid "Connected"
@@ -5172,6 +5185,11 @@ msgstr "Verbunden"
 
 #: src/routes/_shell.connectors.index.tsx
 msgctxt "apps that are connected"
+msgid "Connected"
+msgstr "Verbunden"
+
+#: src/onboarding/ai-choice.tsx
+msgctxt "setup"
 msgid "Connected"
 msgstr "Verbunden"
 
@@ -5213,7 +5231,6 @@ msgstr "Verbunden, direkt"
 msgid "Connected, via Composio"
 msgstr "Verbunden, über Composio"
 
-#: src/onboarding/ai-choice.tsx
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
 msgid "Connecting"
@@ -5234,6 +5251,11 @@ msgstr "Zum Verbinden braucht Ihre Organisation eine eigene Anmelde-App, die Gra
 #: src/routes/_shell.connect-microsoft.tsx
 msgid "Connecting your Microsoft 365"
 msgstr "Ihr Microsoft 365 wird verbunden"
+
+#: src/onboarding/ai-choice.tsx
+msgctxt "setup"
+msgid "Connecting…"
+msgstr "Verbinde…"
 
 #: src/apps/app-access-requests.tsx
 #: src/apps/resource-bindings.tsx
@@ -5359,10 +5381,6 @@ msgstr "Weiter mit {signIn}"
 #: src/frame/sign-in/sign-in.tsx
 msgid "Continue with Grasp staff"
 msgstr "Weiter als Grasp-Mitarbeiter"
-
-#: src/onboarding/setup-steps.tsx
-msgid "Continue with our own system, or add your own API key if you’d rather."
-msgstr "Mach mit unserem eigenen System weiter, oder füge deinen eigenen API-Schlüssel hinzu, wenn dir das lieber ist."
 
 #: src/apps/resource-bindings.tsx
 msgid "Contract"
@@ -5968,6 +5986,10 @@ msgstr "{name} löschen?"
 msgid "Delete {projectName}?"
 msgstr "{projectName} löschen?"
 
+#: src/onboarding/forget-kickoff.tsx
+msgid "Delete conversation"
+msgstr "Gespräch löschen"
+
 #: src/agents/agent-page.tsx
 #: src/apps/app-remove.tsx
 #: src/brain/skills-page.tsx
@@ -6368,10 +6390,6 @@ msgstr "Dither"
 msgid "Do this later"
 msgstr "Später erledigen"
 
-#: src/onboarding/documents-step.tsx
-msgid "Do you have anything that explains how you work?"
-msgstr "Haben Sie etwas, das erklärt, wie Sie arbeiten?"
-
 #: src/agents/agent-templates.ts
 msgid "Doc reader"
 msgstr "Dokumentleser"
@@ -6505,6 +6523,10 @@ msgstr "In einem Lauf getan"
 msgid "Done right"
 msgstr "Richtig erledigt"
 
+#: src/onboarding/forget-kickoff.tsx
+msgid "Done. Nothing from our first conversation was kept."
+msgstr "Gelöscht. Von unserem ersten Gespräch wurde nichts behalten."
+
 #: src/settings/backdrop-settings.tsx
 msgid "Door"
 msgstr "Tür"
@@ -6620,7 +6642,7 @@ msgstr "Laufwerk"
 
 #: src/frame/ui-words.tsx
 msgid "Drop files here, or"
-msgstr "Dateien hier ablegen, oder"
+msgstr "Dateien hier ablegen oder"
 
 #: src/drafts/share-with-team.tsx
 msgid "Drop them and go back"
@@ -7226,8 +7248,8 @@ msgid "Everyone found"
 msgstr "Alle Gefundenen"
 
 #: src/onboarding/leads-step.tsx
-msgid "Everyone from {signIn} is here. Untick who isn’t taking part, and mark who leads each team: I talk to the leads first."
-msgstr "Alle aus {signIn} sind hier. Entfernen Sie das Häkchen bei allen, die nicht mitmachen, und markieren Sie, wer jedes Team leitet: Ich spreche zuerst mit den Teamleitungen."
+msgid "Everyone from {signIn} is listed below. Untick anyone who isn’t taking part, and mark each team’s lead—I’ll talk to them first."
+msgstr "Alle aus {signIn} stehen hier. Entferne das Häkchen bei allen, die nicht teilnehmen, und markiere die Teamleitung – mit ihr spreche ich zuerst."
 
 #: src/settings/staff-access.tsx
 msgid "Everyone from Grasp is signed out at once, and nobody from Grasp can sign in again until a new window is opened."
@@ -7337,16 +7359,16 @@ msgid "Everything from ordering from a supplier until their invoice is paid."
 msgstr "Alles von der Bestellung bei einem Lieferanten, bis seine Rechnung bezahlt ist."
 
 #: src/onboarding/setup-steps.tsx
-msgid "Everything Grasp does runs on AI, from reading your documents to every interview."
-msgstr "Alles, was Grasp tut, läuft mit KI, vom Lesen deiner Dokumente bis zu jedem Interview."
+msgid "Everything Grasp does runs on AI—from reading documents to running interviews."
+msgstr "Alles in Grasp läuft über KI – vom Lesen deiner Dokumente bis zu den Interviews."
 
 #: src/brain/brain.ts
 msgid "Everything Grasp learned about {company}, each fact traceable to the conversation, document or connection it came from."
 msgstr "Alles, was Grasp über {company} gelernt hat, jede Tatsache zurückverfolgbar auf das Gespräch, das Dokument oder die Verbindung, aus der sie stammt."
 
 #: src/onboarding/setup-steps.tsx
-msgid "Everything in Grasp runs on AI: reading your documents, the interviews, the plan. Here you choose which AI that is."
-msgstr "Alles in Grasp läuft mit KI: deine Dokumente lesen, die Interviews, der Plan. Hier wählst du, welche KI das ist."
+msgid "Everything I do—reading your documents, running the interviews, and putting together the plan—runs on AI."
+msgstr "Alles, was ich tue – Dokumente lesen, Interviews führen und den Plan erstellen – läuft über KI."
 
 #: src/connections/connection-audience.tsx
 msgid "Everything the Brain kept from it is erased for good, and nobody may use it from now on. This can't be undone. To open it again, choose who may use it once the erasure is done."
@@ -7802,10 +7824,6 @@ msgstr "Für {person}: {opening}"
 msgid "For {person}: {opening} · {last}"
 msgstr "Für {person}: {opening} · {last}"
 
-#: src/onboarding/ai-choice.tsx
-msgid "For a provider your company already works with. You pay them directly."
-msgstr "Für einen Anbieter, mit dem dein Unternehmen schon arbeitet. Du bezahlst ihn direkt."
-
 #: src/connections/add-connector.tsx
 msgid "For a server inside your company's own network, with no public address."
 msgstr "Für einen Server im eigenen Netzwerk Ihres Unternehmens, ohne öffentliche Adresse."
@@ -7883,16 +7901,12 @@ msgid "For you"
 msgstr "Für Sie"
 
 #: src/onboarding/forget-kickoff.tsx
-msgid "Forget it"
-msgstr "Vergessen"
-
-#: src/onboarding/forget-kickoff.tsx
 msgid "Forget our first conversation"
-msgstr "Unser erstes Gespräch vergessen"
+msgstr "Unser erstes Gespräch löschen"
 
 #: src/onboarding/forget-kickoff.tsx
 msgid "Forget our first conversation?"
-msgstr "Unser erstes Gespräch vergessen?"
+msgstr "Unser erstes Gespräch löschen?"
 
 #: src/activity/audit-words.ts
 msgid "Forgot an erased member as the one who answered the Brain's questions"
@@ -7901,10 +7915,6 @@ msgstr "Ein gelöschtes Mitglied als Antwortgeber der Fragen des Brain vergessen
 #: src/brain/memories-page.tsx
 msgid "Forgotten, kept as history"
 msgstr "Vergessen, im Verlauf bewahrt"
-
-#: src/onboarding/forget-kickoff.tsx
-msgid "Forgotten. Nothing of our first conversation is kept."
-msgstr "Vergessen. Von unserem ersten Gespräch ist nichts mehr gespeichert."
 
 #: src/connections/groups.ts
 msgctxt "kind of app"
@@ -8071,7 +8081,7 @@ msgstr "Einen Schlüssel bei {name} holen"
 
 #: src/routes/setup.tsx
 msgid "Getting started"
-msgstr "Kennenlernen"
+msgstr "Erste Schritte"
 
 #: src/agents/agent-apps-card.tsx
 msgid "Give {app} back"
@@ -8200,20 +8210,20 @@ msgid "Good"
 msgstr "Gut"
 
 #: src/onboarding/sources-step.tsx
-msgid "Good to know where the work lives. That already helps."
-msgstr "Gut zu wissen, wo die Arbeit steckt. Das hilft schon."
+msgid "Good to know where everything lives—that already helps."
+msgstr "Gut zu wissen, welche Tools ihr nutzt – das hilft schon sehr."
 
 #: src/onboarding/leads-step.tsx
-msgid "Good, I’ll start with the leads you marked."
+msgid "Good, I’ll start with the leads you selected."
 msgstr "Gut, ich fange bei den Teamleitungen an, die du markiert hast."
 
 #: src/onboarding/sources-step.tsx
 msgid "Good, let’s connect it."
-msgstr "Gut, dann verbinden wir es."
+msgstr "Gut, verbinden wir es."
 
 #: src/onboarding/company-step.tsx
-msgid "Good, now I know who works where."
-msgstr "Gut, jetzt weiß ich, wer wo arbeitet."
+msgid "Good, now I have a clear picture of who works where."
+msgstr "Gut, jetzt habe ich einen klaren Überblick, wer wo arbeitet."
 
 #: src/onboarding/document-visitors.tsx
 msgid "Got a checklist? Toss it in!"
@@ -8224,32 +8234,32 @@ msgid "Got it"
 msgstr "Verstanden"
 
 #: src/onboarding/documents-step.tsx
-msgid "Got it, I’ll read that one."
-msgstr "Hab ich, das lese ich."
+msgid "Got it, I’ll read through that."
+msgstr "Erhalten, ich schaue es mir an."
 
 #: src/onboarding/leads-step.tsx
 msgid "Got it, I’ll start with them."
-msgstr "Alles klar, da fange ich an."
+msgstr "Verstanden, mit ihnen fange ich an."
 
 #: src/onboarding/leads-step.tsx
 msgid "Got it, now I know who I’ll talk to."
 msgstr "Alles klar, jetzt weiß ich, mit wem ich spreche."
 
 #: src/onboarding/leads-step.tsx
-msgid "Got it, they’re on the list now."
-msgstr "Alles klar, die Liste ist aktualisiert."
+msgid "Got it, they’ve been added."
+msgstr "Alles klar, sie stehen jetzt auf der Liste."
 
 #: src/interview/start.tsx
 msgid "Got it."
 msgstr "Alles klar."
 
 #: src/onboarding/leads-step.tsx
-msgid "Got the list, they’re all here now."
-msgstr "Liste erhalten, jetzt sind alle da."
+msgid "Got the list—everyone’s in."
+msgstr "Liste erhalten – alle sind drin."
 
 #: src/onboarding/documents-step.tsx
 msgid "Got them, I’ll read through those."
-msgstr "Hab ich, die lese ich durch."
+msgstr "Erhalten, ich gehe sie durch."
 
 #: src/chat/connection-requests.tsx
 msgid "Grant"
@@ -8418,10 +8428,6 @@ msgstr "Grasp darf in {app} lesen und schreiben, nur für das, was Sie erlauben.
 msgid "Grasp may use {app} only through the tools you allowed."
 msgstr "Grasp darf {app} nur über die Werkzeuge nutzen, die Sie erlaubt haben."
 
-#: src/onboarding/setup-steps.tsx
-msgid "Grasp needs an AI to work"
-msgstr "Grasp braucht eine KI, um zu arbeiten"
-
 #: src/connections/connector-tools.tsx
 msgid "Grasp never runs it"
 msgstr "Grasp führt es nie aus"
@@ -8549,10 +8555,14 @@ msgstr "Bis dahin kann das Grasp-Team hier helfen"
 msgid "Great"
 msgstr "Sehr gut"
 
-#. Stephen, as the next step arrives, in the language just chosen. Name your own language, not English: in Dutch “Fijn, dan praten we Nederlands.”
+#. Stephen, as the next step arrives, in the language just chosen. Name your own language, not English: in Dutch “Helder, dan gaan we verder in het Nederlands.”
 #: src/onboarding/setup-steps.tsx
-msgid "Great, we’ll talk in English."
-msgstr "Schön, dann sprechen wir Deutsch."
+msgid "Great, we’ll continue in English."
+msgstr "Alles klar, dann machen wir auf Deutsch weiter."
+
+#: src/onboarding/setup-steps.tsx
+msgid "Great, we’re using our built-in system. The AI is ready."
+msgstr "Alles klar, wir nutzen unser System. Die KI ist startklar."
 
 #: src/onboarding/campaign/concepts/canvas.tsx
 msgid "Green lines: new that day"
@@ -8648,8 +8658,8 @@ msgid "Hi {admin}, I’m Stephen"
 msgstr "Hallo {admin}, ich bin Stephen"
 
 #: src/onboarding/setup-steps.tsx
-msgid "Hi {admin}, I’m Stephen. Over the next few minutes we’ll set up Grasp together, and I’ll walk you through every part as we go. First things first: which language shall we talk in?"
-msgstr "Hallo {admin}, ich bin Stephen. In den nächsten Minuten richten wir Grasp zusammen ein, und ich erkläre dir dabei jeden Teil. Als Erstes: In welcher Sprache wollen wir sprechen?"
+msgid "Hi {admin}, I’m Stephen. I’ll guide you through setting up Grasp—it only takes a few minutes. To start, which language do you speak?"
+msgstr "Hallo {admin}, ich bin Stephen. Ich führe dich in ein paar Minuten durch die Einrichtung von Grasp. Zum Start: Welche Sprache sprichst du?"
 
 #: src/interview/start.tsx
 msgid "Hi {name}, got a few minutes\n"
@@ -8666,8 +8676,8 @@ msgid "Hi, I’m Stephen"
 msgstr "Hallo, ich bin Stephen"
 
 #: src/onboarding/setup-steps.tsx
-msgid "Hi, I’m Stephen. Over the next few minutes we’ll set up Grasp together, and I’ll walk you through every part as we go. First things first: which language shall we talk in?"
-msgstr "Hallo, ich bin Stephen. In den nächsten Minuten richten wir Grasp zusammen ein, und ich erkläre dir dabei jeden Teil. Als Erstes: In welcher Sprache wollen wir sprechen?"
+msgid "Hi, I’m Stephen. I’ll guide you through setting up Grasp—it only takes a few minutes. To start, which language do you speak?"
+msgstr "Hallo, ich bin Stephen. Ich führe dich in ein paar Minuten durch die Einrichtung von Grasp. Zum Start: Welche Sprache sprichst du?"
 
 #: src/routes/waiting.tsx
 msgid "Hi, I’m Stephen. Your admins are still setting things up for you. As soon as they’re done, this page opens Grasp by itself, so you can just leave it open."
@@ -8755,10 +8765,6 @@ msgstr "Verlauf"
 msgctxt "an app's settings section"
 msgid "History"
 msgstr "Verlauf"
-
-#: src/onboarding/step-voice.tsx
-msgid "Hmm, that didn’t work. What happened is at the top."
-msgstr "Hm, das hat nicht geklappt. Oben steht, was passiert ist."
 
 #: src/settings/ai-providers.tsx
 msgid "Hold to delete the key"
@@ -8954,10 +8960,6 @@ msgstr "Ich konnte Ihr Verzeichnis gerade nicht prüfen. Versuchen Sie es gleich
 msgid "I couldn’t read this one"
 msgstr "Diese konnte ich nicht lesen"
 
-#: src/onboarding/forget-kickoff.tsx
-msgid "I delete what was said and everything I took from it: what I know about your company from it, and what your Brain learned from it. I then know less about your company, which can put off the day your Grasp opens. This can’t be undone."
-msgstr "Ich lösche, was gesagt wurde, und alles, was ich daraus entnommen habe: was ich dadurch über Ihr Unternehmen weiß und was Ihr Brain daraus gelernt hat. Ich weiß dann weniger über Ihr Unternehmen, und der Tag, an dem Ihr Grasp öffnet, kann sich verschieben. Das lässt sich nicht rückgängig machen."
-
 #: src/onboarding/forget-teams.tsx
 msgid "I erase everything your Brain keeps of your teams, every earlier version too, for everyone. Your list of teams and people stays as it is, and the next time you confirm it, your Brain gets it again. This can’t be undone."
 msgstr "Ich lösche alles, was Ihr Brain von Ihren Teams aufbewahrt, auch jede frühere Fassung, für alle. Ihre Liste der Teams und Personen bleibt, wie sie ist, und wenn Sie sie das nächste Mal bestätigen, bekommt Ihr Brain sie wieder. Das lässt sich nicht rückgängig machen."
@@ -8974,9 +8976,13 @@ msgstr "Ich habe die Verbindung verloren. Bitte prüfen Sie Ihr Internet. Ich ha
 msgid "I'd rather skip this"
 msgstr "Ich möchte das lieber auslassen"
 
+#: src/onboarding/forget-kickoff.tsx
+msgid "I’ll delete what was said and everything I learned from it, including what your Brain saved. I’ll know less about your company, which may delay when Grasp is ready. This can’t be undone."
+msgstr "Ich lösche das Gespräch und alles, was ich daraus gelernt habe – einschließlich dem, was dein Brain gespeichert hat. Dadurch weiß ich weniger über dein Unternehmen, was den Start von Grasp verzögern kann. Dies kann nicht rückgängig gemacht werden."
+
 #: src/onboarding/setup-steps.tsx
-msgid "I’ll set up Grasp with you, one step at a time. Which language would you like?"
-msgstr "Ich richte Grasp mit dir ein, Schritt für Schritt. Welche Sprache möchtest du?"
+msgid "I’ll guide you through setting up Grasp, step by step. Which language do you speak?"
+msgstr "Ich führe dich Schritt für Schritt durch die Einrichtung von Grasp. Welche Sprache sprichst du?"
 
 #: src/routes/waiting.tsx
 msgid "I’m almost ready for you"
@@ -10094,7 +10100,7 @@ msgstr "Layout"
 
 #: src/onboarding/leads-step.tsx
 msgid "Lead"
-msgstr "Leitung"
+msgstr "Teamleitung"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
@@ -10129,7 +10135,7 @@ msgstr "Verlassen"
 
 #: src/onboarding/calm-frame.tsx
 msgid "Leave for now"
-msgstr "Vorerst verlassen"
+msgstr "Später fortfahren"
 
 #: src/frame/panels/head.tsx
 msgid "Leave full screen"
@@ -11446,9 +11452,17 @@ msgstr "Nächste Woche"
 msgid "Next week, then."
 msgstr "Dann nächste Woche."
 
+#: src/onboarding/company-step.tsx
+msgid "Next, let’s bring in your company directory. Connect your {signIn} account so I can see who works where—that way I’ll know who to reach out to later."
+msgstr "Als Nächstes bringen wir deine Teamstruktur rein. Verbinde dein {signIn}-Konto, damit ich sehe, wer in welchem Team arbeitet und wen ich später ansprechen soll."
+
+#: src/onboarding/company-step.tsx
+msgid "Next, let’s bring in your company directory. Connect your work account so I can see who works where—that way I’ll know who to reach out to later."
+msgstr "Als Nächstes bringen wir deine Teamstruktur rein. Verbinde dein Arbeitskonto, damit ich sehe, wer in welchem Team arbeitet und wen ich später ansprechen soll."
+
 #: src/onboarding/sources-step.tsx
-msgid "Next, I’d like to understand how the work actually gets done. Most of it lives in the tools your team already uses: shared drives, Teams channels and wikis, full of the files and pages people work from every day. Point me to the ones you use, and I’ll only read what you choose to share with me."
-msgstr "Als Nächstes möchte ich verstehen, wie die Arbeit wirklich gemacht wird. Das meiste davon steckt in den Tools, die dein Team schon nutzt: geteilte Laufwerke, Teams-Kanäle und Wikis, voller Dateien und Seiten, mit denen alle jeden Tag arbeiten. Zeig mir, welche ihr nutzt, und ich lese nur, was du mit mir teilst."
+msgid "Next, let’s connect the tools where your team stores files, notes, and internal docs—like shared drives, wikis, or chat channels. Select what you use; I’ll only read what you explicitly share with me."
+msgstr "Jetzt verbinden wir die Tools, in denen dein Team Dateien und Infos ablegt – wie geteilte Laufwerke, Wikis oder Kanäle. Wähle aus, was ihr nutzt; ich lese nur, was du bewusst mit mir teilst."
 
 #: src/apps/field-editor.tsx
 #: src/inbox/json-fields.tsx
@@ -11584,8 +11598,8 @@ msgid "No description."
 msgstr "Keine Beschreibung."
 
 #: src/onboarding/documents-step.tsx
-msgid "No documents for now, that’s fine. You can add them later too."
-msgstr "Noch keine Dokumente, das ist in Ordnung. Du kannst sie auch später hinzufügen."
+msgid "No documents for now, that’s fine. You can always upload them later."
+msgstr "Noch keine Dokumente – kein Problem. Du kannst sie später jederzeit hochladen."
 
 #: src/settings/event-source-activity.tsx
 msgid "No event accepted in the last seven days."
@@ -11778,8 +11792,8 @@ msgid "No stack frames"
 msgstr "Keine Stackframes"
 
 #: src/onboarding/company-step.tsx
-msgid "No staff list for now, that’s fine. We’ll sort it out together later."
-msgstr "Noch keine Mitarbeiterliste, das ist in Ordnung. Das klären wir später gemeinsam."
+msgid "No staff list for now—that’s fine. We’ll add it together later."
+msgstr "Noch keine Liste – kein Problem. Das erledigen wir später gemeinsam."
 
 #: src/brain/brain.ts
 msgid "No stakeholder named yet"
@@ -11822,8 +11836,8 @@ msgid "No tool matches"
 msgstr "Kein Tool passt"
 
 #: src/onboarding/sources-step.tsx
-msgid "No tools for now, that’s fine. You can add them later too."
-msgstr "Noch keine Tools, das ist in Ordnung. Du kannst sie auch später hinzufügen."
+msgid "No tools for now, that’s fine. You can always connect them later."
+msgstr "Noch keine Tools verbunden – kein Problem. Du kannst sie später jederzeit hinzufügen."
 
 #: src/settings/event-source-activity.tsx
 msgid "No trigger matches this type. A test event starts no workflow."
@@ -12068,9 +12082,13 @@ msgid "Not confirmed by the board yet"
 msgstr "Noch nicht von der Geschäftsleitung bestätigt"
 
 #: src/connections/app/words.ts
-#: src/onboarding/ai-choice.tsx
 #: src/settings/ai-providers.tsx
 #: src/workflows/files-and-apps.tsx
+msgid "Not connected"
+msgstr "Nicht verbunden"
+
+#: src/onboarding/ai-choice.tsx
+msgctxt "setup"
 msgid "Not connected"
 msgstr "Nicht verbunden"
 
@@ -12599,10 +12617,6 @@ msgid "Now"
 msgstr "Jetzt"
 
 #: src/onboarding/leads-step.tsx
-msgid "Now for the people I’ll be talking to. Everyone from {signIn} is already on this list, so there’s nothing to type. Untick anyone who shouldn’t take part, and mark who leads each team. I always start with the leads, so they hear about this before their team does. Someone missing? Add them by email."
-msgstr "Jetzt zu den Menschen, mit denen ich sprechen werde. Alle aus {signIn} stehen schon auf dieser Liste, Sie müssen also nichts eintippen. Entfernen Sie das Häkchen bei allen, die nicht mitmachen sollen, und markieren Sie, wer jedes Team leitet. Ich fange immer bei den Teamleitungen an, damit sie davon hören, bevor ihr Team es tut. Fehlt jemand? Fügen Sie die Person per E-Mail hinzu."
-
-#: src/onboarding/leads-step.tsx
 msgid "Now for the people I’ll be talking to. Everyone from your staff list is already here. Untick anyone who shouldn’t take part, and mark who leads each team. I always start with the leads, so they hear about this before their team does. Someone missing? Add them by email."
 msgstr "Jetzt zu den Menschen, mit denen ich sprechen werde. Alle aus Ihrer Mitarbeiterliste sind schon hier. Entfernen Sie das Häkchen bei allen, die nicht mitmachen sollen, und markieren Sie, wer jedes Team leitet. Ich fange immer bei den Teamleitungen an, damit sie davon hören, bevor ihr Team es tut. Fehlt jemand? Fügen Sie die Person per E-Mail hinzu."
 
@@ -12610,17 +12624,13 @@ msgstr "Jetzt zu den Menschen, mit denen ich sprechen werde. Alle aus Ihrer Mita
 msgid "Now for the people I’ll be talking to. I don’t have anyone yet, so add them here by email, or drop in a staff list if you have one. Then mark who leads each team. I always start with the leads, so they hear about this before their team does."
 msgstr "Jetzt zu den Menschen, mit denen ich sprechen werde. Ich habe noch niemanden, also fügen Sie sie hier per E-Mail hinzu, oder laden Sie eine Mitarbeiterliste hoch, wenn Sie eine haben. Markieren Sie dann, wer jedes Team leitet. Ich fange immer bei den Teamleitungen an, damit sie davon hören, bevor ihr Team es tut."
 
+#: src/onboarding/leads-step.tsx
+msgid "Now let’s decide who I’ll be talking to. Everyone from {signIn} is already here—just untick anyone who shouldn’t be included, and mark each team’s lead. I always speak with leads first so they know what’s coming before their team does. Missing someone? Add them by email."
+msgstr "Jetzt legen wir fest, mit wem ich spreche. Alle aus {signIn} sind schon drin – nimm einfach raus, wer nicht teilnimmt, und markiere die jeweilige Teamleitung. Ich spreche immer zuerst mit den Teamleitungen, damit sie vor ihrem Team Bescheid wissen. Fehlt jemand? Füge sie per E-Mail hinzu."
+
 #: src/onboarding/company-step.tsx
 msgid "Now let’s get to know your company. A staff list works fine for that, one row per person with their team and job. Don’t have one at hand? No problem, skip it and we’ll sort it out together."
 msgstr "Lernen wir jetzt dein Unternehmen kennen. Eine Mitarbeiterliste reicht dafür völlig, eine Zeile pro Person mit Team und Funktion. Hast du keine zur Hand? Kein Problem, überspring es einfach und wir klären das zusammen."
-
-#: src/onboarding/company-step.tsx
-msgid "Now let’s get to know your company. If you connect your {signIn} account, I can see who works there and in which team, so I know who to talk to later on."
-msgstr "Lernen wir jetzt dein Unternehmen kennen. Wenn du dein {signIn}-Konto verbindest, sehe ich, wer dort arbeitet und in welchem Team, damit ich später weiß, mit wem ich sprechen soll."
-
-#: src/onboarding/company-step.tsx
-msgid "Now let’s get to know your company. If you connect your work account, I can see who works there and in which team, so I know who to talk to later on."
-msgstr "Lernen wir jetzt dein Unternehmen kennen. Wenn du dein Arbeitskonto verbindest, sehe ich, wer dort arbeitet und in welchem Team, damit ich später weiß, mit wem ich sprechen soll."
 
 #: src/onboarding/campaign/campaign-asks.tsx
 msgid "Nudge {team}"
@@ -12693,10 +12703,6 @@ msgstr "Oft korrigiert"
 #: src/interview/rating.tsx
 msgid "Okay"
 msgstr "Okay"
-
-#: src/onboarding/leads-step.tsx
-msgid "Okay, I’ll leave them out."
-msgstr "Okay, die lasse ich außen vor."
 
 #: src/activity/audit-log.tsx
 msgid "Older"
@@ -13366,12 +13372,8 @@ msgid "Our email didn’t reach {names}. Send them their link yourself from Link
 msgstr "Unsere E-Mail hat {names} nicht erreicht. Senden Sie den Link selbst über „Links zum Versenden“, oder bitten Sie Grasp, die Adresse zu prüfen."
 
 #: src/onboarding/forget-kickoff.tsx
-msgid "Our first conversation is deleted. I’m still erasing what I took from it, and I finish that by myself."
-msgstr "Unser erstes Gespräch ist gelöscht. Ich lösche noch, was ich daraus entnommen habe, und schließe das von selbst ab."
-
-#: src/onboarding/setup-steps.tsx
-msgid "Our own system it is, so the AI is ready to go."
-msgstr "Dann also unser eigenes System, die KI ist startklar."
+msgid "Our first conversation is deleted. I’m still clearing what I learned from it—I’ll finish that automatically."
+msgstr "Unser erstes Gespräch ist gelöscht. Ich entferne noch die restlichen Daten – das schließe ich automatisch ab."
 
 #: src/connections/native-descriptions.ts
 msgid "Outlook mail and calendars, and files in OneDrive and SharePoint."
@@ -13564,8 +13566,8 @@ msgid "Paste a key from your company’s provider here. You pay them directly, a
 msgstr "Füge hier einen Schlüssel vom Anbieter deines Unternehmens ein. Du bezahlst ihn direkt, und ich prüfe, ob er funktioniert."
 
 #: src/onboarding/setup-steps.tsx
-msgid "Paste a key from your provider to connect it. You pay them directly."
-msgstr "Füge einen Schlüssel deines Anbieters ein, um ihn zu verbinden. Du bezahlst ihn direkt."
+msgid "Paste an API key from your provider to connect. You pay them directly."
+msgstr "Füge einen API-Schlüssel deines Anbieters ein. Du zahlst direkt an ihn."
 
 #: src/onboarding/people-add.tsx
 msgid "Paste one or more email addresses first."
@@ -13933,8 +13935,8 @@ msgid "PNG, JPEG or WebP, up to {most}."
 msgstr "PNG, JPEG oder WebP, bis {most}."
 
 #: src/onboarding/documents-step.tsx
-msgid "Policies, procedures, work instructions. Anything that explains how you work helps."
-msgstr "Richtlinien, Abläufe, Arbeitsanweisungen. Alles, was erklärt, wie ihr arbeitet, hilft."
+msgid "Policies, procedures, work instructions—anything that gives context helps."
+msgstr "Richtlinien, Abläufe, Arbeitsanweisungen – alles, was Kontext gibt, hilft."
 
 #: src/activity/audit-event.tsx
 msgid "Position"
@@ -14461,8 +14463,8 @@ msgid "Reads, and asks before each change"
 msgstr "Liest und fragt vor jeder Änderung"
 
 #: src/onboarding/ai-choice.tsx
-msgid "Ready right away, nothing to set up."
-msgstr "Sofort startklar, nichts einzurichten."
+msgid "Ready right away, nothing to configure."
+msgstr "Sofort einsatzbereit, keine Einrichtung nötig."
 
 #: src/agents/setup/review-step.tsx
 msgid "Ready to make {name}?"
@@ -14497,13 +14499,17 @@ msgstr "Letzte Läufe"
 #: src/agents/setup/apps-step.tsx
 #: src/connections/permissions/permission-choice.tsx
 #: src/frame/ui-words.tsx
-#: src/onboarding/ai-choice.tsx
 #: src/settings/ai-providers.tsx
 msgid "Recommended"
 msgstr "Empfohlen"
 
 #: src/connections/recommended-apps.tsx
 msgctxt "apps to connect first"
+msgid "Recommended"
+msgstr "Empfohlen"
+
+#: src/onboarding/ai-choice.tsx
+msgctxt "setup"
 msgid "Recommended"
 msgstr "Empfohlen"
 
@@ -14913,6 +14919,10 @@ msgstr "Eine App anfragen"
 #: src/routes/_shell.connectors.index.tsx
 msgid "Request app"
 msgstr "App anfragen"
+
+#: src/onboarding/sources-step.tsx
+msgid "requested"
+msgstr "angefragt"
 
 #: src/connections/requested-apps.tsx
 msgctxt "apps someone asked for"
@@ -16173,6 +16183,10 @@ msgstr "Teilen Sie eine Mitarbeiterliste als CSV- oder Excel-Datei, eine Zeile p
 msgid "Share as how your team works"
 msgstr "Teilen als Arbeitsweise deines Teams"
 
+#: src/onboarding/documents-step.tsx
+msgid "Share documents that explain how you work"
+msgstr "Teile Dokumente, die eure Arbeitsweise erklären"
+
 #: src/frame/setting-up.tsx
 msgid "Share once it's ready"
 msgstr "Teilen, sobald es bereit ist"
@@ -16207,7 +16221,7 @@ msgstr "Mit Ihrem Team teilen"
 
 #: src/onboarding/company-step.tsx
 msgid "Share your staff list"
-msgstr "Teilen Sie Ihre Mitarbeiterliste"
+msgstr "Mitarbeiterliste teilen"
 
 #: src/brain/memories-page.tsx
 msgid "Share…"
@@ -16674,7 +16688,7 @@ msgstr "Überspringen Sie Rechnungen, an die in den letzten 7 Tagen erinnert wur
 #: src/onboarding/company-step.tsx
 #: src/onboarding/leads-step.tsx
 msgid "Skip for now"
-msgstr "Vorerst überspringen"
+msgstr "Erstmal überspringen"
 
 #: src/agents/agent-templates.ts
 msgid "Skip leads marked lost or not interested."
@@ -16794,10 +16808,6 @@ msgstr "Etwas anderes"
 msgid "Something to fix first"
 msgstr "Erst etwas beheben"
 
-#: src/onboarding/step-voice.tsx
-msgid "Something went wrong there. The bar at the top says what to do."
-msgstr "Da ist etwas schiefgelaufen. Die Leiste oben sagt, was zu tun ist."
-
 #: src/pages/frame-failure.tsx
 msgid "Something went wrong while it opened."
 msgstr "Beim Öffnen ist etwas schiefgegangen."
@@ -16811,6 +16821,10 @@ msgstr "Etwas ist schiefgelaufen."
 #: src/agents/agent-overview.tsx
 msgid "Something went wrong. It tries again at its next run."
 msgstr "Etwas ist schiefgelaufen. Er versucht es bei seinem nächsten Lauf erneut."
+
+#: src/onboarding/step-voice.tsx
+msgid "Something went wrong. The bar at the top explains how to fix it."
+msgstr "Etwas ist schiefgelaufen. In der Leiste oben steht, wie du es beheben kannst."
 
 #: src/brain/memories-page.tsx
 msgid "something without a name"
@@ -17240,6 +17254,10 @@ msgstr "Funktioniert nicht mehr"
 msgid "Stopped."
 msgstr "Gestoppt."
 
+#: src/onboarding/ai-choice.tsx
+msgid "Stored encrypted. Only the last four characters remain visible."
+msgstr "Verschlüsselt gespeichert. Nur die letzten vier Zeichen bleiben sichtbar."
+
 #: src/agents/agent-templates.ts
 msgid "Suggest up to three points to raise."
 msgstr "Schlag bis zu drei Punkte vor, die man ansprechen sollte."
@@ -17297,8 +17315,8 @@ msgid "Support"
 msgstr "Kundenservice"
 
 #: src/onboarding/setup-steps.tsx
-msgid "Sure. Paste your key, and I’ll check that it works."
-msgstr "Klar. Füg deinen Schlüssel ein, und ich prüfe, ob er funktioniert."
+msgid "Sure—paste your key and I’ll check that it works."
+msgstr "Gerne – füge deinen Schlüssel ein, ich prüfe, ob er funktioniert."
 
 #: src/settings/member-suspension.tsx
 msgid "Suspended"
@@ -17657,12 +17675,12 @@ msgid "Thank you. Want to say why?"
 msgstr "Danke. Möchten Sie sagen, warum?"
 
 #: src/onboarding/documents-step.tsx
-msgid "Thanks for the document. I’ll read it before I talk to anyone."
-msgstr "Danke für das Dokument. Ich lese es, bevor ich mit jemandem spreche."
+msgid "Thanks for the document. I’ll review it before talking to anyone."
+msgstr "Danke für das Dokument. Ich lese es durch, bevor ich mit jemandem spreche."
 
 #: src/onboarding/documents-step.tsx
-msgid "Thanks for the documents. I’ll read them before I talk to anyone."
-msgstr "Danke für die Dokumente. Ich lese sie, bevor ich mit jemandem spreche."
+msgid "Thanks for the documents. I’ll review them before talking to anyone."
+msgstr "Danke für die Dokumente. Ich lese sie durch, bevor ich mit jemandem spreche."
 
 #: src/onboarding/sources-step.tsx
 msgid "Thanks. I’ll only read what you’ve shared with me there."
@@ -17711,6 +17729,10 @@ msgstr "Das hat nicht funktioniert. Versuchen Sie es gleich noch einmal."
 #: src/guest-sign-in.tsx
 msgid "That didn't work. Try again."
 msgstr "Das hat nicht geklappt. Versuche es noch einmal."
+
+#: src/onboarding/step-voice.tsx
+msgid "That didn’t work. You can see what happened at the top."
+msgstr "Das hat nicht geklappt. Oben siehst du, was passiert ist."
 
 #: src/sign-in-errors.ts
 msgid "That email address already signs in with another account."
@@ -18199,9 +18221,9 @@ msgstr "Die Beispieldaten passen nicht zur Änderung"
 msgid "The export didn't work. Try again."
 msgstr "Der Export hat nicht funktioniert. Versuchen Sie es erneut."
 
-#: src/onboarding/sources-step.tsx
-msgid "The files, pages and folders your team works from. Connect the tools they’re in, and I’ll only read what you share with me."
-msgstr "Die Dateien, Seiten und Ordner, mit denen Ihr Team arbeitet. Verbinden Sie die Tools, in denen sie liegen, und ich lese nur, was Sie mit mir teilen."
+#: src/onboarding/setup-steps.tsx
+msgid "The fastest way is to use our built-in setup; it’s ready right away. If your company prefers its own provider, you can enter your API key here instead."
+msgstr "Am schnellsten geht es mit unserem eigenen System, das sofort einsatzbereit ist. Wenn ihr lieber euren eigenen Anbieter nutzt, kannst du hier euren API-Schlüssel eingeben."
 
 #: src/onboarding/review-parts.tsx
 msgid "The first way: {way}"
@@ -18835,8 +18857,8 @@ msgid "This interview went on in another window. You now see that one."
 msgstr "Dieses Gespräch ging in einem anderen Fenster weiter. Sie sehen jetzt dieses."
 
 #: src/onboarding/documents-step.tsx
-msgid "This is a good moment to give me some context. A process description, an onboarding guide or a price list helps me understand what you’re dealing with every day. The more I know, the better my questions to your team, and the more useful everything I give back."
-msgstr "Das ist ein guter Moment, mir etwas Kontext zu geben. Eine Prozessbeschreibung, eine Einarbeitungsmappe oder eine Preisliste hilft mir zu verstehen, womit ihr jeden Tag zu tun habt. Je mehr ich weiß, desto besser meine Fragen an dein Team, und desto nützlicher alles, was ich zurückgebe."
+msgid "This is a great moment to give me some context. A process doc, onboarding guide, or price list helps me understand your day-to-day. The more context I have upfront, the sharper my questions to your team will be."
+msgstr "Jetzt ist ein guter Moment, mir etwas Kontext zu geben. Eine Prozessbeschreibung, ein Onboarding-Leitfaden oder eine Preisliste hilft mir, euren Alltag zu verstehen. Je mehr ich vorab weiß, desto gezielter sind meine Fragen an dein Team."
 
 #: src/connections/connection-list.tsx
 msgid "This is the consent as Grasp words it now. The audit log keeps a hash of the exact text they were shown."
@@ -19349,11 +19371,11 @@ msgstr "Schalten Sie ein Werkzeug aus, um es zu sperren: Grasp bietet es niemand
 
 #: src/onboarding/calm-frame.tsx
 msgid "Turn my voice off"
-msgstr "Meine Stimme ausschalten"
+msgstr "Meine Stimme aus"
 
 #: src/onboarding/calm-frame.tsx
 msgid "Turn my voice on"
-msgstr "Meine Stimme einschalten"
+msgstr "Meine Stimme an"
 
 #: src/workflows/workflow-triggers.tsx
 msgctxt "turn a trigger off"
@@ -19456,6 +19478,10 @@ msgstr "Unter 5"
 #: src/onboarding/review-parts.tsx
 msgid "Under Spam, bypass spam filters for an approved senders list, and add {domain} to it."
 msgstr "Lassen Sie unter „Spam“ die Spamfilter für eine Liste zugelassener Absender umgehen, und fügen Sie {domain} hinzu."
+
+#: src/onboarding/leads-step.tsx
+msgid "Understood, I’ll leave them out."
+msgstr "Verstanden, lasse ich raus."
 
 #: src/agents/agent-wakes.tsx
 #: src/chat/saved-memory.tsx
@@ -19671,9 +19697,13 @@ msgstr "Apps nutzen"
 msgid "Use capital letters, digits and underscores, starting with a letter, and not a name the platform uses itself."
 msgstr "Verwenden Sie Großbuchstaben, Ziffern und Unterstriche, beginnend mit einem Buchstaben, und keinen Namen, den die Plattform selbst verwendet."
 
+#: src/onboarding/setup-steps.tsx
+msgid "Use our built-in setup, or connect your own API key."
+msgstr "Nutze unser integriertes System oder verbinde deinen eigenen API-Schlüssel."
+
 #: src/onboarding/ai-choice.tsx
-msgid "Use our own system"
-msgstr "Unser eigenes System nutzen"
+msgid "Use our built-in system"
+msgstr "Unser System nutzen"
 
 #: src/workflows/resource-params.tsx
 msgid "Use the default"
@@ -20167,10 +20197,6 @@ msgstr "Wir haben die passenden Apps gewählt. Fügen Sie weitere hinzu."
 #: src/onboarding/campaign/campaign-asks.tsx
 msgid "We send the invitation again at once."
 msgstr "Wir schicken die Einladung sofort erneut."
-
-#: src/onboarding/ai-choice.tsx
-msgid "We store it sealed. You’ll only see its last four characters again."
-msgstr "Wir speichern ihn versiegelt. Du siehst nur noch die letzten vier Zeichen."
 
 #: src/onboarding/team-step.tsx
 msgid "We want to spend less time on repetitive work, so there’s more time for our clients. This is about how work flows, not about jobs."
@@ -20888,8 +20914,8 @@ msgid "Where"
 msgstr "Wo"
 
 #: src/onboarding/sources-step.tsx
-msgid "Where does the work get written down?"
-msgstr "Wo wird die Arbeit festgehalten?"
+msgid "Where does your team store its work?"
+msgstr "Wo legt dein Team seine Arbeit ab?"
 
 #: src/workflows/today-lanes.tsx
 msgctxt "the card that follows one item across workflows"
@@ -21527,8 +21553,8 @@ msgid "You can add it now and connect it after the agent is made."
 msgstr "Sie können sie jetzt hinzufügen und verbinden, sobald der Agent erstellt ist."
 
 #: src/onboarding/setup-steps.tsx
-msgid "You can carry on with our own system: it works right away, with nothing to set up. Or, if your company would rather use a provider of its own, you can add your own API key. Either is fine."
-msgstr "Du kannst mit unserem eigenen System weitermachen: Es funktioniert sofort, ohne etwas einzurichten. Oder, wenn dein Unternehmen lieber einen eigenen Anbieter nutzt, kannst du deinen eigenen API-Schlüssel hinzufügen. Beides ist in Ordnung."
+msgid "You can also set this up later in Settings."
+msgstr "Du kannst das auch später in den Einstellungen einrichten."
 
 #: src/agents/setup/review-step.tsx
 msgid "You can change all of this later."
@@ -21550,10 +21576,6 @@ msgstr "Sie können diese Erinnerung nicht mehr lesen."
 #: src/brain/learned-section.tsx
 msgid "You can no longer read what the Brain learned from this version."
 msgstr "Sie können nicht mehr lesen, was das Brain aus dieser Version gelernt hat."
-
-#: src/onboarding/setup-steps.tsx
-msgid "You can set it up later in Settings."
-msgstr "Du kannst es später in den Einstellungen einrichten."
 
 #: src/brain/memories-page.tsx
 msgid "You can share with a team of yours, or with everyone, once it has three people or more."
@@ -21711,6 +21733,14 @@ msgctxt "the answer a person gives a decision"
 msgid "Your answer"
 msgstr "Ihre Antwort"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Your API key is connected and ready."
+msgstr "Dein API-Schlüssel ist verbunden und einsatzbereit."
+
+#: src/onboarding/setup-steps.tsx
+msgid "Your API key is working. The AI is ready."
+msgstr "Dein API-Schlüssel funktioniert. Die KI ist startklar."
+
 #: src/interview/composer.tsx
 msgid "Your browser blocked the microphone."
 msgstr "Dein Browser hat das Mikrofon blockiert."
@@ -21738,7 +21768,7 @@ msgstr "Ihre Chats"
 
 #: src/routes/setup.tsx
 msgid "Your company"
-msgstr "Ihr Unternehmen"
+msgstr "Dein Unternehmen"
 
 #: src/interview/start.tsx
 msgid "Your company asked everyone to have a short chat with {who}, our AI interviewer. It takes {minutes} minutes at most, and you decide <0>what happens to your answers</0>."
@@ -21833,16 +21863,8 @@ msgid "Your own key"
 msgstr "Dein eigener Schlüssel"
 
 #: src/onboarding/setup-steps.tsx
-msgid "Your own key is connected and works."
-msgstr "Dein eigener Schlüssel ist verbunden und funktioniert."
-
-#: src/onboarding/setup-steps.tsx
 msgid "Your own key is connected and works. You can keep it, or change it here."
 msgstr "Dein eigener Schlüssel ist verbunden und funktioniert. Du kannst ihn behalten oder hier ändern."
-
-#: src/onboarding/setup-steps.tsx
-msgid "Your own key works, so the AI is ready to go."
-msgstr "Dein eigener Schlüssel funktioniert, die KI ist startklar."
 
 #: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
@@ -21899,7 +21921,7 @@ msgstr "Ihre Geschichte"
 
 #: src/routes/setup.tsx
 msgid "Your team"
-msgstr "Ihr Team"
+msgstr "Dein Team"
 
 #: src/apps/app-workspace.tsx
 msgid "Your team has nothing yet"

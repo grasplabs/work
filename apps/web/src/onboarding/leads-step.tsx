@@ -364,7 +364,7 @@ const PeopleList = ({
         one: "# person found",
         other: "# people found",
       })
-    : `${t`${allTaking} of ${all} take part`} · ${plural(allLeads, {
+    : `${t`${allTaking} of ${all} taking part`} · ${plural(allLeads, {
         one: "# lead",
         other: "# leads",
       })}`;
@@ -472,18 +472,18 @@ const useWords = (from: "directory" | "list" | "nobody", signIn: string) => {
     title: t`Who should I talk to?`,
     body:
       from === "directory"
-        ? t`Everyone from ${signIn} is here. Untick who isn’t taking part, and mark who leads each team: I talk to the leads first.`
+        ? t`Everyone from ${signIn} is listed below. Untick anyone who isn’t taking part, and mark each team’s lead—I’ll talk to them first.`
         : t`Everyone from your staff list is here. Untick who isn’t taking part, and mark who leads each team: I talk to the leads first.`,
     spoken:
       from === "directory"
-        ? t`Now for the people I’ll be talking to. Everyone from ${signIn} is already on this list, so there’s nothing to type. Untick anyone who shouldn’t take part, and mark who leads each team. I always start with the leads, so they hear about this before their team does. Someone missing? Add them by email.`
+        ? t`Now let’s decide who I’ll be talking to. Everyone from ${signIn} is already here—just untick anyone who shouldn’t be included, and mark each team’s lead. I always speak with leads first so they know what’s coming before their team does. Missing someone? Add them by email.`
         : t`Now for the people I’ll be talking to. Everyone from your staff list is already here. Untick anyone who shouldn’t take part, and mark who leads each team. I always start with the leads, so they hear about this before their team does. Someone missing? Add them by email.`,
   };
 };
 
 /** What Stephen says of who he'll talk to, as the next step arrives. */
 const leadsLeft = {
-  leads: msg`Good, I’ll start with the leads you marked.`,
+  leads: msg`Good, I’ll start with the leads you selected.`,
   people: msg`Got it, now I know who I’ll talk to.`,
   nobody: msg`Nobody on the list yet, that’s fine. We’ll add them together later.`,
 };
@@ -491,9 +491,9 @@ const leadsLeft = {
 /** What Stephen answers as the list changes: a lead marked, someone left out, people added, a list shared. */
 const peopleAnswers = {
   lead: msg`Got it, I’ll start with them.`,
-  out: msg`Okay, I’ll leave them out.`,
-  added: msg`Got it, they’re on the list now.`,
-  list: msg`Got the list, they’re all here now.`,
+  out: msg`Understood, I’ll leave them out.`,
+  added: msg`Got it, they’ve been added.`,
+  list: msg`Got the list—everyone’s in.`,
 };
 
 export const LeadsStep = ({ data, onward }: StepProps) => {
