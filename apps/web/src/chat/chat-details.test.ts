@@ -3,14 +3,14 @@ import type {
   OfferedCatalog,
 } from "@grasp-os/shared/connect";
 import { internalErrors } from "@grasp-os/shared/errors";
-import { describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { readChatNames } from "./chat-details.ts";
+import { catalogWaitMs, readChatNames } from "./chat-details.ts";
 
 // What a chat's sources are called: each connection by the name the
 // Connectors page gives it, read from core's connection list and its
-// catalog; a catalog core refuses names each by the list alone, and a
-// list it refuses names none.
+// catalog; a catalog core refuses, or is slow to send, names each by the
+// list alone, and a list it refuses names none.
 
 const connector = "mcp_779f118c28fe4d5abc44822751adce18";
 
@@ -84,6 +84,10 @@ const namesFrom = async (session: {
 };
 
 describe(readChatNames, () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("names each connection as the Connectors page does", async () => {
     await expect(
       namesFrom({
@@ -103,6 +107,21 @@ describe(readChatNames, () => {
         catalog: refused,
       })
     ).resolves.toStrictEqual({
+      outlook: "microsoft (sanne@acme.test)",
+      tracker: "Issue tracker",
+    });
+  });
+
+  it("names each by the list alone when core is slow to send its catalog, inside the read's own deadline", async () => {
+    vi.useFakeTimers();
+    const names = namesFrom({
+      list: async () => await Promise.resolve(connections),
+      // An uncached catalog, waiting on Composio for longer than the read may.
+      catalog: async () => await Promise.withResolvers<never>().promise,
+    });
+    await vi.advanceTimersByTimeAsync(catalogWaitMs);
+
+    await expect(names).resolves.toStrictEqual({
       outlook: "microsoft (sanne@acme.test)",
       tracker: "Issue tracker",
     });

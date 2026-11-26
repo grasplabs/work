@@ -17920,6 +17920,10 @@ msgstr "The model's answer came back in the wrong shape. Try again."
 msgid "The monthly budget for AI is not set yet."
 msgstr "The monthly budget for AI is not set yet."
 
+#: src/connections/add-connector.tsx
+msgid "The name holds a character that doesn't show, such as a zero-width space or a direction mark. Type it again rather than pasting it."
+msgstr "The name holds a character that doesn't show, such as a zero-width space or a direction mark. Type it again rather than pasting it."
+
 #: src/agents/manual-agent.tsx
 #: src/agents/new-agent.tsx
 msgid "The new agent"

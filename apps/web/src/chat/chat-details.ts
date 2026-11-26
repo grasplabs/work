@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 
 import { connectionNames } from "../connections/integrations.ts";
 import type { CoreConnection } from "../core-connection.ts";
+import { withTimeout } from "../core.ts";
 import type { Session } from "../core.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -19,10 +20,20 @@ export interface ChatNames {
   sourceNames: ReadonlyMap<string, SourceName>;
 }
 
-/** The catalog's entries, or none where core refused them. */
+/**
+ * How long the names wait on the catalog, well inside the read's own few
+ * seconds (`timeoutMs`): an uncached catalog waits on Composio, which can
+ * take longer, and the connection list names every source without it.
+ */
+export const catalogWaitMs = 2000;
+
+/** The catalog's entries, or none where core refused them or was slow to. */
 const catalogEntries = async (session: Session) => {
   try {
-    const { entries } = await session.connections.catalog();
+    const { entries } = await withTimeout(
+      session.connections.catalog(),
+      catalogWaitMs
+    );
     return entries;
   } catch {
     return [];
@@ -32,7 +43,8 @@ const catalogEntries = async (session: Session) => {
 /**
  * The names of the connections the person can see, by ID, as the
  * Connectors page names them: a list refused only leaves those IDs
- * unnamed, a catalog refused names each by what the list says alone.
+ * unnamed, a catalog refused or slow names each by what the list says
+ * alone.
  */
 const readSourceNames = async (
   session: Session
