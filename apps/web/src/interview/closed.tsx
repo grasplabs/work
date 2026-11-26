@@ -57,7 +57,6 @@ const styles = stylex.create({
 /** His thanks, and what they can still do: add something, and say how it was. */
 export const Closed = ({
   name,
-  closes,
   rating,
   feedback,
   onRate,
@@ -65,8 +64,6 @@ export const Closed = ({
   onAdd,
 }: {
   name: string;
-  /** The last day the link works, in words. */
-  closes: string;
   rating: number | undefined;
   feedback: string | undefined;
   onRate: (rating: number) => void;
@@ -75,7 +72,7 @@ export const Closed = ({
 }) => {
   const { t } = useLingui();
   const title = t`Thank you, ${name}.`;
-  const message = t`What you agreed to is kept. Forgot something? This link works until ${closes}.`;
+  const message = t`What you approved is saved. Forgot something? This link works for 7 days.`;
   const line = `${title} ${message}`;
   // He says his thanks once, as the screen comes.
   const [saying, setSaying] = useState(true);
@@ -95,7 +92,8 @@ export const Closed = ({
           <SpokenText said={said} text={title} />
         </Heading>
         <Text aria-live="polite" color="muted">
-          <SpokenText from={title.length + 1} said={said} text={message} />
+          {/* The line stands still: only the title is drawn as he says it. */}
+          {message}
         </Text>
       </div>
       {/* Where their lines go was said when they started: not again here. */}

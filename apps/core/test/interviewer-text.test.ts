@@ -67,7 +67,7 @@ describe("the languages", () => {
   const address: Record<InterviewLocale, string> = {
     en: "Speak English.",
     nl: 'Say "je".',
-    de: 'Say "Sie".',
+    de: 'Say "du".',
     fr: 'Say "vous".',
     es: 'Say "tú".',
   };
@@ -100,13 +100,12 @@ describe("the languages", () => {
 });
 
 describe("the interview", () => {
-  it("is about someone's own work, with an example asked for", () => {
+  it("is about someone's own work, and never asks for a file", () => {
     const { text } = textOf({ kind: "own", locale: "en" });
     expect(text).toContain("# The interview, in order");
     expect(text).not.toContain("# The interview with a team lead");
-    expect(text).toContain(
-      'ask for one real example to share, and set wants to "file"'
-    );
+    expect(text).toContain("Never ask them to drop, upload or share a file.");
+    expect(text).not.toContain('set wants to "file"');
   });
 
   it("is with a lead about the team's work", () => {

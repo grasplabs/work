@@ -216,7 +216,10 @@ export const Composer = ({
           <>
             <PromptInputBody>
               <PromptInputTextarea
-                aria-label={t`Your answer`}
+                aria-label={t({
+                  message: "Your answer",
+                  context: "the person interviewed",
+                })}
                 // The cursor is in the box, so typing is all it takes.
                 autoFocus
                 placeholder={placeholder}

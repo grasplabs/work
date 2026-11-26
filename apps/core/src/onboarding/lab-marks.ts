@@ -17,18 +17,18 @@ export const labMarks: Record<
   Record<InterviewLocale, string>
 > = {
   own: {
-    en: "b1f5fc8275a27977fe4d1d7cf88f58638d7be73fda956a9ced516d8ef1828f4b",
-    nl: "4ba6ae52e4acc5ac0ad21fb3045258a466da4287e064d042e5c068238d79fcb0",
-    de: "70f35a1939e513c3e05c7b8fbc57dd174babf0fcf3121ebe3095067821199105",
-    fr: "76239731f35f5aaa160f558ef83037ad232111d4690c065011bb9982bd41cf34",
-    es: "c9ed96d825db6b4086d4937f84a0927c95020c776988430b268c5f920cdc1de4",
+    en: "7f1d7d0430c88c9673900ce8b272ee267f1762c4d2c0f85601777721be525486",
+    nl: "a40a1589a3801560139382f64607d097180262deb8bd793253ceb7804b53ab7b",
+    de: "5e42a604d0755cd34668776763d7a7507bafc2ab1e75332e16e7db0a73910ac0",
+    fr: "ef02280b849fce1c95099f89967436e0e27c7eb0ae643a0f0ade6078d4cbc7b8",
+    es: "739a4b5662710a2ac1b0328b739cb234e6b1e81d6c3c6c3245884d8088147b59",
   },
   lead: {
-    en: "2ab363362ae8ec50373401069cfd49013e3001ac403a71331603a48eb470e7d5",
-    nl: "fd964a8c6b5247e2c36725bcc19783902891ef4a28d814e14750e67a368f8e6b",
-    de: "45c037cfc6cd723e3978b3b6b87b2173f5f4e664ed56984fae3f93b6270c9442",
-    fr: "989e12a0d7e4a1550ad82ee9b6c9a64fbb4cd41ee498d8397c4b4ada3ec3d20e",
-    es: "a2d9cdaa24f43eb4c513f704926976f6bfaef62730ca99e5716e1a0f32647c27",
+    en: "a7b3fc29df6aa73dd2ad8c915368da1bce3cfd4fdcd6160964b54a5602a802f2",
+    nl: "94f105be5d83558ef3981baf633fcae2e484a8348256423e1e99377ca675428c",
+    de: "50ccf3d6a616db8bde5b3c3ceba045a709e77636802d87cec4e3219e4bc82b5b",
+    fr: "51b722722cc6e9a222b497b4966fcc8c15398212f5d938c9d923b1ce3402df48",
+    es: "1c4c8c4054dd290cca468674aecb34e3c44bfbc00fcda6caae4fa8f186355013",
   },
 };
 
@@ -36,7 +36,7 @@ export const labMarks: Record<
 // every mark, in the order they stand here, one to a line. A test holds it
 // to the marks, so no text changes under a version's name: whoever changes
 // a mark changes this.
-export const marksDigest = "e8d62fbbf6a5";
+export const marksDigest = "97d081995c13";
 
 // Which Stephen this is, as one name for all of the marks above: an
 // interview that keeps it says which texts held it, in whatever language
@@ -59,18 +59,18 @@ export const voiceMarks: Record<
   Record<InterviewLocale, string>
 > = {
   own: {
-    en: "75699dcf39796b22d43c3ba60ce60b7a09acd5cf509d38c5450e8b0356598170",
-    nl: "b85b666ffa4338bb4be6be365fb19cb7dc20f7dca0d0d868f6ecc9ad68e59fb6",
-    de: "858d45d00d35f03c3f69ad3f0a2629dc094f373f41d1a26132a4059ed88b1289",
-    fr: "d03f55eb509803281b338a8eb65f6d09727b797850642509577c190f9e40cbda",
-    es: "5f213c1e86b49919527d4c241bb62624e24cf0dabec44992383258d0be537055",
+    en: "c9ed2e32e821f22192aa9666d13bdf95983bb17937ca52f8622ade8017ff6826",
+    nl: "d9e3fea732462fd1060792e1fb5d1ea5eb344250ca4d505cd52d731c07ed9830",
+    de: "d420903dfd575f01219dd407eb886519cb59c4393f4ced6d92e83f26dcb2a685",
+    fr: "cab71a6f28bd4d56501675ced00914633eb34ab948b7c022e22d948321594b23",
+    es: "1c1bb3341f487708bffa5e79d0d77f9de3f062f46b61c072dd2dfdc5de568335",
   },
   lead: {
-    en: "333d7f622762885e1f1212e38ba2120560d105a49912044cff0e367733f4bdfb",
-    nl: "c73fd3fbcfa22e133d8240c7e966d3a65d54f25b57e1174fa2f99f7d3b3360e7",
-    de: "c8546fccb091a6fc29f471a79ca91ad2261218317cf96b5c4c3da0a5bccf866b",
-    fr: "37a75b2c40beb028b71ca1bb7f657f8f694562eec06403c7b55f69512ca0b7cd",
-    es: "9d1cba8086ecfd68157c704286bd81c0827a95c1351e95162d1c2818bbcae367",
+    en: "95cfcaa5587adfc50e65c59794e6c7df21112215f3a8644db66542361648451b",
+    nl: "390810c186a2ba351b11bf0818e07613ae425a2b1183815500619bf636b36e82",
+    de: "0d6b5c8dc71d3e5cfdda93a3c99ba17d6cae0163dcbae109ed5e528007b89a9c",
+    fr: "c592de06b84b58403ce61fe8c6f2906b65df36bcd77a283556a0c0f89c00d5b8",
+    es: "125879aa45ed70a965023dba234ca212214af56f0182750e898812cb8ae476bd",
   },
 };
 
@@ -79,7 +79,7 @@ export const everyVoiceMark = (): string[] =>
   Object.values(voiceMarks).flatMap((locales) => Object.values(locales));
 
 // The voice marks as one, as `marksDigest` is taken over the turn marks.
-export const voiceMarksDigest = "ba3a1198115d";
+export const voiceMarksDigest = "b1c89bcc44f7";
 
 // Which Stephen holds a voice interview: its own name, so the admin's lab
 // sets voice interviews apart from turn interviews.

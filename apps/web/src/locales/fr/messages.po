@@ -233,6 +233,10 @@ msgstr "{column}, ligne {number}"
 msgid "{company} · Week {number} of {weeks} · {from} to {to}"
 msgstr "{company} · Semaine {number} sur {weeks} · du {from} au {to}"
 
+#: src/interview/start.tsx
+msgid "{company} asked everyone to have a short conversation with {who}, our AI interviewer. It takes {minutes} minutes at most, and you decide <0>what happens to your answers</0>."
+msgstr "{company} a demandé à chacun un court échange avec {who}, notre intervieweur IA. Cela prend {minutes} minutes maximum, et vous décidez <0>ce que deviennent vos réponses</0>."
+
 #: src/chat/held-writes.tsx
 #: src/inbox/outcome-details.tsx
 msgid "{connection} ({tool})"
@@ -895,8 +899,8 @@ msgid "{minutes}m {rest}s"
 msgstr "{minutes} min {rest} s"
 
 #: src/interview/start.tsx
-msgid "{minutesLeft, plural, one {Your answers are saved and the clock is stopped. You have # minute left, and you can pick up where you left off any time until {closes}.} other {Your answers are saved and the clock is stopped. You have # minutes left, and you can pick up where you left off any time until {closes}.}}"
-msgstr "{minutesLeft, plural, one {Vos réponses sont enregistrées et le chrono est arrêté. Il vous reste # minute, et vous pouvez reprendre là où vous en étiez à tout moment jusqu’au {closes}.} other {Vos réponses sont enregistrées et le chrono est arrêté. Il vous reste # minutes, et vous pouvez reprendre là où vous en étiez à tout moment jusqu’au {closes}.}}"
+msgid "{minutesLeft, plural, one {Your answers are saved and the clock is paused. You have # minute left, and you can pick up where you left off anytime until {closes}.} other {Your answers are saved and the clock is paused. You have # minutes left, and you can pick up where you left off anytime until {closes}.}}"
+msgstr "{minutesLeft, plural, one {Vos réponses sont enregistrées et le chrono est en pause. Il vous reste # minute et vous pouvez reprendre à tout moment jusqu’au {closes}.} other {Vos réponses sont enregistrées et le chrono est en pause. Il vous reste # minutes et vous pouvez reprendre à tout moment jusqu’au {closes}.}}"
 
 #: src/frame/ui-words.tsx
 msgid "{model} added to favourites"
@@ -1968,13 +1972,13 @@ msgstr "Une valeur JSON"
 msgid "A key in a header"
 msgstr "Une clé dans un en-tête"
 
-#: src/interview/transcript-looks.tsx
-msgid "A line of mine, removed."
-msgstr "Une de mes interventions, supprimée."
-
 #: src/onboarding/campaign/concepts/canvas.tsx
 msgid "A list or sheet of their own, beside the systems"
 msgstr "Une liste ou un tableau à eux, à côté des systèmes"
+
+#: src/interview/transcript-looks.tsx
+msgid "A message of mine, removed."
+msgstr "Un de mes messages, supprimé."
 
 #: src/activity/audit-words.ts
 msgid "A model call was refused"
@@ -3864,10 +3868,6 @@ msgstr "Arrière-plan"
 msgid "Bad"
 msgstr "Mauvais"
 
-#: src/interview/words.ts
-msgid "Based on our conversation, I’ve made a summary for you. This is how it looks."
-msgstr "À partir de notre conversation, j’ai préparé un résumé pour vous. Le voici."
-
 #: src/settings/backdrop-settings.tsx
 msgid "Bayer"
 msgstr "Bayer"
@@ -4190,7 +4190,6 @@ msgstr "Impossible de proposer Exécuter : {unread}"
 #: src/frame/panels/rename.tsx
 #: src/frame/ui-words.tsx
 #: src/inbox/decision-confirmation.tsx
-#: src/interview/destination.tsx
 #: src/interview/transcript.tsx
 #: src/link-confirmation.tsx
 #: src/onboarding/people-add.tsx
@@ -4247,7 +4246,6 @@ msgstr "Cas par semaine : {cases}."
 #: src/agents/new-agent.tsx
 #: src/apps/app-workflows.tsx
 #: src/drafts/share-with-team.tsx
-#: src/interview/transcript-looks.tsx
 #: src/settings/ai-providers.tsx
 msgid "Change"
 msgstr "Modification"
@@ -4362,10 +4360,6 @@ msgstr "Modifier cette ligne"
 #: src/apps/app-workflows.tsx
 msgid "Change what {alias} starts"
 msgstr "Modifier ce que {alias} lance"
-
-#: src/interview/transcript-looks.tsx
-msgid "Change your line: {words}"
-msgstr "Modifier votre réponse : {words}"
 
 #: src/interview/read-back-story.tsx
 msgid "Change: {text}"
@@ -4764,10 +4758,6 @@ msgstr "Choisissez ce que Grasp peut faire dans {app}, puis saisissez sa clé."
 msgid "Choose what Grasp may do in {app}, then sign in there."
 msgstr "Choisissez ce que Grasp peut faire dans {app}, puis connectez-vous-y."
 
-#: src/interview/destination.tsx
-msgid "Choose where each line goes. A line you move counts again once you save."
-msgstr "Choisissez où va chaque ligne. Une ligne que vous déplacez compte de nouveau dès que vous enregistrez."
-
 #: src/onboarding/setup-steps.tsx
 msgid "Choose your AI"
 msgstr "Choisissez votre IA"
@@ -4852,7 +4842,6 @@ msgstr "Falaises"
 #: src/frame/panels/head.tsx
 #: src/frame/top-error.tsx
 #: src/frame/ui-words.tsx
-#: src/interview/destination.tsx
 #: src/onboarding/campaign/campaign-page.tsx
 #: src/projects/project-chats.tsx
 #: src/settings/erasures.tsx
@@ -5601,10 +5590,6 @@ msgstr "La réponse n’a pas pu être envoyée"
 #: src/frame/ui-words.tsx
 msgid "Could not send. Your message is kept."
 msgstr "Envoi impossible. Votre message est conservé."
-
-#: src/interview/parts/consent.tsx
-msgid "Could not start"
-msgstr "Impossible de commencer"
 
 #: src/frame/ui-words.tsx
 msgid "Could not upload"
@@ -6431,8 +6416,8 @@ msgid "Does something that needs your yes"
 msgstr "Fait quelque chose qui demande votre accord"
 
 #: src/interview/words.ts
-msgid "Does that sound like a good summary, or is there anything you’d like to add?"
-msgstr "Est-ce que ce résumé vous semble juste, ou souhaitez-vous ajouter quelque chose ?"
+msgid "Does that capture it well, or is there anything you’d like to change or add?"
+msgstr "Est-ce que cela reflète bien ce que vous m’avez dit, ou souhaitez-vous modifier quelque chose ?"
 
 #: src/settings/stephen-settings.tsx
 msgid "Does things for people here"
@@ -6441,6 +6426,10 @@ msgstr "Agit pour les personnes ici"
 #: src/settings/stephen-settings.tsx
 msgid "Does things for people in {name}"
 msgstr "Agit pour les personnes dans {name}"
+
+#: src/interview/words.ts
+msgid "Does this new part look right?"
+msgstr "Cette nouvelle partie vous semble-t-elle exacte ?"
 
 #: src/connections/http-connections.tsx
 msgid "Doesn't work now"
@@ -6749,6 +6738,11 @@ msgstr "Bord"
 msgid "Edit"
 msgstr "Modifier"
 
+#: src/interview/transcript-looks.tsx
+msgctxt "a message of theirs in the transcript"
+msgid "Edit"
+msgstr "Modifier"
+
 #: src/frame/ui-words.tsx
 msgctxt "edit a value in place"
 msgid "Edit"
@@ -6785,6 +6779,10 @@ msgstr "Modifier l’horaire"
 #: src/settings/org-card.tsx
 msgid "Edit the name"
 msgstr "Modifier le nom"
+
+#: src/interview/transcript-looks.tsx
+msgid "Edit your message: {words}"
+msgstr "Modifier votre message : {words}"
 
 #: src/chat/thread.tsx
 msgid "Edited {path}"
@@ -8307,11 +8305,15 @@ msgstr "Grasp est disponible"
 
 #: src/chat/global-chat.tsx
 #: src/core.ts
-#: src/interview/api.ts
 #: src/load-from-core.tsx
 #: src/routes/_shell.tsx
 #: src/routes/decisions.$decision.tsx
 #: src/routes/sign-in.tsx
+msgid "Grasp can't be reached right now. Try again in a moment."
+msgstr "Grasp est injoignable pour le moment. Réessayez dans un instant."
+
+#: src/interview/api.ts
+msgctxt "the interview"
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Grasp est injoignable pour le moment. Réessayez dans un instant."
 
@@ -8639,10 +8641,6 @@ msgstr "Il cesse de répondre partout en dehors de Grasp et le dit une fois à q
 msgid "Header name"
 msgstr "Nom de l'en-tête"
 
-#: src/interview/words.ts
-msgid "Hello"
-msgstr "Bonjour"
-
 #: src/agents/agent-templates.ts
 msgid "Help desk"
 msgstr "Service d’aide"
@@ -8667,7 +8665,7 @@ msgstr "Bonjour {admin}, je suis Stephen. Je vais vous guider dans la configurat
 #: src/interview/start.tsx
 msgid "Hi {name}, got a few minutes\n"
 "to talk about your work?"
-msgstr "Bonjour {name}, vous avez quelques minutes\n"
+msgstr "Bonjour {name}, avez-vous quelques minutes\n"
 "pour parler de votre travail ?"
 
 #: src/onboarding/team-step.tsx
@@ -8909,10 +8907,6 @@ msgstr "Connexions HTTP"
 msgid "https:// and a public host name, with nothing after it."
 msgstr "https:// et un nom d'hôte public, sans rien après."
 
-#: src/interview/parts/consent.tsx
-msgid "I agree, let's start"
-msgstr "D'accord, commençons"
-
 #: src/interview/start.tsx
 msgid "I agree, let’s start"
 msgstr "J’accepte, commençons"
@@ -8974,10 +8968,6 @@ msgstr "Je n’ai trouvé personne dans {signIn}."
 #: src/interview/words.ts
 msgid "I lost the connection. Please check your internet. I have kept what you said, and I keep trying."
 msgstr "J’ai perdu la connexion. Vérifiez votre connexion internet. J’ai gardé ce que vous avez dit et je continue d’essayer."
-
-#: src/interview/parts/consent.tsx
-msgid "I'd rather skip this"
-msgstr "Je préfère passer mon tour"
 
 #: src/onboarding/forget-kickoff.tsx
 msgid "I’ll delete what was said and everything I learned from it, including what your Brain saved. I’ll know less about your company, which may delay when Grasp is ready. This can’t be undone."
@@ -12234,7 +12224,6 @@ msgstr "Non réinitialisé"
 msgid "Not revoked"
 msgstr "Non révoqué"
 
-#: src/interview/parts/consent.tsx
 #: src/interview/start.tsx
 msgid "Not right now"
 msgstr "Pas tout de suite"
@@ -12250,14 +12239,6 @@ msgstr "Non enregistré"
 #: src/interview/composer.tsx
 msgid "Not saved yet. Trying again."
 msgstr "Pas encore enregistré. Nouvel essai en cours."
-
-#: src/interview/destination.tsx
-msgid "Not saved yet. Until it is, the lines you moved count nowhere."
-msgstr "Pas encore enregistré. D’ici là, les lignes que vous avez déplacées ne comptent nulle part."
-
-#: src/interview/destination.tsx
-msgid "Not saved yet. Until it is, your lines still go where they went before."
-msgstr "Pas encore enregistré. D’ici là, vos lignes vont toujours là où elles allaient avant."
 
 #: src/settings/invitations.tsx
 msgid "Not sent"
@@ -12883,10 +12864,6 @@ msgstr "l’une de ses options"
 msgid "One of the company's agents"
 msgstr "Un des agents de l’entreprise"
 
-#: src/interview/words.ts
-msgid "One real case"
-msgstr "Un cas réel"
-
 #: src/agents/agent-brief.ts
 msgid "One short message: what you found first, then what you suggest."
 msgstr "Un message court : d’abord ce que tu as trouvé, puis ce que tu proposes."
@@ -12919,7 +12896,6 @@ msgstr "Seul un administrateur réinitialise les données d'une App : tous les e
 msgid "Only builders see this."
 msgstr "Seuls les créateurs voient ceci."
 
-#: src/interview/destination.tsx
 #: src/interview/read-back-story.tsx
 msgid "Only counted anonymously"
 msgstr "Compté seulement de façon anonyme"
@@ -12998,7 +12974,6 @@ msgstr "Seulement les équipes que vous choisissez."
 msgid "Only the workflow's builders can change these."
 msgstr "Seuls les concepteurs du workflow peuvent les modifier."
 
-#: src/interview/destination.tsx
 #: src/interview/read-back-story.tsx
 msgid "Only used to know whom to ask"
 msgstr "Utilisé seulement pour savoir à qui demander"
@@ -13233,8 +13208,8 @@ msgid "Opening the note"
 msgstr "Ouverture de la note"
 
 #: src/routes/interview.tsx
-msgid "Opening your interview…"
-msgstr "Ouverture de votre entretien…"
+msgid "Opening your conversation…"
+msgstr "Ouverture de votre échange…"
 
 #: src/frame/ui-words.tsx
 msgid "opens in a new tab"
@@ -14374,6 +14349,10 @@ msgstr "A lu ce qui a changé sur une connexion"
 msgid "Read what could be improved"
 msgstr "A lu ce qui pourrait être amélioré"
 
+#: src/interview/api.ts
+msgid "Read what this interview is for and agree to take part first."
+msgstr "Lisez d’abord à quoi sert cet entretien et acceptez d’y participer."
+
 #. Grasp reads a file the person attached; {file} is its name.
 #: src/chat/thread.tsx
 msgid "Reading {file}"
@@ -14390,10 +14369,6 @@ msgstr "Lecture de {path}"
 #: src/chat/thread.tsx
 msgid "Reading {path} in the docs"
 msgstr "Lecture de {path} dans la documentation"
-
-#: src/interview/words.ts
-msgid "Reading it back"
-msgstr "Relecture"
 
 #: src/inbox/items.ts
 msgid "Reading it kept failing, so your triggers there start nothing new for now. Grasp keeps trying; if it doesn't come back, check the connection."
@@ -14451,10 +14426,6 @@ msgstr "Prêt immédiatement, rien à configurer."
 #: src/agents/setup/review-step.tsx
 msgid "Ready to make {name}?"
 msgstr "Prêt à créer {name} ?"
-
-#: src/interview/parts/consent.tsx
-msgid "Ready to start?"
-msgstr "Prêt à commencer ?"
 
 #: src/workflows/item-test.tsx
 msgid "Real run"
@@ -14682,8 +14653,8 @@ msgid "Remove {when}, for {person}"
 msgstr "Retirer {when}, pour {person}"
 
 #: src/interview/transcript-looks.tsx
-msgid "Remove {who}’s line: {words}"
-msgstr "Retirer l’intervention de {who} : {words}"
+msgid "Remove {who}’s message: {words}"
+msgstr "Retirer le message de {who} : {words}"
 
 #: src/frame/ui-words.tsx
 msgid "Remove {words}"
@@ -14743,12 +14714,12 @@ msgid "Remove this from the brain"
 msgstr "Retirer ceci du cerveau"
 
 #: src/interview/transcript.tsx
-msgid "Remove this line?"
-msgstr "Retirer cette intervention ?"
+msgid "Remove this message?"
+msgstr "Retirer ce message ?"
 
 #: src/interview/transcript-looks.tsx
-msgid "Remove your line: {words}"
-msgstr "Retirer votre intervention : {words}"
+msgid "Remove your message: {words}"
+msgstr "Retirer votre message : {words}"
 
 #: src/frame/ui-words.tsx
 msgctxt "a table row's state"
@@ -15590,13 +15561,8 @@ msgstr "Enregistrer la correction"
 msgid "Save the places"
 msgstr "Enregistrer les emplacements"
 
-#: src/interview/destination.tsx
-msgid "Save where they go"
-msgstr "Enregistrer où elles vont"
-
 #: src/apps/blueprints.tsx
 #: src/frame/ui-words.tsx
-#: src/interview/destination.tsx
 #: src/settings/ai-providers.tsx
 msgid "Saved"
 msgstr "Enregistré"
@@ -15661,10 +15627,6 @@ msgstr "Enregistrement"
 #: src/chat/thread.tsx
 msgid "Saving to memory"
 msgstr "Enregistrement en mémoire"
-
-#: src/interview/destination.tsx
-msgid "Saving…"
-msgstr "Enregistrement…"
 
 #: src/agents/agent-overview.tsx
 msgid "Say in plain words what it should do, as to a new colleague."
@@ -16219,7 +16181,6 @@ msgstr "A partagé un document pour l’onboarding"
 msgid "Shared apps"
 msgstr "Applications partagées"
 
-#: src/interview/destination.tsx
 #: src/interview/read-back-story.tsx
 msgid "Shared as how your team works"
 msgstr "Partagé comme la façon de travailler de votre équipe"
@@ -16501,8 +16462,8 @@ msgid "Sign in to Grasp"
 msgstr "Se connecter à Grasp"
 
 #: src/routes/interview.tsx
-msgid "Sign in to open your interview"
-msgstr "Connectez-vous pour ouvrir votre entretien"
+msgid "Sign in to open your conversation"
+msgstr "Connectez-vous pour ouvrir votre échange"
 
 #: src/sign-in-options.tsx
 msgid "Sign in with {label}"
@@ -16515,6 +16476,10 @@ msgstr "Se connecter avec un code"
 #: src/sign-in-errors.ts
 msgid "Sign in with your organization's account."
 msgstr "Connectez-vous avec le compte de votre organisation."
+
+#: src/interview/api.ts
+msgid "Sign in with your work account to open your interview."
+msgstr "Connectez-vous avec votre compte professionnel pour ouvrir votre entretien."
 
 #: src/frame/person-menu.tsx
 #: src/guest-sign-in.tsx
@@ -17080,10 +17045,6 @@ msgstr "Étape {step} sur {total}"
 msgid "Step {step} of {total}: {label}"
 msgstr "Étape {step} sur {total} : {label}"
 
-#: src/interview/words.ts
-msgid "Step by step"
-msgstr "Étape par étape"
-
 #: src/workflows/traces.tsx
 msgctxt "the steps of one run, one under the other"
 msgid "Step by step"
@@ -17097,9 +17058,25 @@ msgstr "Stephen"
 msgid "Stephen can offer it in Microsoft Teams to anyone who may start it. It starts only when they press Start, and runs as them."
 msgstr "Stephen peut le proposer dans Microsoft Teams à toute personne autorisée à le lancer. Il ne démarre que lorsqu’elle appuie sur Lancer, et s’exécute en son nom."
 
+#: src/interview/api.ts
+msgid "Stephen could not answer that. Say it another way."
+msgstr "Stephen n’a pas pu répondre à cela. Dites-le autrement."
+
+#: src/interview/api.ts
+msgid "Stephen could not be reached. Try again."
+msgstr "Stephen est injoignable. Réessayez."
+
+#: src/interview/api.ts
+msgid "Stephen is busy. Try again in a minute."
+msgstr "Stephen est occupé. Réessayez dans une minute."
+
 #: src/settings/chat-accounts.tsx
 msgid "Stephen is still answering one of your conversations. Try again in a moment."
 msgstr "Stephen est encore en train de répondre dans l’une de vos conversations. Réessayez dans un instant."
+
+#: src/interview/api.ts
+msgid "Stephen lost his thread. Say it once more."
+msgstr "Stephen a perdu le fil. Redites-le une fois."
 
 #: src/settings/stephen-card.tsx
 msgid "Stephen outside Grasp"
@@ -17669,6 +17646,18 @@ msgstr "Merci pour ce document. Je le lirai avant de parler à qui que ce soit."
 msgid "Thanks for the documents. I’ll review them before talking to anyone."
 msgstr "Merci pour ces documents. Je les lirai avant de parler à qui que ce soit."
 
+#: src/interview/words.ts
+msgid "Thanks so much—it was great talking with you. You can always come back to this link within 7 days if you want to adjust anything. Have a great rest of your week."
+msgstr "Merci beaucoup — c’était un plaisir d’échanger avec vous. Vous pouvez revenir sur ce lien pendant 7 jours si vous voulez ajuster quoi que ce soit. Bonne fin de semaine !"
+
+#: src/interview/words.ts
+msgid "Thanks so much, {name}—it was great talking with you. You can always come back to this link within 7 days if you want to adjust anything. Have a great rest of your week."
+msgstr "Merci beaucoup, {name} — c’était un plaisir d’échanger avec vous. Vous pouvez revenir sur ce lien pendant 7 jours si vous voulez ajuster quoi que ce soit. Bonne fin de semaine !"
+
+#: src/interview/words.ts
+msgid "Thanks—I’ve put together a quick summary of what we talked about. Take a look."
+msgstr "Merci — j’ai préparé un court résumé de notre échange. Regardez si cela vous correspond."
+
 #: src/onboarding/sources-step.tsx
 msgid "Thanks. I’ll only read what you’ve shared with me there."
 msgstr "Merci. Je ne lirai que ce que vous y avez partagé."
@@ -17733,6 +17722,10 @@ msgstr "Ce fichier est vide."
 msgid "That is {who}."
 msgstr "C’est-à-dire {who}."
 
+#: src/interview/api.ts
+msgid "That is as long as the interview can run today. Come back tomorrow to go on."
+msgstr "L’entretien ne peut pas durer plus longtemps aujourd’hui. Revenez demain pour continuer."
+
 #: src/pages/page-files.ts
 msgid "That isn't a file call."
 msgstr "Ce n'est pas un appel de fichier."
@@ -17744,6 +17737,10 @@ msgstr "Ce n’est pas un lien qui peut être ouvert."
 #: src/workflows/resource-params.tsx
 msgid "That isn't a value this parameter takes."
 msgstr "Ce paramètre n’accepte pas cette valeur."
+
+#: src/interview/api.ts
+msgid "That isn't something an interview takes."
+msgstr "Ce n’est pas quelque chose qu’un entretien peut accepter."
 
 #: src/settings/add-connection/words.ts
 msgid "That key didn't work."
@@ -17760,6 +17757,10 @@ msgstr "Ce compte de l’équipe n’a pas reçu d’accès ici."
 #: src/onboarding/document-visitors.tsx
 msgid "That training deck helps too"
 msgstr "Ce support de formation aide aussi"
+
+#: src/interview/api.ts
+msgid "That was a lot at once. Wait a minute, then go on."
+msgstr "C’était beaucoup d’un coup. Patientez une minute, puis continuez."
 
 #: src/sign-in-errors.ts
 msgid "That way of signing in isn't set up here."
@@ -17786,8 +17787,8 @@ msgid "That’s more people than I can take: up to 2,000."
 msgstr "C’est plus de personnes que je ne peux en prendre : jusqu’à 2 000."
 
 #: src/interview/conversation.tsx
-msgid "That’s our {minutes} minutes. Thanks, {name}. Everything you shared is saved."
-msgstr "Voilà nos {minutes} minutes. Merci, {name}. Tout ce que vous avez partagé est enregistré."
+msgid "That’s our {minutes} minutes—thank you, {name}. Everything you shared is safely saved."
+msgstr "Nos {minutes} minutes sont écoulées — merci, {name}. Tout ce que vous avez partagé est bien enregistré."
 
 #: src/frame/ui-words.tsx
 msgid "The {many} did not load"
@@ -18233,9 +18234,25 @@ msgstr "Les champs d’entrée ne sont pas du JSON."
 msgid "The input isn't JSON."
 msgstr "L'entrée n'est pas du JSON."
 
+#: src/interview/api.ts
+msgid "The interview could not start. Try again."
+msgstr "L’entretien n’a pas pu démarrer. Réessayez."
+
+#: src/interview/api.ts
+msgid "The interview is not set up yet."
+msgstr "L’entretien n’est pas encore configuré."
+
 #: src/interview/page.tsx
 msgid "The interviews are over."
 msgstr "Les entretiens sont terminés."
+
+#: src/interview/api.ts
+msgid "The interviews are over. Thank you for your time."
+msgstr "Les entretiens sont terminés. Merci pour votre temps."
+
+#: src/interview/api.ts
+msgid "The interviews are paused for now. Try again a little later."
+msgstr "Les entretiens sont en pause pour le moment. Réessayez un peu plus tard."
 
 #: src/onboarding/campaign/concepts/concept-words.ts
 msgid "The interviews close"
@@ -18273,10 +18290,6 @@ msgstr "La dernière lecture n’a pas pu lister les comptes supprimés dans l�
 msgid "The light around the box while Grasp works"
 msgstr "La lumière autour de la zone pendant que Grasp travaille"
 
-#: src/interview/transcript.tsx
-msgid "The line is deleted now, and so is what I marked in it. What I wrote down from it is in what I read back to you at the end: take it out there, and it is deleted for good when our conversation is finished. This can’t be undone."
-msgstr "L’intervention est supprimée maintenant, tout comme ce que j’y ai marqué. Ce que j’en ai noté figure dans ce que je vous relis à la fin : retirez-le là, et il sera supprimé pour de bon une fois notre échange terminé. Cette action est irréversible."
-
 #: src/pages/page-links.ts
 msgid "The link wasn't opened."
 msgstr "Le lien n’a pas été ouvert."
@@ -18292,6 +18305,10 @@ msgstr "Le logo n’a pas pu être supprimé"
 #: src/onboarding/message-compose.tsx
 msgid "The message"
 msgstr "Le message"
+
+#: src/interview/transcript.tsx
+msgid "The message is deleted now, and so is what I marked in it. What I wrote down from it is in what I read back to you at the end: take it out there, and it is deleted for good when our conversation is finished. This can’t be undone."
+msgstr "Le message est supprimé maintenant, tout comme ce que j’y ai marqué. Ce que j’en ai noté figure dans ce que je vous relis à la fin : retirez-le là, et il sera supprimé pour de bon une fois notre échange terminé. Cette action est irréversible."
 
 #: src/interview/composer.tsx
 #: src/interview/words.ts
@@ -18342,10 +18359,6 @@ msgstr "Le nouveau secret"
 #: src/inbox/inbox-page.tsx
 msgid "The next one"
 msgstr "La suivante"
-
-#: src/interview/words.ts
-msgid "The numbers"
-msgstr "Les chiffres"
 
 #: src/inbox/inbox-page.tsx
 msgid "The one before"
@@ -18855,6 +18868,7 @@ msgstr "Voici ta nouvelle App, avec des données d'exemple."
 msgid "This link can’t be used"
 msgstr "Ce lien ne peut pas être utilisé"
 
+#: src/interview/api.ts
 #: src/routes/interview.tsx
 msgid "This link doesn't work. Ask whoever sent it for a new one."
 msgstr "Ce lien ne fonctionne pas. Demandez-en un nouveau à la personne qui l’a envoyé."
@@ -19317,7 +19331,6 @@ msgstr "Essayer"
 #: src/inbox/decision-card.tsx
 #: src/inbox/inbox-page.tsx
 #: src/interview-routes.tsx
-#: src/interview/destination.tsx
 #: src/onboarding/company-step.tsx
 #: src/onboarding/document-shelf.tsx
 #: src/settings/sign-in-settings.tsx
@@ -20272,14 +20285,6 @@ msgstr "Bilan de la semaine"
 msgid "Weekly reporter"
 msgstr "Rapporteur hebdo"
 
-#: src/interview/words.ts
-msgid "Well, thank you, {name}. It was great talking to you. You can always come back to this link if you want to change something. For now, I have enough. Have a great rest of your week."
-msgstr "Merci beaucoup, {name}. C’était un plaisir de discuter avec vous. Vous pouvez toujours revenir par ce lien si vous voulez changer quelque chose. Pour l’instant, j’ai ce qu’il me faut. Bonne fin de semaine !"
-
-#: src/interview/words.ts
-msgid "Well, thank you. It was great talking to you. You can always come back to this link if you want to change something. For now, I have enough. Have a great rest of your week."
-msgstr "Merci beaucoup. C’était un plaisir de discuter avec vous. Vous pouvez toujours revenir par ce lien si vous voulez changer quelque chose. Pour l’instant, j’ai ce qu’il me faut. Bonne fin de semaine !"
-
 #: src/activity/audit-words.ts
 msgid "Went back to an earlier version"
 msgstr "Est revenu à une version antérieure"
@@ -20665,6 +20670,10 @@ msgstr "Ce que demande cette décision ne peut pas être affiché pour le moment
 msgid "What this decision asks is withheld, so you can only reject it."
 msgstr "Ce que demande cette décision est retenu : vous ne pouvez donc que la rejeter."
 
+#: src/interview/api.ts
+msgid "What this interview is for has changed. Read it again before you go on."
+msgstr "L’objet de cet entretien a changé. Relisez-le avant de continuer."
+
 #: src/inbox/item-detail.tsx
 msgid "What this would send can't be shown right now, so you can only decline it for now. Try again in a moment."
 msgstr "Ce que cela enverrait ne peut pas être affiché pour l'instant, vous pouvez donc seulement le refuser pour le moment. Réessayez dans un instant."
@@ -20731,6 +20740,10 @@ msgstr "ce qui a été dit"
 msgid "What was said"
 msgstr "Ce qui a été dit"
 
+#: src/interview/api.ts
+msgid "What was said could not be read. Try again."
+msgstr "Ce qui a été dit n’a pas pu être lu. Réessayez."
+
 #: src/brain/activity-page.tsx
 msgid "What was said is on the work it was about"
 msgstr "Ce qui a été dit figure sur le travail concerné"
@@ -20764,8 +20777,8 @@ msgid "What would have made it better?"
 msgstr "Qu’est-ce qui l’aurait rendu meilleur ?"
 
 #: src/interview/closed.tsx
-msgid "What you agreed to is kept. Forgot something? This link works until {closes}."
-msgstr "Ce que vous avez validé est conservé. Vous avez oublié quelque chose ? Ce lien fonctionne jusqu’au {closes}."
+msgid "What you approved is saved. Forgot something? This link works for 7 days."
+msgstr "Ce que vous avez validé est enregistré. Vous avez oublié quelque chose ? Ce lien reste actif 7 jours."
 
 #: src/brain/skills-page.tsx
 msgid "What you asked to share"
@@ -20933,10 +20946,6 @@ msgstr "Où le travail passe la main"
 #: src/onboarding/sources-step.tsx
 msgid "Where your documents live"
 msgstr "Où se trouvent vos documents"
-
-#: src/interview/destination.tsx
-msgid "Where your lines go"
-msgstr "Où vont vos lignes"
 
 #: src/settings/ai-providers.tsx
 msgid "Wherever your endpoint runs"
@@ -21504,9 +21513,13 @@ msgstr "Hier {time}"
 
 #: src/connections/app-of.tsx
 #: src/drafts/draft-history.tsx
-#: src/interview/transcript-looks.tsx
 #: src/workflows/run-detail.tsx
 #: src/workflows/runs.tsx
+msgid "You"
+msgstr "Vous"
+
+#: src/interview/transcript-looks.tsx
+msgctxt "the person interviewed"
 msgid "You"
 msgstr "Vous"
 
@@ -21519,10 +21532,6 @@ msgstr "Vous"
 msgctxt "who wrote a message"
 msgid "You"
 msgstr "Vous"
-
-#: src/interview/words.ts
-msgid "You and AI"
-msgstr "Vous et l’IA"
 
 #: src/onboarding/campaign/concepts/concept-words.ts
 msgid "You and your leads look it over"
@@ -21546,8 +21555,8 @@ msgid "You can change everything later."
 msgstr "Vous pourrez tout modifier plus tard."
 
 #: src/interview/start.tsx
-msgid "You can change or delete it any time until {closes}."
-msgstr "Vous pouvez le modifier ou le supprimer à tout moment jusqu’au {closes}."
+msgid "You can change or delete everything up to 7 days afterwards."
+msgstr "Vous pouvez tout modifier ou supprimer jusqu’à 7 jours après."
 
 #: src/brain/memories-page.tsx
 msgid "You can no longer read this memory."
@@ -21588,6 +21597,10 @@ msgstr "Vous ne pouvez pas ouvrir ceci"
 #: src/agents/new-agent.tsx
 msgid "You choose people and teams on its page"
 msgstr "Tu choisis les personnes et équipes sur sa page"
+
+#: src/interview/api.ts
+msgid "You deleted this interview. Start again to talk with Stephen."
+msgstr "Vous avez supprimé cet entretien. Recommencez pour parler avec Stephen."
 
 #: src/sign-in-errors.ts
 msgid "You don't have access to this organization. Ask an admin."
@@ -21634,6 +21647,10 @@ msgstr "Vous vous connectez sur {host}. L’accès reste dans votre déploiement
 #: src/connections/connect-dialog.tsx
 msgid "You sign in on {app}’s own page. The access stays in your deployment, and Grasp uses it only for what you allow."
 msgstr "Vous vous connectez sur la page de {app}. L’accès reste dans votre déploiement, et Grasp ne l’utilise que pour ce que vous autorisez."
+
+#: src/interview/api.ts
+msgid "You withdrew from this interview. Nothing more is taken from it."
+msgstr "Vous vous êtes retiré de cet entretien. Plus rien n’en est utilisé."
 
 #: src/interview/page.tsx
 msgid "You withdrew. Nothing you said is used from now on."
@@ -21704,12 +21721,16 @@ msgid "Your AI runs on your own keys"
 msgstr "Votre IA fonctionne avec vos propres clés"
 
 #: src/chat/brain-questions.tsx
-#: src/interview/composer.tsx
 msgid "Your answer"
 msgstr "Votre réponse"
 
 #: src/inbox/decision-confirmation.tsx
 msgctxt "the answer a person gives a decision"
+msgid "Your answer"
+msgstr "Votre réponse"
+
+#: src/interview/composer.tsx
+msgctxt "the person interviewed"
 msgid "Your answer"
 msgstr "Votre réponse"
 
@@ -21746,13 +21767,10 @@ msgstr "L'agent de votre conversation a demandé à lancer ce workflow pour vous
 msgid "Your chats"
 msgstr "Vos chats"
 
+#: src/interview/start.tsx
 #: src/routes/setup.tsx
 msgid "Your company"
 msgstr "Votre entreprise"
-
-#: src/interview/start.tsx
-msgid "Your company asked everyone to have a short chat with {who}, our AI interviewer. It takes {minutes} minutes at most, and you decide <0>what happens to your answers</0>."
-msgstr "Votre entreprise a demandé à chacun un court échange avec {who}, notre intervieweur IA. Cela prend {minutes} minutes au plus, et c’est vous qui décidez <0>ce que deviennent vos réponses</0>."
 
 #: src/apps/apps-overview.tsx
 msgid "Your company has no other Apps yet."
@@ -21806,6 +21824,10 @@ msgstr "Les fichiers de votre export"
 msgid "Your instructions"
 msgstr "Vos instructions"
 
+#: src/interview/api.ts
+msgid "Your interview isn't open yet. You'll get an email when it is."
+msgstr "Votre entretien n’est pas encore ouvert. Vous recevrez un e-mail dès qu’il le sera."
+
 #: src/onboarding/campaign/campaign-words.ts
 msgid "Your invitations reached all {invited} people. {talked, plural, one {# has talked already.} other {# have talked already.}}"
 msgstr "Vos invitations ont atteint les {invited} personnes. {talked, plural, one {# a déjà parlé.} other {# ont déjà parlé.}}"
@@ -21818,17 +21840,13 @@ msgstr "Votre langue"
 msgid "Your language, whenever you like."
 msgstr "Votre langue, quand vous voulez."
 
-#: src/interview/transcript-looks.tsx
-msgid "Your line"
-msgstr "Votre réponse"
-
 #: src/onboarding/campaign/concepts/road.tsx
 msgid "Your look"
 msgstr "Votre relecture"
 
-#: src/interview/parts/consent.tsx
-msgid "Your microphone stays off until you agree."
-msgstr "Votre micro reste coupé tant que vous n'avez pas accepté."
+#: src/interview/transcript-looks.tsx
+msgid "Your message"
+msgstr "Votre message"
 
 #: src/chat/failure.ts
 msgid "Your organization doesn't allow this model. Pick another one."
@@ -21899,10 +21917,6 @@ msgstr "Vos skills"
 msgid "Your staff list is in. A new one replaces it."
 msgstr "Votre liste du personnel est là. Une nouvelle la remplace."
 
-#: src/interview/words.ts
-msgid "Your story"
-msgstr "Votre récit"
-
 #: src/routes/setup.tsx
 msgid "Your team"
 msgstr "Votre équipe"
@@ -21960,10 +21974,6 @@ msgstr "Votre version de l’App"
 #: src/interview/start.tsx
 msgid "Your voice isn’t saved, only your words."
 msgstr "Votre voix n’est pas enregistrée, seulement vos mots."
-
-#: src/interview/words.ts
-msgid "Your week"
-msgstr "Votre semaine"
 
 #: src/inbox/report-row.tsx
 msgid "Your weekly report"

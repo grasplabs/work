@@ -246,17 +246,17 @@ const Answers = ({
 /** The start: one decision, centred. */
 export const Consent = ({
   name,
+  company: named,
   who,
-  closes,
   refusal,
   onAgree,
   onNotNow,
 }: {
   name: string;
+  /** The company's name; "Your company" when it has none yet. */
+  company: string | undefined;
   /** Who interviews them, by name. */
   who: string;
-  /** The last day the link works, in words. */
-  closes: string;
   /** Why taking part wasn't kept, when it wasn't. */
   refusal: string | null;
   onAgree: () => void;
@@ -265,13 +265,14 @@ export const Consent = ({
   const { t } = useLingui();
   const title = useTitleSize();
   const minutes = budgetMinutes;
+  const company = named === undefined || named === "" ? t`Your company` : named;
   // One sentence for translators; it stands on two lines where the window has room for both.
   const lines = t`Hi ${name}, got a few minutes
 to talk about your work?`.split("\n");
   const promises = [
     t`Your voice isn’t saved, only your words.`,
     t`Nothing is shared until you review and approve it.`,
-    t`You can change or delete it any time until ${closes}.`,
+    t`You can change or delete everything up to 7 days afterwards.`,
   ];
   return (
     <div {...stylex.props(styles.page)}>
@@ -296,8 +297,9 @@ to talk about your work?`.split("\n");
           {/* A box, not a paragraph: the dialog it opens stands in it. */}
           <Text as="div" size="lg">
             <Trans>
-              Your company asked everyone to have a short chat with {who}, our
-              AI interviewer. It takes {minutes} minutes at most, and you decide{" "}
+              {company} asked everyone to have a short conversation with {who},
+              our AI interviewer. It takes {minutes} minutes at most, and you
+              decide{" "}
               <Answers promises={promises}>
                 what happens to your answers
               </Answers>
@@ -471,8 +473,8 @@ export const Paused = ({
     <Page>
       <Words
         line={plural(minutesLeft, {
-          one: `Your answers are saved and the clock is stopped. You have # minute left, and you can pick up where you left off any time until ${closes}.`,
-          other: `Your answers are saved and the clock is stopped. You have # minutes left, and you can pick up where you left off any time until ${closes}.`,
+          one: `Your answers are saved and the clock is paused. You have # minute left, and you can pick up where you left off anytime until ${closes}.`,
+          other: `Your answers are saved and the clock is paused. You have # minutes left, and you can pick up where you left off anytime until ${closes}.`,
         })}
         live
         title={t`Paused`}

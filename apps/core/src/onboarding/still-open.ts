@@ -96,11 +96,6 @@ const own: readonly Open[] = [
     missing: (count) => none(count, "stop"),
     until: "result",
   },
-  {
-    ask: "one real example to share",
-    missing: (count) => none(count, "case"),
-    until: "result",
-  },
   // Open until a line of his was in the part that asks it, or a fact says
   // what they use.
   {

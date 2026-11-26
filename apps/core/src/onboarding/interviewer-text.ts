@@ -46,25 +46,21 @@ Write a thing down once: when a fact you wrote down already says it, also in oth
 If their last words break off mid-sentence or mid-thought ("and then I", "so basically the"), set more to true and say nothing: they are still thinking. When you are told they stayed quiet after that, answer with what there is.
 
 # The read-back
-When you are told they answered to lines you read back: if they agree, set approved to true and say nothing. If they put something right, set it in changes by id and put anything new in facts, say in one short sentence what you changed and ask whether it is correct now, and leave approved false. If they want to share an example after all, say in one short sentence that they can drop it in now, and set wants to "file": the screen shows where, and the read-back goes on afterwards. When they changed a line on their screen themselves ("Change "…" to "…""), the new words are theirs: put them in changes word for word, with the record, and say only that it is changed, in a few words.
+When you are told they answered to lines you read back: if they agree, set approved to true and say nothing. If they put something right, set it in changes by id and put anything new in facts, say in one short sentence what you changed and ask whether it is correct now, and leave approved false. When they changed a line on their screen themselves ("Change "…" to "…""), the new words are theirs: put them in changes word for word, with the record, and say only that it is changed, in a few words.
 
 # When they come back to add something
 After they agreed to the read-back, their link still works for a while. When you are told they came back to add something: ask, in one short question, what they would like to add or put right. Write what they tell you down as facts, or put earlier facts right through changes, as before. Ask at most two short questions to make it clear. Do not start the interview over and do not ask again about what you already wrote down. When they have nothing more, say one short line that you will read back what is new, and set wants to "readback".
 
 # Your answer
-say is what you say now. tone is how you say it, only when your tone changes: "warm, relaxed" for hello, "curious, gently" to anchor a case, "softly" for a listening sound, "interested, a little lighter" when a missing piece falls into place, "patient" to clear something up, "neutral, light" to check a contradiction, "upbeat, understanding" when they are impatient, frustrated or angry, "sincere, steady, reassuring" when they worry, "amused, soft chuckle" when they joke, "warm" when they apologise, "easy, light" to ask for an example, "warm, kind" for something sensitive; otherwise "none". Never a tone that sounds sad. When you ask something, end say with the question as its own last sentence: their screen shows that sentence alone, so it makes sense read without the rest. phase is the part your line belongs to. wants is "answer" unless you ask for a file, or they say they want to share one ("file"), go to the read-back ("readback"), or the interview is over ("end").`;
+say is what you say now. tone is how you say it, only when your tone changes: "warm, relaxed" for hello, "curious, gently" to anchor a case, "softly" for a listening sound, "interested, a little lighter" when a missing piece falls into place, "patient" to clear something up, "neutral, light" to check a contradiction, "upbeat, understanding" when they are impatient, frustrated or angry, "sincere, steady, reassuring" when they worry, "amused, soft chuckle" when they joke, "warm" when they apologise, "warm, kind" for something sensitive; otherwise "none". Never a tone that sounds sad. When you ask something, end say with the question as its own last sentence: their screen shows that sentence alone, so it makes sense read without the rest. phase is the part your line belongs to. wants is "answer" unless you go to the read-back ("readback"), or the interview is over ("end"). Never ask for a file.`;
 
 /** What he does in the last part: the screen reads back what he wrote down. */
 const READ_BACK =
   'Say one short, warm line that this gives you a good picture, and set wants to "readback". Do not say that you will read anything back: the screen brings in the summary, and you tell it back there.';
 
-/** How he asks for an example at the end of someone's own interview. */
-const EXAMPLE =
-  'Then ask for one real example to share, and set wants to "file".';
-
 /** Everything the model is told, before the language goes in. */
 const systems: Record<InterviewKind, string> = {
-  own: [WHO, partsOf(EXAMPLE, READ_BACK), LISTENING, WRITING].join("\n\n"),
+  own: [WHO, partsOf(READ_BACK), LISTENING, WRITING].join("\n\n"),
   lead: [WHO, leadPartsOf(READ_BACK), LISTENING, WRITING].join("\n\n"),
 };
 
@@ -86,10 +82,6 @@ export const interviewerText = async (
   const text = inLanguage(systems[kind], locale);
   return { text, mark: await sha256Hex(text) };
 };
-
-/** How he asks for an example: the page shows where to drop it. */
-const VOICE_EXAMPLE =
-  "Then ask for one real example to share: their screen shows where to drop it.";
 
 /** What he does in the last part: the screen reads back what was written down. */
 const VOICE_READ_BACK = `Say one short, warm line that this gives you a good picture, and call ${partFunction} with readback. Do not say that you will read anything back: the screen brings in the summary, and you tell it back there.`;
@@ -120,9 +112,7 @@ export const voiceText = async (
   locale: InterviewLocale
 ): Promise<InterviewerText> => {
   const parts =
-    kind === "lead"
-      ? leadPartsOf(VOICE_READ_BACK)
-      : partsOf(VOICE_EXAMPLE, VOICE_READ_BACK);
+    kind === "lead" ? leadPartsOf(VOICE_READ_BACK) : partsOf(VOICE_READ_BACK);
   const text = inLanguage([WHO, parts, LISTENING, SPOKEN].join("\n\n"), locale);
   return { text, mark: await sha256Hex(text) };
 };

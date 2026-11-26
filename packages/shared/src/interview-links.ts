@@ -478,6 +478,8 @@ export interface InterviewSession {
   team: string;
   lead: string | null;
   kind: InterviewKind;
+  /** The company's name, as its Grasp has it; missing or empty when it has none yet. */
+  company?: string;
   /** The last day the link takes anything, as an ISO day. */
   closes: string;
   /** The interviews are over: what was said can be read and deleted, no more. */

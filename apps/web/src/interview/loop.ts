@@ -853,7 +853,8 @@ const readPart = async (): Promise<void> => {
   for (const sentence of sentences) {
     prepare(sentence.say, voiceOf(tone));
   }
-  prepare(told.summaryAsk, voiceOf(tone));
+  const ask = now.adding ? told.addedAsk : told.summaryAsk;
+  prepare(ask, voiceOf(tone));
   if (!(await tell(sentences, mine))) {
     return;
   }
@@ -863,7 +864,7 @@ const readPart = async (): Promise<void> => {
       `${intro} ${told.question}`,
       mine,
       intro.length + 1,
-      told.summaryAsk
+      ask
     ))
   ) {
     return;

@@ -102,8 +102,10 @@ const plannedStore = async (start: string) => {
 const sentTo = (mail: { sent: EmailMessageBuilder[] }) =>
   mail.sent.map(({ to, subject }) => ({ to, subject }));
 
-const linkSubject = "acme.test would like to hear how your work goes";
-const reminderSubject = "A reminder: your interview with Stephen";
+const linkSubject =
+  "acme.test x Grasp: Your personal link to talk with Stephen";
+const reminderSubject =
+  "Reminder — acme.test x Grasp: Your personal link to talk with Stephen";
 
 /** Whom a mail went to, and whether it was a reminder or the link. */
 const whichTo = ({ to, subject }: EmailMessageBuilder) => [
@@ -204,14 +206,15 @@ describe("the interview link emails", () => {
       replyTo: sent?.replyTo,
       subject: sent?.subject,
       hello: sent?.text?.startsWith("Hallo Lea,"),
-      lead: sent?.text?.includes("über die Arbeit Ihres Teams"),
+      lead: sent?.text?.includes("über die Arbeit deines Teams"),
       link: link !== undefined && (sent?.html?.includes(link) ?? false),
       surname: sent?.text?.includes(sentinel),
       headers: sent?.headers,
     }).toStrictEqual({
       from: { name: "Stephen at Grasp", email: "onboarding@mail.grasp.test" },
       replyTo: "ada@acme.test",
-      subject: "Acme Werke möchte wissen, wie Ihre Arbeit läuft",
+      subject:
+        "Acme Werke x Grasp: Dein persönlicher Link für das Gespräch mit Stephen",
       hello: true,
       lead: true,
       link: true,

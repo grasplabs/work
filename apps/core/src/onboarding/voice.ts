@@ -113,36 +113,36 @@ const welcome: Record<
   Record<"own" | "lead" | "resume" | "add" | "back", string>
 > = {
   en: {
-    own: "Hi, I'm Stephen, nice to meet you. First your work as a whole, then one part of it up close. What do you do here, in a sentence or two?",
-    lead: "Hi, I'm Stephen, nice to meet you. First the work of your team as a whole, then who does what. What does your team take care of, in a few words?",
+    own: "Hi, I’m Stephen—nice to meet you. We’ll start with a quick look at your work overall, then zoom in on one part of it. In a sentence or two, what do you do here?",
+    lead: "Hi, I’m Stephen—nice to meet you. We’ll start with what your team handles overall, then who takes care of what. In a few words, what does your team do?",
     resume: "Welcome back. Let's go on where we left off.",
     back: "Welcome back.",
     add: "Welcome back. What would you like to add or put right?",
   },
   nl: {
-    own: "Hoi, ik ben Stephen, leuk je te spreken. Eerst je werk als geheel, daarna één onderdeel ervan van dichtbij. Wat doe je hier, in een of twee zinnen?",
-    lead: "Hoi, ik ben Stephen, leuk je te spreken. Eerst het werk van je team als geheel, daarna wie wat doet. Waar zorgt je team voor, in een paar woorden?",
+    own: "Hoi, ik ben Stephen, leuk je te spreken. We beginnen met een kort beeld van je werk in grote lijnen, en daarna zoomen we in op één onderdeel. Wat doe je hier, in een paar zinnen?",
+    lead: "Hoi, ik ben Stephen, leuk je te spreken. We beginnen met wat je team in grote lijnen doet, en daarna wie wat oppakt. Waar houdt je team zich mee bezig?",
     resume: "Welkom terug. Laten we verdergaan waar we gebleven waren.",
     back: "Welkom terug.",
     add: "Welkom terug. Wat wil je toevoegen of rechtzetten?",
   },
   de: {
-    own: "Hallo, ich bin Stephen, schön, Sie kennenzulernen. Zuerst Ihre Arbeit als Ganzes, dann ein Teil davon aus der Nähe. Was machen Sie hier, in ein oder zwei Sätzen?",
-    lead: "Hallo, ich bin Stephen, schön, Sie kennenzulernen. Zuerst die Arbeit Ihres Teams als Ganzes, dann wer was macht. Worum kümmert sich Ihr Team, in ein paar Worten?",
+    own: "Hallo, ich bin Stephen, freut mich. Wir schauen uns erst kurz deine Arbeit im Überblick an und gehen dann auf einen Teil genauer ein. Was machst du hier in ein, zwei Sätzen?",
+    lead: "Hallo, ich bin Stephen, freut mich. Wir starten mit dem Überblick über dein Team und schauen dann, wer was übernimmt. Wofür ist dein Team zuständig?",
     resume: "Willkommen zurück. Machen wir da weiter, wo wir aufgehört haben.",
     back: "Willkommen zurück.",
-    add: "Willkommen zurück. Was möchten Sie ergänzen oder richtigstellen?",
+    add: "Willkommen zurück. Was möchtest du ergänzen oder richtigstellen?",
   },
   fr: {
-    own: "Bonjour, je suis Stephen, ravi de vous rencontrer. D’abord votre travail dans son ensemble, puis une partie de plus près. Que faites-vous ici, en une ou deux phrases ?",
-    lead: "Bonjour, je suis Stephen, ravi de vous rencontrer. D’abord le travail de votre équipe dans son ensemble, puis qui fait quoi. De quoi votre équipe s’occupe-t-elle, en quelques mots ?",
+    own: "Bonjour, je suis Stephen, ravi de vous rencontrer. On va d’abord voir votre travail dans les grandes lignes, puis zoomer sur une partie précise. En une ou deux phrases, que faites-vous ici ?",
+    lead: "Bonjour, je suis Stephen, ravi de vous rencontrer. On va d’abord voir ce que gère votre équipe dans l’ensemble, puis qui s’occupe de quoi. En quelques mots, que fait votre équipe ?",
     resume: "Bon retour. Reprenons là où nous nous étions arrêtés.",
     back: "Bon retour.",
     add: "Bon retour. Que souhaitez-vous ajouter ou corriger ?",
   },
   es: {
-    own: "Hola, soy Stephen, encantado de conocerte. Primero tu trabajo en conjunto, luego una parte de cerca. ¿Qué haces aquí, en una o dos frases?",
-    lead: "Hola, soy Stephen, encantado de conocerte. Primero el trabajo de tu equipo en conjunto, luego quién hace qué. ¿De qué se encarga tu equipo, en pocas palabras?",
+    own: "Hola, soy Stephen, encantado. Empezaremos con una vista rápida de tu trabajo en general y luego entraremos en detalle en una parte. En una o dos frases, ¿a qué te dedicas aquí?",
+    lead: "Hola, soy Stephen, encantado. Empezaremos viendo de qué se encarga tu equipo en general y luego quién lleva cada parte. En pocas palabras, ¿qué hace tu equipo?",
     resume: "Bienvenido de nuevo. Sigamos donde lo dejamos.",
     back: "Bienvenido de nuevo.",
     add: "Bienvenido de nuevo. ¿Qué te gustaría añadir o corregir?",
@@ -232,7 +232,7 @@ const restatedIn = async (
 const stillThere: Record<InterviewLocale, string> = {
   en: "Are you still there?",
   nl: "Ben je er nog?",
-  de: "Sind Sie noch da?",
+  de: "Bist du noch da?",
   fr: "Vous êtes toujours là ?",
   es: "¿Sigues ahí?",
 };

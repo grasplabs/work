@@ -66,7 +66,7 @@ const shown = async (secret: string) => {
         : Response.json(
             {
               code: "interview.link_invalid",
-              // Core's own words, whatever they are.
+              // Core's own words, in English: the page says it in theirs.
               message: "No interview opens on this link.",
             },
             { status: 404 }
@@ -136,10 +136,13 @@ describe("an interview link that opens nothing", () => {
 
   afterEach(unmounted);
 
-  it("says the interview can't be opened, in core's words, and signs out whoever is signed in for another account", async () => {
+  it("says the interview can't be opened, in their language from core's code, and signs out whoever is signed in for another account", async () => {
     const { posted, ended } = await shown("s".repeat(43));
     const refused = {
-      said: text().includes("No interview opens on this link."),
+      said:
+        text().includes(
+          "This link doesn't work. Ask whoever sent it for a new one."
+        ) && !text().includes("No interview opens on this link."),
       wayOut: signOut() !== undefined,
     };
     await act(async () => {

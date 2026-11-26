@@ -385,7 +385,7 @@ export const TimeUp = ({
   const { t } = useLingui();
   const speaker = useInterviewer();
   const minutes = budgetMinutes;
-  const line = t`That’s our ${minutes} minutes. Thanks, ${name}. Everything you shared is saved.`;
+  const line = t`That’s our ${minutes} minutes—thank you, ${name}. Everything you shared is safely saved.`;
   const saidOf = useSaidOf(line);
   // Said once, as the screen comes, and again in another language.
   useEffect(() => {
