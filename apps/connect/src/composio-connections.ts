@@ -2,6 +2,7 @@ import type { AuditDetailValue, AuditEntry } from "@grasp-os/shared/audit";
 import {
   composioConsentText,
   composioKeyConsentText,
+  composioReasonSchema,
   composioToolName,
   composioToolsSchema,
   connectionCallbackPath,
@@ -9,6 +10,7 @@ import {
   changeToolkitToolsSchema,
   connectErrors,
   connectToolkitWithKeySchema,
+  connectVersionSchema,
   finishConnectionSchema,
   oauthFlowLifetimeMs,
   startToolkitConnectionSchema,
@@ -16,6 +18,7 @@ import {
 } from "@grasp-os/shared/connect";
 import type {
   ComposioAccountState,
+  ComposioReason,
   ComposioToolRule,
   ConnectionPerson,
   ToolkitKeyField,
@@ -577,6 +580,70 @@ const consentEvents = async (
 };
 
 /**
+ * Where in starting or finishing a Composio connection a request to
+ * Composio failed: making the auth config, the hosted link or (with a key)
+ * the connected account; reading the account; making its MCP server or
+ * that server's URL.
+ */
+type Step = "auth_config" | "link" | "account" | "read" | "server" | "url";
+
+/** The reason of each Composio failure that ended a finish, by its error. */
+const failureReasons = new WeakMap<ComposioError, ComposioReason>();
+
+/** Why Composio's `error` at `step` ended a finish (`composioReasonSchema`). */
+const reasonOfFailure = (step: Step, error: ComposioError): ComposioReason => {
+  if (error.unanswered) {
+    return `${step}:unanswered`;
+  }
+  return error.status === undefined
+    ? `${step}:unreadable`
+    : `${step}:http_${error.status}`;
+};
+
+/** `error`, its reason noted as a failure at `step`, unless it has one. */
+const failedAt = (step: Step, error: unknown): unknown => {
+  if (error instanceof ComposioError && !failureReasons.has(error)) {
+    failureReasons.set(error, reasonOfFailure(step, error));
+  }
+  return error;
+};
+
+/** What `run` returns, any Composio error it throws noted at `step`. */
+const atStep = async <T>(step: Step, run: () => Promise<T>): Promise<T> => {
+  try {
+    return await run();
+  } catch (error) {
+    throw failedAt(step, error);
+  }
+};
+
+/**
+ * Why a finish that Composio ended with `error` ended: the reason noted
+ * where it failed, if one was.
+ */
+const reasonOfError = (error: ComposioError): ComposioReason | undefined =>
+  failureReasons.get(error);
+
+/**
+ * What a Composio refusal carries for support (its `details`): why, and
+ * the first eight hex digits of the version of connect that refused, to
+ * tell at a glance which code answered. Neither is secret.
+ */
+const supportDetails = (
+  env: Env,
+  why: ComposioReason | undefined
+): Record<string, string> => {
+  const version = env.CF_VERSION_METADATA?.id.replaceAll("-", "").slice(0, 8);
+  return {
+    ...(why === undefined ? {} : { reason: why }),
+    ...(version === undefined ||
+    !connectVersionSchema.safeParse(version).success
+      ? {}
+      : { version }),
+  };
+};
+
+/**
  * Starts connecting a toolkit for an admin who consented: records their
  * consent with the flow, and returns Composio's auth link.
  */
@@ -639,30 +706,38 @@ export const startToolkitConnection = async (
   });
   const made: AtComposio = {};
   try {
-    const { auth_config: authConfig } = await composioRequest(key, {
-      method: "POST",
-      path: "/auth_configs",
-      body: {
-        toolkit: { slug: toolkit },
-        auth_config: { type: "use_composio_managed_auth", name: marker },
-      },
-      schema: authConfigSchema,
-    });
+    const { auth_config: authConfig } = await atStep(
+      "auth_config",
+      async () =>
+        await composioRequest(key, {
+          method: "POST",
+          path: "/auth_configs",
+          body: {
+            toolkit: { slug: toolkit },
+            auth_config: { type: "use_composio_managed_auth", name: marker },
+          },
+          schema: authConfigSchema,
+        })
+    );
     made.authConfigId = authConfig.id;
     await db
       .update(composioCleanups)
       .set({ authConfigId: authConfig.id })
       .where(thisCleanup);
-    const link = await composioRequest(key, {
-      method: "POST",
-      path: "/connected_accounts/link",
-      body: {
-        auth_config_id: authConfig.id,
-        user_id: composioUserOf(origin),
-        callback_url: callback.href,
-      },
-      schema: linkSchema,
-    });
+    const link = await atStep(
+      "link",
+      async () =>
+        await composioRequest(key, {
+          method: "POST",
+          path: "/connected_accounts/link",
+          body: {
+            auth_config_id: authConfig.id,
+            user_id: composioUserOf(origin),
+            callback_url: callback.href,
+          },
+          schema: linkSchema,
+        })
+    );
     made.connectedAccountId = link.connected_account_id;
     await db
       .update(composioCleanups)
@@ -708,12 +783,17 @@ export const startToolkitConnection = async (
     if (!(error instanceof ComposioError)) {
       throw error;
     }
+    const why = reasonOfError(error);
     await auditRefusal(env, person, "connection.connect", {
       ...detailOf(toolkit),
       outcome: "failed",
       reason: "connection.provider_refused",
+      ...(why === undefined ? {} : { why }),
     });
-    throw connectionErrors.create("connection.provider_refused");
+    throw connectionErrors.create(
+      "connection.provider_refused",
+      supportDetails(env, why)
+    );
   }
 };
 
@@ -821,28 +901,33 @@ export const purgeExpiredToolkitFlows = async (env: Env): Promise<void> => {
 };
 
 /**
- * Whether `url`, as Composio generated it, is the server connect calls for
- * this server and this one connected account, and nothing wider: Composio's
- * MCP host, the server's own path, and exactly this account (never a
- * user-wide URL).
+ * What is wrong with the server URLs Composio generated for `serverId`
+ * and `connectedAccountId`, if anything: connect calls only exactly one,
+ * on Composio's MCP host, at the server's own path, for exactly this
+ * account (never a user-wide URL).
  */
-const isServerFor = (
-  url: string,
+const serverUrlProblem = (
+  urls: readonly string[],
   serverId: string,
   connectedAccountId: string
-): boolean => {
+): "count" | "host" | "path" | "account" | "user" | undefined => {
+  const [url] = urls;
+  if (urls.length !== 1 || url === undefined) {
+    return "count";
+  }
   if (!isComposioServerUrl(url)) {
-    return false;
+    return "host";
   }
   const { pathname, searchParams } = new URL(url);
   const path = `/v3/mcp/${encodeURIComponent(serverId)}`;
+  if (pathname !== path && pathname !== `${path}/mcp`) {
+    return "path";
+  }
   const accounts = searchParams.getAll("connected_account_id");
-  return (
-    (pathname === path || pathname === `${path}/mcp`) &&
-    accounts.length === 1 &&
-    accounts[0] === connectedAccountId &&
-    !searchParams.has("user_id")
-  );
+  if (accounts.length !== 1 || accounts[0] !== connectedAccountId) {
+    return "account";
+  }
+  return searchParams.has("user_id") ? "user" : undefined;
 };
 
 /** Whether `toolkit` has a shared Composio connection that isn't disconnected. */
@@ -899,8 +984,50 @@ const isTransient = (error: unknown): error is ComposioError =>
     (error.status !== undefined &&
       (error.status === 429 || error.status >= 500)));
 
+/** Composio's statuses an account that won't become active can end in. */
+const endedStatuses = new Set(["FAILED", "EXPIRED", "INACTIVE", "REVOKED"]);
+
+/** A toolkit slug as Composio writes one, in ASCII alone. */
+const asciiSlug = /^[A-Za-z0-9_-]+$/u;
+
+/**
+ * `slug` in lower case, ASCII letters alone: never Unicode's rules, by
+ * which other letters (the Kelvin sign) lower to ASCII ones.
+ */
+const asciiLower = (slug: string): string =>
+  slug.replaceAll(/[A-Z]/gu, (letter) =>
+    String.fromCodePoint((letter.codePointAt(0) ?? 0) + 32)
+  );
+
+/**
+ * Which part of the account Composio holds isn't the flow's, if any.
+ * A toolkit's slug is the same in any case of its ASCII letters, as
+ * Composio's own SDK compares them (`normalizeToolkitSlug`), and the flow's
+ * is lower case already (`composioToolkitSchema`); IDs are compared
+ * exactly.
+ */
+const mismatchOf = (
+  held: z.infer<typeof connectedAccountSchema>,
+  account: Pick<Made, "toolkit" | "authConfigId" | "connectedAccountId">
+): "id" | "toolkit" | "auth_config" | undefined => {
+  if (held.id !== account.connectedAccountId) {
+    return "id";
+  }
+  if (
+    !asciiSlug.test(held.toolkit.slug) ||
+    asciiLower(held.toolkit.slug) !== account.toolkit
+  ) {
+    return "toolkit";
+  }
+  return held.auth_config.id === account.authConfigId
+    ? undefined
+    : "auth_config";
+};
+
 /** Where a Composio account settled, as `settledAccount` reads it. */
-type Settled = "active" | "refused" | "pending" | "unanswered";
+type Settled =
+  | { ended: "active" }
+  | { ended: "refused" | "pending" | "unanswered"; why: ComposioReason };
 
 /**
  * Where Composio's connected account `account` settled, read at Composio
@@ -910,7 +1037,8 @@ type Settled = "active" | "refused" | "pending" | "unanswered";
  * while Composio is still completing it after `completingWaitMs`; and
  * `unanswered` when Composio's last read in that time failed in a way
  * asking again might not (`isTransient`), as such a read is asked again
- * meanwhile. Throws {@link ComposioError} when Composio fails otherwise.
+ * meanwhile; each but `active` with why (`composioReasonSchema`). Throws
+ * {@link ComposioError} when Composio fails otherwise.
  */
 const settledAccount = async (
   key: string,
@@ -919,7 +1047,7 @@ const settledAccount = async (
   const deadline = Date.now() + completingWaitMs;
   const detail = { toolkit: account.toolkit };
   for (let waitMs = firstReadWaitMs; ;) {
-    let failed = false;
+    let failed: ComposioError | undefined;
     try {
       // oxlint-disable-next-line no-await-in-loop -- one read at a time
       const held = await composioRequest(key, {
@@ -927,39 +1055,38 @@ const settledAccount = async (
         schema: connectedAccountSchema,
         timeoutMs: Math.max(deadline - Date.now(), shortestReadMs),
       });
-      const isThisOne =
-        held.id === account.connectedAccountId &&
-        held.toolkit.slug === account.toolkit &&
-        held.auth_config.id === account.authConfigId;
-      if (!isThisOne) {
-        log.warn("composio.account_not_made", detail);
-        return "refused";
+      const mismatch = mismatchOf(held, account);
+      if (mismatch !== undefined) {
+        log.warn("composio.account_not_made", { ...detail, mismatch });
+        return { ended: "refused", why: `mismatch:${mismatch}` };
       }
       if (held.status === "ACTIVE") {
-        return "active";
+        return { ended: "active" };
       }
       if (!completingStatuses.has(held.status)) {
-        // Composio's word for it, such as FAILED or EXPIRED: never its
-        // reason, which is the provider's text.
-        log.warn("composio.account_refused", {
-          ...detail,
-          status: held.status.slice(0, 32),
-        });
-        return "refused";
+        // Composio's word for it, from a known set: never its reason,
+        // which is the provider's text.
+        const status = endedStatuses.has(held.status) ? held.status : "other";
+        log.warn("composio.account_refused", { ...detail, status });
+        return {
+          ended: "refused",
+          why: composioReasonSchema.parse(`status:${status}`),
+        };
       }
     } catch (error) {
       if (!isTransient(error)) {
-        throw error;
+        throw failedAt("read", error);
       }
-      failed = true;
+      failed = error;
     }
     const left = deadline - Date.now();
     if (left <= 0) {
-      log.warn(
-        failed ? "composio.account_unanswered" : "composio.account_pending",
-        detail
-      );
-      return failed ? "unanswered" : "pending";
+      if (failed !== undefined) {
+        log.warn("composio.account_unanswered", detail);
+        return { ended: "unanswered", why: reasonOfFailure("read", failed) };
+      }
+      log.warn("composio.account_pending", detail);
+      return { ended: "pending", why: "pending" };
     }
     // oxlint-disable-next-line no-await-in-loop -- waits for Composio
     await scheduler.wait(Math.min(waitMs, left));
@@ -1003,38 +1130,47 @@ const serveAndStore = async (
   auth: "managed" | "key"
 ): Promise<string> => {
   const tools = composioToolsSchema.parse(JSON.parse(account.tools));
-  const server = await composioRequest(key, {
-    method: "POST",
-    path: "/mcp/servers",
-    body: {
-      // Its flow's marker: 4 to 30 letters, digits and hyphens.
-      name: markerOf(account.flowId),
-      auth_config_ids: [account.authConfigId],
-      allowed_tools: tools.map(composioToolName),
-    },
-    schema: mcpServerSchema,
-  });
+  const server = await atStep(
+    "server",
+    async () =>
+      await composioRequest(key, {
+        method: "POST",
+        path: "/mcp/servers",
+        body: {
+          // Its flow's marker: 4 to 30 letters, digits and hyphens.
+          name: markerOf(account.flowId),
+          auth_config_ids: [account.authConfigId],
+          allowed_tools: tools.map(composioToolName),
+        },
+        schema: mcpServerSchema,
+      })
+  );
   made.serverId = server.id;
   await drizzle(env.DB)
     .update(composioCleanups)
     .set({ serverId: server.id })
     .where(eq(composioCleanups.id, account.flowId));
-  const { connected_account_urls: urls } = await composioRequest(key, {
-    method: "POST",
-    path: "/mcp/servers/generate",
-    body: {
-      mcp_server_id: server.id,
-      connected_account_ids: [account.connectedAccountId],
-    },
-    schema: mcpUrlsSchema,
-  });
+  const { connected_account_urls: urls } = await atStep(
+    "url",
+    async () =>
+      await composioRequest(key, {
+        method: "POST",
+        path: "/mcp/servers/generate",
+        body: {
+          mcp_server_id: server.id,
+          connected_account_ids: [account.connectedAccountId],
+        },
+        schema: mcpUrlsSchema,
+      })
+  );
   const [url] = urls;
-  if (
-    urls.length !== 1 ||
-    url === undefined ||
-    !isServerFor(url, server.id, account.connectedAccountId)
-  ) {
-    throw new ComposioError("Composio's server URL isn't one connect calls");
+  const problem = serverUrlProblem(urls, server.id, account.connectedAccountId);
+  if (problem !== undefined || url === undefined) {
+    const error = new ComposioError(
+      "Composio's server URL isn't one connect calls"
+    );
+    failureReasons.set(error, `url:${problem ?? "count"}`);
+    throw error;
   }
   const connectionId = crypto.randomUUID();
   const now = new Date();
@@ -1097,18 +1233,31 @@ const finishToolkitConnection = async (
   const detail = detailOf(flow.toolkit);
   const refuse = async (
     reason: string,
-    outcome: "refused" | "failed" = "refused"
+    outcome: "refused" | "failed" = "refused",
+    why?: ComposioReason
   ): Promise<void> => {
     await auditRefusal(env, person, "connection.connect", {
       ...detail,
       outcome,
       reason,
+      ...(why === undefined ? {} : { why }),
     });
   };
   const key = composioKey(env);
   const made: AtComposio = {
     connectedAccountId: flow.connectedAccountId,
     authConfigId: flow.authConfigId,
+  };
+  /** The refusal `code`, audited with why, and its error saying why too. */
+  const ended = async (
+    code:
+      | "connection.provider_refused"
+      | "connection.provider_pending"
+      | "connection.provider_not_answering",
+    why: ComposioReason | undefined
+  ): Promise<Error> => {
+    await refuse(code, "failed", why);
+    return connectionErrors.create(code, supportDetails(env, why));
   };
   try {
     const live =
@@ -1130,12 +1279,12 @@ const finishToolkitConnection = async (
       // Only noted: the flow's own account, read at Composio, decides.
       log.warn("composio.callback_account_differs", { toolkit: flow.toolkit });
     }
-    const settled =
-      answer.status === "failed" ? "refused" : await settledAccount(key, flow);
-    if (settled !== "active") {
-      const reason = unsettledReasons[settled];
-      await refuse(reason, "failed");
-      throw connectionErrors.create(reason);
+    const settled: Settled =
+      answer.status === "failed"
+        ? { ended: "refused", why: "redirect_said_failed" }
+        : await settledAccount(key, flow);
+    if (settled.ended !== "active") {
+      throw await ended(unsettledReasons[settled.ended], settled.why);
     }
     const tools = composioToolsSchema.parse(JSON.parse(flow.tools));
     const toolsHash = await sha256Hex(flow.tools);
@@ -1164,8 +1313,7 @@ const finishToolkitConnection = async (
     if (!(error instanceof ComposioError)) {
       throw error;
     }
-    await refuse("connection.provider_refused", "failed");
-    throw connectionErrors.create("connection.provider_refused");
+    throw await ended("connection.provider_refused", reasonOfError(error));
   }
 };
 
@@ -1272,12 +1420,14 @@ export const connectToolkitWithKey = async (
   const detail = detailOf(toolkit);
   const refuse = async (
     reason: string,
-    outcome: "refused" | "failed" = "refused"
+    outcome: "refused" | "failed" = "refused",
+    why?: ComposioReason
   ): Promise<void> => {
     await auditRefusal(env, person, "connection.connect", {
       ...detail,
       outcome,
       reason,
+      ...(why === undefined ? {} : { why }),
     });
   };
   let auth: Awaited<ReturnType<typeof keyAuthOf>>;
@@ -1315,38 +1465,49 @@ export const connectToolkitWithKey = async (
   });
   const made: AtComposio = {};
   try {
-    const { auth_config: authConfig } = await composioRequest(key, {
-      method: "POST",
-      path: "/auth_configs",
-      body: {
-        toolkit: { slug: toolkit },
-        // Empty credentials: the key comes with the connected account.
-        auth_config: {
-          type: "use_custom_auth",
-          authScheme: auth.scheme,
-          credentials: {},
-          name: marker,
-        },
-      },
-      schema: authConfigSchema,
-    });
+    const { auth_config: authConfig } = await atStep(
+      "auth_config",
+      async () =>
+        await composioRequest(key, {
+          method: "POST",
+          path: "/auth_configs",
+          body: {
+            toolkit: { slug: toolkit },
+            // Empty credentials: the key comes with the connected account.
+            auth_config: {
+              type: "use_custom_auth",
+              authScheme: auth.scheme,
+              credentials: {},
+              name: marker,
+            },
+          },
+          schema: authConfigSchema,
+        })
+    );
     made.authConfigId = authConfig.id;
     await db
       .update(composioCleanups)
       .set({ authConfigId: authConfig.id })
       .where(thisCleanup);
-    const created = await composioRequest(key, {
-      method: "POST",
-      path: "/connected_accounts",
-      body: {
-        auth_config: { id: authConfig.id },
-        connection: {
-          user_id: composioUserOf(origin),
-          state: { authScheme: auth.scheme, val: { ...val, status: "ACTIVE" } },
-        },
-      },
-      schema: createdAccountSchema,
-    });
+    const created = await atStep(
+      "account",
+      async () =>
+        await composioRequest(key, {
+          method: "POST",
+          path: "/connected_accounts",
+          body: {
+            auth_config: { id: authConfig.id },
+            connection: {
+              user_id: composioUserOf(origin),
+              state: {
+                authScheme: auth.scheme,
+                val: { ...val, status: "ACTIVE" },
+              },
+            },
+          },
+          schema: createdAccountSchema,
+        })
+    );
     made.connectedAccountId = created.id;
     await db
       .update(composioCleanups)
@@ -1370,13 +1531,17 @@ export const connectToolkitWithKey = async (
       tools: storedTools,
     };
     const settled = await settledAccount(key, account);
-    if (settled === "refused") {
-      throw new ComposioError("Composio didn't make the account active");
+    if (settled.ended === "refused") {
+      const error = new ComposioError(
+        "Composio didn't make the account active"
+      );
+      failureReasons.set(error, settled.why);
+      throw error;
     }
-    if (settled !== "active") {
-      const reason = unsettledReasons[settled];
-      await refuse(reason, "failed");
-      throw connectionErrors.create(reason);
+    if (settled.ended !== "active") {
+      const reason = unsettledReasons[settled.ended];
+      await refuse(reason, "failed", settled.why);
+      throw connectionErrors.create(reason, supportDetails(env, settled.why));
     }
     const connectionId = await serveAndStore(
       env,
@@ -1410,12 +1575,16 @@ export const connectToolkitWithKey = async (
     if (!(error instanceof ComposioError)) {
       throw error;
     }
-    const reason =
-      error.slug === credentialsRejected
-        ? "connection.key_rejected"
-        : "connection.provider_refused";
-    await refuse(reason, "failed");
-    throw connectionErrors.create(reason);
+    if (error.slug === credentialsRejected) {
+      await refuse("connection.key_rejected", "failed");
+      throw connectionErrors.create("connection.key_rejected");
+    }
+    const why = reasonOfError(error);
+    await refuse("connection.provider_refused", "failed", why);
+    throw connectionErrors.create(
+      "connection.provider_refused",
+      supportDetails(env, why)
+    );
   }
 };
 

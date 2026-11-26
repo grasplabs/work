@@ -6047,6 +6047,10 @@ msgctxt "what else an answer to a decision says"
 msgid "Details"
 msgstr "Details"
 
+#: src/connections/support-details.tsx
+msgid "Details for support: {reason} (release {release}, connect {version})"
+msgstr "Details voor support: {reason} (release {release}, connect {version})"
+
 #: src/settings/event-sources.tsx
 msgid "Details of {name}"
 msgstr "Details van {name}"
