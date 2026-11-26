@@ -37,6 +37,37 @@ const keyAuth = auth.apiKey({
   account: { url: `https://${host}/v1/account`, id: "/id" },
 });
 
+/** A host template filled per connection, under the vendor's name. */
+const companyHost = "{company}.stock.test";
+
+/**
+ * A connector on `hosts` that signs in with OAuth 2.0, its account read by
+ * a lookup at the first, or from an ID token.
+ */
+const companySignIn =
+  (
+    hosts: string[],
+    hostsFrom?: Record<string, string>,
+    reads: "lookup" | "idToken" = "lookup"
+  ) =>
+  () =>
+    defineConnector({
+      name: "stock",
+      title: "Stock",
+      hosts,
+      auth: auth.oauth2({
+        hosts,
+        authorizeUrl: "https://auth.stock.test/authorize",
+        tokenUrl: "https://auth.stock.test/token",
+        scopes: { "stock:read": "Read stock" },
+        ...(hostsFrom === undefined ? {} : { hostsFrom }),
+        ...(reads === "lookup"
+          ? { account: { url: `https://${hosts[0]}/v1/account`, id: "/id" } }
+          : { idToken: { issuer: "https://auth.stock.test", subject: "sub" } }),
+      }),
+      tools: {},
+    });
+
 const Stock = v.object({ sku: v.string(), onHand: v.number().integer() });
 
 const getStock = tool({
@@ -685,6 +716,110 @@ describe("a connector's definition", () => {
     );
   });
 
+  it("sends its credential to its one host, and with several, only to those its sign-in names", () => {
+    const files = "files.stock.test";
+    expect(stock.manifest.credentialHosts).toStrictEqual([host]);
+    const several = (hosts?: string[]) => () =>
+      defineConnector({
+        name: "stock",
+        title: "Stock",
+        hosts: [host, files],
+        auth: auth.apiKey({
+          ...(hosts === undefined ? {} : { hosts }),
+          header: "x-api-key",
+          account: { url: `https://${host}/v1/account`, id: "/id" },
+        }),
+        tools: {},
+      });
+    expect(several()).toThrow("names those its credential goes to");
+    expect(several([host])().manifest.credentialHosts).toStrictEqual([host]);
+    expect(several(["evil.test"])).toThrow("only to hosts of the connector's");
+    // The account lookup carries the key: only where the key goes.
+    expect(several([files])).toThrow("one of the hosts the credential goes to");
+  });
+
+  it("takes a host set per connection as a template, and refuses one that isn't", () => {
+    const at = (template: string) => () =>
+      defineConnector({
+        name: "stock",
+        title: "Stock",
+        hosts: [host, template],
+        auth: auth.apiKey({
+          hosts: [host, template],
+          header: "x-api-key",
+          account: { url: `https://${template}/v1/account`, id: "/id" },
+        }),
+        tools: {},
+      });
+    expect(at("{host}")().manifest.credentialHosts).toStrictEqual([
+      host,
+      "{host}",
+    ]);
+    expect(at("{company}.stock.test")().manifest.hosts).toStrictEqual([
+      host,
+      "{company}.stock.test",
+    ]);
+    for (const template of [
+      "{company}.test",
+      "{company}.{region}.stock.test",
+      "{Company}.stock.test",
+      "{company}stock.test",
+      "x.{company}.stock.test",
+      // A template's stand-in, named as a fixed host.
+      "company.stock.test.invalid",
+      "{}",
+    ]) {
+      expect(at(template)).toThrow("Not a host, or a host template");
+    }
+    const twice = ["{company}.stock.test", "{company}.other.test"];
+    expect(() =>
+      defineConnector({
+        name: "stock",
+        title: "Stock",
+        hosts: twice,
+        auth: auth.apiKey({
+          hosts: twice,
+          header: "x-api-key",
+          account: {
+            url: "https://{company}.stock.test/v1/account",
+            id: "/id",
+          },
+        }),
+        tools: {},
+      })
+    ).toThrow("Each host template has a name of its own");
+  });
+
+  it("fills an OAuth sign-in's template under a fixed name from the token response with a lookup there, and refuses any other hostsFrom", () => {
+    expect(
+      companySignIn([companyHost], { [companyHost]: "/api_domain" })
+    ).not.toThrow();
+    const unfilled = "A host template is filled by an API key's sign-in";
+    const notOurs = "hostsFrom names only the connector's host templates";
+    const refused: [string[], Record<string, string> | undefined, string][] = [
+      [[companyHost], undefined, unfilled],
+      // A whole host is only an admin's to give, never a token response's.
+      [["{host}"], { "{host}": "/api_domain" }, unfilled],
+      [
+        [companyHost],
+        { [companyHost]: "/api_domain", "{region}.stock.test": "/region" },
+        notOurs,
+      ],
+      [
+        [companyHost, host],
+        { [companyHost]: "/api_domain", [host]: "/api_host" },
+        notOurs,
+      ],
+    ];
+    for (const [hosts, hostsFrom, refusal] of refused) {
+      expect(companySignIn(hosts, hostsFrom)).toThrow(refusal);
+    }
+    // An ID token's subject is the vendor's, whatever host the response names.
+    expect(
+      companySignIn([companyHost], { [companyHost]: "/api_domain" }, "idToken")
+    ).toThrow("A sign-in with hostsFrom reads its account with a lookup");
+  });
+
   it("refuses args that let any key through", () => {
     const open = tool({
       description: "Open",
@@ -942,6 +1077,7 @@ describe("a connector's definition", () => {
       mcp: { url: "https://mcp.tracker.test/mcp", registration: "dcr" },
       scopes: [],
       hosts: [],
+      credentialHosts: [],
       actions: {},
     });
   });

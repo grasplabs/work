@@ -48,7 +48,9 @@ declare module "vite-plus/test" {
  * syncs (`sample-sync`), three apps
  * that sign in with their own records (OAuth 2.0, an API key, and OAuth
  * 2.0 pinned to a tenant as a suite's, `sample-tenant`), a built-in
- * serving its vendor's MCP server with a key (`sample-tracker`), one named
+ * serving its vendor's MCP server with a key (`sample-tracker`), two on a
+ * host of each client's own (`sample-host`, given with the key, and
+ * `sample-company`, named by the token response), one named
  * `composio`, whose contracts must never be served, and `sample-unreached`
  * (`withUnreachedTool`).
  */
@@ -145,6 +147,8 @@ const setup = async (project: TestProject): Promise<void> => {
     path.join(import.meta.dirname, "fixtures/sample-erp-connector.ts"),
     path.join(import.meta.dirname, "fixtures/sample-tenant-connector.ts"),
     path.join(import.meta.dirname, "fixtures/sample-mcp-key-connector.ts"),
+    path.join(import.meta.dirname, "fixtures/sample-host-connector.ts"),
+    path.join(import.meta.dirname, "fixtures/sample-company-connector.ts"),
     path.join(import.meta.dirname, "fixtures/composio-named-connector.ts"),
   ];
   await buildConnectors(
