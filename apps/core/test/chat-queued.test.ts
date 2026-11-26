@@ -5,12 +5,13 @@ import type {
   ChatUpdate,
 } from "@grasp-os/shared/chat";
 import { chatIdSchema } from "@grasp-os/shared/ids";
-import { runInDurableObject } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { chatSession } from "../src/durable-objects.ts";
+import { personalWorkspaceId } from "../src/chats-rpc.ts";
+import { chatSession, workspace } from "../src/durable-objects.ts";
 import { chatOf, model, pausedReply, says } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -94,7 +95,9 @@ const notedFor = async (personId: string, chatId: string): Promise<number> => {
 };
 
 /** Restarts `stub`'s object, as an eviction or a deploy does, mid-call. */
-const restart = async (stub: ReturnType<typeof chatSession>): Promise<void> => {
+const restart = async (
+  stub: ReturnType<typeof chatSession> | ReturnType<typeof workspace>
+): Promise<void> => {
   await runInDurableObject(stub, (_instance, state) => {
     state.abort("Restarted by the test");
   }).catch(() => {
@@ -479,6 +482,62 @@ describe("a question sent while the agent answers", slow, () => {
       });
     } finally {
       cut.release();
+    }
+  });
+
+  it("is taken at once on Send now after both the person's object and the chat's restarted with it queued", async () => {
+    const ann = await signedInApi(idp, "user");
+    const cut = pausedReply(says("Never."), 2);
+    const writing = pausedReply(says("A long answer."), 6);
+    const provider = await fakeProvider(
+      cut.reply,
+      writing.reply,
+      says("Short.")
+    );
+    const chat = await ann.api.chats.create("Restarted");
+    const id = personalWorkspaceId(ann.userId);
+    try {
+      await ann.api.chats.send(chat.id, { text: "Tell me all.", model });
+      await vi.waitFor(
+        () => {
+          expect(provider.requests).toHaveLength(1);
+        },
+        { timeout: 10_000 }
+      );
+      await ann.api.chats.send(chat.id, { text: "Just the gist.", model });
+      // Both objects restart: nothing waits on the turn any more, and the
+      // chat's object takes it up again on its own.
+      await restart(workspace(env, id));
+      const session = chatSession(env, id, chatIdSchema.parse(chat.id));
+      await restart(session);
+      // Its heartbeat wakes it, as the platform's alarm does.
+      await runDurableObjectAlarm(
+        chatSession(env, id, chatIdSchema.parse(chat.id))
+      );
+      const tab = await follow(ann, chat.id);
+      await vi.waitFor(
+        () => {
+          expect(provider.requests).toHaveLength(2);
+          expect(tab.queued()).toStrictEqual(["Just the gist."]);
+        },
+        { timeout: 20_000 }
+      );
+
+      await ann.api.chats.sendNow(chat.id);
+      await settled(tab);
+      expect({
+        last: tab.shown().slice(-2),
+        queued: tab.queued(),
+      }).toStrictEqual({
+        last: [
+          { role: "user", text: "Just the gist." },
+          { role: "assistant", text: "Short." },
+        ],
+        queued: [],
+      });
+    } finally {
+      cut.release();
+      writing.release();
     }
   });
 });

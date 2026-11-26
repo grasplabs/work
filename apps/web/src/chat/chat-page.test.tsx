@@ -129,7 +129,7 @@ const opened = async (
     heldCalls: async () => await Promise.resolve([]),
     cancel: async (chatId: string) => {
       asked.push(`cancel ${chatId}`);
-      return await Promise.resolve(true);
+      return await Promise.resolve({ dropped: ["Germany?"] });
     },
     sendNow: async (chatId: string) => {
       asked.push(`sendNow ${chatId}`);

@@ -29,6 +29,7 @@ import type {
   ChatRating,
   ChatSearchHit,
   ChatsApi,
+  ChatStopped,
   ChatAgent,
   ChatSummary,
   ChatUpdate,
@@ -1333,7 +1334,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     });
   }
 
-  async cancel(chatId: string): Promise<boolean> {
+  async cancel(chatId: string): Promise<ChatStopped | false> {
     return await withPerson(
       this.#check,
       async ({ userId }) =>

@@ -273,6 +273,15 @@ const maxTurnChecks = 3;
 const wordsPlease =
   "You showed your thinking in the brain, but wrote no answer. Now write your answer to the person in words.";
 
+/**
+ * Where a turn's checks of its drafts stand (`#wrapUp`): the round it is
+ * at, and the drafts the last check read.
+ */
+interface TurnChecks {
+  round: number;
+  checked?: string;
+}
+
 /** Whether a chat's Harness has asked the model anything yet (`retryPolicy`). */
 interface Asked {
   since: boolean;
@@ -1314,60 +1323,27 @@ export class ChatHarness {
       this.#opening?.opened.resolve(true);
     }
     let { settled, newest } = await this.#ended(request.turnId, submission);
-    // The turn's check of the drafts it wrote, each time it would answer
-    // having written since the last (agent-builds.ts): what fails goes back
-    // to it, to fix in this turn, until they pass or it answers without
-    // writing again, and at most `maxTurnChecks` times: the third that
-    // fails ends the turn, its problems left in the chat as they are. A
-    // stopped or failed run ends it, as it ends the turn.
-    let checked: string | undefined;
-    for (let round = 1; round <= maxTurnChecks; round += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one round after another
-      const answered = await this.#endOf(settled);
-      const check =
-        answered.outcome === "answered"
-          ? // oxlint-disable-next-line no-await-in-loop -- see above
-            await turnCheck(this.#env, request.scope, request.turnId, checked)
-          : undefined;
-      if (check?.notice === undefined || round === maxTurnChecks) {
+    const checks: TurnChecks = { round: 1 };
+    for (;;) {
+      // oxlint-disable-next-line no-await-in-loop -- once more only after a queued question
+      ({ settled, newest } = await this.#wrapUp(
+        request,
+        submission,
+        { settled, newest },
+        checks
+      ));
+      // A question queued as the turn wrapped up (its checks, its words)
+      // started a run of its own in it: the turn waits for that too, and
+      // checks what it wrote then. Then it takes no more, decided with
+      // nothing awaited between, so none slips in after.
+      if (
+        !this.#running &&
+        this.#joining.size === 0 &&
+        this.#inbox.length === 0
+      ) {
         break;
       }
-      checked = check.drafts;
       // oxlint-disable-next-line no-await-in-loop -- see above
-      await this.#conversation.submit(
-        {
-          type: "input",
-          content: check.notice,
-          // Once a round, however often the turn is asked.
-          requestId: `${noticeRequestPrefix(request.turnId)}check:${round}`,
-          whenBusy: "steer",
-          entry: { kind: noticeKind },
-        },
-        context
-      );
-      // oxlint-disable-next-line no-await-in-loop -- see above
-      ({ settled, newest } = await this.#ended(request.turnId, submission));
-    }
-    if (await this.#wantsWords(newest)) {
-      // Once a turn, by its request ID, however often it is asked.
-      await this.#conversation.submit(
-        {
-          type: "input",
-          content: wordsPlease,
-          requestId: `${noticeRequestPrefix(request.turnId)}words`,
-          whenBusy: "steer",
-          entry: { kind: noticeKind },
-        },
-        context
-      );
-      ({ settled, newest } = await this.#ended(request.turnId, submission));
-    }
-    // A question queued as the turn wrapped up (its checks, its words)
-    // started a run of its own in it: the turn waits for that too. Then it
-    // takes no more, decided with nothing awaited between, so none slips in
-    // after.
-    while (this.#running || this.#joining.size > 0 || this.#inbox.length > 0) {
-      // oxlint-disable-next-line no-await-in-loop -- until nothing joins it
       ({ settled, newest } = await this.#ended(request.turnId, submission));
     }
     this.#close(request.turnId);
@@ -1408,6 +1384,72 @@ export class ChatHarness {
       }
     }
     return end;
+  }
+
+  /**
+   * Wraps turn `request` up from `ended`, how its runs ended so far: its
+   * check of the drafts it wrote, each time it would answer having written
+   * since the last (agent-builds.ts): what fails goes back to it, to fix
+   * in this turn, until they pass or it answers without writing again, and
+   * at most `maxTurnChecks` times in all (`checks`, kept across a question
+   * queued into it): the third that fails ends the turn, its problems left
+   * in the chat as they are. A stopped or failed run ends it, as it ends
+   * the turn. Then its words, should it have shown only its thinking.
+   */
+  async #wrapUp(
+    request: TurnRequest,
+    submission: Submission,
+    ended: { settled: SettledSubmissionRecord; newest?: EntryRecord },
+    checks: TurnChecks
+  ): Promise<{ settled: SettledSubmissionRecord; newest?: EntryRecord }> {
+    let { settled, newest } = ended;
+    for (; checks.round <= maxTurnChecks; checks.round += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one round after another
+      const answered = await this.#endOf(settled);
+      const check =
+        answered.outcome === "answered"
+          ? // oxlint-disable-next-line no-await-in-loop -- see above
+            await turnCheck(
+              this.#env,
+              request.scope,
+              request.turnId,
+              checks.checked
+            )
+          : undefined;
+      if (check?.notice === undefined || checks.round === maxTurnChecks) {
+        break;
+      }
+      checks.checked = check.drafts;
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await this.#conversation.submit(
+        {
+          type: "input",
+          content: check.notice,
+          // Once a round, however often the turn is asked.
+          requestId: `${noticeRequestPrefix(request.turnId)}check:${checks.round}`,
+          whenBusy: "steer",
+          entry: { kind: noticeKind },
+        },
+        context
+      );
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      ({ settled, newest } = await this.#ended(request.turnId, submission));
+    }
+    if (await this.#wantsWords(newest)) {
+      // Once a turn, by its request ID, however often it is asked.
+      await this.#conversation.submit(
+        {
+          type: "input",
+          content: wordsPlease,
+          requestId: `${noticeRequestPrefix(request.turnId)}words`,
+          whenBusy: "steer",
+          entry: { kind: noticeKind },
+        },
+        context
+      );
+      ({ settled, newest } = await this.#ended(request.turnId, submission));
+    }
+    return newest === undefined ? { settled } : { settled, newest };
   }
 
   /**
@@ -1964,7 +2006,14 @@ export class ChatHarness {
    * it goes on (`#placeHeld`).
    */
   async sendNow(turnId: string): Promise<void> {
-    if (this.#open !== turnId || this.#inbox.length === 0) {
+    // The chat's turn, whether a `run` waits on it or a restart left it to
+    // go on with nobody waiting (`setUpStored`): its queue is pi's either
+    // way.
+    if (
+      this.#active !== turnId ||
+      this.#stopped !== undefined ||
+      this.#inbox.length === 0
+    ) {
       return;
     }
     const sending = (async () => {
@@ -2002,21 +2051,30 @@ export class ChatHarness {
 
   /**
    * Stops the chat's run, and drops the questions queued into it: pi keeps
-   * them through a stop (`onAbort: "keep"`), for Send now alone.
+   * them through a stop (`onAbort: "keep"`), for Send now alone. The words
+   * of those it dropped, oldest first.
    */
-  async #halt(): Promise<void> {
+  async #halt(): Promise<string[]> {
     await this.#conversation.abort(context);
-    await this.#withdraw();
+    return await this.#withdraw();
   }
 
-  /** Withdraws every question pi holds queued: settled unanswered, never asked. */
-  async #withdraw(): Promise<void> {
-    for (const { id } of this.#inbox) {
+  /**
+   * Withdraws every question pi holds queued: settled unanswered, never
+   * asked. The words of those it withdrew, oldest first: not one pi placed
+   * meanwhile.
+   */
+  async #withdraw(): Promise<string[]> {
+    const dropped: string[] = [];
+    for (const question of this.#inbox) {
       // oxlint-disable-next-line no-await-in-loop -- one after another
-      const queued = await this.#harness.submission(id, context);
+      const queued = await this.#harness.submission(question.id, context);
       // oxlint-disable-next-line no-await-in-loop -- see above
-      await queued?.abort(context);
+      if ((await queued?.abort(context)) === "aborted") {
+        dropped.push(queuedOf(question).text);
+      }
     }
+    return dropped;
   }
 
   /** Makes `work` one the turn waits for before it settles (`#joining`). */
@@ -2138,12 +2196,12 @@ export class ChatHarness {
    * ends. With `turnId`, only that turn: kept, so it is stopped too if it
    * hasn't submitted its question yet, as it does; and pi's run stopped
    * only while that turn is the chat's, so a stop that comes late, or is
-   * sent again, never stops the question after it.
+   * sent again, never stops the question after it. The words of the
+   * questions queued into it that the stop dropped, oldest first.
    */
-  async abort(turnId?: string): Promise<void> {
+  async abort(turnId?: string): Promise<string[]> {
     if (turnId === undefined) {
-      await this.#halt();
-      return;
+      return await this.#halt();
     }
     await this.#conversation.commit(async (tx) => {
       const stopped = await tx.doc(StoppedDoc);
@@ -2152,11 +2210,12 @@ export class ChatHarness {
     // After the commit: the turn the chat holds now. It takes no more
     // questions, and those on their way are in pi before the stop drops
     // them with what it holds queued.
-    if (this.#active === turnId) {
-      this.#close(turnId);
-      await Promise.allSettled(this.#joining);
-      await this.#halt();
+    if (this.#active !== turnId) {
+      return [];
     }
+    this.#close(turnId);
+    await Promise.allSettled(this.#joining);
+    return await this.#halt();
   }
 
   async close(): Promise<void> {

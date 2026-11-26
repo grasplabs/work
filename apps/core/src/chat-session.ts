@@ -409,11 +409,12 @@ export class ChatSession extends DurableObject<Env> {
     return await this.#work((harness) => harness.activeTurn());
   }
 
-  /** Stops the turn under way, if there is one, or turn `turnId` as it starts. */
-  async abort(turnId?: string): Promise<void> {
-    await this.#work(async (harness) => {
-      await harness.abort(turnId);
-    });
+  /**
+   * Stops the turn under way, if there is one, or turn `turnId` as it
+   * starts: the words of the questions queued into it that it dropped.
+   */
+  async abort(turnId?: string): Promise<string[]> {
+    return await this.#work(async (harness) => await harness.abort(turnId));
   }
 
   /**
