@@ -426,11 +426,21 @@ export const fakeComposioApi = (
     /**
      * As `failing`, for its next `times` requests only, each counted down
      * as it fails: a failure that passes. It answers `status` (503 by
-     * default), or, `broken`, 200 with a body that breaks off after its
-     * first bytes.
+     * default) with Composio's error envelope, its `code` when given (403
+     * names 1001 by default, as a key without the route's permission), or,
+     * `broken`, 200 with a body that breaks off after its first bytes.
      */
     failingFor:
-      | { prefix: string; times: number; broken?: boolean; status?: number }
+      | {
+          prefix: string;
+          times: number;
+          broken?: boolean;
+          status?: number;
+          /** Composio's number for the error; `null` sends none. */
+          code?: number | null;
+          /** Composio's name for the error; `null` sends none. */
+          slug?: string | null;
+        }
       | undefined;
     /**
      * How its answers about an account write the toolkit's slug: as it is,
@@ -776,9 +786,24 @@ export const fakeComposioApi = (
     }
     failingFor.times -= 1;
     if (failingFor.broken !== true) {
+      const status = failingFor.status ?? 503;
+      const defaultCode = status === 403 ? 1001 : null;
+      const code =
+        failingFor.code === undefined ? defaultCode : failingFor.code;
+      const slug = failingFor.slug === undefined ? "Refused" : failingFor.slug;
+      // As Composio's envelope has it: its message may repeat what was
+      // sent, so connect reads only the slug and the code.
       return Response.json(
-        { error: { message: "Refused", slug: "Refused" } },
-        { status: failingFor.status ?? 503 }
+        {
+          error: {
+            message: "The API key doesn't have permissions: sent ak_secret",
+            status,
+            ...(slug === null ? {} : { slug }),
+            ...(code === null ? {} : { code }),
+            request_id: "req_test",
+          },
+        },
+        { status }
       );
     }
     return new Response(
