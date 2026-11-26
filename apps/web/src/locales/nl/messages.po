@@ -5355,6 +5355,10 @@ msgstr "Doorgaan met {signIn}"
 msgid "Continue with Grasp staff"
 msgstr "Doorgaan als Grasp-medewerker"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Continue with our own system, or add your own API key if you’d rather."
+msgstr "Ga verder met ons eigen systeem, of voeg je eigen API-sleutel toe als je dat liever wilt."
+
 #: src/apps/resource-bindings.tsx
 msgid "Contract"
 msgstr "Contract"
@@ -8152,8 +8156,8 @@ msgid "Going well."
 msgstr "Het gaat goed."
 
 #: src/onboarding/setup-steps.tsx
-msgid "Good, that’s settled. Before we really start, one thing: everything in Grasp runs on AI. Reading your documents, the interviews, the plan, all of it. So we need an AI attached to get it working."
-msgstr "Goed, dat is geregeld. Eén ding voordat we echt beginnen: alles in Grasp draait op AI. Je documenten lezen, de interviews, het plan, alles. Dus er moet een AI aan gekoppeld zijn om het werkend te krijgen."
+msgid "Good, that’s settled. Everything in Grasp runs on AI: reading your documents, the interviews, the plan. Here you choose which AI that is."
+msgstr "Goed, dat is geregeld. Alles in Grasp draait op AI: je documenten lezen, de interviews, het plan. Hier kies je welke AI dat is."
 
 #: src/onboarding/document-visitors.tsx
 msgid "Got a checklist? Toss it in!"
@@ -18406,10 +18410,6 @@ msgstr "Het inloggen is niet afgerond, dus er is niets gekoppeld. Probeer het op
 msgid "The sign-in took too long, so nothing was connected. Try again."
 msgstr "Het inloggen duurde te lang, dus er is niets gekoppeld. Probeer het opnieuw."
 
-#: src/onboarding/setup-steps.tsx
-msgid "The simplest is our own system: leave it chosen and press Continue, and you’re ready. If your company already works with a provider like OpenAI or Mistral, choose your own key and paste it instead."
-msgstr "Het makkelijkst is ons eigen systeem: laat het gekozen staan, druk op Doorgaan en je bent klaar. Werkt je bedrijf al met een aanbieder zoals OpenAI of Mistral, kies dan je eigen sleutel en plak die in plaats daarvan."
-
 #: src/workflows/version-source.tsx
 msgid "The source files of version {sourceVersion}"
 msgstr "De bronbestanden van versie {sourceVersion}"
@@ -19627,10 +19627,6 @@ msgstr "Gebruik hoofdletters, cijfers en underscores, beginnend met een letter, 
 #: src/onboarding/ai-choice.tsx
 msgid "Use our own system"
 msgstr "Ons eigen systeem gebruiken"
-
-#: src/onboarding/setup-steps.tsx
-msgid "Use our own system and you’re set, or connect a provider of your own."
-msgstr "Gebruik ons eigen systeem en je bent klaar, of koppel een eigen aanbieder."
 
 #: src/workflows/resource-params.tsx
 msgid "Use the default"
@@ -21491,6 +21487,10 @@ msgstr "Jij en je teamleiders kijken het na"
 msgid "You can add it now and connect it after the agent is made."
 msgstr "Je kunt hem nu toevoegen en koppelen nadat de agent is gemaakt."
 
+#: src/onboarding/setup-steps.tsx
+msgid "You can carry on with our own system: it works right away, with nothing to set up. Or, if your company would rather use a provider of its own, you can add your own API key. Either is fine."
+msgstr "Je kunt verder met ons eigen systeem: dat werkt meteen, zonder iets in te stellen. Of, als je bedrijf liever een eigen aanbieder gebruikt, kun je je eigen API-sleutel toevoegen. Allebei prima."
+
 #: src/agents/setup/review-step.tsx
 msgid "You can change all of this later."
 msgstr "Je kunt dit allemaal later wijzigen."
@@ -21609,14 +21609,6 @@ msgstr "Jullie werken in {name}"
 #: src/chat/answer-words.tsx
 msgid "You’re about to visit an external website."
 msgstr "Je gaat naar een externe website."
-
-#: src/onboarding/setup-steps.tsx
-msgid "You’re already on our own system, and it works, so just press Continue."
-msgstr "Je gebruikt ons eigen systeem al en het werkt, dus druk gewoon op Doorgaan."
-
-#: src/onboarding/setup-steps.tsx
-msgid "You’re on our own system, and it works."
-msgstr "Je gebruikt ons eigen systeem, en dat werkt."
 
 #: src/drafts/share-with-team.tsx
 msgid "You’re seeing your version."
@@ -21806,8 +21798,8 @@ msgid "Your own key is connected and works."
 msgstr "Je eigen sleutel is gekoppeld en werkt."
 
 #: src/onboarding/setup-steps.tsx
-msgid "Your own key works, so just press Continue."
-msgstr "Je eigen sleutel werkt, dus druk gewoon op Doorgaan."
+msgid "Your own key is connected and works. You can keep it, or change it here."
+msgstr "Je eigen sleutel is gekoppeld en werkt. Je kunt hem houden, of hier wijzigen."
 
 #: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
