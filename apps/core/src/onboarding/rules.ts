@@ -4,6 +4,7 @@ import {
   dayOf,
 } from "@grasp-os/shared/admin/org-record";
 import {
+  leadsOfTeam,
   leadWaitWorkingDays,
   minTalkedShown,
   minTeamShown,
@@ -67,9 +68,9 @@ export const takingPart = (roster: Roster, person: RosterPerson): boolean => {
   return team !== undefined && !team.off && !person.away;
 };
 
-/** Whether someone leads a team. */
+/** Whether someone leads a team: as its lead, or as one of its other leads. */
 export const leads = (roster: Roster, person: string): boolean =>
-  roster.teams.some((team) => team.lead === person);
+  roster.teams.some((team) => leadsOfTeam(team).includes(person));
 
 /**
  * Whether interviews may happen: of the agreements `asked` of this
@@ -112,8 +113,8 @@ const leadOf = (roster: Roster, team: string): RosterPerson | undefined => {
 };
 
 /**
- * Whether one person's link is due by `now`. A lead's at their team's
- * moment, and so is everyone's in a team without a lead. Everyone else's
+ * Whether one person's link is due by `now`. A lead's (each of them) at
+ * their team's moment, and so is everyone's in a team without a lead. Everyone else's
  * once their lead has agreed to their interview and the team's work is
  * mapped; or, when the lead hasn't, `leadWaitWorkingDays` after the team's
  * moment, and Stephen asks them what work they do.
@@ -138,7 +139,12 @@ const isDue = (
     return false;
   }
   const lead = leadOf(roster, person.team);
-  if (lead === undefined || lead.id === person.id) {
+  // Every lead of the team talks at its moment: the others wait for the first alone.
+  const team = roster.teams.find(({ id }) => id === person.team);
+  if (
+    lead === undefined ||
+    (team !== undefined && leadsOfTeam(team).includes(person.id))
+  ) {
     return true;
   }
   const leadDone = facts.interviews.get(lead.id)?.completedAt ?? null;

@@ -141,6 +141,25 @@ describe("the teams and people in a staff list", () => {
     expect(list.leadsFrom).toBe("column");
   });
 
+  it("takes every lead the list marks in a team, the first first", () => {
+    const list = staffListOf(
+      [
+        ["Name", "Email", "Team", "Team lead"],
+        ["Lisa Jansen", "lisa@x.com", "Service", "yes"],
+        ["Sem de Vries", "sem@x.com", "Service", ""],
+        ["Daan Bakker", "daan@x.com", "Service", "yes"],
+      ],
+      "Other"
+    );
+    const [team] = list.roster.teams;
+    const nameOf = (id: string | null | undefined) =>
+      list.roster.people.find((person) => person.id === id)?.name;
+    expect({
+      lead: nameOf(team?.lead),
+      others: team?.coLeads?.map(nameOf),
+    }).toStrictEqual({ lead: "Lisa Jansen", others: ["Daan Bakker"] });
+  });
+
   it("takes the one most of a team reports to, by name or email", () => {
     const list = staffListOf(
       [

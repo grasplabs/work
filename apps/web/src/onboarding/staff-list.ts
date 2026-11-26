@@ -370,9 +370,17 @@ const rosterOf = (
   }
   let leadsFrom: StaffList["leadsFrom"] = "none";
   for (const team of teams.values()) {
-    const lead = leadOf(said.filter((each) => each.person.team === team.id));
+    const mine = said.filter((each) => each.person.team === team.id);
+    const lead = leadOf(mine);
     if (lead !== null) {
       team.lead = lead.id;
+      // A list may mark more than one lead of a team: the first leads, the others with them.
+      const others = mine
+        .filter((each) => each.lead && each.person.id !== lead.id)
+        .map((each) => each.person.id);
+      if (others.length > 0) {
+        team.coLeads = others.slice(0, 20);
+      }
       if (rank[lead.from] > rank[leadsFrom]) {
         leadsFrom = lead.from;
       }
@@ -538,13 +546,19 @@ export const withSaved = (
       if (before === undefined) {
         return team;
       }
-      const lead =
-        before.lead !== null && teamOf.get(before.lead) === team.id
-          ? before.lead
-          : team.lead;
+      const { coLeads: listed = [], ...rest } = team;
+      const kept = before.lead !== null && teamOf.get(before.lead) === team.id;
+      const lead = kept ? before.lead : team.lead;
+      // Who else led it stays with the lead kept, each still in the team; else the list's.
+      const coLeads = kept
+        ? (before.coLeads ?? []).filter(
+            (id) => id !== lead && teamOf.get(id) === team.id
+          )
+        : listed;
       return {
-        ...team,
+        ...rest,
         lead,
+        ...(coLeads.length > 0 ? { coLeads } : {}),
         off: before.off,
         does: team.does === "" ? before.does : team.does,
       };
@@ -573,10 +587,14 @@ export const withLeadsFrom = (
   const named = new Map(read.teams.map((team) => [team.id, team.lead]));
   return {
     ...kept,
-    teams: kept.teams.map((team) => ({
-      ...team,
-      lead: named.get(team.id) ?? team.lead,
-    })),
+    teams: kept.teams.map((team) => {
+      const lead = named.get(team.id) ?? team.lead;
+      return {
+        ...team,
+        lead,
+        coLeads: (team.coLeads ?? []).filter((id) => id !== lead),
+      };
+    }),
   };
 };
 

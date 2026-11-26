@@ -53,6 +53,7 @@ import type {
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   agreementsSchema,
+  leadsOfTeam,
   minTeamShown,
   planDays,
   planSchema,
@@ -1978,7 +1979,7 @@ export class Onboarding extends DurableObject<Env> {
       const members = roster.people.filter((person) => person.team === team.id);
       const newcomers = members.filter(
         (person) =>
-          person.id !== team.lead &&
+          !leadsOfTeam(team).includes(person.id) &&
           !person.away &&
           wasIn.get(person.id) !== team.id &&
           !asked.has(person.id)
@@ -2968,7 +2969,8 @@ export class Onboarding extends DurableObject<Env> {
       .filter(
         (each) =>
           own !== undefined &&
-          (each.team === own.team || each.id === team?.lead) &&
+          (each.team === own.team ||
+            (team !== undefined && leadsOfTeam(team).includes(each.id))) &&
           !each.away
       )
       .map(({ name }) => firstName(name));
@@ -6837,7 +6839,8 @@ export class Onboarding extends DurableObject<Env> {
       .where(eq(onboarding.id, 1))
       .run();
     const ledTeam =
-      roster.teams.find(({ lead: led }) => led === person)?.id ?? null;
+      roster.teams.find((team) => leadsOfTeam(team).includes(person))?.id ??
+      null;
     this.#db.insert(links).values({ person, sentAt: now, ledTeam }).run();
     this.#queuePersonMail({ roster, plan, said, person, sentAt: now }, "link");
     const team = roster.people.find(({ id }) => id === person)?.team;
@@ -10116,7 +10119,7 @@ export class Onboarding extends DurableObject<Env> {
             id,
             name,
             title,
-            lead: id === team.lead,
+            lead: leadsOfTeam(team).includes(id),
           })),
         facts: input.facts,
         documents: this.documentsBrief(team.name),
@@ -11346,10 +11349,11 @@ export class Onboarding extends DurableObject<Env> {
       return null;
     }
     return {
-      teams: teamRows.map(({ id, name, lead, does, off }) => ({
+      teams: teamRows.map(({ id, name, lead, coLeads, does, off }) => ({
         id,
         name,
         lead,
+        coLeads,
         does,
         off,
       })),
