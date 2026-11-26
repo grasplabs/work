@@ -438,6 +438,38 @@ describe("connecting a Composio toolkit with a key", () => {
     });
   });
 
+  it("reads Composio's name or number for an error when its answer gives only one", async () => {
+    const admin = someone("admin");
+    // Only the number: the reason still names it.
+    composio.state.failingFor = {
+      prefix: "POST /auth_configs",
+      times: 1,
+      status: 403,
+      code: 1001,
+      slug: null,
+    };
+    const numbered = await outcome(connectWithKey(admin));
+    // Only the name: a key the provider refused is still told apart.
+    composio.state.failingFor = {
+      prefix: "POST /connected_accounts",
+      times: 1,
+      status: 400,
+      code: null,
+      slug: "ConnectedAccount_CredentialValidationRejected",
+    };
+    const named = await outcome(connectWithKey(admin));
+    const recorded = await events();
+    expect({
+      ends: [numbered, named],
+      why: recorded
+        .filter(({ action }) => action === "connection.connect")
+        .map(({ detail }) => detail.why ?? null),
+    }).toStrictEqual({
+      ends: ["connection.provider_forbidden", "connection.key_rejected"],
+      why: ["auth_config:http_403:1001", null],
+    });
+  });
+
   it("keeps one shared connection per toolkit: of two connects at once, one is stored and the other leaves nothing at Composio", async () => {
     const admin = someone("admin");
     // Both get past everything before making their server, then go on.

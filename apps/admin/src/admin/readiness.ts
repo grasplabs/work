@@ -331,13 +331,18 @@ const readinessOf = async (envOf: Env): Promise<Readiness> => {
     newestRelease(envOf),
     missingSecrets(envOf, requiredSecrets),
   ]);
+  // Each asks a service of its own, so they ask at once.
+  const [deployer, composio] = await Promise.all([
+    deployerCheck(envOf, missing.includes("DEPLOYER_API_TOKEN")),
+    composioCheck(envOf, missing.includes("COMPOSIO_API_KEY")),
+  ]);
   const checks: ReadinessCheck[] = [
     stageCheck(envOf),
     domainCheck(envOf),
     releaseCheck(imported?.n ?? 0, newestId),
     secretsCheck(missing),
-    await deployerCheck(envOf, missing.includes("DEPLOYER_API_TOKEN")),
-    await composioCheck(envOf, missing.includes("COMPOSIO_API_KEY")),
+    deployer,
+    composio,
   ];
   return {
     checks,

@@ -147,11 +147,18 @@ const maxErrorBytes = 64 * 1024;
  * slug and the number (`code`), never its message.
  */
 const errorAnswerSchema = z.object({
-  error: z.object({ slug: z.unknown(), code: z.unknown() }),
+  error: z.object({
+    slug: z.unknown().optional(),
+    code: z.unknown().optional(),
+  }),
 });
 
-/** A slug of Composio's: a word, never text. */
-const errorSlugSchema = z.string().regex(/^\w{1,128}$/u);
+/**
+ * A slug of Composio's: a machine name such as
+ * `ConnectedAccount_CredentialValidationRejected`, letters, digits and
+ * underscores starting with a letter, never text.
+ */
+const errorSlugSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,127}$/u);
 
 /** A number of Composio's for an error. */
 const errorCodeSchema = z.number().int().min(0).max(999_999);

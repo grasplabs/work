@@ -436,7 +436,10 @@ export const fakeComposioApi = (
           times: number;
           broken?: boolean;
           status?: number;
-          code?: number;
+          /** Composio's number for the error; `null` sends none. */
+          code?: number | null;
+          /** Composio's name for the error; `null` sends none. */
+          slug?: string | null;
         }
       | undefined;
     /**
@@ -784,16 +787,19 @@ export const fakeComposioApi = (
     failingFor.times -= 1;
     if (failingFor.broken !== true) {
       const status = failingFor.status ?? 503;
-      const code = failingFor.code ?? (status === 403 ? 1001 : undefined);
+      const defaultCode = status === 403 ? 1001 : null;
+      const code =
+        failingFor.code === undefined ? defaultCode : failingFor.code;
+      const slug = failingFor.slug === undefined ? "Refused" : failingFor.slug;
       // As Composio's envelope has it: its message may repeat what was
       // sent, so connect reads only the slug and the code.
       return Response.json(
         {
           error: {
             message: "The API key doesn't have permissions: sent ak_secret",
-            slug: "Refused",
             status,
-            ...(code === undefined ? {} : { code }),
+            ...(slug === null ? {} : { slug }),
+            ...(code === null ? {} : { code }),
             request_id: "req_test",
           },
         },
