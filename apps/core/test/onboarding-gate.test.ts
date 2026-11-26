@@ -180,6 +180,17 @@ describe("while the company is onboarding", () => {
     });
   });
 
+  it("tells an admin who finished every screen that it is behind them, while it waits for Grasp's go for everyone else", async () => {
+    const admin = await signedInApi(idp, "admin");
+    await adminCommands().close();
+    const halfWay = await admin.api.onboarding.behind();
+    await admin.api.onboarding.finishSteps([...setupSteps]);
+    expect({
+      halfWay,
+      finished: await admin.api.onboarding.behind(),
+    }).toStrictEqual({ halfWay: false, finished: true });
+  });
+
   it("lets in an admin the directory made a member before they ever signed in, by their object id, and no other member it made", async () => {
     const promoted = await fromDirectory("admin");
     const plain = await fromDirectory("user");
