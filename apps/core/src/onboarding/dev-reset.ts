@@ -84,3 +84,34 @@ export const devInterviewLinkResponse = async (
         { headers: { "referrer-policy": "no-referrer" } }
       );
 };
+
+/**
+ * `POST /api/dev/onboarding/voice-budget`, on a local stack only: today's
+ * seconds of voice, heard and said, given back to everyone, so the live
+ * interview can be tried again without starting the whole onboarding over.
+ * On a deployed core the route isn't there, and the object refuses besides.
+ */
+export const devVoiceBudgetResponse = async (
+  request: Request,
+  env: Env,
+  requestId: string
+): Promise<Response> => {
+  const fetchSite = request.headers.get("sec-fetch-site");
+  if (
+    !isLocalDevRequest(request, env) ||
+    request.method !== "POST" ||
+    (fetchSite !== null && !sameSiteFetches.has(fetchSite))
+  ) {
+    return notFound(requestId);
+  }
+  const person = await identify(env, request.headers);
+  if (person === undefined) {
+    return errorResponse(
+      401,
+      authErrors.create("auth.unauthenticated"),
+      requestId
+    );
+  }
+  const done = await onboardingStore(env).clearVoiceUseLocally();
+  return done ? new Response(null, { status: 204 }) : notFound(requestId);
+};

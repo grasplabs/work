@@ -1,3 +1,4 @@
+import { devVoiceBudgetPath } from "@grasp-os/shared/dev-reset";
 import type {
   InterviewFact,
   InterviewLine,
@@ -357,6 +358,15 @@ const jumpTo = async (jump: Jump, onJumped?: () => void): Promise<void> => {
 const isJump = (value: string | null): value is Jump =>
   jumps.some((jump) => jump === value);
 
+/** Today's seconds of voice given back on the local stack, so the live interview can be tried again. */
+const giveVoiceBack = async (): Promise<void> => {
+  const response = await fetch(devVoiceBudgetPath, { method: "POST" });
+  console.info(
+    "[interview] dev: voice budget",
+    response.ok ? "given back" : `not given back (${response.status})`
+  );
+};
+
 /**
  * `?jump=` in the address, applied as the link opens, before the page and
  * its conversation start (routes/interview.tsx): nothing runs yet that could
@@ -415,6 +425,14 @@ const Menu = ({ onJumped }: { onJumped: () => void }) => (
           </Fragment>
         ))}
       </DropdownMenuGroup>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem
+        onSelect={() => {
+          void giveVoiceBack();
+        }}
+      >
+        Give today&apos;s voice back (budget)
+      </DropdownMenuItem>
     </DropdownMenuContent>
   </DropdownMenu>
 );

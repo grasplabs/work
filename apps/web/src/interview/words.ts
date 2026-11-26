@@ -43,6 +43,8 @@ export interface LoopWords {
   stillTrouble: string;
   unheard: string;
   noMicrophone: string;
+  /** Their voice for today is used up: they can type, or come back tomorrow to talk. */
+  voiceSpent: string;
 }
 
 /** A plain yes, in each language: said to a part of the read-back, it needs no thinking about. */
@@ -76,6 +78,7 @@ export const useLoopWords = (locale: Locale): LoopWords => {
     trouble: t`We have a technical problem on our side. It is not you. I have kept what you said, and I keep trying.`,
     stillTrouble: t`It still does not work. You can stop for now and come back later. Your place is kept.`,
     unheard: t`I could not hear that. Say it once more, or type it.`,
+    voiceSpent: t`You have talked as long as you can today. Type your answers to go on, or come back tomorrow to talk.`,
     noMicrophone: t`The microphone is not available here. Type your answer.`,
   };
 };

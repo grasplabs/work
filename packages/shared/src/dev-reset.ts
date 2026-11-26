@@ -9,3 +9,9 @@ export const devResetPath = "/api/dev/onboarding/start-over";
 // there: a local stack only, as above.
 
 export const devInterviewLinkPath = "/api/dev/onboarding/interview-link";
+
+// Where a local stack gives everyone their voice for today back (core's
+// onboarding/dev-reset.ts), so the live interview can be tried again
+// without waiting for tomorrow: a local stack only, as above.
+
+export const devVoiceBudgetPath = "/api/dev/onboarding/voice-budget";

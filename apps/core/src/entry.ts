@@ -13,7 +13,11 @@ import {
   connectionCallbackPath,
   connectorClientMetadataPath,
 } from "@grasp-os/shared/connect";
-import { devInterviewLinkPath, devResetPath } from "@grasp-os/shared/dev-reset";
+import {
+  devInterviewLinkPath,
+  devResetPath,
+  devVoiceBudgetPath,
+} from "@grasp-os/shared/dev-reset";
 import { errorReportPath } from "@grasp-os/shared/error-reports";
 import { internalErrors, requestErrors } from "@grasp-os/shared/errors";
 import { requestIdHeader } from "@grasp-os/shared/http";
@@ -77,6 +81,7 @@ import { mailIngressResponse } from "./mail-ingress.ts";
 import {
   devInterviewLinkResponse,
   devResetResponse,
+  devVoiceBudgetResponse,
 } from "./onboarding/dev-reset.ts";
 import { hearResponse } from "./onboarding/hear.ts";
 import { interviewTurnResponse } from "./onboarding/interview.ts";
@@ -363,6 +368,7 @@ const pathHandlers: ReadonlyMap<
   [onboardingSummaryPath, onboardingSummaryResponse],
   [devResetPath, devResetResponse],
   [devInterviewLinkPath, devInterviewLinkResponse],
+  [devVoiceBudgetPath, devVoiceBudgetResponse],
   [aiStatusReportPath, aiStatusReportResponse],
   [brainReportPath, brainReportResponse],
   [brainActionPath, brainActionResponse],

@@ -1418,6 +1418,19 @@ export class Onboarding extends DurableObject<Env> {
    * again at once and its one row as it is first made, so the next request
    * finds it as new. Anywhere else it does nothing.
    */
+  /**
+   * Today's voice given back to everyone, on a local stack only
+   * (`DEV_SKIP_ROUTER_SECRET`), so the live interview can be tried again
+   * the same day. Anywhere else it does nothing.
+   */
+  clearVoiceUseLocally(): boolean {
+    if (this.env.DEV_SKIP_ROUTER_SECRET !== "true") {
+      return false;
+    }
+    this.#db.delete(voiceUse).run();
+    return true;
+  }
+
   async startOverLocally(): Promise<boolean> {
     if (this.env.DEV_SKIP_ROUTER_SECRET !== "true") {
       return false;
