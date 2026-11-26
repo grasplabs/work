@@ -83,6 +83,8 @@ const styles = stylex.create({
     gap: space["4"],
     width: "100%",
     maxWidth: { default: "26rem", [media.lg]: "45rem" },
+    // Its lines as long as each other, so the last never stands short under the first.
+    textWrap: "balance",
   },
   // The title no wider than the page's room, so a line too long for it runs over, and is measured.
   title: { maxWidth: "100%" },
