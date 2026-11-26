@@ -15,31 +15,24 @@ import {
   Item,
   ItemActions,
   ItemContent,
-  ItemDescription,
   ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import { Separator } from "@grasp-os/ui/components/separator";
 import { Text } from "@grasp-os/ui/components/text";
-import { CircleCheckIcon, FileIcon, Icon } from "@grasp-os/ui/lib/icons";
+import { CircleCheckIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { msg, plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
 
-import { formatList } from "../format.ts";
 import { TopError } from "../frame/top-error.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { CalmStep } from "./calm-frame.tsx";
-import { CompanyDots } from "./company-dots.tsx";
-import { namedOf, useCompanyConcept } from "./company-picture.ts";
-import type { CompanyConcept } from "./company-picture.ts";
-import { CompanyRows } from "./company-rows.tsx";
 import { useConnectionReturn } from "./connection-return.ts";
 import {
   csvRows,
@@ -57,7 +50,6 @@ import {
 } from "./step-parts.ts";
 import type { StepProps } from "./step-parts.ts";
 import { useLeaving } from "./step-voice.tsx";
-import { SupportLink } from "./support-link.tsx";
 import { XlsxError, xlsxMost, xlsxRows } from "./xlsx.ts";
 
 // Who works there: from the organization's Microsoft or Google sign-in,
@@ -66,8 +58,10 @@ import { XlsxError, xlsxMost, xlsxRows } from "./xlsx.ts";
 // staff list the admin shares, a CSV or Excel file with a row per person,
 // read in this browser. Either way only names, email addresses, teams and
 // jobs are kept, in core. A sign-in is offered for each suite this
-// deployment signs in with, as a row pressed to connect it. Once they are
-// in, the line names a few of them, so the admin sees their own company.
+// deployment signs in with, as a row pressed to connect it. Once a list is
+// in, the step moves on by itself: no page in between to confirm it
+// (Ruben), Stephen says what came in as the next step arrives. Coming back,
+// the sign-in in use is marked done, and a new list replaces the one kept.
 // Never forced: without a list the admin skips on, and Grasp's own people
 // sort the list out with them in their talks.
 
@@ -81,9 +75,6 @@ const styles = stylex.create({
 });
 
 /** The first few people on the list, by name; someone core erased has none. */
-const namesOf = (roster: Roster): string[] =>
-  namedOf(roster).map(({ name }) => name);
-
 const xlsxName = /\.xlsx$/iu;
 
 /**
@@ -208,112 +199,16 @@ export const WaitingNote = ({ waiting }: { waiting: number }) =>
     </Text>
   ) : null;
 
-/** "1 person", "12 people": the count with its word, in the page's language. */
-const peopleWords = (count: number): string =>
-  plural(count, { one: "# person", other: "# people" });
-
-/** "1 team", "3 teams". */
-const teamWords = (count: number): string =>
-  plural(count, { one: "# team", other: "# teams" });
-
 /**
- * What Grasp found, confirmed where it was connected: the sign-in (or the
- * staff list) as a row, done, with how many people in how many teams and a
- * few of them by name, so the admin sees it is their own company.
+ * The step's title and line: just the ask, the same arriving or coming
+ * back. It leads with the sign-in, named for what Grasp reads through it;
+ * a staff list is the way in only where this deployment signs in with no
+ * suite. What came in, Stephen says as the next step arrives.
  */
-const ConfirmRow = ({
-  roster,
-  fromDirectory,
-}: {
-  roster: Roster;
-  fromDirectory: DirectorySuite | null;
-}) => {
+const useWords = (
+  suites: DirectorySuite[]
+): { title: string; body: string | null; spoken: string } => {
   const { t } = useLingui();
-  const people = peopleWords(roster.people.length);
-  const teams = teamWords(roster.teams.length);
-  const names = formatList(namesOf(roster));
-  const signIn = fromDirectory === null ? null : suiteNames[fromDirectory];
-  return (
-    <ItemGroup aria-label={t`What I found`}>
-      <Item variant="outline">
-        <ItemMedia>
-          {fromDirectory === null ? (
-            <Icon icon={FileIcon} />
-          ) : (
-            <BrandIcon
-              decorative
-              logo={suiteLogos[fromDirectory]}
-              name={signIn ?? ""}
-              size="sm"
-            />
-          )}
-        </ItemMedia>
-        <ItemContent>
-          <ItemTitle>
-            {signIn === null ? t`Your staff list` : t`${signIn} is connected`}
-          </ItemTitle>
-          <ItemDescription>
-            {t`I can see ${people} in ${teams}. Among them ${names}.`}
-          </ItemDescription>
-        </ItemContent>
-        <ItemActions>
-          <Icon icon={CircleCheckIcon} />
-        </ItemActions>
-      </Item>
-    </ItemGroup>
-  );
-};
-
-/**
- * The step's title and line. Without a roster it leads with the sign-in,
- * named for what Grasp reads through it; a staff list is the way in only
- * where this deployment signs in with no suite. With one, it says who is in
- * and from where.
- */
-const useWords = ({
-  roster,
-  another,
-  fromDirectory,
-  suites,
-  people,
-  teams,
-  pictured,
-}: {
-  roster: Roster | null;
-  /** Another list asked for, over the roster there is. */
-  another: boolean;
-  /** A concept draws the roster: the line says what it holds, and leaves the names to the picture. */
-  pictured: boolean;
-  fromDirectory: DirectorySuite | null;
-  suites: DirectorySuite[];
-  people: number;
-  teams: number;
-}): { title: string; body: string | null; spoken: string } => {
-  const { t } = useLingui();
-  if (roster !== null && another) {
-    return {
-      title: t`Use another staff list`,
-      body: t`Share another staff list as a CSV or Excel file, a row per person. It replaces the one I have now.`,
-      spoken: t`Got a newer list? Share it here, and it replaces the one I have now.`,
-    };
-  }
-  // Connected or shared: the same page, its title as it was, and what Grasp found in the row itself
-  // (ConfirmRow), confirmed right where it was connected (Ruben: no page of its own for it).
-  const spokenFound = t`There it is, your company. I can see ${peopleWords(people)} in ${teamWords(teams)}. Have a quick look whether that seems right, and then we’ll move on.`;
-  if (roster !== null && pictured) {
-    return { title: t`Here’s your company`, body: null, spoken: spokenFound };
-  }
-  if (roster !== null) {
-    // A shared file keeps no connect ask above it: the row is the list they shared.
-    return {
-      title:
-        fromDirectory === null
-          ? t`Share your staff list`
-          : t`Connect your ${suiteNames[fromDirectory]} account`,
-      body: null,
-      spoken: spokenFound,
-    };
-  }
   // Just the ask, no line under it (Ruben: what matters is that they connect their account).
   if (suites.length > 1) {
     return {
@@ -338,86 +233,52 @@ const useWords = ({
 };
 
 /**
- * The step's ways on: Continue once there is a roster, another list or a
- * staff list instead of a sign-in, and more about it; without one, a way
- * past it. `end` holds the buttons, main first; `also` the link on its own
- * line under them.
+ * The step's way on, in the bottom bar: Continue when a list is already
+ * in (coming back), else a way past it. Never forced: Grasp's own people
+ * sort the list out with them in their talks.
  */
-const useCompanyWays = ({
-  roster,
-  another,
-  fromDirectory,
-  onAnother,
+const CompanyWay = ({
+  known,
   onward,
 }: {
-  roster: boolean;
-  another: boolean;
-  fromDirectory: DirectorySuite | null;
-  onAnother: () => void;
+  known: boolean;
   onward: () => Promise<void>;
-}): { end: ReactNode; also: ReactNode } => {
+}) => {
   const { t } = useLingui();
-  if (roster) {
-    return {
-      end: (
-        <>
-          <Button
-            onClick={() => {
-              void onward();
-            }}
-            size="lg"
-          >
-            {t`Continue`}
-          </Button>
-          {another ? null : (
-            <Button onClick={onAnother} size="lg" variant="outline">
-              {fromDirectory === null
-                ? t`Use another list`
-                : t`Use a staff list instead`}
-            </Button>
-          )}
-        </>
-      ),
-      also:
-        fromDirectory === null ? (
-          <SupportLink page="staffList">{t`More about the staff list`}</SupportLink>
-        ) : (
-          <SupportLink page="directory">{t`More about this connection`}</SupportLink>
-        ),
-    };
-  }
-  // No list yet: never forced. Grasp's own people sort it out with them in their talks. The way past
-  // stands in the bottom bar, so the middle holds only the sign-in and the list.
-  return {
-    end: (
-      <Button
-        onClick={() => {
-          void onward();
-        }}
-        size="lg"
-        variant="outline"
-      >
-        {t`Skip for now`}
-      </Button>
-    ),
-    also: null,
-  };
+  return (
+    <Button
+      onClick={() => {
+        void onward();
+      }}
+      size="lg"
+      variant={known ? "default" : "outline"}
+    >
+      {known ? t`Continue` : t`Skip for now`}
+    </Button>
+  );
 };
 
 /** Where a staff list goes: dropped or chosen right here, with an example to copy. */
 const StaffListDrop = ({
   onUpload,
   disabled,
+  inUse,
 }: {
   onUpload: (file: File) => Promise<void>;
   disabled: boolean;
+  /** Coming back with a staff list kept: a new one replaces it. */
+  inUse: boolean;
 }) => {
   const { t } = useLingui();
   return (
     <div {...stylex.props(styles.drop)}>
       <FileUpload
         accept={[".csv", ".tsv", ".txt", ".xlsx"]}
-        description={t`A CSV or Excel file, a row per person`}
+        description={
+          inUse
+            ? t`Your staff list is in. A new one replaces it.`
+            : t`A CSV or Excel file, a row per person`
+        }
         disabled={disabled}
         onUpload={onUpload}
       />
@@ -433,19 +294,45 @@ const StaffListDrop = ({
   );
 };
 
-/** Concepts only: the roster drawn, as dots (a) or as rows (b). */
-const Pictured = ({
-  concept,
-  roster,
+/**
+ * A sign-in, as a row pressed to connect it. The one in use is marked
+ * done; pressed again, it connects anew and replaces the list kept.
+ */
+const SignInRow = ({
+  suite,
+  done,
+  waiting,
+  onConnect,
 }: {
-  concept: CompanyConcept;
-  roster: Roster;
-}) =>
-  concept === "a" ? (
-    <CompanyDots roster={roster} />
-  ) : (
-    <CompanyRows roster={roster} />
+  suite: DirectorySuite;
+  done: boolean;
+  waiting: boolean;
+  onConnect: () => void;
+}) => {
+  const { t } = useLingui();
+  const signIn = suiteNames[suite];
+  let label = t`Continue with ${signIn}`;
+  if (waiting) {
+    label = t`Waiting for ${signIn}`;
+  } else if (done) {
+    label = t`${signIn} is connected`;
+  }
+  return (
+    <Item onClick={onConnect} variant="outline">
+      <ItemMedia>
+        <BrandIcon decorative logo={suiteLogos[suite]} name={signIn} size="sm" />
+      </ItemMedia>
+      <ItemContent>
+        <ItemTitle>{label}</ItemTitle>
+      </ItemContent>
+      {done ? (
+        <ItemActions>
+          <Icon icon={CircleCheckIcon} />
+        </ItemActions>
+      ) : null}
+    </Item>
   );
+};
 
 /** A directory sign-in that didn't connect, and why: one that came back refused (`useConnectionReturn`), or one the step couldn't start. */
 const useNotConnected = (suites: readonly DirectorySuite[]) => {
@@ -523,18 +410,13 @@ export const CompanyStep = (props: StepProps) => {
   const returned = returnedSchema.safeParse(search).success;
   const [reading, setReading] = useState<DirectorySuite | "list" | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  // Read on this visit, and from where.
-  const [fresh, setFresh] = useState<DirectorySuite | "list" | null>(null);
-  // Another list, once there is one: the upload shows again.
-  const [another, setAnother] = useState(false);
+  // Kept on this visit, and from where: the row it came through shows done while the step moves on.
+  const [kept, setKept] = useState<DirectorySuite | "list" | null>(null);
   const { roster, waiting } = props.data.view;
   const { directory, suites } = props.data;
   // A sign-in that didn't connect, back refused or not started: said over the step, with the way on.
   const [notConnected, setNotConnected] = useNotConnected(suites);
-  const people = roster?.people.length ?? 0;
-  const teams = roster?.teams.length ?? 0;
-  // Connected or shared, he has already said what he found (spokenFound): as the next step
-  // arrives, a word that it's in; skipped, that it can wait.
+  // As the next step arrives, Stephen says it's in (or that it can wait): no line for it here.
   useLeaving(companyLeftAs(roster !== null));
   const noTeam = t({
     message: "Other",
@@ -542,6 +424,7 @@ export const CompanyStep = (props: StepProps) => {
   });
   const peopleMost = onboardingPeopleMax;
   const teamsMost = onboardingTeamsMax;
+  // Kept in core, and on to the next step by itself: nothing in between to confirm.
   const keep = async (
     found: RosterInput,
     from: DirectorySuite | "list"
@@ -555,12 +438,12 @@ export const CompanyStep = (props: StepProps) => {
     if (saved === undefined) {
       return false;
     }
+    setKept(from);
     await refresh();
-    setFresh(from);
-    setAnother(false);
+    await props.onward();
     return true;
   };
-  // A staff list, read here and kept in core; a refusal says why on its row and below.
+  // A staff list, read here and kept in core; a refusal says why across the top.
   const upload = async (file: File): Promise<void> => {
     setReading("list");
     setProblem(null);
@@ -593,13 +476,17 @@ export const CompanyStep = (props: StepProps) => {
       setReading(null);
     }
   };
-  // Back from the sign-in: the directory is read once, made a roster and kept, and the address forgets the connection.
+  // Back from the sign-in: the directory is read once, made a roster and kept, and the step moves on;
+  // when it can't be, the step stays, says why, and the address forgets the connection.
   const readOnReturn = async () => {
     const suite = directory?.suite ?? null;
     setReading(suite ?? "list");
     setProblem(null);
     const found = await readDirectoryRoster(core, noTeam, roster);
     const signIn = suite === null ? "" : suiteNames[suite];
+    if (typeof found !== "string" && (await keep(found.roster, found.suite))) {
+      return;
+    }
     if (found === "large") {
       setProblem(
         t`There are more people in ${signIn} than I can take: up to ${peopleMost} people in up to ${teamsMost} teams. A staff list of those taking part works.`
@@ -614,8 +501,6 @@ export const CompanyStep = (props: StepProps) => {
       setProblem(
         t`I could not read ${signIn} just now. Try again in a moment, or use a staff list.`
       );
-    } else {
-      await keep(found.roster, found.suite);
     }
     setReading(null);
     void navigate({ to: "/setup", search: { step: "company" }, replace: true });
@@ -627,93 +512,51 @@ export const CompanyStep = (props: StepProps) => {
       void readOnReturn();
     }
   });
-  const fromDirectory = directoryShown(fresh, directory);
-  // Without a roster the sign-ins lead and the drop zone stands right under them; with one, only when another list is asked for.
-  const signIns = roster === null && suites.length > 0;
-  const listShown = roster === null || another;
-  // Concepts only: `?concept=a|b` draws the roster, once there is one and no other list is asked for.
-  const concept = useCompanyConcept();
-  const pictured = concept !== null && roster !== null && !listShown;
-  // Connected or shared: confirmed right here, in the row where it happened.
-  const confirmShown = roster !== null && !listShown && !pictured;
-  const { title, body, spoken } = useWords({
-    another,
-    pictured,
-    roster,
-    fromDirectory,
-    suites,
-    people,
-    teams,
-  });
-  const { end, also } = useCompanyWays({
-    another,
-    fromDirectory,
-    onAnother: () => {
-      setAnother(true);
-    },
-    onward: props.onward,
-    roster: roster !== null,
-  });
+  // The sign-in in use: kept on this visit, or, coming back, the one connected; none for a staff list.
+  const inUse = directoryShown(kept, roster === null ? null : directory);
+  const listInUse = roster !== null && inUse === null;
+  const { title, body, spoken } = useWords(suites);
   return (
-    <CalmStep also={also} body={body} end={end} spoken={spoken} title={title}>
-      {pictured ? <Pictured concept={concept} roster={roster} /> : null}
-      {listShown || confirmShown || waiting > 0 ? (
-        <div {...stylex.props(styles.stack)}>
-          {confirmShown && roster !== null ? (
-            <ConfirmRow fromDirectory={fromDirectory} roster={roster} />
-          ) : null}
-          {signIns ? (
-            <>
-              <ItemGroup aria-label={t`Your sign-in`}>
-                {suites.map((suite) => {
-                  const signIn = suiteNames[suite];
-                  return (
-                    <Item
-                      key={suite}
-                      onClick={() => {
-                        if (reading === null) {
-                          void connect(suite);
-                        }
-                      }}
-                      variant="outline"
-                    >
-                      <ItemMedia>
-                        <BrandIcon
-                          decorative
-                          logo={suiteLogos[suite]}
-                          name={signIn}
-                          size="sm"
-                        />
-                      </ItemMedia>
-                      <ItemContent>
-                        <ItemTitle>
-                          {reading === suite
-                            ? t`Waiting for ${signIn}`
-                            : t`Continue with ${signIn}`}
-                        </ItemTitle>
-                      </ItemContent>
-                    </Item>
-                  );
-                })}
-              </ItemGroup>
-              <div {...stylex.props(styles.or)}>
-                <Separator decorative style={styles.orLine} />
-                <Text color="muted" size="sm">
-                  {t`Or use a staff list`}
-                </Text>
-                <Separator decorative style={styles.orLine} />
-              </div>
-            </>
-          ) : null}
-          {listShown ? (
-            <StaffListDrop
-              disabled={reading !== null && reading !== "list"}
-              onUpload={upload}
-            />
-          ) : null}
-          <WaitingNote waiting={waiting} />
-        </div>
-      ) : null}
+    <CalmStep
+      body={body}
+      end={<CompanyWay known={roster !== null} onward={props.onward} />}
+      spoken={spoken}
+      title={title}
+    >
+      <div {...stylex.props(styles.stack)}>
+        {suites.length > 0 ? (
+          <>
+            <ItemGroup aria-label={t`Your sign-in`}>
+              {suites.map((suite) => (
+                <SignInRow
+                  done={inUse === suite}
+                  key={suite}
+                  onConnect={() => {
+                    if (reading === null) {
+                      void connect(suite);
+                    }
+                  }}
+                  suite={suite}
+                  waiting={reading === suite}
+                />
+              ))}
+            </ItemGroup>
+            <div {...stylex.props(styles.or)}>
+              <Separator decorative style={styles.orLine} />
+              <Text color="muted" size="sm">
+                {t`Or use a staff list`}
+              </Text>
+              <Separator decorative style={styles.orLine} />
+            </div>
+          </>
+        ) : null}
+        <StaffListDrop
+          disabled={reading !== null && reading !== "list"}
+          inUse={listInUse}
+          onUpload={upload}
+        />
+        <WaitingNote waiting={waiting} />
+      </div>
       <CompanyError
         connect={connect}
         notConnected={notConnected}
