@@ -48,7 +48,7 @@ test("the admin goes through steps and back, with his voice on and off", async (
       asked.some(
         (line) =>
           line.text ===
-          `${sourcesHeading} Procedures, handbooks, how-tos. Connect where they live, and I’ll only read what you share with me.`
+          `${sourcesHeading} The files, pages and folders your team works from. Connect the tools they’re in, and I’ll only read what you share with me.`
       )
     )
     .toBe(true);
