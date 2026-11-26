@@ -401,6 +401,43 @@ describe("connecting a Composio toolkit with a key", () => {
     });
   });
 
+  it("says why a key connection was refused: Composio refusing its auth config or account, or an account for a toolkit only Unicode's case rules make the same", async () => {
+    const admin = someone("admin");
+    const ends = [];
+    const failing = [
+      ["POST /auth_configs", "auth_config:http_403"],
+      ["POST /connected_accounts", "account:http_403"],
+    ] as const;
+    for (const [prefix, why] of failing) {
+      composio.state.failingFor = {
+        prefix,
+        times: 1,
+        status: Number(why.slice(-3)),
+      };
+      // oxlint-disable-next-line no-await-in-loop -- one connect at a time
+      ends.push(await outcome(connectWithKey(admin)));
+    }
+    // `pipedes\u212A` lowers to `pipedesk` by Unicode's rules alone.
+    composio.state.slugCase = "kelvin";
+    ends.push(await outcome(connectWithKey(admin)));
+    const recorded = await events();
+    expect({
+      ends,
+      why: recorded
+        .filter(({ action }) => action === "connection.connect")
+        .map(({ detail }) => detail.why),
+      held: heldAtComposio(),
+    }).toStrictEqual({
+      ends: [
+        "connection.provider_refused",
+        "connection.provider_refused",
+        "connection.provider_refused",
+      ],
+      why: ["auth_config:http_403", "account:http_403", "mismatch:toolkit"],
+      held: nothingHeld,
+    });
+  });
+
   it("keeps one shared connection per toolkit: of two connects at once, one is stored and the other leaves nothing at Composio", async () => {
     const admin = someone("admin");
     // Both get past everything before making their server, then go on.

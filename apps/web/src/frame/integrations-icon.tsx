@@ -3,13 +3,11 @@ import type { ComponentProps } from "react";
 /**
  * Integrations: three apps, linked in a flow. Drawn on Lucide's 24-unit
  * grid with its 2px round stroke, so it sits with the sidebar's other
- * icons; it moves as they do when pointed at (`links` in icon-moves.css).
- * From the prototype's components/integrations-icon.tsx.
+ * icons. From the prototype's components/integrations-icon.tsx.
  */
 export const IntegrationsIcon = (props: ComponentProps<"svg">) => (
   <svg
     aria-hidden="true"
-    data-moves="links"
     fill="none"
     height="24"
     stroke="currentColor"

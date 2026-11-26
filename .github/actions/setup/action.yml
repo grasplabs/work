@@ -29,13 +29,14 @@
 # would have them all pack the same 2 GB at once, for one to win.
 #
 # Then oxc.wasm, which the compiler builds in (.github/actions/oxc-wasm),
-# with no token: every workflow that sets up can build.
+# with no token: every workflow that sets up can build. Restored from its
+# own cache by its pin, which the same jobs save.
 name: Set up
-description: Install Vite+ and Node.js, restore or install node_modules, and download oxc.wasm
+description: Install Vite+ and Node.js, restore or install node_modules, and restore or download oxc.wasm
 
 inputs:
   save:
-    description: "Save node_modules and pnpm's store when their cache missed: true or false"
+    description: "Save node_modules and pnpm's store, and oxc.wasm, when their cache missed: true or false"
     default: "false"
   store:
     description: "Restore pnpm's store even when node_modules hit, for tests that install offline from it: true or false"
@@ -138,3 +139,5 @@ runs:
         key: ${{ steps.keys.outputs.modules }}
     - if: inputs.oxc-wasm == 'true'
       uses: ./.github/actions/oxc-wasm
+      with:
+        save: ${{ inputs.save }}

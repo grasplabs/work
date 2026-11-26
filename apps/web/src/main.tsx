@@ -1,5 +1,4 @@
 import "./styles.css";
-import { CSPProvider } from "@base-ui/react/csp-provider";
 import { Button } from "@grasp-os/ui/components/button";
 import { Text } from "@grasp-os/ui/components/text";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
@@ -131,20 +130,16 @@ const start = async (): Promise<void> => {
     },
   }).render(
     <StrictMode>
-      {/* Base UI renders no <style> of its own: the kit's styles.css
-          carries the rule it held. */}
-      <CSPProvider disableStyleElements>
-        {/* Lingui draws nothing until a language is active. */}
-        {worded ? (
-          <I18nProvider i18n={i18n}>
-            <UiWords>
-              <Routes />
-            </UiWords>
-          </I18nProvider>
-        ) : (
-          <NoWords />
-        )}
-      </CSPProvider>
+      {/* Lingui draws nothing until a language is active. */}
+      {worded ? (
+        <I18nProvider i18n={i18n}>
+          <UiWords>
+            <Routes />
+          </UiWords>
+        </I18nProvider>
+      ) : (
+        <NoWords />
+      )}
     </StrictMode>
   );
 };

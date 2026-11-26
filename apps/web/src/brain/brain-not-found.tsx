@@ -12,8 +12,8 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 
 // A note or a part of the brain that isn't there, as the reference's
-// frame says it (#2503's NotFoundState in `frame/page-states.tsx`, which
-// is still the old kit's here): the page's own empty state, the Brain's
+// frame says it (#2503's NotFoundState in `frame/page-states.tsx`): the
+// page's own empty state, the Brain's
 // mark, what wasn't found, and the way on to Chat.
 
 export const BrainNotFound = ({ title }: { title: string }) => {

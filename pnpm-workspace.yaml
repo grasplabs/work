@@ -46,10 +46,17 @@ catalog:
   typedoc-plugin-markdown: 4.14.1
   mdast-util-from-markdown: 2.1.0
   # Damsko's Markdown (packages/ui): tables, task lists and the rest of
-  # GitHub's flavour, on the parser above, and remend, which makes the end
-  # of an answer still being written whole, at the versions Damsko pins.
+  # GitHub's flavour, on the parser above; maths, read by its micromark
+  # and mdast extensions and drawn by KaTeX; Mermaid, which draws a
+  # diagram fence; and remend, which makes the end of an answer still
+  # being written whole, at the versions Damsko pins. KaTeX and Mermaid
+  # load only with an answer that has a formula or a diagram.
+  katex: 0.18.10
   mdast-util-gfm: 3.1.0
+  mdast-util-math: 3.0.0
+  mermaid: 12.2.0
   micromark-extension-gfm: 3.0.0
+  micromark-extension-math: 3.1.0
   remend: 1.5.0
   "@types/mdast": 4.0.4
   # Reads the built pages for the hashes of their inline code (apps/docs),
@@ -305,13 +312,9 @@ catalog:
   react-resizable-panels: 4.14.2
   # The kit's charts.
   recharts: 3.10.1
-  # An App's Code tab: its files and a draft's changes, virtualised and
-  # highlighted by the library's own highlighter (Highlights).
-  "@pierre/diffs": 1.6.2
-  # Damsko's code block (packages/ui): its highlighter, each language's
-  # grammar loaded when a block first shows it.
-  prismjs: 1.30.0
-  "@types/prismjs": 1.26.6
+  # Damsko's code block (packages/ui): its highlighter, on the page, each
+  # language's grammar loaded when a block first shows it.
+  "@pierre/highlights": 0.5.2
   remark-gfm: 4.0.1
   shadcn: 4.23.0
   tailwind-merge: 3.7.0
