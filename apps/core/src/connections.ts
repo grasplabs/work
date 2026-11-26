@@ -11,6 +11,7 @@ import type {
 import { actorOf } from "@grasp-os/shared/audit";
 import {
   addConnectorSchema,
+  blockConnectorToolSchema,
   catalogLogoPath,
   catalogSourceSchema,
   composioToolkitSchema,
@@ -21,6 +22,7 @@ import {
   connectionScopeSchema,
   connectorClientMetadataPath,
   connectorIdSchema,
+  connectorToolsRequestSchema,
   oauthProviderSchema,
   returnPathMaxLength,
 } from "@grasp-os/shared/connect";
@@ -37,6 +39,7 @@ import type {
   ConnectionPerson,
   ConnectionSummary,
   ConnectionsApi,
+  ConnectorToolView,
   ListedConnection,
   RevocationToDo,
   OAuthProvider,
@@ -823,6 +826,36 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
       person,
       origin: config.origin,
     });
+  }
+
+  /**
+   * A connector's tools for an admin, with their classes and the names
+   * blocked, as the signed-in person: connect checks the role.
+   */
+  async connectorTools(connector: unknown): Promise<ConnectorToolView[]> {
+    const person = await this.#person();
+    const parsed = connectorToolsRequestSchema
+      .omit({ person: true })
+      .safeParse({ connector });
+    if (!parsed.success) {
+      throw connectionErrors.create("connection.invalid");
+    }
+    return await this.#env.CONNECT.connectorTools({ ...parsed.data, person });
+  }
+
+  /**
+   * Blocks a connector's tool by its name, or lets it through again, as
+   * the signed-in person: connect checks the role and staff, and audits it.
+   */
+  async blockConnectorTool(request: unknown): Promise<void> {
+    const person = await this.#person();
+    const parsed = blockConnectorToolSchema
+      .omit({ person: true })
+      .safeParse(request);
+    if (!parsed.success) {
+      throw connectionErrors.create("connection.invalid");
+    }
+    await this.#env.CONNECT.blockConnectorTool({ ...parsed.data, person });
   }
 
   async disconnect(connectionId: string): Promise<{ revoked: boolean }> {

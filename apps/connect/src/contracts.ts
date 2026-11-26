@@ -41,8 +41,8 @@ import {
   connectorActionShape,
   connectorContractId,
   connectorContract as connectorServedContract,
-  currentTools,
   keptToolsNow,
+  offeredTools,
 } from "./mcp-connectors.ts";
 
 // Generated connector contracts (spec 12). Which one a connection serves
@@ -264,7 +264,7 @@ const describedTools = async (
   if (connection.serverKind === "connector") {
     const listed =
       searched === undefined
-        ? await currentTools(env, connection)
+        ? await offeredTools(env, connection)
         : await keptToolsNow(env, connection, searched);
     return listed.map(({ name, description, inputSchema, outputSchema }) => ({
       name,
@@ -295,8 +295,9 @@ const describedTools = async (
  * descriptions and schemas (`ConnectionTool`): a native connection's as
  * its connector's manifest in this release has them; a connector's, in
  * full for the `actions` named, as its server lists them now
- * (`currentTools`), else every one as a search reads it, as kept and at
- * once, a stale list read again after (`later`). None for any other
+ * (`offeredTools`), else every one as a search reads it, as kept and at
+ * once, a stale list read again after (`later`); never one an admin
+ * blocked on its connector. None for any other
  * connection, or one that is gone. Throws `connect.server_unavailable`
  * when a connector's list can't be read for the `actions` named.
  */

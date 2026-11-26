@@ -367,8 +367,15 @@ const signInHosts: Readonly<Record<OAuthProvider, string>> = {
   google: "accounts.google.com",
 };
 
-/** The sign-in host of `integration`, when it is a native provider's. */
+/**
+ * The sign-in host of `integration`: a native provider's, or the one the
+ * catalog names for a connector made from a URL, as any public host can
+ * draw a look-alike sign-in page.
+ */
 export const signInHostOf = (integration: Integration): string | undefined => {
+  if (integration.source === "connector") {
+    return integration.signInHost;
+  }
   if (integration.source !== "native") {
     return undefined;
   }

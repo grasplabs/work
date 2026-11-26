@@ -27,7 +27,10 @@ export const connectionEvent = (
     | "connection.tools.removed"
     | "connection.tools.read_tools"
     | "connection.sync_places"
-    | "connector.added",
+    | "connector.added"
+    | "connector.tools.changed"
+    | "connector.tool.blocked"
+    | "connector.tool.unblocked",
   connectionId: string | undefined,
   detail: Record<string, AuditDetailValue>
 ): AuditEntry => ({
@@ -108,7 +111,9 @@ export const auditRefusal = async (
     | "connection.disconnect"
     | "connection.tools"
     | "connection.sync_places"
-    | "connector.added",
+    | "connector.added"
+    | "connector.tool.blocked"
+    | "connector.tool.unblocked",
   detail: Record<string, AuditDetailValue>,
   connectionId?: string
 ): Promise<void> => {
@@ -123,17 +128,18 @@ export const auditRefusal = async (
 
 /**
  * Grasp staff, in a staff window, can't connect anything: accounts belong
- * to the client's people and admins.
+ * to the client's people and admins. Recorded as a refused `action`.
  */
 export const refuseStaff = async (
   env: Env,
   person: ConnectionPerson,
-  detail: Record<string, AuditDetailValue>
+  detail: Record<string, AuditDetailValue>,
+  action: Parameters<typeof auditRefusal>[2] = "connection.connect"
 ): Promise<void> => {
   if (!person.staff) {
     return;
   }
-  await auditRefusal(env, person, "connection.connect", {
+  await auditRefusal(env, person, action, {
     ...detail,
     outcome: "refused",
     reason: "connection.staff_not_allowed",
