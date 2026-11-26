@@ -385,17 +385,20 @@ describe("what needs the admin", () => {
 });
 
 describe("the AI step", () => {
-  it("asks for a key until a model is ready for calls, and goes on once one is or core can't say", () => {
+  it("asks for a key until a model is ready for calls, with Continue to send it, and goes on once one is or core can't say", () => {
     const asked = said("ai", { ai: aiOf({ ready: false }) });
     const ready = said("ai", {});
     const unknown = said("ai", { ai: null });
     expect({
       // Asked for a key: the step says so (the providers stand on the page, with no card titled for it).
       asked: [asked.includes("Paste a key"), asked.includes("Continue")],
-      ready: [ready.includes("Your own key works"), ready.includes("Continue")],
+      ready: [
+        ready.includes("Your own key is connected"),
+        ready.includes("Continue"),
+      ],
       unknown: [unknown.includes("Paste a key"), unknown.includes("Continue")],
     }).toStrictEqual({
-      asked: [true, false],
+      asked: [true, true],
       ready: [true, true],
       unknown: [false, true],
     });
@@ -418,13 +421,10 @@ describe("the AI step", () => {
         shown.includes("Use your own API key"),
         shown.includes("Continue"),
       ],
-      notOffered: [
-        notOffered.includes("Use our own system"),
-        notOffered.includes("Continue"),
-      ],
+      notOffered: notOffered.includes("Use our own system"),
     }).toStrictEqual({
       offered: [true, true, true],
-      notOffered: [false, false],
+      notOffered: false,
     });
   });
 });
