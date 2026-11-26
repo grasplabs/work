@@ -15,6 +15,7 @@ import {
   changeToolkitTools,
   reconcileUnsyncedTools,
 } from "../src/composio-connections.ts";
+import type Connect from "../src/index.ts";
 import { fakeComposioApi } from "./composio-api.ts";
 import { auditEvents, clientOrigin, someone } from "./connect.ts";
 
@@ -191,16 +192,30 @@ export const connectWithKey = async (
   return connectionId;
 };
 
-/** Composio sending `person`'s browser back to core with the flow's state. */
-export const back = async (person: ConnectionPerson, state: string) =>
-  await exports.default.finishConnection({ person, state });
+/**
+ * Composio sending `person`'s browser back to `callback`, and core passing
+ * on what its query holds to `connect`, as its callback does.
+ */
+export const back = async (
+  person: ConnectionPerson,
+  callback: string,
+  connect: Pick<Connect, "finishConnection"> = exports.default
+) => {
+  const params = new URL(callback).searchParams;
+  return await connect.finishConnection({
+    person,
+    state: params.get("state") ?? "",
+    status: params.get("status") ?? undefined,
+    connectedAccountId: params.get("connected_account_id") ?? undefined,
+  });
+};
 
 /** Connects HubSpot end to end for the admin `person`. */
 export const connectHubSpot = async (
   person: ConnectionPerson
 ): Promise<string> => {
-  const { state } = composio.authorize(await start(person));
-  const { connectionId } = await back(person, state);
+  const { callback } = composio.authorize(await start(person));
+  const { connectionId } = await back(person, callback);
   return connectionId;
 };
 
@@ -241,6 +256,27 @@ export const afterMinutes = async (
     await run();
   } finally {
     clock.mockRestore();
+  }
+};
+
+/**
+ * What `run` ends with, where every wait on `scheduler.wait` passes at
+ * once and moves the clock on by as long: Composio is asked again as
+ * often as it would be over that time, without the time going by.
+ */
+export const asTimePasses = async <T>(run: () => Promise<T>): Promise<T> => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const waits = vi
+    .spyOn(scheduler, "wait")
+    .mockImplementation(async (ms: number) => {
+      vi.setSystemTime(Date.now() + ms);
+      await Promise.resolve();
+    });
+  try {
+    return await run();
+  } finally {
+    waits.mockRestore();
+    vi.useRealTimers();
   }
 };
 

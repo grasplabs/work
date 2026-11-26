@@ -354,6 +354,11 @@ export interface FakeAccount {
   callbackUrl: string;
   redirectUrl: string;
   status: "INITIATED" | "ACTIVE" | "FAILED";
+  /**
+   * How many more reads see it still `INITIATED` before its `status`: an
+   * account Composio is still completing after its redirect.
+   */
+  pendingReads: number;
   /** The scheme and values it was made with, when made with a key. */
   state?: { authScheme: unknown; val: unknown };
 }
@@ -534,6 +539,7 @@ export const fakeComposioApi = (
         callbackUrl: String(body.callback_url),
         redirectUrl,
         status: "INITIATED",
+        pendingReads: 0,
       });
       return Response.json(
         {
@@ -593,6 +599,7 @@ export const fakeComposioApi = (
         callbackUrl: "",
         redirectUrl: "",
         status: "ACTIVE",
+        pendingReads: 0,
         state: { authScheme, val },
       });
       return Response.json(
@@ -654,14 +661,17 @@ export const fakeComposioApi = (
   const accountAt = (route: string): Response => {
     const id = route.slice("/connected_accounts/".length);
     const account = state.holds.accounts.get(id);
-    return account === undefined
-      ? notFound()
-      : Response.json({
-          id,
-          status: account.status,
-          toolkit: { slug: account.toolkit },
-          auth_config: { id: account.authConfigId },
-        });
+    if (account === undefined) {
+      return notFound();
+    }
+    const completing = account.pendingReads > 0;
+    account.pendingReads = Math.max(account.pendingReads - 1, 0);
+    return Response.json({
+      id,
+      status: completing ? "INITIATED" : account.status,
+      toolkit: { slug: account.toolkit },
+      auth_config: { id: account.authConfigId },
+    });
   };
 
   /**
@@ -852,23 +862,40 @@ export const fakeComposioApi = (
   return {
     state,
     /**
-     * The admin finishing at the auth link `url` as `status` says, as
-     * Composio would: the flow's `state`, from the callback URL it sends
-     * the browser back to.
+     * The admin finishing at the auth link `url`, as Composio would: the
+     * account ends `status`, after `pendingReads` reads that still see it
+     * completing, and Composio sends the browser to `callback`, the
+     * callback it was given with its own `status` (`success`, or `failed`
+     * for an account that failed, unless `says` says otherwise) and
+     * `connected_account_id` appended. `state` is the flow's, from it.
      */
     authorize: (
       url: string,
-      status: FakeAccount["status"] = "ACTIVE"
-    ): { state: string; account: FakeAccount } => {
-      const account = [...state.holds.accounts.values()].find(
-        ({ redirectUrl }) => redirectUrl === url
+      {
+        status = "ACTIVE",
+        pendingReads = 0,
+        says = status === "FAILED" ? "failed" : "success",
+      }: {
+        status?: FakeAccount["status"];
+        pendingReads?: number;
+        says?: string;
+      } = {}
+    ): { state: string; callback: string; account: FakeAccount } => {
+      const found = [...state.holds.accounts].find(
+        ([, { redirectUrl }]) => redirectUrl === url
       );
-      if (account === undefined) {
+      if (found === undefined) {
         throw new Error(`No account at ${url}`);
       }
+      const [accountId, account] = found;
       account.status = status;
+      account.pendingReads = pendingReads;
+      const callback = new URL(account.callbackUrl);
+      callback.searchParams.append("status", says);
+      callback.searchParams.append("connected_account_id", accountId);
       return {
-        state: new URL(account.callbackUrl).searchParams.get("state") ?? "",
+        state: callback.searchParams.get("state") ?? "",
+        callback: callback.href,
         account,
       };
     },
