@@ -548,6 +548,16 @@ describe("a Composio connection's generated contract", () => {
   });
 });
 
+describe("a Composio toolkit's tools, as the chat's tool search reads them", () => {
+  it("are none: core searches them by name alone", async () => {
+    const toolkit = await hubspot();
+
+    await expect(
+      exports.default.connectionTools({ connectionId: toolkit })
+    ).resolves.toStrictEqual([]);
+  });
+});
+
 const shapeOf = async (connectionId: string, action: string) =>
   await exports.default.actionShape({ connectionId, action });
 

@@ -65,16 +65,15 @@ import { resealBatchSize, vaultFor } from "./vault.ts";
 //   private, loopback or metadata addresses, whatever the name resolves
 //   to (`global_fetch_strictly_public` isn't it: that only sends requests
 //   to the Worker's own zone through the front door). On-prem it is
-//   workerd's outbound network for connect, which must allow only
-//   `public` (`allow = ["public"]`); without that, nothing here stops a
-//   name that leads inside. Connect has one such network today, so any
-//   CIDR an install opens for `AI_PRIVATE_HOSTS` is reachable by HTTP
-//   connections too, until they get a public-only network of their own
-//   (GRA-1481). A DNS lookup of our own can't stand in
-//   for it: the name can be rebound between the lookup and the fetch, and
-//   on-prem, split-horizon DNS answers the outside resolver one address
-//   and the install's own resolver another, so a public answer means
-//   nothing. The host is looked up only when an admin approves the
+//   connect's own outbound network (its `globalOutbound`), which allows
+//   only `public`; without that, nothing here stops a name that leads
+//   inside. The CIDRs an install opens for `AI_PRIVATE_HOSTS` are on the
+//   AI endpoints' network alone, never on this one
+//   (scripts/workerd-connect-networks.ts). A DNS lookup of our own can't
+//   stand in for it: the name can be rebound between the lookup and the
+//   fetch, and on-prem, split-horizon DNS answers the outside resolver
+//   one address and the install's own resolver another, so a public
+//   answer means nothing. The host is looked up only when an admin approves the
 //   connection (`resolvedPublic`), as feedback: a name that resolves to
 //   nothing or to a private address is refused then, and a resolver that
 //   can't answer is a retryable `connect.server_unavailable`.

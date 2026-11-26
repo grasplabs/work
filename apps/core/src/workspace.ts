@@ -111,7 +111,12 @@ import type {
 } from "./agent-scope.ts";
 import { heldIn } from "./agent-skills.ts";
 import { builtNoteText, resultRunId, withheldResult } from "./agent.ts";
-import type { QuestionBuilt, TurnContext, TurnResult } from "./agent.ts";
+import type {
+  CodeRunEnd,
+  QuestionBuilt,
+  TurnContext,
+  TurnResult,
+} from "./agent.ts";
 import { turnAgent } from "./agents.ts";
 import { drainObjectOutbox, uuidFromHash } from "./audit-outbox.ts";
 import { accountNameOf, memberRole } from "./auth/identity.ts";
@@ -206,6 +211,7 @@ import type { InstructionContext } from "./instruction-files.ts";
 import { chatTurnPurpose } from "./model-spend.ts";
 import { inputTokens, modelSettings, models } from "./models.ts";
 import type { WorkContext } from "./restricted.ts";
+import { outsideReadOf } from "./ungranted-reads.ts";
 import { retireUnseen } from "./unseen-memories.ts";
 
 export type Chat = typeof chats.$inferSelect;
@@ -3421,12 +3427,29 @@ export class Workspace extends DurableObject<Env> {
     chatId: ChatId,
     runId: string,
     status: CodeRunStatus
-  ): Promise<CodeRunStatus> {
-    return await this.#endCodeRun(
+  ): Promise<CodeRunEnd> {
+    const ended = await this.#endCodeRun(
       this.#scopeOf(this.#chat(chatId)),
       runId,
       status
     );
+    // Read once the run is closed, when none of its calls can record a
+    // read any more: every read it hands on, as each call recorded it
+    // before handing it to the run (`recordSources`). A revoked run hands
+    // nothing on.
+    if (ended === "revoked") {
+      return { status: ended, readFrom: [] };
+    }
+    const readFrom = this.#db
+      .select({ sourceId: chatRunSources.sourceId })
+      .from(chatRunSources)
+      .where(
+        and(eq(chatRunSources.chatId, chatId), eq(chatRunSources.runId, runId))
+      )
+      .orderBy(chatRunSources.sourceId)
+      .all()
+      .flatMap(({ sourceId }) => outsideReadOf(sourceId) ?? []);
+    return { status: ended, readFrom };
   }
 
   /**

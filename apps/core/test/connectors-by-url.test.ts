@@ -321,8 +321,8 @@ describe("a connector made from a URL", slow, () => {
     const person = await signedInApi(idp, "user");
     const connectionId = await connect(person, id);
     const mail = await mailConnection([], mailWithSearch);
-    // Its list due again, and its access gone, as connect leaves it once
-    // its server's sign-in fails.
+    // Its list never kept (its read at connecting failed), and its access
+    // gone, as connect leaves it once its server's sign-in fails.
     const db = connectDb();
     await db.batch([
       db
@@ -332,8 +332,11 @@ describe("a connector made from a URL", slow, () => {
         .bind(person.userId, mail.id),
       db
         .prepare(
-          "UPDATE connections SET tool_list_fresh_until = NULL WHERE id = ?"
+          "UPDATE connections SET tool_list_read_at = NULL, tool_list_fresh_until = NULL WHERE id = ?"
         )
+        .bind(connectionId),
+      db
+        .prepare("DELETE FROM connection_tools WHERE connection_id = ?")
         .bind(connectionId),
       db
         .prepare("DELETE FROM connection_tokens WHERE connection_id = ?")
@@ -363,5 +366,42 @@ describe("a connector made from a URL", slow, () => {
     expect(asked).toBe(
       "Returned:\nThis connection isn't active: it needs to be connected again."
     );
+  });
+
+  it("whose kept list is due again while its sign-in fails is offered as kept at once, and says why when asked for", async () => {
+    const id = await linear();
+    const person = await signedInApi(idp, "user");
+    const connectionId = await connect(person, id);
+    const db = connectDb();
+    await db.batch([
+      db
+        .prepare(
+          "UPDATE connections SET tool_list_fresh_until = NULL WHERE id = ?"
+        )
+        .bind(connectionId),
+      db
+        .prepare("DELETE FROM connection_tokens WHERE connection_id = ?")
+        .bind(connectionId),
+    ]);
+    const chats = await personalChatsOf(
+      person.userId,
+      codeStep(
+        `export default async (self, env) => { const all = await env.connections.available(); return String(all.find((each) => each.connectionId === ${JSON.stringify(connectionId)})?.actions.includes("list_issues")); };`
+      ),
+      codeStep(
+        `export default async (self, env) => await env.connections.request({ connectionId: ${JSON.stringify(connectionId)}, actions: ["list_issues"], binding: "LINEAR", reason: "To find your open issues." }).then(() => "asked", (error) => error.message);`
+      ),
+      says("It is down.")
+    );
+    const chat = await chats.newChat();
+    await chat.ask("Can you read my Linear issues?");
+
+    const steps = await codeResults(chats.stub, chat.chat.id);
+    const [offered, asked] = steps.map(({ text }) => text);
+    expect({ offered, asked }).toStrictEqual({
+      offered: "Returned:\ntrue",
+      asked:
+        "Returned:\nThis connection isn't active: it needs to be connected again.",
+    });
   });
 });

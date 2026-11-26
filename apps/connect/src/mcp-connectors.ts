@@ -1,7 +1,14 @@
 import {
+  classByRules,
+  isJsonArray,
+  topNames,
+} from "@grasp-os/runtime/connector";
+import type { ToolHints } from "@grasp-os/runtime/connector";
+import {
   addConnectorSchema,
   connectErrors,
   connectionErrors,
+  connectionOwnersSchema,
 } from "@grasp-os/shared/connect";
 import type {
   ActionShape,
@@ -12,11 +19,13 @@ import type {
 import { connectionIdSchema } from "@grasp-os/shared/ids";
 import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { recordEvents } from "./audit.ts";
+import { companyAddressOf, companyRoute, outbound } from "./company-network.ts";
 import {
   auditRefusal,
   connectionEvent,
@@ -37,15 +46,8 @@ import {
   servedSchema,
   textAnswer,
 } from "./served-schemas.ts";
-import { credentialFor, pausedWait } from "./tokens.ts";
-import {
-  classByRules,
-  classesOf,
-  isJsonArray,
-  storedSchema,
-  topNames,
-} from "./tool-rules.ts";
-import type { ToolHints } from "./tool-rules.ts";
+import { connectorCredentialFor, pausedWait } from "./tokens.ts";
+import { classesOf, keptToolClasses, storedSchema } from "./tool-rules.ts";
 import { vaultFor } from "./vault.ts";
 
 // Connectors made from an MCP server's URL (GRA-1375), and connections to
@@ -81,6 +83,15 @@ const maxListTtlMs = 60 * 60 * 1000;
 
 /** How long a tool list is fresh when the server doesn't say. */
 const defaultListTtlMs = 5 * 60 * 1000;
+
+/**
+ * Least time between two reads of one connection's tool list after an
+ * answer (`refreshLater`): longer than a read may take, so asks at once
+ * start one read, and a server that failed isn't asked again at every ask.
+ * A list its server keeps fresh for less is read again after this, for
+ * offers and search; calls and requests read it live once it is stale.
+ */
+const laterReadGapMs = 5 * 60 * 1000;
 
 /**
  * Most tools one statement keeps: D1 binds at most 100 parameters a
@@ -130,14 +141,23 @@ export const addConnector = async (
   env: Env,
   request: unknown
 ): Promise<{ id: string }> => {
-  const { person, name, url, origin, auth } = connectionErrors.parse(
-    "connection.invalid",
-    addConnectorSchema,
-    request
-  );
-  // An https URL of its origin and path alone (`addConnectorSchema`).
+  const { person, name, url, companyNetwork, origin, auth } =
+    connectionErrors.parse("connection.invalid", addConnectorSchema, request);
+  // A URL of its origin and path alone (`addConnectorSchema`), https
+  // but inside the company's network.
   const server = new URL(url);
-  const detail = { host: server.host, auth: auth.kind };
+  if (companyNetwork !== true && server.protocol !== "https:") {
+    throw connectionErrors.create("connection.invalid");
+  }
+  // A server inside the company's own network is reached through the
+  // company network at its URL's origin alone (company-network.ts).
+  const address =
+    companyNetwork === true ? companyAddressOf(server.origin) : undefined;
+  const detail = {
+    host: server.host,
+    auth: auth.kind,
+    ...(address !== undefined && { companyNetwork: address }),
+  };
   await refuseStaff(env, person, detail);
   if (!isAdmin(person.role)) {
     await auditRefusal(env, person, "connector.added", {
@@ -147,7 +167,16 @@ export const addConnector = async (
     });
     throw roleErrors.create("role.forbidden");
   }
-  if (!(await isPublicName(server))) {
+  if (companyNetwork === true) {
+    // Its sign-in, discovered and registered at the server, would be read
+    // from the public internet: a key in a header only, for now.
+    if (address === undefined || auth.kind !== "header") {
+      throw connectionErrors.create("connection.invalid");
+    }
+    if (companyRoute(env) === undefined) {
+      throw connectionErrors.create("connection.company_network_unavailable");
+    }
+  } else if (!(await isPublicName(server))) {
     throw connectionErrors.create("connection.server_refused");
   }
   const vault = await vaultFor(env);
@@ -159,7 +188,13 @@ export const addConnector = async (
   const common = { id, name, createdBy: person.userId, createdAt: now };
   let row: typeof connectors.$inferInsert;
   if (auth.kind === "header") {
-    row = { ...common, url: server.href, auth: "header", header: auth.header };
+    row = {
+      ...common,
+      url: server.href,
+      auth: "header",
+      header: auth.header,
+      companyNetwork: address !== undefined,
+    };
   } else {
     const signIn = await discoverSignIn(server);
     const client = await clientFor(signIn, new URL(origin).origin, auth.client);
@@ -316,14 +351,22 @@ const serverFor = async (
   allows: (method: string, name: string | null) => boolean
 ) => {
   const row = await drizzle(env.DB)
-    .select({ url: connectors.url })
+    .select({ url: connectors.url, companyNetwork: connectors.companyNetwork })
     .from(connectors)
     .where(eq(connectors.id, connection.server))
     .get();
   if (row === undefined) {
     throw connectErrors.create("connect.server_unavailable");
   }
-  const credential = await credentialFor(env, connection.id);
+  const { credential, companyNetwork } = await connectorCredentialFor(
+    env,
+    connection.id
+  );
+  // A server inside the network is never sent to over the internet.
+  if (row.companyNetwork === true && companyNetwork === undefined) {
+    throw connectErrors.create("connect.server_unavailable");
+  }
+  const send = outbound(env, companyNetwork);
   return modernMcpServer(row.url, async (request) => {
     if (
       request.method !== "POST" ||
@@ -337,7 +380,7 @@ const serverFor = async (
     }
     const headers = new Headers(request.headers);
     headers.set(credential.header, credential.value);
-    const response = await fetch(
+    const response = await send(
       new Request(request, { headers, redirect: "manual" })
     );
     // A server that asks every caller to wait pauses the connection, as a
@@ -464,6 +507,176 @@ export const currentTools = async (
     read,
   ]);
   return tools;
+};
+
+/**
+ * Reads and keeps `connection`'s tool list as its server lists it now,
+ * if it can: a failure is logged, and the list is read at the next need.
+ */
+const readToolList = async (
+  env: Env,
+  connection: Connection
+): Promise<void> => {
+  try {
+    await currentTools(env, connection);
+  } catch (error) {
+    log.warn("connections.tool_list_unread", {
+      connectionId: connection.id,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
+ * Reads `connection`'s tool list if no read after an answer started in
+ * the last `laterReadGapMs`: the read it marks started is the only one,
+ * however many asks see the list stale at once, and one that fails isn't
+ * tried again until the gap has passed.
+ */
+const readOnceLater = async (
+  env: Env,
+  connection: Connection,
+  now: number
+): Promise<void> => {
+  let started: { id: string }[];
+  try {
+    started = await drizzle(env.DB)
+      .update(connections)
+      .set({ toolListTriedAt: new Date(now) })
+      .where(
+        and(
+          eq(connections.id, connection.id),
+          eq(connections.status, "active"),
+          eq(connections.updatedAt, connection.updatedAt),
+          or(
+            isNull(connections.toolListFreshUntil),
+            lte(connections.toolListFreshUntil, new Date(now))
+          ),
+          or(
+            isNull(connections.toolListTriedAt),
+            lte(connections.toolListTriedAt, new Date(now - laterReadGapMs))
+          )
+        )
+      )
+      .returning({ id: connections.id });
+  } catch (error) {
+    log.warn("connections.tool_list_unread", {
+      connectionId: connection.id,
+      ...errorFields(error),
+    });
+    return;
+  }
+  if (started.length > 0) {
+    await readToolList(env, connection);
+  }
+};
+
+/**
+ * Reads an active `connection`'s tool list again after an answer
+ * (`later`), when it is stale or was never read, for the next ask to see:
+ * one read at a time, and none for a while after one (`readOnceLater`).
+ * Freshness stays as it was, so a list that can't be read is still read
+ * live where a call or a request needs it, and says why it can't be.
+ */
+const refreshLater = (
+  env: Env,
+  connection: Connection,
+  later: (work: Promise<unknown>) => void
+): void => {
+  const now = Date.now();
+  if (
+    connection.status === "active" &&
+    (connection.toolListFreshUntil?.getTime() ?? 0) <= now &&
+    (connection.toolListTriedAt?.getTime() ?? 0) <= now - laterReadGapMs
+  ) {
+    later(readOnceLater(env, connection, now));
+  }
+};
+
+/**
+ * `connection`'s tools as kept, answered at once, so no server holds up a
+ * search; a list stale or never read is read again after (`later`).
+ */
+export const keptToolsNow = async (
+  env: Env,
+  connection: Connection,
+  later: (work: Promise<unknown>) => void
+): Promise<ConnectorTool[]> => {
+  refreshLater(env, connection, later);
+  return await keptTools(env.DB, connection.id);
+};
+
+/**
+ * The tools each connection to a connector in `request` offers to ask
+ * for, by its ID: those of its list as kept that the rules class (tools
+ * Grasp never runs are left out), answered at once, so no server holds
+ * up what a chat is offered. A list gone stale, or never read (its read
+ * at connecting failed), is read again after the answer (`later`), for
+ * the next ask to see what its server lists now. Any other connection, an
+ * inactive one or an unknown ID is left out.
+ */
+export const offeredConnectorTools = async (
+  env: Env,
+  request: unknown,
+  later: (work: Promise<unknown>) => void
+): Promise<Record<string, string[]>> => {
+  const ids = connectErrors.parse(
+    "connect.invalid",
+    connectionOwnersSchema,
+    request
+  );
+  if (ids.length === 0) {
+    return {};
+  }
+  // By ID alone: D1 binds at most 100 to a statement, as many as `ids`.
+  const found = await drizzle(env.DB)
+    .select()
+    .from(connections)
+    .where(inArray(connections.id, ids));
+  const rows = found.filter(
+    ({ serverKind, status }) =>
+      serverKind === "connector" && status === "active"
+  );
+  const kept = await keptToolClasses(env.DB, rows);
+  for (const row of rows) {
+    refreshLater(env, row, later);
+  }
+  return Object.fromEntries(
+    rows.map((row) => [row.id, Object.keys(kept.get(row.id) ?? {})])
+  );
+};
+
+/**
+ * Reads and keeps the tool list of `connectionId` as it is connected, or
+ * connected again, when it is a connection to a connector: what it offers
+ * to ask for is then known before anyone calls it. A list that can't be
+ * read now is read again at the next ask. Awaited by the sign-in, so what
+ * the person just connected is offered at once.
+ */
+export const keepToolList = async (
+  env: Env,
+  connectionId: string
+): Promise<void> => {
+  let connection: Connection | undefined;
+  try {
+    connection = await drizzle(env.DB)
+      .select()
+      .from(connections)
+      .where(eq(connections.id, connectionId))
+      .get();
+  } catch (error) {
+    log.warn("connections.tool_list_unread", {
+      connectionId,
+      ...errorFields(error),
+    });
+    return;
+  }
+  if (
+    connection?.serverKind === "connector" &&
+    connection.status === "active"
+  ) {
+    await readToolList(env, connection);
+  }
 };
 
 /**

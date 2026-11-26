@@ -182,15 +182,15 @@ const throwAfterWrite = tool({
 });
 
 /** A write whose vendor answers it with text. */
-const deleteStock = tool({
-  description: "Deletes one product's stock",
+const zeroStock = tool({
+  description: "Clears one product's stock",
   readOnly: false,
   reach: "company",
-  routes: ["DELETE /v1/stock/{sku}"],
+  routes: ["POST /v1/stock/{sku}/clear"],
   args: { sku: v.string() },
   returns: v.object({ answer: v.string() }),
   handler: async ({ sku }, api) => ({
-    answer: String(await api.delete("/v1/stock/{sku}", { path: { sku } })),
+    answer: String(await api.post("/v1/stock/{sku}/clear", { path: { sku } })),
   }),
 });
 
@@ -219,7 +219,7 @@ const stock = defineConnector({
     "stock.stray": strayRead,
     "stock.writeDuringRead": writeDuringRead,
     "stock.findByWriting": findByWriting,
-    "stock.delete": deleteStock,
+    "stock.zero": zeroStock,
     "stock.throwAfterWrite": throwAfterWrite,
     "stock.readDuringWrite": readDuringWrite,
   },
@@ -308,6 +308,127 @@ describe("a connector's definition", () => {
         auth: keyAuth,
         tools: { "stock.get": each },
       });
+
+  const named = (name: string, each: ReturnType<typeof tool>) => () =>
+    defineConnector({
+      name: "stock",
+      title: "Stock",
+      hosts: [host],
+      auth: keyAuth,
+      tools: { [name]: each },
+    });
+
+  /** A tool that answers the stock, declared as `changes` say. */
+  const declared = (
+    changes: Pick<
+      Parameters<typeof tool>[0],
+      "readOnly" | "reach" | "routes" | "args"
+    >
+  ) =>
+    tool({
+      description: "Declared",
+      ...changes,
+      returns: Stock,
+      handler: async () => await Promise.resolve({ sku: "a", onHand: 1 }),
+    });
+
+  it("refuses a read that sends a write, names a change, or tells people it calls its own", () => {
+    const read = { readOnly: true, reach: "own" } as const;
+    expect(
+      named(
+        "stock.get",
+        declared({ ...read, routes: ["POST /v1/stock/query"], args: {} })
+      )
+    ).toThrow(
+      "stock.get: it is read-only, so it sends only GET and HEAD requests"
+    );
+    expect(
+      named(
+        "send_message",
+        declared({ ...read, routes: ["GET /v1/stock/send"], args: {} })
+      )
+    ).toThrow(
+      "send_message: it is read-only, but its name says it changes something"
+    );
+    expect(
+      named(
+        "get_x",
+        declared({
+          ...read,
+          routes: ["GET /v1/stock/report"],
+          args: { recipients: v.array(v.string()) },
+        })
+      )
+    ).toThrow("get_x: its input names people or places it reaches");
+  });
+
+  it("refuses what Grasp never runs, by its name or a DELETE, and a message declared as its author's own", () => {
+    const write = { readOnly: false, reach: "own" } as const;
+    const addressed = declared({
+      ...write,
+      routes: ["POST /v1/notices"],
+      args: { to: v.string() },
+    });
+    expect(named("stock.softDelete", setStock)).toThrow(
+      "stock.softDelete: Grasp never runs it"
+    );
+    expect(
+      named(
+        "stock.zero",
+        // A connector written without types still can't declare a DELETE.
+        // @ts-expect-error -- DELETE is no route method
+        declared({ ...write, routes: ["DELETE /v1/stock/{sku}"], args: {} })
+      )
+    ).toThrow("DELETE");
+    expect(
+      named(
+        "notice.send",
+        declared({
+          ...write,
+          routes: ["POST /v1/notices"],
+          args: { username: v.string() },
+        })
+      )
+    ).toThrow("notice.send: its input names people or places it reaches");
+    expect(named("notice.submitDraft", addressed)).toThrow(
+      "notice.submitDraft: its input names people or places it reaches"
+    );
+    expect(named("notice.createDraft", addressed)).not.toThrow();
+  });
+
+  it("refuses a draft that can send, and a message written where people talk, declared as its author's own", () => {
+    const write = { readOnly: false, reach: "own" } as const;
+    expect(
+      named(
+        "notice.createDraft",
+        declared({
+          ...write,
+          routes: ["POST /v1/notices"],
+          args: { to: v.string(), send: v.boolean() },
+        })
+      )
+    ).toThrow(
+      "notice.createDraft: its input names people or places it reaches"
+    );
+    expect(
+      named(
+        "chat.createMessage",
+        declared({
+          ...write,
+          routes: ["POST /v1/notices"],
+          args: { chatId: v.string(), content: v.string() },
+        })
+      )
+    ).toThrow(
+      "chat.createMessage: its input names people or places it reaches, or it writes where people talk"
+    );
+    expect(
+      named(
+        "mail.label",
+        declared({ ...write, routes: ["POST /v1/notices"], args: {} })
+      )
+    ).not.toThrow();
+  });
 
   it("refuses a route to a host it doesn't list, and a bare path among several hosts", () => {
     const elsewhere = tool({
@@ -436,7 +557,7 @@ describe("a connector's definition", () => {
     expect(() => withSyncs({ products: writing })).toThrow("only reads");
   });
 
-  it("makes the manifest connect decides by: its sign-in, routes, recovery and resource", () => {
+  it("makes the manifest connect decides by: its sign-in, routes, recovery and resource, and what each tool says it does", () => {
     expect({
       provider: stock.manifest.provider,
       signIn: stock.manifest.signIn,
@@ -445,6 +566,7 @@ describe("a connector's definition", () => {
       provider: "stock",
       signIn: { kind: "api_key", name: "Stock", header: "x-api-key" },
       update: {
+        description: "Sets the stock of one product",
         readOnly: false,
         reach: "company",
         recovery: "find",
@@ -629,13 +751,13 @@ describe("a call of a tool", () => {
   });
 
   it("answers a write's text where the vendor answers with text", async () => {
-    vendorAnswers(new Response("Deleted", { status: 200 }));
+    vendorAnswers(new Response("Zeroed", { status: 200 }));
     const result = await call(
-      "stock.delete",
+      "stock.zero",
       { sku: "a" },
       { [effectKeyMetaKey]: key }
     );
-    expect(result.structuredContent).toStrictEqual({ answer: "Deleted" });
+    expect(result.structuredContent).toStrictEqual({ answer: "Zeroed" });
   });
 
   it("leaves the outcome unknown once its write went out, whatever it throws after", async () => {

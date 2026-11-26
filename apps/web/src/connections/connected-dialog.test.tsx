@@ -95,6 +95,27 @@ describe("the page a connection ends on", () => {
     expect(dialog()?.textContent).toContain("Just for you");
   });
 
+  it("says where a connection reached through the company network goes", async () => {
+    await opened(
+      connection({
+        source: "connector",
+        provider: `mcp_${"0".repeat(32)}`,
+        scope: "shared",
+        ownerUserId: null,
+        accountName: null,
+        companyNetwork: "http://10.0.0.8:8080",
+      }),
+      { app: "Ledger" }
+    );
+    expect(dialog()?.textContent).toContain("For everyone");
+    expect(dialog()?.textContent).toContain(
+      "Reached through your company network"
+    );
+    expect(dialog()?.textContent).toContain(
+      "Grasp reaches it at http://10.0.0.8:8080, inside your network."
+    );
+  });
+
   it("says connected again after signing in again", async () => {
     await opened(connection(), { again: true });
     expect(dialog()?.textContent).toContain("Microsoft 365 is connected again");

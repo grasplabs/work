@@ -488,13 +488,25 @@ export const modelGrantClaimsSchema = z.strictObject({
    * request to the provider within its few seconds.
    */
   body: z.string().regex(/^[\da-f]{64}$/u),
+  /**
+   * The request's method where it isn't POST: reading (GET) or closing
+   * (DELETE) a live voice session, whose body is empty. Absent for every
+   * other request, which is a POST.
+   */
+  method: z.enum(["GET", "DELETE"]).optional(),
 });
 export type ModelGrantClaims = z.infer<typeof modelGrantClaimsSchema>;
 
 /** What core signs a model grant for. */
 export type ModelGrantScope = Pick<
   ModelGrantClaims,
-  "credential" | "provider" | "host" | "request" | "notAfter" | "body"
+  | "credential"
+  | "provider"
+  | "host"
+  | "request"
+  | "notAfter"
+  | "body"
+  | "method"
 >;
 
 /** Makes the grant for one provider request, valid to start for {@link capabilityTtlMs}. */
@@ -515,6 +527,7 @@ export const signModelGrant = async (
     host: scope.host.toLowerCase(),
     request: scope.request,
     body: scope.body,
+    ...(scope.method === undefined ? {} : { method: scope.method }),
   });
   const payload = toBase64Url(new TextEncoder().encode(JSON.stringify(claims)));
   const mac = await crypto.subtle.sign(

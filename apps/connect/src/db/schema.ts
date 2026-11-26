@@ -65,6 +65,13 @@ export const connections = sqliteTable(
     }).notNull(),
     server: text().notNull(),
     /**
+     * For a shared connection reached through the company network, the
+     * one address its requests go to, as an origin (company-network.ts).
+     * The address its key is sealed with is what routes them; this is
+     * what is shown of it.
+     */
+    companyNetwork: text("company_network"),
+    /**
      * For an OAuth connection: the organization's tenant at the provider,
      * the account in it (its stable subject, such as an Entra object ID)
      * and its name for people (an email address), and who connected it.
@@ -195,6 +202,13 @@ export const connections = sqliteTable(
      */
     toolListReadAt: timestamp("tool_list_read_at"),
     toolListFreshUntil: timestamp("tool_list_fresh_until"),
+    /**
+     * When connect last started reading that list after an answer, as it
+     * does for a stale one, whether the read worked or not: the next such
+     * read waits a while (mcp-connectors.ts `refreshLater`). Null until
+     * the first.
+     */
+    toolListTriedAt: timestamp("tool_list_tried_at"),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   },
@@ -255,6 +269,12 @@ export const connectors = sqliteTable(
     auth: text({ enum: ["oauth", "header"] }).notNull(),
     /** The header a key goes in, in lower case. */
     header: text(),
+    /**
+     * Whether its server sits inside the company's own network, reached
+     * through the company network at its URL's origin alone
+     * (company-network.ts).
+     */
+    companyNetwork: integer("company_network", { mode: "boolean" }),
     issuer: text(),
     authorizationEndpoint: text("authorization_endpoint"),
     tokenEndpoint: text("token_endpoint"),
