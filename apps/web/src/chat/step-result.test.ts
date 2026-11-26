@@ -47,6 +47,25 @@ describe("what a step gave back", () => {
     });
   });
 
+  it("reads a run that returned, logged and read nothing as nothing to show, and an object that only looks like one as text", () => {
+    expect({
+      nothing: stepResultOf("{}"),
+      status: stepResultOf('{"status":"done"}'),
+      logs: stepResultOf('{"logs":"x"}'),
+    }).toStrictEqual({
+      nothing: {
+        kind: "run",
+        readFrom: [],
+        logs: [],
+        returned: undefined,
+        error: undefined,
+        cut: false,
+      },
+      status: { kind: "text", text: '{"status":"done"}', cut: false },
+      logs: { kind: "text", text: '{"logs":"x"}', cut: false },
+    });
+  });
+
   it("keeps any other text as it is, a tool's own JSON too, and says when core cut it", () => {
     expect({
       lines: stepResultOf("1: export default"),

@@ -371,7 +371,8 @@ const useAnswerSteps = (): ((
           status,
           input: step.code.code,
           inputLanguage: "ts",
-          result: result?.text ?? logged,
+          result: result?.text,
+          ...(result === undefined && logged !== undefined ? { logged } : {}),
         };
       })
     );

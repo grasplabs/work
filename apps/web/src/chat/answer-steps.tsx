@@ -34,6 +34,7 @@ import {
 } from "@grasp-os/ui/lib/tokens.stylex";
 import { nothing } from "@grasp-os/ui/lib/utils";
 import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
+import { msg, plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useLayoutEffect, useRef, useState } from "react";
@@ -75,6 +76,8 @@ export interface AnswerStep {
   inputLanguage: "json" | "ts";
   /** What it gave back, as core gave it to the model (step-result.ts). */
   result: string | undefined;
+  /** What a code step has logged so far, while it runs. */
+  logged?: string;
 }
 
 /** A step's status as Trace says it: a done, retried or stopped step has none of its own. */
@@ -299,6 +302,12 @@ const StepItem = ({ children }: { children: ReactNode }) => (
   </span>
 );
 
+/** What a code step logged, as its label says. */
+const loggedLabel = msg({
+  message: "Logged",
+  context: "what a code step logged",
+});
+
 /** How many lines of a step's data show before Show more. */
 const stepDataLines = 12;
 
@@ -372,14 +381,29 @@ const StepResultParts = ({
       </>
     );
   }
-  const read = result.readFrom.map(
-    (id) => sourceNames.get(id)?.name ?? t`a connection`
+  const known = result.readFrom.flatMap(
+    (id) => sourceNames.get(id)?.name ?? []
   );
-  const sources = formatList([...new Set(read)]);
+  const unknown = result.readFrom.length - known.length;
+  const sources = formatList([
+    ...known,
+    ...(unknown === 0
+      ? []
+      : [
+          t({
+            message: plural(unknown, {
+              one: "a connection",
+              other: "# connections",
+            }),
+            comment:
+              "Connections a step read from that the page has no name for, as the last item of the list in “Read from {sources}”.",
+          }),
+        ]),
+  ]);
   const { returned, error } = result;
   return (
     <>
-      {read.length === 0 ? null : (
+      {result.readFrom.length === 0 ? null : (
         <span {...stylex.props(styles.label)}>
           {t({
             message: `Read from ${sources}`,
@@ -389,10 +413,7 @@ const StepResultParts = ({
         </span>
       )}
       {result.logs.length === 0 ? null : (
-        <StepOutput
-          label={t({ message: "Logged", context: "what a code step logged" })}
-          text={result.logs.join("\n")}
-        />
+        <StepOutput label={t(loggedLabel)} text={result.logs.join("\n")} />
       )}
       {returned === undefined ? null : (
         <ReturnedValue label={gave} value={returned.value} />
@@ -416,7 +437,8 @@ const Step = ({
   const { t } = useLingui();
   const status = traceStatuses[step.status];
   const result = step.result ?? "";
-  if (step.input === "" && result === "") {
+  const logged = step.logged ?? "";
+  if (step.input === "" && result === "" && logged === "") {
     return (
       <TraceLine status={status}>
         <StepMark status={step.status} />
@@ -455,6 +477,9 @@ const Step = ({
                   language={step.inputLanguage}
                   text={step.input}
                 />
+              )}
+              {logged === "" ? null : (
+                <StepOutput label={t(loggedLabel)} text={logged} />
               )}
               {result === "" ? null : (
                 <StepResultParts

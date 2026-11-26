@@ -1679,6 +1679,11 @@ msgstr "{triggers, plural, one {# disparador, y ejecutar a mano.} other {# dispa
 msgid "{uninterviewed} of {total} not interviewed yet"
 msgstr "{uninterviewed} de {total} aún sin entrevistar"
 
+#. Connections a step read from that the page has no name for, as the last item of the list in “Read from {sources}”.
+#: src/chat/answer-steps.tsx
+msgid "{unknown, plural, one {a connection} other {# connections}}"
+msgstr "{unknown, plural, one {una conexión} other {# conexiones}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{unnamed} of {total} seen in use, never named"
 msgstr "{unnamed} de {total} vistas en uso, nunca nombradas"
@@ -1851,10 +1856,6 @@ msgstr "Un cambio en {name}"
 msgctxt "what an opportunity could become"
 msgid "A change to an existing App"
 msgstr "Un cambio en una App existente"
-
-#: src/chat/answer-steps.tsx
-msgid "a connection"
-msgstr "una conexión"
 
 #: src/apps/app-access-requests.tsx
 #: src/apps/draft-changes.tsx

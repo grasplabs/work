@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 // What a step of an answer gave back, as the person reads it. Core hands
 // the model a code step's result, and a tool's that read from outside, as
 // one JSON object (core's `describeRun`): the outside systems it read from
@@ -22,15 +24,23 @@ export type StepResult =
       cut: boolean;
     };
 
-/** The fields of a run's result; an object with any other is no run's. */
-const runFields = new Set([
-  "readFrom",
-  "logs",
-  "returned",
-  "status",
-  "error",
-  "cut",
-]);
+/**
+ * A run's result as core writes it (core's `RunResult`): only these
+ * fields, each of its own kind, `status` and `error` together; `{}` for a
+ * run that returned, logged and read nothing.
+ */
+const runSchema = z
+  .strictObject({
+    readFrom: z.array(z.string()).optional(),
+    logs: z.array(z.string()).optional(),
+    returned: z.unknown().optional(),
+    status: z.string().optional(),
+    error: z.string().optional(),
+    cut: z.literal(true).optional(),
+  })
+  .refine(
+    ({ status, error }) => (status === undefined) === (error === undefined)
+  );
 
 /** How core ends a text it cut (core's `cutMarker`). */
 const cutMarker = /\n… \(cut: over \d+ bytes of output\)$/u;
@@ -38,45 +48,43 @@ const cutMarker = /\n… \(cut: over \d+ bytes of output\)$/u;
 /** How core names a connection a run read from: `connection <id>`, then its actions. */
 const connectionName = /^connection (?<id>\S+)/u;
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const strings = (value: unknown): string[] =>
-  Array.isArray(value)
-    ? value.filter((each): each is string => typeof each === "string")
-    : [];
-
-/** `text` as a run's result, if it is one. */
-const runOf = (text: string): Record<string, unknown> | undefined => {
+/** `text` as a run's result, if it is one, and whether it returned anything. */
+const runOf = (
+  text: string
+): { run: z.infer<typeof runSchema>; returns: boolean } | undefined => {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
     return undefined;
   }
-  return isRecord(parsed) &&
-    Object.keys(parsed).length > 0 &&
-    Object.keys(parsed).every((key) => runFields.has(key))
-    ? parsed
+  const run = runSchema.safeParse(parsed);
+  return run.success
+    ? {
+        run: run.data,
+        returns:
+          typeof parsed === "object" && parsed !== null && "returned" in parsed,
+      }
     : undefined;
 };
 
 /** What the step whose result core gave as `text` gave back. */
 export const stepResultOf = (text: string): StepResult => {
-  const run = runOf(text);
-  if (run === undefined) {
+  const read = runOf(text);
+  if (read === undefined) {
     const cut = cutMarker.test(text);
     return { kind: "text", text: text.replace(cutMarker, ""), cut };
   }
-  const readFrom = strings(run.readFrom).flatMap(
+  const { run, returns } = read;
+  const readFrom = (run.readFrom ?? []).flatMap(
     (name) => connectionName.exec(name)?.groups?.id ?? []
   );
   return {
     kind: "run",
     readFrom: [...new Set(readFrom)],
-    logs: strings(run.logs),
-    returned: "returned" in run ? { value: run.returned } : undefined,
-    error: typeof run.error === "string" ? run.error : undefined,
+    logs: run.logs ?? [],
+    returned: returns ? { value: run.returned } : undefined,
+    error: run.error,
     cut: run.cut === true,
   };
 };

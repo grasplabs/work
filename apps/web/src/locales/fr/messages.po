@@ -1679,6 +1679,11 @@ msgstr "{triggers, plural, one {# déclencheur, et lancer à la main.} other {# 
 msgid "{uninterviewed} of {total} not interviewed yet"
 msgstr "{uninterviewed} sur {total} pas encore interviewées"
 
+#. Connections a step read from that the page has no name for, as the last item of the list in “Read from {sources}”.
+#: src/chat/answer-steps.tsx
+msgid "{unknown, plural, one {a connection} other {# connections}}"
+msgstr "{unknown, plural, one {une connexion} other {# connexions}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{unnamed} of {total} seen in use, never named"
 msgstr "{unnamed} sur {total} vues en usage, jamais citées"
@@ -1851,10 +1856,6 @@ msgstr "Une modification de {name}"
 msgctxt "what an opportunity could become"
 msgid "A change to an existing App"
 msgstr "Une modification d'une App existante"
-
-#: src/chat/answer-steps.tsx
-msgid "a connection"
-msgstr "une connexion"
 
 #: src/apps/app-access-requests.tsx
 #: src/apps/draft-changes.tsx

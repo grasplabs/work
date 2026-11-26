@@ -885,6 +885,7 @@ describe(ChatThread, () => {
             readFrom: [
               "connection conn-1 (messages.list)",
               "connection conn-2",
+              "connection conn-3",
             ],
             logs: ["Reading the inbox", "Found 2"],
             returned: { unread: 2, from: ["Acme", "Globex"] },
@@ -915,7 +916,7 @@ describe(ChatThread, () => {
       document.querySelector('[role="listitem"]')?.textContent ?? "";
 
     expect({
-      read: opened.includes("Read from Gmail and a connection"),
+      read: opened.includes("Read from Gmail and 2 connections"),
       logged: opened.includes("Reading the inbox\nFound 2"),
       returned:
         document
