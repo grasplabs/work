@@ -108,9 +108,15 @@ export const readAiSource = async (env: Pick<Env, "DB">): Promise<AiSource> => {
   return parsed.data.source;
 };
 
-/** Whether this deployment has Grasp's key for Grasp's AI. */
+/** Grasp's AI on this deployment: its first model whose provider Grasp has a key for here; none without one. */
+export const graspAiOf = (
+  routes: AiProviderRoutes
+): (typeof graspAi.models)[number] | undefined =>
+  graspAi.models.find(({ provider }) => routes.platform.includes(provider));
+
+/** Whether this deployment has a key of Grasp's for Grasp's AI. */
 export const graspAiAvailable = (routes: AiProviderRoutes): boolean =>
-  routes.platform.includes(graspAi.provider);
+  graspAiOf(routes) !== undefined;
 
 /** Whether `model` is one of `providers`. */
 const isModelOf = (
@@ -194,7 +200,8 @@ export const usableModels = (
   source: AiSource
 ): string[] => {
   if (source === "grasp") {
-    return graspAiAvailable(routes) ? [graspAi.model] : [];
+    const grasp = graspAiOf(routes);
+    return grasp === undefined ? [] : [grasp.model];
   }
   return chosenModels(routes, choice);
 };
