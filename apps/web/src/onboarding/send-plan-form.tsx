@@ -8,19 +8,8 @@ import {
 import { DatePicker } from "@grasp-os/ui/components/date-picker";
 import { Field } from "@grasp-os/ui/components/field";
 import { Input } from "@grasp-os/ui/components/input";
-import { Text } from "@grasp-os/ui/components/text";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
 import { CheckIcon, Icon } from "@grasp-os/ui/lib/icons";
-import {
-  colors,
-  font,
-  media,
-  radius,
-  space,
-} from "@grasp-os/ui/lib/tokens.stylex";
+import { colors, font, radius, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { addYears, datePattern } from "@ui-sdk/react/date";
@@ -28,22 +17,23 @@ import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { flushSync } from "react-dom";
 
-import { formatList } from "../format.ts";
 import { TopError } from "../frame/top-error.tsx";
 import { dateLocale } from "./date-locale.ts";
-import { dayChoices, dayTiles } from "./send-plan.ts";
+import { dayTiles } from "./send-plan.ts";
 import type { SendChoice } from "./send-plan.ts";
 
 const styles = stylex.create({
   // What is set, each on a row with its name on the start edge; on a phone the name over it.
+  // The card's own width decides (beside the message on a wide screen, under it on a laptop).
+  frame: { containerType: "inline-size" },
   rows: {
     display: "grid",
     gridTemplateColumns: {
       default: "4.5rem minmax(0, 1fr)",
-      [media.maxSm]: "minmax(0, 1fr)",
+      "@container (width < 32rem)": "minmax(0, 1fr)",
     },
     columnGap: space[4],
-    rowGap: { default: space[5], [media.maxSm]: space[2] },
+    rowGap: { default: space[5], "@container (width < 32rem)": space[1] },
     alignItems: "center",
   },
   // The name of a row, small and quiet.
@@ -51,7 +41,7 @@ const styles = stylex.create({
     color: colors.mutedForeground,
     fontSize: font.textSm,
     lineHeight: font.textSmLine,
-    marginBlockStart: { default: 0, [media.maxSm]: space[3] },
+    marginBlockStart: { default: 0, "@container (width < 32rem)": space[2] },
   },
   dayPart: { display: "grid", gap: space[3], minWidth: 0 },
   // The next working days as tiles, a little calendar, and another day after them.
@@ -59,7 +49,7 @@ const styles = stylex.create({
     display: "grid",
     gridTemplateColumns: {
       default: "repeat(6, minmax(0, 1fr))",
-      [media.maxSm]: "repeat(3, minmax(0, 1fr))",
+      "@container (width < 24rem)": "repeat(3, minmax(0, 1fr))",
     },
     gap: space[2],
   },
@@ -68,7 +58,7 @@ const styles = stylex.create({
     justifyItems: "center",
     alignContent: "center",
     gap: 2,
-    minHeight: "4.5rem",
+    minHeight: "4rem",
     paddingBlock: space[2],
     paddingInline: space[1],
     borderWidth: 1,
@@ -108,18 +98,8 @@ const styles = stylex.create({
     fontWeight: font.weightSemibold,
     fontVariantNumeric: "tabular-nums",
   },
-  // The day typed, "at" and the hour beside it; on a narrow phone "at" and the hour go under the day.
-  dayHour: {
-    display: "flex",
-    flexWrap: "wrap",
-    alignItems: "center",
-    gap: space[2],
-    minWidth: 0,
-  },
-  atHour: { display: "flex", alignItems: "center", gap: space[2] },
   day: { width: "11rem" },
   hour: { width: "7rem" },
-  at: { display: "flex" },
   // The teams as pills, each with its tick: on, it gets links on the day; off, it waits.
   pills: { display: "flex", flexWrap: "wrap", gap: space[2] },
   pill: {
@@ -171,7 +151,6 @@ const styles = stylex.create({
   },
   // A set of choices with none of a fieldset's own frame.
   set: { margin: 0, padding: 0, borderWidth: 0, minWidth: 0 },
-  later: { display: "grid", gap: space[3], justifyItems: "start", minWidth: 0 },
 });
 
 // When the links go out, and to whom (prototype
@@ -180,10 +159,9 @@ const styles = stylex.create({
 // the message over it. Each thing set on a row with its name at the start:
 // the day, as tiles for today and the next working days, a little calendar, with
 // another day after them; the hour; the teams, as pills with their tick,
-// all of them unless one is taken out. For the teams taken out: a later
-// day and hour, or nothing yet, so a first group can go this week and the
-// rest when they are ready. What happens next on the card's foot. Leads
-// get theirs at that moment; everyone else once their lead has talked.
+// all of them unless one is taken out: a team taken out waits, unplanned,
+// and the card's foot says so, with what happens next. Leads get theirs at
+// that moment; everyone else once their lead has talked.
 
 /** A team as the choice lists it. */
 interface SendTeam {
@@ -366,7 +344,6 @@ export const SendPlanForm = ({
 }) => {
   const { t, i18n } = useLingui();
   const timeField = useId();
-  const laterField = useId();
   const dayLabel = useId();
   const teamsLabel = useId();
   const strip = dayTiles(today);
@@ -374,14 +351,6 @@ export const SendPlanForm = ({
   // Other day asked for, or one set before that the strip has no tile for: the day field shows.
   const [picking, setPicking] = useState(!inStrip);
   const other = picking || !inStrip;
-  const offered = dayChoices(today);
-  const held = teams.filter((team) => choice.held.includes(team.id));
-  const leftOut = formatList(held.map((team) => team.name));
-  const heldCount = held.length;
-  const at = t({
-    message: "at",
-    context: "at an hour of the day: on Tuesday at 9:00",
-  });
   const weekday = new Intl.DateTimeFormat(i18n.locale, {
     weekday: "short",
     timeZone: "UTC",
@@ -404,188 +373,133 @@ export const SendPlanForm = ({
           <CardTitle level={2}>{t`When the links go out`}</CardTitle>
         </CardHeader>
         <CardContent>
-          <div {...stylex.props(styles.rows)}>
-            <span id={dayLabel} {...stylex.props(styles.label)}>
-              {t({ message: "Day", context: "the day the links go out" })}
-            </span>
-            <div {...stylex.props(styles.dayPart)}>
-              <fieldset
-                aria-labelledby={dayLabel}
-                {...stylex.props(styles.set, styles.strip)}
-              >
-                {strip.map((day) => {
-                  const on = !other && day === choice.day;
-                  const date = dateOf(day);
-                  return (
-                    <button
-                      aria-label={whole.format(date)}
-                      aria-pressed={on}
-                      key={day}
-                      onClick={() => {
-                        setPicking(false);
-                        onChange({ ...choice, day });
-                      }}
-                      type="button"
-                      {...stylex.props(styles.tile, on && styles.tileOn)}
-                    >
-                      <span {...stylex.props(styles.tileSmall)}>
-                        {day === today
-                          ? t({ message: "Today", context: "a day tile" })
-                          : weekday.format(date)}
-                      </span>
-                      <span {...stylex.props(styles.tileDay)}>
-                        {date.getUTCDate()}
-                      </span>
-                      <span {...stylex.props(styles.tileSmall)}>
-                        {month.format(date)}
-                      </span>
-                    </button>
-                  );
-                })}
-                <button
-                  aria-pressed={other}
-                  onClick={() => {
-                    // The field shows, from the day set so far.
-                    setPicking(true);
-                  }}
-                  type="button"
-                  {...stylex.props(
-                    styles.tile,
-                    styles.tileOther,
-                    other && styles.tileOn
-                  )}
-                >
-                  {t`Other day`}
-                </button>
-              </fieldset>
-              {other ? (
-                <DayField
-                  label={t`Other day`}
-                  min={today}
-                  onDay={(day) => {
-                    onChange({ ...choice, day });
-                  }}
-                  onWrong={(wrong) => {
-                    onWrong("first", wrong);
-                  }}
-                  today={today}
-                  value={choice.day}
-                />
-              ) : null}
-            </div>
-            <label htmlFor={timeField} {...stylex.props(styles.label)}>
-              {t({ message: "Time", context: "the hour the links go out" })}
-            </label>
-            <div>
-              <Input
-                id={timeField}
-                onValueChange={(time) => {
-                  onChange({ ...choice, time });
-                }}
-                size="sm"
-                style={styles.hour}
-                type="time"
-                value={choice.time}
-              />
-            </div>
-            {teams.length > 1 ? (
-              <>
-                <span id={teamsLabel} {...stylex.props(styles.label)}>
-                  {t({ message: "Teams", context: "the teams that get links" })}
-                </span>
+          <div {...stylex.props(styles.frame)}>
+            <div {...stylex.props(styles.rows)}>
+              <span id={dayLabel} {...stylex.props(styles.label)}>
+                {t({ message: "Day", context: "the day the links go out" })}
+              </span>
+              <div {...stylex.props(styles.dayPart)}>
                 <fieldset
-                  aria-labelledby={teamsLabel}
-                  {...stylex.props(styles.set, styles.pills)}
+                  aria-labelledby={dayLabel}
+                  {...stylex.props(styles.set, styles.strip)}
                 >
-                  {teams.map((team) => {
-                    const on = !choice.held.includes(team.id);
+                  {strip.map((day) => {
+                    const on = !other && day === choice.day;
+                    const date = dateOf(day);
                     return (
                       <button
+                        aria-label={whole.format(date)}
                         aria-pressed={on}
-                        key={team.id}
+                        key={day}
                         onClick={() => {
-                          onChange({
-                            ...choice,
-                            held: on
-                              ? [...choice.held, team.id]
-                              : choice.held.filter((id) => id !== team.id),
-                          });
+                          setPicking(false);
+                          onChange({ ...choice, day });
                         }}
                         type="button"
-                        {...stylex.props(styles.pill, on && styles.pillOn)}
+                        {...stylex.props(styles.tile, on && styles.tileOn)}
                       >
-                        <span
-                          {...stylex.props(styles.tick, on && styles.tickOn)}
-                        >
-                          <Icon icon={CheckIcon} style={styles.tickIcon} />
+                        <span {...stylex.props(styles.tileSmall)}>
+                          {day === today
+                            ? t({ message: "Today", context: "a day tile" })
+                            : weekday.format(date)}
                         </span>
-                        {team.name}
+                        <span {...stylex.props(styles.tileDay)}>
+                          {date.getUTCDate()}
+                        </span>
+                        <span {...stylex.props(styles.tileSmall)}>
+                          {month.format(date)}
+                        </span>
                       </button>
                     );
                   })}
-                </fieldset>
-              </>
-            ) : null}
-            {heldCount > 0 ? (
-              <>
-                <span id={laterField} {...stylex.props(styles.label)}>
-                  {leftOut}
-                </span>
-                <div {...stylex.props(styles.later)}>
-                  <ToggleGroup
-                    aria-labelledby={laterField}
-                    onValueChange={(value: unknown[]) => {
-                      if (value[0] === "open") {
-                        onChange({ ...choice, heldDay: null });
-                      }
-                      if (value[0] === "day") {
-                        onChange({
-                          ...choice,
-                          heldDay:
-                            choice.heldDay ?? offered[2]?.day ?? choice.day,
-                        });
-                      }
+                  <button
+                    aria-pressed={other}
+                    onClick={() => {
+                      // The field shows, from the day set so far.
+                      setPicking(true);
                     }}
-                    size="sm"
-                    value={[choice.heldDay === null ? "open" : "day"]}
+                    type="button"
+                    {...stylex.props(
+                      styles.tile,
+                      styles.tileOther,
+                      other && styles.tileOn
+                    )}
                   >
-                    <ToggleGroupItem value="open">{t`Not planned yet`}</ToggleGroupItem>
-                    <ToggleGroupItem value="day">{t`On a later day`}</ToggleGroupItem>
-                  </ToggleGroup>
-                  {choice.heldDay === null ? null : (
-                    <span {...stylex.props(styles.dayHour)}>
-                      <DayField
-                        label={t`The day the other teams get their links`}
-                        min={choice.day}
-                        onDay={(heldDay) => {
-                          onChange({ ...choice, heldDay });
-                        }}
-                        onWrong={(wrong) => {
-                          onWrong("later", wrong);
-                        }}
-                        today={today}
-                        value={choice.heldDay}
-                      />
-                      <span {...stylex.props(styles.atHour)}>
-                        <span {...stylex.props(styles.at)}>
-                          <Text as="span">{at}</Text>
-                        </span>
-                        <Input
-                          aria-label={t`The hour the other teams get their links`}
-                          onValueChange={(heldTime) => {
-                            onChange({ ...choice, heldTime });
+                    {t`Other day`}
+                  </button>
+                </fieldset>
+                {other ? (
+                  <DayField
+                    label={t`Other day`}
+                    min={today}
+                    onDay={(day) => {
+                      onChange({ ...choice, day });
+                    }}
+                    onWrong={(wrong) => {
+                      onWrong("first", wrong);
+                    }}
+                    today={today}
+                    value={choice.day}
+                  />
+                ) : null}
+              </div>
+              <label htmlFor={timeField} {...stylex.props(styles.label)}>
+                {t({ message: "Time", context: "the hour the links go out" })}
+              </label>
+              <div>
+                <Input
+                  id={timeField}
+                  onValueChange={(time) => {
+                    onChange({ ...choice, time });
+                  }}
+                  size="sm"
+                  style={styles.hour}
+                  type="time"
+                  value={choice.time}
+                />
+              </div>
+              {teams.length > 1 ? (
+                <>
+                  <span id={teamsLabel} {...stylex.props(styles.label)}>
+                    {t({
+                      message: "Teams",
+                      context: "the teams that get links",
+                    })}
+                  </span>
+                  <fieldset
+                    aria-labelledby={teamsLabel}
+                    {...stylex.props(styles.set, styles.pills)}
+                  >
+                    {teams.map((team) => {
+                      const on = !choice.held.includes(team.id);
+                      return (
+                        <button
+                          aria-pressed={on}
+                          key={team.id}
+                          onClick={() => {
+                            onChange({
+                              ...choice,
+                              held: on
+                                ? [...choice.held, team.id]
+                                : choice.held.filter((id) => id !== team.id),
+                            });
                           }}
-                          size="sm"
-                          style={styles.hour}
-                          type="time"
-                          value={choice.heldTime}
-                        />
-                      </span>
-                    </span>
-                  )}
-                </div>
-              </>
-            ) : null}
+                          type="button"
+                          {...stylex.props(styles.pill, on && styles.pillOn)}
+                        >
+                          <span
+                            {...stylex.props(styles.tick, on && styles.tickOn)}
+                          >
+                            <Icon icon={CheckIcon} style={styles.tickIcon} />
+                          </span>
+                          {team.name}
+                        </button>
+                      );
+                    })}
+                  </fieldset>
+                </>
+              ) : null}
+            </div>
           </div>
         </CardContent>
         <CardFooter>{summary}</CardFooter>

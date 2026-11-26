@@ -9,6 +9,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { formatList } from "../format.ts";
 import { TopError } from "../frame/top-error.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { CalmStep } from "./calm-frame.tsx";
@@ -31,8 +32,27 @@ import { planDraft } from "./visit.ts";
 // step's, which comes next. Without a staff list there is no day to plan
 // yet: the letter alone, and Grasp's staff plan the day with the admin.
 
+/** Wide enough for the message and the plan side by side. */
+const wide = "@media (width >= 72rem)";
+
 const styles = stylex.create({
-  stack: { display: "grid", gap: space[4] },
+  // The message and when the links go out: one under the other, and on a wide screen side by side,
+  // out past the column on its middle, so the whole step fits a laptop's screen without scrolling.
+  stack: {
+    display: "grid",
+    gap: { default: space[4], [wide]: space[6] },
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      [wide]: "minmax(0, 1.1fr) minmax(0, 1fr)",
+    },
+    alignItems: "stretch",
+    width: { default: "100%", [wide]: "min(68rem, calc(100vw - 4rem))" },
+    // On its middle, past the column on both sides alike.
+    marginInline: {
+      default: 0,
+      [wide]: "calc((100% - min(68rem, calc(100vw - 4rem))) / 2)",
+    },
+  },
   // Copy on the end edge of the message's foot, where the hand goes on.
   foot: { display: "flex", justifyContent: "flex-end" },
 });
@@ -116,15 +136,36 @@ export const TeamStep = ({
   const [wrong, setWrong] = useState({ first: false, later: false });
   // Sent, it stays busy until every step reads what core now has, so it can't be pressed twice.
   const [refreshing, setRefreshing] = useState(false);
-  const when = useSendWords(today)(choice.day, choice.time);
+  const sendWords = useSendWords(today);
+  const when = sendWords(choice.day, choice.time);
+  const heldWhen =
+    choice.heldDay === null ? "" : sendWords(choice.heldDay, choice.heldTime);
   const going = teams.length - choice.held.length;
-  const next =
-    choice.held.length === 0
+  // A team taken out waits, unplanned: one sentence after what happens next says which, or when, if a plan set before has a day for it.
+  const heldNames = formatList(
+    teams
+      .filter((team) => choice.held.includes(team.id))
+      .map((team) => team.name)
+  );
+  const heldCount = choice.held.length;
+  const later =
+    choice.heldDay === null
+      ? plural(heldCount, {
+          one: `${heldNames} gets no link yet.`,
+          other: `${heldNames} get no link yet.`,
+        })
+      : plural(heldCount, {
+          one: `${heldNames} gets theirs ${heldWhen}.`,
+          other: `${heldNames} get theirs ${heldWhen}.`,
+        });
+  const first =
+    heldCount === 0
       ? t`Leads get their link ${when}. Everyone else right after their lead has talked to me.`
       : t`${plural(going, {
           one: `The lead of # team gets their link ${when}. Everyone else right after their lead has talked to me.`,
           other: `The leads of # teams get their link ${when}. Everyone else right after their lead has talked to me.`,
         })}`;
+  const next = heldCount === 0 ? first : `${first} ${later}`;
   const holds =
     !wrong.first &&
     !wrong.later &&

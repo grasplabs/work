@@ -97,6 +97,7 @@ import {
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { SecretOnce, ShownOnceDialog } from "../shown-once.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { RefusedBadge, SourceActivity } from "./event-source-activity.tsx";
@@ -755,20 +756,6 @@ const SourceInspector = ({
   );
 };
 
-/** A secret core answered once, with the warning that it is shown this once. */
-const SecretOnce = ({ secret }: { secret: string }) => {
-  const { t } = useLingui();
-  return (
-    <>
-      {/* Mounted with each secret, so Copied never carries over. */}
-      <Snippet key={secret} aria-label={t`Copy the secret`} value={secret} />
-      <Alert variant="warning">
-        {t`Copy it now: you won't see it again. Lost, it can only be replaced.`}
-      </Alert>
-    </>
-  );
-};
-
 /**
  * A new source, in two steps of one dialog: its name, after its sender;
  * then what to give the sender, the secret shown this once. Kept mounted
@@ -885,49 +872,6 @@ const AddSource = ({
   );
 };
 
-/**
- * A secret core answered once on a rotation: shown with the way to copy it
- * and how the sender signs with it, until it is closed on purpose.
- */
-const SecretDialog = ({
-  secret,
-  onClose,
-}: {
-  secret: string | undefined;
-  onClose: () => void;
-}) => {
-  const { t } = useLingui();
-  return (
-    <Dialog
-      onOpenChange={(open, details) => {
-        // A stray press beside it never takes the secret away: Done or the close button does.
-        if (!open && details.reason === "outside-press") {
-          details.cancel();
-          return;
-        }
-        if (!open) {
-          onClose();
-        }
-      }}
-      open={secret !== undefined}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t`The new secret`}</DialogTitle>
-        </DialogHeader>
-        <DialogBody>
-          <SettingsStack>
-            {secret === undefined ? null : <SecretOnce secret={secret} />}
-          </SettingsStack>
-        </DialogBody>
-        <DialogFooter>
-          <DialogClose variant="default">{t`Done`}</DialogClose>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-};
-
 /** How wide the page must be for a source to open beside the list. */
 const besideFrom = 60 * 16;
 
@@ -1007,11 +951,12 @@ export const EventSourcesSettings = ({
       flush
       title={t`Sources`}
     >
-      <SecretDialog
+      <ShownOnceDialog
         onClose={() => {
           setSecret(undefined);
         }}
         secret={secret}
+        title={t`The new secret`}
       />
       <AddSource onChanged={changed} onOpenChange={setAdding} open={adding} />
       {page.state === "ready" ? null : (

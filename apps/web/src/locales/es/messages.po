@@ -42,7 +42,7 @@ msgid "{0, plural, one {# thing that was said in it goes with it.} other {# thin
 msgstr "{0, plural, one {# cosa que se dijo en ella se va con ella.} other {# cosas que se dijeron en ella se van con ella.}}"
 
 #. placeholder {0}: team.name
-#. placeholder {1}: lead.name
+#. placeholder {1}: formatList(ledBy)
 #: src/onboarding/leads-step.tsx
 msgid "{0} · led by {1}"
 msgstr "{0} · liderado por {1}"
@@ -696,6 +696,14 @@ msgstr "{goals, plural, one {# objetivo} other {# objetivos}}"
 #: src/onboarding/team-step.tsx
 msgid "{going, plural, one {The lead of # team gets their link {when}. Everyone else right after their lead has talked to me.} other {The leads of # teams get their link {when}. Everyone else right after their lead has talked to me.}}"
 msgstr "{going, plural, one {El responsable de # equipo recibe su enlace {when}. Los demás justo después de que su responsable haya hablado conmigo.} other {Los responsables de # equipos reciben su enlace {when}. Los demás justo después de que su responsable haya hablado conmigo.}}"
+
+#: src/onboarding/team-step.tsx
+msgid "{heldCount, plural, one {{heldNames} gets no link yet.} other {{heldNames} get no link yet.}}"
+msgstr "{heldCount, plural, one {{heldNames} aún no recibe enlace.} other {{heldNames} aún no reciben enlace.}}"
+
+#: src/onboarding/team-step.tsx
+msgid "{heldCount, plural, one {{heldNames} gets theirs {heldWhen}.} other {{heldNames} get theirs {heldWhen}.}}"
+msgstr "{heldCount, plural, one {{heldNames} lo recibe {heldWhen}.} other {{heldNames} lo reciben {heldWhen}.}}"
 
 #: src/brain/brain-chips.tsx
 #: src/brain/brain-source-contents.tsx
@@ -3747,11 +3755,6 @@ msgctxt "who wrote a message"
 msgid "Assistant"
 msgstr "Asistente"
 
-#: src/onboarding/send-plan-form.tsx
-msgctxt "at an hour of the day: on Tuesday at 9:00"
-msgid "at"
-msgstr "a las"
-
 #: src/agents/setup/schedule-step.tsx
 msgid "At"
 msgstr "A las"
@@ -4178,7 +4181,6 @@ msgstr "No se puede ofrecer Ejecutar: {unread}"
 #: src/chat/brain-questions.tsx
 #: src/chat/chat-window.tsx
 #: src/chat/delete-chat-dialog.tsx
-#: src/confirmed.tsx
 #: src/connections/add-connector.tsx
 #: src/connections/http-connections.tsx
 #: src/connections/request-app-dialog.tsx
@@ -4853,7 +4855,6 @@ msgstr "Acantilados"
 #: src/onboarding/campaign/campaign-page.tsx
 #: src/projects/project-chats.tsx
 #: src/settings/erasures.tsx
-#: src/shown-once.tsx
 #: src/workflows/start-run.tsx
 msgid "Close"
 msgstr "Cerrar"
@@ -5412,7 +5413,6 @@ msgstr "Copenhague"
 #: src/settings/event-sources.tsx
 #: src/settings/guests.tsx
 #: src/settings/invitations.tsx
-#: src/shown-once.tsx
 msgid "Copied"
 msgstr "Copiado"
 
@@ -5439,7 +5439,6 @@ msgstr "Copias"
 
 #: src/frame/ui-words.tsx
 #: src/onboarding/review-parts.tsx
-#: src/shown-once.tsx
 msgid "Copy"
 msgstr "Copiar"
 
@@ -5461,7 +5460,6 @@ msgstr "Copiar correo"
 msgid "Copy into the Brain from {label}"
 msgstr "Copiar al Brain desde {label}"
 
-#: src/settings/event-sources.tsx
 #: src/shown-once.tsx
 msgid "Copy it now: you won't see it again. Lost, it can only be replaced."
 msgstr "Cópialo ahora: no lo volverás a ver. Si se pierde, solo se puede sustituir."
@@ -5486,7 +5484,6 @@ msgstr "Copiar el mensaje"
 msgid "Copy the output"
 msgstr "Copiar la salida"
 
-#: src/settings/event-sources.tsx
 #: src/shown-once.tsx
 msgid "Copy the secret"
 msgstr "Copiar el secreto"
@@ -7245,8 +7242,8 @@ msgid "Everyone found"
 msgstr "Todas las personas encontradas"
 
 #: src/onboarding/leads-step.tsx
-msgid "Everyone from {signIn} is listed below. Untick anyone who isn’t taking part, and mark each team’s lead—I’ll talk to them first."
-msgstr "Todos los de {signIn} aparecen abajo. Desmarca a quien no participe y señala a cada responsable de equipo: hablaré con ellos primero."
+msgid "Everyone from {signIn} is listed below. Untick anyone who isn’t taking part, and mark each team’s leads—I’ll talk to them first."
+msgstr "Todos los de {signIn} aparecen abajo. Desmarca a quien no participe y señala a los responsables de cada equipo: hablaré con ellos primero."
 
 #: src/settings/staff-access.tsx
 msgid "Everyone from Grasp is signed out at once, and nobody from Grasp can sign in again until a new window is opened."
@@ -12202,10 +12199,6 @@ msgstr "No es mía"
 msgid "Not offered"
 msgstr "No ofrecida"
 
-#: src/onboarding/send-plan-form.tsx
-msgid "Not planned yet"
-msgstr "Aún sin planificar"
-
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Not published yet."
 msgstr "Aún no publicado."
@@ -12617,8 +12610,8 @@ msgid "Now for the people I’ll be talking to. I don’t have anyone yet, so ad
 msgstr "Ahora, las personas con las que voy a hablar. Todavía no tengo a nadie, así que añádelas aquí por correo, o sube una lista de personal si tienes una. Luego marca quién lidera cada equipo. Siempre empiezo por los responsables, para que se enteren antes que su equipo."
 
 #: src/onboarding/leads-step.tsx
-msgid "Now let’s decide who I’ll be talking to. Everyone from {signIn} is already here—just untick anyone who shouldn’t be included, and mark each team’s lead. I always speak with leads first so they know what’s coming before their team does. Missing someone? Add them by email."
-msgstr "Ahora decidamos con quién voy a hablar. Todos los de {signIn} ya están aquí: desmarca a quien no deba participar y marca al responsable de cada equipo. Siempre hablo primero con los responsables para que sepan qué esperar antes que su equipo. ¿Falta alguien? Añádelo por correo."
+msgid "Now let’s decide who I’ll be talking to. Everyone from {signIn} is already here—just untick anyone who shouldn’t be included, and mark each team’s leads, as many as it has. I always speak with leads first so they know what’s coming before their team does. Missing someone? Add them by email."
+msgstr "Ahora decidamos con quién voy a hablar. Todos los de {signIn} ya están aquí: desmarca a quien no deba participar y marca a los responsables de cada equipo, tantos como tenga. Siempre hablo primero con los responsables para que sepan qué esperar antes que su equipo. ¿Falta alguien? Añádelo por correo."
 
 #: src/onboarding/company-step.tsx
 msgid "Now let’s get to know your company. A staff list works fine for that, one row per person with their team and job. Don’t have one at hand? No problem, skip it and we’ll sort it out together."
@@ -12767,10 +12760,6 @@ msgstr "Con eventos {type} de una fuente de webhook eliminada"
 #: src/inbox/outcome-details.tsx
 msgid "On {where}"
 msgstr "En {where}"
-
-#: src/onboarding/send-plan-form.tsx
-msgid "On a later day"
-msgstr "Un día más adelante"
 
 #: src/agents/setup/schedule-step.tsx
 msgid "On a schedule"
@@ -15875,7 +15864,6 @@ msgid "Searching the docs for {query}"
 msgstr "Buscando {query} en la documentación"
 
 #: src/connections/http-connections.tsx
-#: src/shown-once.tsx
 msgid "Secret"
 msgstr "Secreto"
 
@@ -18119,10 +18107,6 @@ msgstr "La versión actual no los declara, así que no sirven nada hasta que una
 msgid "The data isn't JSON."
 msgstr "Los datos no son JSON."
 
-#: src/onboarding/send-plan-form.tsx
-msgid "The day the other teams get their links"
-msgstr "El día en que los demás equipos reciben sus enlaces"
-
 #: src/chat/composer.tsx
 msgid "The default"
 msgstr "El predeterminado"
@@ -18224,10 +18208,6 @@ msgstr "El encabezado es un nombre de letras, dígitos y guiones, y no uno que G
 #: src/drafts/draft-history.tsx
 msgid "The history of your changes couldn't be read. Try again in a moment."
 msgstr "No se pudo leer el historial de tus cambios. Inténtalo de nuevo en un momento."
-
-#: src/onboarding/send-plan-form.tsx
-msgid "The hour the other teams get their links"
-msgstr "La hora a la que los demás equipos reciben sus enlaces"
 
 #: src/inbox/inbox-page.tsx
 msgid "The inbox didn't load"

@@ -1,3 +1,4 @@
+import { leadsOfTeam } from "@grasp-os/shared/onboarding";
 import type { Roster } from "@grasp-os/shared/onboarding";
 
 // The story's days and people (plan-story.tsx), read from what the admin
@@ -17,16 +18,19 @@ export const weekdayOf = (day: string): string => {
   return date.toISOString().slice(0, 10);
 };
 
-/** The teams that take part, and their leads by name: those who go first. */
+/** The teams that take part, and their leads by name, the first first: those who go first. */
 export const leadsOf = (
   roster: Roster | null
-): { team: string; lead: string | null }[] =>
+): { team: string; leads: string[] }[] =>
   (roster?.teams ?? [])
     .filter((team) => !team.off)
-    .map((team) => {
-      const lead = roster?.people.find(
-        (person) => person.id === team.lead && !person.away
-      );
-      const name = lead?.name.trim() ?? "";
-      return { team: team.name, lead: name === "" ? null : name };
-    });
+    .map((team) => ({
+      team: team.name,
+      leads: leadsOfTeam(team).flatMap((id) => {
+        const name =
+          roster?.people
+            .find((person) => person.id === id && !person.away)
+            ?.name.trim() ?? "";
+        return name === "" ? [] : [name];
+      }),
+    }));
