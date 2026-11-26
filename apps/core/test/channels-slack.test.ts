@@ -1407,7 +1407,8 @@ describe("a linked person's held write in Slack, on a paused connection", () => 
     const admin = await signedInApi(idp, "admin");
     const mail = await mailConnection(
       [],
-      ["MAIL_SEND", { name: "mail.search", read: true }]
+      ["MAIL_SEND", { name: "mail.search", read: true }],
+      { audience: "everyone" }
     );
     const binding = bindingOf("MAIL");
     await requestGranted(idp, admin, {
