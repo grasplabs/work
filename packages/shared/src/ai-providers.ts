@@ -188,7 +188,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     realtime: [
       {
         path: "/v1/audio/transcriptions/realtime",
-        query: "?model=voxtral-mini-transcribe-realtime-2602",
+        query: "?model=voxtral-mini-transcribe-realtime-3",
       },
     ],
     // Its voice agents' sessions, for Grasp's interviews.

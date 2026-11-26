@@ -58,7 +58,7 @@ export const platformAi = {
   transcription: { provider: "openai", model: "gpt-4o-transcribe" },
   liveTranscription: {
     provider: "mistral",
-    model: "voxtral-mini-transcribe-realtime-2602",
+    model: "voxtral-mini-transcribe-realtime-3",
   },
   speech: {
     provider: "mistral",
