@@ -10,6 +10,7 @@ import {
   openAdmin,
   settle,
   summaryOf,
+  until,
 } from "../../test/app.tsx";
 import type { Answers } from "../../test/app.tsx";
 import { daysAgo, readySnapshot, toldSnapshot } from "../../test/snapshots.ts";
@@ -430,14 +431,15 @@ const month = (period: string, micros: number) => ({
 /** What Grasp's AI cost on its keys: each organization's, none in all unless given. */
 const spendOf = (
   byOrganization: PlatformSpend["byOrganization"],
-  months: { thisMonth?: number; lastMonth?: number } = {}
+  months: { thisMonth?: number; lastMonth?: number } = {},
+  unreported: PlatformSpend["unreported"] = []
 ): PlatformSpend => ({
   thisMonth: month("2026-11", months.thisMonth ?? 0),
   lastMonth: month("2026-10", months.lastMonth ?? 0),
   byOrganization,
   organizations: byOrganization.length,
   unread: [],
-  unreported: [],
+  unreported,
 });
 
 /** The text of Home's figure labelled `label`. */
@@ -680,9 +682,10 @@ describe("Home", () => {
   it("says what Grasp's AI cost this month against last, and each organization's use of it against its limit", async () => {
     const near = row("near", { name: "Near Co" });
     const own = row("own", { name: "Own Co" });
+    const old = row("old", { name: "Old Co" });
     const { container } = await openAdmin("/", {
-      fetchClientGrid: [near, own],
-      fetchClientSummaries: [near, own].map((client) =>
+      fetchClientGrid: [near, own, old],
+      fetchClientSummaries: [near, own, old].map((client) =>
         summaryWith(client, { stage: "open", open: true, openedAt: daysAgo(9) })
       ),
       fetchPlatformSpend: spendOf(
@@ -702,7 +705,9 @@ describe("Home", () => {
             graspAi: null,
           },
         ],
-        { thisMonth: 191_000_000, lastMonth: 100_000_000 }
+        { thisMonth: 191_000_000, lastMonth: 100_000_000 },
+        // Its release doesn't report what AI cost.
+        [{ clientId: "old", name: "Old Co" }]
       ),
     });
 
@@ -710,10 +715,13 @@ describe("Home", () => {
       figure: figureOf(container, "Grasp AI this month"),
       near: rowText(container, "near").includes("$191 of $200"),
       own: rowText(container, "own").includes("No limit reported"),
+      old: rowText(container, "old").includes("Not reported by its release"),
     }).toStrictEqual({
-      figure: "Grasp AI this month$191+91% on last month · 1 near its limit",
+      figure:
+        "Grasp AI this month$191$100 last month · 1 near its limit · 1 not counted",
       near: true,
       own: true,
+      old: true,
     });
   });
 
@@ -736,8 +744,43 @@ describe("Home", () => {
     await settle();
 
     expect(figureOf(container, "Grasp AI this month")).toBe(
-      "Grasp AI this month$12Nothing last month"
+      "Grasp AI this month$12$0 last month"
     );
+  });
+
+  it("shows every organization while what Grasp's AI cost is still being read, that alone said to be reading", async () => {
+    const live = row("live", { name: "Live Co" });
+    const held = Promise.withResolvers<null>();
+    const { container } = await openAdmin(
+      "/",
+      {
+        fetchClientGrid: [live],
+        fetchClientSummaries: [
+          summaryWith(live, {
+            stage: "open",
+            open: true,
+            openedAt: daysAgo(4),
+          }),
+        ],
+        // Every core is still being asked: never answered here.
+        fetchPlatformSpend: async () => await held.promise,
+      },
+      { rest: false }
+    );
+    await until(() => rowText(container, "live") !== "");
+
+    expect({
+      row: rowText(container, "live").includes("Reading…"),
+      live: figureOf(container, "Live"),
+      // Its label over a placeholder: no figure yet.
+      ai: container
+        .querySelector('[aria-label="How Grasp is doing"]')
+        ?.textContent?.endsWith("Grasp AI this month"),
+    }).toStrictEqual({
+      row: true,
+      live: "Live1of 1 organization",
+      ai: true,
+    });
   });
 
   it("says plainly when there is nothing: no organizations yet, and nothing that needs Grasp", async () => {

@@ -166,8 +166,8 @@ describe("what Grasp's own AI features cost", () => {
     expect({
       saysUnreported: own.html.includes("Not reported by this release"),
       sum: spend.thisMonth.micros,
-      unread: spend.unread,
-      unreported: spend.unreported,
+      unread: spend.unread.map(({ name }) => name),
+      unreported: spend.unreported.map(({ name }) => name),
       platformSays: platform.html.includes(
         "Not reported by their release, so not in these sums: Oudegracht."
       ),
@@ -220,8 +220,8 @@ describe("what Grasp's own AI features cost", () => {
         })
       ),
       organizations: spend.organizations,
-      unread: spend.unread,
-      unreported: spend.unreported,
+      unread: spend.unread.map(({ name }) => name),
+      unreported: spend.unreported.map(({ name }) => name),
       shown: tableText(html, "Top organizations"),
     }).toStrictEqual({
       thisMonth: {

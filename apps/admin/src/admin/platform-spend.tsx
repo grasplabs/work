@@ -275,11 +275,11 @@ const TopOrganizations = ({
 
 /** Which organizations aren't in the sums, as their core didn't answer. */
 const unreadLine = ({ unread, organizations }: PlatformSpend): string =>
-  `Read from ${organizations - unread.length} of ${organizations} active organizations. Not in these sums, as their core didn’t answer: ${unread.join(", ")}.`;
+  `Read from ${organizations - unread.length} of ${organizations} active organizations. Not in these sums, as their core didn’t answer: ${unread.map(({ name }) => name).join(", ")}.`;
 
 /** Which organizations aren't in the sums, as their core's release doesn't report it. */
 const unreportedLine = ({ unreported }: PlatformSpend): string =>
-  `Not reported by their release, so not in these sums: ${unreported.join(", ")}.`;
+  `Not reported by their release, so not in these sums: ${unreported.map(({ name }) => name).join(", ")}.`;
 
 /**
  * Every active organization's spend on Grasp's keys summed, read from

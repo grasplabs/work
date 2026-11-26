@@ -8,7 +8,6 @@
  * audits) and what Grasp's AI cost on its keys: no person, nothing anyone
  * wrote, and no organization's snapshot read.
  */
-import { fewPeople } from "@grasp-os/shared/admin-summary";
 import type { AdminSummary } from "@grasp-os/shared/admin-summary";
 import { Badge } from "@grasp-os/ui/components/badge";
 import type { BadgeVariant } from "@grasp-os/ui/components/badge";
@@ -227,14 +226,12 @@ const order: Readonly<Record<Standing, number>> = {
   live: 7,
 };
 
-/** Its runs of the last seven days; null when its summary doesn't share them. */
-const weekOf = (
-  summary: AdminSummary | null
-): { done: number; failed: number } | null => {
-  if (summary?.activity === null || summary?.activity === undefined) {
-    return null;
-  }
-  const week = summary.activity.runs.slice(-weekDays);
+/** How a company uses Grasp, while its summary shares it. */
+type Activity = NonNullable<AdminSummary["activity"]>;
+
+/** Its runs of the last seven days. */
+const weekOf = (activity: Activity): { done: number; failed: number } => {
+  const week = activity.runs.slice(-weekDays);
   return {
     done: week.reduce((sum, day) => sum + day.done, 0),
     failed: week.reduce((sum, day) => sum + day.failed, 0),
@@ -270,19 +267,11 @@ const nearLimit = (spend: OrganizationSpend | undefined): boolean =>
   spend.graspAi.limit > 0 &&
   spend.graspAi.spent >= spend.graspAi.limit * nearShare;
 
-/** "+12% on last month", or how it compares when last month was nothing. */
-const changeWords = (now: number, before: number): string => {
-  if (before === 0) {
-    return now === 0 ? "Nothing this month or last" : "Nothing last month";
-  }
-  const change = Math.round(((now - before) / before) * 100);
-  if (change === 0) {
-    return "As much as last month";
-  }
-  return `${change > 0 ? "+" : "−"}${Math.abs(change)}% on last month`;
-};
-
-/** Grasp's AI this month against last, and how many organizations are near their limit. */
+/**
+ * Grasp's AI this month so far, beside last month's, and how many
+ * organizations are near their limit; those whose core didn't report it
+ * aren't in it, and it says how many.
+ */
 const AiFigure = ({ rows, spend }: { rows: Row[]; spend: Spend }) => {
   if (spend === null) {
     return (
@@ -294,11 +283,15 @@ const AiFigure = ({ rows, spend }: { rows: Row[]; spend: Spend }) => {
     );
   }
   const near = rows.filter((row) => nearLimit(spendOf(spend, row))).length;
+  const unread = spend.unread.length + spend.unreported.length;
   return (
     <Stat
+      // Last month in full beside this month so far: never a share of a
+      // month against a whole one.
       change={[
-        changeWords(spend.thisMonth.micros, spend.lastMonth.micros),
+        `${dollarsOf(spend.lastMonth.micros)} last month`,
         near > 0 ? `${near} near ${plural(near, "its", "their")} limit` : null,
+        unread > 0 ? `${unread} not counted` : null,
       ]
         .filter((part) => part !== null)
         .join(" · ")}
@@ -343,7 +336,9 @@ const Figures = ({ rows, spend }: { rows: Row[]; spend: SpendRead }) => {
         {...(needs > 0 ? { variant: "warning" as const } : {})}
       />
       <WithSpend
-        fallback={<Stat label="Grasp AI this month" loading value="" />}
+        fallback={
+          <Stat change="" label="Grasp AI this month" loading value="" />
+        }
         spend={spend}
       >
         {(read) => <AiFigure rows={rows} spend={read} />}
@@ -575,16 +570,22 @@ const Progressed = ({ row }: { row: Row }) => {
   );
 };
 
+/** Why its AI spend isn't there: not set up, its release doesn't report it, or not read. */
+const unspentWords = (row: Row, spend: Spend): string => {
+  if (row.entry.state === "not_deployed") {
+    return missingWords(row);
+  }
+  return spend?.unreported.some(({ clientId }) => clientId === row.id) === true
+    ? "Not reported by its release"
+    : "Not read now";
+};
+
 /** Its AI on Grasp's key this month against its limit, or why that isn't there. */
 const Ai = ({ row, spend }: { row: Row; spend: Spend }) => {
   const own = spend === null ? undefined : spendOf(spend, row);
   if (own === undefined) {
     return (
-      <span {...stylex.props(styles.quiet)}>
-        {spend?.unreported.includes(row.name) === true
-          ? "Not reported by its release"
-          : "Not read now"}
-      </span>
+      <span {...stylex.props(styles.quiet)}>{unspentWords(row, spend)}</span>
     );
   }
   const { graspAi } = own;
@@ -621,7 +622,7 @@ const Ai = ({ row, spend }: { row: Row; spend: Spend }) => {
 const aiWords = (row: Row, spend: Spend): string => {
   const own = spend === null ? undefined : spendOf(spend, row);
   if (own === undefined) {
-    return "Not read now";
+    return unspentWords(row, spend);
   }
   return own.graspAi === null || own.graspAi.limit === 0
     ? `${dollarsOf(own.thisMonth)}, no limit reported`
@@ -630,30 +631,16 @@ const aiWords = (row: Row, spend: Spend): string => {
 
 /**
  * How many people did something themselves last week (the last whole
- * week, core's next to last): none, a few ("1–4", as core sends 1 to 4),
- * else how many; null when its summary doesn't share it.
+ * week, core's next to last), in a line: "8 active last week", "1–4" as
+ * core sends 1 to 4, "Nobody"; or that core hasn't counted that week yet.
+ * Only for a summary that shares how the company uses Grasp.
  */
-const peopleOf = (row: Row): AdminPeople | null => {
-  const activity = row.summary?.activity;
-  return activity === null || activity === undefined
-    ? null
-    : (activity.activePeople.at(-2)?.people ?? 0);
-};
-
-type AdminPeople = NonNullable<
-  AdminSummary["activity"]
->["activePeople"][number]["people"];
-
-/** Last week's active people in words: "Nobody", "1–4", "12", or why it isn't there. */
-const peopleWords = (row: Row): string => {
-  const people = peopleOf(row);
-  if (people === null) {
-    return missingWords(row);
+const peopleLine = (activity: Activity): string => {
+  const people = activity.activePeople.at(-2)?.people;
+  if (people === undefined) {
+    return "Active people not counted yet";
   }
-  if (people === 0) {
-    return "Nobody";
-  }
-  return people === fewPeople ? fewPeople : String(people);
+  return `${people === 0 ? "Nobody" : String(people)} active last week`;
 };
 
 /**
@@ -661,10 +648,11 @@ const peopleWords = (row: Row): string => {
  * over how many people did something themselves last week.
  */
 const Use = ({ row }: { row: Row }) => {
-  const week = weekOf(row.summary);
-  if (week === null) {
+  const activity = row.summary?.activity;
+  if (activity === null || activity === undefined) {
     return <span {...stylex.props(styles.quiet)}>{missingWords(row)}</span>;
   }
+  const week = weekOf(activity);
   const runs = week.done + week.failed;
   return (
     <span {...stylex.props(styles.cell)}>
@@ -678,9 +666,7 @@ const Use = ({ row }: { row: Row }) => {
           </span>
         ) : null}
       </span>
-      <span
-        {...stylex.props(styles.quiet)}
-      >{`${peopleWords(row)} active last week`}</span>
+      <span {...stylex.props(styles.quiet)}>{peopleLine(activity)}</span>
     </span>
   );
 };
@@ -700,7 +686,11 @@ const healthOf = (row: Row): { tone: BadgeVariant; words: string } => {
     return { tone: "destructive", words: "Last deploy failed" };
   }
   const connectors = row.summary?.connectors;
-  if (connectors !== null && connectors !== undefined) {
+  if (connectors === null) {
+    // Connect didn't answer its core.
+    return { tone: "warning", words: "Connectors not read" };
+  }
+  if (connectors !== undefined) {
     if (connectors.stopped > 0) {
       return {
         tone: "destructive",
@@ -753,18 +743,17 @@ const Next = ({ row }: { row: Row }) => {
 };
 
 /** Its use in a line, for a card: runs, what failed, and last week's people. */
-const useWords = (
-  row: Row,
-  week: { done: number; failed: number } | null
-): string => {
-  if (week === null) {
+const useWords = (row: Row): string => {
+  const activity = row.summary?.activity;
+  if (activity === null || activity === undefined) {
     return missingWords(row);
   }
+  const week = weekOf(activity);
   const runs =
     week.done + week.failed === 0
       ? "No runs"
       : `${week.done} ${plural(week.done, "run", "runs")}, ${week.failed} failed`;
-  return `${runs}; ${peopleWords(row)} active last week`;
+  return `${runs}; ${peopleLine(activity)}`;
 };
 
 /** One fact on a card: its quiet label, then its value. */
@@ -810,37 +799,34 @@ const OrganizationRow = ({ row, spend }: { row: Row; spend: SpendRead }) => (
 );
 
 /** One organization as a card, below 84rem: its name, how it stands, then its facts. */
-const OrganizationCard = ({ row, spend }: { row: Row; spend: SpendRead }) => {
-  const week = weekOf(row.summary);
-  return (
-    <Item asChild>
-      <Link params={{ clientId: row.id }} to="/organizations/$clientId">
-        <ItemContent>
-          <ItemTitle>{row.name}</ItemTitle>
-          <ItemDescription>
-            <span {...stylex.props(styles.card)}>
-              <State row={row} />
-              <span {...stylex.props(styles.facts)}>
-                <Fact label="Health">{healthOf(row).words}</Fact>
-                <Fact label="Last 7 days">{useWords(row, week)}</Fact>
-                <Fact label="Grasp AI">
-                  <WithSpend fallback="Reading…" spend={spend}>
-                    {(read) => aiWords(row, read)}
-                  </WithSpend>
-                </Fact>
-                <Fact label="Next">
-                  {row.needs[0] === undefined
-                    ? "Nothing waits on Grasp"
-                    : needText(row.needs[0])}
-                </Fact>
-              </span>
+const OrganizationCard = ({ row, spend }: { row: Row; spend: SpendRead }) => (
+  <Item asChild>
+    <Link params={{ clientId: row.id }} to="/organizations/$clientId">
+      <ItemContent>
+        <ItemTitle>{row.name}</ItemTitle>
+        <ItemDescription>
+          <span {...stylex.props(styles.card)}>
+            <State row={row} />
+            <span {...stylex.props(styles.facts)}>
+              <Fact label="Health">{healthOf(row).words}</Fact>
+              <Fact label="Last 7 days">{useWords(row)}</Fact>
+              <Fact label="Grasp AI">
+                <WithSpend fallback="Reading…" spend={spend}>
+                  {(read) => aiWords(row, read)}
+                </WithSpend>
+              </Fact>
+              <Fact label="Next">
+                {row.needs[0] === undefined
+                  ? "Nothing waits on Grasp"
+                  : needText(row.needs[0])}
+              </Fact>
             </span>
-          </ItemDescription>
-        </ItemContent>
-      </Link>
-    </Item>
-  );
-};
+          </span>
+        </ItemDescription>
+      </ItemContent>
+    </Link>
+  </Item>
+);
 
 const Organizations = ({ rows, spend }: { rows: Row[]; spend: SpendRead }) => (
   <section {...stylex.props(styles.part)}>

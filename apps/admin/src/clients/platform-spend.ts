@@ -90,11 +90,11 @@ export const platformSpend = async (
     organizations: active.length,
     unread: reports
       .filter(({ report }) => report === null)
-      .map(({ client }) => client.name),
+      .map(({ client }) => ({ clientId: client.id, name: client.name })),
     unreported: reports
       .filter(
         ({ report }) => report !== null && report.platformSpend === undefined
       )
-      .map(({ client }) => client.name),
+      .map(({ client }) => ({ clientId: client.id, name: client.name })),
   };
 };

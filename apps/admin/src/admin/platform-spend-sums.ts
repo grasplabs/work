@@ -46,6 +46,12 @@ export interface OrganizationSpend {
   graspAi: { spent: number; limit: number } | null;
 }
 
+/** An organization the sums name: its stable id, and its name to say. */
+export interface SpendOrganization {
+  clientId: string;
+  name: string;
+}
+
 /** The platform's: every active organization's summed, and each one's. */
 export interface PlatformSpend extends SpendOverview {
   /** Each organization whose core reported it, the dearest this month first, then last. */
@@ -53,12 +59,12 @@ export interface PlatformSpend extends SpendOverview {
   /** How many active organizations were read. */
   organizations: number;
   /** The active organizations whose core didn't answer: not in the sums. */
-  unread: string[];
+  unread: SpendOrganization[];
   /**
    * The active organizations whose core answered on a release that
    * doesn't report what Grasp's features cost: not in the sums either.
    */
-  unreported: string[];
+  unreported: SpendOrganization[];
 }
 
 /** `rows` summed by `keyOf`, the dearest first. */
