@@ -1,4 +1,5 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { getCurrentTools } from "@earendil-works/pi-ai";
 import type {
   AssistantMessage,
   Message,
@@ -200,10 +201,7 @@ const gateway = "grasp";
  * the chat agent always has some; pi's summary of the chat offers none.
  */
 const declaresTools = ({ messages }: TranscriptContext): boolean =>
-  messages.some(
-    (message) =>
-      message.role === "system" && (message.toolsAdded ?? []).length > 0
-  );
+  getCurrentTools(messages).length > 0;
 
 /**
  * How the request ID of a notice to turn `turnId` begins: pi keeps it with
@@ -1367,9 +1365,10 @@ export class ChatHarness {
     );
     // The turn's answers reach pi without the tags that mark what was read
     // from outside as data (untrusted-tags.ts), should the model copy one:
-    // what pi stores and streams, and all that is made of it (the chat,
-    // its channels, the Brain), never shows one. Not pi's summary of the
-    // chat, a request that declares no tools, which only the model reads.
+    // the answer's text as pi stores and streams it, and all that is made
+    // of it (the chat, its channels, the Brain), never shows one. Not pi's
+    // summary of the chat, a request that declares no tools, which only
+    // the model reads.
     const stream: typeof admitted.stream = (model, sent, options) => {
       const events = admitted.stream(model, sent, options);
       return declaresTools(sent) ? withoutUntrustedTagsIn(events) : events;
