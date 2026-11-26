@@ -7,7 +7,8 @@ import {
   codeResults,
   codeStep,
   says,
-  withoutMarking,
+  withoutReadFrom,
+  returnedText,
 } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
@@ -114,12 +115,12 @@ const chatUsing = async (
   return async () => {
     await chat.ask("Look in the app.");
     const [result] = await codeResults(chat.stub, chat.chat.id);
-    return result === undefined ? undefined : withoutMarking(result.text);
+    return result === undefined ? undefined : withoutReadFrom(result.text);
   };
 };
 
 const answer = (answers: { invoice: string; salary: string; send: string }) =>
-  `Returned:\n${JSON.stringify(answers)}`;
+  returnedText(answers);
 
 /** A team of the company's, with `userIds` in it. */
 const teamOf = async (...userIds: string[]): Promise<string> => {

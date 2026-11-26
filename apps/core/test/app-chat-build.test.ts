@@ -11,6 +11,7 @@ import {
   toolResults,
   toolStep,
   turnChecks,
+  returnedOf,
 } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInApi, unique } from "./sign-in.ts";
@@ -164,7 +165,7 @@ const calling = (app: string) =>
 
 /** What a code step returned, as JSON. */
 const returned = (text: string | undefined): unknown =>
-  z.unknown().parse(JSON.parse(text?.replace("Returned:\n", "") ?? "null"));
+  z.unknown().parse(returnedOf(text));
 
 describe("an App's chat building its App", { timeout: 180_000 }, () => {
   it("reads the docs, defines the board's table with the tools, hears exactly what a guess got wrong, and drafts a board that passes", async () => {

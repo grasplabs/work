@@ -1,7 +1,8 @@
 // The formats a string can be held to besides `email`: RFC 3339's
 // `full-date` and `date-time`, as JSON Schema's `date` and `date-time`
-// read them, and a web address as the WHATWG URL parser reads one. Each
-// only checks: the value stays the text it was.
+// read them, a web address as the WHATWG URL parser reads one, and one
+// segment of a URL's path as connect's egress sends it. Each only checks:
+// the value stays the text it was.
 
 const datePattern = /^(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2})$/u;
 
@@ -77,6 +78,42 @@ const invisible = /\p{Default_Ignorable_Code_Point}/u;
 // with `isWellFormed` (nor the URL with `URL.canParse`), because pages run
 // it too, in browsers older than those.
 const loneSurrogate = /\p{Cs}/u;
+
+/**
+ * The characters a path parameter's value may not decode to, as a regex
+ * character class's contents: path and query delimiters, matrix and
+ * custom-method separators (`;`, `:`), a percent sign (so it isn't decoded
+ * a second time), a backslash, and controls.
+ */
+export const forbiddenInValue = String.raw`/\\?#%;:\u0000-\u001F\u007F`;
+
+/** A path parameter's value, decoded: text with none of `forbiddenInValue`. */
+export const segmentValuePattern = new RegExp(`^[^${forbiddenInValue}]+$`, "u");
+
+/**
+ * Batch endpoints (Graph's `/$batch`, Google's `/batch/...`) carry any
+ * number of requests to any path in one body, past the path allowlist: no
+ * route declares one, and no value stands for one.
+ */
+export const isBatchSegment = (segment: string): boolean => {
+  const lower = segment.toLowerCase();
+  return lower === "batch" || lower.startsWith("$batch");
+};
+
+/**
+ * One whole segment of a URL's path, as a route's `{name}` takes it: text
+ * with none of `forbiddenInValue`, not a dot segment (`.`, `..`), not a
+ * batch endpoint, and no lone surrogate, which no URL can encode. Connect's
+ * egress sends a value standing alone in a segment only if this holds
+ * (`pathMatches`), so `v.string().segment()` takes exactly the values it
+ * sends.
+ */
+export const isPathSegment = (text: string): boolean =>
+  segmentValuePattern.test(text) &&
+  text !== "." &&
+  text !== ".." &&
+  !isBatchSegment(text) &&
+  !loneSurrogate.test(text);
 
 /**
  * An absolute `http` or `https` URL, read as the WHATWG URL parser reads

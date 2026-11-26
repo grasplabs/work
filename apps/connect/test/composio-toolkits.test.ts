@@ -34,7 +34,9 @@ const firstOf = (
 ): string | undefined =>
   Object.entries(shipped[toolkit] ?? {})
     .toSorted(([first], [second]) => first.localeCompare(second))
-    .find(([, toolClass]) => classes.includes(toolClass))?.[0];
+    .find(([, reviewed]) =>
+      classes.includes(typeof reviewed === "object" ? reviewed.class : reviewed)
+    )?.[0];
 
 /** Each reviewed toolkit, with a read, a change if it has one, and a tool nobody classed. */
 const toolkits = Object.keys(shipped)

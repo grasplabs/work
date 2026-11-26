@@ -279,10 +279,11 @@ const stringBody = (draft: DescriptorDraft): Body => {
   const datetime = setFlag(draft, "datetime");
   const date = setFlag(draft, "date");
   const url = setFlag(draft, "url");
-  if ([email, datetime, date, url].filter(Boolean).length > 1) {
+  const segment = setFlag(draft, "segment");
+  if ([email, datetime, date, url, segment].filter(Boolean).length > 1) {
     refuse(
       "definition.invalid_schema",
-      "A string has one format at most: email, datetime, date or url."
+      "A string has one format at most: email, datetime, date, url or segment."
     );
   }
   return {
@@ -294,6 +295,7 @@ const stringBody = (draft: DescriptorDraft): Body => {
       ...(datetime ? { datetime: true } : {}),
       ...(date ? { date: true } : {}),
       ...(url ? { url: true } : {}),
+      ...(segment ? { segment: true } : {}),
       ...withoutZeroMin(bounds(draft, isLength)),
     },
   };

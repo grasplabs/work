@@ -608,8 +608,8 @@ export const chatCodeRuns = sqliteTable(
     endedAt: integer("ended_at", { mode: "timestamp_ms" }),
     /**
      * The connections whose own words the run handed over without calling
-     * them, and which (`OutsideText`): its result is marked with them as
-     * text from outside (`describeRun`). Never the chat's provenance, nor
+     * them, and which (`OutsideText`): its result names them as read from
+     * outside (`describeRun`'s `readFrom`). Never the chat's provenance, nor
      * what the run's result rests on (`chat_run_sources`). Null for none.
      */
     outsideText: text("outside_text", { mode: "json" }).$type<

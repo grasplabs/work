@@ -25,7 +25,13 @@ import { confirmPendingAction } from "../src/pending-actions.ts";
 import { sessionRecheckMs } from "../src/session-check.ts";
 import { maxChatsPerPerson } from "../src/workspace.ts";
 import { newTeam } from "./admin-teams.ts";
-import { codeStep, model, pausedReply, says } from "./agent-chat.ts";
+import {
+  codeStep,
+  model,
+  pausedReply,
+  says,
+  returnedText,
+} from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { connectionIn } from "./contexts.ts";
@@ -1335,7 +1341,7 @@ describe("chats", () => {
           end: "done",
         },
         // The step's result, paired with its code.
-        { role: "result", callId, text: "Returned:\n4", failed: false },
+        { role: "result", callId, text: returnedText(4), failed: false },
         { role: "assistant", text: "Two plus two is four.", end: "done" },
       ],
       // Once stored, the answer is no longer shown as being written.

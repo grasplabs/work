@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
+import {
+  chatOf,
+  codeResults,
+  codeStep,
+  model,
+  says,
+  returnedText,
+} from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
@@ -79,7 +86,7 @@ describe("a turn nobody was there for", setUpTime, () => {
       others: others.length,
       calls: reached,
     }).toStrictEqual({
-      said: ["Returned:\nheld"],
+      said: [returnedText("held")],
       action: "mail.search",
       input: JSON.stringify(filing),
       unattended: true,
@@ -117,7 +124,9 @@ describe("a turn nobody was there for", setUpTime, () => {
       sent: await mail.did(),
     }).toStrictEqual({
       said: [
-        "Returned:\nYour company hasn't turned this kind of action on for you, so it wasn't done. An admin can turn it on.",
+        returnedText(
+          "Your company hasn't turned this kind of action on for you, so it wasn't done. An admin can turn it on."
+        ),
       ],
       waiting: [],
       sent: { calls: 0, sent: [] },
@@ -153,7 +162,9 @@ describe("a turn nobody was there for", setUpTime, () => {
     await chat.stub.askUnattended(inTeams.id, { text: "Start it.", model });
     const [result] = await codeResults(chat.stub, inTeams.id);
     expect(result?.text).toBe(
-      "Returned:\nNobody asked for this just now, so the agent can only read. What it wants to change waits for its person."
+      returnedText(
+        "Nobody asked for this just now, so the agent can only read. What it wants to change waits for its person."
+      )
     );
   });
 });

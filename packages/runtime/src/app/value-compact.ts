@@ -20,7 +20,7 @@ import type {
 // `v.string().max(200).optional()`. Everything a descriptor holds by
 // default is left out (`descriptorVersion`, `nullable: false`, `presence:
 // "required"`, `trim: false`, `email: false`, `integer: false`, and the
-// formats `datetime`, `date` and `url` when they aren't set), a flag is
+// formats `datetime`, `date`, `url` and `segment` when they aren't set), a flag is
 // only ever `true`, and a default is the `default` it falls back to.
 //
 // One reader, one writer: `descriptorFromCompact` reads the compact form
@@ -49,6 +49,7 @@ export type CompactKind =
       readonly datetime?: true;
       readonly date?: true;
       readonly url?: true;
+      readonly segment?: true;
       readonly min?: number;
       readonly max?: number;
     }
@@ -101,7 +102,7 @@ const kindKeys: Readonly<Record<string, readonly string[]>> = {
   number: ["integer", "min", "max"],
   object: ["fields"],
   record: ["value"],
-  string: ["trim", "email", "datetime", "date", "url", "min", "max"],
+  string: ["trim", "email", "datetime", "date", "url", "segment", "min", "max"],
   union: ["members"],
   duration: [],
   file: [],
@@ -122,6 +123,7 @@ const flagKeys: ReadonlySet<string> = new Set([
   "datetime",
   "date",
   "url",
+  "segment",
   "integer",
 ]);
 
@@ -160,6 +162,7 @@ const scalarPart = (
       ...(descriptor.datetime === true ? { datetime: true } : {}),
       ...(descriptor.date === true ? { date: true } : {}),
       ...(descriptor.url === true ? { url: true } : {}),
+      ...(descriptor.segment === true ? { segment: true } : {}),
       ...boundsOf(descriptor),
     };
   }
@@ -465,6 +468,7 @@ const kindProperties: Readonly<Record<string, Record<string, unknown>>> = {
     datetime: flag,
     date: flag,
     url: flag,
+    segment: flag,
     min: count,
     max: count,
   },

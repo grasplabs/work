@@ -6,7 +6,13 @@ import { turnDocumentsMax } from "../src/agent.ts";
 import { chatFileTextMaxBytes } from "../src/chat-files.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
-import { codeResults, codeStep, model, says } from "./agent-chat.ts";
+import {
+  codeResults,
+  codeStep,
+  model,
+  returnedOf,
+  says,
+} from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -213,7 +219,7 @@ describe("an agent's documents", slow, () => {
       named: named.length,
       first: named[0]?.name,
       lastNamed: asked.includes(listed.at(-1)?.id ?? ""),
-      counted: counted?.text.endsWith(String(turnDocumentsMax + 1)),
+      counted: returnedOf(counted?.text) === turnDocumentsMax + 1,
     }).toStrictEqual({
       named: turnDocumentsMax,
       first: "a.md",

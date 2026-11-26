@@ -2979,7 +2979,7 @@ export const tools = {
     reach: "company",
     routes: ["GET /activityFields/{field_code}"],
     args: {
-      field_code: v.string(),
+      field_code: v.string().segment(),
       include_fields: v.array(v.enum(["ui_visibility"])).optional(),
     },
     returns: answers["activityFields.get"],
@@ -3331,7 +3331,7 @@ export const tools = {
     routes: ["PATCH /deals/{id}/discounts/{discount_id}"],
     args: {
       id: v.number().integer(),
-      discount_id: v.string(),
+      discount_id: v.string().segment(),
       description: v.string().optional(),
       amount: v.number().optional(),
       type: v.enum(["percentage","amount"]).optional(),
@@ -3416,7 +3416,7 @@ export const tools = {
     reach: "company",
     routes: ["GET /dealFields/{field_code}"],
     args: {
-      field_code: v.string(),
+      field_code: v.string().segment(),
       include_fields: v.array(v.enum(["ui_visibility","important_fields","required_fields"])).optional(),
     },
     returns: answers["dealFields.get"],
@@ -3429,7 +3429,7 @@ export const tools = {
     routes: ["GET /deals/{id}/convert/status/{conversion_id}"],
     args: {
       id: v.number().integer(),
-      conversion_id: v.string(),
+      conversion_id: v.string().segment(),
     },
     returns: answers["deals.convert.status.get"],
     handler: async (args, api) => await api.get("/deals/{id}/convert/status/{conversion_id}", { path: { id: args.id, conversion_id: args.conversion_id }, returns: answers["deals.convert.status.get"] }),
@@ -3682,7 +3682,7 @@ export const tools = {
     reach: "company",
     routes: ["GET /personFields/{field_code}"],
     args: {
-      field_code: v.string(),
+      field_code: v.string().segment(),
       include_fields: v.array(v.enum(["ui_visibility","important_fields","required_fields"])).optional(),
     },
     returns: answers["personFields.get"],
@@ -3694,7 +3694,7 @@ export const tools = {
     reach: "company",
     routes: ["PATCH /personFields/{field_code}"],
     args: {
-      field_code: v.string(),
+      field_code: v.string().segment(),
       field_name: v.string().optional(),
       ui_visibility: v.object({
         add_visible_flag: v.boolean().optional(),
@@ -3920,7 +3920,7 @@ export const tools = {
     reach: "company",
     routes: ["GET /organizationFields/{field_code}"],
     args: {
-      field_code: v.string(),
+      field_code: v.string().segment(),
       include_fields: v.array(v.enum(["ui_visibility","important_fields","required_fields"])).optional(),
     },
     returns: answers["organizationFields.get"],
@@ -3932,7 +3932,7 @@ export const tools = {
     reach: "company",
     routes: ["PATCH /organizationFields/{field_code}"],
     args: {
-      field_code: v.string(),
+      field_code: v.string().segment(),
       field_name: v.string().optional(),
       ui_visibility: v.object({
         add_visible_flag: v.boolean().optional(),
@@ -4247,7 +4247,7 @@ export const tools = {
     reach: "company",
     routes: ["GET /productFields/{field_code}"],
     args: {
-      field_code: v.string(),
+      field_code: v.string().segment(),
       include_fields: v.array(v.enum(["ui_visibility"])).optional(),
     },
     returns: answers["productFields.get"],
@@ -4259,7 +4259,7 @@ export const tools = {
     reach: "company",
     routes: ["PATCH /productFields/{field_code}"],
     args: {
-      field_code: v.string(),
+      field_code: v.string().segment(),
       field_name: v.string().optional(),
       ui_visibility: v.object({
         add_visible_flag: v.boolean().optional(),
@@ -4293,7 +4293,7 @@ export const tools = {
     reach: "company",
     routes: ["POST /leads/{id}/convert/deal"],
     args: {
-      id: v.string(),
+      id: v.string().segment(),
       stage_id: v.number().integer().optional(),
       pipeline_id: v.number().integer().optional(),
     },
@@ -4306,8 +4306,8 @@ export const tools = {
     reach: "company",
     routes: ["GET /leads/{id}/convert/status/{conversion_id}"],
     args: {
-      id: v.string(),
-      conversion_id: v.string(),
+      id: v.string().segment(),
+      conversion_id: v.string().segment(),
     },
     returns: answers["leads.convert.status.get"],
     handler: async (args, api) => await api.get("/leads/{id}/convert/status/{conversion_id}", { path: { id: args.id, conversion_id: args.conversion_id }, returns: answers["leads.convert.status.get"] }),
@@ -4541,7 +4541,7 @@ export const tools = {
     reach: "company",
     routes: ["GET /projectFields/{field_code}"],
     args: {
-      field_code: v.string(),
+      field_code: v.string().segment(),
     },
     returns: answers["projectFields.get"],
     handler: async (args, api) => await api.get("/projectFields/{field_code}", { path: { field_code: args.field_code }, returns: answers["projectFields.get"] }),
@@ -4552,7 +4552,7 @@ export const tools = {
     reach: "company",
     routes: ["PATCH /projectFields/{field_code}"],
     args: {
-      field_code: v.string(),
+      field_code: v.string().segment(),
       field_name: v.string().optional(),
       ui_visibility: v.object({
         add_visible_flag: v.boolean().optional(),

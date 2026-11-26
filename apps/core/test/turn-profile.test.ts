@@ -17,7 +17,13 @@ import {
 import { addSource, forgetAs, rememberAs } from "../src/brain-next.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
-import { chatOf, personalChatsOf, says, setObjectEnv } from "./agent-chat.ts";
+import {
+  chatOf,
+  personalChatsOf,
+  returnedOf,
+  says,
+  setObjectEnv,
+} from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { signedInWithRole, unique } from "./sign-in.ts";
@@ -224,7 +230,7 @@ describe("the profile a chat starts with", setUpTime, () => {
           await ask(question);
           const recall = latestRecallIn(chats.provider.requests.at(-1)?.body);
           const { evidence } = handedSchema.parse(
-            JSON.parse(recall.slice(recall.indexOf("{")))
+            returnedOf(recall.slice(recall.indexOf("{")))
           );
           handed.push(evidence);
         }

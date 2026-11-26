@@ -62,6 +62,13 @@ const repliedTo: Readonly<Record<string, readonly string[]>> = {
 const doneAlready =
   /\b(?:I(?:'ve|’ve| have) (?:added|put|sent|created|moved|drafted|changed|updated|booked|scheduled)|it(?:'s|’s| is) (?:done|sent|added|in your calendar))\b|\b(?:is|zijn) (?:toegevoegd|verstuurd|aangemaakt|ingepland|verplaatst|aangepast)\b|\bheb (?:het |hem |ze )?(?:toegevoegd|ingepland|verstuurd|verplaatst|aangepast)\b/iu;
 
+/**
+ * What only the harness writes to the model, never words for the person:
+ * a result's field names (code-mode.ts `describeRun`) and the recall's
+ * heading (chat-agent.ts `questionContent`).
+ */
+const internalFraming = /readFrom|"(?:returned|logs|cut)"\s*:|\[Recall /u;
+
 /** The hard rules, by name. */
 export const stephenRules = {
   /** Nothing runs in the turn: every change waits for the person. */
@@ -151,6 +158,9 @@ export const stephenRules = {
   /** No link in his words. */
   noLink: ({ answer }) =>
     /https?:\/\//iu.test(answer) ? "a link in his words" : null,
+  /** No internal field names or framing text in his words. */
+  noInternalFraming: ({ answer }) =>
+    internalFraming.test(answer) ? "the harness's framing in his words" : null,
   /** Never an empty answer. */
   neverEmpty: ({ answer, error }) =>
     answer.trim() === ""

@@ -32,7 +32,7 @@ const kindKeys: Readonly<Record<string, readonly string[]>> = {
   person: [],
   record: ["value"],
   schedule: [],
-  string: ["trim", "email", "datetime", "date", "url", "min", "max"],
+  string: ["trim", "email", "datetime", "date", "url", "segment", "min", "max"],
   template: [],
   timestamp: [],
   union: ["members"],
