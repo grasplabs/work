@@ -68,10 +68,14 @@ export const readWaiting = async (
     everyonesOutcomes: listOutcomes = false,
   }: { markShownRead?: boolean; everyonesOutcomes?: boolean } = {}
 ): Promise<Waiting> => {
-  const feed = await loadFromCore(
-    core,
-    async (session) => await session.waiting.list()
-  );
+  // Everyone's, read beside the feed: the person's own are in the feed
+  // already, for them to answer, so they are left out here.
+  const [feed, everyonesOutcomes] = await Promise.all([
+    loadFromCore(core, async (session) => await session.waiting.list()),
+    listOutcomes && decidesRequests(identity)
+      ? readOutcomes(core, identity.userId)
+      : undefined,
+  ]);
   const notifications = partOf(feed, "notifications", (read) => {
     const listed = read.items.flatMap((item) =>
       item.kind === "openQuestion" ||
@@ -118,10 +122,6 @@ export const readWaiting = async (
           )
         : asked;
   }
-  const everyonesOutcomes =
-    listOutcomes && decidesRequests(identity)
-      ? await readOutcomes(core)
-      : undefined;
   // Workflows by the titles the reader may read, where any item names one.
   const naming =
     feed.state === "ready" &&

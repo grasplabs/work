@@ -644,13 +644,12 @@ const readyOf = <T>(part: Loaded<T> | undefined): T | undefined =>
  * Everyone's open calls of unknown outcome, for the organization's own
  * admins to follow up with each person: only that person can say what
  * became of it, so there is nothing here to decide and nothing it blocks.
- * The admin's own are theirs to answer already (`outcomeItems`), so they
- * aren't listed twice.
+ * The admin's own are theirs to answer already (`outcomeItems`), so
+ * `readWaiting` leaves them out.
  */
 const everyonesOutcomeItems = (
   waiting: Waiting,
-  viewer: Viewer,
-  own: readonly UnknownOutcome[]
+  viewer: Viewer
 ): InboxItem[] => {
   // The organization's own admins alone, as `readWaiting` reads them for.
   const everyones = decidesRequests(viewer)
@@ -659,30 +658,27 @@ const everyonesOutcomeItems = (
   if (everyones === undefined) {
     return [];
   }
-  const mine = new Set(own.map(({ cursor }) => JSON.stringify(cursor)));
-  return everyones.listed
-    .filter(({ cursor }) => !mine.has(JSON.stringify(cursor)))
-    .map((listing) => {
-      const person =
-        everyones.people.get(listing.onBehalfOf) ?? listing.onBehalfOf;
-      const change = listing.title ?? listing.action;
-      const connection = listing.connectionName ?? listing.connectionId;
-      return {
-        id: `everyonesOutcome:${listing.id}`,
-        kind: "everyonesOutcome",
-        title: change,
-        context: change,
-        summary: t`${person} · ${connection}`,
-        face: person,
-        logo: { name: connection },
-        // Its page shows what became of it and its facts (item-detail.tsx).
-        body: [],
-        facts: [],
-        date: listing.sentAt,
-        urgent: false,
-        source: { type: "everyonesOutcome", listing, person },
-      };
-    });
+  return everyones.listed.map((listing) => {
+    const person =
+      everyones.people.get(listing.onBehalfOf) ?? listing.onBehalfOf;
+    const change = listing.title ?? listing.action;
+    const connection = listing.connectionName ?? listing.connectionId;
+    return {
+      id: `everyonesOutcome:${listing.id}`,
+      kind: "everyonesOutcome",
+      title: change,
+      context: change,
+      summary: `${person} · ${connection}`,
+      face: person,
+      logo: { name: connection },
+      // Its page shows what became of it and its facts (item-detail.tsx).
+      body: [],
+      facts: [],
+      date: listing.sentAt,
+      urgent: false,
+      source: { type: "everyonesOutcome", listing, person },
+    };
+  });
 };
 
 /**
@@ -742,7 +738,7 @@ export const inboxItems = (
     ...heldItems(held, me),
     ...heldStartItems(heldStarts, me),
     ...outcomeItems(outcomes, me),
-    ...everyonesOutcomeItems(waiting, viewer, outcomes),
+    ...everyonesOutcomeItems(waiting, viewer),
     ...(requests === undefined ? [] : requestItems(requests)),
     ...bindingItems(bindings, readAt),
     ...skillShareItems(skillShares),

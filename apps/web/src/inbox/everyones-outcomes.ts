@@ -22,9 +22,10 @@ export interface Outcomes {
   people: ReadonlyMap<string, string>;
 }
 
-/** Every open call of unknown outcome, each page within its own few seconds. */
+/** Every open call of unknown outcome but `own`'s, each page within its own few seconds. */
 export const readOutcomes = async (
-  core: Pick<CoreConnection, "withSession">
+  core: Pick<CoreConnection, "withSession">,
+  own: string
 ): Promise<Loaded<Outcomes>> => {
   const [listed, people] = await Promise.all([
     loadEveryPage(
@@ -39,5 +40,11 @@ export const readOutcomes = async (
   if (people.state !== "ready") {
     return people;
   }
-  return { state: "ready", data: { listed: listed.data, people: people.data } };
+  return {
+    state: "ready",
+    data: {
+      listed: listed.data.filter(({ onBehalfOf }) => onBehalfOf !== own),
+      people: people.data,
+    },
+  };
 };

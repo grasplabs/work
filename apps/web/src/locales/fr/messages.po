@@ -1273,10 +1273,6 @@ msgstr "{percent} du contexte"
 msgid "{percent}% known now"
 msgstr "{percent} % connu à ce jour"
 
-#: src/inbox/items.ts
-msgid "{person} · {connection}"
-msgstr "{person} · {connection}"
-
 #: src/workflows/activity-words.ts
 msgid "{person} approved {alias} for version {version}"
 msgstr "{person} a approuvé {alias} pour la version {version}"

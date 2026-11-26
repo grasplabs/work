@@ -442,7 +442,7 @@ describe(inboxItems, () => {
     expect(kinds).not.toContain("bindingApproval");
   });
 
-  it("lists everyone's open changes of unknown outcome for the organization's own admin to follow up, by whose they are, but not their own twice", () => {
+  it("lists everyone's open changes of unknown outcome for the organization's own admin to follow up, by whose they are", () => {
     const listing = (id: string, cursor: string, onBehalfOf: string) => ({
       effectKeyHash: `hash-${id}`,
       id,
@@ -461,16 +461,13 @@ describe(inboxItems, () => {
       everyonesOutcomes: {
         state: "ready",
         data: {
-          listed: [
-            listing("theirs", "2.def", "user-bo"),
-            // The admin's own, which the inbox lists for them to answer already.
-            listing("own", "1.abc", "user-ada"),
-          ],
+          listed: [listing("theirs", "2.def", "user-bo")],
           people: new Map([["user-bo", "Bo Berg"]]),
         },
       },
     } satisfies Waiting;
-    const followed = (viewer: typeof admin | typeof member) =>
+    const staff = { ...admin, staff: true } as const;
+    const followed = (viewer: typeof admin | typeof member | typeof staff) =>
       inboxItems(read, viewer, readAt)
         .filter(({ kind }) => kind === "everyonesOutcome")
         .map(({ id, face, summary, urgent }) => ({
@@ -480,7 +477,11 @@ describe(inboxItems, () => {
           urgent,
         }));
 
-    expect({ admin: followed(admin), member: followed(member) }).toStrictEqual({
+    expect({
+      admin: followed(admin),
+      member: followed(member),
+      staff: followed(staff),
+    }).toStrictEqual({
       admin: [
         {
           id: "everyonesOutcome:theirs",
@@ -490,6 +491,7 @@ describe(inboxItems, () => {
         },
       ],
       member: [],
+      staff: [],
     });
   });
 
