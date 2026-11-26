@@ -125,9 +125,18 @@ export interface VoiceLine {
 export interface VoiceAnswered {
   /** How many of their answers are written down now; the same as sent when Mistral had no new one yet. */
   noted: number;
-  /** The conversation of this session, as Mistral wrote it down. */
+  /**
+   * The conversation of this session, as Mistral wrote it down, its last
+   * `interviewLimits.lines`: on a resume the page sends back the last that
+   * many of everything before (`before`).
+   */
   lines: VoiceLine[];
-  /** What was written down from it, checked against what was said; null when nothing new was said. */
+  /**
+   * What was written down from it, checked against what was said; null when
+   * nothing new was said. Its facts have no ID yet: the page gives each one
+   * as it keeps them, as it does a turn's. A request sent again with the
+   * same `noted` writes the same facts again: the page sends each once.
+   */
   turn: Pick<StephenTurn, "facts" | "changes" | "phase"> | null;
   /** What Stephen is told from now on: the page hands it the session (`session.update`). */
   instructions: string;

@@ -4,7 +4,10 @@ import {
   toBase64Url,
 } from "@grasp-os/shared/encoding";
 import { requestErrors } from "@grasp-os/shared/errors";
-import { interviewPhases } from "@grasp-os/shared/interview-links";
+import {
+  interviewLimits,
+  interviewPhases,
+} from "@grasp-os/shared/interview-links";
 import { checkedTurn } from "@grasp-os/shared/interview-turn";
 import type { InterviewPhase } from "@grasp-os/shared/interview-turn";
 import {
@@ -18,13 +21,6 @@ import type {
   VoiceLine,
   VoiceSessionJoin,
 } from "@grasp-os/shared/interview-voice";
-import {
-  inLanguage,
-  leadPartsOf,
-  LISTENING,
-  partsOf,
-  WHO,
-} from "@grasp-os/shared/interviewers/stephen";
 import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import type {
@@ -47,8 +43,8 @@ import {
   write,
 } from "./interview.ts";
 import type { Situation, TurnAsked } from "./interview.ts";
-import { interviewerText } from "./interviewer-text.ts";
-import { stephenVersion } from "./lab-marks.ts";
+import { interviewerText, voiceText } from "./interviewer-text.ts";
+import { voiceVersion } from "./lab-marks.ts";
 import { linkHeaders, linkRefusal, noCallerRefusal } from "./links.ts";
 import { onboardingStore } from "./store.ts";
 import type { TurnContext } from "./store.ts";
@@ -106,32 +102,6 @@ const turnDetection = {
   end_threshold: 0.33,
   min_silence_ms: 500,
 } as const;
-
-/** How he asks for an example: the page shows where to drop it. */
-const EXAMPLE =
-  "Then ask for one real example to share: their screen shows where to drop it.";
-
-/** What he does in the last part: the screen reads back what was written down. */
-const READ_BACK = `Say one short line that you will now read back what was written down, and call ${partFunction} with readback. The screen reads it back.`;
-
-/** What a live session needs that a turn doesn't: everything he writes is said out loud. */
-const SPOKEN = `# This conversation
-You talk and they talk, live and out loud. Everything you write is said exactly as you write it: write only the words you say. No labels, no lists, no brackets, no notes to yourself.
-- They can talk over you. When they do, stop, take what they said, and go on from there. Do not repeat the line you were cut off in unless they ask.
-- What they say is written down for you by someone else, from what they said: you only talk.
-- Each time you go to another part of the interview, call ${partFunction} with the name of that part first, then say your line.
-- What follows is renewed after each of their answers: always go by the latest.`;
-
-/** What a session is told whole, before where the interview stands, and its mark. */
-const voiceTextOf = async (
-  kind: InterviewKind,
-  locale: InterviewLocale
-): Promise<{ text: string; mark: string }> => {
-  const parts =
-    kind === "lead" ? leadPartsOf(READ_BACK) : partsOf(EXAMPLE, READ_BACK);
-  const text = inLanguage([WHO, parts, LISTENING, SPOKEN].join("\n\n"), locale);
-  return { text, mark: await sha256Hex(text) };
-};
 
 /**
  * What Stephen says as the session connects, said for him so the first
@@ -473,7 +443,7 @@ const open = async (
     await closeQuietly(env, earlier, requestId);
   }
   const [voice, company] = await Promise.all([
-    voiceTextOf(context.kind, asked.locale),
+    voiceText(context.kind, asked.locale),
     companyOf(env),
   ]);
   const before = asked.event === "start" ? [] : asked.before;
@@ -544,7 +514,7 @@ const open = async (
       mark: voice.mark,
       interviewer: "stephen",
       locale: asked.locale,
-      version: stephenVersion,
+      version: voiceVersion,
     });
     pass = await passOf(env, {
       session: id,
@@ -610,7 +580,7 @@ const answer = async (
   }
   const answers = heard.lines.filter(({ from }) => from === "person");
   const phase = heard.phase ?? asked.phase;
-  const voice = await voiceTextOf(context.kind, asked.locale);
+  const voice = await voiceText(context.kind, asked.locale);
   const answeredNow = (
     turn: VoiceAnswered["turn"],
     situation: Situation
@@ -618,7 +588,14 @@ const answer = async (
     Response.json(
       {
         noted: Math.max(asked.noted, answers.length),
-        lines: heard.lines,
+        // As the page may send them back (`before`): each line and their
+        // number within what a request takes.
+        lines: heard.lines
+          .slice(-interviewLimits.lines)
+          .map(({ from, text }) => ({
+            from,
+            text: text.slice(0, interviewLimits.line),
+          })),
         turn,
         instructions: instructionsOf(
           voice.text,
