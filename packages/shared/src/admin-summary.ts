@@ -105,7 +105,7 @@ export const adminSummarySchema = z.object({
     /** The team is told: a link went out. */
     told: z.boolean(),
     paused: z.boolean(),
-    /** Enough is known: it waits only for Grasp's go. */
+    /** Enough is known, or the interviews are over: it waits only for Grasp's go. */
     ready: z.boolean(),
     open: z.boolean(),
     openedAt: isoTime.nullable(),
