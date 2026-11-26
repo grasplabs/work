@@ -34,6 +34,10 @@ const addWorkingDays = (day: string, count: number): string => {
   return at;
 };
 
+/** The `count` working days after `day`, the next one first: the days a plan is usually for. */
+export const workingDaysAfter = (day: string, count: number): string[] =>
+  Array.from({ length: count }, (_, index) => addWorkingDays(day, index + 1));
+
 export interface SendChoice {
   /** The day the first links go out, as an ISO day, and the hour on the sender's own clock, as HH:MM. */
   day: string;
