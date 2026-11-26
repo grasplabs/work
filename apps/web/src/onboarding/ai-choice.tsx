@@ -17,7 +17,13 @@ import {
   RadioGroup,
   RadioGroupItem,
 } from "@grasp-os/ui/components/radio-group";
-import { colors, radius, space } from "@grasp-os/ui/lib/tokens.stylex";
+import {
+  colors,
+  duration,
+  media,
+  radius,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
@@ -39,7 +45,29 @@ import type { AiReadiness } from "./setup.ts";
 // featured one: choosing another is for Settings › AI providers.
 
 const styles = stylex.create({
-  stack: { display: "grid", gap: space[4], width: "100%" },
+  stack: { display: "grid", width: "100%" },
+  // The key's providers open under the rows by their height while they fade in, and close the
+  // same way back: the page moves with them, never jumps. Still, with reduced motion.
+  reveal: {
+    display: "grid",
+    gridTemplateRows: "0fr",
+    opacity: 0,
+    transitionProperty: {
+      default: "grid-template-rows, opacity",
+      [media.reducedMotion]: "none",
+    },
+    transitionDuration: duration.ui,
+    transitionTimingFunction: duration.easeInOut,
+  },
+  shown: { gridTemplateRows: "1fr", opacity: 1 },
+  // Hidden while it opens or closes; open, its fields' focus rings may stand past its edge.
+  inner: {
+    minHeight: 0,
+    overflow: "hidden",
+  },
+  // The room above it is inside what closes, so none is left when it has.
+  room: { paddingTop: space[4] },
+  innerShown: { overflow: "clip", overflowClipMargin: space[2] },
   // The two ways as one list, as the connect step's permission answers stand, on a solid card:
   // the step's dither never shows through it (Ruben: "it shouldn't" be transparent).
   list: {
@@ -366,7 +394,17 @@ export const AiChoice = ({
           ))}
         </div>
       </RadioGroup>
-      {way === "own" ? keyBlock : null}
+      {/* Kept while closed, so it can close as it opened; out of reach of Tab and touch. */}
+      <div
+        {...stylex.props(styles.reveal, way === "own" && styles.shown)}
+        inert={way !== "own"}
+      >
+        <div
+          {...stylex.props(styles.inner, way === "own" && styles.innerShown)}
+        >
+          <div {...stylex.props(styles.room)}>{keyBlock}</div>
+        </div>
+      </div>
     </div>
   );
 };
