@@ -1,5 +1,6 @@
 import { voiceLevel } from "../../voice/voice.ts";
 import { readTones } from "../campaign/pixels.ts";
+import { ditherLookNow, onDitherLook } from "./look.ts";
 import { drawMarks } from "./marks.ts";
 import { FRAGMENT, VERTEX } from "./shader.ts";
 
@@ -39,6 +40,10 @@ const UNIFORMS = [
   "u_pointer",
   "u_holds[0]",
   "u_holdLooks[0]",
+  "u_variant",
+  "u_trail[0]",
+  "u_ripples[0]",
+  "u_accent",
 ] as const;
 type Uniform = (typeof UNIFORMS)[number];
 
@@ -154,7 +159,8 @@ const coloursOf = (canvas: HTMLCanvasElement) => {
   const red = rgb(destructiveOf(canvas));
   const blood = mix(red, night, 0.45);
   const rose = mix(red, paper, 0.4);
-  const alarmed: { amb: Rgb[]; palette: Rgb[] } = {
+  const alarmed: { amb: Rgb[]; palette: Rgb[]; accent: Rgb } = {
+    accent: dark ? mix(red, rose, 0.3) : blood,
     amb: dark
       ? [
           mix(ground, blood, 0.3),
@@ -179,6 +185,8 @@ const coloursOf = (canvas: HTMLCanvasElement) => {
     ],
   };
   return {
+    // Where C's light is brightest: lime by night, pine by day, where lime would vanish.
+    accent: dark ? mix(mint, lime, 0.45) : mix(mint, pine, 0.62),
     alarmed,
     // At rest he is close to the page's own ground; only where he gathers does he light up. On a
     // light page the palest greens would vanish into it: there he is mint, deepening toward pine.
@@ -268,6 +276,10 @@ interface Him {
   alarm: number;
   /** What his red is on its way to. */
   alarmed: boolean;
+  /** Where the pointer has been (A, B, C with its effect on): newest first, each fading. */
+  trail: { x: number; y: number; on: number }[];
+  /** The rings presses sent out: where, and when (his clock). */
+  ripples: { x: number; y: number; at: number }[];
 }
 
 const him: Him = {
@@ -278,7 +290,16 @@ const him: Him = {
   holds: [],
   alarm: 0,
   alarmed: false,
+  trail: [],
+  ripples: [],
 };
+
+/** How many points of the pointer's trail and how many rings the shader takes. */
+const TRAIL = 8;
+const RIPPLES = 3;
+
+/** Which dither he is drawn in, as the shader numbers them. */
+const variantNumber = { current: 0, a: 1, b: 2, c: 3 } as const;
 
 /** What stops the drawing on the canvas he is drawn on now; none between two screens. */
 let stopDrawing: (() => void) | null = null;
@@ -319,7 +340,35 @@ const draw = (layer: Layer, colours: Colours) => {
     pose?.tempo ?? 1,
     rest.strength * speaking
   );
-  gl.uniform3f(u("u_pointer"), pointer.x, pointer.y, pointer.on);
+  const look = ditherLookNow();
+  // The pointer's light: the current dither keeps its faint one unless it is turned off; A, B and
+  // C take the pointer itself, its trail and its rings, only with the effect on.
+  const touched = look.cursor ? pointer.on : 0;
+  const fx = look.cursor && look.variant !== "current";
+  gl.uniform3f(u("u_pointer"), pointer.x, pointer.y, touched);
+  gl.uniform1f(u("u_variant"), variantNumber[look.variant]);
+  gl.uniform3fv(
+    u("u_trail[0]"),
+    Array.from({ length: TRAIL }, (_, place) => {
+      const point = him.trail[place];
+      return point === undefined || !fx
+        ? [0, 0, 0]
+        : [point.x, point.y, point.on];
+    }).flat()
+  );
+  gl.uniform3fv(
+    u("u_ripples[0]"),
+    Array.from({ length: RIPPLES }, (_, place) => {
+      const ripple = him.ripples[place];
+      return ripple === undefined || !fx
+        ? [0, 0, -1]
+        : [ripple.x, ripple.y, him.clock - ripple.at];
+    }).flat()
+  );
+  gl.uniform3fv(
+    u("u_accent"),
+    mix(colours.accent, colours.alarmed.accent, him.alarm)
+  );
   const holds = Array.from({ length: HOLDS }, (_, slot) => him.holds[slot]);
   gl.uniform4fv(
     u("u_holds[0]"),
@@ -350,6 +399,20 @@ const settle = (elapsed: number) => {
   pointer.x = toward(pointer.x, pointer.tx, elapsed, 110);
   pointer.y = toward(pointer.y, pointer.ty, elapsed, 110);
   pointer.on = toward(pointer.on, pointer.there ? 1 : 0, elapsed, 180);
+  // The trail: a new point each time the pointer has gone a little way, each fading behind it.
+  const [head] = him.trail;
+  if (
+    pointer.there &&
+    (head === undefined ||
+      Math.hypot(head.x - pointer.x, head.y - pointer.y) > 14)
+  ) {
+    him.trail.unshift({ x: pointer.x, y: pointer.y, on: 1 });
+  }
+  for (const point of him.trail) {
+    point.on = toward(point.on, 0, elapsed, 160);
+  }
+  him.trail = him.trail.filter((point) => point.on > 0.01).slice(0, TRAIL);
+  him.ripples = him.ripples.filter((ripple) => him.clock - ripple.at < 2.4);
   // Each thing he holds stays where it is; his light builds up there, or fades there.
   for (const hold of him.holds) {
     if (hold.element.isConnected) {
@@ -371,6 +434,8 @@ const rested = () => {
   }
   pointer.on = 0;
   him.holds = [];
+  him.trail = [];
+  him.ripples = [];
 };
 
 /**
@@ -433,7 +498,13 @@ export const attachField = (
     }
   };
   const onMove = (event: PointerEvent) => {
-    if (event.pointerType !== "mouse") {
+    // A finger is no pointer that rests anywhere: with A, B or C's effect on it counts while it
+    // touches, and fades once it lifts.
+    const touching =
+      event.pointerType !== "mouse" &&
+      ditherLookNow().variant !== "current" &&
+      event.pressure > 0;
+    if (event.pointerType !== "mouse" && !touching) {
       return;
     }
     const { pointer } = him;
@@ -448,6 +519,28 @@ export const attachField = (
   const onLeave = () => {
     him.pointer.there = false;
   };
+  // A press (a click, a tap) sends a ring out through A, B and C.
+  const onDown = (event: PointerEvent) => {
+    if (ditherLookNow().variant === "current") {
+      return;
+    }
+    onMove(event);
+    him.ripples = [
+      { x: event.clientX, y: event.clientY, at: him.clock },
+      ...him.ripples,
+    ].slice(0, RIPPLES);
+  };
+  const onUp = (event: PointerEvent) => {
+    if (event.pointerType !== "mouse") {
+      him.pointer.there = false;
+    }
+  };
+  const onLook = () => {
+    him.trail = [];
+    if (still.matches) {
+      draw(layer, colours);
+    }
+  };
   const onColours = () => {
     colours = coloursOf(canvas);
     ({ mint } = readTones(canvas));
@@ -459,6 +552,10 @@ export const attachField = (
   size();
   window.addEventListener("resize", onResize);
   window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerdown", onDown);
+  window.addEventListener("pointerup", onUp);
+  window.addEventListener("pointercancel", onUp);
+  const stopLook = onDitherLook(onLook);
   document.documentElement.addEventListener("pointerleave", onLeave);
   still.addEventListener("change", run);
   const modes = new MutationObserver(onColours);
@@ -473,6 +570,10 @@ export const attachField = (
     cancelAnimationFrame(frame);
     window.removeEventListener("resize", onResize);
     window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerdown", onDown);
+    window.removeEventListener("pointerup", onUp);
+    window.removeEventListener("pointercancel", onUp);
+    stopLook();
     document.documentElement.removeEventListener("pointerleave", onLeave);
     still.removeEventListener("change", run);
     modes.disconnect();
