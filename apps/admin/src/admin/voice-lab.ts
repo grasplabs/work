@@ -205,6 +205,34 @@ const keyOf = async (
     : { key: value, refusal: null };
 };
 
+/** One field Mistral turned down: where it is, and why, in its words. */
+const problemSchema = z.object({
+  loc: z.array(z.union([z.string(), z.number()])).optional(),
+  msg: z.string().optional(),
+  type: z.string().optional(),
+});
+
+/**
+ * Which fields of a refused request Mistral named, and why, from a
+ * validation answer (`{"detail": [{"loc", "msg", "type"}]}`): at most
+ * five, each message cut short, and never the value it was sent.
+ */
+export const problemsOf = (answer: unknown): string[] => {
+  const parsed = z.object({ detail: z.array(z.unknown()) }).safeParse(answer);
+  if (!parsed.success) {
+    return [];
+  }
+  return parsed.data.detail.slice(0, 5).flatMap((each) => {
+    const problem = problemSchema.safeParse(each);
+    if (!problem.success) {
+      return [];
+    }
+    const where = (problem.data.loc ?? []).join(".");
+    const why = (problem.data.msg ?? problem.data.type ?? "").slice(0, 160);
+    return [`${where}: ${why}`];
+  });
+};
+
 /**
  * Opens a session for `staff`, on record as theirs, with its language:
  * never anything said in it.
@@ -232,12 +260,20 @@ export const openVoiceSession = async (
       body: JSON.stringify(sessionRequestOf(input)),
       signal: AbortSignal.timeout(sessionTimeoutMs),
     });
-    const opened = openedSchema.safeParse(
-      response.ok ? await response.json() : undefined
-    );
+    let answer: unknown = null;
+    try {
+      answer = await response.json();
+    } catch {
+      // No JSON in the answer: only its status is logged.
+    }
+    const opened = openedSchema.safeParse(response.ok ? answer : undefined);
     if (!opened.success) {
-      // The status alone: Mistral's answer may repeat what it was sent.
-      log.warn("admin.voice_lab_not_opened", { status: response.status });
+      // The status, and for a request Mistral turned down, which fields
+      // and why: never its whole answer, which may repeat what it was sent.
+      log.warn("admin.voice_lab_not_opened", {
+        status: response.status,
+        problems: response.ok ? "" : problemsOf(answer).join("; "),
+      });
       return refused("not_opened");
     }
     return {
