@@ -1,6 +1,11 @@
+import {
+  createExecutionContext,
+  waitOnExecutionContext,
+} from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import Connect from "../src/index.ts";
 import { callAs, outcome, someone } from "./connect.ts";
 import type { LinearTool } from "./linear-mcp-fake.ts";
 import {
@@ -112,6 +117,88 @@ describe("a connector's tools", () => {
       });
     } finally {
       linear.tools = listed;
+    }
+  });
+
+  it("are read once for asks that find them stale at once, and not again for a while after that read failed", async () => {
+    const { connectionId } = await connected();
+    await listExpires(connectionId);
+    let reads = 0;
+    const failing = (): Response => {
+      reads += 1;
+      linear.next = failing;
+      return new Response(null, { status: 503 });
+    };
+    linear.next = failing;
+    try {
+      // Three asks at once, then whatever they started after their answers.
+      const ask = async () => {
+        const ctx = createExecutionContext();
+        const connect = new Connect(ctx, env);
+        await Promise.all([
+          connect.offeredConnectorTools([connectionId]),
+          connect.offeredConnectorTools([connectionId]),
+          connect.connectionTools({ connectionId }),
+        ]);
+        await waitOnExecutionContext(ctx);
+      };
+      await ask();
+      const once = reads;
+      await ask();
+      await ask();
+      const soon = reads;
+      // The gap since that read passes.
+      await env.DB.prepare(
+        "UPDATE connections SET tool_list_tried_at = 0 WHERE id = ?"
+      )
+        .bind(connectionId)
+        .run();
+      await ask();
+
+      expect({ once, soon, later: reads }).toStrictEqual({
+        once: 1,
+        soon: 1,
+        later: 2,
+      });
+    } finally {
+      linear.next = undefined;
+    }
+  });
+
+  it("are read after an answer at once when signed in again, though a read failed moments before", async () => {
+    const { anna, connector, connectionId } = await connected();
+    await listExpires(connectionId);
+    let reads = 0;
+    const failing = (): Response => {
+      reads += 1;
+      linear.next = failing;
+      return new Response(null, { status: 503 });
+    };
+    linear.next = failing;
+    try {
+      await offered(connectionId);
+      await vi.waitFor(() => {
+        expect(reads).toBeGreaterThan(0);
+      }, waitForRead);
+      // Its grant ran out: Anna signs in again.
+      await env.DB.batch([
+        env.DB.prepare(
+          "UPDATE connections SET status = 'needs_reauth' WHERE id = ?"
+        ).bind(connectionId),
+        env.DB.prepare(
+          "DELETE FROM connection_tokens WHERE connection_id = ?"
+        ).bind(connectionId),
+      ]);
+      const again = await connectLinear(connector, anna);
+      const signedIn = reads;
+      await offered(again);
+      await vi.waitFor(() => {
+        expect(reads).toBeGreaterThan(signedIn);
+      }, waitForRead);
+
+      expect(again).toBe(connectionId);
+    } finally {
+      linear.next = undefined;
     }
   });
 
