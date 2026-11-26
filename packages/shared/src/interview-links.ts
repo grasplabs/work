@@ -467,6 +467,15 @@ export const interviewRequestSchema = z.discriminatedUnion("action", [
     action: z.literal("withdraw"),
     secret: interviewSecretSchema,
   }),
+  /**
+   * Not now: they ask for a reminder at `at`, a moment the page picked on
+   * their own clock (a morning is theirs, not core's).
+   */
+  z.strictObject({
+    action: z.literal("later"),
+    secret: interviewSecretSchema,
+    at: z.iso.datetime(),
+  }),
 ]);
 export type InterviewRequest = z.input<typeof interviewRequestSchema>;
 
@@ -537,6 +546,14 @@ export interface InterviewWithdrawal {
   removing?: true;
 }
 
+/**
+ * What asking for a reminder answers: when it goes, as core keeps it. The
+ * one asked for before, while that hasn't gone yet.
+ */
+export interface InterviewLater {
+  at: string;
+}
+
 /** Why an interview link refused something. */
 export const interviewErrors = defineErrorFamily({
   "interview.link_invalid":
@@ -557,4 +574,8 @@ export const interviewErrors = defineErrorFamily({
     "What this interview is for has changed. Read it again before you go on.",
   "interview.withdrawn":
     "You withdrew from this interview. Nothing more is taken from it.",
+  "interview.finished":
+    "You talked with Stephen already. There is nothing to remind you of.",
+  "interview.no_address":
+    "We have no email address to remind you at. This link stays open: come back when it suits you.",
 });

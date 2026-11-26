@@ -192,12 +192,15 @@ describe("an onboarding flow", () => {
       [
         "full",
         true,
-        setupSteps.filter(
-          (step) => !["listening", "review", "open"].includes(step)
-        ),
+        setupSteps.filter((step) => !["review", "open"].includes(step)),
         "go",
       ],
-      ["short", true, ["welcome", "ai", "company", "leads", "team"], "go"],
+      [
+        "short",
+        true,
+        ["welcome", "ai", "company", "leads", "team", "listening"],
+        "go",
+      ],
       [
         "setup",
         true,
@@ -229,7 +232,7 @@ describe("an onboarding flow", () => {
     });
   });
 
-  it("puts the interviews' screens last, and the story of what comes next after them, wherever the flow has the steps", () => {
+  it("puts the interviews' screens last, the story of what comes next after telling the team, and the page the interviews are watched on at the end, wherever the flow has the steps", () => {
     const early = withStepMoved(
       withStepMoved(defaultFlow, "about", 0),
       "interviews",
@@ -237,10 +240,10 @@ describe("an onboarding flow", () => {
     );
     expect({
       step: order(early)[4],
-      screens: flowScreens(early).slice(-3),
+      screens: flowScreens(early).slice(-4),
     }).toStrictEqual({
       step: "interviews",
-      screens: ["leads", "team", "about"],
+      screens: ["leads", "team", "about", "listening"],
     });
   });
 

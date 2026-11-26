@@ -218,7 +218,11 @@ const About = ({ data, onward }: StepProps) => (
   <PlanStory data={data} onward={onward} />
 );
 
-/** The screens a flow can show: Stephen listening, the review and the way in are no longer among them. */
+/**
+ * The screens that are steps on the way: the page the interviews are
+ * watched on has its own frame (campaign/campaign-page.tsx), and the
+ * review and the way in are no longer shown.
+ */
 export type ShownStep = Exclude<SetupStep, "listening" | "review" | "open">;
 
 /** One screen per step. */

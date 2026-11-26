@@ -53,19 +53,24 @@ describe("the clock", () => {
   });
 });
 
-/** Which times are offered at `at`. */
-const offered = (at: Date): string[] => remindTimes(at).map(({ id }) => id);
+/** Which times are offered at `at`, for interviews that close on `closes`. */
+const offered = (at: Date, closes = "2026-12-31"): string[] =>
+  remindTimes(at, closes).map(({ id }) => id);
 
 describe("the times to be reminded", () => {
-  it("offers later today only while there is an afternoon left, and Monday unless tomorrow is", () => {
+  it("offers later today only while there is an afternoon left, Monday unless tomorrow is, and none past the interviews' last day", () => {
     expect({
       tuesdayMorning: offered(new Date(2026, 10, 24, 10, 0)),
       tuesdayEvening: offered(new Date(2026, 10, 24, 17, 0)),
       sunday: offered(new Date(2026, 10, 29, 10, 0)),
+      closingFriday: offered(new Date(2026, 10, 24, 10, 0), "2026-11-27"),
+      closedSince: offered(new Date(2026, 10, 24, 10, 0), "2026-11-20"),
     }).toStrictEqual({
       tuesdayMorning: ["today", "tomorrow", "monday"],
       tuesdayEvening: ["tomorrow", "monday"],
       sunday: ["today", "tomorrow"],
+      closingFriday: ["today", "tomorrow"],
+      closedSince: [],
     });
   });
 });

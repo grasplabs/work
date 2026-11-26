@@ -1,3 +1,4 @@
+import { leadsOfTeam } from "../onboarding.ts";
 import { addMonths } from "./admin-account.ts";
 import { KEPT_SHARE, PRICES } from "./admin-usage.ts";
 import type { Model } from "./admin-usage.ts";
@@ -251,18 +252,24 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
   const works = snapshot.works.map(workOf);
   const everyone: Person[] = (roster?.teams ?? []).flatMap((team) => {
     const mine = people.filter((person) => person.team === team.id);
+    // Everyone who leads it is a lead here, the first before the others:
+    // each talks about the whole team, and none is asked about one piece of work.
+    const leading = leadsOfTeam(team);
     const ordered = [
-      ...mine.filter((person) => person.id === team.lead),
-      ...mine.filter((person) => person.id !== team.lead),
+      ...leading.flatMap((id) => mine.filter((person) => person.id === id)),
+      ...mine.filter((person) => !leading.includes(person.id)),
     ];
-    return ordered.map((person): Person => ({
-      id: person.id,
-      name: person.name,
-      first: first(person.name),
-      team: team.id,
-      lead: person.id === team.lead,
-      work: person.id === team.lead ? null : person.work,
-    }));
+    return ordered.map((person): Person => {
+      const lead = leading.includes(person.id);
+      return {
+        id: person.id,
+        name: person.name,
+        first: first(person.name),
+        team: team.id,
+        lead,
+        work: lead ? null : person.work,
+      };
+    });
   });
   const held = new Map(
     snapshot.interviews.map((interview) => [interview.person, interview])
@@ -307,8 +314,9 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
   const sent = new Map<string, number>();
   for (const team of roster?.teams ?? []) {
     const lead = present(team.lead) ? held.get(team.lead) : undefined;
+    const leading = leadsOfTeam(team);
     const members = people.filter(
-      (person) => person.team === team.id && person.id !== team.lead
+      (person) => person.team === team.id && !leading.includes(person.id)
     );
     const out = members.flatMap((person) =>
       present(links.get(person.id)?.sent)

@@ -1,7 +1,8 @@
 // The campaign page, what the client's admin sees while the interviews
-// run, from fixtures in five states until core serves it:
-// `/setup?step=listening&concept=c&state=…` shows it full screen in its
-// own calm frame; Settings, Onboarding shows it in its section.
+// run, as core tells the campaign (`onboarding.campaign`): the setup's
+// last screen (`/setup?step=listening`), full screen in its own calm
+// frame. An old link to Settings, Onboarding leads here too.
+import type { Campaign } from "@grasp-os/shared/onboarding-campaign";
 import { Button } from "@grasp-os/ui/components/button";
 import { Container } from "@grasp-os/ui/components/container";
 import { Icon, XIcon } from "@grasp-os/ui/lib/icons";
@@ -9,23 +10,12 @@ import { media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Link, useLocation } from "@tanstack/react-router";
+import { Link, useRouter } from "@tanstack/react-router";
 
 import { GraspLogo } from "../../connections/brand-logos.ts";
+import { TopErrorBar } from "../../frame/top-error.tsx";
 import { StartOver } from "../start-over.tsx";
 import { CampaignWeek } from "./campaign-week.tsx";
-import { Canvas } from "./concepts/canvas.tsx";
-import { Letter } from "./concepts/letter.tsx";
-import { Mosaic } from "./concepts/mosaic.tsx";
-import { RoadPage } from "./concepts/road.tsx";
-import { campaigns } from "./fixtures.ts";
-import type { CampaignState } from "./fixtures.ts";
-
-/** The routes' `?concept=` letter: in development, which concept of the progress page shows. */
-export type Concept = "a" | "b" | "c" | "d";
-
-export const isConcept = (value: unknown): value is Concept =>
-  value === "a" || value === "b" || value === "c" || value === "d";
 
 const styles = stylex.create({
   window: {
@@ -55,44 +45,16 @@ const styles = stylex.create({
 });
 
 /**
- * Concepts only, in development: `?concept=a|b|c|d` shows the progress
- * page as the letter, the company in one picture, the road, or the
- * canvas that fills in as interviews end; without
- * it, the week as it is.
- */
-const useProgressConcept = (): Concept | null => {
-  const written = useLocation({ select: (location) => location.searchStr });
-  const concept = new URLSearchParams(written).get("concept");
-  return import.meta.env.DEV && isConcept(concept) ? concept : null;
-};
-
-/** The campaign page's content in one state, as the development switch picks it. */
-export const CampaignConcept = ({ state }: { state: CampaignState }) => {
-  const concept = useProgressConcept();
-  const campaign = campaigns[state];
-  if (concept === "a") {
-    return <Letter campaign={campaign} />;
-  }
-  if (concept === "b") {
-    return <Mosaic campaign={campaign} key={state} />;
-  }
-  if (concept === "d") {
-    return <Canvas campaign={campaign} key={state} />;
-  }
-  if (concept === "c") {
-    return <RoadPage campaign={campaign} />;
-  }
-  return <CampaignWeek campaign={campaign} />;
-};
-
-/**
  * The campaign page, full screen: Grasp's mark, and on a local stack the
  * start-over button beside the way out, on one quiet bar, the week in a column under it. The page scrolls.
  */
-export const CampaignFrame = ({ state }: { state: CampaignState }) => {
+export const CampaignFrame = ({ campaign }: { campaign: Campaign }) => {
   const { t } = useLingui();
+  const router = useRouter();
   return (
     <div {...stylex.props(styles.window)}>
+      {/* Every error is said here, at the very top, above the bar. */}
+      <TopErrorBar />
       <header {...stylex.props(styles.bar)}>
         <span {...stylex.props(styles.mark)}>
           <Icon icon={GraspLogo} label="Grasp" />
@@ -114,7 +76,13 @@ export const CampaignFrame = ({ state }: { state: CampaignState }) => {
       </header>
       <main {...stylex.props(styles.main)}>
         <Container size="lg" style={styles.column}>
-          <CampaignConcept state={state} />
+          <CampaignWeek
+            campaign={campaign}
+            // What core tells is read again: the ask done is gone, or says so.
+            onChanged={async () => {
+              await router.invalidate({ sync: true });
+            }}
+          />
         </Container>
       </main>
     </div>

@@ -50,6 +50,7 @@ import m0047 from './0047_spicy_typhoid_mary.sql';
 import m0048 from './0048_married_havok.sql';
 import m0049 from './0049_team_co_leads.sql';
 import m0050 from './0050_voice_holds.sql';
+import m0051 from './0051_campaign_nudges_and_asked_reminders.sql';
 
   export default {
     journal,
@@ -104,7 +105,8 @@ m0046,
 m0047,
 m0048,
 m0049,
-m0050
+m0050,
+m0051
     }
   }
   

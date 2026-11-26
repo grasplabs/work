@@ -10,6 +10,7 @@ import type {
   OnboardingReview,
   OnboardingView,
 } from "@grasp-os/shared/onboarding";
+import type { Campaign } from "@grasp-os/shared/onboarding-campaign";
 import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
 import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
 import { flowScreens } from "@grasp-os/shared/onboarding-flow";
@@ -36,11 +37,11 @@ import { PageError } from "../frame/page-states.tsx";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import { CalmFrame } from "../onboarding/calm-frame.tsx";
 import type { Ways } from "../onboarding/calm-frame.tsx";
+import { CampaignFrame } from "../onboarding/campaign/campaign-page.tsx";
 import { poses } from "../onboarding/field/poses.ts";
 import { keptKey } from "../onboarding/kept.ts";
 import { todayInUtc } from "../onboarding/send-plan.ts";
 import { SetupStepBody } from "../onboarding/setup-steps.tsx";
-import type { ShownStep } from "../onboarding/setup-steps.tsx";
 import {
   finishedAt,
   waysFrom,
@@ -71,9 +72,12 @@ import { useCore } from "../use-core.ts";
 /** The suites whose directory the company step offers, in order. */
 const directorySuites = directorySuiteSchema.options;
 
-/** Screens no flow has any more, kept by name only so places kept with them still read. */
-const gone: ReadonlySet<SetupStep> = new Set(["listening", "review", "open"]);
-const framed = (step: SetupStep): step is ShownStep => !gone.has(step);
+/**
+ * Where the admin watches the interviews run, the path's last screen where
+ * the company's people are interviewed: no step on the way, as nothing on
+ * it is theirs to finish.
+ */
+const watching: SetupStep = "listening";
 
 /** Which list of steps a kept place counts in: core keeps the place by the screens' names, this browser only the message and what was settled. */
 const keptSteps = 3;
@@ -244,14 +248,20 @@ const Setup = () => {
   const go = (next: SetupStep) => {
     void turnTo(next);
   };
-  // The screen after this one; past the last, every screen is finished and the admin is in the platform.
+  // The screen after this one; past the last on the way, every screen is
+  // finished and the admin is in the platform. The page the interviews are
+  // watched on is where they come back to, never the next step: the story
+  // before it leads into the platform (plan-story.tsx).
   const onward = async (): Promise<void> => {
     const next = path[index + 1];
-    if (next !== undefined) {
+    if (next !== undefined && next !== watching) {
       await turnTo(next);
       return;
     }
-    await notePlace(core, [...path]);
+    await notePlace(
+      core,
+      path.filter((screen) => screen !== watching)
+    );
     await navigate({ to: "/" });
   };
 
@@ -262,9 +272,18 @@ const Setup = () => {
   if (path.length === 0) {
     return <Navigate replace to="/" />;
   }
-  // Never on the path; named here so the steps below know they are the setup's.
-  if (!framed(step)) {
+  // Screens no flow has any more, named only so places kept with them still read: never on the path.
+  if (step === "review" || step === "open") {
     return <Navigate replace to="/" />;
+  }
+  // The interviews, watched: its own frame. Core tells no campaign before
+  // the plan is in; whoever got this far without one finished every screen.
+  if (step === "listening") {
+    return data.campaign === null ? (
+      <Navigate replace to="/" />
+    ) : (
+      <CampaignFrame campaign={data.campaign} />
+    );
   }
   return (
     <CalmFrame
@@ -372,6 +391,8 @@ interface Loaded {
   places: OnboardingPlaces | null;
   /** What Grasp's AI has to call; null when core can't say. */
   ai: AiReadiness | null;
+  /** How the interviews are going; null before the plan is in. */
+  campaign: Campaign | null;
 }
 
 export const Route = createFileRoute("/setup")({
@@ -444,6 +465,7 @@ export const Route = createFileRoute("/setup")({
         ai,
         place,
         flow,
+        campaign,
       ] = await Promise.all([
         session.onboarding.view(),
         session.onboarding.links(),
@@ -458,6 +480,7 @@ export const Route = createFileRoute("/setup")({
         aiReadinessOf(session),
         session.onboarding.place(),
         session.onboarding.flow(),
+        session.onboarding.campaign(),
       ]);
       return {
         view,
@@ -473,6 +496,7 @@ export const Route = createFileRoute("/setup")({
         ai,
         place,
         flow,
+        campaign,
       };
     }),
   component: Setup,

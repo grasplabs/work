@@ -190,6 +190,30 @@ describe("an organization from core's admin snapshot", () => {
     ).toStrictEqual({ lisa: "lead", tom: "employee" });
   });
 
+  it("shows someone core names as a team's second lead as a lead, as core's snapshot sends them", () => {
+    const answered = adminSnapshotSchema.parse({
+      ...answer,
+      roster: {
+        ...answer.roster,
+        teams: answer.roster.teams.map((team) =>
+          team.id === "sales" ? { ...team, coLeads: ["tom"] } : team
+        ),
+      },
+    });
+    const { org, state } = adminOrgOf(answered, client);
+    const view = adminViewOf(org, state, "2026-10-14");
+
+    expect(
+      view.people
+        .filter(({ person }) => person.team === "sales")
+        .map(({ person }) => [person.id, person.lead])
+    ).toStrictEqual([
+      ["lisa", true],
+      ["tom", true],
+      ["ann", false],
+    ]);
+  });
+
   it("knows what core knows, against core's threshold, and stays closed without Grasp's go", () => {
     const { view } = shown();
 

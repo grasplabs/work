@@ -265,7 +265,8 @@ export const Consent = ({
   /** Why taking part wasn't kept, when it wasn't. */
   refusal: string | null;
   onAgree: () => void;
-  onNotNow: () => void;
+  /** The way to be reminded later; none once no time is left to be reminded at. */
+  onNotNow: (() => void) | undefined;
 }) => {
   const { t } = useLingui();
   const title = useTitleSize();
@@ -320,9 +321,11 @@ to talk about your work?`.split("\n");
         </div>
       </div>
       <div {...stylex.props(styles.foot)}>
-        <Button onClick={onNotNow} variant="link">
-          {t`Not right now`}
-        </Button>
+        {onNotNow === undefined ? null : (
+          <Button onClick={onNotNow} variant="link">
+            {t`Not right now`}
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -350,9 +353,10 @@ const laterTodayUntil = 15;
 /**
  * The times "Not now" offers: later today while there is still a working
  * afternoon left, tomorrow morning, and Monday morning unless tomorrow is
- * Monday.
+ * Monday; none past the interviews' last day (`closes`, an ISO day as core
+ * counts days, in UTC), which core would refuse.
  */
-export const remindTimes = (now: Date): RemindAt[] => {
+export const remindTimes = (now: Date, closes: string): RemindAt[] => {
   const times: RemindAt[] = [];
   if (now.getHours() < laterTodayUntil) {
     times.push({ id: "today", at: dayAt(now, 0, 16) });
@@ -362,7 +366,7 @@ export const remindTimes = (now: Date): RemindAt[] => {
   if (toMonday > 1) {
     times.push({ id: "monday", at: dayAt(now, toMonday, 9) });
   }
-  return times;
+  return times.filter(({ at }) => at.toISOString().slice(0, 10) <= closes);
 };
 
 /** The reminder time we would pick: tomorrow morning, a fresh start. */
@@ -379,11 +383,14 @@ const useClock = () => {
 export const NotNow = ({
   closes,
   times,
+  refusal,
   onPick,
   onBack,
 }: {
   closes: string;
   times: RemindAt[];
+  /** Why core didn't take the time picked; null while all is well. */
+  refusal: string | null;
   onPick: (picked: RemindAt) => void;
   onBack: () => void;
 }) => {
@@ -432,11 +439,12 @@ export const NotNow = ({
           {t`Back`}
         </Button>
       </Quiet>
+      <TopError>{refusal}</TopError>
     </Page>
   );
 };
 
-/** "Not now" taken. */
+/** "Not now" taken: the time is the one core keeps. */
 export const Reminded = ({
   picked,
   onStart,

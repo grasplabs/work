@@ -280,6 +280,7 @@ export const staffSnapshotOf = (
               id: team.id,
               name: team.name,
               lead: team.lead,
+              ...(team.coLeads === undefined ? {} : { coLeads: team.coLeads }),
               does: team.does,
               off: team.off,
             })),
