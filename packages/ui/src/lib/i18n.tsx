@@ -575,12 +575,26 @@ export interface I18nCatalog {
     csv: string;
     /** What a ticked task says to a screen reader. */
     done: string;
+    /** A drawn diagram's name, its code its description. */
+    diagram: string;
+    /** The name of a diagram's download button, whose menu holds the formats. */
+    downloadDiagram: string;
     /** The name of a table's download button, whose menu holds the formats. */
     downloadTable: string;
     /** A footnote's mark, said to a screen reader, from its number. */
     footnote: (number: number) => string;
     /** A format in a table's copy and download menus: the table as Markdown. */
     markdown: string;
+    /** A diagram's language over it, and its format names in its download menu. */
+    mermaid: string;
+    mmd: string;
+    png: string;
+    svg: string;
+    /** A diagram's view: to full screen, and its zoom. */
+    fullScreen: string;
+    zoomIn: string;
+    zoomOut: string;
+    resetZoom: string;
     /** Under a table drawn only in part, how many rows are not drawn. */
     moreRows: (count: number) => string;
     /** What a task not yet ticked says. */
@@ -1334,9 +1348,19 @@ const english: I18nCatalog = {
     copyTable: "Copy table",
     csv: "CSV",
     done: "Done",
+    diagram: "Mermaid diagram",
+    downloadDiagram: "Download diagram",
     downloadTable: "Download table",
     footnote: (number: number) => `Footnote ${number}`,
     markdown: "Markdown",
+    mermaid: "Mermaid",
+    mmd: "MMD",
+    png: "PNG",
+    svg: "SVG",
+    fullScreen: "View full screen",
+    zoomIn: "Zoom in",
+    zoomOut: "Zoom out",
+    resetZoom: "Reset zoom",
     moreRows: (count: number) =>
       count === 1 ? "1 more row" : `${count} more rows`,
     notDone: "Not done",

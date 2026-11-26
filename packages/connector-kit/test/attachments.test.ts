@@ -26,6 +26,8 @@ const route: Route = {
   path: "/v1/send",
 };
 
+const noteRoute: Route = { ...route, path: "/v1/notes" };
+
 /** What the sending tool received: each file's name, type and content. */
 const received: { name: string; type: string; text: string }[][] = [];
 
@@ -61,7 +63,7 @@ const plainTool = defineTool({
   output: z.strictObject({ done: z.literal(true) }),
   readOnly: false,
   reach: "own",
-  routes: [route],
+  routes: [noteRoute],
   run: async () => await Promise.resolve({ output: { done: true as const } }),
 });
 

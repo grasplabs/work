@@ -6397,6 +6397,10 @@ msgid "Download as PDF"
 msgstr "Downloaden als pdf"
 
 #: src/frame/ui-words.tsx
+msgid "Download diagram"
+msgstr "Diagram downloaden"
+
+#: src/frame/ui-words.tsx
 msgid "Download table"
 msgstr "Tabel downloaden"
 
@@ -10623,6 +10627,10 @@ msgid "Mentioned"
 msgstr "Genoemd"
 
 #: src/frame/ui-words.tsx
+msgid "Mermaid diagram"
+msgstr "Mermaid-diagram"
+
+#: src/frame/ui-words.tsx
 msgid "Message actions"
 msgstr "Acties bij bericht"
 
@@ -14678,6 +14686,10 @@ msgstr "Wat het bewaart resetten"
 #: src/workflows/kept-state.tsx
 msgid "Reset what it keeps?"
 msgstr "Wat het bewaart resetten?"
+
+#: src/frame/ui-words.tsx
+msgid "Reset zoom"
+msgstr "Zoom herstellen"
 
 #: src/apps/app-reset.tsx
 #: src/apps/reset-test-data.tsx
@@ -19479,6 +19491,10 @@ msgstr "Alles bekijken"
 msgid "View changes"
 msgstr "Wijzigingen bekijken"
 
+#: src/frame/ui-words.tsx
+msgid "View full screen"
+msgstr "Volledig scherm bekijken"
+
 #: src/brain/note-actions.tsx
 msgid "View in map"
 msgstr "Bekijken op de kaart"
@@ -21479,12 +21495,14 @@ msgid "Zoom"
 msgstr "Zoom"
 
 #: src/brain/atlas-overlays.tsx
+#: src/frame/ui-words.tsx
 #: src/inbox/report-viewer.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Zoom in"
 msgstr "Inzoomen"
 
 #: src/brain/atlas-overlays.tsx
+#: src/frame/ui-words.tsx
 #: src/inbox/report-viewer.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Zoom out"

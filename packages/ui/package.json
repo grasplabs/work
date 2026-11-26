@@ -31,6 +31,7 @@
     "mdast-util-from-markdown": "catalog:",
     "mdast-util-gfm": "catalog:",
     "mdast-util-math": "catalog:",
+    "mermaid": "catalog:",
     "micromark-extension-gfm": "catalog:",
     "micromark-extension-math": "catalog:",
     "prismjs": "catalog:",

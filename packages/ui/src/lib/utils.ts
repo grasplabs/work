@@ -389,9 +389,11 @@ export const tsvOf = (rows: readonly (readonly string[])[]) =>
     )
     .join("\n");
 
-/** Saves `text` as a file of that name and type, which the browser downloads. */
-export const saveFile = (text: string, name: string, type: string) => {
-  const href = URL.createObjectURL(new Blob([text], { type }));
+/** Saves `text` (or a Blob) as a file of that name and type, which the browser downloads. */
+export const saveFile = (text: string | Blob, name: string, type: string) => {
+  const href = URL.createObjectURL(
+    typeof text === "string" ? new Blob([text], { type }) : text
+  );
   const link = document.createElement("a");
   link.href = href;
   link.download = name;

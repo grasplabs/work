@@ -275,6 +275,35 @@ describe("a spec as tools", () => {
     });
   });
 
+  it("holds the path under the spec's base to the class rules, which no tool's name holds", async () => {
+    const answer = ok({ type: "object", properties: {} });
+    const paths = {
+      "/deals": { post: { operationId: "addDeal", responses: answer } },
+    };
+    const served = async (server: string) =>
+      await generateConnector(
+        specText(paths, { servers: [{ url: server }] }),
+        url,
+        { reach: "company" }
+      );
+    const trashed = await served("https://api.example.test/trash/v1");
+    const sending = await served("https://api.example.test/send/v1");
+    expect({
+      skipped: trashed.spec.skipped,
+      reach: [...sending.source.matchAll(/reach: "(?<reach>\w+)"/gu)].map(
+        (match) => match.groups?.reach
+      ),
+    }).toStrictEqual({
+      skipped: [
+        {
+          operation: "POST /deals",
+          reason: "Its path names what Grasp never does.",
+        },
+      ],
+      reach: ["others"],
+    });
+  });
+
   it("reads a parameter after a literal prefix that ends in a colon", async () => {
     const spec = await readSpec(
       specText({

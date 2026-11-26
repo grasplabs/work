@@ -47,7 +47,10 @@ const frontendTheme = "/theme.js";
  *   no path that decodes to another (`/assets/..%2Fpage-modules/…`,
  *   entry.ts). Core also refuses those paths to this page's own requests
  *   (`isRefusedToProductPage`), in case a browser lets one through.
- * - No workers: the frontend starts none.
+ * - Workers only from the frontend's own files, as scripts: Damsko's code
+ *   block colours code in one (code-block-worker, a chunk under
+ *   `/assets/`). Never one from this origin's other paths, so a page's
+ *   module still can't start one in this page.
  * - Connections only to this origin. `'self'` covers the same-origin
  *   WebSocket to `/rpc`.
  * - Sign-in leaves for the IdP by top-level navigation, which the policy
@@ -66,7 +69,7 @@ export const frontendDirectives = (origin: string): Record<string, string> => ({
   "default-src": "'self'",
   "script-src": `${origin}${frontendAssets} ${origin}${frontendTheme} 'wasm-unsafe-eval'`,
   "style-src": `${origin}${frontendAssets} 'unsafe-inline'`,
-  "worker-src": "'none'",
+  "worker-src": `${origin}${frontendAssets}`,
   "img-src": "'self' data:",
   "connect-src": "'self'",
   "object-src": "'none'",

@@ -76,6 +76,7 @@ import { Link } from "../link";
 import { Separator } from "../separator";
 import * as Tables from "../table";
 import { tableVars } from "../table.stylex";
+import { Diagram } from "./diagram";
 import * as parse from "./parse";
 import type { Block, RootContent } from "./parse";
 
@@ -1236,6 +1237,10 @@ const draw: { [T in Node["type"]]?: Draw<T> } = {
           </Custom>
         );
       return Pre === undefined ? code : <Pre node={node}>{code}</Pre>;
+    }
+    // A diagram once its fence is closed: until then its code, as it is written.
+    if (node.lang === "mermaid" && node.position !== undefined) {
+      return <Diagram code={node.value} streaming={shared.streaming} />;
     }
     // Numbered from the fence's `startLine=N` (up to 7 digits), or not with `noLineNumbers`.
     const meta = node.meta ?? "";
