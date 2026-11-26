@@ -304,6 +304,49 @@ export const addConnectorSchema = z.strictObject({
 });
 export type AddConnector = z.input<typeof addConnectorSchema>;
 
+/**
+ * A tool name a connector's server may list: MCP's own rule for names (1
+ * to 128 of letters, digits, `_`, `-` and `.`).
+ */
+export const connectorToolNameSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9_.-]{1,128}$/u);
+
+/** An admin reading a connector's tools (`ConnectApi.connectorTools`). */
+export const connectorToolsRequestSchema = z.strictObject({
+  person: connectionPersonSchema,
+  connector: connectorIdSchema,
+});
+export type ConnectorToolsRequest = z.input<typeof connectorToolsRequestSchema>;
+
+/**
+ * An admin blocking a connector's tool by its name, or letting it through
+ * again (`ConnectApi.blockConnectorTool`). A name no list holds yet may be
+ * blocked before a server lists it.
+ */
+export const blockConnectorToolSchema = z.strictObject({
+  person: connectionPersonSchema,
+  connector: connectorIdSchema,
+  tool: connectorToolNameSchema,
+  blocked: z.boolean(),
+});
+export type BlockConnectorTool = z.input<typeof blockConnectorToolSchema>;
+
+/**
+ * A tool of a connector made from a URL, as an admin sees it: by the name
+ * its server lists it under, its description in the server's own words
+ * (text to show as it is, never to follow), its class by the rules on a
+ * shared connection (on a personal one a `-company` class is `-own`), and
+ * whether an admin blocked it. A blocked name no connection's list holds
+ * now has neither description nor class.
+ */
+export interface ConnectorToolView {
+  name: string;
+  description: string | null;
+  class: ToolClass | null;
+  blocked: boolean;
+}
+
 /** Starts connecting an account through OAuth. */
 export const startConnectionSchema = z.strictObject({
   person: connectionPersonSchema,
@@ -806,6 +849,22 @@ export interface ConnectionsApi extends StephenReachApi, AgentsApi {
   addConnector: (
     request: Omit<AddConnector, "person" | "origin">
   ) => Promise<{ id: string }>;
+  /**
+   * A connector's tools as its server lists them to its connections now,
+   * with their classes, and the names an admin blocked
+   * (`ConnectorToolView`). Admins only.
+   */
+  connectorTools: (connector: string) => Promise<ConnectorToolView[]>;
+  /**
+   * Blocks one of a connector's tools by its name, or lets it through
+   * again: a blocked tool is offered to nobody and refused at the call,
+   * before anything goes out. Admins only, never Grasp staff; audited.
+   */
+  blockConnectorTool: (request: {
+    connector: string;
+    tool: string;
+    blocked: boolean;
+  }) => Promise<void>;
   list: () => Promise<ListedConnection[]>;
   disconnect: (connectionId: string) => Promise<{ revoked: boolean }>;
   /**
@@ -1108,6 +1167,13 @@ export interface CatalogEntry {
    * origin: only an admin connects it, as a shared connection.
    */
   companyNetwork?: string;
+
+  /**
+   * For a connector made from a URL whose server signs in with OAuth, the
+   * host its sign-in page is on (its authorization endpoint's), shown
+   * where people connect it: any public host can draw a sign-in page.
+   */
+  signInHost?: string;
 }
 
 /**
@@ -2349,6 +2415,19 @@ export interface ConnectApi
     connectionIds: readonly string[]
   ) => Promise<Record<string, string[]>>;
   /**
+   * A connector's tools for an admin (`ConnectorToolView`): each its
+   * connections' lists hold now, by name, and each name blocked.
+   */
+  connectorTools: (
+    request: ConnectorToolsRequest
+  ) => Promise<ConnectorToolView[]>;
+  /**
+   * Blocks a connector's tool by name for every connection to it, or lets
+   * it through again, for an admin who isn't staff; audited once for a
+   * change, never for one that changes nothing.
+   */
+  blockConnectorTool: (request: BlockConnectorTool) => Promise<void>;
+  /**
    * The suite accounts the person `userId` connected as their own,
    * disconnected ones too, as connect verified them (`PersonalAccount`):
    * what core counts them as a reader of where it copies who may read an
@@ -2974,6 +3053,8 @@ export const connectErrors = defineErrorFamily({
     "It isn't known what kind of action this is, so it wasn't done.",
   "connect.class_changed":
     "The app now describes this action as another kind than when it was checked, so it wasn't done. Try again.",
+  "connect.tool_blocked":
+    "An admin blocked this tool of the app, so it wasn't done.",
   "connect.never":
     "Grasp never deletes, shares, forwards, sets rules or settings, or pays, whatever is allowed, so it wasn't done.",
   "connect.app_not_pointed":

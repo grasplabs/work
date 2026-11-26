@@ -197,8 +197,8 @@ export const connections = sqliteTable(
     /**
      * For a connection to a connector made from a URL: when its server's
      * tool list was last read (`connection_tools`), and until when that
-     * read is fresh, as the server's `ttlMs` said, an hour at most. Null
-     * until the first read.
+     * read is fresh, as the server's `ttlMs` said, a minute at least and
+     * an hour at most. Null until the first read.
      */
     toolListReadAt: timestamp("tool_list_read_at"),
     toolListFreshUntil: timestamp("tool_list_fresh_until"),
@@ -295,6 +295,25 @@ export const connectors = sqliteTable(
     createdAt: timestamp("created_at").notNull(),
   },
   (table) => [uniqueIndex("connectors_url_idx").on(table.url)]
+);
+
+/**
+ * The tools an admin blocked on a connector made from a URL, by the name
+ * its server lists them under: offered to nobody, and refused at the call
+ * before anything goes out (src/mcp-connectors.ts). A name may be blocked
+ * before any list holds it.
+ */
+export const connectorBlockedTools = sqliteTable(
+  "connector_blocked_tools",
+  {
+    connectorId: text("connector_id")
+      .notNull()
+      .references(() => connectors.id),
+    name: text().notNull(),
+    blockedBy: text("blocked_by").notNull(),
+    blockedAt: timestamp("blocked_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.connectorId, table.name] })]
 );
 
 /**

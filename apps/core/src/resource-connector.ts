@@ -333,8 +333,8 @@ const refusalOf = (error: unknown): unknown => {
     return functionErrors.create("permission.declined");
   }
   // An HTTP connection's request off what an admin approved (its paths,
-  // methods, headers, a redirect elsewhere).
-  if (code === "connect.http_refused") {
+  // methods, headers, a redirect elsewhere), or a tool an admin blocked.
+  if (code === "connect.http_refused" || code === "connect.tool_blocked") {
     return functionErrors.create("permission.not_allowed");
   }
   if (code === "connect.idempotency_conflict") {

@@ -4425,6 +4425,7 @@ msgid "Changed who reads what a shared connection brings into the Brain"
 msgstr "Cambió quién lee lo que una conexión compartida trae al Brain"
 
 #: src/connections/app/words.ts
+#: src/connections/connector-tools.tsx
 msgid "Changes"
 msgstr "Cambia"
 
@@ -8180,6 +8181,10 @@ msgstr "Grasp puede leer y escribir en {app}, solo para lo que permitas."
 msgid "Grasp may use {app} only through the tools you allowed."
 msgstr "Grasp solo puede usar {app} con las herramientas que permitiste."
 
+#: src/connections/connector-tools.tsx
+msgid "Grasp never runs it"
+msgstr "Grasp nunca la ejecuta"
+
 #: src/connections/connected-dialog.tsx
 msgid "Grasp reaches it at {address}, inside your network."
 msgstr "Grasp lo alcanza en {address}, dentro de tu red."
@@ -9536,6 +9541,10 @@ msgstr "Sus tablas pueden decir quién ve y modifica qué filas."
 msgid "Its tokens are deleted, every App and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
 msgstr "Sus tokens se eliminan, todas las aplicaciones y agentes la pierden y las acciones que esperan por ella se descartan. Vuelve a conectarla para usarla de nuevo."
 
+#: src/connections/connector-tools.tsx
+msgid "Its tools show here once someone connects it."
+msgstr "Sus herramientas aparecen aquí cuando alguien la conecta."
+
 #: src/workflows/trigger-block.ts
 msgid "Its trigger can't start it"
 msgstr "Su disparador no puede iniciarlo"
@@ -9974,6 +9983,10 @@ msgstr "Volvió a admitir la dirección antigua de un miembro borrado"
 #: src/onboarding/document-drop.tsx
 msgid "Let go to add them"
 msgstr "Suelta para añadirlos"
+
+#: src/connections/connector-tools.tsx
+msgid "Let Grasp use {name}"
+msgstr "Dejar que Grasp use {name}"
 
 #: src/onboarding/review-parts.tsx
 msgid "Let Grasp’s mail through"
@@ -11924,6 +11937,10 @@ msgstr "No invitados: {notInvited}. {sent, plural, one {La otra invitación se e
 msgid "Not listed"
 msgstr "No indicados"
 
+#: src/connections/connector-tools.tsx
+msgid "Not listed now"
+msgstr "Ahora no aparece"
+
 #: src/drafts/share-with-team.tsx
 msgid "Not live"
 msgstr "Sin publicar"
@@ -13436,6 +13453,10 @@ msgstr "Personas de fuera de tu organización, invitadas a lo que se comparte co
 msgid "People respond better when they know why I’m reaching out. I’ve drafted a message you can send yourself. Then pick the day the interviews start."
 msgstr "La gente responde mejor cuando sabe por qué me pongo en contacto. He redactado un mensaje que puedes enviar tú mismo. Después elige el día en que empiezan las entrevistas."
 
+#: src/connections/connector-tools.tsx
+msgid "People sign in at {host}."
+msgstr "La gente inicia sesión en {host}."
+
 #: src/connections/add-connector.tsx
 msgid "People sign in at the server"
 msgstr "Cada persona inicia sesión en el servidor"
@@ -13941,6 +13962,10 @@ msgstr "Accesible a través de la red de tu empresa"
 msgid "Reached through your company network at {address}."
 msgstr "Accesible a través de la red de tu empresa en {address}."
 
+#: src/connections/connector-tools.tsx
+msgid "Reaches other people"
+msgstr "Llega a otras personas"
+
 #: src/activity/type-labels.ts
 msgid "Read"
 msgstr "Lectura"
@@ -14155,6 +14180,7 @@ msgid "Reading your staff list"
 msgstr "Leyendo tu lista de personal"
 
 #: src/connections/app/words.ts
+#: src/connections/connector-tools.tsx
 msgid "Reads"
 msgstr "Lee"
 
@@ -18825,6 +18851,10 @@ msgstr "Herramientas permitidas: {tools}"
 msgid "Tools allowed: none recorded"
 msgstr "Herramientas permitidas: ninguna registrada"
 
+#: src/connections/connector-tools.tsx
+msgid "Tools its server lists"
+msgstr "Herramientas que ofrece su servidor"
+
 #: src/connections/connect-dialog.tsx
 msgid "Tools to allow"
 msgstr "Herramientas que permitir"
@@ -18926,6 +18956,10 @@ msgstr "Reintentando…"
 #: src/agents/agent-templates.ts
 msgid "Turn a full inbox into a short list of what needs a person today."
 msgstr "Convierte una bandeja llena en una lista breve de lo que necesita a una persona hoy."
+
+#: src/connections/connector-tools.tsx
+msgid "Turn a tool off to block it: Grasp offers it to nobody and refuses every call to it."
+msgstr "Desactiva una herramienta para bloquearla: Grasp no se la ofrece a nadie y rechaza cada llamada a ella."
 
 #: src/workflows/workflow-triggers.tsx
 msgctxt "turn a trigger off"

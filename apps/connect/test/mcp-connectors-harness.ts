@@ -50,7 +50,10 @@ const resolve = (url: URL): Response => {
 export const mcpInternet = (): void => {
   beforeEach(async () => {
     // Each test adds its servers again, to a server that forgot it.
-    await env.DB.prepare("DELETE FROM connectors").run();
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM connector_blocked_tools"),
+      env.DB.prepare("DELETE FROM connectors"),
+    ]);
     linear.reset();
     servers.clear();
     sent.length = 0;
