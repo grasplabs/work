@@ -492,7 +492,13 @@ describe("a connector's definition", () => {
         declared({
           readOnly: true,
           reach: "company",
-          routes: ["GET /v1/submissions", "GET /v1/deliveries"],
+          routes: [
+            "GET /v1/submissions",
+            "GET /v1/deliveries",
+            "GET /v1/senders",
+            "GET /v1/publications",
+            "GET /v1.0/me/mailFolders/sentitems/messages",
+          ],
           args: {},
         })
       )
@@ -550,25 +556,34 @@ describe("a connector's definition", () => {
         declared({ ...write, routes: ["POST /v1.0/me/sendmail"] })
       )
     ).toThrow("mail.store: a route's path delivers to people");
+    expect(
+      named(
+        "chat.note",
+        declared({ ...write, routes: ["POST /api/chat.scheduleMessage"] })
+      )
+    ).toThrow("chat.note: a route's path delivers to people");
   });
 
-  it("refuses a route to a host that names what Grasp never does", () => {
-    expect(() =>
+  it("refuses a route to a host that names what Grasp never does, but not for its brand", () => {
+    const savingTo = (to: string) => () =>
       defineConnector({
         name: "notes",
         title: "Notes",
-        hosts: [host, "hooks.slack.com"],
+        hosts: [host, to],
         auth: keyAuth,
         tools: {
           "notes.save": declared({
             readOnly: false,
             reach: "own",
-            routes: ["POST hooks.slack.com/services/{a}/{b}/{c}"],
+            routes: [`POST ${to}/services/{a}/{b}/{c}`],
             args: {},
           }),
         },
-      })
-    ).toThrow("notes.save: a route's host names what Grasp never does");
+      });
+    expect(savingTo("hooks.slack.com")).toThrow(
+      "notes.save: a route's host names what Grasp never does"
+    );
+    expect(savingTo("api.clearbit.com")).not.toThrow();
   });
 
   it("refuses a read whose path changes or delivers", () => {
@@ -593,6 +608,22 @@ describe("a connector's definition", () => {
       named(
         "channel.history",
         declared({ ...read, routes: ["GET /api/chat.postmessage"] })
+      )
+    ).toThrow(
+      "channel.history: it is read-only, but a route's path says it changes or delivers something"
+    );
+    expect(
+      named(
+        "channel.history",
+        declared({ ...read, routes: ["GET /api/chat.pOstMessage"] })
+      )
+    ).toThrow(
+      "channel.history: it is read-only, but a route's path says it changes or delivers something"
+    );
+    expect(
+      named(
+        "channel.history",
+        declared({ ...read, routes: ["GET /api/chat.scheduleMessage"] })
       )
     ).toThrow(
       "channel.history: it is read-only, but a route's path says it changes or delivers something"

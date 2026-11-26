@@ -518,6 +518,8 @@ export const defineConnector = (
       if (method !== "GET") {
         throw new Error(`"${route}": an event or a sync only reads, by GET`);
       }
+      // Delivery only, as a sync's manifest is checked: never or change words
+      // would refuse real reads (a drive item's permissions, a start token).
       if (isDeliveringPath(path)) {
         throw new Error(
           `"${route}": an event or a sync runs on its own, so its path may not deliver to people`

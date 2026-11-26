@@ -289,27 +289,18 @@ const targetWords: readonly string[] = [
 ];
 
 /**
- * The `sendingWords` a write's path is searched for inside its joined
- * words too (`sendmail`, `SENDMAIL`). Not `post` or `notify`, which
- * `posts` and `notifications` hold.
- */
-const sendingParts: readonly string[] = [
-  "broadcast",
-  "deliver",
-  "dispatch",
-  "publish",
-  "send",
-  "submit",
-];
-
-/**
  * Name words that send something to people: a change named with one
  * reaches others, and a draft named with one is sent, not written.
  */
 const sendingWords: ReadonlySet<string> = new Set([
-  ...sendingParts,
+  "broadcast",
+  "deliver",
+  "dispatch",
   "notify",
   "post",
+  "publish",
+  "send",
+  "submit",
 ]);
 
 /**
@@ -612,30 +603,33 @@ const delivers = (word: string): boolean =>
 
 /**
  * Whether a path's literal `piece` says it delivers to people: by a word
- * that delivers, or a sending word joined to what people say
- * (`chat.postmessage`, `sendmail`). Enough to refuse a read by.
+ * that delivers, or, in its letters run together whatever their case, a
+ * sending word or `schedule` right before what people say
+ * (`chat.pOstMessage`, `sendmail`, `chat.scheduleMessage`). Enough to
+ * refuse a read by.
  */
-const pieceDelivers = (piece: string): boolean =>
-  wordsOf(piece).some(
-    (word) =>
-      delivers(word) ||
-      [...sendingWords].some(
-        (sending) =>
-          word.startsWith(sending) &&
-          conversationWords.has(word.slice(sending.length))
+const pieceDelivers = (piece: string): boolean => {
+  const joined = joinedOf(piece);
+  return (
+    wordsOf(piece).some(delivers) ||
+    [...sendingWords, "schedule"].some((sending) =>
+      [...conversationWords].some((said) =>
+        joined.includes(`${sending}${said}`)
       )
+    )
   );
+};
 
 /**
  * Whether a path's literal `piece` may deliver to people: it says so
- * (`pieceDelivers`), or holds a sending or answering word anywhere in
- * its joined words (`replyall`, `SENDMAIL`). That also hits reads
- * (`submissions`, `deliveries`), so it only makes a write reach others,
+ * (`pieceDelivers`), or holds a sending stem or an answering word
+ * anywhere in its joined words (`replyall`, `SENDMAIL`). That also hits
+ * reads (`deliveries`, `senders`), so it only makes a write reach others,
  * where a wrong hit only makes its class stricter.
  */
 const pieceMayDeliver = (piece: string): boolean =>
   pieceDelivers(piece) ||
-  [...sendingParts, ...answeringWords].some((part) =>
+  [...sendingStems, ...answeringWords].some((part) =>
     joinedOf(piece).includes(part)
   );
 
@@ -1153,7 +1147,11 @@ export const declarationProblem = (
   if (routes.some(({ path }) => isNeverPath(path))) {
     return "a route's path names what Grasp never does";
   }
-  if (routes.some(({ host }) => host.split(".").some(isNeverTool))) {
+  // The labels left of the domain (`hooks` of `hooks.slack.com`): a
+  // domain is a brand's name, which may hold a word (`clearbit`, `payfit`).
+  if (
+    routes.some(({ host }) => host.split(".").slice(0, -2).some(isNeverTool))
+  ) {
     return "a route's host names what Grasp never does";
   }
   if (readOnly && routes.some(({ method }) => !readMethods.has(method))) {

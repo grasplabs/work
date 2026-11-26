@@ -250,7 +250,9 @@ export const syncManifestSchema = z.strictObject({
     )
     .refine(
       (routes) => !routes.some(({ path }) => isDeliveringPath(path)),
-      // It runs on its own: one that delivers would on every run.
+      // It runs on its own: one that delivers would on every run. Delivery
+      // only: never or change words would refuse real sync reads (a drive
+      // item's permissions, a changes start token).
       "A sync runs on its own, so its paths may not deliver to people"
     ),
 });
