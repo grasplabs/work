@@ -25,6 +25,7 @@ import { companiesOf } from "../../admin/platform.ts";
 import type { PlatformNeed, Standing } from "../../admin/platform.ts";
 import { ReadinessPanel } from "../../admin/readiness-parts.tsx";
 import { fetchReadiness } from "../../admin/readiness.ts";
+import { rowTarget } from "../../admin/row-target.ts";
 import { fetchClientGrid, fetchGridLive } from "../../clients/functions.ts";
 import type { GridRow, LiveStatus } from "../../clients/grid.ts";
 import { fetchPlatformSpend } from "../../platform-ai-functions.ts";
@@ -62,6 +63,7 @@ const CompanyRow = ({
           data-row-target
           params={{ clientId: row.id }}
           to="/organizations/$clientId/setup"
+          {...stylex.props(rowTarget)}
         >
           {row.name}
         </Link>

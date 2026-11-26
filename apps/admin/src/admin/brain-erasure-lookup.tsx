@@ -8,25 +8,34 @@
  * the staff member, before it answers; nothing of it is kept here.
  */
 
-import { Button } from "@grasp-os/app-kit/components/button";
+import type { BrainErasureLookup } from "@grasp-os/shared/brain-report";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import { Button } from "@grasp-os/ui/components/button";
+import { CardContent } from "@grasp-os/ui/components/card";
 import {
   Field,
   FieldDescription,
   FieldLabel,
-} from "@grasp-os/app-kit/components/field";
-import { Input } from "@grasp-os/app-kit/components/input";
+} from "@grasp-os/ui/components/field";
+import { Input } from "@grasp-os/ui/components/input";
 import {
   NativeSelect,
   NativeSelectOption,
-} from "@grasp-os/app-kit/components/native-select";
-import type { BrainErasureLookup } from "@grasp-os/shared/brain-report";
-import { useId, useState } from "react";
+} from "@grasp-os/ui/components/native-select";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
+import { useState } from "react";
 
 import { brainErasureFn } from "../clients/brain-functions.ts";
 import type { BrainErasureResult } from "../clients/brain.ts";
 import { answerKept, answerShown } from "./erasure-answer.ts";
 import type { LookupAnswer } from "./erasure-answer.ts";
-import { Section } from "./section.tsx";
+import { Panel } from "./panel.tsx";
+
+const styles = stylex.create({
+  form: { display: "flex", flexDirection: "column", gap: space["4"] },
+  kind: { width: "14rem", maxWidth: "100%" },
+});
 
 const kinds = [
   { value: "source", label: "A source, by its key" },
@@ -95,8 +104,6 @@ export const BrainErasureLookupSection = ({
 }: {
   clientId: string;
 }) => {
-  const kindId = useId();
-  const nameId = useId();
   const [kind, setKind] = useState<Kind>("source");
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
@@ -134,80 +141,76 @@ export const BrainErasureLookupSection = ({
     })();
   };
   return (
-    <Section
+    <Panel
       description="Answer a company's question whether something was erased. Type its key or id as the company gave it. Each lookup is in the company's audit log, with your name."
       title="Was it erased?"
     >
-      <form
-        className="flex flex-col gap-4"
-        onSubmit={(event) => {
-          event.preventDefault();
-          lookUp();
-        }}
-      >
-        <Field>
-          <FieldLabel htmlFor={kindId}>What to look up</FieldLabel>
-          <NativeSelect
-            className="w-56"
-            id={kindId}
-            onChange={(event) => {
-              const chosen = kinds.find(
-                (each) => each.value === event.target.value
-              )?.value;
-              if (chosen !== undefined) {
-                setKind(chosen);
+      <CardContent>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            lookUp();
+          }}
+          {...stylex.props(styles.form)}
+        >
+          <Field>
+            <FieldLabel>What to look up</FieldLabel>
+            <NativeSelect
+              onChange={(event) => {
+                const chosen = kinds.find(
+                  (each) => each.value === event.target.value
+                )?.value;
+                if (chosen !== undefined) {
+                  setKind(chosen);
+                  setAnswer(null);
+                }
+              }}
+              style={styles.kind}
+              value={kind}
+            >
+              {kinds.map((each) => (
+                <NativeSelectOption key={each.value} value={each.value}>
+                  {each.label}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </Field>
+          <Field>
+            <FieldLabel>
+              {kind === "source" ? "Source key" : "Person's id"}
+            </FieldLabel>
+            <Input
+              autoComplete="off"
+              maxLength={256}
+              onChange={(event) => {
+                setTyped(event.target.value);
                 setAnswer(null);
-              }
-            }}
-            value={kind}
-          >
-            {kinds.map((each) => (
-              <NativeSelectOption key={each.value} value={each.value}>
-                {each.label}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={nameId}>
-            {kind === "source" ? "Source key" : "Person's id"}
-          </FieldLabel>
-          <Input
-            autoComplete="off"
-            id={nameId}
-            maxLength={256}
-            onChange={(event) => {
-              setTyped(event.target.value);
-              setAnswer(null);
-            }}
-            required
-            spellCheck={false}
-            value={typed}
-          />
-          <FieldDescription>
-            {kind === "source"
-              ? "Its producer and the producer's id, as upload:…"
-              : "Their user id in the company's Grasp."}
-          </FieldDescription>
-        </Field>
-        <div>
-          <Button disabled={busy || typed.trim() === ""} type="submit">
-            Look up
-          </Button>
-        </div>
-        {said === null ? null : (
-          <p
-            className={
-              said.wrong
-                ? "text-destructive text-sm"
-                : "text-muted-foreground text-sm"
-            }
-            role={said.wrong ? "alert" : "status"}
-          >
-            {said.text}
-          </p>
-        )}
-      </form>
-    </Section>
+              }}
+              required
+              spellCheck={false}
+              value={typed}
+            />
+            <FieldDescription>
+              {kind === "source"
+                ? "Its producer and the producer's id, as upload:…"
+                : "Their user id in the company's Grasp."}
+            </FieldDescription>
+          </Field>
+          <div>
+            <Button disabled={busy || typed.trim() === ""} type="submit">
+              Look up
+            </Button>
+          </div>
+          {said === null ? null : (
+            <Alert
+              appearance="subtle"
+              variant={said.wrong ? "destructive" : "default"}
+            >
+              <AlertDescription>{said.text}</AlertDescription>
+            </Alert>
+          )}
+        </form>
+      </CardContent>
+    </Panel>
   );
 };

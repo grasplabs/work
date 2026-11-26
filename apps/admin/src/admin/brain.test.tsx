@@ -70,8 +70,7 @@ describe("an organization's brain", () => {
       counts: headings().includes("What it stands on"),
       reading: main().includes(reading),
       report:
-        container.querySelector('section[aria-label="The Brain at work"]') !==
-        null,
+        container.querySelector('[aria-label="The Brain at work"]') !== null,
     };
     held.resolve(brainReport(1_000_000));
     await settle();
@@ -79,8 +78,7 @@ describe("an organization's brain", () => {
     expect({
       beforeAnswer,
       report:
-        container.querySelector('section[aria-label="The Brain at work"]') !==
-        null,
+        container.querySelector('[aria-label="The Brain at work"]') !== null,
     }).toStrictEqual({
       beforeAnswer: { counts: true, reading: true, report: false },
       report: true,
