@@ -24,6 +24,14 @@ import { env } from "cloudflare:workers";
 
 const encoder = new TextEncoder();
 
+/**
+ * A test release's packages with core on pi-durable `version`, whose minor
+ * is how it stores chats (`readsChatsOf`).
+ */
+export const onPi = (version: string) => ({
+  packages: { "@earendil-works/pi-durable": version },
+});
+
 /** What a test release holds; everything else is fixed. */
 export interface ReleaseSpec {
   notes: string;

@@ -194,6 +194,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // Spend is recorded by ID: a person's usage is keyed by their user ID,
   // never their name or address.
   "core.model_usage": { kept: "accounting, by ID" },
+  // A turn's times and counts, by its chat's ID: no person's ID, name or
+  // words, swept with the usage rows (model-usage.ts).
+  "core.chat_turns": { kept: "accounting of a chat's turns, by ID" },
   "core.provider_health": noPerson,
   "core.run_mail_stamps": { company: "mail a run sent (D3)" },
   "core.run_inboxes": noPerson,

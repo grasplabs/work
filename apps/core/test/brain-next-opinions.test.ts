@@ -1542,7 +1542,7 @@ describe(
           await Promise.resolve();
           return done ? undefined : perLine(requests);
         },
-        { models: ["openai/gpt-4"] }
+        { models: ["openrouter/openai/gpt-4"] }
       );
       try {
         for (let run = 0; run < 10; run += 1) {
