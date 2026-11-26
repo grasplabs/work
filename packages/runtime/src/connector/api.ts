@@ -1,6 +1,7 @@
 import { validateValue } from "../common/value-interpreter.ts";
 import type { AnySchema } from "../common/value-schema.ts";
 import type { Infer } from "../common/value-types.ts";
+import { requestHost } from "./hosts.ts";
 import type { Route } from "./manifest.ts";
 import { httpMethods, pathMatches } from "./protocol.ts";
 import { providerFetch, segment } from "./provider.ts";
@@ -262,7 +263,7 @@ export const apiFor = (
         throw refused("A tool sends at most one write, as its last request");
       }
       const path = filledPath(target.path, request.path ?? {});
-      const url = new URL(`https://${target.host}${path ?? ""}`);
+      const url = new URL(`https://${requestHost(target.host)}${path ?? ""}`);
       // Egress's own rule: each value is one segment of plain text, so a
       // value it would refuse is refused here, before anything is sent.
       if (path === undefined || !pathMatches(target.path, url.pathname)) {

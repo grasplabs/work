@@ -1,3 +1,8 @@
+import {
+  fitsTemplate,
+  hostOf,
+  hostTemplateOf,
+} from "@grasp-os/runtime/connector";
 import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import {
   connectErrors,
@@ -517,6 +522,19 @@ interface Keeping {
   vault: Vault;
 }
 
+/**
+ * The hosts a connection signed in with, as its events record them: one
+ * member a template, `hosts.<name>` (a connector's template names are its
+ * own), each a host short enough for an audit value.
+ */
+const hostsDetail = ({ hosts = {} }: Kept): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(hosts).map(([template, host]) => [
+      `hosts.${hostTemplateOf(template)?.name ?? ""}`,
+      host,
+    ])
+  );
+
 /** Stores a new connection with its tokens and its event, all or nothing. */
 const storeConnection = async (
   env: Env,
@@ -570,6 +588,7 @@ const storeConnection = async (
         scope: flow.scope,
         ...companyNetworkDetail(tokens, null),
         outcome: "ok",
+        ...hostsDetail(tokens),
       }),
     ],
     writes
@@ -928,9 +947,12 @@ const keepTokens = async (
     await refuse(reason, { connectionId: held?.id });
     throw connectionErrors.create(reason);
   };
-  if (account === null) {
-    // A suite's account outside the tenant, or an app's lookup that
-    // named none.
+  if (
+    account === null ||
+    (provider.hostsFrom !== undefined && tokens.hosts === undefined)
+  ) {
+    // A suite's account outside the tenant, an app's lookup that named
+    // none, or a token response naming a host its template doesn't fit.
     return await refusal(
       provider.pinned
         ? "connection.wrong_account"
@@ -956,6 +978,7 @@ const keepTokens = async (
       refreshToken,
       expiresAt: tokens.expiresAt,
       scope: tokens.scope,
+      ...(tokens.hosts === undefined ? {} : { hosts: tokens.hosts }),
     },
     drop,
     refuse
@@ -1467,6 +1490,7 @@ export const connectWithKey = async (
     scope,
     key,
     companyNetwork: asked,
+    hosts: given = {},
   } = connectionErrors.parse(
     "connection.invalid",
     connectWithKeySchema,
@@ -1504,6 +1528,27 @@ export const connectWithKey = async (
       connectionId
     );
   };
+  // A host for each of its connector's host templates, as a URL parser
+  // reads it, fitting the template, and nothing else; each is sealed with
+  // the key (GRA-2350). A whole host (`{host}`) makes the app shared only.
+  const templates = provider.hostTemplates ?? [];
+  const hosts = Object.fromEntries(
+    Object.entries(given).map(([template, host]) => [
+      template,
+      hostOf(host) ?? "",
+    ])
+  );
+  if (
+    Object.keys(hosts).length !== templates.length ||
+    !templates.every(
+      (template) =>
+        Object.hasOwn(hosts, template) &&
+        fitsTemplate(template, hosts[template] ?? "")
+    )
+  ) {
+    await refuse("connection.invalid");
+    throw connectionErrors.create("connection.invalid");
+  }
   const companyNetwork = await keyCompanyNetwork(
     env,
     provider,
@@ -1514,7 +1559,8 @@ export const connectWithKey = async (
   const account = await provider.account(
     key,
     ownerOf({ scope }, person),
-    outbound(env, companyNetwork)
+    outbound(env, companyNetwork),
+    hosts
   );
   if (account === null) {
     await refuse("connection.provider_refused", { outcome: "failed" });
@@ -1524,6 +1570,7 @@ export const connectWithKey = async (
     apiKey: key,
     expiresAt: apiKeyExpiresAt,
     ...(companyNetwork === undefined ? {} : { companyNetwork }),
+    ...(templates.length === 0 ? {} : { hosts }),
   };
   const replaced = await replaceKey(
     env,

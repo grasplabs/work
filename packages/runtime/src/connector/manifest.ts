@@ -9,6 +9,7 @@ import { permissionActionSchema } from "@grasp-os/shared/permissions";
 import { syncCursorSchema, syncItemKindSchema } from "@grasp-os/shared/sync";
 import { z } from "zod";
 
+import { dnsLabel, hostPattern, hostTemplateOf } from "./hosts.ts";
 import { httpMethods, isBatchSegment, parameterSegment } from "./protocol.ts";
 import { endpointHost, signInSchema } from "./sign-in.ts";
 import { declarationProblem, isDeliveringPath } from "./tool-rules.ts";
@@ -44,14 +45,6 @@ export const provenanceSchema = z
   .array(z.string().min(1).max(auditIdentifierMaxLength))
   .max(maxProvenanceItems);
 
-/**
- * A provider host, as the egress handler compares it: a lowercase DNS name
- * with at least two labels and a top-level label that starts with a letter,
- * so never an IP address, a port or userinfo.
- */
-const hostPattern =
-  /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
-
 /** A path segment an action names as it is, such as `v1.0` or `$value`. */
 const literalSegment = /^[\w.~$:@()'-]+$/u;
 
@@ -74,6 +67,17 @@ const isPathTemplate = (path: string): boolean => {
   );
 };
 
+/** A host a connector declares: fixed (`hostPattern`), or a template. */
+export const declaredHostSchema = z
+  .string()
+  .max(253)
+  .refine(
+    (host) =>
+      (hostPattern.test(host) && !host.endsWith(".invalid")) ||
+      hostTemplateOf(host) !== undefined,
+    "Not a host, or a host template: {name}.<host> or {name}"
+  );
+
 /** A host a connector may reach (`hostPattern`). */
 export const hostSchema = z.string().regex(hostPattern);
 
@@ -88,9 +92,6 @@ const redirectHostSchema = z
     (pattern) => pattern.startsWith("*.") && hostPattern.test(pattern.slice(2)),
     "Not a redirect host: *.<host>"
   );
-
-/** One DNS label, as a redirect host's `*` stands for. */
-const dnsLabel = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 
 /** Whether `hostname` (lowercase, as a URL has it) is one `pattern` allows. */
 export const redirectHostMatches = (
@@ -121,7 +122,7 @@ export const redirectHostMatches = (
 export const routeSchema = z
   .strictObject({
     method: z.enum(httpMethods),
-    host: hostSchema,
+    host: declaredHostSchema,
     path: z.string().max(512).refine(isPathTemplate, "Not a path template"),
     redirects: z.array(redirectHostSchema).min(1).max(4).optional(),
   })
@@ -306,8 +307,14 @@ export const connectorManifestSchema = z
     signIn: signInSchema.optional(),
     /** The OAuth scopes its actions need, all among those connect asks for. */
     scopes: z.array(z.string().min(1).max(256)).max(64),
-    /** Every host it may reach, exactly. */
-    hosts: z.array(hostSchema).min(1).max(maxHosts),
+    /** Every host it may reach, exactly, or as a template (`filledHost`). */
+    hosts: z.array(declaredHostSchema).min(1).max(maxHosts),
+    /**
+     * Those of its hosts the connection's credential goes to: connect's
+     * egress adds it to a request for one of these alone, and sends one
+     * for any other host without it.
+     */
+    credentialHosts: z.array(declaredHostSchema).min(1).max(maxHosts),
     /** Each action (tool) by name, and the only requests it may send. */
     actions: z.record(permissionActionSchema, actionManifestSchema),
     /**
@@ -330,11 +337,48 @@ export const connectorManifestSchema = z
     "A connector's scopes are among those its record asks for; an API key has none"
   )
   .refine(
-    ({ signIn, hosts }) =>
+    ({ hosts, credentialHosts }) =>
+      credentialHosts.every((host) => hosts.includes(host)),
+    "The credential goes only to hosts of the connector's"
+  )
+  .refine(
+    ({ signIn, credentialHosts }) =>
       signIn?.account === undefined ||
-      hosts.includes(endpointHost(signIn.account.url) ?? ""),
-    // The lookup carries the token or key: only where the calls go.
-    "The account lookup goes to one of the connector's hosts"
+      credentialHosts.includes(endpointHost(signIn.account.url) ?? ""),
+    // The lookup carries the token or key: only where the credential goes.
+    "The account lookup goes to one of the hosts the credential goes to"
+  )
+  .refine(
+    ({ signIn, hosts }) =>
+      hosts.every((host) => {
+        const template = hostTemplateOf(host);
+        return (
+          template === undefined ||
+          signIn?.kind === "api_key" ||
+          (signIn?.kind === "oauth2" &&
+            template.suffix !== null &&
+            Object.hasOwn(signIn.hostsFrom ?? {}, host))
+        );
+      }),
+    // Given with the key when a connection signs in, or named by the token
+    // response under a fixed name: a whole host only an admin types.
+    "A host template is filled by an API key's sign-in, or by the token response (hostsFrom) under a fixed name"
+  )
+  .refine(
+    ({ hosts }) => {
+      const names = hosts.flatMap((host) => hostTemplateOf(host)?.name ?? []);
+      return new Set(names).size === names.length;
+    },
+    // A connection's hosts are told apart, and audited, by name.
+    "Each host template has a name of its own"
+  )
+  .refine(
+    ({ signIn, hosts }) =>
+      signIn?.kind !== "oauth2" ||
+      Object.keys(signIn.hostsFrom ?? {}).every(
+        (host) => hosts.includes(host) && hostTemplateOf(host) !== undefined
+      ),
+    "hostsFrom names only the connector's host templates"
   )
   .refine(
     ({ hosts, actions, syncs = {} }) =>

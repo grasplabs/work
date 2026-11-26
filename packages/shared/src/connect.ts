@@ -405,6 +405,12 @@ export const connectWithKeySchema = z.strictObject({
    * names its own (`AddConnector.companyNetwork`).
    */
   companyNetwork: z.string().max(connectorUrlMaxLength).optional(),
+  /**
+   * The host for each of the app's connector's host templates, such as
+   * `{ "{host}": "erp.example.com" }`: sealed with the key, so another
+   * host takes signing in again. Connect checks each against its template.
+   */
+  hosts: z.record(z.string().max(253), z.string().max(253)).optional(),
 });
 export type ConnectWithKey = z.input<typeof connectWithKeySchema>;
 

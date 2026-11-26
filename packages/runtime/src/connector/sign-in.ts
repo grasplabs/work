@@ -1,6 +1,8 @@
 import { companyToolClassSchema } from "@grasp-os/shared/connect";
 import { z } from "zod";
 
+import { hostPattern, hostTemplateOf } from "./hosts.ts";
+
 // How a person signs in to an app that isn't one of the suites connect
 // handles itself (Microsoft 365, Google Workspace): its provider record.
 // A native connector for such an app carries the record in its manifest,
@@ -79,13 +81,6 @@ export const withTenant = (value: string, tenant: string): string =>
 /** Two tenants a template is checked with: what changes between them is the tenant's. */
 const checkedTenants = ["tenant", "other-tenant"] as const;
 
-/**
- * A DNS name as a URL has it (lowercase): two labels or more and a
- * top-level label starting with a letter, so never an IP address.
- */
-const hostPattern =
-  /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
-
 /** `value` as a URL, if it is one. */
 const urlOf = (value: string): URL | undefined => {
   try {
@@ -95,8 +90,11 @@ const urlOf = (value: string): URL | undefined => {
   }
 };
 
-/** Whether `value` is an HTTPS URL on a DNS name, as an endpoint must be. */
-const isEndpoint = (value: string): boolean => {
+/**
+ * Whether `value` is an HTTPS URL on a DNS name, as an endpoint must be,
+ * or on a host template too where `templates` says so.
+ */
+const isEndpoint = (value: string, templates = false): boolean => {
   const url = urlOf(value);
   return (
     url !== undefined &&
@@ -105,7 +103,8 @@ const isEndpoint = (value: string): boolean => {
     url.password === "" &&
     url.port === "" &&
     url.hash === "" &&
-    hostPattern.test(url.hostname) &&
+    (hostPattern.test(url.hostname) ||
+      (templates && hostTemplateOf(url.hostname) !== undefined)) &&
     // As written: no case, escapes or dot segments the parser would change.
     url.href === value
   );
@@ -114,7 +113,7 @@ const isEndpoint = (value: string): boolean => {
 const endpointSchema = z
   .string()
   .max(512)
-  .refine(isEndpoint, "Not an HTTPS endpoint on a DNS name");
+  .refine((value) => isEndpoint(value), "Not an HTTPS endpoint on a DNS name");
 
 /**
  * An endpoint that may hold `{tenant}`, past its host: filled with any
@@ -123,7 +122,7 @@ const endpointSchema = z
 const isEndpointTemplate = (value: string): boolean => {
   const filled = checkedTenants.map((tenant) => withTenant(value, tenant));
   const origins = new Set(filled.map((each) => urlOf(each)?.origin));
-  return filled.every(isEndpoint) && origins.size === 1;
+  return filled.every((each) => isEndpoint(each)) && origins.size === 1;
 };
 
 const endpointTemplateSchema = z
@@ -203,7 +202,14 @@ const pointerSchema = z.string().regex(/^(?:\/[\w.-]{1,64}){1,8}$/u);
  * are connected only as shared ones, by an admin.
  */
 export const accountLookupSchema = z.strictObject({
-  url: endpointSchema,
+  /** On a host template too, filled as the connection's calls are. */
+  url: z
+    .string()
+    .max(512)
+    .refine(
+      (value) => isEndpoint(value, true),
+      "Not an HTTPS endpoint on a DNS name or a host template"
+    ),
   id: pointerSchema,
   name: pointerSchema.optional(),
   email: pointerSchema.optional(),
@@ -377,12 +383,26 @@ const oauth2SignInSchema = z
     renewalRequires: scopeListSchema.optional(),
     /** `account`: revoking one token revokes the account's whole grant. */
     grant: z.literal("account").optional(),
+    /**
+     * Each of the connector's host templates (`{company}.example.com`),
+     * and where the token response names its host: a pointer to a host,
+     * or to an HTTPS origin. A sign-in whose response names one that
+     * doesn't fit its template connects nothing.
+     */
+    hostsFrom: z.record(z.string().max(253), pointerSchema).optional(),
   })
   .refine(
     ({ scopes, scopeSeparator }) =>
       scopes.every((scope) => !scope.includes(scopeSeparator)),
     // Joined, it would be two scopes at the app, and not the ones checked.
     "A scope can't hold the separator it is joined with"
+  )
+  .refine(
+    ({ idToken, hostsFrom }) =>
+      idToken === undefined || hostsFrom === undefined,
+    // An ID token's subject is the vendor's, whatever host the response
+    // names: only a lookup at the filled host reads the account there.
+    "A sign-in with hostsFrom reads its account with a lookup, not an ID token"
   )
   .refine(
     ({ account, idToken }) =>
