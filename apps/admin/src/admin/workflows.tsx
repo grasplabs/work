@@ -1,57 +1,3 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/app-kit/components/dialog";
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-} from "@grasp-os/app-kit/components/field";
-import { Input } from "@grasp-os/app-kit/components/input";
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@grasp-os/app-kit/components/native-select";
-import { Progress } from "@grasp-os/app-kit/components/progress";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/app-kit/components/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/app-kit/components/table";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/app-kit/components/toggle-group";
-import { cn } from "@grasp-os/app-kit/lib/utils";
-import type {
-  AdminIntegrations,
-  AdminNeeded,
-} from "@grasp-os/shared/admin-snapshot";
-import type { AdminView } from "@grasp-os/shared/admin/admin-view";
-import {
-  STANDINGS,
-  workflowListOf,
-} from "@grasp-os/shared/admin/admin-workflows";
-import type {
-  Standing,
-  WorkflowRow,
-} from "@grasp-os/shared/admin/admin-workflows";
 /**
  * An organization's Workflows, ported from the prototype
  * (grasplabs/prototype `components/admin/org-workflows.tsx`): every piece
@@ -67,6 +13,19 @@ import type {
  * Not here yet, as the prototype has it: a row opening the work's own
  * record (its steps on the canvas, and who described which).
  */
+import type {
+  AdminIntegrations,
+  AdminNeeded,
+} from "@grasp-os/shared/admin-snapshot";
+import type { AdminView } from "@grasp-os/shared/admin/admin-view";
+import {
+  STANDINGS,
+  workflowListOf,
+} from "@grasp-os/shared/admin/admin-workflows";
+import type {
+  Standing,
+  WorkflowRow,
+} from "@grasp-os/shared/admin/admin-workflows";
 import {
   SETTLERS,
   STARTING_ORG_RULES,
@@ -76,14 +35,68 @@ import type {
   Settler,
 } from "@grasp-os/shared/admin/onboarding-admin";
 import { orgRulesSchema } from "@grasp-os/shared/onboarding-staff";
-import { SlidersHorizontalIcon, WorkflowIcon } from "lucide-react";
-import { useId, useState } from "react";
+import { Button } from "@grasp-os/ui/components/button";
+import { Card, CardContent } from "@grasp-os/ui/components/card";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@grasp-os/ui/components/dialog";
+import {
+  Field,
+  FieldDescription,
+  FieldLabel,
+} from "@grasp-os/ui/components/field";
+import { IconTile } from "@grasp-os/ui/components/icon-tile";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@grasp-os/ui/components/native-select";
+import { NumberField } from "@grasp-os/ui/components/number-field";
+import { Progress } from "@grasp-os/ui/components/progress";
+import {
+  Select,
+  SelectContent,
+  SelectTrigger,
+  SelectValue,
+} from "@grasp-os/ui/components/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@grasp-os/ui/components/table";
+import { Text } from "@grasp-os/ui/components/text";
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@grasp-os/ui/components/toggle-group";
+import {
+  Icon,
+  SlidersHorizontalIcon,
+  WorkflowIcon,
+} from "@grasp-os/ui/lib/icons";
+import {
+  colors,
+  font,
+  media,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
+import { useState } from "react";
 
 import { CommandMenu } from "./command-menu.tsx";
 import { CommandFailure, useCommand } from "./commands.tsx";
 import { appName, needWords } from "./connections.tsx";
-import { Attention } from "./parts.tsx";
-import { EmptySection } from "./section.tsx";
+import { Attention } from "./marks.tsx";
+import { EmptyPanel, PanelNote } from "./panel.tsx";
 
 const all = "all";
 
@@ -98,11 +111,135 @@ const standingWords: Record<Standing, string> = {
   blocked: "Waits on a difference",
 };
 
-const standingDot: Record<Standing, string> = {
-  known: "bg-status-agreed",
-  nearly: "bg-foreground",
-  mapping: "bg-border",
-  blocked: "bg-status-attention",
+/** Narrower than `width`, measured on the table's own box (its container): a column goes. */
+const narrowerThan = (width: string) => `@container (width < ${width})`;
+
+const styles = stylex.create({
+  stage: { display: "flex", alignItems: "center", gap: space["2"] },
+  blocked: { color: colors.warning },
+  dot: {
+    width: "0.5rem",
+    height: "0.5rem",
+    flexShrink: 0,
+    borderRadius: "50%",
+  },
+  known: { backgroundColor: colors.success },
+  nearly: { backgroundColor: colors.foreground },
+  mapping: { backgroundColor: colors.border },
+  blockedDot: { backgroundColor: colors.warning },
+  // The figure, then its bar taking the rest of the column, as wide as it is.
+  meter: {
+    display: "flex",
+    alignItems: "center",
+    gap: space["2"],
+    width: "100%",
+  },
+  meterFigure: {
+    width: "3.5rem",
+    flexShrink: 0,
+    fontVariantNumeric: "tabular-nums",
+  },
+  meterBar: { flexGrow: 1, minWidth: "3rem" },
+  numberField: { width: "7rem" },
+  settles: { width: "18rem", maxWidth: "100%" },
+  form: { display: "flex", flexDirection: "column", gap: space["5"] },
+  dialog: { width: "42rem" },
+  page: { display: "flex", flexDirection: "column", gap: space["8"] },
+  list: { display: "flex", flexDirection: "column", gap: space["3"] },
+  bar: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: space["3"],
+  },
+  filters: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["2"],
+  },
+  team: { width: "12rem" },
+  work: { display: "flex", minWidth: 0, alignItems: "center", gap: space["3"] },
+  workWords: {
+    display: "flex",
+    minWidth: 0,
+    flexDirection: "column",
+    gap: "0.125rem",
+  },
+  name: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+    color: colors.foreground,
+  },
+  teamLine: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    fontSize: font.textXs,
+    lineHeight: font.textXsLine,
+    color: colors.mutedForeground,
+  },
+  // The stage under the name while its own column has no room.
+  stageBelow: {
+    display: { default: "none", [narrowerThan("36rem")]: "block" },
+    marginBlockStart: space["1"],
+  },
+  // The name takes what the other columns leave, its words cut with an ellipsis.
+  nameColumn: { width: "100%", maxWidth: 0 },
+  talkedColumn: {
+    width: "10rem",
+    display: { default: null, [narrowerThan("42rem")]: "none" },
+  },
+  stepsColumn: {
+    width: "10rem",
+    display: { default: null, [narrowerThan("48rem")]: "none" },
+  },
+  missingColumn: {
+    width: "9.5rem",
+    display: { default: null, [narrowerThan("56rem")]: "none" },
+  },
+  stageColumn: {
+    width: "11rem",
+    display: { default: null, [narrowerThan("36rem")]: "none" },
+  },
+  actionsColumn: { width: "3.5rem" },
+  waiting: {
+    display: "flex",
+    flexDirection: "column",
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  waitingRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    columnGap: space["6"],
+    rowGap: space["1"],
+    paddingBlock: space["3"],
+    paddingInline: space["5"],
+    borderBlockStartWidth: { default: size.hairline, ":first-child": 0 },
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: colors.border,
+  },
+  needs: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: { default: "flex-start", [media.lg]: "flex-end" },
+  },
+});
+
+/** How a standing is marked; its word always stands beside the mark. */
+const standingDot: Record<Standing, stylex.StyleXStyles> = {
+  known: styles.known,
+  nearly: styles.nearly,
+  mapping: styles.mapping,
+  blocked: styles.blockedDot,
 };
 
 const percent = new Intl.NumberFormat("en", {
@@ -141,17 +278,15 @@ const StageLine = ({
   standing: Standing;
   label: string;
 }) => (
-  <span
-    className={cn(
-      "flex items-center gap-2",
-      standing === "blocked" && "text-status-attention"
+  <span {...stylex.props(styles.stage)}>
+    <span aria-hidden {...stylex.props(styles.dot, standingDot[standing])} />
+    {standing === "blocked" ? (
+      <span {...stylex.props(styles.name, styles.blocked)}>{label}</span>
+    ) : (
+      <Text as="span" color="default" size="sm">
+        {label}
+      </Text>
     )}
-  >
-    <span
-      aria-hidden
-      className={cn("size-2 flex-none rounded-full", standingDot[standing])}
-    />
-    {label}
   </span>
 );
 
@@ -166,18 +301,27 @@ const Meter = ({
   label: string;
 }) => {
   if (total === 0) {
-    return <span className="text-muted-foreground">–</span>;
+    return (
+      <Text as="span" color="muted" size="sm">
+        –
+      </Text>
+    );
   }
   return (
-    <Progress
-      aria-label={label}
-      className="flex-nowrap items-center"
-      getAriaValueText={() => of(value, total)}
-      max={total}
-      value={Math.min(value, total)}
-    >
-      <span className="w-14 flex-none tabular-nums">{of(value, total)}</span>
-    </Progress>
+    <span {...stylex.props(styles.meter)}>
+      <span {...stylex.props(styles.meterFigure)}>
+        <Text as="span" color="default" size="sm">
+          {of(value, total)}
+        </Text>
+      </span>
+      <Progress
+        aria-label={label}
+        getAriaValueText={() => of(value, total)}
+        max={total}
+        style={styles.meterBar}
+        value={Math.min(value, total)}
+      />
+    </span>
   );
 };
 
@@ -199,27 +343,23 @@ const RuleField = ({
   /** A share in percent takes one decimal; counts stay whole. */
   step?: number;
   onChange: (value: number) => void;
-}) => {
-  const id = useId();
-  return (
-    <Field>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <Input
-        className="w-28"
-        id={id}
-        max={max}
-        min={min}
-        onChange={(event) => {
-          onChange(event.target.valueAsNumber);
-        }}
-        step={step}
-        type="number"
-        value={Number.isNaN(value) ? "" : value}
-      />
-      <FieldDescription>{description}</FieldDescription>
-    </Field>
-  );
-};
+}) => (
+  <Field>
+    <FieldLabel>{label}</FieldLabel>
+    <NumberField
+      max={max}
+      min={min}
+      // An emptied field is no number, which the rules' check refuses.
+      onValueChange={(next) => {
+        onChange(next ?? Number.NaN);
+      }}
+      step={step}
+      style={styles.numberField}
+      value={Number.isNaN(value) ? null : value}
+    />
+    <FieldDescription>{description}</FieldDescription>
+  </Field>
+);
 
 /**
  * The rules that say when a workflow counts as known at this
@@ -237,7 +377,6 @@ const Rules = ({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) => {
-  const settlesId = useId();
   const { busy, failure, give } = useCommand(clientId);
   const [draft, setDraft] = useState<OrgRules>(rules);
   const set = (change: Partial<OrgRules>) => {
@@ -253,7 +392,7 @@ const Rules = ({
   const fewer = draft.people - 1;
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent style={styles.dialog}>
         <DialogHeader>
           <DialogTitle>When a workflow is known</DialogTitle>
           <DialogDescription>
@@ -262,7 +401,6 @@ const Rules = ({
           </DialogDescription>
         </DialogHeader>
         <form
-          className="flex flex-col gap-5"
           onSubmit={(event) => {
             event.preventDefault();
             if (parsed.success) {
@@ -270,92 +408,93 @@ const Rules = ({
             }
           }}
         >
-          <RuleField
-            description={`People who do the work themselves, or ${fewer} and a document, a log or an example. The lead’s own account is a guess, never one of them.`}
-            label="People per step"
-            max={10}
-            min={1}
-            onChange={(people) => {
-              set({ people });
-            }}
-            value={draft.people}
-          />
-          <RuleField
-            description="Approved interviews before it is checked. Fewer, and the workflow is still being mapped."
-            label="Before it is checked"
-            max={30}
-            min={1}
-            onChange={(minInterviews) => {
-              set({ minInterviews });
-            }}
-            value={draft.minInterviews}
-          />
-          <RuleField
-            description="How many of the last interviews are looked at for new facts."
-            label="Interviews looked at"
-            max={10}
-            min={1}
-            onChange={(run) => {
-              set({ run });
-            }}
-            value={draft.run}
-          />
-          <RuleField
-            description={`It stops once those added less than this share of new facts, in percent: then more interviews would only repeat what is known. Now ${percent.format(draft.stopShare)}.`}
-            label="When it stops"
-            max={100}
-            min={0}
-            onChange={(share) => {
-              set({ stopShare: share / 100 });
-            }}
-            step={0.1}
-            value={Math.round(draft.stopShare * 1000) / 10}
-          />
-          <RuleField
-            description="After this many interviews, Stephen asks the lead to split it: probably two workflows in one, or teams that work differently."
-            label="When it does not settle"
-            max={50}
-            min={1}
-            onChange={(maxInterviews) => {
-              set({ maxInterviews });
-            }}
-            value={draft.maxInterviews}
-          />
-          <Field>
-            <FieldLabel htmlFor={settlesId}>
-              When people say different things
-            </FieldLabel>
-            <NativeSelect
-              className="w-72"
-              id={settlesId}
-              onChange={(event) => {
-                const settles = SETTLERS.find(
-                  (each) => each === event.target.value
-                );
-                if (settles !== undefined) {
-                  set({ settles });
-                }
-              }}
-              value={draft.settles}
-            >
-              {SETTLERS.map((each) => (
-                <NativeSelectOption key={each} value={each}>
-                  {settlerWords[each]}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            <FieldDescription>
-              Most differences are findings: it depends on the case, the office
-              or the date. Only one nobody can explain needs someone to settle
-              it.
-            </FieldDescription>
-          </Field>
-          {parsed.success ? null : (
-            <p>
-              <Attention>One of these is out of its bounds.</Attention>
-            </p>
-          )}
-          <CommandFailure failure={failure} />
+          <DialogBody>
+            <div {...stylex.props(styles.form)}>
+              <RuleField
+                description={`People who do the work themselves, or ${fewer} and a document, a log or an example. The lead’s own account is a guess, never one of them.`}
+                label="People per step"
+                max={10}
+                min={1}
+                onChange={(people) => {
+                  set({ people });
+                }}
+                value={draft.people}
+              />
+              <RuleField
+                description="Approved interviews before it is checked. Fewer, and the workflow is still being mapped."
+                label="Before it is checked"
+                max={30}
+                min={1}
+                onChange={(minInterviews) => {
+                  set({ minInterviews });
+                }}
+                value={draft.minInterviews}
+              />
+              <RuleField
+                description="How many of the last interviews are looked at for new facts."
+                label="Interviews looked at"
+                max={10}
+                min={1}
+                onChange={(run) => {
+                  set({ run });
+                }}
+                value={draft.run}
+              />
+              <RuleField
+                description={`It stops once those added less than this share of new facts, in percent: then more interviews would only repeat what is known. Now ${percent.format(draft.stopShare)}.`}
+                label="When it stops"
+                max={100}
+                min={0}
+                onChange={(share) => {
+                  set({ stopShare: share / 100 });
+                }}
+                step={0.1}
+                value={Math.round(draft.stopShare * 1000) / 10}
+              />
+              <RuleField
+                description="After this many interviews, Stephen asks the lead to split it: probably two workflows in one, or teams that work differently."
+                label="When it does not settle"
+                max={50}
+                min={1}
+                onChange={(maxInterviews) => {
+                  set({ maxInterviews });
+                }}
+                value={draft.maxInterviews}
+              />
+              <Field>
+                <FieldLabel>When people say different things</FieldLabel>
+                <NativeSelect
+                  style={styles.settles}
+                  onChange={(event) => {
+                    const settles = SETTLERS.find(
+                      (each) => each === event.target.value
+                    );
+                    if (settles !== undefined) {
+                      set({ settles });
+                    }
+                  }}
+                  value={draft.settles}
+                >
+                  {SETTLERS.map((each) => (
+                    <NativeSelectOption key={each} value={each}>
+                      {settlerWords[each]}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+                <FieldDescription>
+                  Most differences are findings: it depends on the case, the
+                  office or the date. Only one nobody can explain needs someone
+                  to settle it.
+                </FieldDescription>
+              </Field>
+              {parsed.success ? null : (
+                <Text color="default" size="sm">
+                  <Attention>One of these is out of its bounds.</Attention>
+                </Text>
+              )}
+              <CommandFailure failure={failure} />
+            </div>
+          </DialogBody>
           <DialogFooter>
             {starting ? null : (
               <Button
@@ -426,53 +565,45 @@ const WorkRow = ({
   const lacking = lackingWords(row);
   return (
     <TableRow>
-      <TableCell variant="roomy">
-        <div className="flex min-w-0 items-center gap-3">
-          <span
-            aria-hidden
-            className="bg-muted text-muted-foreground flex size-8 flex-none items-center justify-center rounded-lg"
-          >
-            <WorkflowIcon className="size-4" />
+      <TableCell rowHeader style={styles.nameColumn}>
+        <div {...stylex.props(styles.work)}>
+          <span aria-hidden>
+            <IconTile icon={WorkflowIcon} />
           </span>
-          <div className="flex min-w-0 flex-col gap-0.5">
-            <span className="truncate" title={work.work.name}>
+          <div {...stylex.props(styles.workWords)}>
+            <span title={work.work.name} {...stylex.props(styles.name)}>
               {work.work.name}
             </span>
-            <span className="text-muted-foreground truncate text-xs">
-              {team}
-            </span>
-            <span className="mt-1 @xl:hidden">
+            <span {...stylex.props(styles.teamLine)}>{team}</span>
+            <span {...stylex.props(styles.stageBelow)}>
               <StageLine label={stage} standing={standing} />
             </span>
           </div>
         </div>
       </TableCell>
-      <TableCell className="hidden @2xl:table-cell" variant="roomy">
+      <TableCell style={styles.talkedColumn}>
         <Meter
           label={`${work.work.name}: who talked`}
           total={work.doers}
           value={work.approved}
         />
       </TableCell>
-      <TableCell className="hidden @3xl:table-cell" variant="roomy">
+      <TableCell style={styles.stepsColumn}>
         <Meter
           label={`${work.work.name}: steps described`}
           total={work.steps}
           value={work.evidenced}
         />
       </TableCell>
-      <TableCell
-        className="hidden whitespace-normal @4xl:table-cell"
-        variant="roomy"
-      >
-        <span className={row.missing > 0 ? undefined : "text-muted-foreground"}>
+      <TableCell style={styles.missingColumn} wrap>
+        <Text as="span" color={row.missing > 0 ? "default" : "muted"} size="sm">
           {lacking}
-        </span>
+        </Text>
       </TableCell>
-      <TableCell className="hidden @xl:table-cell" variant="roomy">
+      <TableCell style={styles.stageColumn}>
         <StageLine label={stage} standing={standing} />
       </TableCell>
-      <TableCell variant="roomy">
+      <TableCell align="end" style={styles.actionsColumn}>
         <WorkActions clientId={clientId} row={row} />
       </TableCell>
     </TableRow>
@@ -504,7 +635,7 @@ export const OrgWorkflows = ({
     } else if (view.told) {
       none = "None found yet. They show up here as the interviews come in.";
     }
-    return <EmptySection>{none}</EmptySection>;
+    return <EmptyPanel>{none}</EmptyPanel>;
   }
 
   const list = workflowListOf(view);
@@ -532,22 +663,20 @@ export const OrgWorkflows = ({
   ];
 
   return (
-    <div className="flex flex-col gap-8">
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2">
+    <div {...stylex.props(styles.page)}>
+      <div {...stylex.props(styles.list)}>
+        <div {...stylex.props(styles.bar)}>
+          <div {...stylex.props(styles.filters)}>
             {filtered ? (
               <>
                 <ToggleGroup
                   aria-label="How far it is"
-                  onValueChange={(value: string[]) => {
+                  onValueChange={(value) => {
                     const [next] = value;
                     setStanding(STANDINGS.find((each) => each === next) ?? all);
                   }}
                   size="sm"
-                  spacing={0}
                   value={[standing]}
-                  variant="outline"
                 >
                   {filters.map((each) => (
                     <ToggleGroupItem key={each.value} value={each.value}>
@@ -558,23 +687,19 @@ export const OrgWorkflows = ({
                 {teams.length > 2 ? (
                   <Select
                     items={teams}
-                    onValueChange={(value: string | null) => {
+                    onValueChange={(value) => {
                       setTeam(value ?? all);
                     }}
                     value={team}
                   >
-                    <SelectTrigger aria-label="Team" className="w-48" size="sm">
+                    <SelectTrigger
+                      aria-label="Team"
+                      size="sm"
+                      style={styles.team}
+                    >
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        {teams.map((each) => (
-                          <SelectItem key={each.value} value={each.value}>
-                            {each.label}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
+                    <SelectContent />
                   </Select>
                 ) : null}
               </>
@@ -587,63 +712,47 @@ export const OrgWorkflows = ({
             size="sm"
             variant="outline"
           >
-            <SlidersHorizontalIcon data-icon="inline-start" />
+            <Icon icon={SlidersHorizontalIcon} />
             When one counts as known
           </Button>
         </div>
 
         {shown.length === 0 ? (
-          <EmptySection>No workflow matches.</EmptySection>
+          <EmptyPanel>No workflow matches.</EmptyPanel>
         ) : (
-          <div className="bg-card @container overflow-hidden rounded-xl border">
-            {/* Fixed widths for all but the first column, which takes the rest: the
-                others must leave it room at every width they show at, or the
-                workflow's name has none. */}
-            <Table className="table-fixed">
-              <TableHeader>
-                <TableRow>
-                  <TableHead variant="card">Workflow</TableHead>
-                  <TableHead
-                    className="hidden w-40 @2xl:table-cell"
-                    variant="card"
-                  >
-                    Talked
-                  </TableHead>
-                  <TableHead
-                    className="hidden w-40 @3xl:table-cell"
-                    variant="card"
-                  >
-                    Steps described
-                  </TableHead>
-                  <TableHead
-                    className="hidden w-32 @4xl:table-cell"
-                    variant="card"
-                  >
-                    Missing
-                  </TableHead>
-                  <TableHead
-                    className="hidden w-44 @xl:table-cell"
-                    variant="card"
-                  >
-                    Stage
-                  </TableHead>
-                  <TableHead className="w-14" variant="card">
-                    <span className="sr-only">What Grasp can do</span>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {shown.map((row) => (
-                  <WorkRow
-                    clientId={clientId}
-                    key={row.work.id}
-                    row={row}
-                    team={teamNames.get(row.work.team) ?? ""}
-                  />
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+          <Card size="sm">
+            <CardContent flush>
+              {/* The name takes what the other columns leave at every width they show
+                  at, or the workflow's name has none. */}
+              <Table aria-label="Workflows">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead style={styles.nameColumn}>Workflow</TableHead>
+                    <TableHead style={styles.talkedColumn}>Talked</TableHead>
+                    <TableHead style={styles.stepsColumn}>
+                      Steps described
+                    </TableHead>
+                    <TableHead style={styles.missingColumn}>Missing</TableHead>
+                    <TableHead style={styles.stageColumn}>Stage</TableHead>
+                    <TableHead
+                      aria-label="What Grasp can do"
+                      style={styles.actionsColumn}
+                    />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {shown.map((row) => (
+                    <WorkRow
+                      clientId={clientId}
+                      key={row.work.id}
+                      row={row}
+                      team={teamNames.get(row.work.team) ?? ""}
+                    />
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
         )}
       </div>
 
@@ -700,27 +809,26 @@ export const WaitingOnConnectionsRows = ({
 }) => {
   const workflows = waitingWorkflows(integrations.needed);
   if (workflows.length === 0) {
-    return (
-      <p className="text-muted-foreground border-t px-5 py-4">
-        No workflow waits on a connection.
-      </p>
-    );
+    return <PanelNote>No workflow waits on a connection.</PanelNote>;
   }
   return (
-    <ul className="flex flex-col">
-      {workflows.map((workflow) => (
-        <li
-          className="flex flex-wrap items-start justify-between gap-x-6 gap-y-1 border-t px-5 py-3"
-          key={workflow.id}
-        >
-          <span className="min-w-0">{workflow.name}</span>
-          <span className="flex flex-col text-xs lg:items-end">
-            {workflow.needs.map((need) => (
-              <Attention key={need.alias}>{needLine(need)}</Attention>
-            ))}
-          </span>
-        </li>
-      ))}
-    </ul>
+    <CardContent flush>
+      <ul {...stylex.props(styles.waiting)}>
+        {workflows.map((workflow) => (
+          <li key={workflow.id} {...stylex.props(styles.waitingRow)}>
+            <Text as="span" color="default" size="sm">
+              {workflow.name}
+            </Text>
+            <span {...stylex.props(styles.needs)}>
+              {workflow.needs.map((need) => (
+                <Text as="span" color="default" key={need.alias} size="xs">
+                  <Attention>{needLine(need)}</Attention>
+                </Text>
+              ))}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </CardContent>
   );
 };

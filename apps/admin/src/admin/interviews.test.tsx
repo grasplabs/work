@@ -174,10 +174,10 @@ describe("an organization's interviews", () => {
     );
     /** The figure labelled `label`: its label up to the line under its number. */
     const figureOf = (label: string) => {
-      const start = html.indexOf(`>${label}</span>`);
+      const start = html.indexOf(`>${label}</p>`);
       return start === -1
         ? ""
-        : html.slice(start, html.indexOf("</div>", start));
+        : html.slice(start, html.indexOf("</li>", start));
     };
 
     // None of the two who started.

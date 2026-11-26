@@ -1,4 +1,3 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
 import type { OrgView } from "@grasp-os/shared/admin/onboarding-admin";
 import { stephenOf } from "@grasp-os/shared/admin/onboarding-admin-record";
 import { RATINGS } from "@grasp-os/shared/admin/org-record";
@@ -14,13 +13,57 @@ import { RATINGS } from "@grasp-os/shared/admin/org-record";
  * each interview found (core runs no such review, so the model says none
  * is `reviewed`).
  */
+import { Badge } from "@grasp-os/ui/components/badge";
+import { CardContent } from "@grasp-os/ui/components/card";
+import { StatGroup } from "@grasp-os/ui/components/stat";
+import { Text } from "@grasp-os/ui/components/text";
+import { colors, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 
 import { BarList } from "./interview-parts.tsx";
 import { noInterviewsYet } from "./interviews.tsx";
-import { Attention, Figure } from "./parts.tsx";
-import { EmptySection, Section } from "./section.tsx";
+import { Attention } from "./marks.tsx";
+import { EmptyPanel, Panel, PanelNote } from "./panel.tsx";
 import { SetupActions } from "./stephen-setup.tsx";
 import type { SetupRead } from "./stephen-setup.tsx";
+
+const styles = stylex.create({
+  // A part of the setup, edge to edge under the panel's header, a hairline over it.
+  part: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["3"],
+    paddingBlock: space["4"],
+    paddingInline: space["5"],
+    borderBlockStartWidth: { default: size.hairline, ":first-child": 0 },
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: colors.border,
+  },
+  words: { display: "flex", flexDirection: "column", gap: "0.125rem" },
+  list: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.375rem",
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  badges: { flexDirection: "row", flexWrap: "wrap" },
+  lines: {
+    display: "flex",
+    flexDirection: "column",
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  line: {
+    paddingBlock: "0.625rem",
+    paddingInline: space["5"],
+    borderBlockStartWidth: { default: size.hairline, ":first-child": 0 },
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: colors.border,
+  },
+});
 
 const oneDecimal = new Intl.NumberFormat("en", {
   minimumFractionDigits: 1,
@@ -38,32 +81,37 @@ const decimal = (value: number): string => oneDecimal.format(value);
 export const InterviewersDoing = ({ view }: { view: OrgView }) => {
   const stats = stephenOf(view);
   if (stats.started === 0) {
-    return <EmptySection>{noInterviewsYet(view)}</EmptySection>;
+    return <EmptyPanel>{noInterviewsYet(view)}</EmptyPanel>;
   }
   const { count, average, by } = stats.rating;
   return (
-    <Section
+    <Panel
       description="At the end of their interview, people can say how it was: from 1 to 5."
       title="What people thought of it"
     >
-      <div className="bg-border grid grid-cols-2 gap-px border-t">
-        <Figure
-          label="Rating"
-          sub={
-            count === 0
-              ? "Nobody has said yet"
-              : `${count} of ${stats.held} said how it was`
-          }
-          value={count === 0 ? "–" : `${decimal(average)} of 5`}
+      <CardContent>
+        <StatGroup
+          aria-label="What people thought of it"
+          columns={2}
+          items={[
+            {
+              label: "Rating",
+              value: count === 0 ? "–" : `${decimal(average)} of 5`,
+              change:
+                count === 0
+                  ? "Nobody has said yet"
+                  : `${count} of ${stats.held} said how it was`,
+            },
+            {
+              label: "Finished",
+              value: `${stats.held} of ${stats.started}`,
+              change: "who started also agreed",
+            },
+          ]}
         />
-        <Figure
-          label="Finished"
-          sub="who started also agreed"
-          value={`${stats.held} of ${stats.started}`}
-        />
-      </div>
+      </CardContent>
       {count > 0 ? (
-        <div className="border-t px-5 py-4">
+        <CardContent>
           <BarList
             label="How many gave each"
             rows={RATINGS.toReversed().map((rating) => {
@@ -76,9 +124,9 @@ export const InterviewersDoing = ({ view }: { view: OrgView }) => {
               return { id: label, label, value: by[rating] ?? 0 };
             })}
           />
-        </div>
+        </CardContent>
       ) : null}
-    </Section>
+    </Panel>
   );
 };
 
@@ -107,20 +155,30 @@ const SetupPart = ({
   none: string;
   short?: boolean;
 }) => (
-  <div className="flex flex-col gap-3 border-t px-5 py-4">
-    <div className="flex flex-col gap-0.5">
-      <span>{label}</span>
-      <p className="text-muted-foreground">{description}</p>
+  <div {...stylex.props(styles.part)}>
+    <div {...stylex.props(styles.words)}>
+      <Text as="span" color="default" size="sm">
+        {label}
+      </Text>
+      <Text color="muted" size="sm">
+        {description}
+      </Text>
     </div>
     {items.length === 0 ? (
-      <p className="text-muted-foreground">{none}</p>
+      <Text color="muted" size="sm">
+        {none}
+      </Text>
     ) : (
-      <ul
-        className={short ? "flex flex-wrap gap-1.5" : "flex flex-col gap-1.5"}
-      >
+      <ul {...stylex.props(styles.list, short && styles.badges)}>
         {items.map((item) => (
           <li key={item}>
-            {short ? <Badge variant="outline">{item}</Badge> : item}
+            {short ? (
+              <Badge variant="outline">{item}</Badge>
+            ) : (
+              <Text as="span" color="default" size="sm">
+                {item}
+              </Text>
+            )}
           </li>
         ))}
       </ul>
@@ -144,7 +202,7 @@ export const InterviewersSetup = ({
   const wanted = org.wanted ?? "";
   return (
     <>
-      <Section
+      <Panel
         action={<SetupActions clientId={clientId} setup={setupRead} />}
         description={
           setupRead.changed
@@ -153,52 +211,59 @@ export const InterviewersSetup = ({
         }
         title="How Stephen is set up here"
       >
-        <SetupPart
-          description="Someone chooses their own language when they open their link."
-          items={setup.languages.map(languageOf)}
-          label="Languages he interviews in"
-          none="None named yet: the company’s own Grasp doesn’t say which."
-          short
-        />
-        {wanted === "" ? null : (
-          <p className="border-t px-5 py-4">
-            <Attention>
-              People there also need {wanted}, which Stephen doesn’t speak yet.
-            </Attention>
-          </p>
-        )}
-        <SetupPart
-          description="He doesn’t ask about it, and moves on when somebody brings it up."
-          items={setup.limits}
-          label="What he leaves alone"
-          none="Nothing yet."
-        />
-        <SetupPart
-          description="Tools, products and the company’s own words, so he hears them right."
-          items={setup.terms}
-          label="Words he has to know"
-          none="None yet."
-          short
-        />
-      </Section>
-      <Section
+        <CardContent flush>
+          <SetupPart
+            description="Someone chooses their own language when they open their link."
+            items={setup.languages.map(languageOf)}
+            label="Languages he interviews in"
+            none="None named yet: the company’s own Grasp doesn’t say which."
+            short
+          />
+          {wanted === "" ? null : (
+            <div {...stylex.props(styles.part)}>
+              <Text as="span" color="default" size="sm">
+                <Attention>
+                  People there also need {wanted}, which Stephen doesn’t speak
+                  yet.
+                </Attention>
+              </Text>
+            </div>
+          )}
+          <SetupPart
+            description="He doesn’t ask about it, and moves on when somebody brings it up."
+            items={setup.limits}
+            label="What he leaves alone"
+            none="Nothing yet."
+          />
+          <SetupPart
+            description="Tools, products and the company’s own words, so he hears them right."
+            items={setup.terms}
+            label="Words he has to know"
+            none="None yet."
+            short
+          />
+        </CardContent>
+      </Panel>
+      <Panel
         description="A line each, from the first conversation, the research and what the company connected."
         title="What he knows before he says hello"
       >
         {org.brief.length === 0 ? (
-          <p className="text-muted-foreground border-t px-5 py-4">
-            Nothing yet.
-          </p>
+          <PanelNote>Nothing yet.</PanelNote>
         ) : (
-          <ul className="flex flex-col">
-            {org.brief.map((line) => (
-              <li className="border-t px-5 py-2.5" key={line}>
-                {line}
-              </li>
-            ))}
-          </ul>
+          <CardContent flush>
+            <ul {...stylex.props(styles.lines)}>
+              {org.brief.map((line) => (
+                <li key={line} {...stylex.props(styles.line)}>
+                  <Text as="span" color="default" size="sm">
+                    {line}
+                  </Text>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
         )}
-      </Section>
+      </Panel>
     </>
   );
 };

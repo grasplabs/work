@@ -13,22 +13,6 @@
  * link is a credential, which core never sends.
  */
 
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@grasp-os/app-kit/components/input-group";
-import { Progress } from "@grasp-os/app-kit/components/progress";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/app-kit/components/table";
-import { cn } from "@grasp-os/app-kit/lib/utils";
 import type { AdminLink } from "@grasp-os/shared/admin-snapshot";
 import type { Funnel } from "@grasp-os/shared/admin/admin-interviews";
 import { funnelOf, talkedByDay } from "@grasp-os/shared/admin/admin-interviews";
@@ -42,15 +26,116 @@ import type {
   OrgView,
   PersonView,
 } from "@grasp-os/shared/admin/onboarding-admin";
-import { SearchIcon } from "lucide-react";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { CardContent } from "@grasp-os/ui/components/card";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@grasp-os/ui/components/input-group";
+import { Progress } from "@grasp-os/ui/components/progress";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@grasp-os/ui/components/table";
+import { Text } from "@grasp-os/ui/components/text";
+import { Icon, SearchIcon } from "@grasp-os/ui/lib/icons";
+import { colors, media, space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
 import { CommandMenu } from "./command-menu.tsx";
 import { CommandButton } from "./commands.tsx";
 import { BarList, Dot, markOf } from "./interview-parts.tsx";
-import { Section } from "./section.tsx";
+import { Panel, PanelNote } from "./panel.tsx";
 import { NoTeams, OneTeam, TeamList } from "./teams.tsx";
 import { formatDate, interviewPhaseWords, linkWords } from "./words.ts";
+
+const styles = stylex.create({
+  // The two looks side by side from a laptop's width, a hairline between them.
+  looks: {
+    display: "grid",
+    gridTemplateColumns: { default: "minmax(0, 1fr)", [media.lg]: "1fr 1fr" },
+    gap: "1px",
+    backgroundColor: colors.border,
+  },
+  look: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["3"],
+    paddingBlock: space["4"],
+    paddingInline: space["5"],
+    backgroundColor: colors.card,
+  },
+  lookHead: {
+    display: "flex",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    gap: space["3"],
+  },
+  steps: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["2"],
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  step: {
+    display: "grid",
+    gridTemplateColumns: "5.5rem minmax(0, 1fr) 2.5rem",
+    alignItems: "center",
+    gap: space["3"],
+  },
+  count: { textAlign: "end", fontVariantNumeric: "tabular-nums" },
+  figures: { fontVariantNumeric: "tabular-nums" },
+  // The count beside the search: on a phone, where there is no room for it, said to a screen
+  // reader alone.
+  shownCount: {
+    position: { default: null, [media.maxSm]: "absolute" },
+    width: { default: null, [media.maxSm]: "1px" },
+    height: { default: null, [media.maxSm]: "1px" },
+    overflow: { default: null, [media.maxSm]: "hidden" },
+    clipPath: { default: null, [media.maxSm]: "inset(50%)" },
+    whiteSpace: { default: null, [media.maxSm]: "nowrap" },
+  },
+  search: {
+    display: "flex",
+    minWidth: 0,
+    alignItems: "center",
+    gap: space["3"],
+  },
+  searchField: { width: "14rem" },
+  remindAll: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: space["3"],
+  },
+  stack: { display: "flex", flexDirection: "column" },
+  nameLine: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["2"],
+  },
+  where: { display: "flex", alignItems: "center", gap: space["2"] },
+  actions: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: space["2"],
+  },
+  // Columns the window's width makes room for, as the old table had them.
+  fromMd: { display: { default: null, [media.maxMd]: "none" } },
+  fromLg: { display: { default: null, [media.maxLg]: "none" } },
+});
 
 /** The day `day` of the organization's interviews, as a date. */
 const dayDate = (view: OrgView, day: number): string =>
@@ -73,31 +158,31 @@ const FunnelBars = ({ funnel }: { funnel: Funnel }) => (
   // Under a title of its own and from the top of its cell, as the days
   // beside it are: centred, five bars floated in the middle of a cell as
   // tall as that list.
-  <div className="bg-card flex flex-col gap-3 px-5 py-4">
-    <span className="font-medium">How far everyone has come</span>
-    <ul
-      aria-label="How far everyone has come"
-      className="flex flex-col gap-2.5"
-    >
+  <div {...stylex.props(styles.look)}>
+    <Text as="span" color="default" size="sm" weight="medium">
+      How far everyone has come
+    </Text>
+    <ul aria-label="How far everyone has come" {...stylex.props(styles.steps)}>
       {funnelSteps.map((step) => (
-        <li
-          className="grid grid-cols-[5.5rem_minmax(0,1fr)_2.5rem] items-center gap-3"
-          key={step}
-        >
-          <span
-            className={cn(
-              "truncate",
-              step === "talked" ? undefined : "text-muted-foreground"
-            )}
+        <li key={step} {...stylex.props(styles.step)}>
+          <Text
+            as="span"
+            color={step === "talked" ? "default" : "muted"}
+            size="sm"
+            truncate
           >
             {funnelWords[step]}
-          </span>
+          </Text>
           <Progress
             aria-label={funnelWords[step]}
             max={Math.max(funnel.asked, 1)}
             value={funnel[step]}
           />
-          <span className="text-right tabular-nums">{funnel[step]}</span>
+          <span {...stylex.props(styles.count)}>
+            <Text as="span" color="default" size="sm">
+              {String(funnel[step])}
+            </Text>
+          </span>
         </li>
       ))}
     </ul>
@@ -111,22 +196,28 @@ const FunnelBars = ({ funnel }: { funnel: Funnel }) => (
 const TalkedDays = ({ view, asked }: { view: OrgView; asked: number }) => {
   if (!view.told) {
     return (
-      <div className="bg-card flex flex-col gap-1 px-5 py-4">
-        <span className="font-medium">Talked, day by day</span>
-        <span className="text-muted-foreground">
+      <div {...stylex.props(styles.look)}>
+        <Text as="span" color="default" size="sm" weight="medium">
+          Talked, day by day
+        </Text>
+        <Text as="span" color="muted" size="sm">
           Starts the day the company tells its team.
-        </span>
+        </Text>
       </div>
     );
   }
   const days = talkedByDay(view).filter((each) => each.total !== null);
   const talked = days.at(-1)?.total ?? 0;
   return (
-    <div className="bg-card flex flex-col gap-3 px-5 py-4">
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="font-medium">Talked, day by day</span>
-        <span className="text-muted-foreground text-xs tabular-nums">
-          {`${talked} of ${asked} by day ${view.day} of ${listenDays(view.org)}`}
+    <div {...stylex.props(styles.look)}>
+      <div {...stylex.props(styles.lookHead)}>
+        <Text as="span" color="default" size="sm" weight="medium">
+          Talked, day by day
+        </Text>
+        <span {...stylex.props(styles.figures)}>
+          <Text as="span" color="muted" size="xs">
+            {`${talked} of ${asked} by day ${view.day} of ${listenDays(view.org)}`}
+          </Text>
         </span>
       </div>
       <BarList
@@ -181,15 +272,17 @@ export const InterviewTeams = ({
   }
   return (
     <>
-      <Section
+      <Panel
         description={`One reminder after ${REMIND_AFTER} working days, then nothing. ${links}`}
         title="Where everyone stands"
       >
-        <div className="bg-border grid gap-px border-t lg:grid-cols-2">
-          <FunnelBars funnel={funnel} />
-          <TalkedDays asked={funnel.asked} view={view} />
-        </div>
-      </Section>
+        <CardContent flush>
+          <div {...stylex.props(styles.looks)}>
+            <FunnelBars funnel={funnel} />
+            <TalkedDays asked={funnel.asked} view={view} />
+          </div>
+        </CardContent>
+      </Panel>
       <TeamList chart={chart} clientId={clientId} view={view} />
     </>
   );
@@ -245,7 +338,7 @@ const PersonActions = ({
 }) => {
   const { id, name } = each.person;
   return (
-    <span className="flex flex-wrap items-center justify-end gap-2">
+    <span {...stylex.props(styles.actions)}>
       {each.mayRemind ? (
         <CommandButton
           clientId={clientId}
@@ -312,14 +405,12 @@ export const InterviewPeople = ({
   const [query, setQuery] = useState("");
   if (view.people.length === 0) {
     return (
-      <Section
+      <Panel
         description="Names come with the company’s own list. Until it is in, nobody is known here."
         title="People"
       >
-        <p className="text-muted-foreground border-t px-5 py-4">
-          No people yet.
-        </p>
-      </Section>
+        <PanelNote>No people yet.</PanelNote>
+      </Panel>
     );
   }
   const teams = new Map(view.teams.map((team) => [team.team.id, team]));
@@ -339,16 +430,17 @@ export const InterviewPeople = ({
     (each) => wanted === "" || each.person.name.toLowerCase().includes(wanted)
   );
   return (
-    <Section
+    <Panel
       action={
-        <div className="flex min-w-0 items-center gap-3">
-          <span
-            aria-live="polite"
-            className="text-muted-foreground tabular-nums max-sm:sr-only"
-          >
-            {`${shown.length} of ${view.people.length} people`}
+        <div {...stylex.props(styles.search)}>
+          <span aria-live="polite" {...stylex.props(styles.shownCount)}>
+            <span {...stylex.props(styles.figures)}>
+              <Text as="span" color="muted" size="sm">
+                {`${shown.length} of ${view.people.length} people`}
+              </Text>
+            </span>
           </span>
-          <InputGroup className="w-56">
+          <InputGroup style={styles.searchField}>
             <InputGroupInput
               aria-label="Search people"
               onChange={(event) => {
@@ -358,7 +450,7 @@ export const InterviewPeople = ({
               value={query}
             />
             <InputGroupAddon>
-              <SearchIcon />
+              <Icon icon={SearchIcon} />
             </InputGroupAddon>
           </InputGroup>
         </div>
@@ -368,46 +460,38 @@ export const InterviewPeople = ({
     >
       {/* More than one: all at once, as each row does for its own. */}
       {reminders.length > 1 ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3">
-          <p className="text-muted-foreground">
-            {`${reminders.length} people can still be reminded, once each.`}
-          </p>
-          <CommandButton
-            clientId={clientId}
-            command={{
-              type: "onboarding.remind",
-              payload: { people: reminders },
-            }}
-            variant="outline"
-          >
-            {`Mark ${reminders.length} people reminded`}
-          </CommandButton>
-        </div>
+        <CardContent>
+          <div {...stylex.props(styles.remindAll)}>
+            <Text color="muted" size="sm">
+              {`${reminders.length} people can still be reminded, once each.`}
+            </Text>
+            <CommandButton
+              clientId={clientId}
+              command={{
+                type: "onboarding.remind",
+                payload: { people: reminders },
+              }}
+              variant="outline"
+            >
+              {`Mark ${reminders.length} people reminded`}
+            </CommandButton>
+          </div>
+        </CardContent>
       ) : null}
-      <div className="border-t">
-        <Table>
+      <CardContent flush>
+        <Table aria-label="People">
           <TableHeader>
             <TableRow>
-              <TableHead variant="card">Name</TableHead>
-              <TableHead variant="card">Where the link stands</TableHead>
-              <TableHead className="hidden md:table-cell" variant="card">
-                Last
-              </TableHead>
-              <TableHead
-                className="hidden text-right lg:table-cell"
-                variant="card"
-              >
+              <TableHead>Name</TableHead>
+              <TableHead>Where the link stands</TableHead>
+              <TableHead style={styles.fromMd}>Last</TableHead>
+              <TableHead align="end" style={styles.fromLg}>
                 Minutes
               </TableHead>
-              <TableHead
-                className="hidden text-right lg:table-cell"
-                variant="card"
-              >
+              <TableHead align="end" style={styles.fromLg}>
                 Facts agreed
               </TableHead>
-              <TableHead variant="card">
-                <span className="sr-only">What Grasp can do</span>
-              </TableHead>
+              <TableHead aria-label="What Grasp can do" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -418,66 +502,56 @@ export const InterviewPeople = ({
               const interview = interviewOf.get(each.person.id);
               return (
                 <TableRow key={each.person.id}>
-                  <TableCell className="whitespace-normal" variant="card">
-                    <span className="flex flex-col">
-                      <span className="flex flex-wrap items-center gap-2">
+                  <TableCell rowHeader wrap>
+                    <span {...stylex.props(styles.stack)}>
+                      <span {...stylex.props(styles.nameLine)}>
                         {each.person.name}
                         {each.person.lead && team?.lead ? (
                           <Badge variant="outline">Team lead</Badge>
                         ) : null}
                       </span>
-                      <span className="text-muted-foreground text-xs">
+                      <Text as="span" color="muted" size="xs">
                         {team?.team.name ?? ""}
-                      </span>
+                      </Text>
                     </span>
                   </TableCell>
-                  <TableCell className="whitespace-normal" variant="card">
-                    <span className="flex items-center gap-2">
+                  <TableCell wrap>
+                    <span {...stylex.props(styles.where)}>
                       <Dot mark={markOf(each.state)} />
-                      <span className="flex flex-col">
-                        <span
-                          className={
-                            each.state === "completed"
-                              ? undefined
-                              : "text-muted-foreground"
+                      <span {...stylex.props(styles.stack)}>
+                        <Text
+                          as="span"
+                          color={
+                            each.state === "completed" ? "default" : "muted"
                           }
+                          size="sm"
                         >
                           {each.out && each.state === "away"
                             ? "Not asked"
                             : linkWords[each.state]}
-                        </span>
+                        </Text>
                         {beside === "" ? null : (
-                          <span className="text-muted-foreground text-xs">
+                          <Text as="span" color="muted" size="xs">
                             {beside}
-                          </span>
+                          </Text>
                         )}
                       </span>
                     </span>
                   </TableCell>
-                  <TableCell className="hidden md:table-cell" variant="card">
-                    <span className="text-muted-foreground">
+                  <TableCell style={styles.fromMd}>
+                    <Text as="span" color="muted" size="sm">
                       {lastOf(view, each)}
-                    </span>
+                    </Text>
                   </TableCell>
-                  <TableCell
-                    className="hidden text-right lg:table-cell"
-                    variant="card"
-                  >
-                    <span className="tabular-nums">
-                      {interview?.minutes ?? "–"}
-                    </span>
+                  <TableCell align="end" style={styles.fromLg}>
+                    {interview?.minutes ?? "–"}
                   </TableCell>
-                  <TableCell
-                    className="hidden text-right lg:table-cell"
-                    variant="card"
-                  >
-                    <span className="tabular-nums">
-                      {interview === undefined
-                        ? "–"
-                        : `${interview.approved ? interview.facts - interview.out : 0} of ${interview.facts}`}
-                    </span>
+                  <TableCell align="end" style={styles.fromLg}>
+                    {interview === undefined
+                      ? "–"
+                      : `${interview.approved ? interview.facts - interview.out : 0} of ${interview.facts}`}
                   </TableCell>
-                  <TableCell variant="card">
+                  <TableCell align="end">
                     <PersonActions
                       clientId={clientId}
                       each={each}
@@ -489,13 +563,9 @@ export const InterviewPeople = ({
             })}
           </TableBody>
         </Table>
-        {shown.length === 0 ? (
-          <p className="text-muted-foreground border-t px-5 py-4">
-            Nobody matches.
-          </p>
-        ) : null}
-      </div>
-    </Section>
+      </CardContent>
+      {shown.length === 0 ? <PanelNote>Nobody matches.</PanelNote> : null}
+    </Panel>
   );
 };
 

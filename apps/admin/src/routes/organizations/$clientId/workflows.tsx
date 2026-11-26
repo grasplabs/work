@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { useOrganization } from "../../../admin/organization.tsx";
-import { Section } from "../../../admin/section.tsx";
+import { Panel } from "../../../admin/panel.tsx";
 import {
   OrgWorkflows,
   WaitingOnConnectionsRows,
@@ -19,12 +19,12 @@ const Workflows = () => {
     <>
       <OrgWorkflows clientId={admin.client.id} view={view} />
       {integrations === null ? null : (
-        <Section
+        <Panel
           description="Workflows that can’t run as they are: an app they work in isn’t connected, stopped, or has no connection approved for it yet."
           title="Waiting on a connection"
         >
           <WaitingOnConnectionsRows integrations={integrations} />
-        </Section>
+        </Panel>
       )}
     </>
   );

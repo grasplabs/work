@@ -1,10 +1,3 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@grasp-os/app-kit/components/input-group";
 /**
  * The company's teams as Grasp knows them, ported from the prototype
  * (grasplabs/prototype `components/admin/org-organization.tsx`,
@@ -21,13 +14,6 @@ import {
  * admin never shows. Nor is where a piece of work goes said in the words
  * of whoever said it, when it isn't one of the company's own teams.
  */
-import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
-import { Progress } from "@grasp-os/app-kit/components/progress";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/app-kit/components/toggle-group";
-import { cn } from "@grasp-os/app-kit/lib/utils";
 import type {
   ChartTeam,
   Organization,
@@ -40,28 +26,337 @@ import type {
   PersonView,
   WorkEvidence,
 } from "@grasp-os/shared/admin/onboarding-admin";
-import { Link } from "@tanstack/react-router";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import { Card, CardContent } from "@grasp-os/ui/components/card";
+import { Heading } from "@grasp-os/ui/components/heading";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@grasp-os/ui/components/input-group";
+import { Progress } from "@grasp-os/ui/components/progress";
+import { StatGroup } from "@grasp-os/ui/components/stat";
+import { Text } from "@grasp-os/ui/components/text";
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@grasp-os/ui/components/toggle-group";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
   ChevronRightIcon,
+  Icon,
   SearchIcon,
-} from "lucide-react";
+} from "@grasp-os/ui/lib/icons";
+import { focusRingInset, focusRingText } from "@grasp-os/ui/lib/styles";
+import {
+  colors,
+  font,
+  media,
+  radius,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
+import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { CommandButton } from "./commands.tsx";
-import {
-  AttentionDot,
-  Dot,
-  Figure,
-  Initials,
-  markOf,
-  PeopleDots,
-} from "./parts.tsx";
-import { EmptySection, Section } from "./section.tsx";
+import { Dot, Initials, markOf, PeopleDots } from "./interview-parts.tsx";
+import { Attention } from "./marks.tsx";
+import { EmptyPanel, Panel, PanelNote } from "./panel.tsx";
 import { sectionTo } from "./sections.ts";
 import { formatDate, linkWords, talkedWords, workflowWords } from "./words.ts";
+
+const styles = stylex.create({
+  // A list of rows edge to edge under a panel's header, a hairline over each.
+  rows: {
+    display: "flex",
+    flexDirection: "column",
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  row: {
+    borderBlockStartWidth: size.hairline,
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: colors.border,
+  },
+  firstRow: { borderBlockStartWidth: { default: null, ":first-child": 0 } },
+  // A row that is one link: its pointer's quiet fill, and the keyboard's ring inside it.
+  rowLink: {
+    display: "flex",
+    width: "100%",
+    alignItems: "center",
+    gap: space["3"],
+    paddingBlock: space["2"],
+    paddingInline: space["4"],
+    color: "inherit",
+    textAlign: "start",
+    textDecoration: "none",
+    backgroundColor: {
+      default: null,
+      [media.hover]: { default: null, ":hover": colors.tableRowBgHover },
+    },
+  },
+  rowLinkWide: { paddingBlock: "0.625rem", paddingInline: space["5"] },
+  between: {
+    display: "grid",
+    alignItems: "center",
+    columnGap: space["4"],
+    rowGap: "0.125rem",
+    gridTemplateColumns: { default: "minmax(0, 1fr)", [media.sm]: "1fr 1fr" },
+  },
+  stack: { display: "flex", minWidth: 0, flexDirection: "column" },
+  grow: { flexGrow: 1 },
+  inline: {
+    display: "flex",
+    minWidth: 0,
+    flexWrap: "wrap",
+    alignItems: "center",
+    columnGap: space["2"],
+  },
+  arrow: {
+    display: "inline-flex",
+    flexShrink: 0,
+    color: colors.mutedForeground,
+  },
+  aside: {
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    gap: space["2"],
+  },
+  // Its words on a phone, where only the dot shows, said to a screen reader alone.
+  belowSmHidden: {
+    position: { default: null, [media.maxSm]: "absolute" },
+    width: { default: null, [media.maxSm]: "1px" },
+    height: { default: null, [media.maxSm]: "1px" },
+    overflow: { default: null, [media.maxSm]: "hidden" },
+    clipPath: { default: null, [media.maxSm]: "inset(50%)" },
+    whiteSpace: { default: null, [media.maxSm]: "nowrap" },
+  },
+  named: {
+    display: "grid",
+    gap: space["3"],
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      [media.sm]: "repeat(2, minmax(0, 1fr))",
+      [media.xl]: "repeat(3, minmax(0, 1fr))",
+    },
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  namedTeam: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["1"],
+    paddingBlock: space["3"],
+    paddingInline: space["4"],
+    borderRadius: radius.xl,
+    cornerShape: radius.shape,
+    borderWidth: size.hairline,
+    borderStyle: "dashed",
+    borderColor: colors.border,
+  },
+  tools: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["2"],
+  },
+  search: {
+    width: { default: "100%", [media.sm]: "16rem" },
+    marginInlineStart: { default: null, [media.sm]: "auto" },
+  },
+  // One team in the list: the whole row opens it, ending in a chevron.
+  team: {
+    position: "relative",
+    display: "grid",
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr) auto",
+      [media.md]: "minmax(0, 15rem) minmax(0, 1fr) auto",
+    },
+    alignItems: "center",
+    columnGap: space["5"],
+    rowGap: space["2"],
+    paddingBlock: space["3"],
+    paddingInline: space["5"],
+    backgroundColor: {
+      default: null,
+      [media.hover]: { default: null, ":hover": colors.tableRowBgHover },
+    },
+  },
+  teamName: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    color: "inherit",
+    textDecoration: "none",
+    "::after": { content: '""', position: "absolute", inset: 0 },
+  },
+  teamOff: { color: colors.mutedForeground },
+  teamDots: {
+    gridColumn: { default: "1 / -1", [media.md]: "auto" },
+    display: "flex",
+    minWidth: 0,
+    alignItems: "center",
+    gap: space["4"],
+  },
+  teamEnd: {
+    gridColumn: { default: "2", [media.md]: "auto" },
+    gridRow: { default: "1", [media.md]: "auto" },
+    display: "flex",
+    alignItems: "center",
+    gap: space["3"],
+  },
+  // Above the row's link, so it is pressed itself.
+  above: { position: "relative" },
+  figures: { fontVariantNumeric: "tabular-nums" },
+  oneLine: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  late: {
+    color: colors.warning,
+    fontSize: font.textXs,
+    lineHeight: font.textXsLine,
+  },
+  back: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: space["3"],
+  },
+  head: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "flex-start",
+    columnGap: space["8"],
+    rowGap: space["4"],
+  },
+  headWords: {
+    display: "flex",
+    minWidth: 0,
+    flexGrow: 1,
+    flexBasis: "16rem",
+    flexDirection: "column",
+    gap: "0.125rem",
+  },
+  lead: {
+    display: "flex",
+    minWidth: 0,
+    flexDirection: "column",
+    gap: "0.375rem",
+  },
+  person: {
+    display: "grid",
+    gridTemplateColumns: "auto minmax(0, 1fr) auto",
+    alignItems: "center",
+    columnGap: space["3"],
+    paddingBlock: "0.625rem",
+    paddingInline: space["5"],
+  },
+  personName: {
+    display: "flex",
+    minWidth: 0,
+    alignItems: "center",
+    gap: space["2"],
+  },
+  work: {
+    display: "flex",
+    width: "100%",
+    flexDirection: "column",
+    gap: space["1"],
+    paddingBlock: space["3"],
+    paddingInline: space["5"],
+    color: "inherit",
+    textAlign: "start",
+    textDecoration: "none",
+    backgroundColor: {
+      default: null,
+      [media.hover]: { default: null, ":hover": colors.tableRowBgHover },
+    },
+  },
+  workHead: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: space["3"],
+  },
+  workFacts: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    columnGap: space["3"],
+    rowGap: "0.125rem",
+  },
+  workState: { display: "flex", alignItems: "center", gap: "0.375rem" },
+  // How a piece of work stands, as a mark beside its words.
+  tone: {
+    width: "0.375rem",
+    height: "0.375rem",
+    flexShrink: 0,
+    borderRadius: "50%",
+    backgroundColor: colors.mutedForeground,
+    opacity: 0.6,
+  },
+  toneKnown: { backgroundColor: colors.success, opacity: 1 },
+  toneBlocked: { backgroundColor: colors.warning, opacity: 1 },
+  doers: {
+    display: "flex",
+    alignItems: "center",
+    gap: space["2"],
+    marginBlockStart: space["1"],
+  },
+  faces: { display: "flex", flexShrink: 0, gap: "0.125rem" },
+  workBar: { paddingInline: space["5"], paddingBlockEnd: space["4"] },
+  hand: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.125rem",
+    paddingBlock: "0.625rem",
+    paddingInline: space["5"],
+  },
+  handTeam: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    color: "inherit",
+    textDecoration: {
+      default: "none",
+      [media.hover]: { default: "none", ":hover": "underline" },
+    },
+  },
+  flag: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.125rem",
+    paddingBlock: space["3"],
+    paddingInline: space["5"],
+  },
+  // The team's own page: its people beside its work from a wide screen.
+  team2: {
+    display: "grid",
+    alignItems: "start",
+    gap: space["6"],
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      [media.xl]: "minmax(0, 1fr) 22rem",
+    },
+  },
+  side: {
+    display: "flex",
+    minWidth: 0,
+    flexDirection: "column",
+    gap: space["6"],
+  },
+});
 
 /** `count` and the thing it counts: one for one, many for the rest. */
 const counted = (count: number, one: string, other: string): string =>
@@ -117,38 +412,47 @@ const flagAbout: Record<TeamFlag["kind"], string> = {
 const isKnown = (work: WorkEvidence): boolean =>
   work.state === "complete" || work.state === "variants";
 
-/** How a piece of work is marked: known in the colour of agreed, waiting on an answer in the colour of attention. */
-const workTone = (work: WorkEvidence): string => {
+/** How a piece of work is marked: known in the colour of agreed, waiting on an answer in the colour of attention; its words say which beside it. */
+const workTone = (work: WorkEvidence) => {
   if (isKnown(work)) {
-    return "bg-status-agreed";
+    return styles.toneKnown;
   }
-  return work.state === "blocked"
-    ? "bg-status-attention"
-    : "bg-muted-foreground/60";
+  return work.state === "blocked" ? styles.toneBlocked : null;
 };
 
 /** A team's name, by its id. */
 const teamName = (view: OrgView, id: string | null): string =>
   view.teams.find((each) => each.team.id === id)?.team.name ?? "";
 
+/** Where a link to one team leads, open where the teams are, or to all of them. */
+const teamLinkOf = (clientId: string, team: string | null) => ({
+  params: { clientId },
+  search: team === null ? {} : { team },
+  to: sectionTo.interviews,
+});
+
 /** A link to one team, open where the teams are, or to all of them. */
 const TeamLink = ({
   clientId,
   team,
-  ...props
+  look,
+  "aria-label": label,
+  children,
 }: {
   clientId: string;
   team: string | null;
-  className?: string;
+  /** How it is drawn: a row's whole width, or words. */
+  look?: stylex.StyleXStyles;
   "aria-label"?: string;
   children?: ReactNode;
 }) => (
   <Link
-    {...props}
-    params={{ clientId }}
-    search={team === null ? {} : { team }}
-    to={sectionTo.interviews}
-  />
+    aria-label={label}
+    {...teamLinkOf(clientId, team)}
+    {...stylex.props(look)}
+  >
+    {children}
+  </Link>
 );
 
 /** How far a team's work is known, as one bar under it. */
@@ -168,22 +472,21 @@ export const NoTeams = ({ view }: { view: OrgView }) => {
       : "Nobody is on the list yet. The company’s admin shares its staff list in their onboarding.";
   return (
     <>
-      <Section description={line} title={view.org.name} />
+      <Panel description={line} title={view.org.name} />
       {named.length > 0 ? (
-        <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <ul {...stylex.props(styles.named)}>
           {named.map((each) => {
             const count = each.people ?? 0;
             return (
-              <li
-                className="flex flex-col gap-1 rounded-xl border border-dashed px-4 py-3"
-                key={each.name}
-              >
-                <span className="font-medium">{each.name}</span>
-                <span className="text-muted-foreground text-xs">
+              <li key={each.name} {...stylex.props(styles.namedTeam)}>
+                <Text as="span" color="default" size="sm" weight="medium">
+                  {each.name}
+                </Text>
+                <Text as="span" color="muted" size="xs">
                   {count > 0
                     ? `About ${counted(count, "person", "people")}, as the sponsor said.`
                     : "How many people is not known yet."}
-                </span>
+                </Text>
               </li>
             );
           })}
@@ -203,36 +506,51 @@ const Found = ({
   found: readonly PersonView[];
   clientId: string;
 }) => (
-  <ul className="bg-card flex flex-col overflow-hidden rounded-xl border">
-    {found.slice(0, mostFound).map((each) => (
-      <li className="border-t first:border-t-0" key={each.person.id}>
-        <TeamLink
-          className="hover:bg-muted/50 focus-visible:ring-ring/50 flex w-full items-center gap-3 px-4 py-2 text-left outline-none focus-visible:ring-3 focus-visible:ring-inset"
-          clientId={clientId}
-          team={each.person.team}
-        >
-          <Initials name={each.person.name} />
-          <span className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate">{each.person.name}</span>
-            <span className="text-muted-foreground truncate text-xs">
-              {teamName(view, each.person.team)}
-            </span>
-          </span>
-          <span className="text-muted-foreground flex flex-none items-center gap-2 text-xs">
-            <Dot mark={markOf(each.state)} />
-            <span className="max-sm:sr-only">
-              {each.out ? "Team does not take part" : linkWords[each.state]}
-            </span>
-          </span>
-        </TeamLink>
-      </li>
-    ))}
-    {found.length > mostFound ? (
-      <li className="text-muted-foreground border-t px-4 py-2 text-xs">
-        And {found.length - mostFound} more: type more of the name.
-      </li>
-    ) : null}
-  </ul>
+  <Card size="sm">
+    <CardContent flush>
+      <ul {...stylex.props(styles.rows)}>
+        {found.slice(0, mostFound).map((each) => (
+          <li
+            key={each.person.id}
+            {...stylex.props(styles.row, styles.firstRow)}
+          >
+            <TeamLink
+              clientId={clientId}
+              look={[styles.rowLink, focusRingInset]}
+              team={each.person.team}
+            >
+              <Initials name={each.person.name} />
+              <span {...stylex.props(styles.stack, styles.grow)}>
+                <Text as="span" color="default" size="sm" truncate>
+                  {each.person.name}
+                </Text>
+                <Text as="span" color="muted" size="xs" truncate>
+                  {teamName(view, each.person.team)}
+                </Text>
+              </span>
+              <span {...stylex.props(styles.aside)}>
+                <Dot mark={markOf(each.state)} />
+                <span {...stylex.props(styles.belowSmHidden)}>
+                  <Text as="span" color="muted" size="xs">
+                    {each.out
+                      ? "Team does not take part"
+                      : linkWords[each.state]}
+                  </Text>
+                </span>
+              </span>
+            </TeamLink>
+          </li>
+        ))}
+        {found.length > mostFound ? (
+          <li {...stylex.props(styles.row, styles.rowLink)}>
+            <Text as="span" color="muted" size="xs">
+              {`And ${found.length - mostFound} more: type more of the name.`}
+            </Text>
+          </li>
+        ) : null}
+      </ul>
+    </CardContent>
+  </Card>
 );
 
 /** Work one team hands to another, as the people who do it said. */
@@ -245,35 +563,45 @@ const Between = ({
   chart: Organization;
   clientId: string;
 }) => (
-  <Section
+  <Panel
     description="Work one team hands to another, as the people who do it said. Work stalls most where it changes hands."
     title="Where the work goes between teams"
   >
-    <ul className="flex flex-col">
-      {chart.between.map((each) => (
-        <li className="border-t" key={each.work.id}>
-          <Link
-            aria-label={`Open the workflows: “${each.work.name}”`}
-            className="hover:bg-muted/50 focus-visible:ring-ring/50 grid w-full items-center gap-x-4 gap-y-0.5 px-5 py-2.5 text-left outline-none focus-visible:ring-3 focus-visible:ring-inset sm:grid-cols-2"
-            params={{ clientId }}
-            to={sectionTo.workflows}
-          >
-            <span className="flex min-w-0 flex-wrap items-center gap-x-2">
-              <span className="truncate">{teamName(view, each.from)}</span>
-              <ArrowRightIcon
-                aria-hidden
-                className="text-muted-foreground size-3.5 flex-none"
-              />
-              <span className="truncate">{teamName(view, each.to)}</span>
-            </span>
-            <span className="text-muted-foreground min-w-0 truncate">
-              {each.work.name}
-            </span>
-          </Link>
-        </li>
-      ))}
-    </ul>
-  </Section>
+    <CardContent flush>
+      <ul {...stylex.props(styles.rows)}>
+        {chart.between.map((each) => (
+          <li key={each.work.id} {...stylex.props(styles.row, styles.firstRow)}>
+            <Link
+              aria-label={`Open the workflows: “${each.work.name}”`}
+              params={{ clientId }}
+              to={sectionTo.workflows}
+              {...stylex.props(
+                styles.rowLink,
+                styles.rowLinkWide,
+                styles.between,
+                focusRingInset
+              )}
+            >
+              <span {...stylex.props(styles.inline)}>
+                <Text as="span" color="default" size="sm" truncate>
+                  {teamName(view, each.from)}
+                </Text>
+                <span aria-hidden {...stylex.props(styles.arrow)}>
+                  <Icon icon={ArrowRightIcon} />
+                </span>
+                <Text as="span" color="default" size="sm" truncate>
+                  {teamName(view, each.to)}
+                </Text>
+              </span>
+              <Text as="span" color="muted" size="sm" truncate>
+                {each.work.name}
+              </Text>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </CardContent>
+  </Panel>
 );
 
 /** Whether a team is shown under `filter`. */
@@ -374,66 +702,63 @@ const TeamRow = ({
     .join(" · ");
   const flags = each.off ? [] : besideStanding(team);
   const [flag] = flags;
+  const late = next.kind === "lead" && next.reminded;
   return (
     // The whole row opens the team, as every list's rows open what they name: it answers the pointer and ends in a chevron.
-    <li className="hover:bg-muted/50 relative grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-5 gap-y-2 border-t px-5 py-3 transition-colors md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)_auto]">
-      <span className="flex min-w-0 flex-col">
+    <li {...stylex.props(styles.row, styles.team)}>
+      <span {...stylex.props(styles.stack)}>
         <TeamLink
           aria-label={`Open ${name}`}
-          className={cn(
-            "focus-visible:ring-ring/50 truncate rounded-sm outline-none after:absolute after:inset-0 focus-visible:ring-3",
-            each.off && "text-muted-foreground"
-          )}
           clientId={clientId}
+          look={[styles.teamName, focusRingText, each.off && styles.teamOff]}
           team={each.team.id}
         >
           {name}
         </TeamLink>
-        <span
-          className={cn(
-            "truncate text-xs",
-            next.kind === "lead" && next.reminded
-              ? "text-status-attention"
-              : "text-muted-foreground"
-          )}
-        >
-          {line}
-        </span>
+        {late ? (
+          // A lead who was reminded and has not talked: said in the words, marked in amber.
+          <span {...stylex.props(styles.oneLine, styles.late)}>{line}</span>
+        ) : (
+          <Text as="span" color="muted" size="xs" truncate>
+            {line}
+          </Text>
+        )}
         {flag === undefined ? null : (
-          <span className="flex items-baseline gap-1.5 truncate text-xs">
-            <AttentionDot />
-            {flagLine(flag)}
-            {flags.length > 1 ? (
-              <span className="text-muted-foreground tabular-nums">
-                {` +${flags.length - 1}`}
-              </span>
-            ) : null}
-          </span>
+          <Text as="span" color="default" size="xs" truncate>
+            <Attention>
+              {flagLine(flag)}
+              {flags.length > 1 ? (
+                <Text as="span" color="muted" size="xs">
+                  {` +${flags.length - 1}`}
+                </Text>
+              ) : null}
+            </Attention>
+          </Text>
         )}
       </span>
-      <span className="col-span-2 flex min-w-0 items-center gap-4 md:col-span-1">
+      <span {...stylex.props(styles.teamDots)}>
         {each.off || !view.told ? (
-          <span className="text-muted-foreground text-xs tabular-nums">
-            {counted(people, "person", "people")}
+          <span {...stylex.props(styles.figures)}>
+            <Text as="span" color="muted" size="xs">
+              {counted(people, "person", "people")}
+            </Text>
           </span>
         ) : (
           <>
-            <span className="min-w-0 flex-1">
+            <span {...stylex.props(styles.grow)}>
               <PeopleDots label={talked} people={each.people} />
             </span>
-            <span
-              aria-hidden
-              className="text-muted-foreground flex-none text-xs tabular-nums"
-            >
-              {talked}
+            <span aria-hidden {...stylex.props(styles.figures)}>
+              <Text as="span" color="muted" size="xs">
+                {talked}
+              </Text>
             </span>
           </>
         )}
       </span>
-      <span className="col-start-2 row-start-1 flex items-center gap-3 md:col-start-auto md:row-start-auto">
+      <span {...stylex.props(styles.teamEnd)}>
         {each.off && !view.closed ? (
-          // Above the row's link, so it is pressed itself.
-          <span className="relative">
+          <span {...stylex.props(styles.above)}>
             <CommandButton
               clientId={clientId}
               command={{
@@ -446,10 +771,9 @@ const TeamRow = ({
             </CommandButton>
           </span>
         ) : null}
-        <ChevronRightIcon
-          aria-hidden
-          className="text-muted-foreground size-4 flex-none"
-        />
+        <span aria-hidden {...stylex.props(styles.arrow)}>
+          <Icon icon={ChevronRightIcon} />
+        </span>
       </span>
     </li>
   );
@@ -500,44 +824,36 @@ export const TeamList = ({
   return (
     <>
       {long ? (
-        <div className="flex flex-wrap items-center gap-2">
+        <div {...stylex.props(styles.tools)}>
           {shownFilters.length > 1 ? (
             <ToggleGroup
               aria-label="Which teams to show"
-              className="flex-wrap"
               onValueChange={(value) => {
                 setFilter(filters.find((each) => each === value[0]) ?? "all");
               }}
               size="sm"
-              spacing={0}
               value={[filter]}
-              variant="outline"
             >
               {shownFilters.map((each) => (
                 <ToggleGroupItem key={each} value={each}>
-                  {filterWords[each]}
-                  <span className="text-muted-foreground tabular-nums">
-                    {counts[each]}
-                  </span>
+                  {`${filterWords[each]} ${counts[each]}`}
                 </ToggleGroupItem>
               ))}
             </ToggleGroup>
           ) : null}
-          <div className="w-full sm:ml-auto sm:w-64">
-            <InputGroup>
-              <InputGroupInput
-                aria-label="Find a team or a person"
-                onChange={(event) => {
-                  setQuery(event.target.value);
-                }}
-                placeholder="Find a team or a person"
-                value={query}
-              />
-              <InputGroupAddon>
-                <SearchIcon />
-              </InputGroupAddon>
-            </InputGroup>
-          </div>
+          <InputGroup style={styles.search}>
+            <InputGroupInput
+              aria-label="Find a team or a person"
+              onChange={(event) => {
+                setQuery(event.target.value);
+              }}
+              placeholder="Find a team or a person"
+              value={query}
+            />
+            <InputGroupAddon>
+              <Icon icon={SearchIcon} />
+            </InputGroupAddon>
+          </InputGroup>
         </div>
       ) : null}
 
@@ -545,24 +861,24 @@ export const TeamList = ({
         <Found clientId={clientId} found={found} view={view} />
       ) : null}
 
-      <Section title="Teams">
+      <Panel title="Teams">
         {shown.length === 0 ? (
-          <p className="text-muted-foreground border-t px-5 py-4">
-            No team matches.
-          </p>
+          <PanelNote>No team matches.</PanelNote>
         ) : (
-          <ul className="flex flex-col">
-            {shown.map((each) => (
-              <TeamRow
-                clientId={clientId}
-                key={each.view.team.id}
-                team={each}
-                view={view}
-              />
-            ))}
-          </ul>
+          <CardContent flush>
+            <ul {...stylex.props(styles.rows)}>
+              {shown.map((each) => (
+                <TeamRow
+                  clientId={clientId}
+                  key={each.view.team.id}
+                  team={each}
+                  view={view}
+                />
+              ))}
+            </ul>
+          </CardContent>
         )}
-      </Section>
+      </Panel>
 
       {chart.between.length > 0 ? (
         <Between chart={chart} clientId={clientId} view={view} />
@@ -603,25 +919,26 @@ const TeamFigures = ({ view, team }: { view: OrgView; team: ChartTeam }) => {
     linksSub = `Links out since ${formatDate(dateOn(view.org, each.sent))}`;
   }
   return (
-    <div className="@container border-t">
-      <div className="bg-border grid grid-cols-2 gap-px @3xl:grid-cols-4">
-        <Figure label="People" sub={peopleSub} value={people} />
-        <Figure
-          label="Talked"
-          sub={linksSub}
-          value={counts ? `${each.counts.completed} of ${each.asked}` : "–"}
-        />
-        <Figure
-          label="Pieces of work"
-          sub={works === 0 ? "Named by its lead" : "As its lead named them"}
-          value={works}
-        />
-        <Figure
-          label="Known"
-          value={works === 0 ? "–" : `${team.known} of ${works}`}
-        />
-      </div>
-    </div>
+    <StatGroup
+      aria-label={`${each.team.name} in numbers`}
+      items={[
+        { label: "People", value: String(people), change: peopleSub },
+        {
+          label: "Talked",
+          value: counts ? `${each.counts.completed} of ${each.asked}` : "–",
+          change: linksSub,
+        },
+        {
+          label: "Pieces of work",
+          value: String(works),
+          change: works === 0 ? "Named by its lead" : "As its lead named them",
+        },
+        {
+          label: "Known",
+          value: works === 0 ? "–" : `${team.known} of ${works}`,
+        },
+      ]}
+    />
   );
 };
 
@@ -635,7 +952,7 @@ const TeamPeople = ({
 }) => {
   const each = team.view;
   return (
-    <Section
+    <Panel
       description={
         team.small
           ? `Fewer than ${MIN_GROUP}: the company never sees this team’s numbers apart.`
@@ -644,65 +961,66 @@ const TeamPeople = ({
       title="People"
     >
       {each.people.length === 0 ? (
-        <p className="text-muted-foreground border-t px-5 py-4">
-          Nobody is in this team yet.
-        </p>
+        <PanelNote>Nobody is in this team yet.</PanelNote>
       ) : (
-        <ul className="flex flex-col">
-          {each.people.map((one) => {
-            const who = one.person;
-            const about = [titles.get(who.id) ?? "", askedAbout(team, one)]
-              .filter((part) => part !== "")
-              .join(" · ");
-            return (
-              <li
-                className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 border-t px-5 py-2.5"
-                key={who.id}
-              >
-                <Initials name={who.name} />
-                <span className="flex min-w-0 flex-col">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate">{who.name}</span>
-                    {who.lead && each.lead !== null ? (
-                      <Badge variant="outline">Team lead</Badge>
-                    ) : null}
-                  </span>
-                  {about === "" ? null : (
-                    <span className="text-muted-foreground truncate text-xs">
-                      {about}
+        <CardContent flush>
+          <ul {...stylex.props(styles.rows)}>
+            {each.people.map((one) => {
+              const who = one.person;
+              const about = [titles.get(who.id) ?? "", askedAbout(team, one)]
+                .filter((part) => part !== "")
+                .join(" · ");
+              return (
+                <li key={who.id} {...stylex.props(styles.row, styles.person)}>
+                  <Initials name={who.name} />
+                  <span {...stylex.props(styles.stack)}>
+                    <span {...stylex.props(styles.personName)}>
+                      <Text as="span" color="default" size="sm" truncate>
+                        {who.name}
+                      </Text>
+                      {who.lead && each.lead !== null ? (
+                        <Badge variant="outline">Team lead</Badge>
+                      ) : null}
                     </span>
-                  )}
-                </span>
-                <span className="text-muted-foreground flex flex-none items-center gap-2 text-xs">
-                  <Dot mark={markOf(one.state)} />
-                  <span className="max-sm:sr-only">
-                    {one.out && one.state === "away"
-                      ? "Not asked"
-                      : linkWords[one.state]}
+                    {about === "" ? null : (
+                      <Text as="span" color="muted" size="xs" truncate>
+                        {about}
+                      </Text>
+                    )}
                   </span>
-                </span>
-              </li>
-            );
-          })}
-        </ul>
+                  <span {...stylex.props(styles.aside)}>
+                    <Dot mark={markOf(one.state)} />
+                    <span {...stylex.props(styles.belowSmHidden)}>
+                      <Text as="span" color="muted" size="xs">
+                        {one.out && one.state === "away"
+                          ? "Not asked"
+                          : linkWords[one.state]}
+                      </Text>
+                    </span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </CardContent>
       )}
-    </Section>
+    </Panel>
   );
 };
 
 /** Who does a piece of work, as their initials and their first names. */
 const Doers = ({ doers }: { doers: readonly PersonView[] }) => (
-  <span className="text-muted-foreground mt-1 flex items-center gap-2 text-xs">
-    <span aria-hidden className="flex flex-none gap-0.5">
+  <span {...stylex.props(styles.doers)}>
+    <span aria-hidden {...stylex.props(styles.faces)}>
       {doers.slice(0, mostFaces).map((one) => (
         <Initials key={one.person.id} name={one.person.name} />
       ))}
     </span>
-    <span className="min-w-0 truncate">
+    <Text as="span" color="muted" size="xs" truncate>
       {doers.length <= mostNamed
         ? doers.map((one) => one.person.first).join(", ")
         : `${doers.length} do it`}
-    </span>
+    </Text>
   </span>
 );
 
@@ -716,7 +1034,7 @@ const TeamWork = ({
 }) => {
   const works = team.works.length;
   return (
-    <Section
+    <Panel
       description={
         works === 0
           ? "Its lead names the team’s work in their interview: what there is, how much of it, and who does which."
@@ -725,43 +1043,51 @@ const TeamWork = ({
       title="The work it does"
     >
       {works > 0 ? (
-        <>
-          <div className="px-5 pb-4">
+        <CardContent flush>
+          <div {...stylex.props(styles.workBar)}>
             <WorkBar team={team} />
           </div>
-          <ul className="flex flex-col">
+          <ul {...stylex.props(styles.rows)}>
             {team.works.map((work) => {
               const title = work.evidence.work.name;
               const doers = work.doers.length;
               return (
-                <li className="border-t" key={work.evidence.id}>
+                <li key={work.evidence.id} {...stylex.props(styles.row)}>
                   <Link
                     aria-label={`Open the workflows: “${title}”`}
-                    className="hover:bg-muted/50 focus-visible:ring-ring/50 flex w-full flex-col gap-1 px-5 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-inset"
                     params={{ clientId }}
                     to={sectionTo.workflows}
+                    {...stylex.props(styles.work, focusRingInset)}
                   >
-                    <span className="flex items-start justify-between gap-3">
-                      <span className="min-w-0">{title}</span>
-                      <span className="text-muted-foreground flex-none text-xs tabular-nums">
-                        {Math.round(work.share * 100)}%
+                    <span {...stylex.props(styles.workHead)}>
+                      <Text as="span" color="default" size="sm">
+                        {title}
+                      </Text>
+                      <span {...stylex.props(styles.figures)}>
+                        <Text as="span" color="muted" size="xs">
+                          {`${Math.round(work.share * 100)}%`}
+                        </Text>
                       </span>
                     </span>
-                    <span className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
-                      <span className="flex items-center gap-1.5">
+                    <span {...stylex.props(styles.workFacts)}>
+                      <span {...stylex.props(styles.workState)}>
                         <span
                           aria-hidden
-                          className={cn(
-                            "size-1.5 rounded-full",
+                          {...stylex.props(
+                            styles.tone,
                             workTone(work.evidence)
                           )}
                         />
-                        {workflowWords[work.evidence.state]}
+                        <Text as="span" color="muted" size="xs">
+                          {workflowWords[work.evidence.state]}
+                        </Text>
                       </span>
-                      <span className="tabular-nums">
-                        {doers > 0
-                          ? `${work.evidence.approved} of ${doers} talked`
-                          : "Nobody named for it"}
+                      <span {...stylex.props(styles.figures)}>
+                        <Text as="span" color="muted" size="xs">
+                          {doers > 0
+                            ? `${work.evidence.approved} of ${doers} talked`
+                            : "Nobody named for it"}
+                        </Text>
                       </span>
                     </span>
                     {doers > 0 ? <Doers doers={work.doers} /> : null}
@@ -770,11 +1096,35 @@ const TeamWork = ({
               );
             })}
           </ul>
-        </>
+        </CardContent>
       ) : null}
-    </Section>
+    </Panel>
   );
 };
+
+/** One hand-over: from where to where, and the work. */
+const Hand = ({
+  from,
+  to,
+  work,
+}: {
+  from: ReactNode;
+  to: ReactNode;
+  work: string;
+}) => (
+  <li {...stylex.props(styles.row, styles.hand)}>
+    <span {...stylex.props(styles.inline)}>
+      {from}
+      <span aria-hidden {...stylex.props(styles.arrow)}>
+        <Icon icon={ArrowRightIcon} />
+      </span>
+      {to}
+    </span>
+    <Text as="span" color="muted" size="xs" truncate>
+      {work}
+    </Text>
+  </li>
+);
 
 /** Where a team's work comes from and goes to, by the company's own teams. */
 const TeamHandoffs = ({
@@ -787,71 +1137,55 @@ const TeamHandoffs = ({
   clientId: string;
 }) => {
   const { name } = team.view.team;
-  const otherLink =
-    "truncate rounded-sm hover:underline focus-visible:ring-3 focus-visible:ring-ring/50 outline-none";
+  const own = (
+    <Text as="span" color="muted" size="sm" truncate>
+      {name}
+    </Text>
+  );
+  const other = (id: string) => (
+    <TeamLink
+      clientId={clientId}
+      look={[styles.handTeam, focusRingText]}
+      team={id}
+    >
+      {teamName(view, id)}
+    </TeamLink>
+  );
   return (
-    <Section
+    <Panel
       description="Who gets each piece of work next, as the people who do it said."
       title="Where its work goes"
     >
-      <ul className="flex flex-col">
-        {team.from.map((hand) => (
-          <li
-            className="flex flex-col gap-0.5 border-t px-5 py-2.5"
-            key={`from-${hand.work.id}`}
-          >
-            <span className="flex min-w-0 items-center gap-2">
-              <TeamLink
-                className={otherLink}
-                clientId={clientId}
-                team={hand.from}
-              >
-                {teamName(view, hand.from)}
-              </TeamLink>
-              <ArrowRightIcon
-                aria-hidden
-                className="text-muted-foreground size-3.5 flex-none"
-              />
-              <span className="text-muted-foreground truncate">{name}</span>
-            </span>
-            <span className="text-muted-foreground truncate text-xs">
-              {hand.work.name}
-            </span>
-          </li>
-        ))}
-        {team.to.map((hand) => (
-          <li
-            className="flex flex-col gap-0.5 border-t px-5 py-2.5"
-            key={`to-${hand.work.id}`}
-          >
-            <span className="flex min-w-0 items-center gap-2">
-              <span className="text-muted-foreground truncate">{name}</span>
-              <ArrowRightIcon
-                aria-hidden
-                className="text-muted-foreground size-3.5 flex-none"
-              />
-              {/* Somewhere outside the teams is said in someone's words: not shown here. */}
-              {hand.to === null ? (
-                <span className="text-muted-foreground truncate">
-                  Outside the company’s teams
-                </span>
-              ) : (
-                <TeamLink
-                  className={otherLink}
-                  clientId={clientId}
-                  team={hand.to}
-                >
-                  {teamName(view, hand.to)}
-                </TeamLink>
-              )}
-            </span>
-            <span className="text-muted-foreground truncate text-xs">
-              {hand.work.name}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </Section>
+      <CardContent flush>
+        <ul {...stylex.props(styles.rows)}>
+          {team.from.map((hand) => (
+            <Hand
+              from={other(hand.from)}
+              key={`from-${hand.work.id}`}
+              to={own}
+              work={hand.work.name}
+            />
+          ))}
+          {team.to.map((hand) => (
+            <Hand
+              from={own}
+              key={`to-${hand.work.id}`}
+              // Somewhere outside the teams is said in someone's words: not shown here.
+              to={
+                hand.to === null ? (
+                  <Text as="span" color="muted" size="sm" truncate>
+                    Outside the company’s teams
+                  </Text>
+                ) : (
+                  other(hand.to)
+                )
+              }
+              work={hand.work.name}
+            />
+          ))}
+        </ul>
+      </CardContent>
+    </Panel>
   );
 };
 
@@ -859,34 +1193,38 @@ const TeamHandoffs = ({
 const TeamFlags = ({ view, team }: { view: OrgView; team: ChartTeam }) => {
   if (team.view.off) {
     return (
-      <EmptySection>
+      <EmptyPanel>
         {view.closed
           ? "This team did not take part, and the interviews have closed."
           : "This team does not take part: nobody in it gets a link, and nothing waits for it. Asked in, its lead gets a link first, then everyone else."}
-      </EmptySection>
+      </EmptyPanel>
     );
   }
   if (team.flags.length === 0) {
     return null;
   }
   return (
-    <ul className="bg-card flex flex-col overflow-hidden rounded-xl border">
-      {team.flags.map((flag) => (
-        <li
-          className="flex flex-col gap-0.5 border-t px-5 py-3 first:border-t-0"
-          key={flag.kind === "nobody" ? `nobody-${flag.work.id}` : flag.kind}
-        >
-          <span className="flex items-center gap-2">
-            <span
-              aria-hidden
-              className="bg-status-attention size-1.5 flex-none rounded-full"
-            />
-            {flagLine(flag)}
-          </span>
-          <span className="text-muted-foreground">{flagAbout[flag.kind]}</span>
-        </li>
-      ))}
-    </ul>
+    <Card size="sm">
+      <CardContent flush>
+        <ul {...stylex.props(styles.rows)}>
+          {team.flags.map((flag) => (
+            <li
+              key={
+                flag.kind === "nobody" ? `nobody-${flag.work.id}` : flag.kind
+              }
+              {...stylex.props(styles.row, styles.firstRow, styles.flag)}
+            >
+              <Text as="span" color="default" size="sm">
+                <Attention>{flagLine(flag)}</Attention>
+              </Text>
+              <Text as="span" color="muted" size="sm">
+                {flagAbout[flag.kind]}
+              </Text>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
   );
 };
 
@@ -911,68 +1249,80 @@ export const OneTeam = ({
   const { lead } = each;
   return (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Button
-          className="-ml-2"
-          nativeButton={false}
-          render={<TeamLink clientId={clientId} team={null} />}
-          size="sm"
-          variant="outline"
-        >
-          <ArrowLeftIcon data-icon="inline-start" />
-          All teams
+      <div {...stylex.props(styles.back)}>
+        <Button asChild size="sm" variant="outline">
+          <Link {...teamLinkOf(clientId, null)}>
+            <Icon icon={ArrowLeftIcon} />
+            All teams
+          </Link>
         </Button>
-        <span className={each.off ? "text-muted-foreground" : undefined}>
+        <Text as="span" color={each.off ? "muted" : "default"} size="sm">
           {each.off
             ? "Does not take part in the interviews"
             : "Takes part in the interviews"}
-        </span>
+        </Text>
       </div>
 
-      <section className="bg-card overflow-hidden rounded-xl border">
-        <div className="flex flex-wrap items-start gap-x-8 gap-y-4 px-5 py-4">
-          <div className="flex min-w-0 flex-1 basis-64 flex-col gap-0.5">
-            <PageHeaderTitle render={<h2>{each.team.name}</h2>} />
-            {each.team.does === "" ? null : (
-              <p className="text-muted-foreground">{each.team.does}</p>
-            )}
-          </div>
-          <div className="flex min-w-0 flex-col gap-1.5">
-            <span className="text-muted-foreground text-xs">Team lead</span>
-            <span className="flex items-center gap-2">
-              {lead === null ? null : <Initials name={lead.person.name} />}
-              <span
-                className={lead === null ? "text-muted-foreground" : undefined}
-              >
-                {lead === null ? "Not named yet" : lead.person.name}
-              </span>
-            </span>
-          </div>
-        </div>
-        <TeamFigures team={team} view={view} />
-      </section>
+      <Card asChild size="sm">
+        <section aria-label={each.team.name}>
+          <CardContent>
+            <div {...stylex.props(styles.head)}>
+              <div {...stylex.props(styles.headWords)}>
+                <Heading level={2} size="lg">
+                  {each.team.name}
+                </Heading>
+                {each.team.does === "" ? null : (
+                  <Text color="muted" size="sm">
+                    {each.team.does}
+                  </Text>
+                )}
+              </div>
+              <div {...stylex.props(styles.lead)}>
+                <Text as="span" color="muted" size="xs">
+                  Team lead
+                </Text>
+                <span {...stylex.props(styles.personName)}>
+                  {lead === null ? null : <Initials name={lead.person.name} />}
+                  <Text
+                    as="span"
+                    color={lead === null ? "muted" : "default"}
+                    size="sm"
+                  >
+                    {lead === null ? "Not named yet" : lead.person.name}
+                  </Text>
+                </span>
+              </div>
+            </div>
+          </CardContent>
+          <CardContent>
+            <TeamFigures team={team} view={view} />
+          </CardContent>
+        </section>
+      </Card>
 
       <TeamFlags team={team} view={view} />
 
-      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
+      <div {...stylex.props(styles.team2)}>
         <TeamPeople team={team} titles={titles} />
-        <div className="flex min-w-0 flex-col gap-6">
+        <div {...stylex.props(styles.side)}>
           <TeamWork clientId={clientId} team={team} />
           {team.tools.length > 0 ? (
-            <Section
+            <Panel
               description="As the people who do the work named them, with how many pieces of work each is in."
               title="The apps it works in"
             >
-              <ul className="flex flex-wrap gap-2 border-t px-5 py-4">
-                {team.tools.map((tool) => (
-                  <li key={tool.name}>
-                    <Badge variant="outline">
-                      {`${tool.name} · ${tool.works}`}
-                    </Badge>
-                  </li>
-                ))}
-              </ul>
-            </Section>
+              <CardContent>
+                <ul {...stylex.props(styles.rows, styles.tools)}>
+                  {team.tools.map((tool) => (
+                    <li key={tool.name}>
+                      <Badge variant="outline">
+                        {`${tool.name} · ${tool.works}`}
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Panel>
           ) : null}
           {team.to.length + team.from.length > 0 ? (
             <TeamHandoffs clientId={clientId} team={team} view={view} />
