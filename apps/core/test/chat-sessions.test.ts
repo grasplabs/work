@@ -630,6 +630,43 @@ describe("a chat's ChatSession", () => {
     }).toStrictEqual({ answer: "Stored.", requests: 3 });
   });
 
+  it("stops sending a turn's requests again once its storage keeps failing after opens that work, and ends the turn", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId);
+    const provider = await fakeProviderFor(
+      [model],
+      ...Array.from({ length: 10 }, () => says("Never stored."))
+    );
+    const { session, request } = sessionOf(asking, userId);
+    await session().activeTurn();
+    await runInDurableObject(session(), (_instance, state) => {
+      state.storage.sql.exec(
+        `CREATE TRIGGER test_fault BEFORE INSERT ON pi_entries WHEN NEW.record LIKE '%Never stored%' AND NEW.record LIKE '%"stopReason":"stop"%' BEGIN SELECT RAISE(ABORT, 'Refused by the test'); END`
+      );
+    });
+    const ended = await session()
+      .run(request("turn-a", "Stored?"))
+      .then(
+        (end) => end.stopped ?? end.outcome,
+        (error: unknown) =>
+          z.object({ message: z.string() }).parse(error).message
+      );
+    // Woken by its alarm meanwhile, as nothing else calls it.
+    await runDurableObjectAlarm(session());
+    const sent = provider.requests.length;
+    await runDurableObjectAlarm(session());
+    expect({
+      // Lost, or failed for restarts cutting it off: either way it ends.
+      ended: [
+        "lost",
+        "failed",
+        agentErrors.create("agent.turn_lost").message,
+      ].includes(ended),
+      bounded: sent <= 6,
+      noMore: provider.requests.length === sent,
+    }).toStrictEqual({ ended: true, bounded: true, noMore: true });
+  });
+
   it("opens pi again when its storage fails under a turn nothing waits on, and the turn answers", async () => {
     const { userId } = await signedInWithRole(idp, "user");
     const cut = pausedReply(says("Cut."), 1);
