@@ -221,4 +221,54 @@ describe("a chat shown twice from one watch", () => {
       expect(lines.back?.at(-1)).toStrictEqual({ decided: true, before: 2 });
     });
   });
+
+  it("marks nothing read from the view the tab kept of a chat, only once core's view of it is there", async () => {
+    shownChat = "chat-3";
+    let watches = 0;
+    const markRead = vi.fn<(chatId: string) => Promise<number>>(
+      async () => await Promise.resolve(0)
+    );
+    const chats = {
+      watch: async (
+        _chatId: string,
+        _after: number | null,
+        onUpdate: (update: ChatUpdate) => void
+      ) => {
+        watches += 1;
+        // Coming back, core's watch hasn't answered yet.
+        if (watches > 1) {
+          return await Promise.withResolvers<never>().promise;
+        }
+        onUpdate({
+          messages,
+          partial: null,
+          running: false,
+          stopped: null,
+          held: 0,
+          worked: 0,
+          seenUpTo: 2,
+        });
+        return await Promise.withResolvers<never>().promise;
+      },
+      markRead,
+    };
+    views = ["first"];
+    await opened(chats);
+    await vi.waitFor(() => {
+      expect(markRead).toHaveBeenCalledOnce();
+    });
+    await showViews([]);
+    await act(async () => {
+      await sleep(10);
+    });
+    await showViews(["again"]);
+    await act(async () => {
+      await sleep(10);
+    });
+
+    expect({
+      shown: lines.again?.length !== undefined,
+      marks: markRead.mock.calls.length,
+    }).toStrictEqual({ shown: true, marks: 1 });
+  });
 });

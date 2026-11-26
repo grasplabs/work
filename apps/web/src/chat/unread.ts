@@ -206,7 +206,9 @@ export const useNewLine = (
   });
   // Only once the page has the chat's messages: a watch core refused
   // (too many open, say) shows nothing, so nothing is read.
-  const { loaded } = view;
+  // Nor from the tab's kept view (chat-watch.ts): what came since is
+  // unseen until core's view of the chat is there.
+  const loaded = view.loaded && view.stale !== true;
   useEffect(() => {
     if (
       chatId === undefined ||
