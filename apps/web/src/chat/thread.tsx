@@ -555,6 +555,11 @@ interface AnswerTurn {
   partial: ChatPartial | null;
   /** Grasp works on this answer now. */
   live: boolean;
+  /**
+   * It answers a question asked again (`asksAgain`), which has no row of
+   * its own: it is where the thread goes, as a question's row is.
+   */
+  again?: true;
 }
 
 /** One row of the thread. */
@@ -720,6 +725,26 @@ const asksAgain = (rows: readonly Row[], message: Asked): boolean => {
 };
 
 /**
+ * An answer's row: live for the one Grasp works on now (`answering`),
+ * and marked when it answers a question asked again.
+ */
+const answerRow = (
+  id: string,
+  at: string | undefined,
+  replies: Answer[],
+  partial: ChatPartial | null,
+  again: boolean
+): AnswerTurn => ({
+  kind: "answer",
+  id,
+  at,
+  replies,
+  partial,
+  live: id === "answering",
+  ...(again ? { again: true as const } : {}),
+});
+
+/**
  * The thread's rows: each question, then its replies as one answer per
  * agent, the reply being written joined to it. A question asked again
  * after it was stopped or failed is drawn once, as the references draw a
@@ -752,19 +777,14 @@ const rowsOf = (
       const last = rows.at(-1);
       const joins =
         !again && last?.kind === "answer" && sameAgent(last, message.agentId);
-      again = false;
       if (joins) {
         last.replies.push(message);
       } else {
-        rows.push({
-          kind: "answer",
-          id: `a${message.id}`,
-          at: message.at,
-          replies: [message],
-          partial: null,
-          live: false,
-        });
+        rows.push(
+          answerRow(`a${message.id}`, message.at, [message], null, again)
+        );
       }
+      again = false;
     }
   }
   if (!live) {
@@ -776,14 +796,7 @@ const rowsOf = (
     last.partial = partial;
     last.live = true;
   } else {
-    rows.push({
-      kind: "answer",
-      id: "answering",
-      at: last?.at,
-      replies: [],
-      partial,
-      live: true,
-    });
+    rows.push(answerRow("answering", last?.at, [], partial, again));
   }
   return rows;
 };
@@ -1639,7 +1652,10 @@ export const ChatThread = ({
                       <MessageScrollerItem
                         key={row.id}
                         messageId={row.id}
-                        scrollAnchor={row.kind === "question"}
+                        scrollAnchor={
+                          row.kind === "question" ||
+                          (row.kind === "answer" && row.again === true)
+                        }
                         {...column}
                       >
                         {row.kind === "question" ? (

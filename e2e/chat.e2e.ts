@@ -168,11 +168,13 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   await page.keyboard.press("Escape");
   await expect(chats).toHaveCount(0);
 
-  // Trying again asks the question again.
+  // Trying again asks the question again, in place: drawn once, its new
+  // answer under the one that failed.
   await messages.getByRole("button", { name: "Try again" }).click();
+  await expect(messages.getByRole("alert")).toHaveCount(2, { timeout: 30_000 });
   await expect(
     messages.getByRole("article", { name: "You" }).filter({ hasText: question })
-  ).toHaveCount(2);
+  ).toHaveCount(1);
   // The first try's failure stays where it was; the new one is last.
   await expect(messages.getByRole("alert").last()).toContainText(
     "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
