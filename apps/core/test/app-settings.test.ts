@@ -58,7 +58,10 @@ const share = async (
   });
 };
 
-/** A shared connection to `provider`, `status` at connect. */
+/**
+ * A shared connection to `provider`, `status` at connect, which an admin
+ * opened to everyone in the company (connection-audiences.ts).
+ */
 const connection = async (
   provider: string,
   status: "active" | "disconnected" = "active"
@@ -70,6 +73,11 @@ const connection = async (
       "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, ?, 'shared', NULL, ?, 'native', ?, ?, ?)"
     )
     .bind(id, provider, status, provider, now, now)
+    .run();
+  await env.DB.prepare(
+    "INSERT INTO connection_brain_audiences (connection_id, team_id, changed_by, changed_at) VALUES (?, NULL, 'test-admin', ?)"
+  )
+    .bind(id, now)
     .run();
   return id;
 };

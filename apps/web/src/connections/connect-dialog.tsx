@@ -409,11 +409,11 @@ const ScopeChoice = ({
         value={[scope]}
       >
         <ToggleGroupItem value="personal">{t`Just for you`}</ToggleGroupItem>
-        <ToggleGroupItem value="shared">{t`For everyone`}</ToggleGroupItem>
+        <ToggleGroupItem value="shared">{t`For the company`}</ToggleGroupItem>
       </ToggleGroup>
       <Text color="muted" size="xs">
         {scope === "shared"
-          ? t`Your organization uses it through the permissions you grant.`
+          ? t`Nobody uses it in chat until you choose who may, and Apps and workflows only through the permissions you grant.`
           : t`Only you can use it.`}
       </Text>
     </div>

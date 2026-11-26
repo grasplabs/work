@@ -63,13 +63,17 @@ const heldMails = async (
 ) => {
   const admin = await signedInApi(idp, "admin");
   const tools = ["MAIL_SEND", { name: "mail.search", read: true }];
-  const mail = await mailConnection([], tools);
-  const other = connections === 1 ? mail : await mailConnection([], tools);
+  // Opened to everyone, as an admin chooses on their cards (GRA-2322).
+  const opened = { audience: "everyone" } as const;
+  const mail = await mailConnection([], tools, opened);
+  const other =
+    connections === 1 ? mail : await mailConnection([], tools, opened);
   const read = reads?.tool ?? "mail.search";
   const reader =
     reads === undefined
       ? mail
       : await mailConnection([], [{ name: read, read: true }], {
+          ...opened,
           provider: reads.provider,
         });
   if (reads !== undefined) {

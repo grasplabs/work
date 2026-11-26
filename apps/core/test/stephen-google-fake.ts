@@ -10,6 +10,9 @@
  * reads as the sheet shows it. A test sets a mailbox's world, a drive's
  * files and a spreadsheet's sheets by POSTing to the control URL; it
  * answers only for those, so every other test's Google stays as it was.
+ * A shared drive set with an `account` is that account's alone: Google
+ * lists it, its files and its spreadsheets to no other account's token,
+ * and keeps no read of them.
  * Every read of a world is kept, its path and query as written, and every
  * write is kept and never carried out, for the eval's first hard rule:
  * nothing runs in the turn. `{ failNext: "events" }` has the next calendar
@@ -40,6 +43,14 @@ export const stephenGoogleFake = () => {
   const worlds = new Map<string, World>();
   const drives = new Map<string, File[]>();
   const spreadsheets = new Map<string, Spreadsheet>();
+  /**
+   * The accounts that alone reach a shared drive: one for each company set
+   * up against this Google.
+   */
+  const accounts = new Map<string, Set<string>>();
+  /** Whether `subject`'s account reaches `drive`. */
+  const reaches = (drive: string, subject: string): boolean =>
+    accounts.get(drive)?.has(subject) ?? true;
   // oxlint-disable-next-line unicorn/consistent-function-scoping -- self-contained: core's tests embed this function's source
   const listOf = (value: unknown): unknown[] =>
     Array.isArray(value) ? value.map((item: unknown) => item) : [];
@@ -183,11 +194,15 @@ export const stephenGoogleFake = () => {
    * ("fewer may be returned"), so a listing runs over many pages; each
    * drive's name is its ID. Nothing for any other path.
    */
-  const drivesAnswer = (parts: string[], url: URL): Response | undefined => {
+  const drivesAnswer = (
+    parts: string[],
+    url: URL,
+    subject: string
+  ): Response | undefined => {
     if (parts[3] !== "drives" || parts.length !== 4) {
       return undefined;
     }
-    const ids = [...drives.keys()];
+    const ids = [...drives.keys()].filter((drive) => reaches(drive, subject));
     const at = Number(url.searchParams.get("pageToken") ?? 0);
     const id = ids[at];
     return Response.json({
@@ -277,10 +292,71 @@ export const stephenGoogleFake = () => {
     });
   };
 
+  /**
+   * The shared drive a request for a file or spreadsheet reads, or a
+   * drive's files, if a drive holds it.
+   */
+  const driveOf = (parts: string[], url: URL): string | undefined => {
+    if (url.hostname === "sheets.googleapis.com") {
+      return fileById(parts[3] ?? "")?.drive;
+    }
+    if (parts[1] !== "drive" || parts[3] !== "files") {
+      return undefined;
+    }
+    return parts[4] === undefined
+      ? (url.searchParams.get("driveId") ?? undefined)
+      : fileById(parts[4])?.drive;
+  };
+
+  /**
+   * Google's refusal of a file, a shared drive's files or a spreadsheet
+   * the token's account can't reach: Drive's 404, Sheets' 403.
+   */
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- self-contained: core's tests embed this function's source
+  const refusalOf = (url: URL): Response => {
+    if (url.hostname === "sheets.googleapis.com") {
+      return Response.json(
+        {
+          error: {
+            code: 403,
+            message: "The caller does not have permission",
+            status: "PERMISSION_DENIED",
+          },
+        },
+        { status: 403 }
+      );
+    }
+    // /drive/v3/files[/{file}]
+    const id = decodeURIComponent(url.pathname).split("/").at(4);
+    const message =
+      id === undefined
+        ? `Shared drive not found: ${url.searchParams.get("driveId") ?? ""}`
+        : `File not found: ${id}.`;
+    return Response.json(
+      {
+        error: {
+          code: 404,
+          message,
+          errors: [
+            {
+              domain: "global",
+              reason: "notFound",
+              message,
+              location: id === undefined ? "driveId" : "fileId",
+              locationType: "parameter",
+            },
+          ],
+        },
+      },
+      { status: 404 }
+    );
+  };
+
   /** Google's answer for a world's request, or `undefined` for the rest. */
   const route = (
     request: Request,
-    url: URL
+    url: URL,
+    subject: string
   ): (() => Response | undefined) | undefined => {
     const parts = decodeURIComponent(url.pathname).split("/");
     if (url.hostname === "gmail.googleapis.com" && parts[3] === "users") {
@@ -305,7 +381,7 @@ export const stephenGoogleFake = () => {
     if (url.hostname === "www.googleapis.com" && parts[1] === "drive") {
       // /drive/v3/drives, or /drive/v3/files[/{file}[/export]]
       const answered =
-        drivesAnswer(parts, url) ?? driveAnswer(parts.slice(4), url);
+        drivesAnswer(parts, url, subject) ?? driveAnswer(parts.slice(4), url);
       return answered === undefined ? undefined : () => answered;
     }
     if (
@@ -324,8 +400,8 @@ export const stephenGoogleFake = () => {
      * calendar is its address), `{ drive, files }` a shared drive's files
      * (each `{ id, name, mimeType, text }`), `{ spreadsheet, drive, name,
      * sheets }` a spreadsheet in a shared drive (each sheet `{ title, rows
-     * }`, a row Sheets' grid cells), or `{ failNext }`; GET reads what
-     * reached them.
+     * }`, a row Sheets' grid cells), or `{ failNext }`; with an `account`,
+     * the shared drive is that account's alone. GET reads what reached them.
      */
     control: async (request: Request): Promise<Response> => {
       if (request.method === "GET") {
@@ -335,6 +411,12 @@ export const stephenGoogleFake = () => {
       const { failNext: failing, mailbox, drive, spreadsheet } = set;
       if (typeof failing === "string") {
         failNext = failing;
+      }
+      if (typeof drive === "string" && typeof set.account === "string") {
+        accounts.set(
+          drive,
+          new Set([...(accounts.get(drive) ?? []), set.account])
+        );
       }
       if (typeof mailbox === "string") {
         worlds.set(mailbox.toLowerCase(), {
@@ -377,7 +459,16 @@ export const stephenGoogleFake = () => {
       request: Request,
       url: URL
     ): Promise<Response | undefined> => {
-      const answer = route(request, url);
+      // The account a token is of: `Bearer access.{subject}`, with a
+      // `.{nonce}` once renewed (connect-providers.ts).
+      const [subject = ""] = (request.headers.get("authorization") ?? "")
+        .replace("Bearer access.", "")
+        .split(".");
+      const drive = driveOf(decodeURIComponent(url.pathname).split("/"), url);
+      if (drive !== undefined && !reaches(drive, subject)) {
+        return refusalOf(url);
+      }
+      const answer = route(request, url, subject);
       if (answer === undefined) {
         return undefined;
       }

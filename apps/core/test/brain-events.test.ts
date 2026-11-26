@@ -193,7 +193,9 @@ describe("the Brain's events", setUpTime, () => {
       newTeam(person.userId, ...others),
       newTeam(person.userId, ...others.slice(1)),
     ]);
-    const mail = await mailConnection([], mailWithSearch);
+    const mail = await mailConnection([], mailWithSearch, {
+      audience: "everyone",
+    });
     const chat = await chatOf(
       person.userId,
       codeStep(

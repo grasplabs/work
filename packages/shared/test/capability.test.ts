@@ -22,6 +22,18 @@ const authority = authoritySchema.parse({
   appVersion: 1,
 });
 
+/** Anna's authority, acting as an agent or an App, in `mode`. */
+const acting = (type: "agent" | "app", mode: "interactive" | "workflow") =>
+  authoritySchema.parse({
+    subject:
+      type === "agent"
+        ? { type, agentId: "acme" }
+        : { type, appId: "app-invoices" },
+    onBehalfOf: "user-anna",
+    mode,
+    ...(type === "app" ? { appVersion: 1 } : {}),
+  });
+
 const scope: CapabilityScope = {
   connectionId: "connection-outlook",
   resource: "finance@acme.test",
@@ -232,31 +244,61 @@ describe("capabilities", () => {
     ).resolves.toBe("scope");
   });
 
-  it("with no grant, are accepted only for work that may only read", async () => {
+  it("with no grant, are accepted only for work that may only read, or the chat's agent, whose every change waits for its person", async () => {
     const grantless: CapabilityScope = {
       ...scope,
       idempotencyKey: undefined,
       origin: { ...scope.origin, permissionId: null },
     };
-    const verified = async (readOnly: boolean) =>
+    const inChat: CapabilityScope = {
+      ...grantless,
+      origin: {
+        permissionId: null,
+        context: {
+          type: "chat",
+          workspaceId: "workspace-anna",
+          chatId: "chat-1",
+        },
+      },
+    };
+    const verified = async (
+      readOnly: boolean,
+      by = authority,
+      where = grantless
+    ) =>
       await refusal(
         async () =>
           await verifyCapability(
             [key],
-            await signCapability(
-              key,
-              authority,
-              { ...grantless, readOnly },
-              now
-            ),
-            grantless,
+            await signCapability(key, by, { ...where, readOnly }, now),
+            where,
             now
           )
       );
     expect({
       reads: await verified(true),
       mayWrite: await verified(false),
-    }).toStrictEqual({ reads: "none", mayWrite: "scope" });
+      chatAgentMayWrite: await verified(
+        false,
+        acting("agent", "interactive"),
+        inChat
+      ),
+      // Narrow: no App, no agent a workflow runs, and no agent outside a chat.
+      appInChat: await verified(false, acting("app", "interactive"), inChat),
+      agentInWorkflow: await verified(
+        false,
+        acting("agent", "workflow"),
+        inChat
+      ),
+      agentOutsideChat: await verified(false, acting("agent", "interactive")),
+    }).toStrictEqual({
+      reads: "none",
+      mayWrite: "scope",
+      chatAgentMayWrite: "none",
+      appInChat: "scope",
+      agentInWorkflow: "scope",
+      agentOutsideChat: "scope",
+    });
   });
 
   it("are each unique", async () => {

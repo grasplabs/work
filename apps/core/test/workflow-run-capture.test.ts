@@ -93,7 +93,7 @@ const ownMail = async (owner: string | undefined, messages: string[]) => {
   const mail = await mailConnection(
     [],
     [{ name: "mail.search", read: true }],
-    owner === undefined ? {} : { owner }
+    owner === undefined ? { audience: "nobody" } : { owner }
   );
   await mail.serves([
     {

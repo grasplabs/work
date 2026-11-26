@@ -1294,7 +1294,7 @@ describe("what the recall before a question may reach", setUpTime, () => {
     };
     const [sharedOne, own, others, disconnected, sends, otherAgents] =
       await Promise.all([
-        mailConnection([], searches),
+        mailConnection([], searches, { audience: "everyone" }),
         mailConnection([], searches, { owner: person.userId }),
         mailConnection([], searches, { owner: other.userId }),
         mailConnection([], searches, { owner: person.userId }),
@@ -1403,6 +1403,13 @@ describe("what the recall before a question may reach", setUpTime, () => {
     };
     const direct = await through("slack");
     const thread = await through("slack", true);
+    // Every turn's reader asks connect about each audience there is: one
+    // left would hold later tests' turns that hold connect.
+    await env.DB.prepare(
+      "DELETE FROM connection_brain_audiences WHERE connection_id = ?"
+    )
+      .bind(sharedOne.id)
+      .run();
 
     const none = Object.fromEntries(
       Object.keys(names).map((kind) => [kind, false])

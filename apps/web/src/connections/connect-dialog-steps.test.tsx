@@ -232,7 +232,7 @@ describe("the connect dialog's steps", () => {
       return await waitingForever();
     });
     expect(document.body.textContent).toContain("Who uses it");
-    await press(button("For everyone"));
+    await press(button("For the company"));
     await press(button("Sign in to Microsoft 365"));
     expect(scopes).toStrictEqual(["shared"]);
   });

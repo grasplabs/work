@@ -1,13 +1,13 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import {
   brainConnectionIdSchema,
-  connectionBrainAudienceSchema,
+  connectionAudienceSchema,
   connectionErrors,
   connectionOwnersMax,
 } from "@grasp-os/shared/connect";
 import type {
-  ConnectionBrainAudience,
-  ConnectionBrainAudienceSetting,
+  ConnectionAudience,
+  ConnectionAudienceSetting,
 } from "@grasp-os/shared/connect";
 import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -24,18 +24,23 @@ import {
 } from "./audit-outbox.ts";
 import {
   brainSyncSources,
-  connectionBrainAudiences,
+  connectionAudiences,
   connectionBrainErasures,
   teams,
 } from "./db/core/schema.ts";
 
-// Who may read in the Brain what agents read through a shared connection
-// (GRA-1831; the threat model and the decisions are on the issue). An
-// admin connects a system once for a group and says who may read what is
-// kept of it: one team or everyone, the choice an uploaded document has,
-// and nobody until an admin chooses. Access is then decided inside Grasp,
-// where every read already checks it; nothing mirrors the other system's
-// own permissions, and the admin answers for the scope they choose.
+// A shared connection's one audience (GRA-1831, GRA-2322; the threat
+// models and the decisions are on the issues). An admin connects a system
+// once for a group and says who it is for: one team or everyone, the
+// choice an uploaded document has, and nobody until an admin chooses.
+// That group alone uses it in chat, with no grant (ungranted-reads.ts),
+// reaches an App that read it, itself or through the workflows it reaches
+// (app-provenance.ts; a workflow shared on its own isn't checked yet:
+// GRA-2333), and reads
+// in the Brain what agents read through it. Access is then decided inside
+// Grasp, where every call and read already checks it; nothing mirrors the
+// other system's own permissions, and the admin answers for the scope
+// they choose.
 //
 // What is kept goes to the shared store for the connection's own group
 // (brain-next.ts `connectionGroup`), never for the team or the company
@@ -53,14 +58,14 @@ import {
 // one that doesn't exist or was disconnected; one naming a team the
 // company doesn't have; a row that can't be read opening anything.
 
-/** One row as recall reads it: a connection, and its team or everyone (null). */
-export interface ConnectionAudience {
+/** One row as every path reads it: a connection, and its team or everyone (null). */
+export interface AudienceRow {
   connectionId: string;
   teamId: string | null;
 }
 
 /**
- * The read of every shared connection's Brain audience as core keeps it,
+ * The read of every shared connection's audience as core keeps it,
  * for one batch with the reader's own records (brain-next.ts
  * `memberGroupsOf`): what each read of the Brain puts its reader in the
  * connections' groups by. One row per shared connection with an audience,
@@ -69,20 +74,20 @@ export interface ConnectionAudience {
 export const audiencesRead = (db: DrizzleD1Database) =>
   db
     .select({
-      connectionId: connectionBrainAudiences.connectionId,
-      teamId: connectionBrainAudiences.teamId,
+      connectionId: connectionAudiences.connectionId,
+      teamId: connectionAudiences.teamId,
     })
-    .from(connectionBrainAudiences)
+    .from(connectionAudiences)
     // Never one of a connection being erased or closed by a disconnect:
     // none has an audience (shared-reads.ts), and a read never trusts one
     // that would.
     .where(
-      sql`NOT EXISTS (SELECT 1 FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connectionBrainAudiences.connectionId} AND (${connectionBrainErasures.erasing} = 1 OR ${connectionBrainErasures.closed} = 1))`
+      sql`NOT EXISTS (SELECT 1 FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connectionAudiences.connectionId} AND (${connectionBrainErasures.erasing} = 1 OR ${connectionBrainErasures.closed} = 1))`
     )
     // In one order, with the places of each (`sharedPlacesRead`): a reader
     // past the bound of groups leaves out the same places each read
     // (brain-next.ts `readerGroupsOf`).
-    .orderBy(connectionBrainAudiences.connectionId);
+    .orderBy(connectionAudiences.connectionId);
 
 /**
  * Of `audiences`, those of a connection connect holds as active now, read
@@ -94,7 +99,7 @@ export const audiencesRead = (db: DrizzleD1Database) =>
  * Only a disconnect in Grasp, or an un-pick, erases (shared-reads.ts,
  * brain-sync.ts).
  */
-export const activeAudiences = async <Row extends ConnectionAudience>(
+export const activeAudiences = async <Row extends AudienceRow>(
   env: Pick<Env, "CONNECT">,
   audiences: readonly Row[]
 ): Promise<Row[]> => {
@@ -137,7 +142,7 @@ export const sharedPlacesRead = (db: DrizzleD1Database) =>
         isNull(brainSyncSources.personId),
         eq(brainSyncSources.dropped, false),
         ne(brainSyncSources.place, placesListing),
-        sql`EXISTS (SELECT 1 FROM ${connectionBrainAudiences} WHERE ${connectionBrainAudiences.connectionId} = ${brainSyncSources.connectionId})`
+        sql`EXISTS (SELECT 1 FROM ${connectionAudiences} WHERE ${connectionAudiences.connectionId} = ${brainSyncSources.connectionId})`
       )
     )
     // In one order, so a reader past the bound of groups leaves out the
@@ -148,11 +153,11 @@ export const sharedPlacesRead = (db: DrizzleD1Database) =>
       brainSyncSources.place
     );
 
-/** Every shared connection's Brain audience, as an admin last chose it. */
+/** Every shared connection's audience, as an admin last chose it. */
 export const readConnectionAudiences = async (
   env: Env,
   identity: Identity
-): Promise<ConnectionBrainAudienceSetting[]> => {
+): Promise<ConnectionAudienceSetting[]> => {
   requireAdmin(identity);
   const db = drizzle(env.DB);
   // One snapshot: an erasure that starts takes the audience away in the
@@ -160,8 +165,8 @@ export const readConnectionAudiences = async (
   const [rows, erasing] = await db.batch([
     db
       .select()
-      .from(connectionBrainAudiences)
-      .orderBy(connectionBrainAudiences.connectionId),
+      .from(connectionAudiences)
+      .orderBy(connectionAudiences.connectionId),
     db
       .select({ connectionId: connectionBrainErasures.connectionId })
       .from(connectionBrainErasures)
@@ -169,7 +174,7 @@ export const readConnectionAudiences = async (
       .orderBy(connectionBrainErasures.connectionId),
   ]);
   const erasingIds = new Set(erasing.map(({ connectionId }) => connectionId));
-  const chosen: ConnectionBrainAudienceSetting[] = rows.map(
+  const chosen: ConnectionAudienceSetting[] = rows.map(
     ({ connectionId, teamId, changedBy, changedAt }) => ({
       connectionId,
       audience:
@@ -182,7 +187,7 @@ export const readConnectionAudiences = async (
   const audienced = new Set(rows.map(({ connectionId }) => connectionId));
   // Being erased, so with no audience: listed all the same, so a page
   // can say so and offer no choice until it has ended.
-  const beingErased: ConnectionBrainAudienceSetting[] = erasing.flatMap(
+  const beingErased: ConnectionAudienceSetting[] = erasing.flatMap(
     ({ connectionId }) =>
       audienced.has(connectionId)
         ? []
@@ -254,7 +259,7 @@ const unopenableNow = async (
 };
 
 /** `audience` as a row holds it (`Held`). */
-const heldOf = (audience: ConnectionBrainAudience): Held => {
+const heldOf = (audience: ConnectionAudience): Held => {
   if (audience.kind === "nobody") {
     return undefined;
   }
@@ -263,13 +268,13 @@ const heldOf = (audience: ConnectionBrainAudience): Held => {
 
 /** Whether `one` and `other` are the same audience: the same team, if one. */
 export const sameAudience = (
-  one: ConnectionBrainAudience,
-  other: ConnectionBrainAudience
+  one: ConnectionAudience,
+  other: ConnectionAudience
 ): boolean => heldOf(one) === heldOf(other);
 
 /** `audience` as the audit log names it: who, and which team. */
 export const audienceFields = (
-  audience: ConnectionBrainAudience
+  audience: ConnectionAudience
 ): Record<string, string> => audienceDetail(heldOf(audience), "");
 
 /**
@@ -283,8 +288,8 @@ export const requireAcknowledged = async (
   identity: Identity,
   action: "connection.sync_places" | "brain.connection_audience.changed",
   connectionId: string,
-  audience: ConnectionBrainAudience,
-  acknowledged: ConnectionBrainAudience | undefined,
+  audience: ConnectionAudience,
+  acknowledged: ConnectionAudience | undefined,
   detail: Record<string, string> = {}
 ): Promise<void> => {
   if (acknowledged !== undefined && sameAudience(acknowledged, audience)) {
@@ -310,27 +315,30 @@ const heldBy = async (
   connectionId: string
 ): Promise<Held> => {
   const row = await db
-    .select({ teamId: connectionBrainAudiences.teamId })
-    .from(connectionBrainAudiences)
-    .where(eq(connectionBrainAudiences.connectionId, connectionId))
+    .select({ teamId: connectionAudiences.teamId })
+    .from(connectionAudiences)
+    .where(eq(connectionAudiences.connectionId, connectionId))
     .get();
   return row?.teamId;
 };
 
-/**
- * The Brain audience the shared connection `connectionId` holds now:
- * nobody when it has none.
- */
-export const connectionAudienceOf = async (
-  env: Env,
-  connectionId: string
-): Promise<ConnectionBrainAudience> => {
-  const held = await heldBy(drizzle(env.DB), connectionId);
+/** The audience a row holds (`Held`), as an admin chose it. */
+export const audienceOf = (held: Held): ConnectionAudience => {
   if (held === undefined) {
     return { kind: "nobody" };
   }
   return held === null ? { kind: "everyone" } : { kind: "team", teamId: held };
 };
+
+/**
+ * The audience the shared connection `connectionId` holds now: nobody
+ * when it has none.
+ */
+export const connectionAudienceOf = async (
+  env: Env,
+  connectionId: string
+): Promise<ConnectionAudience> =>
+  audienceOf(await heldBy(drizzle(env.DB), connectionId));
 
 /**
  * Refuses `chosen` for `connectionId` unless it is a shared connection
@@ -366,8 +374,9 @@ const requireOpenable = async (
 };
 
 /**
- * Chooses who may read in the Brain what agents read through the shared
- * connection `connectionId`: one team, everyone, or nobody (`audience`).
+ * Chooses who may use the shared connection `connectionId`, in their own
+ * chat, through an App that holds it and in the Brain: one team,
+ * everyone, or nobody (`audience`).
  * Admins only, never Grasp staff, who never decide what a client's people
  * connect. One audit event a change, with the audience before and after;
  * the same audience again records nothing. Throws `connection.invalid`
@@ -379,7 +388,7 @@ const requireOpenable = async (
  * only while that is still the one held, compared in the statement that
  * writes, so a page left open never opens access over a change it didn't
  * see (an erase, another admin's choice) without its confirmation.
- * Otherwise it throws `connection.brain_audience_changed` and changes
+ * Otherwise it throws `connection.audience_changed` and changes
  * nothing; the page reads the audience again. Choosing what is held
  * already changes nothing, whatever `from` says.
  *
@@ -402,11 +411,9 @@ export const setConnectionAudience = async (
     throw roleErrors.create("role.forbidden");
   }
   const id = brainConnectionIdSchema.safeParse(connectionId);
-  const chosen = connectionBrainAudienceSchema.safeParse(audience);
-  const seen = connectionBrainAudienceSchema.safeParse(from);
-  const confirmed = connectionBrainAudienceSchema
-    .optional()
-    .safeParse(acknowledged);
+  const chosen = connectionAudienceSchema.safeParse(audience);
+  const seen = connectionAudienceSchema.safeParse(from);
+  const confirmed = connectionAudienceSchema.optional().safeParse(acknowledged);
   if (!(id.success && chosen.success && seen.success && confirmed.success)) {
     throw connectionErrors.create("connection.invalid");
   }
@@ -432,7 +439,7 @@ export const setConnectionAudience = async (
       return;
     }
     if (held !== expected) {
-      throw connectionErrors.create("connection.brain_audience_changed");
+      throw connectionErrors.create("connection.audience_changed");
     }
     // Never opened while what the Brain kept of it is being erased, nor
     // once a disconnect closed it, though connect said it was connected a
@@ -466,25 +473,25 @@ export const setConnectionAudience = async (
         ...audienceDetail(wanted, ""),
       },
     });
-    const thisRow = eq(connectionBrainAudiences.connectionId, id.data);
+    const thisRow = eq(connectionAudiences.connectionId, id.data);
     const asRead = and(
       thisRow,
-      sql`${connectionBrainAudiences.teamId} IS ${held ?? null}`
+      sql`${connectionAudiences.teamId} IS ${held ?? null}`
     );
     const changedAt = new Date();
     let write;
     if (wanted === undefined) {
-      write = db.delete(connectionBrainAudiences).where(asRead);
+      write = db.delete(connectionAudiences).where(asRead);
     } else if (held === undefined) {
       write = db
-        .insert(connectionBrainAudiences)
+        .insert(connectionAudiences)
         .select(
           sql`SELECT ${id.data}, ${wanted}, ${identity.userId}, ${changedAt.getTime()} WHERE ${openable(id.data)}`
         )
         .onConflictDoNothing();
     } else {
       write = db
-        .update(connectionBrainAudiences)
+        .update(connectionAudiences)
         .set({ teamId: wanted, changedBy: identity.userId, changedAt })
         .where(and(asRead, openable(id.data)));
     }
