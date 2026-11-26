@@ -9,7 +9,7 @@ import { failureText } from "@grasp-os/shared/errors";
 import type { ModelEffort, ModelEfforts } from "@grasp-os/shared/models";
 import type { Subject } from "@grasp-os/shared/subject";
 import { useRouteContext } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useCoreAction } from "../use-core-action.ts";
 import { activeChat, setActiveChat } from "./active-chat.ts";
@@ -24,6 +24,13 @@ import {
   writeChoice,
 } from "./model-choice.ts";
 import type { ModelChoice } from "./model-choice.ts";
+import {
+  keepMade,
+  pendingKey,
+  setPending,
+  usePending,
+} from "./pending-question.ts";
+import type { PendingQuestion } from "./pending-question.ts";
 
 // Asking in a chat, from the chat page or the chat dock on any other page:
 // the box's text, model, effort and files, and asking in the open chat, or
@@ -61,8 +68,13 @@ const noModelEfforts: Readonly<Record<string, ModelEfforts>> = {};
 
 /** Where a question goes when there is no chat yet, and what follows it. */
 export interface AskOptions {
-  /** Once a question is taken, in the chat it went into. */
-  onAsked?: (chatId: string) => void;
+  /**
+   * Once the chat a question goes into is there, made for it or not, as
+   * the question goes on its way: its page may open at once, and shows it.
+   */
+  onChat?: (chatId: string) => void;
+  /** The chat's last message: a question sent now comes after it. */
+  after?: number;
   /**
    * What each question is about: the page it is asked on (chat-subject.ts).
    */
@@ -115,7 +127,7 @@ export const useAsk = (
   efforts: Readonly<Record<string, ModelEfforts>> = noModelEfforts,
   /** Which of the tab's open chats a new chat becomes. */
   slot: ChatSlot = "chat",
-  { onAsked, subject, make, agentId }: AskOptions = noOptions
+  { onChat, after = 0, subject, make, agentId }: AskOptions = noOptions
 ) => {
   const { identity } = useRouteContext({ from: "/_shell" });
   const { busy, failure, run } = useCoreAction();
@@ -130,6 +142,25 @@ export const useAsk = (
   const [files, setFiles] = useState<readonly BoxFile[]>([]);
   // Why a file the person chose stays out of the box.
   const [fileProblem, setFileProblem] = useState<string>();
+  // A question that failed to send comes back into the box that shows its
+  // chat, which says why (`failure`): this one, or the chat's page Chat's
+  // start opened as it went. Into an empty box only; what was typed since
+  // stays, and the files go back before the box's own.
+  const pendingHere = pendingKey(chatId, slot);
+  const returned = usePending(pendingHere);
+  const [takenBack, setTakenBack] = useState<PendingQuestion>();
+  if (returned?.failed === true && returned !== takenBack) {
+    setTakenBack(returned);
+    setText((now) => (now === "" ? returned.text : now));
+    setMentions((now) => (now.length === 0 ? returned.mentions : now));
+    setFiles((now) => [...returned.files, ...now]);
+  }
+  // Taken back, it is the box's alone.
+  useEffect(() => {
+    if (returned?.failed === true) {
+      setPending(pendingHere, undefined);
+    }
+  }, [returned, pendingHere]);
   // The chat what is typed belongs to, and the chat a question asked here
   // made: the box is that one's still once it opens.
   const [draftOf, setDraftOf] = useState(chatId);
@@ -215,15 +246,46 @@ export const useAsk = (
     // question mentions: the first agent, paused, never stops it.
     const startWith = agentId ?? named.find(({ kind }) => kind === "agent")?.id;
     let created: string | undefined;
+    // The thread shows the question at once, and the box lets go of it.
+    const asked: PendingQuestion = {
+      text: question,
+      mentions: mentioned,
+      files: carried,
+      after,
+      at: new Date().toISOString(),
+      failed: false,
+    };
+    let pendingIn = pendingKey(chatId, slot);
+    setPending(pendingIn, asked);
+    setText((now) => (now === question ? "" : now));
+    if (mentioned.length > 0) {
+      setMentions([]);
+    }
+    setFiles((now) => now.filter((each) => !carried.includes(each)));
     const sent = await run(async (session) => {
       let id = chatId ?? unsentChatFor(unsent.current, question, startWith);
       if (id === undefined) {
-        ({ id } = await session.chats.create(
+        const chat = await session.chats.create(
           titleOf(question),
           startWith,
           make
-        ));
+        );
+        keepMade(chat);
+        ({ id } = chat);
         created = id;
+      }
+      if (chatId === undefined) {
+        // The chat is there: the question shows in it as it goes on, and
+        // it is the open one, unless another was opened meanwhile.
+        setPending(pendingIn, undefined);
+        pendingIn = id;
+        setPending(pendingIn, asked);
+        // The box is the chat's still once it opens.
+        setMade(id);
+        if (activeChat(slot) === undefined) {
+          setActiveChat(id, slot);
+        }
+        onChat?.(id);
       }
       const askedIn = id;
       const fileIds: string[] = [];
@@ -255,31 +317,19 @@ export const useAsk = (
     });
     sending.current = false;
     if (sent === undefined) {
-      // The box keeps the question and says why it wasn't sent; a new chat
-      // made for it waits to be asked in again.
+      // The question leaves the thread and goes back into the box, which
+      // says why it wasn't sent; a new chat made for it waits to be asked
+      // in again.
+      setPending(pendingIn, { ...asked, failed: true });
       if (created !== undefined) {
         unsent.current = { id: created, question, agentId: startWith };
       }
       return false;
     }
     unsent.current = null;
-    // Clears the box only of what was sent from it: asking again sends an
-    // earlier question, and a draft the person started stays.
-    setText((now) => (now === question ? "" : now));
-    if (mentioned.length > 0) {
-      setMentions([]);
-    }
-    setFiles((now) => now.filter((each) => !carried.includes(each)));
     for (const { id } of carried) {
       attached.current.delete(id);
     }
-    setMade(sent);
-    // The chat it made is the open one, unless another was opened while it
-    // was on its way: an answer that late selects nothing.
-    if (chatId === undefined && activeChat(slot) === undefined) {
-      setActiveChat(sent, slot);
-    }
-    onAsked?.(sent);
     return true;
   };
   const stop = async (id: string): Promise<void> => {

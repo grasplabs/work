@@ -23,7 +23,7 @@ import {
 import { act, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { loadFromCore } from "../load-from-core.tsx";
 import { wordsOf } from "../test-words.ts";
@@ -114,7 +114,12 @@ const opened = async (
     chatId: string,
     after: number | null,
     onUpdate: (update: ChatUpdate) => void
-  ) => Promise<never> = async () => await Promise.withResolvers<never>().promise
+  ) => Promise<never> = async () =>
+    await Promise.withResolvers<never>().promise,
+  /** How core takes a question, once it is asked: at once by default. */
+  taking: () => Promise<void> = async () => {
+    await Promise.resolve();
+  }
 ) => {
   const asked: string[] = [];
   const chats = {
@@ -124,7 +129,7 @@ const opened = async (
     agents: async () => await Promise.resolve([]),
     send: async (chatId: string, question: ChatQuestion) => {
       asked.push(`send ${chatId} ${question.text}`);
-      await Promise.resolve();
+      await taking();
     },
     heldCalls: async () => await Promise.resolve([]),
     watch,
@@ -291,6 +296,81 @@ describe("a chat's own page", () => {
     expect({ typedForA, onB: box()?.textContent }).toStrictEqual({
       typedForA: "Half a thought for A",
       onB: "",
+    });
+  });
+
+  it("shows a question in the thread the moment it is sent, and puts it back in the box with why once core refuses it", async () => {
+    const taken = Promise.withResolvers<undefined>();
+    await opened(
+      "chat-a",
+      undefined,
+      async (_chatId, _after, onUpdate) => {
+        await Promise.resolve();
+        onUpdate({
+          messages: [
+            {
+              id: 1,
+              role: "user",
+              text: "Which deals closed?",
+              at: "2026-11-01T08:00:00.000Z",
+            },
+          ],
+          partial: null,
+          running: false,
+          stopped: null,
+          held: 0,
+          worked: 0,
+        });
+        return await Promise.withResolvers<never>().promise;
+      },
+      async () => {
+        await taken.promise;
+      }
+    );
+    await typed("And which are late?");
+    await sent();
+    // The thread, which loads once a chat is shown.
+    // The thread, which loads once a chat is shown.
+    await vi.waitFor(
+      async () => {
+        await settled();
+        expect(document.querySelector("article")).not.toBeNull();
+      },
+      { timeout: 15_000 }
+    );
+    const meanwhile = {
+      box: box()?.textContent,
+      thread: [...document.querySelectorAll("article")].map((row) =>
+        wordsOf(row)
+      ),
+    };
+    await act(async () => {
+      taken.reject(agentErrors.create("agent.invalid_question"));
+      await taken.promise.catch(() => {});
+    });
+    await settled();
+
+    expect({
+      meanwhile,
+      box: box()?.textContent,
+      thread: document.body.textContent.split("And which are late?").length - 1,
+      notes: [
+        ...document.querySelectorAll('[data-slot="prompt-input-note"]'),
+      ].map((note) => note.textContent),
+    }).toStrictEqual({
+      meanwhile: {
+        box: "",
+        thread: [
+          expect.stringContaining("Which deals closed?"),
+          expect.stringContaining("And which are late?"),
+        ],
+      },
+      box: "And which are late?",
+      thread: 1,
+      notes: [
+        "Could not send. Your message is kept.",
+        agentErrors.create("agent.invalid_question").message,
+      ],
     });
   });
 

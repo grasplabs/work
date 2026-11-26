@@ -44,7 +44,7 @@ import { msg, select } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useEffectEvent, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { makerMark } from "../frame/brands.ts";
@@ -737,6 +737,25 @@ export const Composer = ({
     unavailable,
     onSend,
   });
+  // Stop, after which the text takes the focus where Stop had it: Stop
+  // gives way to Send, which can't hold the focus with nothing typed, and
+  // it would fall to the page (Damsko's Submit hands it to the text on a
+  // send, not yet on a stop).
+  const textBox = useRef<HTMLDivElement>(null);
+  const stop = held ? letGo : onStop;
+  const stopHere =
+    stop === undefined
+      ? undefined
+      : () => {
+          const here =
+            textBox.current
+              ?.closest("form")
+              ?.contains(document.activeElement) === true;
+          stop();
+          if (here) {
+            textBox.current?.focus();
+          }
+        };
   const failed = heldFailure ?? failure;
   const note = dictation.problem ?? failed;
   const canConnect = useMemberAdmin();
@@ -791,6 +810,7 @@ export const Composer = ({
       )}
       <PromptInputBody>
         <PromptInputTextarea
+          ref={textBox}
           aria-label={label ?? t`Your question`}
           {...(placeholder === undefined ? {} : { placeholder })}
         />
@@ -803,7 +823,7 @@ export const Composer = ({
           compact={compact}
           speech={dictation.speech}
           // Stop lets a held question go; else it stops the answer, where one can be.
-          stop={held ? letGo : onStop}
+          stop={stopHere}
         >
           {children}
         </BoxTools>
