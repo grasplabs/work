@@ -274,9 +274,6 @@ const DecidersChoice = ({
           disabled={busy || reading || deciders.length >= decisionDecidersMax}
           holding={holding}
           label={t`Add who answers`}
-          // A decision sent to a role (`role:admin`) is answered only by a
-          // binding that names that role.
-          roles
           onOpen={() => {
             void readCandidates();
           }}

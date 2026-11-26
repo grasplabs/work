@@ -787,6 +787,15 @@ const namedPerson = async (
   return name === undefined ? {} : { person: { name } };
 };
 
+/** Whether a turn builds (`TurnContext.builds`): its person's own chat, with a role that builds. */
+const buildsIn = ({
+  shared,
+  role,
+}: {
+  shared: boolean;
+  role: Role | undefined;
+}): boolean => !shared && role !== undefined && canBuild(role);
+
 /**
  * Which agents a turn may draft for its person (`TurnContext.drafts`):
  * only one they asked for, in their own chat in Grasp; one of the
@@ -3242,11 +3251,13 @@ export class Workspace extends DurableObject<Env> {
     });
     // A chat that came through a chat platform: how to answer there.
     const channel = via === "web" ? undefined : await channelText();
-    // Only who builds reads Grasp's docs, in their own chat: thousands of
-    // tokens in every request, of no use to anyone else. Building, an App
-    // included, needs a role that builds (app-access.ts).
+    // Only who builds is told how, reads Grasp's docs and gets the APIs
+    // and tools to build with, in their own chat, in Grasp's app or their
+    // direct message on a chat app: thousands of tokens in every request,
+    // of no use to anyone else. Building, an App included, needs a role
+    // that builds (app-access.ts).
     const role = await memberRole(this.env.DB, scope.personId);
-    const builds = !shared && role !== undefined && canBuild(role);
+    const builds = buildsIn({ shared, role });
     // Who drafts an agent for its person to make (`draftAgent`).
     const drafts = draftsOf({ shared, unattended, via, role });
     // The documents an admin gave the chat's agent, by name.

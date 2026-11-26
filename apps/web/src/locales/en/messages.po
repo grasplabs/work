@@ -2332,10 +2332,6 @@ msgstr "Add a fallback"
 msgid "Add a goal"
 msgstr "Add a goal"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Add a group"
-msgstr "Add a group"
-
 #: src/settings/workspace-name.tsx
 msgid "Add a logo"
 msgstr "Add a logo"
@@ -3922,7 +3918,6 @@ msgstr "Bound to"
 #: src/brain/brain-section.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.brain.tsx
-#: src/settings/sections.ts
 msgid "Brain"
 msgstr "Brain"
 
@@ -4067,10 +4062,6 @@ msgstr "Called a model"
 msgid "Called another App"
 msgstr "Called another App"
 
-#: src/routes/_shell.settings.outcomes.tsx
-msgid "Calls"
-msgstr "Calls"
-
 #: src/activity/pending.tsx
 msgid "Calls {path} of {app}. Each run can read or change whatever that function reads or changes in the App, as the person it runs for"
 msgstr "Calls {path} of {app}. Each run can read or change whatever that function reads or changes in the App, as the person it runs for"
@@ -4123,7 +4114,6 @@ msgstr "Can't offer Run: {unread}"
 #: src/chat/brain-questions.tsx
 #: src/chat/chat-window.tsx
 #: src/chat/delete-chat-dialog.tsx
-#: src/confirmed.tsx
 #: src/connections/add-connector.tsx
 #: src/connections/app/words.ts
 #: src/connections/connect-dialog.tsx
@@ -4194,7 +4184,6 @@ msgstr "Cases a week: {cases}."
 #: src/agents/new-agent.tsx
 #: src/apps/app-workflows.tsx
 #: src/drafts/share-with-team.tsx
-#: src/routes/_shell.settings.outcomes.tsx
 #: src/settings/ai-providers.tsx
 msgid "Change"
 msgstr "Change"
@@ -4451,10 +4440,6 @@ msgstr "Changes"
 msgctxt "a list of changes"
 msgid "Changes"
 msgstr "Changes"
-
-#: src/routes/_shell.settings.outcomes.tsx
-msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, in their inbox; follow up with them."
-msgstr "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, in their inbox; follow up with them."
 
 #: src/drafts/draft-history.tsx
 #: src/drafts/share-with-team.tsx
@@ -4782,7 +4767,6 @@ msgstr "Cliffs"
 #: src/interview/destination.tsx
 #: src/projects/project-chats.tsx
 #: src/settings/erasures.tsx
-#: src/shown-once.tsx
 #: src/workflows/start-run.tsx
 msgid "Close"
 msgstr "Close"
@@ -5142,8 +5126,8 @@ msgstr "Connecting your Microsoft 365"
 #: src/apps/resource-bindings.tsx
 #: src/chat/sources.tsx
 #: src/connections/app/words.ts
+#: src/inbox/item-detail.tsx
 #: src/inbox/items.ts
-#: src/routes/_shell.settings.outcomes.tsx
 #: src/settings/ai-providers.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Connection"
@@ -5307,7 +5291,6 @@ msgstr "Copenhagen"
 #: src/settings/event-sources.tsx
 #: src/settings/guests.tsx
 #: src/settings/invitations.tsx
-#: src/shown-once.tsx
 msgid "Copied"
 msgstr "Copied"
 
@@ -5331,7 +5314,6 @@ msgstr "Copies"
 #: src/frame/ui-words.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
-#: src/shown-once.tsx
 msgid "Copy"
 msgstr "Copy"
 
@@ -5353,7 +5335,6 @@ msgstr "Copy email"
 msgid "Copy into the Brain from {label}"
 msgstr "Copy into the Brain from {label}"
 
-#: src/settings/event-sources.tsx
 #: src/shown-once.tsx
 msgid "Copy it now: you won't see it again. Lost, it can only be replaced."
 msgstr "Copy it now: you won't see it again. Lost, it can only be replaced."
@@ -5374,7 +5355,6 @@ msgstr "Copy the link for {name}"
 msgid "Copy the output"
 msgstr "Copy the output"
 
-#: src/settings/event-sources.tsx
 #: src/shown-once.tsx
 msgid "Copy the secret"
 msgstr "Copy the secret"
@@ -6546,10 +6526,6 @@ msgstr "Each as the company has it, or for fewer people. Never more."
 #: src/routes/_shell.settings.billing.tsx
 msgid "Each invoice to your billing email"
 msgstr "Each invoice to your billing email"
-
-#: src/routes/_shell.settings.outcomes.tsx
-msgid "Each one sent for someone shows here until they say what became of it."
-msgstr "Each one sent for someone shows here until they say what became of it."
 
 #: src/connections/http-connections.tsx
 msgid "Each path prefix starts with /, on its own line, with no query or dot segments."
@@ -8314,16 +8290,7 @@ msgstr "Grasp's team can help here until then"
 msgid "Grid"
 msgstr "Grid"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Group {number}"
-msgstr "Group {number}"
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "Groups of teams"
-msgstr "Groups of teams"
-
 #: src/drafts/sharing.tsx
-#: src/people/person-picker.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/erasures.tsx
 msgid "Guest"
@@ -9433,6 +9400,10 @@ msgstr "Its access ran out. Grasp staff can't reconnect it: an admin of the orga
 msgid "Its account is out of credit."
 msgstr "Its account is out of credit."
 
+#: src/inbox/item-detail.tsx
+msgid "Its answer was lost: nobody can tell whether it took effect."
+msgstr "Its answer was lost: nobody can tell whether it took effect."
+
 #: src/answer-pause.tsx
 msgid "Its answers can be used in a moment, so a press meant for the one before doesn't answer it."
 msgstr "Its answers can be used in a moment, so a press meant for the one before doesn't answer it."
@@ -9789,7 +9760,6 @@ msgid "Language"
 msgstr "Language"
 
 #: src/frame/language-button.tsx
-#: src/language-picker.tsx
 msgid "Language: {name}"
 msgstr "Language: {name}"
 
@@ -11148,10 +11118,6 @@ msgstr "New chat"
 msgid "New field"
 msgstr "New field"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "New group"
-msgstr "New group"
-
 #: src/settings/ai-providers.tsx
 msgid "New key"
 msgstr "New key"
@@ -11352,10 +11318,6 @@ msgstr "No billing details yet"
 msgid "No business process"
 msgstr "No business process"
 
-#: src/routes/_shell.settings.outcomes.tsx
-msgid "No call of unknown outcome is open."
-msgstr "No call of unknown outcome is open."
-
 #: src/apps/app-data.tsx
 msgid "No changes are kept for this record."
 msgstr "No changes are kept for this record."
@@ -11436,10 +11398,6 @@ msgstr "No first line"
 msgid "No goals yet."
 msgstr "No goals yet."
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "No group"
-msgstr "No group"
-
 #: src/agents/agents-overview.tsx
 msgid "No job written yet"
 msgstr "No job written yet"
@@ -11513,10 +11471,6 @@ msgstr "No one has shared an App with you yet."
 #: src/settings/teams.tsx
 msgid "No one yet: open it to add people"
 msgstr "No one yet: open it to add people"
-
-#: src/people/person-picker.tsx
-msgid "No owner yet"
-msgstr "No owner yet"
 
 #: src/apps/app-page.tsx
 msgid "No page yet"
@@ -11732,10 +11686,6 @@ msgstr "Nobody sees the records in {table}, Sam included."
 #: src/connections/connected-dialog.tsx
 msgid "Nobody uses it in chat until you choose who may, and Apps and workflows only through the permissions you grant."
 msgstr "Nobody uses it in chat until you choose who may, and Apps and workflows only through the permissions you grant."
-
-#: src/people/person-picker.tsx
-msgid "Nobody with that name."
-msgstr "Nobody with that name."
 
 #: src/agents/agent-facts.tsx
 #: src/agents/new-agent.tsx
@@ -12641,6 +12591,10 @@ msgstr "Only {accounts}"
 msgid "Only {owner} so far."
 msgstr "Only {owner} so far."
 
+#: src/inbox/item-detail.tsx
+msgid "Only {person} can say whether it happened."
+msgstr "Only {person} can say whether it happened."
+
 #: src/settings/use-team-change.ts
 msgid "Only admins can change teams."
 msgstr "Only admins can change teams."
@@ -13187,14 +13141,6 @@ msgctxt "who answers for an app"
 msgid "Owner"
 msgstr "Owner"
 
-#: src/people/person-picker.tsx
-msgid "Owner: {owner}. Change owner"
-msgstr "Owner: {owner}. Change owner"
-
-#: src/people/person-picker.tsx
-msgid "Owner: nobody yet. Change owner"
-msgstr "Owner: nobody yet. Change owner"
-
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Owns"
@@ -13519,7 +13465,6 @@ msgid "person"
 msgstr "person"
 
 #: src/activity/audit-event.tsx
-#: src/routes/_shell.settings.outcomes.tsx
 msgid "Person"
 msgstr "Person"
 
@@ -14170,10 +14115,6 @@ msgstr "Reading it kept failing, so your triggers there start nothing new for no
 msgid "Reading its instructions…"
 msgstr "Reading its instructions…"
 
-#: src/people/people-teams-picker.tsx
-msgid "Reading people and teams…"
-msgstr "Reading people and teams…"
-
 #: src/connections/sync-places.tsx
 msgid "Reading the places"
 msgstr "Reading the places"
@@ -14193,10 +14134,6 @@ msgstr "Reading the workspace"
 #: src/activity/audit-words.ts
 msgid "Reading what changed at a connection failed"
 msgstr "Reading what changed at a connection failed"
-
-#: src/people/person-picker.tsx
-msgid "Reading who can own it…"
-msgstr "Reading who can own it…"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Reading your staff list"
@@ -14240,7 +14177,7 @@ msgstr "Reasoning"
 msgid "Recalled from the Brain"
 msgstr "Recalled from the Brain"
 
-#: src/routes/_shell.settings.outcomes.tsx
+#: src/inbox/item-detail.tsx
 msgid "Receipt"
 msgstr "Receipt"
 
@@ -15327,10 +15264,6 @@ msgstr "Save changes"
 msgid "Save first"
 msgstr "Save first"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Save groups"
-msgstr "Save groups"
-
 #: src/apps/app-own-link.tsx
 msgid "Save link"
 msgstr "Save link"
@@ -15521,11 +15454,6 @@ msgstr "Search members"
 msgid "Search models"
 msgstr "Search models"
 
-#: src/people/person-picker.tsx
-msgid "Search people"
-msgstr "Search people"
-
-#: src/people/people-teams-picker.tsx
 #: src/projects/project-people.tsx
 msgid "Search people and teams"
 msgstr "Search people and teams"
@@ -15613,7 +15541,6 @@ msgid "Searching the docs for {query}"
 msgstr "Searching the docs for {query}"
 
 #: src/connections/http-connections.tsx
-#: src/shown-once.tsx
 msgid "Secret"
 msgstr "Secret"
 
@@ -15726,8 +15653,8 @@ msgstr "Sending"
 msgid "Sensitive"
 msgstr "Sensitive"
 
+#: src/inbox/item-detail.tsx
 #: src/inbox/items.ts
-#: src/routes/_shell.settings.outcomes.tsx
 msgid "Sent"
 msgstr "Sent"
 
@@ -17231,7 +17158,6 @@ msgstr "Team size unknown."
 #: src/agents/setup/audience-step.tsx
 #: src/brain/brain.ts
 #: src/people/people-teams-picker.tsx
-#: src/routes/_shell.settings.brain.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/sections.ts
 #: src/settings/teams.tsx
@@ -17623,10 +17549,6 @@ msgstr "The best part of its passage"
 msgid "The board"
 msgstr "The board"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "The brain has no teams to group yet."
-msgstr "The brain has no teams to group yet."
-
 #: src/brain/learned-section.tsx
 msgid "The Brain hasn't learned anything from this version."
 msgstr "The Brain hasn't learned anything from this version."
@@ -17650,10 +17572,6 @@ msgstr "The Brain, as each run's person may read it"
 #: src/brain/brain-section.tsx
 msgid "The Brain's pages"
 msgstr "The Brain's pages"
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "The brain's regions: your teams, grouped the way your company is. Grasp groups new teams by itself; rename a group or move a team here."
-msgstr "The brain's regions: your teams, grouped the way your company is. Grasp groups new teams by itself; rename a group or move a team here."
 
 #: src/brain/atlas-overlays.tsx
 msgid "The brain's view"
@@ -19174,11 +19092,6 @@ msgstr "Unknown"
 msgid "Unknown device"
 msgstr "Unknown device"
 
-#: src/routes/_shell.settings.outcomes.tsx
-#: src/settings/sections.ts
-msgid "Unknown outcomes"
-msgstr "Unknown outcomes"
-
 #: src/brain/brain.ts
 #: src/chat/chat-markdown.ts
 #: src/chat/sources.tsx
@@ -19573,6 +19486,10 @@ msgstr "Voice conversation"
 #: src/voice/sound-controls.tsx
 msgid "Volume"
 msgstr "Volume"
+
+#: src/voice/sound-controls.tsx
+msgid "Volume (sound off)"
+msgstr "Volume (sound off)"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"

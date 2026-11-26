@@ -13,6 +13,7 @@ import type { CoreConnection } from "../core-connection.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { readWorkflowTitles, titledDecision } from "../workflows/reads.ts";
+import { readOutcomes } from "./everyones-outcomes.ts";
 import { markShownRead } from "./notifications-page.ts";
 import { decidesRequests } from "./waiting.ts";
 import type { Waiting } from "./waiting.ts";
@@ -54,17 +55,33 @@ const partOf = <T>(
  * permission requests are shown with. Reading it marks the
  * notifications it lists as read, as the inbox, which shows them, does;
  * the sidebar's Inbox view, which only says what waits, reads them with
- * `markShownRead: false`.
+ * `markShownRead: false`. Everyone's unknown outcomes are listed only
+ * with `everyonesOutcomes` (the inbox's page, which shows them): core
+ * records each such read in the audit trail, so the sidebar's read, every
+ * few minutes, would fill it.
  */
 export const readWaiting = async (
   core: CoreConnection,
   identity: Identity,
-  { markShownRead: marking = true }: { markShownRead?: boolean } = {}
+  {
+    markShownRead: marking = true,
+    everyonesOutcomes: listOutcomes = false,
+    left,
+  }: {
+    markShownRead?: boolean;
+    everyonesOutcomes?: boolean;
+    /** The page's signal that it was left: everyone's are listed no further. */
+    left?: AbortSignal;
+  } = {}
 ): Promise<Waiting> => {
-  const feed = await loadFromCore(
-    core,
-    async (session) => await session.waiting.list()
-  );
+  // Everyone's, read beside the feed: the person's own are in the feed
+  // already, for them to answer, so they are left out here.
+  const [feed, everyonesOutcomes] = await Promise.all([
+    loadFromCore(core, async (session) => await session.waiting.list()),
+    listOutcomes && decidesRequests(identity)
+      ? readOutcomes(core, identity.userId, left)
+      : undefined,
+  ]);
   const notifications = partOf(feed, "notifications", (read) => {
     const listed = read.items.flatMap((item) =>
       item.kind === "openQuestion" ||
@@ -179,5 +196,6 @@ export const readWaiting = async (
           ),
         }
       : {}),
+    ...(everyonesOutcomes === undefined ? {} : { everyonesOutcomes }),
   };
 };
