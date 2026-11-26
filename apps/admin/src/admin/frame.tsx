@@ -73,6 +73,7 @@ import { PageLoading } from "./failure.tsx";
 import { GraspMark } from "./grasp-mark.ts";
 import { askedApps } from "./integrations-asked.ts";
 import { needsOf } from "./needs.ts";
+import type { OrgRead } from "./org-reads.ts";
 import type { PlatformCounts } from "./platform.ts";
 import { ReadinessBanner } from "./readiness-parts.tsx";
 import type { Readiness } from "./readiness.ts";
@@ -80,7 +81,7 @@ import { sectionGroups, sectionTo, sectionWords } from "./sections.ts";
 import type { OrgSection } from "./sections.ts";
 import { useSettled } from "./settled.tsx";
 import type { Deferred } from "./settled.tsx";
-import { organizationsOf, unreadWords } from "./views.ts";
+import { organizationOf, organizationsOf, unreadWords } from "./views.ts";
 import type { Organization } from "./views.ts";
 
 /** Where the sidebar keeps, in this browser, whether it is folded. */
@@ -95,7 +96,11 @@ export interface Staff {
 }
 
 /** A link to one of an organization's sections, in a sidebar row's look. */
-const sectionLink = (clientId: string, section: OrgSection): RenderLink =>
+const sectionLink = (
+  clientId: string,
+  section: OrgSection,
+  search?: { tab: "contract" }
+): RenderLink =>
   function SectionLink(look) {
     return (
       <Link
@@ -103,6 +108,7 @@ const sectionLink = (clientId: string, section: OrgSection): RenderLink =>
         // The overview is only itself; a section holds the pages under it.
         activeOptions={{ exact: section === "overview", includeSearch: false }}
         params={{ clientId }}
+        search={search}
         to={sectionTo[section]}
       />
     );
@@ -272,7 +278,7 @@ const inboxGroups = (
               id: `${id}-${String(at)}`,
               label: need.text,
               quiet: true,
-              render: sectionLink(id, need.section),
+              render: sectionLink(id, need.section, need.search),
             })),
           },
         ];
@@ -336,7 +342,12 @@ const organizationSection = (
 // this browser, read by public/theme.js before the first paint.
 const themeKey = "grasp.admin.theme";
 const themeListeners = new Set<() => void>();
+// The choice made in this page, which stands even where storage refuses it.
+let chosenTheme: string | null = null;
 const readTheme = (): string => {
+  if (chosenTheme !== null) {
+    return chosenTheme;
+  }
   try {
     return localStorage.getItem(themeKey) ?? "system";
   } catch {
@@ -344,6 +355,7 @@ const readTheme = (): string => {
   }
 };
 const chooseTheme = (mode: string) => {
+  chosenTheme = mode;
   try {
     localStorage.setItem(themeKey, mode);
   } catch {
@@ -485,19 +497,22 @@ interface SidebarState {
   setSearching: (searching: boolean) => void;
 }
 
-const AdminSidebar = ({
-  clients,
-  admins,
-  platform,
-  staff,
-  state: { view, setView, searching, setSearching },
-}: {
+interface SidebarProps {
   clients: readonly GridRow[];
   admins: readonly ClientAdmin[] | null;
   platform: PlatformCounts;
   staff: Staff;
   state: SidebarState;
-}) => {
+}
+
+const SidebarBody = ({
+  clients,
+  admins,
+  platform,
+  staff,
+  state: { view, setView, searching, setSearching },
+  openRead,
+}: SidebarProps & { openRead: OrgRead | undefined }) => {
   const router = useRouter();
   const matchRoute = useMatchRoute();
   const { pathname } = useLocation();
@@ -576,13 +591,45 @@ const AdminSidebar = ({
           : {
               section: organizationSection(
                 shown,
-                organizations?.get(shown.id),
+                openRead === undefined
+                  ? organizations?.get(shown.id)
+                  : organizationOf(openRead.admin),
                 pathname
               ),
             })}
       />
       <Search clients={clients} onOpenChange={setSearching} open={searching} />
     </>
+  );
+};
+
+/** The sidebar once the open organization's page has read its core. */
+const SettledOpen = ({
+  read,
+  ...props
+}: SidebarProps & { read: Deferred<OrgRead> }) => (
+  <SidebarBody {...props} openRead={useSettled(read)} />
+);
+
+/**
+ * The sidebar, and while an organization's page is open, its level drawn
+ * from that page's own read of its core (`read`), so what waits where
+ * follows the page as it is read again; from the frame's reads until it
+ * is in.
+ */
+const AdminSidebar = (props: SidebarProps) => {
+  const open = useMatch({
+    from: "/organizations/$clientId",
+    shouldThrow: false,
+  })?.loaderData;
+  const read = open?.state === "open" ? open.read : undefined;
+  if (read === undefined) {
+    return <SidebarBody {...props} openRead={undefined} />;
+  }
+  return (
+    <Suspense fallback={<SidebarBody {...props} openRead={undefined} />}>
+      <SettledOpen {...props} read={read} />
+    </Suspense>
   );
 };
 

@@ -1,13 +1,14 @@
-import { needSection } from "./sections.ts";
+import { needWhere } from "./sections.ts";
 import type { OrgSection } from "./sections.ts";
 import { rolloutNeedLine, rolloutNeeds } from "./views.ts";
 import type { Organization } from "./views.ts";
 import { needLine } from "./words.ts";
 
-/** Something that needs Grasp at one organization, and the section it is settled in. */
+/** Something that needs Grasp at one organization, and where it is settled: its section, and the tab there when not the first. */
 export interface OrgNeed {
   text: string;
   section: OrgSection;
+  search: { tab: "contract" } | undefined;
 }
 
 const setupSection: OrgSection = "setup";
@@ -21,11 +22,12 @@ export const needsOf = ({ admin, view }: Organization): OrgNeed[] => [
   ...rolloutNeeds(admin.client).map((need) => ({
     text: rolloutNeedLine(need),
     section: setupSection,
+    search: undefined,
   })),
   ...(view === null
     ? []
     : view.needs.map((need) => ({
         text: needLine(need, view),
-        section: needSection(need),
+        ...needWhere(need),
       }))),
 ];
