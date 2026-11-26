@@ -3014,10 +3014,6 @@ msgstr "Een upload naar het Brain is mislukt"
 msgid "and {more} more"
 msgstr "en nog {more}"
 
-#: src/onboarding/documents-step.tsx
-msgid "And if you have files lying around that explain how you work, you can drop them in here. Rough drafts are just as welcome. One thing though: leave out anything about a single person, that’s not what I’m here for."
-msgstr "En heb je nog bestanden liggen die uitleggen hoe jullie werken, dan kun je ze hier neerzetten. Ruwe versies zijn net zo welkom. Eén ding wel: laat alles over één persoon eruit, daar ben ik niet voor."
-
 #: src/apps/app-data.tsx
 msgid "And more."
 msgstr "En meer."
@@ -11428,8 +11424,8 @@ msgid "Next week"
 msgstr "Volgende week"
 
 #: src/onboarding/sources-step.tsx
-msgid "Next, I’d like to understand how the work actually gets done. Most of that is written down somewhere, in handbooks, procedures or how-tos. Show me where those live, and I’ll only read what you choose to share with me."
-msgstr "Nu wil ik graag begrijpen hoe het werk echt gedaan wordt. Het meeste daarvan staat ergens opgeschreven, in handboeken, procedures of werkinstructies. Laat me zien waar die staan, en ik lees alleen wat jij met me deelt."
+msgid "Next, I’d like to understand how the work actually gets done. Most of it lives in the tools your team already uses: shared drives, Teams channels and wikis, full of the files and pages people work from every day. Point me to the ones you use, and I’ll only read what you choose to share with me."
+msgstr "Nu wil ik graag begrijpen hoe het werk echt gedaan wordt. Het meeste daarvan zit in de tools die je team al gebruikt: gedeelde schijven, Teams-kanalen en wiki’s, vol bestanden en pagina’s waar mensen elke dag mee werken. Wijs me aan welke jullie gebruiken, en ik lees alleen wat jij met me deelt."
 
 #: src/apps/field-editor.tsx
 #: src/inbox/json-fields.tsx
@@ -13968,10 +13964,6 @@ msgstr "Prijs"
 #: src/drafts/share-with-team.tsx
 msgid "Problems"
 msgstr "Problemen"
-
-#: src/onboarding/sources-step.tsx
-msgid "Procedures, handbooks, how-tos. Connect where they live, and I’ll only read what you share with me."
-msgstr "Procedures, handboeken, handleidingen. Koppel de plekken waar ze staan, en ik lees alleen wat je met me deelt."
 
 #: src/brain/memories-page.tsx
 msgctxt "a kind of thing the Brain remembers"
@@ -18102,6 +18094,10 @@ msgstr "De voorbeeldgegevens passen niet bij de wijziging"
 msgid "The export didn't work. Try again."
 msgstr "Het exporteren is niet gelukt. Probeer het opnieuw."
 
+#: src/onboarding/sources-step.tsx
+msgid "The files, pages and folders your team works from. Connect the tools they’re in, and I’ll only read what you share with me."
+msgstr "De bestanden, pagina’s en mappen waar je team mee werkt. Koppel de tools waar ze in staan, en ik lees alleen wat je met me deelt."
+
 #: src/onboarding/review-parts.tsx
 msgid "The first way: {way}"
 msgstr "De eerste manier: {way}"
@@ -18737,6 +18733,10 @@ msgstr "Dit gesprek kan niet worden geopend"
 #: src/interview/composer.tsx
 msgid "This interview went on in another window. You now see that one."
 msgstr "Dit gesprek ging verder in een ander venster. Je ziet nu dat gesprek."
+
+#: src/onboarding/documents-step.tsx
+msgid "This is a good moment to give me some context. A process description, an onboarding guide, a price list or even a rough draft helps me understand what you’re dealing with every day. The more I know, the better my questions to your team, and the more useful everything I give back. Just leave out anything about a single person."
+msgstr "Dit is een mooi moment om me wat context te geven. Een procesbeschrijving, een inwerkdocument, een prijslijst of zelfs een ruwe versie helpt me te begrijpen waar jullie elke dag mee bezig zijn. Hoe meer ik weet, hoe beter mijn vragen aan je team, en hoe bruikbaarder alles wat ik teruggeef. Laat alleen alles over één persoon weg."
 
 #: src/onboarding/leads-step.tsx
 msgid "This is how I understand your organization. I’ll talk to each team lead first, so nobody is caught off guard. Have a quick look whether the right people lead the right teams, and which teams should take part."
