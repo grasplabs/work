@@ -595,9 +595,28 @@ const reasonOfFailure = (step: Step, error: ComposioError): ComposioReason => {
   if (error.unanswered) {
     return `${step}:unanswered`;
   }
-  return error.status === undefined
-    ? `${step}:unreadable`
-    : `${step}:http_${error.status}`;
+  if (error.status === undefined) {
+    return `${step}:unreadable`;
+  }
+  return error.code === undefined
+    ? `${step}:http_${error.status}`
+    : `${step}:http_${error.status}:${error.code}`;
+};
+
+/**
+ * The refusal a Composio failure ends a start or finish as: Composio not
+ * letting connect's key do it (401 or 403) is no failure starting again
+ * helps, so it is said apart, and logged for staff with why.
+ */
+const refusalOf = (
+  error: ComposioError,
+  why: ComposioReason | undefined
+): "connection.provider_forbidden" | "connection.provider_refused" => {
+  if (error.status !== 401 && error.status !== 403) {
+    return "connection.provider_refused";
+  }
+  log.error("composio.forbidden", why === undefined ? {} : { why });
+  return "connection.provider_forbidden";
 };
 
 /** `error`, its reason noted as a failure at `step`, unless it has one. */
@@ -784,16 +803,14 @@ export const startToolkitConnection = async (
       throw error;
     }
     const why = reasonOfError(error);
+    const refusal = refusalOf(error, why);
     await auditRefusal(env, person, "connection.connect", {
       ...detailOf(toolkit),
       outcome: "failed",
-      reason: "connection.provider_refused",
+      reason: refusal,
       ...(why === undefined ? {} : { why }),
     });
-    throw connectionErrors.create(
-      "connection.provider_refused",
-      supportDetails(env, why)
-    );
+    throw connectionErrors.create(refusal, supportDetails(env, why));
   }
 };
 
@@ -1251,6 +1268,7 @@ const finishToolkitConnection = async (
   /** The refusal `code`, audited with why, and its error saying why too. */
   const ended = async (
     code:
+      | "connection.provider_forbidden"
       | "connection.provider_refused"
       | "connection.provider_pending"
       | "connection.provider_not_answering",
@@ -1313,7 +1331,8 @@ const finishToolkitConnection = async (
     if (!(error instanceof ComposioError)) {
       throw error;
     }
-    throw await ended("connection.provider_refused", reasonOfError(error));
+    const why = reasonOfError(error);
+    throw await ended(refusalOf(error, why), why);
   }
 };
 
@@ -1580,11 +1599,9 @@ export const connectToolkitWithKey = async (
       throw connectionErrors.create("connection.key_rejected");
     }
     const why = reasonOfError(error);
-    await refuse("connection.provider_refused", "failed", why);
-    throw connectionErrors.create(
-      "connection.provider_refused",
-      supportDetails(env, why)
-    );
+    const refusal = refusalOf(error, why);
+    await refuse(refusal, "failed", why);
+    throw connectionErrors.create(refusal, supportDetails(env, why));
   }
 };
 
