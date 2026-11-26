@@ -182,13 +182,14 @@ describe("the Voice Lab's session", () => {
   });
 
   it.each([
-    ["refuses it", 403, { message: "Voice agents are not enabled." }],
+    ["refuses it", 403, { message: "Voice agents are not enabled." }, 403],
     [
       "answers with a room that isn't a secure socket",
       200,
       { ...opened, server_url: "https://voice.mistral.test" },
+      null,
     ],
-  ])("opens nothing when Mistral %s", async (_, status, answer) => {
+  ])("opens nothing when Mistral %s", async (_, status, answer, shown) => {
     await setStoreSecret(
       env.MISTRAL_API_KEY,
       "MISTRAL_API_KEY",
@@ -196,11 +197,11 @@ describe("the Voice Lab's session", () => {
     );
     mistral.status = status;
     mistral.answer = answer;
-    // What Mistral answered, by its status alone, for whoever looks into it.
+    // Where Mistral refused, its status alone, for whoever looks into it.
     await expect(open({ locale: "en" })).resolves.toStrictEqual({
       id: null,
       refused: "not_opened",
-      status,
+      status: shown,
     });
   });
 

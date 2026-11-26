@@ -57,9 +57,10 @@ const models = {
 
 /**
  * When Mistral hears someone start and stop talking: its own detection, at
- * its defaults. A session that set the thresholds itself (a start of 0.3,
- * below the end's 0.33) was not opened at all; how talking over him is
- * heard is Mistral's until its docs say which values it takes.
+ * its defaults. Once the thresholds were set here (a start of 0.3, below
+ * the end's 0.33), no session opened any more, most likely refused for
+ * them; how talking over him is heard is Mistral's until its docs say
+ * which values it takes.
  */
 const turnDetection = {} as const;
 
@@ -208,7 +209,9 @@ export const openVoiceSession = async (
     if (!opened.success) {
       // The status alone: Mistral's answer may repeat what it was sent.
       log.warn("admin.voice_lab_not_opened", { status: response.status });
-      return refused("not_opened", response.status);
+      // Its status only where it refused: an answer that came back but
+      // couldn't be joined says nothing more by "200".
+      return refused("not_opened", response.ok ? null : response.status);
     }
     return {
       id: opened.data.id,

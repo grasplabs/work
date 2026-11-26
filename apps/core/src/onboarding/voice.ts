@@ -94,9 +94,10 @@ const passPurpose = "grasp-os onboarding voice session";
 
 /**
  * When Mistral hears someone start and stop talking: its own detection, at
- * its defaults. A session that set the thresholds itself (a start of 0.3,
- * below the end's 0.33) was not opened at all; how talking over him is
- * heard is Mistral's until its docs say which values it takes.
+ * its defaults. Once the thresholds were set here (a start of 0.3, below
+ * the end's 0.33), no session opened any more, most likely refused for
+ * them; how talking over him is heard is Mistral's until its docs say
+ * which values it takes.
  */
 const turnDetection = {} as const;
 
