@@ -1,21 +1,20 @@
-import { Button } from "@grasp-os/app-kit/components/button";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@grasp-os/app-kit/components/dropdown-menu";
-import { Spinner } from "@grasp-os/app-kit/components/spinner";
+} from "@grasp-os/ui/components/dropdown-menu";
+import { toast } from "@grasp-os/ui/components/toast";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/app-kit/components/tooltip";
+  DownloadIcon,
+  FileDocIcon,
+  FilePdfIcon,
+  Icon,
+} from "@grasp-os/ui/lib/icons";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { DownloadIcon, FileTextIcon, PrinterIcon } from "lucide-react";
 import { useState } from "react";
 
-import { ErrorText } from "../error-text.tsx";
 import { exportAs } from "./export-file.tsx";
 import type { ExportFile, ExportFormat } from "./export-file.tsx";
 
@@ -27,75 +26,57 @@ import type { ExportFile, ExportFormat } from "./export-file.tsx";
 export const ExportMenu = ({
   file,
   label,
-  className,
 }: {
   file: ExportFile;
   /** What it exports, as the tooltip says it: "Export this chat". Plain "Export" without it. */
   label?: string;
-  /** Placement only. */
-  className?: string;
 }) => {
   const { i18n, t } = useLingui();
   const name = label ?? t`Export`;
-  // While the page to print is being made (its styles and font), and why
-  // an export failed, if one did.
+  // While the page to print is being made (its styles and font): one
+  // export at a time. A failure is a toast, as the "…" menu's downloads
+  // say it (brain/note-actions.tsx).
   const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState(false);
   const exportIn = async (format: ExportFormat): Promise<void> => {
     setBusy(true);
-    setFailed(false);
     try {
       await exportAs(file, format, i18n.locale);
     } catch {
-      setFailed(true);
+      toast.error(t`The export didn't work. Try again.`);
     }
     setBusy(false);
   };
   return (
-    <span className="inline-flex items-center gap-1.5">
-      {failed ? (
-        <ErrorText>{t`The export didn't work. Try again.`}</ErrorText>
-      ) : null}
-      <DropdownMenu>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    aria-label={name}
-                    className={className}
-                    disabled={busy}
-                    size="icon-sm"
-                    variant="ghost"
-                  />
-                }
-              />
-            }
-          >
-            {busy ? <Spinner /> : <DownloadIcon />}
-          </TooltipTrigger>
-          <TooltipContent>{name}</TooltipContent>
-        </Tooltip>
-        <DropdownMenuContent align="end" className="w-44">
-          <DropdownMenuItem
-            onClick={() => {
-              void exportIn("md");
-            }}
-          >
-            <FileTextIcon />
-            <Trans>Markdown (.md)</Trans>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() => {
-              void exportIn("pdf");
-            }}
-          >
-            <PrinterIcon />
-            <Trans>PDF</Trans>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </span>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild disabled={busy}>
+        {/* Its name shows as its tooltip; while the page is made, the spinner takes the icon's place. */}
+        <Button
+          aria-label={name}
+          size="icon-sm"
+          status={busy ? "loading" : "idle"}
+          variant="ghost"
+        >
+          <Icon icon={DownloadIcon} />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem
+          icon={FileDocIcon}
+          onSelect={() => {
+            void exportIn("md");
+          }}
+        >
+          <Trans>Markdown (.md)</Trans>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          icon={FilePdfIcon}
+          onSelect={() => {
+            void exportIn("pdf");
+          }}
+        >
+          <Trans>PDF</Trans>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 };

@@ -1,8 +1,11 @@
 import "./styles.css";
 import { CSPProvider } from "@base-ui/react/csp-provider";
-import { Button } from "@grasp-os/app-kit/components/button";
+import { Button } from "@grasp-os/ui/components/button";
+import { Text } from "@grasp-os/ui/components/text";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { i18n } from "@lingui/core";
 import { I18nProvider, useLingui } from "@lingui/react";
+import * as stylex from "@stylexjs/stylex";
 import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -66,16 +69,30 @@ if (!root) {
   throw new Error("Missing #root element");
 }
 
+const styles = stylex.create({
+  // The one line and its button, in the middle of the window.
+  noWords: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: space["4"],
+    minHeight: "100svh",
+    padding: space["6"],
+    textAlign: "center",
+  },
+});
+
 /**
  * When not even English's words could be fetched (the connection dropped
  * as Grasp loaded), there is one thing left to say, and only English to
  * say it in.
  */
 const NoWords = () => (
-  <main className="flex min-h-svh flex-col items-center justify-center gap-4 p-6 text-center">
-    <p className="text-muted-foreground text-sm">
+  <main {...stylex.props(styles.noWords)}>
+    <Text color="muted" size="sm">
       Grasp could not load. Check your connection and try again.
-    </p>
+    </Text>
     <Button
       onClick={() => {
         window.location.reload();

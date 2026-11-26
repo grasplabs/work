@@ -30,8 +30,8 @@ import type { ReactNode, RefObject } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatDay } from "../format.ts";
+import { LanguageButton } from "../frame/language-button.tsx";
 import { isLocale } from "../i18n.ts";
-import { LanguageButton } from "../language-picker.tsx";
 import { deleteInterview, isRefused, withdrawInterview } from "./api.ts";
 import type { OpenSession } from "./api.ts";
 import { Before } from "./before.tsx";

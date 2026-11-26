@@ -4,7 +4,9 @@
  * the real connect runs unchanged behind core. It lists three toolkits:
  * HubSpot, one it holds no app for, and one that takes a key. An admin's
  * auth at its link succeeds at once: the link it gives is the callback
- * connect asked it to send the browser back to; a key it takes is
+ * connect asked it to send the browser back to, with `status=success` and
+ * the `connected_account_id` appended, as Composio's redirect does; a key
+ * it takes is
  * {@link acmeCrmKey} alone.
  * Imported by vite.config.ts (Node) and the tests (workerd), so it only
  * holds data.
@@ -124,7 +126,12 @@ const composioApi = async (request, url) => {
     const { auth_config_id, callback_url } = await request.json();
     const id = "ca_" + crypto.randomUUID();
     composioAccounts.set(id, auth_config_id);
-    return Response.json({ redirect_url: callback_url, connected_account_id: id });
+    // The admin's auth succeeds at once: the link is where Composio then
+    // sends the browser, the callback with its own query appended.
+    const back = new URL(callback_url);
+    back.searchParams.append("status", "success");
+    back.searchParams.append("connected_account_id", id);
+    return Response.json({ redirect_url: back.href, connected_account_id: id });
   }
   if (request.method === "POST" && route === "/connected_accounts") {
     const { auth_config, connection } = await request.json();

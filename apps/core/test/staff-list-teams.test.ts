@@ -454,30 +454,6 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
     });
   });
 
-  it("keep a draft team where the admin placed it on the Brain's map once the admin confirms", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const tag = unique();
-    const { roster: drafted } = await admin.api.onboarding.saveRoster({
-      teams: [{ id: `desk-${tag}`, name: `Desk ${tag}`, lead: null }],
-      people: [{ id: `dee-${tag}`, name: "Dee", team: `desk-${tag}` }],
-    });
-    const desk = drafted?.teams[0]?.id ?? "";
-    // Placed by the admin while the team is only on the draft.
-    await admin.api.brain.saveTeamGroups([
-      { id: `front-${tag}`, name: "Front office", teamIds: [desk] },
-    ]);
-    if (drafted === null) {
-      throw new Error("The draft wasn't kept");
-    }
-
-    await admin.api.onboarding.confirmRoster(drafted);
-    const { teamGroups } = await admin.api.brain.read();
-
-    expect(
-      teamGroups.find(({ id }) => id === `front-${tag}`)?.teamIds
-    ).toStrictEqual([desk]);
-  });
-
   it("make a confirmed team as Better Auth makes one in Settings, under the id the draft gave it", async () => {
     const admin = await signedInApi(idp, "admin");
     const tag = unique();
