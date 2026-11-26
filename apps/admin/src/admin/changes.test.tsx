@@ -1143,3 +1143,36 @@ describe("linking an organization to its Stripe customer", () => {
     }).toStrictEqual({ before: true, after: true });
   });
 });
+
+describe("keeping what was agreed", () => {
+  it("refuses a day still to come, saying so under it, and gives no command", async () => {
+    const empty = emptyAdminSnapshot("Acme");
+    const page = await openAdmin(acmeContract, {
+      fetchClientGrid: [acme],
+      fetchClientAdmin: answeredAdmin({
+        client: acme,
+        snapshot: {
+          ...empty,
+          agreements: {
+            processing: true,
+            assessment: false,
+            council: "waiting",
+            // Typed in by mistake: a day nothing can have been signed on yet.
+            processingOn: "2999-01-01",
+          },
+        },
+      }),
+      fetchClientAdmins: [],
+      commandFn: () => ({ refused: null, issuedAt: new Date().toISOString() }),
+    });
+    await giveAgreements(page.container);
+    await settle();
+
+    expect({
+      said: agreementsForm()?.textContent?.includes(
+        "The day can’t be after today."
+      ),
+      given: page.calls.filter(({ fn }) => fn === "commandFn").length,
+    }).toStrictEqual({ said: true, given: 0 });
+  });
+});

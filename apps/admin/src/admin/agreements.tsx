@@ -23,6 +23,7 @@ import {
   Field,
   FieldContent,
   FieldDescription,
+  FieldError,
   FieldLabel,
 } from "@grasp-os/ui/components/field";
 import {
@@ -114,29 +115,43 @@ const withDay = (
   return day === "" ? rest : { ...rest, [key]: day };
 };
 
+/** The days staff give, by what each is the day of. */
+const dayKeys = ["processingOn", "assessmentOn", "councilOn"] as const;
+
+/** The days in `agreements` after today: nothing is agreed on a day still to come. */
+const lateDays = (agreements: Agreements): DayKey[] => {
+  const now = today();
+  return dayKeys.filter((key) => (agreements[key] ?? "") > now);
+};
+
 /**
- * The day one agreement was made, once it is in. Damsko's DatePicker has
- * no latest day, so a day after today is no longer refused as it is
- * picked (the native field's `max`); core keeps the day as given.
+ * The day one agreement was made, once it is in; `late` when it is after
+ * today, which Save refuses, saying so under it. Damsko's DatePicker takes
+ * no latest day (as the native field's `max` did), so it is checked here.
  */
 const AgreedDay = ({
   label,
   value,
+  late,
   onChange,
 }: {
   label: string;
   value: string | undefined;
+  late: boolean;
   onChange: (day: string) => void;
 }) => (
-  <DatePicker
-    aria-label={label}
-    onValueChange={(day) => {
-      onChange(typeof day === "string" ? day : "");
-    }}
-    required
-    style={styles.day}
-    value={value ?? null}
-  />
+  <Field data-invalid={late}>
+    <DatePicker
+      aria-label={label}
+      onValueChange={(day) => {
+        onChange(typeof day === "string" ? day : "");
+      }}
+      required
+      style={styles.day}
+      value={value ?? null}
+    />
+    {late ? <FieldError match>The day can’t be after today.</FieldError> : null}
+  </Field>
 );
 
 /** One agreement as a switch, with what it is. */
@@ -177,7 +192,18 @@ const AgreementsDialog = ({
 }) => {
   const { busy, failure, give } = useCommand(clientId);
   const [draft, setDraft] = useState<Agreements>(agreements);
+  // The days found after today when Save was last pressed: said until changed.
+  const [late, setLate] = useState<readonly DayKey[]>([]);
+  const change = (next: Agreements): void => {
+    setDraft(next);
+    setLate([]);
+  };
   const save = async (): Promise<void> => {
+    const after = lateDays(draft);
+    setLate(after);
+    if (after.length > 0) {
+      return;
+    }
     const applied = await give({
       type: "onboarding.agreements",
       payload: { agreements: draft },
@@ -209,14 +235,15 @@ const AgreementsDialog = ({
                 description="The data processing agreement between the company and Grasp."
                 label="Agreement on handling data signed"
                 onChange={(processing) => {
-                  setDraft(withProcessing(draft, processing));
+                  change(withProcessing(draft, processing));
                 }}
               />
               {draft.processing ? (
                 <AgreedDay
                   label="Day the agreement on handling data was signed"
+                  late={late.includes("processingOn")}
                   onChange={(day) => {
-                    setDraft(withDay(draft, "processingOn", day));
+                    change(withDay(draft, "processingOn", day));
                   }}
                   value={draft.processingOn}
                 />
@@ -226,14 +253,15 @@ const AgreementsDialog = ({
                 description="The data protection impact assessment, signed off by the company."
                 label="The company’s look at the risks signed off"
                 onChange={(assessment) => {
-                  setDraft(withAssessment(draft, assessment));
+                  change(withAssessment(draft, assessment));
                 }}
               />
               {draft.assessment ? (
                 <AgreedDay
                   label="Day the look at the risks was signed off"
+                  late={late.includes("assessmentOn")}
                   onChange={(day) => {
-                    setDraft(withDay(draft, "assessmentOn", day));
+                    change(withDay(draft, "assessmentOn", day));
                   }}
                   value={draft.assessmentOn}
                 />
@@ -247,7 +275,7 @@ const AgreementsDialog = ({
                       (each) => each.value === event.target.value
                     )?.value;
                     if (council !== undefined) {
-                      setDraft(withCouncil(draft, council));
+                      change(withCouncil(draft, council));
                     }
                   }}
                   value={draft.council}
@@ -265,8 +293,9 @@ const AgreementsDialog = ({
               {draft.council === "waiting" ? null : (
                 <AgreedDay
                   label="Day the works council said yes, or it was found there is none"
+                  late={late.includes("councilOn")}
                   onChange={(day) => {
-                    setDraft(withDay(draft, "councilOn", day));
+                    change(withDay(draft, "councilOn", day));
                   }}
                   value={draft.councilOn}
                 />
