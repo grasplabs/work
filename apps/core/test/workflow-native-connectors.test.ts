@@ -33,6 +33,7 @@ import {
 } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
+import { configuredLimits, withQuotas } from "./quota-limits.ts";
 import { resumed, sleeping, stopped } from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi, unique } from "./sign-in.ts";
@@ -293,7 +294,7 @@ const ran = async (
   by: Identity,
   id: string,
   input: { mailbox: string; message: string; attachment: string },
-  meanwhile?: (runId: string) => Promise<void>
+  meanwhile?: (runId: string) => Promise<void> | void
 ) => {
   const { runId } = await startWorkflow(
     env,
@@ -492,27 +493,61 @@ describe("a workflow binding a native connector's operation", () => {
       name: "notes.txt",
       text: "due 2026-11-01",
     });
-    // Longer than a sealed step's retries take in all (a second, then two).
+    const input = { mailbox, message: "m1", attachment: "a1" };
+    // A run before it gets Graph's 429, which pauses the connection longer
+    // than a sealed step's retries take in all (a second, then two).
     await throttle(mailbox, 6);
+    const paused = Promise.withResolvers<null>();
+    const tripping = ran(builder, workflow.id, input, async (runId) => {
+      await sleeping(runId, waitStepPrefix);
+      paused.resolve(null);
+    });
+    await paused.promise;
+    // So connect refuses this run's first attempt itself, the connection
+    // paused (`connect.rate_limited`): Graph has no 429 left to give.
     let run = "";
-    const read = await ran(
-      builder,
-      workflow.id,
-      { mailbox, message: "m1", attachment: "a1" },
+    const read = await ran(builder, workflow.id, input, async (runId) => {
+      run = runId;
       // Stopped and resumed as it waits: a new activation replays the
       // wait, and waits on.
-      async (runId) => {
-        run = runId;
-        await sleeping(runId, waitStepPrefix);
-        await stopped(runId);
-        await resumed(runId);
-      }
+      await sleeping(runId, waitStepPrefix);
+      await stopped(runId);
+      await resumed(runId);
+    });
+    const { tasks } = await resourceRunTrace(env, builder, workflow.id, run);
+    const done = {
+      status: "completed",
+      output: { status: "due 2026-11-01" },
+    };
+    expect({ tripping: await tripping, read, tasks }).toStrictEqual({
+      tripping: done,
+      read: done,
+      // The attempt connect refused, then the one after the wait.
+      tasks: [{ task: "read", state: "reached", attempts: 2 }],
+    });
+  });
+
+  it("retries a pause longer than a step may wait as any failure, and fails with it", async () => {
+    const { builder, workflow, mailbox } = await readingWorkflow();
+    await throttle(mailbox, 6);
+    let run = "";
+    const read = await withQuotas(
+      { ...configuredLimits, workflowQueuedStepMs: 1000 },
+      async () =>
+        await ran(
+          builder,
+          workflow.id,
+          { mailbox, message: "m1", attachment: "a1" },
+          (runId) => {
+            run = runId;
+          }
+        )
     );
     const { tasks } = await resourceRunTrace(env, builder, workflow.id, run);
     expect({ read, tasks }).toStrictEqual({
-      read: { status: "completed", output: { status: "due 2026-11-01" } },
-      // The attempt its vendor turned away, then the one after the wait.
-      tasks: [{ task: "read", state: "reached", attempts: 2 }],
+      read: { status: "failed", code: "connect.rate_limited" },
+      // Its first attempt and the engine's two retries, none waiting.
+      tasks: [{ task: "read", state: "failed", attempts: 3 }],
     });
   });
 
