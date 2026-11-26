@@ -1,4 +1,21 @@
-import { Button } from "@grasp-os/app-kit/components/button";
+import { ADMIN_PHASES, phaseOf } from "@grasp-os/shared/admin/admin-health";
+import type { AdminPhase } from "@grasp-os/shared/admin/admin-health";
+import { portfolioOf } from "@grasp-os/shared/admin/admin-view";
+import type { AdminView } from "@grasp-os/shared/admin/admin-view";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import { CardContent } from "@grasp-os/ui/components/card";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { Link } from "@grasp-os/ui/components/link";
+import { Stat, StatGroup } from "@grasp-os/ui/components/stat";
 import {
   Table,
   TableBody,
@@ -6,23 +23,26 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/app-kit/components/table";
-import { Tabs, TabsList, TabsTrigger } from "@grasp-os/app-kit/components/tabs";
-import { cn } from "@grasp-os/app-kit/lib/utils";
-import { ADMIN_PHASES, phaseOf } from "@grasp-os/shared/admin/admin-health";
-import type { AdminPhase } from "@grasp-os/shared/admin/admin-health";
-import { portfolioOf } from "@grasp-os/shared/admin/admin-view";
-import type { AdminView } from "@grasp-os/shared/admin/admin-view";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { ArrowRightIcon, ChevronRightIcon, PlusIcon } from "lucide-react";
+} from "@grasp-os/ui/components/table";
+import { Tabs, TabsList, TabsTrigger } from "@grasp-os/ui/components/tabs";
+import { Text } from "@grasp-os/ui/components/text";
+import { ArrowRightIcon, Icon, PlusIcon } from "@grasp-os/ui/lib/icons";
+import { colors, space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
+import {
+  createFileRoute,
+  Link as RouterLink,
+  useNavigate,
+} from "@tanstack/react-router";
+import type { ReactNode } from "react";
 
 import { WithAdmins } from "../admin/admins.tsx";
 import { PageLoading } from "../admin/failure.tsx";
 import { AdminPage } from "../admin/page.tsx";
-import { Figure, KnowledgeDots, StageBar } from "../admin/parts.tsx";
+import { Panel, PanelNote } from "../admin/panel.tsx";
+import { KnowledgeDots, StageBar } from "../admin/parts.tsx";
 import { ReadinessBanner } from "../admin/readiness-parts.tsx";
 import { fetchReadiness } from "../admin/readiness.ts";
-import { Section } from "../admin/section.tsx";
 import {
   organizationsOf,
   rolloutNeedLine,
@@ -57,36 +77,46 @@ const phaseTabsFrom = 9;
 /** How many dots say how much is known. */
 const knowledgeDots = 20;
 
-/** A cell with nothing to say: a dash, never a made-up number. */
-const Nothing = () => <span className="text-muted-foreground">–</span>;
+const styles = stylex.create({
+  // A cell's lines, one under the other.
+  lines: { display: "flex", flexDirection: "column", gap: space["1"] },
+  // A line that waits on Grasp, or a contract that ends: in the warning's colour.
+  warning: { color: colors.warning },
+  muted: { color: colors.mutedForeground },
+  figures: { fontVariantNumeric: "tabular-nums" },
+  together: { display: "flex", flexDirection: "column", gap: space["2"] },
+});
 
-/** A row's last cell: the chevron that says the whole row opens, as every list a row of which opens has it. */
-const RowChevron = () => (
-  <TableCell variant="end">
-    <ChevronRightIcon
-      aria-hidden="true"
-      className="text-muted-foreground ml-auto size-4"
-    />
-  </TableCell>
+/** A cell with nothing to say: a dash, never a made-up number. */
+const Nothing = () => (
+  <Text as="span" color="muted" size="sm">
+    –
+  </Text>
 );
 
-/** An organization's name, linking to its own page, with whatever goes under it. */
-const NameLink = ({
-  id,
-  name,
+/** A small line under a cell's words, quiet or, when it waits on Grasp, in the warning's colour. */
+const Note = ({
+  warn = false,
   children,
 }: {
-  id: string;
-  name: string;
-  children?: React.ReactNode;
+  warn?: boolean;
+  children: ReactNode;
 }) => (
-  <Link
-    className="focus-visible:ring-ring/50 flex flex-col rounded-sm outline-none after:absolute after:inset-0 hover:underline focus-visible:ring-3"
-    params={{ clientId: id }}
-    to="/organizations/$clientId"
-  >
-    <span className="font-medium">{name}</span>
-    {children}
+  <Text as="span" color="muted" size="xs">
+    <span {...stylex.props(warn && styles.warning)}>{children}</span>
+  </Text>
+);
+
+/** An organization's name: the link the whole row opens by. */
+const NameLink = ({ id, name }: { id: string; name: string }) => (
+  <Link asChild variant="plain">
+    <RouterLink
+      data-row-target
+      params={{ clientId: id }}
+      to="/organizations/$clientId"
+    >
+      {name}
+    </RouterLink>
   </Link>
 );
 
@@ -114,91 +144,51 @@ const AnsweredRow = ({
       : `${euros(contract.fee)} a month`;
   }
   return (
-    <TableRow className="relative">
-      <TableCell className="whitespace-normal" variant="card">
-        <NameLink id={id} name={name}>
-          {/* Where there is no room for a column of its own, where it stands goes under the name. */}
-          <span className="text-muted-foreground mt-1 text-xs @xl:hidden">
-            {`${stage}: ${line}`}
-          </span>
-          <span
-            className={cn(
-              "text-xs @3xl:hidden",
-              waits ? "text-status-attention" : "text-muted-foreground"
-            )}
-          >
-            {opens}
-          </span>
-        </NameLink>
+    <TableRow interactive>
+      <TableCell rowHeader wrap>
+        <NameLink id={id} name={name} />
       </TableCell>
-      <TableCell
-        className="hidden whitespace-normal @xl:table-cell"
-        variant="card"
-      >
-        <span className="flex flex-col gap-1.5">
+      <TableCell hideBelow="sm" wrap>
+        <span {...stylex.props(styles.lines)}>
           <span>{stage}</span>
           <StageBar label={`${stage}: ${line}`} stages={view.stages} />
-          <span className="text-muted-foreground text-xs">{line}</span>
+          <Note>{line}</Note>
         </span>
       </TableCell>
-      <TableCell
-        className="hidden whitespace-normal @3xl:table-cell"
-        variant="card"
-      >
-        <span className="flex flex-col gap-1.5">
+      <TableCell hideBelow="md" wrap>
+        <span {...stylex.props(styles.lines)}>
           <KnowledgeDots
             count={knowledgeDots}
             knowledge={view.knowledge}
             label={opens}
           />
-          <span
-            aria-hidden
-            className={cn(
-              "text-xs",
-              waits ? "text-status-attention" : "text-muted-foreground"
-            )}
-          >
-            {opens}
+          <span aria-hidden>
+            <Note warn={waits}>{opens}</Note>
           </span>
         </span>
       </TableCell>
-      <TableCell
-        className="hidden whitespace-normal @5xl:table-cell"
-        variant="card"
-      >
-        <span className="flex flex-col">
+      <TableCell hideBelow="md" wrap>
+        <span {...stylex.props(styles.lines)}>
           <span>{contractName(view)}</span>
-          <span
-            className={cn(
-              "text-xs",
-              contract.ending
-                ? "text-status-attention"
-                : "text-muted-foreground"
-            )}
-          >
-            {contractLine}
-          </span>
+          <Note warn={contract.ending}>{contractLine}</Note>
         </span>
       </TableCell>
-      <TableCell className="hidden text-right @6xl:table-cell" variant="card">
+      <TableCell align="end" hideBelow="md">
         {view.usage.thisMonth.spend > 0 ? (
-          <span className="tabular-nums">
-            {euro(view.usage.thisMonth.spend)}
-          </span>
+          euro(view.usage.thisMonth.spend)
         ) : (
           <Nothing />
         )}
       </TableCell>
-      <TableCell className="text-right" variant="card">
+      <TableCell align="end">
         {view.needs.length > 0 ? (
-          <span className="text-status-attention tabular-nums">
+          <span {...stylex.props(styles.warning, styles.figures)}>
             {view.needs.length}
           </span>
         ) : (
           <Nothing />
         )}
       </TableCell>
-      <RowChevron />
     </TableRow>
   );
 };
@@ -219,38 +209,28 @@ const UnreadRow = ({
       ? null
       : `Last answered on ${formatDate(admin.lastAnsweredAt)}`;
   return (
-    <TableRow className="relative">
-      <TableCell className="whitespace-normal" variant="card">
-        <NameLink id={admin.client.id} name={admin.client.name}>
-          <span className="text-muted-foreground mt-1 text-xs @xl:hidden">
-            {last === null ? why : `${why}. ${last}`}
-          </span>
-        </NameLink>
+    <TableRow interactive>
+      <TableCell rowHeader wrap>
+        <NameLink id={admin.client.id} name={admin.client.name} />
       </TableCell>
-      <TableCell
-        className="hidden whitespace-normal @xl:table-cell"
-        variant="card"
-      >
-        <span className="flex flex-col gap-1.5">
+      <TableCell hideBelow="sm" wrap>
+        <span {...stylex.props(styles.lines)}>
           <span>{why}</span>
-          {last === null ? null : (
-            <span className="text-muted-foreground text-xs">{last}</span>
-          )}
+          {last === null ? null : <Note>{last}</Note>}
         </span>
       </TableCell>
-      <TableCell className="hidden @3xl:table-cell" variant="card">
+      <TableCell hideBelow="md">
         <Nothing />
       </TableCell>
-      <TableCell className="hidden @5xl:table-cell" variant="card">
+      <TableCell hideBelow="md">
         <Nothing />
       </TableCell>
-      <TableCell className="hidden text-right @6xl:table-cell" variant="card">
+      <TableCell align="end" hideBelow="md">
         <Nothing />
       </TableCell>
-      <TableCell className="text-right" variant="card">
+      <TableCell align="end">
         <Nothing />
       </TableCell>
-      <RowChevron />
     </TableRow>
   );
 };
@@ -303,38 +283,38 @@ const Portfolio = ({
   return (
     <section
       aria-label="Every organization together"
-      className="flex flex-col gap-2"
+      {...stylex.props(styles.together)}
     >
-      <div className="overflow-hidden rounded-xl border text-sm">
-        {/* Two abreast on a phone too: one a row made the numbers a screen long before the list began. */}
-        <div className="bg-border grid grid-cols-2 gap-px lg:grid-cols-3 xl:grid-cols-6">
-          <Figure
-            label={portfolio.orgs === 1 ? "Organization" : "Organizations"}
-            value={portfolio.orgs}
-          />
-          <Figure label="Ready for Grasp’s go" value={portfolio.ready} />
-          <Figure label="Open, in the platform" value={portfolio.open} />
-          <Figure
-            label="Under contract"
-            sub={`a month, before VAT${fees.from}`}
-            value={fees.value}
-          />
-          <Figure label="AI this month" value={euro(portfolio.spend)} />
-          <Figure
-            label="Hours a week freed"
-            sub={
-              portfolio.counted.value === 0
-                ? "not known yet"
-                : `worth ${euros(portfolio.value)} a month${freed.from}`
-            }
-            value={freed.value}
-          />
-        </div>
-      </div>
+      {/* A figure's note (what it counts in, how far it is known) is its
+          `change`, the words beside it: Damsko's Stat has no line under
+          its value. */}
+      <StatGroup aria-label="Every organization together">
+        <Stat
+          label={portfolio.orgs === 1 ? "Organization" : "Organizations"}
+          value={String(portfolio.orgs)}
+        />
+        <Stat label="Ready for Grasp’s go" value={String(portfolio.ready)} />
+        <Stat label="Open, in the platform" value={String(portfolio.open)} />
+        <Stat
+          change={`a month, before VAT${fees.from}`}
+          label="Under contract"
+          value={fees.value}
+        />
+        <Stat label="AI this month" value={euro(portfolio.spend)} />
+        <Stat
+          change={
+            portfolio.counted.value === 0
+              ? "not known yet"
+              : `worth ${euros(portfolio.value)} a month${freed.from}`
+          }
+          label="Hours a week freed"
+          value={freed.value}
+        />
+      </StatGroup>
       {unread > 0 ? (
-        <p className="text-muted-foreground text-sm">
+        <Text color="muted" size="sm">
           {`Counted from the ${views.length} that answered now: ${unread} didn’t, and ${unread === 1 ? "isn’t" : "aren’t"} in these numbers.`}
-        </p>
+        </Text>
       ) : null}
     </section>
   );
@@ -379,62 +359,62 @@ const NeedsToday = ({ organizations }: { organizations: Organization[] }) => {
   }
   const more = waiting.length - todayItems;
   return (
-    <Section
-      title="Needs Grasp today"
+    <Panel
       description="At every organization, the most pressing first."
+      title="Needs Grasp today"
     >
-      <ul className="flex flex-col">
-        {waiting
-          .slice(0, todayItems)
-          .map(({ id, name, text, setup }, index) => (
-            <li
-              className="flex items-center justify-between gap-4 border-t px-5 py-3"
-              // The same need can stand twice at one organization, for two teams.
-              key={`${id}-${index}`}
-            >
-              <span className="flex min-w-0 items-start gap-2.5">
-                <span
-                  aria-hidden
-                  className="bg-status-attention mt-1.5 size-1.5 flex-none rounded-full"
-                />
-                <span className="flex min-w-0 flex-col">
-                  <span className="text-muted-foreground text-xs">{name}</span>
-                  <span>{text}</span>
-                </span>
-              </span>
-              <Button
-                aria-label={`Open at ${name}: ${text}`}
-                nativeButton={false}
-                render={
-                  setup ? (
-                    <Link
-                      params={{ clientId: id }}
-                      to="/organizations/$clientId/setup"
-                    />
-                  ) : (
-                    <Link
-                      params={{ clientId: id }}
-                      to="/organizations/$clientId"
-                    />
-                  )
-                }
+      <CardContent flush>
+        <ItemGroup separated>
+          {waiting
+            .slice(0, todayItems)
+            .map(({ id, name, text, setup }, index) => (
+              <Item
+                // The same need can stand twice at one organization, for two teams.
+                key={`${id}-${index}`}
                 size="sm"
-                variant="outline"
               >
-                Open
-                <ArrowRightIcon data-icon="inline-end" />
-              </Button>
-            </li>
-          ))}
-      </ul>
+                <ItemMedia>
+                  <Badge dot variant="warning" />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemDescription>{name}</ItemDescription>
+                  <ItemTitle>{text}</ItemTitle>
+                </ItemContent>
+                <ItemActions>
+                  <Button asChild size="sm" variant="outline">
+                    {setup ? (
+                      <RouterLink
+                        aria-label={`Open at ${name}: ${text}`}
+                        params={{ clientId: id }}
+                        to="/organizations/$clientId/setup"
+                      >
+                        Open
+                        <Icon icon={ArrowRightIcon} />
+                      </RouterLink>
+                    ) : (
+                      <RouterLink
+                        aria-label={`Open at ${name}: ${text}`}
+                        params={{ clientId: id }}
+                        to="/organizations/$clientId"
+                      >
+                        Open
+                        <Icon icon={ArrowRightIcon} />
+                      </RouterLink>
+                    )}
+                  </Button>
+                </ItemActions>
+              </Item>
+            ))}
+        </ItemGroup>
+      </CardContent>
       {more > 0 ? (
-        <p className="text-muted-foreground border-t px-5 py-3">
+        <PanelNote>
           {more === 1
             ? "1 more, on the organization’s own overview."
             : `${more} more, on the organizations’ own overviews.`}
-        </p>
+        </PanelNote>
       ) : null}
-    </Section>
+    </Panel>
   );
 };
 
@@ -472,7 +452,7 @@ const Organizations = ({ admins }: { admins: readonly ClientAdmin[] }) => {
       {/* The organizations by phase: where each is, from the first conversation until it works in Grasp. */}
       {organizations.length < phaseTabsFrom && phase === undefined ? null : (
         <Tabs
-          onValueChange={(value: string) => {
+          onValueChange={(value) => {
             const chosen = ADMIN_PHASES.find((each) => each === value);
             void navigate({
               to: "/",
@@ -482,51 +462,37 @@ const Organizations = ({ admins }: { admins: readonly ClientAdmin[] }) => {
           value={phase ?? "all"}
         >
           <TabsList aria-label="Show organizations" variant="line">
-            <TabsTrigger className="flex-none" value="all">
-              All
-              <span className="text-muted-foreground tabular-nums">
+            <TabsTrigger value="all">
+              {"All "}
+              <Text as="span" color="muted" size="sm">
                 {organizations.length}
-              </span>
+              </Text>
             </TabsTrigger>
             {ADMIN_PHASES.map((each) => (
-              <TabsTrigger className="flex-none" key={each} value={each}>
-                {phaseWords[each]}
-                <span className="text-muted-foreground tabular-nums">
+              <TabsTrigger key={each} value={each}>
+                {`${phaseWords[each]} `}
+                <Text as="span" color="muted" size="sm">
                   {views.filter((view) => phaseOf(view) === each).length}
-                </span>
+                </Text>
               </TabsTrigger>
             ))}
           </TabsList>
         </Tabs>
       )}
       {/* Then the organizations themselves: what needs Grasp at one is on its own page, a click away. */}
-      <div className="@container">
-        <Section title="Every organization">
-          <Table>
+      <Panel title="Every organization">
+        <CardContent flush>
+          <Table aria-label="Every organization">
             <TableHeader>
               <TableRow>
-                <TableHead variant="card">Organization</TableHead>
-                <TableHead className="hidden @xl:table-cell" variant="card">
-                  Where it stands
-                </TableHead>
-                <TableHead className="hidden @3xl:table-cell" variant="card">
-                  Known
-                </TableHead>
-                <TableHead className="hidden @5xl:table-cell" variant="card">
-                  Contract
-                </TableHead>
-                <TableHead
-                  className="hidden text-right @6xl:table-cell"
-                  variant="card"
-                >
+                <TableHead>Organization</TableHead>
+                <TableHead hideBelow="sm">Where it stands</TableHead>
+                <TableHead hideBelow="md">Known</TableHead>
+                <TableHead hideBelow="md">Contract</TableHead>
+                <TableHead align="end" hideBelow="md">
                   AI this month
                 </TableHead>
-                <TableHead className="text-right" variant="card">
-                  Needs Grasp
-                </TableHead>
-                <TableHead variant="card">
-                  <span className="sr-only">Open</span>
-                </TableHead>
+                <TableHead align="end">Needs Grasp</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -538,8 +504,8 @@ const Organizations = ({ admins }: { admins: readonly ClientAdmin[] }) => {
               ))}
             </TableBody>
           </Table>
-        </Section>
-      </div>
+        </CardContent>
+      </Panel>
     </>
   );
 };
@@ -550,9 +516,11 @@ const Overview = () => {
   return (
     <AdminPage
       action={
-        <Button nativeButton={false} render={<Link to="/new-organization" />}>
-          <PlusIcon data-icon="inline-start" />
-          New organization
+        <Button asChild>
+          <RouterLink to="/new-organization">
+            <Icon icon={PlusIcon} />
+            New organization
+          </RouterLink>
         </Button>
       }
       description="Every company with Grasp, from its first conversation on. Only Grasp sees this: a company sees numbers per team, never names."

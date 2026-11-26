@@ -62,6 +62,27 @@ const markOf = (entry: Element | undefined): string =>
     ?.querySelector('[data-slot="sidebar-menu-action"]')
     ?.getAttribute("aria-label") ?? "";
 
+/**
+ * A page's title as it is read: its words, without what the page header
+ * lays beside them out of a screen reader's reach (on a narrow page, room
+ * for its actions).
+ */
+const titleOf = (root: Element | null | undefined): string | undefined => {
+  const heading = root?.querySelector("h1");
+  return heading === null || heading === undefined
+    ? undefined
+    : [...heading.childNodes]
+        .filter(
+          (node) =>
+            !(
+              node instanceof Element &&
+              node.getAttribute("aria-hidden") === "true"
+            )
+        )
+        .map((node) => node.textContent)
+        .join("");
+};
+
 /** The sidebar's entry for `name`, under its organizations. */
 const sidebarEntry = (root: Element, name: string): Element | undefined =>
   [...root.querySelectorAll('[data-slot="sidebar"] li')].find((item) =>
@@ -253,12 +274,12 @@ describe("the admin's overview", () => {
     const downRow = rowText(container, down.id);
     const waitingRow = rowText(container, waiting.id);
     const tileOf = (label: string) =>
-      [...(page?.querySelectorAll("span") ?? [])]
-        .find((span) => span.textContent === label)
-        ?.closest("div")?.textContent ?? "";
+      [...(page?.querySelectorAll('[data-slot="stat"]') ?? [])].find((stat) =>
+        stat.textContent?.startsWith(label)
+      )?.textContent ?? "";
 
     expect({
-      title: page?.querySelector("h1")?.textContent,
+      title: titleOf(page),
       acme: [
         "Agreed",
         "Not signed yet",
@@ -268,7 +289,7 @@ describe("the admin's overview", () => {
       acmeNeeds: container
         .querySelector(`main table a[href="/organizations/acme"]`)
         ?.closest("tr")
-        ?.querySelector(".text-status-attention.tabular-nums")?.textContent,
+        ?.querySelector("td:last-child")?.textContent,
       acmeNamed: acmeRow.includes(acme.name),
       goToGive: main().includes(
         "85% of what Grasp needs is known: enough to open at 80%. The company comes in once Grasp gives its go."
