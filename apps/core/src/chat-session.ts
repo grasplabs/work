@@ -80,6 +80,9 @@ const lostOf = (error: unknown): unknown =>
     ? agentErrors.create("agent.turn_lost")
     : error;
 
+/** How many times in a row storage failed pi once open (`#onFailed`). */
+const storageFailuresKey = "storageFailures";
+
 /** How many opens in a row failed, or are under way: none once one works. */
 const failedOpensKey = "failedOpens";
 
@@ -270,13 +273,34 @@ export class ChatSession extends DurableObject<Env> {
     if (end.kind !== "failed") {
       return;
     }
+    // Counted, so storage that fails again after each open that works
+    // (say, every time a turn's answer is stored) stops: the turn's paid
+    // requests aren't sent again without end.
+    const failures = this.#storageFailures() + 1;
+    this.ctx.storage.kv.put(storageFailuresKey, failures);
     log.error("chat.storage_failed", {
       chatSession: this.ctx.id.name,
+      failures,
       ...errorFields(end.error),
     });
-    if (!this.#erased()) {
-      this.#host.arm({ active: false, at: Date.now() });
+    if (this.#erased()) {
+      return;
     }
+    if (failures >= opensMost) {
+      await this.#giveUp();
+      return;
+    }
+    // At once the first time, then later each time.
+    this.#host.arm({
+      active: false,
+      at: Date.now() + (failures === 1 ? 0 : backoffMs(failures - 1)),
+    });
+  }
+
+  /** How many times in a row storage failed pi once open. */
+  #storageFailures(): number {
+    const failures = this.ctx.storage.kv.get(storageFailuresKey);
+    return typeof failures === "number" ? failures : 0;
   }
 
   /**
@@ -313,6 +337,10 @@ export class ChatSession extends DurableObject<Env> {
     } finally {
       if (this.#current === harness) {
         await this.#arm(harness.wake());
+        // No turn left unsettled: whatever failed before is behind it.
+        if (harness.activeTurn() === undefined) {
+          this.ctx.storage.kv.delete(storageFailuresKey);
+        }
       }
     }
   }
