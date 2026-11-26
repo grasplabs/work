@@ -535,24 +535,29 @@ const saidOnArrival = new Set<string>();
 
 /**
  * Stephen says `line` as its step arrives, after `delay` ms: once in a visit, not again on the way
- * back. It is fetched from the moment the step opens (if the step before hasn't already), so he
- * starts on time, and remembered as what the step says, to be fetched ahead the next time through
- * (step-voice.tsx). Come on from the step before, he first answers the choice made there; and
+ * back, whatever its words are by then (step-voice.tsx keeps which steps he told). A line that
+ * changes while the admin is on the step, such as what he found once they connect, is said then.
+ * It is fetched from the moment the step opens (if the step before hasn't already), so he starts
+ * on time, and remembered as what the step says, to be fetched ahead the next time through. Come
+ * on from the step before, he first answers the choice made there, when that is fetched already;
  * when he has just answered something on this step (something gone wrong), the line waits for him
  * to finish it.
  */
 const useSayOnce = (line: string, delay: number, when: boolean): void => {
   const remember = useRememberLines();
   const talk = useStepTalk();
+  // Back on a step he told: the line it opens with isn't said again.
+  const heldBack = useRef(talk?.toldBefore === true ? line : null);
   useEffect(() => {
-    const due = when && !saidOnArrival.has(line);
+    const due = when && !saidOnArrival.has(line) && line !== heldBack.current;
     if (due) {
       prepare(line);
     }
     const id = due
       ? window.setTimeout(() => {
           saidOnArrival.add(line);
-          if (answeredLately()) {
+          talk?.tell();
+          if (talk !== null && answeredLately(talk.step)) {
             speak(line, { after: true });
           } else {
             const first = talk?.arriving() ?? null;
