@@ -16,6 +16,7 @@ import {
   withoutMarking,
 } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
+import { chooseAudience } from "./brain-audiences.ts";
 import { heldFor } from "./held-in-connect.ts";
 import { mockIdp } from "./idp.ts";
 import { linearConsentUrl } from "./linear-service.ts";
@@ -311,6 +312,8 @@ describe("a chat app's writes", setUpTime, () => {
         "connection"
       ) ?? "";
     await agentMayUse(connectionId);
+    // Open to nobody until an admin chooses its audience (#2726).
+    await chooseAudience(admin.api, connectionId, { kind: "everyone" });
     const id = workspaceIdSchema.parse(crypto.randomUUID());
     const stub = workspace(env, id);
     const chat = await stub.createChat(
