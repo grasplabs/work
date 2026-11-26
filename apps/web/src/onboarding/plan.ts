@@ -9,9 +9,13 @@ export type Moment = keyof typeof after;
 export const planStart = (today: string): Date =>
   new Date(`${today}T12:00:00Z`);
 
-/** The day of a moment of the plan. */
+/** The day of a moment of the plan: a weekday, so one that falls on a weekend moves to the Monday after. */
 export const dateOf = (start: Date, moment: Moment): Date => {
   const date = new Date(start);
   date.setUTCDate(start.getUTCDate() + after[moment]);
+  const weekday = date.getUTCDay();
+  if (weekday === 6 || weekday === 0) {
+    date.setUTCDate(date.getUTCDate() + (weekday === 6 ? 2 : 1));
+  }
   return date;
 };
