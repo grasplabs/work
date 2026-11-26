@@ -484,16 +484,21 @@ const open = async (
   }
   const { who } = listening.value;
   const seconds = expectedSeconds[context.kind];
+  // What he is told is ready before anything is held: nothing fails
+  // between holding the listening and asking Mistral.
+  const [voice, company] = await Promise.all([
+    voiceText(context.kind, asked.locale),
+    companyOf(env),
+  ]);
   // Held before Mistral is asked, in one write with the check, so sessions
   // opened side by side can't each find the budget unspent; given back
   // when none opens.
-  if (
-    !(await onboardingStore(env).reserveListening(
-      who,
-      seconds,
-      heardBudgets.link
-    ))
-  ) {
+  const heldOn = await onboardingStore(env).reserveListening(
+    who,
+    seconds,
+    heardBudgets.link
+  );
+  if (heldOn === null) {
     log.warn("interview.voice_budget_spent", { requestId });
     return failed(
       "That is as long as the interview can run today. Come back tomorrow to go on.",
@@ -509,10 +514,6 @@ const open = async (
   if (earlier !== null) {
     await closeQuietly(env, earlier, requestId);
   }
-  const [voice, company] = await Promise.all([
-    voiceText(context.kind, asked.locale),
-    companyOf(env),
-  ]);
   const before = asked.event === "start" ? [] : asked.before;
   const said = asked.event === "start" ? context.kind : asked.event;
   const { conversation } = platformAi;
@@ -557,7 +558,7 @@ const open = async (
       requestId,
       ...(code === undefined ? {} : { code }),
     });
-    await onboardingStore(env).releaseListening(who, seconds);
+    await onboardingStore(env).releaseListening(who, seconds, heldOn);
     return failed("The interview could not start. Try again.", 503);
   }
   const raw = await jsonOrNothing(answered);
@@ -573,7 +574,7 @@ const open = async (
     if (answered.ok && unusable.success) {
       await closeQuietly(env, unusable.data.id, requestId);
     }
-    await onboardingStore(env).releaseListening(who, seconds);
+    await onboardingStore(env).releaseListening(who, seconds, heldOn);
     return failed("The interview could not start. Try again.", 503);
   }
   const { id, participant_token, server_url, expires_at } = opened.data;
@@ -582,7 +583,9 @@ const open = async (
     // In the onboarding's use, as a line said is.
     await onboardingStore(env).meter({
       purpose: "interviews",
-      model: "voice",
+      // Its own kind, never Stephen's voice alone: the session listens,
+      // answers and speaks.
+      model: "conversation",
       seconds,
     });
     await onboardingStore(env).turnRan(secretMark, {

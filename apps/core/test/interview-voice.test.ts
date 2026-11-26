@@ -159,6 +159,16 @@ const atMistral = async () => {
     .map(({ method, path, body }) => ({ method, path, body }));
 };
 
+/** The seconds of live voice sessions the onboarding counted, every day together. */
+const sessionsUsed = async (): Promise<number> => {
+  const rows = await onboardingStore(env).usage();
+  return rows
+    .filter(
+      (row) => row.purpose === "interviews" && row.model === "conversation"
+    )
+    .reduce((sum, { seconds }) => sum + seconds, 0);
+};
+
 /** The audit events of voice sessions opened. */
 const sessionsOpened = async () => {
   const events = await allEvents();
@@ -618,6 +628,7 @@ describe("an interview as a live voice session", { timeout: 60_000 }, () => {
       }))
     );
     const before = await atMistral();
+    const usedBefore = await sessionsUsed();
     // Each held at the 15 minutes it is expected to last: four fill the
     // hour, side by side as one after the other.
     const { result } = await answering([], async () => {
@@ -632,10 +643,17 @@ describe("an interview as a live voice session", { timeout: 60_000 }, () => {
         .toSorted((one, other) => one - other);
     });
     const after = await atMistral();
+    const used = await sessionsUsed();
     expect({
       statuses: result,
       opened: after.length - before.length,
-    }).toStrictEqual({ statuses: [200, 200, 200, 200, 429], opened: 4 });
+      // In the onboarding's use as interviews held live, never as his voice.
+      used: used - usedBefore,
+    }).toStrictEqual({
+      statuses: [200, 200, 200, 200, 429],
+      opened: 4,
+      used: 4 * 15 * 60,
+    });
   });
 
   it("keeps a quote across a pause when the words before it were written down already", async () => {

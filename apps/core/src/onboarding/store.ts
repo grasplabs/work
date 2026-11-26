@@ -4470,18 +4470,19 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Holds `seconds` of a live voice session (voice.ts) against `who`'s
    * listening today, in one write, only when all of them fit `budget`:
-   * sessions opened side by side each find what the others held. False,
-   * holding nothing, when they don't fit.
+   * sessions opened side by side each find what the others held. The day
+   * they are held on, to give them back on; null, holding nothing, when
+   * they don't fit.
    */
   reserveListening(
     who: string,
     seconds: number,
     budget: number,
     now: string = new Date().toISOString()
-  ): boolean {
+  ): string | null {
     return this.ctx.storage.transactionSync(() => {
       if (this.voiceSaid(who, now) + seconds > budget) {
-        return false;
+        return null;
       }
       const day = now.slice(0, 10);
       this.#db.delete(voiceUse).where(lt(voiceUse.day, day)).run();
@@ -4493,23 +4494,20 @@ export class Onboarding extends DurableObject<Env> {
           set: { seconds: sql`${voiceUse.seconds} + ${seconds}` },
         })
         .run();
-      return true;
+      return day;
     });
   }
 
   /**
-   * Gives back what `reserveListening` held for a session that never
-   * opened: Mistral refused it, so nothing was listened to.
+   * Gives back what `reserveListening` held on `day` for a session that
+   * never opened: Mistral refused it, so nothing was listened to. On that
+   * day alone: one held before midnight never takes from the next.
    */
-  releaseListening(
-    who: string,
-    seconds: number,
-    now: string = new Date().toISOString()
-  ): void {
+  releaseListening(who: string, seconds: number, day: string): void {
     this.#db
       .update(voiceUse)
       .set({ seconds: sql`max(0, ${voiceUse.seconds} - ${seconds})` })
-      .where(and(eq(voiceUse.who, who), eq(voiceUse.day, now.slice(0, 10))))
+      .where(and(eq(voiceUse.who, who), eq(voiceUse.day, day)))
       .run();
   }
 
