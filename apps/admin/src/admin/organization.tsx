@@ -388,11 +388,18 @@ const knowledgeDots = 20;
  * is told, the day its interviews are on; while its core isn't read, where
  * to see why (its Setup).
  */
-const OrgStatus = ({ clientId }: { clientId: string }) => {
+const OrgStatus = ({
+  clientId,
+  section,
+}: {
+  clientId: string;
+  section: OrgSection;
+}) => {
   const { admin } = useOrgRead();
   const { view } = organizationOf(admin);
   if (view === null) {
-    return admin.state === "answered" ? null : (
+    // On its Setup, which says why itself, no way to where staff already are.
+    return admin.state === "answered" || section === "setup" ? null : (
       <Badge asChild variant="warning">
         <Link params={{ clientId }} to="/organizations/$clientId/setup">
           Not read now: see its Setup
@@ -520,7 +527,7 @@ export const OrganizationPage = ({
                 <span>{about}</span>
               )}
               <Suspense fallback={null}>
-                <OrgStatus clientId={client.id} />
+                <OrgStatus clientId={client.id} section={section} />
                 <span {...stylex.props(styles.lines)}>
                   <ReadNotes section={section} />
                 </span>

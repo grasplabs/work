@@ -91,7 +91,6 @@ const styles = stylex.create({
 });
 
 export interface Staff {
-  email: string;
   name: string;
 }
 
@@ -354,6 +353,7 @@ const chooseTheme = (mode: string) => {
     mode === "dark" ||
     (mode === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.classList.toggle("dark", dark);
+  document.documentElement.dataset.mode = mode;
   for (const listener of themeListeners) {
     listener();
   }
@@ -477,23 +477,31 @@ const viewTabs = (waiting: number): SidebarTab[] => [
   },
 ];
 
+/** The sidebar's view and whether the search is open: kept by the frame, so they stay as the organizations come in. */
+interface SidebarState {
+  view: View;
+  setView: (view: View) => void;
+  searching: boolean;
+  setSearching: (searching: boolean) => void;
+}
+
 const AdminSidebar = ({
   clients,
   admins,
   platform,
   staff,
+  state: { view, setView, searching, setSearching },
 }: {
   clients: readonly GridRow[];
   admins: readonly ClientAdmin[] | null;
   platform: PlatformCounts;
   staff: Staff;
+  state: SidebarState;
 }) => {
   const router = useRouter();
   const matchRoute = useMatchRoute();
   const { pathname } = useLocation();
   const { setOpenMobile } = useSidebar();
-  const [view, setView] = useState<View>("home");
-  const [searching, setSearching] = useState(false);
   useEffect(
     () =>
       router.subscribe("onBeforeNavigate", () => {
@@ -501,18 +509,6 @@ const AdminSidebar = ({
       }),
     [router, setOpenMobile]
   );
-  useEffect(() => {
-    const key = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === "k") {
-        event.preventDefault();
-        setSearching(true);
-      }
-    };
-    window.addEventListener("keydown", key);
-    return () => {
-      window.removeEventListener("keydown", key);
-    };
-  }, []);
   const organizations =
     admins === null
       ? null
@@ -554,11 +550,6 @@ const AdminSidebar = ({
           </Link>
         }
         navLabel={view === "inbox" ? "Inbox" : "Main"}
-        onTabChange={(next) => {
-          if (next === "home" || next === "inbox") {
-            setView(next);
-          }
-        }}
         profile={<StaffMenu staff={staff} />}
         search={{
           label: "Search",
@@ -567,9 +558,16 @@ const AdminSidebar = ({
             setSearching(true);
           },
         }}
-        tab={view}
-        tabs={viewTabs(waiting)}
-        tabsLabel="Views"
+        views={{
+          tabs: viewTabs(waiting),
+          tab: view,
+          onTabChange: (next) => {
+            if (next === "home" || next === "inbox") {
+              setView(next);
+            }
+          },
+          label: "Views",
+        }}
         {...(view === "inbox" && admins !== null
           ? { empty: "Nothing needs Grasp." }
           : {})}
@@ -596,6 +594,7 @@ const SettledSidebar = ({
   admins: Deferred<ClientAdmin[] | null>;
   platform: PlatformCounts;
   staff: Staff;
+  state: SidebarState;
 }) => <AdminSidebar {...rest} admins={useSettled(admins)} />;
 
 // Readiness set aside for this session: a standing item staff know of
@@ -611,9 +610,14 @@ const asideNow = (): boolean => {
 };
 
 /** What stops an organization being onboarded, across the top of the frame, until set aside. */
-const ReadinessAcross = ({ readiness }: { readiness: Readiness }) => {
+const ReadinessAcross = ({
+  readiness,
+}: {
+  readiness: Deferred<Readiness | null>;
+}) => {
+  const read = useSettled(readiness);
   const [aside, setAside] = useState(asideNow);
-  if (aside) {
+  if (aside || read === null) {
     return null;
   }
   return (
@@ -626,7 +630,7 @@ const ReadinessAcross = ({ readiness }: { readiness: Readiness }) => {
         }
         setAside(true);
       }}
-      readiness={readiness}
+      readiness={read}
     />
   );
 };
@@ -643,34 +647,59 @@ export const AdminFrame = ({
   admins: Deferred<ClientAdmin[] | null>;
   platform: PlatformCounts;
   staff: Staff;
-  readiness: Readiness;
-}) => (
-  <FrameShell
-    banner={<ReadinessAcross readiness={readiness} />}
-    sidebar={
-      <Suspense
-        fallback={
-          <AdminSidebar
-            admins={null}
+  readiness: Deferred<Readiness | null>;
+}) => {
+  const [view, setView] = useState<View>("home");
+  const [searching, setSearching] = useState(false);
+  const state = { view, setView, searching, setSearching };
+  // ⌘K opens the search, wherever focus is.
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === "k") {
+        event.preventDefault();
+        setSearching(true);
+      }
+    };
+    window.addEventListener("keydown", key);
+    return () => {
+      window.removeEventListener("keydown", key);
+    };
+  }, []);
+
+  return (
+    <FrameShell
+      banner={
+        <Suspense fallback={null}>
+          <ReadinessAcross readiness={readiness} />
+        </Suspense>
+      }
+      sidebar={
+        <Suspense
+          fallback={
+            <AdminSidebar
+              admins={null}
+              clients={clients}
+              platform={platform}
+              staff={staff}
+              state={state}
+            />
+          }
+        >
+          <SettledSidebar
+            admins={admins}
             clients={clients}
             platform={platform}
             staff={staff}
+            state={state}
           />
-        }
-      >
-        <SettledSidebar
-          admins={admins}
-          clients={clients}
-          platform={platform}
-          staff={staff}
-        />
-      </Suspense>
-    }
-    storageKey={sidebarKey}
-  >
-    <Outlet />
-  </FrameShell>
-);
+        </Suspense>
+      }
+      storageKey={sidebarKey}
+    >
+      <Outlet />
+    </FrameShell>
+  );
+};
 
 /** How many organizations the sidebar's skeleton stands in for. */
 const loadingEntries = 6;
@@ -700,10 +729,6 @@ export const FrameLoading = () => (
         ]}
         mark={<Icon icon={GraspMark} label="Grasp admin" />}
         navLabel="Main"
-        onTabChange={() => {
-          // Nothing to switch to while the admin's records come.
-        }}
-        profile={null}
         search={{
           label: "Search",
           shortcut: "⌘K",
@@ -711,9 +736,6 @@ export const FrameLoading = () => (
             // Nothing to search while the admin's records come.
           },
         }}
-        tab="home"
-        tabs={viewTabs(0)}
-        tabsLabel="Views"
       />
     }
     storageKey={sidebarKey}

@@ -19,7 +19,6 @@ export const fetchStaff = createServerFn({ method: "GET" }).handler(
       .get();
     const local = email.split("@")[0] ?? email;
     return {
-      email,
       name: row?.name ?? local.charAt(0).toUpperCase() + local.slice(1),
     };
   }

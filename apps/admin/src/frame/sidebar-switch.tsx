@@ -24,8 +24,7 @@ import type {
 
 import { switchMarker } from "./sidebar-switch.stylex.ts";
 
-// The sidebar's switch under its head (Home | Inbox, an App's preview
-// widths) and a level's head (Back and the level's name as one raised
+// The sidebar's switch under its head (Home | Inbox) and a level's head (Back and the level's name as one raised
 // segment), as the reference draws them (#2503's grasp/sidebar/section.tsx):
 // a track on the sidebar's hover fill, its tabs sharing its width, the
 // chosen one raised on a thumb that glides from tab to tab. Damsko's Tabs
@@ -184,7 +183,6 @@ const styles = stylex.create({
       [FORCED]: "none",
     },
   },
-  countAtWords: { insetInlineStart: "100%", marginInlineStart: space["1"] },
   // A level's head: Back and its name as one segment, raised out of the track as a chosen tab.
   head: {
     display: "flex",
@@ -265,15 +263,6 @@ const styles = stylex.create({
     borderStartEndRadius: TAB_CORNER,
     borderEndEndRadius: TAB_CORNER,
     color: { default: colors.sidebarForeground, [FORCED]: "LinkText" },
-  },
-  // A mark of the level's own before its name (an agent's face), in the icon's box.
-  mark: {
-    display: "inline-flex",
-    flexShrink: 0,
-    alignItems: "center",
-    justifyContent: "center",
-    width: size.sidebarIcon,
-    height: size.sidebarIcon,
   },
 });
 
@@ -559,15 +548,15 @@ const tabFor = (
   return next === undefined ? null : (all[next] ?? null);
 };
 
-export const tabId = (id: string, value: string) => `${id}-tab-${value}`;
-export const tabPanelId = (id: string) => `${id}-tabpanel`;
+const tabId = (id: string, value: string) => `${id}-tab-${value}`;
+const tabPanelId = (id: string) => `${id}-tabpanel`;
 
-/** A tab's count: a red dot on its icon's corner, or raised at its words' end with no icon. */
-const TabCount = ({ atWords = false }: { atWords?: boolean }) => (
+/** A tab's count: a red dot on its icon's corner. */
+const TabCount = () => (
   <span
     aria-hidden="true"
     data-slot="sidebar-tab-count"
-    {...stylex.props(styles.count, atWords && styles.countAtWords)}
+    {...stylex.props(styles.count)}
   />
 );
 
@@ -575,23 +564,17 @@ const Tab = ({
   id,
   tab,
   chosen,
-  panel,
-  iconOnly,
   onChoose,
 }: {
   id: string;
   tab: SidebarTab;
   chosen: boolean;
-  panel: boolean;
-  iconOnly: boolean;
   onChoose: (value: string) => void;
 }) => {
   const counted = tab.count !== undefined && tab.count > 0;
   return (
     <button
-      aria-controls={panel ? tabPanelId(id) : undefined}
-      // Its words are its name when only its icon shows.
-      aria-label={iconOnly ? tab.label : undefined}
+      aria-controls={tabPanelId(id)}
       aria-selected={chosen}
       data-sidebar-tab={tab.value}
       id={tabId(id, tab.value)}
@@ -608,7 +591,6 @@ const Tab = ({
       }}
       role="tab"
       tabIndex={chosen ? 0 : -1}
-      title={iconOnly ? tab.label : undefined}
       type="button"
       {...stylex.props(styles.tab, chosen && styles.tabChosen, focusRingInset)}
     >
@@ -619,14 +601,11 @@ const Tab = ({
           {counted ? <TabCount /> : null}
         </span>
       )}
-      {iconOnly ? null : (
-        <span {...stylex.props(styles.hold)}>
-          <span data-slot="sidebar-tab-words" {...stylex.props(styles.words)}>
-            {tab.label}
-          </span>
-          {counted && tab.icon === undefined ? <TabCount atWords /> : null}
+      <span {...stylex.props(styles.hold)}>
+        <span data-slot="sidebar-tab-words" {...stylex.props(styles.words)}>
+          {tab.label}
         </span>
-      )}
+      </span>
       {counted ? (
         <span {...stylex.props(visuallyHidden)}>
           {` ${tab.countLabel ?? String(tab.count)}`}
@@ -636,30 +615,21 @@ const Tab = ({
   );
 };
 
-/**
- * The switch under the sidebar's head, or a level's views under its name:
- * one tab stop, ←/→, Home and End move and choose. From three tabs that
- * all have an icon, each shows its icon alone.
- */
+/** The switch under the sidebar's head: one tab stop, ←/→, Home and End move and choose. */
 export const SidebarSwitch = ({
   id,
   tabs,
   value,
   label,
   onChoose,
-  panel = true,
 }: {
   id: string;
   tabs: readonly SidebarTab[];
   value: string;
   label: string;
   onChoose: (value: string) => void;
-  /** The tabs switch the rows under them, in a tab panel; false for views of the page. */
-  panel?: boolean;
 }) => {
   useCountVoice(tabs);
-  const iconOnly =
-    tabs.length > 2 && tabs.every((tab) => tab.icon !== undefined);
   return (
     <div {...stylex.props(styles.row)}>
       <div
@@ -677,11 +647,10 @@ export const SidebarSwitch = ({
         {tabs.map((tab) => (
           <Tab
             chosen={tab.value === value}
-            iconOnly={iconOnly}
             id={id}
             key={tab.value}
             onChoose={(next) => {
-              if (panel && next !== value) {
+              if (next !== value) {
                 crossfade(
                   document.querySelector<HTMLElement>(
                     `#${CSS.escape(tabPanelId(id))}`
@@ -690,7 +659,6 @@ export const SidebarSwitch = ({
               }
               onChoose(next);
             }}
-            panel={panel}
             tab={tab}
           />
         ))}
@@ -735,7 +703,6 @@ export const SwitchPanel = ({
 export const LevelHead = ({
   title,
   icon,
-  mark,
   back,
   backLabel,
   home,
@@ -743,7 +710,6 @@ export const LevelHead = ({
 }: {
   title: string;
   icon?: IconData;
-  mark?: ReactNode;
   /** The link Back leads by (`<Link to="/apps" />`): it takes the chevron and its name. */
   back: RenderLink;
   backLabel: string;
@@ -751,16 +717,7 @@ export const LevelHead = ({
   home: RenderLink;
   homeCurrent?: boolean;
 }) => {
-  let lead: ReactNode = null;
-  if (mark !== undefined) {
-    lead = (
-      <span aria-hidden="true" {...stylex.props(styles.mark)}>
-        {mark}
-      </span>
-    );
-  } else if (icon !== undefined) {
-    lead = <Icon icon={icon} />;
-  }
+  const lead = icon === undefined ? null : <Icon icon={icon} />;
   return (
     <div data-slot="sidebar-section-head" {...stylex.props(styles.head)}>
       <div {...stylex.props(styles.track, styles.headTrack)}>

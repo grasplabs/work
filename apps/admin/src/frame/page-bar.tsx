@@ -24,20 +24,17 @@ import type { ReactElement, ReactNode } from "react";
 /** What a crumb's link is drawn with: its look and its words. */
 export interface CrumbLook {
   className?: string;
-  style?: Record<string, string | number>;
   children: ReactNode;
 }
 
 /**
  * A step on the way to the page; the last one is the page itself. With
- * `render`, a link (`(look) => <Link {...look} to="/apps" />`); without,
- * words. The page may draw its own name (`name`), such as a field that
- * renames it in place.
+ * `render`, a link (`(look) => <Link {...look} to="/platform" />`);
+ * without, words.
  */
 export interface Crumb {
   label: string;
   render?: (look: CrumbLook) => ReactElement;
-  name?: ReactNode;
 }
 
 /** The words the bar says to a screen reader, in the product's language. */
@@ -78,7 +75,7 @@ const RING_REACH = `calc(${size.ringWidth} + ${size.ringOffsetText} + ${CRUMB_RO
 const styles = stylex.create({
   // One row the shell's bar height, across the page's card from edge to
   // edge, at the top of the page, which scrolls under it: on the card's
-  // own ground at every width (app-frame.tsx), as #2503's bar on its
+  // own ground at every width (shell.tsx), as #2503's bar on its
   // card's (shell-card), with a hairline at its foot.
   bar: {
     position: "sticky",
@@ -129,9 +126,8 @@ const styles = stylex.create({
     marginInlineStart: `calc((${size.sidebarIcon} - ${size.sidebarIconButton}) / 2)`,
     marginInlineEnd: "-2px",
   },
-  // On a phone the button is #2503's Menu button, a ghost Button: in its
-  // ink, the chat button's at the bar's other end, not the sidebar's
-  // greys.
+  // On a phone the button is #2503's Menu button, a ghost Button: in the
+  // page's ink, not the sidebar's greys.
   triggerInk: {
     display: "contents",
     "--damsko-sidebar-secondary-foreground": {
@@ -232,11 +228,6 @@ const styles = stylex.create({
     gap: space["2"],
     marginInlineStart: "auto",
   },
-  // Room at its end for the chat's button, which the frame lays over the
-  // card's end at the bar's height (app-frame.tsx), as the reference's.
-  roomForChat: {
-    paddingInlineEnd: `calc(${size.appShellPageInline} + ${size.sidebarIconButton})`,
-  },
 });
 
 /**
@@ -291,7 +282,7 @@ const PhoneTrail = ({
         {step === undefined ? null : (
           <li ref={watchStep} {...stylex.props(styles.phoneStep)}>
             {step.render === undefined ? (
-              // A step that leads nowhere (Settings) in the page's look, as
+              // A step that leads nowhere in the page's look, as
               // #2503's bar draws a crumb without a link (`CrumbStep`).
               <span title={step.label} {...stylex.props(styles.phonePageWords)}>
                 {step.label}
@@ -313,7 +304,7 @@ const PhoneTrail = ({
             title={page.label}
             {...stylex.props(styles.phonePageWords)}
           >
-            {page.name ?? page.label}
+            {page.label}
           </span>
         </li>
       </ol>
@@ -327,22 +318,16 @@ const PhoneTrail = ({
  * or a sheet on a narrow window; otherwise the sidebar's head holds it),
  * then where the page is (Damsko's Breadcrumb, its steps parted by a
  * slash; on a phone the page and the step before it, `PhoneTrail`), with
- * where its subject stands after it (`trailing`), and at its end the
- * page's actions. `roomEnd` keeps room at its end for a button the frame
- * lays over the card there (the product's chat).
+ * and at its end the page's actions.
  */
 export const PageBar = ({
   crumbs,
   labels,
   actions,
-  trailing,
-  roomEnd = false,
 }: {
   crumbs: readonly Crumb[];
   labels: PageBarLabels;
   actions?: ReactNode;
-  trailing?: ReactNode;
-  roomEnd?: boolean;
 }) => {
   const { state, isMobile } = useSidebar();
   const away = isMobile || state === "collapsed";
@@ -393,7 +378,7 @@ export const PageBar = ({
           !isMobile && target.dataset.slot === "sidebar-trigger";
       }}
       ref={bar}
-      {...stylex.props(styles.bar, roomEnd && styles.roomForChat)}
+      {...stylex.props(styles.bar)}
     >
       {away ? (
         <span {...stylex.props(styles.triggerInk)}>
@@ -425,9 +410,7 @@ export const PageBar = ({
                         {crumb.render({ children: crumb.label })}
                       </BreadcrumbLink>
                     ) : (
-                      <BreadcrumbPage>
-                        {crumb.name ?? crumb.label}
-                      </BreadcrumbPage>
+                      <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
                     )}
                   </BreadcrumbItem>
                 </Fragment>
@@ -435,7 +418,6 @@ export const PageBar = ({
             </BreadcrumbList>
           </Breadcrumb>
         )}
-        {trailing}
       </div>
       {actions === undefined ? null : (
         <div {...stylex.props(styles.actions)}>{actions}</div>

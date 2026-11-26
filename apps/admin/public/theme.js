@@ -13,6 +13,9 @@
       "dark",
       mode === "dark" || (mode === "system" && dark.matches)
     );
+    // Damsko's parts read the same choice from `data-mode`: their colours
+    // follow the root's `color-scheme`, which its themes.css sets from it.
+    document.documentElement.dataset.mode = mode;
   };
   apply();
   dark.addEventListener("change", apply);

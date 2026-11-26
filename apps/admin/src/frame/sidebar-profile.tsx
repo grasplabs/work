@@ -52,15 +52,6 @@ const styles = stylex.create({
     cornerShape: "round",
     fontWeight: font.weightNormal,
   },
-  // A submenu is as wide as its longest choice.
-  subPanel: {
-    width: "auto",
-    minWidth: 0,
-    backgroundColor: `light-dark(${colors.sidebarCard}, oklch(0.26 0 0))`,
-    borderRadius: "8px",
-    cornerShape: "round",
-    fontWeight: font.weightNormal,
-  },
   item: {
     [iconVars.size]: size.sidebarIcon,
     [iconVars.stroke]: size.iconStroke,
@@ -100,10 +91,6 @@ const styles = stylex.create({
       [FORCED]: { default: "CanvasText", [HIGHLIGHTED]: "HighlightText" },
     },
   },
-  // A choice keeps room at its end for the tick.
-  choice: {
-    paddingInlineEnd: `calc(${size.sidebarRowInline} + ${size.sidebarIcon} + ${space["2"]})`,
-  },
   icon: { display: "inline-flex", flexShrink: 0, color: "inherit" },
   words: {
     flexGrow: 1,
@@ -111,12 +98,6 @@ const styles = stylex.create({
     minWidth: 0,
     overflow: "hidden",
     textOverflow: "ellipsis",
-  },
-  end: { display: "inline-flex", flexShrink: 0, marginInlineStart: "auto" },
-  tick: {
-    position: "absolute",
-    insetInlineEnd: size.sidebarRowInline,
-    display: "inline-flex",
   },
   // The theme's row: its words at the start, the segments at the end.
   themeRow: {
@@ -249,8 +230,6 @@ export interface ProfileChoice {
   label: string;
   value: string;
   icon?: IconData;
-  /** Its picture: initials when true. */
-  avatar?: boolean;
 }
 
 /** One entry of the menu: a press, the theme's row, or a line. */

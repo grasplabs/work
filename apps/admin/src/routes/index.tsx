@@ -18,22 +18,17 @@ import { ArrowRightIcon, ChevronRightIcon, PlusIcon } from "lucide-react";
 
 import { WithAdmins } from "../admin/admins.tsx";
 import { PageLoading } from "../admin/failure.tsx";
+import { needsOf } from "../admin/needs.ts";
 import { AdminPage } from "../admin/page.tsx";
 import { Figure, KnowledgeDots, StageBar } from "../admin/parts.tsx";
 import { Section } from "../admin/section.tsx";
-import {
-  organizationsOf,
-  rolloutNeedLine,
-  rolloutNeeds,
-  unreadWords,
-} from "../admin/views.ts";
+import { organizationsOf, unreadWords } from "../admin/views.ts";
 import type { Organization } from "../admin/views.ts";
 import {
   contractWords,
   euro,
   euros,
   formatDate,
-  needLine,
   phaseWords,
   stageLines,
   stageWords,
@@ -343,24 +338,14 @@ const Portfolio = ({
  * own platform needs (`rolloutNeeds`, acted on from its Setup), whether
  * its core answered or not, then what its core's view says.
  */
-const needsAt = ({ admin, view }: Organization) => {
-  const { id, name } = admin.client;
-  return [
-    ...rolloutNeeds(admin.client).map((need) => ({
-      id,
-      name,
-      text: rolloutNeedLine(need),
-      setup: true,
-    })),
-    ...(view === null
-      ? []
-      : view.needs.map((need) => ({
-          id,
-          name,
-          text: needLine(need, view),
-          setup: false,
-        }))),
-  ];
+const needsAt = (organization: Organization) => {
+  const { id, name } = organization.admin.client;
+  return needsOf(organization).map(({ text, section }) => ({
+    id,
+    name,
+    text,
+    setup: section === "setup",
+  }));
 };
 
 /** What needs Grasp today, at every organization: the most pressing at each first. */

@@ -379,15 +379,17 @@ export interface FrameSidebarProps {
   navLabel: string;
   /** One quiet sentence where the rows would be, when there are none. */
   empty?: string;
-  /** The main list's views, under the head; the host gives each view's rows as `groups`. */
-  tabs: readonly SidebarTab[];
-  tab: string;
-  onTabChange: (value: string) => void;
-  tabsLabel: string;
+  /** The main list's views, under the head (none while the admin's records come); the host gives each view's rows as `groups`. */
+  views?: {
+    tabs: readonly SidebarTab[];
+    tab: string;
+    onTabChange: (value: string) => void;
+    label: string;
+  };
   /** The place staff are in: its level takes the main list's place. */
   section?: SidebarSection;
-  /** The staff member, at the foot. */
-  profile: ReactNode;
+  /** The staff member, at the foot; no foot without one. */
+  profile?: ReactNode;
 }
 
 /**
@@ -403,10 +405,7 @@ export const FrameSidebar = ({
   groups,
   navLabel,
   empty,
-  tabs,
-  tab,
-  onTabChange,
-  tabsLabel,
+  views,
   section,
   profile,
 }: FrameSidebarProps) => {
@@ -452,26 +451,36 @@ export const FrameSidebar = ({
       </SidebarHeader>
       <SidebarLevels value={section?.id ?? "main"}>
         <SidebarLevel value="main">
-          <SidebarSwitch
-            id={switchId}
-            label={tabsLabel}
-            onChoose={onTabChange}
-            tabs={tabs}
-            value={tab}
-          />
-          <SwitchPanel id={switchId} value={tab}>
+          {views === undefined ? (
             <Nav empty={empty} groups={groups} label={navLabel} />
-          </SwitchPanel>
+          ) : (
+            <>
+              <SidebarSwitch
+                id={switchId}
+                label={views.label}
+                onChoose={(next) => {
+                  views.onTabChange(next);
+                }}
+                tabs={views.tabs}
+                value={views.tab}
+              />
+              <SwitchPanel id={switchId} value={views.tab}>
+                <Nav empty={empty} groups={groups} label={navLabel} />
+              </SwitchPanel>
+            </>
+          )}
         </SidebarLevel>
         {shownSection === undefined ? null : (
           <SectionLevel key={shownSection.id} section={shownSection} />
         )}
       </SidebarLevels>
-      <SidebarFooter>
-        <div data-slot="sidebar-foot" {...stylex.props(styles.foot)}>
-          {profile}
-        </div>
-      </SidebarFooter>
+      {profile === undefined ? null : (
+        <SidebarFooter>
+          <div data-slot="sidebar-foot" {...stylex.props(styles.foot)}>
+            {profile}
+          </div>
+        </SidebarFooter>
+      )}
     </Sidebar>
   );
 };
