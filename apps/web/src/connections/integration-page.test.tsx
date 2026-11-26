@@ -130,6 +130,7 @@ const stopped: ListedConnection = {
   id: "c-stopped",
   source: "composio",
   provider: "hubspot",
+  name: "hubspot",
   scope: "shared",
   status: "needs_reauth",
   ownerUserId: null,
@@ -157,6 +158,7 @@ const mailbox = (
   id: `c-${account}`,
   source: "native",
   provider: "microsoft",
+  name: "Microsoft 365",
   scope: "shared",
   status,
   ownerUserId: null,
@@ -410,9 +412,9 @@ describe("the Connectors pages, back from a sign-in", () => {
     );
 
     expect({
-      // The account's tile, under its provider's ID, as the catalog names none.
+      // The account's tile, under connect's name for it, as the catalog names none.
       app: [...document.querySelectorAll("button")].some((each) =>
-        each.textContent.startsWith("microsoft")
+        each.textContent.startsWith("Microsoft 365")
       ),
       said: alerts.some((each) => each.includes("The catalog can't be read.")),
       searched: document.body.textContent.includes("No apps match"),

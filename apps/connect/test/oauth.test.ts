@@ -1178,7 +1178,7 @@ describe("reconnecting a connection whose access ran out", () => {
     ]);
   });
 
-  it("of a person removed once their flow was already taken connects as new, which the next offboarding try stops", async () => {
+  it("of a person removed once their flow was already taken makes nothing, and drops the grant it was given", async () => {
     const anna = someone();
     const account = ownAccount(anna, "google");
     const connectionId = await connectedThenRanOut(anna, account);
@@ -1188,22 +1188,29 @@ describe("reconnecting a connection whose access ran out", () => {
         person: null,
         ownerUserIds: [anna.userId],
       });
-    // Too late to spend the flow: it is past that, about to write.
-    const finished = await finishConnection(
-      { ...env, DB: racingOnce(offboard) },
-      flow
+    // Too late to spend the flow: it is past that, about to write. The
+    // offboarding took the person's flows, so the write finds none.
+    const finished = await outcome(
+      finishConnection({ ...env, DB: racingOnce(offboard) }, flow)
     );
-    expect(finished.connectionId).not.toBe(connectionId);
-    await expect(
-      Promise.all([stored(connectionId), reconnections(connectionId)])
-    ).resolves.toStrictEqual([{ status: "disconnected", tokens: 0 }, []]);
-    // Core retries until a call completes with nothing left.
-    await expect(offboard()).resolves.toStrictEqual({ disconnected: 1 });
-    await expect(stored(finished.connectionId)).resolves.toStrictEqual({
-      status: "disconnected",
-      tokens: 0,
+    const { results: annas } = await env.DB.prepare(
+      "SELECT id FROM connections WHERE owner_user_id = ?"
+    )
+      .bind(anna.userId)
+      .all<{ id: string }>();
+    expect({
+      finished,
+      annas: annas.map(({ id }) => id),
+      old: await stored(connectionId),
+      reconnections: await reconnections(connectionId),
+      grantHolds: providers.grantHolds(account),
+    }).toStrictEqual({
+      finished: "connection.flow_invalid",
+      annas: [connectionId],
+      old: { status: "disconnected", tokens: 0 },
+      reconnections: [],
+      grantHolds: false,
     });
-    expect(providers.grantHolds(account)).toBeFalsy();
   });
 });
 

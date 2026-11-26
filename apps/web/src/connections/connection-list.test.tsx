@@ -43,6 +43,7 @@ const connection = (change: Partial<CatalogConnection>): CatalogConnection => ({
   id: "c1",
   source: "composio",
   provider: "notes",
+  name: "notes",
   scope: "personal",
   status: "active",
   ownerUserId: "u1",

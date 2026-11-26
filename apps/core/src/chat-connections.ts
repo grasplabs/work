@@ -600,7 +600,7 @@ export const chatRequests = async (
     return {
       id: permission.id,
       connectionId: row.objectId,
-      provider: connection?.provider ?? null,
+      name: connection?.name ?? null,
       accountName: connection?.accountName ?? null,
       resource: row.resource,
       actions: permission.actions,

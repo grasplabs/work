@@ -58,7 +58,28 @@ export interface GuardedChange {
   where: SQL;
   /** The change: statements the same condition guards. */
   writes: readonly BatchItem<"sqlite">[];
+  /**
+   * Entries of the event's detail counted as it is written, before the
+   * change: each a SQL expression (a COUNT subquery over the rows `writes`
+   * touch), exact in the change's own transaction.
+   */
+  counted?: Record<string, SQL>;
 }
+
+/** `event` as JSON text, with `counted` set into its detail in SQL. */
+const eventText = (
+  event: unknown,
+  counted: Record<string, SQL> | undefined
+): SQL => {
+  const text = JSON.stringify(event);
+  const entries = Object.entries(counted ?? {});
+  return entries.length === 0
+    ? sql`${text}`
+    : sql`json_set(${text}, ${sql.join(
+        entries.map(([key, value]) => sql`${`$.detail.${key}`}, (${value})`),
+        sql`, `
+      )})`;
+};
 
 /**
  * Records each change's event only if a row of its `from` matches its
@@ -73,23 +94,27 @@ export const recordEventsIf = async (
 ): Promise<boolean[]> => {
   const db = drizzle(env.DB);
   const events = changes.map(({ entry }) => createAuditEvent(entry, "connect"));
-  const statements = changes.flatMap(({ from, where, writes }, index) => [
-    db
-      .insert(auditOutbox)
-      .select(
-        db
-          .select({
-            id: sql<string>`${events[index]?.id}`.as("id"),
-            event: sql<string>`${JSON.stringify(events[index])}`.as("event"),
-            createdAt: sql<Date>`${Date.now()}`.as("created_at"),
-          })
-          .from(from)
-          .where(where)
-          .limit(1)
-      )
-      .returning({ id: auditOutbox.id }),
-    ...writes,
-  ]);
+  const statements = changes.flatMap(
+    ({ from, where, writes, counted }, index) => [
+      db
+        .insert(auditOutbox)
+        .select(
+          db
+            .select({
+              id: sql<string>`${events[index]?.id}`.as("id"),
+              event: sql<string>`${eventText(events[index], counted)}`.as(
+                "event"
+              ),
+              createdAt: sql<Date>`${Date.now()}`.as("created_at"),
+            })
+            .from(from)
+            .where(where)
+            .limit(1)
+        )
+        .returning({ id: auditOutbox.id }),
+      ...writes,
+    ]
+  );
   const [first, ...rest] = statements;
   if (first === undefined) {
     return [];
@@ -111,11 +136,11 @@ export const recordEventsIf = async (
 export const recordEventIf = async (
   env: Env,
   entry: AuditEntry,
-  { from, where }: { from: SQLiteTable; where: SQL },
+  { from, where, counted }: Pick<GuardedChange, "from" | "where" | "counted">,
   writes: readonly BatchItem<"sqlite">[]
 ): Promise<boolean> => {
   const [recorded = false] = await recordEventsIf(env, [
-    { entry, from, where, writes },
+    { entry, from, where, writes, counted },
   ]);
   return recorded;
 };

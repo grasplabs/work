@@ -24,6 +24,7 @@ export type {
   IdTokenDeclaration,
   Infer,
   InferInput,
+  McpDeclaration,
   OAuth2Declaration,
   QueryValue,
   RightsDeclaration,

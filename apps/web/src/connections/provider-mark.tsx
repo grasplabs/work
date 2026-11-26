@@ -4,8 +4,7 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
-import { brands } from "./brands.ts";
-import type { Brand } from "./brands.ts";
+import { brands, isBrand } from "./brands.ts";
 
 // A provider's mark wherever an app is named on the Integrations pages,
 // on Damsko's BrandIcon tile: the logo core serves for it
@@ -18,9 +17,6 @@ import type { Brand } from "./brands.ts";
 
 /** The size of an app's mark: Damsko's BrandIcon's own, by where it stands. */
 export type MarkSize = "sm" | "default" | "lg";
-
-/** Whether the product has its own mark for the connector `id`, by that id exactly. */
-const isBrand = (id: string): id is Brand => Object.hasOwn(brands, id);
 
 const styles = stylex.create({
   // A served logo on BrandIcon's tile: its ground, its edge and its corner.

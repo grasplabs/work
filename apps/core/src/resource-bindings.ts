@@ -765,7 +765,7 @@ const targetLabels = async (
             ? null
             : {
                 account: connection.accountName,
-                provider: connection.provider,
+                name: connection.name,
               },
       };
     }

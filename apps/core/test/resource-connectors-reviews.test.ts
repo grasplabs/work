@@ -348,7 +348,7 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
         label: {
           connection: {
             account: connection?.accountName ?? null,
-            provider: "microsoft",
+            name: "Microsoft 365",
           },
         },
         choices: null,

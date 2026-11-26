@@ -168,7 +168,7 @@ export interface BindingLabel {
    * A connector binding's connection, while the reviewer can see it among
    * their own connections; null otherwise, and for other kinds.
    */
-  connection: { account: string | null; provider: string } | null;
+  connection: { account: string | null; name: string } | null;
 }
 
 /**

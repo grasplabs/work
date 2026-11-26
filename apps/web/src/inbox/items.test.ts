@@ -111,6 +111,7 @@ const signInAgain: SignInAgainItem = {
     id: "connection-1",
     source: "native",
     provider: "microsoft",
+    name: "Microsoft 365",
     scope: "personal",
     status: "needs_reauth",
     ownerUserId: "me",

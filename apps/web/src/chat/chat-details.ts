@@ -30,10 +30,12 @@ const readSourceNames = async (
     for (const {
       id,
       provider,
+      name,
       accountName,
     } of await session.connections.list()) {
       names.set(id, {
-        name: accountName === null ? provider : `${provider} (${accountName})`,
+        name: accountName === null ? name : `${name} (${accountName})`,
+        provider,
       });
     }
   } catch {

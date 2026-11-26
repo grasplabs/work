@@ -733,6 +733,11 @@ const readOnce = async (
   try {
     answered = await server.call(tool.name, input);
   } catch (error) {
+    // Too much to read is the caller's to fix by asking for less (a page,
+    // fields), not a server that is down.
+    if (error instanceof McpError && error.answerTooLarge) {
+      throw connectErrors.create("connect.answer_too_large");
+    }
     throw error instanceof McpError
       ? connectErrors.create("connect.server_unavailable")
       : error;
