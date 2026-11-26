@@ -1,4 +1,4 @@
-import { noTeamId } from "@grasp-os/shared/onboarding";
+import { leadsOfTeam, noTeamId } from "@grasp-os/shared/onboarding";
 import type { RosterPerson, RosterTeam } from "@grasp-os/shared/onboarding";
 import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
 import { Button } from "@grasp-os/ui/components/button";
@@ -33,6 +33,7 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
+import { formatList } from "../format.ts";
 import { TopError } from "../frame/top-error.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { CalmStep } from "./calm-frame.tsx";
@@ -44,6 +45,7 @@ import { personRowMarker } from "./people-list.stylex.ts";
 import {
   countsOf,
   found,
+  leadIdsOf,
   leads,
   noPicks,
   takesPart,
@@ -62,7 +64,7 @@ import { orgConfirmed, orgDraft } from "./visit.ts";
 // Who Stephen talks to (Ruben: no HR platform; the people come from the
 // Microsoft or Google directory the company step connected). Everyone it
 // gave is on one list, by team: the admin unticks who doesn't take part,
-// a whole team at once if they like, and marks each team's lead, whom
+// a whole team at once if they like, and marks each team's leads, whom
 // Stephen talks to first. Someone missing, or no directory at all: they
 // add people by address or with a staff list. Nothing goes to core until
 // Continue, which confirms the organization as it stands (core checks it
@@ -254,7 +256,11 @@ const TeamRow = ({
   const { t } = useLingui();
   const [all, setAll] = useState(false);
   const taking = people.filter((person) => takesPart(picks, person)).length;
-  const lead = people.find((person) => person.id === team.lead);
+  // Its leads by name, the first first: "Sales · led by Ann and Bob" while closed.
+  const ledBy = leadsOfTeam(team).flatMap((id) => {
+    const lead = people.find((person) => person.id === id);
+    return lead === undefined ? [] : [lead.name];
+  });
   const counted = searching
     ? plural(people.length, { one: "# found", other: "# found" })
     : t`${taking} of ${people.length}`;
@@ -285,9 +291,9 @@ const TeamRow = ({
         >
           <span {...stylex.props(styles.teamName)}>
             <Text as="span" color="default" truncate weight="medium">
-              {lead === undefined || open
+              {ledBy.length === 0 || open
                 ? team.name
-                : t`${team.name} · led by ${lead.name}`}
+                : t`${team.name} · led by ${formatList(ledBy)}`}
             </Text>
           </span>
           <Text as="span" color="subtle" size="sm">
@@ -348,8 +354,7 @@ const PeopleList = ({
   const shown = found(picks, query);
   // The leads as a team was last opened stand first in it; marking another moves no row, so its
   // star plays where it was pressed. Opening or closing a team brings the leads up again.
-  const leadsNow = (): ReadonlySet<string> =>
-    new Set(picks.teams.flatMap(({ lead }) => (lead === null ? [] : [lead])));
+  const leadsNow = (): ReadonlySet<string> => leadIdsOf(picks);
   const [first, setFirst] = useState(leadsNow);
   const rows = teamRowsOf(picks, shown, noTeamId, first);
   // A small company opens every team; a large one opens a team on its press. A search opens all it found.
@@ -472,11 +477,11 @@ const useWords = (from: "directory" | "list" | "nobody", signIn: string) => {
     title: t`Who should I talk to?`,
     body:
       from === "directory"
-        ? t`Everyone from ${signIn} is listed below. Untick anyone who isn’t taking part, and mark each team’s lead—I’ll talk to them first.`
+        ? t`Everyone from ${signIn} is listed below. Untick anyone who isn’t taking part, and mark each team’s leads—I’ll talk to them first.`
         : t`Everyone from your staff list is here. Untick who isn’t taking part, and mark who leads each team: I talk to the leads first.`,
     spoken:
       from === "directory"
-        ? t`Now let’s decide who I’ll be talking to. Everyone from ${signIn} is already here—just untick anyone who shouldn’t be included, and mark each team’s lead. I always speak with leads first so they know what’s coming before their team does. Missing someone? Add them by email.`
+        ? t`Now let’s decide who I’ll be talking to. Everyone from ${signIn} is already here—just untick anyone who shouldn’t be included, and mark each team’s leads, as many as it has. I always speak with leads first so they know what’s coming before their team does. Missing someone? Add them by email.`
         : t`Now for the people I’ll be talking to. Everyone from your staff list is already here. Untick anyone who shouldn’t take part, and mark who leads each team. I always start with the leads, so they hear about this before their team does. Someone missing? Add them by email.`,
   };
 };
