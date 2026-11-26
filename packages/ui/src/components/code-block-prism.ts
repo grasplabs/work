@@ -1,26 +1,95 @@
-// Prism for CodeBlock (code-block.tsx), in the browser only: its core and each language are loaded
-// the first time a block asks for them, never up front. The code is tokenized into runs that are
-// drawn as React elements, so nothing reaches the page as HTML.
-//
-// Prism 1.30.0, pinned. Its language files read a global `Prism`, so the core is put on globalThis
-// before any of them loads.
-// oxlint-disable-next-line typescript/triple-slash-reference -- Prism's language files have no types and nothing to import: it brings their declaration to every program this file is in
-/// <reference path="./code-block-grammars.d.ts" />
+// Prism for CodeBlock (code-block.tsx), read in a worker (code-block-worker.ts), never on the page.
+// Prism's grammars take time that grows faster than the code on some text: one match of
+// TypeScript's over a string of 50,000 characters takes seconds, and no part of it can be cut
+// short or paused. Code in a block is often a model's, so whatever it is, Prism reads it in the
+// worker, whole, as Prism reads any text; the page draws it plain until the worker answers, and
+// keeps it plain when the worker takes too long (code-block.tsx). This file is what both sides
+// share (the languages, Prism's tokens turned into runs) and how the page turns runs into lines;
+// it loads no Prism: the worker passes its own.
 import type * as PrismTypes from "prismjs";
 
-import { ownValue } from "../lib/utils";
-
 type PrismModule = typeof PrismTypes;
-type Grammar = PrismTypes.Grammar;
 type PrismToken = PrismTypes.Token;
 
-/** Prism and one language's grammar, once both have loaded. */
-export interface Highlight {
-  Prism: PrismModule;
-  grammar: Grammar;
+/**
+ * The languages a block can name, by the names people write: the name shown over the code, Prism's
+ * grammar for it, and the extension its file is saved with. The worker loads every one of these
+ * grammars.
+ */
+export const languages: Record<
+  string,
+  { name: string; grammar: string; extension: string }
+> = {
+  ts: { name: "TypeScript", grammar: "typescript", extension: "ts" },
+  typescript: { name: "TypeScript", grammar: "typescript", extension: "ts" },
+  tsx: { name: "TSX", grammar: "tsx", extension: "tsx" },
+  jsx: { name: "JSX", grammar: "jsx", extension: "jsx" },
+  js: { name: "JavaScript", grammar: "javascript", extension: "js" },
+  javascript: { name: "JavaScript", grammar: "javascript", extension: "js" },
+  html: { name: "HTML", grammar: "markup", extension: "html" },
+  markup: { name: "HTML", grammar: "markup", extension: "html" },
+  xml: { name: "XML", grammar: "markup", extension: "xml" },
+  svg: { name: "SVG", grammar: "markup", extension: "svg" },
+  css: { name: "CSS", grammar: "css", extension: "css" },
+  json: { name: "JSON", grammar: "json", extension: "json" },
+  bash: { name: "Bash", grammar: "bash", extension: "sh" },
+  sh: { name: "Shell", grammar: "bash", extension: "sh" },
+  shell: { name: "Shell", grammar: "bash", extension: "sh" },
+  python: { name: "Python", grammar: "python", extension: "py" },
+  py: { name: "Python", grammar: "python", extension: "py" },
+  markdown: { name: "Markdown", grammar: "markdown", extension: "md" },
+  md: { name: "Markdown", grammar: "markdown", extension: "md" },
+  yaml: { name: "YAML", grammar: "yaml", extension: "yaml" },
+  yml: { name: "YAML", grammar: "yaml", extension: "yml" },
+  sql: { name: "SQL", grammar: "sql", extension: "sql" },
+  diff: { name: "Diff", grammar: "diff", extension: "diff" },
+  go: { name: "Go", grammar: "go", extension: "go" },
+  rust: { name: "Rust", grammar: "rust", extension: "rs" },
+  rs: { name: "Rust", grammar: "rust", extension: "rs" },
+  java: { name: "Java", grammar: "java", extension: "java" },
+  c: { name: "C", grammar: "c", extension: "c" },
+  cpp: { name: "C++", grammar: "cpp", extension: "cpp" },
+  "c++": { name: "C++", grammar: "cpp", extension: "cpp" },
+  csharp: { name: "C#", grammar: "csharp", extension: "cs" },
+  cs: { name: "C#", grammar: "csharp", extension: "cs" },
+  "c#": { name: "C#", grammar: "csharp", extension: "cs" },
+  php: { name: "PHP", grammar: "php", extension: "php" },
+  ruby: { name: "Ruby", grammar: "ruby", extension: "rb" },
+  rb: { name: "Ruby", grammar: "ruby", extension: "rb" },
+  kotlin: { name: "Kotlin", grammar: "kotlin", extension: "kt" },
+  kt: { name: "Kotlin", grammar: "kotlin", extension: "kt" },
+  swift: { name: "Swift", grammar: "swift", extension: "swift" },
+  toml: { name: "TOML", grammar: "toml", extension: "toml" },
+  docker: { name: "Dockerfile", grammar: "docker", extension: "dockerfile" },
+  dockerfile: {
+    name: "Dockerfile",
+    grammar: "docker",
+    extension: "dockerfile",
+  },
+};
+
+/**
+ * Code as Prism reads it, in runs: where each ends in the code, and which of `kinds` it is. A kind
+ * is Prism's names for a run ("keyword", "string"), outermost first, joined by spaces; a run Prism
+ * names nothing is "". Two runs side by side of one kind are one.
+ */
+export interface Runs {
+  ends: Uint32Array;
+  kinds: Uint32Array;
+  names: string[];
 }
 
-/** A run of code and what Prism says it is ("keyword", "string"), outermost first. */
+/**
+ * The most runs the lines a block draws may have and be coloured: drawn lines Prism reads as more
+ * (a block opened on minified code, generated data, thousands of lines) are plain, all of them. A
+ * folded block draws few lines, so it is coloured; opened, it is weighed again. Every run is a node
+ * the page draws, all in one frame when the block opens: 5,000, some 1,000 to 1,300 lines of
+ * ordinary code, is what that frame holds in Chromium, Firefox and WebKit, on CI's two-core runners
+ * too, no more than 100 ms past the same lines as text. 10,000 held it 146 ms past them there.
+ */
+export const MOST_RUNS = 5000;
+
+/** A run of code and what Prism says it is, outermost first. */
 export interface Segment {
   text: string;
   types: string[];
@@ -29,218 +98,12 @@ export interface Segment {
 /** One line of code: its runs, in order. */
 export type Line = Segment[];
 
-// The languages a block can name, by the names people write, each with the Prism files it needs
-// in order. The core already holds markup, css, clike and javascript.
-const files: Record<string, () => Promise<void>> = {
-  typescript: async () => {
-    await import("prismjs/components/prism-typescript.js");
-  },
-  jsx: async () => {
-    await import("prismjs/components/prism-jsx.js");
-  },
-  tsx: async () => {
-    await import("prismjs/components/prism-tsx.js");
-  },
-  json: async () => {
-    await import("prismjs/components/prism-json.js");
-  },
-  bash: async () => {
-    await import("prismjs/components/prism-bash.js");
-  },
-  python: async () => {
-    await import("prismjs/components/prism-python.js");
-  },
-  markdown: async () => {
-    await import("prismjs/components/prism-markdown.js");
-  },
-  yaml: async () => {
-    await import("prismjs/components/prism-yaml.js");
-  },
-  sql: async () => {
-    await import("prismjs/components/prism-sql.js");
-  },
-  diff: async () => {
-    await import("prismjs/components/prism-diff.js");
-  },
-  go: async () => {
-    await import("prismjs/components/prism-go.js");
-  },
-  rust: async () => {
-    await import("prismjs/components/prism-rust.js");
-  },
-};
-
-const needs: Record<string, string[]> = {
-  ts: ["typescript"],
-  typescript: ["typescript"],
-  tsx: ["jsx", "typescript", "tsx"],
-  jsx: ["jsx"],
-  js: [],
-  javascript: [],
-  html: [],
-  markup: [],
-  xml: [],
-  svg: [],
-  css: [],
-  json: ["json"],
-  bash: ["bash"],
-  sh: ["bash"],
-  shell: ["bash"],
-  python: ["python"],
-  py: ["python"],
-  markdown: ["markdown"],
-  md: ["markdown"],
-  yaml: ["yaml"],
-  yml: ["yaml"],
-  sql: ["sql"],
-  diff: ["diff"],
-  go: ["go"],
-  rust: ["rust"],
-};
-
-// The Prism grammar's own name, where people write another.
-const grammarName: Record<string, string> = {
-  ts: "typescript",
-  js: "javascript",
-  html: "markup",
-  xml: "markup",
-  svg: "markup",
-  sh: "bash",
-  shell: "bash",
-  py: "python",
-  md: "markdown",
-  yml: "yaml",
-};
-
-/** The language's name as a person reads it, for the block's header; plain text's is a word (i18n). */
-export const languageNames: Record<string, string> = {
-  ts: "TypeScript",
-  typescript: "TypeScript",
-  tsx: "TSX",
-  jsx: "JSX",
-  js: "JavaScript",
-  javascript: "JavaScript",
-  html: "HTML",
-  markup: "HTML",
-  xml: "XML",
-  svg: "SVG",
-  css: "CSS",
-  json: "JSON",
-  bash: "Bash",
-  sh: "Shell",
-  shell: "Shell",
-  python: "Python",
-  py: "Python",
-  markdown: "Markdown",
-  md: "Markdown",
-  yaml: "YAML",
-  yml: "YAML",
-  sql: "SQL",
-  diff: "Diff",
-  go: "Go",
-  rust: "Rust",
-};
-
-let core: Promise<PrismModule> | undefined;
-const loaded = new Map<string, Promise<void>>();
-
-/** Whether `value` is Prism itself: the module's default where a bundler wraps it. */
-const isPrism = (value: unknown): value is PrismModule =>
+/** Whether `value` is Prism itself. */
+export const isPrism = (value: unknown): value is PrismModule =>
   typeof value === "object" &&
   value !== null &&
   "tokenize" in value &&
   "languages" in value;
-
-// One Prism on the page. Each language file runs once, into whichever Prism is the global then: with
-// two (another part of the page that loaded its own), a file the other loaded first never reaches
-// this one, and its blocks stay plain. So a Prism already on the page is taken as it is, before
-// loading this one and after.
-const startCore = async (): Promise<PrismModule> => {
-  const before: unknown = Reflect.get(globalThis, "Prism");
-  if (isPrism(before)) {
-    return before;
-  }
-  // Prism highlights nothing by itself: it waits to be asked.
-  Reflect.set(globalThis, "Prism", {
-    ...(typeof before === "object" ? before : null),
-    manual: true,
-  });
-  const module = await import("prismjs");
-  const now: unknown = Reflect.get(globalThis, "Prism");
-  if (isPrism(now)) {
-    return now;
-  }
-  const inner: unknown = "default" in module ? module.default : null;
-  const Prism = isPrism(inner) ? inner : module;
-  Reflect.set(globalThis, "Prism", Prism);
-  return Prism;
-};
-
-const loadCore = async (): Promise<PrismModule> => {
-  core ??= startCore();
-  const attempt = core;
-  try {
-    return await attempt;
-  } catch (error) {
-    // A load that failed (a network error, a chunk gone after a deploy) is forgotten, so the next
-    // block tries again.
-    if (core === attempt) {
-      core = undefined;
-    }
-    throw error;
-  }
-};
-
-const loadFile = async (file: string): Promise<void> => {
-  const load = ownValue(files, file);
-  if (!load) {
-    return;
-  }
-  const attempt = loaded.get(file) ?? load();
-  loaded.set(file, attempt);
-  try {
-    await attempt;
-  } catch (error) {
-    if (loaded.get(file) === attempt) {
-      loaded.delete(file);
-    }
-    throw error;
-  }
-};
-
-/** One after another: a language's file reads the grammars of those before it. */
-const loadInOrder = async (list: string[]): Promise<void> => {
-  const [first, ...rest] = list;
-  if (first === undefined) {
-    return;
-  }
-  await loadFile(first);
-  await loadInOrder(rest);
-};
-
-/**
- * Prism and the grammar for `language`, or null when Prism does not know it or it could not be
- * loaded: the code then stays plain.
- */
-export const grammarOrNull = async (
-  language: string
-): Promise<Highlight | null> => {
-  const key = language.toLowerCase();
-  // The language is a fence's tag, written by whoever wrote the answer: only the tables' own names.
-  const list = ownValue(needs, key);
-  if (!list) {
-    return null;
-  }
-  try {
-    const Prism = await loadCore();
-    await loadInOrder(list);
-    // `key` is one of the names above, so this never reaches the methods Prism keeps beside them.
-    const grammar = Prism.languages[ownValue(grammarName, key) ?? key];
-    return grammar ? { Prism, grammar } : null;
-  } catch {
-    return null;
-  }
-};
 
 const aliasesOf = (alias: string | string[]): string[] => {
   if (Array.isArray(alias)) {
@@ -249,38 +112,49 @@ const aliasesOf = (alias: string | string[]): string[] => {
   return alias ? [alias] : [];
 };
 
-// How much of a block is highlighted. Past this many lines or characters the rest is plain: a run
-// is a node to draw, and a long file pasted whole would be hundreds of thousands of them.
-const HIGHLIGHT_LINES = 1000;
-const HIGHLIGHT_CHARS = 50_000;
-
-/** How much of `code` is highlighted: up to a line's end within both bounds. */
-const highlightedLength = (code: string): number => {
-  let end = -1;
-  for (let line = 0; line < HIGHLIGHT_LINES; line += 1) {
-    end = code.indexOf("\n", end + 1);
-    if (end === -1 || end > HIGHLIGHT_CHARS) {
-      break;
-    }
-  }
-  if (end === -1 && code.length <= HIGHLIGHT_CHARS) {
-    return code.length;
-  }
-  if (end === -1 || end > HIGHLIGHT_CHARS) {
-    return Math.max(code.lastIndexOf("\n", HIGHLIGHT_CHARS), 0);
-  }
-  return end;
-};
-
 /**
- * The code as lines of runs. Without a grammar, each line is one plain run, and so is each line
- * past what is highlighted.
+ * `code` read whole by Prism in `grammar` (a value of `languages`), as runs; null when Prism has no
+ * such grammar.
  */
-export const linesOf = (code: string, highlight: Highlight | null): Line[] => {
-  const segments: Segment[] = [];
+export const runsOf = (
+  Prism: PrismModule,
+  code: string,
+  grammar: string
+): Runs | null => {
+  // Only a grammar's own entry: Prism keeps its methods (`extend`, `DFS`) beside them.
+  const found: unknown = Object.hasOwn(Prism.languages, grammar)
+    ? Prism.languages[grammar]
+    : undefined;
+  if (typeof found !== "object" || found === null) {
+    return null;
+  }
+  const ends: number[] = [];
+  const kinds: number[] = [];
+  const names: string[] = [];
+  const kindOf = new Map<string, number>();
+  let at = 0;
+  const add = (text: string, types: string[]) => {
+    if (!text) {
+      return;
+    }
+    const name = types.join(" ");
+    let kind = kindOf.get(name);
+    if (kind === undefined) {
+      kind = names.length;
+      names.push(name);
+      kindOf.set(name, kind);
+    }
+    at += text.length;
+    if (kinds.at(-1) === kind) {
+      ends[ends.length - 1] = at;
+    } else {
+      ends.push(at);
+      kinds.push(kind);
+    }
+  };
   const walk = (token: string | PrismToken, types: string[]) => {
     if (typeof token === "string") {
-      segments.push({ text: token, types });
+      add(token, types);
       return;
     }
     const inner = [...types, token.type, ...aliasesOf(token.alias)];
@@ -293,31 +167,175 @@ export const linesOf = (code: string, highlight: Highlight | null): Line[] => {
       walk(content, inner);
     }
   };
-  const highlighted = highlight ? highlightedLength(code) : 0;
-  if (highlight) {
-    for (const token of highlight.Prism.tokenize(
-      code.slice(0, highlighted),
-      highlight.grammar
-    )) {
-      walk(token, []);
+  for (const token of Prism.tokenize(code, found)) {
+    walk(token, []);
+  }
+  return {
+    ends: Uint32Array.from(ends),
+    kinds: Uint32Array.from(kinds),
+    names,
+  };
+};
+
+/** `code` up to its `count`th line's end: all of it when it has no more lines than that. */
+const firstLines = (code: string, count: number): string => {
+  let at = -1;
+  for (let line = 0; line < count; line += 1) {
+    at = code.indexOf("\n", at + 1);
+    if (at === -1) {
+      return code;
     }
   }
-  segments.push({ text: code.slice(highlighted), types: [] });
+  return code.slice(0, Math.max(at, 0));
+};
+
+/** Splits code into its lines: a last newline ends a line, it does not start one. */
+const split = (code: string): string[] => {
+  const lines = code.split("\n");
+  if (lines.length > 1 && lines.at(-1) === "") {
+    lines.pop();
+  }
+  return lines;
+};
+
+/** The first `most` lines of `code`, as text. */
+export const plainLines = (code: string, most: number): string[] =>
+  split(firstLines(code, most)).slice(0, most);
+
+/**
+ * The first `most` lines of `code`, coloured by `runs`, Prism's runs for it; made only until more
+ * than `mostRuns` runs are, the last line then cut short.
+ */
+export const linesOf = (
+  code: string,
+  runs: Runs,
+  most: number,
+  mostRuns = Infinity
+): Line[] => {
   const lines: Line[] = [[]];
-  for (const segment of segments) {
-    const parts = segment.text.split("\n");
-    for (const [index, part] of parts.entries()) {
+  let made = 0;
+  const add = (text: string, types: string[]) => {
+    for (const [index, part] of text.split("\n").entries()) {
       if (index > 0) {
         lines.push([]);
       }
       if (part) {
-        lines.at(-1)?.push({ text: part, types: segment.types });
+        lines.at(-1)?.push({ text: part, types });
+        made += 1;
       }
     }
+  };
+  const { ends, kinds, names } = runs;
+  const types = names.map((name) => (name ? name.split(" ") : []));
+  let start = 0;
+  for (const [index, end] of ends.entries()) {
+    if (lines.length > most || made > mostRuns) {
+      break;
+    }
+    add(code.slice(start, end), types[kinds[index] ?? 0] ?? []);
+    start = end;
   }
   // A last empty line from a trailing newline is not a line of code.
   if (lines.length > 1 && lines.at(-1)?.length === 0) {
     lines.pop();
   }
-  return lines;
+  return lines.slice(0, most);
+};
+
+const sameRuns = (one: Line, other: Line) =>
+  one.length === other.length &&
+  one.every((run, index) => {
+    const that = other[index];
+    return (
+      that !== undefined &&
+      run.text === that.text &&
+      run.types.join(" ") === that.types.join(" ")
+    );
+  });
+
+/**
+ * `lines`, with each line that is the same as the one at its place in `before` (the same text in the
+ * same runs) taken from `before`: one object for one line, from one read to the next, so the page
+ * draws again only the lines that changed.
+ */
+export const keepSame = (before: Line[], lines: Line[]): Line[] =>
+  lines.map((line, index) => {
+    const was = before[index];
+    return was !== undefined && sameRuns(was, line) ? was : line;
+  });
+
+/**
+ * What a read gave the page: the code read; its first lines, coloured; how many of them a newline
+ * ends, and where the line after those starts; whether they are all of the code; and whether the
+ * lines after them are past MOST_RUNS, so a block that draws one of those is plain.
+ */
+export interface Coloured {
+  code: string;
+  lines: Line[];
+  ended: number;
+  after: number;
+  whole: boolean;
+  past: boolean;
+}
+
+/**
+ * `code`'s first `most` lines coloured by `runs`, as many as hold MOST_RUNS runs, each line the
+ * same as in `before` kept from it.
+ */
+export const colouredOf = (
+  code: string,
+  runs: Runs,
+  most: number,
+  before: Line[] = []
+): Coloured => {
+  const made = linesOf(code, runs, most, MOST_RUNS);
+  const past = made.reduce((sum, line) => sum + line.length, 0) > MOST_RUNS;
+  // The line the runs ran past MOST_RUNS in is not whole: only those before it are kept.
+  const lines = keepSame(before, past ? made.slice(0, -1) : made);
+  let ended = 0;
+  let after = 0;
+  for (
+    let at = code.indexOf("\n");
+    at !== -1 && ended < lines.length;
+    at = code.indexOf("\n", at + 1)
+  ) {
+    ended += 1;
+    after = at + 1;
+  }
+  return {
+    code,
+    lines,
+    ended,
+    after,
+    whole: !past && (ended < lines.length || after === code.length),
+    past,
+  };
+};
+
+/**
+ * The first `most` lines of `code`, coloured by `read` where it can be: all it coloured when it is
+ * for this code, and while the code is still being written and has grown past it, the lines a
+ * newline ended in it. The rest is text, each line a string.
+ */
+export const colouredLines = (
+  code: string,
+  read: Coloured | null,
+  most: number,
+  streaming = false
+): (Line | string)[] => {
+  // Past MOST_RUNS, the lines drawn (an open block's, not a folded one's) are plain, all of them.
+  if (
+    read === null ||
+    !code.startsWith(read.code) ||
+    (read.past && most > read.lines.length)
+  ) {
+    return plainLines(code, most);
+  }
+  // While written, a line no newline has ended yet is plain: it is never coloured for one read and
+  // plain for the next.
+  if (!streaming && read.whole && read.code.length === code.length) {
+    return read.lines.slice(0, most);
+  }
+  const kept = read.lines.slice(0, Math.min(read.ended, most));
+  return [...kept, ...plainLines(code.slice(read.after), most - kept.length)];
 };

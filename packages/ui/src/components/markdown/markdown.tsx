@@ -25,8 +25,15 @@ import type {
   ReactNode,
 } from "react";
 
+import { useCopy } from "../../hooks/use-copy";
 import { useI18n } from "../../lib/i18n";
-import { CheckIcon, ChevronRightIcon, Icon } from "../../lib/icons";
+import {
+  CheckIcon,
+  ChevronRightIcon,
+  CopyIcon,
+  DownloadIcon,
+  Icon,
+} from "../../lib/icons";
 import {
   choiceBoxStyles,
   fadeIn,
@@ -42,19 +49,34 @@ import {
   size,
   space,
 } from "../../lib/tokens.stylex";
-import { announce, safeHref, useReducedMotion } from "../../lib/utils";
+import {
+  announce,
+  csvOf,
+  safeHref,
+  saveFile,
+  tsvOf,
+  useReducedMotion,
+} from "../../lib/utils";
 import type { LayoutStyle } from "../../lib/utils";
 import { iconVars, motionVars } from "../../lib/vars.stylex";
+import { Button } from "../button";
 import * as Code from "../code-block";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "../collapsible";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../dropdown-menu";
 import { Link } from "../link";
 import { Separator } from "../separator";
 import * as Tables from "../table";
 import { tableVars } from "../table.stylex";
+import { Diagram } from "./diagram";
 import * as parse from "./parse";
 import type { Block, RootContent } from "./parse";
 
@@ -214,6 +236,24 @@ const styles = stylex.create({
     color: colors.foreground,
   },
   xsCode: { fontSize: `calc(${size.messageText} * 0.92)` },
+  // A formula in a sentence, and one on lines of its own, wider than the column scrolling sideways.
+  // One in a sentence is cut at ten lines' height: a matrix of a thousand rows is thousands of
+  // pixels tall.
+  math: {
+    display: "inline-block",
+    maxWidth: "100%",
+    maxHeight: "10em",
+    overflow: "hidden",
+    verticalAlign: "middle",
+    direction: "ltr",
+    unicodeBidi: "isolate",
+  },
+  mathBlock: {
+    display: "block",
+    direction: "ltr",
+    overflowX: "auto",
+    overflowY: "hidden",
+  },
   list: {
     display: "flex",
     flexDirection: "column",
@@ -280,6 +320,16 @@ const styles = stylex.create({
     lineHeight: font.textSmLine,
     color: colors.mutedForeground,
     listStyleType: "decimal",
+  },
+  tableActions: {
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: space["2"],
+    // Each button's touch target reaches the middle of the gap to the next, and the room under it.
+    "--tap-room-inline": `calc(${space["2"]} / 2)`,
+    marginBlockEnd: space["2"],
+    // and past the last one's end, inside the answer: a target past it would scroll a box round it.
+    paddingInlineEnd: `calc((${size.tapTarget} - ${size.controlSm}) / 2)`,
   },
   more: {
     margin: 0,
@@ -681,6 +731,97 @@ type Draw<T extends Node["type"]> = (
 // A table is named by the heading above it; a row draws its own cells, as many as the head's. One
 // from a model has no bound: at most 1,000 rows are drawn, and a line says how many more.
 const MOST_ROWS = 1000;
+/** A table's cells as Markdown: a pipe or a backslash in a cell kept as written. */
+const markdownOf = (rows: readonly (readonly string[])[]) =>
+  rows
+    .flatMap((cells, at) => {
+      const line = `| ${cells.map((cell) => cell.replaceAll(/[\\|]/gu, "\\$&")).join(" | ")} |`;
+      return at === 0
+        ? [line, `| ${cells.map(() => "---").join(" | ")} |`]
+        : [line];
+    })
+    .join("\n");
+/**
+ * A table's Copy (as Markdown, CSV or TSV) and Download (as CSV or Markdown), as a chat's tables
+ * have them: out of use while the answer is written. Each is written from the rows when it is
+ * chosen, not each time the table is drawn.
+ */
+const TableActions = ({
+  rows,
+  disabled,
+}: {
+  rows: readonly (readonly string[])[];
+  disabled: boolean;
+}) => {
+  const words = useI18n().markdown;
+  // The format chosen in Copy's menu, read when it copies: CopyButton's copy, said as its is.
+  const format = useRef(markdownOf);
+  const copy = useCopy(() => format.current(rows));
+  const copyAs = (as: typeof markdownOf) => () => {
+    format.current = as;
+    void copy.run();
+  };
+  return (
+    <div {...stylex.props(styles.tableActions)}>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild disabled={disabled}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={words.copyTable}
+            // A copy is over within a frame: it shows where it went, never a spinner.
+            status={copy.status === "loading" ? "idle" : copy.status}
+          >
+            <Icon icon={CopyIcon} />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={copyAs(markdownOf)}>
+            {words.markdown}
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={copyAs(csvOf)}>
+            {words.csv}
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={copyAs(tsvOf)}>
+            {words.tsv}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild disabled={disabled}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={words.downloadTable}
+          >
+            <Icon icon={DownloadIcon} />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            onSelect={() => {
+              saveFile(
+                `\uFEFF${csvOf(rows)}`,
+                "table.csv",
+                "text/csv;charset=utf-8"
+              );
+            }}
+          >
+            {words.csv}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => {
+              saveFile(markdownOf(rows), "table.md", "text/markdown");
+            }}
+          >
+            {words.markdown}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+};
+
 const TableBlock = ({ node, shared, kids, name }: Part<Of<"table">>) => {
   const words = useI18n().markdown;
   const [head, ...rows] = node.children;
@@ -723,8 +864,15 @@ const TableBlock = ({ node, shared, kids, name }: Part<Of<"table">>) => {
   const more =
     Math.max(rows.length - MOST_ROWS, 0) +
     ("more" in node ? Number(node.more) : 0);
+  // What Copy and Download take: the cells drawn, as their words.
+  const cells = [head, ...rows.slice(0, MOST_ROWS)].flatMap((each) =>
+    each === undefined
+      ? []
+      : [each.children.slice(0, align.length).map((cell) => textOf(cell))]
+  );
   const own = (
     <>
+      <TableActions rows={cells} disabled={shared.streaming} />
       <Tables.Table aria-label={label} streaming={shared.greedy}>
         {children}
       </Tables.Table>
@@ -842,7 +990,77 @@ const Words = ({
   fading(at, value.length);
   return parts;
 };
-const framed = new Set(["code", "table", "thematicBreak"]);
+const framed = new Set(["code", "math", "table", "thematicBreak"]);
+
+/** Draws `tex` into `box` with KaTeX, loaded the first time; false once the formula has gone. */
+const drawFormula = async (
+  box: HTMLElement,
+  { tex, display }: { tex: string; display: boolean },
+  live: () => boolean
+) => {
+  try {
+    const { default: katex } = await import("katex");
+    if (!live()) {
+      return false;
+    }
+    katex.render(tex, box, {
+      displayMode: display,
+      output: "mathml",
+      throwOnError: false,
+      errorColor: colors.mutedForeground,
+      trust: false,
+      strict: "ignore",
+      // No rule, space or box past 10em, and no macro expanded more than 1,000 times.
+      maxSize: 10,
+      maxExpand: 1000,
+    });
+    return true;
+  } catch {
+    // KaTeX did not load: the formula stays its TeX.
+    return false;
+  }
+};
+// A formula longer than this stays its TeX: the browser lays out MathML on the page, and 100 KB of
+// it takes seconds.
+const MOST_TEX = 4000;
+/**
+ * A formula, in TeX: drawn by KaTeX as MathML, which the browser lays out itself, once KaTeX has
+ * loaded (only a page with maths loads it), and its TeX as code until then and without script.
+ * KaTeX builds the nodes itself, never HTML from text; with `trust` off, no command in a formula
+ * can lead anywhere or add a class or a style, and one it cannot read is its TeX, muted.
+ */
+const Formula = ({ tex, display }: { tex: string; display: boolean }) => {
+  const box = useRef<HTMLSpanElement>(null);
+  const [drawn, setDrawn] = useState(false);
+  useEffect(() => {
+    let live = true;
+    const at = box.current;
+    const draw = async () => {
+      if (
+        at !== null &&
+        tex.length <= MOST_TEX &&
+        (await drawFormula(at, { tex, display }, () => live))
+      ) {
+        setDrawn(true);
+      }
+    };
+    void draw();
+    return () => {
+      live = false;
+    };
+  }, [tex, display]);
+  return (
+    <span
+      data-slot="markdown-math"
+      data-tex={tex}
+      data-display={display || undefined}
+      {...stylex.props(display ? styles.mathBlock : styles.math)}
+    >
+      <span ref={box} hidden={!drawn} />
+      {!drawn && <code {...stylex.props(styles.inlineCode)}>{tex}</code>}
+    </span>
+  );
+};
 /** A block in the answer's column: a framed one fades in whole while written; a section is its own. */
 const Placed = ({
   node,
@@ -942,6 +1160,8 @@ const draw: { [T in Node["type"]]?: Draw<T> } = {
       styles.inlineCode,
       shared.size === "xs" && styles.xsCode,
     ]),
+  inlineMath: (node) => <Formula tex={node.value} display={false} />,
+  math: (node) => <Formula tex={node.value} display />,
   break: () => <br />,
   link: anchor,
   linkReference: anchor,
@@ -1018,6 +1238,14 @@ const draw: { [T in Node["type"]]?: Draw<T> } = {
         );
       return Pre === undefined ? code : <Pre node={node}>{code}</Pre>;
     }
+    // A diagram once its fence is closed: until then its code, as it is written.
+    if (node.lang === "mermaid" && node.position !== undefined) {
+      return <Diagram code={node.value} streaming={shared.streaming} />;
+    }
+    // Numbered from the fence's `startLine=N` (up to 7 digits), or not with `noLineNumbers`.
+    const meta = node.meta ?? "";
+    const startLine =
+      Number(/\bstartLine=(?<at>\d{1,7})(?!\d)/u.exec(meta)?.groups?.at) || 1;
     return (
       <Code.CodeBlock
         language={node.lang ?? "text"}
@@ -1025,13 +1253,22 @@ const draw: { [T in Node["type"]]?: Draw<T> } = {
       >
         <Code.CodeBlockHeader>
           <Code.CodeBlockTitle />
+          {/* Saved and copied once the answer is written, as a chat's are. */}
           <Code.CodeBlockActions>
-            <Code.CodeBlockCopyButton value={node.value} />
+            <Code.CodeBlockDownloadButton
+              value={node.value}
+              disabled={shared.streaming}
+            />
+            <Code.CodeBlockCopyButton
+              value={node.value}
+              disabled={shared.streaming}
+            />
           </Code.CodeBlockActions>
         </Code.CodeBlockHeader>
         {/* `false` never folds, yet still draws at most 2,000 lines: a model's code has no bound. */}
         <Code.CodeBlockContent
-          lineNumbers
+          lineNumbers={!/\bnoLineNumbers\b/u.test(meta)}
+          startLine={startLine}
           maxLines={
             shared.codeMaxLines === false
               ? Number.POSITIVE_INFINITY
