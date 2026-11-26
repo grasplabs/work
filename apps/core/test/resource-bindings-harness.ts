@@ -29,7 +29,7 @@ import type { Fixture } from "./sealed-apps.ts";
 // admin binds, and how they call them and read what was approved.
 
 /** The model the organization chose, which answers at most 65,536 tokens. */
-export const chosenModel = "mistral/mistral-large-latest";
+export const chosenModel = "mistral/mistral-large-2512";
 
 /**
  * An App whose actions ask its `ai` for text and for values, each within
