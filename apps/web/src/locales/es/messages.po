@@ -62,6 +62,11 @@ msgstr "{0} acciones"
 msgid "{0} didn't connect"
 msgstr "{0} no se ha conectado"
 
+#. placeholder {0}: suiteNames[from]
+#: src/onboarding/company-step.tsx
+msgid "{0} is connected"
+msgstr "{0} está conectado"
+
 #. placeholder {0}: countOn(allowed, ofThis)
 #. placeholder {1}: ofThis.length
 #: src/connections/permissions/action-list.tsx
@@ -405,6 +410,7 @@ msgstr "{count, plural, one {# parte que funciona detrás de las páginas} other
 msgid "{count, plural, one {# person in the team} other {# people in the team}}"
 msgstr "{count, plural, one {# persona en el equipo} other {# personas en el equipo}}"
 
+#: src/onboarding/company-step.tsx
 #: src/settings/teams.tsx
 msgid "{count, plural, one {# person} other {# people}}"
 msgstr "{count, plural, one {# persona} other {# personas}}"
@@ -428,6 +434,10 @@ msgstr "{count, plural, one {# ejecución} other {# ejecuciones}}"
 #: src/brain/brain.ts
 msgid "{count, plural, one {# team, with its roles} other {# teams, with their roles}}"
 msgstr "{count, plural, one {# equipo, con sus roles} other {# equipos, con sus roles}}"
+
+#: src/onboarding/company-step.tsx
+msgid "{count, plural, one {# team} other {# teams}}"
+msgstr "{count, plural, one {# equipo} other {# equipos}}"
 
 #: src/drafts/share-with-team.tsx
 msgid "{count, plural, one {# test} other {# tests}}"
@@ -1283,6 +1293,10 @@ msgstr "{people, plural, one {¿Dar acceso también a la # persona de {projectNa
 #: src/connections/recommended-apps.tsx
 msgid "{people, plural, one {Asked for by # person} other {Asked for by # people}}"
 msgstr "{people, plural, one {Solicitada por # persona} other {Solicitada por # personas}}"
+
+#: src/onboarding/company-step.tsx
+msgid "{people} in {teams}"
+msgstr "{people} en {teams}"
 
 #: src/frame/ui-words.tsx
 msgid "{percent} context"
@@ -20312,6 +20326,10 @@ msgstr "Lo que los agentes leen a través de conexiones compartidas"
 msgid "What AI costs this month"
 msgstr "Lo que cuesta la IA este mes"
 
+#: src/onboarding/company-step.tsx
+msgid "What came in"
+msgstr "Lo que llegó"
+
 #: src/brain/brain-atlas.ts
 msgctxt "the brainstem: every conversation, document and connection"
 msgid "What came in"
@@ -21911,6 +21929,10 @@ msgstr "Tu inicio de sesión, que cambia tu administrador"
 #: src/brain/skills-page.tsx
 msgid "Your skills"
 msgstr "Tus skills"
+
+#: src/onboarding/company-step.tsx
+msgid "Your staff list is in"
+msgstr "Tu lista de personal ya está"
 
 #: src/onboarding/company-step.tsx
 msgid "Your staff list is in. A new one replaces it."
