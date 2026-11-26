@@ -737,6 +737,69 @@ describe("a chat's ChatSession", () => {
     }
   });
 
+  it("stops waking a chat whose opens reset the object as often as it gives up after, telling its Workspace, and opens it again for a call", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const never = Promise.withResolvers<boolean>();
+    const stuck = { ...says("Never."), pause: { at: 0, until: never.promise } };
+    const { id, stub, provider, newChat } = await personalChatsOf(
+      userId,
+      stuck,
+      says("Answered after all.")
+    );
+    const { chat, ask } = await newChat();
+    const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
+    try {
+      void ask("Hello?").catch(() => "settled");
+      await vi.waitFor(
+        async () => {
+          expect(provider.requests).toHaveLength(1);
+          await expect(
+            stub.chatSummary(chat.id, userId)
+          ).resolves.toMatchObject({ running: true });
+        },
+        { timeout: 10_000 }
+      );
+      for (const stopped of [stub, session()]) {
+        // oxlint-disable-next-line no-await-in-loop -- one, then the other
+        await runInDurableObject(stopped, (_instance, state) => {
+          state.abort("Restarted by the test");
+        }).catch(() => {
+          // Aborting fails the call that aborted: that is the restart.
+        });
+      }
+      // What six opens a reset cut short leave: each counted before it
+      // was tried, none reaching its end.
+      await runInDurableObject(session(), (_instance, state) => {
+        state.storage.kv.put("failedOpens", 6);
+      });
+      await runDurableObjectAlarm(session());
+      const { running } = await workspace(env, id).chatSummary(chat.id, userId);
+      const afterAlarm = {
+        alarm: await runInDurableObject(
+          session(),
+          async (_instance, state) => await state.storage.getAlarm()
+        ),
+        requests: provider.requests.length,
+        running,
+      };
+      // A call still opens it, and the turn goes on.
+      await session().activeTurn();
+      await vi.waitFor(
+        () => {
+          expect(provider.requests).toHaveLength(2);
+        },
+        { timeout: 15_000 }
+      );
+      expect(afterAlarm).toStrictEqual({
+        alarm: null,
+        requests: 1,
+        running: false,
+      });
+    } finally {
+      never.resolve(true);
+    }
+  });
+
   it("stops a turn that runs past its time, as overdue", async () => {
     const { userId } = await signedInWithRole(idp, "user");
     const asking = await chatOf(userId);
