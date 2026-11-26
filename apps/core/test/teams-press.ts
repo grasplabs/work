@@ -75,7 +75,7 @@ export const pressOn = (
 ) => ({
   ...messageFrom(from, { text: undefined, ...changes }),
   replyToId: cardId,
-  value: { actionId, value: JSON.stringify(press) },
+  value: { actionId, value: JSON.stringify({ writes: press }) },
 });
 
 /** How many calls reached the mail server, and to whom it sent. */

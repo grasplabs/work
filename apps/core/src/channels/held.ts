@@ -7,12 +7,11 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { connectionReadOf } from "../agent-scope.ts";
 import { activeMember, organizationId } from "../auth/auth.ts";
 import { personOf } from "../connections.ts";
 import { members, users } from "../db/core/schema.ts";
 import { heldAppCallsOf } from "../held-app-calls.ts";
-import type { HeldWriteView, ReadCheck } from "./cards.tsx";
+import type { HeldWriteView } from "./cards.tsx";
 import { inertOn } from "./inert.ts";
 import { say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
@@ -223,19 +222,6 @@ export const turnHeldWrites = async (
     .toSorted((a, b) => a.at - b.at)
     .map(({ view }) => view);
 };
-
-/**
- * What the card warns of, from what the chat's code read (the turn's
- * provenance, `connectionRead` sources): mail, which other people wrote.
- * Company records' line (`record`) comes with the rules that know which
- * reads are of a company record (GRA-719).
- */
-export const checkOf = (sources: readonly string[]): ReadCheck | undefined =>
-  sources.some(
-    (source) => connectionReadOf(source)?.action.startsWith("mail.") === true
-  )
-    ? { read: "mail" }
-    : undefined;
 
 /**
  * `view` as a card on `platform` shows it: its title, labels and values,
