@@ -197,6 +197,68 @@ describe("a tool held to the vendor's spec", () => {
     ).toStrictEqual([]);
   });
 
+  it("may narrow a path argument to fixed values, each one segment", async () => {
+    const stages = await readSpec(
+      JSON.stringify({
+        openapi: "3.1.0",
+        info: { title: "Stages", version: "1" },
+        servers: [{ url: "https://api.example.test/api/v2" }],
+        paths: {
+          "/stages/{status}": {
+            get: {
+              operationId: "getStage",
+              parameters: [
+                {
+                  name: "status",
+                  in: "path",
+                  required: true,
+                  schema: { type: "string" },
+                },
+              ],
+              responses: {
+                "200": {
+                  description: "ok",
+                  content: {
+                    "application/json": {
+                      schema: {
+                        type: "object",
+                        properties: { id: { type: "integer" } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+      "https://developers.example.test/stages.json"
+    );
+    const getting = (status: { descriptor: ValueDescriptor }): MirrorTool => ({
+      name: "stages.get",
+      routes: ["GET /stages/{status}"],
+      args: shape({ status }),
+      returns: v.object({ id: v.number().integer().optional() }).descriptor,
+    });
+    expect(
+      checkMirror(
+        [
+          getting(v.string().segment()),
+          getting(v.enum(["open", "won"])),
+          getting(v.literal("open")),
+          getting(v.enum(["open", "a/b"])),
+          getting(v.literal("..")),
+        ],
+        stages
+      ).map((problem) => `${problem.tool}: ${problem.message}`)
+    ).toStrictEqual(
+      Array.from({ length: 2 }, () => [
+        "stages.get: args.status doesn't keep the vendor's type.",
+        "stages.get: args.status fills the path parameter {status}: declare it v.string().segment(), a number or fixed values.",
+      ]).flat()
+    );
+  });
+
   it("is refused a renamed argument or field", () => {
     expect(
       messages([

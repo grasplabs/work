@@ -1,5 +1,5 @@
 import type { ValueDescriptor } from "@grasp-os/runtime/app";
-import { isPathSegment } from "@grasp-os/runtime/host";
+import { isPathSegment, validateValue } from "@grasp-os/runtime/host";
 
 import { servedElsewhere } from "./openapi.ts";
 import type { Spec, SpecOperation } from "./openapi.ts";
@@ -141,7 +141,11 @@ const pathArgsOf = (
     );
 };
 
-/** Whether every value of a scalar `inner` is one of scalar `outer`'s. */
+/**
+ * Whether every value of a scalar `inner` is one of scalar `outer`'s. Fixed
+ * strings are when `outer` takes each, its format included (a `segment`
+ * the spec's path parameter has).
+ */
 const scalarWithin = (
   inner: ValueDescriptor,
   outer: ValueDescriptor
@@ -149,10 +153,14 @@ const scalarWithin = (
   const values = valuesOf(inner);
   if (outer.kind === "string") {
     const format = formatOf(outer);
+    const required = { ...outer, presence: "required" as const };
     return inner.kind === "string"
       ? format === undefined || formatOf(inner) === format
-      : format === undefined &&
-          values?.every((value) => typeof value === "string") === true;
+      : values?.every(
+          (value) =>
+            typeof value === "string" &&
+            "value" in validateValue(required, value)
+        ) === true;
   }
   if (outer.kind === "number") {
     const integers =
