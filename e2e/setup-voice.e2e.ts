@@ -68,11 +68,14 @@ test("the admin goes through empty steps and back, with the sound on and off", a
 
   // Sound off: kept in this browser, nothing more is asked of the voice,
   // and the way on comes once there was time to read the step.
+  await page.getByRole("button", { name: "Volume" }).click();
   await page.getByRole("button", { name: "Turn sound off" }).click();
   await page.reload();
+  await page.getByRole("button", { name: "Volume" }).click();
   await expect(
     page.getByRole("button", { name: "Turn sound on" })
-  ).toHaveAttribute("aria-pressed", "false");
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
   const before = asked.length;
   await page.getByRole("button", { name: "Skip for now" }).click();
   await expect(

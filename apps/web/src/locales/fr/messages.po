@@ -9772,7 +9772,6 @@ msgid "Language"
 msgstr "Langue"
 
 #: src/frame/language-button.tsx
-#: src/language-picker.tsx
 msgid "Language: {name}"
 msgstr "Langue : {name}"
 
