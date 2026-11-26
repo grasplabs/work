@@ -88,7 +88,7 @@ export const interviewTurnRequestSchema = z.strictObject({
   /** Minutes since they pressed start. */
   minutes: z.number().min(0).max(240),
   /** With `readback`: the facts that were read back, by id. */
-  reading: z.array(interviewFactSchema.shape.id).max(12).optional(),
+  reading: z.array(interviewFactSchema.shape.id).max(60).optional(),
   /** They agreed to the read-back before and are back to add something. */
   adding: z.boolean().default(false),
 });

@@ -395,13 +395,6 @@ msgstr "{count, plural, one {# partie qui travaille derrière les pages} other {
 msgid "{count, plural, one {# person in the team} other {# people in the team}}"
 msgstr "{count, plural, one {# personne dans l’équipe} other {# personnes dans l’équipe}}"
 
-#: src/onboarding/company-rows.tsx
-msgid "{count, plural, one {# person, led by {lead}} other {# people, led by {lead}}}"
-msgstr "{count, plural, one {# personne, dirigée par {lead}} other {# personnes, dirigées par {lead}}}"
-
-#: src/onboarding/company-dots.tsx
-#: src/onboarding/company-rows.tsx
-#: src/onboarding/company-step.tsx
 #: src/settings/teams.tsx
 msgid "{count, plural, one {# person} other {# people}}"
 msgstr "{count, plural, one {# personne} other {# personnes}}"
@@ -425,10 +418,6 @@ msgstr "{count, plural, one {# exécution} other {# exécutions}}"
 #: src/brain/brain.ts
 msgid "{count, plural, one {# team, with its roles} other {# teams, with their roles}}"
 msgstr "{count, plural, one {# équipe, avec ses rôles} other {# équipes, avec leurs rôles}}"
-
-#: src/onboarding/company-step.tsx
-msgid "{count, plural, one {# team} other {# teams}}"
-msgstr "{count, plural, one {# équipe} other {# équipes}}"
 
 #: src/drafts/share-with-team.tsx
 msgid "{count, plural, one {# test} other {# tests}}"
@@ -927,10 +916,6 @@ msgstr "{more, plural, one {# autre fichier} other {# autres fichiers}}"
 #: src/onboarding/campaign/concepts/concept-words.ts
 msgid "{more, plural, one {# more for enough} other {# more for enough}}"
 msgstr "{more, plural, one {Encore # pour en savoir assez} other {Encore # pour en savoir assez}}"
-
-#: src/onboarding/company-dots.tsx
-msgid "{more, plural, one {# other} other {# others}}"
-msgstr "{more, plural, one {# autre} other {# autres}}"
 
 #: src/drafts/share-with-team.tsx
 msgid "{more, plural, one {and # more} other {and # more}}"
@@ -1764,8 +1749,8 @@ msgid "{waiting, plural, one {# open} other {# open}}"
 msgstr "{waiting, plural, one {# ouverte} other {# ouvertes}}"
 
 #: src/onboarding/company-step.tsx
-msgid "{waiting, plural, one {# person new on your list gets a link once you confirm your organization.} other {# people new on your list get their links once you confirm your organization.}}"
-msgstr "{waiting, plural, one {# nouvelle personne de votre liste reçoit un lien dès que vous confirmez votre organisation.} other {# nouvelles personnes de votre liste reçoivent leur lien dès que vous confirmez votre organisation.}}"
+msgid "{waiting, plural, one {# person is new on your list. Their link goes out once you’ve chosen who takes part.} other {# people are new on your list. Their links go out once you’ve chosen who takes part.}}"
+msgstr "{waiting, plural, one {# personne est nouvelle sur votre liste. Son lien part dès que vous avez choisi qui participe.} other {# personnes sont nouvelles sur votre liste. Leurs liens partent dès que vous avez choisi qui participe.}}"
 
 #: src/frame/app-sidebar.tsx
 msgid "{waiting, plural, one {# thing waiting} other {# things waiting}}"
@@ -2860,10 +2845,6 @@ msgstr "Utilise toujours ce modèle"
 msgid "Amber"
 msgstr "Ambre"
 
-#: src/onboarding/company-dots.tsx
-msgid "Among them {names}."
-msgstr "Parmi elles, {names}."
-
 #: src/workflows/resource-params.tsx
 msgid "Amount"
 msgstr "Montant"
@@ -3872,6 +3853,10 @@ msgstr "Arrière-plan"
 #: src/interview/rating.tsx
 msgid "Bad"
 msgstr "Mauvais"
+
+#: src/interview/words.ts
+msgid "Based on our conversation, I’ve made a summary for you. This is how it looks."
+msgstr "À partir de notre conversation, j’ai préparé un résumé pour vous. Le voici."
 
 #: src/settings/backdrop-settings.tsx
 msgid "Bayer"
@@ -5155,11 +5140,6 @@ msgstr "Connectez d'abord : {systems}."
 msgid "Connect the apps your work runs on"
 msgstr "Connectez les apps avec lesquelles vous travaillez"
 
-#. placeholder {0}: suiteNames[fromDirectory]
-#: src/onboarding/company-step.tsx
-msgid "Connect your {0} account"
-msgstr "Reliez votre compte {0}"
-
 #: src/onboarding/company-step.tsx
 msgid "Connect your {signIn} account"
 msgstr "Connectez votre compte {signIn}"
@@ -5346,6 +5326,7 @@ msgstr "Contexte"
 msgid "Context used"
 msgstr "Contexte utilisé"
 
+#: src/interview/rating.tsx
 #: src/interview/start.tsx
 #: src/onboarding/company-step.tsx
 #: src/onboarding/documents-step.tsx
@@ -6417,6 +6398,10 @@ msgstr "ne contient pas"
 msgid "Does something that needs your yes"
 msgstr "Fait quelque chose qui demande votre accord"
 
+#: src/interview/words.ts
+msgid "Does that sound like a good summary, or is there anything you’d like to add?"
+msgstr "Est-ce que ce résumé vous semble juste, ou souhaitez-vous ajouter quelque chose ?"
+
 #: src/settings/stephen-settings.tsx
 msgid "Does things for people here"
 msgstr "Agit pour les personnes ici"
@@ -7196,6 +7181,10 @@ msgstr "Tous les jours ouvrés à {time}"
 #: src/agents/new-agent.tsx
 msgid "Every weekday at 9:00"
 msgstr "Chaque jour ouvré à 9:00"
+
+#: src/interview/rating.tsx
+msgid "Every word helps {who} get better at this."
+msgstr "Chaque mot aide {who} à progresser."
 
 #: src/agents/agent-facts.tsx
 #: src/agents/agents-overview.tsx
@@ -8220,10 +8209,6 @@ msgstr "Bien, je sais maintenant qui travaille où."
 msgid "Got a checklist? Toss it in!"
 msgstr "Une check-list ? Glissez-la ici !"
 
-#: src/onboarding/company-step.tsx
-msgid "Got a newer list? Share it here, and it replaces the one I have now."
-msgstr "Vous avez une liste plus récente ? Partagez-la ici, elle remplacera celle que j’ai maintenant."
-
 #: src/interview/start.tsx
 msgid "Got it"
 msgstr "Compris"
@@ -8648,10 +8633,6 @@ msgstr "Helsinki"
 msgid "Here's what Grasp will make"
 msgstr "Voici ce que Grasp va faire"
 
-#: src/onboarding/company-step.tsx
-msgid "Here’s your company"
-msgstr "Voici votre entreprise"
-
 #: src/onboarding/setup-steps.tsx
 msgid "Hi {admin}, I’m Stephen"
 msgstr "Bonjour {admin}, je suis Stephen"
@@ -8917,17 +8898,9 @@ msgstr "D'accord, commençons"
 msgid "I agree, let’s start"
 msgstr "J’accepte, commençons"
 
-#: src/onboarding/company-step.tsx
-msgid "I can see {people} in {teams}. Among them {names}."
-msgstr "Je vois {people} dans {teams}. Parmi elles, {names}."
-
 #: src/onboarding/send-plan-form.tsx
 msgid "I can’t plan that day. Type one like {example}, from {earliest} to {latest}."
 msgstr "Je ne peux pas planifier ce jour. Saisissez-en un comme {example}, du {earliest} au {latest}."
-
-#: src/interview/start.tsx
-msgid "I changed my mind"
-msgstr "J’ai changé d’avis"
 
 #: src/onboarding/company-step.tsx
 #: src/onboarding/people-add.tsx
@@ -8990,10 +8963,6 @@ msgstr "J’ai perdu la connexion. Vérifiez votre connexion internet. J’ai ga
 #: src/interview/parts/consent.tsx
 msgid "I'd rather skip this"
 msgstr "Je préfère passer mon tour"
-
-#: src/interview/start.tsx
-msgid "I’d rather skip this"
-msgstr "Je préfère passer"
 
 #: src/onboarding/setup-steps.tsx
 msgid "I’ll set up Grasp with you, one step at a time. Which language would you like?"
@@ -9079,10 +9048,6 @@ msgstr "S’il n’y a rien à faire, dis-le en une ligne et arrête-toi."
 msgid "If you can't find the answer, say so and say who might know."
 msgstr "Si tu ne trouves pas la réponse, dis-le et indique qui pourrait savoir."
 
-#: src/interview/start.tsx
-msgid "If you change your mind, this link stays open until {closes}."
-msgstr "Si vous changez d’avis, ce lien reste ouvert jusqu’au {closes}."
-
 #: src/guest-sign-in.tsx
 msgid "If you were invited, a code is on its way to you. It works for five minutes."
 msgstr "Si vous avez été invité, un code est en route. Il est valable cinq minutes."
@@ -9107,10 +9072,6 @@ msgstr "Importer dans {name}"
 #: src/apps/app-data.tsx
 msgid "Import or export"
 msgstr "Importer ou exporter"
-
-#: src/onboarding/company-dots.tsx
-msgid "In {name}: {everyone}."
-msgstr "Dans {name} : {everyone}."
 
 #: src/settings/directory-placement.tsx
 msgid "In {team} from the directory."
@@ -11013,17 +10974,9 @@ msgstr "En savoir plus sur le rangement"
 msgid "More about the owner"
 msgstr "En savoir plus sur le propriétaire"
 
-#: src/onboarding/company-step.tsx
-msgid "More about the staff list"
-msgstr "En savoir plus sur la liste du personnel"
-
 #: src/onboarding/sources-step.tsx
 msgid "More about these connections"
 msgstr "En savoir plus sur ces connexions"
-
-#: src/onboarding/company-step.tsx
-msgid "More about this connection"
-msgstr "En savoir plus sur cette connexion"
 
 #: src/frame/info-tip.tsx
 #: src/settings/section.tsx
@@ -13568,10 +13521,6 @@ msgstr "Paramètres"
 msgid "Paris"
 msgstr "Paris"
 
-#: src/interview/read-back-story.tsx
-msgid "Part {n} of {count}"
-msgstr "Partie {n} sur {count}"
-
 #: src/routes/_shell.brain.sections.$sectionId.tsx
 msgid "Part of the brain not found"
 msgstr "Partie du brain introuvable"
@@ -13587,10 +13536,6 @@ msgstr "Une partie de ce qui sera envoyé est tronquée ci-dessus. Affichez tout
 #: src/inbox/item-detail.tsx
 msgid "Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm."
 msgstr "Une partie de ce qui sera envoyé est tronquée. Ouvrez Détails et affichez tout, ou exactement ce qui sera envoyé, pour confirmer."
-
-#: src/interview/read-back-story.tsx
-msgid "Parts"
-msgstr "Parties"
 
 #: src/brain/sources-page.tsx
 msgid "Passages"
@@ -16214,10 +16159,6 @@ msgstr "Partager {name} avec l'entreprise ?"
 msgid "Share a staff list as a CSV or Excel file, a row per person. No list at hand? Skip this, and we’ll sort it out with you."
 msgstr "Partagez une liste du personnel en fichier CSV ou Excel, une ligne par personne. Pas de liste sous la main ? Passez cette étape, nous réglerons cela avec vous."
 
-#: src/onboarding/company-step.tsx
-msgid "Share another staff list as a CSV or Excel file, a row per person. It replaces the one I have now."
-msgstr "Partagez une autre liste du personnel en fichier CSV ou Excel, une ligne par personne. Elle remplace celle que j’ai maintenant."
-
 #: src/interview/read-back-story.tsx
 msgid "Share as how your team works"
 msgstr "Partager comme la façon de travailler de votre équipe"
@@ -16728,10 +16669,6 @@ msgstr "Passer pour l’instant"
 #: src/agents/agent-templates.ts
 msgid "Skip leads marked lost or not interested."
 msgstr "Ignore les prospects marqués comme perdus ou pas intéressés."
-
-#: src/interview/start.tsx
-msgid "Skip the interview?"
-msgstr "Passer l’entretien ?"
 
 #: src/frame/ui-words.tsx
 msgid "Skipped {name}"
@@ -17317,6 +17254,7 @@ msgstr "Suggestions"
 msgid "Summarise documents"
 msgstr "Résumer des documents"
 
+#: src/interview/read-back-story.tsx
 #: src/interview/words.ts
 msgid "Summary"
 msgstr "Résumé"
@@ -17708,10 +17646,6 @@ msgstr "Merci, {name}."
 msgid "Thank you. Want to say why?"
 msgstr "Merci. Vous voulez dire pourquoi ?"
 
-#: src/interview/start.tsx
-msgid "Thanks for letting us know"
-msgstr "Merci de nous avoir prévenus"
-
 #: src/onboarding/documents-step.tsx
 msgid "Thanks for the document. I’ll read it before I talk to anyone."
 msgstr "Merci pour le document. Je le lirai avant de parler à qui que ce soit."
@@ -17811,10 +17745,6 @@ msgstr "Ce support de formation aide aussi"
 #: src/sign-in-errors.ts
 msgid "That way of signing in isn't set up here."
 msgstr "Ce mode de connexion n’est pas configuré ici."
-
-#: src/interview/start.tsx
-msgid "That’s completely fine. Your company will see that you opted out, but never why. Nothing was recorded."
-msgstr "C’est tout à fait normal. Votre entreprise verra que vous avez décliné, mais jamais pourquoi. Rien n’a été enregistré."
 
 #: src/onboarding/plan-story.tsx
 msgid "That’s everything. Here’s a quick look at what happens next."
@@ -18681,12 +18611,6 @@ msgstr "Une équipe porte déjà ce nom."
 #: src/onboarding/people-add.tsx
 msgid "There is nobody in this list."
 msgstr "Il n’y a personne dans cette liste."
-
-#. placeholder {0}: peopleWords(people)
-#. placeholder {1}: teamWords(teams)
-#: src/onboarding/company-step.tsx
-msgid "There it is, your company. I can see {0} in {1}. Have a quick look whether that seems right, and then we’ll move on."
-msgstr "Voilà votre entreprise. Je vois {0} dans {1}. Vérifiez rapidement si c'est juste, puis on continue."
 
 #. placeholder {0}: formatList(wrong.slice(0, 5))
 #: src/onboarding/people-add.tsx
@@ -19712,10 +19636,6 @@ msgstr "Fichiers importés partagés avec une équipe ou tout le monde, que seul
 msgid "Use {name} in this chat"
 msgstr "Utiliser {name} dans ce chat"
 
-#: src/onboarding/company-step.tsx
-msgid "Use a staff list instead"
-msgstr "Utiliser plutôt une liste du personnel"
-
 #: src/connections/request-app-dialog.tsx
 msgid "Use an address that starts with http:// or https://."
 msgstr "Utilisez une adresse qui commence par http:// ou https://."
@@ -19723,14 +19643,6 @@ msgstr "Utilisez une adresse qui commence par http:// ou https://."
 #: src/settings/ai-providers.tsx
 msgid "Use an OpenAI-compatible endpoint"
 msgstr "Utiliser un point de terminaison compatible OpenAI"
-
-#: src/onboarding/company-step.tsx
-msgid "Use another list"
-msgstr "Utiliser une autre liste"
-
-#: src/onboarding/company-step.tsx
-msgid "Use another staff list"
-msgstr "Utiliser une autre liste du personnel"
 
 #: src/agents/setup/words.ts
 msgid "Use Apps"
@@ -20335,6 +20247,14 @@ msgstr "Bilan de la semaine"
 msgid "Weekly reporter"
 msgstr "Rapporteur hebdo"
 
+#: src/interview/words.ts
+msgid "Well, thank you, {name}. It was great talking to you. You can always come back to this link if you want to change something. For now, I have enough. Have a great rest of your week."
+msgstr "Merci beaucoup, {name}. C’était un plaisir de discuter avec vous. Vous pouvez toujours revenir par ce lien si vous voulez changer quelque chose. Pour l’instant, j’ai ce qu’il me faut. Bonne fin de semaine !"
+
+#: src/interview/words.ts
+msgid "Well, thank you. It was great talking to you. You can always come back to this link if you want to change something. For now, I have enough. Have a great rest of your week."
+msgstr "Merci beaucoup. C’était un plaisir de discuter avec vous. Vous pouvez toujours revenir par ce lien si vous voulez changer quelque chose. Pour l’instant, j’ai ce qu’il me faut. Bonne fin de semaine !"
+
 #: src/activity/audit-words.ts
 msgid "Went back to an earlier version"
 msgstr "Est revenu à une version antérieure"
@@ -20454,10 +20374,6 @@ msgstr "Ce qu'il peut faire"
 #: src/settings/stephen-settings.tsx
 msgid "What he may do in {appName}, with each person's own sign-in: as for the whole company, or for fewer people."
 msgstr "Ce qu’il peut faire dans {appName}, avec la connexion de chaque personne : comme pour toute l’entreprise, ou pour moins de personnes."
-
-#: src/onboarding/company-step.tsx
-msgid "What I found"
-msgstr "Ce que j'ai trouvé"
 
 #: src/brain/memories-page.tsx
 msgid "What is right"
@@ -21536,10 +21452,6 @@ msgctxt "a kind of field"
 msgid "Yes or no"
 msgstr "Oui ou non"
 
-#: src/interview/start.tsx
-msgid "Yes, skip it"
-msgstr "Oui, passer"
-
 #: src/interview/read-back-story.tsx
 msgid "Yes, that’s correct"
 msgstr "Oui, c’est exact"
@@ -21951,8 +21863,8 @@ msgid "Your skills"
 msgstr "Vos skills"
 
 #: src/onboarding/company-step.tsx
-msgid "Your staff list"
-msgstr "Votre liste du personnel"
+msgid "Your staff list is in. A new one replaces it."
+msgstr "Votre liste du personnel est là. Une nouvelle la remplace."
 
 #: src/interview/words.ts
 msgid "Your story"
@@ -21978,11 +21890,6 @@ msgstr "Votre équipe a celle-ci"
 #: src/drafts/status-badge.tsx
 msgid "Your team uses it"
 msgstr "Votre équipe l’utilise"
-
-#: src/onboarding/company-dots.tsx
-#: src/onboarding/company-rows.tsx
-msgid "Your teams"
-msgstr "Vos équipes"
 
 #: src/brain/skills-page.tsx
 msgid "Your teams have no skills of their own yet."

@@ -395,13 +395,6 @@ msgstr "{count, plural, one {# part that works behind the pages} other {# parts 
 msgid "{count, plural, one {# person in the team} other {# people in the team}}"
 msgstr "{count, plural, one {# person in the team} other {# people in the team}}"
 
-#: src/onboarding/company-rows.tsx
-msgid "{count, plural, one {# person, led by {lead}} other {# people, led by {lead}}}"
-msgstr "{count, plural, one {# person, led by {lead}} other {# people, led by {lead}}}"
-
-#: src/onboarding/company-dots.tsx
-#: src/onboarding/company-rows.tsx
-#: src/onboarding/company-step.tsx
 #: src/settings/teams.tsx
 msgid "{count, plural, one {# person} other {# people}}"
 msgstr "{count, plural, one {# person} other {# people}}"
@@ -425,10 +418,6 @@ msgstr "{count, plural, one {# run} other {# runs}}"
 #: src/brain/brain.ts
 msgid "{count, plural, one {# team, with its roles} other {# teams, with their roles}}"
 msgstr "{count, plural, one {# team, with its roles} other {# teams, with their roles}}"
-
-#: src/onboarding/company-step.tsx
-msgid "{count, plural, one {# team} other {# teams}}"
-msgstr "{count, plural, one {# team} other {# teams}}"
 
 #: src/drafts/share-with-team.tsx
 msgid "{count, plural, one {# test} other {# tests}}"
@@ -927,10 +916,6 @@ msgstr "{more, plural, one {# more file} other {# more files}}"
 #: src/onboarding/campaign/concepts/concept-words.ts
 msgid "{more, plural, one {# more for enough} other {# more for enough}}"
 msgstr "{more, plural, one {# more for enough} other {# more for enough}}"
-
-#: src/onboarding/company-dots.tsx
-msgid "{more, plural, one {# other} other {# others}}"
-msgstr "{more, plural, one {# other} other {# others}}"
 
 #: src/drafts/share-with-team.tsx
 msgid "{more, plural, one {and # more} other {and # more}}"
@@ -1764,8 +1749,8 @@ msgid "{waiting, plural, one {# open} other {# open}}"
 msgstr "{waiting, plural, one {# open} other {# open}}"
 
 #: src/onboarding/company-step.tsx
-msgid "{waiting, plural, one {# person new on your list gets a link once you confirm your organization.} other {# people new on your list get their links once you confirm your organization.}}"
-msgstr "{waiting, plural, one {# person new on your list gets a link once you confirm your organization.} other {# people new on your list get their links once you confirm your organization.}}"
+msgid "{waiting, plural, one {# person is new on your list. Their link goes out once you’ve chosen who takes part.} other {# people are new on your list. Their links go out once you’ve chosen who takes part.}}"
+msgstr "{waiting, plural, one {# person is new on your list. Their link goes out once you’ve chosen who takes part.} other {# people are new on your list. Their links go out once you’ve chosen who takes part.}}"
 
 #: src/frame/app-sidebar.tsx
 msgid "{waiting, plural, one {# thing waiting} other {# things waiting}}"
@@ -2860,10 +2845,6 @@ msgstr "Always uses this model"
 msgid "Amber"
 msgstr "Amber"
 
-#: src/onboarding/company-dots.tsx
-msgid "Among them {names}."
-msgstr "Among them {names}."
-
 #: src/workflows/resource-params.tsx
 msgid "Amount"
 msgstr "Amount"
@@ -3872,6 +3853,10 @@ msgstr "Background"
 #: src/interview/rating.tsx
 msgid "Bad"
 msgstr "Bad"
+
+#: src/interview/words.ts
+msgid "Based on our conversation, I’ve made a summary for you. This is how it looks."
+msgstr "Based on our conversation, I’ve made a summary for you. This is how it looks."
 
 #: src/settings/backdrop-settings.tsx
 msgid "Bayer"
@@ -5155,11 +5140,6 @@ msgstr "Connect first: {systems}."
 msgid "Connect the apps your work runs on"
 msgstr "Connect the apps your work runs on"
 
-#. placeholder {0}: suiteNames[fromDirectory]
-#: src/onboarding/company-step.tsx
-msgid "Connect your {0} account"
-msgstr "Connect your {0} account"
-
 #: src/onboarding/company-step.tsx
 msgid "Connect your {signIn} account"
 msgstr "Connect your {signIn} account"
@@ -5346,6 +5326,7 @@ msgstr "Context"
 msgid "Context used"
 msgstr "Context used"
 
+#: src/interview/rating.tsx
 #: src/interview/start.tsx
 #: src/onboarding/company-step.tsx
 #: src/onboarding/documents-step.tsx
@@ -6417,6 +6398,10 @@ msgstr "does not contain"
 msgid "Does something that needs your yes"
 msgstr "Does something that needs your yes"
 
+#: src/interview/words.ts
+msgid "Does that sound like a good summary, or is there anything you’d like to add?"
+msgstr "Does that sound like a good summary, or is there anything you’d like to add?"
+
 #: src/settings/stephen-settings.tsx
 msgid "Does things for people here"
 msgstr "Does things for people here"
@@ -7196,6 +7181,10 @@ msgstr "Every weekday at {time}"
 #: src/agents/new-agent.tsx
 msgid "Every weekday at 9:00"
 msgstr "Every weekday at 9:00"
+
+#: src/interview/rating.tsx
+msgid "Every word helps {who} get better at this."
+msgstr "Every word helps {who} get better at this."
 
 #: src/agents/agent-facts.tsx
 #: src/agents/agents-overview.tsx
@@ -8220,10 +8209,6 @@ msgstr "Good, now I know who works where."
 msgid "Got a checklist? Toss it in!"
 msgstr "Got a checklist? Toss it in!"
 
-#: src/onboarding/company-step.tsx
-msgid "Got a newer list? Share it here, and it replaces the one I have now."
-msgstr "Got a newer list? Share it here, and it replaces the one I have now."
-
 #: src/interview/start.tsx
 msgid "Got it"
 msgstr "Got it"
@@ -8648,10 +8633,6 @@ msgstr "Helsinki"
 msgid "Here's what Grasp will make"
 msgstr "Here's what Grasp will make"
 
-#: src/onboarding/company-step.tsx
-msgid "Here’s your company"
-msgstr "Here’s your company"
-
 #: src/onboarding/setup-steps.tsx
 msgid "Hi {admin}, I’m Stephen"
 msgstr "Hi {admin}, I’m Stephen"
@@ -8917,17 +8898,9 @@ msgstr "I agree, let's start"
 msgid "I agree, let’s start"
 msgstr "I agree, let’s start"
 
-#: src/onboarding/company-step.tsx
-msgid "I can see {people} in {teams}. Among them {names}."
-msgstr "I can see {people} in {teams}. Among them {names}."
-
 #: src/onboarding/send-plan-form.tsx
 msgid "I can’t plan that day. Type one like {example}, from {earliest} to {latest}."
 msgstr "I can’t plan that day. Type one like {example}, from {earliest} to {latest}."
-
-#: src/interview/start.tsx
-msgid "I changed my mind"
-msgstr "I changed my mind"
 
 #: src/onboarding/company-step.tsx
 #: src/onboarding/people-add.tsx
@@ -8990,10 +8963,6 @@ msgstr "I lost the connection. Please check your internet. I have kept what you 
 #: src/interview/parts/consent.tsx
 msgid "I'd rather skip this"
 msgstr "I'd rather skip this"
-
-#: src/interview/start.tsx
-msgid "I’d rather skip this"
-msgstr "I’d rather skip this"
 
 #: src/onboarding/setup-steps.tsx
 msgid "I’ll set up Grasp with you, one step at a time. Which language would you like?"
@@ -9079,10 +9048,6 @@ msgstr "If there is nothing to do, say so in one line and stop."
 msgid "If you can't find the answer, say so and say who might know."
 msgstr "If you can't find the answer, say so and say who might know."
 
-#: src/interview/start.tsx
-msgid "If you change your mind, this link stays open until {closes}."
-msgstr "If you change your mind, this link stays open until {closes}."
-
 #: src/guest-sign-in.tsx
 msgid "If you were invited, a code is on its way to you. It works for five minutes."
 msgstr "If you were invited, a code is on its way to you. It works for five minutes."
@@ -9107,10 +9072,6 @@ msgstr "Import into {name}"
 #: src/apps/app-data.tsx
 msgid "Import or export"
 msgstr "Import or export"
-
-#: src/onboarding/company-dots.tsx
-msgid "In {name}: {everyone}."
-msgstr "In {name}: {everyone}."
 
 #: src/settings/directory-placement.tsx
 msgid "In {team} from the directory."
@@ -11013,17 +10974,9 @@ msgstr "More about putting it away"
 msgid "More about the owner"
 msgstr "More about the owner"
 
-#: src/onboarding/company-step.tsx
-msgid "More about the staff list"
-msgstr "More about the staff list"
-
 #: src/onboarding/sources-step.tsx
 msgid "More about these connections"
 msgstr "More about these connections"
-
-#: src/onboarding/company-step.tsx
-msgid "More about this connection"
-msgstr "More about this connection"
 
 #: src/frame/info-tip.tsx
 #: src/settings/section.tsx
@@ -13568,10 +13521,6 @@ msgstr "Parameters"
 msgid "Paris"
 msgstr "Paris"
 
-#: src/interview/read-back-story.tsx
-msgid "Part {n} of {count}"
-msgstr "Part {n} of {count}"
-
 #: src/routes/_shell.brain.sections.$sectionId.tsx
 msgid "Part of the brain not found"
 msgstr "Part of the brain not found"
@@ -13587,10 +13536,6 @@ msgstr "Part of what will be sent is cut short above. Show it all, or exactly wh
 #: src/inbox/item-detail.tsx
 msgid "Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm."
 msgstr "Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm."
-
-#: src/interview/read-back-story.tsx
-msgid "Parts"
-msgstr "Parts"
 
 #: src/brain/sources-page.tsx
 msgid "Passages"
@@ -16214,10 +16159,6 @@ msgstr "Share {name} with the company?"
 msgid "Share a staff list as a CSV or Excel file, a row per person. No list at hand? Skip this, and we’ll sort it out with you."
 msgstr "Share a staff list as a CSV or Excel file, a row per person. No list at hand? Skip this, and we’ll sort it out with you."
 
-#: src/onboarding/company-step.tsx
-msgid "Share another staff list as a CSV or Excel file, a row per person. It replaces the one I have now."
-msgstr "Share another staff list as a CSV or Excel file, a row per person. It replaces the one I have now."
-
 #: src/interview/read-back-story.tsx
 msgid "Share as how your team works"
 msgstr "Share as how your team works"
@@ -16728,10 +16669,6 @@ msgstr "Skip for now"
 #: src/agents/agent-templates.ts
 msgid "Skip leads marked lost or not interested."
 msgstr "Skip leads marked lost or not interested."
-
-#: src/interview/start.tsx
-msgid "Skip the interview?"
-msgstr "Skip the interview?"
 
 #: src/frame/ui-words.tsx
 msgid "Skipped {name}"
@@ -17317,6 +17254,7 @@ msgstr "Suggestions"
 msgid "Summarise documents"
 msgstr "Summarise documents"
 
+#: src/interview/read-back-story.tsx
 #: src/interview/words.ts
 msgid "Summary"
 msgstr "Summary"
@@ -17708,10 +17646,6 @@ msgstr "Thank you, {name}."
 msgid "Thank you. Want to say why?"
 msgstr "Thank you. Want to say why?"
 
-#: src/interview/start.tsx
-msgid "Thanks for letting us know"
-msgstr "Thanks for letting us know"
-
 #: src/onboarding/documents-step.tsx
 msgid "Thanks for the document. I’ll read it before I talk to anyone."
 msgstr "Thanks for the document. I’ll read it before I talk to anyone."
@@ -17811,10 +17745,6 @@ msgstr "That training deck helps too"
 #: src/sign-in-errors.ts
 msgid "That way of signing in isn't set up here."
 msgstr "That way of signing in isn't set up here."
-
-#: src/interview/start.tsx
-msgid "That’s completely fine. Your company will see that you opted out, but never why. Nothing was recorded."
-msgstr "That’s completely fine. Your company will see that you opted out, but never why. Nothing was recorded."
 
 #: src/onboarding/plan-story.tsx
 msgid "That’s everything. Here’s a quick look at what happens next."
@@ -18681,12 +18611,6 @@ msgstr "There is a team with this name already."
 #: src/onboarding/people-add.tsx
 msgid "There is nobody in this list."
 msgstr "There is nobody in this list."
-
-#. placeholder {0}: peopleWords(people)
-#. placeholder {1}: teamWords(teams)
-#: src/onboarding/company-step.tsx
-msgid "There it is, your company. I can see {0} in {1}. Have a quick look whether that seems right, and then we’ll move on."
-msgstr "There it is, your company. I can see {0} in {1}. Have a quick look whether that seems right, and then we’ll move on."
 
 #. placeholder {0}: formatList(wrong.slice(0, 5))
 #: src/onboarding/people-add.tsx
@@ -19712,10 +19636,6 @@ msgstr "Uploads shared with a team or everyone, which only an admin can erase."
 msgid "Use {name} in this chat"
 msgstr "Use {name} in this chat"
 
-#: src/onboarding/company-step.tsx
-msgid "Use a staff list instead"
-msgstr "Use a staff list instead"
-
 #: src/connections/request-app-dialog.tsx
 msgid "Use an address that starts with http:// or https://."
 msgstr "Use an address that starts with http:// or https://."
@@ -19723,14 +19643,6 @@ msgstr "Use an address that starts with http:// or https://."
 #: src/settings/ai-providers.tsx
 msgid "Use an OpenAI-compatible endpoint"
 msgstr "Use an OpenAI-compatible endpoint"
-
-#: src/onboarding/company-step.tsx
-msgid "Use another list"
-msgstr "Use another list"
-
-#: src/onboarding/company-step.tsx
-msgid "Use another staff list"
-msgstr "Use another staff list"
 
 #: src/agents/setup/words.ts
 msgid "Use Apps"
@@ -20335,6 +20247,14 @@ msgstr "Week in review"
 msgid "Weekly reporter"
 msgstr "Weekly reporter"
 
+#: src/interview/words.ts
+msgid "Well, thank you, {name}. It was great talking to you. You can always come back to this link if you want to change something. For now, I have enough. Have a great rest of your week."
+msgstr "Well, thank you, {name}. It was great talking to you. You can always come back to this link if you want to change something. For now, I have enough. Have a great rest of your week."
+
+#: src/interview/words.ts
+msgid "Well, thank you. It was great talking to you. You can always come back to this link if you want to change something. For now, I have enough. Have a great rest of your week."
+msgstr "Well, thank you. It was great talking to you. You can always come back to this link if you want to change something. For now, I have enough. Have a great rest of your week."
+
 #: src/activity/audit-words.ts
 msgid "Went back to an earlier version"
 msgstr "Went back to an earlier version"
@@ -20454,10 +20374,6 @@ msgstr "What he may do"
 #: src/settings/stephen-settings.tsx
 msgid "What he may do in {appName}, with each person's own sign-in: as for the whole company, or for fewer people."
 msgstr "What he may do in {appName}, with each person's own sign-in: as for the whole company, or for fewer people."
-
-#: src/onboarding/company-step.tsx
-msgid "What I found"
-msgstr "What I found"
 
 #: src/brain/memories-page.tsx
 msgid "What is right"
@@ -21536,10 +21452,6 @@ msgctxt "a kind of field"
 msgid "Yes or no"
 msgstr "Yes or no"
 
-#: src/interview/start.tsx
-msgid "Yes, skip it"
-msgstr "Yes, skip it"
-
 #: src/interview/read-back-story.tsx
 msgid "Yes, that’s correct"
 msgstr "Yes, that’s correct"
@@ -21951,8 +21863,8 @@ msgid "Your skills"
 msgstr "Your skills"
 
 #: src/onboarding/company-step.tsx
-msgid "Your staff list"
-msgstr "Your staff list"
+msgid "Your staff list is in. A new one replaces it."
+msgstr "Your staff list is in. A new one replaces it."
 
 #: src/interview/words.ts
 msgid "Your story"
@@ -21978,11 +21890,6 @@ msgstr "Your team has this one"
 #: src/drafts/status-badge.tsx
 msgid "Your team uses it"
 msgstr "Your team uses it"
-
-#: src/onboarding/company-dots.tsx
-#: src/onboarding/company-rows.tsx
-msgid "Your teams"
-msgstr "Your teams"
 
 #: src/brain/skills-page.tsx
 msgid "Your teams have no skills of their own yet."

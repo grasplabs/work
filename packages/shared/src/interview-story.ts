@@ -25,7 +25,7 @@ import { interviewerSchema, interviewLocaleSchema } from "./onboarding.ts";
 export const interviewStoryPath = "/api/interview/story";
 
 /** The most lines one part is told from, and the longest a line and a sentence of his may be, in characters. */
-export const storyLinesMax = 12;
+export const storyLinesMax = 60;
 const storyLineMax = 300;
 const sentenceMax = 320;
 /**
@@ -35,7 +35,7 @@ const sentenceMax = 320;
  */
 const longer = 1.25;
 /** The most bytes one story's request may carry. */
-export const interviewStoryMaxBytes = 16 * 1024;
+export const interviewStoryMaxBytes = 32 * 1024;
 
 /** A line of the part, as it stands on screen. */
 export const storyLineSchema = z.strictObject({
@@ -198,11 +198,6 @@ const groupOf: Record<FactTag, (typeof readBackGroups)[number]> = {
   term: "result",
 };
 
-/** How many lines are read back at once: few enough to read, check and agree to without scrolling. */
-export const readBackLines = 5;
-/** The most lines a page has once another part has joined it: parts that fit on one page together are read together. */
-export const readBackMost = 7;
-
 /** One part of the read-back: its group, whether it is that group's first part, and its lines. */
 export interface ReadBackPart {
   group: ReadBackGroup;
@@ -211,55 +206,40 @@ export interface ReadBackPart {
 }
 
 /**
- * The read-back in parts: their recurring work, the steps, what goes
- * differently, the numbers and the result, then what they said about AI,
- * each a few lines at a
- * time. Small parts are read together, so five short answers are not five
- * pages to agree to. A line the person added stays in the part they added
- * it to. What was agreed to in an earlier read-back is not read again:
- * back to add something, only what is new or changed is.
+ * The read-back: one summary of everything still to agree to, on one
+ * screen, told back once (the owner's ask, 2026-11-26: "one big summary").
+ * Its lines go in the order of the interview: their recurring work, the
+ * steps, what goes differently, the numbers and the result, then what
+ * they said about AI; the lines they added while reading back last. Still
+ * a list of parts, of one at most, so what is said and agreed to per part
+ * stays as it was. What was agreed to before is not read again: back to
+ * add something, only what is new or changed is.
  */
 export const readBackParts = (facts: InterviewFact[]): ReadBackPart[] => {
   // One erased is read back nowhere: nothing of it is left to read.
   const open = facts.filter((fact) => fact.agreed !== true && !isErased(fact));
+  if (open.length === 0) {
+    return [];
+  }
   // A wish is read with their recurring work, where it was asked. In an
   // interview with none, a lead's or one from before there was any, it is
   // read where it was before: with what they said about AI.
-  const recurring = facts.some(({ tag }) => tag === "task");
+  const recurring = open.some(({ tag }) => tag === "task");
   const groupIn = ({ tag }: InterviewFact): (typeof readBackGroups)[number] =>
     tag === "wish" && !recurring ? "you" : groupOf[tag];
-  const parts: ReadBackPart[] = readBackGroups.flatMap((group) => {
-    const own = open.filter(
-      (fact) => fact.pin === undefined && groupIn(fact) === group
-    );
-    return Array.from(
-      { length: Math.ceil(own.length / readBackLines) },
-      (_, index) => ({
-        group,
-        first: index === 0,
-        facts: own.slice(index * readBackLines, (index + 1) * readBackLines),
-      })
-    );
-  });
-  // A short interview has a short read-back: a part joins the one before it for as long as the page stays short.
-  const pages: ReadBackPart[] = [];
-  for (const part of parts) {
-    const before = pages.at(-1);
-    if (
-      before !== undefined &&
-      before.facts.length + part.facts.length <= readBackMost
-    ) {
-      pages[pages.length - 1] = {
-        group: before.group === part.group ? before.group : "together",
-        first: before.first,
-        facts: [...before.facts, ...part.facts],
-      };
-    } else {
-      pages.push(part);
-    }
-  }
-  return pages.map((part, index) => ({
-    ...part,
-    facts: [...part.facts, ...open.filter(({ pin }) => pin === index)],
-  }));
+  const ordered = [
+    ...readBackGroups.flatMap((group) =>
+      open.filter((fact) => fact.pin === undefined && groupIn(fact) === group)
+    ),
+    ...open.filter(({ pin }) => pin !== undefined),
+  ];
+  const groups = new Set(ordered.map(groupIn));
+  const [only] = groups;
+  return [
+    {
+      group: groups.size === 1 && only !== undefined ? only : "together",
+      first: true,
+      facts: ordered,
+    },
+  ];
 };
