@@ -1,5 +1,4 @@
 import { roleSchema } from "@grasp-os/shared/roles";
-import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Command,
@@ -13,23 +12,24 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@grasp-os/ui/components/popover";
-import { Icon, KeyIcon, PlusIcon, UsersIcon } from "@grasp-os/ui/lib/icons";
+import { CircleUserIcon, Icon, PlusIcon } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
 import { useState } from "react";
 
 import type { Session } from "../core.ts";
+import { choiceFace } from "../drafts/share-access.tsx";
 import { roleLabel } from "../labels.ts";
 import { usePeopleApart } from "./people-apart.ts";
 
-// The organization's people, teams and roles to pick one of: who answers
-// a workflow's decision, the roles too, as a decision sent to a role
+// The organization's people, teams and roles, to name who answers a
+// workflow's decision: roles too, as a decision sent to a role
 // (`role:admin`) is answered only by a binding that names that role. One
-// button that opens a list to search, people, teams and roles apart,
-// leaving out those the list holds already. Who may
-// be picked is core's to decide; the list is whoever the page offers. A
-// workflow's start names one of the same subjects (`subjectKey`) through
-// its own Combobox (start-run.tsx). Drawn as an App's "Add a connector"
-// (apps/app-integrations.tsx): Damsko's Popover and Command.
+// button opens a list to search, people, teams and roles apart, leaving
+// out those picked already. Who may be picked is core's to decide; the
+// list is whoever the page offers. A workflow's start names the same
+// subjects (`subjectKey`) through its own Combobox (start-run.tsx). Drawn
+// as an App's "Add a connector" (apps/app-integrations.tsx), its faces as
+// Share access's (drafts/share-access.tsx).
 
 /** Who can be added: the organization's people and teams. */
 export interface PeopleAndTeams {
@@ -125,11 +125,7 @@ export const PeopleTeamsPicker = ({
       [person.name, person.email ?? "", hint ?? ""],
       {
         label: person.name,
-        media: (
-          <Avatar decorative name={person.name} size="xs">
-            <AvatarFallback />
-          </Avatar>
-        ),
+        media: choiceFace({ name: person.name, kind: "person" }),
         ...(hint === undefined ? {} : { description: hint }),
       }
     );
@@ -137,7 +133,7 @@ export const PeopleTeamsPicker = ({
   const teams = (candidates?.teams ?? []).map((team) =>
     offer({ type: "team", id: team.id, name: team.name }, [team.name], {
       label: team.name,
-      icon: UsersIcon,
+      media: choiceFace({ name: team.name, kind: "team" }),
     })
   );
   const roles =
@@ -147,7 +143,7 @@ export const PeopleTeamsPicker = ({
           const name = roleLabel(role);
           return offer({ type: "role", id: role, name }, [name], {
             label: t`Everyone with the ${name} role`,
-            icon: KeyIcon,
+            icon: CircleUserIcon,
           });
         });
   const shown = (offers: Offer[]): Offer[] =>
