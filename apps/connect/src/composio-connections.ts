@@ -870,10 +870,14 @@ const hasLiveShared = async (env: Env, toolkit: string): Promise<boolean> => {
 const completingStatuses = new Set(["INITIALIZING", "INITIATED"]);
 
 /**
- * How long finishing waits for Composio to complete an account, at most:
- * the browser waits on the callback meanwhile.
+ * How long finishing waits for Composio to complete an account: reads
+ * start only within it, and the last may take `shortestReadMs` past it,
+ * so the browser waits on the callback for 17 seconds at most.
  */
 const completingWaitMs = 15_000;
+
+/** The least time a read of the account is given, even the last. */
+const shortestReadMs = 2000;
 
 /**
  * The waits between reads of an account still completing, as Composio's
@@ -884,35 +888,44 @@ const firstReadWaitMs = 1000;
 const readWaitGrowth = 1.5;
 const longestReadWaitMs = 5000;
 
-/** Whether Composio may answer a read it failed if it's asked again. */
-const isPassing = (error: unknown): error is ComposioError =>
+/**
+ * Whether Composio may answer a read it failed if it's asked again: it
+ * didn't answer at all, rate limited it, or failed on its side. Never an
+ * answer connect can't read, which asking again won't change.
+ */
+const isTransient = (error: unknown): error is ComposioError =>
   error instanceof ComposioError &&
-  error.status !== undefined &&
-  (error.status === 429 || error.status >= 500);
+  (error.unanswered ||
+    (error.status !== undefined &&
+      (error.status === 429 || error.status >= 500)));
+
+/** Where a Composio account settled, as `settledAccount` reads it. */
+type Settled = "active" | "refused" | "pending" | "unanswered";
 
 /**
  * Where Composio's connected account `account` settled, read at Composio
  * with connect's key, never taken from the browser: `active` once it is
  * the one made (its ID, toolkit and auth config) and `ACTIVE`; `refused`
- * when it isn't the one made, or failed, expired or was revoked; and
- * `pending` while Composio is still completing it after
- * `completingWaitMs`. A read Composio fails for now (rate limited, or
- * its error) is tried again in that time. Throws {@link ComposioError}
- * when Composio fails otherwise, or still fails at the end.
+ * when it isn't the one made, or failed, expired or was revoked; `pending`
+ * while Composio is still completing it after `completingWaitMs`; and
+ * `unanswered` when Composio's last read in that time failed in a way
+ * asking again might not (`isTransient`), as such a read is asked again
+ * meanwhile. Throws {@link ComposioError} when Composio fails otherwise.
  */
 const settledAccount = async (
   key: string,
   account: Pick<Made, "toolkit" | "authConfigId" | "connectedAccountId">
-): Promise<"active" | "refused" | "pending"> => {
+): Promise<Settled> => {
   const deadline = Date.now() + completingWaitMs;
   const detail = { toolkit: account.toolkit };
   for (let waitMs = firstReadWaitMs; ;) {
-    let failed: ComposioError | undefined;
+    let failed = false;
     try {
       // oxlint-disable-next-line no-await-in-loop -- one read at a time
       const held = await composioRequest(key, {
         path: `/connected_accounts/${encodeURIComponent(account.connectedAccountId)}`,
         schema: connectedAccountSchema,
+        timeoutMs: Math.max(deadline - Date.now(), shortestReadMs),
       });
       const isThisOne =
         held.id === account.connectedAccountId &&
@@ -935,24 +948,31 @@ const settledAccount = async (
         return "refused";
       }
     } catch (error) {
-      if (!isPassing(error)) {
+      if (!isTransient(error)) {
         throw error;
       }
-      failed = error;
+      failed = true;
     }
     const left = deadline - Date.now();
     if (left <= 0) {
-      if (failed !== undefined) {
-        throw failed;
-      }
-      log.warn("composio.account_pending", detail);
-      return "pending";
+      log.warn(
+        failed ? "composio.account_unanswered" : "composio.account_pending",
+        detail
+      );
+      return failed ? "unanswered" : "pending";
     }
     // oxlint-disable-next-line no-await-in-loop -- waits for Composio
     await scheduler.wait(Math.min(waitMs, left));
     waitMs = Math.min(waitMs * readWaitGrowth, longestReadWaitMs);
   }
 };
+
+/** The refusal each way an account didn't settle active ends as. */
+const unsettledReasons = {
+  refused: "connection.provider_refused",
+  pending: "connection.provider_pending",
+  unanswered: "connection.provider_not_answering",
+} as const;
 
 /** A connected account connect made at Composio, to serve as a connection. */
 interface Made {
@@ -1107,17 +1127,13 @@ const finishToolkitConnection = async (
       answer.connectedAccountId !== undefined &&
       answer.connectedAccountId !== flow.connectedAccountId
     ) {
+      // Only noted: the flow's own account, read at Composio, decides.
       log.warn("composio.callback_account_differs", { toolkit: flow.toolkit });
-      await refuse("connection.provider_refused", "failed");
-      throw connectionErrors.create("connection.provider_refused");
     }
     const settled =
       answer.status === "failed" ? "refused" : await settledAccount(key, flow);
     if (settled !== "active") {
-      const reason =
-        settled === "pending"
-          ? "connection.provider_pending"
-          : "connection.provider_refused";
+      const reason = unsettledReasons[settled];
       await refuse(reason, "failed");
       throw connectionErrors.create(reason);
     }
@@ -1353,8 +1369,14 @@ export const connectToolkitWithKey = async (
       connectedAccountId: created.id,
       tools: storedTools,
     };
-    if ((await settledAccount(key, account)) !== "active") {
-      throw new ComposioError("Composio's account isn't the one made");
+    const settled = await settledAccount(key, account);
+    if (settled === "refused") {
+      throw new ComposioError("Composio didn't make the account active");
+    }
+    if (settled !== "active") {
+      const reason = unsettledReasons[settled];
+      await refuse(reason, "failed");
+      throw connectionErrors.create(reason);
     }
     const connectionId = await serveAndStore(
       env,

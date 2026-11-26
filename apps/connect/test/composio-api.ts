@@ -423,6 +423,11 @@ export const fakeComposioApi = (
      * API's base start with this, such as `DELETE /connected_accounts/`.
      */
     failing: string | undefined;
+    /**
+     * As `failing`, for its next `times` requests only, each counted down
+     * as it fails: a failure that passes.
+     */
+    failingFor: { prefix: string; times: number } | undefined;
     /** Where it says a new server is, instead of its own MCP host. */
     serverUrlBase: string;
     /**
@@ -464,6 +469,7 @@ export const fakeComposioApi = (
     endless: false,
     toolsStatus: undefined,
     failing: undefined,
+    failingFor: undefined,
     serverUrlBase: mcpBase,
     accountInUrl: "own",
     holds: { authConfigs: new Map(), accounts: new Map(), servers: new Map() },
@@ -769,6 +775,15 @@ export const fakeComposioApi = (
     ) {
       return new Response("Service Unavailable", { status: 503 });
     }
+    const { failingFor } = state;
+    if (
+      failingFor !== undefined &&
+      failingFor.times > 0 &&
+      `${request.method} ${route}`.startsWith(failingFor.prefix)
+    ) {
+      failingFor.times -= 1;
+      return new Response("Service Unavailable", { status: 503 });
+    }
     const cursor = url.searchParams.get("cursor");
     if (request.method === "GET" && route === "/toolkits") {
       return page(
@@ -830,6 +845,7 @@ export const fakeComposioApi = (
     state.endless = false;
     state.toolsStatus = undefined;
     state.failing = undefined;
+    state.failingFor = undefined;
     state.beforeUpdate = undefined;
     state.updateGate = undefined;
     state.serverGate = undefined;

@@ -27,8 +27,8 @@ import { z } from "zod";
 /** Composio's REST API. */
 export const composioApiBase = "https://backend.composio.dev/api/v3.1";
 
-/** How long one request to Composio may take. */
-const requestTimeoutMs = 10_000;
+/** How long one request to Composio may take, unless it asks for less. */
+export const requestTimeoutMs = 10_000;
 
 /** Largest answer connect reads from Composio's API, in bytes. */
 const maxResponseBytes = 4 * 1024 * 1024;
@@ -44,17 +44,24 @@ export class ComposioError extends Error {
    * what was sent.
    */
   readonly slug: string | undefined;
+  /**
+   * Composio didn't answer at all: the request failed on the way, or took
+   * longer than it may. Asking again may get an answer.
+   */
+  readonly unanswered: boolean;
 
   constructor(
     message: string,
     status?: number,
     cause?: unknown,
-    slug?: string
+    slug?: string,
+    unanswered = false
   ) {
     super(message, { cause });
     this.name = "ComposioError";
     this.status = status;
     this.slug = slug;
+    this.unanswered = unanswered;
   }
 }
 
@@ -140,6 +147,8 @@ export interface ComposioRequest<Schema extends z.ZodType> {
   body?: object;
   /** What the answer must be. */
   schema: Schema;
+  /** How long it may take, if less than `requestTimeoutMs`. */
+  timeoutMs?: number;
 }
 
 /**
@@ -151,7 +160,13 @@ export interface ComposioRequest<Schema extends z.ZodType> {
  */
 export const composioRequest = async <Schema extends z.ZodType>(
   key: string,
-  { method = "GET", path, body, schema }: ComposioRequest<Schema>
+  {
+    method = "GET",
+    path,
+    body,
+    schema,
+    timeoutMs = requestTimeoutMs,
+  }: ComposioRequest<Schema>
 ): Promise<z.infer<Schema>> => {
   const url = new URL(`${composioApiBase}${path}`);
   const [, area = ""] = path.split(/[/?]/u);
@@ -167,11 +182,17 @@ export const composioRequest = async <Schema extends z.ZodType>(
       body: body === undefined ? undefined : JSON.stringify(body),
       // A redirect could carry the key to another host: never follow.
       redirect: "manual",
-      signal: AbortSignal.timeout(requestTimeoutMs),
+      signal: AbortSignal.timeout(Math.min(timeoutMs, requestTimeoutMs)),
     });
   } catch (error) {
     log.warn("composio.failed", { method, area, ...errorFields(error) });
-    throw new ComposioError("Composio didn't answer", undefined, error);
+    throw new ComposioError(
+      "Composio didn't answer",
+      undefined,
+      error,
+      undefined,
+      true
+    );
   }
   log.info("composio.request", { method, area, status: response.status });
   if (!response.ok) {

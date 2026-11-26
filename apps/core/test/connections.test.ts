@@ -542,6 +542,23 @@ describe("connecting a Composio toolkit", () => {
     });
   });
 
+  it("leaves out an empty or overlong hint on Composio's redirect, and still connects", async () => {
+    const admin = await signedInAdmin();
+    const { url } = await admin.connections.connectToolkit(request);
+    const response = await backFromProvider(
+      admin.session,
+      {
+        ...Object.fromEntries(new URL(url).searchParams),
+        status: "",
+        connected_account_id: "a".repeat(10_000),
+      },
+      admin.coreEnv
+    );
+    expect(response.headers.get("location")).toMatch(
+      /^[^?]+\?tab=shared&connection=[^&]+$/u
+    );
+  });
+
   it("is refused for a toolkit Composio holds no app for, connecting nothing", async () => {
     const admin = await signedInAdmin();
     await expect(

@@ -2817,6 +2817,8 @@ export const connectionErrors = defineErrorFamily({
     "The provider didn't complete the connection. Start again.",
   "connection.provider_pending":
     "The provider was still finishing the connection, so nothing was connected yet. Start again in a minute.",
+  "connection.provider_not_answering":
+    "The provider isn't answering just now, so nothing was connected. Try again in a minute.",
   "connection.wrong_account":
     "That account isn't in your organization. Connect an account of your organization.",
   "connection.refresh_failed":

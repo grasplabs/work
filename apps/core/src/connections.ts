@@ -54,6 +54,7 @@ import type {
 import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import { authErrors, requestErrors } from "@grasp-os/shared/errors";
 import { httpConnectionSchema } from "@grasp-os/shared/http-connections";
+import { identifierMaxLength } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import {
@@ -1401,6 +1402,10 @@ export const clientMetadataResponse = (
   });
 };
 
+/** A hint on Composio's redirect, or `undefined` when empty or over `max`. */
+const composioHint = (value: string | null, max: number): string | undefined =>
+  value === null || value === "" || value.length > max ? undefined : value;
+
 /**
  * The provider's redirect back, on the client's origin. The session cookie
  * comes along (a top-level navigation sends `SameSite=Lax` cookies), and
@@ -1455,9 +1460,13 @@ export const handleConnectionCallback = async (
       // check against the one the sign-in started at.
       iss: params.get("iss") ?? undefined,
       // What Composio appends to the callback it was given: hints, which
-      // connect checks against the flow and Composio itself.
-      status: params.get("status")?.slice(0, 64) ?? undefined,
-      connectedAccountId: params.get("connected_account_id") ?? undefined,
+      // connect checks against the flow and Composio itself. Left out
+      // when empty, or an ID too long to be one, never failing the flow.
+      status: composioHint(params.get("status"), 64),
+      connectedAccountId: composioHint(
+        params.get("connected_account_id"),
+        identifierMaxLength
+      ),
     });
     // The accounts it proves are theirs, for the reader lists the Brain
     // copies (GRA-1761): failed, the flow fails, and connecting again in

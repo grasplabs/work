@@ -17,7 +17,7 @@ import {
 } from "../src/composio-connections.ts";
 import type Connect from "../src/index.ts";
 import { fakeComposioApi } from "./composio-api.ts";
-import { auditEvents, clientOrigin, someone } from "./connect.ts";
+import { auditEvents, clientOrigin, connectWith, someone } from "./connect.ts";
 
 // What composio-connections*.test.ts share: the fake Composio, the
 // connections made through it, and the walks of the crash tests.
@@ -178,9 +178,10 @@ export const start = async (
 /** Connects Pipedesk with `values` for `person`, as core does. */
 export const connectWithKey = async (
   person: ConnectionPerson,
-  options: Partial<Omit<ConnectToolkitWithKey, "person">> = {}
+  options: Partial<Omit<ConnectToolkitWithKey, "person">> = {},
+  connect: Pick<Connect, "connectToolkitWithKey"> = exports.default
 ): Promise<string> => {
-  const { connectionId } = await exports.default.connectToolkitWithKey({
+  const { connectionId } = await connect.connectToolkitWithKey({
     person,
     toolkit: "pipedesk",
     tools: ["PIPEDESK_LIST_DEALS"],
@@ -260,11 +261,14 @@ export const afterMinutes = async (
 };
 
 /**
- * What `run` ends with, where every wait on `scheduler.wait` passes at
- * once and moves the clock on by as long: Composio is asked again as
- * often as it would be over that time, without the time going by.
+ * What `run` ends with, given connect in this test's own context, where
+ * every wait on `scheduler.wait` passes at once and moves the (fake) clock
+ * on by as long: Composio is asked again as often as it would be over
+ * that time, without the time going by.
  */
-export const asTimePasses = async <T>(run: () => Promise<T>): Promise<T> => {
+export const asTimePasses = async <T>(
+  run: (connect: Connect) => Promise<T>
+): Promise<T> => {
   vi.useFakeTimers({ toFake: ["Date"] });
   const waits = vi
     .spyOn(scheduler, "wait")
@@ -273,7 +277,7 @@ export const asTimePasses = async <T>(run: () => Promise<T>): Promise<T> => {
       await Promise.resolve();
     });
   try {
-    return await run();
+    return await run(connectWith({}));
   } finally {
     waits.mockRestore();
     vi.useRealTimers();
