@@ -198,7 +198,8 @@ export const aiProvidersFake = () => {
   /**
    * A realtime transcription session, as Mistral's Voxtral holds one: it
    * says it was created, writes the first audio of a stretch down as
-   * `partialText`, and the rest (" there") when asked to flush.
+   * `partialText`, and the rest (" there") once silence follows it. Its
+   * settings changed after audio came, it errs (3051) as Mistral does.
    */
   const openRealtime = (request: Request, url: URL): Response => {
     const { 0: client, 1: server } = new WebSocketPair();
@@ -217,6 +218,8 @@ export const aiProvidersFake = () => {
     realtime.push({ record, asked });
     /** Words of the stretch being said were written down already. */
     let heard = false;
+    /** Audio came: the settings are fixed. */
+    let started = false;
     const send = (event: Record<string, unknown>): void => {
       server.send(JSON.stringify(event));
     };
@@ -240,6 +243,17 @@ export const aiProvidersFake = () => {
       }
       record.events.push(parsed.type);
       if (parsed.type === "session.update") {
+        if (started) {
+          send({
+            type: "error",
+            error: {
+              message:
+                "Session fields cannot be changed after audio has started.",
+              code: 3051,
+            },
+          });
+          return;
+        }
         record.session = parsed.session;
         send({ type: "session.updated", session: parsed.session });
       } else if (
@@ -259,13 +273,15 @@ export const aiProvidersFake = () => {
         ) {
           record.firstSamples.push(view.getInt16(at, true));
         }
-        if (!heard) {
+        started = true;
+        const silent = bytes.every((byte) => byte === 0);
+        if (!heard && !silent) {
           heard = true;
           send({ type: "transcription.text.delta", text: "Hello" });
+        } else if (heard && silent) {
+          heard = false;
+          send({ type: "transcription.text.delta", text: " there" });
         }
-      } else if (parsed.type === "input_audio.flush" && heard) {
-        heard = false;
-        send({ type: "transcription.text.delta", text: " there" });
       }
     });
     server.addEventListener("close", (event) => {
