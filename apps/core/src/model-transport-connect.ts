@@ -18,6 +18,7 @@ import type {
 import { signModelGrant } from "@grasp-os/shared/capability";
 import { sha256HexOfBytes } from "@grasp-os/shared/encoding";
 
+import { withOpenAiContent } from "./mistral-stream.ts";
 import { isRouteApi } from "./model-catalog.ts";
 import type { ModelRef } from "./model-catalog.ts";
 import type { TransportRoute } from "./model-transport.ts";
@@ -483,7 +484,11 @@ export const connectRoute = (
     api,
     host: host.toLowerCase(),
     headers: placeholderHeaders(target.provider),
-    fetch: connectFetch(env, target, host.toLowerCase()),
+    // Mistral's reasoning answers stream their content as a list (mistral-stream.ts).
+    fetch:
+      target.provider === "mistral"
+        ? withOpenAiContent(connectFetch(env, target, host.toLowerCase()))
+        : connectFetch(env, target, host.toLowerCase()),
     // The chat's shared prompt cached apart from what differs between chats.
     ...(api === "anthropic-messages"
       ? { onPayload: withSharedPrefixCached }
