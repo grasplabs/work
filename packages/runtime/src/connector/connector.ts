@@ -129,6 +129,7 @@ export { jsonBody, providerFetch, retryAfterOf, segment } from "./provider.ts";
 export {
   classByRules,
   isJsonArray,
+  isNeverPath,
   isNeverTool,
   ruledDeclaration,
   topNames,

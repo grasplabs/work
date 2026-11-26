@@ -30,6 +30,7 @@ import {
 } from "./server.ts";
 import type { CallResult, Connector, JsonObject, Tool } from "./server.ts";
 import type { AccountLookup, SignInInput } from "./sign-in.ts";
+import { isDeliveringPath } from "./tool-rules.ts";
 
 // How a connector is written (@grasp-os/sdk/connector): its tools, each one
 // route of the vendor's API with `v` for its arguments and what it
@@ -493,7 +494,8 @@ export interface DefinedConnector extends Connector {
  * A connector: its manifest, and the MCP server connect runs it as. Throws
  * if a tool breaks the connector contract (a route to a host it doesn't
  * list, args that aren't strict, a scope its sign-in doesn't ask for), or
- * an event or a sync reads a route off its hosts.
+ * an event or a sync reads a route off its hosts, or one whose path
+ * delivers to people.
  */
 export const defineConnector = (
   declaration: ConnectorDeclaration
@@ -512,8 +514,16 @@ export const defineConnector = (
     ...Object.values(syncs),
   ]) {
     for (const route of routes) {
-      if (routeOf(route, hosts, base).method !== "GET") {
+      const { method, path } = routeOf(route, hosts, base);
+      if (method !== "GET") {
         throw new Error(`"${route}": an event or a sync only reads, by GET`);
+      }
+      // Delivery only, as a sync's manifest is checked: never or change words
+      // would refuse real reads (a drive item's permissions, a start token).
+      if (isDeliveringPath(path)) {
+        throw new Error(
+          `"${route}": an event or a sync runs on its own, so its path may not deliver to people`
+        );
       }
     }
   }
