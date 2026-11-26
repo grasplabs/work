@@ -1,4 +1,3 @@
-import { agentErrors } from "@grasp-os/shared/agent";
 import { applyPartial } from "@grasp-os/shared/chat";
 import type {
   ChatMessage,
@@ -18,7 +17,7 @@ import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider, fakeProviderFor } from "./model-provider.ts";
 import { turnRecordsOf } from "./model-usage.ts";
-import { signedInApi, signedInWithRole } from "./sign-in.ts";
+import { outcome, signedInApi, signedInWithRole } from "./sign-in.ts";
 
 // A question sent while the chat's agent works on another is queued into
 // that turn (chat-harness.ts `queueQuestion`), in pi's own queue, as Claude Code,
@@ -518,12 +517,14 @@ describe("a question sent while the agent answers", slow, () => {
     );
 
     await expect(
-      session().queueQuestion("turn-wake", {
-        id: "question-wake",
-        text: "And mine?",
-        files: [],
-      })
-    ).rejects.toThrow(agentErrors.create("agent.busy").message);
+      outcome(
+        session().queueQuestion("turn-wake", {
+          id: "question-wake",
+          text: "And mine?",
+          files: [],
+        })
+      )
+    ).resolves.toBe("agent.busy");
     await session().abort("turn-wake");
     await woken;
   });
