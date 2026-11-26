@@ -187,14 +187,14 @@ const directoryShown = (
   return directory?.status === "active" ? directory.suite : null;
 };
 
-/** Whoever is new on a list saved while the plan runs gets no link until the organization is confirmed again. */
+/** Whoever is new on a list saved while the plan runs gets no link until the admin has chosen again who takes part (the leads step). */
 export const WaitingNote = ({ waiting }: { waiting: number }) =>
   waiting > 0 ? (
     <Text>
       {plural(waiting, {
-        one: "# person new on your list gets a link once you confirm your organization.",
+        one: "# person is new on your list. Their link goes out once you’ve chosen who takes part.",
         other:
-          "# people new on your list get their links once you confirm your organization.",
+          "# people are new on your list. Their links go out once you’ve chosen who takes part.",
       })}
     </Text>
   ) : null;
@@ -417,7 +417,7 @@ export const CompanyStep = (props: StepProps) => {
   const [problem, setProblem] = useState<string | null>(null);
   // Kept on this visit, and from where: the row it came through shows done while the step moves on.
   const [kept, setKept] = useState<DirectorySuite | "list" | null>(null);
-  const { roster, waiting } = props.data.view;
+  const { roster } = props.data.view;
   const { directory, suites } = props.data;
   // A sign-in that didn't connect, back refused or not started: said over the step, with the way on.
   const [notConnected, setNotConnected] = useNotConnected(suites);
@@ -560,7 +560,6 @@ export const CompanyStep = (props: StepProps) => {
           inUse={listInUse}
           onUpload={upload}
         />
-        <WaitingNote waiting={waiting} />
       </div>
       <CompanyError
         connect={connect}
