@@ -101,11 +101,12 @@ export const admin = (): ConnectionPerson => someone("admin");
 /** Adds Linear's server as a connector, as `person` would: its ID. */
 export const addLinear = async (
   person: ConnectionPerson = admin(),
-  url: string = linear.url
+  url: string = linear.url,
+  name = "Linear"
 ): Promise<string> => {
   const { id } = await exports.default.addConnector({
     person,
-    name: "Linear",
+    name,
     url,
     origin: clientOrigin,
     auth: { kind: "oauth" },

@@ -183,6 +183,7 @@ export {
   isJsonArray,
   isNeverPath,
   isNeverTool,
+  readsMailByRules,
   ruledDeclaration,
   topNames,
 } from "./tool-rules.ts";

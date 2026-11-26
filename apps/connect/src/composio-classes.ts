@@ -12,10 +12,19 @@ import type { ToolClass } from "@grasp-os/shared/connect";
 // repo; a toolkit comes in here once its review is done. Connect reads it
 // as `#composio-classes` (package.json), so its tests and core's can class
 // the tools of their fake Composio instead (test/fixtures/composio-classes.ts).
+//
+// A tool that reads or changes mail says so beside its class, `{ class,
+// mail: true }`, as a native connector's `mail` does: a held write's card
+// then says its turn read mail, which others wrote.
+
+/** A reviewed tool's class, and whether it reads or changes mail. */
+export type ComposioClass =
+  | ToolClass
+  | { readonly class: ToolClass; readonly mail: true };
 
 /** Each reviewed tool's class, by toolkit, then by the tool's name. */
 export type ComposioClasses = Readonly<
-  Record<string, Readonly<Record<string, ToolClass>>>
+  Record<string, Readonly<Record<string, ComposioClass>>>
 >;
 
 // Reviewed toolkits. First the CRMs a pilot may run on, any of which an
