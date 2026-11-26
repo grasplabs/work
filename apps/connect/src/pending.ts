@@ -51,7 +51,6 @@ import {
   desc,
   eq,
   gt,
-  isNotNull,
   isNull,
   lte,
   notExists,
@@ -75,6 +74,7 @@ import {
 } from "./db/schema.ts";
 import type { DecidedCall } from "./decisions.ts";
 import { erasureBegan } from "./erased-people.ts";
+import { heldDeletions } from "./held-deletions.ts";
 
 // Side effects that wait for their person (threat model R7, R12). A side
 // effect a person is there for (`interactive`: from chat, or from a person
@@ -152,7 +152,7 @@ export const shownConnection = {
   accountName: connections.accountName,
   serverKind: connections.serverKind,
   server: connections.server,
-  // A connector's name, for a connection to one made from a URL.
+  // A connector's name, for a connection to a connector.
   connectorName: sql<
     string | null
   >`(select ${connectors.name} from ${connectors} where ${connectors.id} = ${connections.server})`,
@@ -320,12 +320,19 @@ export const decidedCallOf = (row: Row): DecidedCall => {
   };
 };
 
+/**
+ * What a connection reaches, as people know it: its connector's name for a
+ * connection to a connector, else its provider's (`providerName`).
+ */
+export const reachedName = (connection: NonNullable<ShownConnection>): string =>
+  connection.connectorName ?? providerName(connection);
+
 /** The connection's name for people: what it reaches, and its account. */
 export const nameOf = (connection: ShownConnection): string | null => {
   if (connection === null) {
     return null;
   }
-  const name = connection.connectorName ?? providerName(connection);
+  const name = reachedName(connection);
   return connection.accountName === null
     ? name
     : `${name} (${connection.accountName})`;
@@ -406,84 +413,15 @@ const deletion = (
   /** What must still hold of it as it goes, read in the same transaction. */
   guard?: SQL
 ): GuardedChange => {
-  const db = drizzle(env.DB);
   const still =
     guard === undefined
       ? eq(pendingActions.id, row.id)
       : and(eq(pendingActions.id, row.id), guard);
-  const spend = db
-    .insert(idempotentCalls)
-    .select(
-      db
-        .select({
-          subjectType: pendingActions.subjectType,
-          subjectId: pendingActions.subjectId,
-          onBehalfOf: pendingActions.onBehalfOf,
-          connectionId: pendingActions.connectionId,
-          action: pendingActions.action,
-          idempotencyKey: pendingActions.idempotencyKey,
-          inputHash: pendingActions.inputHash,
-          state: sql<"declined">`'declined'`.as("state"),
-          output: sql<string | null>`${spentAs ?? null}`.as("output"),
-          provenance: sql<null>`NULL`.as("provenance"),
-          createdAt: sql<Date>`${Date.now()}`.as("created_at"),
-          claimedAt: sql<Date>`${Date.now()}`.as("claimed_at"),
-          connectorVersion: sql<null>`NULL`.as("connector_version"),
-          resource: pendingActions.resource,
-          // Never of unknown outcome: nothing of the call is kept.
-          input: sql<null>`NULL`.as("input"),
-          origin: sql<null>`NULL`.as("origin"),
-          // Declined, never listed as of unknown outcome.
-          listId: sql<string>`''`.as("list_id"),
-        })
-        .from(pendingActions)
-        .where(
-          and(
-            still,
-            or(
-              eq(pendingActions.mode, "workflow"),
-              sql`${pendingActions.idempotencyKey} = json_extract(${pendingActions.context}, '$.chatId') || ':' || ${pendingActions.id}`,
-              // An App action's call through a resource binding, only when
-              // its person declined it: its key is core's, derived from the
-              // action's call, so the same call made again is told it was
-              // declined, not asked again. A drop (its binding revoked or
-              // stale, its connection gone, its person removed) leaves the
-              // key free: the person declined nothing, and the same call
-              // made again is decided afresh.
-              spentAs === "declined"
-                ? isNotNull(pendingActions.binding)
-                : sql`0`
-            )
-          )
-        )
-    )
-    // A key its person freed for one more send (it didn't happen), held
-    // since: spent as this decision says, for that same input only, so
-    // the call made again is told so rather than asked again.
-    .onConflictDoUpdate({
-      target: [
-        idempotentCalls.subjectType,
-        idempotentCalls.subjectId,
-        idempotentCalls.onBehalfOf,
-        idempotentCalls.connectionId,
-        idempotentCalls.action,
-        idempotentCalls.idempotencyKey,
-      ],
-      set: {
-        state: sql`excluded.state`,
-        output: sql`excluded.output`,
-        claimedAt: sql`excluded.claimed_at`,
-        input: null,
-        origin: null,
-      },
-      setWhere: sql`${idempotentCalls.state} = 'freed' AND ${idempotentCalls.inputHash} = excluded.input_hash`,
-    });
-  const remove = db.delete(pendingActions).where(still);
   return {
     entry,
     from: pendingActions,
     where: sql`${still}`,
-    writes: spentAs === undefined ? [remove] : [spend, remove],
+    writes: heldDeletions(env, sql`${still}`, spentAs),
   };
 };
 

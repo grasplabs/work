@@ -58,6 +58,7 @@ const connection = (
   id: crypto.randomUUID(),
   source: "native",
   provider,
+  name: provider,
   scope,
   status,
   ownerUserId: scope === "personal" ? "me" : null,
@@ -128,7 +129,7 @@ describe(connectionNames, () => {
     const tracker = {
       ...connection(connector, "shared", "active"),
       source: "connector" as const,
-      connectorName: "Tracker",
+      name: "Tracker",
     };
     const billing: ListedConnection = {
       ...connection("http", "shared", "active"),
@@ -162,7 +163,7 @@ describe(connectionNames, () => {
     const tracker = {
       ...connection(connector, "shared", "active"),
       source: "connector" as const,
-      connectorName: "Issue tracker",
+      name: "Issue tracker",
     };
     expect(connectionNames([], [tracker]).get(tracker.id)).toBe(
       "Issue tracker"

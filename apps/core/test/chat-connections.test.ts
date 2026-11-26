@@ -237,7 +237,7 @@ describe("a connection the chat's agent asks for", setUpTime, () => {
     }).toStrictEqual({
       shown: {
         connectionId: mail.id,
-        provider: "mail",
+        name: "mail",
         accountName: null,
         resource: null,
         actions: ["mail.search"],

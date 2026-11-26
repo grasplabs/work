@@ -78,17 +78,24 @@ describe("a catalog entry's logo", () => {
   it("is named by its address on the deployment's own origin, never Composio's", async () => {
     const { entries } = await exports.default.catalog();
     expect(
-      Object.fromEntries(entries.map(({ id, logo }) => [id, logo]))
+      Object.fromEntries(
+        entries.map(({ source, id, logo }) => [`${source}:${id}`, logo])
+      )
     ).toStrictEqual({
-      microsoft: null,
-      google: null,
-      hubspot: catalogLogoUrl("composio", "hubspot"),
-      linear: catalogLogoUrl("composio", "linear"),
+      "native:microsoft": null,
+      "native:google": null,
+      // The built-ins serving their vendors' MCP servers, the tests' own
+      // too, have none: the web draws theirs.
+      "connector:linear": null,
+      "connector:notion": null,
+      "connector:sample-tracker": null,
+      "composio:hubspot": catalogLogoUrl("composio", "hubspot"),
+      "composio:linear": catalogLogoUrl("composio", "linear"),
       // Not on Composio's logo host over https, or no address at all.
-      elsewhere: null,
-      plain_http: null,
-      with_login: null,
-      no_logo: null,
+      "composio:elsewhere": null,
+      "composio:plain_http": null,
+      "composio:with_login": null,
+      "composio:no_logo": null,
     });
     expect(catalogLogoUrl("composio", "hubspot")).toBe(
       "/api/catalog/logos/composio/hubspot"

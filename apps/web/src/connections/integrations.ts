@@ -1,4 +1,7 @@
-import { catalogSourceSchema } from "@grasp-os/shared/connect";
+import {
+  catalogSourceSchema,
+  urlConnectorIdSchema,
+} from "@grasp-os/shared/connect";
 import type {
   CatalogAuth,
   CatalogGroup,
@@ -147,16 +150,12 @@ export const integrationsOf = (
         key,
         source: connection.source,
         id: connection.provider,
-        // The catalog has its name; else the name an admin gave the
-        // connector, or the product we know it as; else the provider's
-        // own ID (a vendor's, as `gmail`) stands in.
+        // The product we know it as, else connect's name for it.
         name:
-          connection.connectorName ??
           (connection.source === "native" &&
           Object.hasOwn(unlistedNames, connection.provider)
             ? unlistedNames[connection.provider]
-            : undefined) ??
-          connection.provider,
+            : undefined) ?? connection.name,
         categories: [],
         group: "Other",
         description: null,
@@ -364,18 +363,6 @@ export const connectionLabel = (
     : `${integration.name} (${connection.accountName})`;
 
 /**
- * Whether `integration`'s name is only its connector's ID: a connector the
- * catalog doesn't list, whose connection connect didn't name either.
- */
-const namedByConnectorId = (
-  integration: Integration,
-  connection: ListedConnection
-): boolean =>
-  integration.source === "connector" &&
-  !integration.listed &&
-  connection.connectorName === undefined;
-
-/**
  * Every live connection's name, by ID, as the Connectors page shows it:
  * a catalog entry's (`connectionLabel`), an HTTP connection's own. A
  * connector known by nothing but its ID is left unnamed.
@@ -387,7 +374,9 @@ export const connectionNames = (
   new Map([
     ...integrationsOf(entries, connections).flatMap((integration) =>
       integration.connections.flatMap((connection): [string, string][] =>
-        namedByConnectorId(integration, connection)
+        // A connector known by nothing but its ID (connect's name falls
+        // back to it) is left unnamed: never shown by its ID.
+        urlConnectorIdSchema.safeParse(integration.name).success
           ? []
           : [[connection.id, connectionLabel(connection, integration)]]
       )

@@ -2,7 +2,6 @@ import { env, exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { auditEvents, callAs, outcome, someone } from "./connect.ts";
-import { linearMcpUrl } from "./linear-mcp-fake.ts";
 import {
   addLinear,
   chatAgent,
@@ -73,7 +72,7 @@ describe("a connector made from Linear's MCP server URL", () => {
     }).toStrictEqual({
       registrations: 1,
       authMethod: "none",
-      tokenResource: linearMcpUrl,
+      tokenResource: linear.url,
       read: true,
       held: "held",
       sentBeforeConfirming: 1,
@@ -85,7 +84,7 @@ describe("a connector made from Linear's MCP server URL", () => {
     expect(added).toMatchObject([
       {
         detail: {
-          host: "mcp.linear.app",
+          host: new URL(linear.origin).host,
           auth: "oauth",
           connector,
           registration: "dynamic",
@@ -93,20 +92,6 @@ describe("a connector made from Linear's MCP server URL", () => {
         },
       },
     ]);
-  });
-
-  it("lists its connections under the name its admin gave it", async () => {
-    const connector = await addLinear();
-    const anna = someone();
-    const connectionId = await connectLinear(connector, anna);
-
-    const listed = await exports.default.listConnections(anna);
-
-    expect(listed.find(({ id }) => id === connectionId)).toMatchObject({
-      source: "connector",
-      provider: connector,
-      connectorName: "Linear",
-    });
   });
 
   it("pauses its connection for every caller when its server rate limits it, until the server's time passes", async () => {

@@ -55,8 +55,12 @@ const readSourceNames = async (
       session.connections.list(),
       catalogEntries(session),
     ]);
-    for (const [id, name] of connectionNames(entries, listed)) {
-      names.set(id, { name });
+    const named = connectionNames(entries, listed);
+    for (const { id, provider } of listed) {
+      const name = named.get(id);
+      if (name !== undefined) {
+        names.set(id, { name, provider });
+      }
     }
   } catch {
     // Refused: the IDs stay unnamed.

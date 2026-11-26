@@ -212,11 +212,22 @@ export const companyToolClassSchema = z.enum(companyToolClasses);
 export type CompanyToolClass = z.infer<typeof companyToolClassSchema>;
 
 /**
- * A connector made from an MCP server's URL (connect's src/mcp-connectors.ts):
- * `mcp_` and 32 random hex digits. Never an app's provider name, which
- * takes no underscore.
+ * A connector made from an MCP server's URL (connect's
+ * src/mcp-connectors.ts): `mcp_` and 32 random hex digits. Never a name,
+ * which takes no underscore.
  */
-export const connectorIdSchema = z.string().regex(/^mcp_[0-9a-f]{32}$/u);
+export const urlConnectorIdSchema = z.string().regex(/^mcp_[0-9a-f]{32}$/u);
+
+/**
+ * A connector served through its vendor's MCP server: one made from a
+ * URL (`urlConnectorIdSchema`), or a built-in of the release by its name
+ * (`tracker`). Which names are built-ins is connect's to say; a suite's
+ * name never is one.
+ */
+export const connectorIdSchema = z.union([
+  urlConnectorIdSchema,
+  appProviderSchema,
+]);
 
 /**
  * Where a deployment serves its client metadata document (the client ID
@@ -242,6 +253,16 @@ const forbiddenKeyHeaders: ReadonlySet<string> = new Set([
   "mcp-protocol-version",
   "transfer-encoding",
 ]);
+
+/** The header a connector's key goes in, in lower case. */
+export const connectorKeyHeaderSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$/u)
+  .transform((header) => header.toLowerCase())
+  .refine(
+    (header) => !forbiddenKeyHeaders.has(header) && !header.startsWith("mcp-"),
+    "A header connect sets itself"
+  );
 
 /**
  * An admin adding a connector by its MCP server's URL: the one-line
@@ -299,15 +320,7 @@ export const addConnectorSchema = z.strictObject({
     }),
     z.strictObject({
       kind: z.literal("header"),
-      header: z
-        .string()
-        .regex(/^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$/u)
-        .transform((header) => header.toLowerCase())
-        .refine(
-          (header) =>
-            !forbiddenKeyHeaders.has(header) && !header.startsWith("mcp-"),
-          "A header connect sets itself"
-        ),
+      header: connectorKeyHeaderSchema,
     }),
   ]),
 });
@@ -534,7 +547,7 @@ export interface RevocationByHand {
   attempts: number;
   /** When connect gave up (ISO 8601), and why; null while it still tries. */
   givenUpAt: string | null;
-  reason: "expired" | "unreadable" | null;
+  reason: "expired" | "unreadable" | "moved" | null;
   /** A shared connection's account, as the provider named it. */
   accountName: string | null;
   /** A personal connection's owner, by ID (core adds their name). */
@@ -571,8 +584,14 @@ export interface ConnectionSummary {
    * connector, or an HTTP connection's requests), or Composio.
    */
   source: ConnectionSource;
-  /** A native provider (`microsoft`), or a Composio toolkit's slug. */
+  /** A native provider (`microsoft`), a Composio toolkit's slug, or a connector's ID. */
   provider: string;
+  /**
+   * What it reaches, as people know it (connect's `reachedName`): its
+   * connector's name, a native suite's catalog name, an HTTP connection's
+   * name, or a Composio toolkit's slug. Never its account: `accountName`.
+   */
+  name: string;
   scope: ConnectionScope;
   status: "active" | "needs_reauth" | "disconnected";
   /** A personal connection's owner; `null` for a shared one. */
@@ -623,12 +642,6 @@ export interface ConnectionSummary {
    * credential goes in: never the credential. Absent for any other.
    */
   http?: HttpConnectionSummary;
-  /**
-   * A connection to a connector made from a URL: the name the admin who
-   * added the connector gave it, also where the catalog doesn't list it
-   * to this person (no longer offered). Absent for any other.
-   */
-  connectorName?: string;
 }
 
 /**
@@ -2372,8 +2385,15 @@ export interface WebhookApi {
 export interface ConnectApi
   extends PackageRegistryApi, ChannelApi, AiProviderConnectApi, WebhookApi {
   call: (call: ConnectCall) => Promise<ConnectResult>;
-  /** The provider URL to send the person's browser to. */
-  startConnection: (request: StartConnection) => Promise<{ url: string }>;
+  /**
+   * The provider URL to send the person's browser to, and whether connect
+   * sent its provider back through the relay (`callbackOrigin`), whose
+   * state core then relays: never for a connector served by an MCP
+   * server, whose client is registered with the origin's own callback.
+   */
+  startConnection: (
+    request: StartConnection
+  ) => Promise<{ url: string; relayed: boolean }>;
   /**
    * Finishes a flow the same person started: the new connection, or the
    * one that needed connecting again (`needs_reauth`) and holds the account
@@ -2816,6 +2836,8 @@ export const connectionErrors = defineErrorFamily({
     "A connector for that server was already added.",
   "connection.company_network_unavailable":
     "This deployment can't reach your company's network, so nothing can be connected through it yet.",
+  "connection.connector_built_in":
+    "A connector built into Grasp serves that server: connect it from the catalog.",
 });
 
 /** Which App's held actions of which binding to drop. */
@@ -3012,6 +3034,8 @@ export const connectErrors = defineErrorFamily({
   "connect.contract_not_found":
     "This connection doesn't serve that contract: it isn't a connection of that connector or toolkit, or it has no such actions to serve.",
   "connect.input_too_large": "This call's input is too large.",
+  "connect.answer_too_large":
+    "This call's answer is larger than connect reads: ask for less, such as a smaller page or fewer fields.",
   "connect.resource_out_of_scope":
     "This call reaches beyond the one resource it may use.",
   "connect.idempotency_key_required":

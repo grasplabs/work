@@ -37,10 +37,15 @@ import {
 } from "./connection-audit.ts";
 import type { Connection } from "./connections.ts";
 import {
+  builtIn,
+  builtInAt,
   connectorRow,
+  isDuplicate,
   maxListedTools,
-  secretContext,
+  sameServer,
+  signInRow,
 } from "./connector-providers.ts";
+import type { ConnectorRow } from "./connector-providers.ts";
 import {
   connections,
   connectionTools,
@@ -48,7 +53,7 @@ import {
   connectors,
 } from "./db/schema.ts";
 import { ownerErased } from "./erased-people.ts";
-import { clientFor, discoverSignIn, isPublicName } from "./mcp-discovery.ts";
+import { isPublicName } from "./mcp-discovery.ts";
 import { McpError, mcpHeaderValue, modernMcpServer } from "./mcp.ts";
 import type { ListedServerTool, McpServer, McpTool } from "./mcp.ts";
 import { pauseAsked } from "./pause.ts";
@@ -63,13 +68,18 @@ import { connectorCredentialFor, pausedWait } from "./tokens.ts";
 import { classesOf, keptToolClasses, storedSchema } from "./tool-rules.ts";
 import { vaultFor } from "./vault.ts";
 
-// Connectors made from an MCP server's URL (GRA-1375), and connections to
-// them: the one connection kind, always to a connector. An admin enters a
-// server's URL; connect checks where it leads, learns how it signs in and
-// registers there (mcp-discovery.ts), and keeps it as the one-line
-// `defineConnector({ name, mcp: { url } })` in `connectors`. People then
-// connect to it as to any app (oauth.ts, connector-providers.ts), and
-// connect alone holds their tokens.
+// Connectors served through a vendor's MCP server, and connections to
+// them: the one connection kind, always to a connector. A built-in of the
+// release declares its server in its manifest (`defineConnector`'s
+// `mcp`), and connect learns how it signs in and registers there on its
+// first connection (connector-providers.ts `prepareBuiltIn`). Any other
+// is made from its URL (GRA-1375): an admin enters it, and connect checks
+// where it leads, learns how it signs in and registers there
+// (mcp-discovery.ts), and keeps it as the one-line
+// `defineConnector({ name, mcp: { url } })` in `connectors`; moving that
+// onto generated source is GRA-2325's second part. People then connect to
+// either as to any app (oauth.ts, connector-providers.ts), and connect
+// alone holds their tokens.
 //
 // Everything the server says is untrusted (threat model on GRA-1375):
 // - its tool list is read when the last read's `ttlMs` (an hour at most)
@@ -140,13 +150,6 @@ export interface ConnectorTool {
   annotations: ToolHints;
 }
 
-/** A unique index refused the row: another connector has that URL. */
-const isDuplicate = (error: unknown): boolean =>
-  error instanceof Error &&
-  [error.message, error.cause instanceof Error ? error.cause.message : ""].some(
-    (message) => message.includes("UNIQUE") && message.includes("connectors")
-  );
-
 /**
  * Adds a connector by its server's URL, for an admin who isn't staff: the
  * URL checked and its name resolved to public addresses only, its sign-in
@@ -183,6 +186,13 @@ export const addConnector = async (
     });
     throw roleErrors.create("role.forbidden");
   }
+  // One catalog entry per server: a built-in's is connected as it is.
+  const served = builtInAt(server.href);
+  if (served !== undefined) {
+    throw connectionErrors.create("connection.connector_built_in", {
+      connector: served.name,
+    });
+  }
   if (companyNetwork === true) {
     // Its sign-in, discovered and registered at the server, would be read
     // from the public internet: a key in a header only, for now.
@@ -202,38 +212,23 @@ export const addConnector = async (
   const id = `mcp_${crypto.randomUUID().replaceAll("-", "")}`;
   const now = new Date();
   const common = { id, name, createdBy: person.userId, createdAt: now };
-  let row: typeof connectors.$inferInsert;
-  if (auth.kind === "header") {
-    row = {
-      ...common,
-      url: server.href,
-      auth: "header",
-      header: auth.header,
-      companyNetwork: address !== undefined,
-    };
-  } else {
-    const signIn = await discoverSignIn(server);
-    const client = await clientFor(signIn, new URL(origin).origin, auth.client);
-    row = {
-      ...common,
-      url: server.href,
-      resource: signIn.resource,
-      auth: "oauth",
-      issuer: signIn.issuer,
-      authorizationEndpoint: signIn.authorizationEndpoint,
-      tokenEndpoint: signIn.tokenEndpoint,
-      revocationEndpoint: signIn.revocationEndpoint ?? null,
-      scopes: signIn.scopes,
-      issParameter: signIn.issParameter,
-      registration: client.registration,
-      clientId: client.id,
-      clientSecret:
-        client.secret === undefined
-          ? null
-          : await vault.seal(client.secret, secretContext(id, signIn.issuer)),
-      clientAuthentication: client.authentication,
-    };
-  }
+  const row: typeof connectors.$inferInsert = {
+    ...common,
+    url: server.href,
+    ...(auth.kind === "header"
+      ? {
+          auth: "header",
+          header: auth.header,
+          companyNetwork: address !== undefined,
+        }
+      : await signInRow(
+          vault,
+          id,
+          server,
+          new URL(origin).origin,
+          auth.client
+        )),
+  };
   try {
     await recordEvents(
       env,
@@ -359,25 +354,34 @@ const toolOf = (listed: ListedServerTool): ConnectorTool | undefined => {
 
 /**
  * A client for `connection`'s server that sends only what `allows` lets
- * through, to the connector's own URL, with the connection's credential.
+ * through, to the connector's own URL, with the connection's credential;
+ * none once its connector moved from `admitted`, the server a call's tool
+ * was read from.
  */
 const serverFor = async (
   env: Env,
   connection: Connection,
-  allows: (method: string, name: string | null) => boolean
+  allows: (method: string, name: string | null) => boolean,
+  admitted?: ConnectorRow
 ) => {
-  const row = await drizzle(env.DB)
-    .select({ url: connectors.url, companyNetwork: connectors.companyNetwork })
-    .from(connectors)
-    .where(eq(connectors.id, connection.server))
-    .get();
-  if (row === undefined) {
+  const row = await connectorRow(env.DB, connection.server);
+  if (
+    row === undefined ||
+    (admitted !== undefined && !sameServer(row, admitted))
+  ) {
     throw connectErrors.create("connect.server_unavailable");
   }
   const { credential, companyNetwork } = await connectorCredentialFor(
     env,
     connection.id
   );
+  // A release may have moved the connector while its credential was read,
+  // and the credential read since be the new server's: it goes only to
+  // the server the row still names.
+  const still = await connectorRow(env.DB, connection.server);
+  if (!sameServer(still, row) || still?.companyNetwork !== row.companyNetwork) {
+    throw connectErrors.create("connect.server_unavailable");
+  }
   // A server inside the network is never sent to over the internet.
   if (row.companyNetwork === true && companyNetwork === undefined) {
     throw connectErrors.create("connect.server_unavailable");
@@ -857,6 +861,12 @@ export const connectorAction = async (
   if (blocked.has(action)) {
     throw connectErrors.create("connect.tool_blocked");
   }
+  // The server its tool is read from, before it is: the call goes to that
+  // server or nowhere, should a release move its connector meanwhile.
+  const admitted = await connectorRow(env.DB, connection.server);
+  if (admitted === undefined) {
+    throw connectErrors.create("connect.server_unavailable");
+  }
   const listed = named(await currentTools(env, connection), action);
   if (listed === undefined) {
     throw connectErrors.create("connect.action_not_found");
@@ -882,7 +892,8 @@ export const connectorAction = async (
       const server = await serverFor(
         env,
         connection,
-        (method, name) => method === "tools/call" && name === callName
+        (method, name) => method === "tools/call" && name === callName,
+        admitted
       );
       return {
         call: async (name, input) => {
@@ -1015,7 +1026,11 @@ export const connectorTools = async (
   if (!isAdmin(person.role)) {
     throw roleErrors.create("role.forbidden");
   }
-  await requireConnector(env, connector);
+  // A built-in has its row only once someone connects it: until then it
+  // has no connections, and so no tools, to show.
+  if (builtIn(connector) === undefined) {
+    await requireConnector(env, connector);
+  }
   const db = drizzle(env.DB);
   // One row a name, as the list read last holds it, however many people
   // connected: what is read grows with the connector's tools alone.

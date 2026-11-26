@@ -62,7 +62,9 @@ describe(chatMarkdown, () => {
           answered(4, "| Open |\n| --- |\n| 12 |"),
         ],
         provenance: { sources: ["conn-1", "conn-9"], restricted: false },
-        names: new Map([["conn-1", { name: "Microsoft 365" }]]),
+        names: new Map([
+          ["conn-1", { name: "Microsoft 365", provider: "microsoft" }],
+        ]),
         i18n,
       })
     ).toBe(

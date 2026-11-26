@@ -22,6 +22,7 @@ const listed = (
   id,
   source: "native",
   provider,
+  name: provider,
   scope: "shared",
   status: "active",
   ownerUserId: null,
@@ -32,12 +33,15 @@ const listed = (
   ...more,
 });
 
+// As connect names each: a suite by its catalog name, a Composio toolkit
+// by its slug, a connector by the name its admin gave it.
 const connections = [
-  listed("outlook", "microsoft", { accountName: "sanne@acme.test" }),
-  listed("tracker", connector, {
-    source: "connector",
-    connectorName: "Issue tracker",
+  listed("outlook", "microsoft", {
+    name: "Microsoft 365",
+    accountName: "sanne@acme.test",
   }),
+  listed("mail", "gmail", { source: "composio" }),
+  listed("tracker", connector, { source: "connector", name: "Issue tracker" }),
 ];
 
 const catalog: OfferedCatalog = {
@@ -47,6 +51,18 @@ const catalog: OfferedCatalog = {
       source: "native",
       id: "microsoft",
       name: "Microsoft 365",
+      categories: [],
+      toolCount: 3,
+      logo: null,
+      description: null,
+      group: "Other",
+      auth: "managed",
+      offered: true,
+    },
+    {
+      source: "composio",
+      id: "gmail",
+      name: "Gmail",
       categories: [],
       toolCount: 3,
       logo: null,
@@ -96,6 +112,7 @@ describe(readChatNames, () => {
       })
     ).resolves.toStrictEqual({
       outlook: "Microsoft 365 (sanne@acme.test)",
+      mail: "Gmail",
       tracker: "Issue tracker",
     });
   });
@@ -107,7 +124,8 @@ describe(readChatNames, () => {
         catalog: refused,
       })
     ).resolves.toStrictEqual({
-      outlook: "microsoft (sanne@acme.test)",
+      outlook: "Microsoft 365 (sanne@acme.test)",
+      mail: "gmail",
       tracker: "Issue tracker",
     });
   });
@@ -122,7 +140,8 @@ describe(readChatNames, () => {
     await vi.advanceTimersByTimeAsync(catalogWaitMs);
 
     await expect(names).resolves.toStrictEqual({
-      outlook: "microsoft (sanne@acme.test)",
+      outlook: "Microsoft 365 (sanne@acme.test)",
+      mail: "gmail",
       tracker: "Issue tracker",
     });
   });

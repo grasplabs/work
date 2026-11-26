@@ -10,7 +10,6 @@ import {
   outcome,
   someone,
 } from "./connect.ts";
-import { linearMcpUrl } from "./linear-mcp-fake.ts";
 import {
   addLinear,
   admin,
@@ -18,6 +17,7 @@ import {
   confirmHeld,
   connectLinear,
   dns,
+  keyServer,
   linear,
   mcpInternet,
   rpcOf,
@@ -47,7 +47,7 @@ const connected = async () => {
 
 /** Requests that reached Linear's token endpoint. */
 const tokenRequests = (): number =>
-  sent.filter(({ url }) => url === "https://mcp.linear.app/token").length;
+  sent.filter(({ url }) => url === `${linear.origin}/token`).length;
 
 /**
  * An MCP server at `origin` that signs in with OAuth, its metadata as
@@ -100,35 +100,6 @@ const signInServer = (
       );
     }
     return new Response("Not Found", { status: 404 });
-  });
-  return `${origin}/mcp`;
-};
-
-/** An MCP server that takes a fixed key in `x-api-key`, with one read. */
-const keyServer = (origin: string, key: string): string => {
-  dns.set(new URL(origin).hostname, ["34.120.10.3"]);
-  servers.set(origin, async (request) => {
-    if (request.headers.get("x-api-key") !== key) {
-      return new Response(null, { status: 401 });
-    }
-    const { id, method } = await rpcOf(request);
-    const result =
-      method === "tools/list"
-        ? {
-            resultType: "complete",
-            ttlMs: 300_000,
-            tools: [
-              {
-                name: "list_notes",
-                inputSchema: { type: "object", properties: {} },
-              },
-            ],
-          }
-        : {
-            resultType: "complete",
-            content: [{ type: "text", text: "[]" }],
-          };
-    return Response.json({ jsonrpc: "2.0", id, result });
   });
   return `${origin}/mcp`;
 };
@@ -191,7 +162,7 @@ describe("a connector's server", () => {
     const incomplete = await read();
 
     expect({ large, garbage, html, otherId, incomplete }).toStrictEqual({
-      large: "connect.server_unavailable",
+      large: "connect.answer_too_large",
       garbage: "connect.server_unavailable",
       html: "connect.server_unavailable",
       otherId: "connect.server_unavailable",
@@ -453,7 +424,7 @@ describe("a connector's server", () => {
     expect({
       otherIssuer: await finish("https://login.other.example"),
       noIssuer: await finish(null),
-      otherPerson: await finish("https://mcp.linear.app", bob),
+      otherPerson: await finish(linear.issuer, bob),
       tokenRequests: tokenRequests(),
     }).toStrictEqual({
       otherIssuer: "connection.provider_refused",
@@ -611,9 +582,7 @@ describe("a connector's server", () => {
       action: "list_notes",
       input: {},
     });
-    const toLinear = sent.filter(({ url }) =>
-      url.startsWith("https://mcp.linear.app/mcp")
-    );
+    const toLinear = sent.filter(({ url }) => url.startsWith(linear.url));
     const toNotes = sent.filter(({ url }) =>
       url.startsWith("https://mcp.notes.example")
     );
@@ -633,10 +602,8 @@ describe("a connector's server", () => {
       tokenAtNotes: toNotes.some(
         ({ headers }) => headers.authorization !== undefined
       ),
-      member: await outcome(addServer(linearMcpUrl, someone("user"))),
-      staff: await outcome(
-        addServer(linearMcpUrl, { ...admin(), staff: true })
-      ),
+      member: await outcome(addServer(linear.url, someone("user"))),
+      staff: await outcome(addServer(linear.url, { ...admin(), staff: true })),
     }).toStrictEqual({
       colleague: "connect.not_owner",
       bobsRead: JSON.stringify("[]"),
@@ -692,7 +659,7 @@ describe("a connector's server", () => {
 
   it("is named only in characters that show, never turning or hiding the text around it", async () => {
     const named = async (name: string) =>
-      await outcome(addServer(linearMcpUrl, admin(), name));
+      await outcome(addServer(linear.url, admin(), name));
 
     expect({
       rightToLeft: await named("Linear\u202Etxt.exe"),
@@ -723,7 +690,7 @@ describe("a connector's server", () => {
       {
         actor: { userId: person.userId },
         detail: {
-          host: "mcp.linear.app",
+          host: new URL(linear.origin).host,
           auth: "oauth",
           connector,
           registration: "dynamic",

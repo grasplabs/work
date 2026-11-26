@@ -50,8 +50,8 @@ msgid "{accepted, plural, one {# event accepted in the last 24 hours.} other {# 
 msgstr "{accepted, plural, one {# evento aceptado en las últimas 24 horas.} other {# eventos aceptados en las últimas 24 horas.}}"
 
 #: src/apps/resource-bindings.tsx
-msgid "{account} on {provider}"
-msgstr "{account} en {provider}"
+msgid "{account} on {name}"
+msgstr "{account} en {name}"
 
 #: src/frame/ui-words.tsx
 msgid "{action} {count} {unit}?"
