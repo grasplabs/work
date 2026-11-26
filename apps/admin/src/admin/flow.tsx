@@ -1,15 +1,3 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Field, FieldLabel } from "@grasp-os/app-kit/components/field";
-import {
-  SortableItem,
-  SortableList,
-} from "@grasp-os/app-kit/components/sortable-list";
-import type { SortableWords } from "@grasp-os/app-kit/components/sortable-list";
-import { Switch } from "@grasp-os/app-kit/components/switch";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/app-kit/components/toggle-group";
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import {
   defaultFlow,
@@ -17,7 +5,6 @@ import {
   flowOpening,
   flowPresets,
   flowProblemOf,
-  withStepMoved,
 } from "@grasp-os/shared/onboarding-flow";
 import type {
   FlowAgreement,
@@ -26,11 +13,53 @@ import type {
   FlowStep,
   OnboardingFlow,
 } from "@grasp-os/shared/onboarding-flow";
-import { useId, useState } from "react";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@grasp-os/ui/components/empty";
+import { Field, FieldLabel } from "@grasp-os/ui/components/field";
+import {
+  Section as Part,
+  SectionHeader,
+} from "@grasp-os/ui/components/section-header";
+import {
+  SortableList,
+  SortableListHandle,
+  SortableListItem,
+} from "@grasp-os/ui/components/sortable-list";
+import { Switch } from "@grasp-os/ui/components/switch";
+import { Text } from "@grasp-os/ui/components/text";
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@grasp-os/ui/components/toggle-group";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
+import { useState } from "react";
 
 import { CommandFailure, useCommand } from "./commands.tsx";
-import { Attention } from "./parts.tsx";
-import { EmptySection, Section } from "./section.tsx";
+
+const styles = stylex.create({
+  // The page's parts, a step further apart than the lines within each.
+  parts: { display: "flex", flexDirection: "column", gap: space["8"] },
+  row: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["3"],
+  },
+  foot: { display: "flex", flexDirection: "column", gap: space["3"] },
+  // The switches at a readable width, each label its row's.
+  switches: { display: "flex", flexDirection: "column", maxWidth: "36rem" },
+  readable: { maxWidth: "36rem" },
+  // The presets as wide as their words.
+  presets: { width: "fit-content" },
+  field: { flexGrow: 1 },
+});
 
 // An organization's Flow: how much onboarding it goes through, as Grasp's
 // staff set it. Whether there is an onboarding at all, the admin's steps
@@ -85,17 +114,7 @@ const openingWords: Record<ReturnType<typeof flowOpening>, string> = {
     "Its Grasp opens at once: everyone signs in straight to the platform.",
 };
 
-/** What a screen reader hears as a step is moved. */
-const moveWords: SortableWords = {
-  instructions:
-    "Press space to pick a step up, the arrow keys to move it, space to put it down, escape to leave it where it was.",
-  picked: (name, place) => `${name} picked up, at place ${place}.`,
-  moved: (name, place) => `${name} moved to place ${place}.`,
-  dropped: (name, place) => `${name} put down at place ${place}.`,
-  cancelled: (name) => `${name} left where it was.`,
-};
-
-/** A switch with what it switches beside it. */
+/** A setting turned on or off: its words, and the switch at the row's end. */
 const Switched = ({
   label,
   checked,
@@ -106,22 +125,14 @@ const Switched = ({
   checked: boolean;
   disabled: boolean;
   onChange: (checked: boolean) => void;
-}) => {
-  const id = useId();
-  return (
-    <Field orientation="horizontal">
-      <Switch
-        checked={checked}
-        disabled={disabled}
-        id={id}
-        onCheckedChange={onChange}
-      />
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-    </Field>
-  );
-};
+}) => (
+  <Field disabled={disabled} orientation="horizontal" style={styles.field}>
+    <FieldLabel>{label}</FieldLabel>
+    <Switch checked={checked} onCheckedChange={onChange} />
+  </Field>
+);
 
-/** The admin's steps: each on or off, and moved by hand or from the keyboard. */
+/** The admin's steps: each on or off, and moved by its handle, by hand or from the keyboard. */
 const Steps = ({
   flow,
   disabled,
@@ -131,43 +142,42 @@ const Steps = ({
   disabled: boolean;
   onChange: (flow: OnboardingFlow) => void;
 }) => (
-  <div className="px-5 pb-5">
-    <SortableList
-      aria-label="The admin’s steps, in order"
-      disabled={disabled}
-      items={flow.steps.map(({ id }) => ({ id, name: stepWords[id] }))}
-      onMove={(id, to) => {
-        const step = flow.steps.find((each) => each.id === id);
-        if (step !== undefined) {
-          onChange(withStepMoved(flow, step.id, to));
-        }
-      }}
-      words={moveWords}
-    >
-      {flow.steps.map((step) => {
-        const name = stepWords[step.id];
-        return (
-          <SortableItem handleLabel={`Move ${name}`} id={step.id} key={step.id}>
-            <div className="min-w-0 flex-1 py-2">
-              <Switched
-                checked={step.on}
-                disabled={disabled}
-                label={name}
-                onChange={(on) => {
-                  onChange({
-                    ...flow,
-                    steps: flow.steps.map((each) =>
-                      each.id === step.id ? { ...each, on } : each
-                    ),
-                  });
-                }}
-              />
-            </div>
-          </SortableItem>
-        );
-      })}
-    </SortableList>
-  </div>
+  <SortableList
+    aria-label="The admin’s steps, in order"
+    disabled={disabled}
+    onValueChange={(order) => {
+      onChange({
+        ...flow,
+        steps: order.flatMap((id) =>
+          flow.steps.filter((step) => step.id === id)
+        ),
+      });
+    }}
+    style={styles.readable}
+    value={flow.steps.map(({ id }) => id)}
+  >
+    {flow.steps.map((step) => {
+      const name = stepWords[step.id];
+      return (
+        <SortableListItem key={step.id} textValue={name} value={step.id}>
+          <SortableListHandle aria-label={`Move ${name}`} />
+          <Switched
+            checked={step.on}
+            disabled={disabled}
+            label={name}
+            onChange={(on) => {
+              onChange({
+                ...flow,
+                steps: flow.steps.map((each) =>
+                  each.id === step.id ? { ...each, on } : each
+                ),
+              });
+            }}
+          />
+        </SortableListItem>
+      );
+    })}
+  </SortableList>
 );
 
 /** The preset `flow` is, as it stands; none once it was changed by hand. */
@@ -193,10 +203,15 @@ export const OrgFlow = ({
   const [draft, setDraft] = useState<OnboardingFlow | null>(null);
   if (kept === undefined) {
     return (
-      <EmptySection>
-        This company’s Grasp keeps no flow yet: it goes through the whole
-        onboarding. Update its Grasp from Setup to set one.
-      </EmptySection>
+      <Empty align="start" size="sm">
+        <EmptyHeader>
+          <EmptyTitle>No flow kept yet</EmptyTitle>
+          <EmptyDescription>
+            This company’s Grasp keeps no flow yet: it goes through the whole
+            onboarding. Update its Grasp from Setup to set one.
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
   const flow = draft ?? saved;
@@ -210,22 +225,30 @@ export const OrgFlow = ({
     }
   };
   return (
-    <>
-      <div className="flex flex-wrap items-center gap-2">
-        {/* One of a few, as every choice inside a page is made: the kit's joined toggle, the chosen one filled. */}
+    <div {...stylex.props(styles.parts)}>
+      <Part aria-labelledby="how-much">
+        <SectionHeader
+          description={
+            flow.on
+              ? "Start from one of these, then change the steps below."
+              : "No onboarding: pick another to switch the steps back on."
+          }
+          id="how-much"
+          title="How much onboarding"
+          variant="group"
+        />
         <ToggleGroup
           aria-label="How much onboarding"
           disabled={busy}
-          onValueChange={(next: unknown[]) => {
+          onValueChange={(next) => {
             const chosen = presets.find(({ id }) => id === next[0]);
             if (chosen !== undefined) {
               setDraft(flowPresets[chosen.id]);
             }
           }}
           size="sm"
-          spacing={0}
+          style={styles.presets}
           value={preset === undefined ? [] : [preset]}
-          variant="outline"
         >
           {presets.map(({ id, name }) => (
             <ToggleGroupItem key={id} value={id}>
@@ -233,21 +256,24 @@ export const OrgFlow = ({
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
-        {flow.on ? null : (
-          <span className="text-muted-foreground">
-            No onboarding: pick another to switch the steps back on.
-          </span>
-        )}
-      </div>
-      <Section title="The admin’s steps">
+      </Part>
+      <Part aria-labelledby="admin-steps">
+        <SectionHeader
+          description="What the company’s admin goes through, in this order."
+          id="admin-steps"
+          title="The admin’s steps"
+          variant="group"
+        />
         <Steps disabled={busy || !flow.on} flow={flow} onChange={setDraft} />
-      </Section>
-      <Section
-        description="Interview links wait for each agreement that is on."
-        title="Grasp’s steps"
-      >
-        {/* In the rhythm of the admin's steps above, and as far in as their switches stand past the handles. */}
-        <div className="flex flex-col gap-px pr-5 pb-5 pl-12 *:py-2">
+      </Part>
+      <Part aria-labelledby="grasp-steps">
+        <SectionHeader
+          description="Interview links wait for each agreement that is on."
+          id="grasp-steps"
+          title="Grasp’s steps"
+          variant="group"
+        />
+        <div {...stylex.props(styles.switches)}>
           <Switched
             checked={flow.grasp.kickoff}
             disabled={busy || !flow.on}
@@ -274,21 +300,20 @@ export const OrgFlow = ({
             />
           ))}
         </div>
-      </Section>
-      <div className="flex flex-col gap-2">
+      </Part>
+      <div {...stylex.props(styles.foot)}>
         {problem === null ? null : (
-          <output>
-            <Attention>{problemWords[problem]}</Attention>
-          </output>
+          <Alert live="polite" variant="warning">
+            <AlertDescription>{problemWords[problem]}</AlertDescription>
+          </Alert>
         )}
         <CommandFailure failure={failure} />
-        <div className="flex flex-wrap items-center gap-2">
+        <div {...stylex.props(styles.row)}>
           <Button
             disabled={busy || !changed || problem !== null}
             onClick={() => {
               void save(flow);
             }}
-            variant="highlight"
           >
             Save flow
           </Button>
@@ -314,16 +339,16 @@ export const OrgFlow = ({
               Take the whole onboarding back
             </Button>
           ) : null}
-          <span className="text-muted-foreground">
+          <Text color="muted" size="sm">
             {changed
               ? "Not saved yet: nothing has reached the company’s Grasp."
               : "This is what the company’s Grasp keeps."}
-          </span>
+          </Text>
         </div>
-        <p className="text-muted-foreground">
+        <Text color="muted" size="sm">
           {openingWords[flowOpening(flow)]}
-        </p>
+        </Text>
       </div>
-    </>
+    </div>
   );
 };

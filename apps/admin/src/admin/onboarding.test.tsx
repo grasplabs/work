@@ -146,19 +146,25 @@ const bakery = (): AdminSnapshot =>
     },
   });
 
-/** The steps' list on a page: from its start to its end. */
-const stepsOf = (html: string): string => {
-  const at = html.indexOf('<nav aria-label="The steps of this onboarding"');
-  return at === -1 ? "" : html.slice(at, html.indexOf("</nav>", at));
+/** The step titled `title` in a page's steps, as the link it opens by: its markup, or none. */
+const stepOf = (html: string, title: string): string => {
+  const page = new DOMParser().parseFromString(html, "text/html");
+  const links = page.querySelectorAll(
+    'nav[aria-label="The steps of this onboarding"] a'
+  );
+  const step = [...links].find((link) =>
+    (link.textContent ?? "").startsWith(`${title}:`)
+  );
+  return step?.outerHTML ?? "";
 };
 
-/** The step titled `title` in the steps' list: from its link's start to its end. */
-const stepOf = (steps: string, title: string): string => {
-  const at = steps.indexOf(`>${title}<`);
-  return at === -1
-    ? ""
-    : steps.slice(steps.lastIndexOf("<a", at), steps.indexOf("</a>", at));
-};
+/** How many steps of a page's steps are marked as the one open. */
+const markedOf = (html: string): number =>
+  new DOMParser()
+    .parseFromString(html, "text/html")
+    .querySelectorAll(
+      'nav[aria-label="The steps of this onboarding"] a[aria-current]'
+    ).length;
 
 /** The row of the team named `name` among the interviews' teams. */
 const teamRowOf = (html: string, name: string): string => {
@@ -186,28 +192,27 @@ describe("an organization's onboarding in the admin", () => {
     const base = await liveClient(bakery());
 
     const { html } = await page(`${base}/steps`);
-    const steps = stepsOf(html);
 
     expect({
       // Operations's lead hasn't talked, which Interviews shows: Grasp opens is next here.
-      current: stepOf(steps, "Grasp opens").includes('aria-current="page"'),
+      current: stepOf(html, "Grasp opens").includes('aria-current="page"'),
       // Only the open step is marked.
-      marked: steps.split("aria-current=").length - 1,
+      marked: markedOf(html),
       statuses: [
-        stepOf(steps, "Agreed").includes(": Done"),
-        stepOf(steps, "Interviews").includes(": Now"),
-        stepOf(steps, "Grasp opens").includes(": Later"),
+        stepOf(html, "Agreed").includes(": Done"),
+        stepOf(html, "Interviews").includes(": Now"),
+        stepOf(html, "Grasp opens").includes(": Later"),
       ],
       // What was agreed is the Contract's; the leads and the interviews are Interviews'.
       elsewhere: [
-        stepOf(steps, "Agreed").includes(`href="${base}/details?tab=contract"`),
-        stepOf(steps, "Team leads").includes(
+        stepOf(html, "Agreed").includes(`href="${base}/details?tab=contract"`),
+        stepOf(html, "Team leads").includes(
           `href="${base}/interviews?tab=people"`
         ),
-        stepOf(steps, "Interviews").includes(`href="${base}/interviews"`),
+        stepOf(html, "Interviews").includes(`href="${base}/interviews"`),
       ],
       // The others open themselves underneath.
-      opensResearch: stepOf(steps, "Research").includes(
+      opensResearch: stepOf(html, "Research").includes(
         `href="${base}/steps?stage=research"`
       ),
       complete: html.includes("nothing is missing"),
@@ -242,16 +247,15 @@ describe("an organization's onboarding in the admin", () => {
         go: opens.html.includes("Open Grasp for"),
       },
       conversation: {
-        current: stepOf(
-          stepsOf(conversation.html),
-          "First conversation"
-        ).includes('aria-current="page"'),
+        current: stepOf(conversation.html, "First conversation").includes(
+          'aria-current="page"'
+        ),
         read: conversation.html.includes(
           "Stephen has read it. What it brought stays in the company’s own Grasp."
         ),
       },
       // A step that isn't one opens where the steps open by themselves.
-      unknown: stepOf(stepsOf(unknown.html), "Grasp opens").includes(
+      unknown: stepOf(unknown.html, "Grasp opens").includes(
         'aria-current="page"'
       ),
     }).toStrictEqual({
@@ -313,7 +317,7 @@ describe("an organization's onboarding in the admin", () => {
 
     expect({
       // Grasp brings the first conversation in: the first step here in its hands.
-      current: stepOf(stepsOf(html), "First conversation").includes(
+      current: stepOf(html, "First conversation").includes(
         'aria-current="page"'
       ),
       conversation: html.includes(

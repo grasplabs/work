@@ -13,7 +13,6 @@ import {
   setupSteps,
   startingFlowOf,
   storedFlowOf,
-  withStepMoved,
 } from "../src/onboarding-flow.ts";
 import type { FlowStep, OnboardingFlow } from "../src/onboarding-flow.ts";
 import { knownPercent, knownSourcesOf } from "../src/onboarding-gate.ts";
@@ -238,7 +237,10 @@ describe("an onboarding flow", () => {
   });
 
   it("puts the interviews' screens last, wherever the flow has the step", () => {
-    const early = withStepMoved(defaultFlow, "interviews", 4);
+    const early = {
+      ...defaultFlow,
+      steps: stepsOf(moved("interviews", "sources")),
+    };
     expect({
       step: order(early)[4],
       screens: flowScreens(early).slice(-5),
@@ -248,21 +250,9 @@ describe("an onboarding flow", () => {
     });
   });
 
-  it("moves a step to another place, the others keeping their order", () => {
-    expect({
-      first: order(withStepMoved(defaultFlow, "documents", 0)).slice(0, 3),
-      last: order(withStepMoved(defaultFlow, "welcome", 99)).at(-1),
-      same: order(withStepMoved(defaultFlow, "ai", 1)),
-      // Opens at once with every step off, too.
-      allOff: flowOpening({
-        ...defaultFlow,
-        steps: stepsOf(flowSteps, flowSteps),
-      }),
-    }).toStrictEqual({
-      first: ["documents", "welcome", "ai"],
-      last: "welcome",
-      same: [...flowSteps],
-      allOff: "at_once",
-    });
+  it("opens at once with every step off", () => {
+    expect(
+      flowOpening({ ...defaultFlow, steps: stepsOf(flowSteps, flowSteps) })
+    ).toBe("at_once");
   });
 });

@@ -1,5 +1,26 @@
-import { Button } from "@grasp-os/app-kit/components/button";
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import {
+  Section as Part,
+  SectionHeader,
+} from "@grasp-os/ui/components/section-header";
+import {
+  CircleCheckIcon,
+  ClockIcon,
+  HourglassIcon,
+  Icon,
+} from "@grasp-os/ui/lib/icons";
+import type { IconData } from "@grasp-os/ui/lib/icons";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
@@ -7,8 +28,6 @@ import { AgreementsAction } from "./agreements.tsx";
 import { CommandButton } from "./commands.tsx";
 import { startItems, started } from "./getting-started.ts";
 import type { StartFacts, StartItem } from "./getting-started.ts";
-import { Attention, Done } from "./parts.tsx";
-import { Section, SectionRow } from "./section.tsx";
 
 type AgreementsRead = AdminSnapshot["agreements"];
 
@@ -27,32 +46,31 @@ const ToSettings = ({
   clientId: string;
   children: ReactNode;
 }) => (
-  <Button
-    nativeButton={false}
-    render={
-      <Link
-        params={{ clientId }}
-        search={{ tab: "settings" }}
-        to="/organizations/$clientId/setup"
-      />
-    }
-    size="sm"
-    variant="outline"
-  >
-    {children}
+  <Button asChild size="sm" variant="outline">
+    <Link
+      params={{ clientId }}
+      search={{ tab: "settings" }}
+      to="/organizations/$clientId/setup"
+    >
+      {children}
+    </Link>
   </Button>
 );
 
-/** How an item stands, in the row's own words. */
-const Standing = ({ item }: { item: StartItem }) => {
-  if (item.state === "done") {
-    return <Done>Done</Done>;
-  }
-  return item.state === "todo" ? (
-    <Attention>For Grasp to do</Attention>
-  ) : (
-    <span className="text-muted-foreground">Waits</span>
-  );
+/** How an item stands, as its mark and its Badge: amber for what is Grasp's to do. */
+const standings: Record<
+  StartItem["state"],
+  { icon: IconData; badge: ReactNode }
+> = {
+  done: {
+    icon: CircleCheckIcon,
+    badge: <Badge variant="success">Done</Badge>,
+  },
+  todo: {
+    icon: ClockIcon,
+    badge: <Badge variant="warning">For Grasp to do</Badge>,
+  },
+  waits: { icon: HourglassIcon, badge: <Badge>Waits</Badge> },
 };
 
 /** What Grasp does about an item that is its own to do, right here. */
@@ -116,23 +134,35 @@ export const GettingStarted = ({
     return null;
   }
   return (
-    <Section
-      description="What has to be in place before its admins get in and its people get their interview links, in order. What is Grasp’s to do can be done from here."
-      title="Getting started"
-    >
-      {startItems(facts).map((item) => (
-        <SectionRow description={item.detail} key={item.id} label={item.title}>
-          <span className="flex flex-wrap items-center justify-end gap-3">
-            <Standing item={item} />
-            <ActionOf
-              agreements={agreements}
-              clientId={clientId}
-              item={item}
-              told={facts.told}
-            />
-          </span>
-        </SectionRow>
-      ))}
-    </Section>
+    <Part aria-labelledby="getting-started">
+      <SectionHeader
+        description="What has to be in place before its admins get in and its people get their interview links, in order. What is Grasp’s to do can be done from here."
+        id="getting-started"
+        title="Getting started"
+        variant="group"
+      />
+      <ItemGroup aria-labelledby="getting-started" separated>
+        {startItems(facts).map((item) => (
+          <Item key={item.id}>
+            <ItemMedia variant="icon">
+              <Icon icon={standings[item.state].icon} />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>{item.title}</ItemTitle>
+              <ItemDescription>{item.detail}</ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              {standings[item.state].badge}
+              <ActionOf
+                agreements={agreements}
+                clientId={clientId}
+                item={item}
+                told={facts.told}
+              />
+            </ItemActions>
+          </Item>
+        ))}
+      </ItemGroup>
+    </Part>
   );
 };
