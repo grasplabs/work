@@ -159,3 +159,34 @@ export const shownAs = (
   }
   return { title: line, rest: "", restAt: line.length };
 };
+
+/**
+ * The question a line of his ends in, as their screen shows it while he
+ * talks around it out loud: its last sentence that asks, and where it
+ * starts in the line; null when it asks nothing (yet). A sentence ends
+ * where `shownAs` cuts one, so a Spanish "¿" and a French " ?" stay in it.
+ */
+export const questionOf = (
+  line: string
+): { question: string; at: number } | null => {
+  let found: { question: string; at: number } | null = null;
+  let start = 0;
+  const ends = [
+    ...Array.from(line.matchAll(/(?<=[.?!…])\s+(?=\S)/gu), (end) => ({
+      at: end.index,
+      next: end.index + end[0].length,
+    })),
+    { at: line.trimEnd().length, next: line.length },
+  ];
+  for (const { at, next } of ends) {
+    const sentence = line.slice(start, at).trim();
+    if (/[?？]$/u.test(sentence)) {
+      found = {
+        question: sentence,
+        at: start + line.slice(start).search(/\S/u),
+      };
+    }
+    start = next;
+  }
+  return found;
+};

@@ -3854,6 +3854,10 @@ msgstr "Achtergrond"
 msgid "Bad"
 msgstr "Slecht"
 
+#: src/interview/words.ts
+msgid "Based on our conversation, I’ve made a summary for you. This is how it looks."
+msgstr "Op basis van ons gesprek heb ik een samenvatting voor je gemaakt. Zo ziet die eruit."
+
 #: src/settings/backdrop-settings.tsx
 msgid "Bayer"
 msgstr "Bayer"
@@ -6393,6 +6397,10 @@ msgstr "bevat niet"
 #: src/frame/ui-words.tsx
 msgid "Does something that needs your yes"
 msgstr "Doet iets waarvoor jouw ja nodig is"
+
+#: src/interview/words.ts
+msgid "Does that sound like a good summary, or is there anything you’d like to add?"
+msgstr "Klinkt dat als een goede samenvatting, of wil je nog iets toevoegen?"
 
 #: src/settings/stephen-settings.tsx
 msgid "Does things for people here"
@@ -13513,10 +13521,6 @@ msgstr "Parameters"
 msgid "Paris"
 msgstr "Parijs"
 
-#: src/interview/read-back-story.tsx
-msgid "Part {n} of {count}"
-msgstr "Deel {n} van {count}"
-
 #: src/routes/_shell.brain.sections.$sectionId.tsx
 msgid "Part of the brain not found"
 msgstr "Onderdeel van de brain niet gevonden"
@@ -13532,10 +13536,6 @@ msgstr "Een deel van wat wordt verstuurd, is hierboven ingekort. Toon alles, of 
 #: src/inbox/item-detail.tsx
 msgid "Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm."
 msgstr "Een deel van wat er verstuurd wordt is ingekort. Open Details en toon alles, of precies wat er verstuurd wordt, om te bevestigen."
-
-#: src/interview/read-back-story.tsx
-msgid "Parts"
-msgstr "Delen"
 
 #: src/brain/sources-page.tsx
 msgid "Passages"
@@ -17254,6 +17254,7 @@ msgstr "Suggesties"
 msgid "Summarise documents"
 msgstr "Documenten samenvatten"
 
+#: src/interview/read-back-story.tsx
 #: src/interview/words.ts
 msgid "Summary"
 msgstr "Samenvatting"
@@ -20245,6 +20246,14 @@ msgstr "Week in review"
 #: src/agents/agent-templates.ts
 msgid "Weekly reporter"
 msgstr "Weekverslaggever"
+
+#: src/interview/words.ts
+msgid "Well, thank you, {name}. It was great talking to you. You can always come back to this link if you want to change something. For now, I have enough. Have a great rest of your week."
+msgstr "Nou, dank je wel, {name}. Het was fijn om met je te praten. Je kunt altijd terugkomen via deze link als je iets wilt veranderen. Voor nu heb ik genoeg. Nog een fijne week!"
+
+#: src/interview/words.ts
+msgid "Well, thank you. It was great talking to you. You can always come back to this link if you want to change something. For now, I have enough. Have a great rest of your week."
+msgstr "Nou, dank je wel. Het was fijn om met je te praten. Je kunt altijd terugkomen via deze link als je iets wilt veranderen. Voor nu heb ik genoeg. Nog een fijne week!"
 
 #: src/activity/audit-words.ts
 msgid "Went back to an earlier version"

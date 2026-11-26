@@ -3854,6 +3854,10 @@ msgstr "Background"
 msgid "Bad"
 msgstr "Bad"
 
+#: src/interview/words.ts
+msgid "Based on our conversation, I’ve made a summary for you. This is how it looks."
+msgstr "Based on our conversation, I’ve made a summary for you. This is how it looks."
+
 #: src/settings/backdrop-settings.tsx
 msgid "Bayer"
 msgstr "Bayer"
@@ -6393,6 +6397,10 @@ msgstr "does not contain"
 #: src/frame/ui-words.tsx
 msgid "Does something that needs your yes"
 msgstr "Does something that needs your yes"
+
+#: src/interview/words.ts
+msgid "Does that sound like a good summary, or is there anything you’d like to add?"
+msgstr "Does that sound like a good summary, or is there anything you’d like to add?"
 
 #: src/settings/stephen-settings.tsx
 msgid "Does things for people here"
@@ -13513,10 +13521,6 @@ msgstr "Parameters"
 msgid "Paris"
 msgstr "Paris"
 
-#: src/interview/read-back-story.tsx
-msgid "Part {n} of {count}"
-msgstr "Part {n} of {count}"
-
 #: src/routes/_shell.brain.sections.$sectionId.tsx
 msgid "Part of the brain not found"
 msgstr "Part of the brain not found"
@@ -13532,10 +13536,6 @@ msgstr "Part of what will be sent is cut short above. Show it all, or exactly wh
 #: src/inbox/item-detail.tsx
 msgid "Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm."
 msgstr "Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm."
-
-#: src/interview/read-back-story.tsx
-msgid "Parts"
-msgstr "Parts"
 
 #: src/brain/sources-page.tsx
 msgid "Passages"
@@ -17254,6 +17254,7 @@ msgstr "Suggestions"
 msgid "Summarise documents"
 msgstr "Summarise documents"
 
+#: src/interview/read-back-story.tsx
 #: src/interview/words.ts
 msgid "Summary"
 msgstr "Summary"
@@ -20245,6 +20246,14 @@ msgstr "Week in review"
 #: src/agents/agent-templates.ts
 msgid "Weekly reporter"
 msgstr "Weekly reporter"
+
+#: src/interview/words.ts
+msgid "Well, thank you, {name}. It was great talking to you. You can always come back to this link if you want to change something. For now, I have enough. Have a great rest of your week."
+msgstr "Well, thank you, {name}. It was great talking to you. You can always come back to this link if you want to change something. For now, I have enough. Have a great rest of your week."
+
+#: src/interview/words.ts
+msgid "Well, thank you. It was great talking to you. You can always come back to this link if you want to change something. For now, I have enough. Have a great rest of your week."
+msgstr "Well, thank you. It was great talking to you. You can always come back to this link if you want to change something. For now, I have enough. Have a great rest of your week."
 
 #: src/activity/audit-words.ts
 msgid "Went back to an earlier version"

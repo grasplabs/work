@@ -178,8 +178,8 @@ const notedMs = 2600;
 const penMs = 1400;
 /** How long nothing may come in of a turn before that try is given up. */
 const quietMs = 20_000;
-/** How long a story is waited for once he said which part it is. */
-const storyWaitMs = 2500;
+/** How long the summary's story is waited for once he brought it in: it is all of it, and takes a while to write. */
+const storyWaitMs = 6000;
 /** How he sounds saying that something doesn't work. */
 const sorry: VoiceTag = "upbeat, reassuring";
 /** How long their yes to a part stays before the next part. */
@@ -450,11 +450,17 @@ const grow = (all: string): void => {
 const sayThrough = async (
   line: string,
   mine: number,
-  from = 0
+  from = 0,
+  /** What he says, when it is not what the screen shows: then the line on screen stands whole. */
+  spoken?: string
 ): Promise<boolean> => {
   sayingCount += 1;
-  set({ line, saying: sayingCount, from });
-  await say(line.slice(from), voiceOf(tone));
+  set({
+    line,
+    saying: sayingCount,
+    from: spoken === undefined ? from : line.length,
+  });
+  await say(spoken ?? line.slice(from), voiceOf(tone));
   return speaking === mine && on;
 };
 
@@ -638,7 +644,7 @@ const requestOf = (
 
 /** The lines of the part on screen, by id, as core is told what was read back. */
 const readingIds = (facts: InterviewFact[], part: number): string[] =>
-  (readBackParts(facts)[part]?.facts ?? []).map(({ id }) => id).slice(0, 12);
+  (readBackParts(facts)[part]?.facts ?? []).map(({ id }) => id).slice(0, 60);
 
 /** In the read-back it stays the read-back, whatever the model makes of it. */
 const staysIn = (turn: StephenTurn): StephenTurn["wants"] =>
@@ -731,10 +737,34 @@ const within = async <T>(
     })(),
   ]);
 
-/** They agreed to the last part: what they left in counts from now. */
+/** Their first name, as he says goodbye with it: the page tells it (`setLoopName`). */
+let firstName = "";
+/** His goodbye is being said: it goes on while the page moves to the thanks. */
+let farewell = false;
+
+/** Who he talks to, by the name the page knows them by. */
+export const setLoopName = (name: string): void => {
+  firstName = name.trim();
+};
+
+/**
+ * They agreed to the summary: what they left in counts from now, and he
+ * says goodbye, warmly and by name, while the thanks comes on screen.
+ */
 const finish = (): void => {
   rest();
   show("idle", { line: "", said: null, sign: null });
+  const goodbye = words?.farewell(firstName);
+  if (goodbye !== undefined && progressNow().mode === "talk") {
+    farewell = true;
+    void (async () => {
+      try {
+        await say(goodbye, voiceOf("warm, grateful"));
+      } finally {
+        farewell = false;
+      }
+    })();
+  }
   update(approved);
   approveWhenKept();
 };
@@ -783,10 +813,18 @@ const readPart = async (): Promise<void> => {
   happen({ type: "speak", at: performance.now(), readsBack: true });
   tone = "easy, light";
   asked = true;
-  const intro = now.adding ? told.added : told.intro(part.group, part.first);
+  // On screen the summary's heading; out loud he brings it in, in his own words.
+  const intro = now.adding ? told.added : told.summary;
   const telling = storyFor(part);
   show("speaking", { said: null });
-  if (!(await sayThrough(intro, mine))) {
+  if (
+    !(await sayThrough(
+      intro,
+      mine,
+      0,
+      now.adding ? undefined : told.summaryIntro
+    ))
+  ) {
     return;
   }
   const story = await within(telling, storyWaitMs);
@@ -806,12 +844,18 @@ const readPart = async (): Promise<void> => {
   for (const sentence of sentences) {
     prepare(sentence.say, voiceOf(tone));
   }
-  prepare(told.question, voiceOf(tone));
+  prepare(told.summaryAsk, voiceOf(tone));
   if (!(await tell(sentences, mine))) {
     return;
   }
+  // The screen asks "Is that correct?"; he asks it as one asks it out loud.
   if (
-    !(await sayThrough(`${intro} ${told.question}`, mine, intro.length + 1))
+    !(await sayThrough(
+      `${intro} ${told.question}`,
+      mine,
+      intro.length + 1,
+      told.summaryAsk
+    ))
   ) {
     return;
   }
@@ -2140,7 +2184,12 @@ export const stopLoop = ({ keep = true }: { keep?: boolean } = {}): void => {
   meter.stop();
   unmeasure?.();
   unmeasure = null;
-  rest();
+  // His goodbye is said to its end, as the thanks comes on screen.
+  if (farewell) {
+    underway = null;
+  } else {
+    rest();
+  }
   window.clearTimeout(noting);
   window.removeEventListener("online", tryAgain);
   state = idle;

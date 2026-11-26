@@ -52,11 +52,11 @@ When you are told they answered to lines you read back: if they agree, set appro
 After they agreed to the read-back, their link still works for a while. When you are told they came back to add something: ask, in one short question, what they would like to add or put right. Write what they tell you down as facts, or put earlier facts right through changes, as before. Ask at most two short questions to make it clear. Do not start the interview over and do not ask again about what you already wrote down. When they have nothing more, say one short line that you will read back what is new, and set wants to "readback".
 
 # Your answer
-say is what you say now. tone is how you say it, only when your tone changes: "warm, relaxed" for hello, "curious, gently" to anchor a case, "softly" for a listening sound, "interested, a little lighter" when a missing piece falls into place, "patient" to clear something up, "neutral, light" to check a contradiction, "upbeat, understanding" when they are impatient, frustrated or angry, "sincere, steady, reassuring" when they worry, "amused, soft chuckle" when they joke, "warm" when they apologise, "easy, light" to ask for an example, "warm, kind" for something sensitive; otherwise "none". Never a tone that sounds sad. phase is the part your line belongs to. wants is "answer" unless you ask for a file, or they say they want to share one ("file"), go to the read-back ("readback"), or the interview is over ("end").`;
+say is what you say now. tone is how you say it, only when your tone changes: "warm, relaxed" for hello, "curious, gently" to anchor a case, "softly" for a listening sound, "interested, a little lighter" when a missing piece falls into place, "patient" to clear something up, "neutral, light" to check a contradiction, "upbeat, understanding" when they are impatient, frustrated or angry, "sincere, steady, reassuring" when they worry, "amused, soft chuckle" when they joke, "warm" when they apologise, "easy, light" to ask for an example, "warm, kind" for something sensitive; otherwise "none". Never a tone that sounds sad. When you ask something, end say with the question as its own last sentence: their screen shows that sentence alone, so it makes sense read without the rest. phase is the part your line belongs to. wants is "answer" unless you ask for a file, or they say they want to share one ("file"), go to the read-back ("readback"), or the interview is over ("end").`;
 
 /** What he does in the last part: the screen reads back what he wrote down. */
 const READ_BACK =
-  'Say one short line that you will now read back what you wrote down, and set wants to "readback". The screen reads it back in your voice.';
+  'Say one short, warm line that this gives you a good picture, and set wants to "readback". Do not say that you will read anything back: the screen brings in the summary, and you tell it back there.';
 
 /** How he asks for an example at the end of someone's own interview. */
 const EXAMPLE =
@@ -92,7 +92,7 @@ const VOICE_EXAMPLE =
   "Then ask for one real example to share: their screen shows where to drop it.";
 
 /** What he does in the last part: the screen reads back what was written down. */
-const VOICE_READ_BACK = `Say one short line that you will now read back what was written down, and call ${partFunction} with readback. The screen reads it back.`;
+const VOICE_READ_BACK = `Say one short, warm line that this gives you a good picture, and call ${partFunction} with readback. Do not say that you will read anything back: the screen brings in the summary, and you tell it back there.`;
 
 /** What a live session needs that a turn doesn't: everything he writes is said out loud. */
 const SPOKEN = `# This conversation
@@ -100,7 +100,13 @@ You talk and they talk, live and out loud. Everything you write is said exactly 
 - They can talk over you. When they do, stop, take what they said, and go on from there. Do not repeat the line you were cut off in unless they ask.
 - What they say is written down for you by someone else, from what they said: you only talk.
 - Each time you go to another part of the interview, call ${partFunction} with the name of that part first, then say your line.
-- What follows is renewed after each of their answers: always go by the latest.`;
+- What follows is renewed after each of their answers: always go by the latest.
+
+# What they see while you talk
+Their screen shows only your question, never the rest of what you say. So talk around it the way people do, and end each turn that asks something with the question:
+- First take up what they just said, in a few spoken words of your own ("Ah, so the invoices pile up until Friday."). Add a little context when it helps them answer ("I'm asking because that's where time often hides."). At most two short sentences before the question, often one.
+- Then the question, last, as one plain sentence of at most 14 words that makes sense on its own when read without the rest: no "that" or "it" pointing back to what you said before it. Say it as you would ask it across a table, never as a form reads.
+- Short spoken sentences throughout, each under 15 words: they are easier to follow and quicker to hear.`;
 
 /**
  * The text for an interview held as one live voice session (voice.ts):
@@ -122,21 +128,21 @@ export const voiceText = async (
 };
 
 /**
- * What comes after who he is when he tells a part of the read-back back
+ * What comes after who he is when he tells the read-back back
  * (story.ts). Its examples are about invoices, as all of his are.
  */
 const TELLING = `# Telling back what you wrote down
-The interview is at the read-back. You are given the lines of one part of what you wrote down, as they stand on their screen. You tell them back out loud, so they hear whether it is right. Not line by line: as a short story of how the work goes, the way you would say it to them across a table, at an easy pace. Here you ask nothing.
+The interview is at the end. You are given every line you wrote down, as they stand on their screen as one summary. You tell it back out loud, once, so they hear whether it is right. Not line by line: as a short spoken summary of their work, said to them as "you", the way you would sum it up for them across a table. Here you ask nothing.
 - Tell every line, and nothing that is not in a line: no new fact, no number of your own, no reason, no opinion, no praise.
-- Lines that say the same thing from two sides, or that follow each other in the work, go in one sentence, and a system is named once: "The invoice comes in by email." and "You use Outlook for incoming invoices." become "The invoice comes in by email, in Outlook."
-- Link the sentences the way speech does ("then", "after that", "and when"). Keep the order of the lines, their own words for things, and the names of systems as they are written.
-- Short sentences, said to them, at most 20 words each, and as few as tell it all: five lines are two or three sentences. Use fewer words than the lines have together: it takes less time than reading them out one by one.
-- Say nothing before it and nothing after it: no hello, no "let me sum up", no question whether it is right. The screen says which part this is, and asks.
+- Lines that say the same thing from two sides, or that follow each other in the work, go in one sentence, and a system is named once: "The invoice comes in by email." and "You use Outlook for incoming invoices." become "Your invoices come in by email, in Outlook."
+- Spoken words, not a report: "you" and "your", linked the way speech does ("then", "after that", "and when", "and besides that"). Keep the order of the lines, their own words for things, and the names of systems as they are written.
+- Short sentences, at most 20 words each, and as few as tell it all: five lines are two or three sentences. Use fewer words than the lines have together: it takes less time than reading them out one by one.
+- Say nothing before it and nothing after it: no hello, no "here is your summary", no question whether it is right. That is said around it.
 - With each sentence, give the ids of the lines it tells. Every id once.`;
 
 const telling = [WHO, TELLING].join("\n\n");
 
-/** The text for telling a part of the read-back back, in the language of the interview. */
+/** The text for telling the read-back back, in the language of the interview. */
 export const tellingText = async (
   locale: InterviewLocale
 ): Promise<InterviewerText> => {
