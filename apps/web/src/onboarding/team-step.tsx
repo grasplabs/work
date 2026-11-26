@@ -14,7 +14,7 @@ import { useCoreAction } from "../use-core-action.ts";
 import { CalmStep } from "./calm-frame.tsx";
 import { MessageCompose } from "./message-compose.tsx";
 import { SendPlanForm, useSendWords } from "./send-plan-form.tsx";
-import { choiceHolds, choiceShown, dayChoices, replanOf } from "./send-plan.ts";
+import { choiceHolds, choiceShown, dayTiles, replanOf } from "./send-plan.ts";
 import type { SendChoice } from "./send-plan.ts";
 import { useRefresh } from "./step-parts.ts";
 import type { StepProps } from "./step-parts.ts";
@@ -37,13 +37,8 @@ const styles = stylex.create({
   foot: { display: "flex", justifyContent: "flex-end" },
 });
 
-/** What Stephen answers as the message is copied, and as one of the quick days is picked. */
-const teamAnswers = {
-  copied: msg`Copied. Send it from your own email.`,
-  tomorrow: msg`Tomorrow it is.`,
-  after: msg`The day after, then.`,
-  week: msg`Next week, then.`,
-};
+/** What Stephen answers as the message is copied. */
+const copied = msg`Copied. Send it from your own email.`;
 
 export const TeamStep = ({
   data,
@@ -52,7 +47,7 @@ export const TeamStep = ({
   onMessage,
   onward,
 }: StepProps) => {
-  const { t } = useLingui();
+  const { t, i18n } = useLingui();
   const navigate = useNavigate();
   const { admin, company, view } = data;
   const { run, busy, failure } = useCoreAction();
@@ -85,14 +80,34 @@ export const TeamStep = ({
         teams.map((team) => team.id)
       )
   );
-  const answer = useAnswer(Object.values(teamAnswers));
+  // What he says as a day is picked, as the tiles show it: today, a tile's weekday, or another day's date.
+  const tiles = dayTiles(today);
+  const weekday = new Intl.DateTimeFormat(i18n.locale, {
+    weekday: "long",
+    timeZone: "UTC",
+  });
+  const longDate = new Intl.DateTimeFormat(i18n.locale, {
+    day: "numeric",
+    month: "long",
+    timeZone: "UTC",
+  });
+  const dayLine = (day: string) => {
+    const date = new Date(`${day}T12:00:00Z`);
+    if (day === today) {
+      return msg`Today it is.`;
+    }
+    if (tiles.includes(day)) {
+      const name = weekday.format(date);
+      return msg`${name} it is.`;
+    }
+    const named = longDate.format(date);
+    return msg`On ${named}, then.`;
+  };
+  const answer = useAnswer([copied, ...tiles.map(dayLine)]);
   const choose = (next: SendChoice) => {
-    // One of the quick days picked: he says it back.
-    const quick = dayChoices(today).find(
-      (each) => each.day === next.day && next.day !== choice.day
-    );
-    if (quick !== undefined) {
-      answer(teamAnswers[quick.id]);
+    // Another day picked: he says it back.
+    if (next.day !== choice.day) {
+      answer(dayLine(next.day));
     }
     planDraft.keep(from, next);
     setChoice(next);
@@ -187,7 +202,7 @@ export const TeamStep = ({
             <div {...stylex.props(styles.foot)}>
               <CopyButton
                 onCopy={() => {
-                  answer(teamAnswers.copied);
+                  answer(copied);
                 }}
                 size="lg"
                 value={message}

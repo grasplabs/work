@@ -235,7 +235,7 @@ const field = (name: string): HTMLInputElement => {
 
 /** Presses "Other day" under the day's tiles, so the field to type a day in shows. */
 const otherDay = async (): Promise<void> => {
-  if (document.querySelector('input[aria-label="Another day"]') !== null) {
+  if (document.querySelector('input[aria-label="Other day"]') !== null) {
     return;
   }
   const button = [...document.querySelectorAll("button")].find(
@@ -251,7 +251,7 @@ const otherDay = async (): Promise<void> => {
 /** Types `typed` into the first day's field and leaves it, as a person does. */
 const typeDay = async (typed: string): Promise<void> => {
   await otherDay();
-  const day = field("Another day");
+  const day = field("Other day");
   await act(async () => {
     day.focus();
     Reflect.getOwnPropertyDescriptor(
@@ -444,7 +444,7 @@ describe("the team step's day, typed", () => {
       const said = nextSaid();
       await send();
       expect({
-        field: field("Another day").value,
+        field: field("Other day").value,
         saved: saved.map((plan) => plan.start),
         said: said.includes(region.said),
       }).toStrictEqual({
@@ -475,7 +475,7 @@ describe("the team step's day, typed", () => {
     await typeDay("31/12/2026");
     expect({
       error: error(),
-      marked: field("Another day").getAttribute("aria-invalid"),
+      marked: field("Other day").getAttribute("aria-invalid"),
       disabled: sendButton().disabled,
       // What it would have said is still the day before, so it can't be sent with it.
       next: nextSaid().includes("on 24 Nov at 9:00"),
@@ -742,7 +742,7 @@ describe("the team step's first day, on the device's clock", () => {
       expect({
         on,
         error: error(),
-        marked: field("Another day").getAttribute("aria-invalid"),
+        marked: field("Other day").getAttribute("aria-invalid"),
         said: said.includes("on 24 Nov at 9:00"),
         saved: saved.map((plan) => plan.start),
       }).toStrictEqual({
