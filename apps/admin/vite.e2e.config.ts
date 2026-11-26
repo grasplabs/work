@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import stylex from "@stylexjs/unplugin/vite";
 import { bindings } from "cf/config";
 import { defineConfig } from "vite-plus";
@@ -7,6 +9,9 @@ import { adminPlugins, damskoStyles, localEnv } from "./vite.config.ts";
 /** How many client databases the fake Cloudflare API holds at once. */
 const clientDatabases = 24;
 
+/** Where the journeys' Workers keep their state. */
+const state = process.env.ADMIN_E2E_STATE ?? ".wrangler/e2e";
+
 /**
  * The admin the browser journeys run (e2e/admin/): the
  * dev server's, with test/e2e-worker.ts as its Worker's entry, which puts
@@ -15,10 +20,21 @@ const clientDatabases = 24;
  * `vp dev`'s.
  */
 export default defineConfig(({ command }) => ({
+  // The state's databases are written as the journeys run, and StyleX
+  // answers every file change by having the page fetch its whole CSS
+  // again, which it rebuilds each time. Watched, on CI's runner the page
+  // fetched it without a pause (0.4 s each, one after another), and the
+  // server's answers came too late for the journeys (November 2026). The
+  // Cloudflare plugin leaves out only its own state (`.cloudflare`).
+  server: {
+    watch: {
+      ignored: [path.join(path.resolve(import.meta.dirname, state), "**")],
+    },
+  },
   plugins: [
     stylex(damskoStyles(command)),
     ...adminPlugins({
-      persistState: { path: process.env.ADMIN_E2E_STATE ?? ".wrangler/e2e" },
+      persistState: { path: state },
       config: (worker) => ({
         entrypoint: "./test/e2e-worker.ts",
         env: {
