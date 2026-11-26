@@ -41,6 +41,11 @@ msgstr "{0, plural, one {# encontrada} other {# encontradas}}"
 msgid "{0, plural, one {# thing that was said in it goes with it.} other {# things that were said in it go with it.}}"
 msgstr "{0, plural, one {# cosa que se dijo en ella se va con ella.} other {# cosas que se dijeron en ella se van con ella.}}"
 
+#. placeholder {0}: missing.length
+#: src/onboarding/leads-step.tsx
+msgid "{0, plural, one {Not on the list yet} other {# addresses not on the list yet}}"
+msgstr "{0, plural, one {Aún no está en la lista} other {# direcciones aún no están en la lista}}"
+
 #. placeholder {0}: team.name
 #. placeholder {1}: formatList(ledBy)
 #: src/onboarding/leads-step.tsx
@@ -2314,6 +2319,7 @@ msgstr "Mejor empecemos ahora"
 #: src/connections/http-connections.tsx
 #: src/drafts/share-access.tsx
 #: src/drafts/share-with-team.tsx
+#: src/onboarding/leads-step.tsx
 #: src/onboarding/people-add.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/directory-placement.tsx

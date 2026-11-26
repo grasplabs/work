@@ -6,6 +6,7 @@ import {
   takesPart,
   TooManyPeopleError,
   typedOf,
+  unlisted,
   withAdded,
   withLead,
   withTaking,
@@ -120,6 +121,15 @@ describe("addresses pasted", () => {
       ],
       wrong: ["nope"],
     });
+  });
+
+  it("offers to add from the search only addresses not on the list, and only when it is all addresses", () => {
+    expect(unlisted(picks, "dee@acme.test, BOB@acme.test")).toStrictEqual([
+      { name: "Dee", email: "dee@acme.test" },
+    ]);
+    expect(unlisted(picks, "dee@acme.test bob")).toStrictEqual([]);
+    expect(unlisted(picks, "ann")).toStrictEqual([]);
+    expect(unlisted(picks, "dee@acme")).toStrictEqual([]);
   });
 
   it("adds new people to a new team, and ticks someone already in rather than adding them twice", () => {

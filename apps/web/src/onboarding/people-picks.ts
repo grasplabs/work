@@ -254,6 +254,21 @@ export const typedOf = (text: string): { typed: Typed[]; wrong: string[] } => {
   return { typed, wrong };
 };
 
+/**
+ * The addresses in a search that aren't on the list yet, so the search can
+ * offer to add them: none unless the search is nothing but addresses.
+ */
+export const unlisted = (picks: Picks, query: string): Typed[] => {
+  const { typed, wrong } = typedOf(query);
+  if (wrong.length > 0) {
+    return [];
+  }
+  const listed = new Set(
+    picks.people.map(({ email }) => email.toLowerCase()).filter(Boolean)
+  );
+  return typed.filter(({ email }) => !listed.has(email));
+};
+
 /** Where people added by address go: a team there is, or a new one by its name. */
 export type AddTo = { team: string } | { newTeam: string };
 
