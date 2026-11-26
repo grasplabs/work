@@ -19,7 +19,8 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { streamText } from "../apps/core/test/provider-streams.ts";
+import { streamParts } from "../apps/core/test/provider-streams.ts";
+import type { Answer } from "../apps/core/test/provider-streams.ts";
 import { scriptedAnswer } from "./model-scripts.ts";
 import { modelFakeOrigin, modelFakePort } from "./stack.ts";
 
@@ -33,6 +34,28 @@ export interface FakeModelRequest {
   /** The provider's own host, as connect named it. */
   forwardedHost: string | null;
 }
+
+/**
+ * Streams `answer` as `api` does to `response`: each part of it between
+ * its pauses as soon as the pause before it is over, so a script's answer
+ * can be caught while it is still being written.
+ */
+const streamTo = async (
+  response: ServerResponse,
+  api: Parameters<typeof streamParts>[0],
+  answer: Answer
+): Promise<void> => {
+  // In the stream's order: its thinking's pause, then its text's.
+  const pauses = [answer.thinking?.pause, answer.pause ?? []]
+    .flat()
+    .flatMap((pause) => (pause === undefined ? [] : [pause]));
+  for (const [index, part] of streamParts(api, answer).entries()) {
+    // oxlint-disable-next-line no-await-in-loop -- each part after its pause
+    await pauses[index - 1]?.until;
+    response.write(part);
+  }
+  response.end();
+};
 
 /** A provider's refusal of a key it doesn't know, in its own shape. */
 const refusalOf = (path: string): unknown =>
@@ -92,7 +115,7 @@ const serve = (): void => {
           : scriptedAnswer(parsed(Buffer.concat(chunks).toString("utf-8")));
       if (api !== undefined && scripted !== undefined) {
         response.writeHead(200, { "content-type": "text/event-stream" });
-        response.end(streamText(api, scripted));
+        void streamTo(response, api, scripted);
         return;
       }
       response.writeHead(401, { "content-type": "application/json" });
