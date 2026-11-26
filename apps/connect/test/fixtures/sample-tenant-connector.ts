@@ -88,7 +88,7 @@ export default defineConnector({
       scopes: ["Items.Read"],
       resource: "board",
       routes: ["GET /v1/boards/{board}/items"],
-      args: { board: v.string().min(1) },
+      args: { board: v.string().segment() },
       returns: Items,
       handler: async ({ board }, api) =>
         await api.get("/v1/boards/{board}/items", {

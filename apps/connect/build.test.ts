@@ -57,7 +57,7 @@ export default defineConnector({
       readOnly: true,
       reach: "company",
       routes: ["GET /items/{id}"],
-      args: { id: v.string() },
+      args: { id: v.string().segment() },
       returns: Item,
       handler: async ({ id }, api) =>
         await api.get("/items/{id}", { path: { id }, returns: Item }),
@@ -83,7 +83,7 @@ export default defineConnector({
       readOnly: true,
       reach: "company",
       routes: ["GET /checks/{id}"],
-      args: { id: v.string() },
+      args: { id: v.string().segment() },
       returns: Item,
       handler: async ({ id }, api) => {
         await api.get("/checks/{id}", { path: { id } });

@@ -48,7 +48,7 @@ export default defineConnector({
       reach: "company",
       resource: "board",
       routes: ["GET /v1/boards/{board}/items"],
-      args: { board: v.string().min(1), cursor: v.string().optional() },
+      args: { board: v.string().segment(), cursor: v.string().optional() },
       returns: page(Item),
       handler: async ({ board, cursor }, api) => {
         const answer = await api.get("/v1/boards/{board}/items", {
@@ -77,10 +77,11 @@ A tool's name is its family and its action: `items.list`. The tools of one famil
 - `returns`: what it answers, an object. The answer is checked against it before anyone sees it: one that doesn't fit fails the call, and its caller gets the failure, never the answer.
 - `readOnly`: `true` for a tool that only reads, `false` for one that changes something at the vendor.
 - `reach`: whom it reaches, as far as any call of it can: `own` (only the person it acts for), `company` (what the company keeps together), `others` (anything that reaches other people, such as sending them something) or `conversations` (what other people said where the person was, such as a chat or a meeting's transcript). With `readOnly`, it decides the tool's class, which an admin allows or not.
-- `routes`: the only requests it may send, as `"METHOD /path"` with `{name}` for a path parameter. A connector with several hosts names the host too: `"GET api.boards.example/v1/me"`. At most one route is a write (anything but GET and HEAD).
+- `routes`: the only requests it may send, as `"METHOD /path"` with `{name}` for a path parameter. A connector with several hosts names the host too: `"GET api.boards.example/v1/me"`. At most one route is a write (anything but GET and HEAD). The argument named after a path parameter that fills a whole segment (`/deals/{id}`) is `v.string().segment()` (exactly what connect's egress sends in such a segment), a number, or fixed values that are each one segment; the build refuses a tool whose path argument is any other text. A parameter inside literal text, such as `/items('{id}')`, is held to a looser rule by the egress, and `api` refuses a value it wouldn't send there before anything goes out.
 - `resource`: the one string argument that names the record a call acts on, such as a board. A permission can be held to one record, and a path parameter of that name is held to the record the call's permission names.
 - `scopes`: the OAuth scopes it needs, among those its connector's `auth` asks for.
-- `handler`: the call, as `(args, api, call)`. It gets the arguments, already checked, and the vendor's API.
+- `redirects`: for a GET route of its own, the hosts its answer may redirect to, as `*.<host>` where `*` is one label: `{ "GET /v1/files/{file}": ["*.storage.boards.example"] }`. Connect's egress follows one such redirect itself, without the token. Any other redirect is refused.
+- `handler`: the call, as `(args, api, call)`. It gets the arguments, already checked, and the vendor's API. It refuses a call by throwing a `ToolError` with a `code`, such as `new ToolError("This list is shared", { code: "access_denied" })` or `invalid` for an argument `v` can't check: thrown before the tool's write, the call failed and nothing was done. Anything else it throws fails a read, and leaves a write's outcome unknown.
 
 `readOnly` and `reach` are checked against the rules that class every tool by its name, its arguments and its routes' paths, and a connector that claims less than they find isn't built:
 
@@ -93,11 +94,17 @@ Type every value the vendor gives a shape. A free-form `v.json()` in a connector
 
 ## The API
 
-`api` sends a request to one of the tool's routes, as the route is declared: `api.get("/v1/boards/{board}/items", { path, query, body, returns })`, and `post`, `put`, `patch` and `head` the same way. It fills in each path parameter from `path` as one segment of the path (a value can't be empty, `.` or `..`, or hold `/ \ ? # % ; :` or a control character; it's refused before anything is sent), adds `query` (leaving out undefined and null values) and sends `body` as JSON. A route the tool doesn't declare is refused before anything is sent.
+`api` sends a request to one of the tool's routes, as the route is declared: `api.get("/v1/boards/{board}/items", { path, query, body, returns })`, and `post`, `put`, `patch` and `head` the same way. It fills in each path parameter from `path` as one segment of the path, refusing before anything is sent a value connect's egress wouldn't send there, adds `query` (leaving out undefined and null values) and sends `body` as JSON. A route the tool doesn't declare is refused before anything is sent.
 
 `returns` is optional. With it, the answer is checked against it and typed by it, and one that doesn't fit fails the call. Fields it doesn't name are left out, so a field the vendor adds never breaks a call: name only what the connector reads. Without it, the answer is `unknown`: the JSON, or the text when the answer isn't JSON. Either way, the tool's own `returns` checks what the handler makes of it.
 
 A call sends at most one write, as its last request: a write sent while another request is still out is refused, and once the write is sent, any other request is refused. That's how connect can tell a caller whether nothing was done.
+
+`api` takes more than JSON:
+
+- `headers`: request headers the call adds, such as `if-match` with an etag, or `prefer`. Names are lowercase, and values are visible ASCII and spaces. A header that connect's egress or the body sets is refused before anything is sent: `authorization`, `proxy-authorization`, `cookie`, `host`, `connection`, `content-length`, `content-type`, `transfer-encoding`, `te`, `upgrade`, `forwarded`, any `x-forwarded-*`, the method overrides (`x-http-method-override`, `x-http-method`, `x-method-override`), the path rewrites (`x-original-url`, `x-rewrite-url`) and `grasp-egress`.
+- `contentType`: a media type, such as `text/html`. With it, a string `body` or a `Uint8Array` one goes out exactly as it is, under that type. Without it, `body` goes out as JSON. Bytes always need it, and it can't be set without a string or bytes body.
+- `as: "bytes"`: the answer is the body's exact bytes, a `Uint8Array`, within the same size limit as any answer. It takes no `returns`.
 
 ## Writes that can be recovered
 
@@ -120,7 +127,7 @@ export const finish = tool({
   reach: "company",
   resource: "board",
   routes: ["PATCH /v1/boards/{board}/items/{item}"],
-  args: { board: v.string(), item: v.string() },
+  args: { board: v.string().segment(), item: v.string().segment() },
   returns: Item,
   repeatable: true,
   handler: async ({ board, item }, api) =>
@@ -138,7 +145,7 @@ export const add = tool({
   reach: "company",
   resource: "board",
   routes: ["GET /v1/boards/{board}/items", "POST /v1/boards/{board}/items"],
-  args: { board: v.string(), title: v.string().min(1) },
+  args: { board: v.string().segment(), title: v.string().min(1) },
   returns: Item,
   handler: async ({ board, title }, api, call) =>
     await api.post("/v1/boards/{board}/items", {
@@ -158,6 +165,141 @@ export const add = tool({
 ```
 
 Each goes into the connector's `tools` under its name, such as `"items.finish": finish`.
+
+## What a call read and changed
+
+Connect records which of the vendor's records each read returned, by their IDs, from its answer: the `id` of each of its `items`, or else the answer's own `id`, or else nothing. An `id` is a string, or a number, recorded as its text. A handler never reports it, and a write reports nothing: what it answers is what it made or changed, not what it read.
+
+So a list answers `page(item)`, `{ items, next }`, with each item's `id` in it, as the build already requires of a tool named `list`. Where the vendor keeps its list elsewhere, such as under `data`, the handler maps it into `items`, as `items.list` above does. A read of one record answers the record itself, with its `id` at the top; one that answers the vendor's envelope instead (`{ success, data: { id } }`) records nothing.
+
+A read that answers one item, such as a message or a page, says `answersItem: true`. Its answer's own `id` then names exactly that item, and one without it fails the call. Core may keep what such a tool reads of the person's own things as a source in the Brain.
+
+A write reports what it changed with `call.changed({ before, after })`, once, for the audit's record of old and new values. A change past 256 KiB of JSON, or a second one, leaves the call's outcome unknown, as does any answer that isn't what the tool declares once its write went out.
+
+## Confirmation
+
+A write may say how a call reads to the person asked to confirm it: `describe`, a `title` and the args that matter, each under a `label`. The person sees each value exactly as the call holds it, and is told when the call holds more than these show, so list every arg that changes what it does. Without it they see the tool's name and the raw args. `call.confirmed` says whether the person confirmed this call on such a card.
+
+```ts notes-tools.ts
+import { tool, v } from "@grasp-os/sdk/connector";
+
+/** Replaces an item's notes, unless someone changed them since. */
+export const writeNotes = tool({
+  description: "Replaces an item's notes",
+  readOnly: false,
+  reach: "company",
+  resource: "board",
+  routes: ["PUT /v1/boards/{board}/items/{item}/notes"],
+  args: {
+    board: v.string().segment(),
+    item: v.string().segment(),
+    notes: v.string(),
+    etag: v.string(),
+  },
+  describe: {
+    title: "Replace an item's notes",
+    fields: [
+      { label: "Item", arg: "item" },
+      { label: "Notes", arg: "notes" },
+      { label: "Version", arg: "etag" },
+    ],
+  },
+  returns: v.object({ id: v.string(), etag: v.string() }),
+  handler: async ({ board, item, notes, etag }, api, call) => {
+    const answer = await api.put("/v1/boards/{board}/items/{item}/notes", {
+      path: { board, item },
+      headers: { "if-match": etag },
+      body: notes,
+      contentType: "text/markdown",
+      returns: v.object({ etag: v.string(), previous: v.string() }),
+    });
+    call.changed({ before: answer.previous, after: notes });
+    return { id: item, etag: answer.etag };
+  },
+});
+```
+
+## Files
+
+A read that answers a file says `answersFile: true`. It takes an `as` arg of `"text"` or `"base64"` and answers `name`, `contentType`, `encoding` and `content`, as `contentAs(bytes, as)` makes the last two. A workflow may then keep the answer as a file of its run instead of passing the bytes on.
+
+A write that attaches files says `takesFiles: true` and has exactly the SDK's `attachments` as its `attachments` arg: each file by name, type, size and SHA-256. A workflow names its run's files, and connect hands the call their bytes beside its args. They are checked against the digests before the handler runs, with none missing or extra, and `attachedFiles(args.attachments, call)` gives each file with its bytes. A handler refuses a call it can't carry out by throwing a `ToolError` before its write.
+
+```ts file-tools.ts
+import {
+  attachedFiles,
+  attachments,
+  contentAs,
+  tool,
+  ToolError,
+  v,
+} from "@grasp-os/sdk/connector";
+
+/** Reads an item's file, which the vendor serves from its storage. */
+export const readFile = tool({
+  description: "Reads the file on an item",
+  readOnly: true,
+  reach: "company",
+  answersFile: true,
+  routes: ["GET /v1/items/{item}/file"],
+  redirects: { "GET /v1/items/{item}/file": ["*.storage.boards.example"] },
+  args: { item: v.string().segment(), as: v.enum(["text", "base64"]) },
+  returns: v.object({
+    name: v.string(),
+    contentType: v.string(),
+    encoding: v.enum(["text", "base64"]),
+    content: v.string(),
+  }),
+  handler: async ({ item, as }, api) => {
+    const bytes = await api.get("/v1/items/{item}/file", {
+      path: { item },
+      as: "bytes",
+    });
+    return {
+      name: `${item}.bin`,
+      contentType: "application/octet-stream",
+      ...contentAs(bytes, as),
+    };
+  },
+});
+
+/** Puts one file on an item. */
+export const putFile = tool({
+  description: "Puts a file on an item",
+  readOnly: false,
+  reach: "company",
+  takesFiles: true,
+  routes: ["PUT /v1/items/{item}/file"],
+  args: { item: v.string().segment(), attachments },
+  describe: {
+    title: "Put a file on an item",
+    fields: [
+      { label: "Item", arg: "item" },
+      { label: "File", arg: "attachments" },
+    ],
+  },
+  returns: v.object({ id: v.string() }),
+  handler: async ({ item, attachments: named }, api, call) => {
+    const [file, ...more] = attachedFiles(named, call);
+    if (file === undefined || more.length > 0) {
+      throw new ToolError("Put exactly one file", { code: "invalid" });
+    }
+    return await api.put("/v1/items/{item}/file", {
+      path: { item },
+      query: { name: file.name },
+      body: file.bytes,
+      contentType: file.type,
+      returns: v.object({ id: v.string() }),
+    });
+  },
+});
+```
+
+## Mail
+
+A tool that reads or changes email says `mail: true`, and a write that mails someone, sending or drafting, says `mail: { recipients: [...] }`, naming the args that hold the addresses it mails, as address strings or within objects. The platform holds mail tools to its mail rules: through one whose `resource` is `"mailbox"`, a chat's agent reaches only its person's own mailbox or one the company pointed it at for them; a card confirming a write tells the person when the turn read mail, which others wrote; and core records a workflow run's mail with its recipients.
+
+A mail tool puts `call.stamp`, when a workflow run sends the mail, on what it sends or drafts as the message's `stampHeader` header, so a copy that reaches a watched mailbox names the run that sent it.
 
 ## Signing in
 

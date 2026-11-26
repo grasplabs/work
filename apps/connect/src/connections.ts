@@ -20,6 +20,7 @@ import { z } from "zod";
 
 import { composioClasses } from "#composio-classes";
 
+import type { ComposioClass } from "./composio-classes.ts";
 import { composioKey } from "./composio.ts";
 import { connections } from "./db/schema.ts";
 import { mcpServer } from "./mcp.ts";
@@ -179,21 +180,34 @@ const reachOf = {
 } as const satisfies Record<Exclude<ToolClass, "never">, ToolReach>;
 
 /**
- * The class Grasp gave `tool` of `toolkit` (composio-classes.ts), if it
- * was given one other than `never`. Both names are Composio's and the
- * admin's, so only the table's own entries are read: a tool named
- * `constructor` or `__proto__` has no class.
+ * What Grasp's review says of `tool` of `toolkit` (composio-classes.ts),
+ * if it was reviewed. Both names are Composio's and the admin's, so only
+ * the table's own entries are read: a tool named `constructor` or
+ * `__proto__` was never reviewed.
  */
+const reviewOf = (toolkit: string, tool: string): ComposioClass | undefined => {
+  const tools = Object.hasOwn(composioClasses, toolkit)
+    ? composioClasses[toolkit]
+    : undefined;
+  return tools !== undefined && Object.hasOwn(tools, tool)
+    ? tools[tool]
+    : undefined;
+};
+
+/** The class Grasp gave `tool` of `toolkit`, if one other than `never`. */
 const reviewedClass = (
   toolkit: string,
   tool: string
 ): Exclude<ToolClass, "never"> | undefined => {
-  const tools = Object.hasOwn(composioClasses, toolkit)
-    ? composioClasses[toolkit]
-    : undefined;
-  const reviewed =
-    tools !== undefined && Object.hasOwn(tools, tool) ? tools[tool] : undefined;
-  return reviewed === "never" ? undefined : reviewed;
+  const reviewed = reviewOf(toolkit, tool);
+  const toolClass = typeof reviewed === "object" ? reviewed.class : reviewed;
+  return toolClass === "never" ? undefined : toolClass;
+};
+
+/** Whether Grasp's review says `tool` of `toolkit` reads or changes mail. */
+export const reviewedMail = (toolkit: string, tool: string): boolean => {
+  const reviewed = reviewOf(toolkit, tool);
+  return typeof reviewed === "object" && reviewed.mail;
 };
 
 /**

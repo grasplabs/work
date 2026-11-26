@@ -9,7 +9,12 @@ import type {
   ValueIssue,
   ValueIssueCode,
 } from "./value-descriptor.ts";
-import { isDate, isDateTime, isWebUrl } from "./value-formats.ts";
+import {
+  isDate,
+  isDateTime,
+  isPathSegment,
+  isWebUrl,
+} from "./value-formats.ts";
 
 /** Returned in place of a value that was refused. */
 export const invalid = Symbol("invalid");
@@ -242,6 +247,9 @@ export const checkString = (
   }
   if (descriptor.url === true && !isWebUrl(text)) {
     return refuse(state, "value.invalid_url");
+  }
+  if (descriptor.segment === true && !isPathSegment(text)) {
+    return refuse(state, "value.invalid_segment");
   }
   return text;
 };

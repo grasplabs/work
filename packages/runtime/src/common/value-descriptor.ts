@@ -83,6 +83,7 @@ export type ValueKindDescriptor =
       readonly datetime?: true;
       readonly date?: true;
       readonly url?: true;
+      readonly segment?: true;
       /** In UTF-16 code units, as `String.length` counts. */
       readonly min?: number;
       readonly max?: number;
@@ -187,6 +188,8 @@ export const valueIssueMessages = {
     "The value isn't a date and time with its offset (RFC 3339).",
   "value.invalid_date": "The value isn't a calendar date (YYYY-MM-DD).",
   "value.invalid_url": "The value isn't an http or https URL.",
+  "value.invalid_segment":
+    "The value isn't one segment of a URL's path: no / \\ ? # % ; : or control character, not . or .., and not a batch endpoint.",
   "value.invalid_literal": "The value isn't the one allowed.",
   "value.invalid_enum": "The value isn't one of those allowed.",
   "value.invalid_id": "The value isn't a record ID.",

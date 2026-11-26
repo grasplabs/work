@@ -26,12 +26,12 @@ import { pauseAsked } from "./pause.ts";
 // the requests the called action declares
 // (threat model R9, Q11, EG1 to EG7). A request goes out only to one of
 // the connector's hosts, over HTTPS, as a method and path template the
-// action declares, with the connector's credential and method-override
-// headers stripped; anything else is refused before it leaves. The call's
-// credential is added only for the hosts the connector says it goes to
-// (`credentialHosts`), so a connector that lists a host of its own choosing
-// (one written by a client's agent, or generated from a spec naming a
-// second server) can reach it but never hand it the credential (GN2). A
+// action declares, with the connector's credential, method-override and
+// path-rewrite headers stripped; anything else is refused before it leaves.
+// The call's credential is added only for the hosts the connector says it
+// goes to (`credentialHosts`), so a connector that lists a host of its own
+// choosing (one written by a client's agent, or generated from a spec naming
+// a second server) can reach it but never hand it the credential (GN2). A
 // host filled per connection (`{company}.example.com`) is named by the
 // connector's code as declared and filled here alone, from the values the
 // connection signed in with (GRA-2350). Answers reach the connector
@@ -112,7 +112,9 @@ const egressAnswer = (
  * Request headers the connector can't send: credentials (the token is
  * connect's to add); method overrides, which some providers (Google)
  * honour on a POST, turning it into a method the action doesn't declare
- * (Q11); and hop-by-hop headers that could change the connection itself.
+ * (Q11); path rewrites, which some servers and proxies (IIS) honour,
+ * turning it into a path the action doesn't declare; and hop-by-hop
+ * headers that could change the connection itself.
  */
 const connectorHeadersRefused = [
   "authorization",
@@ -122,6 +124,8 @@ const connectorHeadersRefused = [
   "x-http-method-override",
   "x-http-method",
   "x-method-override",
+  "x-original-url",
+  "x-rewrite-url",
   "upgrade",
   "connection",
   "te",

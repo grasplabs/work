@@ -184,6 +184,7 @@ const listMessages = defineTool({
   readOnly: true,
   reach: "own",
   resource: "mailbox",
+  mail: true,
   // Gmail lists IDs only; each message's metadata is one more request.
   routes: [get("/messages"), get("/messages/{message}")],
   run: async ({
@@ -324,6 +325,7 @@ const getMessage = defineTool({
   answersItem: true,
   reach: "own",
   resource: "mailbox",
+  mail: true,
   routes: [
     get("/messages/{message}"),
     get("/messages/{message}/attachments/{attachment}"),
@@ -391,6 +393,7 @@ const readAttachment = defineTool({
   // A workflow action may keep it as a file of its run (GRA-886).
   answersFile: true,
   resource: "mailbox",
+  mail: true,
   routes: [
     get("/messages/{message}"),
     get("/messages/{message}/attachments/{attachment}"),
@@ -443,6 +446,7 @@ const listLabels = defineTool({
   readOnly: true,
   reach: "own",
   resource: "mailbox",
+  mail: true,
   routes: [get("/labels")],
   run: async ({ mailbox }) => {
     const { labels } = await googleJson(
@@ -495,6 +499,7 @@ const labelMessage = defineTool({
   // horizon, before people relabel it).
   repeatable: true,
   resource: "mailbox",
+  mail: true,
   routes: [post("/messages/{message}/modify")],
   describe: {
     title: "Change an email's labels",
@@ -603,6 +608,7 @@ const sendMail = defineTool({
   destructive: false,
   takesFiles: true,
   resource: "mailbox",
+  mail: { recipients: ["to", "cc", "bcc"] },
   routes: [post("/messages/send")],
   describe: { title: "Send an email", fields: draftFields },
   run: async (input, effect) => {
@@ -637,6 +643,7 @@ const createDraft = defineTool({
   destructive: false,
   takesFiles: true,
   resource: "mailbox",
+  mail: { recipients: ["to", "cc", "bcc"] },
   routes: [post("/drafts")],
   describe: { title: "Create a draft email", fields: draftFields },
   run: async (input, effect) => {

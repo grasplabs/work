@@ -3,6 +3,8 @@ import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { linearCopyOrigin } from "../../connect/test/linear-mcp-fake.ts";
+import type { Consent } from "../../connect/test/linear-mcp-fake.ts";
 import { heldWriteRefusal } from "../src/channels/stephen-rules.ts";
 import { workspace } from "../src/durable-objects.ts";
 import {
@@ -14,14 +16,16 @@ import {
   withoutMarking,
 } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
+import { chooseAudience } from "./brain-audiences.ts";
 import { heldFor } from "./held-in-connect.ts";
 import { mockIdp } from "./idp.ts";
-import { mailConnection } from "./mail-connection.ts";
+import { linearConsentUrl } from "./linear-service.ts";
+import { agentMayUse, mailConnection } from "./mail-connection.ts";
 import { mailControlUrl } from "./mail-server.ts";
 import type { ToolkitServer } from "./mail-server.ts";
 import { fakeProvider } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
-import { signedInApi } from "./sign-in.ts";
+import { routed, signedInApi } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
 
 // A chat that came through a chat app (Teams first) holds a write only when
@@ -272,6 +276,68 @@ describe("a chat app's writes", setUpTime, () => {
       check: null,
       channelText: null,
     });
+  });
+
+  it("say the turn read mail when it read through a server connected by its URL and added under a name for mail", async () => {
+    // A server's tools say nothing of mail: the rules read it from the
+    // name the admin added the server under (tool-rules.ts). Linear's copy,
+    // since Linear's own address is the built-in Linear's.
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInApi(idp, "user");
+    const { id: connector } = await admin.api.connections.addConnector({
+      name: "Support inbox",
+      url: `${linearCopyOrigin}/mcp`,
+      auth: { kind: "oauth" },
+    });
+    const { url } = await admin.api.connections.start({
+      provider: connector,
+      scope: "shared",
+      returnTo: "/connectors",
+    });
+    const internet = testBinding("CONNECT_PROVIDERS");
+    if (!isFetcher(internet)) {
+      throw new TypeError("Expected the providers Worker as CONNECT_PROVIDERS");
+    }
+    const consented = await internet.fetch(linearConsentUrl, {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    });
+    const { code, state, iss } = await consented.json<Consent>();
+    const back = await routed(
+      `/api/connections/callback?${new URLSearchParams({ code, state, ...(iss === undefined ? {} : { iss }) }).toString()}`,
+      { headers: { cookie: admin.session } }
+    );
+    const connectionId =
+      new URL(back.headers.get("location") ?? "").searchParams.get(
+        "connection"
+      ) ?? "";
+    await agentMayUse(connectionId);
+    // Open to nobody until an admin chooses its audience (#2726).
+    await chooseAudience(admin.api, connectionId, { kind: "everyone" });
+    const id = workspaceIdSchema.parse(crypto.randomUUID());
+    const stub = workspace(env, id);
+    const chat = await stub.createChat(
+      "Questions",
+      person.userId,
+      id,
+      undefined,
+      "teams"
+    );
+    await fakeProvider(
+      codeStep(
+        'export default async (self, env) => (await env.connections.call("INBOX", "list_issues", { limit: 1 })).output;'
+      ),
+      says("Found it.")
+    );
+    await requestGranted(idp, admin, {
+      subject: { type: "agent", agentId: id },
+      object: { type: "connection", connectionId },
+      actions: ["list_issues"],
+      binding: "INBOX",
+    });
+
+    const answer = await stub.ask(chat.id, { text: "What came in?", model });
+    expect(answer.check).toStrictEqual({ read: "mail", where: connector });
   });
 });
 
