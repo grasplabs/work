@@ -28,7 +28,7 @@ import {
   UserPlusIcon,
 } from "@grasp-os/ui/lib/icons";
 import { colors, media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
-import { plural } from "@lingui/core/macro";
+import { msg, plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
@@ -56,6 +56,7 @@ import {
 import type { Picks } from "./people-picks.ts";
 import { suiteNames, useRefresh } from "./step-parts.ts";
 import type { StepProps } from "./step-parts.ts";
+import { useAnswer, useLeaving } from "./step-voice.tsx";
 import { orgConfirmed, orgDraft } from "./visit.ts";
 
 // Who Stephen talks to (Ruben: no HR platform; the people come from the
@@ -480,6 +481,21 @@ const useWords = (from: "directory" | "list" | "nobody", signIn: string) => {
   };
 };
 
+/** What Stephen says of who he'll talk to, as the next step arrives. */
+const leadsLeft = {
+  leads: msg`Good, I’ll start with the leads you marked.`,
+  people: msg`Got it, now I know who I’ll talk to.`,
+  nobody: msg`Nobody on the list yet, that’s fine. We’ll add them together later.`,
+};
+
+/** What Stephen answers as the list changes: a lead marked, someone left out, people added, a list shared. */
+const peopleAnswers = {
+  lead: msg`Got it, I’ll start with them.`,
+  out: msg`Okay, I’ll leave them out.`,
+  added: msg`Got it, they’re on the list now.`,
+  list: msg`Got the list, they’re all here now.`,
+};
+
 export const LeadsStep = ({ data, onward }: StepProps) => {
   const { t } = useLingui();
   const { run, busy, failure } = useCoreAction();
@@ -517,7 +533,25 @@ export const LeadsStep = ({ data, onward }: StepProps) => {
     }
     setPicks(next);
   };
-  const { taking } = countsOf(picks);
+  const { taking, leads: marked } = countsOf(picks);
+  const answer = useAnswer(Object.values(peopleAnswers));
+  // A lead marked, or someone left out, as they do it in the list.
+  const pick = (next: Picks) => {
+    const now = countsOf(next);
+    if (now.leads > marked) {
+      answer(peopleAnswers.lead);
+    } else if (now.taking < taking) {
+      answer(peopleAnswers.out);
+    }
+    change(next);
+  };
+  let left = leadsLeft.people;
+  if (picks.people.length === 0) {
+    left = leadsLeft.nobody;
+  } else if (marked > 0) {
+    left = leadsLeft.leads;
+  }
+  useLeaving(left);
   const confirm = async () => {
     if (busy || refreshing) {
       return;
@@ -596,7 +630,7 @@ export const LeadsStep = ({ data, onward }: StepProps) => {
             }}
           />
         ) : (
-          <PeopleList noTeam={noTeam} onPicks={change} picks={picks} />
+          <PeopleList noTeam={noTeam} onPicks={pick} picks={picks} />
         )}
         <WaitingNote waiting={waiting} />
       </div>
@@ -605,6 +639,7 @@ export const LeadsStep = ({ data, onward }: StepProps) => {
         onAdd={(typed, to) => {
           try {
             change(withAdded(picks, typed, to).picks);
+            answer(peopleAnswers.added);
             return true;
           } catch (error) {
             if (error instanceof TooManyPeopleError) {
@@ -616,6 +651,7 @@ export const LeadsStep = ({ data, onward }: StepProps) => {
         }}
         onList={(next) => {
           change(next);
+          answer(peopleAnswers.list);
         }}
         onOpenChange={setAdding}
         open={adding}

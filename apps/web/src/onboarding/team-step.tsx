@@ -3,7 +3,7 @@ import { Button } from "@grasp-os/ui/components/button";
 import { CopyButton } from "@grasp-os/ui/components/copy-button";
 import { Text } from "@grasp-os/ui/components/text";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
-import { plural } from "@lingui/core/macro";
+import { msg, plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
@@ -14,10 +14,11 @@ import { useCoreAction } from "../use-core-action.ts";
 import { CalmStep } from "./calm-frame.tsx";
 import { MessageCompose } from "./message-compose.tsx";
 import { SendPlanForm, useSendWords } from "./send-plan-form.tsx";
-import { choiceHolds, choiceShown, replanOf } from "./send-plan.ts";
+import { choiceHolds, choiceShown, dayChoices, replanOf } from "./send-plan.ts";
 import type { SendChoice } from "./send-plan.ts";
 import { useRefresh } from "./step-parts.ts";
 import type { StepProps } from "./step-parts.ts";
+import { useAnswer } from "./step-voice.tsx";
 import { planDraft } from "./visit.ts";
 
 // Tell the team, and plan the interviews: the message the admin sends
@@ -35,6 +36,14 @@ const styles = stylex.create({
   // Copy on the end edge of the message's foot, where the hand goes on.
   foot: { display: "flex", justifyContent: "flex-end" },
 });
+
+/** What Stephen answers as the message is copied, and as one of the quick days is picked. */
+const teamAnswers = {
+  copied: msg`Copied. Send it from your own email.`,
+  tomorrow: msg`Tomorrow it is.`,
+  after: msg`The day after, then.`,
+  week: msg`Next week, then.`,
+};
 
 export const TeamStep = ({
   data,
@@ -76,7 +85,15 @@ export const TeamStep = ({
         teams.map((team) => team.id)
       )
   );
+  const answer = useAnswer(Object.values(teamAnswers));
   const choose = (next: SendChoice) => {
+    // One of the quick days picked: he says it back.
+    const quick = dayChoices(today).find(
+      (each) => each.day === next.day && next.day !== choice.day
+    );
+    if (quick !== undefined) {
+      answer(teamAnswers[quick.id]);
+    }
     planDraft.keep(from, next);
     setChoice(next);
   };
@@ -168,7 +185,14 @@ export const TeamStep = ({
           changed={kept !== null}
           foot={
             <div {...stylex.props(styles.foot)}>
-              <CopyButton size="lg" value={message} variant="outline">
+              <CopyButton
+                onCopy={() => {
+                  answer(teamAnswers.copied);
+                }}
+                size="lg"
+                value={message}
+                variant="outline"
+              >
                 {t`Copy the message`}
               </CopyButton>
             </div>

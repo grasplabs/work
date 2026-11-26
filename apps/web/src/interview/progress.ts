@@ -1,5 +1,6 @@
 import {
   erasedFact,
+  interviewFeedbackLimit,
   interviewLimits,
   nextFactId,
   readBackOrder,
@@ -435,6 +436,22 @@ export const rated = (
   progress.person === "completed"
     ? { ...progress, rating: Math.min(Math.max(Math.round(rating), 1), 5) }
     : progress;
+
+/** What they wrote with their rating, trimmed; empty takes it away. */
+export const feedbackGiven = (
+  progress: InterviewProgress,
+  feedback: string
+): InterviewProgress => {
+  if (progress.person !== "completed") {
+    return progress;
+  }
+  const words = feedback.trim().slice(0, interviewFeedbackLimit);
+  if (words === "") {
+    const { feedback: _gone, ...rest } = progress;
+    return rest;
+  }
+  return { ...progress, feedback: words };
+};
 
 /** The event a conversation starts with, by where it stands: the first line, back to add something, an answer never answered, or coming back. */
 export const openingEvent = (progress: InterviewProgress): InterviewEvent => {

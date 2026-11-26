@@ -1,4 +1,3 @@
-import { interviewerNames } from "@grasp-os/shared/onboarding";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,24 +18,15 @@ import {
   TooltipTrigger,
 } from "@grasp-os/ui/components/tooltip";
 import { Icon, PlusIcon, TrashIcon } from "@grasp-os/ui/lib/icons";
-import { focusRing, visuallyHidden } from "@grasp-os/ui/lib/styles";
-import {
-  colors,
-  duration,
-  media,
-  radius,
-  size as sizes,
-  space,
-} from "@grasp-os/ui/lib/tokens.stylex";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useState } from "react";
 
 import { SaveTrouble } from "./composer.tsx";
-import { WhereLinesGo } from "./destination.tsx";
 import { tool } from "./frame.tsx";
-import { useInterviewer, useProgress } from "./kept.ts";
 import { sayingMs } from "./loop.ts";
+import { Rating } from "./rating.tsx";
 import { SpokenText, useSaid } from "./spoken.tsx";
 
 // The end of an interview (prototype `interview-view.tsx`, `Closed`,
@@ -44,8 +34,6 @@ import { SpokenText, useSaid } from "./spoken.tsx";
 // works. The one thing to do here is to go back in and add something;
 // under it, quietly, how it was to talk to him. Deleting is top right, out
 // of the way, and has to be held before it even asks.
-
-const ratings = [1, 2, 3, 4, 5] as const;
 
 const styles = stylex.create({
   page: {
@@ -64,120 +52,28 @@ const styles = stylex.create({
     gap: space["3"],
     textWrap: "balance",
   },
-  // The one thing to do, and the quiet way to where the lines go under it.
-  ways: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: space["2"],
-  },
-  // The rating, quiet and on one line where it fits: the question, then five dots.
-  rating: {
-    display: "flex",
-    flexWrap: "wrap",
-    alignItems: "center",
-    justifyContent: "center",
-    columnGap: space["2"],
-    margin: 0,
-    padding: 0,
-    borderWidth: 0,
-  },
-  dots: { display: "flex", alignItems: "center" },
-  dotButton: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    width: space["8"],
-    height: space["8"],
-    padding: 0,
-    borderWidth: 0,
-    borderRadius: radius.circle,
-    backgroundColor: "transparent",
-    cursor: "pointer",
-  },
-  dot: {
-    width: space["3"],
-    height: space["3"],
-    borderWidth: sizes.hairline,
-    borderStyle: "solid",
-    borderRadius: radius.circle,
-    borderColor: {
-      default: colors.mutedForeground,
-      ":is(:hover > *)": colors.foreground,
-    },
-    transitionProperty: {
-      default: "border-color, background-color",
-      [media.reducedMotion]: "none",
-    },
-    transitionDuration: duration.hover,
-    transitionTimingFunction: duration.ease,
-  },
-  dotOn: { borderColor: colors.foreground, backgroundColor: colors.foreground },
 });
 
-/**
- * How it was to talk to Stephen, as five dots to press: theirs to say or
- * to leave, and to change while the link works. Quiet: the question in
- * the body's muted words, the dots after it; each dot names itself.
- */
-const Rating = ({
-  value,
-  onRate,
-}: {
-  value: number | undefined;
-  onRate: (rating: number) => void;
-}) => {
-  const { t } = useLingui();
-  const who = interviewerNames[useInterviewer()];
-  const question = t`How was talking to ${who}?`;
-  return (
-    <fieldset {...stylex.props(styles.rating)}>
-      <legend {...stylex.props(visuallyHidden)}>{question}</legend>
-      <Text aria-live="polite" as="span" color="muted">
-        {value === undefined ? question : t`Thank you for telling me.`}
-      </Text>
-      <span {...stylex.props(styles.dots)}>
-        {ratings.map((rating) => {
-          const on = value !== undefined && rating <= value;
-          return (
-            <button
-              aria-label={t`${rating} of 5`}
-              aria-pressed={value === rating}
-              key={rating}
-              onClick={() => {
-                onRate(rating);
-              }}
-              type="button"
-              {...stylex.props(styles.dotButton, focusRing)}
-            >
-              <span {...stylex.props(styles.dot, on && styles.dotOn)} />
-            </button>
-          );
-        })}
-      </span>
-    </fieldset>
-  );
-};
-
-/** His thanks, and what they can still do: add something, see where their lines go, and say how it was. */
+/** His thanks, and what they can still do: add something, and say how it was. */
 export const Closed = ({
   name,
   closes,
   rating,
+  feedback,
   onRate,
+  onFeedback,
   onAdd,
 }: {
   name: string;
   /** The last day the link works, in words. */
   closes: string;
   rating: number | undefined;
+  feedback: string | undefined;
   onRate: (rating: number) => void;
+  onFeedback: (feedback: string) => void;
   onAdd: () => void;
 }) => {
   const { t } = useLingui();
-  // Lines agreed under what this interview said before can only be moved
-  // once they read what it says now: "Add something" takes them there.
-  const { told } = useProgress();
   const title = t`Thank you, ${name}.`;
   const message = t`What you agreed to is kept. Forgot something? This link works until ${closes}.`;
   const line = `${title} ${message}`;
@@ -202,16 +98,19 @@ export const Closed = ({
           <SpokenText from={title.length + 1} said={said} text={message} />
         </Text>
       </div>
-      <div {...stylex.props(styles.ways)}>
-        <Button onClick={onAdd} size="lg">
-          <Icon icon={PlusIcon} />
-          {t`Add something`}
-        </Button>
-        {told ? <WhereLinesGo /> : null}
-      </div>
-      {/* A change of where a line goes not kept yet, or refused, shows here too once the sheet is closed. */}
+      {/* Where their lines go was said when they started: not again here. */}
+      <Button onClick={onAdd} size="lg">
+        <Icon icon={PlusIcon} />
+        {t`Add something`}
+      </Button>
+      {/* A rating or their words not kept, or refused, shows here too. */}
       <SaveTrouble />
-      <Rating onRate={onRate} value={rating} />
+      <Rating
+        feedback={feedback}
+        onFeedback={onFeedback}
+        onRate={onRate}
+        value={rating}
+      />
     </div>
   );
 };

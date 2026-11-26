@@ -147,6 +147,7 @@ const styles = stylex.create({
     transitionTimingFunction: duration.ease,
   },
   lit: { backgroundColor: colors.accent },
+  partOf: { display: { default: "inline", [media.maxSm]: "none" } },
   // When they said it, over their words: the transcript's own time.
   when: {
     display: "block",
@@ -805,9 +806,13 @@ export const ReadBackFoot = ({ onChange }: { onChange: () => void }) => {
       // The part they are in counts as under way, so the line shows from the first.
       share={n / count}
       start={
-        <Text as="span" color="muted" size="sm">
-          {t`Part ${n} of ${count}`}
-        </Text>
+        // On a phone the line along the edge says how far along alone, as
+        // the setup's foot does: the words would run under the buttons.
+        <span {...stylex.props(styles.partOf)}>
+          <Text as="span" color="muted" size="sm">
+            {t`Part ${n} of ${count}`}
+          </Text>
+        </span>
       }
     />
   );

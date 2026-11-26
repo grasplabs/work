@@ -47,25 +47,12 @@ const agreesIn: Record<Locale, RegExp> = {
 /** The words of the conversation, in `locale`. */
 export const useLoopWords = (locale: Locale): LoopWords => {
   const { t } = useLingui();
-  const intros: Record<ReadBackGroup, [string, string]> = {
-    you: [
-      t`Last: what you told me about AI.`,
-      t`More of what you told me about AI.`,
-    ],
-    tasks: [t`Your recurring work.`, t`More of your recurring work.`],
-    steps: [t`The steps.`, t`More of the steps.`],
-    differently: [
-      t`Then, when it goes differently.`,
-      t`More of when it goes differently.`,
-    ],
-    result: [t`Then, the numbers and the result.`, t`And the rest.`],
-    together: [t`This is what I wrote down.`, t`And the rest.`],
-  };
   return {
     locale,
     question: t`Is that correct?`,
     yes: t`Yes, that’s correct.`,
-    intro: (group, first) => intros[group][first ? 0 : 1],
+    // Every part is headed the same: the bar under it says which part of how many.
+    intro: () => t`Summary`,
     added: t`This is what is new.`,
     agrees: agreesIn[locale],
     changed: (was, now) => t`Change “${was}” to “${now}”.`,

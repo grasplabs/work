@@ -11,6 +11,7 @@ import {
 import { FileIcon, Icon, PlusIcon } from "@grasp-os/ui/lib/icons";
 import { visuallyHidden } from "@grasp-os/ui/lib/styles";
 import { size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
@@ -32,6 +33,7 @@ import { sourcesFor } from "./setup.ts";
 import type { DocumentSource } from "./setup.ts";
 import { namedPlaces, sourceLogo } from "./source-logos.ts";
 import type { SetupData, StepProps } from "./step-parts.ts";
+import { useAnswer, useLeaving } from "./step-voice.tsx";
 import { SupportLink } from "./support-link.tsx";
 
 // Where the documents live: the places, those of the company's sign-in
@@ -131,6 +133,19 @@ export const kindsOf = (words: ContextWords | undefined): string | null => {
   return `${list.charAt(0).toLocaleUpperCase()}${list.slice(1)}`;
 };
 
+/** What Stephen says of the places pointed to, as the next step arrives. */
+const sourcesLeft = {
+  shared: msg`Thanks. I’ll only read what you’ve shared with me there.`,
+  noted: msg`Good to know where the work lives. That already helps.`,
+  none: msg`No tools for now, that’s fine. You can add them later too.`,
+};
+
+/** What Stephen answers as a place is pointed to: one to connect now, or one noted. */
+const sourceAnswers = {
+  connect: msg`Good, let’s connect it.`,
+  noted: msg`Noted.`,
+};
+
 export const SourcesStep = ({ data, onward }: StepProps) => {
   const { t } = useLingui();
   const { choices, signIn, identity } = data;
@@ -171,6 +186,7 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
     }
     return integration;
   };
+  const answer = useAnswer([sourceAnswers.connect, sourceAnswers.noted]);
   const press = async (source: DocumentSource) => {
     if (busy) {
       return;
@@ -179,14 +195,20 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
       noted.includes(source.id) ||
       (await save({ ...choices, sources: [...noted, source.id] }));
     if (kept) {
-      setConnecting(connectable(source) ?? null);
+      const toConnect = connectable(source) ?? null;
+      answer(toConnect === null ? sourceAnswers.noted : sourceAnswers.connect);
+      setConnecting(toConnect);
     }
   };
   const isAsked = (name: string): boolean =>
     wanted.some((each) => each.toLowerCase() === name.toLowerCase());
-  const ask = async (name: string) => {
+  // Asked for by name, noted; `quietly` when it is about to be connected, and that is what he answers.
+  const ask = async (name: string, quietly = false) => {
     if (!isAsked(name)) {
       await save({ ...choices, sourcesWanted: [...wanted, name] });
+      if (!quietly) {
+        answer(sourceAnswers.noted);
+      }
     }
   };
   // A named place pressed again is no longer asked for.
@@ -224,6 +246,24 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
       ? undefined
       : integration;
   };
+  // Pointed somewhere they shared from, pointed somewhere, or nowhere yet: said as the next step arrives.
+  const sharedSomewhere =
+    listed.some((source) => noted.includes(source.id) && isConnected(source)) ||
+    wanted.some((name) => {
+      const integration = integrationNamed(name);
+      return (
+        integration !== undefined &&
+        (stateOf(integration) === "shared" ||
+          stateOf(integration) === "personal")
+      );
+    });
+  let left = sourcesLeft.none;
+  if (sharedSomewhere) {
+    left = sourcesLeft.shared;
+  } else if (noted.length > 0 || wanted.length > 0) {
+    left = sourcesLeft.noted;
+  }
+  useLeaving(left);
   // What became of a place, said to a screen reader after its name; its tile glows with it.
   const stateOfRow = (source: DocumentSource): string | null => {
     if (!noted.includes(source.id)) {
@@ -363,15 +403,18 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
       </div>
       <ConnectorSearch
         integrations={integrations}
-        onAsk={ask}
+        onAsk={async (name) => {
+          await ask(name);
+        }}
         onOpenChange={setSearching}
         onPick={async (integration) => {
-          await ask(integration.name);
-          if (
+          const toConnect =
             stateOf(integration) !== "shared" &&
             stateOf(integration) !== "personal" &&
-            canConnect(integration, identity)
-          ) {
+            canConnect(integration, identity);
+          await ask(integration.name, toConnect);
+          if (toConnect) {
+            answer(sourceAnswers.connect);
             setConnecting(integration);
           }
         }}
