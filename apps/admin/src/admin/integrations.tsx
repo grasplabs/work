@@ -46,6 +46,7 @@ import { AdminsLoading, WithAdmins } from "./admins.tsx";
 import { askedApps } from "./integrations-asked.ts";
 import type { AskedApp } from "./integrations-asked.ts";
 import { AdminPage } from "./page.tsx";
+import { rowTarget } from "./row-target.ts";
 import { formatDate, formatList } from "./words.ts";
 
 const styles = stylex.create({
@@ -60,16 +61,15 @@ const askedByOf = (app: AskedApp): string =>
 const AppRow = ({ app }: { app: AskedApp }) => (
   <TableRow interactive>
     <TableCell rowHeader wrap>
-      <Link asChild variant="plain">
-        <RouterLink
-          aria-label={`Open ${app.name}`}
-          data-row-target
-          search={{ app: app.key }}
-          to="/connectors"
-        >
-          {app.name}
-        </RouterLink>
-      </Link>
+      <RouterLink
+        aria-label={`Open ${app.name}`}
+        data-row-target
+        search={{ app: app.key }}
+        to="/connectors"
+        {...stylex.props(rowTarget)}
+      >
+        {app.name}
+      </RouterLink>
     </TableCell>
     <TableCell wrap>
       <span {...stylex.props(styles.cell)}>

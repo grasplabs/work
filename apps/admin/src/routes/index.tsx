@@ -14,7 +14,6 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
-import { Link } from "@grasp-os/ui/components/link";
 import { Stat, StatGroup } from "@grasp-os/ui/components/stat";
 import {
   Table,
@@ -43,6 +42,7 @@ import { Panel, PanelNote } from "../admin/panel.tsx";
 import { KnowledgeDots, StageBar } from "../admin/parts.tsx";
 import { ReadinessBanner } from "../admin/readiness-parts.tsx";
 import { fetchReadiness } from "../admin/readiness.ts";
+import { rowTarget } from "../admin/row-target.ts";
 import {
   organizationsOf,
   rolloutNeedLine,
@@ -109,15 +109,14 @@ const Note = ({
 
 /** An organization's name: the link the whole row opens by. */
 const NameLink = ({ id, name }: { id: string; name: string }) => (
-  <Link asChild variant="plain">
-    <RouterLink
-      data-row-target
-      params={{ clientId: id }}
-      to="/organizations/$clientId"
-    >
-      {name}
-    </RouterLink>
-  </Link>
+  <RouterLink
+    data-row-target
+    params={{ clientId: id }}
+    to="/organizations/$clientId"
+    {...stylex.props(rowTarget)}
+  >
+    {name}
+  </RouterLink>
 );
 
 /** One organization whose core answered: everything the model worked out of it. */
