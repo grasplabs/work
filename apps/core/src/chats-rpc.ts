@@ -31,6 +31,7 @@ import type {
   ChatsApi,
   ChatAgent,
   ChatSummary,
+  ChatListUpdate,
   ChatUpdate,
   ChatWork,
   HeldAppCall,
@@ -1342,38 +1343,75 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   ): Promise<Subscription> {
     return await withPerson(this.#check, async ({ userId }) => {
       const id = chatIdOf(chatId);
-      if (!isStub(onUpdate)) {
-        throw agentErrors.create("agent.invalid_request");
-      }
-      if (this.#watches.size >= maxWatches) {
-        throw agentErrors.create("agent.too_many_watches");
-      }
-      const listener = callbackFor(onUpdate, this.#stillOpen, refusals, () => {
-        this.#watches.delete(listener);
-      });
-      this.#watches.add(listener);
       const chats = this.#chatsOf(userId);
-      let watchId: string;
-      try {
-        watchId = await chats.watch(id, userId, after, listener);
-      } catch (error) {
-        listener[Symbol.dispose]();
-        throw error;
-      }
-      return new Subscription(async () => {
-        // The slot is free at once, and the listener forwards nothing
-        // more; the object drops it now, or at its next update if it
-        // can't be reached.
-        listener[Symbol.dispose]();
-        try {
+      return await this.#follow(
+        onUpdate,
+        async (listener) => await chats.watch(id, userId, after, listener),
+        async (watchId) => {
           await chats.unwatch(id, watchId);
-        } catch (error) {
-          log.warn("chat.unwatch_failed", {
-            chatId: id,
-            ...errorFields(error),
-          });
-        }
-      });
+        },
+        { chatId: id }
+      );
+    });
+  }
+
+  async watchList(
+    onUpdate: (update: ChatListUpdate) => void
+  ): Promise<Subscription> {
+    return await withPerson(this.#check, async ({ userId }) => {
+      // Only the signed-in person's own object, and only their list in it.
+      const chats = this.#chatsOf(userId);
+      return await this.#follow(
+        onUpdate,
+        async (listener) => await chats.watchChats(userId, listener),
+        async (watchId) => {
+          await chats.unwatchChats(watchId);
+        },
+        {}
+      );
+    });
+  }
+
+  /**
+   * Has the person's object push to the page's `onUpdate` what `start`
+   * follows, until the page releases it: one of this connection's few
+   * watches (`maxWatches`), each push checked against the session first.
+   */
+  async #follow(
+    onUpdate: unknown,
+    start: (
+      listener: Disposable & ((value: unknown) => Promise<void>)
+    ) => Promise<string>,
+    stop: (watchId: string) => Promise<void>,
+    logged: Record<string, string>
+  ): Promise<Subscription> {
+    if (!isStub(onUpdate)) {
+      throw agentErrors.create("agent.invalid_request");
+    }
+    if (this.#watches.size >= maxWatches) {
+      throw agentErrors.create("agent.too_many_watches");
+    }
+    const listener = callbackFor(onUpdate, this.#stillOpen, refusals, () => {
+      this.#watches.delete(listener);
+    });
+    this.#watches.add(listener);
+    let watchId: string;
+    try {
+      watchId = await start(listener);
+    } catch (error) {
+      listener[Symbol.dispose]();
+      throw error;
+    }
+    return new Subscription(async () => {
+      // The slot is free at once, and the listener forwards nothing
+      // more; the object drops it now, or at its next update if it
+      // can't be reached.
+      listener[Symbol.dispose]();
+      try {
+        await stop(watchId);
+      } catch (error) {
+        log.warn("chat.unwatch_failed", { ...logged, ...errorFields(error) });
+      }
     });
   }
 }

@@ -1291,6 +1291,24 @@ export interface ChatQuestion {
 }
 
 /**
+ * What changed in the person's list of chats (`ChatsApi.watchList`) since
+ * the last update: each chat whose summary changed, whole (made, renamed,
+ * asked in, answered, read, back from the archive), and the IDs of those
+ * no longer in it (deleted, archived, or past the newest that `list`
+ * gives). The first update holds the whole list, `full`: the page
+ * replaces what it had. The list is in `lastAt` order, the most recent
+ * first.
+ */
+export interface ChatListUpdate {
+  chats: ChatSummary[];
+  removed: string[];
+  /** Whether `chats` is the whole list, which replaces any the page had. */
+  full: boolean;
+  /** How many chats the person archived. */
+  archived: number;
+}
+
+/**
  * A hold on a chat's updates (`watch`), until it's released: then core
  * sends no more, and the slot it took is free again.
  */
@@ -1548,5 +1566,14 @@ export interface ChatsApi {
     chatId: string,
     after: number | null,
     onUpdate: (update: ChatUpdate) => void
+  ) => Promise<ChatSubscriptionApi>;
+  /**
+   * Follows the person's list of chats, as `list` gives it: `onUpdate`
+   * gets the whole list, then what changes in it, as it changes, from
+   * this tab, another one or another device. Watching again after a lost
+   * connection starts with the whole list again.
+   */
+  watchList: (
+    onUpdate: (update: ChatListUpdate) => void
   ) => Promise<ChatSubscriptionApi>;
 }

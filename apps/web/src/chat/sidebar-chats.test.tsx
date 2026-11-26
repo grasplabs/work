@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import type { ChatSummary } from "@grasp-os/shared/chat";
+import type { ChatListUpdate, ChatSummary } from "@grasp-os/shared/chat";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { SidebarProvider, useSidebar } from "@grasp-os/ui/components/sidebar";
 import { Toaster } from "@grasp-os/ui/components/toast";
@@ -22,9 +22,8 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { FrameSidebar } from "../frame/sidebar.tsx";
 import { forgetActiveChats, setActiveChat } from "./active-chat.ts";
 import { closeChat, openChat } from "./chat-layout.ts";
-import { tellChatsChanged } from "./chats-changed.ts";
 import { GlobalChatProvider } from "./global-chat.tsx";
-import { useRecentChats, workingReadMs } from "./sidebar-chats.tsx";
+import { useRecentChats } from "./sidebar-chats.tsx";
 
 // The sidebar's recent chats on a phone, where the sidebar is a sheet over
 // the page: a chat is a link to its own page, which the frame's sheet
@@ -75,10 +74,49 @@ const Frame = () => {
   );
 };
 
-const shown = async () => {
-  const session = {
-    chats: { list: async () => await Promise.resolve([chat]) },
+/**
+ * Core's list of the person's chats as a test pushes it (`watchList`): the
+ * whole of `chats` as the sidebar subscribes, then whatever `push` sends.
+ * Nothing else of the list is there to read: the sidebar only follows it.
+ */
+const listOf = (chats: ChatSummary[]) => {
+  let page: ((update: ChatListUpdate) => void) | undefined;
+  return {
+    watchList: async (onUpdate: (update: ChatListUpdate) => void) => {
+      page = onUpdate;
+      onUpdate({ chats, removed: [], full: true, archived: 0 });
+      return await Promise.resolve({
+        release: async () => {
+          await Promise.resolve();
+        },
+        [Symbol.dispose]: () => {
+          page = undefined;
+        },
+      });
+    },
+    /** Core pushes that these chats changed, as core answers a call. */
+    pushNow: (...changed: ChatSummary[]) => {
+      page?.({ chats: changed, removed: [], full: false, archived: 0 });
+    },
+    /** Core pushes that these chats changed. */
+    push: async (...changed: ChatSummary[]) => {
+      await act(async () => {
+        page?.({ chats: changed, removed: [], full: false, archived: 0 });
+        await Promise.resolve();
+      });
+    },
+    /** Core pushes that these chats left the list. */
+    drop: async (...removed: string[]) => {
+      await act(async () => {
+        page?.({ chats: [], removed, full: false, archived: 1 });
+        await Promise.resolve();
+      });
+    },
   };
+};
+
+const shown = async () => {
+  const session = { chats: { watchList: listOf([chat]).watchList } };
   const core = {
     withSession: async <T,>(
       read: (reached: typeof session) => Promise<T>
@@ -214,16 +252,27 @@ const RenameFrame = () => {
 
 /** Shows the recent chats against a core whose list and rename the test answers. */
 const shownWith = async ({
-  list,
+  chats,
   rename = async () => {
     await Promise.resolve();
   },
 }: {
-  list: () => Promise<ChatSummary[]>;
-  rename?: (chatId: string, title: string) => Promise<void>;
+  chats: ChatSummary[];
+  rename?: (
+    chatId: string,
+    title: string,
+    list: ReturnType<typeof listOf>
+  ) => Promise<void>;
 }) => {
-  const renamed = vi.fn<typeof rename>(rename);
-  const session = { chats: { list, rename: renamed } };
+  const list = listOf(chats);
+  const renamed = vi.fn<(chatId: string, title: string) => Promise<void>>(
+    async (chatId: string, title: string) => {
+      await rename(chatId, title, list);
+    }
+  );
+  const session = {
+    chats: { watchList: list.watchList, rename: renamed },
+  };
   const core = {
     withSession: async <T,>(
       action: (reached: typeof session) => Promise<T>
@@ -251,8 +300,14 @@ const shownWith = async ({
     );
     await router.load();
   });
-  return { router, renamed };
+  return { router, renamed, push: list.push, drop: list.drop };
 };
+
+/** The chats' links, in the order the sidebar lists them. */
+const order = () =>
+  [...document.querySelectorAll<HTMLElement>("a[href^='/chats/']")].map(
+    (link) => link.getAttribute("href")
+  );
 
 /** The chat's row: the item that holds its link. */
 const itemOf = (chatId: string): HTMLElement => {
@@ -355,11 +410,11 @@ describe("renaming a recent chat from its row", () => {
   });
 
   it("shows one text at every step of a rename by Enter, and focus comes back to the row", async () => {
-    let title = "Travel costs";
     const { renamed } = await shownWith({
-      list: async () => await Promise.resolve([chatNamed("chat-1", title)]),
-      rename: async (_id, next) => {
-        title = next;
+      chats: [chatNamed("chat-1", "Travel costs")],
+      // Core keeps it, and pushes the chat renamed.
+      rename: async (_id, next, list) => {
+        list.pushNow(chatNamed("chat-1", next));
         await Promise.resolve();
       },
     });
@@ -395,8 +450,7 @@ describe("renaming a recent chat from its row", () => {
 
   it("keeps the name, as one text, when the field is left with the name unchanged", async () => {
     const { renamed } = await shownWith({
-      list: async () =>
-        await Promise.resolve([chatNamed("chat-1", "Travel costs")]),
+      chats: [chatNamed("chat-1", "Travel costs")],
     });
     const item = await vi.waitFor(() => itemOf("chat-1"));
     const field = await startRename(item);
@@ -413,8 +467,7 @@ describe("renaming a recent chat from its row", () => {
 
   it("keeps the name on Escape and on an empty name, and focus comes back after Escape", async () => {
     const { renamed } = await shownWith({
-      list: async () =>
-        await Promise.resolve([chatNamed("chat-1", "Travel costs")]),
+      chats: [chatNamed("chat-1", "Travel costs")],
     });
     const item = await vi.waitFor(() => itemOf("chat-1"));
     const escaped = await startRename(item);
@@ -443,8 +496,7 @@ describe("renaming a recent chat from its row", () => {
 
   it("brings the old name back, and says so, when core refuses the rename", async () => {
     await shownWith({
-      list: async () =>
-        await Promise.resolve([chatNamed("chat-1", "Travel costs")]),
+      chats: [chatNamed("chat-1", "Travel costs")],
       rename: async () => {
         await Promise.reject(new Error("refused"));
       },
@@ -464,64 +516,33 @@ describe("renaming a recent chat from its row", () => {
     }).toStrictEqual({ shown: ["Travel costs"], said: [] });
   });
 
-  it("shows a rename made elsewhere while the row is shown, and never a late answer over it", async () => {
-    // The first read answers last, with the name as it was.
-    let reads = 0;
-    const late = Promise.withResolvers<boolean>();
-    const { router } = await shownWith({
-      list: async () => {
-        reads += 1;
-        if (reads === 1) {
-          await late.promise;
-          return [chatNamed("chat-1", "Travel costs")];
-        }
-        return [chatNamed("chat-1", "Renamed elsewhere")];
-      },
+  it("shows a rename made elsewhere as core pushes it, the row staying where it is", async () => {
+    const { push } = await shownWith({
+      chats: [chatNamed("chat-1", "Travel costs")],
     });
-    // Renamed from the chat's own page: the page resolves again, and the list is read again.
-    await act(async () => {
-      await router.invalidate();
-    });
-    await vi.waitFor(() => {
-      expect(shownNames(itemOf("chat-1"))).toStrictEqual(["Renamed elsewhere"]);
-    });
-    await act(async () => {
-      late.resolve(true);
-      await Promise.resolve();
-    });
+    await vi.waitFor(() => itemOf("chat-1"));
+    await push(chatNamed("chat-1", "Renamed elsewhere"));
     expect(shownNames(itemOf("chat-1"))).toStrictEqual(["Renamed elsewhere"]);
   });
 
   it("shows the Working mark while the chat's agent answers, and no more once the answer ends", async () => {
-    let answering = true;
-    await shownWith({
-      list: async () =>
-        await Promise.resolve([chatNamed("chat-1", "Month-end", answering)]),
+    const { push } = await shownWith({
+      chats: [chatNamed("chat-1", "Month-end", true)],
     });
     await vi.waitFor(() => {
       expect(
         document.querySelectorAll("[data-slot=sidebar-row-working]")
       ).toHaveLength(1);
     });
-    answering = false;
-    await act(async () => {
-      tellChatsChanged();
-      await Promise.resolve();
-    });
-    await vi.waitFor(() => {
-      expect(
-        document.querySelectorAll("[data-slot=sidebar-row-working]")
-      ).toHaveLength(0);
-    });
+    await push(chatNamed("chat-1", "Month-end", false));
+    expect(
+      document.querySelectorAll("[data-slot=sidebar-row-working]")
+    ).toHaveLength(0);
   });
 
   it("shows a dot said as Unread once an answer the person hasn't seen ends, never while it works nor on the chat open in front of them", async () => {
-    let state = { running: true, unread: false };
-    const { router } = await shownWith({
-      list: async () =>
-        await Promise.resolve([
-          { ...chatNamed("chat-1", "Month-end"), ...state },
-        ]),
+    const { router, push } = await shownWith({
+      chats: [{ ...chatNamed("chat-1", "Month-end"), running: true }],
     });
     const marks = () => ({
       working: document.querySelectorAll("[data-slot=sidebar-row-working]")
@@ -533,14 +554,15 @@ describe("renaming a recent chat from its row", () => {
       expect(marks()).toStrictEqual({ working: 1, dot: 0, said: false });
     });
 
-    state = { running: false, unread: true };
-    await act(async () => {
-      tellChatsChanged();
-      await Promise.resolve();
+    // Done in the background, with the tab hidden: the dot at once.
+    act(() => {
+      setShown(false);
     });
-    await vi.waitFor(() => {
-      expect(marks()).toStrictEqual({ working: 0, dot: 1, said: true });
+    await push({ ...chatNamed("chat-1", "Month-end"), unread: true });
+    act(() => {
+      setShown(true);
     });
+    expect(marks()).toStrictEqual({ working: 0, dot: 1, said: true });
 
     // Opened: no dot on the chat in front of them.
     await act(async () => {
@@ -556,10 +578,8 @@ describe("renaming a recent chat from its row", () => {
 
   it("shows no dot on the chat open beside the page, and shows it again once that chat is closed to its bar", async () => {
     const chats = {
-      list: async () =>
-        await Promise.resolve([
-          { ...chatNamed("chat-1", "Month-end"), unread: true },
-        ]),
+      watchList: listOf([{ ...chatNamed("chat-1", "Month-end"), unread: true }])
+        .watchList,
       models: async () => await Promise.resolve(["openai/gpt-5"]),
       efforts: async () => await Promise.resolve({}),
       agents: async () => await Promise.resolve([]),
@@ -637,104 +657,25 @@ describe("renaming a recent chat from its row", () => {
     expect(beside).toBe(0);
   });
 
-  it("reads the list again every few seconds while a chat works and the tab is shown, so its Working mark turns into the dot, and stops once none works or the tab hides", async () => {
-    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-    try {
-      let state = { running: true, unread: false };
-      const list = vi.fn<() => Promise<ChatSummary[]>>(
-        async () =>
-          await Promise.resolve([
-            { ...chatNamed("chat-1", "Month-end"), ...state },
-          ])
-      );
-      await shownWith({ list });
-      await vi.waitFor(() => {
-        expect(
-          document.querySelectorAll("[data-slot=sidebar-row-working]")
-        ).toHaveLength(1);
-      });
-      /** How many times the list is read over `ms`. */
-      const readsOver = async (ms: number): Promise<number> => {
-        const before = list.mock.calls.length;
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(ms);
-        });
-        return list.mock.calls.length - before;
-      };
-      const working = await readsOver(workingReadMs * 2);
-
-      // Hidden: nobody sees it, so nothing is read.
-      act(() => {
-        setShown(false);
-      });
-      const hidden = await readsOver(workingReadMs * 3);
-      // Shown again (read once for coming back), then the answer ends in
-      // the background: the next read turns the mark into the dot.
-      state = { running: false, unread: true };
-      act(() => {
-        setShown(true);
-      });
-      await vi.waitFor(() => {
-        expect(dots()).toBe(1);
-      });
-      const done = await readsOver(workingReadMs * 3);
-
-      expect({
-        working,
-        hidden,
-        done,
-        marks: document.querySelectorAll("[data-slot=sidebar-row-working]")
-          .length,
-      }).toStrictEqual({ working: 2, hidden: 0, done: 0, marks: 0 });
-    } finally {
-      setShown(true);
-      vi.useRealTimers();
-    }
-  });
-
-  it("shows what a read finds while a chat works even when core takes longer to answer than the pace of reading", async () => {
-    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-    try {
-      let state = { running: true, unread: false };
-      // Each answer after the first waits until the test lets it go.
-      const answers: (() => void)[] = [];
-      const list = vi.fn<() => Promise<ChatSummary[]>>(async () => {
-        const now = { ...chatNamed("chat-1", "Month-end"), ...state };
-        if (list.mock.calls.length > 1) {
-          const { promise, resolve } = Promise.withResolvers<boolean>();
-          answers.push(() => {
-            resolve(true);
-          });
-          await promise;
-        }
-        return [now];
-      });
-      await shownWith({ list });
-      await vi.waitFor(() => {
-        expect(
-          document.querySelectorAll("[data-slot=sidebar-row-working]")
-        ).toHaveLength(1);
-      });
-      state = { running: false, unread: true };
-      // A read starts, and core is slow: three more paces pass.
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(workingReadMs * 4);
-      });
-      const asked = list.mock.calls.length;
-      await act(async () => {
-        for (const answer of answers) {
-          answer();
-        }
-        await Promise.resolve();
-      });
-
-      await vi.waitFor(() => {
-        expect(dots()).toBe(1);
-      });
-      // One read at a time: no new one while the slow one was on its way.
-      expect(asked).toBe(2);
-    } finally {
-      vi.useRealTimers();
-    }
+  it("moves a chat asked in, here or on another device, to the top as core pushes it, and drops one deleted or archived", async () => {
+    const { push, drop } = await shownWith({
+      chats: [
+        { ...chatNamed("chat-2", "Newer"), lastAt: "2026-11-17T10:00:00.000Z" },
+        chatNamed("chat-1", "Older"),
+      ],
+    });
+    await vi.waitFor(() => {
+      expect(order()).toStrictEqual(["/chats/chat-2", "/chats/chat-1"]);
+    });
+    await push({
+      ...chatNamed("chat-1", "Older", true),
+      lastAt: "2026-11-17T11:00:00.000Z",
+    });
+    const asked = order();
+    await drop("chat-2");
+    expect({ asked, dropped: order() }).toStrictEqual({
+      asked: ["/chats/chat-1", "/chats/chat-2"],
+      dropped: ["/chats/chat-1"],
+    });
   });
 });

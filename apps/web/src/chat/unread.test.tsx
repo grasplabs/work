@@ -12,7 +12,6 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { onChatsChanged } from "./chats-changed.ts";
 import { firstUnseenAnswer, opensAtNewLine, useNewLine } from "./unread.ts";
 
 // Where the person has read a chat to. These start from the ways it can
@@ -182,8 +181,6 @@ describe("where the person has read a chat to", () => {
 
   it("marks a chat read as it opens, and draws the New line over the first answer it hadn't seen, only once core said where it was read to", async () => {
     showTab(true);
-    const told = vi.fn<() => void>();
-    const unheard = onChatsChanged(told);
     const view = {
       messages: [question(1), answer(2), question(3), answer(4)],
       running: false,
@@ -194,17 +191,14 @@ describe("where the person has read a chat to", () => {
     await vi.waitFor(() => {
       expect(chat.line()).toStrictEqual({ decided: true, before: 4 });
     });
-    unheard();
     // Loading until core answered, so the thread opens where the line is.
     // Marked once: core read it as it answered.
     expect({
       first: lines[0],
       marks: chat.markRead.mock.calls,
-      told: told.mock.calls.length > 0,
     }).toStrictEqual({
       first: { decided: false, before: undefined },
       marks: [["chat-1"]],
-      told: true,
     });
   });
 
@@ -330,6 +324,64 @@ describe("where the person has read a chat to", () => {
     expect(hidden).toStrictEqual({
       line: { decided: false, before: undefined },
       marks: 0,
+    });
+  });
+
+  it("draws the New line over an answer that ended while the tab was hidden, reading it only once the tab is shown, and keeps the line where it was when nothing came", async () => {
+    showTab(true);
+    const view = {
+      messages: [question(1), answer(2)],
+      running: false,
+      loaded: true,
+    };
+    const chat = await opened(view, 0);
+    await vi.waitFor(() => {
+      expect(chat.line()).toStrictEqual({ decided: true, before: 2 });
+    });
+    // Away with nothing new, and back: the line where it was.
+    await act(async () => {
+      showTab(false);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      showTab(true);
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(chat.markRead).toHaveBeenCalledTimes(2);
+    });
+    const nothingNew = chat.line();
+
+    // They ask, and leave the tab while the answer is written.
+    await chat.show({
+      view: {
+        ...view,
+        messages: [...view.messages, question(3)],
+        running: true,
+      },
+    });
+    await act(async () => {
+      showTab(false);
+      await Promise.resolve();
+    });
+    await chat.show({
+      view: {
+        ...view,
+        messages: [...view.messages, question(3), answer(4)],
+        running: false,
+      },
+    });
+    const whileHidden = chat.markRead.mock.calls.length;
+    await act(async () => {
+      showTab(true);
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(chat.line()).toStrictEqual({ decided: true, before: 4 });
+    });
+    expect({ nothingNew, whileHidden }).toStrictEqual({
+      nothingNew: { decided: true, before: 2 },
+      whileHidden: 2,
     });
   });
 

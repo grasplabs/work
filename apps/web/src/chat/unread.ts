@@ -10,7 +10,6 @@ import {
 
 import { useCore } from "../use-core.ts";
 import { useTabShown } from "../use-tab-shown.ts";
-import { tellChatsChanged } from "./chats-changed.ts";
 
 // Where the person has read a chat to, as Slack and Linear keep it: one
 // place per chat, on core (`ChatsApi.markRead`), so it holds on every
@@ -97,9 +96,11 @@ const lineOf = (
  * watches that answer come, and it is read as it ends). Closed (`seen`
  * false) and opened again, the thread stays as it was, its rows, scroll
  * and cards, and only the line is decided again, from core's new answer:
- * gone when nothing came meanwhile. An answer that ends while the tab is
- * hidden is read once it is shown, with no line. A failed mark draws
- * none, and the chat stays unread. One chat a mount: its caller keys it.
+ * gone when nothing came meanwhile. Coming back to the tab opens it again
+ * too: an answer that ended while the tab was hidden is read only then,
+ * with the line over it, as the person has not seen it; with nothing new,
+ * the line stays where it was. A failed mark draws none, and the chat
+ * stays unread. One chat a mount: its caller keys it.
  */
 export const useNewLine = (
   chatId: string | undefined,
@@ -112,13 +113,24 @@ export const useNewLine = (
 ): NewLine => {
   const core = useCore();
   const looking = useTabShown() && seen;
-  // Each time it is opened again (closed, then seen) counts up: a reply
-  // core gives an earlier opening never decides a later one's line.
-  const [opening, setOpening] = useState({ count: 0, seen });
-  if (opening.seen !== seen) {
-    setOpening({ count: seen ? opening.count + 1 : opening.count, seen });
+  // Each time it is looked at again (opened again, or its tab shown
+  // again) counts up: a reply core gives an earlier opening never decides
+  // a later one's line. Whether this one is only the tab shown again.
+  const [opening, setOpening] = useState({
+    count: 0,
+    looking,
+    seen,
+    byTab: false,
+  });
+  if (opening.looking !== looking) {
+    setOpening({
+      count: looking ? opening.count + 1 : opening.count,
+      looking,
+      seen,
+      byTab: seen === opening.seen,
+    });
   }
-  const { count } = opening;
+  const { count, byTab } = opening;
   // Where core said they had read to, for the opening that asked: a
   // number or null, or `false` when it couldn't say.
   const [reply, setReply] = useState<{
@@ -137,14 +149,13 @@ export const useNewLine = (
   // an answer ended.
   const asked = useRef(-1);
   const marked = useRef(0);
-  const mark = useEffectEvent(async (id: string): Promise<number | null> => {
-    const before = await core.withSession(
-      async (session) => await session.chats.markRead(id)
-    );
-    // Its row loses its dot.
-    tellChatsChanged();
-    return before;
-  });
+  const mark = useEffectEvent(
+    async (id: string): Promise<number | null> =>
+      // Its row loses its dot, here and on every device, as core pushes it.
+      await core.withSession(
+        async (session) => await session.chats.markRead(id)
+      )
+  );
   // Only once the page has the chat's messages: a watch core refused
   // (too many open, say) shows nothing, so nothing is read.
   const { loaded } = view;
@@ -171,7 +182,12 @@ export const useNewLine = (
       ? undefined
       : lineOf(view, reply?.count === count ? reply.seenUpTo : undefined);
   if (next !== undefined) {
-    setLine({ count, ...next });
+    // Back on the tab with nothing new: the line stays where it was.
+    setLine({
+      count,
+      ...next,
+      before: next.before ?? (byTab ? (line?.before ?? null) : null),
+    });
   }
   // An answer that ends while the person looks is read at once: no dot,
   // no line.
@@ -200,10 +216,9 @@ export const useNewLine = (
       }
     })();
   }, [chatId, current, looking, latest, read]);
-  return {
-    decided,
-    before: line?.count === count ? (line.before ?? undefined) : undefined,
-  };
+  // The line last decided, until the next opening's is: it never blinks
+  // out while core answers.
+  return { decided, before: line?.before ?? undefined };
 };
 
 /** The New line's row in the thread (`MessageScrollerItem`'s `messageId`). */

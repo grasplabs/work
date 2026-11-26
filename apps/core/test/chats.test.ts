@@ -675,7 +675,7 @@ describe("chats", () => {
     }).toStrictEqual({ before: false, seenUpTo: null, after: false });
   });
 
-  it("are listed by their latest message: a chat just continued comes first", async () => {
+  it("are listed by their latest message: a chat just asked in comes first, before its question shows", async () => {
     const ann = await person();
     const older = await ann.chats.create("Invoices");
     const newer = await ann.chats.create("Travel");
@@ -688,10 +688,15 @@ describe("chats", () => {
       ])
     );
 
-    await answering(ann, says("Noted."));
+    const { reply, release } = pausedReply(says("Noted."), 1);
+    await answering(ann, reply);
     const follower = await follow(ann.chats, older.id);
     await ann.chats.send(older.id, { text: "Any news?", model });
+    // Taken, its answer not begun: first already.
+    const asked = await ann.chats.list();
+    release();
     await settled(follower);
+    expect(asked.map(({ id }) => id)).toStrictEqual([older.id, newer.id]);
     const answered = follower.messages().at(-1)?.at;
 
     const listed = await ann.chats.list();
@@ -1743,6 +1748,9 @@ describe("chats", () => {
       "agent.invalid_question",
     ]);
     expect(gateway.requests).toHaveLength(0);
+    // Not taken, so not moved up its person's list either.
+    const after = await ann.chats.summary(chat.id);
+    expect(after.lastAt).toBe(chat.lastAt);
     const follower = await follow(ann.chats, chat.id);
     await vi.waitFor(
       () => {

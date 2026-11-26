@@ -177,6 +177,7 @@ export const rpcParamNames: ParamNames = {
     "summary": ["chatId"],
     "unarchive": ["chatId"],
     "watch": ["chatId","after","onUpdate"],
+    "watchList": ["onUpdate"],
     "worked": ["chatId"],
   },
   "ConnectionsRpc": {

@@ -144,6 +144,8 @@ import type {
   TurnRequest,
   TurnStop,
 } from "./chat-harness.ts";
+import { ChatListWatch } from "./chat-list-watch.ts";
+import type { ChatListListener } from "./chat-list-watch.ts";
 import {
   chatMessageOf,
   partialOf,
@@ -1149,6 +1151,12 @@ export class Workspace extends DurableObject<Env> {
   /** Who follows each chat (`watch`), by chat and watch ID. */
   readonly #watchers = new Map<ChatId, Map<string, ChatWatch>>();
 
+  /** Who follows their list of chats (`watchChats`), by watch ID. */
+  readonly #listWatchers = new Map<string, ChatListWatch>();
+
+  /** Whether the list's watchers are told already this tick (`#listChanged`). */
+  #listTold = false;
+
   /**
    * Bumped whenever a chat's agent writes an App's draft, so its watchers
    * read what it worked on again (`draftWritten`). In memory only.
@@ -1204,6 +1212,7 @@ export class Workspace extends DurableObject<Env> {
       .where(eq(chats.id, chatId))
       .run();
     this.#keepSaid(chatId, stored.id, message);
+    this.#listChanged();
     return stored;
   }
 
@@ -1512,6 +1521,7 @@ export class Workspace extends DurableObject<Env> {
       return made;
     });
     this.#deliverAudit();
+    this.#listChanged();
     return chat;
   }
 
@@ -2817,6 +2827,7 @@ export class Workspace extends DurableObject<Env> {
       delete live.unstarted;
       started?.();
       this.#changed(chat.id);
+      this.#listChanged();
       if (onText !== undefined) {
         live.onText = throttled(onText);
       }
@@ -2875,6 +2886,7 @@ export class Workspace extends DurableObject<Env> {
       });
     }
     this.#turns.delete(chatId);
+    this.#listChanged();
     this.#partials.delete(chatId);
     this.#waits.delete(chatId);
     // A turn that stopped short of a step's result shows no output on.
@@ -2972,6 +2984,11 @@ export class Workspace extends DurableObject<Env> {
     if (key !== undefined) {
       this.#starting.set(key, { chatId: chat.id, started: started.promise });
     }
+    // Asked: first in its person's list now, as Send was pressed, not once
+    // the question is shown (`#store`), which waits on the chat's object
+    // and may take seconds; back where it was if it is refused.
+    const asked = new Date();
+    this.#movedTo(chat.id, asked);
     const ended = this.#sentTurns(chat, question, started);
     this.#sent.add(ended);
     void this.#forget(ended);
@@ -2980,6 +2997,9 @@ export class Workspace extends DurableObject<Env> {
       if (key !== undefined) {
         this.#keepRequest("send", key, chat.id);
       }
+    } catch (error) {
+      this.#movedTo(chat.id, chat.lastAt, asked);
+      throw error;
     } finally {
       if (key !== undefined) {
         this.#starting.delete(key);
@@ -2987,6 +3007,24 @@ export class Workspace extends DurableObject<Env> {
     }
     // The alarm keeps the object up until the turn ends (`alarm`).
     await this.#alarmBy(Date.now());
+  }
+
+  /**
+   * Moves the chat in its person's list to `lastAt`, as active then;
+   * given `from`, only while nothing moved it since.
+   */
+  #movedTo(chatId: ChatId, lastAt: Date, from?: Date): void {
+    this.#db
+      .update(chats)
+      .set({ lastAt })
+      .where(
+        and(
+          eq(chats.id, chatId),
+          from === undefined ? undefined : eq(chats.lastAt, from)
+        )
+      )
+      .run();
+    this.#listChanged();
   }
 
   /**
@@ -3544,6 +3582,7 @@ export class Workspace extends DurableObject<Env> {
       this.ctx.storage.kv.delete(key);
     }
     this.#changed(chatId);
+    this.#listChanged();
   }
 
   /**
@@ -4669,6 +4708,7 @@ export class Workspace extends DurableObject<Env> {
         .set({ readUpTo: latest })
         .where(eq(chats.id, chat.id))
         .run();
+      this.#listChanged();
     }
     return chat.readUpTo;
   }
@@ -4979,6 +5019,7 @@ export class Workspace extends DurableObject<Env> {
       this.#outboxed(by, "chat.renamed", id);
     });
     this.#deliverAudit();
+    this.#listChanged();
   }
 
   /**
@@ -5050,6 +5091,7 @@ export class Workspace extends DurableObject<Env> {
       );
     });
     this.#deliverAudit();
+    this.#listChanged();
   }
 
   /**
@@ -5243,6 +5285,7 @@ export class Workspace extends DurableObject<Env> {
           .where(eq(chatRequestKeys.chatId, id))
           .run();
         this.#db.delete(chats).where(eq(chats.id, id)).run();
+        this.#listChanged();
         this.ctx.storage.kv.delete(`${traceKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${builtKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${runningKeyPrefix}${id}`);
@@ -5327,6 +5370,10 @@ export class Workspace extends DurableObject<Env> {
       }
     }
     this.#watchers.clear();
+    for (const watch of this.#listWatchers.values()) {
+      watch[Symbol.dispose]();
+    }
+    this.#listWatchers.clear();
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     // Its tables went with its storage: they are made again, empty, as for
@@ -5368,13 +5415,7 @@ export class Workspace extends DurableObject<Env> {
     );
     // Read again after the await: the chat may have gone meanwhile.
     const { id } = this.#graspChat(chatId, personId);
-    let watching = 0;
-    for (const watchers of this.#watchers.values()) {
-      watching += watchers.size;
-    }
-    if (watching >= maxWatchers) {
-      throw agentErrors.create("agent.too_many_watches");
-    }
+    this.#requireRoomToWatch();
     const watchId = crypto.randomUUID();
     const watch = new ChatWatch(
       listener.dup(),
@@ -5392,6 +5433,78 @@ export class Workspace extends DurableObject<Env> {
       this.#toolEvents(id)
     );
     return watchId;
+  }
+
+  /** Refuses another watcher once the object holds its most (chats' and lists' together). */
+  #requireRoomToWatch(): void {
+    let watching = this.#listWatchers.size;
+    for (const watchers of this.#watchers.values()) {
+      watching += watchers.size;
+    }
+    if (watching >= maxWatchers) {
+      throw agentErrors.create("agent.too_many_watches");
+    }
+  }
+
+  /**
+   * Follows `personId`'s list of chats, as `chats` gives it: `listener`
+   * gets the whole list, then what changes in it (chat-watch.ts,
+   * `ChatListWatch`). Returns the ID `unwatchChats` drops it by; one that
+   * can't be reached drops itself.
+   */
+  watchChats(personId: string, listener: ChatListListener): string {
+    this.#requireRoomToWatch();
+    const watchId = crypto.randomUUID();
+    const watch = new ChatListWatch(
+      listener.dup(),
+      () => ({
+        chats: this.chats(personId),
+        archived: this.#archivedCount(personId),
+      }),
+      () => {
+        this.unwatchChats(watchId);
+      }
+    );
+    this.#listWatchers.set(watchId, watch);
+    watch.push();
+    return watchId;
+  }
+
+  /** Drops the list's watcher `watchChats` kept as `watchId`, if it still does. */
+  unwatchChats(watchId: string): void {
+    const watch = this.#listWatchers.get(watchId);
+    this.#listWatchers.delete(watchId);
+    watch?.[Symbol.dispose]();
+  }
+
+  /**
+   * Tells whoever follows a list of chats that it may have changed: a
+   * chat made, renamed, archived or deleted, asked in, answered, running
+   * or not, read. Once a tick, however many changes it made: each
+   * watcher then sends only what of its list did change.
+   */
+  #listChanged(): void {
+    if (this.#listTold || this.#listWatchers.size === 0) {
+      return;
+    }
+    this.#listTold = true;
+    queueMicrotask(() => {
+      this.#listTold = false;
+      for (const watch of this.#listWatchers.values()) {
+        watch.push();
+      }
+    });
+  }
+
+  /** How many chats `personId` archived. */
+  #archivedCount(personId: string): number {
+    return (
+      this.#db
+        .select({ archived: count() })
+        .from(chats)
+        .where(and(shownInGrasp(personId), isNotNull(chats.archivedAt)))
+        .get()?.archived ?? 0
+    );
   }
 
   /** Drops the watcher `watch` kept as `watchId`, if it still does. */
@@ -5460,6 +5573,7 @@ export class Workspace extends DurableObject<Env> {
       .set({ lastAt: new Date() })
       .where(eq(chats.id, chatId))
       .run();
+    this.#listChanged();
     this.#changed(chatId);
   }
 
