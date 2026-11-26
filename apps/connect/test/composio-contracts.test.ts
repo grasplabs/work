@@ -1,6 +1,6 @@
 import { composioToolsMax } from "@grasp-os/shared/connect";
 import type { ComposioToolRule } from "@grasp-os/shared/connect";
-import { exports } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { fakeComposioApi } from "./composio-api.ts";
@@ -12,7 +12,6 @@ import {
   connectWith,
   outcome,
 } from "./connect.ts";
-import { composioClasses } from "./fixtures/composio-classes.ts";
 import type { FakeTool } from "./mcp-server.ts";
 import { testComposioKey } from "./provider-config.ts";
 
@@ -308,9 +307,8 @@ describe("a Composio connection's generated contract", () => {
     );
   });
 
-  it("carries each tool's class: a release that reclasses one is a changed contract, a read no more", async () => {
-    // Marked as a read, and allowed by name alone: for this one, the
-    // admin's rule already made it a change before the reclass.
+  it("carries each tool's class as its admin allowed it: changing it is a changed contract", async () => {
+    // Allowed as a read, and by name alone: a change.
     const connections = await Promise.all(
       [
         [{ name: "HUBSPOT_LIST_CONTACTS", read: true }],
@@ -320,28 +318,18 @@ describe("a Composio connection's generated contract", () => {
     const before = await Promise.all(
       connections.map(async (id) => await contractOf(id))
     );
-    const { hubspot: classed } = composioClasses;
-    if (classed === undefined) {
-      throw new Error("Expected HubSpot's classes");
-    }
-    classed.HUBSPOT_LIST_CONTACTS = "change-company";
-    try {
-      const after = await Promise.all(
-        connections.map(async (id) => await contractOf(id))
-      );
-      expect({ was: before.map(listOf), is: after.map(listOf) }).toStrictEqual({
-        was: [
-          { class: "read-company", readOnly: true },
-          { class: "read-company", readOnly: false },
-        ],
-        is: [
-          { class: "change-company", readOnly: false },
-          { class: "change-company", readOnly: false },
-        ],
-      });
-    } finally {
-      classed.HUBSPOT_LIST_CONTACTS = "read-company";
-    }
+    const [asRead = ""] = connections;
+    await env.DB.prepare("UPDATE connections SET tools = ? WHERE id = ?")
+      .bind(JSON.stringify(["HUBSPOT_LIST_CONTACTS"]), asRead)
+      .run();
+    const after = await contractOf(asRead);
+    expect({ was: before.map(listOf), is: listOf(after) }).toStrictEqual({
+      was: [
+        { class: "read-company", readOnly: true },
+        { class: "change-company", readOnly: false },
+      ],
+      is: { class: "change-company", readOnly: false },
+    });
   });
 
   it("follows the admin's allowlist as it stands: a tool taken off it is gone", async () => {

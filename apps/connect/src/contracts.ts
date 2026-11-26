@@ -1,4 +1,7 @@
-import { generatedContracts } from "@grasp-os/runtime/connector";
+import {
+  generatedContracts,
+  readsMailByRules,
+} from "@grasp-os/runtime/connector";
 import {
   actionShapeRequestSchema,
   connectErrors,
@@ -29,7 +32,7 @@ import {
   composioContract,
   composioContractPrefix,
 } from "./composio-contracts.ts";
-import { allowedTool, reviewedMail } from "./connections.ts";
+import { allowedTool } from "./connections.ts";
 import type { Connection } from "./connections.ts";
 import { connections } from "./db/schema.ts";
 import {
@@ -360,8 +363,8 @@ const propertiesOf = (schema: string | undefined): string[] | null => {
 
 /**
  * What core needs of a Composio connection's `action`: a read only as its
- * admin allowed it, with the input its server lists now, and mail as
- * Grasp's review says.
+ * admin allowed it, with the input its server lists now, and mail as the
+ * rules read a read's name (`readsMailByRules`), as for any server's.
  */
 const composioActionShape = async (
   env: Env,
@@ -395,7 +398,10 @@ const composioActionShape = async (
     readOnly: rule.read,
     inputs,
     provider,
-    ...(reviewedMail(provider, action) ? { mail: true as const } : {}),
+    // As a read of a server connected by its URL: by the rules.
+    ...(rule.read && readsMailByRules(action, provider)
+      ? { mail: true as const }
+      : {}),
   };
 };
 

@@ -10,7 +10,6 @@ import type {
   ConnectionOwner,
   PersonalAccount,
   ToolClass,
-  ToolReach,
 } from "@grasp-os/shared/connect";
 import { sourceReaderProviders } from "@grasp-os/shared/source-readers";
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
@@ -18,9 +17,6 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { composioClasses } from "#composio-classes";
-
-import type { ComposioClass } from "./composio-classes.ts";
 import { composioKey } from "./composio.ts";
 import { connections } from "./db/schema.ts";
 import { mcpServer } from "./mcp.ts";
@@ -152,117 +148,61 @@ export const toolResourcesOf = (
 /**
  * What connect takes a tool the admin allowed on a Composio connection to
  * be: whether it only reads, which input property names its resource
- * (`ComposioToolRule`), and its class: the one it is taken to be, and the
- * one Grasp gave it.
+ * (`ComposioToolRule`), and its class.
  */
 export interface ToolRule {
   read: boolean;
   resource: string | undefined;
-  /** What a call of it is: Grasp's class, a change unless both say read. */
-  class: Exclude<ToolClass, "never">;
   /**
-   * The class Grasp gave it (composio-classes.ts), as reviewed. It goes in
-   * the contract, not `class`: a reclass the admin's rule hides (a read
-   * turned change, for a tool the admin never marked as a read) is still
-   * a changed contract an admin approves again.
+   * What a call of it is: a read of what the connection holds when the
+   * admin allowed it as a read, a change of it otherwise (`toolClassOf`).
    */
-  reviewed: Exclude<ToolClass, "never">;
+  class: Exclude<ToolClass, "never">;
 }
 
-/** Whom each class a tool can be given reaches. */
-const reachOf = {
-  "read-own": "own",
-  "read-company": "company",
-  "change-own": "own",
-  "change-company": "company",
-  "reach-others": "others",
-  "read-others": "conversations",
-} as const satisfies Record<Exclude<ToolClass, "never">, ToolReach>;
-
 /**
- * What Grasp's review says of `tool` of `toolkit` (composio-classes.ts),
- * if it was reviewed. Both names are Composio's and the admin's, so only
- * the table's own entries are read: a tool named `constructor` or
- * `__proto__` was never reviewed.
- */
-const reviewOf = (toolkit: string, tool: string): ComposioClass | undefined => {
-  const tools = Object.hasOwn(composioClasses, toolkit)
-    ? composioClasses[toolkit]
-    : undefined;
-  return tools !== undefined && Object.hasOwn(tools, tool)
-    ? tools[tool]
-    : undefined;
-};
-
-/** The class Grasp gave `tool` of `toolkit`, if one other than `never`. */
-const reviewedClass = (
-  toolkit: string,
-  tool: string
-): Exclude<ToolClass, "never"> | undefined => {
-  const reviewed = reviewOf(toolkit, tool);
-  const toolClass = typeof reviewed === "object" ? reviewed.class : reviewed;
-  return toolClass === "never" ? undefined : toolClass;
-};
-
-/** Whether Grasp's review says `tool` of `toolkit` reads or changes mail. */
-export const reviewedMail = (toolkit: string, tool: string): boolean => {
-  const reviewed = reviewOf(toolkit, tool);
-  return typeof reviewed === "object" && reviewed.mail;
-};
-
-/**
- * The rule for `action` on a Composio connection, if the admin allowed it
- * and Grasp classed it: a tool nobody classed is never offered, served in
- * a contract or run, whatever the admin allowed. One whose tools aren't
- * recorded, or can't be read, allows none. A tool allowed by name alone
- * is a side effect with no resource.
+ * The rule for `action` on a Composio connection, if the admin allowed it:
+ * the admin's allowlist is the gate. Every tool Composio serves for the
+ * toolkit may be allowed, as a read or as a change, and whatever is
+ * allowed is offered and runs; no review by Grasp stands in between. One
+ * whose tools aren't recorded, or can't be read, allows none. A tool
+ * allowed by name alone is a change with no resource.
  *
- * A tool Grasp never runs (`isNeverTool`) has no rule either.
+ * What Grasp never runs (`isNeverTool`) is refused by name, as it is for
+ * every connection.
  *
- * A call is a read only when both say so: the class Grasp gave the tool
- * and the admin's rule. Neither alone makes a change a read: a classed
- * read the admin didn't mark is held as a change of the same reach, and a
- * tool the admin marked as a read is held when its class changes
- * something. The class it is then taken to be follows (`toolClassOf`).
+ * Its class follows the admin's choice: a read reaches what the
+ * connection holds (its person's own, or the company's), and so does a
+ * change. The company's classes and a held change's confirmation then
+ * apply to it as to any connection's.
  */
 export const allowedTool = (
-  connection: Pick<Connection, "provider" | "tools">,
+  connection: Pick<Connection, "tools" | "scope">,
   action: string
 ): ToolRule | undefined => {
   const tool = storedTools(connection).find(
     (each) => composioToolName(each) === action
   );
-  // Never offered, served or run, whatever its review or the admin say.
-  const reviewed =
-    tool === undefined || isNeverTool(action)
-      ? undefined
-      : reviewedClass(connection.provider, action);
-  if (tool === undefined || reviewed === undefined) {
+  if (tool === undefined || isNeverTool(action)) {
     return undefined;
   }
-  const rule =
-    typeof tool === "string"
-      ? { read: false, resource: undefined }
-      : { read: tool.read === true, resource: tool.resource };
-  const read =
-    rule.read &&
-    (reviewed === "read-own" ||
-      reviewed === "read-company" ||
-      reviewed === "read-others");
+  const read = typeof tool !== "string" && tool.read === true;
   return {
     read,
-    resource: rule.resource,
-    class: toolClassOf({ readOnly: read, reach: reachOf[reviewed] }),
-    reviewed,
+    resource: typeof tool === "string" ? undefined : tool.resource,
+    class: toolClassOf({
+      readOnly: read,
+      reach: connection.scope === "personal" ? "own" : "company",
+    }),
   };
 };
 
 /**
  * The names of the tools a Composio connection offers: those the admin
- * allowed that Grasp classed (`allowedTool`).
+ * allowed, but for what Grasp never runs (`allowedTool`).
  */
 export const offeredToolNames = (
-  connection: Pick<Connection, "provider" | "tools">
+  connection: Pick<Connection, "tools" | "scope">
 ): string[] =>
   allowedToolNames(connection).filter(
     (name) => allowedTool(connection, name) !== undefined
@@ -291,7 +231,7 @@ export const composioServer = (env: Env, connection: Connection): McpServer => {
  * (`allowedTool`), by its name.
  */
 const offeredToolClasses = (
-  connection: Pick<Connection, "provider" | "tools">
+  connection: Pick<Connection, "tools" | "scope">
 ): Record<string, Exclude<ToolClass, "never">> =>
   Object.fromEntries(
     offeredToolNames(connection).flatMap((name) => {
@@ -344,12 +284,12 @@ export const connectionOwners = async (
     rows.filter(({ source }) => source === "connector")
   );
   return rows.map(
-    ({ accountAddresses, accountSenders, tools, scope: _scope, ...row }) => ({
+    ({ accountAddresses, accountSenders, tools, scope, ...row }) => ({
       ...row,
       accountAddresses: accountAddresses ?? [],
       accountSenders: accountSenders ?? [],
       ...(row.source === "composio" && {
-        toolClasses: offeredToolClasses({ provider: row.provider, tools }),
+        toolClasses: offeredToolClasses({ tools, scope }),
       }),
       ...(row.source === "connector" && {
         toolClasses: connectorClasses.get(row.id) ?? {},

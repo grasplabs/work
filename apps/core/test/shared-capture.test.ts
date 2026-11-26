@@ -245,7 +245,7 @@ const openToTeam = async () => {
 };
 
 describe("what agents read through a shared connection", setUpTime, () => {
-  it("keeps one record for the connection's audience, whoever read it, and nothing of others' things, so a reader outside the audience never reads it back", async () => {
+  it("keeps one record for the connection's audience, whoever read it, so a reader outside the audience never reads it back", async () => {
     const [admin, ann, bea, dana, carl] = await Promise.all([
       signedInApi(idp, "admin"),
       signedInApi(idp, "user"),
@@ -254,40 +254,25 @@ describe("what agents read through a shared connection", setUpTime, () => {
       signedInApi(idp, "user"),
     ]);
     const sales = await newTeam(ann.userId, bea.userId, dana.userId);
-    const [deal, others] = [markerOf(), markerOf()];
+    const deal = markerOf();
     const company = await mailConnection([], allowed, {
       provider: "mail_own",
     });
     await company.serves(listed);
     await company.answers({
       "mail.search": structured({ deals: [`Deal ${deal}`] }),
-      "mail.others": structured({ messages: [`Others ${others}`] }),
     });
     await chooseAudience(admin.api, company.id, {
       kind: "team",
       teamId: sales,
     });
-    // Agents may read others' things here, so that read runs, and only
-    // its capture is in question.
-    await env.DB.prepare(
-      "INSERT OR REPLACE INTO tool_class_settings (tool_class, who, teams, changed_by, changed_at) VALUES ('read-others', 'everyone', '[]', 'test-admin', ?)"
-    )
-      .bind(Date.now())
-      .run();
-    // Ann reads the deal and, in another chat, someone's mail: a read
-    // through a connection not everyone may read marks its chat, and a
-    // marked chat's next toolkit read waits for her (private-reads.ts).
-    // Bea reads the same deal; Carl, outside the audience, is refused it,
+    // Ann reads the deal; Bea reads the same deal; Carl, outside the
+    // audience, is refused it,
     // though his agent was granted it (GRA-2322). One chat at a time: the
     // tests' model answers whichever asks.
     const search = calling("MAIL", "mail.search", { query: deal });
     for (const [person, code, actions] of [
       [ann, step(search), ["mail.search"]],
-      [
-        ann,
-        step(calling("MAIL", "mail.others", { mailbox: others })),
-        ["mail.others"],
-      ],
       [bea, step(search), ["mail.search"]],
       [carl, step(search), ["mail.search"]],
     ] as const) {
@@ -298,7 +283,7 @@ describe("what agents read through a shared connection", setUpTime, () => {
       // oxlint-disable-next-line no-await-in-loop -- one chat at a time
       await chat.ask("Read it.");
     }
-    const events = await captures(company.id, 3);
+    const events = await captures(company.id, 2);
     const kept = `${await keyOf(company.id, deal)}@1`;
 
     expect({
@@ -309,16 +294,9 @@ describe("what agents read through a shared connection", setUpTime, () => {
       dana: await recalled(dana.userId, deal),
       // Outside the audience: read neither at the source nor from the Brain.
       carl: await recalled(carl.userId, deal),
-      othersByAnn: await finds(ann.userId, others),
-      othersByDana: await finds(dana.userId, others),
     }).toStrictEqual({
       events: [
         { action: "brain.capture.kept", onBehalfOf: ann.userId, reason: null },
-        {
-          action: "brain.capture.skipped",
-          onBehalfOf: ann.userId,
-          reason: "reach",
-        },
         { action: "brain.capture.kept", onBehalfOf: bea.userId, reason: null },
       ],
       // One record, its one version: the same answer read again adds only
@@ -327,8 +305,6 @@ describe("what agents read through a shared connection", setUpTime, () => {
       bea: [kept],
       dana: [kept],
       carl: [],
-      othersByAnn: false,
-      othersByDana: false,
     });
   });
 

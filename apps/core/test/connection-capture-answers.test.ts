@@ -484,32 +484,19 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
     });
   });
 
-  it("keeps a read of the company's things through the person's own connection for them alone, and nothing of others' things, a write or an error answer", async () => {
+  it("keeps a read of the company's things through the person's own connection for them alone, and nothing of a write or an error answer", async () => {
     const [person, colleague] = await Promise.all([
       signedInApi(idp, "user"),
       signedInApi(idp, "user"),
     ]);
-    const [sent, failed, others, company] = [
-      markerOf(),
-      markerOf(),
-      markerOf(),
-      markerOf(),
-    ];
+    const [sent, failed, company] = [markerOf(), markerOf(), markerOf()];
     const own = await ownToolkit(person);
     const companys = await ownToolkit(person, "mail");
-    // Reading others' things turned on for everyone, so connect carries
-    // the call out and capture decides what to keep of it.
-    await env.DB.prepare(
-      "INSERT OR REPLACE INTO tool_class_settings (tool_class, who, teams, changed_by, changed_at) VALUES ('read-others', 'everyone', '[]', 'test-admin', ?)"
-    )
-      .bind(Date.now())
-      .run();
     await own.answers({
       "mail.search": {
         content: [{ type: "text", text: `No such folder ${failed}` }],
         isError: true,
       },
-      "mail.others": structured({ messages: [`Ben's mail ${others}`] }),
     });
     await companys.answer(
       "mail.search",
@@ -521,27 +508,25 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
       says("Held."),
       step(tryCalling("OWN", "mail.search", { query: failed })),
       says("Failed."),
-      step(calling("OWN", "mail.others", { mailbox: "ben@acme.test" })),
-      says("Read."),
       // Its capture last: once it is in, the calls before it ended.
       step(calling("COMPANY", "mail.search", { query: company })),
       says("Done.")
     );
-    await grant(chat, own.id, "OWN", [
-      "mail.send",
-      "mail.search",
-      "mail.others",
-    ]);
+    await grant(chat, own.id, "OWN", ["mail.send", "mail.search"]);
     await grant(chat, companys.id, "COMPANY", ["mail.search"]);
 
-    for (const ask of ["Send it.", "Find it.", "Read Ben's.", "Find ours."]) {
+    for (const ask of ["Send it.", "Find it.", "Find ours."]) {
       // oxlint-disable-next-line no-await-in-loop -- one turn at a time
       await askAfresh(chat, ask);
     }
-    const [ownEvents, companyEvents] = await Promise.all([
-      captures(own.id),
-      captures(companys.id),
-    ]);
+    // The company read's capture last: once it is in, the calls before it
+    // ended, and the own connection's held write and error kept nothing.
+    const companyEvents = await captures(companys.id);
+    const everything = await allEvents();
+    const ownEvents = everything.filter(
+      ({ action, target }) =>
+        action.startsWith("brain.capture.") && target?.id === own.id
+    );
     const companyKey = await answerCaptureIdOf(
       companys.id,
       person.userId,
@@ -556,20 +541,14 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
       colleague: await recalled(colleague.userId, company),
       asApp: await recalled(person.userId, company, false),
       nothing: await Promise.all(
-        [sent, failed, others].map(
+        [sent, failed].map(
           async (marker) => await recalled(person.userId, marker)
         )
       ),
       keepsReads: await keepsReads(person, companys.id),
     }).toStrictEqual({
-      // The read of others' mail: reaches beyond theirs and the company's.
-      own: [
-        {
-          action: "brain.capture.skipped",
-          onBehalfOf: person.userId,
-          detail: { reason: "reach", items: 1, kept: 0, failed: 0, skipped: 1 },
-        },
-      ],
+      // A held write and an error answer: nothing to keep.
+      own: [],
       company: [
         {
           action: "brain.capture.kept",
@@ -580,7 +559,7 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
       kept: [companyKey],
       colleague: [],
       asApp: [],
-      nothing: [[], [], []],
+      nothing: [[], []],
       keepsReads: true,
     });
   });

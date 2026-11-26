@@ -25,12 +25,11 @@ import {
 // is made, not Composio's version of the toolkit.
 //
 // Everything the server lists is untrusted (threat model on GRA-504):
-// - only tools on the admin's allowlist that Grasp classed are served
-//   (composio-classes.ts), each with its class, a read only if both the
-//   class and the admin say so (`ToolRule`), never by Composio's hint;
-//   nothing of any other tool is even read. The class is fingerprinted
-//   with the rest, so a release that reclasses a tool stops the binding
-//   until an admin approves it again;
+// - only tools on the admin's allowlist are served, each with its class,
+//   a read only if the admin allowed it as one (`ToolRule`), never by
+//   Composio's hint; nothing of any other tool is even read. The class is
+//   fingerprinted with the rest, so an admin's change of it stops the
+//   binding until an admin approves it again;
 // - a tool is served only by a name an App can declare, once: a name
 //   listed twice is ambiguous, and left out;
 // - the list is read up to `maxListedTools`, and each schema is checked for
@@ -115,7 +114,7 @@ export const composioContract = async (
       actions[name] = {
         tool: name,
         readOnly: rule.read,
-        class: rule.reviewed,
+        class: rule.class,
         input,
         output,
       };

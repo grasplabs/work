@@ -73,21 +73,6 @@ describe("what connect lets core keep of a call", () => {
     });
   });
 
-  it("is nothing of a toolkit whose provider's terms forbid copies", async () => {
-    const connectionId = await connection("mail_private");
-
-    const read = await callAs(chat, {
-      connectionId,
-      action: "mail.search",
-      input: {},
-    });
-
-    expect({ provenance: read.provenance, keep: read.keep }).toStrictEqual({
-      provenance: ["message-2"],
-      keep: undefined,
-    });
-  });
-
   it("is nothing of a change, carried out or replayed, nor of a call held for its person", async () => {
     const connectionId = await connection();
     const send = {

@@ -25,7 +25,7 @@ import type { Connection } from "./connections.ts";
  */
 export const requirePointedResource = (
   claims: Pick<CapabilityClaims, "authority" | "resources">,
-  connection: Pick<Connection, "serverKind" | "provider" | "tools">,
+  connection: Pick<Connection, "serverKind" | "tools" | "scope">,
   action: string,
   input: Readonly<Record<string, Json>>
 ): void => {
