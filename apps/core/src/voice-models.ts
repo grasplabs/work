@@ -120,7 +120,7 @@ const openAiDollarsPerHour = {
  * $0.01 a minute, above it, as OpenAI's are.
  */
 const mistralDollarsPerHour = {
-  "voxtral-mini-transcribe-realtime-2602": 0.6,
+  "voxtral-mini-transcribe-realtime-3": 0.6,
 } as const;
 
 /** Each transcription provider's models, with their prices. */
