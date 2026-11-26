@@ -60,6 +60,11 @@ export interface LiveHandlers {
   part: (part: InterviewPhase) => void;
   /** It ended without the page closing it: dropped, or it broke off. */
   ended: () => void;
+  /**
+   * It began, but Stephen never said his first line: the provider refused
+   * part of it, or said nothing in time. The session is closed already.
+   */
+  failed: () => void;
 }
 
 /** A session the page is in. */
@@ -236,6 +241,12 @@ const joinMistral = async (
   }
 };
 
+/**
+ * How long his first line may take to come once the conversation began,
+ * in ms: past it, the conversation counts as failed.
+ */
+const firstLineMs = 10_000;
+
 /** What a client tool answers ElevenLabs: that the page took it. */
 const tookIt = "ok";
 
@@ -258,6 +269,10 @@ const joinAgent = async (
   let hisCount = 0;
   /** What they typed last, not yet heard back from the agent, if it echoes it. */
   let typed: string | null = null;
+  /** Whether his first line came. */
+  let begun = false;
+  /** Ends a conversation his first line never came in: set once it began. */
+  let fail: ((why: string) => void) | null = null;
   const keep = (line: VoiceLine): void => {
     said.push({
       from: line.from,
@@ -363,6 +378,7 @@ const joinAgent = async (
           on.doing("thinking");
           return;
         }
+        begun = true;
         keep({ from: "stephen", text: message });
         on.segment({
           id: `his-${hisCount}`,
@@ -380,6 +396,13 @@ const joinAgent = async (
             from: "stephen",
             text: corrected_agent_response.slice(0, interviewLimits.line),
           };
+        }
+      },
+      onError: (message: string) => {
+        // What ElevenLabs said went wrong, for whoever looks: never what was said.
+        console.warn("[interview] ElevenLabs:", message);
+        if (!begun) {
+          fail?.(message);
         }
       },
       onDisconnect: () => {
@@ -401,6 +424,18 @@ const joinAgent = async (
         // Nothing more to let go of: the agent ends it by itself.
       }
     };
+    // Begun, but without his first line, it is no conversation: closed, and the page goes on without it.
+    fail = (why) => {
+      if (closed || begun) {
+        return;
+      }
+      console.warn("[interview] Stephen's first line never came:", why);
+      void close();
+      on.failed();
+    };
+    window.setTimeout(() => {
+      fail?.("nothing in time");
+    }, firstLineMs);
     return {
       pass: join.pass,
       instruct: async ({ situation }) => {
