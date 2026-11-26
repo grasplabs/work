@@ -63,7 +63,7 @@ const returned = (text: string | undefined): unknown =>
 describe("a chat's tool search", setUpTime, () => {
   it("finds the one tool a task needs among thousands, and calls it by its real name", async () => {
     const person = await signedInApi(idp, "user");
-    const needle = "BULK_INVOICE_VOID";
+    const needle = "BULK_FIND_SHIPMENT";
     const connections = await Promise.all(
       [0, 1, 2].map(
         async (part) =>
@@ -78,23 +78,23 @@ describe("a chat's tool search", setUpTime, () => {
     );
     const [, holder] = connections;
     await holder?.answer(needle, {
-      content: [{ type: "text", text: '{"refunded":"INV-7"}' }],
-      structuredContent: { refunded: "INV-7" },
+      content: [{ type: "text", text: '{"shipment":"SHP-7"}' }],
+      structuredContent: { shipment: "SHP-7" },
     });
     const chat = await chatOf(
       person.userId,
       codeStep(
         `export default async (self, env) => {
-          const [found] = await env.connections.search({ queries: ["void a paid invoice"] });
+          const [found] = await env.connections.search({ queries: ["find a lost shipment"] });
           const [best] = found.matches;
           const { output } = await env.connections.call(best.connection, best.action, { invoice: "INV-7" });
           return { best, matches: found.matches.length, output };
         };`
       ),
-      says("Voided.")
+      says("Found it.")
     );
 
-    await chat.ask("Void invoice INV-7.");
+    await chat.ask("Find the lost shipment for invoice INV-7.");
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
     expect(returned(result?.text)).toStrictEqual({
@@ -106,7 +106,7 @@ describe("a chat's tool search", setUpTime, () => {
         input: "unknown",
       },
       matches: 1,
-      output: { refunded: "INV-7" },
+      output: { shipment: "SHP-7" },
     });
   });
 

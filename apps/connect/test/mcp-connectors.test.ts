@@ -80,7 +80,7 @@ describe("a connector made from Linear's MCP server URL", () => {
       confirmed: true,
       sent: ["list_issues", "save_issue"],
       created: true,
-      classes: { list_issues: "read-own", save_issue: "change-own" },
+      classes: { list_issues: "read-own", save_issue: "reach-others" },
     });
     expect(added).toMatchObject([
       {

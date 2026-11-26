@@ -217,8 +217,8 @@ describe("the Microsoft 365 connector's free time", () => {
           timeZone: auckland,
           minutes: 60,
           workingHours: {
-            from: "08:00",
-            to: "12:00",
+            start: "08:00",
+            end: "12:00",
             days: ["tuesday", "wednesday", "thursday"],
           },
         })
@@ -251,7 +251,7 @@ describe("the Microsoft 365 connector's free time", () => {
     const wrongs: Input[] = [
       { end: range.start },
       { end: "2026-12-01T00:00" },
-      { workingHours: { from: "17:00", to: "09:00", days: ["monday"] } },
+      { workingHours: { start: "17:00", end: "09:00", days: ["monday"] } },
     ];
     for (const wrong of wrongs) {
       // oxlint-disable-next-line no-await-in-loop -- one input at a time

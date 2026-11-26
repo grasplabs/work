@@ -252,7 +252,6 @@ const impliedActions: Readonly<Record<HttpMethod, readonly string[]>> = {
   POST: ["create"],
   PUT: ["update"],
   PATCH: ["update"],
-  DELETE: ["delete"],
 };
 
 /**

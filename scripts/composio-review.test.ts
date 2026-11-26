@@ -1,7 +1,7 @@
+import { isNeverTool } from "@grasp-os/runtime/connector";
 import { describe, expect, it } from "vite-plus/test";
 
 import { composioClasses } from "../apps/connect/src/composio-classes.ts";
-import { isNeverTool } from "../apps/connect/src/never.ts";
 import { reviewRows } from "./composio-review.ts";
 
 describe("a Composio toolkit's review table", () => {

@@ -38,7 +38,7 @@ const sendTool = defineTool({
   }),
   output: z.strictObject({ sent: z.literal(true) }),
   readOnly: false,
-  reach: "own",
+  reach: "others",
   takesFiles: true,
   resource: "mailbox",
   routes: [route],
