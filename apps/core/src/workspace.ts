@@ -207,10 +207,11 @@ import {
   readableSources,
   withheldDetail,
 } from "./history-access.ts";
+import { allInOrder } from "./in-order.ts";
 import { instructionFilesFor } from "./instruction-files.ts";
 import type { InstructionContext } from "./instruction-files.ts";
 import { chatTurnPurpose } from "./model-spend.ts";
-import { inputTokens, modelSettings, models } from "./models.ts";
+import { modelSettings, models } from "./models.ts";
 import type { OutsideTextNote } from "./outside-text.ts";
 import type { WorkContext } from "./restricted.ts";
 import { outsideReadOf } from "./ungranted-reads.ts";
@@ -250,11 +251,6 @@ interface LiveTurn {
   remembered?: ChatSavedMemory[];
   /** Tells a chat platform's asker the answer's text so far. */
   onText?: (text: string) => unknown;
-  /**
-   * What its model requests read from the provider's prompt cache, of all
-   * the prompt tokens they sent, recorded once the turn ends.
-   */
-  cache: { requests: number; inputTokens: number; cacheReadTokens: number };
 }
 
 /**
@@ -724,6 +720,12 @@ const turnStopError = (stop: TurnStop): Error => {
   switch (stop) {
     case "history_revoked": {
       return agentErrors.create("agent.history_revoked");
+    }
+    case "overdue": {
+      return agentErrors.create("agent.turn_overdue");
+    }
+    case "lost": {
+      return agentErrors.create("agent.turn_lost");
     }
     case "person_inactive": {
       return permissionErrors.create("permission.person_inactive");
@@ -2661,18 +2663,20 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Refuses a turn its person may no longer take, or one for a chat that
-   * holds all it may.
+   * holds all it may; else their role, which the turn's context reads.
    */
   async #mayTakeTurn(
     chatId: Chat["id"],
     personId: Chat["personId"]
-  ): Promise<void> {
-    if ((await memberRole(this.env.DB, personId)) === undefined) {
+  ): Promise<Role> {
+    const role = await memberRole(this.env.DB, personId);
+    if (role === undefined) {
       throw permissionErrors.create("permission.person_inactive");
     }
     if (this.#storedChars(chatId) > maxChatChars) {
       throw agentErrors.create("agent.chat_full");
     }
+    return role;
   }
 
   /**
@@ -2699,6 +2703,8 @@ export class Workspace extends DurableObject<Env> {
       remembered?: ChatSavedMemory[];
     } = {}
   ): Promise<Answer> {
+    // What the turn's record times from (turn-records.ts).
+    const sentAt = Date.now();
     const parsed = questionSchema.safeParse(question);
     if (!parsed.success) {
       throw agentErrors.create("agent.invalid_question");
@@ -2724,36 +2730,41 @@ export class Workspace extends DurableObject<Env> {
       reads: [],
       calls,
       remembered,
-      cache: { requests: 0, inputTokens: 0, cacheReadTokens: 0 },
     };
     this.#turns.set(chat.id, live);
     try {
-      // Refused before anything is prepared while the chat's ChatSession
-      // has a turn under way: one this object's restart left there. That
-      // object refuses it again as it claims the turn.
-      if ((await this.#activeTurn(chat.id)) !== undefined) {
-        throw agentErrors.create("agent.busy");
-      }
-      await this.#mayTakeTurn(chat.id, personId);
+      // The checks before anything is prepared, each only a read, at once
+      // and refused in this order, as one after another would be.
+      const [, role, agent] = await allInOrder([
+        // Refused while the chat's ChatSession has a turn under way: one
+        // this object's restart left there. That object refuses it again
+        // as it claims the turn. Asking opens the chat's pi meanwhile.
+        (async () => {
+          if ((await this.#activeTurn(chat.id)) !== undefined) {
+            throw agentErrors.create("agent.busy");
+          }
+        })(),
+        this.#mayTakeTurn(chat.id, personId),
+        // The chat's agent as the company has it now: a paused one takes
+        // no turn, nor one an admin deleted, and nothing is read for
+        // either. Refused before its reach, so each for what it is.
+        turnAgent(this.env, chat.agentId),
+        // Another of the company's agents answers only those an admin let
+        // it answer, and in a chat app only where it works (agent-reach.ts).
+        requireAgentReaches(this.env, chat.agentId, personId, via),
+      ]);
       // The agent this turn runs as becomes the chat's, before anything is
-      // checked of it: the chat is the context its reads and code work in
-      // (restricted.ts), which is its agent's alone. A next question that
-      // addresses none then goes to it, and a turn a restart cut short
-      // keeps its answers under it (`keepTurnMessages`). After the checks
-      // above, so no turn under way loses its chat to another agent.
+      // read for the turn: the chat is the context its reads and code work
+      // in (restricted.ts), which is its agent's alone. A next question
+      // that addresses none then goes to it, and a turn a restart cut
+      // short keeps its answers under it (`keepTurnMessages`). After the
+      // checks above, so no turn under way loses its chat to another agent.
       const was = this.#chat(chat.id).agentId;
       this.#setChatAgent(chat.id, chat.agentId);
       // Put back if the turn is refused before it starts (`#endLive`).
       live.unstarted = () => {
         this.#setChatAgent(chat.id, was);
       };
-      // The chat's agent as the company has it now: a paused one takes no
-      // turn, nor one an admin deleted, and nothing is read for either.
-      // Before its reach is asked, so each is refused for what it is.
-      const agent = await turnAgent(this.env, chat.agentId);
-      // Another of the company's agents answers only those an admin let
-      // it answer, and in a chat app only where it works (agent-reach.ts).
-      await requireAgentReaches(this.env, chat.agentId, personId, via);
       // Before anything is kept: a file it names that the chat hasn't, or
       // that another question carried, refuses the question.
       const files = this.#unsentFiles(chat.id, parsed.data.files ?? []);
@@ -2774,38 +2785,46 @@ export class Workspace extends DurableObject<Env> {
       if (shared && audience === undefined) {
         throw permissionErrors.create("permission.context_invalid");
       }
-      // Before the model is admitted: what memory reads is a source too.
       // Whether the turn's answer reaches its person alone: the one gate
       // for their own content, whatever reads it (`answersAlone`).
       const personal = answersAlone(chat, unattended);
-      const context = await this.#turnContext(
-        scope,
-        authority,
-        work,
-        { shared, personal, unattended },
-        agent
-      );
-      // Refuses a model the deployment or its rules don't allow before
-      // anything is kept or shown as started. The chat's object admits it again for its
-      // turn, as it sets up a turn a restart cut short on its own, with
-      // nobody here to admit it; and every request by the rules then.
-      // The agent's own model, where an admin gave it one the organization
-      // still has: else the one the question names.
-      const asked = await this.#turnModel(
-        context.agentModel,
-        parsed.data.model
-      );
-      await models(this.env).agent(
-        {
-          model: asked,
-          effort: parsed.data.effort,
-          purpose: chatTurnPurpose,
-          trigger: delegateActorOf(authority, via),
-          provenance: this.#sources(chat.id),
-          work: { authority, context: work },
-        },
-        () => this.#sources(chat.id)
-      );
+      // What the model reads besides the question, and the model admitted,
+      // at once: neither reads the other. A refusal of the context's is
+      // said first, as before.
+      const [context, asked] = await allInOrder([
+        this.#turnContext(
+          scope,
+          authority,
+          work,
+          { shared, personal, unattended },
+          agent,
+          role
+        ),
+        // Refuses a model the deployment or its rules don't allow before
+        // anything is kept or shown as started. The chat's object admits it
+        // again for its turn, as it sets up a turn a restart cut short on
+        // its own, with nobody here to admit it; and every request by the
+        // rules then. The agent's own model, where an admin gave it one the
+        // organization still has: else the one the question names.
+        (async () => {
+          const model = await this.#turnModel(
+            agent?.model ?? undefined,
+            parsed.data.model
+          );
+          await models(this.env).agent(
+            {
+              model,
+              effort: parsed.data.effort,
+              purpose: chatTurnPurpose,
+              trigger: delegateActorOf(authority, via),
+              provenance: this.#sources(chat.id),
+              work: { authority, context: work },
+            },
+            () => this.#sources(chat.id)
+          );
+          return model;
+        })(),
+      ]);
       this.#stopped.delete(chat.id);
       // Under way: the chat keeps the agent it answers as.
       delete live.unstarted;
@@ -2816,6 +2835,7 @@ export class Workspace extends DurableObject<Env> {
       }
       const end = await this.#runTurn({
         turnId: live.id,
+        sentAt,
         scope,
         question: turnQuestion(
           { ...parsed.data, model: asked },
@@ -2852,22 +2872,12 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Ends what the object holds of `live`, the chat's turn, however it
-   * ended: its cache share logged, its partial answer and output dropped.
+   * ended: its partial answer and output dropped. What it used, the
+   * cache's share included, is in its record (turn-records.ts).
    */
   #endLive(chatId: ChatId, live: LiveTurn): void {
     // Refused before it started: the chat stays with the agent it had.
     live.unstarted?.();
-    const { cache } = live;
-    if (cache.requests > 0) {
-      // A log line, as the compiler's cache logs its own (`build.cache`):
-      // a measure of how the cache does, not something done.
-      log.info("chat.turn_cache", {
-        chatId,
-        turnId: live.id,
-        ...cache,
-        share: cache.cacheReadTokens / cache.inputTokens,
-      });
-    }
     this.#turns.delete(chatId);
     this.#partials.delete(chatId);
     this.#waits.delete(chatId);
@@ -3173,7 +3183,8 @@ export class Workspace extends DurableObject<Env> {
    * What the model reads this turn besides the question: the instruction
    * files of where it works (instruction-files.ts, read now, so an edit
    * counts from the next turn), the skills it may use, from the Brain,
-   * and how to answer on the chat platform it came through, if any.
+   * and how to answer on the chat platform it came through, if any. Each
+   * read on its own, so all at once; a refusal said in this order.
    */
   async #turnContext(
     scope: Parameters<typeof auditAgentCall>[1],
@@ -3184,20 +3195,69 @@ export class Workspace extends DurableObject<Env> {
       personal,
       unattended,
     }: { shared: boolean; personal: boolean; unattended: boolean },
-    agent: Awaited<ReturnType<typeof turnAgent>>
+    agent: Awaited<ReturnType<typeof turnAgent>>,
+    /** The chat's person's role now (`#mayTakeTurn`). */
+    role: Role
   ): Promise<TurnContext> {
     const chat = this.#chat(work.chatId);
     const { via } = chat;
-    // A Brain that can't give the files leaves the turn without them, as
-    // it does without skills (below) and without the person's own file
-    // when their store fails (brain-next.ts): missing guidance is no
-    // question of access. A refusal (who it acts for, where) still
-    // refuses the turn. One that went without them is recorded, as the
-    // skills' call records it (`unavailable`, below).
-    let instructions: Awaited<ReturnType<typeof instructionFilesFor>> = [];
+    const [instructions, skills, channel, kept, person] = await allInOrder([
+      this.#turnInstructions(chat, scope, authority, shared, personal),
+      this.#turnSkills(scope, authority, shared),
+      // A chat that came through a chat platform: how to answer there.
+      via === "web" ? undefined : channelText(),
+      // The documents an admin gave the chat's agent, by name.
+      agent === undefined ? [] : documentsOf(this.env, agent.id),
+      namedPerson(this.env, scope.personId, personal),
+    ]);
+    // Only who builds is told how, reads Grasp's docs and gets the APIs
+    // and tools to build with, in their own chat, in Grasp's app or their
+    // direct message on a chat app: thousands of tokens in every request,
+    // of no use to anyone else. Building, an App included, needs a role
+    // that builds (app-access.ts).
+    const builds = buildsIn({ shared, role });
+    // Who drafts an agent for its person to make (`draftAgent`).
+    const drafts = draftsOf({ shared, unattended, via, role });
+    const documents = kept.map(({ id, name, type }) => ({ id, name, type }));
+    return {
+      ...person,
+      instructions: instructions.map(({ file, text }) => ({ file, text })),
+      skills,
+      channel,
+      builds,
+      ...(drafts === undefined ? {} : { drafts }),
+      // The first agent as Grasp ships it, with no document, is told
+      // nothing more.
+      ...(agent === undefined ||
+      (agent.changedAt === null && documents.length === 0)
+        ? {}
+        : {
+            agent: {
+              name: agent.name,
+              ...(documents.length === 0 ? {} : { documents }),
+            },
+          }),
+    };
+  }
+
+  /**
+   * The instruction files a turn of `chat` reads. A Brain that can't give
+   * them leaves the turn without them, as it does without skills
+   * (`#turnSkills`) and without the person's own file when their store
+   * fails (brain-next.ts): missing guidance is no question of access. A
+   * refusal (who it acts for, where) still refuses the turn. One that went
+   * without them is recorded, as the skills' call records it.
+   */
+  async #turnInstructions(
+    chat: Chat,
+    scope: Parameters<typeof auditAgentCall>[1],
+    authority: Authority,
+    shared: boolean,
+    personal: boolean
+  ): Promise<Awaited<ReturnType<typeof instructionFilesFor>>> {
     try {
       const appId = await lastAppOf(this.env, chat);
-      instructions = await instructionFilesFor(
+      return await instructionFilesFor(
         this.env,
         authority,
         instructionContextOf(shared, appId, personal)
@@ -3213,15 +3273,24 @@ export class Workspace extends DurableObject<Env> {
         method: "brain.instructions",
         detail: { files: 0, turn: true, unavailable: true },
       });
+      return [];
     }
-    // The skills the chat may use, from the Brain: guidance, never a grant
-    // (brain-skills.ts). Their own skills only where the scope says so, a
-    // turn they asked for in their own chat, and their teams' only where
-    // nobody else reads the answer (`skillsReachOf`); only those whose
-    // needs the chat's agent meets now (`heldIn`). Recorded as the code's
-    // calls are, by count. A Brain that can't answer leaves the turn
-    // without them, not without an answer: missing guidance is no
-    // question of access.
+  }
+
+  /**
+   * The skills a turn may use, from the Brain: guidance, never a grant
+   * (brain-skills.ts). Their own skills only where the scope says so, a
+   * turn they asked for in their own chat, and their teams' only where
+   * nobody else reads the answer (`skillsReachOf`); only those whose needs
+   * the chat's agent meets now (`heldIn`). Recorded as the code's calls
+   * are, by count. A Brain that can't answer leaves the turn without
+   * them, not without an answer: missing guidance is no question of access.
+   */
+  async #turnSkills(
+    scope: Parameters<typeof auditAgentCall>[1],
+    authority: Authority,
+    shared: boolean
+  ): Promise<Awaited<ReturnType<typeof skillsFor>>> {
     let skills: Awaited<ReturnType<typeof skillsFor>> = [];
     let unavailable = false;
     try {
@@ -3246,44 +3315,7 @@ export class Workspace extends DurableObject<Env> {
         ...(unavailable ? { unavailable } : {}),
       },
     });
-    // A chat that came through a chat platform: how to answer there.
-    const channel = via === "web" ? undefined : await channelText();
-    // Only who builds is told how, reads Grasp's docs and gets the APIs
-    // and tools to build with, in their own chat, in Grasp's app or their
-    // direct message on a chat app: thousands of tokens in every request,
-    // of no use to anyone else. Building, an App included, needs a role
-    // that builds (app-access.ts).
-    const role = await memberRole(this.env.DB, scope.personId);
-    const builds = buildsIn({ shared, role });
-    // Who drafts an agent for its person to make (`draftAgent`).
-    const drafts = draftsOf({ shared, unattended, via, role });
-    // The documents an admin gave the chat's agent, by name.
-    const kept =
-      agent === undefined ? [] : await documentsOf(this.env, agent.id);
-    const documents = kept.map(({ id, name, type }) => ({ id, name, type }));
-    return {
-      ...(await namedPerson(this.env, scope.personId, personal)),
-      instructions: instructions.map(({ file, text }) => ({ file, text })),
-      skills,
-      channel,
-      builds,
-      ...(drafts === undefined ? {} : { drafts }),
-      // The first agent as Grasp ships it, with no document, is told
-      // nothing more.
-      ...(agent === undefined ||
-      (agent.changedAt === null && documents.length === 0)
-        ? {}
-        : {
-            agent: {
-              name: agent.name,
-              ...(documents.length === 0 ? {} : { documents }),
-            },
-          }),
-      // The model an admin gave the agent, for its turns.
-      ...(agent?.model === null || agent?.model === undefined
-        ? {}
-        : { agentModel: agent.model }),
-    };
+    return skills;
   }
 
   /**
@@ -3510,6 +3542,19 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * The chat's `ChatSession` gave its turn up, as it couldn't open the
+   * chat for a while (chat-session.ts): no longer running, and stopped
+   * with why, which the chat shows with a Try again.
+   */
+  turnLost(chatId: ChatId): void {
+    if (this.chatState(chatId) === undefined || this.#deleting.has(chatId)) {
+      return;
+    }
+    this.#stopped.set(chatId, agentErrors.create("agent.turn_lost").message);
+    this.turnRunning(chatId, false);
+  }
+
+  /**
    * The chat's `ChatSession` says whether a turn of the chat runs there,
    * as its record of the turn is claimed and settled (chat-harness.ts):
    * what the chat's lists and watchers show.
@@ -3578,14 +3623,6 @@ export class Workspace extends DurableObject<Env> {
       through = Math.max(through, entryId);
       if (message.role === "assistant") {
         this.#partials.delete(chatId);
-        // Only a response the provider counted a prompt for: not a request
-        // the gateway refused, held or cancelled before any count.
-        const prompt = inputTokens(message.usage);
-        if (live !== undefined && prompt > 0) {
-          live.cache.requests += 1;
-          live.cache.inputTokens += prompt;
-          live.cache.cacheReadTokens += message.usage.cacheRead;
-        }
       }
       const id = this.#keep(
         chatId,

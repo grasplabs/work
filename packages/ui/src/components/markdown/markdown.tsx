@@ -498,12 +498,17 @@ const At = createContext("");
 const kidsOf = (node: Node) =>
   ("children" in node ? node.children : []) as Node[];
 const BLOCKY = /^(?:blockquote|list|listItem|table|tableRow|section)$/u;
-const textOf = (node: Node): string =>
-  "value" in node
+// A tag is dropped as it is drawn; `<br>` is a break between words.
+const textOf = (node: Node): string => {
+  if (node.type === "html") {
+    return /^<br\s*\/?>$/iu.test(node.value) ? " " : "";
+  }
+  return "value" in node
     ? node.value
     : kidsOf(node)
         .map(textOf)
         .join(BLOCKY.test(node.type) ? " " : "");
+};
 const linkOf = (
   node: Linked,
   url: string,
@@ -770,16 +775,23 @@ type Draw<T extends Node["type"]> = (
 // A table is named by the heading above it; a row draws its own cells, as many as the head's. One
 // from a model has no bound: at most 1,000 rows are drawn, and a line says how many more.
 const MOST_ROWS = 1000;
-/** A table's cells as Markdown: a pipe or a backslash in a cell kept as written. */
-const markdownOf = (rows: readonly (readonly string[])[]) =>
-  rows
+/** A table's cells, as their words (for CSV and TSV) and as Markdown that reads back the same. */
+interface TableText {
+  words: readonly (readonly string[])[];
+  source: readonly (readonly string[])[];
+}
+/** A table as Markdown: each cell written by parse.markdownOfCell. */
+const markdownOf = ({ source }: TableText) =>
+  source
     .flatMap((cells, at) => {
-      const line = `| ${cells.map((cell) => cell.replaceAll(/[\\|]/gu, "\\$&")).join(" | ")} |`;
+      const line = `| ${cells.join(" | ")} |`;
       return at === 0
         ? [line, `| ${cells.map(() => "---").join(" | ")} |`]
         : [line];
     })
     .join("\n");
+const csvOfTable = ({ words }: TableText) => csvOf(words);
+const tsvOfTable = ({ words }: TableText) => tsvOf(words);
 /**
  * A table's Copy (as Markdown, CSV or TSV) and Download (as CSV or Markdown), as a chat's tables
  * have them: out of use while the answer is written. Each is written from the rows when it is
@@ -789,7 +801,7 @@ const TableActions = ({
   rows,
   disabled,
 }: {
-  rows: readonly (readonly string[])[];
+  rows: TableText;
   disabled: boolean;
 }) => {
   const words = useI18n().markdown;
@@ -818,10 +830,10 @@ const TableActions = ({
           <DropdownMenuItem onSelect={copyAs(markdownOf)}>
             {words.markdown}
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={copyAs(csvOf)}>
+          <DropdownMenuItem onSelect={copyAs(csvOfTable)}>
             {words.csv}
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={copyAs(tsvOf)}>
+          <DropdownMenuItem onSelect={copyAs(tsvOfTable)}>
             {words.tsv}
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -840,7 +852,7 @@ const TableActions = ({
           <DropdownMenuItem
             onSelect={() => {
               saveFile(
-                `\uFEFF${csvOf(rows)}`,
+                `\uFEFF${csvOfTable(rows)}`,
                 "table.csv",
                 "text/csv;charset=utf-8"
               );
@@ -915,12 +927,16 @@ const TableBlock = ({ node, shared, kids, name }: Part<Of<"table">>) => {
   const more =
     Math.max(rows.length - MOST_ROWS, 0) +
     ("more" in node ? Number(node.more) : 0);
-  // What Copy and Download take: the cells drawn, as their words.
-  const cells = [head, ...rows.slice(0, MOST_ROWS)].flatMap((each) =>
-    each === undefined
-      ? []
-      : [each.children.slice(0, align.length).map((cell) => textOf(cell))]
+  // What Copy and Download take: the cells drawn, as their words and as Markdown.
+  const drawnRows = [head, ...rows.slice(0, MOST_ROWS)].flatMap((each) =>
+    each === undefined ? [] : [each.children.slice(0, align.length)]
   );
+  const cells = {
+    words: drawnRows.map((line) => line.map((cell) => textOf(cell))),
+    source: drawnRows.map((line) =>
+      line.map((cell) => parse.markdownOfCell(cell))
+    ),
+  };
   const own = (
     <>
       <TableActions rows={cells} disabled={shared.streaming} />
@@ -1087,11 +1103,17 @@ const Formula = ({ tex, display }: { tex: string; display: boolean }) => {
     let live = true;
     const at = box.current;
     const draw = async () => {
-      if (
-        at !== null &&
-        tex.length <= MOST_TEX &&
-        (await drawFormula(at, { tex, display }, () => live))
-      ) {
+      if (at === null) {
+        return;
+      }
+      // Past MOST_TEX (a formula still being written grows past it) it is its TeX: the drawing of
+      // a shorter one is taken away, never left standing as if it were the formula.
+      if (tex.length > MOST_TEX) {
+        at.replaceChildren();
+        setDrawn(false);
+        return;
+      }
+      if (await drawFormula(at, { tex, display }, () => live)) {
         setDrawn(true);
       }
     };

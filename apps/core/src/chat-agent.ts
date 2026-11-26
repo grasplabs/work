@@ -1,5 +1,4 @@
-import type { Context } from "@earendil-works/chord";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
+import type { Context } from "@earendil-works/chord/context";
 import type { ImageContent, Message, UserMessage } from "@earendil-works/pi-ai";
 import {
   estimateContextTokens,
@@ -23,6 +22,7 @@ import type {
   EntryRecord,
   Extension,
   HookApi,
+  ToolRegistration,
 } from "@earendil-works/pi-durable";
 import { agentErrors } from "@grasp-os/shared/agent";
 import {
@@ -36,7 +36,7 @@ import { z } from "zod";
 
 import { readDocs, searchDocs } from "./agent-docs.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
-import { dedicatedTools, durableTool } from "./agent-tools.ts";
+import { dedicatedTools } from "./agent-tools.ts";
 import {
   askQuestions,
   aboutNotes,
@@ -108,17 +108,19 @@ export interface ChatAgent {
    */
   history: readonly Message[];
   /** The tool that shows the turn's thinking in the brain (agent-thinking.ts), if it may. */
-  thinking?: AgentTool;
+  thinking?: ToolRegistration;
   /**
    * The tool that keeps what the person said worth keeping
    * (agent-remember.ts): only in their own chat, in a turn they started.
    */
-  remember?: AgentTool;
+  remember?: ToolRegistration;
   /**
    * The code runs whose results the chat may no longer send (workspace.ts),
    * asked before every model request and every compaction.
    */
   withheld: () => Promise<ReadonlySet<string>>;
+  /** Called as each of the turn's requests starts, before its guard. */
+  asking: () => void;
   /**
    * One of the chat's pictures, for the model to see after its line
    * (`pictureLine`), unless larger than `maxBytes`: only where the turn's
@@ -198,11 +200,15 @@ const startsTurn = (entry: EntryRecord): boolean => {
 };
 
 // A question carries what the recall before it found (`recallForTurn` in
-// turn-recall.ts) as a part of its own, headed by the recall's run: pi
-// takes nothing between an input and the run's first request, and the run
-// is what a revocation withholds it by, as a code step's result.
+// turn-recall.ts) as a part of its own, in a `<recall>` tag that names the
+// recall's run: pi takes nothing between an input and the run's first
+// request, and the run is what a revocation withholds it by, as a code
+// step's result. A tag, as Anthropic and OpenAI advise for context handed
+// to a model, so it reads as structure, never as a label to write into the
+// answer.
 
-const recallPattern = /^\[Recall (?<run>[^\]\s]+)\]\n/u;
+const recallPattern =
+  /^<recall run="(?<run>[^"\s]+)">\n(?<text>[\s\S]*)\n<\/recall>$/u;
 
 /** The run the recall in `part` was, if it is one. */
 const recallRunOf = (part: {
@@ -240,7 +246,7 @@ export const questionContent = (
     : [
         {
           type: "text" as const,
-          text: `[Recall ${recall.runId}]\n${recall.text}`,
+          text: `<recall run="${recall.runId}">\n${recall.text}\n</recall>`,
         },
       ]),
 ];
@@ -260,11 +266,12 @@ export const recallTextOf = (message: UserMessage): string | undefined => {
     return undefined;
   }
   for (const part of message.content) {
-    if (part.type === "text") {
-      const header = recallPattern.exec(part.text);
-      if (header !== null) {
-        return part.text.slice(header[0].length);
-      }
+    const text =
+      part.type === "text"
+        ? recallPattern.exec(part.text)?.groups?.text
+        : undefined;
+    if (text !== undefined) {
+      return text;
     }
   }
   return undefined;
@@ -747,7 +754,7 @@ export const chatAgent = (agent: ChatAgent): Extension => {
       ? chatAskLimits.questions
       : makeQuestionsLeft(agent.history, agent.context.make.kind);
   const plans = offersPlans(agent.context, scope.unattended === true);
-  const tools: AgentTool[] = [
+  const tools: ToolRegistration[] = [
     executeCode(agent),
     readApi(apis),
     ...(agent.context.builds === true
@@ -777,13 +784,14 @@ export const chatAgent = (agent: ChatAgent): Extension => {
   ];
   return defineExtension({
     name: chatAgentName(scope.chatId),
-    tools: tools.map((tool) => durableTool(tool)),
+    tools,
     sections: sectionsOf({ apis, context: agent.context, plans }).map(
       ({ name, text }) => section(name, () => text ?? undefined, { tag: false })
     ),
     hooks: [
       hook(GenerationTask, {
         beforeRequest: async ({ messages }, api, context) => {
+          agent.asking();
           const sent = await guarded(agent, messages, api, context);
           if (sent.stop !== undefined) {
             try {
@@ -808,9 +816,9 @@ export const chatAgent = (agent: ChatAgent): Extension => {
           try {
             return (await mayRead(agent, api, context))
               ? undefined
-              : { decline: true };
+              : { kind: "decline" as const };
           } catch {
-            return { decline: true };
+            return { kind: "decline" as const };
           }
         },
       }),

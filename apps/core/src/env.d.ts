@@ -161,6 +161,11 @@ interface __BaseEnv_Env {
    * parks it (`restartLimit`, src/chat-harness.ts).
    */
   CHAT_RESTART_LIMIT?: string;
+  /**
+   * Tests only: a shorter time a chat's turn may go without progress
+   * before it is stopped as overdue (`turnIdleMs`, src/chat-harness.ts).
+   */
+  CHAT_TURN_IDLE_MS?: string;
   /** Tests only: a shorter limit for one call into an App (src/app.ts). */
   APP_CALL_TIMEOUT_MS?: string;
   /**

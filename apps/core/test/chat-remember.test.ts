@@ -1,8 +1,8 @@
+import { compile } from "@earendil-works/pi-schema";
 import { personalBrainOf } from "@grasp-os/brain-next/contract";
 import type { MemoriesCursor } from "@grasp-os/brain-next/contract";
 import type { ChatMessage } from "@grasp-os/shared/chat";
 import { env } from "cloudflare:workers";
-import { Value } from "typebox/value";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
@@ -13,6 +13,7 @@ import { keepAudience } from "../src/chat-audiences.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import {
+  callTool,
   chatOf,
   codeStep,
   model,
@@ -982,19 +983,23 @@ describe("the agent remembering in a person's own chat", () => {
         quote: "it's sushi now",
         replaces: [pizza],
       };
-      if (!Value.Check(tool.parameters, input)) {
+      if (!compile(tool.parameters).check(input)) {
         throw new Error("Not the tool's input");
       }
       // A restart replays the same call, by its id.
-      const first = await tool.execute("call_replayed", input);
-      const again = await tool.execute("call_replayed", input);
+      const first = await callTool(tool, "call_replayed", input);
+      const again = await callTool(tool, "call_replayed", input);
       const replayed = await ownHistoryOf(member.userId);
-      await member.api.brainMemories.forget(first.details.memory);
-      const afterUndo = await tool.execute("call_replayed", input);
+      const saved = first.details?.memory;
+      if (saved === undefined) {
+        throw new Error("Nothing saved");
+      }
+      await member.api.brainMemories.forget(saved);
+      const afterUndo = await callTool(tool, "call_replayed", input);
 
       expect({
         again: again.details,
-        afterUndo: afterUndo.details.memory === first.details.memory,
+        afterUndo: afterUndo.details?.memory === saved,
         replayed,
         // The Undo stands: the replay replaced nothing again.
         kept: await ownHistoryOf(member.userId),

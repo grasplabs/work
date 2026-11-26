@@ -4,7 +4,11 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { vi } from "vite-plus/test";
 
-import { modelUsage, providerHealth } from "../src/db/core/schema.ts";
+import {
+  chatTurns,
+  modelUsage,
+  providerHealth,
+} from "../src/db/core/schema.ts";
 
 // What the gateway recorded after each response (src/model-usage.ts), read
 // from core's D1 as the spend overview reads it. The gateway records in
@@ -74,3 +78,24 @@ export const recordedUsage = async (
 /** How each provider's requests fared last, by whose key. */
 export const providerHealthRows = async () =>
   await drizzle(env.DB).select().from(providerHealth);
+
+/**
+ * The records of `chatId`'s turns (src/turn-records.ts), in the order they
+ * were asked, once there are `count`: each is written in the background
+ * as its turn settles.
+ */
+export const turnRecordsOf = async (chatId: string, count: number) =>
+  await vi.waitFor(
+    async () => {
+      const rows = await drizzle(env.DB)
+        .select()
+        .from(chatTurns)
+        .where(eq(chatTurns.chatId, chatId))
+        .orderBy(chatTurns.sentAt);
+      if (rows.length < count) {
+        throw new Error(`${String(rows.length)} of ${String(count)} recorded`);
+      }
+      return rows;
+    },
+    { timeout: 5000, interval: 20 }
+  );

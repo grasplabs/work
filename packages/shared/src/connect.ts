@@ -468,7 +468,9 @@ export type FinishConnection = z.input<typeof finishConnectionSchema>;
  *   connected account (`account`), all while starting; or, finishing,
  *   reading the account (`read`), making its MCP server (`server`) or that
  *   server's URL (`url`). How is `unanswered` (no answer in time),
- *   `unreadable` (an answer connect can't read) or `http_<status>`.
+ *   `unreadable` (an answer connect can't read) or `http_<status>`, with
+ *   Composio's number for the error after it when its answer gave one
+ *   (`http_403:1234`): a stable code, never its message.
  * - `url:<problem>`: the server URL Composio made isn't one connect calls:
  *   not exactly one (`count`), not Composio's MCP host (`host`), not this
  *   server's path (`path`), not exactly this account (`account`), or for
@@ -495,7 +497,7 @@ export const composioReasonSchema = z.union([
   z
     .string()
     .regex(
-      /^(?:auth_config|link|account|read|server|url):(?:unanswered|unreadable|http_[1-5]\d\d)$/u
+      /^(?:auth_config|link|account|read|server|url):(?:unanswered|unreadable|http_[1-5]\d\d(?::\d{1,6})?)$/u
     ),
 ]);
 export type ComposioReason = z.infer<typeof composioReasonSchema>;
@@ -2881,6 +2883,8 @@ export const connectionErrors = defineErrorFamily({
     "This connection attempt has expired, was already used, or was started by someone else. Start again.",
   "connection.provider_refused":
     "The provider didn't complete the connection. Start again.",
+  "connection.provider_forbidden":
+    "Grasp's connection service isn't allowed to finish this at the provider. Tell Grasp; trying again won't help.",
   "connection.provider_pending":
     "The provider was still finishing the connection, so nothing was connected yet. Start again in a minute.",
   "connection.provider_not_answering":
