@@ -127,7 +127,8 @@ describe("an organization's billing, as Stripe's answer reads", () => {
     }).toStrictEqual({
       line: true,
       lines: {
-        "Customer in Stripe": "Noordkade B.V.",
+        // The link says it opens a new tab, as Damsko's Link to another site does.
+        "Customer in Stripe": "Noordkade B.V. (opens in a new tab)",
         "How it pays": "Stripe charges it each time",
         Open: "Nothing",
         Overdue: "Nothing",

@@ -1,11 +1,40 @@
-import { Avatar, AvatarFallback } from "@grasp-os/app-kit/components/avatar";
 import type { MemberView } from "@grasp-os/shared/admin/admin-account";
 import type { MemberRole } from "@grasp-os/shared/admin/onboarding-admin";
-import { MailIcon } from "lucide-react";
+import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
+import { CardContent } from "@grasp-os/ui/components/card";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { Text } from "@grasp-os/ui/components/text";
+import { Icon, MailIcon } from "@grasp-os/ui/lib/icons";
+import { visuallyHidden } from "@grasp-os/ui/lib/styles";
+import { colors, space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 
 import { useOrganization } from "./organization.tsx";
-import { Section } from "./section.tsx";
+import { Panel, PanelNote } from "./panel.tsx";
 import { formatDate } from "./words.ts";
+
+const styles = stylex.create({
+  // Someone whose access was taken away: their name struck through.
+  gone: {
+    color: colors.mutedForeground,
+    textDecorationLine: "line-through",
+  },
+  stands: {
+    display: "flex",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    columnGap: space["4"],
+    rowGap: space["1"],
+  },
+});
 
 /** A role in the platform, as the company's own Members page says it. */
 const roleWords: Record<MemberRole, string> = {
@@ -36,16 +65,7 @@ const standsLine = (member: MemberView): string => {
     : `In since ${joined}, last in on ${formatDate(member.seen)}`;
 };
 
-/** A capitalised name's first letters, at most two: "Anna de Vries" is "AV". */
-const initialsOf = (name: string): string =>
-  name
-    .split(" ")
-    .map((part) => part.charAt(0))
-    .filter((first) => first !== "" && first === first.toUpperCase())
-    .slice(0, 2)
-    .join("");
-
-/** One member a row: who they are, where they stand, and their role; on a narrow screen, under each other. */
+/** One member a row: who they are, where they stand, and their role. */
 const MemberRow = ({ member }: { member: MemberView }) => {
   const name = member.name === "" ? member.email : member.name;
   const gone = member.state === "removed";
@@ -53,39 +73,37 @@ const MemberRow = ({ member }: { member: MemberView }) => {
     .filter((part) => part !== "")
     .join(" · ");
   return (
-    <li className="flex flex-col gap-x-4 gap-y-2 border-t px-5 py-3 @2xl:flex-row @2xl:items-center">
-      <span className="flex min-w-0 flex-1 items-center gap-3">
-        <Avatar>
-          <AvatarFallback>
-            {/* Someone known only by their email has no initials to show. */}
-            {member.name === "" ? <MailIcon aria-hidden /> : initialsOf(name)}
-          </AvatarFallback>
-        </Avatar>
-        <span className="flex min-w-0 flex-col">
-          <span
-            className={
-              gone
-                ? "text-muted-foreground decoration-border truncate line-through"
-                : "truncate"
-            }
-          >
-            {name}
-          </span>
-          {under === "" ? null : (
-            <span className="text-muted-foreground truncate text-xs">
-              {under}
-            </span>
+    <Item size="sm">
+      <ItemMedia>
+        <Avatar decorative name={name}>
+          {/* Someone known only by their email has no initials to show. */}
+          {member.name === "" ? (
+            <AvatarFallback>
+              <Icon icon={MailIcon} />
+            </AvatarFallback>
+          ) : (
+            <AvatarFallback />
           )}
+        </Avatar>
+      </ItemMedia>
+      <ItemContent>
+        <ItemTitle>
+          <span {...stylex.props(gone && styles.gone)}>{name}</span>
+        </ItemTitle>
+        {under === "" ? null : <ItemDescription>{under}</ItemDescription>}
+      </ItemContent>
+      <ItemActions>
+        <span {...stylex.props(styles.stands)}>
+          <Text as="span" color="muted" size="sm">
+            {standsLine(member)}
+          </Text>
+          <Text as="span" size="sm">
+            <span {...stylex.props(visuallyHidden)}>Role: </span>
+            {roleWords[member.role]}
+          </Text>
         </span>
-      </span>
-      <span className="text-muted-foreground min-w-0 @2xl:w-56 @2xl:flex-none @5xl:w-72">
-        {standsLine(member)}
-      </span>
-      <span className="@2xl:w-24 @2xl:flex-none @2xl:text-right">
-        <span className="sr-only">Role: </span>
-        {roleWords[member.role]}
-      </span>
-    </li>
+      </ItemActions>
+    </Item>
   );
 };
 
@@ -108,20 +126,18 @@ export const OrgMembers = () => {
     ? `${seats.used} ${seats.used === 1 ? "seat" : "seats"} taken`
     : `${seats.used} of ${seats.of} seats taken`;
   return (
-    <Section description={taken} title="Members">
+    <Panel description={taken} title="Members">
       {members.length === 0 ? (
-        <p className="text-muted-foreground border-t px-5 py-4">
-          Nobody has made an account yet.
-        </p>
+        <PanelNote>Nobody has made an account yet.</PanelNote>
       ) : (
-        <div className="@container">
-          <ul className="flex flex-col">
+        <CardContent flush>
+          <ItemGroup separated>
             {members.map((member) => (
               <MemberRow key={member.id} member={member} />
             ))}
-          </ul>
-        </div>
+          </ItemGroup>
+        </CardContent>
       )}
-    </Section>
+    </Panel>
   );
 };

@@ -6,32 +6,43 @@
  * out. Once the team is told, it stays as it was agreed.
  */
 
-import { Button } from "@grasp-os/app-kit/components/button";
+import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import type { Agreements } from "@grasp-os/shared/onboarding";
+import { Button } from "@grasp-os/ui/components/button";
+import { DatePicker } from "@grasp-os/ui/components/date-picker";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@grasp-os/app-kit/components/dialog";
+} from "@grasp-os/ui/components/dialog";
 import {
   Field,
+  FieldContent,
   FieldDescription,
   FieldLabel,
-} from "@grasp-os/app-kit/components/field";
-import { Input } from "@grasp-os/app-kit/components/input";
+} from "@grasp-os/ui/components/field";
 import {
   NativeSelect,
   NativeSelectOption,
-} from "@grasp-os/app-kit/components/native-select";
-import { Switch } from "@grasp-os/app-kit/components/switch";
-import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
-import type { Agreements } from "@grasp-os/shared/onboarding";
-import { PencilIcon } from "lucide-react";
-import { useId, useState } from "react";
+} from "@grasp-os/ui/components/native-select";
+import { Switch } from "@grasp-os/ui/components/switch";
+import { Icon, PencilIcon } from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
+import { useState } from "react";
 
 import { CommandFailure, useCommand } from "./commands.tsx";
+
+const styles = stylex.create({
+  form: { display: "flex", flexDirection: "column", gap: space["5"] },
+  // A day's field, as wide as a date.
+  day: { width: "12rem" },
+  council: { width: "14rem" },
+});
 
 /** The agreements as the snapshot has them; null before staff said anything. */
 type AgreementsRead = AdminSnapshot["agreements"];
@@ -103,7 +114,11 @@ const withDay = (
   return day === "" ? rest : { ...rest, [key]: day };
 };
 
-/** The day one agreement was made, once it is in. */
+/**
+ * The day one agreement was made, once it is in. Damsko's DatePicker has
+ * no latest day, so a day after today is no longer refused as it is
+ * picked (the native field's `max`); core keeps the day as given.
+ */
 const AgreedDay = ({
   label,
   value,
@@ -113,16 +128,14 @@ const AgreedDay = ({
   value: string | undefined;
   onChange: (day: string) => void;
 }) => (
-  <Input
+  <DatePicker
     aria-label={label}
-    className="w-40"
-    max={today()}
-    onChange={(event) => {
-      onChange(event.target.value);
+    onValueChange={(day) => {
+      onChange(typeof day === "string" ? day : "");
     }}
     required
-    type="date"
-    value={value ?? ""}
+    style={styles.day}
+    value={value ?? null}
   />
 );
 
@@ -137,18 +150,20 @@ const AgreedSwitch = ({
   description: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
-}) => {
-  const id = useId();
-  return (
-    <Field orientation="horizontal">
-      <Switch checked={checked} id={id} onCheckedChange={onChange} />
-      <div className="flex flex-col gap-0.5">
-        <FieldLabel htmlFor={id}>{label}</FieldLabel>
-        <FieldDescription>{description}</FieldDescription>
-      </div>
-    </Field>
-  );
-};
+}) => (
+  <Field orientation="horizontal">
+    <FieldContent>
+      <FieldLabel>{label}</FieldLabel>
+      <FieldDescription>{description}</FieldDescription>
+    </FieldContent>
+    <Switch
+      checked={checked}
+      onCheckedChange={(next) => {
+        onChange(next);
+      }}
+    />
+  </Field>
+);
 
 /** The dialog that keeps what was agreed, opened on what holds now. */
 const AgreementsDialog = ({
@@ -160,7 +175,6 @@ const AgreementsDialog = ({
   agreements: Agreements;
   onOpenChange: (open: boolean) => void;
 }) => {
-  const councilId = useId();
   const { busy, failure, give } = useCommand(clientId);
   const [draft, setDraft] = useState<Agreements>(agreements);
   const save = async (): Promise<void> => {
@@ -174,7 +188,7 @@ const AgreementsDialog = ({
   };
   return (
     <Dialog onOpenChange={onOpenChange} open>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>What was agreed</DialogTitle>
           <DialogDescription>
@@ -183,81 +197,83 @@ const AgreementsDialog = ({
           </DialogDescription>
         </DialogHeader>
         <form
-          className="flex flex-col gap-5"
           onSubmit={(event) => {
             event.preventDefault();
             void save();
           }}
         >
-          <AgreedSwitch
-            checked={draft.processing}
-            description="The data processing agreement between the company and Grasp."
-            label="Agreement on handling data signed"
-            onChange={(processing) => {
-              setDraft(withProcessing(draft, processing));
-            }}
-          />
-          {draft.processing ? (
-            <AgreedDay
-              label="Day the agreement on handling data was signed"
-              onChange={(day) => {
-                setDraft(withDay(draft, "processingOn", day));
-              }}
-              value={draft.processingOn}
-            />
-          ) : null}
-          <AgreedSwitch
-            checked={draft.assessment}
-            description="The data protection impact assessment, signed off by the company."
-            label="The company’s look at the risks signed off"
-            onChange={(assessment) => {
-              setDraft(withAssessment(draft, assessment));
-            }}
-          />
-          {draft.assessment ? (
-            <AgreedDay
-              label="Day the look at the risks was signed off"
-              onChange={(day) => {
-                setDraft(withDay(draft, "assessmentOn", day));
-              }}
-              value={draft.assessmentOn}
-            />
-          ) : null}
-          <Field>
-            <FieldLabel htmlFor={councilId}>Works council</FieldLabel>
-            <NativeSelect
-              className="w-56"
-              id={councilId}
-              onChange={(event) => {
-                const council = councils.find(
-                  (each) => each.value === event.target.value
-                )?.value;
-                if (council !== undefined) {
-                  setDraft(withCouncil(draft, council));
-                }
-              }}
-              value={draft.council}
-            >
-              {councils.map((each) => (
-                <NativeSelectOption key={each.value} value={each.value}>
-                  {each.label}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            <FieldDescription>
-              Only the works council can agree to this, not the sponsor.
-            </FieldDescription>
-          </Field>
-          {draft.council === "waiting" ? null : (
-            <AgreedDay
-              label="Day the works council said yes, or it was found there is none"
-              onChange={(day) => {
-                setDraft(withDay(draft, "councilOn", day));
-              }}
-              value={draft.councilOn}
-            />
-          )}
-          <CommandFailure failure={failure} />
+          <DialogBody>
+            <div {...stylex.props(styles.form)}>
+              <AgreedSwitch
+                checked={draft.processing}
+                description="The data processing agreement between the company and Grasp."
+                label="Agreement on handling data signed"
+                onChange={(processing) => {
+                  setDraft(withProcessing(draft, processing));
+                }}
+              />
+              {draft.processing ? (
+                <AgreedDay
+                  label="Day the agreement on handling data was signed"
+                  onChange={(day) => {
+                    setDraft(withDay(draft, "processingOn", day));
+                  }}
+                  value={draft.processingOn}
+                />
+              ) : null}
+              <AgreedSwitch
+                checked={draft.assessment}
+                description="The data protection impact assessment, signed off by the company."
+                label="The company’s look at the risks signed off"
+                onChange={(assessment) => {
+                  setDraft(withAssessment(draft, assessment));
+                }}
+              />
+              {draft.assessment ? (
+                <AgreedDay
+                  label="Day the look at the risks was signed off"
+                  onChange={(day) => {
+                    setDraft(withDay(draft, "assessmentOn", day));
+                  }}
+                  value={draft.assessmentOn}
+                />
+              ) : null}
+              <Field>
+                <FieldLabel>Works council</FieldLabel>
+                <NativeSelect
+                  style={styles.council}
+                  onChange={(event) => {
+                    const council = councils.find(
+                      (each) => each.value === event.target.value
+                    )?.value;
+                    if (council !== undefined) {
+                      setDraft(withCouncil(draft, council));
+                    }
+                  }}
+                  value={draft.council}
+                >
+                  {councils.map((each) => (
+                    <NativeSelectOption key={each.value} value={each.value}>
+                      {each.label}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+                <FieldDescription>
+                  Only the works council can agree to this, not the sponsor.
+                </FieldDescription>
+              </Field>
+              {draft.council === "waiting" ? null : (
+                <AgreedDay
+                  label="Day the works council said yes, or it was found there is none"
+                  onChange={(day) => {
+                    setDraft(withDay(draft, "councilOn", day));
+                  }}
+                  value={draft.councilOn}
+                />
+              )}
+              <CommandFailure failure={failure} />
+            </div>
+          </DialogBody>
           <DialogFooter>
             <Button disabled={busy} type="submit">
               Save
@@ -291,7 +307,7 @@ export const AgreementsAction = ({
         size="sm"
         variant="outline"
       >
-        <PencilIcon data-icon="inline-start" />
+        <Icon icon={PencilIcon} />
         Change what was agreed
       </Button>
       {open ? (

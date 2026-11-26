@@ -1,9 +1,3 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@grasp-os/app-kit/components/collapsible";
 /**
  * An organization's Contract, ported from the prototype (grasplabs/prototype
  * `components/admin/org-contract.tsx`), a tab of its Details: the
@@ -17,12 +11,37 @@ import {
  * and its invoices as Stripe has them, once someone at Grasp linked it to
  * its customer there; until then, or without Stripe's key, it says so.
  */
-import { cn } from "@grasp-os/app-kit/lib/utils";
 import type { AgreementView } from "@grasp-os/shared/admin/admin-account";
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import type { Agreed } from "@grasp-os/shared/admin/onboarding-admin";
 import { present } from "@grasp-os/shared/admin/present";
-import { CheckIcon, ChevronDownIcon } from "lucide-react";
+import { CardContent } from "@grasp-os/ui/components/card";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@grasp-os/ui/components/collapsible";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { KeyValueList } from "@grasp-os/ui/components/key-value";
+import { Link } from "@grasp-os/ui/components/link";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@grasp-os/ui/components/table";
+import { Text } from "@grasp-os/ui/components/text";
+import { CheckIcon, Icon } from "@grasp-os/ui/lib/icons";
+import { colors, space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
 import type {
@@ -34,9 +53,36 @@ import type {
 import type { StripeReadError } from "../billing/stripe.ts";
 import { AgreementsAction } from "./agreements.tsx";
 import { useOrganization } from "./organization.tsx";
-import { Section } from "./section.tsx";
+import { Panel } from "./panel.tsx";
 import { StripeLink } from "./stripe-link.tsx";
 import { addSecretStep, formatDate, formatList, money } from "./words.ts";
+
+const styles = stylex.create({
+  // Something in place: a check in the success colour before quiet words.
+  done: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: space["1"],
+    color: colors.mutedForeground,
+  },
+  check: { display: "inline-flex", color: colors.success },
+  muted: { color: colors.mutedForeground },
+  // What needs someone: in the warning's colour.
+  warning: { color: colors.warning },
+  stands: { display: "flex", flexDirection: "column", gap: space["1"] },
+  // Who else handles the data, two abreast where there is room.
+  others: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(14rem, 1fr))",
+    columnGap: space["8"],
+    rowGap: space["2"],
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+    paddingBlockStart: space["2"],
+  },
+  other: { display: "flex", flexDirection: "column" },
+});
 
 /** One for one, many for the rest. */
 const plural = (count: number, one: string, other: string): string =>
@@ -62,19 +108,12 @@ const others = [
   { name: "Stripe", what: "Invoices and payments." },
 ] as const;
 
-/** One line of a part: what it is on the left, how it stands on the right. */
-const Line = ({ label, children }: { label: string; children: ReactNode }) => (
-  <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t px-5 py-3">
-    <dt className="text-muted-foreground">{label}</dt>
-    {/* Beside its label however long it is, rather than on a line of its own pushed to the right. */}
-    <dd className="min-w-0 flex-1 text-right">{children}</dd>
-  </div>
-);
-
 /** Something in place. */
 const Done = ({ children }: { children: ReactNode }) => (
-  <span className="text-muted-foreground flex items-center gap-1.5">
-    <CheckIcon aria-hidden className="text-status-agreed size-4 flex-none" />
+  <span {...stylex.props(styles.done)}>
+    <span {...stylex.props(styles.check)}>
+      <Icon icon={CheckIcon} />
+    </span>
     {children}
   </span>
 );
@@ -96,10 +135,10 @@ const Stands = ({ agreement }: { agreement: AgreementView }) => {
     return <Done>{line}</Done>;
   }
   if (agreement.state === "none") {
-    return <span className="text-muted-foreground">No works council</span>;
+    return <span {...stylex.props(styles.muted)}>No works council</span>;
   }
   return (
-    <span className="text-status-attention">
+    <span {...stylex.props(styles.warning)}>
       {agreement.state === "waiting" ? "Still deciding" : "Not signed yet"}
     </span>
   );
@@ -129,72 +168,63 @@ const Agreements = ({
     description = `Without all three, nobody is invited. ${open} ${plural(open, "is", "are")} still open.`;
   }
   return (
-    <Section
+    <Panel
       action={action}
       description={description}
       id="contract-agreements"
       title="Agreed before the first interview"
     >
-      <ul className="flex flex-col">
-        {view.agreements.map((agreement) => {
-          const paper = [
-            present(agreement.version)
-              ? `Version ${agreement.version} of Grasp’s own text`
-              : "",
-            agreement.file ?? "",
-          ].filter((part) => part !== "");
-          return (
-            <li
-              className="flex flex-col gap-0.5 border-t px-5 py-3"
-              key={agreement.what}
-            >
-              <span>{agreementWords[agreement.what]}</span>
-              <span className="text-xs">
-                {recorded ? (
-                  <Stands agreement={agreement} />
-                ) : (
-                  <span className="text-status-attention">
-                    Not recorded yet
-                  </span>
-                )}
-              </span>
-              {paper.length > 0 ? (
-                <span className="text-muted-foreground truncate text-xs">
-                  {paper.join(" · ")}
-                </span>
-              ) : null}
-            </li>
-          );
-        })}
-      </ul>
-      <div className="border-t">
-        <Collapsible>
-          <CollapsibleTrigger
-            render={
-              <Button className="mx-3 my-2" size="sm" variant="outline" />
-            }
-          >
-            Who else handles the data
-            <ChevronDownIcon
-              className="transition-transform in-data-panel-open:rotate-180"
-              data-icon="inline-end"
-            />
-          </CollapsibleTrigger>
+      <CardContent flush>
+        <ItemGroup separated>
+          {view.agreements.map((agreement) => {
+            const paper = [
+              present(agreement.version)
+                ? `Version ${agreement.version} of Grasp’s own text`
+                : "",
+              agreement.file ?? "",
+            ].filter((part) => part !== "");
+            return (
+              <Item key={agreement.what} size="sm">
+                <ItemContent>
+                  <ItemTitle>{agreementWords[agreement.what]}</ItemTitle>
+                  <ItemDescription>
+                    <span {...stylex.props(styles.stands)}>
+                      {recorded ? (
+                        <Stands agreement={agreement} />
+                      ) : (
+                        <span {...stylex.props(styles.warning)}>
+                          Not recorded yet
+                        </span>
+                      )}
+                      {paper.length > 0 ? (
+                        <span>{paper.join(" · ")}</span>
+                      ) : null}
+                    </span>
+                  </ItemDescription>
+                </ItemContent>
+              </Item>
+            );
+          })}
+        </ItemGroup>
+      </CardContent>
+      <CardContent>
+        <Collapsible fitContent variant="outline">
+          <CollapsibleTrigger>Who else handles the data</CollapsibleTrigger>
           <CollapsibleContent>
-            <ul className="grid gap-x-8 gap-y-2 px-5 pb-4 sm:grid-cols-2">
+            <ul {...stylex.props(styles.others)}>
               {others.map((other) => (
-                <li className="flex flex-col" key={other.name}>
+                <li key={other.name} {...stylex.props(styles.other)}>
                   <span>{other.name}</span>
-                  <span className="text-muted-foreground text-xs">
+                  <Text as="span" color="muted" size="xs">
                     {other.what}
-                  </span>
+                  </Text>
                 </li>
               ))}
             </ul>
           </CollapsibleContent>
         </Collapsible>
-      </div>
-    </Section>
+      </CardContent>
+    </Panel>
   );
 };
 
@@ -277,39 +307,57 @@ const BillingLines = ({
   account: BillingAccount;
   customerId: string;
 }) => (
-  <dl>
-    <Line label="Customer in Stripe">
-      <a
-        className="hover:text-foreground underline underline-offset-4"
-        href={account.url}
-        rel="noreferrer"
-        target="_blank"
-      >
-        {account.name ?? customerId}
-      </a>
-    </Line>
-    <Line label="How it pays">{paysWords(account.pays)}</Line>
-    <Line label="Open">
-      {account.open.count === 0
-        ? "Nothing"
-        : `${moneyOf(account.open.amount)}, ${account.open.count} ${plural(account.open.count, "invoice", "invoices")}`}
-    </Line>
-    <Line label="Overdue">
-      {account.overdue.count === 0 || account.overdue.since === null ? (
-        "Nothing"
-      ) : (
-        <span className="text-status-attention">
-          {`${moneyOf(account.overdue.amount)}, due since ${formatDate(account.overdue.since)}`}
-        </span>
-      )}
-    </Line>
-    <Line label="Last paid">
-      {account.lastPaid === null
-        ? "Nothing yet"
-        : `${money(account.lastPaid.amount.amount, account.lastPaid.amount.currency)} on ${formatDate(account.lastPaid.on)}`}
-    </Line>
-    <Line label="Next invoice">{nextWords(account.subscription)}</Line>
-  </dl>
+  <CardContent>
+    <KeyValueList
+      divided
+      items={[
+        {
+          id: "customer",
+          label: "Customer in Stripe",
+          value: (
+            <Link external href={account.url}>
+              {account.name ?? customerId}
+            </Link>
+          ),
+        },
+        { id: "pays", label: "How it pays", value: paysWords(account.pays) },
+        {
+          id: "open",
+          label: "Open",
+          value:
+            account.open.count === 0
+              ? "Nothing"
+              : `${moneyOf(account.open.amount)}, ${account.open.count} ${plural(account.open.count, "invoice", "invoices")}`,
+        },
+        {
+          id: "overdue",
+          label: "Overdue",
+          value:
+            account.overdue.count === 0 || account.overdue.since === null ? (
+              "Nothing"
+            ) : (
+              <span {...stylex.props(styles.warning)}>
+                {`${moneyOf(account.overdue.amount)}, due since ${formatDate(account.overdue.since)}`}
+              </span>
+            ),
+        },
+        {
+          id: "paid",
+          label: "Last paid",
+          value:
+            account.lastPaid === null
+              ? "Nothing yet"
+              : `${money(account.lastPaid.amount.amount, account.lastPaid.amount.currency)} on ${formatDate(account.lastPaid.on)}`,
+        },
+        {
+          id: "next",
+          label: "Next invoice",
+          value: nextWords(account.subscription),
+        },
+      ]}
+      orientation="horizontal"
+    />
+  </CardContent>
 );
 
 /**
@@ -325,7 +373,7 @@ const BillingPart = ({
 }) => {
   const customerId = billing.state === "not_linked" ? null : billing.customerId;
   return (
-    <Section
+    <Panel
       description={billingLine(billing)}
       id="contract-billing"
       title="Billing"
@@ -337,7 +385,7 @@ const BillingPart = ({
         />
       ) : null}
       <StripeLink clientId={clientId} customerId={customerId} />
-    </Section>
+    </Panel>
   );
 };
 
@@ -362,40 +410,45 @@ const StripeInvoices = ({ account }: { account: BillingAccount }) => {
         : `From Stripe, the latest ${invoices.length}. All are paid.`;
   }
   return (
-    <Section description={description} id="contract-invoices" title="Invoices">
+    <Panel description={description} id="contract-invoices" title="Invoices">
       {invoices.length > 0 ? (
-        <ul className="flex flex-col">
-          {invoices.map((invoice) => (
-            <li
-              className="flex items-baseline justify-between gap-x-6 border-t px-5 py-2.5"
-              key={invoice.number}
-            >
-              <span className="flex min-w-0 flex-wrap items-baseline gap-x-3">
-                <span className="tabular-nums">{invoice.number}</span>
-                <span className="text-muted-foreground text-xs">
-                  {formatDate(invoice.date)}
-                </span>
-              </span>
-              <span className="flex items-baseline gap-x-6">
-                <span className="tabular-nums">
-                  {money(invoice.amount, invoice.currency)}
-                </span>
-                <span
-                  className={cn(
-                    "w-20 text-right text-xs",
-                    invoice.status === "open" || invoice.status === "overdue"
-                      ? "text-status-attention"
-                      : "text-muted-foreground"
-                  )}
-                >
-                  {invoiceStatusWords[invoice.status]}
-                </span>
-              </span>
-            </li>
-          ))}
-        </ul>
+        <CardContent flush>
+          <Table aria-label="Invoices">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Invoice</TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead align="end">Amount</TableHead>
+                <TableHead align="end">Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {invoices.map((invoice) => (
+                <TableRow key={invoice.number}>
+                  <TableCell rowHeader>{invoice.number}</TableCell>
+                  <TableCell>{formatDate(invoice.date)}</TableCell>
+                  <TableCell align="end">
+                    {money(invoice.amount, invoice.currency)}
+                  </TableCell>
+                  <TableCell align="end">
+                    <span
+                      {...stylex.props(
+                        invoice.status === "open" ||
+                          invoice.status === "overdue"
+                          ? styles.warning
+                          : styles.muted
+                      )}
+                    >
+                      {invoiceStatusWords[invoice.status]}
+                    </span>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
       ) : null}
-    </Section>
+    </Panel>
   );
 };
 
