@@ -10,6 +10,8 @@ import { useState } from "react";
 import { WithAdmins } from "../admin/admins.tsx";
 import { AskChat } from "../admin/ask-chat.tsx";
 import { documentOf } from "../admin/ask-document.ts";
+import { loadEveryAdmin } from "../admin/org-loads.ts";
+import { freshMs } from "../admin/org-reads.ts";
 import { AdminHeader } from "../admin/page.tsx";
 
 /** Every organization, as the admin's layout read them. */
@@ -29,6 +31,7 @@ const localToday = (): string => {
 const AskPage = () => {
   const { clients } = adminRoute.useLoaderData();
   const { about } = Route.useSearch();
+  const { admins } = Route.useLoaderData();
   const [chat, setChat] = useState(0);
   const name =
     about === undefined
@@ -54,11 +57,11 @@ const AskPage = () => {
       <div className="flex min-h-0 flex-1 flex-col text-sm">
         <h1 className="sr-only">Ask Grasp</h1>
         {/* Asked over every organization as its core answered, once they are in. */}
-        <WithAdmins>
-          {(admins) => (
+        <WithAdmins admins={admins}>
+          {(read) => (
             <AskChat
               about={name}
-              document={() => documentOf(admins, localToday())}
+              document={() => documentOf(read, localToday())}
               key={chat}
             />
           )}
@@ -72,5 +75,9 @@ const AskPage = () => {
 export const Route = createFileRoute("/ask")({
   validateSearch: (search: Record<string, unknown>): { about?: string } =>
     typeof search.about === "string" ? { about: search.about } : {},
+  loader: loadEveryAdmin,
+  staleTime: freshMs,
+  // A preload reads nothing: opened, the page loads anew and reads them.
+  preloadStaleTime: 0,
   component: AskPage,
 });

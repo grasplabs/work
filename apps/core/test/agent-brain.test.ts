@@ -229,7 +229,7 @@ describe("a chat's brain", setUpTime, () => {
 
     /** Each request's own recall part, if it carries one. */
     const recalled = provider.requests.map(({ body }) =>
-      JSON.stringify(body).includes("[Recall ")
+      JSON.stringify(body).includes("<recall ")
     );
     const recalls = await vi.waitFor(
       async () => {

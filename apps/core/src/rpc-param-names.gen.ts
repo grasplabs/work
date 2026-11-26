@@ -173,6 +173,7 @@ export const rpcParamNames: ParamNames = {
     "rename": ["chatId","title"],
     "search": ["query"],
     "send": ["chatId","question"],
+    "sendNow": ["chatId"],
     "setProject": ["chatId","project"],
     "summary": ["chatId"],
     "unarchive": ["chatId"],
