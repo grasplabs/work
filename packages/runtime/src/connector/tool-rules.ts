@@ -7,6 +7,8 @@ import type {
 import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 
+import { parameterSegment } from "./protocol.ts";
+
 // The rules that class a tool by what it is: its name and its input's
 // property names. The same rules class every tool an MCP server lists
 // (connect's tool-rules.ts) and check every tool a connector declares
@@ -32,6 +34,11 @@ import type { Json } from "@grasp-os/shared/json";
 //   until someone sends it. It reaches conversations when its name reads
 //   or writes what people said. Anything else reaches what its connection
 //   holds: the person's own, or the company's.
+// - A declared tool's routes are read too: the author picks its name, but
+//   not the vendor's paths, and egress holds it to them (GRA-2356). A
+//   path's literal words say what its name may not: one Grasp never runs
+//   refuses it, a change or a delivery makes it no read, and a delivery
+//   makes a change reach others.
 // - Its description is never read: it is the vendor's text, written for
 //   the model, and may be written to steer it.
 // - What Grasp never does is refused by name, for every tool (GRA-717);
@@ -121,7 +128,6 @@ const changeWords: ReadonlySet<string> = new Set([
   "escalate",
   "exec",
   "execute",
-  "export",
   "extend",
   "favorite",
   "fill",
@@ -566,6 +572,39 @@ export const isNeverTool = (name: string): boolean => {
   );
 };
 
+/**
+ * A route path's literal text, piece by piece: each segment, and the text
+ * a segment holds before and after its parameter (`{id}:batchUpdate`,
+ * `19:{chat}`). A parameter's value is the caller's, never a word of the
+ * route, and a word never runs across a `/` or a parameter.
+ */
+const literalPieces = (path: string): string[] =>
+  path.split("/").flatMap((segment) => {
+    const parameter = parameterSegment.exec(segment)?.groups;
+    return parameter === undefined
+      ? [segment]
+      : [parameter.prefix ?? "", parameter.suffix ?? ""];
+  });
+
+/**
+ * Whether a route's `path` names what Grasp never does
+ * (`/messages/{id}/trash`), by the rules that refuse a tool's name.
+ */
+export const isNeverPath = (path: string): boolean =>
+  literalPieces(path).some(isNeverTool);
+
+/** Whether `word` sends something to people, or answers them. */
+const delivers = (word: string): boolean =>
+  isOneOf(sendingWords, word) || isOneOf(answeringWords, word);
+
+/**
+ * Whether a route's `path` delivers to people (`/api/chat.postMessage`):
+ * a read that runs on its own, an event's or a sync's, may not send to
+ * one, as it would on every run.
+ */
+export const isDeliveringPath = (path: string): boolean =>
+  literalPieces(path).some((piece) => wordsOf(piece).some(delivers));
+
 /** A property's name and its schema, as a schema's `properties` hold it. */
 type Property = [name: string, schema: Json | undefined];
 
@@ -852,7 +891,10 @@ const namesPeople = (
 interface Findings {
   /** Its name leads with a verb that reads. */
   reads: boolean;
-  /** Its name holds a verb that changes something. */
+  /**
+   * Its name holds a verb that changes something, or a route's path holds
+   * one or delivers.
+   */
   changes: boolean;
   /**
    * Its input names people or an address it reaches, or has a flag that
@@ -861,7 +903,8 @@ interface Findings {
   recipients: boolean;
   /**
    * Its input names people or places a change of it acts on, or its name
-   * delivers to people, or one of its input's sends (`notify_attendees`).
+   * or a route's path delivers to people, or one of its input's sends
+   * (`notify_attendees`).
    */
   targets: boolean;
   /** Its name reads or writes what people said. */
@@ -874,11 +917,16 @@ interface Findings {
   writesConversations: boolean;
 }
 
-/** What the rules find in the tool `name` taking `inputSchema`. */
-const findingsOf = (name: string, inputSchema: Json): Findings => {
+/**
+ * What the rules find in the tool `name` taking `inputSchema`, sending
+ * to `paths`: a server's tool has none.
+ */
+const findingsOf = (
+  name: string,
+  inputSchema: Json,
+  paths: readonly string[]
+): Findings => {
   const words = wordsOf(name);
-  const delivers = (word: string) =>
-    isOneOf(sendingWords, word) || isOneOf(answeringWords, word);
   const properties = allProperties(inputSchema);
   // A draft is written for its person to send: whoever it is addressed to
   // is reached only by the send, which is a tool of its own. Only a draft
@@ -895,6 +943,19 @@ const findingsOf = (name: string, inputSchema: Json): Findings => {
           writingWords.has(word) ||
           answeringWords.has(word))
     );
+  // A path delivers where one of its pieces does, but a draft's piece that
+  // writes what it answers with, sending nothing (`createReply`): the
+  // vendor's draft route. Its sending twin (`reply`) writes nothing.
+  const pieces = paths.flatMap(literalPieces).map(wordsOf);
+  const pathDelivers = pieces.some(
+    (piece) =>
+      piece.some(delivers) &&
+      !(
+        draft &&
+        piece.some((word) => writingWords.has(word)) &&
+        !piece.some((word) => isOneOf(sendingWords, word))
+      )
+  );
   const names = (starts: readonly string[], to: "none" | "first" | "either") =>
     properties.some((property) => namesPeople(property, starts, to));
   const sends = ([property]: Property) =>
@@ -905,7 +966,11 @@ const findingsOf = (name: string, inputSchema: Json): Findings => {
     reads:
       readVerbs.has(words[0] ?? "") ||
       (readVerbs.has(words[1] ?? "") && !delivers(words[0] ?? "")),
-    changes: words.some((word) => isOneOf(changeWords, word)),
+    changes:
+      words.some((word) => isOneOf(changeWords, word)) ||
+      pieces.some((piece) =>
+        piece.some((word) => isOneOf(changeWords, word) || delivers(word))
+      ),
     recipients:
       (!draft && names(recipientWords, "first")) ||
       names(addressWords, "none") ||
@@ -918,6 +983,7 @@ const findingsOf = (name: string, inputSchema: Json): Findings => {
     targets:
       names(targetWords, draft ? "none" : "either") ||
       (!draft && words.some(delivers)) ||
+      pathDelivers ||
       properties.some(sends),
     conversations: words.some((word) => conversationWords.has(word)),
     writesConversations:
@@ -966,7 +1032,7 @@ export const classByRules = (
   if (isNeverTool(name)) {
     return "never";
   }
-  const found = findingsOf(name, inputSchema);
+  const found = findingsOf(name, inputSchema, []);
   const hintedChange =
     annotations.readOnlyHint === false || annotations.destructiveHint === true;
   // A change its name doesn't say, known from nothing or only from a hint,
@@ -988,15 +1054,17 @@ const readMethods: ReadonlySet<string> = new Set(["GET", "HEAD"]);
 export interface DeclaredTool {
   readOnly: boolean;
   reach: ToolReach;
-  routes: readonly { method: string }[];
+  routes: readonly { method: string; path: string }[];
   contract: { input: Json };
 }
 
 /**
- * What tool `name` taking `input` declares at least, where its connector
- * says `declared`: a read named for a change is a change, and a tool the
- * rules find reaching others reaches others. They find that where its
- * input names people it reaches, or it writes where people talk. Whether
+ * What tool `name` taking `input` and sending to `paths` declares at
+ * least, where its connector says `declared`: a read named for a change,
+ * or sending to a path that changes or delivers, is a change, and a tool
+ * the rules find reaching others reaches others. They find that where its
+ * input names people it reaches, its name or a path delivers to them, or
+ * it writes where people talk. Whether
  * what it reads, or only sorts (`mail.label`), is the person's own or
  * others' conversations stays the declaration's to say: the rules only
  * guess it from a name word.
@@ -1004,9 +1072,10 @@ export interface DeclaredTool {
 export const ruledDeclaration = (
   name: string,
   input: Json,
-  declared: { readOnly: boolean; reach: ToolReach }
+  declared: { readOnly: boolean; reach: ToolReach },
+  paths: readonly string[]
 ): { readOnly: boolean; reach: ToolReach } => {
-  const found = findingsOf(name, input);
+  const found = findingsOf(name, input, paths);
   const readOnly = declared.readOnly && !found.changes;
   const reachesOthers =
     reachOf(found, readOnly, declared.reach) === "others" ||
@@ -1019,9 +1088,10 @@ export const ruledDeclaration = (
 
 /**
  * Why the declaration of tool `name` claims less than the rules find, if
- * it does: it is one Grasp never runs; it claims to read but sends a
- * request other than a GET or HEAD; or it claims less than
- * `ruledDeclaration` gives it.
+ * it does: it is one Grasp never runs, by its name or a route's path; it
+ * claims to read but sends a request other than a GET or HEAD; or it
+ * claims less than `ruledDeclaration` gives it, by its name and input,
+ * or else by its routes' paths.
  */
 export const declarationProblem = (
   name: string,
@@ -1030,15 +1100,31 @@ export const declarationProblem = (
   if (isNeverTool(name)) {
     return "Grasp never runs it";
   }
+  if (routes.some(({ path }) => isNeverPath(path))) {
+    return "a route's path names what Grasp never does";
+  }
   if (readOnly && routes.some(({ method }) => !readMethods.has(method))) {
     return "it is read-only, so it sends only GET and HEAD requests";
   }
-  const ruled = ruledDeclaration(name, contract.input, { readOnly, reach });
-  if (ruled.readOnly !== readOnly) {
+  const declared = { readOnly, reach };
+  const byName = ruledDeclaration(name, contract.input, declared, []);
+  if (byName.readOnly !== readOnly) {
     return "it is read-only, but its name says it changes something";
   }
-  if (ruled.reach !== reach) {
+  if (byName.reach !== reach) {
     return "its input names people or places it reaches, or it writes where people talk, so it reaches others";
+  }
+  const ruled = ruledDeclaration(
+    name,
+    contract.input,
+    declared,
+    routes.map(({ path }) => path)
+  );
+  if (ruled.readOnly !== readOnly) {
+    return "it is read-only, but a route's path says it changes or delivers something";
+  }
+  if (ruled.reach !== reach) {
+    return "a route's path delivers to people, so it reaches others";
   }
   return undefined;
 };

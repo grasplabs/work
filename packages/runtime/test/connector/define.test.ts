@@ -183,14 +183,14 @@ const throwAfterWrite = tool({
 
 /** A write whose vendor answers it with text. */
 const zeroStock = tool({
-  description: "Clears one product's stock",
+  description: "Zeroes one product's stock",
   readOnly: false,
   reach: "company",
-  routes: ["POST /v1/stock/{sku}/clear"],
+  routes: ["POST /v1/stock/{sku}/zero"],
   args: { sku: v.string() },
   returns: v.object({ answer: v.string() }),
   handler: async ({ sku }, api) => ({
-    answer: String(await api.post("/v1/stock/{sku}/clear", { path: { sku } })),
+    answer: String(await api.post("/v1/stock/{sku}/zero", { path: { sku } })),
   }),
 });
 
@@ -430,6 +430,142 @@ describe("a connector's definition", () => {
     ).not.toThrow();
   });
 
+  it("refuses a benign name for a route whose path names what Grasp never does, but not for a parameter's name", () => {
+    const write = { readOnly: false, reach: "own", args: {} } as const;
+    expect(
+      named(
+        "mail.tidy",
+        declared({
+          ...write,
+          routes: ["POST /gmail/v1/users/{u}/messages/{id}/trash"],
+        })
+      )
+    ).toThrow("mail.tidy: a route's path names what Grasp never does");
+    expect(
+      named(
+        "mail.pass",
+        declared({
+          ...write,
+          routes: ["POST /v1.0/users/{u}/messages/{id}/forward"],
+        })
+      )
+    ).toThrow("mail.pass: a route's path names what Grasp never does");
+    expect(
+      named(
+        "items.tidy",
+        declared({ ...write, routes: ["POST /v1/items/{id}:batchDelete"] })
+      )
+    ).toThrow("items.tidy: a route's path names what Grasp never does");
+    expect(
+      named(
+        "mail.store",
+        declared({
+          ...write,
+          routes: ["POST /gmail/v1/users/{send}/messages/{trash}"],
+        })
+      )
+    ).not.toThrow();
+  });
+
+  it("lets a read export a file, as Drive answers one in another format", () => {
+    expect(
+      named(
+        "drive.files.get",
+        declared({
+          readOnly: true,
+          reach: "own",
+          routes: [
+            "GET /drive/v3/files/{fileId}",
+            "GET /drive/v3/files/{fileId}/export",
+          ],
+          args: {},
+        })
+      )
+    ).not.toThrow();
+  });
+
+  it("makes a write whose path delivers, by any method, reach others", () => {
+    const write = { readOnly: false, reach: "own", args: {} } as const;
+    expect(
+      named(
+        "mail.store",
+        declared({
+          ...write,
+          routes: ["POST /gmail/v1/users/{u}/messages/send"],
+        })
+      )
+    ).toThrow("mail.store: a route's path delivers to people");
+    expect(
+      named(
+        "mail.store",
+        declared({ ...write, routes: ["POST /v1.0/me/sendMail"] })
+      )
+    ).toThrow("mail.store: a route's path delivers to people");
+    expect(
+      named(
+        "chat.note",
+        declared({ ...write, routes: ["GET /api/chat.postMessage"] })
+      )
+    ).toThrow("chat.note: a route's path delivers to people");
+  });
+
+  it("refuses a read whose path changes or delivers", () => {
+    const read = { readOnly: true, reach: "own", args: {} } as const;
+    expect(
+      named(
+        "channel.history",
+        declared({ ...read, routes: ["GET /api/chat.postMessage"] })
+      )
+    ).toThrow(
+      "channel.history: it is read-only, but a route's path says it changes or delivers something"
+    );
+    expect(
+      named(
+        "channel.info",
+        declared({ ...read, routes: ["GET /api/conversations.archive"] })
+      )
+    ).toThrow(
+      "channel.info: it is read-only, but a route's path says it changes or delivers something"
+    );
+  });
+
+  it("lets a draft write its reply on the vendor's draft route, never on the route that sends it", () => {
+    const write = { readOnly: false, reach: "own", args: {} } as const;
+    expect(
+      named(
+        "mail.createReplyDraft",
+        declared({
+          ...write,
+          routes: ["POST /v1.0/me/messages/{id}/createReply"],
+        })
+      )
+    ).not.toThrow();
+    expect(
+      named(
+        "mail.createReplyDraft",
+        declared({ ...write, routes: ["POST /v1.0/me/messages/{id}/reply"] })
+      )
+    ).toThrow("mail.createReplyDraft: a route's path delivers to people");
+    expect(
+      named(
+        "mail.createDraft",
+        declared({
+          ...write,
+          routes: ["POST /gmail/v1/users/{u}/drafts/send"],
+        })
+      )
+    ).toThrow("mail.createDraft: a route's path delivers to people");
+    expect(
+      named(
+        "mail.tidy",
+        declared({
+          ...write,
+          routes: ["POST /v1.0/me/messages/{id}/createReply"],
+        })
+      )
+    ).toThrow("mail.tidy: a route's path delivers to people");
+  });
+
   it("refuses a route to a host it doesn't list, and a bare path among several hosts", () => {
     const elsewhere = tool({
       description: "Elsewhere",
@@ -555,6 +691,61 @@ describe("a connector's definition", () => {
     expect(() => withSyncs({ products })).not.toThrow();
     expect(() => withSyncs({ products: offHosts })).toThrow("doesn't list");
     expect(() => withSyncs({ products: writing })).toThrow("only reads");
+  });
+
+  it("refuses an event or a sync whose path delivers to people, as it would on every run", () => {
+    const withReaders = (route: `GET ${string}`) => [
+      () =>
+        defineConnector({
+          name: "stock",
+          title: "Stock",
+          hosts: [host],
+          auth: keyAuth,
+          tools: { "stock.get": getStock },
+          events: {
+            restocked: event({
+              description: "A product is back in stock",
+              filter: {},
+              payload: Stock,
+              id: ({ sku }) => sku,
+              poll: {
+                routes: [route],
+                handler: async (_filter, cursor) =>
+                  await Promise.resolve({ events: [], cursor }),
+              },
+            }),
+          },
+        }),
+      () =>
+        defineConnector({
+          name: "stock",
+          title: "Stock",
+          hosts: [host],
+          auth: keyAuth,
+          tools: { "stock.get": getStock },
+          syncs: {
+            products: sync({
+              model: Stock,
+              id: ({ sku }) => sku,
+              mode: "full",
+              routes: [route],
+              handler: async () =>
+                await Promise.resolve({
+                  upserts: [],
+                  deletes: [],
+                  checkpoint: {},
+                  more: false,
+                }),
+            }),
+          },
+        }),
+    ];
+    for (const define of withReaders("GET /api/chat.postMessage")) {
+      expect(define).toThrow("its path may not deliver to people");
+    }
+    for (const define of withReaders("GET /v1/stock/{sku}/export")) {
+      expect(define).not.toThrow();
+    }
   });
 
   it("makes the manifest connect decides by: its sign-in, routes, recovery and resource, and what each tool says it does", () => {
