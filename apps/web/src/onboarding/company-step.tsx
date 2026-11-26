@@ -33,6 +33,7 @@ import { useEffect, useRef, useState } from "react";
 import { TopError } from "../frame/top-error.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import { prepare, say } from "../voice/voice.ts";
 import { CalmStep } from "./calm-frame.tsx";
 import { useConnectionReturn } from "./connection-return.ts";
 import {
@@ -51,7 +52,6 @@ import {
 } from "./step-parts.ts";
 import type { StepProps } from "./step-parts.ts";
 import { useLeaving } from "./step-voice.tsx";
-import { prepare, say } from "../voice/voice.ts";
 import { XlsxError, xlsxMost, xlsxRows } from "./xlsx.ts";
 
 // Who works there: from the organization's Microsoft or Google sign-in,
@@ -581,7 +581,10 @@ export const CompanyStep = (props: StepProps) => {
     }
   });
   // The sign-in in use: kept on this visit, or, coming back, the one connected; none for a staff list.
-  const inUse = directoryShown(kept?.from ?? null, roster === null ? null : directory);
+  const inUse = directoryShown(
+    kept?.from ?? null,
+    roster === null ? null : directory
+  );
   const listInUse = roster !== null && inUse === null;
   const { title, body, spoken } = useWords(suites);
   return (
