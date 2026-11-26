@@ -197,7 +197,12 @@ const pastTimeMark = {};
 
 Object.defineProperty(globalThis, "caches", { value: undefined });
 
-// A value as text, never throwing, whatever the value does: serializing
+// Whether the harness cut or replaced anything the run sent (a value too
+// large, text past room, a log line past the limits): the outcome says so.
+let cut = false;
+const tooLargeText = "(a value too large to show, over " + room + " characters)";
+
+// A value as text (\`tooLarge\` for one past room), never throwing, whatever the value does: serializing
 // stops as soon as it would pass room, instead of building all of a huge
 // value first.
 const render = (value) => {
@@ -216,7 +221,7 @@ const render = (value) => {
     return json === undefined ? toText(value) : json;
   } catch (error) {
     if (error === tooLarge) {
-      return "(a value too large to show, over " + room + " characters)";
+      return tooLarge;
     }
     try {
       return toText(value);
@@ -227,26 +232,40 @@ const render = (value) => {
 };
 
 // Never longer than room, and never throwing, whatever the value makes
-// of itself (a \`toString\` of its own, say).
-const show = (value) => {
+// of itself (a \`toString\` of its own, say): \`large\` for a value too
+// large to show; anything cut or replaced noted as \`cut\`.
+const shown = (value, large) => {
   try {
-    return slice(toText(render(value)), 0, room);
+    const text = render(value);
+    if (text === tooLarge) {
+      cut = true;
+      return large;
+    }
+    const whole = toText(text);
+    if (whole.length > room) {
+      cut = true;
+      return slice(whole, 0, room);
+    }
+    return whole;
   } catch {
     return "(a value that can't be shown)";
   }
 };
+const show = (value) => shown(value, tooLargeText);
 
 // What the code returned, as JSON, a string too, so core reads back the
 // value it was (a string of JSON's text stays that string); a string
 // whose JSON passes room, cut until it fits: each round keeps the share
-// of it that room is of its JSON, always less, so it ends.
+// of it that room is of its JSON, always less, so it ends. A value too
+// large to show is none, cut.
 const returned = (value) => {
   if (typeof value !== "string") {
-    return show(value);
+    return shown(value, undefined);
   }
   let part = value;
   let json = stringify(part);
   while (json.length > room) {
+    cut = true;
     part = slice(part, 0, (part.length * room) / json.length);
     json = stringify(part);
   }
@@ -335,13 +354,18 @@ const delivered = async () => {
   }
 };
 const write = (...parts) => {
-  if (left > 0 && logCount < lines) {
+  if (left <= 0 || logCount >= lines) {
+    cut = true;
+  } else {
     let line = "";
     for (let index = 0; index < parts.length; index += 1) {
       const part = show(parts[index]);
       line = line === "" ? part : line + " " + part;
     }
-    line = slice(line, 0, left);
+    if (line.length > left) {
+      cut = true;
+      line = slice(line, 0, left);
+    }
     left -= line.length + 1;
     const quoted = stringify(line);
     logsJson = logCount === 0 ? quoted : logsJson + "," + quoted;
@@ -365,11 +389,12 @@ const outcome = (ok, loaded, field, text) => {
       '{"ok":' + (ok ? "true" : "false") +
       ',"loaded":' + (loaded ? "true" : "false") +
       ',"logs":[' + logsJson + "]" +
+      ',"cut":' + (cut ? "true" : "false") +
       (typeof text === "string" ? "," + stringify(field) + ":" + stringify(text) : "") +
       "}"
     );
   } catch {
-    return '{"ok":false,"loaded":' + (loaded ? "true" : "false") + ',"logs":[],"error":"(an outcome that could not be sent)"}';
+    return '{"ok":false,"loaded":' + (loaded ? "true" : "false") + ',"logs":[],"cut":true,"error":"(an outcome that could not be sent)"}';
   }
 };
 for (const level of ["log", "info", "warn", "error", "debug"]) {
@@ -523,6 +548,8 @@ const outcomeSchema = z
     /** Whether the code's function was there to call (`verify` found it). */
     loaded: z.boolean(),
     logs: logsSchema,
+    /** Whether the harness cut or replaced anything the run sent. */
+    cut: z.boolean(),
     result: z.string().max(room).optional(),
     error: z.string().max(room).optional(),
   })
@@ -534,6 +561,8 @@ export interface CodeRun {
   logs: string[];
   result?: string;
   error?: string;
+  /** Whether part of what it sent was cut or replaced before core read it. */
+  cut?: boolean;
 }
 
 /**
@@ -976,6 +1005,7 @@ export const runCode = async (
       return {
         status: "load_failed",
         logs: verified.logs,
+        cut: verified.cut,
         error: verified.error ?? exportNeeded,
       };
     }
@@ -1104,6 +1134,8 @@ export interface RunEnd {
   logs?: readonly string[];
   result?: string | undefined;
   error?: string | undefined;
+  /** Whether part of it was cut or replaced before (`CodeRun.cut`). */
+  cut?: boolean | undefined;
 }
 
 /** A result as the model reads it, by field (`describeRun`). */
@@ -1174,11 +1206,12 @@ const resultOf = ({
 
 /**
  * `whole` within `outputBytes` UTF-8 bytes, cut where it passes them,
- * and saying so (`cut`): its logs first, then what it returned (a value
- * cut becomes the start of its JSON text), within everything but its
+ * and saying so (`cut`): what it returned first (a value cut becomes the
+ * start of its JSON text), then its logs, within everything but its
  * error's share, at most `diagnosticBytes`, so a flood of logs never
- * hides how a run ended; then its error in what is left. Each part is
- * measured as JSON writes it, so the result is always whole JSON.
+ * hides what a run returned nor how it ended; then its error in what is
+ * left. Each part is measured as JSON writes it, so the result is always
+ * whole JSON.
  */
 const cutResult = (whole: RunResult): RunResult => {
   const { outputBytes, diagnosticBytes } = codeLimits;
@@ -1197,6 +1230,17 @@ const cutResult = (whole: RunResult): RunResult => {
   const errorShare =
     error === undefined ? 0 : Math.min(jsonBytes(error) - 2, diagnosticBytes);
   let left = outputBytes - frame - errorShare;
+  let returnedKept = returned;
+  if (returned !== undefined) {
+    if (jsonBytes(returned) - 2 > left) {
+      const start = cutForJson(
+        typeof returned === "string" ? returned : JSON.stringify(returned),
+        Math.max(left, 0) + 2
+      );
+      returnedKept = start === "" ? undefined : start;
+    }
+    left -= returnedKept === undefined ? 0 : jsonBytes(returnedKept) - 2;
+  }
   const logsKept: string[] = [];
   for (const line of logs) {
     // A line after the first takes its comma and its quotes too.
@@ -1206,19 +1250,10 @@ const cutResult = (whole: RunResult): RunResult => {
       if (left > extra) {
         logsKept.push(cutForJson(line, left - extra + 2));
       }
-      left = 0;
       break;
     }
     logsKept.push(line);
     left -= takes;
-  }
-  let returnedKept = returned;
-  if (returned !== undefined && jsonBytes(returned) - 2 > left) {
-    const start = cutForJson(
-      typeof returned === "string" ? returned : JSON.stringify(returned),
-      Math.max(left, 0) + 2
-    );
-    returnedKept = start === "" ? undefined : start;
   }
   const kept = resultOf({
     ...whole,
@@ -1233,6 +1268,25 @@ const cutResult = (whole: RunResult): RunResult => {
         ...kept,
         error: cutForJson(error, outputBytes - jsonBytes(kept) + 2),
       };
+};
+
+// The rule: a result that carries what a run read, from outside systems
+// above all, reaches the model as one JSON object (`describeRun`); only a
+// tool's text that read nothing from outside, such as a file's lines the
+// agent edits by, reaches it as that text (`describeText`).
+
+/**
+ * A tool's text that read nothing from outside, such as a file's lines,
+ * as the model reads it: itself, redacted, cut past {@link codeLimits}'
+ * `outputBytes` UTF-8 bytes with {@link cutMarker}, so the agent quotes it
+ * exactly as it is, unescaped.
+ */
+export const describeText = (text: string): string => {
+  const shown = redact(text);
+  const { outputBytes } = codeLimits;
+  return utf8Bytes(shown) <= outputBytes
+    ? shown
+    : `${cutToBytes(shown, outputBytes - utf8Bytes(cutMarker))}${cutMarker}`;
 };
 
 /**
@@ -1273,6 +1327,7 @@ export const describeRun = (
     ...(completed
       ? {}
       : { status, error: redact(run.error ?? "The run failed.") }),
+    ...(run.cut === true ? { cut: true as const } : {}),
   });
   const text = JSON.stringify(whole);
   return utf8Bytes(text) <= codeLimits.outputBytes

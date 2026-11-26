@@ -372,20 +372,53 @@ describe("chat agent sandbox", () => {
     );
 
     expect(result.status).toBe("completed");
-    expect(
-      readResult(result.text).logs?.[0]?.startsWith("\u0001".repeat(100))
-    ).toBeTruthy();
+    // What it returned comes first, cut to fit, and says so.
+    const { returned, cut } = readResult(result.text);
+    expect({
+      returned:
+        typeof returned === "string" &&
+        returned.startsWith("\u0001".repeat(100)),
+      cut,
+    }).toStrictEqual({ returned: true, cut: true });
   });
 
-  it("shows a value too large to read as such, without building it all", async () => {
+  it("says a value too large to read was cut, without building it all, and never passes a note off as its value", async () => {
     const result = await runStep(
       "export default async () => Array.from({ length: 1_000_000 }, (_, i) => ({ i }));"
     );
 
     expect(result).toStrictEqual({
       isError: false,
-      text: returnedText("(a value too large to show, over 65536 characters)"),
+      text: JSON.stringify({ cut: true }),
     });
+  });
+
+  it("says a string cut to fit was cut", async () => {
+    const result = await runStep(
+      "export default async () => 'y'.repeat(70_000);"
+    );
+    const { returned, cut } = readResult(result?.text);
+
+    expect({
+      start: typeof returned === "string" && /^y{40000,}$/u.test(returned),
+      cut,
+    }).toStrictEqual({ start: true, cut: true });
+  });
+
+  it.each([
+    [
+      "more lines than a run may log",
+      `export default async () => { for (let i = 0; i < ${codeLimits.logLines + 1}; i++) console.log(i); return "done"; };`,
+    ],
+    [
+      "more than the logs' room",
+      `export default async () => { console.log("x".repeat(${codeLimits.outputBytes + 1})); return "done"; };`,
+    ],
+  ])("says what it logged was cut when it logged %s", async (_, code) => {
+    const result = await runStep(code);
+    const { returned, cut } = readResult(result?.text);
+
+    expect({ returned, cut }).toStrictEqual({ returned: "done", cut: true });
   });
 
   it("gets APIs that stop answering once its run was cancelled", async () => {
@@ -532,7 +565,7 @@ describe("chat agent sandbox", () => {
     [
       "patched string and array methods",
       "String.prototype.slice = function () { return String(this); }; Array.prototype.push = function (...items) { for (const item of items) this[this.length] = item; return this.length; }; export default async () => { for (let i = 0; i < 5000; i++) console.log('x'.repeat(1000)); return 'y'.repeat(5_000_000); };",
-      /^\{"logs":\["x+/u,
+      /"returned":"y+","cut":true\}$/u,
     ],
     [
       "a value that makes itself huge text",

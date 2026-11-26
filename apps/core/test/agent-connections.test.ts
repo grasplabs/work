@@ -249,6 +249,8 @@ describe("a chat's connections", setUpTime, () => {
       failed: readResult(failed),
       cut: {
         readFrom: shown.readFrom,
+        // What it returned is kept whole, its logs cut.
+        returned: shown.returned,
         cut: shown.cut,
         logged: shown.logs?.every((line) => /^x+$/u.test(line)),
         bytes: utf8Bytes(cut ?? "") <= codeLimits.outputBytes,
@@ -260,6 +262,7 @@ describe("a chat's connections", setUpTime, () => {
       },
       cut: {
         readFrom: [`connection ${mail.id} (mail.search)`],
+        returned: { output: JSON.stringify(planted) },
         cut: true,
         logged: true,
         bytes: true,

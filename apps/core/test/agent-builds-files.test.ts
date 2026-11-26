@@ -28,7 +28,6 @@ import {
   toolResults,
   toolStep,
   turnChecks,
-  returnedText,
 } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
 import { agentWriting } from "./draft-writers.ts";
@@ -243,6 +242,45 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
   });
 
+  it("hands the agent a file's text as it is, quotes, backslashes and all, and edits it by that same text", async () => {
+    // Quotes, backslashes, a tab, accents and an emoji: what JSON escapes.
+    const text =
+      'const greeting = "Grüß dich 👋";\nconst path = "C:\\temp\\new";\nconst tab = "\t";\n';
+    const oldText = 'const path = "C:\\temp\\new";';
+    const newText = 'const path = "D:\\data\\ünï";';
+    const { builder, existing, chat } = await setUp((app) => [
+      toolStep("readFile", { app, path: "AGENTS.md" }),
+      says("Read."),
+      toolStep("readFile", { app, path: "notes.txt" }),
+      toolStep("editFile", { app, path: "notes.txt", oldText, newText }),
+      says("Edited."),
+    ]);
+    await chat.ask("Read the App's notes");
+    const draft = await readDraft(env, { kind: "app", id: existing });
+    await saveDraft(
+      env,
+      appKind,
+      appIdSchema.parse(existing),
+      { ...draft, base: 1 },
+      { changes: { "notes.txt": text }, unchanged: [] },
+      await agentWriting(builder, crypto.randomUUID())
+    );
+
+    await chat.ask("Fix the path");
+
+    const [, read, edited] = await toolResults(chat.stub, chat.chat.id);
+    const { changes } = await readDraft(env, { kind: "app", id: existing });
+    expect({
+      read: read?.text,
+      edited: [edited?.tool, edited?.isError],
+      saved: changes["notes.txt"],
+    }).toStrictEqual({
+      read: text,
+      edited: ["editFile", false],
+      saved: text.replace(oldText, newText),
+    });
+  });
+
   it("saves what it writes fixed and formatted, as Ultracite would, and reports what is left by file", async () => {
     // Formatted as oxfmt formats it, a `var` that never changes is a
     // `const` and a body that only returns is the arrow's: each fixes
@@ -286,9 +324,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       read: read?.text,
     }).toStrictEqual({
       written: [{ line: 3, rule: "eqeqeq" }],
-      read: returnedText(
-        "const rate = 2;\nexport const total = (n: number) => n * rate;\nexport const same = (a: number, b: number) => a == b;\n"
-      ),
+      read: "const rate = 2;\nexport const total = (n: number) => n * rate;\nexport const same = (a: number, b: number) => a == b;\n",
     });
   });
 
@@ -312,12 +348,8 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
     const [, first, last] = await toolResults(chat.stub, chat.chat.id);
     expect([first?.text, last?.text]).toStrictEqual([
-      returnedText(
-        `const rate0 = 0;\nexport const total0 = (n: number) => n * rate0;\n${lines(0)}\n`
-      ),
-      returnedText(
-        `const rate49 = 49;\nexport const total49 = (n: number) => n * rate49;\n${lines(49)}\n`
-      ),
+      `const rate0 = 0;\nexport const total0 = (n: number) => n * rate0;\n${lines(0)}\n`,
+      `const rate49 = 49;\nexport const total49 = (n: number) => n * rate49;\n${lines(49)}\n`,
     ]);
   });
 
@@ -349,10 +381,8 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
     const [, stopped, tidied] = await toolResults(chat.stub, chat.chat.id);
     expect([stopped?.text, tidied?.text]).toStrictEqual([
-      returnedText(rates(0)),
-      returnedText(
-        "const rate3 = 3;\nexport const total3 = (n: number) => n * rate3;\n"
-      ),
+      rates(0),
+      "const rate3 = 3;\nexport const total3 = (n: number) => n * rate3;\n",
     ]);
   });
 
@@ -401,10 +431,8 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         ],
       },
       capped: [100, 5, "many.md:1:an alpha line"],
-      whole: returnedText("Alpha\nbeta\nalphabet"),
-      end: returnedText(
-        "an alpha line\nan alpha line\n\n[Lines 104 to 105 of 105. That is the end of the file.]"
-      ),
+      whole: "Alpha\nbeta\nalphabet",
+      end: "an alpha line\nan alpha line\n\n[Lines 104 to 105 of 105. That is the end of the file.]",
     });
   });
 
