@@ -1,5 +1,14 @@
 import { interviewerNames } from "@grasp-os/shared/onboarding";
 import { Button } from "@grasp-os/ui/components/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@grasp-os/ui/components/dialog";
 import { Text } from "@grasp-os/ui/components/text";
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { focusRing, visuallyHidden } from "@grasp-os/ui/lib/styles";
@@ -62,6 +71,35 @@ const lifts = stylex.create({
 });
 
 const styles = stylex.create({
+  // The rating's room on the page: whole until their words are sent and
+  // thanked for, then it folds shut (and takes the page's gap above it with
+  // it), so nothing jumps when it goes.
+  fold: {
+    display: "grid",
+    gridTemplateRows: "1fr",
+    width: "100%",
+    transitionProperty: {
+      default: "grid-template-rows, margin-block-start, opacity, transform",
+      [media.reducedMotion]: "none",
+    },
+    transitionDuration: "480ms",
+    transitionTimingFunction: duration.ease,
+  },
+  folded: {
+    gridTemplateRows: "0fr",
+    marginBlockStart: `calc(-1 * ${space["8"]})`,
+    opacity: 0,
+    transform: "scale(0.96)",
+  },
+  folding: { minHeight: 0, overflow: "hidden" },
+  open: { minHeight: 0 },
+  // The face they chose, at the top of the thanks.
+  thanksFace: {
+    display: "block",
+    width: "5rem",
+    height: "5rem",
+    marginBlockEnd: space["2"],
+  },
   rating: {
     position: "relative",
     display: "flex",
@@ -384,9 +422,26 @@ export const Rating = ({
     middling: t`What would have made it better?`,
     bad: t`What went wrong? Every word helps.`,
   });
+  // Their words sent: thanks in a dialog, then the faces fold away. Sent
+  // before this screen came, there is nothing left to ask.
+  const [stage, setStage] = useState<"asking" | "thanked" | "leaving" | "gone">(
+    feedback === undefined ? "asking" : "gone"
+  );
+  const leaving = stage === "leaving";
   const send = (): void => {
     onFeedback(draft);
     setWriting(false);
+    if (draft.trim() !== "") {
+      setStage("thanked");
+    }
+  };
+  const fold = (): void => {
+    // With reduced motion nothing moves, so nothing ends: gone at once.
+    setStage(
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "gone"
+        : "leaving"
+    );
   };
   let heading = question;
   if (value !== undefined) {
@@ -399,93 +454,138 @@ export const Rating = ({
   const chosenFace = value === undefined ? undefined : faces[value - 1];
   const namedFace =
     named === undefined || named === null ? undefined : faces[named - 1];
+  const thanks = (
+    <Dialog
+      onOpenChange={(opened) => {
+        if (!opened) {
+          fold();
+        }
+      }}
+      open={stage === "thanked"}
+    >
+      <DialogContent>
+        <DialogHeader>
+          {chosenFace === undefined ? null : (
+            <span {...stylex.props(styles.thanksFace)}>
+              <Face chosen dim={false} lit mood={chosenFace.mood} />
+            </span>
+          )}
+          <DialogTitle>{t`Thank you for telling me.`}</DialogTitle>
+          <DialogDescription>
+            {t`Every word helps ${who} get better at this.`}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <DialogClose variant="default">{t`Continue`}</DialogClose>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+  if (stage === "gone") {
+    return null;
+  }
   return (
-    <fieldset {...stylex.props(styles.rating)}>
-      <legend {...stylex.props(visuallyHidden)}>{question}</legend>
-      <Text aria-live="polite" as="span" color="muted">
-        {heading}
-      </Text>
-      <span {...stylex.props(styles.faces)}>
-        {faces.map(({ mood }, at) => {
-          const rating = at + 1;
-          const chosen = value === rating;
-          const under = over === rating;
-          return (
-            <button
-              aria-label={names[at]}
-              aria-pressed={chosen}
-              key={mood}
-              onBlur={() => {
-                setOver(null);
-              }}
-              onClick={() => {
-                onRate(rating);
-                setWriting(true);
-              }}
-              onFocus={() => {
-                setOver(rating);
-              }}
-              onPointerEnter={() => {
-                setOver(rating);
-              }}
-              onPointerLeave={() => {
-                setOver(null);
-              }}
-              type="button"
-              {...stylex.props(
-                styles.face,
-                lifts.lift,
-                focusRing,
-                value !== undefined && !chosen && styles.other,
-                chosen && styles.chosen
-              )}
-            >
-              <Face
-                chosen={chosen}
-                dim={value !== undefined && !chosen && !under}
-                lit={chosen || under}
-                mood={mood}
-              />
-            </button>
-          );
-        })}
-      </span>
-      <span aria-hidden="true" {...stylex.props(styles.name, namedFace?.name)}>
-        {named === undefined || named === null ? "" : names[named - 1]}
-      </span>
-      {chosenFace !== undefined && writing ? (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            send();
-          }}
-          {...stylex.props(styles.card)}
-        >
+    <div
+      onTransitionEnd={(event) => {
+        if (leaving && event.target === event.currentTarget) {
+          setStage("gone");
+        }
+      }}
+      {...stylex.props(styles.fold, leaving && styles.folded)}
+    >
+      {thanks}
+      <div {...stylex.props(leaving ? styles.folding : styles.open)}>
+        <fieldset {...stylex.props(styles.rating)}>
+          <legend {...stylex.props(visuallyHidden)}>{question}</legend>
+          <Text aria-live="polite" as="span" color="muted">
+            {heading}
+          </Text>
+          <span {...stylex.props(styles.faces)}>
+            {faces.map(({ mood }, at) => {
+              const rating = at + 1;
+              const chosen = value === rating;
+              const under = over === rating;
+              return (
+                <button
+                  aria-label={names[at]}
+                  aria-pressed={chosen}
+                  key={mood}
+                  onBlur={() => {
+                    setOver(null);
+                  }}
+                  onClick={() => {
+                    onRate(rating);
+                    setWriting(true);
+                  }}
+                  onFocus={() => {
+                    setOver(rating);
+                  }}
+                  onPointerEnter={() => {
+                    setOver(rating);
+                  }}
+                  onPointerLeave={() => {
+                    setOver(null);
+                  }}
+                  type="button"
+                  {...stylex.props(
+                    styles.face,
+                    lifts.lift,
+                    focusRing,
+                    value !== undefined && !chosen && styles.other,
+                    chosen && styles.chosen
+                  )}
+                >
+                  <Face
+                    chosen={chosen}
+                    dim={value !== undefined && !chosen && !under}
+                    lit={chosen || under}
+                    mood={mood}
+                  />
+                </button>
+              );
+            })}
+          </span>
           <span
             aria-hidden="true"
-            {...stylex.props(styles.point, chosenFace.point)}
-          />
-          <label htmlFor={box} {...stylex.props(visuallyHidden)}>
-            {asks}
-          </label>
-          <span {...stylex.props(styles.backing)}>
-            <Textarea
-              id={box}
-              onValueChange={(next) => {
-                setDraft(next);
-              }}
-              placeholder={asks}
-              ref={field}
-              rows={3}
-              submitShortcut="enter"
-              value={draft}
-            />
+            {...stylex.props(styles.name, namedFace?.name)}
+          >
+            {named === undefined || named === null ? "" : names[named - 1]}
           </span>
-          <Button size="sm" style={styles.send} type="submit">
-            {t`Send`}
-          </Button>
-        </form>
-      ) : null}
-    </fieldset>
+          {chosenFace !== undefined && writing ? (
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                send();
+              }}
+              {...stylex.props(styles.card)}
+            >
+              <span
+                aria-hidden="true"
+                {...stylex.props(styles.point, chosenFace.point)}
+              />
+              <label htmlFor={box} {...stylex.props(visuallyHidden)}>
+                {asks}
+              </label>
+              <span {...stylex.props(styles.backing)}>
+                <Textarea
+                  id={box}
+                  onValueChange={(next) => {
+                    setDraft(next);
+                  }}
+                  placeholder={asks}
+                  ref={field}
+                  rows={3}
+                  submitShortcut="enter"
+                  value={draft}
+                />
+              </span>
+              <Button size="sm" style={styles.send} type="submit">
+                {t`Send`}
+              </Button>
+            </form>
+          ) : null}
+        </fieldset>
+      </div>
+    </div>
   );
 };

@@ -1,7 +1,7 @@
 import { Button } from "@grasp-os/ui/components/button";
 import { Heading } from "@grasp-os/ui/components/heading";
 import { Text } from "@grasp-os/ui/components/text";
-import { visuallyHidden } from "@grasp-os/ui/lib/styles";
+import { fadeIn, visuallyHidden } from "@grasp-os/ui/lib/styles";
 import { duration, media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -16,7 +16,7 @@ import { micProblem } from "./mic.ts";
 import { partAt, withLineText, withoutLine } from "./progress.ts";
 import { ReadBack, ReadBackFoot } from "./read-back-story.tsx";
 import { say, stopSpeaking, useSaidOf } from "./speech.ts";
-import { shownAs, wordsOf } from "./spoken.tsx";
+import { questionOf, shownAs, wordsOf } from "./spoken.tsx";
 import { Transcript } from "./transcript.tsx";
 import { useInterviewWords } from "./words.ts";
 
@@ -181,21 +181,47 @@ const SaidLine = ({ line, said }: { line: string; said: number }) => {
   );
 };
 
-/** The stage while they talk: his line as he says it; the minutes left stand in the header (page.tsx). */
+/** His question alone, as the screen shows it while he talks around it: whole at once, fading in. */
+const AskedLine = ({ question }: { question: string }) => (
+  <div {...stylex.props(fadeIn)}>
+    <Heading level={1} size="xl">
+      <Streamed said={-1} text={question} />
+    </Heading>
+  </div>
+);
+
+/**
+ * The stage while they talk; the minutes left stand in the header
+ * (page.tsx). Out loud he talks as people do, taking up what they said
+ * before he asks; the screen shows only the question, in one plain
+ * sentence, so voice and screen are two things that belong together, not
+ * the same words twice. Until the question is there, nothing new stands:
+ * no words that are taken away again. A line that asks nothing is shown as
+ * he says it. Typing, nothing is heard: the screen shows all he says.
+ */
 const Asking = () => {
   const loop = useLoop();
+  const { mode } = useProgress();
   const saidOf = useSaidOf(loop.line);
   // While he says it, its words come one by one; once said, or waiting, they all stand.
   const said = loop.doing === "speaking" ? Math.max(loop.from, saidOf, 0) : -1;
+  const heard = mode === "talk";
+  const asked = heard ? questionOf(loop.line) : null;
+  let shown: ReactNode = null;
+  if (asked !== null) {
+    shown = <AskedLine key={asked.question} question={asked.question} />;
+  } else if (!heard || loop.doing !== "speaking") {
+    shown = <SaidLine line={loop.line} said={said} />;
+  }
   return (
     <div {...stylex.props(styles.question)}>
-      {loop.line === "" ? null : (
+      {loop.line === "" || shown === null ? null : (
         <div
           aria-live="polite"
           key={loop.saying}
           {...stylex.props(styles.question)}
         >
-          <SaidLine line={loop.line} said={said} />
+          {shown}
         </div>
       )}
     </div>

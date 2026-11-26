@@ -147,7 +147,6 @@ const styles = stylex.create({
     transitionTimingFunction: duration.ease,
   },
   lit: { backgroundColor: colors.accent },
-  partOf: { display: { default: "inline", [media.maxSm]: "none" } },
   // When they said it, over their words: the transcript's own time.
   when: {
     display: "block",
@@ -766,24 +765,21 @@ export const ReadBack = () => {
 };
 
 /**
- * The read-back's foot, the setup's own (StepFoot): which part of how many
- * at its start, with the line along the edge, and at its end agreeing to
- * the part, its main way on, and changing something before it, which
- * brings the box back to say what.
+ * The read-back's foot, the setup's own (StepFoot): at its end agreeing to
+ * the summary, its main way on, and changing something before it, which
+ * brings the box back to say what. One summary, so no count of parts.
  */
 export const ReadBackFoot = ({ onChange }: { onChange: () => void }) => {
   const { t } = useLingui();
   const loop = useLoop();
   const progress = useProgress();
-  const { parts, at, part } = partAt(progress);
+  const { part } = partAt(progress);
   const left = part?.facts.filter(({ out }) => out !== true) ?? [];
   const out = part?.facts.filter(({ out: taken }) => taken === true) ?? [];
   const agree = useAgree(left.length, out.length);
   if (part === undefined) {
     return null;
   }
-  const n = at + 1;
-  const count = parts.length;
   return (
     <StepFoot
       end={
@@ -802,18 +798,8 @@ export const ReadBackFoot = ({ onChange }: { onChange: () => void }) => {
           </Button>
         </>
       }
-      label={t`Parts`}
-      // The part they are in counts as under way, so the line shows from the first.
-      share={n / count}
-      start={
-        // On a phone the line along the edge says how far along alone, as
-        // the setup's foot does: the words would run under the buttons.
-        <span {...stylex.props(styles.partOf)}>
-          <Text as="span" color="muted" size="sm">
-            {t`Part ${n} of ${count}`}
-          </Text>
-        </span>
-      }
+      label={t`Summary`}
+      start={null}
     />
   );
 };
