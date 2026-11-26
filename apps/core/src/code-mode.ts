@@ -1,4 +1,4 @@
-import piAgentCore from "@earendil-works/pi-agent-core/package.json" with { type: "json" };
+import piDurable from "@earendil-works/pi-durable/package.json" with { type: "json" };
 import { agentErrors } from "@grasp-os/shared/agent";
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
@@ -77,6 +77,18 @@ export const codeLimits = {
 } as const;
 
 /**
+ * pi's bound on a chat tool's result (`outputLimits`): every tool bounds
+ * its own result to a run's output budget, saying where it cut, so pi's
+ * is that same budget in bytes and none in lines (its own default is
+ * 50 KB and 2,000 lines). A result is never cut twice, nor shorter than
+ * its tool kept it.
+ */
+export const resultLimits = {
+  maxBytes: codeLimits.outputBytes,
+  maxLines: Number.POSITIVE_INFINITY,
+} as const;
+
+/**
  * What a run ran on, kept with its record (`chat_code_runs`): the agent
  * loop's exact version (pi-ai is pinned to the same one in the catalog,
  * and exports no version of its own to read), the runtime's compatibility
@@ -94,7 +106,7 @@ export const codeRuntime = (
 ) => {
   const cloudflare = env.RUNTIME_PROFILE === "cloudflare";
   return {
-    agent: `${piAgentCore.name}@${piAgentCore.version}`,
+    agent: `${piDurable.name}@${piDurable.version}`,
     compatibilityDate,
     runtime: cloudflare ? ("cloudflare" as const) : ("workerd" as const),
     // On-prem, the sandbox supervisor ends a run past its CPU time.

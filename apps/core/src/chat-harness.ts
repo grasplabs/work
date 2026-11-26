@@ -22,13 +22,13 @@ import type {
   EntryRecord,
   JsonObject,
   Registry,
+  SessionEnd,
   SettledSubmissionRecord,
   Storage,
   Submission,
   SubmissionRecord,
   Wake,
 } from "@earendil-works/pi-durable";
-import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
 import { agentErrors } from "@grasp-os/shared/agent";
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import type { ChatMake } from "@grasp-os/shared/chat";
@@ -99,6 +99,22 @@ import { recallForTurn, turnRecallTool } from "./turn-recall.ts";
 // (`rebase` in chat-agent.ts) before its next turn, and after a turn the
 // guard stopped for it.
 
+/**
+ * What a chat's Harness needs of where it runs, and nothing else: on
+ * Cloudflare its Durable Object (chat-session.ts), the one host there is.
+ */
+export interface ChatHost {
+  /** Opens the storage pi keeps the chat in, again for each open. */
+  storage: () => Promise<Storage>;
+  /**
+   * Wakes the host when `wake` says, to `resume`: pi's `onWake`, and the
+   * Harness's own retry of a sync that failed (`ChatHarness.wake`).
+   */
+  arm: (wake: Wake) => void;
+  /** Keeps the host up until `work` settles: work no call waits on. */
+  waitUntil: (work: Promise<unknown>) => void;
+}
+
 /** One question of a chat, as its Workspace hands it over. */
 export interface TurnRequest {
   /** The turn's ID: the request ID of its input, so a retry finds it. */
@@ -164,7 +180,12 @@ export type TurnCapture = {
 } & Pick<TurnRequest["capture"], "attended">;
 
 /** Why a turn stopped before it answered, when no model said so. */
-export type TurnStop = "history_revoked" | "person_inactive" | "unreadable";
+export type TurnStop =
+  | "history_revoked"
+  | "person_inactive"
+  | "unreadable"
+  | "overdue"
+  | "lost";
 
 /** How a turn ended, as its Workspace reads it. */
 export interface TurnEnd {
@@ -214,6 +235,26 @@ const wordsPlease =
 const syncRetryMs = 15_000;
 
 /**
+ * Most a turn pi runs may go without pi committing anything (a word, a
+ * step, a result) before it is stopped as overdue (`#watchdog`): past the
+ * gateway's 15 minutes for one request, which streams as it goes, and any
+ * code run's limit. A turn that keeps going is never stopped for it.
+ */
+const turnIdleMs = 20 * 60_000;
+
+/** Most a turn may run however it goes: a turn calling tools without end. */
+const turnMostMs = 4 * 60 * 60_000;
+
+/**
+ * `turnIdleMs`, or less where tests set `CHAT_TURN_IDLE_MS`; never set in
+ * wrangler.jsonc.
+ */
+const turnIdleOf = (env: Pick<Env, "CHAT_TURN_IDLE_MS">): number => {
+  const set = Number(env.CHAT_TURN_IDLE_MS);
+  return Number.isInteger(set) && set > 0 ? set : turnIdleMs;
+};
+
+/**
  * The chat's turn: the one record of it, under way or the last. Written
  * as the turn is claimed (`#take`), before anything else of it, so a turn
  * this object holds no record of never ran; settled once (`#settle`), its
@@ -228,6 +269,8 @@ interface TurnRecord extends JsonObject {
   ended: boolean;
   answerId: number | null;
   captureOwed: boolean;
+  /** When the turn was claimed: none in a record an earlier release wrote. */
+  startedAt: number | null;
 }
 
 const TurnDoc = defineDoc<TurnRecord>({
@@ -239,6 +282,7 @@ const TurnDoc = defineDoc<TurnRecord>({
     ended: true,
     answerId: null,
     captureOwed: false,
+    startedAt: null,
   }),
   checkpointWhen: () => true,
 });
@@ -577,7 +621,9 @@ const stopOf = (error: Error): TurnStop =>
 
 /** One chat's Harness, opened on its object's storage. */
 export class ChatHarness {
-  readonly #ctx: DurableObjectState;
+  readonly #host: ChatHost;
+  /** Its host's name for it, in what it logs. */
+  readonly #name: string;
   readonly #env: Env;
   readonly #storage: Storage;
   readonly #harness: Harness;
@@ -613,6 +659,8 @@ export class ChatHarness {
   #answering: string | undefined;
   /** Whether pi runs the agent now (`pi.live.run`). */
   #running = false;
+  /** When pi last committed anything: what `#watchdog` measures from. */
+  #progressAt = Date.now();
   /** The answer streaming in, as `pi.live` has it now. */
   #partial: AssistantMessage | null = null;
   /** What the turn's model request waits on now, as the gateway says. */
@@ -643,43 +691,38 @@ export class ChatHarness {
    * busy, so the object's alarm wakes it to sync again (`wake`).
    */
   #behind = false;
-  /** Arms the object's alarm for what `wake` says. */
-  readonly #onWake: (wake: Wake) => void;
 
   constructor(
-    ctx: DurableObjectState,
+    host: ChatHost,
+    name: string,
     env: Env,
     storage: Storage,
     harness: Harness,
     conversation: Conversation,
     registry: Registry,
-    pi: MutableModels,
-    onWake: (wake: Wake) => void
+    pi: MutableModels
   ) {
-    this.#ctx = ctx;
+    this.#host = host;
+    this.#name = name;
     this.#env = env;
     this.#storage = storage;
     this.#harness = harness;
     this.#conversation = conversation;
     this.#registry = registry;
     this.#models = pi;
-    this.#onWake = onWake;
   }
 
   /**
-   * Opens the chat's Harness on its object's SQLite, in the EU as the
-   * object is. `onWake` arms the object's alarm. Nothing runs yet: the
-   * object sets up the turn under way, if any (`setUpStored`), then
-   * resumes it (`resume`).
+   * Opens the chat's Harness on its host's storage (`ChatHost`), `name`
+   * its host's name for it. Nothing runs yet: the host sets up the turn
+   * under way, if any (`setUpStored`), then resumes it (`resume`).
    */
   static async open(
-    ctx: DurableObjectState,
-    env: Env,
-    onWake: (wake: Wake) => void
+    host: ChatHost,
+    name: string,
+    env: Env
   ): Promise<ChatHarness> {
-    const storage = await openDurableObjectSqliteStorage(ctx.storage, {
-      prefix: "pi_",
-    });
+    const storage = await host.storage();
     const registry = createRegistry();
     const pi = createModels();
     const harness = await Harness.open(
@@ -698,13 +741,13 @@ export class ChatHarness {
           ...restartLimitOf(env),
         }),
         identity: { attribution: null },
-        onWake,
+        onWake: host.arm,
         // Said once, as the open that parks a task: what the object does
         // of it reads pi's state (`setUpStored`), at every open.
         onReport: (error, info) => {
           if (info.type === "task_parked") {
             log.warn("chat.task_parked", {
-              chatSession: ctx.id.name,
+              chatSession: name,
               task: info.task.kind,
               ...errorFields(error),
             });
@@ -715,14 +758,14 @@ export class ChatHarness {
     );
     const conversation = await harness.root(context);
     const opened = new ChatHarness(
-      ctx,
+      host,
+      name,
       env,
       storage,
       harness,
       conversation,
       registry,
-      pi,
-      onWake
+      pi
     );
     // The one watch of pi: called at once with the view as it is, then at
     // each commit. Whatever the Workspace was last told, and whatever a
@@ -741,6 +784,7 @@ export class ChatHarness {
    * date with it, in order.
    */
   #see(value: ConversationView): void {
+    this.#progressAt = Date.now();
     const live = liveSchema.safeParse(value.docs["pi.live"] ?? {});
     const partial = live.success
       ? (live.data.generation?.message ?? null)
@@ -1081,6 +1125,7 @@ export class ChatHarness {
       turn.ended = false;
       turn.answerId = null;
       turn.captureOwed = false;
+      turn.startedAt = Date.now();
     }, context);
     this.#answering = undefined;
     const turn = await this.#setUp(request);
@@ -1195,11 +1240,26 @@ export class ChatHarness {
    * the next question rebases (`#submit`), the guard holding every request
    * meanwhile. A rebase can take longer than an object may block. A
    * parked task is read from pi's state, as an earlier open may have
-   * parked it and reset before it ended the turn.
+   * parked it and reset before it ended the turn. With `lost`, the host
+   * gave the turn up while pi couldn't open, and its Workspace showed it
+   * failed: it is stopped and settled here, so the next question is taken.
    */
-  async setUpStored(): Promise<void> {
+  async setUpStored(lost = false): Promise<void> {
     const turn = await this.#harness.snapshot(TurnDoc, context);
     const request = turn === undefined ? undefined : requestOf(turn);
+    if (lost && turn?.ended === false && request !== undefined) {
+      this.#stopped = "lost";
+      if (this.#running) {
+        await this.#conversation.abort(context);
+      }
+      this.#active = request.turnId;
+      await this.#settle(request.turnId, {
+        outcome: "failed",
+        answer: "",
+        stopped: "lost",
+      });
+      return;
+    }
     // The turn its record holds unsettled: the chat takes no other first.
     if (turn?.ended === false) {
       this.#active = request?.turnId;
@@ -1237,12 +1297,56 @@ export class ChatHarness {
     return this.#active;
   }
 
-  /** Goes on with what pi left pending, and with what sleeps till now. */
+  /**
+   * Goes on with what pi left pending, and with what sleeps till now; and
+   * stops the turn under way if it is overdue (`#watchdog`), which the
+   * alarm's heartbeat checks while a turn runs.
+   */
   resume(): void {
     this.#harness.resume();
     // An alarm armed for a sync that failed (`wake`) tries it again.
     if (this.#behind) {
       this.#syncSoon();
+    }
+    this.#host.waitUntil(this.#watchdog());
+  }
+
+  /**
+   * Stops the turn under way once pi has committed nothing for
+   * `turnIdleMs`, or it has run `turnMostMs`: it ends as overdue, as a
+   * turn its guard stopped ends, rather than keeping its chat busy without
+   * end. A turn waiting on a person isn't running: its holds end the turn.
+   */
+  async #watchdog(): Promise<void> {
+    try {
+      const turn = await this.#harness.snapshot(TurnDoc, context);
+      // Only while pi runs it: a turn that answered and waits only for its
+      // copy to reach the Workspace is never stopped.
+      if (
+        turn === undefined ||
+        turn.ended ||
+        !this.#running ||
+        requestOf(turn)?.turnId !== this.#active ||
+        (Date.now() - this.#progressAt < turnIdleOf(this.#env) &&
+          // A turn an earlier release claimed says nothing of its start:
+          // only the idle limit holds for it.
+          (typeof turn.startedAt !== "number" ||
+            Date.now() - turn.startedAt < turnMostMs))
+      ) {
+        return;
+      }
+      log.warn("chat.turn_overdue", {
+        chatSession: this.#name,
+        turnId: requestOf(turn)?.turnId,
+        ms:
+          typeof turn.startedAt === "number"
+            ? Date.now() - turn.startedAt
+            : undefined,
+        idleMs: Date.now() - this.#progressAt,
+      });
+      this.#stop("overdue");
+    } catch {
+      // pi closed: the turn is checked again as it opens.
     }
   }
 
@@ -1299,6 +1403,23 @@ export class ChatHarness {
     await this.#harness.close(context);
   }
 
+  /**
+   * Settles once pi has closed, its storage included: after `close`, or
+   * after its first failed storage call, which fails it for good. pi
+   * retries nothing: the host opens it again.
+   */
+  get closed(): Promise<SessionEnd> {
+    return this.#harness.closed;
+  }
+
+  /**
+   * Calls `listener` at once as pi begins to close, by `close` or by a
+   * failed storage call: no call should reach it from then on.
+   */
+  onClose(listener: () => void): void {
+    this.#harness.subscribeClose(listener);
+  }
+
   /** The chat's newest entry, read on pi's line. */
   async #newest(): Promise<EntryRecord | undefined> {
     const page = await this.#conversation.entries(
@@ -1311,7 +1432,7 @@ export class ChatHarness {
   }
 
   /** The chat's Workspace. */
-  #host(scope: TurnRequest["scope"]) {
+  #workspace(scope: TurnRequest["scope"]) {
     return workspace(this.#env, scope.workspaceId);
   }
 
@@ -1322,14 +1443,14 @@ export class ChatHarness {
    */
   async #guard(scope: TurnRequest["scope"]) {
     return await callObject(
-      async () => await this.#host(scope).turnGuard(scope.chatId)
+      async () => await this.#workspace(scope).turnGuard(scope.chatId)
     );
   }
 
   /** Stops the turn under way for `reason`. */
   #stop(reason: TurnStop): void {
     this.#stopped ??= reason;
-    this.#ctx.waitUntil(this.#conversation.abort(context));
+    this.#host.waitUntil(this.#conversation.abort(context));
   }
 
   /**
@@ -1342,7 +1463,7 @@ export class ChatHarness {
     // A stub a call, never one kept for the turn: a stub to a Workspace
     // that restarted mid-turn stays broken, its calls failing or never
     // answering, where a new one reaches the Workspace as it is now.
-    const host = () => this.#host(scope);
+    const host = () => this.#workspace(scope);
     const authority = chatAuthority(scope);
     const guard = await this.#guard(scope);
     if (guard.stop !== undefined) {
@@ -1411,7 +1532,7 @@ export class ChatHarness {
             }
             await host().codeRunOutput(scope.chatId, runId, callId, line);
           })();
-          this.#ctx.waitUntil(logged);
+          this.#host.waitUntil(logged);
         },
       },
       loader: quietLoader(env.LOADER),
@@ -1556,19 +1677,24 @@ export class ChatHarness {
       }
     })();
     this.#syncing = syncing;
-    this.#ctx.waitUntil(
+    this.#host.waitUntil(
       (async () => {
         try {
           await syncing;
           this.#behind = false;
         } catch (error) {
           log.warn("chat.sync_failed", {
-            chatSession: this.#ctx.id.name,
+            chatSession: this.#name,
+            turnId: this.#active,
             ...errorFields(error),
           });
           // Woken soon to sync again, even with nothing else to do.
           this.#behind = true;
-          this.#onWake(this.wake());
+          try {
+            this.#host.arm(this.wake());
+          } catch {
+            // pi failed: its host opens it again, which syncs as it opens.
+          }
         }
       })()
     );
@@ -1608,14 +1734,14 @@ export class ChatHarness {
     const partial = this.#partial;
     if (partial !== this.#told.partial) {
       await callObject(async () => {
-        await this.#host(scope).showPartial(scope.chatId, partial);
+        await this.#workspace(scope).showPartial(scope.chatId, partial);
       });
       this.#told.partial = partial;
     }
     const waiting = this.#waiting;
     if (waiting !== this.#told.waiting) {
       await callObject(async () => {
-        await this.#host(scope).turnWaiting(scope.chatId, waiting);
+        await this.#workspace(scope).turnWaiting(scope.chatId, waiting);
       });
       this.#told.waiting = waiting;
     }
@@ -1634,7 +1760,7 @@ export class ChatHarness {
     );
     if (running !== this.#told.running) {
       await callObject(async () => {
-        await this.#host(scope).turnRunning(scope.chatId, running);
+        await this.#workspace(scope).turnRunning(scope.chatId, running);
       });
       this.#told.running = running;
     }
@@ -1683,7 +1809,7 @@ export class ChatHarness {
       return;
     }
     await callObject(async () => {
-      await this.#host(scope).captureTurn(scope.chatId, owed);
+      await this.#workspace(scope).captureTurn(scope.chatId, owed);
     });
     await this.#conversation.commit(async (tx) => {
       await tx.retireDoc(CaptureDoc, key);
@@ -1763,7 +1889,7 @@ export class ChatHarness {
         ? undefined
         : await callObject(
             async () =>
-              await this.#host(scope).keepTurnMessages(scope.chatId, shown)
+              await this.#workspace(scope).keepTurnMessages(scope.chatId, shown)
           );
     const through = last;
     await this.#conversation.commit(async (tx) => {

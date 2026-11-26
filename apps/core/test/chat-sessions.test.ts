@@ -532,6 +532,426 @@ describe("a chat's ChatSession", () => {
     }
   });
 
+  it("answers once however often its alarm fires while a turn runs", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId);
+    const held = pausedReply(says("Once."), 1);
+    const provider = await fakeProviderFor([model], held.reply);
+    const { session, request } = sessionOf(asking, userId);
+    try {
+      const asked = session().run(request("turn-a", "Once?"));
+      await vi.waitFor(
+        () => {
+          expect(provider.requests).toHaveLength(1);
+        },
+        { timeout: 10_000 }
+      );
+      // Early and twice: each re-arms the heartbeat the next one runs.
+      const fired = [
+        await runDurableObjectAlarm(session()),
+        await runDurableObjectAlarm(session()),
+      ];
+      held.release();
+      const { answer } = await asked;
+      expect({
+        fired,
+        answer,
+        requests: provider.requests.length,
+        kept: await keptOf(asking.stub, asking.chat.id),
+      }).toStrictEqual({
+        fired: [true, true],
+        answer: "Once.",
+        requests: 1,
+        kept: ["user", "assistant:toolUse", "toolResult", "assistant:stop"],
+      });
+    } finally {
+      held.release();
+    }
+  });
+
+  it("opens pi again when its storage fails under a turn, and the turn answers, its caller none the wiser", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId);
+    const provider = await fakeProviderFor(
+      [model],
+      says("Never stored."),
+      says("Stored.")
+    );
+    const { session, request } = sessionOf(asking, userId);
+    // pi's tables, then a fault in them: the storage refuses the first
+    // answer's entry, which fails pi as a storage error does.
+    await session().activeTurn();
+    await runInDurableObject(session(), (_instance, state) => {
+      state.storage.sql.exec(
+        `CREATE TRIGGER test_fault BEFORE INSERT ON pi_entries WHEN NEW.record LIKE '%Never stored.%' AND NEW.record LIKE '%"stopReason":"stop"%' BEGIN SELECT RAISE(ABORT, 'Refused by the test'); END`
+      );
+    });
+    const end = await session().run(request("turn-a", "Stored?"));
+    expect({
+      outcome: end.outcome,
+      answer: end.answer,
+      requests: provider.requests.length,
+      // Open still: the next call needs no restart.
+      next: await session().activeTurn(),
+    }).toStrictEqual({
+      outcome: "answered",
+      answer: "Stored.",
+      requests: 2,
+      next: undefined,
+    });
+  });
+
+  it("opens pi again each time its storage fails under a turn, also after an open that worked", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId);
+    const provider = await fakeProviderFor(
+      [model],
+      says("Never stored."),
+      says("Never stored either."),
+      says("Stored.")
+    );
+    const { session, request } = sessionOf(asking, userId);
+    await session().activeTurn();
+    await runInDurableObject(session(), (_instance, state) => {
+      state.storage.sql.exec(
+        `CREATE TRIGGER test_fault BEFORE INSERT ON pi_entries WHEN NEW.record LIKE '%Never stored%' AND NEW.record LIKE '%"stopReason":"stop"%' BEGIN SELECT RAISE(ABORT, 'Refused by the test'); END`
+      );
+    });
+    const end = await session().run(request("turn-a", "Stored?"));
+    expect({
+      answer: end.answer,
+      requests: provider.requests.length,
+    }).toStrictEqual({ answer: "Stored.", requests: 3 });
+  });
+
+  it("stops sending a turn's requests again once its storage keeps failing after opens that work, and ends the turn", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId);
+    const provider = await fakeProviderFor(
+      [model],
+      ...Array.from({ length: 10 }, () => says("Never stored."))
+    );
+    const { session, request } = sessionOf(asking, userId);
+    await session().activeTurn();
+    await runInDurableObject(session(), (_instance, state) => {
+      state.storage.sql.exec(
+        `CREATE TRIGGER test_fault BEFORE INSERT ON pi_entries WHEN NEW.record LIKE '%Never stored%' AND NEW.record LIKE '%"stopReason":"stop"%' BEGIN SELECT RAISE(ABORT, 'Refused by the test'); END`
+      );
+    });
+    const ended = await session()
+      .run(request("turn-a", "Stored?"))
+      .then(
+        (end) => end.stopped ?? end.outcome,
+        (error: unknown) =>
+          z.object({ message: z.string() }).parse(error).message
+      );
+    // Woken by its alarm meanwhile, as nothing else calls it.
+    await runDurableObjectAlarm(session());
+    const sent = provider.requests.length;
+    await runDurableObjectAlarm(session());
+    expect({
+      // Lost, or failed for restarts cutting it off: either way it ends.
+      ended: [
+        "lost",
+        "failed",
+        agentErrors.create("agent.turn_lost").message,
+      ].includes(ended),
+      bounded: sent <= 6,
+      noMore: provider.requests.length === sent,
+    }).toStrictEqual({ ended: true, bounded: true, noMore: true });
+  });
+
+  it("opens pi again when its storage fails under a turn nothing waits on, and the turn answers", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const cut = pausedReply(says("Cut."), 1);
+    const { id, stub, provider, newChat } = await personalChatsOf(
+      userId,
+      cut.reply,
+      says("Never stored."),
+      says("Stored.")
+    );
+    const { chat, ask } = await newChat();
+    const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
+    try {
+      void ask("Stored?").catch(() => "cut short");
+      await vi.waitFor(
+        () => {
+          expect(provider.requests).toHaveLength(1);
+        },
+        { timeout: 10_000 }
+      );
+      // Both objects restart mid-answer, so no call waits on the turn: only
+      // the chat's alarm takes it up again. Then a fault in pi's tables: the
+      // storage refuses the answer the request sent again brings.
+      for (const stopped of [stub, session()]) {
+        // oxlint-disable-next-line no-await-in-loop -- one, then the other
+        await runInDurableObject(stopped, (_instance, state) => {
+          state.abort("Restarted by the test");
+        }).catch(() => {
+          // Aborting fails the call that aborted: that is the restart.
+        });
+      }
+      await runInDurableObject(session(), (_instance, state) => {
+        state.storage.sql.exec(
+          `CREATE TRIGGER test_fault BEFORE INSERT ON pi_entries WHEN NEW.record LIKE '%Never stored.%' AND NEW.record LIKE '%"stopReason":"stop"%' BEGIN SELECT RAISE(ABORT, 'Refused by the test'); END`
+        );
+      });
+      await runDurableObjectAlarm(session());
+      // The failure arms the alarm for now, which opens pi again: no sooner
+      // than the heartbeat, a minute on, without it.
+      await vi.waitFor(
+        () => {
+          expect(provider.requests).toHaveLength(3);
+        },
+        { timeout: 15_000 }
+      );
+      const woken = workspace(env, id);
+      await vi.waitFor(
+        async () => {
+          await expect(
+            woken.chatSummary(chat.id, userId)
+          ).resolves.toMatchObject({ running: false });
+        },
+        { timeout: 15_000 }
+      );
+      const kept = await keptOf(woken, chat.id);
+      expect(kept.at(-1)).toBe("assistant:stop");
+    } finally {
+      cut.release();
+    }
+  });
+
+  it("tries a pi that fails to open again later and later, then gives the turn up as failed, and takes the next question once storage recovers", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const never = Promise.withResolvers<boolean>();
+    const stuck = { ...says("Never."), pause: { at: 0, until: never.promise } };
+    const { id, stub, provider, newChat } = await personalChatsOf(
+      userId,
+      stuck,
+      says("Answered now.")
+    );
+    const { chat, ask } = await newChat();
+    const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
+    try {
+      void ask("Hello?").catch(() => "settled");
+      await vi.waitFor(
+        async () => {
+          expect(provider.requests).toHaveLength(1);
+          await expect(
+            stub.chatSummary(chat.id, userId)
+          ).resolves.toMatchObject({ running: true });
+        },
+        { timeout: 10_000 }
+      );
+      // The Workspace first, so nothing asks for the turn again, then the
+      // chat's object, whose pi then can't open: its storage is of a newer
+      // pi, as after a rollback.
+      for (const stopped of [stub, session()]) {
+        // oxlint-disable-next-line no-await-in-loop -- one, then the other
+        await runInDurableObject(stopped, (_instance, state) => {
+          state.abort("Restarted by the test");
+        }).catch(() => {
+          // Aborting fails the call that aborted: that is the restart.
+        });
+      }
+      await runInDurableObject(session(), (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE pi_durable_schema SET version = version + 100"
+        );
+      });
+      // How long after each alarm the next is, or none.
+      const after: (number | null)[] = [];
+      for (let alarm = 1; alarm <= 6; alarm += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one alarm after another
+        await runDurableObjectAlarm(session());
+        const now = Date.now();
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        const next = await runInDurableObject(
+          session(),
+          async (_instance, state) => await state.storage.getAlarm()
+        );
+        after.push(next === null ? null : next - now);
+      }
+      const waits = after.filter((wait) => wait !== null);
+      const { running } = await workspace(env, id).chatSummary(chat.id, userId);
+      // Storage recovers: the turn given up on stays given up, and the
+      // next question is taken, not refused as busy.
+      await runInDurableObject(session(), (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE pi_durable_schema SET version = version - 100"
+        );
+      });
+      const next = await workspace(env, id).ask(chat.id, {
+        text: "Again?",
+        model,
+      });
+      expect({
+        tried: waits.length,
+        longerEachTime: waits.every(
+          (wait, index) => index === 0 || wait > (waits[index - 1] ?? 0)
+        ),
+        thenNone: after.at(-1),
+        running,
+        next: next.answer,
+        requests: provider.requests.length,
+      }).toStrictEqual({
+        tried: 5,
+        longerEachTime: true,
+        thenNone: null,
+        running: false,
+        next: "Answered now.",
+        requests: 2,
+      });
+    } finally {
+      never.resolve(true);
+    }
+  });
+
+  it("stops waking a chat whose opens reset the object as often as it gives up after, and settles its turn as lost once a call opens it", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const never = Promise.withResolvers<boolean>();
+    const stuck = { ...says("Never."), pause: { at: 0, until: never.promise } };
+    const { id, stub, provider, newChat } = await personalChatsOf(
+      userId,
+      stuck,
+      says("Answered after all.")
+    );
+    const { chat, ask } = await newChat();
+    const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
+    try {
+      void ask("Hello?").catch(() => "settled");
+      await vi.waitFor(
+        async () => {
+          expect(provider.requests).toHaveLength(1);
+          await expect(
+            stub.chatSummary(chat.id, userId)
+          ).resolves.toMatchObject({ running: true });
+        },
+        { timeout: 10_000 }
+      );
+      for (const stopped of [stub, session()]) {
+        // oxlint-disable-next-line no-await-in-loop -- one, then the other
+        await runInDurableObject(stopped, (_instance, state) => {
+          state.abort("Restarted by the test");
+        }).catch(() => {
+          // Aborting fails the call that aborted: that is the restart.
+        });
+      }
+      // What six opens a reset cut short leave: each counted before it
+      // was tried, none reaching its end.
+      await runInDurableObject(session(), (_instance, state) => {
+        state.storage.kv.put("failedOpens", 6);
+      });
+      await runDurableObjectAlarm(session());
+      const { running } = await workspace(env, id).chatSummary(chat.id, userId);
+      const afterAlarm = {
+        alarm: await runInDurableObject(
+          session(),
+          async (_instance, state) => await state.storage.getAlarm()
+        ),
+        requests: provider.requests.length,
+        running,
+      };
+      // A call still opens it: the turn given up on is settled, and the
+      // next question answered.
+      const active = await session().activeTurn();
+      const next = await workspace(env, id).ask(chat.id, {
+        text: "Again?",
+        model,
+      });
+      expect({ ...afterAlarm, active, next: next.answer }).toStrictEqual({
+        alarm: null,
+        requests: 1,
+        running: false,
+        active: undefined,
+        next: "Answered after all.",
+      });
+    } finally {
+      never.resolve(true);
+    }
+  });
+
+  it("never stops a turn that keeps going, however long it runs", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId);
+    const steps = [6, 12, 18].map(() => Promise.withResolvers<boolean>());
+    const provider = await fakeProviderFor([model], {
+      ...says("Slowly but surely, the answer."),
+      pause: steps.map(({ promise }, index) => ({
+        at: 6 * (index + 1),
+        until: promise,
+      })),
+    });
+    const { session, request } = sessionOf(asking, userId);
+    const restore = await setObjectEnv(session(), {
+      CHAT_TURN_IDLE_MS: "1500",
+    });
+    try {
+      const startedAt = Date.now();
+      const asked = session().run(request("turn-a", "Slowly?"));
+      await vi.waitFor(
+        () => {
+          expect(provider.requests).toHaveLength(1);
+        },
+        { timeout: 10_000 }
+      );
+      for (const step of steps) {
+        // oxlint-disable-next-line no-await-in-loop -- a word a second
+        await scheduler.wait(1000);
+        step.resolve(true);
+        // oxlint-disable-next-line no-await-in-loop -- the heartbeat checks
+        await scheduler.wait(200);
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await runDurableObjectAlarm(session());
+      }
+      const end = await asked;
+      expect({
+        outcome: end.outcome,
+        answer: end.answer,
+        pastTheLimit: Date.now() - startedAt > 1500,
+      }).toStrictEqual({
+        outcome: "answered",
+        answer: "Slowly but surely, the answer.",
+        pastTheLimit: true,
+      });
+    } finally {
+      for (const step of steps) {
+        step.resolve(true);
+      }
+      await restore();
+    }
+  });
+
+  it("stops a turn pi makes no progress in, as overdue", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId);
+    const never = Promise.withResolvers<boolean>();
+    const provider = await fakeProviderFor([model], {
+      ...says("Never."),
+      pause: { at: 0, until: never.promise },
+    });
+    const { session, request } = sessionOf(asking, userId);
+    const restore = await setObjectEnv(session(), { CHAT_TURN_IDLE_MS: "1" });
+    try {
+      const asked = session().run(request("turn-a", "Forever?"));
+      await vi.waitFor(
+        () => {
+          expect(provider.requests).toHaveLength(1);
+        },
+        { timeout: 10_000 }
+      );
+      // The heartbeat's alarm finds it overdue.
+      await runDurableObjectAlarm(session());
+      await expect(asked).resolves.toMatchObject({
+        outcome: "failed",
+        stopped: "overdue",
+      });
+    } finally {
+      never.resolve(true);
+      await restore();
+    }
+  });
+
   it("is erased with its chat, a decision told meanwhile included, and takes nothing after", async () => {
     const { userId, person: signedIn } = await signedInWithRole(idp, "user");
     const { id, stub, chat, ask } = await chatOf(userId, says("Hi."));

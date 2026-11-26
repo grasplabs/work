@@ -168,7 +168,6 @@ catalog:
   # as better-auth.
   "@better-auth/core": 1.7.14
   "@better-auth/sso": 1.7.14
-  "@earendil-works/pi-agent-core": 1.4.0
   "@earendil-works/pi-ai": 1.4.0
   # pi's durable agent runtime (MIT, marked experimental: pinned exactly,
   # moved with pi-ai), and Chord, its document state and contexts: the chat
