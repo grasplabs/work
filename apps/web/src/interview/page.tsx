@@ -534,6 +534,9 @@ const Talking = ({
     />
   );
 
+/** Which screen it is, as far as pausing and coming back fade from one to the next. */
+const sceneOf = (stopped: boolean): string => (stopped ? "paused" : "on");
+
 /**
  * Every screen but the conversation stands on Stephen's field; the
  * conversation keeps its own room. The read-back told as a story stands
@@ -675,6 +678,8 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
         />
       }
       pose={poseOf(stage, reading)}
+      // Pausing and coming back fade from one screen to the next, as the field moves.
+      scene={sceneOf(stopped)}
       strip={!reading}
     >
       {stage}
