@@ -119,6 +119,8 @@ export interface ChatAgent {
    * asked before every model request and every compaction.
    */
   withheld: () => Promise<ReadonlySet<string>>;
+  /** Called as each of the turn's requests starts, before its guard. */
+  asking: () => void;
   /**
    * One of the chat's pictures, for the model to see after its line
    * (`pictureLine`), unless larger than `maxBytes`: only where the turn's
@@ -784,6 +786,7 @@ export const chatAgent = (agent: ChatAgent): Extension => {
     hooks: [
       hook(GenerationTask, {
         beforeRequest: async ({ messages }, api, context) => {
+          agent.asking();
           const sent = await guarded(agent, messages, api, context);
           if (sent.stop !== undefined) {
             try {

@@ -96,6 +96,8 @@ export const agentErrors = defineErrorFamily({
     "This turn read something its chat can no longer read, so it stopped. Ask again to go on without it.",
   "agent.turn_overdue":
     "This answer ran for too long without ending, so it was stopped. Ask again.",
+  "agent.turn_lost":
+    "This answer couldn't go on: the chat couldn't be opened for a while. Try again.",
   "agent.run_calls_spent":
     "This code run has made all the API calls one run may. Run the rest in another code step.",
   "agent.write_untraced":

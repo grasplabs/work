@@ -1,3 +1,4 @@
+import { SessionFailed } from "@earendil-works/pi-durable";
 import type { Wake } from "@earendil-works/pi-durable";
 import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
 import { agentErrors } from "@grasp-os/shared/agent";
@@ -66,6 +67,18 @@ const closeMs = 30_000;
  * a stop) brings back what its chat or person's erasure took.
  */
 const erasedKey = "erased";
+
+/**
+ * Kept once the object gave the chat's turn up (`#giveUp`): the next open
+ * settles that turn as lost, as its Workspace showed it.
+ */
+const lostKey = "lost";
+
+/** pi's failure of its storage, in the words a person may read. */
+const lostOf = (error: unknown): unknown =>
+  error instanceof SessionFailed
+    ? agentErrors.create("agent.turn_lost")
+    : error;
 
 /** How many opens in a row failed, or are under way: none once one works. */
 const failedOpensKey = "failedOpens";
@@ -176,12 +189,14 @@ export class ChatSession extends DurableObject<Env> {
           });
           // Armed before anything runs, as for any call that can start work.
           await this.#arm(opening.wake());
-          await opening.setUpStored();
+          // A turn given up on meanwhile (`#giveUp`) is settled as lost.
+          await opening.setUpStored(this.ctx.storage.kv.get(lostKey) === true);
           if (this.#current !== opening) {
             throw new Error("pi closed as it opened");
           }
           // Before pi runs anything: only pi writes this storage meanwhile.
           this.ctx.storage.kv.delete(failedOpensKey);
+          this.ctx.storage.kv.delete(lostKey);
           opening.resume();
         } catch (error) {
           if (harness !== undefined) {
@@ -217,8 +232,13 @@ export class ChatSession extends DurableObject<Env> {
    * this storage.
    */
   async #closedOrReset(): Promise<void> {
+    await this.#withinOrReset(async () => await this.#lastClosed);
+  }
+
+  /** Waits for `work` at most `closeMs`, else resets the object. */
+  async #withinOrReset(work: () => Promise<unknown>): Promise<void> {
     const waited = await Promise.race([
-      this.#lastClosed.then(() => "closed" as const),
+      work().then(() => "done" as const),
       scheduler.wait(closeMs).then(() => "late" as const),
     ]);
     if (waited === "late") {
@@ -300,25 +320,31 @@ export class ChatSession extends DurableObject<Env> {
   /**
    * Runs the chat's turn `request` to its end (chat-harness.ts). Should
    * storage fail pi under it, the turn goes on in pi opened again, found
-   * by its ID, once: its caller waits on, rather than see it fail.
+   * by its ID: its caller waits on, rather than see it fail, for as many
+   * failures as an open may fail (`opensMost`). Past that, or when pi
+   * can't open, the caller hears it in our words, never pi's.
    */
   async run(request: TurnRequest): Promise<TurnEnd> {
-    let used: ChatHarness | undefined;
-    try {
-      return await this.#work(async (harness) => {
-        used = harness;
-        return await harness.run(request);
-      });
-    } catch (error) {
-      // pi drops a Harness storage failed before the failing call returns.
-      if (used === undefined || this.#current === used || this.#erased()) {
-        throw error;
+    for (let failures = 0; ; failures += 1) {
+      let used: ChatHarness | undefined;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- again only once pi failed
+        return await this.#work(async (harness) => {
+          used = harness;
+          return await harness.run(request);
+        });
+      } catch (error) {
+        // pi drops a Harness storage failed before the failing call returns.
+        const dropped =
+          used !== undefined && this.#current !== used && !this.#erased();
+        if (!dropped || failures + 1 >= opensMost) {
+          throw dropped ? agentErrors.create("agent.turn_lost") : lostOf(error);
+        }
+        log.warn("chat.turn_reopened", {
+          chatSession: this.ctx.id.name,
+          turnId: request.turnId,
+        });
       }
-      log.warn("chat.turn_reopened", {
-        chatSession: this.ctx.id.name,
-        turnId: request.turnId,
-      });
-      return await this.#work(async (harness) => await harness.run(request));
     }
   }
 
@@ -354,8 +380,12 @@ export class ChatSession extends DurableObject<Env> {
     if (opened !== undefined) {
       try {
         const harness = await opened;
-        await harness.abort();
-        await harness.close();
+        // At most `closeMs`, as a tool call that never answers holds both:
+        // the object then resets, and the erase is asked again.
+        await this.#withinOrReset(async () => {
+          await harness.abort();
+          await harness.close();
+        });
       } catch {
         // One that failed to open, or to stop, goes with the storage below.
       }
@@ -420,6 +450,8 @@ export class ChatSession extends DurableObject<Env> {
         return;
       }
       const name = this.ctx.id.name ?? "";
+      // Kept first: the next open settles the turn as the Workspace shows it.
+      this.ctx.storage.kv.put(lostKey, true);
       log.error("chat.gave_up", {
         chatSession: name,
         failedOpens: this.#failedOpens(),
@@ -433,7 +465,7 @@ export class ChatSession extends DurableObject<Env> {
         await workspace(
           this.env,
           workspaceIdSchema.parse(workspaceId)
-        ).turnRunning(chatIdSchema.parse(chatId), false);
+        ).turnLost(chatIdSchema.parse(chatId));
       } catch (error) {
         log.error("chat.gave_up_untold", {
           chatSession: name,
