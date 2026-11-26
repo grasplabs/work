@@ -515,6 +515,17 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       external: t`opens in a new tab`,
     },
     markdown: {
+      // The titles of the five alerts an answer may hold (GitHub's).
+      alerts: {
+        note: t({ message: "Note", context: "an alert in an answer" }),
+        tip: t({ message: "Tip", context: "an alert in an answer" }),
+        important: t({
+          message: "Important",
+          context: "an alert in an answer",
+        }),
+        warning: t({ message: "Warning", context: "an alert in an answer" }),
+        caution: t({ message: "Caution", context: "an alert in an answer" }),
+      },
       // A note used more than once leads back to each use: the second is "1-2".
       back: (number, mark) =>
         mark > 1

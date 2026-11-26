@@ -186,9 +186,9 @@ test("the product page runs no page module through an escaped path under its own
   const page = await pageOf(builder);
   const moduleAddress = await openPage(page);
   // The browser matches the policy on the path as written, so this passes
-  // as one of the frontend's files, for a script and, since the frontend
-  // starts its code block's worker from them, for a worker too; decoded, it
-  // is the module's address. Core answers no such path.
+  // as one of the frontend's files; decoded, it is the module's address.
+  // Core answers no such path. A worker, from it as from anywhere, is
+  // refused: the frontend starts none.
   const escaped = moduleAddress.replace(
     "/page-modules/",
     "/assets/..%2Fpage-modules/"
@@ -220,8 +220,8 @@ test("the product page runs no page module through an escaped path under its own
     element.src = address;
     const script = settled(element);
     document.head.append(element);
-    // A worker the policy lets start from the frontend's files: it fails to
-    // load, by an error event, as core answers nothing for the path.
+    // A worker is refused whatever its path (worker-src 'none'), by an
+    // error event in every engine.
     let worker = "";
     try {
       worker = await settled(new Worker(address, { type: "module" }));

@@ -4186,6 +4186,11 @@ msgstr "Casos por semana"
 msgid "Cases a week: {cases}."
 msgstr "Casos por semana: {cases}."
 
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Caution"
+msgstr "Precaución"
+
 #: src/agents/new-agent.tsx
 #: src/apps/app-workflows.tsx
 #: src/drafts/share-with-team.tsx
@@ -8872,6 +8877,11 @@ msgstr "Importar en {name}"
 msgid "Import or export"
 msgstr "Importar o exportar"
 
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Important"
+msgstr "Importante"
+
 #: src/onboarding/hr-leads.tsx
 msgid "In {name}, make a service user that may read people’s basic and work details, and paste its ID and token here."
 msgstr "En {name}, crea un usuario de servicio que pueda leer los datos básicos y laborales de las personas, y pega aquí su ID y su token."
@@ -12115,6 +12125,11 @@ msgstr "No funciona"
 
 #: src/frame/ui-words.tsx
 msgctxt "a badge's dot"
+msgid "Note"
+msgstr "Nota"
+
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
 msgid "Note"
 msgstr "Nota"
 
@@ -18708,6 +18723,11 @@ msgstr "Zona horaria"
 msgid "Timeline"
 msgstr "Cronología"
 
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Tip"
+msgstr "Consejo"
+
 #: src/apps/app-access-requests.tsx
 msgid "To"
 msgstr "Hasta"
@@ -19703,6 +19723,11 @@ msgstr "Caminante"
 msgctxt "a badge's dot"
 msgid "Warning"
 msgstr "Aviso"
+
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Warning"
+msgstr "Advertencia"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx

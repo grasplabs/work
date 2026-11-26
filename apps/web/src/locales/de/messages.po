@@ -4186,6 +4186,11 @@ msgstr "Fälle pro Woche"
 msgid "Cases a week: {cases}."
 msgstr "Fälle pro Woche: {cases}."
 
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Caution"
+msgstr "Vorsicht"
+
 #: src/agents/new-agent.tsx
 #: src/apps/app-workflows.tsx
 #: src/drafts/share-with-team.tsx
@@ -8872,6 +8877,11 @@ msgstr "In {name} importieren"
 msgid "Import or export"
 msgstr "Importieren oder exportieren"
 
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Important"
+msgstr "Wichtig"
+
 #: src/onboarding/hr-leads.tsx
 msgid "In {name}, make a service user that may read people’s basic and work details, and paste its ID and token here."
 msgstr "Legen Sie in {name} einen Service-User an, der die Stamm- und Arbeitsdaten der Mitarbeitenden lesen darf, und fügen Sie hier seine ID und seinen Token ein."
@@ -12115,6 +12125,11 @@ msgstr "Funktioniert nicht"
 
 #: src/frame/ui-words.tsx
 msgctxt "a badge's dot"
+msgid "Note"
+msgstr "Hinweis"
+
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
 msgid "Note"
 msgstr "Hinweis"
 
@@ -18708,6 +18723,11 @@ msgstr "Zeitzone"
 msgid "Timeline"
 msgstr "Zeitverlauf"
 
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Tip"
+msgstr "Tipp"
+
 #: src/apps/app-access-requests.tsx
 msgid "To"
 msgstr "Bis"
@@ -19701,6 +19721,11 @@ msgstr "Wanderer"
 
 #: src/frame/ui-words.tsx
 msgctxt "a badge's dot"
+msgid "Warning"
+msgstr "Warnung"
+
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
 msgid "Warning"
 msgstr "Warnung"
 

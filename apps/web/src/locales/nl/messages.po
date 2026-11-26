@@ -4186,6 +4186,11 @@ msgstr "Gevallen per week"
 msgid "Cases a week: {cases}."
 msgstr "Gevallen per week: {cases}."
 
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Caution"
+msgstr "Let op"
+
 #: src/agents/new-agent.tsx
 #: src/apps/app-workflows.tsx
 #: src/drafts/share-with-team.tsx
@@ -8872,6 +8877,11 @@ msgstr "Importeren in {name}"
 msgid "Import or export"
 msgstr "Importeren of exporteren"
 
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Important"
+msgstr "Belangrijk"
+
 #: src/onboarding/hr-leads.tsx
 msgid "In {name}, make a service user that may read people’s basic and work details, and paste its ID and token here."
 msgstr "Maak in {name} een service user aan die de basis- en werkgegevens van mensen mag lezen, en plak hier de ID en het token."
@@ -12117,6 +12127,11 @@ msgstr "Werkt niet"
 msgctxt "a badge's dot"
 msgid "Note"
 msgstr "Notitie"
+
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Note"
+msgstr "Opmerking"
 
 #: src/routes/_shell.brain.$noteId.tsx
 msgctxt "tab: a piece of work's note in the brain"
@@ -18708,6 +18723,11 @@ msgstr "Tijdzone"
 msgid "Timeline"
 msgstr "Tijdlijn"
 
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Tip"
+msgstr "Tip"
+
 #: src/apps/app-access-requests.tsx
 msgid "To"
 msgstr "Tot"
@@ -19701,6 +19721,11 @@ msgstr "Wandelaar"
 
 #: src/frame/ui-words.tsx
 msgctxt "a badge's dot"
+msgid "Warning"
+msgstr "Waarschuwing"
+
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
 msgid "Warning"
 msgstr "Waarschuwing"
 

@@ -354,9 +354,9 @@ test("a person reads an answer in blocks: a table, a formula, code and a diagram
   ).toBeVisible();
   // The formula, drawn by KaTeX as maths a screen reader reads.
   await expect(answer.locator("math")).toHaveCount(1);
-  // The code, which can be saved as a file as well as copied, coloured by
-  // the code block's worker, which the frontend's policy lets start: its
-  // words in more than one colour.
+  // The code, which can be saved as a file as well as copied, coloured on
+  // the page under the frontend's own policy (no worker): its words in more
+  // than one colour.
   await expect(
     answer.getByRole("button", { name: "Download", exact: true })
   ).toBeVisible();
