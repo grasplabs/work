@@ -408,9 +408,53 @@ const joinedSince = (
 // ---- The route ----------------------------------------------------------
 
 /** A 2xx answer's JSON; undefined for any other answer, or one that isn't JSON. Read once, whole. */
+/** A word of a refusal's, as the log keeps it: a string or number, cut short. */
+const refusalWord = (value: unknown): string =>
+  typeof value === "string" || typeof value === "number"
+    ? String(value).slice(0, 200)
+    : "";
+
+/**
+ * What Mistral says it refused in a request, without what it was sent:
+ * each field it names (`loc`, `param`) and its words on why (`msg`,
+ * `message`, `type`, `code`), never the `input` it may echo back.
+ */
+export const refusalDetailOf = (body: unknown): string[] => {
+  if (typeof body !== "object" || body === null) {
+    return [];
+  }
+  const fieldsOf = (entry: object): string =>
+    [
+      "loc" in entry && Array.isArray(entry.loc)
+        ? entry.loc.map(refusalWord).join(".")
+        : "",
+      ..."param msg message type code"
+        .split(" ")
+        .map((key) =>
+          key in entry ? refusalWord(Reflect.get(entry, key)) : ""
+        ),
+    ]
+      .filter((part) => part !== "")
+      .join(" | ");
+  // Mistral may wrap the validation's own answer in its `message`.
+  const inner =
+    "message" in body &&
+    typeof body.message === "object" &&
+    body.message !== null
+      ? body.message
+      : body;
+  const detail = "detail" in inner ? inner.detail : undefined;
+  const entries: unknown[] = Array.isArray(detail) ? detail : [body];
+  return entries
+    .flatMap((entry) =>
+      typeof entry === "object" && entry !== null ? [fieldsOf(entry)] : []
+    )
+    .filter((line) => line !== "")
+    .slice(0, 8);
+};
+
 const jsonOrNothing = async (answered: Response): Promise<unknown> => {
   if (!answered.ok) {
-    await answered.body?.cancel();
     return undefined;
   }
   try {
@@ -548,13 +592,19 @@ const open = async (
     await onboardingStore(env).releaseListening(who, seconds, heldOn);
     return failed("The interview could not start. Try again.", 503);
   }
+  // A refusal's body is read for what Mistral names as wrong, and only that.
+  const refusal = answered.ok
+    ? []
+    : refusalDetailOf(await answered.json().catch(() => null));
   const raw = await jsonOrNothing(answered);
   const opened = openedSchema.safeParse(raw);
   if (!opened.success) {
-    // The status alone: Mistral's answer may repeat what it was sent.
+    // Mistral's answer may repeat what it was sent: only its status, and
+    // the fields it refused with its words on why.
     log.warn("interview.voice_not_opened", {
       requestId,
       status: answered.status,
+      ...(refusal.length === 0 ? {} : { refused: refusal.join(" ; ") }),
     });
     // Opened, but with nothing to join it by: closed, as nobody else can.
     const unusable = openedIdSchema.safeParse(raw);

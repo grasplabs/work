@@ -7,6 +7,7 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { refusalDetailOf } from "../src/onboarding/voice.ts";
 import { allEvents } from "./audit-events.ts";
 import { platformMistralKey } from "./connect-providers.ts";
 import {
@@ -727,5 +728,35 @@ describe("an interview as a live voice session", { timeout: 60_000 }, () => {
       noted: 2,
       kept: ["You check the invoices in Exact every morning."],
     });
+  });
+});
+
+describe("a refused voice session's log", () => {
+  it("names the fields Mistral refused and why, never what it was sent", () => {
+    expect(
+      refusalDetailOf({
+        object: "error",
+        message: {
+          detail: [
+            {
+              type: "value_error",
+              loc: ["body", "session", "tts", "voice_id"],
+              msg: "Unknown voice",
+              input: "secret words",
+            },
+          ],
+        },
+        type: "invalid_request_error",
+      })
+    ).toStrictEqual([
+      "body.session.tts.voice_id | Unknown voice | value_error",
+    ]);
+    expect(
+      refusalDetailOf({
+        message: "Voice not found",
+        type: "invalid_request_error",
+        code: "3001",
+      })
+    ).toStrictEqual(["Voice not found | invalid_request_error | 3001"]);
   });
 });
