@@ -508,13 +508,38 @@ const underSavedIds = (
     }
     idOf.set(id, free);
   }
+  // Whoever is on the roster already keeps their id, matched on the address,
+  // so one person read again from another source is never listed twice.
+  const savedByEmail = new Map(
+    saved.people
+      .filter((person) => person.email !== "")
+      .map((person) => [person.email.trim().toLowerCase(), person.id])
+  );
+  const readIds = new Set(read.people.map((person) => person.id));
+  const personOf = new Map<string, string>();
+  for (const person of read.people) {
+    const savedId = savedByEmail.get(person.email.trim().toLowerCase());
+    if (
+      savedId !== undefined &&
+      savedId !== person.id &&
+      !readIds.has(savedId)
+    ) {
+      personOf.set(person.id, savedId);
+    }
+  }
+  const personId = (id: string) => personOf.get(id) ?? id;
   return {
     teams: read.teams.map((team) => ({
       ...team,
       id: idOf.get(team.id) ?? team.id,
+      lead: team.lead === null ? null : personId(team.lead),
+      ...(team.coLeads === undefined
+        ? {}
+        : { coLeads: team.coLeads.map(personId) }),
     })),
     people: read.people.map((person) => ({
       ...person,
+      id: personId(person.id),
       team: idOf.get(person.team) ?? person.team,
     })),
   };
