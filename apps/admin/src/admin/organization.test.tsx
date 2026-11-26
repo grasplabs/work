@@ -123,6 +123,33 @@ describe("an organization's page", () => {
     });
   });
 
+  it("shows an organization's sections in the sidebar in place of the admin's list, whatever its id", async () => {
+    // An id that is also the name of the sidebar's own list.
+    const main = gridRow({ id: "main", name: "Main Street" });
+    const { container } = await openAdmin("/organizations/main", {
+      fetchClientGrid: [main],
+      fetchClientAdmin: answeredAdmin({
+        client: main,
+        snapshot: readySnapshot("Main Street"),
+      }),
+      ...setupAnswers,
+    });
+    const shown = [
+      ...container.querySelectorAll(
+        '[data-slot="sidebar-level"][data-state="active"]'
+      ),
+    ];
+
+    expect(
+      shown.map(
+        (level) =>
+          level
+            .querySelector('[data-slot="sidebar-content"]')
+            ?.getAttribute("aria-label") ?? null
+      )
+    ).toStrictEqual(["Main Street"]);
+  });
+
   it("says the interviews closed on the last day their links worked", async () => {
     const snapshot = toldSnapshot("Closed", {
       days: 5,
