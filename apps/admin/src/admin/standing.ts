@@ -1,8 +1,7 @@
 /**
  * Where an organization stands, from its summary (core's admin-summary.ts,
  * counts and dates only): the phase of its onboarding, whether it is at
- * risk, and its standing in one word, for Home and an organization's own
- * page alike. Pure.
+ * risk, and its standing in one word, for Home. Pure.
  */
 import type { AdminSummary } from "@grasp-os/shared/admin-summary";
 import type { BadgeVariant } from "@grasp-os/ui/components/badge";
@@ -75,14 +74,16 @@ export const phaseOf = ({ stage }: Onboarding): Phase => {
 const lateShare = 0.75;
 
 /**
- * At risk: the interviews closed short of what it opens at (over, and not
- * enough known), or three quarters of their days are gone and less is
- * known than an even pace towards the threshold would give by now.
+ * At risk: the interviews closed short of what it opens at (waiting for
+ * the go with less known than its threshold: core's `ready` is true once
+ * they are over, whatever is known), or three quarters of their days are
+ * gone and less is known than an even pace towards the threshold would
+ * give by now.
  */
-export const atRisk = (onboarding: Onboarding): boolean => {
-  const { stage, ready, day, days, known, threshold } = onboarding;
+const atRisk = (onboarding: Onboarding): boolean => {
+  const { stage, day, days, known, threshold } = onboarding;
   if (stage === "waiting") {
-    return !ready;
+    return known < threshold;
   }
   if (stage !== "interviews" || day === null || days === null) {
     return false;
@@ -103,11 +104,11 @@ export const standingOf = (entry: ClientSummary): Standing => {
 const dayMs = 86_400_000;
 
 /** Whole days from `from` to `to`, never fewer than none. */
-export const daysBetween = (from: string, to: string): number =>
+const daysBetween = (from: string, to: string): number =>
   Math.max(0, Math.floor((Date.parse(to) - Date.parse(from)) / dayMs));
 
 /** "today", "1 day", "9 days". */
-export const dayCount = (days: number): string => {
+const dayCount = (days: number): string => {
   if (days === 0) {
     return "today";
   }
@@ -131,7 +132,7 @@ export const whereWords = (summary: AdminSummary): string => {
       return since === 0 ? "Since today" : `For ${dayCount(since)}`;
     }
     case "waiting": {
-      return onboarding.ready
+      return known >= threshold
         ? "Enough is known"
         : `Closed at ${known}% of ${threshold}%`;
     }

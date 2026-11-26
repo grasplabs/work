@@ -23,19 +23,19 @@ const spendOrNone = async (): Promise<PlatformSpend | null> => {
   }
 };
 
+/** Home's body once the summaries are in; what Grasp's AI cost fills in apart. */
 const Settled = ({
   summaries,
   spend,
 }: {
   summaries: Deferred<ClientSummary[] | null>;
-  spend: Deferred<PlatformSpend | null>;
+  spend: Deferred<PlatformSpend | null> | undefined;
 }) => {
   const read = useSettled(summaries);
-  const cost = useSettled(spend);
   return read === null ? (
     <AdminsUnread />
   ) : (
-    <HomeBody spend={cost} summaries={read} />
+    <HomeBody spend={spend} summaries={read} />
   );
 };
 
@@ -50,7 +50,7 @@ const Home = () => {
       title="Home"
     >
       <Suspense fallback={<LoadingLines lines={8} />}>
-        <Settled spend={spend ?? null} summaries={summaries} />
+        <Settled spend={spend} summaries={summaries} />
       </Suspense>
     </AdminPage>
   );

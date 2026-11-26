@@ -544,7 +544,8 @@ describe("Home", () => {
       ["early", { stage: "interviews", day: 10, days: 14, known: 10 }],
       // 11 of 14 with 70% known: ahead of the pace.
       ["ahead", { stage: "interviews", day: 11, days: 14, known: 70 }],
-      ["short", { stage: "waiting", known: 55, ready: false }],
+      // Over at 55% of 80%: core's `ready` is true once they are over.
+      ["short", { stage: "waiting", known: 55, ready: true }],
       ["ready", { stage: "waiting", known: 85, ready: true }],
     ];
     const { container } = await openAdmin("/", {
@@ -595,7 +596,16 @@ describe("Home", () => {
       fetchPlatformSpend: null,
     });
 
+    // Below 84rem each is a card: the same words.
+    const cards =
+      container.querySelector('main ul[aria-label="Organizations"]')
+        ?.textContent ?? "";
+
     expect({
+      cards: [
+        cards.includes("12 runs, 0 failed; 9 active last week"),
+        cards.includes("Last 7 days Not shared"),
+      ],
       sharing: ["3 workflows live", "12 runs", "9 active last week"].map(
         (text) => rowText(container, "sharing").includes(text)
       ),
@@ -604,6 +614,7 @@ describe("Home", () => {
         rowText(container, "ended").includes(text)
       ),
     }).toStrictEqual({
+      cards: [true, true],
       sharing: [true, true, true],
       ended: 2,
       endedCounts: false,
@@ -698,12 +709,35 @@ describe("Home", () => {
     expect({
       figure: figureOf(container, "Grasp AI this month"),
       near: rowText(container, "near").includes("$191 of $200"),
-      own: rowText(container, "own").includes("On its own key"),
+      own: rowText(container, "own").includes("No limit reported"),
     }).toStrictEqual({
       figure: "Grasp AI this month$191+91% on last month · 1 near its limit",
       near: true,
       own: true,
     });
+  });
+
+  it("reads what Grasp's AI cost once Home is opened after a link to it was pointed at, never saying it couldn't be read", async () => {
+    const live = row("live");
+    const { router, container } = await openAdmin("/platform/releases", {
+      fetchClientGrid: [live],
+      fetchClientSummaries: [
+        summaryWith(live, { stage: "open", open: true, openedAt: daysAgo(2) }),
+      ],
+      fetchReleases: { releases: [], older: null, channelsOn: {} },
+      fetchPlatformSpend: spendOf([], { thisMonth: 12_000_000 }),
+    });
+    await act(async () => {
+      await router.preloadRoute({ to: "/" });
+    });
+    await act(async () => {
+      await router.navigate({ to: "/" });
+    });
+    await settle();
+
+    expect(figureOf(container, "Grasp AI this month")).toBe(
+      "Grasp AI this month$12Nothing last month"
+    );
   });
 
   it("says plainly when there is nothing: no organizations yet, and nothing that needs Grasp", async () => {
