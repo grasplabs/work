@@ -115,7 +115,9 @@ const oldDesignImports = {
     "@grasp-os/app-kit",
     "@grasp-os/app-kit/**",
     "lucide-react",
+    "lucide-react/**",
     "tailwindcss",
+    "tailwindcss/**",
     "@tailwindcss/**",
   ],
   message:
@@ -400,6 +402,12 @@ export default defineConfig({
         // a value built from several (@grasp-os/shared/rpc-target). In
         // workerd, Cap'n Web's RpcTarget is workerd's own.
         files: ["apps/core/src/**", "apps/web/src/**"],
+        rules: { "grasp/no-unbounded-rpc-target": "error" },
+      },
+      {
+        // Core's imports: RpcTarget only through the bounded base, and the
+        // Brain's only as the patterns above allow.
+        files: ["apps/core/src/**"],
         rules: {
           "no-restricted-imports": [
             "error",
@@ -412,12 +420,11 @@ export default defineConfig({
               ],
             },
           ],
-          "grasp/no-unbounded-rpc-target": "error",
         },
       },
       {
-        // The frontend draws with Damsko alone; the rules above, and the
-        // old design's imports refused.
+        // The frontend's, the same, and the old design's imports refused:
+        // it draws with Damsko alone.
         files: ["apps/web/src/**"],
         rules: {
           "no-restricted-imports": [
@@ -541,11 +548,14 @@ export default defineConfig({
         },
       },
       {
-        // A test's stand-ins are called by the test alone.
+        // A test's stand-ins are called by the test alone, and a test of
+        // the kit's App page parts (src/app-kit) hands them the kit's
+        // classes.
         files: ["apps/web/src/**/*.test.ts", "apps/web/src/**/*.test.tsx"],
         rules: {
           "no-restricted-imports": "off",
           "grasp/no-unbounded-rpc-target": "off",
+          "grasp/no-class-strings": "off",
         },
       },
       {

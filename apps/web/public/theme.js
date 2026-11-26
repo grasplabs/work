@@ -1,7 +1,10 @@
 // Light, dark, or the system's colour scheme, through the root's
 // `data-mode`, which Damsko's colours follow, and the `dark` class, the
-// scheme as it resolves, which an App page's frame follows
-// (src/pages/page-bridge.ts); and Damsko's theme, its colours (Evergreen,
+// scheme as it resolves: an App page's frame follows it
+// (src/pages/page-bridge.ts), and the drawings on a canvas repaint when
+// it changes, as it does when the system's scheme flips under "system"
+// (the dot brain, the chat's backdrop, an agent's figure); and Damsko's
+// theme, its colours (Evergreen,
 // Pine, Paper), as the root's `data-theme`, which index.html starts at
 // Evergreen. Loaded as a classic
 // script in <head>, so it runs before first paint and nothing flashes. A

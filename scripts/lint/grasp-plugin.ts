@@ -50,10 +50,12 @@
  * hold.
  *
  * no-class-strings: apps/web has no Tailwind, so a class list written in
- * its JSX styles nothing. It refuses a `className` that holds text: a
- * string, a template, either branch of a condition, or an argument of a
- * call (`cn("…")`). A class name StyleX made (`stylex.props(…).className`)
- * is no text and passes, as does `{...stylex.props(…)}`.
+ * its JSX styles nothing. It refuses a `className` (or `class`) that holds
+ * class names as text: a string, a template's own text, either branch of
+ * a condition, or an argument of a call (`cn("…")`), through TypeScript's
+ * wrappers. Spaces alone name nothing (a `join(" ")`), and a class name
+ * StyleX made (`stylex.props(…).className`) is no text, so both pass, as
+ * does `{...stylex.props(…)}`.
  *
  * no-inline-styles: refuses an inline style object (`style={{ … }}`) and
  * a `style` the lint can't read as a fixed one, with the component
@@ -777,17 +779,23 @@ const motionUnit = (object: Node): MotionUnit | undefined => {
   return undefined;
 };
 
-/** Whether `node` holds text of its own: a string, a template, or one inside a condition or a call. */
+/** Whether `text` names a class: anything but spaces, such as the one a join puts between names. */
+const namesClass = (text: string): boolean => text.trim() !== "";
+
+/** Whether `node` holds class names as text: a string, a template's own text, or one inside a condition or a call. */
 const holdsText = (node: Node | null | undefined): boolean => {
   if (node === null || node === undefined) {
     return false;
   }
+  if (valueWrappers.has(node.type)) {
+    return holdsText(node.expression);
+  }
   switch (node.type) {
     case "Literal": {
-      return typeof node.value === "string";
+      return typeof node.value === "string" && namesClass(node.value);
     }
     case "TemplateLiteral": {
-      return true;
+      return (node.quasis ?? []).some((quasi) => namesClass(quasi.value.raw));
     }
     case "JSXExpressionContainer": {
       return holdsText(node.expression);
@@ -822,9 +830,10 @@ const noClassStrings = {
   },
   create: (context: Context) => ({
     JSXAttribute: (node: Node): void => {
+      const name =
+        typeof node.name === "object" ? nameOf(node.name) : undefined;
       if (
-        typeof node.name === "object" &&
-        nameOf(node.name) === "className" &&
+        (name === "className" || name === "class") &&
         isNode(node.value) &&
         holdsText(node.value)
       ) {

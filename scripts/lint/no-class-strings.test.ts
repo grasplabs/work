@@ -45,6 +45,11 @@ tester.run("grasp/no-class-strings", rule, {
       filename,
     },
     {
+      name: "StyleX class names joined by a space",
+      code: `${styles}const Row = ({ own }) => <div className={[stylex.props(looks.row).className, own].join(" ")} />;`,
+      filename,
+    },
+    {
       name: "a class name passed on from a prop",
       code: "const Row = ({ className }) => <div className={className} />;",
       filename,
@@ -72,6 +77,18 @@ tester.run("grasp/no-class-strings", rule, {
     {
       name: "a branch of a condition, on a component",
       code: 'const Row = ({ on }) => <Item className={on ? "w-44" : undefined} />;',
+      filename,
+      errors: [{ messageId: "found" }],
+    },
+    {
+      name: "a class list through a TypeScript wrapper",
+      code: 'const Row = () => <div className={"flex gap-2" as string} />;',
+      filename,
+      errors: [{ messageId: "found" }],
+    },
+    {
+      name: "a class attribute",
+      code: 'const Row = () => <div class="flex" />;',
       filename,
       errors: [{ messageId: "found" }],
     },
