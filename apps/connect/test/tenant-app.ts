@@ -174,8 +174,16 @@ export const fakeTenantApp = () => {
     const passThrough =
       vi.mocked(globalThis.fetch).getMockImplementation() ?? globalThis.fetch;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      // Read from the URL alone: a request made of `input` would take its
+      // body from the one handed on.
+      const url = new URL(input instanceof Request ? input.url : input);
+      if (
+        url.hostname !== sampleTenantApiHost &&
+        url.hostname !== sampleTenantLoginHost
+      ) {
+        return await passThrough(input, init);
+      }
       const request = new Request(input, init);
-      const url = new URL(request.url);
       if (url.hostname === sampleTenantApiHost) {
         const authorization = request.headers.get("authorization");
         calls.push(authorization);
@@ -183,9 +191,6 @@ export const fakeTenantApp = () => {
         return holders.has(token)
           ? json({ items, next: null })
           : json({ message: "Unauthorized" }, 401);
-      }
-      if (url.hostname !== sampleTenantLoginHost) {
-        return await passThrough(input, init);
       }
       const form = new URLSearchParams(await request.text());
       requests.push({ url: url.href, form });
