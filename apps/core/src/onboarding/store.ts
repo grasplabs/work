@@ -4700,7 +4700,7 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * Gives back what `reserveListening` held on `day` for a session that
-   * never opened: Mistral refused it, so nothing was listened to. On that
+   * never opened: ElevenLabs refused it, so nothing was listened to. On that
    * day alone: one held before midnight never takes from the next.
    */
   releaseListening(who: string, seconds: number, day: string): void {

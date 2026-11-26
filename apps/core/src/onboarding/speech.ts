@@ -39,8 +39,8 @@ import type { Took } from "./store.ts";
 // prototype, packages/grasp: worker/speech.ts).
 //
 // Said through speech synthesis behind its interface (speech.ts): the
-// voices fixed in src/platform-ai.ts, Mistral's for an interview and
-// ElevenLabs's for an admin's onboarding, through the model
+// voices fixed in src/platform-ai.ts, ElevenLabs's for an interview and
+// for an admin's onboarding, through the model
 // gateway: the deployment's rules judge every line, its
 // budgets are charged, and the audit log records it, never the line.
 //
@@ -328,132 +328,13 @@ const keptStreamed = (kept: string): Response => {
   return new Response(body, { headers: streamHeaders });
 };
 
-/** What saying a line as it is made needs. */
-interface Streamed {
-  env: Env;
-  listener: Listener;
-  stored: string;
-  key: SpokenKey;
-  requestId: string;
-  ctx: Pick<ExecutionContext, "waitUntil">;
-}
-
-/**
- * Says a new line as it is made: the answer begins with the first piece
- * of its audio, so the page plays the start of the line while the voice
- * is still making the rest, and ends with its words. A line that fails
- * before any of it is there is refused as one asked for whole is. Once
- * begun, it is made to its end even when the page stops listening (they
- * talked over him): it is billed whole either way, so it is kept for the
- * next to ask, and counted.
- */
-const sayStreamed = async ({
-  env,
-  listener,
-  stored,
-  key,
-  requestId,
-  ctx,
-}: Streamed): Promise<Response> => {
-  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
-  const writer = writable.getWriter();
-  let listening = true;
-  const send = async (event: SpeechStreamEvent): Promise<void> => {
-    if (!listening) {
-      return;
-    }
-    try {
-      await writer.write(eventLine(event));
-    } catch {
-      // The page went away: the line is still made, for the cache.
-      listening = false;
-    }
-  };
-  const begun = Promise.withResolvers<boolean>();
-  /** A piece of the line went out: the answer is the stream from then on. */
-  let streaming = false;
-  const speaking = platformSpeech(env, {
-    purpose,
-    trigger: listener.trigger,
-    work: { onboarding: true },
-    requestId,
-  }).speak(
-    {
-      text: key.spoken,
-      voice: key.voice,
-      language: key.language,
-      model: key.model,
-    },
-    undefined,
-    (piece) => {
-      streaming = true;
-      begun.resolve(true);
-      void send({ audio: toBase64(piece) });
-    }
-  );
-  const made = (async (): Promise<unknown> => {
-    try {
-      const speech = await speaking;
-      streaming = true;
-      begun.resolve(true);
-      // The end of the answer goes out as the page reads it. A page that
-      // stopped reading without going away never holds up keeping and
-      // counting the line, which is made and billed by now.
-      void (async () => {
-        await send({ words: speech.words });
-        await writer.close().catch(() => null);
-      })();
-      const answer: SpeechAnswer = {
-        audio: toBase64(speech.audio),
-        mime: speech.mime,
-        words: speech.words,
-      };
-      await Promise.all([
-        keepUnlessErased(
-          env,
-          listener.who,
-          stored,
-          key,
-          JSON.stringify(answer),
-          requestId
-        ),
-        countSaid(env, listener, secondsOf(speech.words), requestId),
-      ]);
-      return undefined;
-    } catch (error) {
-      if (streaming) {
-        // Broken off halfway: the page is told, as its answer began.
-        log.warn("speech.failed", {
-          requestId,
-          code: modelErrors.codeOf(error),
-        });
-        await send({ failed: true });
-        await writer.close().catch(() => null);
-      } else {
-        // Nothing went out, and nobody reads the stream: a write to it
-        // would never settle. The request is refused as one asked for
-        // whole is (below).
-        await writer.abort().catch(() => null);
-      }
-      begun.resolve(false);
-      return error;
-    }
-  })();
-  ctx.waitUntil(made);
-  if (await begun.promise) {
-    return new Response(readable, { headers: streamHeaders });
-  }
-  return failed(await made, requestId);
-};
-
-/** What saying a line needs: who asked, for whom, and how long the answer may run on. */
+/** What saying a line needs: who asked, and for whom. */
 interface Said {
   env: Env;
   asked: Asked;
   listener: Listener;
   stored: string;
   requestId: string;
-  ctx: Pick<ExecutionContext, "waitUntil">;
 }
 
 /** Says the page's line for `listener`, from the cache when it was said before. */
@@ -463,18 +344,15 @@ const say = async ({
   listener,
   stored,
   requestId,
-  ctx,
 }: Said): Promise<Response> => {
-  // An admin's onboarding is said with ElevenLabs; an interview in the
-  // voice of whoever holds it live, the ElevenLabs agent or Mistral (platform-ai.ts).
+  // Each audience has its own voices (platform-ai.ts).
   const audience = asked.link === undefined ? "onboarding" : "interview";
-  const speech = speechOf(audience, env);
-  const model = speechModelOf(audience, env);
+  const speech = speechOf(audience);
+  const model = speechModelOf(audience);
   const voice = speech.voices[asked.speaker];
-  // An interview's page reads its lines as a stream: Mistral's voice makes one in pieces, as it
-  // goes; any other is made whole, then sent as that stream's one piece and its words.
+  // An interview's page reads its lines as a stream: a line is made
+  // whole, then sent as that stream's one piece and its words.
   const streamed = asked.stream && audience === "interview";
-  const streams = streamed && speech.provider === "mistral";
   const spoken = spokenOf(asked.text);
   const key: SpokenKey = {
     text: asked.text,
@@ -491,9 +369,6 @@ const say = async ({
   // budget.
   if (listener.said >= listener.budget) {
     return refused(429, speechErrors.create("speech.limited"), requestId);
-  }
-  if (streams) {
-    return await sayStreamed({ env, listener, stored, key, requestId, ctx });
   }
   let said: Awaited<ReturnType<ReturnType<typeof platformSpeech>["speak"]>>;
   try {
@@ -523,8 +398,7 @@ const say = async ({
 export const speechResponse = async (
   request: Request,
   env: Env,
-  requestId: string,
-  ctx: Pick<ExecutionContext, "waitUntil">
+  requestId: string
 ): Promise<Response> => {
   if (request.method !== "POST") {
     return errorResponse(
@@ -549,5 +423,5 @@ export const speechResponse = async (
   if (listener instanceof Response) {
     return listener;
   }
-  return await say({ env, asked, listener, stored, requestId, ctx });
+  return await say({ env, asked, listener, stored, requestId });
 };

@@ -511,6 +511,8 @@ export interface RealHappened {
       | "opus"
       | "sonnet"
       | "haiku"
+      | "mistralMedium"
+      | "mistralSmall"
       | "voice"
       | "ears"
       | "conversation"

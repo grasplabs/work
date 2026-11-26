@@ -120,19 +120,11 @@ const happenedOf = (
 export const languageLast = (locale: TurnAsked["locale"]): string =>
   `Say your line in ${NAMED[locale]}: every word of it, your small words too, also when they answered in another language, and also a line from the examples in your instructions, which you say in ${NAMED[locale]}, never as it stands in English.`;
 
-/**
- * What a live voice session's Stephen is told last, as it holds the whole
- * conversation: one language from start to end, and what he does by a
- * function is never said.
- */
-export const spokenLast = (locale: TurnAsked["locale"]): string =>
-  [
-    `Speak ${NAMED[locale]} only, every word, from your first line to your last, whatever language they use or words they bring in: a name of a product they say stays a name, your sentence around it stays ${NAMED[locale]}.`,
-    "Calling a function is silent: never say its name, a part's name (such as open, week, anchor or readback) or that you go to another part; say your next line only.",
-  ].join("\n");
-
 /** Their work as a whole takes 4 minutes at most: a talker can fill the whole interview with it. */
 const weekPartMinutes = 4;
+
+/** What of a turn tells where the interview stands, without its conversation. */
+type Situation = Pick<TurnAsked, "phase" | "minutes" | "adding" | "facts">;
 
 /**
  * What the record still misses, as Stephen is told it each turn
@@ -159,20 +151,13 @@ const openOf = (turn: Situation, kind: TurnContext["kind"]): string[] => {
   ];
 };
 
-/** What of a turn tells where the interview stands, without its conversation. */
-export type Situation = Pick<
-  TurnAsked,
-  "phase" | "minutes" | "adding" | "facts"
->;
-
 /**
  * Where the interview stands, as Stephen is told it: who he talks to and
  * about what, what Grasp knows already, how long it has run, what he
  * wrote down and what is still open. Who they are comes from the store.
- * The first part of every turn's brief (`briefOf`), and what a live voice
- * session is told, and told again after each answer (voice.ts).
+ * The first part of every turn's brief (`briefOf`).
  */
-export const situationOf = (
+const situationOf = (
   turn: Situation,
   context: TurnContext,
   company: string
@@ -222,8 +207,8 @@ export const situationOf = (
 /**
  * What Stephen is told for one turn: where the interview stands
  * (`situationOf`), the conversation, and what just happened. The
- * conversation comes from the page, or, in a live voice session, from
- * what Mistral wrote down of it.
+ * conversation comes from the page: turn by turn, or as it heard a live
+ * conversation with the agent (voice.ts).
  */
 export const briefOf = (
   turn: TurnAsked,

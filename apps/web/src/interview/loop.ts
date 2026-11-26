@@ -18,10 +18,7 @@ import type {
   StephenTurn,
   VoiceTag,
 } from "@grasp-os/shared/interview-turn";
-import type {
-  VoiceAnswered,
-  VoiceLine,
-} from "@grasp-os/shared/interview-voice";
+import type { VoiceLine } from "@grasp-os/shared/interview-voice";
 import { useSyncExternalStore } from "react";
 
 import { readingSeconds } from "../onboarding/setup.ts";
@@ -125,13 +122,13 @@ import type { LoopWords } from "./words.ts";
 // kept, and he goes on trying: after a while, at once when the connection
 // is back, and with whatever they say next.
 //
-// Whoever chose to talk is talked with in one live voice session at
-// Mistral (live.ts), when it can be had: Mistral hears them and Stephen
-// answers and speaks there, so he answers at once and they can talk over
-// him. Their words show over the box as they are heard, and go into the
-// transcript as each stretch is settled; core writes down what was said
-// from Mistral's own transcript after each answer, and tells Stephen where
-// the interview stands from then on. When he says he will read back, the
+// Whoever chose to talk is talked with in one live conversation with
+// Grasp's ElevenLabs agent (live.ts), when it can be had: ElevenLabs hears
+// them and Stephen answers and speaks there, so he answers at once and
+// they can talk over him. Their words show over the box as they are heard,
+// and go into the transcript as each stretch is settled; core writes down
+// what was said after each answer, from the conversation as the page
+// heard it. When he says he will read back, the
 // session is closed and the read-back goes on here as before. Typing, a
 // read-back, or a session that can't be had or breaks off: the turns
 // above, as before.
@@ -1616,12 +1613,10 @@ const happen = (happening: Happening): void => {
 let live: Live | null = null;
 /** Its pass, kept a moment after it is left, so the last answer is still written down. */
 let livePass: string | null = null;
-/** What the session heard, kept with its pass, for core to write down from where it reads no transcript of its own. */
-let liveSaid: (() => VoiceLine[] | null) | null = null;
+/** What the session heard, kept with its pass, for core to write down from. */
+let liveSaid: (() => VoiceLine[]) | null = null;
 /** Our own ear beside the session, for their words as they talk (`overhearLive`). */
 let liveEar: Ear | null = null;
-/** The pass of the session left last: a new one closes it, should it still be open. */
-let lastPass: string | null = null;
 /** How many of their answers in the session are written down. */
 let liveNoted = 0;
 /** Their stretches still being heard, by ID: the words over the box. */
@@ -1712,18 +1707,6 @@ const standingOf = (told: LoopWords) => {
 const lastAnswer = (): number =>
   progressNow().lines.findLastIndex(({ from }) => from === "person");
 
-/** Tells Stephen where the interview stands; when that fails he goes on as told before, and the next answer tells him again. */
-const instructQuietly = async (
-  session: Live,
-  told: Pick<VoiceAnswered, "instructions" | "situation">
-): Promise<void> => {
-  try {
-    await session.instruct(told);
-  } catch {
-    // As above.
-  }
-};
-
 /** Their microphone in the session follows the box's mute; when that fails it stays as it was. */
 const muteQuietly = async (session: Live, muted: boolean): Promise<void> => {
   try {
@@ -1733,11 +1716,8 @@ const muteQuietly = async (session: Live, muted: boolean): Promise<void> => {
   }
 };
 
-/** What core wrote down after an answer: kept, and Stephen is told where it stands now. */
-const tookLive = (
-  answered: Awaited<ReturnType<typeof answerVoice>>,
-  session: Live | null
-): void => {
+/** What core wrote down after an answer: kept. */
+const tookLive = (answered: Awaited<ReturnType<typeof answerVoice>>): void => {
   if (isRefused(answered)) {
     return;
   }
@@ -1766,14 +1746,11 @@ const tookLive = (
       wroteDown();
     }
   }
-  if (session !== null && live === session) {
-    void instructQuietly(session, answered);
-  }
 };
 
 let liveNoting: Promise<void> | null = null;
 let liveNoteOwed = false;
-/** How long Mistral's transcript is waited for, and how often, when it doesn't hold their answer yet. */
+/** How long their answer is waited for, and how often, when the conversation as heard here doesn't hold it yet. */
 const liveNoteWaitMs = 1500;
 const liveNoteTries = 4;
 
@@ -1805,9 +1782,8 @@ const noteOnce = async (waited: number): Promise<number | null> => {
   if (pass === null || standing === null) {
     return null;
   }
-  const session = live;
   const noted = liveNoted;
-  const said = liveSaid?.() ?? null;
+  const said = liveSaid?.() ?? [];
   const answered = await answerVoice({
     action: "answer",
     ...standing,
@@ -1815,18 +1791,18 @@ const noteOnce = async (waited: number): Promise<number | null> => {
     noted,
     // Only a new session is told what came before.
     before: [],
-    ...(said === null ? {} : { said }),
+    said,
   });
   if (isRefused(answered)) {
     return null;
   }
   if (answered.noted === noted && waited < liveNoteTries) {
-    // Mistral's transcript doesn't hold it yet: a moment later.
+    // Their answer isn't heard here yet: a moment later.
     liveNoteOwed = true;
     await pause(liveNoteWaitMs);
     return waited + 1;
   }
-  tookLive(answered, session);
+  tookLive(answered);
   return 0;
 };
 
@@ -1936,7 +1912,7 @@ const liveDoing = (doing: LiveDoing): void => {
   if (doing === "speaking") {
     show("speaking");
     paceLive(true);
-    // His voice plays as Mistral sends it, as in Stephen Lab: when they talk over him, Mistral
+    // His voice plays as the agent sends it: when they talk over him, the agent
     // stops him itself. Hushing him here on what the microphone heard cut his own voice off.
     live?.hush(false);
     return;
@@ -1972,7 +1948,7 @@ const livePart = (part: InterviewPhase): void => {
 
 /**
  * The session is left: what they said last is written down first, unless
- * `quick`, as when the page is left; then it is closed at Mistral.
+ * `quick`, as when the page is left; then it is closed.
  */
 const leaveLive = async ({ quick = false } = {}): Promise<void> => {
   const session = live;
@@ -2005,7 +1981,6 @@ const leaveLive = async ({ quick = false } = {}): Promise<void> => {
   if (session === null) {
     return;
   }
-  lastPass = session.pass;
   if (!quick) {
     await noteLive();
   }
@@ -2083,7 +2058,7 @@ const eventOf = (
 const overhearLive = async (session: Live, count: number): Promise<void> => {
   const { overheard } = session;
   const link = linkNow();
-  if (overheard === null || words === null || link === null) {
+  if (words === null || link === null) {
     return;
   }
   const opened = await openEar({
@@ -2148,7 +2123,6 @@ const goLive = async (): Promise<boolean> => {
         .filter(({ removed }) => removed !== true)
         .map(({ from, text }) => ({ from, text }))
         .slice(-interviewLimits.lines),
-      ...(lastPass === null ? {} : { previous: lastPass }),
     },
     {
       segment: (segment) => {
@@ -2208,7 +2182,6 @@ const goLive = async (): Promise<boolean> => {
   live = joined;
   livePass = joined.pass;
   liveSaid = joined.said;
-  lastPass = joined.pass;
   liveNoted = 0;
   if (micMuted()) {
     void muteQuietly(joined, true);
@@ -2229,10 +2202,9 @@ export const sendTyped = (text: string): void => {
   if (!on || text.trim() === "" || state.doing === "idle") {
     return;
   }
-  const typing = live?.type ?? null;
-  if (live !== null && typing !== null && progressNow().mode === "talk") {
+  if (live !== null && progressNow().mode === "talk") {
     // Typed while they talk, it goes to him in the session, as their turn.
-    typing(text.trim());
+    live.type(text.trim());
     update((progress) =>
       withSpoken(progress, {
         from: "person",

@@ -453,7 +453,29 @@ export const aiProvidersFake = () => {
       { headers: { "request-id": `req-speech-${seen.length}` } }
     );
   };
-  /** How Mistral's and ElevenLabs's speech and OpenAI's audio endpoints answer when nothing is planned. */
+  /**
+   * How ElevenLabs answers: a token for a conversation with one of the
+   * account's agents, never the key it was asked with, or a line said.
+   */
+  const elevenLabsAnswer = (
+    request: Request,
+    url: URL,
+    body: string
+  ): Response | undefined => {
+    if (
+      request.method === "GET" &&
+      url.pathname === "/v1/convai/conversation/token"
+    ) {
+      return url.searchParams.get("agent_id")?.startsWith("agent_") === true
+        ? Response.json({ token: `conversation-token-${seen.length}` })
+        : Response.json(
+            { detail: { status: "agent_not_found" } },
+            { status: 404 }
+          );
+    }
+    return request.method === "POST" ? elevenLabsLine(url, body) : undefined;
+  };
+  /** How Mistral's and ElevenLabs's speech, ElevenLabs's conversation tokens and OpenAI's audio endpoints answer when nothing is planned. */
   const audioAnswer = (
     request: Request,
     url: URL,
@@ -475,7 +497,7 @@ export const aiProvidersFake = () => {
       url.hostname === "api.elevenlabs.io" ||
       url.hostname === "api.eu.residency.elevenlabs.io"
     ) {
-      return request.method === "POST" ? elevenLabsLine(url, body) : undefined;
+      return elevenLabsAnswer(request, url, body);
     }
     // Grasp's own project answers at OpenAI's EU host, or its US one.
     if (

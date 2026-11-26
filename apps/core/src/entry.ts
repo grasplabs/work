@@ -249,7 +249,7 @@ const linkResponse = async (
     return await interviewStoryResponse(request, env, requestId, ctx);
   }
   if (pathname === speechPath) {
-    return await speechResponse(request, env, requestId, ctx);
+    return await speechResponse(request, env, requestId);
   }
   if (pathname === transcriptionPath) {
     return transcriptionResponse(request, env, requestId, ctx);

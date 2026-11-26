@@ -76,11 +76,16 @@ import {
 /** Every month together, as the choice of month says it. */
 const allMonths = "all";
 
-/** Each model in a shade of its own, the careful one the darkest. */
+/**
+ * Each model in a shade of its own, the careful one the darkest. Mistral's two share the shades
+ * of the two they stand in for: an organization's interviews are written with either pair.
+ */
 const modelShade: Record<Model, ChartColor> = {
   opus: "chart-1",
   sonnet: "chart-5",
   haiku: "chart-3",
+  mistralMedium: "chart-1",
+  mistralSmall: "chart-5",
   voice: "chart-4",
   ears: "chart-2",
   conversation: "chart-6",
@@ -129,6 +134,8 @@ const modelWords: Record<Model, string> = {
   opus: MODEL_NAMES.opus,
   sonnet: MODEL_NAMES.sonnet,
   haiku: MODEL_NAMES.haiku,
+  mistralMedium: MODEL_NAMES.mistralMedium,
+  mistralSmall: MODEL_NAMES.mistralSmall,
   voice: "Stephen’s voice",
   ears: "Stephen’s ears",
   conversation: "Stephen’s live interviews",

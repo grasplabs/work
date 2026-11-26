@@ -152,7 +152,7 @@ export const withLine = (
     : { ...progress, lines: [...progress.lines, line] };
 
 /**
- * A line heard in a live session (live.ts): Mistral hears an answer in
+ * A line heard in a live session (live.ts): the agent hears an answer in
  * stretches, and says a line of his in stretches too. A stretch after one
  * of the same speaker is the same line, its words after the others; after
  * the other's, it is a line of its own.

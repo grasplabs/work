@@ -6,34 +6,28 @@ import {
 import type { InterviewPhase } from "@grasp-os/shared/interview-turn";
 import { partFunction } from "@grasp-os/shared/interview-voice";
 import type {
-  AgentJoin,
   InterviewVoiceRequest,
-  MistralJoin,
-  VoiceAnswered,
   VoiceLine,
+  VoiceSessionJoin,
 } from "@grasp-os/shared/interview-voice";
 
 import { closeVoice, isRefused, openVoice } from "./api.ts";
 import type { Refused } from "./api.ts";
 
-// The interview held as one live voice session (core's onboarding/voice.ts),
-// as core opens it: a conversation with Grasp's ElevenLabs agent, or a
-// session at Mistral. Either way the provider's own SDK takes the
-// microphone and plays Stephen's voice; the provider listens, Stephen
-// answers there, and they can talk over him. What the session tells is
-// handed to the conversation (loop.ts) as it happens: their words and his
+// The interview held as one live conversation with Grasp's ElevenLabs
+// agent (core's onboarding/voice.ts), as core opens it. ElevenLabs's own
+// SDK takes the microphone and plays Stephen's voice; ElevenLabs listens,
+// Stephen answers there, and they can talk over him. What the conversation
+// tells is handed to the loop (loop.ts) as it happens: their words and his
 // as they are heard and said, what he is doing, and the part he goes to.
 //
-// - ElevenLabs: the page starts the conversation with the token core
-//   asked for on Grasp's key, and sends what core says Stephen is told and
-//   says first as the agent's overrides. What was said core can't read
-//   there: the page sends it with each answer (`said`). Where the
-//   interview stands after each answer reaches him as a contextual update.
-// - Mistral: the page joins the session's room with what core answers;
-//   what is written down core reads from Mistral's own transcript.
+// The page starts the conversation with the token core asked for on
+// Grasp's key, and tells the agent who it talks with as context: its
+// prompt and first line are its own. What was said core can't read there:
+// the page sends it with each answer (`said`).
 //
-// Nothing said leaves the page but to the provider and core. The SDKs and
-// the audio transport they bring are loaded when a session begins, never
+// Nothing said leaves the page but to ElevenLabs and core. The SDK and the
+// audio transport it brings are loaded when a conversation begins, never
 // with the page: they are large, and only a talk needs them.
 
 /** What the session says Stephen is doing. */
@@ -44,7 +38,7 @@ export type LiveDoing =
   | "thinking"
   | "speaking";
 
-/** A stretch of the conversation as Mistral writes it down: all its words so far. */
+/** A stretch of the conversation as it is heard: all its words so far. */
 export interface LiveSegment {
   id: string;
   from: "person" | "stephen";
@@ -70,24 +64,14 @@ export interface LiveHandlers {
   failed: () => void;
 }
 
-/** A session the page is in. */
+/** A conversation the page is in. */
 export interface Live {
   /** What core is sent back with each answer and the close. */
   pass: string;
-  /** What Stephen is told from now on, as core answered it: it takes effect at his next turn. */
-  instruct: (
-    told: Pick<VoiceAnswered, "instructions" | "situation">
-  ) => Promise<void>;
-  /**
-   * The conversation of this session as the page heard it, for core to
-   * write down from; null where core reads the provider's own transcript.
-   */
-  said: () => VoiceLine[] | null;
-  /**
-   * Hands what they typed to Stephen in the session, as their turn; null
-   * where the session takes no typing.
-   */
-  type: ((text: string) => void) | null;
+  /** The conversation as the page heard it, for core to write down from. */
+  said: () => VoiceLine[];
+  /** Hands what they typed to Stephen in the conversation, as their turn. */
+  type: (text: string) => void;
   setMuted: (muted: boolean) => Promise<void>;
   /**
    * Stops his voice here at once, or lets it be heard again: what is
@@ -96,164 +80,18 @@ export interface Live {
   hush: (hushed: boolean) => void;
   /**
    * Their words as our own ear hears them while they talk, stretch by
-   * stretch (`ended` once it fell quiet): shown until the session's own
-   * words for their turn come. Null where the session streams their words
-   * itself.
+   * stretch (`ended` once it fell quiet): shown until the agent's own
+   * words for their turn come.
    */
-  overheard: ((stretch: number, text: string, ended: boolean) => void) | null;
-  /** How loud he is and how loud they are, 0 to 1, as the session hears it now. */
+  overheard: (stretch: number, text: string, ended: boolean) => void;
+  /** How loud he is and how loud they are, 0 to 1, as the conversation hears it now. */
   levels: () => { his: number; theirs: number };
-  /** Leaves the room and closes the session at Mistral; again does nothing. */
+  /** Ends the conversation; again does nothing. */
   close: () => Promise<void>;
-}
-
-/** Thrown when core opened no session, with why. */
-class NotOpenedError extends Error {
-  override name = "NotOpenedError";
-  readonly refused: Refused;
-
-  constructor(refused: Refused) {
-    super(`No voice session: ${refused.message}`);
-    this.refused = refused;
-  }
 }
 
 const isPhase = (value: unknown): value is InterviewPhase =>
   interviewPhases.some((phase) => phase === value);
-
-type OpenRequest = Extract<InterviewVoiceRequest, { action: "open" }>;
-
-/**
- * Joins the session at Mistral core opened (`first`): its room, through
- * Mistral's SDK. Should the SDK ask for another, core opens it.
- */
-const joinMistral = async (
-  first: MistralJoin,
-  request: OpenRequest,
-  on: LiveHandlers
-): Promise<Live | Refused | null> => {
-  let pass: string | null = null;
-  let closed = false;
-  let given: MistralJoin | null = first;
-  try {
-    const { initSession } =
-      await import("@mistralai/mistralai/extra/voice-agents/browser");
-    const session = await initSession({
-      createSession: async () => {
-        const opened = given ?? (await openVoice(request));
-        given = null;
-        if (isRefused(opened)) {
-          throw new NotOpenedError(opened);
-        }
-        if (opened.via !== "mistral") {
-          throw new Error("Not a session at Mistral");
-        }
-        ({ pass } = opened);
-        return {
-          id: opened.id,
-          participantToken: opened.participantToken,
-          serverUrl: opened.serverUrl,
-          createdAt: new Date(),
-          expiresAt: new Date(opened.expiresAt),
-        };
-      },
-      deleteSession: async () => {
-        if (pass !== null) {
-          await closeVoice({ action: "close", secret: request.secret, pass });
-        }
-      },
-      functionHandlers: {
-        // The page answers his move to another part; core reads it from Mistral's transcript.
-        [partFunction]: (args) => {
-          const { part } = args;
-          if (isPhase(part)) {
-            on.part(part);
-          }
-          return { ok: true };
-        },
-      },
-    });
-    const close = async (): Promise<void> => {
-      if (closed) {
-        return;
-      }
-      closed = true;
-      try {
-        await session.close();
-      } catch {
-        // Nothing more to let go of: it ends by itself when it expires.
-      }
-    };
-    session.on("transcript", ({ id, role, content, final }) => {
-      if (!closed) {
-        on.segment({
-          id,
-          from: role === "user" ? "person" : "stephen",
-          text: content,
-          final,
-        });
-      }
-    });
-    session.on("agent_state_changed", ({ state }) => {
-      if (!closed) {
-        on.doing(state);
-      }
-    });
-    session.on("error", ({ fatal }) => {
-      if (fatal && !closed) {
-        void close();
-        on.ended();
-      }
-    });
-    session.on("disconnected", () => {
-      if (!closed) {
-        // Dropped from the other side: the session is still closed at Mistral.
-        void close();
-        on.ended();
-      }
-    });
-    try {
-      await session.connect();
-    } catch (error) {
-      await close();
-      throw error;
-    }
-    const joined = pass;
-    if (joined === null) {
-      await close();
-      return null;
-    }
-    return {
-      pass: joined,
-      instruct: async ({ instructions }) => {
-        if (!closed) {
-          await session.update({ instructions });
-        }
-      },
-      said: () => null,
-      overheard: null,
-      levels: () => ({ his: 0, theirs: 0 }),
-      type: null,
-      setMuted: async (muted) => {
-        if (!closed) {
-          await session.setInputEnabled(!muted);
-        }
-      },
-      hush: (hushed) => {
-        const voice = session.remoteTrack;
-        if (voice !== null) {
-          voice.enabled = !hushed;
-        }
-      },
-      close,
-    };
-  } catch (error) {
-    if (error instanceof NotOpenedError) {
-      return error.refused;
-    }
-    return null;
-  }
-};
 
 /**
  * How long his first line may take to come once the conversation began,
@@ -270,13 +108,6 @@ const tookIt = "ok";
  */
 const overheardMs = 6000;
 
-/**
- * Starts the conversation with Grasp's ElevenLabs agent core opened
- * (`join`), through ElevenLabs's own SDK, over WebRTC: with the token core
- * asked for, and what core says Stephen is told and says first as the
- * agent's overrides. Its audio worklets come from this origin, as the
- * page's policy lets scripts come from nowhere else.
- */
 /** What starts a conversation with the agent: the SDK's own, loaded once it is needed (`loadAgentSdk`). */
 export type StartAgent = (
   options: PartialOptions
@@ -293,7 +124,17 @@ export type StartAgent = (
   >
 >;
 
-/** The SDK, with its audio worklets served from this site (the CSP refuses them inline). */
+/** Where ElevenLabs holds a conversation whose token was asked at its EU residency host. */
+const euResidency = {
+  origin: "wss://api.eu.residency.elevenlabs.io",
+  livekitUrl: "wss://livekit.rtc.eu.residency.elevenlabs.io",
+} as const;
+
+/**
+ * The SDK, over WebRTC, with its audio worklets served from this site: the
+ * page's policy lets scripts come from nowhere else, and refuses them
+ * inline.
+ */
 const loadAgentSdk = async (): Promise<StartAgent> => {
   const [{ Conversation }, raw, concat] = await Promise.all([
     import("@elevenlabs/client"),
@@ -313,7 +154,7 @@ const loadAgentSdk = async (): Promise<StartAgent> => {
 
 /** Joins the conversation core opened with the agent, started by `start`; null when it can't be. */
 export const joinAgent = async (
-  join: AgentJoin,
+  join: VoiceSessionJoin,
   on: LiveHandlers,
   start?: StartAgent
 ): Promise<Live | null> => {
@@ -358,6 +199,8 @@ export const joinAgent = async (
     const conversation = await startSession({
       conversationToken: join.conversationToken,
       connectionType: "webrtc",
+      // The token is of the host core asked it at: joined in the EU, the audio stays there.
+      ...(join.location === "eu-residency" ? euResidency : {}),
       // The agent takes no overrides: its own prompt and first line stand; who they are comes as context.
       stripAudioTags: true,
       clientTools: {
@@ -512,10 +355,6 @@ export const joinAgent = async (
     }, firstLineMs);
     return {
       pass: join.pass,
-      // The agent runs the interview by its own prompt: core's notes don't steer it.
-      instruct: async () => {
-        await Promise.resolve();
-      },
       said: () => [...said],
       overheard: (stretch, text, ended) => {
         if (closed || streamsTheirs || takenUp.has(stretch)) {
@@ -575,13 +414,13 @@ export const joinAgent = async (
 };
 
 /**
- * Joins a live session for `request`: the session, or why core opened
- * none; null when the session opened but the page couldn't join it, or
- * the browser has nothing to join it with. A session at Mistral that
- * couldn't be joined is closed there.
+ * Joins a live conversation for `request`: the conversation, or why core
+ * opened none; null when core opened one but the page couldn't join it, or
+ * the browser has nothing to join it with. Core is told when the page
+ * leaves it.
  */
 export const joinLive = async (
-  request: OpenRequest,
+  request: Extract<InterviewVoiceRequest, { action: "open" }>,
   on: LiveHandlers
 ): Promise<Live | Refused | null> => {
   if (typeof RTCPeerConnection === "undefined") {
@@ -596,7 +435,29 @@ export const joinLive = async (
   if (isRefused(opened)) {
     return opened;
   }
-  return opened.via === "elevenlabs"
-    ? await joinAgent(opened, on)
-    : await joinMistral(opened, request, on);
+  const { pass } = opened;
+  let told = false;
+  const tellClosed = async (): Promise<void> => {
+    if (told) {
+      return;
+    }
+    told = true;
+    try {
+      await closeVoice({ action: "close", secret: request.secret, pass });
+    } catch {
+      // Core holds nothing open for it: nothing is lost.
+    }
+  };
+  const live = await joinAgent(opened, on);
+  if (live === null) {
+    await tellClosed();
+    return null;
+  }
+  return {
+    ...live,
+    close: async () => {
+      await live.close();
+      await tellClosed();
+    },
+  };
 };

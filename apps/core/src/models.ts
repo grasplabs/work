@@ -103,14 +103,14 @@ import {
   charactersOf,
   conversationCostOf,
   hearingCostOf,
-  parseConversingRef,
+  parseAgentRef,
   parseHearingRef,
   alignedWordsOf,
   parseVoiceRef,
   speechCostOf,
   wordsOf,
 } from "./voice-models.ts";
-import type { ConversingRef, HearingRef, VoiceRef } from "./voice-models.ts";
+import type { AgentRef, HearingRef, VoiceRef } from "./voice-models.ts";
 
 // The model gateway: every model call in a deployment goes through here,
 // and from here through a model transport (model-transport.ts), never
@@ -3596,47 +3596,41 @@ const canListen = async (env: Env, model: string): Promise<boolean> => {
   return typeof platformTargetOf(env, routes, ref.provider) !== "string";
 };
 
-// A live voice session (Mistral's voice agents: listening, the model and
-// the voice in one session, which the browser joins itself): admitted,
-// judged and refused like a listening; once open, recorded as one model
-// call, with what the session is expected to last and cost, estimated, as
-// its length is known only to Mistral. Its audio never passes core or
-// connect; what core sends is the session's set-up, and later its reads
-// and its close (`voiceSessions`), never anything said.
+// A conversation with one of Grasp's own voice agents (ElevenLabs's
+// agents: listening, the model and the voice in one live conversation,
+// which the browser joins itself with a token): admitted, judged and
+// refused like a listening; once its token is asked, recorded as one model
+// call, with what the conversation is expected to last and cost,
+// estimated, as its length is known only to ElevenLabs. Its audio never
+// passes core or connect; what core sends is the agent's ID, never
+// anything said.
 
-/** The longest a voice session's cost is estimated at. */
+/** The longest a conversation's cost is estimated at. */
 const maxConversationSeconds = 60 * 60;
 
-/** Where Mistral opens its voice sessions, and reads and closes each by its ID. */
-const voiceSessionsPath = "/v1/audio/sessions";
-
-/** How long opening, reading or closing a voice session may take. */
-const voiceSessionRequestMs = 20_000;
+/** How long asking for a conversation's token may take. */
+const agentTokenRequestMs = 20_000;
 
 const conversingSchema = z.strictObject({
+  /** `<provider>/<agent's ID>`: one of Grasp's own agents (`parseAgentRef`). */
   model: sessionShape.model,
   purpose: sessionShape.purpose,
   trigger: sessionShape.trigger,
   provenance: sessionShape.provenance,
   work: sessionShape.work,
   requestId: sessionShape.requestId,
-  /** How long the session is expected to last: what its cost is estimated at. */
+  /** How long the conversation is expected to last: what its cost is estimated at. */
   seconds: z.int().positive().max(maxConversationSeconds),
-  /**
-   * The session as its provider's API takes it, but for its model, which
-   * the gateway names from `model`: its instructions, voices, turns.
-   */
-  session: z.record(z.string(), z.unknown()),
 });
 type ConversingSession = z.output<typeof conversingSchema>;
 
-/** A voice session asked to open. */
+/** A conversation with a voice agent asked to open. */
 export type ConversingCall = z.input<typeof conversingSchema> & {
   /** Where the call works: required, so no caller can leave it out. */
   work: NonNullable<z.input<typeof conversingSchema>["work"]>;
 };
 
-/** What the audit log records of one voice session as it opened. */
+/** What the audit log records of one conversation as it opened. */
 interface ConversedRecord {
   /** The seconds its cost is estimated at. */
   seconds: number;
@@ -3646,10 +3640,10 @@ interface ConversedRecord {
   status: number | undefined;
 }
 
-/** A voice session's audit entry: a `model.call`, as any model call's. */
+/** A conversation's audit entry: a `model.call`, as any model call's. */
 const conversingEntry = (
   call: ConversingSession,
-  ref: ConversingRef,
+  ref: AgentRef,
   recorded: ConversedRecord
 ): AuditEntry =>
   keepingProvenance(call.provenance, (provenance, dropped) => ({
@@ -3657,7 +3651,8 @@ const conversingEntry = (
     action: "model.call",
     requestId: call.requestId,
     provenance,
-    // A voice session is billed by the minute, not by tokens (`seconds`).
+    // A conversation is billed by the minute, not by tokens (`seconds`),
+    // and named by its agent, which holds its models.
     model: {
       provider: ref.provider,
       model: ref.id,
@@ -3681,7 +3676,7 @@ const conversingEntry = (
     },
   }));
 
-/** The most a voice session can add to its audit event (`largestRecord`). */
+/** The most a conversation can add to its audit event (`largestRecord`). */
 const largestConversed: ConversedRecord = {
   seconds: maxConversationSeconds,
   region: "custom",
@@ -3691,11 +3686,15 @@ const largestConversed: ConversedRecord = {
 };
 
 /**
- * Opens a voice session through the gateway: refused, and audited, before
- * anything is sent when the rules or Grasp's keys don't let it through, as
- * a listening is; otherwise asked of the provider once, and recorded as
- * one model call whatever came of it. Answers the provider's response,
- * which the caller reads; throws when none came.
+ * Opens a conversation with one of Grasp's own voice agents through the
+ * gateway: asks its provider for a conversation token with Grasp's key,
+ * through connect, which the browser joins the conversation with, never
+ * the key. Refused, and audited, before anything is sent when the rules or
+ * Grasp's keys don't let it through, as a listening is; otherwise asked
+ * once, and recorded as one model call whatever came of it. The agent is
+ * the caller's own, Grasp's (src/platform-ai.ts), never one a page names.
+ * Answers the provider's response, which the caller reads; throws when
+ * none came.
  */
 const openConversation = async (
   env: Env,
@@ -3703,8 +3702,16 @@ const openConversation = async (
   signal?: AbortSignal
 ): Promise<Response> => {
   const call = parseCall(conversingSchema, fields);
-  const ref = parseConversingRef(call.model);
-  if (ref === undefined) {
+  const ref = parseAgentRef(call.model);
+  const tokens =
+    ref === undefined ? undefined : aiProviders[ref.provider].agentTokens;
+  const query =
+    ref === undefined ? "" : `?agent_id=${encodeURIComponent(ref.id)}`;
+  if (
+    ref === undefined ||
+    tokens === undefined ||
+    !agentTokenQuery.test(query)
+  ) {
     return await refuse(env, call, { code: "model.not_allowed" });
   }
   try {
@@ -3718,33 +3725,25 @@ const openConversation = async (
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
   }
+  const way = platformWay(ref.provider, target.platform, "conversation");
   const id = crypto.randomUUID();
   let answered: Response | undefined = undefined;
   try {
     answered = await connectRequest(
       env,
       target,
-      voiceSessionsPath,
-      {
-        headers: {
-          "content-type": "application/json",
-          accept: "application/json",
-        },
-        body: JSON.stringify({
-          ...call.session,
-          llm: { model: ref.id },
-        }),
-      },
+      `${tokens}${query}`,
+      { method: "GET", headers: { accept: "application/json" } },
       {
         providerRequest: id,
-        endsAt: Date.now() + voiceSessionRequestMs,
+        endsAt: Date.now() + agentTokenRequestMs,
         ...(signal === undefined ? {} : { signal }),
       }
     );
     return answered;
   } finally {
     const opened = answered?.ok === true;
-    const cost = opened ? conversationCostOf(ref, call.seconds) : 0;
+    const cost = opened ? conversationCostOf(call.seconds) : 0;
     await recordResponse(
       env,
       {
@@ -3761,93 +3760,23 @@ const openConversation = async (
           id,
           model: call.model,
           purpose: call.purpose,
-          credential: "platform",
+          credential: way.credential,
           feature: "conversation",
           inputTokens: opened ? call.seconds : 0,
           outputTokens: 0,
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
           cost,
-          // Its length is Mistral's to know: the cost is what it is expected to last.
+          // Its length is ElevenLabs's to know: the cost is what it is expected to last.
           estimated: true,
         },
         ...(opened
-          ? { health: { provider: ref.provider, credential: "platform" } }
+          ? { health: { provider: way.provider, credential: way.credential } }
           : {}),
       },
       { awaited: true }
     );
   }
-};
-
-/**
- * A voice session the gateway opened, read or closed by its ID, with
- * Grasp's key for `provider`, through connect: what Mistral kept of it
- * (its transcript), or its end. Nothing billed and nothing new decided,
- * so neither is judged nor audited; the session's ID is the caller's to
- * have checked as one it opened for whoever asks.
- */
-const sessionRequest = async (
-  env: Env,
-  method: "GET" | "DELETE",
-  sessionId: string,
-  signal?: AbortSignal
-): Promise<Response> => {
-  const target = platformTargetOf(
-    env,
-    await routesOrFailed(env),
-    platformAi.conversation.provider
-  );
-  if (typeof target === "string") {
-    throw modelErrors.create(target);
-  }
-  return await connectRequest(
-    env,
-    target,
-    `${voiceSessionsPath}/${encodeURIComponent(sessionId)}`,
-    { method, headers: { accept: "application/json" } },
-    {
-      providerRequest: crypto.randomUUID(),
-      endsAt: Date.now() + voiceSessionRequestMs,
-      ...(signal === undefined ? {} : { signal }),
-    }
-  );
-};
-
-/**
- * A conversation token for one of Grasp's own voice agents (`agentTokens`,
- * ElevenLabs's agents, for Grasp's interviews), asked with Grasp's key
- * through connect: what the browser joins the conversation with, never
- * the key. The token itself bills nothing: the conversation is metered by
- * its caller, as a session is. The agent's ID is the caller's own,
- * Grasp's (src/platform-ai.ts), never one the page names.
- */
-const agentTokenRequest = async (
-  env: Env,
-  provider: ConnectTarget["provider"],
-  agentId: string,
-  signal?: AbortSignal
-): Promise<Response> => {
-  const { agentTokens } = aiProviders[provider];
-  const query = `?agent_id=${encodeURIComponent(agentId)}`;
-  if (agentTokens === undefined || !agentTokenQuery.test(query)) {
-    throw modelErrors.create("model.not_allowed");
-  }
-  const target = platformTargetOf(env, await routesOrFailed(env), provider);
-  if (typeof target === "string") {
-    throw modelErrors.create(target);
-  }
-  return await connectRequest(
-    env,
-    target,
-    `${agentTokens}${query}`,
-    { method: "GET", headers: { accept: "application/json" } },
-    {
-      providerRequest: crypto.randomUUID(),
-      endsAt: Date.now() + voiceSessionRequestMs,
-      ...(signal === undefined ? {} : { signal }),
-    }
-  );
 };
 
 /**
@@ -4044,29 +3973,12 @@ export const models = (env: Env) => ({
   canListen: async (model: string): Promise<boolean> =>
     await canListen(env, model),
   /**
-   * Opens a live voice session (`openConversation`): judged, refused and
-   * audited like a listening; answers the provider's response.
+   * Opens a conversation with one of Grasp's own voice agents
+   * (`openConversation`): judged, refused and audited like a listening;
+   * answers the provider's response, which holds the token to join it with.
    */
   converse: async (
     call: ConversingCall,
     signal?: AbortSignal
   ): Promise<Response> => await openConversation(env, call, signal),
-  /** Reads what the provider kept of a voice session it opened (`sessionRequest`). */
-  readConversation: async (
-    sessionId: string,
-    signal?: AbortSignal
-  ): Promise<Response> => await sessionRequest(env, "GET", sessionId, signal),
-  /** A conversation token for one of Grasp's own voice agents (`agentTokenRequest`). */
-  agentToken: async (
-    provider: ConnectTarget["provider"],
-    agentId: string,
-    signal?: AbortSignal
-  ): Promise<Response> =>
-    await agentTokenRequest(env, provider, agentId, signal),
-  /** Closes a voice session it opened (`sessionRequest`). */
-  closeConversation: async (
-    sessionId: string,
-    signal?: AbortSignal
-  ): Promise<Response> =>
-    await sessionRequest(env, "DELETE", sessionId, signal),
 });
