@@ -10,6 +10,7 @@ import {
 
 import { useCore } from "../use-core.ts";
 import { useTabShown } from "../use-tab-shown.ts";
+import { readTo } from "./chat-watch.ts";
 
 // Where the person has read a chat to, as Slack and Linear keep it: one
 // place per chat, on core (`ChatsApi.markRead`), so it holds on every
@@ -176,13 +177,18 @@ export const useNewLine = (
   // an answer ended.
   const asked = useRef(-1);
   const marked = useRef(0);
-  const mark = useEffectEvent(
-    async (id: string): Promise<number | null> =>
-      // Its row loses its dot, here and on every device, as core pushes it.
-      await core.withSession(
-        async (session) => await session.chats.markRead(id)
-      )
-  );
+  const mark = useEffectEvent(async (id: string): Promise<number | null> => {
+    // Read up to the latest message the page has, at least: core marks its own latest.
+    const latest = view.messages.at(-1)?.id;
+    // Its row loses its dot, here and on every device, as core pushes it.
+    const before = await core.withSession(
+      async (session) => await session.chats.markRead(id)
+    );
+    if (latest !== undefined) {
+      readTo(id, latest);
+    }
+    return before;
+  });
   // Only once the page has the chat's messages: a watch core refused
   // (too many open, say) shows nothing, so nothing is read.
   const { loaded } = view;
