@@ -3,7 +3,7 @@ import type {
   ConnectionsApi,
 } from "@grasp-os/shared/connect";
 
-// Choosing a shared connection's Brain audience in a test as an admin
+// Choosing who may use a shared connection in a test as an admin
 // looking at it now would (connection-audiences.ts): from the audience
 // core holds at that moment. A test of a change from a stale audience
 // calls `setAudience` with its own `from`.
@@ -33,7 +33,7 @@ export const audienceNow = async (
 
 /**
  * Chooses `audience` for `connectionId` as `api`, from the one held now,
- * confirming that it reads everything the connection brings.
+ * confirming that it opens everything the connection reaches.
  */
 export const chooseAudience = async (
   api: Chooser,

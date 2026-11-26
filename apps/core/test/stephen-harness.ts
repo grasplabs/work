@@ -537,8 +537,8 @@ export const setUpStephenCompany = async (
           messages: lisaMessages(clock, mailbox),
         }
   );
-  // Finance's own account, consented to finance's drive alone: what an
-  // admin connects to keep a slice of the company's from a team.
+  // Finance's own account, the only one that reaches finance's drive: what
+  // an admin connects to keep a slice of the company's from a team.
   const financeSubject = `noordkade-finance-${crypto.randomUUID()}`;
   const finance = await connectSuite(suite, admin, "shared", financeSubject);
   await (suite === "google"

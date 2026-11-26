@@ -10018,7 +10018,7 @@ msgstr "Das Verzeichnis entscheiden lassen, ob {who} in {team} ist"
 
 #: src/connections/connection-audience.tsx
 msgid "Let them use {label}?"
-msgstr "Sie {label} nutzen lassen?"
+msgstr "{label} für diese Personen freigeben?"
 
 #: src/activity/audit-words.ts
 msgid "Let webhook events no run waited for expire"

@@ -38,8 +38,8 @@ import { readsOnly } from "./tool-classes.ts";
 // - Either way, only a connection that is active; every class the company
 //   turned off for the person, and every app the agent lacks, still
 //   refuses it (`requireToolClassOn`); and everything after the call is a
-//   grant's: the chat marked before an answer of the person's own is
-//   handed over (private-reads.ts), the read pinned with the run
+//   grant's: the chat marked before an answer is handed over, unless the
+//   connection is everyone's (private-reads.ts), the read pinned with the run
 //   (`ungrantedRead`), kept in the Brain (connection-capture.ts), and
 //   every call audited by connect with the agent and the person it acts
 //   for.

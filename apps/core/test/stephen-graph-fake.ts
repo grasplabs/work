@@ -8,13 +8,13 @@
  * as Excel's serial number, with its number format: the traps a turn has
  * to get through. A test sets a mailbox's world and a workbook's table by
  * POSTing to the control URL; it answers only for those, so every other
- * test's Graph stays as it was. A drive set with an `account` is that
- * account's alone, as one consented to its site alone: Graph refuses it
- * to any other account's token, and keeps no read of it. Every read of a
- * world is kept, its path and query, and every write is kept and never
- * carried out, for the eval's first hard rule: nothing runs in the turn. `{ failNext:
- * "calendarView" }` has the next calendar read fail, as Graph sometimes
- * does.
+ * test's Graph stays as it was. A drive set with an `account` is reached
+ * by that account alone, as by one consented to its site: Graph refuses
+ * it to any other account's token, and keeps no read of it. Every read of
+ * a world is kept, its path and query, and every write is kept and never
+ * carried out, for the eval's first hard rule: nothing runs in the turn.
+ * `{ failNext: "calendarView" }` has the next calendar read fail, as
+ * Graph sometimes does.
  *
  * Self-contained, with nothing from outside the function: core's tests
  * run it inside the Worker that stands in for the internet behind connect
