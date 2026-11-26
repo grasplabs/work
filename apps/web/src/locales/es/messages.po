@@ -1411,6 +1411,11 @@ msgstr "{scheduled, plural, one {# programación} other {# programaciones}}"
 msgid "{seconds, plural, one {Thought for # second} other {Thought for # seconds}}"
 msgstr "{seconds, plural, one {Pensó durante # segundo} other {Pensó durante # segundos}}"
 
+#. The AI provider asked Grasp to wait before asking again (its rate limit); Grasp waits, then asks again by itself.
+#: src/chat/thread.tsx
+msgid "{seconds, plural, one {Your AI provider is busy. Grasp tries again in # second.} other {Your AI provider is busy. Grasp tries again in # seconds.}}"
+msgstr "{seconds, plural, one {Tu proveedor de IA está saturado. Grasp lo intentará de nuevo en # segundo.} other {Tu proveedor de IA está saturado. Grasp lo intentará de nuevo en # segundos.}}"
+
 #: src/activity/audit-log.tsx
 msgid "{set, plural, one {Filters, # set} other {Filters, # set}}"
 msgstr "{set, plural, one {Filtros, # activo} other {Filtros, # activos}}"
@@ -3088,6 +3093,11 @@ msgstr "Respondida: {title}"
 msgid "Answering"
 msgstr "Respondiendo"
 
+#. The chosen model couldn't take the question (its provider refused or was busy), so another of the organization's models answers it; {model} is that model's name.
+#: src/chat/thread.tsx
+msgid "Answering with {model} instead."
+msgstr "Responde {model} en su lugar."
+
 #: src/agents/agent-page.tsx
 msgid "Answers"
 msgstr "Responde a"
@@ -4057,10 +4067,6 @@ msgstr "Llamó a un modelo"
 msgid "Called another App"
 msgstr "Llamó a otra aplicación"
 
-#: src/routes/_shell.settings.outcomes.tsx
-msgid "Calls"
-msgstr "Llamadas"
-
 #: src/activity/pending.tsx
 msgid "Calls {path} of {app}. Each run can read or change whatever that function reads or changes in the App, as the person it runs for"
 msgstr "Llama a {path} de {app}. Cada ejecución puede leer o cambiar lo que esa función lee o cambia en la app, como la persona para la que se ejecuta"
@@ -4183,7 +4189,6 @@ msgstr "Casos por semana: {cases}."
 #: src/agents/new-agent.tsx
 #: src/apps/app-workflows.tsx
 #: src/drafts/share-with-team.tsx
-#: src/routes/_shell.settings.outcomes.tsx
 #: src/settings/ai-providers.tsx
 msgid "Change"
 msgstr "Cambio"
@@ -4440,10 +4445,6 @@ msgstr "Cambia"
 msgctxt "a list of changes"
 msgid "Changes"
 msgstr "Cambios"
-
-#: src/routes/_shell.settings.outcomes.tsx
-msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, in their inbox; follow up with them."
-msgstr "Cambios que Grasp envió por alguien cuya respuesta se perdió, así que nadie sabe si surtieron efecto. Solo esa persona puede decir qué pasó, en su bandeja de entrada; haz el seguimiento con ella."
 
 #: src/drafts/draft-history.tsx
 #: src/drafts/share-with-team.tsx
@@ -5130,8 +5131,8 @@ msgstr "Conectando tu Microsoft 365"
 #: src/apps/resource-bindings.tsx
 #: src/chat/sources.tsx
 #: src/connections/app/words.ts
+#: src/inbox/item-detail.tsx
 #: src/inbox/items.ts
-#: src/routes/_shell.settings.outcomes.tsx
 #: src/settings/ai-providers.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Connection"
@@ -6530,10 +6531,6 @@ msgstr "Cada una como la tiene la empresa, o para menos personas. Nunca para má
 #: src/routes/_shell.settings.billing.tsx
 msgid "Each invoice to your billing email"
 msgstr "Cada factura a tu correo de facturación"
-
-#: src/routes/_shell.settings.outcomes.tsx
-msgid "Each one sent for someone shows here until they say what became of it."
-msgstr "Cada llamada enviada para alguien aparece aquí hasta que esa persona diga qué pasó con ella."
 
 #: src/connections/http-connections.tsx
 msgid "Each path prefix starts with /, on its own line, with no query or dot segments."
@@ -9416,6 +9413,10 @@ msgstr "Su acceso caducó. El personal de Grasp no puede reconectarla: un admini
 msgid "Its account is out of credit."
 msgstr "La cuenta se ha quedado sin crédito."
 
+#: src/inbox/item-detail.tsx
+msgid "Its answer was lost: nobody can tell whether it took effect."
+msgstr "Su respuesta se perdió: nadie sabe si tuvo efecto."
+
 #: src/answer-pause.tsx
 msgid "Its answers can be used in a moment, so a press meant for the one before doesn't answer it."
 msgstr "Sus respuestas se podrán usar en un momento, para que una pulsación pensada para el anterior no lo responda."
@@ -11334,10 +11335,6 @@ msgstr "Aún no hay datos de facturación"
 msgid "No business process"
 msgstr "Ningún proceso de negocio"
 
-#: src/routes/_shell.settings.outcomes.tsx
-msgid "No call of unknown outcome is open."
-msgstr "No hay ninguna llamada de resultado desconocido abierta."
-
 #: src/apps/app-data.tsx
 msgid "No changes are kept for this record."
 msgstr "No se guardan cambios de este registro."
@@ -12615,6 +12612,10 @@ msgstr "Solo {accounts}"
 msgid "Only {owner} so far."
 msgstr "Por ahora solo {owner}."
 
+#: src/inbox/item-detail.tsx
+msgid "Only {person} can say whether it happened."
+msgstr "Solo {person} puede decir si ocurrió."
+
 #: src/settings/use-team-change.ts
 msgid "Only admins can change teams."
 msgstr "Solo los administradores pueden cambiar los equipos."
@@ -13485,7 +13486,6 @@ msgid "person"
 msgstr "persona"
 
 #: src/activity/audit-event.tsx
-#: src/routes/_shell.settings.outcomes.tsx
 msgid "Person"
 msgstr "Persona"
 
@@ -14198,7 +14198,7 @@ msgstr "Razonamiento"
 msgid "Recalled from the Brain"
 msgstr "Recuperó información del Cerebro"
 
-#: src/routes/_shell.settings.outcomes.tsx
+#: src/inbox/item-detail.tsx
 msgid "Receipt"
 msgstr "Comprobante"
 
@@ -15678,8 +15678,8 @@ msgstr "Enviando"
 msgid "Sensitive"
 msgstr "Sensible"
 
+#: src/inbox/item-detail.tsx
 #: src/inbox/items.ts
-#: src/routes/_shell.settings.outcomes.tsx
 msgid "Sent"
 msgstr "Enviado"
 
@@ -17901,6 +17901,10 @@ msgstr "La migración {name} reescribe cada registro de {table} en cuanto tu equ
 msgid "The model couldn't answer. Try again."
 msgstr "El modelo no pudo responder. Vuelve a intentarlo."
 
+#: src/chat/failure.ts
+msgid "The model declined to answer this."
+msgstr "El modelo se negó a responder a esto."
+
 #: src/agents/setup/review-step.tsx
 msgid "The model picked in the chat"
 msgstr "El modelo elegido en el chat"
@@ -18371,6 +18375,10 @@ msgstr "Esto cambia los datos de la App de una forma que necesita una migración
 #: src/settings/chat-accounts.tsx
 msgid "This chat account is linked to someone else. They need to unlink it first."
 msgstr "Esta cuenta de chat está vinculada a otra persona. Esa persona debe desvincularla primero."
+
+#: src/chat/failure.ts
+msgid "This chat is too long for the model. Start a new chat to go on."
+msgstr "Este chat es demasiado largo para el modelo. Empieza un chat nuevo para continuar."
 
 #: src/chat/held-writes.tsx
 msgid "This chat read private or restricted data: this may send it out"
@@ -19117,11 +19125,6 @@ msgstr "Desconocido"
 #: src/routes/_shell.settings.security.tsx
 msgid "Unknown device"
 msgstr "Dispositivo desconocido"
-
-#: src/routes/_shell.settings.outcomes.tsx
-#: src/settings/sections.ts
-msgid "Unknown outcomes"
-msgstr "Resultados desconocidos"
 
 #: src/brain/brain.ts
 #: src/chat/chat-markdown.ts
@@ -21215,6 +21218,10 @@ msgstr "Tu proveedor de IA rechaza tu clave. Pide a tu administrador que la revi
 #: src/chat/failure.ts
 msgid "Your AI provider isn't answering. This is usually an outage on their side; try again in a while."
 msgstr "Tu proveedor de IA no responde. Suele ser una caída por su parte; inténtalo de nuevo más tarde."
+
+#: src/chat/failure.ts
+msgid "Your AI provider sent nothing for too long, so Grasp gave up on this answer. Try again."
+msgstr "Tu proveedor de IA no envió nada durante demasiado tiempo, así que Grasp abandonó esta respuesta. Vuelve a intentarlo."
 
 #: src/settings/ai-providers.tsx
 msgid "Your AI runs on Grasp’s AI"

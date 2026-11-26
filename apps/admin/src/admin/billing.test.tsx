@@ -1,7 +1,14 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vite-plus/test";
 
-import { answeredAdmin, gridRow, lineOf, openAdmin } from "../../test/app.tsx";
+import {
+  act,
+  answeredAdmin,
+  gridRow,
+  lineOf,
+  openAdmin,
+  settle,
+} from "../../test/app.tsx";
 import type { BillingAccount } from "../billing/billing.ts";
 import type { ClientAdmin } from "../clients/admin.ts";
 import { formatDate } from "./words.ts";
@@ -140,6 +147,33 @@ describe("an organization's billing, as Stripe's answer reads", () => {
       notConnected: false,
       needs: false,
     });
+  });
+
+  it("lists an overdue invoice in the sidebar's Inbox, leading to the Contract tab", async () => {
+    const acme = gridRow();
+    const { container } = await openAdmin("/", {
+      fetchClientGrid: [acme],
+      fetchClientAdmins: [
+        answeredAdmin({
+          client: acme,
+          billing: { state: "read", customerId, account: late },
+        }),
+      ],
+    });
+    const inbox = [
+      ...container.querySelectorAll<HTMLElement>('[role="tab"]'),
+    ].find((tab) => tab.textContent?.includes("Inbox"));
+    await act(() => {
+      inbox?.click();
+    });
+    await settle();
+    const overdue = [
+      ...container.querySelectorAll('[data-slot="sidebar"] a'),
+    ].find((link) => link.textContent?.includes("is overdue"));
+
+    expect(overdue?.getAttribute("href")).toBe(
+      `/organizations/${acme.id}/details?tab=contract`
+    );
   });
 
   it("shows an overdue invoice in Billing and among what needs Grasp", async () => {
