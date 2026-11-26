@@ -7,7 +7,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { buildConnectors, connectorEntries } from "../../connect/build.ts";
-import { testComposioClassesFile } from "../../connect/test/global-setup.ts";
 import { runNode } from "./run-node.ts";
 import { testRun } from "./test-run.ts";
 
@@ -45,8 +44,7 @@ export const bundleConnect = async (): Promise<string> => {
   await buildConnectors(testConnectorEntries(), testConnectors);
   const out = mkdtempSync(path.join(tmpdir(), "grasp-os-connect-"));
   try {
-    // Its output is only shown if bundling fails, in the error. The fake
-    // Composio's tools are classed as in connect's own tests. Not
+    // Its output is only shown if bundling fails, in the error. Not
     // blocking: the global setup builds the App compiler meanwhile.
     await runNode(
       [
@@ -55,8 +53,6 @@ export const bundleConnect = async (): Promise<string> => {
         "--dry-run",
         "--outdir",
         out,
-        "--alias",
-        `#composio-classes:${testComposioClassesFile}`,
         "--alias",
         `#connectors:${testConnectors}`,
       ],
