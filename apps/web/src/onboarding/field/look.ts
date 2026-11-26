@@ -41,7 +41,7 @@ const keep = (look: DitherLook) => {
 
 /** The look kept in this browser, then the address on top of it. */
 const readLook = (): DitherLook => {
-  if (!import.meta.env.DEV) {
+  if (!import.meta.env.DEV || typeof window === "undefined") {
     return fallback;
   }
   let look = fallback;
@@ -71,17 +71,21 @@ const readLook = (): DitherLook => {
   return look;
 };
 
-let look = readLook();
+// Read on first use, not as the module loads: a test or a server render has no window.
+let look: DitherLook | null = null;
 const listeners = new Set<() => void>();
 
-export const ditherLookNow = (): DitherLook => look;
+export const ditherLookNow = (): DitherLook => {
+  look ??= readLook();
+  return look;
+};
 
 /** Another dither, or the pointer's effect on or off: kept, and the field redrawn. */
 export const setDitherLook = (next: Partial<DitherLook>) => {
   if (!import.meta.env.DEV) {
     return;
   }
-  look = { ...look, ...next };
+  look = { ...ditherLookNow(), ...next };
   keep(look);
   // The address follows, so a link copied from it opens the same look.
   const url = new URL(window.location.href);
