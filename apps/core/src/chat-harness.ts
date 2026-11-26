@@ -1301,14 +1301,17 @@ export class ChatHarness {
    */
   async #take(request: TurnRequest): Promise<TurnEnd> {
     const submission = await this.#question(request);
-    // Its question is in pi: one sent meanwhile is queued into it (`queueQuestion`).
-    this.#open = request.turnId;
-    this.#opening?.opened.resolve(true);
     // After the submit: a stop that came before it was kept, and one that
-    // comes after it stops the run itself.
+    // comes after it stops the run itself. A stopped turn takes no question
+    // queued into it: one sent meanwhile is asked on its own.
     const stopped = await this.#harness.snapshot(StoppedDoc, context);
     if (stopped?.turnId === request.turnId) {
       await this.#conversation.abort(context);
+    } else {
+      // Its question is in pi: one sent meanwhile is queued into it
+      // (`queueQuestion`).
+      this.#open = request.turnId;
+      this.#opening?.opened.resolve(true);
     }
     let { settled, newest } = await this.#ended(request.turnId, submission);
     // The turn's check of the drafts it wrote, each time it would answer
@@ -2208,7 +2211,14 @@ export class ChatHarness {
   #stop(reason: TurnStop): void {
     this.#stopped ??= reason;
     this.#open = undefined;
-    this.#host.waitUntil(this.#halt());
+    // As a person's stop: the questions on their way are in pi first, so
+    // the stop drops them with what it holds queued.
+    this.#host.waitUntil(
+      (async () => {
+        await Promise.allSettled(this.#joining);
+        await this.#halt();
+      })()
+    );
   }
 
   /**
@@ -2432,7 +2442,9 @@ export class ChatHarness {
   /**
    * What the person said in turn `request`, for `remember` to check a
    * memory against: its question's words, then those of each question
-   * queued into it (`queueQuestion`) that pi placed so far.
+   * queued into it (`queueQuestion`) that pi placed so far. The agent's
+   * last words before the newest of those become what it answers
+   * (`#answering`), as they were before the question for the turn's own.
    */
   async #saidIn(request: TurnRequest): Promise<string> {
     const placed = await this.#conversation.commit(
@@ -2445,6 +2457,7 @@ export class ChatHarness {
     if (from === undefined) {
       return request.question.text;
     }
+    const seen: Message[] = [];
     let cursor: Cursor | undefined;
     do {
       // oxlint-disable-next-line no-await-in-loop -- page after page
@@ -2462,6 +2475,10 @@ export class ChatHarness {
           questionDataOf(data).queued === true
         ) {
           said.push(questionText(message));
+          this.#answering = lastWordsOf(seen);
+        }
+        if (message !== undefined) {
+          seen.push(message);
         }
       }
       cursor = page.next;

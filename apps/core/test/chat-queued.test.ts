@@ -188,44 +188,67 @@ describe("a question sent while the agent answers", slow, () => {
     }
   });
 
-  it("is queued when it comes as the first starts, both sent at once, and answered after it", async () => {
+  it("is queued when it comes while the first is still being prepared, and answered after it", async () => {
     const ann = await signedInApi(idp, "user");
-    const first = pausedReply(says("Paris."), 2);
-    const provider = await fakeProvider(first.reply, says("Berlin."));
-    const chat = await ann.api.chats.create("At once");
+    const provider = await fakeProvider(
+      says("Hello."),
+      says("Paris."),
+      says("Berlin.")
+    );
+    const chat = await ann.api.chats.create("Preparing");
     const tab = await follow(ann, chat.id);
+    // A chat's first message has no analysis beside its recall: one first.
+    await ann.api.chats.send(chat.id, { text: "Hi?", model });
+    await settled(tab);
+    // The next question's recall, before it reaches pi, waits on its
+    // analysis, held until the second question has come.
+    const recalling = Promise.withResolvers<boolean>();
+    provider.analysisReplies.push({
+      text: JSON.stringify({ query: null }),
+      inputTokens: 10,
+      outputTokens: 5,
+      pause: { at: 1, until: recalling.promise },
+    });
     try {
-      // The second comes while the first is still being prepared.
-      const sent = Promise.all([
-        ann.api.chats.send(chat.id, { text: "France?", model }),
-        ann.api.chats.send(chat.id, { text: "Germany?", model }),
-      ]);
+      await ann.api.chats.send(chat.id, { text: "France?", model });
       await vi.waitFor(
         () => {
-          expect(provider.requests).toHaveLength(1);
+          expect(provider.analyses).toHaveLength(1);
         },
         { timeout: 10_000 }
       );
-      await sent;
-      await vi.waitFor(() => {
-        expect(tab.queued()).toStrictEqual(["Germany?"]);
+      // Taken once the first is in pi.
+      const second = ann.api.chats.send(chat.id, {
+        text: "Germany?",
+        model,
       });
-      first.release();
+      const askedMeanwhile = provider.requests.length;
+      recalling.resolve(true);
+      await second;
+      await vi.waitFor(() => {
+        expect(tab.shown()).toHaveLength(6);
+      });
       await settled(tab);
+      const records = await turnRecordsOf(chat.id, 2);
       expect({
+        askedMeanwhile,
         shown: tab.shown(),
-        requests: provider.requests.length,
+        records: records.map(({ queued }) => queued),
       }).toStrictEqual({
+        askedMeanwhile: 1,
         shown: [
+          { role: "user", text: "Hi?" },
+          { role: "assistant", text: "Hello." },
           { role: "user", text: "France?" },
           { role: "assistant", text: "Paris." },
           { role: "user", text: "Germany?" },
           { role: "assistant", text: "Berlin." },
         ],
-        requests: 2,
+        // One turn took both.
+        records: [0, 1],
       });
     } finally {
-      first.release();
+      recalling.resolve(true);
     }
   });
 
@@ -388,6 +411,74 @@ describe("a question sent while the agent answers", slow, () => {
     } finally {
       cut.release();
       again.release();
+    }
+  });
+
+  it("is answered once when the chat's object restarts as Send now stops the answer, and the turn settles", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const { id, stub, chat } = await chatOf(userId);
+    const cut = pausedReply(says("Never."), 3);
+    const provider = await fakeProviderFor(
+      [model],
+      cut.reply,
+      says("Answered."),
+      says("Answered.")
+    );
+    const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
+    const request = {
+      turnId: "turn-now",
+      sentAt: Date.now(),
+      scope: {
+        workspaceId: id,
+        agentId: chat.agentId,
+        chatId: chat.id,
+        personId: userId,
+        via: chat.via,
+      },
+      question: { text: "First?", model, files: [] },
+      shared: false,
+      personal: true,
+      context: { skills: [] },
+      capture: { attended: true },
+    };
+    try {
+      void session()
+        .run(request)
+        .catch(() => "cut short");
+      await vi.waitFor(
+        () => {
+          expect(provider.requests).toHaveLength(1);
+        },
+        { timeout: 10_000 }
+      );
+      await expect(
+        session().queueQuestion("turn-now", {
+          id: "question-now",
+          text: "Second?",
+          files: [],
+        })
+      ).resolves.toBeTruthy();
+      // Send now, and a restart while it stops the answer and goes on.
+      const sending = session()
+        .sendNow("turn-now")
+        .catch(() => "cut short");
+      await scheduler.wait(5);
+      await restart(session());
+      await sending;
+      const end = await session().run(request);
+      const kept = await keptOf(stub, chat.id);
+      expect({
+        outcome: end.outcome,
+        // The queued question once, answered last.
+        asked: kept.filter((role) => role === "user").length,
+        last: kept.at(-1),
+      }).toStrictEqual({
+        outcome: "answered",
+        asked: 2,
+        last: "assistant:stop",
+      });
+    } finally {
+      cut.release();
     }
   });
 });
