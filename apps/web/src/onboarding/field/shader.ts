@@ -40,6 +40,8 @@ uniform vec3 u_trail[8];
 uniform vec3 u_ripples[3];
 // The deepest tone C's light reaches where it is brightest: lime by night, pine by day.
 uniform vec3 u_accent;
+// How the pointer is moving now, in CSS pixels a second: A1 to A3 answer only its motion.
+uniform vec2 u_motion;
 float hash(vec2 p) {
   p = fract(p * vec2(123.34, 456.21));
   p += dot(p, p + 45.32);
@@ -223,8 +225,24 @@ vec4 tone(float q) {
 // A · Dots, from Chat's dotted backdrop and the composer's voice hill: a halftone grid whose dots
 // grow and deepen with his light, rolling in slow humps. The pointer is a lens: the dots part
 // round it, spread and swell, with a bright rim; a press sends a ring through the grid.
-vec2 dotsPush(vec2 p) {
+// A1, A2 and A3 (mode 1 to 3) are A with a barely-there answer to the pointer, never round and
+// nothing while it rests: A1 the dots it passes lean a few pixels along its way, A2 a faint
+// shimmer of dots along its path, A3 a soft wake that swells behind it and settles slowly.
+vec2 dotsPush(vec2 p, float mode) {
   vec2 push = vec2(0.0);
+  if (mode > 0.5) {
+    float speed = length(u_motion);
+    if (speed < 1.0 || mode > 1.5 && mode < 2.5) return push;
+    vec2 dir = u_motion / speed;
+    vec2 d = p - u_pointer.xy;
+    float along = dot(d, dir);
+    float across = dot(d, vec2(-dir.y, dir.x));
+    // Longer behind the pointer than ahead of it, narrow across: a lean, not a circle.
+    float back = along < 0.0 ? 170.0 : 60.0;
+    float lean = exp(-(along * along / (2.0 * back * back) + across * across / (2.0 * 46.0 * 46.0)));
+    float amount = mode < 1.5 ? 5.0 : 2.0;
+    return dir * amount * min(speed / 900.0, 1.0) * lean * u_pointer.z;
+  }
   vec2 d = p - u_pointer.xy;
   float r = length(d) + 0.001;
   push += d / r * 30.0 * exp(-r * r / (2.0 * 80.0 * 80.0)) * u_pointer.z;
@@ -237,33 +255,41 @@ vec2 dotsPush(vec2 p) {
   }
   return push;
 }
-float dotsLevel(vec2 p, vec2 window, float seed, float t) {
+float dotsLevel(vec2 p, vec2 window, float seed, float t, float mode) {
   float hills = fbm(vec2(p.x / 430.0 + t * 0.05, p.y / 300.0 - t * 0.03) + seed);
   float roll = 0.5 + 0.5 * sin(p.x / 150.0 - t * 0.55 + hills * 5.0 + p.y / 260.0);
   float flow = hills * 0.9 + roll * 0.55;
   float level = restAt(p) * u_mood.z * (0.05 + 0.95 * flow);
-  vec2 d = p - u_pointer.xy;
-  float r = length(d);
-  // Parted at the middle, piled up at the rim.
-  float rim = exp(-pow((r - 96.0) / 30.0, 2.0)) * 0.9 + exp(-r * r / (2.0 * 170.0 * 170.0)) * 0.22;
-  level = level * (1.0 - u_pointer.z * smoothstep(70.0, 30.0, r)) + u_pointer.z * rim * smoothstep(40.0, 70.0, r);
-  level += trailAt(p, 46.0) * 0.45;
-  for (int i = 0; i < 3; i++) level += rippleAt(p, u_ripples[i], 420.0, 40.0) * 0.6;
+  if (mode < 0.5) {
+    vec2 d = p - u_pointer.xy;
+    float r = length(d);
+    // Parted at the middle, piled up at the rim.
+    float rim = exp(-pow((r - 96.0) / 30.0, 2.0)) * 0.9 + exp(-r * r / (2.0 * 170.0 * 170.0)) * 0.22;
+    level = level * (1.0 - u_pointer.z * smoothstep(70.0, 30.0, r)) + u_pointer.z * rim * smoothstep(40.0, 70.0, r);
+    level += trailAt(p, 46.0) * 0.45;
+    for (int i = 0; i < 3; i++) level += rippleAt(p, u_ripples[i], 420.0, 40.0) * 0.6;
+  } else if (mode > 1.5 && mode < 2.5) {
+    // A2: a thin, faint line of light along where it went.
+    level += trailAt(p, 20.0) * 0.13;
+  } else if (mode > 2.5) {
+    // A3: a wider, softer wake that lingers.
+    level += trailAt(p, 40.0) * 0.16;
+  }
   level *= columnAt(p, window);
   level = max(level - 0.06, 0.0) * 1.08;
   level *= clearAt(p);
   level += haloAt(p, fbm(p / 190.0 + vec2(t * 0.35, -t * 0.28) + seed));
   return level;
 }
-vec4 dots(vec2 p, vec2 window, float seed, float t) {
+vec4 dots(vec2 p, vec2 window, float seed, float t, float mode) {
   const float pitch = 6.0;
-  vec2 push = dotsPush(p);
+  vec2 push = dotsPush(p, mode);
   vec2 q = p - push;
   vec2 index = floor(q / pitch);
   vec2 local = floor(fract(q / pitch) * 3.0) - 1.0;
   // The dot's light, read at its own middle where it now stands, so a dot is whole or none.
   vec2 middle = (index + 0.5) * pitch + push;
-  float level = dotsLevel(middle, window, seed, t);
+  float level = dotsLevel(middle, window, seed, t, mode);
   float size = floor(clamp(level, 0.0, 1.0) * 3.0 + bayer4(index));
   if (size < 1.0) return vec4(0.0);
   // 1: one pixel; 2: a square of four; 3: a cross of five. Never the whole cell: always dots.
@@ -341,12 +367,14 @@ void main() {
   vec2 p = (cellAt + 0.5) * u_cell;
   vec2 window = u_cells * u_cell;
   float t = u_time * u_mood.y;
-  if (u_variant > 2.5) {
+  if (u_variant > 3.5) {
+    gl_FragColor = dots(p, window, u_mood.x, t, u_variant - 3.0);
+  } else if (u_variant > 2.5) {
     gl_FragColor = aurora(p, cellAt, window, u_mood.x, t);
   } else if (u_variant > 1.5) {
     gl_FragColor = sand(p, cellAt, window, u_mood.x, t);
   } else if (u_variant > 0.5) {
-    gl_FragColor = dots(p, window, u_mood.x, t);
+    gl_FragColor = dots(p, window, u_mood.x, t, 0.0);
   } else {
     gl_FragColor = ambient(p, cellAt, window, bayer4(cellAt), u_mood.x, t);
   }

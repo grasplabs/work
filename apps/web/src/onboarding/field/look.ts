@@ -7,13 +7,24 @@
 // anywhere else always draws the current one: Vite leaves the rest out.
 
 /** The field's dithers: the current one, and the three to try. */
-export const ditherVariants = ["current", "a", "b", "c"] as const;
+export const ditherVariants = [
+  "current",
+  "a",
+  "a1",
+  "a2",
+  "a3",
+  "b",
+  "c",
+] as const;
 export type DitherVariant = (typeof ditherVariants)[number];
 
 /** What each is, in a developer's words (not in the catalogs). */
 export const ditherNames: Record<DitherVariant, string> = {
   current: "Current: silk light",
   a: "A · Dots: a halftone grid that swells",
+  a1: "A1 · Dots, cursor: dots lean along its way",
+  a2: "A2 · Dots, cursor: a faint shimmer on its path",
+  a3: "A3 · Dots, cursor: a soft wake behind it",
   b: "B · Sand: grains on a singing plate",
   c: "C · Aurora: curtains of light",
 };
