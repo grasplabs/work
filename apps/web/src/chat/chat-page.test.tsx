@@ -5,6 +5,7 @@ import type {
   ChatQuestion,
   ChatSummary,
   ChatListUpdate,
+  ChatMessage,
   ChatUpdate,
 } from "@grasp-os/shared/chat";
 import { internalErrors } from "@grasp-os/shared/errors";
@@ -24,11 +25,11 @@ import {
 import { act, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { loadFromCore } from "../load-from-core.tsx";
 import { wordsOf } from "../test-words.ts";
-import { activeChat, setActiveChat } from "./active-chat.ts";
+import { activeChat, forgetActiveChats, setActiveChat } from "./active-chat.ts";
 import { LoadedChatPage } from "./chat-page.tsx";
 import { GlobalChatProvider, useGlobalChat } from "./global-chat.tsx";
 import type { GlobalChat } from "./global-chat.tsx";
@@ -253,15 +254,41 @@ const saysRestricted = () =>
     (badge) => wordsOf(badge) === "Restricted"
   );
 
+/** A question or an answer of a chat, by its ID. */
+const message = (id: number, role: "user" | "assistant"): ChatMessage =>
+  role === "user"
+    ? { id, role, text: `Question ${id}`, at: "2026-11-01T08:00:00.000Z" }
+    : {
+        id,
+        role,
+        text: `Answer ${id}`,
+        code: [],
+        tools: [],
+        end: "done",
+        at: "2026-11-01T08:01:00.000Z",
+      };
+
+/** Whether the page shows the thread's skeleton, and which questions it shows. */
+const shows = () => ({
+  skeleton: document.querySelector('[data-slot="message-skeleton"]') !== null,
+  questions: ["Question 1", "Question 3"].filter((words) =>
+    document.body.textContent.includes(words)
+  ),
+});
+
 describe("a chat's own page", () => {
-  afterEach(() => {
+  afterEach(async () => {
     act(() => {
       root?.unmount();
     });
+    // Its chat's watch stops a moment after.
+    await settled();
     root = undefined;
     document.body.replaceChildren();
     localStorage.clear();
     sessionStorage.clear();
+    // What the tab kept of chats is the person's: none for the next test.
+    forgetActiveChats();
     setActiveChat(undefined, "chat");
     seen.chat = undefined;
   });
@@ -314,6 +341,74 @@ describe("a chat's own page", () => {
       box: box() !== null,
       named: document.body.textContent.includes("Chat chat-a"),
     }).toStrictEqual({ box: true, named: true });
+  });
+
+  it("shows a chat it showed before at once on coming back, never its skeleton, then as core has it now, and forgets it once the person signs out", async () => {
+    // Chat A's first watch sends two messages at once; the second waits
+    // until the test lets it go, then sends four; any after, nothing.
+    let opens = 0;
+    const later = Promise.withResolvers<boolean>();
+    const { router } = await opened(
+      "chat-a",
+      undefined,
+      async (chatId, _after, onUpdate) => {
+        if (chatId === "chat-a") {
+          opens += 1;
+          const first = opens === 1;
+          await (first ? Promise.resolve() : later.promise);
+          if (opens > 2) {
+            return await Promise.withResolvers<never>().promise;
+          }
+          onUpdate({
+            messages: first
+              ? [message(1, "user"), message(2, "assistant")]
+              : [1, 2, 3, 4].map((id) =>
+                  message(id, id % 2 === 1 ? "user" : "assistant")
+                ),
+            partial: null,
+            running: false,
+            stopped: null,
+            held: 0,
+            worked: 0,
+            seenUpTo: 2,
+          });
+        }
+        return await Promise.withResolvers<never>().promise;
+      }
+    );
+    const go = async (chatId: string) => {
+      await act(async () => {
+        await router.navigate({ to: "/chats/$chatId", params: { chatId } });
+      });
+      await settled();
+    };
+    // Shown once, its thread's code loaded.
+    await vi.waitFor(
+      () => {
+        expect(shows().questions).toStrictEqual(["Question 1"]);
+      },
+      { timeout: 10_000 }
+    );
+    await go("chat-b");
+    await go("chat-a");
+    const back = shows();
+    await act(async () => {
+      later.resolve(true);
+      await later.promise;
+    });
+    await settled();
+    const now = shows();
+    await go("chat-b");
+    act(() => {
+      forgetActiveChats();
+    });
+    await go("chat-a");
+
+    expect({ back, now, signedOut: shows() }).toStrictEqual({
+      back: { skeleton: false, questions: ["Question 1"] },
+      now: { skeleton: false, questions: ["Question 1", "Question 3"] },
+      signedOut: { skeleton: true, questions: [] },
+    });
   });
 
   it("says why a read that failed did, with Try again, and gives no box to ask in", async () => {

@@ -173,7 +173,10 @@ export const ChatConversation = ({
         agents={offered?.agents}
         chatId={chatId}
         compact={compact}
-        loaded={newLine.decided || failure !== undefined}
+        // As soon as the chat's view is there: kept from before, its line
+        // comes as core says where they read to; else the watch's first
+        // update says it at once (unread.ts).
+        loaded={newLine.decided || view.loaded || failure !== undefined}
         messages={view.messages}
         newLineBefore={newLine.before}
         // Ask again goes as its answer is drawn anew: the person is taken
