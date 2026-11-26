@@ -367,59 +367,66 @@ const PeopleList = ({
       })}`;
   return (
     <Card padding="none">
-      <div {...stylex.props(styles.toolbar)}>
-        <InputGroup>
-          <InputGroupAddon>
-            <Icon icon={SearchIcon} />
-          </InputGroupAddon>
-          <InputGroupInput
-            aria-label={t`Search people`}
-            onValueChange={setQuery}
-            placeholder={t`Search by name, email or team`}
-            type="search"
-            value={query}
-          />
-          <InputGroupClear aria-label={t`Clear the search`} />
-        </InputGroup>
-        <div {...stylex.props(styles.all)}>
-          <Checkbox
-            aria-label={searching ? t`Everyone found` : t`Everyone`}
-            checked={checkedOf(taking, shown.length)}
-            disabled={shown.length === 0}
-            onCheckedChange={(on) => {
-              onPicks(
-                withTaking(
-                  picks,
-                  new Set(shown.map(({ id }) => id)),
-                  on === true
-                )
-              );
-            }}
-          />
-          <Text as="span" color="muted" size="sm">
-            {summary}
-          </Text>
+      {/* One child: the card parts its children by a few pixels, which showed as a strip over the first team. */}
+      <div>
+        <div {...stylex.props(styles.toolbar)}>
+          <InputGroup>
+            <InputGroupAddon>
+              <Icon icon={SearchIcon} />
+            </InputGroupAddon>
+            <InputGroupInput
+              aria-label={t`Search people`}
+              onValueChange={setQuery}
+              placeholder={t`Search by name, email or team`}
+              type="search"
+              value={query}
+            />
+            <InputGroupClear aria-label={t`Clear the search`} />
+          </InputGroup>
+          <div {...stylex.props(styles.all)}>
+            <Checkbox
+              aria-label={searching ? t`Everyone found` : t`Everyone`}
+              checked={checkedOf(taking, shown.length)}
+              disabled={shown.length === 0}
+              onCheckedChange={(on) => {
+                onPicks(
+                  withTaking(
+                    picks,
+                    new Set(shown.map(({ id }) => id)),
+                    on === true
+                  )
+                );
+              }}
+            />
+            <Text as="span" color="muted" size="sm">
+              {summary}
+            </Text>
+          </div>
         </div>
+        <ul aria-label={t`People`} {...stylex.props(styles.list)}>
+          {rows.map(({ team, people }) => (
+            <TeamRow
+              key={team.id}
+              onOpen={(open) => {
+                const without = (set: ReadonlySet<string>) =>
+                  new Set([...set].filter((id) => id !== team.id));
+                setOpened(
+                  open ? new Set([...opened, team.id]) : without(opened)
+                );
+                setClosed(
+                  open ? without(closed) : new Set([...closed, team.id])
+                );
+              }}
+              onPicks={onPicks}
+              open={isOpen(team.id)}
+              people={people}
+              picks={picks}
+              searching={searching}
+              team={team.id === noTeamId ? { ...team, name: noTeam } : team}
+            />
+          ))}
+        </ul>
       </div>
-      <ul aria-label={t`People`} {...stylex.props(styles.list)}>
-        {rows.map(({ team, people }) => (
-          <TeamRow
-            key={team.id}
-            onOpen={(open) => {
-              const without = (set: ReadonlySet<string>) =>
-                new Set([...set].filter((id) => id !== team.id));
-              setOpened(open ? new Set([...opened, team.id]) : without(opened));
-              setClosed(open ? without(closed) : new Set([...closed, team.id]));
-            }}
-            onPicks={onPicks}
-            open={isOpen(team.id)}
-            people={people}
-            picks={picks}
-            searching={searching}
-            team={team.id === noTeamId ? { ...team, name: noTeam } : team}
-          />
-        ))}
-      </ul>
     </Card>
   );
 };
