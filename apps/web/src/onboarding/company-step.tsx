@@ -320,7 +320,12 @@ const SignInRow = ({
   return (
     <Item onClick={onConnect} variant="outline">
       <ItemMedia>
-        <BrandIcon decorative logo={suiteLogos[suite]} name={signIn} size="sm" />
+        <BrandIcon
+          decorative
+          logo={suiteLogos[suite]}
+          name={signIn}
+          size="sm"
+        />
       </ItemMedia>
       <ItemContent>
         <ItemTitle>{label}</ItemTitle>
