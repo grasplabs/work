@@ -623,6 +623,7 @@ describe("Home", () => {
     expect({
       cards: [
         cards.includes("12 runs, 0 failed; 9 active last week"),
+        cards.includes("Progress 3 workflows live, 2 Apps, 1 agent on"),
         cards.includes("Last 7 days Not shared"),
       ],
       sharing: ["3 workflows live", "12 runs", "9 active last week"].map(
@@ -633,7 +634,7 @@ describe("Home", () => {
         rowText(container, "ended").includes(text)
       ),
     }).toStrictEqual({
-      cards: [true, true],
+      cards: [true, true, true],
       sharing: [true, true, true],
       ended: 2,
       endedCounts: false,
