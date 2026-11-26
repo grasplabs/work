@@ -742,6 +742,48 @@ describe("a built-in connector serving its vendor's MCP server", () => {
     }).toStrictEqual({ called: "connect.server_unavailable", calls: [] });
   });
 
+  it("keeps no tool list read at the server its connector moved from", async () => {
+    await parkEarlierLinears();
+    const anna = someone();
+    const annas = await connectLinear("linear", anna, "personal", linearItself);
+    const connectionOf = async () => {
+      const row = await drizzle(env.DB)
+        .select()
+        .from(connections)
+        .where(eq(connections.id, annas))
+        .get();
+      if (row === undefined) {
+        throw new Error("Expected Anna's connection");
+      }
+      return row;
+    };
+    await currentTools(env, await connectionOf());
+    await madeForAnotherUrl();
+    // A call loads her connection, its list fresh, as the release moves
+    // the connector; she signs in again before it is sent.
+    const loaded = await connectionOf();
+    await startLinear("linear", someone());
+    const before = sent.length;
+    const call = async () => {
+      const { open } = await connectorAction(
+        env,
+        loaded,
+        "list_issues",
+        "read-own"
+      );
+      await connectLinear("linear", anna, "personal", linearItself);
+      const server = await open();
+      return await server.call("list_issues", {});
+    };
+
+    expect({
+      called: await outcome(call()),
+      calls: sent
+        .slice(before)
+        .filter(({ headers }) => headers["mcp-method"] === "tools/call"),
+    }).toStrictEqual({ called: "connect.action_not_found", calls: [] });
+  });
+
   it("sends no owed revoke to the server its connector moved to as it was tried", async () => {
     const annas = await connectLinear(
       "linear",

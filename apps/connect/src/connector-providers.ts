@@ -14,6 +14,7 @@ import { nativeConnector, nativeConnectors } from "./bundled-connectors.ts";
 import type { Outbound } from "./company-network.ts";
 import {
   connectionTokens,
+  connectionTools,
   connections,
   connectors,
   oauthFlows,
@@ -305,7 +306,8 @@ export const prepareBuiltIn = async (
     const owedOfIt = inArray(tokenRevocations.connectionId, itsConnections);
     const heldOfIt = inArray(pendingActions.connectionId, itsConnections);
     // Its tokens and owed revokes were the old server's: none goes to the
-    // new one. Nor does any action held on its connections, whose saved
+    // new one. Nor does its connections' kept tool list, read there, nor
+    // any action held on its connections, whose saved
     // input was meant for the old server: each is dropped with its key
     // spent as a disconnect's drop spends it (held-deletions.ts), so it is
     // never confirmed there once its person signs in again. An owed revoke
@@ -341,6 +343,19 @@ export const prepareBuiltIn = async (
         giveUpOwed(db, sql`${and(owedOfIt, unmoved)}`, "moved"),
         db.delete(tokenRevocations).where(and(owedOfIt, unmoved)),
         db.delete(connectionTokens).where(and(tokensOfIt, unmoved)),
+        db
+          .delete(connectionTools)
+          .where(
+            and(inArray(connectionTools.connectionId, itsConnections), unmoved)
+          ),
+        db
+          .update(connections)
+          .set({
+            toolListReadAt: null,
+            toolListFreshUntil: null,
+            toolListTriedAt: null,
+          })
+          .where(and(ofIt, unmoved)),
         db
           .update(connections)
           .set({ status: "needs_reauth", updatedAt: new Date() })
