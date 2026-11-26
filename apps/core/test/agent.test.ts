@@ -32,6 +32,7 @@ import { chatsWith, runRecords } from "./agent-code-runs.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
+import { turnRecordsOf } from "./model-usage.ts";
 import { signedInWithRole } from "./sign-in.ts";
 
 // A chat's agent, through the Workspace object: the loop, the code it runs
@@ -80,15 +81,15 @@ const codeOf = async (call: Promise<unknown>) => {
   return "answered";
 };
 
-/** What a turn logs of its prompt cache as it ends. */
-const turnCacheSchema = z.object({
-  event: z.literal("chat.turn_cache"),
-  chatId: z.string(),
-  requests: z.number(),
-  inputTokens: z.number(),
-  cacheReadTokens: z.number(),
-  share: z.unknown(),
-});
+/** What each of `chatId`'s first `count` turns' records says it read from the cache. */
+const cacheOfTurns = async (chatId: string, count: number) => {
+  const turns = await turnRecordsOf(chatId, count);
+  return turns.map(({ inputTokens, cacheReadTokens, cacheWriteTokens }) => ({
+    inputTokens,
+    cacheReadTokens,
+    cacheWriteTokens,
+  }));
+};
 
 /**
  * Restarts the workspace's object where it is, as a deploy does: a stub to
@@ -431,7 +432,6 @@ describe("chat agent turns", () => {
   });
 
   it("keys a chat's requests to its prompt cache, and records what each request and turn read from it", async () => {
-    const logged = vi.spyOn(console, "info");
     const openai = "openai/gpt-5.4";
     const { stub, chat, personId, provider } = await newChatOn(
       [model, openai],
@@ -474,8 +474,7 @@ describe("chat agent turns", () => {
       { inputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 },
     ]);
 
-    // A turn cancelled before the provider counted anything adds no
-    // request to the turn's record, so it records none.
+    // A turn cancelled before the provider counted anything used nothing.
     const cancelled = await newChat({ hang: true });
     const reply = cancelled.ask("Take your time.");
     await vi.waitFor(
@@ -486,23 +485,16 @@ describe("chat agent turns", () => {
     );
     await cancelled.stub.cancel(cancelled.chat.id, cancelled.personId);
     await expect(reply).resolves.toMatchObject({ outcome: "cancelled" });
-    const turnsOf = (chatId: string) =>
-      logged.mock.calls
-        .map(([entry]: unknown[]) => turnCacheSchema.safeParse(entry))
-        .flatMap((parsed) =>
-          parsed.success && parsed.data.chatId === chatId ? [parsed.data] : []
-        )
-        .map(({ event: _event, chatId: _chat, ...turn }) => turn);
     expect({
-      cached: turnsOf(chat.id),
-      cancelled: turnsOf(cancelled.chat.id),
+      cached: await cacheOfTurns(chat.id, 3),
+      cancelled: await cacheOfTurns(cancelled.chat.id, 1),
     }).toStrictEqual({
       cached: [
-        { requests: 1, inputTokens: 1200, cacheReadTokens: 900, share: 0.75 },
-        { requests: 1, inputTokens: 200, cacheReadTokens: 0, share: 0 },
-        { requests: 1, inputTokens: 200, cacheReadTokens: 0, share: 0 },
+        { inputTokens: 1200, cacheReadTokens: 900, cacheWriteTokens: 100 },
+        { inputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        { inputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 },
       ],
-      cancelled: [],
+      cancelled: [{ inputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }],
     });
   });
 

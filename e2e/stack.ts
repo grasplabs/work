@@ -114,6 +114,6 @@ export const connectConfig = path.join(
  * request (401), as a provider refuses one it doesn't know: the chat test
  * shows both, the refusal as the model failing to answer (e2e/chat.e2e.ts).
  */
-export const e2eModel = "mistral/mistral-large-latest";
+export const e2eModel = "mistral/mistral-large-2512";
 export const e2eThinkingModel = "anthropic/claude-sonnet-4-6";
 export const e2eModelKey = "e2e-not-a-real-key";
