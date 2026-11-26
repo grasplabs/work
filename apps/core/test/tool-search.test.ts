@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
+import {
+  chatOf,
+  codeResults,
+  codeStep,
+  model,
+  says,
+  withoutMarking,
+} from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -56,9 +63,9 @@ const bulkConnection = async (tools: readonly string[], owner?: string) => {
   return connection;
 };
 
-/** What a code step returned, as the model read it. */
+/** What a code step returned, as the model read it inside any marking. */
 const returned = (text: string | undefined): unknown =>
-  JSON.parse((text ?? "").replace(/^Returned:\n/u, ""));
+  JSON.parse(withoutMarking(text ?? "").replace(/^Returned:\n/u, ""));
 
 describe("a chat's tool search", setUpTime, () => {
   it("finds the one tool a task needs among thousands, and calls it by its real name", async () => {
