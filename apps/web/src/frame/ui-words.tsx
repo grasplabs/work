@@ -156,6 +156,7 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
     },
     codeBlock: {
       collapse: t`Show less`,
+      download: t({ message: "Download", context: "download a file" }),
       expand: t`Show more`,
       moreLines: (count) =>
         plural(count, { one: "# more line", other: "# more lines" }),
@@ -519,12 +520,18 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
         mark > 1
           ? t`Back to reference ${number}-${mark}`
           : t`Back to reference ${number}`,
+      copyTable: t`Copy table`,
+      // The formats keep their names in every language.
+      csv: "CSV",
       done: t({ message: "Done", context: "a task in a list" }),
+      downloadTable: t`Download table`,
       footnote: (number) => t`Footnote ${number}`,
+      markdown: "Markdown",
       moreRows: (count) =>
         plural(count, { one: "# more row", other: "# more rows" }),
       notDone: t({ message: "Not done", context: "a task in a list" }),
       table: t({ message: "Table", context: "a table in a text" }),
+      tsv: "TSV",
     },
     menu: {
       // On a menu item, and said, when the work it started failed; not a

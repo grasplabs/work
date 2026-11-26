@@ -5343,6 +5343,10 @@ msgstr "Copiez-le maintenant : vous ne le reverrez pas. Perdu, il ne peut qu'êt
 msgid "Copy link"
 msgstr "Copier le lien"
 
+#: src/frame/ui-words.tsx
+msgid "Copy table"
+msgstr "Copier le tableau"
+
 #: src/chat/thread.tsx
 msgid "Copy the answer"
 msgstr "Copier la réponse"
@@ -6366,6 +6370,7 @@ msgstr "Points"
 msgid "Double-click or press F2 to rename"
 msgstr "Double-cliquez ou appuyez sur F2 pour renommer"
 
+#: src/frame/ui-words.tsx
 #: src/workflows/run-files.tsx
 #: src/workflows/version-source.tsx
 msgctxt "download a file"
@@ -6390,6 +6395,10 @@ msgstr "Télécharger en Markdown"
 #: src/chat/chat-more.tsx
 msgid "Download as PDF"
 msgstr "Télécharger en PDF"
+
+#: src/frame/ui-words.tsx
+msgid "Download table"
+msgstr "Télécharger le tableau"
 
 #: src/apps/app-code.tsx
 msgid "Download the file"
