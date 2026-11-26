@@ -36,7 +36,7 @@ const StateBadge = ({ integration }: { integration: Integration }) => {
     return <Badge variant="warning">{t`Needs signing in again`}</Badge>;
   }
   if (state === "shared") {
-    return <Badge variant="success">{t`Connected for everyone`}</Badge>;
+    return <Badge variant="success">{t`Connected for the company`}</Badge>;
   }
   if (state === "personal") {
     return <Badge variant="success">{t`Connected for you`}</Badge>;

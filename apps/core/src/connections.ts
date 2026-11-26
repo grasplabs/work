@@ -11,6 +11,7 @@ import type {
 import { actorOf } from "@grasp-os/shared/audit";
 import {
   addConnectorSchema,
+  blockConnectorToolSchema,
   catalogLogoPath,
   catalogSourceSchema,
   composioToolkitSchema,
@@ -21,6 +22,7 @@ import {
   connectionScopeSchema,
   connectorClientMetadataPath,
   connectorIdSchema,
+  connectorToolsRequestSchema,
   oauthProviderSchema,
   returnPathMaxLength,
 } from "@grasp-os/shared/connect";
@@ -37,6 +39,7 @@ import type {
   ConnectionPerson,
   ConnectionSummary,
   ConnectionsApi,
+  ConnectorToolView,
   ListedConnection,
   RevocationToDo,
   OAuthProvider,
@@ -44,7 +47,7 @@ import type {
   AppPointerSetting,
   SharedMailboxSetting,
   SharedSyncPlaces,
-  ConnectionBrainAudienceSetting,
+  ConnectionAudienceSetting,
   ToolClassSetting,
   ToolkitKeyField,
 } from "@grasp-os/shared/connect";
@@ -548,13 +551,10 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
       scope,
       ...(tenant === undefined ? {} : { tenant }),
       returnTo: `${back.pathname}${back.search}`,
-      // What a suite's sign-in asks for; a connector's server decides its own.
-      ...(suite.success
-        ? {
-            classes: await classesOn(this.#env),
-            sharedMailbox: await anyMailboxPointed(this.#env),
-          }
-        : {}),
+      // What a sign-in asked by class asks for (a suite's, or a connector's
+      // that declares its rights); connect asks the rest for all they declare.
+      classes: await classesOn(this.#env),
+      sharedMailbox: await anyMailboxPointed(this.#env),
     });
   }
 
@@ -828,6 +828,36 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
     });
   }
 
+  /**
+   * A connector's tools for an admin, with their classes and the names
+   * blocked, as the signed-in person: connect checks the role.
+   */
+  async connectorTools(connector: unknown): Promise<ConnectorToolView[]> {
+    const person = await this.#person();
+    const parsed = connectorToolsRequestSchema
+      .omit({ person: true })
+      .safeParse({ connector });
+    if (!parsed.success) {
+      throw connectionErrors.create("connection.invalid");
+    }
+    return await this.#env.CONNECT.connectorTools({ ...parsed.data, person });
+  }
+
+  /**
+   * Blocks a connector's tool by its name, or lets it through again, as
+   * the signed-in person: connect checks the role and staff, and audits it.
+   */
+  async blockConnectorTool(request: unknown): Promise<void> {
+    const person = await this.#person();
+    const parsed = blockConnectorToolSchema
+      .omit({ person: true })
+      .safeParse(request);
+    if (!parsed.success) {
+      throw connectionErrors.create("connection.invalid");
+    }
+    await this.#env.CONNECT.blockConnectorTool({ ...parsed.data, person });
+  }
+
   async disconnect(connectionId: string): Promise<{ revoked: boolean }> {
     const person = await this.#person();
     // Whose it is, read before connect stops it (it keeps its owner).
@@ -978,14 +1008,14 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
     });
   }
 
-  async brainAudiences(): Promise<ConnectionBrainAudienceSetting[]> {
+  async audiences(): Promise<ConnectionAudienceSetting[]> {
     return await withPerson(
       this.#check,
       async (identity) => await readConnectionAudiences(this.#env, identity)
     );
   }
 
-  async setBrainAudience(
+  async setAudience(
     connectionId: unknown,
     audience: unknown,
     from: unknown,

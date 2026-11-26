@@ -37,6 +37,10 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
     company:
       "the organization's connectors made from a URL; `created_by` names the admin who added one",
   },
+  connector_blocked_tools: {
+    company:
+      "the tools an admin blocked on a connector; `blocked_by` names the admin who blocked one",
+  },
   event_sources: { erased: "connect" },
   idempotent_calls: { erased: "connect" },
   pending_actions: { erased: "connect" },
@@ -80,6 +84,7 @@ export const reviewedPersonColumns: Readonly<
   call_changes: ["on_behalf_of"],
   composio_flows: ["user_id"],
   connectors: ["created_by"],
+  connector_blocked_tools: ["blocked_by"],
   connections: [
     "account_email",
     "account_senders",

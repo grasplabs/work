@@ -40,6 +40,10 @@ const openAcme = async (path: string, snapshot: AdminSnapshot, crm?: Crm) =>
     ...setupAnswers,
   });
 
+/** What the organization's level of the sidebar says. */
+const levelOf = (root: Element): string =>
+  root.querySelector('[data-slot="sidebar"]')?.textContent ?? "";
+
 /** The organization's column of sections. */
 const columnOf = (root: Element): Element | null =>
   root.querySelector(`nav[aria-label="${acme.name}"]`);
@@ -51,6 +55,13 @@ const entryOf = (root: Element, title: string): Element | undefined =>
       (span) => span.textContent === title
     )
   );
+
+/** What a column entry says when things wait for Grasp there: "3 things need Grasp". */
+const waitsMark = /\d+ things? needs? Grasp/u;
+
+/** Whether the page says a part of its section isn't read yet (its source note). */
+const notYetRead = (text: string): boolean =>
+  text.includes("doesn’t hold it yet") || text.includes("once it is connected");
 
 /** The part of the page titled `title`. */
 const partOf = (root: Element, title: string): Element | undefined =>
@@ -91,11 +102,10 @@ describe("an organization's page", () => {
       onOverview: entryOf(container, "Overview")?.getAttribute("aria-current"),
       title: container.querySelector("main h1")?.textContent,
       known: column.includes("85% known. Ready for Grasp’s go"),
-      waits: ["Steps", "Details", "Interviews"].map(
-        (title) =>
-          entryOf(container, title)?.textContent?.includes(
-            "Something waits for Grasp"
-          ) ?? false
+      waits: ["Steps", "Details", "Interviews"].map((title) =>
+        waitsMark.test(
+          entryOf(container, title)?.closest("li")?.textContent ?? ""
+        )
       ),
       source: text.includes("From the company’s own Grasp."),
       needs: [
@@ -113,6 +123,33 @@ describe("an organization's page", () => {
     });
   });
 
+  it("shows an organization's sections in the sidebar in place of the admin's list, whatever its id", async () => {
+    // An id that is also the name of the sidebar's own list.
+    const main = gridRow({ id: "main", name: "Main Street" });
+    const { container } = await openAdmin("/organizations/main", {
+      fetchClientGrid: [main],
+      fetchClientAdmin: answeredAdmin({
+        client: main,
+        snapshot: readySnapshot("Main Street"),
+      }),
+      ...setupAnswers,
+    });
+    const shown = [
+      ...container.querySelectorAll(
+        '[data-slot="sidebar-level"][data-state="active"]'
+      ),
+    ];
+
+    expect(
+      shown.map(
+        (level) =>
+          level
+            .querySelector('[data-slot="sidebar-content"]')
+            ?.getAttribute("aria-label") ?? null
+      )
+    ).toStrictEqual(["Main Street"]);
+  });
+
   it("says the interviews closed on the last day their links worked", async () => {
     const snapshot = toldSnapshot("Closed", {
       days: 5,
@@ -123,9 +160,9 @@ describe("an organization's page", () => {
     const last = new Date(`${snapshot.plan?.start ?? ""}T12:00:00Z`);
     last.setUTCDate(last.getUTCDate() + 4);
 
-    const { main } = await openAcme("", snapshot);
+    const { container } = await openAcme("", snapshot);
 
-    expect(main()).toContain(
+    expect(levelOf(container)).toContain(
       `The interviews closed on ${formatDate(last.toISOString().slice(0, 10))}`
     );
   });
@@ -174,7 +211,7 @@ describe("an organization's page", () => {
     const usage = await openAcme("/ai-use", snapshot);
     const usagePage = [
       usage.container.querySelector("main h1")?.textContent,
-      usage.container.querySelector('[data-slot="source-note"]'),
+      notYetRead(usage.main()),
     ];
     const setup = await openAcme("/setup", snapshot);
 
@@ -183,7 +220,7 @@ describe("an organization's page", () => {
       usage: usagePage,
       setup: [
         setup.container.querySelector("main h1")?.textContent,
-        setup.container.querySelector('[data-slot="source-note"]'),
+        notYetRead(setup.main()),
       ],
     }).toStrictEqual({
       details: {
@@ -193,8 +230,8 @@ describe("an organization's page", () => {
         current: "page",
         overviewCurrent: null,
       },
-      usage: ["AI use", null],
-      setup: ["Setup", null],
+      usage: ["AI use", false],
+      setup: ["Setup", false],
     });
   });
 
@@ -356,12 +393,12 @@ describe("an organization's overview", () => {
   });
 
   it("counts the interviews' days to the company's own plan", async () => {
-    const { main } = await openAcme(
+    const { container } = await openAcme(
       "",
       toldSnapshot("Acme", { days: 21, daysIn: 3, leadTalked: true })
     );
 
-    expect(main()).toMatch(/Day \d+ of 21/u);
+    expect(levelOf(container)).toMatch(/Day \d+ of 21/u);
   });
 });
 

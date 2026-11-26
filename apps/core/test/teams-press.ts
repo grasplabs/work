@@ -25,7 +25,9 @@ export const heldTurn = async (
   const admin = await signedInApi(idp, "admin");
   // A send whose fields its server lists, so core can check a chat app's
   // write against them (channels/stephen-rules.ts).
-  const mail = await mailConnection(plan, ["MAIL_SEND"]);
+  const mail = await mailConnection(plan, ["MAIL_SEND"], {
+    audience: "everyone",
+  });
   const binding = `MAIL${unique()}`.toUpperCase();
   await requestGranted(idp, admin, {
     subject: { type: "agent", agentId: chatAgentId },
@@ -75,7 +77,7 @@ export const pressOn = (
 ) => ({
   ...messageFrom(from, { text: undefined, ...changes }),
   replyToId: cardId,
-  value: { actionId, value: JSON.stringify(press) },
+  value: { actionId, value: JSON.stringify({ writes: press }) },
 });
 
 /** How many calls reached the mail server, and to whom it sent. */

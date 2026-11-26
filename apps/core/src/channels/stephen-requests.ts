@@ -97,6 +97,7 @@ export const companyDay = async (
 const missingWhy: Readonly<Record<string, MissingReason>> = {
   "connect.class_off": "actionOff",
   "connect.class_unknown": "actionOff",
+  "connect.tool_blocked": "actionOff",
   "connect.app_not_pointed": "actionOff",
   "connect.resource_not_pointed": "actionOff",
   "connect.mailbox_not_pointed": "actionOff",

@@ -1,6 +1,6 @@
 import type {
-  ConnectionBrainAudience,
-  ConnectionBrainAudienceSetting,
+  ConnectionAudience,
+  ConnectionAudienceSetting,
   ListedConnection,
 } from "@grasp-os/shared/connect";
 import { connectionErrors } from "@grasp-os/shared/connect";
@@ -45,13 +45,14 @@ import { RowAlert } from "./app/rows.tsx";
 import { SyncPlaces } from "./sync-places.tsx";
 import { useChange } from "./use-change.ts";
 
-// For an admin, on a shared connection's card: who may read in the Brain
-// what agents read through it (GRA-1831), one team, everyone or nobody,
-// and erasing what the Brain kept of it. Core decides who may change it
-// and checks every choice (connection-audiences.ts, shared-reads.ts);
-// the card only asks. Opening it or widening it is confirmed first, in a
-// whole sentence that says what was kept before is shown too; back to
-// nobody hides it and keeps it, so it needs none. Erasing is for good.
+// For an admin, on a shared connection's card: its one audience (GRA-2322),
+// one team, everyone or nobody, who may use it in chats and Apps (and the
+// workflows an App reaches) and read in the Brain what came from it, and erasing what the
+// Brain kept of it. Core decides who may change it and checks every choice
+// (connection-audiences.ts, shared-reads.ts); the card only asks. Opening
+// it or widening it is confirmed first, in a whole sentence that says what
+// was kept before is shown too; back to nobody closes it and keeps what
+// was kept, so it needs none. Erasing is for good.
 // Beside it, which of the connection's shared drives or libraries Grasp
 // may copy into the Brain (sync-places.tsx): what comes in, and who may
 // read it, are decided in one place.
@@ -89,7 +90,7 @@ interface Team {
 
 /** What the cards read from core once for all of them: every shared connection's audience, and the company's teams. */
 interface Audiences {
-  settings: ConnectionBrainAudienceSetting[];
+  settings: ConnectionAudienceSetting[];
   teams: Team[];
 }
 
@@ -111,10 +112,10 @@ type AudiencesRead =
  */
 const readSettings = async (
   core: CoreConnection
-): Promise<ConnectionBrainAudienceSetting[] | { refused: string }> => {
+): Promise<ConnectionAudienceSetting[] | { refused: string }> => {
   try {
     return await core.withSession(
-      async (session: Session) => await session.connections.brainAudiences()
+      async (session: Session) => await session.connections.audiences()
     );
   } catch (error) {
     return { refused: failureText(error) };
@@ -127,7 +128,7 @@ const readAudiences = async (core: CoreConnection): Promise<AudiencesRead> => {
     const data = await core.withSession(
       async (session: Session): Promise<Audiences> => {
         const [settings, teams] = await Promise.all([
-          session.connections.brainAudiences(),
+          session.connections.audiences(),
           session.organization.teams(),
         ]);
         return { settings, teams };
@@ -150,7 +151,7 @@ const readAudiences = async (core: CoreConnection): Promise<AudiencesRead> => {
  * A refused re-read keeps what was read before and says why beside it;
  * after any refusal the next read is a whole one, teams too.
  */
-export const useBrainAudiences = (
+export const useConnectionAudiences = (
   wanted: boolean
 ): { read: AudiencesRead; onChanged: () => void } => {
   const core = useCore();
@@ -218,12 +219,12 @@ export const useBrainAudiences = (
 const chosenFrom = async (
   session: Session,
   connectionId: string,
-  next: ConnectionBrainAudience,
-  from: ConnectionBrainAudience,
+  next: ConnectionAudience,
+  from: ConnectionAudience,
   confirmed: boolean
 ): Promise<"chosen" | "changed"> => {
   try {
-    await session.connections.setBrainAudience(
+    await session.connections.setAudience(
       connectionId,
       next,
       from,
@@ -233,9 +234,7 @@ const chosenFrom = async (
     );
     return "chosen";
   } catch (error) {
-    if (
-      connectionErrors.codeOf(error) === "connection.brain_audience_changed"
-    ) {
+    if (connectionErrors.codeOf(error) === "connection.audience_changed") {
       return "changed";
     }
     throw error;
@@ -244,7 +243,7 @@ const chosenFrom = async (
 
 /** The name of `audience`'s team, if it is a team the list holds. */
 const teamNameOf = (
-  audience: ConnectionBrainAudience,
+  audience: ConnectionAudience,
   teams: readonly Team[]
 ): string | undefined =>
   audience.kind === "team"
@@ -252,37 +251,52 @@ const teamNameOf = (
     : undefined;
 
 /** An audience as the select names it: `nobody`, `everyone`, or a team's ID. */
-const valueOf = (audience: ConnectionBrainAudience): string =>
+const valueOf = (audience: ConnectionAudience): string =>
   audience.kind === "team" ? audience.teamId : audience.kind;
 
 /** The audience the select's `value` names. */
-const audienceOf = (value: string): ConnectionBrainAudience => {
+const audienceOf = (value: string): ConnectionAudience => {
   if (value === "nobody" || value === "everyone") {
     return { kind: value };
   }
   return { kind: "team", teamId: value };
 };
 
-/** Whether `next` lets anyone read who `now` doesn't: confirmed first. */
-const widens = (
-  now: ConnectionBrainAudience,
-  next: ConnectionBrainAudience
-): boolean =>
+/** Whether `next` lets anyone use it who `now` doesn't: confirmed first. */
+const widens = (now: ConnectionAudience, next: ConnectionAudience): boolean =>
   next.kind !== "nobody" &&
   valueOf(now) !== valueOf(next) &&
   now.kind !== "everyone";
+
+/**
+ * Whether the Brain may hold something of `connection` to erase: open to
+ * someone, or kept before (`keepsReads`), and no erasure under way. Never
+ * of an outside API, whose answers it never keeps.
+ */
+const erasable = (
+  connection: ListedConnection,
+  audience: ConnectionAudience,
+  erasing: boolean,
+  outsideApi: boolean
+): boolean =>
+  !outsideApi &&
+  !erasing &&
+  (audience.kind !== "nobody" || connection.keepsReads === true);
 
 /** Asks before `next` is chosen for `label`: what it shows, and to whom. */
 const WidenDialog = ({
   label,
   next,
   teams,
+  outsideApi,
   onConfirm,
   onCancel,
 }: {
   label: string;
-  next: ConnectionBrainAudience;
+  next: ConnectionAudience;
   teams: Team[];
+  /** An outside API (`AudienceChoice`): said as only Apps use it. */
+  outsideApi: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }) => {
@@ -300,32 +314,60 @@ const WidenDialog = ({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            <Trans>Keep what agents read through {label} in the Brain?</Trans>
+            <Trans>Let them use {label}?</Trans>
           </AlertDialogTitle>
           <AlertDialogDescription>
-            {next.kind === "everyone" ? (
+            {outsideApi && next.kind === "everyone" ? (
               <Trans>
-                Everyone in the company will be able to find what agents read
-                through {label} and what is copied from it, including what was
-                kept before, whatever their permissions in {label}. Their
-                assistants will also read {label} directly, in their own chats.
-                Choose a team if not everyone should have this.
+                Apps that use {label}, with its credential, can then be shared
+                with everyone in the company. Choose a team if not everyone
+                should have this.
               </Trans>
             ) : null}
-            {next.kind === "team" && team !== undefined ? (
+            {outsideApi && next.kind === "team" && team !== undefined ? (
               <Trans>
-                Everyone in {team} will be able to find what agents read through{" "}
-                {label} and what is copied from it, including what was kept
-                before, whatever their permissions in {label}. Their assistants
-                will also read {label} directly, in their own chats.
+                Apps that use {label}, with its credential, can then be shared
+                with everyone in {team}.
               </Trans>
             ) : null}
-            {next.kind === "team" && team === undefined ? (
+            {outsideApi && next.kind === "team" && team === undefined ? (
               <Trans>
-                Everyone in this team will be able to find what agents read
-                through {label} and what is copied from it, including what was
-                kept before, whatever their permissions in {label}. Their
-                assistants will also read {label} directly, in their own chats.
+                Apps that use {label}, with its credential, can then be shared
+                with everyone in this team.
+              </Trans>
+            ) : null}
+            {!outsideApi && next.kind === "everyone" ? (
+              <Trans>
+                Everyone in the company will be able to use {label} in their own
+                chats, with everything it reaches, whatever their own
+                permissions there, change things through it once they confirm
+                each change, be given Apps that use it, and find in the Brain
+                what came from it, including what was kept before. To open only
+                part of it, connect an account that reaches only that part, or
+                have each person connect their own. Choose a team if not
+                everyone should have this.
+              </Trans>
+            ) : null}
+            {!outsideApi && next.kind === "team" && team !== undefined ? (
+              <Trans>
+                Everyone in {team} will be able to use {label} in their own
+                chats, with everything it reaches, whatever their own
+                permissions there, change things through it once they confirm
+                each change, be given Apps that use it, and find in the Brain
+                what came from it, including what was kept before. To open only
+                part of it, connect an account that reaches only that part, or
+                have each person connect their own.
+              </Trans>
+            ) : null}
+            {!outsideApi && next.kind === "team" && team === undefined ? (
+              <Trans>
+                Everyone in this team will be able to use {label} in their own
+                chats, with everything it reaches, whatever their own
+                permissions there, change things through it once they confirm
+                each change, be given Apps that use it, and find in the Brain
+                what came from it, including what was kept before. To open only
+                part of it, connect an account that reaches only that part, or
+                have each person connect their own.
               </Trans>
             ) : null}
           </AlertDialogDescription>
@@ -333,7 +375,7 @@ const WidenDialog = ({
         <AlertDialogFooter>
           <AlertDialogCancel />
           <AlertDialogAction onClick={onConfirm}>
-            {t`Keep it for them`}
+            {t`Open it to them`}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -417,7 +459,7 @@ const EraseKept = ({
             {t`Erase what the Brain kept from ${label}?`}
           </AlertDialogTitle>
           <AlertDialogDescription>
-            {t`Everything the Brain kept from it is erased for good, and nobody reads it from now on. This can't be undone. To keep anything from it again, choose who may read it once the erasure is done.`}
+            {t`Everything the Brain kept from it is erased for good, and nobody may use it from now on. This can't be undone. To open it again, choose who may use it once the erasure is done.`}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <EraseAnswers
@@ -433,22 +475,29 @@ const EraseKept = ({
 };
 
 /**
- * For an admin, on a shared connection's card: its Brain audience as
+ * For an admin, on a shared connection's card: its audience as
  * core holds it (`audiences`, read once for every card), and erasing what
  * was kept. `onChanged` once a change or an erase was asked for, whether
  * it went through or was refused, so the audiences are read again; its
  * own error stays on the card meanwhile.
+ * An outside API (`outsideApi`, an HTTP connection) is called only by
+ * Apps and workflows, with the one credential an admin gave it, never in
+ * a chat, and the Brain keeps nothing it answers (its server names no
+ * items, connect's call.ts `keepOf`): its audience is said as such, with
+ * nothing kept to erase and no places to pick.
  */
-export const BrainAudience = ({
+export const AudienceChoice = ({
   connection,
   label,
   audiences,
   onChanged,
+  outsideApi = false,
 }: {
   connection: ListedConnection;
   label: string;
   audiences: AudiencesRead;
   onChanged: () => void;
+  outsideApi?: boolean;
 }) => {
   const { t } = useLingui();
   const { busy, failure, change } = useChange();
@@ -456,15 +505,15 @@ export const BrainAudience = ({
   // core is told the choice was made from, so another admin's change
   // meanwhile is refused, not overwritten.
   const [asked, setAsked] = useState<{
-    next: ConnectionBrainAudience;
-    from: ConnectionBrainAudience;
+    next: ConnectionAudience;
+    from: ConnectionAudience;
   }>();
   // Refused as the audience changed meanwhile: said until the next choice.
   const [changedMeanwhile, setChangedMeanwhile] = useState(false);
   if (audiences.state === "loading") {
     return null;
   }
-  const title = t`The Brain`;
+  const title = t`Who may use this connection`;
   if (audiences.state === "refused") {
     return (
       <section>
@@ -477,13 +526,13 @@ export const BrainAudience = ({
   const setting = settings.find(
     ({ connectionId }) => connectionId === connection.id
   );
-  const audience: ConnectionBrainAudience = setting?.audience ?? {
+  const audience: ConnectionAudience = setting?.audience ?? {
     kind: "nobody",
   };
   const erasing = setting?.erasing ?? false;
   const choose = (
-    next: ConnectionBrainAudience,
-    from: ConnectionBrainAudience,
+    next: ConnectionAudience,
+    from: ConnectionAudience,
     confirmed = false
   ): void => {
     setAsked(undefined);
@@ -511,8 +560,7 @@ export const BrainAudience = ({
     <section>
       <SectionHeader
         actions={
-          !erasing &&
-          (audience.kind !== "nobody" || connection.keepsReads === true) ? (
+          erasable(connection, audience, erasing, outsideApi) ? (
             <EraseKept
               connection={connection}
               label={label}
@@ -529,10 +577,12 @@ export const BrainAudience = ({
           <FieldContent>
             {/* The label and its info mark on one line, the mark outside it so the select keeps the label's words, as #2503's setting row. */}
             <div {...stylex.props(styles.named)}>
-              <FieldLabel>{t`Keep what agents read through it for`}</FieldLabel>
+              <FieldLabel>{t`Open to`}</FieldLabel>
               <span {...stylex.props(styles.mark)}>
                 <InfoTip>
-                  {t`Who may read it, in the Brain and through their assistant in their own chat, is decided inside Grasp, not by the permissions in ${label}: choose a team if not everyone should have it.`}
+                  {outsideApi
+                    ? t`Who Apps that use ${label}, with its credential, may be shared with is decided inside Grasp: choose a team if not everyone should have it. An App's owner and admins can still open Apps that use it, whatever you choose.`
+                    : t`Who may use ${label} in their own chats, be given Apps that use it, and find in the Brain what came from it is decided inside Grasp, not by the permissions in ${label}: choose a team if not everyone should have it. Their chats reach everything ${label} reaches: to open only part of it, connect an account that reaches only that part, or have each person connect their own. An App's owner and admins can still open Apps that use it, whatever you choose.`}
                 </InfoTip>
               </span>
             </div>
@@ -563,19 +613,19 @@ export const BrainAudience = ({
         {failure === undefined ? null : (
           <RowAlert variant="destructive">{failure}</RowAlert>
         )}
-        {connection.status === "needs_reauth" ? (
+        {!outsideApi && connection.status === "needs_reauth" ? (
           <RowAlert variant="warning">
             {t`Nobody can find what the Brain kept from ${label} until someone signs in again. None of it is erased.`}
           </RowAlert>
         ) : null}
         {erasing ? (
           <RowAlert>
-            {t`What the Brain kept from ${label} is being erased. You can choose who may read it again once that is done.`}
+            {t`What the Brain kept from ${label} is being erased. You can choose who may use it again once that is done.`}
           </RowAlert>
         ) : null}
         {changedMeanwhile ? (
           <RowAlert variant="warning">
-            {t`Who may read what agents read through ${label} was changed in the meantime. This is who may read it now: choose again if you still want to change it.`}
+            {t`Who may use ${label} was changed in the meantime. This is who may use it now: choose again if you still want to change it.`}
           </RowAlert>
         ) : null}
         {audiences.refused === undefined ? null : (
@@ -592,16 +642,19 @@ export const BrainAudience = ({
           onConfirm={() => {
             choose(asked.next, asked.from, true);
           }}
+          outsideApi={outsideApi}
           teams={teams}
         />
       )}
-      <SyncPlaces
-        audience={audience}
-        connection={connection}
-        label={label}
-        onAudienceStale={onChanged}
-        team={teamNameOf(audience, teams)}
-      />
+      {outsideApi ? null : (
+        <SyncPlaces
+          audience={audience}
+          connection={connection}
+          label={label}
+          onAudienceStale={onChanged}
+          team={teamNameOf(audience, teams)}
+        />
+      )}
     </section>
   );
 };

@@ -37,6 +37,8 @@ export interface Integration {
   description: string | null;
   /** Whose sign-in app connecting it takes; unknown where the catalog doesn't list it. */
   auth: CatalogAuth | undefined;
+  /** The host of a connector's sign-in page, as the catalog sends it (`CatalogEntry.signInHost`). */
+  signInHost?: string;
   /** Where core serves its logo, or `null`: its first letter stands in. */
   logo: string | null;
   /** How many tools it has; unknown where the catalog doesn't list it, or doesn't count them (a connector's). */
@@ -126,6 +128,7 @@ export const integrationsOf = (
     group: entry.group,
     description: entry.description,
     auth: entry.auth,
+    ...(entry.signInHost === undefined ? {} : { signInHost: entry.signInHost }),
     logo: entry.logo,
     toolCount: entry.toolCount ?? undefined,
     offered: entry.offered,

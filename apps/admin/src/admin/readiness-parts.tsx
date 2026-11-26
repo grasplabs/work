@@ -7,20 +7,28 @@ import {
   AlertAction,
   AlertDescription,
   AlertTitle,
-} from "@grasp-os/app-kit/components/alert";
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { buttonVariants } from "@grasp-os/app-kit/components/button";
-import { cn } from "@grasp-os/app-kit/lib/utils";
+} from "@grasp-os/ui/components/alert";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import { CardContent } from "@grasp-os/ui/components/card";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemDetail,
+  ItemGroup,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
 import { Link } from "@tanstack/react-router";
-import { TriangleAlertIcon } from "lucide-react";
 
+import { Panel } from "./panel.tsx";
 import type {
   CheckLink,
   CheckStatus,
   Readiness,
   ReadinessCheck,
 } from "./readiness.ts";
-import { Section } from "./section.tsx";
 
 /** Where Platform holds its checklist, for a link to it. */
 export const readinessId = "readiness";
@@ -34,12 +42,12 @@ const statusWords: Readonly<Record<CheckStatus, string>> = {
 };
 
 const statusVariant: Readonly<
-  Record<CheckStatus, "passed" | "attention" | "outline">
+  Record<CheckStatus, "success" | "warning" | "default">
 > = {
-  ready: "passed",
-  blocked: "attention",
-  waiting: "outline",
-  not_configured: "outline",
+  ready: "success",
+  blocked: "warning",
+  waiting: "default",
+  not_configured: "default",
 };
 
 /** Where each check leads, for its next step in the admin. */
@@ -58,35 +66,27 @@ const checkLinks: Readonly<
 
 /** A check's link, where its next step is done in the admin. */
 const CheckLinkTo = ({ link }: { link: CheckLink }) => (
-  <Link
-    className={cn(
-      buttonVariants({ size: "sm", variant: "ghost" }),
-      "flex-none"
-    )}
-    to={checkLinks[link].to}
-  >
-    {checkLinks[link].label}
-  </Link>
+  <Button asChild size="sm" variant="ghost">
+    <Link to={checkLinks[link].to}>{checkLinks[link].label}</Link>
+  </Button>
 );
 
 const CheckRow = ({ check }: { check: ReadinessCheck }) => (
-  <li className="flex flex-col gap-1 border-t px-5 py-3">
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <span className="flex items-center gap-2">
-        <span className="font-medium">{check.title}</span>
-        {check.required ? null : (
-          <span className="text-muted-foreground text-xs">Optional</span>
-        )}
-      </span>
+  <Item size="sm">
+    <ItemContent>
+      <ItemTitle>
+        {check.title}
+        {check.required ? null : <ItemDetail>Optional</ItemDetail>}
+      </ItemTitle>
+      <ItemDescription>{check.words}</ItemDescription>
+    </ItemContent>
+    <ItemActions>
       <Badge variant={statusVariant[check.status]}>
         {statusWords[check.status]}
       </Badge>
-    </div>
-    <div className="flex flex-wrap items-start justify-between gap-2">
-      <p className="min-w-0 flex-1">{check.words}</p>
       {check.link === undefined ? null : <CheckLinkTo link={check.link} />}
-    </div>
-  </li>
+    </ItemActions>
+  </Item>
 );
 
 /** Platform's checklist of what isn't ready: required lines first, then optional ones. */
@@ -98,24 +98,25 @@ export const ReadinessPanel = ({ readiness }: { readiness: Readiness }) => {
     ...open.filter(({ required }) => !required),
   ];
   return (
-    <div id={readinessId}>
-      <Section
-        description={
-          readiness.blocking === 0
-            ? "Everything onboarding an organization needs is ready."
-            : `${readiness.blocking} ${readiness.blocking === 1 ? "thing stops" : "things stop"} an organization being onboarded. Each line says what to do next.`
-        }
-        title="Readiness"
-      >
-        {ordered.length === 0 ? null : (
-          <ul className="flex flex-col">
+    <Panel
+      description={
+        readiness.blocking === 0
+          ? "Everything onboarding an organization needs is ready."
+          : `${readiness.blocking} ${readiness.blocking === 1 ? "thing stops" : "things stop"} an organization being onboarded. Each line says what to do next.`
+      }
+      id={readinessId}
+      title="Readiness"
+    >
+      {ordered.length === 0 ? null : (
+        <CardContent flush>
+          <ItemGroup separated>
             {ordered.map((check) => (
               <CheckRow check={check} key={check.id} />
             ))}
-          </ul>
-        )}
-      </Section>
-    </div>
+          </ItemGroup>
+        </CardContent>
+      )}
+    </Panel>
   );
 };
 
@@ -128,25 +129,19 @@ export const ReadinessBanner = ({ readiness }: { readiness: Readiness }) => {
     ({ required, status }) => required && status !== "ready"
   );
   return (
-    <Alert aria-label="Readiness" live="polite" variant="attention">
-      <TriangleAlertIcon aria-hidden />
+    <Alert live="polite" variant="warning">
       <AlertTitle>
         {`Grasp can't onboard an organization yet: ${readiness.blocking} ${readiness.blocking === 1 ? "thing to fix" : "things to fix"}.`}
       </AlertTitle>
       {first === undefined ? null : (
-        <AlertDescription>
-          <p>{`${first.title}: ${first.words}`}</p>
-        </AlertDescription>
+        <AlertDescription>{`${first.title}: ${first.words}`}</AlertDescription>
       )}
-      {/* The alert's own place for its action: inside its description, a link takes the description's underline. */}
-      <AlertAction placement="below">
-        <Link
-          className={buttonVariants({ size: "sm", variant: "outline" })}
-          hash={readinessId}
-          to="/platform"
-        >
-          Open Readiness
-        </Link>
+      <AlertAction>
+        <Button asChild size="xs" variant="outline">
+          <Link hash={readinessId} to="/platform">
+            Open Readiness
+          </Link>
+        </Button>
       </AlertAction>
     </Alert>
   );

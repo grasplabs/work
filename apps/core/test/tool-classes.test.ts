@@ -17,6 +17,7 @@ import {
 } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { chooseAudience } from "./brain-audiences.ts";
 import { consentCode, graphSentUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { acmeTenant } from "./sign-in-config.ts";
@@ -47,7 +48,7 @@ type Admin = Awaited<ReturnType<typeof signedInApi>>;
 
 /**
  * A shared Microsoft 365 mailbox, as an admin connects it: granted
- * `granted`, if given, or made before connect kept grants.
+ * `granted`, if given, or what the consent asked for.
  */
 const connectShared = async (admin: Admin, granted?: string) => {
   const subject = `team-${crypto.randomUUID()}`;
@@ -69,6 +70,9 @@ const connectShared = async (admin: Admin, granted?: string) => {
   if (connection === undefined) {
     throw new Error("Expected the shared connection");
   }
+  // Opened to everyone in the company, as the chat uses no shared one
+  // before an admin chooses who may (connection-audiences.ts).
+  await chooseAudience(admin.api, connection.id, { kind: "everyone" });
   return { id: connection.id, mailbox };
 };
 
@@ -78,6 +82,13 @@ const connectShared = async (admin: Admin, granted?: string) => {
  */
 const readCompanyGrant =
   "openid profile email offline_access User.Read Mail.ReadWrite Mail.ReadWrite.Shared Mail.Send.Shared Files.Read.All Sites.Read.All Calendars.Read.Shared Tasks.Read";
+
+/**
+ * A grant that holds the rights of every class but Change company's, as
+ * an admin's consent with Reach others on gives.
+ */
+const sendingGrant =
+  "openid profile email offline_access User.Read MailboxSettings.Read Mail.ReadWrite Mail.Send Calendars.ReadWrite Calendars.Read.Shared Files.ReadWrite.All Files.Read.All Sites.Read.All Tasks.ReadWrite Tasks.Read Notes.ReadWrite";
 
 /** A grant that holds every class's rights, and a shared mailbox's. */
 const everyRightGrant =
@@ -343,7 +354,7 @@ describe("the classes a company turned on", setUpTime, () => {
   it("refuse, by default, the chat's agent's send in core, so connect never sees it", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "user");
-    const { id, mailbox } = await connectShared(admin);
+    const { id, mailbox } = await connectShared(admin, readCompanyGrant);
     await pointedAt(admin, mailbox);
     const chat = await chatCalling(admin, person.userId, mailbox, id);
 
@@ -427,7 +438,7 @@ describe("the classes a company turned on", setUpTime, () => {
     const admin = await signedInApi(idp, "admin");
     const inTeam = await signedInApi(idp, "user");
     const outside = await signedInApi(idp, "user");
-    const { id, mailbox } = await connectShared(admin);
+    const { id, mailbox } = await connectShared(admin, everyRightGrant);
     await pointedAt(admin, mailbox);
     const team = await teamOf(inTeam.userId);
     await admin.api.connections.setToolClass("reach-others", {
@@ -689,7 +700,7 @@ describe("the classes a company turned on", setUpTime, () => {
   it("ask Microsoft, when someone connects, only for the rights of the classes on, and the grants that lack a class turned on to be given again", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "user");
-    const { id } = await connectShared(admin);
+    const { id } = await connectShared(admin, sendingGrant);
     const asked = async () => {
       const { url } = await person.api.connections.start({
         provider: "microsoft",
@@ -708,8 +719,7 @@ describe("the classes a company turned on", setUpTime, () => {
       teams: [await teamOf(person.userId)],
     });
     const sending = await asked();
-    // Made before grants were kept: it holds the old wide set, sending
-    // among it, but not changing the company's sites.
+    // Its grant holds sending, but not changing the company's sites.
     const afterSending = await statusOf();
     await admin.api.connections.setToolClass("change-company", {
       who: "everyone",

@@ -1,3 +1,4 @@
+import { allowsNull } from "../common/schema-fields.ts";
 import type { ValueDescriptor } from "../common/value-descriptor.ts";
 import { validateValue } from "../common/value-interpreter.ts";
 
@@ -126,7 +127,7 @@ export const assignable: Check = (from, to) => {
   if (to.kind === "json") {
     return true;
   }
-  if (from.nullable && !to.nullable) {
+  if (from.nullable && !allowsNull(to)) {
     return false;
   }
   if (from.kind === "union") {

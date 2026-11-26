@@ -176,7 +176,7 @@ import {
   audiencesRead,
   sharedPlacesRead,
 } from "./connection-audiences.ts";
-import type { ConnectionAudience } from "./connection-audiences.ts";
+import type { AudienceRow } from "./connection-audiences.ts";
 import { derivedHmacKey } from "./derived-keys.ts";
 import { inJurisdiction, workspace } from "./durable-objects.ts";
 import {
@@ -294,13 +294,13 @@ const sourceReadersSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("everyone") }),
   z.strictObject({ kind: z.literal("members") }),
   z.strictObject({ kind: z.literal("none") }),
-  // Whoever the shared connection's Brain audience holds now (GRA-1831):
+  // Whoever the shared connection's audience holds now (GRA-1831):
   // only for what agents read through it (`connected`).
   z.strictObject({
     kind: z.literal("connection"),
     connectionId: connectionIdSchema,
   }),
-  // Whoever the shared connection's Brain audience holds now, while the
+  // Whoever the shared connection's audience holds now, while the
   // place an admin picked on it is still picked (GRA-1719): only for what
   // native sync copies from that place (`sync`).
   z.strictObject({
@@ -398,7 +398,7 @@ const kindsWithoutColon = <const K extends string>(
 // and their head counts, readable by everyone (onboarding/new-brain.ts,
 // GRA-1748).
 // `connected`: what agents read through a shared connection, readable by
-// whoever its Brain audience holds now (`connection` readers, GRA-1831),
+// whoever its audience holds now (`connection` readers, GRA-1831),
 // keyed under the connection's ID; in the shared store alone.
 // `sync`: an item native sync copied from where it lives (brain-sync.ts,
 // GRA-1758), keyed under its connection: its owner's alone in their own
@@ -944,7 +944,7 @@ const accessFor = async (
 export type Reach = "person" | "teams" | "company";
 
 /** A shared connection's audience, with the groups of the places picked on it now. */
-type HeldAudience = ConnectionAudience & { places: readonly string[] };
+type HeldAudience = AudienceRow & { places: readonly string[] };
 
 /**
  * Each of `audiences` with the groups of the places picked on its
@@ -952,7 +952,7 @@ type HeldAudience = ConnectionAudience & { places: readonly string[] };
  * can't be read names no place.
  */
 const withPlaces = async (
-  audiences: readonly ConnectionAudience[],
+  audiences: readonly AudienceRow[],
   places: readonly { connectionId: string; feed: string; place: string }[]
 ): Promise<HeldAudience[]> => {
   const groups = new Map<string, string[]>();
@@ -977,7 +977,7 @@ const withPlaces = async (
 /**
  * The member `personId`'s own groups: their teams as core counts them
  * now, the company, and the members reading as themselves
- * (`membersGroup`), with the shared connections' Brain audiences as core
+ * (`membersGroup`), with the shared connections' audiences as core
  * keeps them now. Refused once they have no current membership.
  *
  * With `asThemselves`, also the groups of the accounts they proved are
@@ -1041,7 +1041,7 @@ const memberGroupsOf = async (
 };
 
 /**
- * `groups`, with the group of each shared connection whose Brain audience
+ * `groups`, with the group of each shared connection whose audience
  * is one of them (GRA-1831): `company` for everyone, a team's for that
  * team. So what agents read through it reaches exactly as far as a
  * document shared with that audience would at the same reach: code's
@@ -1125,7 +1125,7 @@ const readerGroupsOf = (
 /**
  * The member `personId` as the Brain's reader: the person, their teams as
  * core counts them now, the company, the members reading as themselves
- * (`membersGroup`), and the shared connections whose Brain audience holds
+ * (`membersGroup`), and the shared connections whose audience holds
  * them (`withConnections`). Refused once they have no current membership.
  */
 const personReaderOf = async (
@@ -1207,7 +1207,7 @@ const readerOf = async (
 /**
  * Refuses `readers` for `source` unless both are a shared connection's or
  * neither is (GRA-1831): what agents read through a shared connection is
- * for whoever its Brain audience holds, keyed under that connection, and
+ * for whoever its audience holds, keyed under that connection, and
  * nothing else is ever for a connection's audience. So a person's own
  * capture never lands in the shared store, nor this in anyone's own.
  */
@@ -2021,7 +2021,7 @@ export interface SourcePage {
 }
 
 /**
- * The shared connections whose Brain audience holds the member
+ * The shared connections whose audience holds the member
  * `personId` now, as their own reader does (`personReaderOf`): those
  * whose kept reads every read of theirs may return (GRA-1831), by ID.
  * Refused once they are no longer a member.

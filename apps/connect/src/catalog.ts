@@ -435,8 +435,9 @@ export const lastListedToolkits = async (
 /**
  * The connectors admins made from an MCP server's URL
  * (mcp-connectors.ts), by name: what connecting one takes is signing in at
- * its server, or a key its server takes in a header. Its tools are listed
- * only to a connection, so none are counted here.
+ * its server, or a key its server takes in a header, and for a sign-in,
+ * the host its sign-in page is on. Its tools are listed only to a
+ * connection, so none are counted here.
  */
 const connectorEntries = async (env: Env): Promise<CatalogEntry[]> => {
   const rows = await drizzle(env.DB)
@@ -446,21 +447,31 @@ const connectorEntries = async (env: Env): Promise<CatalogEntry[]> => {
       url: connectors.url,
       auth: connectors.auth,
       companyNetwork: connectors.companyNetwork,
+      authorizationEndpoint: connectors.authorizationEndpoint,
     })
     .from(connectors)
     .orderBy(connectors.name, connectors.id);
-  return rows.map(({ id, name, url, auth, companyNetwork }) => ({
-    source: "connector",
-    id,
-    name,
-    categories: [],
-    toolCount: null,
-    logo: null,
-    description: null,
-    group: catalogGroupOf([]),
-    auth: auth === "header" ? "key" : "managed",
-    ...(companyNetwork === true && { companyNetwork: new URL(url).origin }),
-  }));
+  return rows.map(
+    ({ id, name, url, auth, companyNetwork, authorizationEndpoint }) => {
+      const signInHost =
+        authorizationEndpoint === null
+          ? undefined
+          : URL.parse(authorizationEndpoint)?.host;
+      return {
+        source: "connector",
+        id,
+        name,
+        categories: [],
+        toolCount: null,
+        logo: null,
+        description: null,
+        group: catalogGroupOf([]),
+        auth: auth === "header" ? "key" : "managed",
+        ...(companyNetwork === true && { companyNetwork: new URL(url).origin }),
+        ...(signInHost === undefined ? {} : { signInHost }),
+      };
+    }
+  );
 };
 
 /** The catalog, as `ConnectApi.catalog` describes it. */

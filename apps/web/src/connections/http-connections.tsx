@@ -77,6 +77,10 @@ import {
   formatList,
   formatNumber,
 } from "../format.ts";
+import {
+  AudienceChoice,
+  useConnectionAudiences,
+} from "./connection-audience.tsx";
 import { httpConnectionsOf } from "./integrations.ts";
 import type { HttpListed } from "./integrations.ts";
 import { SectionCard } from "./section-card.tsx";
@@ -87,8 +91,10 @@ import { useChange } from "./use-change.ts";
 // connect keeps sealed. Listed apart from the catalog's apps, as connect
 // lists them (`connections.list`, with `http`): never the credential, only
 // the header it goes in. An admin who isn't Grasp staff approves one
-// (`connections.createHttp`) and revokes one (`connections.disconnect`,
-// after asking). Core and connect decide both again. A connection is
+// (`connections.createHttp`), revokes one (`connections.disconnect`,
+// after asking) and chooses who may use it (connection-audience.tsx,
+// GRA-2322), under its row: until then nobody may, and no App holding it
+// can be shared. Core and connect decide all of it again. A connection is
 // never edited, by design: another origin, scope or credential is another
 // connection, so a grant always covers exactly what an admin approved.
 
@@ -582,6 +588,10 @@ export const HttpConnections = ({
     connections === undefined
       ? []
       : httpConnectionsMatching(connections, search);
+  // Read once for every row, never a read a row.
+  const { read: audiences, onChanged } = useConnectionAudiences(
+    manages && shown.length > 0
+  );
   if (!manages && shown.length === 0) {
     return null;
   }
@@ -606,6 +616,18 @@ export const HttpConnections = ({
             <Fragment key={listed.connection.id}>
               {index > 0 && <ItemSeparator />}
               <HttpRow listed={listed} manages={manages} />
+              {manages ? (
+                // Under the row it is for, in the list as a separator is.
+                <li role="none">
+                  <AudienceChoice
+                    audiences={audiences}
+                    connection={listed.connection}
+                    label={listed.http.name}
+                    onChanged={onChanged}
+                    outsideApi
+                  />
+                </li>
+              ) : null}
             </Fragment>
           ))}
         </ItemGroup>

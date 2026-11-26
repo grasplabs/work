@@ -2834,10 +2834,6 @@ msgstr "An admin connects this"
 msgid "An admin connects this for everyone."
 msgstr "An admin connects this for everyone."
 
-#: src/chat/connection-requests.tsx
-msgid "An admin decides. It holds in this chat only."
-msgstr "An admin decides. It holds in this chat only."
-
 #: src/workflows/workflow-triggers.tsx
 msgid "An admin refused or took back its reading of these events: it hears nothing."
 msgstr "An admin refused or took back its reading of these events: it hears nothing."
@@ -3354,6 +3350,18 @@ msgstr "Apps shared with you"
 #: src/chat/agent-change-card.tsx
 msgid "Apps taken off"
 msgstr "Apps taken off"
+
+#: src/connections/connection-audience.tsx
+msgid "Apps that use {label}, with its credential, can then be shared with everyone in {team}."
+msgstr "Apps that use {label}, with its credential, can then be shared with everyone in {team}."
+
+#: src/connections/connection-audience.tsx
+msgid "Apps that use {label}, with its credential, can then be shared with everyone in the company. Choose a team if not everyone should have this."
+msgstr "Apps that use {label}, with its credential, can then be shared with everyone in the company. Choose a team if not everyone should have this."
+
+#: src/connections/connection-audience.tsx
+msgid "Apps that use {label}, with its credential, can then be shared with everyone in this team."
+msgstr "Apps that use {label}, with its credential, can then be shared with everyone in this team."
 
 #: src/apps/apps-overview.tsx
 msgid "Apps you build or answer for stand here."
@@ -4417,14 +4425,15 @@ msgid "Changed which connectors are offered"
 msgstr "Changed which connectors are offered"
 
 #: src/activity/audit-words.ts
+msgid "Changed who may use a shared connection"
+msgstr "Changed who may use a shared connection"
+
+#: src/activity/audit-words.ts
 msgid "Changed who reaches Stephen in a place"
 msgstr "Changed who reaches Stephen in a place"
 
-#: src/activity/audit-words.ts
-msgid "Changed who reads what a shared connection brings into the Brain"
-msgstr "Changed who reads what a shared connection brings into the Brain"
-
 #: src/connections/app/words.ts
+#: src/connections/connector-tools.tsx
 msgid "Changes"
 msgstr "Changes"
 
@@ -5079,8 +5088,8 @@ msgid "Connected as {account}."
 msgstr "Connected as {account}."
 
 #: src/connections/integration-item.tsx
-msgid "Connected for everyone"
-msgstr "Connected for everyone"
+msgid "Connected for the company"
+msgstr "Connected for the company"
 
 #: src/connections/integration-item.tsx
 msgid "Connected for you"
@@ -5481,7 +5490,7 @@ msgstr "Couldn't delete"
 msgid "Couldn't disconnect"
 msgstr "Couldn't disconnect"
 
-#: src/connections/brain-audience.tsx
+#: src/connections/connection-audience.tsx
 msgid "Couldn't erase"
 msgstr "Couldn't erase"
 
@@ -6781,7 +6790,7 @@ msgid "Erase {name}?"
 msgstr "Erase {name}?"
 
 #: src/brain/sources-page.tsx
-#: src/connections/brain-audience.tsx
+#: src/connections/connection-audience.tsx
 msgid "Erase for good"
 msgstr "Erase for good"
 
@@ -6797,11 +6806,11 @@ msgstr "Erase this upload for good"
 msgid "Erase this upload for good?"
 msgstr "Erase this upload for good?"
 
-#: src/connections/brain-audience.tsx
+#: src/connections/connection-audience.tsx
 msgid "Erase what the Brain kept"
 msgstr "Erase what the Brain kept"
 
-#: src/connections/brain-audience.tsx
+#: src/connections/connection-audience.tsx
 msgid "Erase what the Brain kept from {label}?"
 msgstr "Erase what the Brain kept from {label}?"
 
@@ -7050,9 +7059,9 @@ msgstr "Everyone has a link of their own. It opens only once they sign in with y
 msgid "Everyone in {project}"
 msgstr "Everyone in {project}"
 
-#: src/connections/brain-audience.tsx
-msgid "Everyone in {team} will be able to find what agents read through {label} and what is copied from it, including what was kept before, whatever their permissions in {label}. Their assistants will also read {label} directly, in their own chats."
-msgstr "Everyone in {team} will be able to find what agents read through {label} and what is copied from it, including what was kept before, whatever their permissions in {label}. Their assistants will also read {label} directly, in their own chats."
+#: src/connections/connection-audience.tsx
+msgid "Everyone in {team} will be able to use {label} in their own chats, with everything it reaches, whatever their own permissions there, change things through it once they confirm each change, be given Apps that use it, and find in the Brain what came from it, including what was kept before. To open only part of it, connect an account that reaches only that part, or have each person connect their own."
+msgstr "Everyone in {team} will be able to use {label} in their own chats, with everything it reaches, whatever their own permissions there, change things through it once they confirm each change, be given Apps that use it, and find in the Brain what came from it, including what was kept before. To open only part of it, connect an account that reaches only that part, or have each person connect their own."
 
 #: src/drafts/sharing.tsx
 msgid "Everyone in a project you aren’t in"
@@ -7064,8 +7073,8 @@ msgstr "Everyone in it · {shownRole}"
 
 #: src/agents/new-agent.tsx
 #: src/chat/agent-draft-card.tsx
-#: src/connections/brain-audience.tsx
 #: src/connections/chat-reads.tsx
+#: src/connections/connection-audience.tsx
 msgid "Everyone in the company"
 msgstr "Everyone in the company"
 
@@ -7077,25 +7086,25 @@ msgstr "Everyone in the company can ask it."
 msgid "Everyone in the company reads your answer, with your name."
 msgstr "Everyone in the company reads your answer, with your name."
 
-#: src/connections/brain-audience.tsx
-msgid "Everyone in the company will be able to find what agents read through {label} and what is copied from it, including what was kept before, whatever their permissions in {label}. Their assistants will also read {label} directly, in their own chats. Choose a team if not everyone should have this."
-msgstr "Everyone in the company will be able to find what agents read through {label} and what is copied from it, including what was kept before, whatever their permissions in {label}. Their assistants will also read {label} directly, in their own chats. Choose a team if not everyone should have this."
-
 #: src/connections/sync-places.tsx
 msgid "Everyone in the company will be able to read everything in the places you pick, whatever their permissions in {label}."
 msgstr "Everyone in the company will be able to read everything in the places you pick, whatever their permissions in {label}."
+
+#: src/connections/connection-audience.tsx
+msgid "Everyone in the company will be able to use {label} in their own chats, with everything it reaches, whatever their own permissions there, change things through it once they confirm each change, be given Apps that use it, and find in the Brain what came from it, including what was kept before. To open only part of it, connect an account that reaches only that part, or have each person connect their own. Choose a team if not everyone should have this."
+msgstr "Everyone in the company will be able to use {label} in their own chats, with everything it reaches, whatever their own permissions there, change things through it once they confirm each change, be given Apps that use it, and find in the Brain what came from it, including what was kept before. To open only part of it, connect an account that reaches only that part, or have each person connect their own. Choose a team if not everyone should have this."
 
 #: src/connections/sync-places.tsx
 msgid "Everyone in the team {team} will be able to read everything in the places you pick, whatever their permissions in {label}."
 msgstr "Everyone in the team {team} will be able to read everything in the places you pick, whatever their permissions in {label}."
 
-#: src/connections/brain-audience.tsx
-msgid "Everyone in this team will be able to find what agents read through {label} and what is copied from it, including what was kept before, whatever their permissions in {label}. Their assistants will also read {label} directly, in their own chats."
-msgstr "Everyone in this team will be able to find what agents read through {label} and what is copied from it, including what was kept before, whatever their permissions in {label}. Their assistants will also read {label} directly, in their own chats."
-
 #: src/connections/sync-places.tsx
 msgid "Everyone in this team will be able to read everything in the places you pick, whatever their permissions in {label}."
 msgstr "Everyone in this team will be able to read everything in the places you pick, whatever their permissions in {label}."
+
+#: src/connections/connection-audience.tsx
+msgid "Everyone in this team will be able to use {label} in their own chats, with everything it reaches, whatever their own permissions there, change things through it once they confirm each change, be given Apps that use it, and find in the Brain what came from it, including what was kept before. To open only part of it, connect an account that reaches only that part, or have each person connect their own."
+msgstr "Everyone in this team will be able to use {label} in their own chats, with everything it reaches, whatever their own permissions there, change things through it once they confirm each change, be given Apps that use it, and find in the Brain what came from it, including what was kept before. To open only part of it, connect an account that reaches only that part, or have each person connect their own."
 
 #: src/drafts/share-with-team.tsx
 msgid "Everyone it is shared with can open it once it is published."
@@ -7152,9 +7161,9 @@ msgstr "Everything I read and every conversation I have runs on an AI model. Use
 msgid "Everything I read and every conversation I have runs on an AI model. Yours is Grasp’s AI, and it is ready."
 msgstr "Everything I read and every conversation I have runs on an AI model. Yours is Grasp’s AI, and it is ready."
 
-#: src/connections/brain-audience.tsx
-msgid "Everything the Brain kept from it is erased for good, and nobody reads it from now on. This can't be undone. To keep anything from it again, choose who may read it once the erasure is done."
-msgstr "Everything the Brain kept from it is erased for good, and nobody reads it from now on. This can't be undone. To keep anything from it again, choose who may read it once the erasure is done."
+#: src/connections/connection-audience.tsx
+msgid "Everything the Brain kept from it is erased for good, and nobody may use it from now on. This can't be undone. To open it again, choose who may use it once the erasure is done."
+msgstr "Everything the Brain kept from it is erased for good, and nobody may use it from now on. This can't be undone. To open it again, choose who may use it once the erasure is done."
 
 #: src/connections/connection-list.tsx
 msgid "Everything the Brain kept from it is erased for good."
@@ -7638,11 +7647,6 @@ msgstr "For each one left, draft a short, friendly reminder in the client's own 
 msgid "For each one, draft a short follow-up that picks up where the last message ended."
 msgstr "For each one, draft a short follow-up that picks up where the last message ended."
 
-#: src/connections/connect-dialog.tsx
-#: src/connections/connected-dialog.tsx
-msgid "For everyone"
-msgstr "For everyone"
-
 #: src/brain/skills-page.tsx
 msgid "For everyone in the company"
 msgstr "For everyone in the company"
@@ -7670,6 +7674,11 @@ msgstr "For schedules and the times Grasp shows"
 #: src/agents/agent-apps-card.tsx
 msgid "For the agent {agentName}."
 msgstr "For the agent {agentName}."
+
+#: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
+msgid "For the company"
+msgstr "For the company"
 
 #: src/brain/skills-page.tsx
 msgid "For the team {team}"
@@ -8179,6 +8188,10 @@ msgstr "Grasp may read and write in {app}, only for what you allow."
 #: src/connections/connected-dialog.tsx
 msgid "Grasp may use {app} only through the tools you allowed."
 msgstr "Grasp may use {app} only through the tools you allowed."
+
+#: src/connections/connector-tools.tsx
+msgid "Grasp never runs it"
+msgstr "Grasp never runs it"
 
 #: src/connections/connected-dialog.tsx
 msgid "Grasp reaches it at {address}, inside your network."
@@ -9536,6 +9549,10 @@ msgstr "Its tables may say who sees and changes which rows."
 msgid "Its tokens are deleted, every App and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
 msgstr "Its tokens are deleted, every App and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
 
+#: src/connections/connector-tools.tsx
+msgid "Its tools show here once someone connects it."
+msgstr "Its tools show here once someone connects it."
+
 #: src/workflows/trigger-block.ts
 msgid "Its trigger can't start it"
 msgstr "Its trigger can't start it"
@@ -9632,10 +9649,6 @@ msgstr "Keep every client question in one place, and remind us when one waits to
 msgid "Keep it"
 msgstr "Keep it"
 
-#: src/connections/brain-audience.tsx
-msgid "Keep it for them"
-msgstr "Keep it for them"
-
 #: src/workflows/stop-run.tsx
 #: src/workflows/workflow-status.tsx
 msgid "Keep it running"
@@ -9668,14 +9681,6 @@ msgstr "Keep track of the month-end close: who does what, and remind people when
 #: src/make/examples.ts
 msgid "Keep track of the yearly compliance checks: who does each one, by when, and proof that it was done."
 msgstr "Keep track of the yearly compliance checks: who does each one, by when, and proof that it was done."
-
-#: src/connections/brain-audience.tsx
-msgid "Keep what agents read through {label} in the Brain?"
-msgstr "Keep what agents read through {label} in the Brain?"
-
-#: src/connections/brain-audience.tsx
-msgid "Keep what agents read through it for"
-msgstr "Keep what agents read through it for"
 
 #: src/inbox/report-view.tsx
 msgid "Keeps failing"
@@ -9975,6 +9980,10 @@ msgstr "Let an erased member's old address in again"
 msgid "Let go to add them"
 msgstr "Let go to add them"
 
+#: src/connections/connector-tools.tsx
+msgid "Let Grasp use {name}"
+msgstr "Let Grasp use {name}"
+
 #: src/onboarding/review-parts.tsx
 msgid "Let Grasp’s mail through"
 msgstr "Let Grasp’s mail through"
@@ -10006,6 +10015,10 @@ msgstr "Let the directory decide"
 #: src/settings/directory-placement.tsx
 msgid "Let the directory decide whether {who} is in {team}"
 msgstr "Let the directory decide whether {who} is in {team}"
+
+#: src/connections/connection-audience.tsx
+msgid "Let them use {label}?"
+msgstr "Let them use {label}?"
 
 #: src/activity/audit-words.ts
 msgid "Let webhook events no run waited for expire"
@@ -11640,8 +11653,8 @@ msgid "No: it was changed, or doesn't link to the event before it."
 msgstr "No: it was changed, or doesn't link to the event before it."
 
 #: src/apps/access-view.tsx
-#: src/connections/brain-audience.tsx
 #: src/connections/chat-reads.tsx
+#: src/connections/connection-audience.tsx
 msgid "Nobody"
 msgstr "Nobody"
 
@@ -11657,7 +11670,7 @@ msgstr "Nobody asked him anything yet."
 msgid "Nobody can find or read it from then on, you included, and it can't be brought back. The Brain keeps its history until an admin erases it."
 msgstr "Nobody can find or read it from then on, you included, and it can't be brought back. The Brain keeps its history until an admin erases it."
 
-#: src/connections/brain-audience.tsx
+#: src/connections/connection-audience.tsx
 msgid "Nobody can find what the Brain kept from {label} until someone signs in again. None of it is erased."
 msgstr "Nobody can find what the Brain kept from {label} until someone signs in again. None of it is erased."
 
@@ -11704,6 +11717,11 @@ msgstr "Nobody outside it can ask it anything, in Grasp or a chat app."
 #: src/apps/access-view.tsx
 msgid "Nobody sees the records in {table}, Sam included."
 msgstr "Nobody sees the records in {table}, Sam included."
+
+#: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
+msgid "Nobody uses it in chat until you choose who may, and Apps and workflows only through the permissions you grant."
+msgstr "Nobody uses it in chat until you choose who may, and Apps and workflows only through the permissions you grant."
 
 #: src/people/person-picker.tsx
 msgid "Nobody with that name."
@@ -11923,6 +11941,10 @@ msgstr "Not invited: {notInvited}. {sent, plural, one {The other invitation went
 #: src/brain/brain-source-contents.tsx
 msgid "Not listed"
 msgstr "Not listed"
+
+#: src/connections/connector-tools.tsx
+msgid "Not listed now"
+msgstr "Not listed now"
 
 #: src/drafts/share-with-team.tsx
 msgid "Not live"
@@ -12847,6 +12869,10 @@ msgstr "Open in a new tab"
 msgid "Open invoices in the accounting system, with their due dates."
 msgstr "Open invoices in the accounting system, with their due dates."
 
+#: src/connections/connection-audience.tsx
+msgid "Open it to them"
+msgstr "Open it to them"
+
 #: src/workflows/run-page.tsx
 msgid "Open its steps"
 msgstr "Open its steps"
@@ -12895,6 +12921,10 @@ msgstr "Open the run"
 #: src/interview/page.tsx
 msgid "Open this link again whenever you like, and carry on where you stopped."
 msgstr "Open this link again whenever you like, and carry on where you stopped."
+
+#: src/connections/connection-audience.tsx
+msgid "Open to"
+msgstr "Open to"
 
 #: src/settings/staff-access.tsx
 msgid "Open until"
@@ -13436,6 +13466,10 @@ msgstr "People outside your organization, invited to what is shared with them. T
 msgid "People respond better when they know why I’m reaching out. I’ve drafted a message you can send yourself. Then pick the day the interviews start."
 msgstr "People respond better when they know why I’m reaching out. I’ve drafted a message you can send yourself. Then pick the day the interviews start."
 
+#: src/connections/connector-tools.tsx
+msgid "People sign in at {host}."
+msgstr "People sign in at {host}."
+
 #: src/connections/add-connector.tsx
 msgid "People sign in at the server"
 msgstr "People sign in at the server"
@@ -13941,6 +13975,10 @@ msgstr "Reached through your company network"
 msgid "Reached through your company network at {address}."
 msgstr "Reached through your company network at {address}."
 
+#: src/connections/connector-tools.tsx
+msgid "Reaches other people"
+msgstr "Reaches other people"
+
 #: src/activity/type-labels.ts
 msgid "Read"
 msgstr "Read"
@@ -14155,6 +14193,7 @@ msgid "Reading your staff list"
 msgstr "Reading your staff list"
 
 #: src/connections/app/words.ts
+#: src/connections/connector-tools.tsx
 msgid "Reads"
 msgstr "Reads"
 
@@ -17142,8 +17181,8 @@ msgstr "Team"
 
 #: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
-#: src/connections/brain-audience.tsx
 #: src/connections/chat-reads.tsx
+#: src/connections/connection-audience.tsx
 msgid "Team {name}"
 msgstr "Team {name}"
 
@@ -17444,10 +17483,6 @@ msgstr "The address of its MCP server, as its vendor gives it."
 msgid "The admin who connects it types its key, which goes in this header."
 msgstr "The admin who connects it types its key, which goes in this header."
 
-#: src/chat/connection-requests.tsx
-msgid "The agent asked an admin for {name}"
-msgstr "The agent asked an admin for {name}"
-
 #: src/chat/package-requests.tsx
 msgid "The agent asks for npm packages for {subject}"
 msgstr "The agent asks for npm packages for {subject}"
@@ -17577,10 +17612,6 @@ msgstr "The best part of its passage"
 #: src/brain/brain-atlas.ts
 msgid "The board"
 msgstr "The board"
-
-#: src/connections/brain-audience.tsx
-msgid "The Brain"
-msgstr "The Brain"
 
 #: src/routes/_shell.settings.brain.tsx
 msgid "The brain has no teams to group yet."
@@ -18829,6 +18860,10 @@ msgstr "Tools allowed: {tools}"
 msgid "Tools allowed: none recorded"
 msgstr "Tools allowed: none recorded"
 
+#: src/connections/connector-tools.tsx
+msgid "Tools its server lists"
+msgstr "Tools its server lists"
+
 #: src/connections/connect-dialog.tsx
 msgid "Tools to allow"
 msgstr "Tools to allow"
@@ -18930,6 +18965,10 @@ msgstr "Trying again…"
 #: src/agents/agent-templates.ts
 msgid "Turn a full inbox into a short list of what needs a person today."
 msgstr "Turn a full inbox into a short list of what needs a person today."
+
+#: src/connections/connector-tools.tsx
+msgid "Turn a tool off to block it: Grasp offers it to nobody and refuses every call to it."
+msgstr "Turn a tool off to block it: Grasp offers it to nobody and refuses every call to it."
 
 #: src/workflows/workflow-triggers.tsx
 msgctxt "turn a trigger off"
@@ -20111,9 +20150,9 @@ msgstr "What the Brain keeps that only they may read"
 msgid "What the brain kept"
 msgstr "What the brain kept"
 
-#: src/connections/brain-audience.tsx
-msgid "What the Brain kept from {label} is being erased. You can choose who may read it again once that is done."
-msgstr "What the Brain kept from {label} is being erased. You can choose who may read it again once that is done."
+#: src/connections/connection-audience.tsx
+msgid "What the Brain kept from {label} is being erased. You can choose who may use it again once that is done."
+msgstr "What the Brain kept from {label} is being erased. You can choose who may use it again once that is done."
 
 #: src/settings/erasures.tsx
 msgid "What the Brain learned about them under the address they signed in with, and what they said, where others may read it"
@@ -20489,6 +20528,10 @@ msgstr "Who answers for the App: who is asked about it and decides what changes.
 msgid "Who approves a new tool"
 msgstr "Who approves a new tool"
 
+#: src/connections/connection-audience.tsx
+msgid "Who Apps that use {label}, with its credential, may be shared with is decided inside Grasp: choose a team if not everyone should have it. An App's owner and admins can still open Apps that use it, whatever you choose."
+msgstr "Who Apps that use {label}, with its credential, may be shared with is decided inside Grasp: choose a team if not everyone should have it. An App's owner and admins can still open Apps that use it, whatever you choose."
+
 #: src/brain/brain.ts
 msgid "Who can answer"
 msgstr "Who can answer"
@@ -20556,13 +20599,13 @@ msgctxt "a memory shared with others"
 msgid "Who may read it"
 msgstr "Who may read it"
 
-#: src/connections/brain-audience.tsx
-msgid "Who may read it, in the Brain and through their assistant in their own chat, is decided inside Grasp, not by the permissions in {label}: choose a team if not everyone should have it."
-msgstr "Who may read it, in the Brain and through their assistant in their own chat, is decided inside Grasp, not by the permissions in {label}: choose a team if not everyone should have it."
+#: src/connections/connection-audience.tsx
+msgid "Who may use {label} in their own chats, be given Apps that use it, and find in the Brain what came from it is decided inside Grasp, not by the permissions in {label}: choose a team if not everyone should have it. Their chats reach everything {label} reaches: to open only part of it, connect an account that reaches only that part, or have each person connect their own. An App's owner and admins can still open Apps that use it, whatever you choose."
+msgstr "Who may use {label} in their own chats, be given Apps that use it, and find in the Brain what came from it is decided inside Grasp, not by the permissions in {label}: choose a team if not everyone should have it. Their chats reach everything {label} reaches: to open only part of it, connect an account that reaches only that part, or have each person connect their own. An App's owner and admins can still open Apps that use it, whatever you choose."
 
-#: src/connections/brain-audience.tsx
-msgid "Who may read what agents read through {label} was changed in the meantime. This is who may read it now: choose again if you still want to change it."
-msgstr "Who may read what agents read through {label} was changed in the meantime. This is who may read it now: choose again if you still want to change it."
+#: src/connections/connection-audience.tsx
+msgid "Who may use {label} was changed in the meantime. This is who may use it now: choose again if you still want to change it."
+msgstr "Who may use {label} was changed in the meantime. This is who may use it now: choose again if you still want to change it."
 
 #: src/agents/agent-page.tsx
 msgid "Who may use {name}"
@@ -20571,6 +20614,10 @@ msgstr "Who may use {name}"
 #: src/agents/agent-page.tsx
 msgid "Who may use it"
 msgstr "Who may use it"
+
+#: src/connections/connection-audience.tsx
+msgid "Who may use this connection"
+msgstr "Who may use this connection"
 
 #: src/settings/stephen-settings.tsx
 msgid "Who reaches him here"
@@ -20607,8 +20654,8 @@ msgid "whoever added the row"
 msgstr "whoever added the row"
 
 #: src/connections/sync-places.tsx
-msgid "Whoever you let read {label} in the Brain will be able to read everything in the places you pick, whatever their permissions in {label}."
-msgstr "Whoever you let read {label} in the Brain will be able to read everything in the places you pick, whatever their permissions in {label}."
+msgid "Whoever you let use {label} will be able to read everything in the places you pick, whatever their permissions in {label}."
+msgstr "Whoever you let use {label} will be able to read everything in the places you pick, whatever their permissions in {label}."
 
 #: src/connections/chat-reads.tsx
 msgid "Whose chats read in it"
@@ -20664,14 +20711,6 @@ msgstr "With the chosen {many}"
 #: src/chat/package-requests.tsx
 msgid "With what they bring"
 msgstr "With what they bring"
-
-#: src/chat/connection-requests.tsx
-msgid "Withdraw"
-msgstr "Withdraw"
-
-#: src/chat/connection-requests.tsx
-msgid "Withdraw {name}"
-msgstr "Withdraw {name}"
 
 #: src/interview/closed.tsx
 msgid "Withdraw instead"
@@ -21321,11 +21360,6 @@ msgstr "Your instructions"
 #: src/chat/failure.ts
 msgid "Your organization doesn't allow this model. Pick another one."
 msgstr "Your organization doesn't allow this model. Pick another one."
-
-#: src/connections/connect-dialog.tsx
-#: src/connections/connected-dialog.tsx
-msgid "Your organization uses it through the permissions you grant."
-msgstr "Your organization uses it through the permissions you grant."
 
 #: src/settings/sign-in-settings.tsx
 msgid "your organization’s work accounts"

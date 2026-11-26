@@ -83,13 +83,14 @@ export const nativeMailConnection = async (): Promise<{ id: string }> => {
 };
 
 /**
- * A shared connection to a connector made from an MCP server's URL, in
- * connect's registry, whose server listed `tools` (each with its
- * description and input) a moment ago, so connect reads its kept list,
- * which the chat's agent may use (`agentMayUse`).
+ * A connection to a connector made from an MCP server's URL, in connect's
+ * registry, shared unless `owner` is given, whose server listed `tools`
+ * (each with its description and input) a moment ago, so connect reads
+ * its kept list, which the chat's agent may use (`agentMayUse`).
  */
 export const connectorConnection = async (
-  tools: readonly { name: string; description: string; inputSchema: unknown }[]
+  tools: readonly { name: string; description: string; inputSchema: unknown }[],
+  owner?: string
 ): Promise<{ id: string }> => {
   const id = `connection-${crypto.randomUUID()}`;
   const now = Date.now();
@@ -97,9 +98,18 @@ export const connectorConnection = async (
   await connectDb().batch([
     connectDb()
       .prepare(
-        "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tool_list_read_at, tool_list_fresh_until, created_at, updated_at) VALUES (?, ?, 'shared', NULL, 'active', 'connector', 'https://mcp.tracker.test/mcp', ?, ?, ?, ?)"
+        "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tool_list_read_at, tool_list_fresh_until, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', 'connector', 'https://mcp.tracker.test/mcp', ?, ?, ?, ?)"
       )
-      .bind(id, `connector-${crypto.randomUUID()}`, now, now + hour, now, now),
+      .bind(
+        id,
+        `connector-${crypto.randomUUID()}`,
+        owner === undefined ? "shared" : "personal",
+        owner ?? null,
+        now,
+        now + hour,
+        now,
+        now
+      ),
     ...tools.map(({ name, description, inputSchema }) =>
       connectDb()
         .prepare(
@@ -117,7 +127,9 @@ export const connectorConnection = async (
  * given, as a Composio toolkit's,
  * allowing `tools`, to a mail server of its own that answers its next
  * calls as `plan` says (then sends mail), and tells what it did. The
- * chat's agent may use it (`agentMayUse`).
+ * chat's agent may use it (`agentMayUse`). A shared one is for nobody,
+ * as one no admin chose an audience for (connection-audiences.ts), unless
+ * `audience` is everyone in the company.
  */
 export const mailConnection = async (
   plan: MailAnswer[] = [],
@@ -125,11 +137,14 @@ export const mailConnection = async (
   {
     provider = "mail",
     owner,
+    audience = "nobody",
   }: {
     /** The toolkit it is of, as connect's review classes it. */
     provider?: string;
     /** The person whose own connection it is: none for a shared one. */
     owner?: string;
+    /** A shared one's audience: nobody until a test chooses, or everyone. */
+    audience?: "everyone" | "nobody";
   } = {}
 ) => {
   const name = `mail-${crypto.randomUUID()}`;
@@ -151,6 +166,13 @@ export const mailConnection = async (
     )
     .run();
   await agentMayUse(id);
+  if (owner === undefined && audience === "everyone") {
+    await env.DB.prepare(
+      "INSERT INTO connection_brain_audiences (connection_id, team_id, changed_by, changed_at) VALUES (?, NULL, 'test-admin', ?)"
+    )
+      .bind(id, now)
+      .run();
+  }
   await providers().fetch(mailControlUrl(name), {
     method: "POST",
     body: JSON.stringify({ plan }),

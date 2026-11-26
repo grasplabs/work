@@ -238,7 +238,7 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
       await admin.api.connections.eraseBrainReads(connectionId);
       await erasuresEnded();
     });
-    const audiences = await admin.api.connections.brainAudiences();
+    const audiences = await admin.api.connections.audiences();
     const after = {
       found: await finds(member, marker),
       keys: await Promise.all(sources.map(keyState)),
@@ -408,7 +408,7 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
     const before = await finds(member, marker);
     await admin.api.connections.disconnect(connectionId);
     // Before connect's record of it is drained.
-    const audiences = await admin.api.connections.brainAudiences();
+    const audiences = await admin.api.connections.audiences();
 
     expect({
       before,
@@ -449,7 +449,7 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
         { kind: "everyone" }
       )
     );
-    const audiences = await admin.api.connections.brainAudiences();
+    const audiences = await admin.api.connections.audiences();
 
     expect({
       opened,
@@ -686,7 +686,7 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
         { kind: "team", teamId: team }
       )
     );
-    const audiences = await admin.api.connections.brainAudiences();
+    const audiences = await admin.api.connections.audiences();
 
     expect({
       opened,
@@ -749,7 +749,7 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
         { kind: "everyone" }
       )
     );
-    const audiences = await admin.api.connections.brainAudiences();
+    const audiences = await admin.api.connections.audiences();
 
     expect({
       opened,
@@ -911,7 +911,7 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
     const { admin, connectionId } = await sharedWithTeam();
     await kept(connectionId, "deal", "Deal");
     const listedFor = async () => {
-      const audiences = await admin.api.connections.brainAudiences();
+      const audiences = await admin.api.connections.audiences();
       return audiences.filter((each) => each.connectionId === connectionId);
     };
     await admin.api.connections.eraseBrainReads(connectionId);

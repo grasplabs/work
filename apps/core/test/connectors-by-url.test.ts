@@ -1,5 +1,6 @@
 import { readRelayRequest } from "@grasp-os/shared/oauth-relay";
 import type { WaitingFeed } from "@grasp-os/shared/waiting";
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { linearMcpUrl } from "../../connect/test/linear-mcp-fake.ts";
@@ -27,7 +28,7 @@ import { connectDb, testBinding } from "./test-env.ts";
 // which the tests start from: a member adds a server; a hidden connector
 // is still connected; its sign-in leaves for the relay or another origin;
 // a connection whose access ran out shows nowhere, or can't be signed in
-// to again.
+// to again; a member reads its tools or blocks one (GRA-2347).
 
 const idp = mockIdp();
 
@@ -123,11 +124,63 @@ describe("a connector made from a URL", slow, () => {
       group: "Other",
       auth: "managed",
       offered: true,
+      signInHost: "mcp.linear.app",
     });
     // Its server lists its tools only to a connection.
     await expect(
       member.api.connections.catalogTools("connector", id)
     ).resolves.toStrictEqual([]);
+  });
+
+  it("shows an admin its tools as its connections list them, each to block and let through again, never a member", async () => {
+    const id = await linear();
+    const admin = await signedInApi(idp, "admin");
+    const connectionId = await connect(admin, id, "shared");
+    // Its list read, as a chat's agent reads it before it offers it.
+    await env.CONNECT.connectorToolClasses(connectionId);
+    const member = await signedInApi(idp, "user");
+    const toolOf = async (name: string) => {
+      const tools = await admin.api.connections.connectorTools(id);
+      return tools.find((tool) => tool.name === name);
+    };
+
+    const listed = await toolOf("share_issue");
+    await admin.api.connections.blockConnectorTool({
+      connector: id,
+      tool: "share_issue",
+      blocked: true,
+    });
+    const blocked = await toolOf("share_issue");
+    await admin.api.connections.blockConnectorTool({
+      connector: id,
+      tool: "share_issue",
+      blocked: false,
+    });
+    const letThrough = await toolOf("share_issue");
+    const refused = {
+      read: await outcome(member.api.connections.connectorTools(id)),
+      block: await outcome(
+        member.api.connections.blockConnectorTool({
+          connector: id,
+          tool: "share_issue",
+          blocked: true,
+        })
+      ),
+    };
+
+    expect({
+      listed: listed?.blocked,
+      blocked: blocked?.blocked,
+      letThrough: letThrough?.blocked,
+      described: typeof listed?.description,
+      refused,
+    }).toStrictEqual({
+      listed: false,
+      blocked: true,
+      letThrough: false,
+      described: "string",
+      refused: { read: "role.forbidden", block: "role.forbidden" },
+    });
   });
 
   it("is connected by signing in at its server, which returns to this origin itself, never the relay", async () => {

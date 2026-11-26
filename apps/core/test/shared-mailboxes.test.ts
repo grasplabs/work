@@ -10,6 +10,7 @@ import {
   withoutMarking,
 } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
+import { chooseAudience } from "./brain-audiences.ts";
 import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { acmeTenant } from "./sign-in-config.ts";
@@ -40,6 +41,13 @@ type Admin = Awaited<ReturnType<typeof signedInApi>>;
 
 const notPointed = connectErrors.create("connect.mailbox_not_pointed").message;
 
+/**
+ * A grant that holds the classes on by default, and a shared mailbox's
+ * rights to read it, as an admin's consent once one is pointed at gives.
+ */
+const sharedGrant =
+  "openid profile email offline_access User.Read MailboxSettings.Read Mail.ReadWrite Mail.ReadWrite.Shared Calendars.ReadWrite Calendars.Read.Shared Files.ReadWrite.All Files.Read.All Sites.Read.All Tasks.ReadWrite Tasks.Read Notes.ReadWrite";
+
 /** A shared Microsoft 365 mailbox, as an admin connects it. */
 const connectShared = async (admin: Admin) => {
   const subject = `team-${crypto.randomUUID()}`;
@@ -49,7 +57,7 @@ const connectShared = async (admin: Admin) => {
   });
   const authorization = new URL(url);
   const query = new URLSearchParams({
-    code: consentCode(authorization, acmeTenant, subject),
+    code: consentCode(authorization, acmeTenant, subject, sharedGrant),
     state: authorization.searchParams.get("state") ?? "",
   });
   await routed(`/api/connections/callback?${query.toString()}`, {
@@ -61,6 +69,9 @@ const connectShared = async (admin: Admin) => {
   if (connection === undefined) {
     throw new Error("Expected the shared connection");
   }
+  // Opened to everyone in the company, as the chat uses no shared one
+  // before an admin chooses who may (connection-audiences.ts).
+  await chooseAudience(admin.api, connection.id, { kind: "everyone" });
   return { id: connection.id, mailbox };
 };
 

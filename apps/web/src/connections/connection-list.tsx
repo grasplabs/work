@@ -46,9 +46,12 @@ import { holderName } from "../activity/pending.tsx";
 import { formatList } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { FactRow, RowAlert, SettingsRows } from "./app/rows.tsx";
-import { BrainAudience, useBrainAudiences } from "./brain-audience.tsx";
 import { ChatReads } from "./chat-reads.tsx";
 import { canReconnect, ConnectDialog } from "./connect-dialog.tsx";
+import {
+  AudienceChoice,
+  useConnectionAudiences,
+} from "./connection-audience.tsx";
 import { connectionLabel } from "./integrations.ts";
 import type { Integration } from "./integrations.ts";
 import { SectionCard } from "./section-card.tsx";
@@ -58,8 +61,7 @@ import { useChange } from "./use-change.ts";
 // app/page.tsx, lists the accounts): signing in again and disconnecting from the
 // row, and under the page's sections what each connection holds besides:
 // why one whose access ran out can't be signed in to again, the consent a
-// Composio one was made with, who may read in the Brain what agents read
-// through a shared one, and which Apps and agents hold a permission for it.
+// Composio one was made with, who may use a shared one (its audience), and which Apps and agents hold a permission for it.
 // Connect and core check every reconnect, disconnect and revoke; the page
 // leaves out only what the role can't do.
 
@@ -415,12 +417,12 @@ export const DisconnectDialog = ({
 );
 
 /**
- * Whether `identity` chooses who may read in the Brain what agents read
- * through `connection` (brain-audience.tsx): one of the company's own
+ * Whether `identity` chooses who may use `connection`
+ * (connection-audience.tsx): one of the company's own
  * admins, never Grasp staff, on a shared connection still connected.
  * Core checks it again.
  */
-const choosesBrainAudience = (
+const choosesAudience = (
   connection: ListedConnection,
   identity: Identity
 ): boolean =>
@@ -570,8 +572,7 @@ export const AccountActions = ({
  * What each of an app's connections holds beyond its row on the app's
  * page: why one whose access ran out can't be signed in to again by this
  * person; the consent a Composio one was made with; for the company's
- * admins on a shared one, who may read in the Brain what agents read
- * through it; and, for admins and builders, the Apps and agents holding a
+ * admins on a shared one, who may use it (its audience); and, for admins and builders, the Apps and agents holding a
  * permission for it. A card for each connection with any of these, named
  * by its account where there are several; nothing for the rest.
  */
@@ -587,9 +588,9 @@ export const ConnectionsAccess = ({
 }) => {
   const { t } = useLingui();
   // Read once for every card that chooses one, never a read a card.
-  const { read: audiences, onChanged } = useBrainAudiences(
+  const { read: audiences, onChanged } = useConnectionAudiences(
     integration.connections.some((connection) =>
-      choosesBrainAudience(connection, identity)
+      choosesAudience(connection, identity)
     )
   );
   const holders = held?.state === "ready" ? held.data : undefined;
@@ -600,7 +601,7 @@ export const ConnectionsAccess = ({
       connection.status === "needs_reauth" &&
       !canReconnect(connection, integration.offered, identity);
     const consented = connection.source === "composio";
-    const chooses = choosesBrainAudience(connection, identity);
+    const chooses = choosesAudience(connection, identity);
     // A connector's shared connection: an admin chooses for whom chats read in it.
     const points = chooses && connection.source === "connector";
     const holding =
@@ -632,7 +633,7 @@ export const ConnectionsAccess = ({
           </SettingsRows>
         ) : null}
         {chooses ? (
-          <BrainAudience
+          <AudienceChoice
             audiences={audiences}
             connection={connection}
             label={label}

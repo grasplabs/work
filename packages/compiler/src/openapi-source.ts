@@ -172,12 +172,17 @@ const handlerOf = (operation: SpecOperation, indent: string): string => {
   return `async (${takes}, api) => await ${call}`;
 };
 
-const toolOf = (operation: SpecOperation, reach: ToolReach): string => {
+const toolOf = (
+  operation: SpecOperation,
+  reach: ToolReach,
+  base: string
+): string => {
   const indent = "    ";
   const declared = ruledDeclaration(
     operation.name,
     jsonSchemaOf(operation.args),
-    { readOnly: operation.readOnly, reach }
+    { readOnly: operation.readOnly, reach },
+    [`${base}${operation.path}`]
   );
   const name = json(operation.name);
   let returns = `answers[${name}]`;
@@ -293,7 +298,7 @@ export const sourceOf = (
     "};",
     "",
     "export const tools = {",
-    ...spec.operations.map((operation) => toolOf(operation, reach)),
+    ...spec.operations.map((operation) => toolOf(operation, reach, spec.base)),
     "};",
     "",
   ].join("\n");

@@ -45,10 +45,11 @@ export interface Account {
   /** Google only: send-as addresses Google hasn't verified. */
   unverified?: string[];
   /**
-   * The scopes the token answer says it granted (its `scope`); left out
-   * of the answer unless set.
+   * The scopes the token answer says it granted (its `scope`): what the
+   * consent asked for unless set, as Entra and Google list them; null for
+   * an answer that says nothing of them.
    */
-  granted?: string;
+  granted?: string | null;
 }
 
 /** One request connect sent to a provider. */
@@ -180,7 +181,9 @@ export const fakeProviders = () => {
       refresh_token: refreshToken,
       expires_in: 3600,
       id_token: idTokenFor(account),
-      scope: account.granted,
+      ...(typeof account.granted === "string"
+        ? { scope: account.granted }
+        : {}),
     });
   };
 
@@ -358,7 +361,13 @@ export const fakeProviders = () => {
       const code = `code-${crypto.randomUUID()}`;
       state.codes.set(code, {
         challenge: url.searchParams.get("code_challenge") ?? "",
-        account,
+        account: {
+          ...account,
+          granted:
+            account.granted === undefined
+              ? url.searchParams.get("scope")
+              : account.granted,
+        },
       });
       return code;
     },

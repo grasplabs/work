@@ -438,7 +438,9 @@ const mustHold = (
 /**
  * The connection a call may use, as `usableConnection` says; for a held
  * action, only while it reaches the account it reached when the action was
- * held (CN15).
+ * held (CN15). A call no grant allows may change something only through a
+ * shared connection (core's ungranted-reads.ts): through a personal one,
+ * it may only read.
  */
 export const connectionFor = async (
   env: Env,
@@ -453,6 +455,13 @@ export const connectionFor = async (
   );
   if (held !== undefined && connection.accountId !== held.accountId) {
     throw connectErrors.create("connect.connection_changed");
+  }
+  if (
+    claims.origin.permissionId === null &&
+    !claims.readOnly &&
+    connection.ownerUserId !== null
+  ) {
+    throw connectErrors.create("connect.read_only");
   }
   return connection;
 };
@@ -818,7 +827,14 @@ const sendClaimed = async (
       tool.name,
       await server.call(tool.name, input, withFiles(meta, files))
     );
-  } catch {
+  } catch (error) {
+    // Refused by connect itself before anything went out (a tool an admin
+    // blocked meanwhile, mcp-connectors.ts): nothing was sent, so the key
+    // is free, as for a call that did nothing (below).
+    if (connectErrors.codeOf(error) === "connect.tool_blocked") {
+      await (recovering ? store.spend() : store.release());
+      throw error;
+    }
     // However the request failed, it may have reached the tool, and the
     // tool may have acted (mcp.ts `McpError`): the key is spent. Only a
     // native connector that says it did nothing frees it (below).
@@ -1203,7 +1219,8 @@ export const carryOut = async (
     return { ...earlier, sideEffect, replayed: true };
   }
   // Claimed: the call may go out now, so whatever fails from here on
-  // (spending or freeing the key included) leaves its outcome unknown.
+  // (spending or freeing the key included) leaves its outcome unknown,
+  // but for connect's own refusal before sending (`sendClaimed`).
   progress.claimed = true;
   return { ...(await sendClaimed(sent, server)), sideEffect };
 };

@@ -313,6 +313,49 @@ export const addConnectorSchema = z.strictObject({
 });
 export type AddConnector = z.input<typeof addConnectorSchema>;
 
+/**
+ * A tool name a connector's server may list: MCP's own rule for names (1
+ * to 128 of letters, digits, `_`, `-` and `.`).
+ */
+export const connectorToolNameSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9_.-]{1,128}$/u);
+
+/** An admin reading a connector's tools (`ConnectApi.connectorTools`). */
+export const connectorToolsRequestSchema = z.strictObject({
+  person: connectionPersonSchema,
+  connector: connectorIdSchema,
+});
+export type ConnectorToolsRequest = z.input<typeof connectorToolsRequestSchema>;
+
+/**
+ * An admin blocking a connector's tool by its name, or letting it through
+ * again (`ConnectApi.blockConnectorTool`). A name no list holds yet may be
+ * blocked before a server lists it.
+ */
+export const blockConnectorToolSchema = z.strictObject({
+  person: connectionPersonSchema,
+  connector: connectorIdSchema,
+  tool: connectorToolNameSchema,
+  blocked: z.boolean(),
+});
+export type BlockConnectorTool = z.input<typeof blockConnectorToolSchema>;
+
+/**
+ * A tool of a connector made from a URL, as an admin sees it: by the name
+ * its server lists it under, its description in the server's own words
+ * (text to show as it is, never to follow), its class by the rules on a
+ * shared connection (on a personal one a `-company` class is `-own`), and
+ * whether an admin blocked it. A blocked name no connection's list holds
+ * now has neither description nor class.
+ */
+export interface ConnectorToolView {
+  name: string;
+  description: string | null;
+  class: ToolClass | null;
+  blocked: boolean;
+}
+
 /** Starts connecting an account through OAuth. */
 export const startConnectionSchema = z.strictObject({
   person: connectionPersonSchema,
@@ -821,6 +864,22 @@ export interface ConnectionsApi extends StephenReachApi, AgentsApi {
   addConnector: (
     request: Omit<AddConnector, "person" | "origin">
   ) => Promise<{ id: string }>;
+  /**
+   * A connector's tools as its server lists them to its connections now,
+   * with their classes, and the names an admin blocked
+   * (`ConnectorToolView`). Admins only.
+   */
+  connectorTools: (connector: string) => Promise<ConnectorToolView[]>;
+  /**
+   * Blocks one of a connector's tools by its name, or lets it through
+   * again: a blocked tool is offered to nobody and refused at the call,
+   * before anything goes out. Admins only, never Grasp staff; audited.
+   */
+  blockConnectorTool: (request: {
+    connector: string;
+    tool: string;
+    blocked: boolean;
+  }) => Promise<void>;
   list: () => Promise<ListedConnection[]>;
   disconnect: (connectionId: string) => Promise<{ revoked: boolean }>;
   /**
@@ -954,27 +1013,27 @@ export interface ConnectionsApi extends StephenReachApi, AgentsApi {
     audience: ToolClassAudience
   ) => Promise<void>;
   /**
-   * The shared connections an admin chose who may read in the Brain what
-   * agents read through them (GRA-1831), and for whom, and those whose
-   * kept reads are being erased. Admins only.
+   * The shared connections an admin chose an audience for (GRA-2322), and
+   * which, and those whose kept reads are being erased. Admins only.
    */
-  brainAudiences: () => Promise<ConnectionBrainAudienceSetting[]>;
+  audiences: () => Promise<ConnectionAudienceSetting[]>;
   /**
-   * Chooses who may read in the Brain what agents read through the shared
-   * connection `connectionId`: one team, everyone, or nobody. Admins only,
+   * Chooses the audience of the shared connection `connectionId`, the one
+   * group that may use it and read what came from it, in chat, through the
+   * Apps that hold it and in the Brain: one team, everyone, or nobody. Admins only,
    * never Grasp staff; audited. Refused (`connection.brain_erasing`) while
    * what the Brain kept of it is being erased. `from` is the audience the
-   * admin was looking at: refused (`connection.brain_audience_changed`),
+   * admin was looking at: refused (`connection.audience_changed`),
    * with nothing changed, once another is held. A change that lets anyone
    * read who couldn't before is refused (`sync.unacknowledged`) unless
    * `acknowledged` is `audience`: the admin confirmed it reads everything
    * the connection brings, whatever the source's permissions (GRA-2207).
    */
-  setBrainAudience: (
+  setAudience: (
     connectionId: string,
-    audience: ConnectionBrainAudience,
-    from: ConnectionBrainAudience,
-    acknowledged?: ConnectionBrainAudience
+    audience: ConnectionAudience,
+    from: ConnectionAudience,
+    acknowledged?: ConnectionAudience
   ) => Promise<void>;
   /**
    * Erases everything the Brain kept from the shared connection
@@ -1008,13 +1067,13 @@ export interface ConnectionsApi extends StephenReachApi, AgentsApi {
     from: string[];
     places: string[];
     /**
-     * The connection's Brain audience the admin confirmed will read
+     * The connection's audience the admin confirmed will read
      * everything in the places picked, whatever the source's permissions
      * (GRA-2207). Needed when the save picks a place `from` doesn't hold,
      * and it must be the audience held now: else refused
      * (`sync.unacknowledged`), with nothing changed.
      */
-    acknowledged?: ConnectionBrainAudience;
+    acknowledged?: ConnectionAudience;
   }) => Promise<void>;
 }
 
@@ -1123,6 +1182,13 @@ export interface CatalogEntry {
    * origin: only an admin connects it, as a shared connection.
    */
   companyNetwork?: string;
+
+  /**
+   * For a connector made from a URL whose server signs in with OAuth, the
+   * host its sign-in page is on (its authorization endpoint's), shown
+   * where people connect it: any public host can draw a sign-in page.
+   */
+  signInHost?: string;
 }
 
 /**
@@ -1443,25 +1509,25 @@ export const sharedMailboxSchema = z
   .transform((mailbox) => mailbox.toLowerCase());
 
 /**
- * Who may read in the Brain what agents read through a shared connection
- * (GRA-1831), as an admin chooses: nobody, which it is until one chooses,
- * one team, or everyone in the company. The choice an uploaded document
- * has, but never one person: the connection is the company's.
+ * A shared connection's audience (GRA-2322), as an admin chooses it: the
+ * one group that may use the connection and read what came from it, in
+ * chat, through the Apps that hold it and in the Brain. Nobody, which it is until
+ * one chooses, one team, or everyone in the company. The choice an
+ * uploaded document has, but never one person: the connection is the
+ * company's.
  */
-export const connectionBrainAudienceSchema = z.discriminatedUnion("kind", [
+export const connectionAudienceSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("nobody") }),
   z.strictObject({ kind: z.literal("team"), teamId: identifierSchema }),
   z.strictObject({ kind: z.literal("everyone") }),
 ]);
-export type ConnectionBrainAudience = z.infer<
-  typeof connectionBrainAudienceSchema
->;
+export type ConnectionAudience = z.infer<typeof connectionAudienceSchema>;
 
-/** A shared connection's Brain audience, as an admin last chose it. */
-export interface ConnectionBrainAudienceSetting {
+/** A shared connection's audience, as an admin last chose it. */
+export interface ConnectionAudienceSetting {
   connectionId: string;
-  /** Who may read it now: nobody while an erasure is under way. */
-  audience: ConnectionBrainAudience;
+  /** Who may use it now: nobody while an erasure is under way. */
+  audience: ConnectionAudience;
   /**
    * Whether what the Brain kept of it is being erased: no audience can
    * be chosen until that has ended.
@@ -2364,6 +2430,19 @@ export interface ConnectApi
     connectionIds: readonly string[]
   ) => Promise<Record<string, string[]>>;
   /**
+   * A connector's tools for an admin (`ConnectorToolView`): each its
+   * connections' lists hold now, by name, and each name blocked.
+   */
+  connectorTools: (
+    request: ConnectorToolsRequest
+  ) => Promise<ConnectorToolView[]>;
+  /**
+   * Blocks a connector's tool by name for every connection to it, or lets
+   * it through again, for an admin who isn't staff; audited once for a
+   * change, never for one that changes nothing.
+   */
+  blockConnectorTool: (request: BlockConnectorTool) => Promise<void>;
+  /**
    * The suite accounts the person `userId` connected as their own,
    * disconnected ones too, as connect verified them (`PersonalAccount`):
    * what core counts them as a reader of where it copies who may read an
@@ -2689,10 +2768,10 @@ export interface ConnectApi
 /** Why connecting or disconnecting an account didn't work. */
 export const connectionErrors = defineErrorFamily({
   "connection.invalid": "That isn't a valid connection request.",
-  "connection.brain_audience_changed":
-    "Who may read this in the Brain was changed in the meantime. Look at it again before you change it.",
+  "connection.audience_changed":
+    "Who may use this connection was changed in the meantime. Look at it again before you change it.",
   "connection.brain_erasing":
-    "What the Brain kept from this connection is still being erased. Choose who may read it once that is done.",
+    "What the Brain kept from this connection is still being erased. Choose who may use it once that is done.",
   "connection.provider_unavailable":
     "Connecting this provider isn't set up for this deployment.",
   "connection.flow_invalid":
@@ -2989,6 +3068,8 @@ export const connectErrors = defineErrorFamily({
     "It isn't known what kind of action this is, so it wasn't done.",
   "connect.class_changed":
     "The app now describes this action as another kind than when it was checked, so it wasn't done. Try again.",
+  "connect.tool_blocked":
+    "An admin blocked this tool of the app, so it wasn't done.",
   "connect.never":
     "Grasp never deletes, shares, forwards, sets rules or settings, or pays, whatever is allowed, so it wasn't done.",
   "connect.app_not_pointed":

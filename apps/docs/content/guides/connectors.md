@@ -19,7 +19,7 @@ A connector runs in connect, each call of a tool in an isolate of its own, and h
 
 ## A connector
 
-`defineConnector` takes the connector's `name` (lowercase), its vendor's `title` as people read it, every host it may reach (`hosts`, exactly), how a person signs in (`auth`) and its `tools`, by name:
+`defineConnector` takes the connector's `name` (lowercase), its vendor's `title` as people read it, every host it may reach (`hosts`, exactly), how a person signs in (`auth`) and its `tools`, by name. Its connections are its `provider`'s: its `name`, unless it names another, such as a connector `microsoft-365` whose provider is `microsoft`:
 
 ```ts connector.ts
 import { auth, defineConnector, page, tool, v } from "@grasp-os/sdk/connector";
@@ -82,11 +82,12 @@ A tool's name is its family and its action: `items.list`. The tools of one famil
 - `scopes`: the OAuth scopes it needs, among those its connector's `auth` asks for.
 - `handler`: the call, as `(args, api, call)`. It gets the arguments, already checked, and the vendor's API.
 
-`readOnly` and `reach` are checked against the rules that class every tool by its name and arguments, and a connector that claims less than they find isn't built:
+`readOnly` and `reach` are checked against the rules that class every tool by its name, its arguments and its routes' paths, and a connector that claims less than they find isn't built:
 
 - A read-only tool sends only GET and HEAD requests, and its name says no change (`send_message` can't be read-only).
 - A tool whose arguments name people it may reach (`to`, `recipients`, `attendees`, `cc`, `email`, a callback) reaches `others`. So does a write named for delivering (send, notify, reply, publish), one with an argument that sends (`sendNow`, `notifyAttendees`), one that acts on a channel, a user, an assignee, a watcher or a URL, and one that writes in a chat or mail (`chat.createMessage`). A draft reaches nobody until someone sends it, so `mail.createDraft` taking `to` is fine. A write that only sorts mail or messages (`mail.label`) reaches whom the connector declares.
 - A tool named for what Grasp never does (deleting, sharing and permissions, forwarding and mail rules, settings, payments) is refused whatever it declares, and no route is a DELETE.
+- Each route's path is read by the same words, its parameters left out, so a mild name can't hide what a route does. A path that names what Grasp never does refuses the tool ("a route's path names what Grasp never does": `POST /messages/{id}/trash`). A write whose path delivers reaches `others` ("a route's path delivers to people, so it reaches others": `POST /me/sendMail`), but for a draft's own route: `mail.createReplyDraft` may write to `createReply`, never to `reply`. A read-only tool whose path changes or delivers is refused ("it is read-only, but a route's path says it changes or delivers something": `GET /api/chat.postMessage`).
 
 Type every value the vendor gives a shape. A free-form `v.json()` in a connector, such as a vendor's custom fields, carries a comment on the line before it saying why, and the lint refuses one without.
 
@@ -186,10 +187,66 @@ export const boardsSignIn = auth.oauth2({
 
 Both name an `account` lookup: a GET to a URL on one of the connector's hosts, sent with the new token or key, and JSON Pointers into its answer for the account's stable `id` and, if the vendor has them, its `name` and `email`. The email, as the vendor vouches for it, is what lets a person connect their own account. Without it, the vendor's accounts are connected only as shared ones, by an admin.
 
+Grasp's client at the vendor, its ID and secret, is the deployment's, found by the provider's name: a connector never names one.
+
+### A suite's sign-in
+
+A vendor whose accounts belong to a company's own tenant (a directory, a workspace domain) can say what pins the sign-in to it, and more, in the same `auth.oauth2`. Pinning works only for a provider the deployment has a tenant for: today Grasp has one for `microsoft` (the Entra tenant ID) and `google` (the hosted domain), from the deployment's sign-in, and for no other provider. And while connect has its own config for `microsoft` and `google`, that config wins over a connector's declaration: until each suite's connector declares its sign-in and connect's config for it goes, no declared pinned sign-in runs.
+
+- `tenant`: the kind of the organization's tenant at the vendor, `"guid"` or `"domain"`. Connect fills `{tenant}` in the endpoints' paths (never their hosts), in `params`, and in the ID token's issuer and claims with the organization's own tenant, in lower case.
+- `params`: parameters the authorization request adds, such as `prompt`. A record may not set the redirect URI, the state, PKCE, the client, the scopes or the response mode.
+- `idToken`, instead of `account`: the account comes from the OpenID ID token the token endpoint answers with. It must come from one of the `issuer`s, exactly, for Grasp's client; each of `claims` must say what it says there (without case) or be `true`; each of `sameIssuer` must be absent or the issuer itself. `subject` names the claim of the account's stable ID, and `name` and `email` the claims its name and address come from, the first that is there. A pinned sign-in checks its tenant in the issuer or a claim, and asks for `openid`.
+- `rights`: what a consent asks for by the tool classes the company has on: `signIn` always, each class's while it is on, `implied` what a scope takes in besides itself (each scope lists everything it takes in, also through the scopes it takes in, never itself, so there are no cycles), and `sharedMailbox` while a shared mailbox is pointed at (`reach` with Reach others on too). Turning a class on asks the connections whose grant lacks its scopes to connect again. Every scope here is one of `scopes`, and each of `scopes` is asked for by the sign-in, a class or a shared mailbox. The vendor's token answer must list the scopes it granted: an answer that lists none, or isn't a list as RFC 6749 §3.3 writes one, counts as listing nothing: it is refused when connecting, and a renewal's keeps the grant it renews. Without `rights`, a consent asks for every scope.
+- `scopePrefix`: a URL ending in `/` the vendor's token answer may put before a scope, left out when scopes are compared.
+- `renewalRequires`: scopes a renewed token must still hold, or its connection is asked to connect again. With `rights`, only scopes of `signIn`, which every consent asks for.
+- `grant: "account"`: revoking one token revokes the account's whole grant with Grasp's client, so connect never revokes an old token while the same account holds the grant again.
+
+```ts suite.ts
+import { auth } from "@grasp-os/sdk/connector";
+
+export const suiteSignIn = auth.oauth2({
+  authorizeUrl: "https://login.suite.example/{tenant}/oauth2/authorize",
+  tokenUrl: "https://login.suite.example/{tenant}/oauth2/token",
+  revokeUrl: "https://login.suite.example/oauth2/revoke",
+  scopes: {
+    openid: "Sign you in",
+    email: "Read your address",
+    offline_access: "Stay signed in",
+    "Mail.Read": "Read your mail",
+    "Mail.ReadWrite": "Change your mail",
+    "Mail.Send": "Send mail as you",
+  },
+  params: { prompt: "select_account" },
+  tenant: "guid",
+  idToken: {
+    issuer: "https://login.suite.example/{tenant}/v2.0",
+    subject: "oid",
+    name: ["preferred_username"],
+    email: ["email", "preferred_username"],
+    claims: { tid: "{tenant}" },
+    sameIssuer: ["idp"],
+  },
+  rights: {
+    signIn: ["openid", "email", "offline_access"],
+    classes: {
+      "read-own": ["Mail.Read"],
+      "change-own": ["Mail.ReadWrite"],
+      "read-company": [],
+      "change-company": [],
+      "reach-others": ["Mail.Send"],
+      "read-others": [],
+    },
+    implied: { "Mail.ReadWrite": ["Mail.Read"] },
+  },
+  scopePrefix: "https://api.suite.example/",
+  grant: "account",
+});
+```
+
 ## Lists
 
 `page(Item)` is what a list answers, one page at a time: `{ items, next }`, where `next` is where the next page starts, or `null` after the last. `items.list` above takes the next page's start as its `cursor` argument.
 
 ## Events and syncs
 
-A connector can also declare `events` (with `event`: what a workflow could start on, read by polling) and `syncs` (with `sync`: records kept in step with the vendor's, a page at a time from a checkpoint). They are declared and typed only, and their routes are checked against the connector's hosts. Connect doesn't serve them yet.
+A connector can also declare `events` (with `event`: what a workflow could start on, read by polling) and `syncs` (with `sync`: records kept in step with the vendor's, a page at a time from a checkpoint). They are declared and typed only, and their routes are checked against the connector's hosts. A route of theirs may not deliver to people (`GET /api/chat.postMessage`), since they run on their own and it would on every run. Connect doesn't serve them yet.

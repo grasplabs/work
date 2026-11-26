@@ -1,4 +1,7 @@
-import type { ConnectionOwner } from "@grasp-os/shared/connect";
+import type {
+  ConnectionAudience,
+  ConnectionOwner,
+} from "@grasp-os/shared/connect";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { isAdmin } from "@grasp-os/shared/roles";
@@ -8,6 +11,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { storedTeamsOf, unreadableTeam } from "./brain-grant-teams.ts";
+import { audienceOf, audiencesRead } from "./connection-audiences.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import {
   apps as appsTable,
@@ -38,7 +42,10 @@ import { inList } from "./db/d1.ts";
 // App the graph reaches that has no row fails closed, as an unresolved
 // source (`app:<id>`), and so does a graph past the caps below (`app:*`).
 // Who may read each: a personal connection (such as a mailbox) only its
-// owner; a shared connection everyone in the organization, who may all use it.
+// owner; a shared connection its audience (connection-audiences.ts,
+// GRA-2322), as it is now: nobody until an admin chooses, one team, or
+// everyone, the group that alone may use it in chat too. One being erased
+// or closed by a disconnect has none, so nobody.
 // A granted source that doesn't resolve (connect doesn't know the
 // connection) fails closed: nobody reads it but the App's owner and
 // admins, who aren't checked, since what the App read of it can't be
@@ -67,9 +74,15 @@ import { inList } from "./db/d1.ts";
 const sourceId = (type: "connection" | "app" | "brain", id: string): string =>
   `${type}:${id}`;
 
+/** A connection an App may have read, with its audience now if shared. */
+export type SourceConnection = ConnectionOwner & {
+  /** Who may read it, for a shared one; nobody for a personal one. */
+  audience: ConnectionAudience;
+};
+
 /** What an App may have read, as `sourcesOf` finds it. */
 export interface AppSources {
-  connections: ConnectionOwner[];
+  connections: SourceConnection[];
   /**
    * The teams a grant to read the Brain ever named (GRA-1842): what it
    * recalled of each, only that team's members may read.
@@ -546,11 +559,17 @@ export const sourcesOfApps = async (
       [...granted.values()].flatMap(({ connected }) => [...connected])
     ),
   ];
-  const owners =
+  const [owners, audiences] =
     connectionIds.length === 0
-      ? []
-      : await connectionOwnersOf(env, connectionIds);
+      ? [[], []]
+      : await Promise.all([
+          connectionOwnersOf(env, connectionIds),
+          audiencesRead(drizzle(env.DB)),
+        ]);
   const ownerOf = new Map(owners.map((owner) => [owner.id, owner]));
+  const audienceIn = new Map(
+    audiences.map(({ connectionId, teamId }) => [connectionId, teamId])
+  );
   return new Map(
     [...granted].map(([app, { connected, teams }]) => {
       const sources: AppSources = {
@@ -563,7 +582,13 @@ export const sourcesOfApps = async (
         if (owner === undefined) {
           sources.unresolved.push(sourceId("connection", id));
         } else {
-          sources.connections.push(owner);
+          sources.connections.push({
+            ...owner,
+            audience:
+              owner.ownerUserId === null
+                ? audienceOf(audienceIn.get(id))
+                : { kind: "nobody" },
+          });
         }
       }
       return [app, sources];
@@ -820,16 +845,34 @@ export const hasSources = (sources: AppSources): boolean =>
   sources.unresolved.length > 0;
 
 /**
+ * Whether `reader` may read what came from `connection`: their own
+ * personal one, or a shared one whose audience holds them.
+ */
+const readsConnection = (
+  { ownerUserId, audience }: SourceConnection,
+  reader: Reader
+): boolean => {
+  if (ownerUserId !== null) {
+    return ownerUserId === reader.userId;
+  }
+  return (
+    audience.kind === "everyone" ||
+    (audience.kind === "team" && reader.teamIds.includes(audience.teamId))
+  );
+};
+
+/**
  * The sources in `sources` that `reader` can't read, as
  * `connection:<id>` and `brain:<team id>`, and those unresolved; none when
  * they may read all. A team's content in the Brain is its members' alone,
- * admins' too (brain-next.ts reads as a person's teams).
+ * admins' too (brain-next.ts reads as a person's teams); a shared
+ * connection is its audience's alone.
  */
 export const unreadableBy = (sources: AppSources, reader: Reader): string[] => [
-  ...sources.connections.flatMap(({ id, ownerUserId }) =>
-    ownerUserId === null || ownerUserId === reader.userId
+  ...sources.connections.flatMap((connection) =>
+    readsConnection(connection, reader)
       ? []
-      : [sourceId("connection", id)]
+      : [sourceId("connection", connection.id)]
   ),
   ...unreadableTeamsBy(sources.brainTeams, reader),
   ...sources.unresolved,

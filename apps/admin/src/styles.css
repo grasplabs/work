@@ -1,4 +1,16 @@
 @import "@grasp-os/app-kit/styles.css";
+/*
+ * Damsko's styles (packages/ui), for the parts that are Damsko's, beside
+ * the kit's theme until the last page moves: its tokens under its own
+ * names (--damsko-*), its themes (the root's `data-theme`, which the
+ * document sets to Evergreen, as apps/web does) and its fonts, served from
+ * this origin. With no `data-mode` on the root its colours follow the
+ * system, as the admin does (public/theme.js). Not its base.css: Tailwind's
+ * preflight is the reset here.
+ */
+@import "@grasp-os/ui/styles/tokens.css";
+@import "@grasp-os/ui/styles/themes.css";
+@import "@grasp-os/ui/styles/fonts.css";
 /* The theme's sans, bundled so it is served from this origin. */
 @import "@fontsource-variable/geist";
 /* Newsreader, the theme's serif (`font-serif`), for titles and key figures. */
@@ -7,11 +19,3 @@
 @import "@fontsource-variable/jetbrains-mono";
 
 @source "../";
-
-/* The admin's frame (admin/frame.tsx): its sidebar, and the bar above each page. */
-@layer base {
-  [data-slot="sidebar-wrapper"] {
-    --sidebar-width: calc(var(--spacing) * 60);
-    --header-height: calc(var(--spacing) * 12);
-  }
-}

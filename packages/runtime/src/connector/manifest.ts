@@ -11,7 +11,7 @@ import { z } from "zod";
 
 import { httpMethods, isBatchSegment, parameterSegment } from "./protocol.ts";
 import { endpointHost, signInSchema } from "./sign-in.ts";
-import { declarationProblem } from "./tool-rules.ts";
+import { declarationProblem, isDeliveringPath } from "./tool-rules.ts";
 
 // A native connector's manifest: what connect knows of it without running
 // it. Connect's build reads it from the connector's module and ships it
@@ -247,6 +247,13 @@ export const syncManifestSchema = z.strictObject({
     .refine(
       (routes) => routes.every(({ method }) => method === "GET"),
       "A sync only reads: its routes are GETs"
+    )
+    .refine(
+      (routes) => !routes.some(({ path }) => isDeliveringPath(path)),
+      // It runs on its own: one that delivers would on every run. Delivery
+      // only: never or change words would refuse real sync reads (a drive
+      // item's permissions, a changes start token).
+      "A sync runs on its own, so its paths may not deliver to people"
     ),
 });
 export type SyncManifest = z.infer<typeof syncManifestSchema>;
@@ -293,8 +300,8 @@ export const connectorManifestSchema = z
     provider: connectorProviderSchema,
     /**
      * An app's provider record: how a person signs in to it (sign-in.ts).
-     * Required for an app, and never for a suite, whose sign-in connect
-     * handles itself.
+     * Required for an app; a suite's connector may leave it to connect's
+     * own config for the suite, which wins while connect has one.
      */
     signIn: signInSchema.optional(),
     /** The OAuth scopes its actions need, all among those connect asks for. */
@@ -311,9 +318,8 @@ export const connectorManifestSchema = z
   })
   .refine(
     ({ provider, signIn }) =>
-      oauthProviderSchema.safeParse(provider).success ===
-      (signIn === undefined),
-    "An app's connector carries its provider record, and a suite's none"
+      signIn !== undefined || oauthProviderSchema.safeParse(provider).success,
+    "An app's connector carries its provider record"
   )
   .refine(
     ({ signIn, scopes }) =>
@@ -325,7 +331,7 @@ export const connectorManifestSchema = z
   )
   .refine(
     ({ signIn, hosts }) =>
-      signIn === undefined ||
+      signIn?.account === undefined ||
       hosts.includes(endpointHost(signIn.account.url) ?? ""),
     // The lookup carries the token or key: only where the calls go.
     "The account lookup goes to one of the connector's hosts"

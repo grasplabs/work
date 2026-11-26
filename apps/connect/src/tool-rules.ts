@@ -2,10 +2,14 @@ import { classByRules } from "@grasp-os/runtime/connector";
 import type { RuledTool } from "@grasp-os/runtime/connector";
 import type { ConnectionScope, ToolClass } from "@grasp-os/shared/connect";
 import type { Json } from "@grasp-os/shared/json";
-import { inArray } from "drizzle-orm";
+import { and, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { connectionTools } from "./db/schema.ts";
+import {
+  connections,
+  connectionTools,
+  connectorBlockedTools,
+} from "./db/schema.ts";
 import { isShallowJson } from "./served-schemas.ts";
 
 // The class of a tool an MCP server lists comes from the rules
@@ -43,7 +47,8 @@ export const classesOf = (
 /**
  * The class of each tool kept for each of `rows`, connections to
  * connectors, by the rules, as their lists were last read: nothing is
- * asked of a server here. Tools Grasp never runs are left out.
+ * asked of a server here. Tools Grasp never runs, and tools an admin
+ * blocked on the connector, are left out.
  */
 export const keptToolClasses = async (
   db: D1Database,
@@ -56,9 +61,12 @@ export const keptToolClasses = async (
     .select()
     .from(connectionTools)
     .where(
-      inArray(
-        connectionTools.connectionId,
-        rows.map(({ id }) => id)
+      and(
+        inArray(
+          connectionTools.connectionId,
+          rows.map(({ id }) => id)
+        ),
+        sql`NOT EXISTS (SELECT 1 FROM ${connectorBlockedTools} JOIN ${connections} ON ${connections.server} = ${connectorBlockedTools.connectorId} WHERE ${connections.id} = ${connectionTools.connectionId} AND ${connectorBlockedTools.name} = ${connectionTools.name})`
       )
     );
   return new Map(
