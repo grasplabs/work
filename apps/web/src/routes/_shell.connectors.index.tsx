@@ -9,11 +9,7 @@ import type { CatalogGroup } from "@grasp-os/shared/connect-names";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ConnectionWorkflows } from "@grasp-os/shared/workflows";
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@grasp-os/ui/components/alert";
+import { Alert, AlertTitle } from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Empty,
@@ -76,6 +72,7 @@ import { nothingKnown, recommendedOf } from "../connections/recommended.ts";
 import { RequestAppDialog } from "../connections/request-app-dialog.tsx";
 import { RequestedApps } from "../connections/requested-apps.tsx";
 import { RevocationsByHand } from "../connections/revocations-by-hand.tsx";
+import { SupportDetails, supportOf } from "../connections/support-details.tsx";
 import { formatNumber } from "../format.ts";
 import { PageNotLoaded } from "../frame/page-states.tsx";
 import { Page } from "../frame/page.tsx";
@@ -469,37 +466,6 @@ const Returned = ({
   );
 };
 
-/**
- * One plain line under a failed flow, for an admin to pass to support: why
- * Composio's flow was refused, the release core runs and the version of
- * connect that refused, each a dash when core's callback didn't name it.
- * An old release names none of them, which says as much.
- */
-const SupportDetails = ({
-  connectionReason,
-  connectionRelease,
-  connectionVersion,
-}: Pick<
-  IntegrationsSearch,
-  "connectionReason" | "connectionRelease" | "connectionVersion"
->) => {
-  const { t } = useLingui();
-  const reason = connectionReason ?? "–";
-  const release = connectionRelease ?? "–";
-  const version = connectionVersion ?? "–";
-  return (
-    <AlertDescription>
-      <span
-        data-connect-version={connectionVersion}
-        data-reason={connectionReason}
-        data-release={connectionRelease}
-      >
-        {t`Details for support: ${reason} (release ${release}, connect ${version})`}
-      </span>
-    </AlertDescription>
-  );
-};
-
 /** What the page must say before its tiles: a failed flow, staff's limits, Composio down, revokes to make. */
 const Notices = ({
   connectionError,
@@ -527,7 +493,13 @@ const Notices = ({
         <Alert variant="destructive">
           <AlertTitle>{connectionErrorMessage(connectionError)}</AlertTitle>
           {identity.staff || isAdmin(identity.role) ? (
-            <SupportDetails {...support} />
+            <SupportDetails
+              {...supportOf({
+                reason: support.connectionReason,
+                release: support.connectionRelease,
+                version: support.connectionVersion,
+              })}
+            />
           ) : null}
         </Alert>
       )}

@@ -6043,7 +6043,7 @@ msgctxt "what else an answer to a decision says"
 msgid "Details"
 msgstr "Details"
 
-#: src/routes/_shell.connectors.index.tsx
+#: src/connections/support-details.tsx
 msgid "Details for support: {reason} (release {release}, connect {version})"
 msgstr "Details for support: {reason} (release {release}, connect {version})"
 

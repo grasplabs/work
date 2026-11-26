@@ -432,8 +432,12 @@ export const fakeComposioApi = (
     failingFor:
       | { prefix: string; times: number; broken?: boolean; status?: number }
       | undefined;
-    /** How its answers about an account write the toolkit's slug. */
-    slugCase: "lower" | "upper";
+    /**
+     * How its answers about an account write the toolkit's slug: as it is,
+     * in capitals, or with each `k` the Kelvin sign (U+212A), which
+     * Unicode lowers to `k`.
+     */
+    slugCase: "lower" | "upper" | "kelvin";
     /** Where it says a new server is, instead of its own MCP host. */
     serverUrlBase: string;
     /**
@@ -683,10 +687,11 @@ export const fakeComposioApi = (
       id,
       status: completing ? "INITIATED" : account.status,
       toolkit: {
-        slug:
-          state.slugCase === "upper"
-            ? account.toolkit.toUpperCase()
-            : account.toolkit,
+        slug: {
+          lower: account.toolkit,
+          upper: account.toolkit.toUpperCase(),
+          kelvin: account.toolkit.replaceAll("k", "\u212A"),
+        }[state.slugCase],
       },
       auth_config: { id: account.authConfigId },
     });

@@ -580,6 +580,70 @@ const consentEvents = async (
 };
 
 /**
+ * Where in starting or finishing a Composio connection a request to
+ * Composio failed: making the auth config, the hosted link or (with a key)
+ * the connected account; reading the account; making its MCP server or
+ * that server's URL.
+ */
+type Step = "auth_config" | "link" | "account" | "read" | "server" | "url";
+
+/** The reason of each Composio failure that ended a finish, by its error. */
+const failureReasons = new WeakMap<ComposioError, ComposioReason>();
+
+/** Why Composio's `error` at `step` ended a finish (`composioReasonSchema`). */
+const reasonOfFailure = (step: Step, error: ComposioError): ComposioReason => {
+  if (error.unanswered) {
+    return `${step}:unanswered`;
+  }
+  return error.status === undefined
+    ? `${step}:unreadable`
+    : `${step}:http_${error.status}`;
+};
+
+/** `error`, its reason noted as a failure at `step`, unless it has one. */
+const failedAt = (step: Step, error: unknown): unknown => {
+  if (error instanceof ComposioError && !failureReasons.has(error)) {
+    failureReasons.set(error, reasonOfFailure(step, error));
+  }
+  return error;
+};
+
+/** What `run` returns, any Composio error it throws noted at `step`. */
+const atStep = async <T>(step: Step, run: () => Promise<T>): Promise<T> => {
+  try {
+    return await run();
+  } catch (error) {
+    throw failedAt(step, error);
+  }
+};
+
+/**
+ * Why a finish that Composio ended with `error` ended: the reason noted
+ * where it failed, if one was.
+ */
+const reasonOfError = (error: ComposioError): ComposioReason | undefined =>
+  failureReasons.get(error);
+
+/**
+ * What a Composio refusal carries for support (its `details`): why, and
+ * the first eight hex digits of the version of connect that refused, to
+ * tell at a glance which code answered. Neither is secret.
+ */
+const supportDetails = (
+  env: Env,
+  why: ComposioReason | undefined
+): Record<string, string> => {
+  const version = env.CF_VERSION_METADATA?.id.replaceAll("-", "").slice(0, 8);
+  return {
+    ...(why === undefined ? {} : { reason: why }),
+    ...(version === undefined ||
+    !connectVersionSchema.safeParse(version).success
+      ? {}
+      : { version }),
+  };
+};
+
+/**
  * Starts connecting a toolkit for an admin who consented: records their
  * consent with the flow, and returns Composio's auth link.
  */
@@ -642,30 +706,38 @@ export const startToolkitConnection = async (
   });
   const made: AtComposio = {};
   try {
-    const { auth_config: authConfig } = await composioRequest(key, {
-      method: "POST",
-      path: "/auth_configs",
-      body: {
-        toolkit: { slug: toolkit },
-        auth_config: { type: "use_composio_managed_auth", name: marker },
-      },
-      schema: authConfigSchema,
-    });
+    const { auth_config: authConfig } = await atStep(
+      "auth_config",
+      async () =>
+        await composioRequest(key, {
+          method: "POST",
+          path: "/auth_configs",
+          body: {
+            toolkit: { slug: toolkit },
+            auth_config: { type: "use_composio_managed_auth", name: marker },
+          },
+          schema: authConfigSchema,
+        })
+    );
     made.authConfigId = authConfig.id;
     await db
       .update(composioCleanups)
       .set({ authConfigId: authConfig.id })
       .where(thisCleanup);
-    const link = await composioRequest(key, {
-      method: "POST",
-      path: "/connected_accounts/link",
-      body: {
-        auth_config_id: authConfig.id,
-        user_id: composioUserOf(origin),
-        callback_url: callback.href,
-      },
-      schema: linkSchema,
-    });
+    const link = await atStep(
+      "link",
+      async () =>
+        await composioRequest(key, {
+          method: "POST",
+          path: "/connected_accounts/link",
+          body: {
+            auth_config_id: authConfig.id,
+            user_id: composioUserOf(origin),
+            callback_url: callback.href,
+          },
+          schema: linkSchema,
+        })
+    );
     made.connectedAccountId = link.connected_account_id;
     await db
       .update(composioCleanups)
@@ -711,12 +783,17 @@ export const startToolkitConnection = async (
     if (!(error instanceof ComposioError)) {
       throw error;
     }
+    const why = reasonOfError(error);
     await auditRefusal(env, person, "connection.connect", {
       ...detailOf(toolkit),
       outcome: "failed",
       reason: "connection.provider_refused",
+      ...(why === undefined ? {} : { why }),
     });
-    throw connectionErrors.create("connection.provider_refused");
+    throw connectionErrors.create(
+      "connection.provider_refused",
+      supportDetails(env, why)
+    );
   }
 };
 
@@ -907,46 +984,27 @@ const isTransient = (error: unknown): error is ComposioError =>
     (error.status !== undefined &&
       (error.status === 429 || error.status >= 500)));
 
-/** Where in finishing a Composio connection a request to Composio failed. */
-type Step = "read" | "server" | "url";
-
-/** The reason of each Composio failure that ended a finish, by its error. */
-const failureReasons = new WeakMap<ComposioError, ComposioReason>();
-
-/** Why Composio's `error` at `step` ended a finish (`composioReasonSchema`). */
-const reasonOfFailure = (step: Step, error: ComposioError): ComposioReason => {
-  if (error.unanswered) {
-    return `${step}:unanswered`;
-  }
-  return error.status === undefined
-    ? `${step}:unreadable`
-    : `${step}:http_${error.status}`;
-};
-
-/** `error`, its reason noted as a failure at `step`, unless it has one. */
-const failedAt = (step: Step, error: unknown): unknown => {
-  if (error instanceof ComposioError && !failureReasons.has(error)) {
-    failureReasons.set(error, reasonOfFailure(step, error));
-  }
-  return error;
-};
-
-/** What `run` returns, any Composio error it throws noted at `step`. */
-const atStep = async <T>(step: Step, run: () => Promise<T>): Promise<T> => {
-  try {
-    return await run();
-  } catch (error) {
-    throw failedAt(step, error);
-  }
-};
-
 /** Composio's statuses an account that won't become active can end in. */
 const endedStatuses = new Set(["FAILED", "EXPIRED", "INACTIVE", "REVOKED"]);
 
+/** A toolkit slug as Composio writes one, in ASCII alone. */
+const asciiSlug = /^[A-Za-z0-9_-]+$/u;
+
+/**
+ * `slug` in lower case, ASCII letters alone: never Unicode's rules, by
+ * which other letters (the Kelvin sign) lower to ASCII ones.
+ */
+const asciiLower = (slug: string): string =>
+  slug.replaceAll(/[A-Z]/gu, (letter) =>
+    String.fromCodePoint((letter.codePointAt(0) ?? 0) + 32)
+  );
+
 /**
  * Which part of the account Composio holds isn't the flow's, if any.
- * A toolkit's slug is the same in any case, as Composio's own SDK compares
- * them (`normalizeToolkitSlug`); IDs are compared exactly.
+ * A toolkit's slug is the same in any case of its ASCII letters, as
+ * Composio's own SDK compares them (`normalizeToolkitSlug`), and the flow's
+ * is lower case already (`composioToolkitSchema`); IDs are compared
+ * exactly.
  */
 const mismatchOf = (
   held: z.infer<typeof connectedAccountSchema>,
@@ -955,7 +1013,10 @@ const mismatchOf = (
   if (held.id !== account.connectedAccountId) {
     return "id";
   }
-  if (held.toolkit.slug.toLowerCase() !== account.toolkit.toLowerCase()) {
+  if (
+    !asciiSlug.test(held.toolkit.slug) ||
+    asciiLower(held.toolkit.slug) !== account.toolkit
+  ) {
     return "toolkit";
   }
   return held.auth_config.id === account.authConfigId
@@ -1039,32 +1100,6 @@ const unsettledReasons = {
   pending: "connection.provider_pending",
   unanswered: "connection.provider_not_answering",
 } as const;
-
-/**
- * Why a finish that Composio ended with `error` ended: the reason noted
- * where it failed, if one was.
- */
-const reasonOfError = (error: ComposioError): ComposioReason | undefined =>
-  failureReasons.get(error);
-
-/**
- * What a Composio refusal carries for support (its `details`): why, and
- * the first eight hex digits of the version of connect that refused, to
- * tell at a glance which code answered. Neither is secret.
- */
-const supportDetails = (
-  env: Env,
-  why: ComposioReason | undefined
-): Record<string, string> => {
-  const version = env.CF_VERSION_METADATA?.id.replaceAll("-", "").slice(0, 8);
-  return {
-    ...(why === undefined ? {} : { reason: why }),
-    ...(version === undefined ||
-    !connectVersionSchema.safeParse(version).success
-      ? {}
-      : { version }),
-  };
-};
 
 /** A connected account connect made at Composio, to serve as a connection. */
 interface Made {
@@ -1430,38 +1465,49 @@ export const connectToolkitWithKey = async (
   });
   const made: AtComposio = {};
   try {
-    const { auth_config: authConfig } = await composioRequest(key, {
-      method: "POST",
-      path: "/auth_configs",
-      body: {
-        toolkit: { slug: toolkit },
-        // Empty credentials: the key comes with the connected account.
-        auth_config: {
-          type: "use_custom_auth",
-          authScheme: auth.scheme,
-          credentials: {},
-          name: marker,
-        },
-      },
-      schema: authConfigSchema,
-    });
+    const { auth_config: authConfig } = await atStep(
+      "auth_config",
+      async () =>
+        await composioRequest(key, {
+          method: "POST",
+          path: "/auth_configs",
+          body: {
+            toolkit: { slug: toolkit },
+            // Empty credentials: the key comes with the connected account.
+            auth_config: {
+              type: "use_custom_auth",
+              authScheme: auth.scheme,
+              credentials: {},
+              name: marker,
+            },
+          },
+          schema: authConfigSchema,
+        })
+    );
     made.authConfigId = authConfig.id;
     await db
       .update(composioCleanups)
       .set({ authConfigId: authConfig.id })
       .where(thisCleanup);
-    const created = await composioRequest(key, {
-      method: "POST",
-      path: "/connected_accounts",
-      body: {
-        auth_config: { id: authConfig.id },
-        connection: {
-          user_id: composioUserOf(origin),
-          state: { authScheme: auth.scheme, val: { ...val, status: "ACTIVE" } },
-        },
-      },
-      schema: createdAccountSchema,
-    });
+    const created = await atStep(
+      "account",
+      async () =>
+        await composioRequest(key, {
+          method: "POST",
+          path: "/connected_accounts",
+          body: {
+            auth_config: { id: authConfig.id },
+            connection: {
+              user_id: composioUserOf(origin),
+              state: {
+                authScheme: auth.scheme,
+                val: { ...val, status: "ACTIVE" },
+              },
+            },
+          },
+          schema: createdAccountSchema,
+        })
+    );
     made.connectedAccountId = created.id;
     await db
       .update(composioCleanups)

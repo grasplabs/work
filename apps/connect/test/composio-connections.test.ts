@@ -546,6 +546,36 @@ describe("connecting a Composio toolkit", () => {
     });
   });
 
+  it("says why a start was refused when Composio refuses to make its auth config or link", async () => {
+    const admin = someone("admin");
+    const failing = [
+      ["POST /auth_configs", "auth_config:http_403"],
+      ["POST /connected_accounts/link", "link:http_503"],
+    ] as const;
+    const endings = [];
+    for (const [prefix, why] of failing) {
+      composio.state.failingFor = {
+        prefix,
+        times: 1,
+        status: Number(why.slice(-3)),
+      };
+      // oxlint-disable-next-line no-await-in-loop -- one start at a time
+      endings.push(await endingOf(start(admin)));
+    }
+    const recorded = await events();
+    expect({
+      endings,
+      audited: recorded
+        .filter(({ action }) => action === "connection.connect")
+        .map(({ detail }) => detail.why),
+      held: heldAtComposio(),
+    }).toStrictEqual({
+      endings: failing.map(([, why]) => ["connection.provider_refused", why]),
+      audited: failing.map(([, why]) => why),
+      held: nothingHeld,
+    });
+  });
+
   it("connects an account whose toolkit Composio names in capitals", async () => {
     const admin = someone("admin");
     const { callback } = composio.authorize(await start(admin));

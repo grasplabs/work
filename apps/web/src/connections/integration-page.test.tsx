@@ -494,13 +494,15 @@ describe("the Connectors pages, back from a sign-in", () => {
     unmounted();
     // Anyone can put anything in a link: what isn't in its form isn't shown.
     await shown(
-      "/connectors?connectionError=connection.provider_refused&connectionReason=see%20evil.example&connectionRelease=%3Cb%3E&connectionVersion=not-hex",
+      "/connectors?connectionError=connection.provider_refused&connectionReason=see%20evil.example&connectionRelease=call-support.evil.example&connectionVersion=not-hex",
       [stopped]
     );
     const said = document.querySelector('[role="alert"]')?.textContent ?? "";
     const crafted = {
       dashes: said.includes("Details for support: – (release –, connect –)"),
-      echoed: ["evil", "<b>", "not-hex"].some((text) => said.includes(text)),
+      echoed: ["evil", "call-support", "not-hex"].some((text) =>
+        said.includes(text)
+      ),
     };
     unmounted();
     await shown(named, [stopped], person({ role: "user" }));
