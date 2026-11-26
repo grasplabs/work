@@ -539,6 +539,45 @@ describe("someone's own link", () => {
     });
   });
 
+  it("opens nothing, and breaks nothing, for an account another listed person's interview already belongs to (L3)", async () => {
+    const { ids, roster, store, secrets, me } = await running();
+    await opened(secrets.oli, me);
+    // Oli's address moves to a new entry, Oli keeping another.
+    const pia = `pia-${unique()}`;
+    await store.saveRoster(
+      {
+        ...roster,
+        people: [
+          ...roster.people.map((person) =>
+            person.id === ids.oli
+              ? { ...person, email: `oli-new-${unique()}@acme.test` }
+              : person
+          ),
+          {
+            id: pia,
+            name: "Pia Holm",
+            email: emailOf(ids.oli),
+            team: "ops",
+            title: "",
+            away: false,
+          },
+        ],
+      },
+      { type: "system" }
+    );
+    await store.releaseDue();
+    const link = await store.linkOf(pia);
+    const theirs = await session(link?.split("#")[1] ?? "", me);
+    const mine = await session(secrets.oli, me);
+    expect({
+      theirs: [theirs.status, await codeOf(theirs)],
+      mine: mine.status,
+    }).toStrictEqual({
+      theirs: [404, "interview.link_invalid"],
+      mine: 200,
+    });
+  });
+
   it("opens for the address it went to though the list changed since, and never for the new one (L3)", async () => {
     const { ids, roster, store, secrets, me } = await running();
     const theirs = `taker-${unique()}@acme.test`;

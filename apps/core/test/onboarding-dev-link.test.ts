@@ -46,4 +46,46 @@ describe("the local stack's interview link", () => {
       await expect(local.devLinkFor("")).resolves.toBe(path);
     });
   });
+
+  it("opens a newcomer's own link for the account that opened Noor's before", async () => {
+    const stub = onboardingStore(env);
+    await runInDurableObject(stub, async (_store, state) => {
+      const local = new Onboarding(state, {
+        ...env,
+        DEV_SKIP_ROUTER_SECRET: "true",
+      });
+      const tim = { account: "account-tim", address: "tim@acme.test" };
+      // Tim, not on the list yet, opens Noor's interview.
+      const noor = await local.devLinkFor(tim.address);
+      expect(
+        local.openLink(await sha256Hex(secretOf(noor ?? "")), tim).ok
+      ).toBeTruthy();
+      // The list made again, Tim on it: his own link opens for him.
+      const roster = local.rosterAsMapped();
+      const [team] = roster?.teams ?? [];
+      await local.saveRoster(
+        {
+          teams: roster?.teams ?? [],
+          people: [
+            ...(roster?.people ?? []),
+            {
+              id: "dev-tim",
+              name: "Tim Visser",
+              email: tim.address,
+              team: team?.id ?? "",
+              title: "",
+              away: false,
+            },
+          ],
+        },
+        { type: "system" }
+      );
+      const own = await local.devLinkFor(tim.address);
+      const opened = local.openLink(await sha256Hex(secretOf(own ?? "")), tim);
+      expect({
+        other: own !== noor,
+        name: opened.ok && opened.value.name,
+      }).toStrictEqual({ other: true, name: "Tim" });
+    });
+  });
 });

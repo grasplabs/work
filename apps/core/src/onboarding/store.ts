@@ -2315,12 +2315,40 @@ export class Onboarding extends DurableObject<Env> {
       if (!opened.ok) {
         return opened;
       }
-      const { person, link } = opened.value;
+      const { person, link, roster } = opened.value;
       // On a local stack, the account that opened it last (`#heldAt`).
-      const takenOver =
-        this.env.DEV_SKIP_ROUTER_SECRET === "true" &&
-        link.account !== caller.account;
+      const local = this.env.DEV_SKIP_ROUTER_SECRET === "true";
+      const takenOver = local && link.account !== caller.account;
       if (link.account === null || link.openedAt === null || takenOver) {
+        // An account has one interview. One it still holds under someone
+        // the list no longer has (a list made again gave them a new entry)
+        // is let go: that link opens nothing any more. One under someone
+        // still listed stays theirs, and this link opens nothing for it;
+        // on a local stack, the newest opening takes it.
+        const elsewhere = this.#db
+          .select({ person: links.person })
+          .from(links)
+          .where(
+            and(eq(links.account, caller.account), ne(links.person, person.id))
+          )
+          .all();
+        for (const other of elsewhere) {
+          if (!local && roster.people.some(({ id }) => id === other.person)) {
+            return refused("interview.link_invalid");
+          }
+        }
+        if (elsewhere.length > 0) {
+          this.#db
+            .update(links)
+            .set({ account: null })
+            .where(
+              inArray(
+                links.person,
+                elsewhere.map((other) => other.person)
+              )
+            )
+            .run();
+        }
         // Theirs from this moment, in the same transaction that found the
         // address theirs (`#holds`).
         this.#db
