@@ -570,4 +570,35 @@ describe("an interview as a live voice session", { timeout: 60_000 }, () => {
       kept: ["You check the invoices in Exact every morning."],
     });
   });
+
+  it("writes down what they put right when they came back to add something, as an answer", async () => {
+    const link = await opened();
+    await plan(platformMistralKey, [
+      { status: 200, body: openedSession },
+      { status: 200, body: kept("It waits three days, not two.") },
+    ]);
+    const adding = { ...standing, phase: "readback", adding: true } as const;
+    const { requests } = await answering(
+      [notes({ facts: [], changes: [] })],
+      async () => {
+        const join = await ask(link, {
+          action: "open",
+          event: "add",
+          ...adding,
+        });
+        const joined: VoiceSessionJoin = await join.json();
+        await ask(link, {
+          action: "answer",
+          ...adding,
+          pass: joined.pass,
+          noted: 0,
+        });
+      }
+    );
+    const brief = JSON.stringify(requests[0]?.body);
+    expect({
+      answered: brief.includes("answered out loud"),
+      cameBack: brief.includes("has just come back on their link"),
+    }).toStrictEqual({ answered: true, cameBack: false });
+  });
 });

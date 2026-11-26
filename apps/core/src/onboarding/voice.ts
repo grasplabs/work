@@ -629,12 +629,17 @@ const answer = async (
     return answeredNow(null, { ...asked, phase });
   }
   const { text: system } = await interviewerText(context.kind, asked.locale);
+  // Up to their last words, as a turn's brief ends: what Stephen said after
+  // them is his, not what was just said.
+  const lastAnswer = heard.lines.findLastIndex(({ from }) => from === "person");
   const turn: TurnAsked = {
-    event: asked.adding ? "add" : "answer",
+    // An answer, also when they came back to add something: `adding` says
+    // that, and "add" is only the event that opens it.
+    event: "answer",
     locale: asked.locale,
     // The whole conversation, as a turn's brief has it: before this
     // session too, on a resume. Quotes are checked in this session's alone.
-    lines: [...asked.before, ...heard.lines],
+    lines: [...asked.before, ...heard.lines.slice(0, lastAnswer + 1)],
     facts: asked.facts,
     phase,
     minutes: asked.minutes,
