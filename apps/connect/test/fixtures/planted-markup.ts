@@ -58,13 +58,13 @@ export const plantedHtml: Readonly<
   },
   notRendered: {
     html: `<p>${shownText}<title>${plantedInstruction}</title></p><dialog>${plantedInstruction}</dialog><video>${plantedInstruction}</video><canvas>${plantedInstruction}</canvas><svg><desc>${plantedInstruction}</desc><title>${plantedInstruction}</title><defs><text>${plantedInstruction}</text></defs><symbol><text>${plantedInstruction}</text></symbol><script>${plantedInstruction}</script><style>${plantedInstruction}</style></svg><math><semantics><mi>x</mi><annotation>${plantedInstruction}</annotation></semantics><script>${plantedInstruction}</script><style>${plantedInstruction}</style></math>`,
-    shown: `${shownText}\nx`,
+    shown: shownText,
   },
-  // A drawing is read as an image is, for none of its text, however it
-  // would draw it; a formula for its shown parts alone.
-  drawnAlone: {
-    html: `<p>${shownText}</p><svg><text>${plantedInstruction}</text><switch><g display="none"/><text>${plantedInstruction}</text></switch><foreignObject><p>${plantedInstruction}</p></foreignObject></svg><p><math><mphantom><mi>${plantedInstruction}</mi></mphantom><semantics><mi>y</mi><mtext>${plantedInstruction}</mtext></semantics><maction><mi>z</mi><mtext>${plantedInstruction}</mtext></maction><semantics><mphantom><mi>a</mi></mphantom><mtext>${plantedInstruction}</mtext></semantics><semantics><annotation>a</annotation><mtext>${plantedInstruction}</mtext></semantics></math></p>`,
-    shown: `${shownText}\nyz`,
+  // A drawing or a formula is read as an image is, for none of its text,
+  // however it would draw it; what the parser moves out of one is read.
+  drawingsAndFormulas: {
+    html: `<p>${shownText}</p><svg><text>${plantedInstruction}</text><switch><g display="none"/><text>${plantedInstruction}</text></switch><foreignObject><p>${plantedInstruction}</p></foreignObject><b>Due</b> soon</svg><p><math>${plantedInstruction}<mrow>${plantedInstruction}<mi>x</mi></mrow><semantics><mi>y</mi><mtext>${plantedInstruction}</mtext></semantics></math></p>`,
+    shown: `${shownText}\nDue soon`,
   },
   // What only an SVG drawing hides, a page shows.
   drawingNamesElsewhere: {

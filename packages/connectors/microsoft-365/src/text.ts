@@ -44,87 +44,59 @@ type Element = DefaultTreeAdapterTypes.Element;
 type ParentNode = DefaultTreeAdapterTypes.ParentNode;
 
 /**
- * Elements whose content a browser never shows, by their namespace: what
- * a page or a formula runs or is styled with, a page's head and title,
- * what stands in for scripts, frames, objects, media and widgets, a list
- * of suggestions; a formula's annotations and phantoms. A template's
- * content is outside the tree already.
+ * Elements whose content a browser never shows: what a page runs or is
+ * styled with, its head and title, what stands in for scripts, frames,
+ * objects, media and widgets, a list of suggestions. A template's content
+ * is outside the tree already.
  */
-const unread: Readonly<Record<string, ReadonlySet<string>>> = {
-  [htmlSpec.NS.HTML]: new Set([
-    "script",
-    "style",
-    "head",
-    "title",
-    "noscript",
-    "iframe",
-    "noembed",
-    "noframes",
-    "audio",
-    "video",
-    "canvas",
-    "object",
-    "datalist",
-    "meter",
-    "progress",
-    "rp",
-  ]),
-  [htmlSpec.NS.MATHML]: new Set([
-    "script",
-    "style",
-    "annotation",
-    "annotation-xml",
-    "mphantom",
-  ]),
-};
+const unread: ReadonlySet<string> = new Set([
+  "script",
+  "style",
+  "head",
+  "title",
+  "noscript",
+  "iframe",
+  "noembed",
+  "noframes",
+  "audio",
+  "video",
+  "canvas",
+  "object",
+  "datalist",
+  "meter",
+  "progress",
+  "rp",
+]);
 
 const hasAttribute = ({ attrs }: Element, attribute: string): boolean =>
   attrs.some(({ name }) => name === attribute);
 
-const isHtml = ({ namespaceURI }: Element): boolean =>
-  namespaceURI === htmlSpec.NS.HTML;
-
 /**
- * Whether a browser hides `element` and all it holds. A drawing (SVG) is
- * read as an image is, for none of its text: which of its characters a
- * browser draws turns on its structure, conditions and styles, more than
- * a reader can follow without passing hidden text for shown.
+ * Whether a browser hides `element` and all it holds. A drawing (SVG) or
+ * a formula (MathML) is read as an image is, for none of its text: which
+ * of its characters a browser draws turns on its structure, conditions
+ * and styles, more than a reader can follow without passing hidden text
+ * for shown. What the parser moves out of one is a page's again.
  */
 const isUnread = (element: Element): boolean =>
-  element.namespaceURI === htmlSpec.NS.SVG ||
-  unread[element.namespaceURI]?.has(element.tagName) === true ||
-  (isHtml(element) &&
-    (hasAttribute(element, "hidden") ||
-      hasAttribute(element, "popover") ||
-      (element.tagName === "dialog" && !hasAttribute(element, "open"))));
-
-/** Formula elements that show their first element alone (MathML Core). */
-const firstShown: ReadonlySet<string> = new Set(["semantics", "maction"]);
+  element.namespaceURI !== htmlSpec.NS.HTML ||
+  unread.has(element.tagName) ||
+  hasAttribute(element, "hidden") ||
+  hasAttribute(element, "popover") ||
+  (element.tagName === "dialog" && !hasAttribute(element, "open"));
 
 /**
  * What a browser shows of what `element` holds: of a closed `details`,
- * only its first `summary`; of a formula's `semantics` or `maction`,
- * only its first element, whatever it is.
+ * only its first `summary`.
  */
 const shownChildren = (element: Element): readonly Node[] => {
-  let shown: Node | undefined;
-  if (
-    element.namespaceURI === htmlSpec.NS.MATHML &&
-    firstShown.has(element.tagName)
-  ) {
-    shown = element.childNodes.find((node) => "tagName" in node);
-  } else if (
-    element.tagName === "details" &&
-    isHtml(element) &&
-    !hasAttribute(element, "open")
-  ) {
-    shown = element.childNodes.find(
-      (node) => "tagName" in node && node.tagName === "summary"
-    );
-  } else {
+  if (element.tagName !== "details" || hasAttribute(element, "open")) {
     return element.childNodes;
   }
-  return shown === undefined ? [] : [shown];
+  const summary = element.childNodes.find(
+    (node) => "tagName" in node && node.tagName === "summary"
+  );
+  return summary === undefined ? [] : [summary];
 };
 
 /** Elements on lines of their own: paragraphs, headings, list items, table rows, sections. */
