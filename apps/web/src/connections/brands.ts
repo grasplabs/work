@@ -27,3 +27,6 @@ export const brands = {
 
 /** A connector with a mark of its own. */
 export type Brand = keyof typeof brands;
+
+/** Whether the product has its own mark for the connector `id`, by that id exactly. */
+export const isBrand = (id: string): id is Brand => Object.hasOwn(brands, id);

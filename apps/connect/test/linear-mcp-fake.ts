@@ -23,10 +23,16 @@ export const linearOrigin = "https://mcp.linear.app";
 export const linearMcpUrl = `${linearOrigin}/mcp`;
 export const linearIssuer = linearOrigin;
 
+/**
+ * Where tests stand the same server up at an address of its own, as a
+ * company might run one like it: what they add by its URL, since Linear's
+ * own address is the built-in Linear's (packages/connectors/linear).
+ */
+export const linearCopyOrigin = "https://mcp.linear-copy.example";
+
 /** The one protocol version the server speaks. */
 const protocolVersion = "2026-07-28";
 const versionMetaKey = "io.modelcontextprotocol/protocolVersion";
-const resourceMetadataUrl = `${linearOrigin}/.well-known/oauth-protected-resource/mcp`;
 const grantableScopes = ["read", "write"];
 const defaultTtlMs = 300_000;
 const defaultAccessTokenLifetimeSeconds = 3600;
@@ -176,6 +182,10 @@ export interface Workspace {
 }
 
 export interface LinearMcpFake {
+  /** Where it is, its MCP endpoint, and its issuer, as `Address` has them. */
+  readonly origin: string;
+  readonly url: string;
+  readonly issuer: string;
   /** What `tools/list` lists, in order; a call runs only a listed tool. */
   tools: LinearTool[];
   /**
@@ -194,7 +204,9 @@ export interface LinearMcpFake {
    * drops the connection.
    */
   next:
-    | ((request: Request) => Response | Promise<Response> | undefined)
+    | ((
+        request: Request
+      ) => Response | Promise<Response | undefined> | undefined)
     | undefined;
   /** Every `/mcp` request hangs until its signal aborts. */
   down: boolean;
@@ -290,55 +302,74 @@ const nowIso = (): string => new Date().toISOString();
 
 // Metadata, as https://mcp.linear.app answered on 25 November 2026.
 
-const protectedResource = (resource: string) => ({
+/**
+ * Where the server is: Linear's origin, or another a test stands it up at,
+ * with its MCP endpoint, issuer and metadata under it as at Linear's.
+ */
+interface Address {
+  origin: string;
+  mcpUrl: string;
+  issuer: string;
+  resourceMetadataUrl: string;
+}
+
+const addressOf = (origin: string): Address => ({
+  origin,
+  mcpUrl: `${origin}/mcp`,
+  issuer: origin,
+  resourceMetadataUrl: `${origin}/.well-known/oauth-protected-resource/mcp`,
+});
+
+const protectedResource = (at: Address, resource: string) => ({
   resource,
-  authorization_servers: [linearIssuer],
+  authorization_servers: [at.issuer],
   scopes_supported: grantableScopes,
   bearer_methods_supported: ["header"],
 });
 
-const metadataDocuments = new Map<string, unknown>([
-  [
-    "/.well-known/oauth-protected-resource/mcp",
-    protectedResource(linearMcpUrl),
-  ],
-  ["/.well-known/oauth-protected-resource", protectedResource(linearOrigin)],
-  [
-    "/.well-known/oauth-authorization-server",
-    {
-      issuer: linearIssuer,
-      authorization_endpoint: `${linearOrigin}/authorize`,
-      token_endpoint: `${linearOrigin}/token`,
-      registration_endpoint: `${linearOrigin}/register`,
-      scopes_supported: ["read", "write", "openid", "email"],
-      response_types_supported: ["code"],
-      response_modes_supported: ["query"],
-      grant_types_supported: [
-        "authorization_code",
-        "refresh_token",
-        "urn:ietf:params:oauth:grant-type:jwt-bearer",
-      ],
-      token_endpoint_auth_methods_supported: [
-        "client_secret_basic",
-        "client_secret_post",
-        "none",
-      ],
-      revocation_endpoint: `${linearOrigin}/token`,
-      code_challenge_methods_supported: ["S256"],
-      authorization_response_iss_parameter_supported: true,
-      client_id_metadata_document_supported: true,
-      resource: linearMcpUrl,
-      resource_metadata: resourceMetadataUrl,
-    },
-  ],
-]);
+const metadataDocumentsOf = (at: Address) =>
+  new Map<string, unknown>([
+    [
+      "/.well-known/oauth-protected-resource/mcp",
+      protectedResource(at, at.mcpUrl),
+    ],
+    ["/.well-known/oauth-protected-resource", protectedResource(at, at.origin)],
+    [
+      "/.well-known/oauth-authorization-server",
+      {
+        issuer: at.issuer,
+        authorization_endpoint: `${at.origin}/authorize`,
+        token_endpoint: `${at.origin}/token`,
+        registration_endpoint: `${at.origin}/register`,
+        scopes_supported: ["read", "write", "openid", "email"],
+        response_types_supported: ["code"],
+        response_modes_supported: ["query"],
+        grant_types_supported: [
+          "authorization_code",
+          "refresh_token",
+          "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        ],
+        token_endpoint_auth_methods_supported: [
+          "client_secret_basic",
+          "client_secret_post",
+          "none",
+        ],
+        revocation_endpoint: `${at.origin}/token`,
+        code_challenge_methods_supported: ["S256"],
+        authorization_response_iss_parameter_supported: true,
+        client_id_metadata_document_supported: true,
+        resource: at.mcpUrl,
+        resource_metadata: at.resourceMetadataUrl,
+      },
+    ],
+  ]);
 
 /** The `WWW-Authenticate` challenge of the MCP endpoint (RFC 6750). */
-const bearerChallenge = (error?: string): string =>
+const bearerChallenge = (at: Address, error?: string): string =>
   [
     'Bearer realm="OAuth"',
     ...(error === undefined ? [] : [`error="${error}"`]),
-    `resource_metadata="${resourceMetadataUrl}"`,
+    `resource_metadata="${at.resourceMetadataUrl}"`,
     `scope="${grantableScopes.join(" ")}"`,
   ].join(", ");
 
@@ -578,35 +609,65 @@ const includeArchivedProperty = {
 const afterProperty = (what: string) =>
   text(`${what} after: ISO-8601 date/duration (e.g., -P1D)`);
 
+// Every field Linear's list_issues takes, and get_issue with a few more;
+// one this fake's issues don't model is null, as Linear gives a requested
+// field with no value.
 const issueFields = [
   "id",
   "uuid",
   "title",
   "description",
+  "projectMilestone",
   "priority",
   "estimate",
   "url",
   "gitBranchName",
   "createdAt",
   "updatedAt",
+  "archivedAt",
+  "completedAt",
+  "startedAt",
+  "canceledAt",
+  "startedTriageAt",
+  "triagedAt",
   "dueDate",
+  "slaStartedAt",
+  "slaMediumRiskAt",
+  "slaHighRiskAt",
+  "slaBreachesAt",
+  "slaType",
   "status",
   "statusType",
   "labels",
+  "triageIntel",
   "createdBy",
   "createdById",
   "assignee",
   "assigneeId",
+  "delegate",
+  "delegateId",
+  "project",
+  "projectId",
+  "parentId",
   "team",
   "teamId",
-  "parentId",
+  "cycleId",
 ];
-const fieldsProperty = {
+const issueDetailFields = [
+  ...issueFields,
+  "attachments",
+  "documents",
+  "stateHistory",
+  "relations",
+  "customerNeeds",
+  "releases",
+];
+const fieldsProperty = (fields: readonly string[]) => ({
   type: "array",
-  items: { type: "string", enum: issueFields },
+  items: { type: "string", enum: fields },
   description:
     "Fields to include in each result. Explicitly requested fields with no value return null. `id` is always included. Omit or pass an empty array for the default response.",
-};
+});
 
 const commentParents = {
   issueId: text(`${issueIdDescription} (provide exactly one parent)`),
@@ -726,7 +787,7 @@ const patchProperty = {
   },
 };
 
-const readOnly = { readOnlyHint: true };
+const readOnly = { readOnlyHint: true, destructiveHint: false };
 const writes = { readOnlyHint: false, destructiveHint: false };
 
 /** Linear's tools, as its server lists them. */
@@ -765,7 +826,7 @@ const linearTools = (): LinearTool[] => [
       release: text("Release ID or slug"),
       priority: priorityProperty,
       parentId: text("Parent issue ID or identifier (e.g., LIN-123)"),
-      fields: fieldsProperty,
+      fields: fieldsProperty(issueFields),
       createdAt: afterProperty("Created"),
       updatedAt: afterProperty("Updated"),
       triagedAt: text(
@@ -785,7 +846,7 @@ const linearTools = (): LinearTool[] => [
     inputSchema: objectSchema(
       {
         id: text(issueIdDescription),
-        fields: fieldsProperty,
+        fields: fieldsProperty(issueDetailFields),
         includeRelations: {
           type: "boolean",
           description: "Include blocking/related/duplicate relations",
@@ -1315,13 +1376,14 @@ const issueView = (ws: Workspace, issue: Issue): Record<string, unknown> => {
 /** The fields asked for, `id` always among them; the whole view if none. */
 const selected = (
   view: Record<string, unknown>,
-  args: Args
+  args: Args,
+  known: readonly string[]
 ): Record<string, unknown> => {
   const fields = stringsArg(args, "fields") ?? [];
   if (fields.length === 0) {
     return view;
   }
-  const unknown = fields.find((field) => !issueFields.includes(field));
+  const unknown = fields.find((field) => !known.includes(field));
   if (unknown !== undefined) {
     fail(`Invalid input: unknown field ${unknown}`);
   }
@@ -1728,7 +1790,10 @@ const handlers = new Map<string, Handler>([
             updatedAt: issue.updatedAt,
           }));
         const { page, ...rest } = paged(views, args);
-        return { issues: page.map((view) => selected(view, args)), ...rest };
+        return {
+          issues: page.map((view) => selected(view, args, issueFields)),
+          ...rest,
+        };
       },
     },
   ],
@@ -1743,7 +1808,7 @@ const handlers = new Map<string, Handler>([
           attachments: [],
           documents: [],
         };
-        return selected(view, args);
+        return selected(view, args, issueDetailFields);
       },
     },
   ],
@@ -1989,11 +2054,12 @@ const checkClient = (
 
 /** What an authorization request asks for, once Linear's checks pass. */
 const authorizationRequest = (
+  at: Address,
   authorizationUrl: string,
   registrations: readonly Registration[]
 ) => {
   const url = new URL(authorizationUrl);
-  if (`${url.origin}${url.pathname}` !== `${linearOrigin}/authorize`) {
+  if (`${url.origin}${url.pathname}` !== `${at.origin}/authorize`) {
     refuse(`it goes to ${url.origin}${url.pathname}`);
   }
   const twice = repeated(url.searchParams);
@@ -2017,8 +2083,8 @@ const authorizationRequest = (
     refuse("code_challenge isn't an S256 challenge");
   }
   const resource = param("resource");
-  if (resource !== linearMcpUrl) {
-    refuse(`resource ${resource} isn't ${linearMcpUrl}`);
+  if (resource !== at.mcpUrl) {
+    refuse(`resource ${resource} isn't ${at.mcpUrl}`);
   }
   const scope = param("scope");
   if (!scope.split(" ").every((each) => grantableScopes.includes(each))) {
@@ -2079,7 +2145,10 @@ const malformed = (
   return undefined;
 };
 
-type FakeState = Omit<LinearMcpFake, "reset" | "consent" | "handle">;
+type FakeState = Omit<
+  LinearMcpFake,
+  "origin" | "url" | "issuer" | "reset" | "consent" | "handle"
+>;
 
 const freshState = (): FakeState => ({
   tools: linearTools(),
@@ -2101,10 +2170,13 @@ const freshState = (): FakeState => ({
 const forever = 2_147_483_647;
 
 /**
- * The fake, fresh as `reset()` leaves it; pass `handle` to the fake
- * internet (test/internet.ts) for requests to `linearOrigin`.
+ * The fake, fresh as `reset()` leaves it, at Linear's origin or at
+ * `origin`; pass `handle` to the fake internet (test/internet.ts) for
+ * requests to its `origin`.
  */
-export const linearMcpFake = (): LinearMcpFake => {
+export const linearMcpFake = (origin: string = linearOrigin): LinearMcpFake => {
+  const at = addressOf(origin);
+  const metadataDocuments = metadataDocumentsOf(at);
   const fake = freshState();
   const codes = new Map<string, Authorization>();
   const grants = new Map<string, Grant>();
@@ -2406,7 +2478,7 @@ export const linearMcpFake = (): LinearMcpFake => {
     ) {
       return new Response(null, {
         status: 401,
-        headers: { "www-authenticate": bearerChallenge() },
+        headers: { "www-authenticate": bearerChallenge(at) },
       });
     }
     const issued = fake.tokens.get(token);
@@ -2414,7 +2486,7 @@ export const linearMcpFake = (): LinearMcpFake => {
       issued === undefined ||
       issued.revoked ||
       issued.expiresAt <= Date.now() ||
-      issued.resource !== linearMcpUrl
+      issued.resource !== at.mcpUrl
     ) {
       return Response.json(
         {
@@ -2423,7 +2495,7 @@ export const linearMcpFake = (): LinearMcpFake => {
         },
         {
           status: 401,
-          headers: { "www-authenticate": bearerChallenge("invalid_token") },
+          headers: { "www-authenticate": bearerChallenge(at, "invalid_token") },
         }
       );
     }
@@ -2545,12 +2617,28 @@ export const linearMcpFake = (): LinearMcpFake => {
       return new Response(null, {
         status: 403,
         headers: {
-          "www-authenticate": `Bearer realm="OAuth", error="insufficient_scope", scope="write", resource_metadata="${resourceMetadataUrl}"`,
+          "www-authenticate": `Bearer realm="OAuth", error="insufficient_scope", scope="write", resource_metadata="${at.resourceMetadataUrl}"`,
         },
       });
     }
     if (handler === undefined) {
       return answer(id, toolError(`${name} isn't available in this workspace`));
+    }
+    // Linear checks a call's arguments against the tool's schema, which
+    // takes no property it doesn't declare.
+    const declared = isRecord(tool.inputSchema)
+      ? tool.inputSchema.properties
+      : {};
+    const unrecognized = Object.keys(args).find(
+      (key) => !isRecord(declared) || !Object.hasOwn(declared, key)
+    );
+    if (unrecognized !== undefined) {
+      return answer(
+        id,
+        toolError(
+          `Invalid input: unrecognized key ${JSON.stringify(unrecognized)}`
+        )
+      );
     }
     const [actor] = fake.workspace.users;
     if (actor === undefined) {
@@ -2669,6 +2757,9 @@ export const linearMcpFake = (): LinearMcpFake => {
   ]);
 
   return Object.assign(fake, {
+    origin: at.origin,
+    url: at.mcpUrl,
+    issuer: at.issuer,
     reset: () => {
       Object.assign(fake, freshState());
       codes.clear();
@@ -2679,7 +2770,11 @@ export const linearMcpFake = (): LinearMcpFake => {
       authorizationUrl: string,
       options: { iss?: string | null } = {}
     ): Consent => {
-      const asked = authorizationRequest(authorizationUrl, fake.registrations);
+      const asked = authorizationRequest(
+        at,
+        authorizationUrl,
+        fake.registrations
+      );
       const { clientId, redirectUri, state } = asked;
       if (asked.registered === undefined) {
         const known = fake.documentClients.find(
@@ -2703,11 +2798,11 @@ export const linearMcpFake = (): LinearMcpFake => {
       });
       return options.iss === null
         ? { code, state }
-        : { code, state, iss: options.iss ?? linearIssuer };
+        : { code, state, iss: options.iss ?? at.issuer };
     },
     handle: async (request: Request): Promise<Response> => {
       const url = new URL(request.url);
-      if (url.origin !== linearOrigin) {
+      if (url.origin !== at.origin) {
         return notFound();
       }
       if (url.pathname.startsWith("/.well-known/")) {

@@ -200,6 +200,7 @@ describe("projects", { timeout: 120_000 }, () => {
           {
             id: mail.id,
             provider: "mail",
+            name: "mail",
             accountName: null,
             status: "active",
           },

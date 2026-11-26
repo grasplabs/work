@@ -760,6 +760,7 @@ describe("A project's page", () => {
           id: "conn-1",
           // The product names and marks only its own connectors (connections/brands.ts).
           provider: "microsoft",
+          name: "Microsoft 365",
           accountName: null,
           status: "needs_reauth",
         },

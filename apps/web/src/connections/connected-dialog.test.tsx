@@ -35,6 +35,7 @@ const connection = (
   id: "c1",
   source: "native",
   provider: "microsoft",
+  name: "Microsoft 365",
   scope: "personal",
   status: "active",
   ownerUserId: "u1",

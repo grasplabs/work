@@ -61,6 +61,7 @@ const connection = (
   id: `c-${provider}`,
   source: "native",
   provider,
+  name: provider,
   scope: "shared",
   status: "active",
   ownerUserId: null,

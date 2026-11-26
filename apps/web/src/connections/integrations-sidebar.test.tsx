@@ -51,6 +51,7 @@ const connected = (provider: string): ListedConnection => ({
   id: crypto.randomUUID(),
   source: "native",
   provider,
+  name: provider,
   scope: "shared",
   status: "active",
   ownerUserId: null,

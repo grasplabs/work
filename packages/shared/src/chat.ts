@@ -1222,8 +1222,11 @@ export interface ChatConnectionRequest {
   /** The permission it would be. */
   id: string;
   connectionId: string;
-  /** The connection's provider and account, while connect lists it. */
-  provider: string | null;
+  /**
+   * What the connection reaches, as people know it
+   * (`ConnectionSummary.name`), and its account, while connect lists it.
+   */
+  name: string | null;
   accountName: string | null;
   resource: string | null;
   actions: string[];

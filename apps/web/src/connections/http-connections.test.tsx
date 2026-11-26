@@ -45,6 +45,7 @@ const billing: ListedConnection = {
   id: "connection-billing",
   source: "http",
   provider: "http",
+  name: "Billing API",
   scope: "shared",
   status: "active",
   ownerUserId: null,

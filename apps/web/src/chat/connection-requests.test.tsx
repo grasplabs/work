@@ -27,7 +27,7 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 const own: ChatConnectionRequest = {
   id: "request-1",
   connectionId: "connection-1",
-  provider: "Gmail",
+  name: "Gmail",
   accountName: "sanne@acme.test",
   resource: null,
   actions: ["send"],
@@ -40,7 +40,7 @@ const other: ChatConnectionRequest = {
   ...own,
   id: "request-3",
   connectionId: "connection-3",
-  provider: "Outlook",
+  name: "Outlook",
   accountName: "sanne@acme.test",
 };
 

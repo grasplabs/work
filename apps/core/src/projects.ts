@@ -561,13 +561,14 @@ export const listProjectConnections = async (
   const ids = new Set(used.map((row) => row.id));
   const connections = listed
     .filter((connection) => ids.has(connection.id))
-    .map(({ id: connectionId, provider, accountName, status }) => ({
+    .map(({ id: connectionId, provider, name, accountName, status }) => ({
       id: connectionId,
       provider,
+      name,
       accountName,
       status,
     }))
-    .toSorted((a, b) => a.provider.localeCompare(b.provider));
+    .toSorted((a, b) => a.name.localeCompare(b.name));
   return { connections, unseen: ids.size - connections.length };
 };
 

@@ -475,9 +475,9 @@ const brandOf = (id: string, name: string): Brand | undefined =>
   brandKeys.find((key) => plain(key) === plain(id.split("-")[0] ?? ""));
 
 /** A connection's name: the brand's name where the product has its mark, else core's. */
-const connectionName = ({ provider }: ProjectConnection): string => {
+const connectionName = ({ provider, name }: ProjectConnection): string => {
   const brand = brandOf(provider, provider);
-  return brand === undefined ? provider : brands[brand].name;
+  return brand === undefined ? name : brands[brand].name;
 };
 
 /** Whether a connection has stopped letting Grasp in. */

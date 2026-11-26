@@ -10,7 +10,8 @@ import { buildConnectors, connectorEntries } from "../build.ts";
  * builds them, the sample connector the tests call through, one that
  * syncs (`sample-sync`), three apps
  * that sign in with their own records (OAuth 2.0, an API key, and OAuth
- * 2.0 pinned to a tenant as a suite's, `sample-tenant`), one named
+ * 2.0 pinned to a tenant as a suite's, `sample-tenant`), a built-in
+ * serving its vendor's MCP server with a key (`sample-tracker`), one named
  * `composio`, whose contracts must never be served, and `sample-unreached`
  * (`withUnreachedTool`).
  */
@@ -77,6 +78,7 @@ const setup = async (): Promise<void> => {
       path.join(import.meta.dirname, "fixtures/sample-key-connector.ts"),
       path.join(import.meta.dirname, "fixtures/sample-erp-connector.ts"),
       path.join(import.meta.dirname, "fixtures/sample-tenant-connector.ts"),
+      path.join(import.meta.dirname, "fixtures/sample-mcp-key-connector.ts"),
       path.join(import.meta.dirname, "fixtures/composio-named-connector.ts"),
     ],
     testConnectorsFile

@@ -65,6 +65,7 @@ const typeRules: readonly {
   { action: "connector.tools.changed", type: "config" },
   { action: "connector.tool.blocked", type: "config" },
   { action: "connector.tool.unblocked", type: "config" },
+  { action: "connector.moved", type: "config" },
   // An admin changing which tools a connected app allows (GRA-993).
   { action: "connection.tools", type: "config" },
   // An admin picking which places of a shared connection sync into the

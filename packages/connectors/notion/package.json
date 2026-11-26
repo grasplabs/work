@@ -1,0 +1,16 @@
+{
+  "name": "@grasp-os/connector-notion",
+  "private": true,
+  "description": "Notion, through Notion's own MCP server, loaded by connect into its own isolate",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@grasp-os/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:"
+  }
+}

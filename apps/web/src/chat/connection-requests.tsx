@@ -63,9 +63,9 @@ const styles = stylex.create({
   list: { display: "grid", gap: space["2"] },
 });
 
-/** The connection a request names: its provider and account, else its ID. */
+/** The connection a request names: what it reaches and its account, else its ID. */
 const nameOf = (request: ChatConnectionRequest): string => {
-  const connection = [request.provider, request.accountName]
+  const connection = [request.name, request.accountName]
     .filter((part) => part !== null)
     .join(", ");
   return connection === "" ? request.connectionId : connection;
