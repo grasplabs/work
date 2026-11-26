@@ -89,6 +89,7 @@ export const PeopleAdd = ({
   noTeam,
   onAdd,
   onList,
+  text: given = "",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -99,9 +100,11 @@ export const PeopleAdd = ({
   onAdd: (typed: Typed[], to: AddTo) => boolean;
   /** The people with a staff list's new ones in. */
   onList: (picks: Picks, added: number) => void;
+  /** Addresses to start from: the ones a search found not on the list. */
+  text?: string;
 }) => {
   const { t } = useLingui();
-  const [text, setText] = useState("");
+  const [text, setText] = useState(given);
   const [team, setTeam] = useState<string>(() => picks.teams[0]?.id ?? newTeam);
   const [named, setNamed] = useState("");
   const [problem, setProblem] = useState<string | null>(null);

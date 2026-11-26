@@ -51,6 +51,7 @@ import {
   takesPart,
   teamRowsOf,
   TooManyPeopleError,
+  unlisted,
   withAdded,
   withLead,
   withTaking,
@@ -149,6 +150,7 @@ const styles = stylex.create({
     cursor: "pointer",
   },
   words: { display: "grid", minWidth: 0 },
+  grow: { flexGrow: 1 },
   out: { opacity: 0.55 },
   // A lead's mark always shows; anyone else's only while the row is pointed at or in focus, so
   // the list stays calm. Without a pointer that hovers, it always shows.
@@ -164,6 +166,19 @@ const styles = stylex.create({
   },
   leadOn: { opacity: 1 },
   more: { display: "flex", justifyContent: "center", padding: space[3] },
+  // The address searched for, not on the list: a row like a person's, offering to add them.
+  missingIcon: {
+    display: "grid",
+    placeItems: "center",
+    flexShrink: 0,
+    width: size.avatarSm,
+    height: size.avatarSm,
+    // Under the avatars: past where a person's box stands, and the gap after it.
+    marginInlineStart: `calc(${size.checkboxBox} + ${space[3]})`,
+    borderRadius: "50%",
+    color: colors.mutedForeground,
+    backgroundColor: colors.muted,
+  },
 });
 
 /** One person: ticked to take part, and marked as their team's lead. */
@@ -341,10 +356,13 @@ const PeopleList = ({
   picks,
   onPicks,
   noTeam,
+  onAddTyped,
 }: {
   picks: Picks;
   onPicks: (picks: Picks) => void;
   noTeam: string;
+  /** Adds the addresses searched for that aren't on the list, picking their team. */
+  onAddTyped: (text: string) => void;
 }) => {
   const { t } = useLingui();
   const [query, setQuery] = useState("");
@@ -352,6 +370,8 @@ const PeopleList = ({
   const [closed, setClosed] = useState<ReadonlySet<string>>(new Set());
   const searching = query.trim() !== "";
   const shown = found(picks, query);
+  // An address searched for that isn't on the list: offered to be added, right where it was looked for.
+  const missing = unlisted(picks, query);
   // The leads as a team was last opened stand first in it; marking another moves no row, so its
   // star plays where it was pressed. Opening or closing a team brings the leads up again.
   const leadsNow = (): ReadonlySet<string> => leadIdsOf(picks);
@@ -412,6 +432,35 @@ const PeopleList = ({
           </div>
         </div>
         <ul aria-label={t`People`} {...stylex.props(styles.list)}>
+          {missing.length === 0 ? null : (
+            <li {...stylex.props(styles.person)}>
+              <span {...stylex.props(styles.missingIcon)}>
+                <Icon icon={UserPlusIcon} />
+              </span>
+              <span {...stylex.props(styles.words, styles.grow)}>
+                <Text as="span" color="default" truncate>
+                  {missing.length === 1
+                    ? (missing[0]?.email ?? "")
+                    : formatList(missing.map(({ email }) => email))}
+                </Text>
+                <Text as="span" color="muted" size="sm">
+                  {plural(missing.length, {
+                    one: "Not on the list yet",
+                    other: "# addresses not on the list yet",
+                  })}
+                </Text>
+              </span>
+              <Button
+                onClick={() => {
+                  onAddTyped(query);
+                }}
+                size="xs"
+                variant="outline"
+              >
+                {t`Add`}
+              </Button>
+            </li>
+          )}
           {rows.map(({ team, people }) => (
             <TeamRow
               key={team.id}
@@ -512,6 +561,9 @@ export const LeadsStep = ({ data, onward }: StepProps) => {
     () => orgDraft.of(from) ?? roster ?? noPicks
   );
   const [adding, setAdding] = useState(false);
+  // The addresses a search offered to add, and a fresh dialog for each such offer.
+  const [searched, setSearched] = useState("");
+  const [addKey, setAddKey] = useState(0);
   const [problem, setProblem] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const noTeam = t({
@@ -635,12 +687,23 @@ export const LeadsStep = ({ data, onward }: StepProps) => {
             }}
           />
         ) : (
-          <PeopleList noTeam={noTeam} onPicks={pick} picks={picks} />
+          <PeopleList
+            noTeam={noTeam}
+            onAddTyped={(text) => {
+              setSearched(text);
+              setAddKey(addKey + 1);
+              setAdding(true);
+            }}
+            onPicks={pick}
+            picks={picks}
+          />
         )}
         <WaitingNote waiting={waiting} />
       </div>
       <PeopleAdd
+        key={addKey}
         noTeam={noTeam}
+        text={searched}
         onAdd={(typed, to) => {
           try {
             change(withAdded(picks, typed, to).picks);

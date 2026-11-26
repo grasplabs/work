@@ -41,6 +41,11 @@ msgstr "{0, plural, one {# gevonden} other {# gevonden}}"
 msgid "{0, plural, one {# thing that was said in it goes with it.} other {# things that were said in it go with it.}}"
 msgstr "{0, plural, one {# ding dat erin gezegd is gaat mee.} other {# dingen die erin gezegd zijn gaan mee.}}"
 
+#. placeholder {0}: missing.length
+#: src/onboarding/leads-step.tsx
+msgid "{0, plural, one {Not on the list yet} other {# addresses not on the list yet}}"
+msgstr "{0, plural, one {Nog niet op de lijst} other {# adressen nog niet op de lijst}}"
+
 #. placeholder {0}: team.name
 #. placeholder {1}: formatList(ledBy)
 #: src/onboarding/leads-step.tsx
@@ -2314,6 +2319,7 @@ msgstr "Laten we toch nu beginnen"
 #: src/connections/http-connections.tsx
 #: src/drafts/share-access.tsx
 #: src/drafts/share-with-team.tsx
+#: src/onboarding/leads-step.tsx
 #: src/onboarding/people-add.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/directory-placement.tsx
@@ -2498,7 +2504,7 @@ msgstr "Connector toevoegen"
 
 #: src/onboarding/leads-step.tsx
 msgid "Add the people I’ll talk to, by email or with a staff list. Then mark who leads each team: I talk to the leads first."
-msgstr "Voeg de mensen toe met wie ik praat, per e-mail of met een personeelslijst. Geef dan aan wie elk team leidt: ik praat eerst met de leidinggevenden."
+msgstr "Voeg de mensen toe met wie ik praat, per e-mail of met een personeelslijst. Geef dan per team de teamleiders aan: hen spreek ik als eerste."
 
 #: src/workflows/workflow-triggers.tsx
 msgid "Add the trigger"
@@ -7245,7 +7251,7 @@ msgstr "Iedereen van Grasp wordt meteen afgemeld, en niemand van Grasp kan weer 
 
 #: src/onboarding/leads-step.tsx
 msgid "Everyone from your staff list is here. Untick who isn’t taking part, and mark who leads each team: I talk to the leads first."
-msgstr "Iedereen uit je personeelslijst staat hier. Vink uit wie niet meedoet, en geef aan wie elk team leidt: ik praat eerst met de leidinggevenden."
+msgstr "Iedereen uit je personeelslijst staat hier. Vink uit wie niet meedoet en geef per team de teamleiders aan—hen spreek ik als eerste."
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Everyone has a link of their own. It opens only once they sign in with your company's sign-in, at the address on the list. Links that are not out yet open on their day, or once their lead has talked."
@@ -8207,7 +8213,7 @@ msgstr "Goed om te weten welke tools jullie gebruiken—dat helpt al."
 
 #: src/onboarding/leads-step.tsx
 msgid "Good, I’ll start with the leads you selected."
-msgstr "Mooi, ik begin bij de leidinggevenden die je hebt aangegeven."
+msgstr "Mooi, ik begin bij de teamleiders die je hebt aangegeven."
 
 #: src/onboarding/sources-step.tsx
 msgid "Good, let’s connect it."
@@ -12584,11 +12590,11 @@ msgstr "Nu"
 
 #: src/onboarding/leads-step.tsx
 msgid "Now for the people I’ll be talking to. Everyone from your staff list is already here. Untick anyone who shouldn’t take part, and mark who leads each team. I always start with the leads, so they hear about this before their team does. Someone missing? Add them by email."
-msgstr "Dan nu de mensen met wie ik ga praten. Iedereen uit je personeelslijst staat er al. Vink uit wie niet mee moet doen, en geef aan wie elk team leidt. Ik begin altijd bij de leidinggevenden, zodat zij het eerder horen dan hun team. Mist er iemand? Voeg diegene toe met een e-mailadres."
+msgstr "Dan nu de mensen met wie ik ga praten. Iedereen uit je personeelslijst staat er al. Vink uit wie niet mee moet doen en geef per team de teamleiders aan. Ik begin altijd bij de teamleiders, zodat zij het eerder horen dan hun team. Mist er iemand? Voeg diegene toe met een e-mailadres."
 
 #: src/onboarding/leads-step.tsx
 msgid "Now for the people I’ll be talking to. I don’t have anyone yet, so add them here by email, or drop in a staff list if you have one. Then mark who leads each team. I always start with the leads, so they hear about this before their team does."
-msgstr "Dan nu de mensen met wie ik ga praten. Ik heb nog niemand, dus voeg ze hier toe met hun e-mailadres, of zet er een personeelslijst in als je die hebt. Geef dan aan wie elk team leidt. Ik begin altijd bij de leidinggevenden, zodat zij het eerder horen dan hun team."
+msgstr "Dan nu de mensen met wie ik ga praten. Ik heb nog niemand, dus voeg ze hier toe met hun e-mailadres, of zet er een personeelslijst in als je die hebt. Geef dan per team de teamleiders aan. Ik begin altijd bij de teamleiders, zodat zij het eerder horen dan hun team."
 
 #: src/onboarding/leads-step.tsx
 msgid "Now let’s decide who I’ll be talking to. Everyone from {signIn} is already here—just untick anyone who shouldn’t be included, and mark each team’s leads, as many as it has. I always speak with leads first so they know what’s coming before their team does. Missing someone? Add them by email."
