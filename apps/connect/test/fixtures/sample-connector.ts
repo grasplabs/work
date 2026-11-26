@@ -127,7 +127,7 @@ export default defineConnector({
         subject: z.string().nullable(),
       }),
       readOnly: false,
-      reach: "own",
+      reach: "others",
       resource: "mailbox",
       routes: [
         {
@@ -219,9 +219,18 @@ export default defineConnector({
       reach: "own",
       routes: [
         { method: "GET", host: sampleHost, path: "/v1/probe/{case}" },
-        { method: "POST", host: sampleHost, path: "/v1/probe/{case}" },
         { method: "GET", host: sampleHost, path: "/v1/probe/{id}:peek" },
       ],
+      run: send,
+    }),
+    defineTool({
+      name: "probe.send",
+      description: "Sends any request it is given, as a write",
+      input: probeInput,
+      output: attemptSchema,
+      readOnly: false,
+      reach: "others",
+      routes: [{ method: "POST", host: sampleHost, path: "/v1/probe/{case}" }],
       run: send,
     }),
     defineTool({

@@ -256,10 +256,11 @@ export const addConnectorSchema = z.strictObject({
   /**
    * The server's own address: nothing but its origin and path, so no
    * query, fragment or credentials, not even empty ones. One that isn't a
-   * URL at all is `z.url`'s to refuse.
+   * URL at all is `z.url`'s to refuse. Plain HTTP only for a server
+   * reached through the company network, which connect checks.
    */
   url: z
-    .url({ protocol: /^https$/u })
+    .url({ protocol: /^https?$/u })
     .max(connectorUrlMaxLength)
     .refine((value) => {
       const parsed = URL.parse(value);
@@ -267,6 +268,14 @@ export const addConnectorSchema = z.strictObject({
         parsed === null || parsed.href === `${parsed.origin}${parsed.pathname}`
       );
     }),
+  /**
+   * Whether the server sits inside the company's own network, reached
+   * through the deployment's company network (GRA-2327): its URL's host
+   * and port are then the one address that route takes, plain HTTP is
+   * taken, its connections are shared ones only, and it signs in with a
+   * key in a header.
+   */
+  companyNetwork: z.boolean().optional(),
   /** The deployment's origin, from its config: its sign-in returns there. */
   origin: z.url(),
   auth: z.discriminatedUnion("kind", [
@@ -387,6 +396,15 @@ export const connectWithKeySchema = z.strictObject({
     .min(1)
     .max(apiKeyMaxLength)
     .regex(/^[\u0021-\u007E]+$/u, "Not an API key"),
+  /**
+   * For an app's shared connection to a system inside the company's own
+   * network: the one address its requests go to, through the
+   * deployment's company network, as an http or https origin with its
+   * port (`http://10.0.0.8:8080`). Sealed with the key, so another
+   * address takes the key again (GRA-2327). A connector made from a URL
+   * names its own (`AddConnector.companyNetwork`).
+   */
+  companyNetwork: z.string().max(connectorUrlMaxLength).optional(),
 });
 export type ConnectWithKey = z.input<typeof connectWithKeySchema>;
 
@@ -513,6 +531,11 @@ export interface ConnectionSummary {
   accountName: string | null;
   /** ISO 8601. */
   createdAt: string;
+  /**
+   * For a shared connection reached through the company network, the one
+   * address its requests go to, as an origin.
+   */
+  companyNetwork?: string;
   /**
    * How a Composio connection was made, and so which consent was given:
    * signing in (`managed`, {@link composioConsentText}) or with a key
@@ -1079,6 +1102,12 @@ export interface CatalogEntry {
   group: CatalogGroup;
   /** Whose sign-in app connecting it takes ({@link CatalogAuth}). */
   auth: CatalogAuth;
+  /**
+   * For a connector whose server sits inside the company's own network,
+   * the one address it is reached at through the company network, as an
+   * origin: only an admin connects it, as a shared connection.
+   */
+  companyNetwork?: string;
 }
 
 /**
@@ -2310,6 +2339,16 @@ export interface ConnectApi
     connectionId: string
   ) => Promise<Record<string, Exclude<ToolClass, "never">>>;
   /**
+   * The tools each connection to a connector in `connectionIds` (at most
+   * `connectionOwnersMax`) offers to ask for, by ID: those of its list as
+   * connect keeps it that the rules class, answered at once. A list gone
+   * stale or never read is read again after the answer, for the next ask.
+   * Any other connection, an inactive one or an unknown ID is left out.
+   */
+  offeredConnectorTools: (
+    connectionIds: readonly string[]
+  ) => Promise<Record<string, string[]>>;
+  /**
    * The suite accounts the person `userId` connected as their own,
    * disconnected ones too, as connect verified them (`PersonalAccount`):
    * what core counts them as a reader of where it copies who may read an
@@ -2457,6 +2496,18 @@ export interface ConnectApi
    * server is asked: `connectorContract` reads each as it is served now.
    */
   connectorContracts: (request: ConnectorContractsRequest) => Promise<string[]>;
+  /**
+   * The tools a call of connection `connectionId` may name, each with its
+   * description and schemas: a native connection's as its connector's
+   * manifest in this release has them; a connector's, in full for
+   * `actions` alone, as its server lists them now, else as connect keeps
+   * them, at once (a stale list is read again after). None for any other
+   * connection, or one that is gone; `connect.server_unavailable` when a
+   * connector's list can't be read for `actions`.
+   */
+  connectionTools: (
+    request: ConnectionToolsRequest
+  ) => Promise<ConnectionTool[]>;
   /**
    * Whether an action of a connection only reads, the input properties it
    * takes and the connection's provider (`ActionShape`), by the rules a
@@ -2669,6 +2720,8 @@ export const connectionErrors = defineErrorFamily({
     "That server takes only clients registered with it. Enter the client ID its vendor issued for Grasp.",
   "connection.connector_exists":
     "A connector for that server was already added.",
+  "connection.company_network_unavailable":
+    "This deployment can't reach your company's network, so nothing can be connected through it yet.",
 });
 
 /** Which App's held actions of which binding to drop. */
@@ -2721,6 +2774,38 @@ export const connectorContractsRequestSchema = z.strictObject({
 export type ConnectorContractsRequest = z.input<
   typeof connectorContractsRequestSchema
 >;
+
+/**
+ * The connection whose tools `connectionTools` lists, and the tools to
+ * describe in full, if only some.
+ */
+export const connectionToolsRequestSchema = z.strictObject({
+  connectionId: connectionIdSchema,
+  actions: z.array(permissionActionSchema).min(1).max(20).optional(),
+});
+export type ConnectionToolsRequest = z.input<
+  typeof connectionToolsRequestSchema
+>;
+
+/**
+ * One tool a call of a connection may name, as its connector or server
+ * describes it: what core's tool search ranks and describes to the chat's
+ * agent. Data only: a call is still checked as any other.
+ */
+export interface ConnectionTool {
+  /** The action a call names, exactly. */
+  name: string;
+  /** What it does, as its connector or server says; empty if it says nothing. */
+  description: string;
+  /**
+   * The JSON Schemas of its input and output, as JSON text. In full only
+   * when it was named (`ConnectionToolsRequest.actions`): a search reads
+   * the start of its description, its input's types alone and no output.
+   */
+  input: string;
+  /** Null for a search, or a tool that lists no output schema. */
+  output: string | null;
+}
 
 /** Which action of which connection `actionShape` describes. */
 export const actionShapeRequestSchema = z.strictObject({

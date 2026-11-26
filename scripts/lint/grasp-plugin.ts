@@ -33,6 +33,22 @@
  * or seen once is turned off for its files in vite.config.ts, each with
  * its reason; a stylesheet's own animations are for review.
  *
+ * no-unexplained-json: in a connector, `v.json()` lets any JSON value
+ * through, so the agent and Apps learn nothing of its shape (GRA-2330).
+ * It refuses a call of `json` on a `v` imported under any name, or read
+ * off a namespace import, unless a comment beside it says why the shape
+ * is free-form (a vendor's custom fields): on lines of its own, ending on
+ * the line right before the call, or before the property that holds it
+ * (outside an object, its statement) or one around it that starts on the
+ * same line. A comment after code on its line explains nothing: it would
+ * stand before whatever comes next, and no-inline-comments refuses it
+ * anyway. A comment with no words, or a tool's directive (`eslint`,
+ * `oxlint`, `@ts-`, `oxfmt-ignore`, `prettier-ignore`), is no such
+ * comment, but one may stand between the explanation and the code. What
+ * the OpenAPI generator writes (`tools.gen.ts`) is never linted: it
+ * writes `v.json()` only where the spec gives the value no shape `v` can
+ * hold.
+ *
  * icon-has-move: every Lucide icon the app imports moves in its own parts
  * when its control is pointed at (apps/web/src/icon-moves.css, the
  * `table` option, from the repository's root). It refuses an import of an
@@ -107,6 +123,13 @@ interface Node {
   accessibility?: string;
   importKind?: string;
   exportKind?: string;
+  loc?: Lines;
+}
+
+/** The lines a node, token or comment starts and ends on. */
+interface Lines {
+  start: { line: number };
+  end: { line: number };
 }
 
 interface Context {
@@ -533,6 +556,165 @@ const noUnboundedRpcTarget = {
   },
 };
 
+/** A token or a comment, as the source code gives it. */
+interface Token {
+  value: string;
+  loc: Lines;
+}
+
+interface Scope {
+  set: Map<string, { defs: { type: string; node: Node }[] }>;
+  upper: Scope | null;
+}
+
+interface JsonContext extends Context {
+  sourceCode: {
+    getScope: (node: Node) => Scope;
+    getCommentsBefore: (of: Node) => Token[];
+    getTokenBefore: (
+      of: Token,
+      options: { includeComments: true }
+    ) => Token | null;
+  };
+}
+
+/** A comment for a tool, which says nothing of a shape. */
+const toolDirective =
+  /^[\s*]*(?:(?:eslint|oxlint)\b|@ts-|oxfmt-ignore|prettier-ignore)/u;
+
+/** A comment with words in it: not only spaces and a doc comment's stars. */
+const hasWords = /[^\s*]/u;
+
+/** The statement lists, whose members are the statements a comment stands before. */
+const statementLists = new Set([
+  "Program",
+  "BlockStatement",
+  "StaticBlock",
+  "SwitchCase",
+]);
+
+/** Whether `node` is a property, a class's field or a statement, with the export that wraps it. */
+const isHolder = (node: Node): boolean =>
+  node.type === "Property" ||
+  node.type === "PropertyDefinition" ||
+  statementLists.has(node.parent?.type ?? "");
+
+/**
+ * What a comment explaining `call` may stand before: the call, the nearest
+ * property or statement that holds it, and those around that one which
+ * start on its line, up to the statement.
+ */
+const holdersOf = (call: Node): Node[] => {
+  const holders = [call];
+  let line: number | undefined;
+  for (let node = call.parent; node !== undefined; node = node.parent) {
+    if (!isHolder(node)) {
+      continue;
+    }
+    line ??= node.loc?.start.line;
+    if (node.loc?.start.line !== line) {
+      break;
+    }
+    holders.push(node);
+    if (statementLists.has(node.parent?.type ?? "")) {
+      break;
+    }
+  }
+  return holders;
+};
+
+/** The import specifier that binds `node`, an identifier, where one does. */
+const importOf = (
+  context: JsonContext,
+  node: Node | undefined
+): Node | undefined => {
+  if (node?.type !== "Identifier" || typeof node.name !== "string") {
+    return undefined;
+  }
+  for (
+    let scope: Scope | null = context.sourceCode.getScope(node);
+    scope !== null;
+    scope = scope.upper
+  ) {
+    const variable = scope.set.get(node.name);
+    if (variable !== undefined) {
+      const [definition] = variable.defs;
+      return definition?.type === "ImportBinding" ? definition.node : undefined;
+    }
+  }
+  return undefined;
+};
+
+/** Whether `node` is an imported `v`, by any name, or a namespace's `v`. */
+const isV = (context: JsonContext, node: Node | undefined): boolean => {
+  if (node?.type === "MemberExpression") {
+    return (
+      nameOf(node.property) === "v" &&
+      importOf(context, node.object)?.type === "ImportNamespaceSpecifier"
+    );
+  }
+  const specifier = importOf(context, node);
+  return (
+    specifier?.type === "ImportSpecifier" && nameOf(specifier.imported) === "v"
+  );
+};
+
+const noUnexplainedJson = {
+  meta: {
+    type: "problem",
+    docs: {
+      description:
+        "Type a connector's values with v, or say why one is free-form.",
+    },
+    messages: {
+      free: "v.json() takes any JSON value, so the agent and Apps learn nothing of its shape. Type it with v, or, where the vendor gives it no fixed shape (custom fields), say why in a comment on the line before its property.",
+    },
+    schema: [],
+  },
+  create: (context: JsonContext) => {
+    const { sourceCode } = context;
+    const explains = ({ value }: Token): boolean =>
+      hasWords.test(value) && !toolDirective.test(value);
+    // The comments right before `node`, each on lines of its own and
+    // ending on the line before the next, read back from `node` until one
+    // explains it.
+    const leads = (node: Node): boolean => {
+      let line = node.loc?.start.line;
+      for (const comment of sourceCode.getCommentsBefore(node).toReversed()) {
+        const before = sourceCode.getTokenBefore(comment, {
+          includeComments: true,
+        });
+        if (
+          comment.loc.end.line + 1 !== line ||
+          (before !== null && before.loc.end.line >= comment.loc.start.line)
+        ) {
+          return false;
+        }
+        if (explains(comment)) {
+          return true;
+        }
+        ({ line } = comment.loc.start);
+      }
+      return false;
+    };
+    return {
+      CallExpression: (node: Node): void => {
+        const { callee } = node;
+        if (
+          callee?.type !== "MemberExpression" ||
+          nameOf(callee.property) !== "json" ||
+          !isV(context, callee.object)
+        ) {
+          return;
+        }
+        if (!holdersOf(node).some(leads)) {
+          context.report({ node, messageId: "free" });
+        }
+      },
+    };
+  },
+};
+
 /** Whether `node` is infinity: `Infinity`, or `Number.POSITIVE_INFINITY`. */
 const isInfinity = (node: Node): boolean =>
   node.type === "MemberExpression"
@@ -855,5 +1037,6 @@ export default {
     "no-old-product-name": noOldProductName,
     "no-slow-motion": noSlowMotion,
     "icon-has-move": iconHasMove,
+    "no-unexplained-json": noUnexplainedJson,
   },
 };

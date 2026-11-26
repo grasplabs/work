@@ -20,10 +20,10 @@ import { recordEvents } from "./audit.ts";
 //
 // - A webhook reaching inside a network (SSRF): the URL is checked again
 //   here, whatever core checked (`webhookTargetOf`): `https:` only, no
-//   userinfo, no IP address, no private network name. Connect's fetch
-//   refuses a name that resolves to a private address
-//   (`global_fetch_strictly_public`), so a public name pointing inside
-//   gets nowhere either. A redirect is never followed: it is a failure,
+//   userinfo, no IP address, no private network name. Connect's outbound network
+//   refuses a name that resolves to a private address (Cloudflare's egress
+//   hosted, connect's public-only workerd network on-prem), so a public
+//   name pointing inside gets nowhere either. A redirect is never followed: it is a failure,
 //   so an allowed host can't send the delivery on to one that isn't.
 // - Core passing on anything but a delivery: the request is read whole
 //   (`webhookPostSchema`), and its headers are set here from its fields,

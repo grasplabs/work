@@ -65,7 +65,6 @@ export interface Api {
   post: Send;
   put: Send;
   patch: Send;
-  delete: Send;
 }
 
 const routeText = /^(?<method>[A-Z]+) (?<target>\S+)$/u;
@@ -304,7 +303,6 @@ export const apiFor = (
       post: send("POST"),
       put: send("PUT"),
       patch: send("PATCH"),
-      delete: send("DELETE"),
     },
     wrote: took,
   };
