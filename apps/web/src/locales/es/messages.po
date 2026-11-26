@@ -35,6 +35,11 @@ msgstr "{0, plural, one {# cosa que se dijo en ella se va con ella.} other {# co
 msgid "{0} actions"
 msgstr "{0} acciones"
 
+#. placeholder {0}: suiteNames[notConnected.suite]
+#: src/onboarding/company-step.tsx
+msgid "{0} didn't connect"
+msgstr "{0} no se ha conectado"
+
 #. placeholder {0}: countOn(allowed, ofThis)
 #. placeholder {1}: ofThis.length
 #: src/connections/permissions/action-list.tsx
@@ -4711,6 +4716,10 @@ msgstr "Elija un flujo de trabajo"
 msgid "Choose an app"
 msgstr "Elige una app"
 
+#: src/onboarding/sources-step.tsx
+msgid "Choose an app again"
+msgstr "Elegir otra vez una app"
+
 #: src/frame/ui-words.tsx
 msgid "Choose date"
 msgstr "Elige una fecha"
@@ -4832,6 +4841,7 @@ msgstr "Acantilados"
 #: src/frame/ui-words.tsx
 #: src/interview/destination.tsx
 #: src/onboarding/campaign/campaign-page.tsx
+#: src/onboarding/sources-step.tsx
 #: src/projects/project-chats.tsx
 #: src/settings/erasures.tsx
 #: src/shown-once.tsx
@@ -17736,6 +17746,10 @@ msgstr "La respuesta se cortó en el límite del modelo."
 msgid "The answer, and who gave it, are taken away for good. The question stays closed."
 msgstr "La respuesta, y quién la dio, se eliminan para siempre. La pregunta sigue cerrada."
 
+#: src/onboarding/sources-step.tsx
+msgid "The app didn't connect"
+msgstr "La app no se ha conectado"
+
 #: src/apps/resource-bindings.tsx
 msgid "The App has no permission to read the Brain. Grant one first."
 msgstr "La aplicación no tiene permiso para leer el Cerebro. Concede uno primero."
@@ -19204,6 +19218,7 @@ msgstr "Intentar"
 #: src/inbox/inbox-page.tsx
 #: src/interview-routes.tsx
 #: src/interview/destination.tsx
+#: src/onboarding/company-step.tsx
 #: src/onboarding/document-shelf.tsx
 #: src/settings/sign-in-settings.tsx
 msgid "Try again"
@@ -19540,6 +19555,10 @@ msgstr "Archivos subidos compartidos con un equipo o con todos, que solo un admi
 #: src/chat/connection-requests.tsx
 msgid "Use {name} in this chat"
 msgstr "Usar {name} en este chat"
+
+#: src/onboarding/company-step.tsx
+msgid "Use a staff list"
+msgstr "Usar una lista de personal"
 
 #: src/onboarding/company-step.tsx
 msgid "Use a staff list instead"

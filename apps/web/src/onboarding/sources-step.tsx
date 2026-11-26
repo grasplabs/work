@@ -26,6 +26,7 @@ import { loadFromCore } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { CalmStep } from "./calm-frame.tsx";
+import { ConnectionProblem } from "./connection-problem.tsx";
 import { useConnectionReturn } from "./connection-return.ts";
 import { ConnectorSearch } from "./connector-search.tsx";
 import { sourcesFor } from "./setup.ts";
@@ -135,8 +136,9 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
   const { t } = useLingui();
   const { choices, signIn, identity } = data;
   const { save, busy, failure } = useSaveChoices();
-  // An app's sign-in that came back without connecting.
+  // An app's sign-in that came back without connecting: said over the step, with the way on.
   const returned = useConnectionReturn();
+  const [returnClosed, setReturnClosed] = useState(false);
   const integrations = useIntegrations();
   const [connecting, setConnecting] = useState<Integration | null>(null);
   const [searching, setSearching] = useState(false);
@@ -358,7 +360,7 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
             </ItemContent>
           </Item>
         </ItemGrid>
-        <ErrorText>{failure ?? returned ?? undefined}</ErrorText>
+        <ErrorText>{failure}</ErrorText>
       </div>
       <ConnectorSearch
         integrations={integrations}
@@ -376,6 +378,20 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
         }}
         open={searching}
         placeholder={t`Search apps, for example Dropbox`}
+      />
+      <ConnectionProblem
+        message={returnClosed ? null : returned}
+        onClose={() => {
+          setReturnClosed(true);
+        }}
+        other={t`Close`}
+        retry={{
+          label: t`Choose an app again`,
+          run: () => {
+            setSearching(true);
+          },
+        }}
+        title={t`The app didn't connect`}
       />
       {connecting === null ? null : (
         <ConnectDialog
