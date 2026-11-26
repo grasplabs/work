@@ -2,6 +2,7 @@ import { v } from "@grasp-os/runtime/app";
 import type { ValueDescriptor } from "@grasp-os/runtime/app";
 import {
   hostSchema,
+  isNeverPath,
   isNeverTool,
   keyHeaderSchema,
   plainEndpointSchema,
@@ -752,9 +753,11 @@ const standard = (candidate: Candidate): string | undefined =>
 /**
  * Names each candidate: its standard action where one applies and no other
  * operation would take the same name, the vendor's operation name otherwise.
+ * Skips one whose name, or path under `base`, Grasp never runs.
  */
 const named = (
   candidates: readonly Candidate[],
+  base: string,
   skipped: SkippedOperation[]
 ): SpecOperation[] => {
   const counts = new Map<string, number>();
@@ -785,6 +788,13 @@ const named = (
       skipped.push({
         operation: candidate.label,
         reason: `Its tool, ${name}, is named for what Grasp never does.`,
+      });
+      continue;
+    }
+    if (isNeverPath(`${base}${candidate.operation.path}`)) {
+      skipped.push({
+        operation: candidate.label,
+        reason: "Its path names what Grasp never does.",
       });
       continue;
     }
@@ -908,7 +918,7 @@ export const readSpec = async (
       skipped.push({ operation: `${method} ${key}`, reason: error.message });
     }
   }
-  const tools = named(candidates, skipped);
+  const tools = named(candidates, base, skipped);
   return {
     sha256: await sha256(input),
     host,
