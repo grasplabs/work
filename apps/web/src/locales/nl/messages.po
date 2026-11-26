@@ -1749,8 +1749,8 @@ msgid "{waiting, plural, one {# open} other {# open}}"
 msgstr "{waiting, plural, one {# open} other {# open}}"
 
 #: src/onboarding/company-step.tsx
-msgid "{waiting, plural, one {# person new on your list gets a link once you confirm your organization.} other {# people new on your list get their links once you confirm your organization.}}"
-msgstr "{waiting, plural, one {# nieuwe persoon op je lijst krijgt een link zodra je je organisatie bevestigt.} other {# nieuwe mensen op je lijst krijgen hun link zodra je je organisatie bevestigt.}}"
+msgid "{waiting, plural, one {# person is new on your list. Their link goes out once you’ve chosen who takes part.} other {# people are new on your list. Their links go out once you’ve chosen who takes part.}}"
+msgstr "{waiting, plural, one {# persoon is nieuw op je lijst. De link gaat de deur uit zodra je hebt gekozen wie meedoet.} other {# mensen zijn nieuw op je lijst. De links gaan de deur uit zodra je hebt gekozen wie meedoet.}}"
 
 #: src/frame/app-sidebar.tsx
 msgid "{waiting, plural, one {# thing waiting} other {# things waiting}}"
