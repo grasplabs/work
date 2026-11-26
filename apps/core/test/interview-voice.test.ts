@@ -275,7 +275,7 @@ describe("an interview as a live voice session", { timeout: 60_000 }, () => {
         model: asked.includes('"llm":{"model":"mistral-small-latest"}'),
         voice: asked.includes('"voice_id":"voice_485"'),
         interrupts: asked.includes('"allow_interruptions":true'),
-        listens: asked.includes('"start_threshold":0.3'),
+        listens: asked.includes('"turn_detection":{}'),
         welcome: asked.includes("What do you do here, in a sentence or two?"),
         part: asked.includes('"name":"part"'),
       },

@@ -93,16 +93,13 @@ const passMs = 5 * 60 * 60_000;
 const passPurpose = "grasp-os onboarding voice session";
 
 /**
- * When Mistral hears someone start and stop talking, as the chance its
- * voice detection gives that they are talking: sent whole, never left to
- * the session, where talking over him went unheard in the Voice Lab. A
- * low start, so a few words over him stop him.
+ * When Mistral hears someone start and stop talking: its own detection, at
+ * its defaults. Once the thresholds were set here (a start of 0.3, below
+ * the end's 0.33), no session opened any more, most likely refused for
+ * them; how talking over him is heard is Mistral's until its docs say
+ * which values it takes.
  */
-const turnDetection = {
-  start_threshold: 0.3,
-  end_threshold: 0.33,
-  min_silence_ms: 500,
-} as const;
+const turnDetection = {} as const;
 
 /**
  * What Stephen says as the session connects, said for him so the first
