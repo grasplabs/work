@@ -516,6 +516,12 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     action: "brain.team_groups.arranged",
     text: msg`Arranged the company's groups of teams`,
   },
+  // No longer made (Settings › Brain is gone), but the trail keeps the
+  // admins' earlier saves, and says them in words.
+  {
+    action: "brain.team_groups.saved",
+    text: msg`Saved the company's groups of teams`,
+  },
   {
     action: "brain.work.more_voices_asked",
     text: msg`Asked Stephen to hear more people about a piece of work`,

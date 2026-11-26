@@ -15315,6 +15315,10 @@ msgstr "Saved just now"
 msgid "Saved on {date}"
 msgstr "Saved on {date}"
 
+#: src/activity/audit-words.ts
+msgid "Saved the company's groups of teams"
+msgstr "Saved the company's groups of teams"
+
 #: src/chat/saved-memory.tsx
 #: src/chat/thread.tsx
 msgid "Saved to memory"

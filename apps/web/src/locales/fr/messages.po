@@ -15315,6 +15315,10 @@ msgstr "Enregistré à l’instant"
 msgid "Saved on {date}"
 msgstr "Enregistré le {date}"
 
+#: src/activity/audit-words.ts
+msgid "Saved the company's groups of teams"
+msgstr "A enregistré les groupes d’équipes de l’entreprise"
+
 #: src/chat/saved-memory.tsx
 #: src/chat/thread.tsx
 msgid "Saved to memory"

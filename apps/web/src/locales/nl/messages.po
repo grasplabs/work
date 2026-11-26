@@ -15315,6 +15315,10 @@ msgstr "Zojuist opgeslagen"
 msgid "Saved on {date}"
 msgstr "Opgeslagen op {date}"
 
+#: src/activity/audit-words.ts
+msgid "Saved the company's groups of teams"
+msgstr "De teamgroepen van het bedrijf opgeslagen"
+
 #: src/chat/saved-memory.tsx
 #: src/chat/thread.tsx
 msgid "Saved to memory"
