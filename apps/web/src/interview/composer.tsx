@@ -3,7 +3,6 @@ import type { FactTag } from "@grasp-os/shared/interview-turn";
 import { Bubble, BubbleContent } from "@grasp-os/ui/components/bubble";
 import {
   PromptInput,
-  PromptInputBanner,
   PromptInputBody,
   PromptInputButton,
   PromptInputFooter,
@@ -26,6 +25,7 @@ import { useProgress, useSaveState } from "./kept.ts";
 import type { LoopState, Said } from "./loop.ts";
 import { Marked } from "./marked.tsx";
 import { micLevel, muteMic, useMicMuted } from "./mic.ts";
+import type { MicProblem } from "./mic.ts";
 
 // The box at the bottom (prototype `interview-view.tsx`, `Composer` and
 // `ChatBox`): Damsko's PromptInput, as in any chat. Enter sends,
@@ -120,7 +120,7 @@ const Spoken = ({
 export const Composer = ({
   placeholder,
   talking,
-  blocked,
+  micTrouble,
   doing,
   line,
   said,
@@ -131,8 +131,8 @@ export const Composer = ({
   placeholder: string;
   /** They chose to talk, not to type. */
   talking: boolean;
-  /** The browser refused the microphone: a line over the card says so. */
-  blocked: boolean;
+  /** Why there is no microphone while they type, if there isn't: the top bar says so. */
+  micTrouble: MicProblem | null;
   doing: LoopState["doing"];
   /** Which of his lines is on screen. */
   line: number;
@@ -197,12 +197,14 @@ export const Composer = ({
           setTyped(holdsWords(value));
         }}
       >
-        {blocked ? (
-          // One line, the banner's most compact honest form on a phone; "Talk" in the card asks again.
-          <PromptInputBanner variant="warning">
-            {t`Your browser blocked the microphone.`}
-          </PromptInputBanner>
-        ) : null}
+        {/* No microphone: said in the top bar, like every error here; "Talk" in the card asks again. */}
+        {micTrouble === null ? null : (
+          <TopError>
+            {micTrouble === "blocked"
+              ? t`Your browser blocked the microphone.`
+              : t`The microphone is not available here. Type your answer.`}
+          </TopError>
+        )}
         {spoken ? (
           <Spoken
             doing={doing}
