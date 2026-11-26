@@ -142,8 +142,8 @@ describe("the Voice Lab's session", () => {
       welcome: asked.includes("Was machen Sie hier, in ein oder zwei Sätzen?"),
       voice: asked.includes('"voice_id":"voice_485"'),
       interrupts: asked.includes('"allow_interruptions":true'),
-      // Talking over him is listened for at a set threshold, never left empty.
-      listens: asked.includes('"start_threshold":0.3'),
+      // Mistral's own turn detection, at its defaults: the session it opened.
+      listens: asked.includes('"turn_detection":{}'),
       // Nothing of what only core's own turns need.
       notes: asked.includes("What you write down"),
       keyInAnswer: JSON.stringify(session).includes("grasp-mistral-key"),
@@ -176,7 +176,7 @@ describe("the Voice Lab's session", () => {
       session: await open({ locale: "en" }),
       sent: mistral.sent.length,
     }).toStrictEqual({
-      session: { id: null, refused: "no_key" },
+      session: { id: null, refused: "no_key", status: null },
       sent: 0,
     });
   });
@@ -196,9 +196,11 @@ describe("the Voice Lab's session", () => {
     );
     mistral.status = status;
     mistral.answer = answer;
+    // What Mistral answered, by its status alone, for whoever looks into it.
     await expect(open({ locale: "en" })).resolves.toStrictEqual({
       id: null,
       refused: "not_opened",
+      status,
     });
   });
 

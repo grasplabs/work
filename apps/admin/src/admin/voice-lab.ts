@@ -56,18 +56,12 @@ const models = {
 } as const;
 
 /**
- * When Mistral hears someone start and stop talking, as the chance its
- * voice detection gives that they are talking. Sent whole, never left to
- * the session: with every field empty, talking over him was not heard on
- * the first try-out. Its realtime transcription's own defaults, but for
- * a lower start, so a few words over him stop him; the record the page
- * shows after each call (`recordOf`) says whether Mistral heard them.
+ * When Mistral hears someone start and stop talking: its own detection, at
+ * its defaults. A session that set the thresholds itself (a start of 0.3,
+ * below the end's 0.33) was not opened at all; how talking over him is
+ * heard is Mistral's until its docs say which values it takes.
  */
-const turnDetection = {
-  start_threshold: 0.3,
-  end_threshold: 0.33,
-  min_silence_ms: 500,
-} as const;
+const turnDetection = {} as const;
 
 /** Stephen's voice, by its Mistral ID, as core says his lines (apps/core/src/platform-ai.ts). */
 const voice = "voice_485";
@@ -144,7 +138,12 @@ export type VoiceLabSession =
       expiresAt: string;
       refused: null;
     }
-  | { id: null; refused: VoiceLabRefusal };
+  | {
+      id: null;
+      refused: VoiceLabRefusal;
+      /** What Mistral answered, by its HTTP status alone; null when it wasn't asked or didn't answer. */
+      status: number | null;
+    };
 
 const openedSchema = z.object({
   id: voiceSessionIdSchema,
@@ -163,9 +162,13 @@ export const sessionRequestOf = ({ locale }: VoiceLabInput) => ({
   turn: { allow_interruptions: true },
 });
 
-const refused = (reason: VoiceLabRefusal): VoiceLabSession => ({
+const refused = (
+  reason: VoiceLabRefusal,
+  status: number | null = null
+): VoiceLabSession => ({
   id: null,
   refused: reason,
+  status,
 });
 
 /** Grasp's Mistral key, or null when it isn't in Secrets Store. */
@@ -205,7 +208,7 @@ export const openVoiceSession = async (
     if (!opened.success) {
       // The status alone: Mistral's answer may repeat what it was sent.
       log.warn("admin.voice_lab_not_opened", { status: response.status });
-      return refused("not_opened");
+      return refused("not_opened", response.status);
     }
     return {
       id: opened.data.id,
