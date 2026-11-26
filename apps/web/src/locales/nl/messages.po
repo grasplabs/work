@@ -1085,6 +1085,10 @@ msgstr "{name} staat nog niet op de inlogpagina."
 msgid "{name} isn't ready yet"
 msgstr "{name} is nog niet klaar"
 
+#: src/onboarding/team-step.tsx
+msgid "{name} it is."
+msgstr "Dan wordt het {name}."
+
 #: src/onboarding/leads-step.tsx
 msgid "{name} leads the team"
 msgstr "{name} leidt het team"
@@ -3036,10 +3040,6 @@ msgstr "Een andere agent heeft deze naam."
 #: src/apps/draft-changes.tsx
 msgid "Another App"
 msgstr "Een andere App"
-
-#: src/onboarding/send-plan-form.tsx
-msgid "Another day"
-msgstr "Een andere dag"
 
 #: src/pages/page-frame.tsx
 msgid "Another link is waiting for an answer, or one was just turned down. Try again in a moment."
@@ -11435,10 +11435,6 @@ msgstr "Volgende stap"
 msgid "Next times"
 msgstr "Volgende keren"
 
-#: src/onboarding/team-step.tsx
-msgid "Next week, then."
-msgstr "Volgende week dan."
-
 #: src/onboarding/company-step.tsx
 msgid "Next, let’s bring in your company directory. Connect your {signIn} account so I can see who works where—that way I’ll know who to reach out to later."
 msgstr "Nu brengen we je organisatie in kaart. Koppel je {signIn}-account, zodat ik zie wie in welk team zit en ik straks weet met wie ik kan praten."
@@ -12717,6 +12713,10 @@ msgstr "Aan · voor iedereen met Grasp"
 #: src/onboarding/send-plan-form.tsx
 msgid "on {date} at {hour}"
 msgstr "op {date} om {hour}"
+
+#: src/onboarding/team-step.tsx
+msgid "On {named}, then."
+msgstr "Dan wordt het {named}."
 
 #: src/onboarding/plan-story.tsx
 msgid "On {start} at {at}, the team leads go first. They get a link for a short chat with me about their day, the tools they use, and where their time goes."
@@ -18084,10 +18084,6 @@ msgstr "De huidige versie declareert deze niet, dus ze bedienen niets tot een ve
 msgid "The data isn't JSON."
 msgstr "De gegevens zijn geen JSON."
 
-#: src/onboarding/team-step.tsx
-msgid "The day after, then."
-msgstr "Overmorgen dan."
-
 #: src/onboarding/send-plan-form.tsx
 msgid "The day the other teams get their links"
 msgstr "De dag waarop de andere teams hun links krijgen"
@@ -19131,6 +19127,10 @@ msgstr "Vandaag"
 msgid "Today {time}"
 msgstr "Vandaag {time}"
 
+#: src/onboarding/team-step.tsx
+msgid "Today it is."
+msgstr "Dan wordt het vandaag."
+
 #: src/agents/agent-templates.ts
 msgid "Today's calendar."
 msgstr "De agenda van vandaag."
@@ -19150,10 +19150,6 @@ msgstr "Verteld door het team dat het doet"
 #: src/workflows/workflow-rows.tsx
 msgid "Tomorrow {time}"
 msgstr "Morgen {time}"
-
-#: src/onboarding/team-step.tsx
-msgid "Tomorrow it is."
-msgstr "Morgen dus."
 
 #: src/interview/start.tsx
 msgid "Tomorrow morning"

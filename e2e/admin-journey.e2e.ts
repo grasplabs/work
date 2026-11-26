@@ -251,7 +251,7 @@ test("the admin signs in, gives the staff list, confirms and plans, and the link
   // Typed, the day counts once it is committed (Enter), as a person does:
   // day first, as the field shows.
   await page.getByRole("button", { name: "Other day" }).click();
-  const day = page.getByLabel("Another day");
+  const day = page.locator('input[aria-label="Other day"]');
   const today = await pageToday(page);
   await day.fill(typed(today));
   await day.press("Enter");

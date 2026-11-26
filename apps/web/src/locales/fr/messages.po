@@ -1085,6 +1085,10 @@ msgstr "{name} n’est pas encore sur la page de connexion."
 msgid "{name} isn't ready yet"
 msgstr "{name} n’est pas encore prêt"
 
+#: src/onboarding/team-step.tsx
+msgid "{name} it is."
+msgstr "Va pour {name}."
+
 #: src/onboarding/leads-step.tsx
 msgid "{name} leads the team"
 msgstr "{name} dirige l’équipe"
@@ -3036,10 +3040,6 @@ msgstr "Un autre agent porte ce nom."
 #: src/apps/draft-changes.tsx
 msgid "Another App"
 msgstr "Une autre App"
-
-#: src/onboarding/send-plan-form.tsx
-msgid "Another day"
-msgstr "Un autre jour"
 
 #: src/pages/page-frame.tsx
 msgid "Another link is waiting for an answer, or one was just turned down. Try again in a moment."
@@ -11435,10 +11435,6 @@ msgstr "Prochaine étape"
 msgid "Next times"
 msgstr "Prochaines exécutions"
 
-#: src/onboarding/team-step.tsx
-msgid "Next week, then."
-msgstr "La semaine prochaine, alors."
-
 #: src/onboarding/company-step.tsx
 msgid "Next, let’s bring in your company directory. Connect your {signIn} account so I can see who works where—that way I’ll know who to reach out to later."
 msgstr "Ensuite, importons l’annuaire de votre entreprise. Connectez votre compte {signIn} pour que je voie qui travaille dans quelle équipe, afin de savoir qui contacter ensuite."
@@ -12717,6 +12713,10 @@ msgstr "Activé · pour tous ceux qui ont Grasp"
 #: src/onboarding/send-plan-form.tsx
 msgid "on {date} at {hour}"
 msgstr "le {date} à {hour}"
+
+#: src/onboarding/team-step.tsx
+msgid "On {named}, then."
+msgstr "Va pour le {named}."
 
 #: src/onboarding/plan-story.tsx
 msgid "On {start} at {at}, the team leads go first. They get a link for a short chat with me about their day, the tools they use, and where their time goes."
@@ -18084,10 +18084,6 @@ msgstr "La version actuelle ne les déclare pas : elles ne servent rien tant qu'
 msgid "The data isn't JSON."
 msgstr "Les données ne sont pas du JSON."
 
-#: src/onboarding/team-step.tsx
-msgid "The day after, then."
-msgstr "Après-demain, alors."
-
 #: src/onboarding/send-plan-form.tsx
 msgid "The day the other teams get their links"
 msgstr "Le jour où les autres équipes reçoivent leurs liens"
@@ -19131,6 +19127,10 @@ msgstr "Aujourd’hui"
 msgid "Today {time}"
 msgstr "Aujourd'hui {time}"
 
+#: src/onboarding/team-step.tsx
+msgid "Today it is."
+msgstr "Va pour aujourd’hui."
+
 #: src/agents/agent-templates.ts
 msgid "Today's calendar."
 msgstr "L’agenda du jour."
@@ -19150,10 +19150,6 @@ msgstr "Raconté par l’équipe qui le fait"
 #: src/workflows/workflow-rows.tsx
 msgid "Tomorrow {time}"
 msgstr "Demain {time}"
-
-#: src/onboarding/team-step.tsx
-msgid "Tomorrow it is."
-msgstr "Ce sera demain."
 
 #: src/interview/start.tsx
 msgid "Tomorrow morning"
