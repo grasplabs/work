@@ -2085,10 +2085,6 @@ msgstr "A team without a lead gets its links on the first day, and I ask each pe
 msgid "A tick: yes or no"
 msgstr "A tick: yes or no"
 
-#: src/connections/connect-dialog.tsx
-msgid "A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's Read or Write to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
-msgstr "A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's Read or Write to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
-
 #: src/apps/field-kinds.tsx
 msgid "A type the App's code declares"
 msgstr "A type the App's code declares"
@@ -12630,6 +12626,10 @@ msgstr "Only {owner} so far."
 #: src/inbox/item-detail.tsx
 msgid "Only {person} can say whether it happened."
 msgstr "Only {person} can say whether it happened."
+
+#: src/connections/connect-dialog.tsx
+msgid "Only a tool Composio says only reads can be Read, and it starts as Read when switched on; any other tool is Write. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a Read tool's Read or Write to change it."
+msgstr "Only a tool Composio says only reads can be Read, and it starts as Read when switched on; any other tool is Write. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a Read tool's Read or Write to change it."
 
 #: src/settings/use-team-change.ts
 msgid "Only admins can change teams."

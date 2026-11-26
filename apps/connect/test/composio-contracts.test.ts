@@ -168,7 +168,22 @@ const tools: FakeTool[] = [
   },
 ];
 
-const composio = fakeComposioApi([], { mcpTools: tools });
+// Composio's catalog tags the tools allowed as reads below read-only: a
+// read stored for any other is a change (composio-tools.test.ts).
+const composio = fakeComposioApi(
+  [
+    {
+      slug: "hubspot",
+      name: "HubSpot",
+      tools: [
+        { slug: "HUBSPOT_LIST_CONTACTS", tags: ["readOnlyHint"] },
+        { slug: "HUBSPOT_SHADOWED", tags: ["readOnlyHint"] },
+        { slug: "HUBSPOT_CREATE_CONTACT" },
+      ],
+    },
+  ],
+  { mcpTools: tools }
+);
 
 /** The admin's allowlist: everything but `HUBSPOT_UPDATE_CONTACTS`. */
 const rules: (string | ComposioToolRule)[] = [

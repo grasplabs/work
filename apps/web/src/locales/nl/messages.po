@@ -2085,10 +2085,6 @@ msgstr "Een team zonder teamleider krijgt zijn links op de eerste dag, en ik vra
 msgid "A tick: yes or no"
 msgstr "Een vinkje: ja of nee"
 
-#: src/connections/connect-dialog.tsx
-msgid "A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's Read or Write to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
-msgstr "Een tool die je aanzet begint als Lezen waar Composio zegt dat hij alleen leest; Grasp controleert dat niet. Een tool met Lezen draait zonder te vragen. Een aanroep van een tool met Schrijven vanuit de chat, of door iemand die een app gebruikt, wacht tot die persoon hem bevestigt; een workflowrun voert hem uit als een van zijn stappen. Druk bij een tool op Lezen of Schrijven om dat te wijzigen. Zet een tool alleen op Lezen als hij niets wijzigt: staat hij er ten onrechte op, dan wijzigt hij dingen zonder te vragen."
-
 #: src/apps/field-kinds.tsx
 msgid "A type the App's code declares"
 msgstr "Een type dat de code van de App vastlegt"
@@ -12630,6 +12626,10 @@ msgstr "Tot nu toe alleen {owner}."
 #: src/inbox/item-detail.tsx
 msgid "Only {person} can say whether it happened."
 msgstr "Alleen {person} kan zeggen of het gebeurd is."
+
+#: src/connections/connect-dialog.tsx
+msgid "Only a tool Composio says only reads can be Read, and it starts as Read when switched on; any other tool is Write. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a Read tool's Read or Write to change it."
+msgstr "Alleen een tool waarvan Composio zegt dat die alleen leest kan Lezen zijn, en die begint als Lezen wanneer je hem aanzet; elke andere tool is Schrijven. Een Lezen-tool draait zonder te vragen. Een aanroep van een Schrijven-tool vanuit een chat, of door iemand die een App gebruikt, wacht tot die persoon hem bevestigt; een run van een workflow voert hem uit als een van zijn stappen. Druk op Lezen of Schrijven van een Lezen-tool om het te wijzigen."
 
 #: src/settings/use-team-change.ts
 msgid "Only admins can change teams."

@@ -4,7 +4,7 @@ import type {
   ConnectorContractAction,
 } from "@grasp-os/shared/connect";
 
-import { allowedTool, composioServer } from "./connections.ts";
+import { allowedTool, readOnlyNow, composioServer } from "./connections.ts";
 import type { Connection } from "./connections.ts";
 import { McpError } from "./mcp.ts";
 import type { McpListedTool } from "./mcp.ts";
@@ -96,11 +96,12 @@ export const composioContract = async (
       : error;
   }
   const actions: Record<string, ConnectorContractAction> = {};
+  const taggedRead = await readOnlyNow(env, connection.provider);
   for (const { name, inputSchema, outputSchema } of listedOnce(listed)) {
     // The admin's word and the name first: nothing else of a tool that
     // can't be served is read.
     const rule = actionNamePattern.test(name)
-      ? allowedTool(connection, name)
+      ? allowedTool(connection, name, taggedRead)
       : undefined;
     const input =
       rule === undefined || inputSchema === undefined

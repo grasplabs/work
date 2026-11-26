@@ -73,9 +73,8 @@ const listed = [
 ];
 
 /**
- * Both marked as reads by the admin. Under the toolkit `mail_own`,
- * connect's review classes the search a read of the connected account's
- * own things and `mail.others` a read of others' things.
+ * Both marked as reads by the admin, and tagged read-only by Composio
+ * (test/composio-api.ts): each a read of what the connection holds.
  */
 const allowed = [
   { name: "mail.search", read: true },

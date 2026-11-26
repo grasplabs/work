@@ -32,7 +32,7 @@ import {
   composioContract,
   composioContractPrefix,
 } from "./composio-contracts.ts";
-import { allowedTool } from "./connections.ts";
+import { allowedToolNow } from "./connections.ts";
 import type { Connection } from "./connections.ts";
 import { connections } from "./db/schema.ts";
 import {
@@ -372,7 +372,7 @@ const composioActionShape = async (
   action: string
 ): Promise<ActionShape> => {
   const { provider } = connection;
-  const rule = allowedTool(connection, action);
+  const rule = await allowedToolNow(env, connection, action);
   if (rule === undefined) {
     throw connectErrors.create("connect.action_not_found");
   }

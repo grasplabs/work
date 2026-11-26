@@ -2,7 +2,7 @@ import type { CapabilityClaims } from "@grasp-os/shared/capability";
 import { connectErrors } from "@grasp-os/shared/connect";
 import type { Json } from "@grasp-os/shared/json";
 
-import { allowedTool } from "./connections.ts";
+import { allowedEntry } from "./connections.ts";
 import type { Connection } from "./connections.ts";
 
 // Where in a company app a chat's agent reads (GRA-725): an admin points
@@ -36,7 +36,9 @@ export const requirePointedResource = (
   ) {
     return;
   }
-  const rule = allowedTool(connection, action);
+  // As the admin allowed it: one stored as a read is held to its
+  // pointers whatever Composio tags now, the stricter way.
+  const rule = allowedEntry(connection, action);
   if (rule === undefined || !rule.read) {
     return;
   }

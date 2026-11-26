@@ -4,6 +4,7 @@ import type { ComposioToolRule } from "@grasp-os/shared/connect";
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { forgetComposioCatalog } from "../src/catalog.ts";
 import { fakeComposioApi } from "./composio-api.ts";
 import {
   addConnection,
@@ -21,10 +22,11 @@ import type { Call } from "./connect.ts";
 // which of its tools only read, and which input property names the one
 // resource a call acts on. Connect goes by it, never by what Composio's
 // server declares about its own tools: a tool is a read only if the admin
-// said so, and held to one resource only by the property the admin named.
-// The ways that could fail come first: a server declaring a write
-// read-only, or naming a resource property of its own; an admin's rule
-// naming a property the tool doesn't take.
+// said so and Composio's catalog tags it read-only, and held to one
+// resource only by the property the admin named. The ways that could fail
+// come first: a server declaring a write read-only, or naming a resource
+// property of its own; a read stored for a tool the catalog doesn't tag;
+// an admin's rule naming a property the tool doesn't take.
 
 /** Tools the fake classes, that Grasp never runs by their names. */
 const neverTools = [
@@ -43,14 +45,22 @@ const composio = fakeComposioApi(
       slug: "hubspot",
       name: "HubSpot",
       tools: [
-        { slug: "HUBSPOT_LIST_CONTACTS", inputs: ["owner_id", "limit"] },
+        {
+          slug: "HUBSPOT_LIST_CONTACTS",
+          inputs: ["owner_id", "limit"],
+          tags: ["readOnlyHint"],
+        },
         {
           slug: "HUBSPOT_GET_CONTACT",
           inputs: ["contact_id"],
-          // Composio says it only reads; the list above, it says nothing of.
           tags: ["readOnlyHint"],
         },
         { slug: "HUBSPOT_CREATE_CONTACT", inputs: ["owner_id", "email"] },
+        {
+          slug: "HUBSPOT_LIST_SHAREHOLDERS",
+          inputs: ["owner_id"],
+          tags: ["readOnlyHint"],
+        },
       ],
     },
     // A toolkit no list of Grasp's names: every tool as Composio serves it.
@@ -236,6 +246,44 @@ describe("a Composio toolkit no list of Grasp's names, such as Attio", () => {
   });
 });
 
+describe("a Composio tool stored as a read", () => {
+  it("runs as a read only while Composio tags it read-only: one it doesn't, or a catalog connect can't read, holds it as a change", async () => {
+    const connectionId = await addConnection({
+      provider: "attio",
+      server: `https://backend.composio.dev/v3/mcp/${crypto.randomUUID()}?connected_account_id=ca_attio`,
+      // As a list stored before the connect form refused an untagged read.
+      tools: JSON.stringify([
+        { name: "ATTIO_SEARCH_RECORDS", read: true },
+        { name: "ATTIO_ASSERT_COMPANY", read: true },
+      ]),
+    });
+    const anna = someone();
+    const inChat = agentFor(anna.userId, "agent-chat", "interactive");
+    const ask = async (action: string) => {
+      const answer = await callAs(
+        inChat,
+        {
+          ...read(connectionId, action, { query: "Acme", name: "Acme" }),
+          idempotencyKey: crypto.randomUUID(),
+        },
+        { origin: chatOrigin }
+      );
+      return answer.pending === undefined ? "ran" : "held";
+    };
+    const tagged = await ask("ATTIO_SEARCH_RECORDS");
+    const untagged = await ask("ATTIO_ASSERT_COMPANY");
+    // A new isolate, its catalog not read yet, while Composio is down.
+    forgetComposioCatalog();
+    composio.state.health = "down";
+    const unread = await ask("ATTIO_SEARCH_RECORDS");
+    expect({ tagged, untagged, unread }).toStrictEqual({
+      tagged: "ran",
+      untagged: "held",
+      unread: "held",
+    });
+  });
+});
+
 describe("a chat agent's read in a company app pointed at within some resources", () => {
   it("runs on those resources alone, while changes aren't bound by them", async () => {
     const connectionId = await hubspot();
@@ -297,7 +345,7 @@ describe("a chat agent's read in a company app pointed at within some resources"
 });
 
 describe("a Composio tool Grasp never runs", () => {
-  it("is refused, neither offered nor run, even when the admin allowed it by name and a review classed it", async () => {
+  it("is refused, neither offered nor run, even when the admin allowed it by name", async () => {
     const connectionId = await addConnection({
       provider: "hubspot",
       server: `https://backend.composio.dev/v3/mcp/${crypto.randomUUID()}?connected_account_id=ca_1`,
@@ -647,7 +695,7 @@ const start = async (
   });
 
 describe("the admin's allowlist, when they connect", () => {
-  it("is kept with the flow, rules and all, and the log names each tool that runs unheld, and whether Composio said it only reads", async () => {
+  it("is kept with the flow, rules and all, and the log names each tool that runs unheld", async () => {
     const admin = someone("admin");
     const allowed = [
       { name: "HUBSPOT_LIST_CONTACTS", read: true },
@@ -669,20 +717,17 @@ describe("the admin's allowlist, when they connect", () => {
         action,
         toolCount: detail.toolCount,
         readCount: detail.readCount,
-        unhintedReadCount: detail.unhintedReadCount,
       }));
     expect(counted).toStrictEqual([
       {
         action: "connection.consent",
         toolCount: 3,
         readCount: 2,
-        unhintedReadCount: 1,
       },
       {
         action: "connection.connect",
         toolCount: 3,
         readCount: 2,
-        unhintedReadCount: undefined,
       },
     ]);
     const consent = recorded.find(
@@ -692,20 +737,18 @@ describe("the admin's allowlist, when they connect", () => {
       recorded
         .filter(({ action }) => action === "connection.consent.read_tools")
         .map(({ actor, detail }) => ({ actor, detail }))
-    ).toStrictEqual(
-      [
-        { hinted: false, part: 1, names1: "HUBSPOT_LIST_CONTACTS" },
-        { hinted: true, part: 1, names1: "HUBSPOT_GET_CONTACT" },
-      ].map((names) => ({
+    ).toStrictEqual([
+      {
         actor: consent?.actor,
         detail: {
           provider: "hubspot",
           scope: "shared",
           flowId: consent?.detail.flowId,
-          ...names,
+          part: 1,
+          names1: "HUBSPOT_LIST_CONTACTS,HUBSPOT_GET_CONTACT",
         },
-      }))
-    );
+      },
+    ]);
     expect(consent?.detail).not.toHaveProperty("unnamedReadCount");
   });
 

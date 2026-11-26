@@ -35,7 +35,7 @@ import { requirePointedResource } from "./app-pointers.ts";
 import { changeOf } from "./changes.ts";
 import type { CallChange } from "./changes.ts";
 import {
-  allowedTool,
+  allowedToolNow,
   composioServer,
   usableConnection,
 } from "./connections.ts";
@@ -393,9 +393,9 @@ const actionFor = async (
       openLookup: open,
     };
   }
-  // Only a tool the admin allowed, asked for before anything goes out,
-  // and taken to be what the admin said.
-  const rule = allowedTool(connection, action);
+  // Only a tool the admin allowed, asked for before anything goes out:
+  // a read only if Composio tags it read-only now too.
+  const rule = await allowedToolNow(env, connection, action);
   if (rule === undefined) {
     throw connectErrors.create("connect.action_not_found");
   }

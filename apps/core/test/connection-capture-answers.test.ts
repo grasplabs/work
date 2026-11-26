@@ -90,9 +90,9 @@ const allowed = [
 ];
 
 /**
- * `person`'s own connection to the toolkit `provider` (`mail_own`: its
- * reads reach their own mail, as connect's review classes them; `mail`:
- * the company's), its server listing `listed`.
+ * `person`'s own connection to the toolkit `provider` (`mail_own` or
+ * `mail`), its server listing `listed`: being their own, its reads are
+ * reads of their own things.
  */
 const ownToolkit = async (
   person: Person,
