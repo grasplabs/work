@@ -82,6 +82,20 @@ const changed = (watch: Watch, state: FollowedChat): void => {
 };
 
 /**
+ * The person read chat `chatId` up to message `id` (`markRead`, from any
+ * view of it): the tab's watch of it says so from now on, so another view
+ * of it opened after (the dock after the page) draws no New line over what
+ * was read meanwhile.
+ */
+export const readTo = (chatId: string, id: number): void => {
+  const watch = watches.get(chatId);
+  const { view } = watch?.state ?? notStarted;
+  if (watch !== undefined && view.loaded && (view.seenUpTo ?? 0) < id) {
+    changed(watch, { ...watch.state, view: { ...view, seenUpTo: id } });
+  }
+};
+
+/**
  * One subscribe function per chat (and connection), so React keeps its
  * subscription from render to render rather than letting go and taking it
  * again; let go of with the watch.
