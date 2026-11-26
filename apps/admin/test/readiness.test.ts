@@ -79,6 +79,7 @@ describe("Platform's Readiness", () => {
         secrets: "ready",
         // No account of Grasp's on the fake: the token reaches nothing.
         deployer: "blocked",
+        composio: "ready",
       },
       blocking: 2,
       release:
@@ -155,6 +156,26 @@ describe("Platform's Readiness", () => {
         "The deployer's token can't reach"
       ),
     }).toStrictEqual({ deployer: "blocked", deployerWords: true });
+  });
+
+  it("names a Composio key Composio refuses its MCP servers, what it needs and where to set it, and asks with the shared key alone", async () => {
+    cloudflare.composio.mcp = "forbidden";
+
+    const read = await withVars(production, readiness);
+
+    expect({
+      composio: statuses(read).composio,
+      words: wordsOf(read, "composio"),
+      keys: cloudflare.composio.keys,
+      // An optional feature: onboarding isn't held by it.
+      blocking: read.checks.find(({ id }) => id === "composio")?.required,
+    }).toStrictEqual({
+      composio: "blocked",
+      words:
+        "Composio refuses this key its MCP servers (403), so every Composio connection fails at server:http_403. In Composio's dashboard, give the project a default API key, or a scoped one with MCP (Legacy), Auth configs and Connected accounts each Read and write and Toolkits and Tools Read only, put it in the stage's 1Password Environment as COMPOSIO_API_KEY, then run Deploy platform and redeploy the organizations, so their connect gets it.",
+      keys: ["composio-key"],
+      blocking: false,
+    });
   });
 
   it("reads only for staff", async () => {

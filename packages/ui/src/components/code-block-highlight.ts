@@ -2,27 +2,27 @@
 // WebAssembly, with no regular expressions, so a lexer reads a line in time that grows with the
 // line and nothing else (3,000 lines of TypeScript in about a millisecond; a string of 50,000
 // characters with no end, which held Prism for seconds, in less than one). It reads on the page.
-// Its module loads the first time a block is drawn, never with the page; where WebAssembly is
-// refused (a Content Security Policy without 'wasm-unsafe-eval', a browser without it) or the
-// module does not load, every block stays plain, and nothing is said.
+//
+// What loads, and when: never anything with the page. The first time a block in a coloured
+// language is drawn, the package's core and its emitter (22 KB gzipped) and that language's lexer
+// (2 to 11 KB); then each other language's lexer the first time a block in it is drawn. Each is a
+// script of its own with its WebAssembly inside. Until then the code is plain; where
+// WebAssembly is refused (a Content Security Policy without 'wasm-unsafe-eval', a browser without
+// it), or the core or a lexer does not load, those blocks stay plain, and nothing is said.
 //
 // It gives each run of code the name of what it is (`keyword-import`, `string`), as a CSS variable
 // of a theme that has no colours of its own (`cssVariables: true`); those names are turned here
 // into Damsko's syntax colours, and the page draws them as text in spans, never as HTML.
-//
-// 0.5.2 is one module with every language, 161 KB compressed. From 0.6.0 (allowed by the 3-day rule
-// from 2026-11-29), load `@pierre/highlights/core` and each language from `langs/*` on demand: a
-// change in this file alone.
-import type * as Highlights from "@pierre/highlights";
+import type * as Highlights from "@pierre/highlights/core";
 
 import { ownValue } from "../lib/utils";
-
-type Engine = typeof Highlights;
+import { lexers } from "./code-block-lexers";
+import type { Lexer } from "./code-block-lexers";
 
 /**
  * The languages a block names, by the names people write: the name shown over the code, the
- * lexer's name for it, and the extension its file is saved with. Any other language the lexers know
- * is coloured too, named as it is written and saved as `.txt`.
+ * lexer's name for it, and the extension its file is saved with. Any other language a lexer reads
+ * (code-block-lexers.ts) is coloured too, named as it is written and saved as `.txt`.
  */
 export const languages: Record<
   string,
@@ -185,19 +185,6 @@ const theme: Highlights.Theme = {
   cssVariables: true,
 };
 
-// The lexers' names for plain text, and for a terminal's output, whose escapes they take out of
-// the text: neither is coloured.
-const uncoloured = new Set(["plain", "plaintext", "text", "txt", "ansi"]);
-
-/** The lexer's name for a block's language; none for plain text and a language it does not know. */
-const langOf = (engine: Engine, language: string) => {
-  const key = language.toLowerCase();
-  const lang = ownValue(languages, key)?.lang ?? key;
-  return !uncoloured.has(lang) && engine.isSupportedLanguage(lang)
-    ? lang
-    : null;
-};
-
 /** The lexer's runs for some lines, as lines of runs in Damsko's colours. */
 const linesOf = (lines: Highlights.ThemedToken[][]): Line[] =>
   lines.map((tokens) => {
@@ -251,11 +238,63 @@ export const plainLines = (code: string, most: number): string[] => {
   return lines.slice(0, most);
 };
 
+// The package's core, once asked for; each language's highlighter, by its lexer, as it loads.
+let core: Promise<typeof Highlights | null> | undefined;
+const loading = new Map<Lexer, Promise<void>>();
+let loaded: Engine = { highlighters: new Map() };
+const waiting = new Set<() => void>();
+
 /**
- * One block's reading of its code: while it is written, a stream that reads only what is new and
- * gives back each line a newline ends, with its own WebAssembly instance (none once it has given
- * up, past MOST_RUNS); once it is done, the lines of the code as read last, kept while the code is
- * the same, `whole` when they are all its lines.
+ * Loads the core, and with it the emitter every highlighter shares (a highlighter of no language
+ * compiles it), while the first lexer is still coming: null where either cannot load or
+ * WebAssembly is refused, which the page then reports once, and no lexer is tried.
+ */
+const loadCore = async () => {
+  try {
+    const found = await import("@pierre/highlights/core");
+    await found.createHighlighter({ langs: [], themes: [theme] });
+    return found;
+  } catch {
+    return null;
+  }
+};
+
+/** Loads a language's lexer and makes its highlighter, then tells every block waiting. */
+const loadOnce = async (lexer: Lexer) => {
+  let highlighter: Highlights.RegisteredHighlighter | null = null;
+  try {
+    core ??= loadCore();
+    const [found, { default: language }] = await Promise.all([core, lexer()]);
+    highlighter =
+      found === null
+        ? null
+        : await found.createHighlighter({ langs: [language], themes: [theme] });
+  } catch {
+    // The lexer did not load, or WebAssembly was refused it: this language stays plain.
+  }
+  loaded = {
+    highlighters: new Map(loaded.highlighters).set(lexer, highlighter),
+  };
+  for (const each of waiting) {
+    each();
+  }
+};
+
+/** Loads a language's lexer, once. */
+const load = async (lexer: Lexer) => {
+  let once = loading.get(lexer);
+  if (once === undefined) {
+    once = loadOnce(lexer);
+    loading.set(lexer, once);
+  }
+  await once;
+};
+
+/**
+ * One block's reading of its code: while it is written, the lines a newline has ended, coloured,
+ * and the text they were read from (none once past MOST_RUNS: it has given up); once it is done,
+ * the lines of the code as read last, kept while the code is the same, `whole` when they are all
+ * its lines.
  */
 export interface Reading {
   stream: {
@@ -263,7 +302,6 @@ export interface Reading {
     fed: string;
     lines: Line[];
     runs: number;
-    tokenizer: Highlights.StreamTokenizer | null;
   } | null;
   done: {
     code: string;
@@ -275,17 +313,58 @@ export interface Reading {
 
 export const newReading = (): Reading => ({ stream: null, done: null });
 
-/** Lets the stream and its WebAssembly instance go; the next reading starts a new one. */
-export const stopReading = (reading: Reading) => {
-  reading.stream?.tokenizer?.dispose();
-  reading.stream = null;
+/**
+ * The lexers loaded so far, as a block reads them: each language's highlighter once its lexer has
+ * loaded, null where it cannot. A new object each time one loads, so a block that waits for one
+ * draws again.
+ */
+export interface Engine {
+  highlighters: ReadonlyMap<Lexer, Highlights.RegisteredHighlighter | null>;
+}
+
+/**
+ * The highlighter for a block's language and the lexer's name for it; null for a language that is
+ * not coloured, while its lexer loads (the first ask starts it) and where it cannot.
+ */
+const highlighterOf = (engine: Engine, language: string) => {
+  const key = language.toLowerCase();
+  const lang = ownValue(languages, key)?.lang ?? key;
+  const lexer = ownValue(lexers, lang);
+  if (lexer === undefined) {
+    return null;
+  }
+  if (!engine.highlighters.has(lexer)) {
+    void load(lexer);
+  }
+  const highlighter = engine.highlighters.get(lexer) ?? null;
+  return highlighter === null ? null : { highlighter, lang };
+};
+
+/** `code`'s lines as the lexer reads them, a last empty line from a trailing newline left out. */
+const readLines = (
+  highlighter: Highlights.RegisteredHighlighter,
+  lang: string,
+  code: string
+) => {
+  const { tokens } = highlighter.codeToTokens(code, {
+    lang,
+    theme,
+    tokenizeMaxLineLength: MOST_LINE,
+  });
+  if (tokens.length > 1 && tokens.at(-1)?.length === 0) {
+    tokens.pop();
+  }
+  return tokens;
 };
 
 /**
- * While `code` is written: its first `most` lines a newline has ended, coloured, read by the
- * stream from where it last stopped (a new stream when the code is not what it read and more, or
- * the language changed); null while they are past MOST_RUNS, or the language is not coloured. A
- * render that gives the same code again reads nothing.
+ * While `code` is written: its first `most` lines a newline has ended, coloured; null while they
+ * are past MOST_RUNS, its lexer has not loaded, or the language is not coloured. When a newline
+ * ends another line, the lines ended are read again and only the new ones made: the lexers never
+ * change a line once its newline has come, so each line already given stays the same object and
+ * is never drawn again. Reading again costs about a millisecond for 2,000 lines; the package's
+ * stream, which reads only what is new, needs its 400 KB module with every language. A render that
+ * gives the same code again reads nothing.
  */
 export const writtenLines = (
   reading: Reading,
@@ -294,9 +373,9 @@ export const writtenLines = (
   language: string,
   most: number
 ): Line[] | null => {
-  const lang = langOf(engine, language);
-  if (lang === null) {
-    stopReading(reading);
+  const found = highlighterOf(engine, language);
+  if (found === null) {
+    reading.stream = null;
     return null;
   }
   let { stream } = reading;
@@ -305,45 +384,31 @@ export const writtenLines = (
     stream.language !== language ||
     !code.startsWith(stream.fed)
   ) {
-    stopReading(reading);
-    stream = {
-      language,
-      fed: "",
-      lines: [],
-      runs: 0,
-      tokenizer: new engine.StreamTokenizer({
-        lang,
-        theme,
-        tokenizeMaxLineLength: MOST_LINE,
-      }),
-    };
+    stream = { language, fed: "", lines: [], runs: 0 };
     reading.stream = stream;
   }
-  if (stream.runs > MOST_RUNS) {
-    return null;
-  }
-  if (stream.tokenizer !== null && stream.lines.length < most) {
+  const ended = code.slice(0, code.lastIndexOf("\n") + 1);
+  if (
+    stream.runs <= MOST_RUNS &&
+    ended.length > stream.fed.length &&
+    stream.lines.length < most
+  ) {
     const more = linesOf(
-      stream.tokenizer.pushCode(code.slice(stream.fed.length))
+      readLines(found.highlighter, found.lang, firstLines(ended, most)).slice(
+        stream.lines.length
+      )
     );
-    stream.fed = code;
+    stream.fed = ended;
     stream.runs += colouredRuns(more);
     stream.lines = [...stream.lines, ...more];
-    if (stream.runs > MOST_RUNS) {
-      // Given up: plain until it is done, and nothing more read.
-      stream.tokenizer.dispose();
-      stream.tokenizer = null;
-      return null;
-    }
   }
-  return stream.lines.slice(0, most);
+  return stream.runs > MOST_RUNS ? null : stream.lines.slice(0, most);
 };
 
 /**
- * `code` done: its first `most` lines, coloured; null when it is not coloured. Read whole, unless
- * it was written in this block and is what the stream read and more: then the stream reads the
- * rest and ends, and each line it gave stays the same object, so no line already drawn is drawn
- * again.
+ * `code` done: its first `most` lines, coloured; null when it is not coloured or its lexer has not
+ * loaded. When it was written in this block and is what was read while it was written and more,
+ * each line read then stays the same object, so no line already drawn is drawn again.
  */
 export const doneLines = (
   reading: Reading,
@@ -361,78 +426,49 @@ export const doneLines = (
   ) {
     return most < done.lines.length ? done.lines.slice(0, most) : done.lines;
   }
-  const lang = langOf(engine, language);
-  if (lang === null) {
-    stopReading(reading);
+  const found = highlighterOf(engine, language);
+  if (found === null) {
     return null;
   }
-  let lines: Line[];
-  let whole = true;
-  if (
+  const read = firstLines(code, most);
+  const tokens = readLines(found.highlighter, found.lang, read);
+  const kept =
     stream !== null &&
-    stream.tokenizer !== null &&
+    stream.runs <= MOST_RUNS &&
     stream.language === language &&
     code.startsWith(stream.fed)
-  ) {
-    const { tokenizer } = stream;
-    lines = [
-      ...stream.lines,
-      ...linesOf(tokenizer.pushCode(code.slice(stream.fed.length))),
-      ...linesOf(tokenizer.end()),
-    ];
-  } else {
-    const read = firstLines(code, most);
-    whole = read.length === code.length;
-    lines = linesOf(
-      engine.codeToTokens(read, {
-        lang,
-        theme,
-        tokenizeMaxLineLength: MOST_LINE,
-      }).tokens
-    );
-  }
-  // A last empty line from a trailing newline is not a line of code.
-  if (lines.length > 1 && lines.at(-1)?.length === 0) {
-    lines.pop();
-  }
-  stopReading(reading);
+      ? stream.lines.slice(0, tokens.length)
+      : [];
+  const lines = [...kept, ...linesOf(tokens.slice(kept.length))];
+  reading.stream = null;
   // Every line read is kept, so Show more and Show less give the same objects.
-  reading.done = { code, language, lines, whole };
+  reading.done = { code, language, lines, whole: read.length === code.length };
   return most < lines.length ? lines.slice(0, most) : lines;
 };
 
-// The lexers, once loaded: undefined until then, null where they cannot load.
-let engine: Engine | null | undefined;
-let loading: Promise<void> | undefined;
-const waiting = new Set<() => void>();
-
-/** Loads the lexers, then tells every block waiting. */
-const load = async () => {
-  try {
-    engine = await import("@pierre/highlights");
-  } catch {
-    // Refused or not loaded: every block stays plain, and nothing is said.
-    engine = null;
-  }
-  for (const each of waiting) {
-    each();
-  }
-};
-
 /**
- * Hears when the lexers are loaded, or cannot be; the first to listen loads them. For
- * `useSyncExternalStore`, by a block as it is first drawn.
+ * Hears when a language's lexer has loaded, or cannot. For `useSyncExternalStore`, by a block as
+ * it is first drawn; a block reading its code asks for its language's lexer, and the first ask
+ * loads the core with it.
  */
 export const watchEngine = (heard: () => void) => {
   waiting.add(heard);
-  loading ??= load();
   return () => {
     waiting.delete(heard);
   };
 };
 
-/** The lexers, once loaded; null until then and where they cannot load. */
-export const currentEngine = (): Engine | null => engine ?? null;
+/** The lexers loaded so far. */
+export const currentEngine = (): Engine | null => loaded;
 
 /** Before the page is live there are no lexers: the code is drawn plain. */
 export const noEngine = (): Engine | null => null;
+
+/** Loads `language`'s lexer, for a reading outside the page (the unit tests). */
+export const loadLanguage = async (language: string) => {
+  const key = language.toLowerCase();
+  const lexer = ownValue(lexers, ownValue(languages, key)?.lang ?? key);
+  if (lexer !== undefined) {
+    await load(lexer);
+  }
+};

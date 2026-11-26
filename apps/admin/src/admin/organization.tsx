@@ -199,8 +199,10 @@ const useReadAgain = (): { busy: boolean; readAgain: () => void } => {
   // The router never throws for a load: one that fails shows where it would be.
   const read = async () => {
     setBusy(true);
+    // Its page and the section's own reads under it (the overview's AI
+    // status and history), so what failed is asked again too.
     await router.invalidate({
-      filter: (match) => match.routeId === "/organizations/$clientId",
+      filter: (match) => match.routeId.startsWith("/organizations/$clientId"),
     });
     setBusy(false);
   };

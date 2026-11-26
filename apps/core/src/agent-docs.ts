@@ -1,5 +1,5 @@
-import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { Type } from "@earendil-works/pi-ai";
+import { defineTool } from "@earendil-works/pi-durable";
+import { int, obj, opt, str } from "@earendil-works/pi-schema";
 import {
   docsMarkdownFile,
   docsPagesSchema,
@@ -12,6 +12,7 @@ import { z } from "zod";
 import guides from "#agent-docs";
 
 import { fileLines } from "./agent-tools.ts";
+import { resultLimits } from "./code-mode.ts";
 import { sharedPrefixEnd } from "./prompt-cache.ts";
 import { docsPath } from "./security-headers.ts";
 
@@ -174,17 +175,14 @@ const linesOf = async (
   }
 };
 
-const searchParameters = Type.Object(
-  {
-    query: Type.String({
-      minLength: 1,
-      maxLength: 200,
-      description:
-        "What to look for, in words or by name: `row rules`, `withIndex`, `useWorkflow`.",
-    }),
-  },
-  { additionalProperties: false }
-);
+const searchParameters = obj({
+  query: str({
+    minLength: 1,
+    maxLength: 200,
+    description:
+      "What to look for, in words or by name: `row rules`, `withIndex`, `useWorkflow`.",
+  }),
+});
 
 const searchInputSchema = z.strictObject({
   query: z.string().trim().min(1).max(200),
@@ -194,60 +192,56 @@ const searchInputSchema = z.strictObject({
  * Finds the docs' pages for a query, best first, as the docs' search
  * does, each with its lines that match.
  */
-export const searchDocs = (
-  assets: Fetcher
-): AgentTool<typeof searchParameters> => ({
-  name: "searchDocs",
-  label: "Search the docs",
-  description: `Searches Grasp's docs (the guides and the API reference) and answers with the best pages, at most ${maxHits}: each one's \`path\`, which \`readDocs\` reads, its title, what it covers, and its \`lines\` that match, each as \`line: text\`, so \`readDocs\` can read on from there with \`fromLine\`.`,
-  parameters: searchParameters,
-  prepareArguments: (args) => {
-    const input = searchInputSchema.safeParse(args);
-    if (!input.success) {
-      throw new Error(
-        "searchDocs takes one field, `query`: what to look for, at most 200 characters."
+export const searchDocs = (assets: Fetcher) =>
+  defineTool({
+    name: "searchDocs",
+    outputLimits: resultLimits,
+    description: `Searches Grasp's docs (the guides and the API reference) and answers with the best pages, at most ${maxHits}: each one's \`path\`, which \`readDocs\` reads, its title, what it covers, and its \`lines\` that match, each as \`line: text\`, so \`readDocs\` can read on from there with \`fromLine\`.`,
+    parameters: searchParameters,
+    prepareArguments: (args) => {
+      const input = searchInputSchema.safeParse(args);
+      if (!input.success) {
+        throw new Error(
+          "searchDocs takes one field, `query`: what to look for, at most 200 characters."
+        );
+      }
+      return input.data;
+    },
+    executionMode: "parallel",
+    execute: async ({ query }) => {
+      const index = await indexOf(await pagesOf(assets));
+      const { hits } = await search<typeof index, DocsPage>(index, {
+        term: query,
+        properties: ["title", "description", "content"],
+        boost: { title: 3, description: 2 },
+        limit: maxHits,
+      });
+      const found = await Promise.all(
+        hits.map(async ({ document: page }) => ({
+          path: page.route,
+          title: page.title,
+          excerpt: excerptOf(page),
+          lines: await linesOf(assets, page.route, query),
+        }))
       );
-    }
-    return input.data;
-  },
-  executionMode: "parallel",
-  execute: async (_toolCallId, { query }) => {
-    const index = await indexOf(await pagesOf(assets));
-    const { hits } = await search<typeof index, DocsPage>(index, {
-      term: query,
-      properties: ["title", "description", "content"],
-      boost: { title: 3, description: 2 },
-      limit: maxHits,
-    });
-    const found = await Promise.all(
-      hits.map(async ({ document: page }) => ({
-        path: page.route,
-        title: page.title,
-        excerpt: excerptOf(page),
-        lines: await linesOf(assets, page.route, query),
-      }))
-    );
-    const text =
-      found.length === 0
-        ? "No page of the docs matches. Try other words, or read the API reference's index (`/reference`)."
-        : JSON.stringify(found);
-    return { content: [{ type: "text", text }], details: undefined };
-  },
-});
+      const text =
+        found.length === 0
+          ? "No page of the docs matches. Try other words, or read the API reference's index (`/reference`)."
+          : JSON.stringify(found);
+      return { output: [{ type: "text" as const, text }] };
+    },
+  });
 
-const readParameters = Type.Object(
-  {
-    path: Type.String({
-      minLength: 1,
-      maxLength: 200,
-      description:
-        "The page, by its path in the docs or a link to it as the docs write it: `/reference/server`, `/guides/data`, `/docs/reference/server.md#query`.",
-    }),
-    fromLine: Type.Optional(Type.Integer({ minimum: 1 })),
-    toLine: Type.Optional(Type.Integer({ minimum: 1 })),
-  },
-  { additionalProperties: false }
-);
+const readParameters = obj({
+  path: str({
+    minLength: 1,
+    maxLength: 200,
+    description:
+      "The page, by its path in the docs or a link to it as the docs write it: `/reference/server`, `/guides/data`, `/docs/reference/server.md#query`.",
+  }),
+  fromLine: opt(int({ minimum: 1 })),
+  toLine: opt(int({ minimum: 1 })),
+});
 
 const readInputSchema = z.strictObject({
   path: z.string().min(1).max(200),
@@ -256,50 +250,48 @@ const readInputSchema = z.strictObject({
 });
 
 /** Reads one page of the docs, as its Markdown. */
-export const readDocs = (
-  assets: Fetcher
-): AgentTool<typeof readParameters> => ({
-  name: "readDocs",
-  label: "Read the docs",
-  description:
-    "Reads one page of Grasp's docs as Markdown: all of it, or the lines `fromLine` to `toLine` (from 1). A long page is cut, and then ends with a note of the lines shown and where to read on.",
-  parameters: readParameters,
-  prepareArguments: (args) => {
-    const input = readInputSchema.safeParse(args);
-    if (!input.success) {
-      throw new Error(
-        "readDocs takes `path`, a page's path in the docs, and optionally `fromLine` and `toLine`, whole numbers from 1."
-      );
-    }
-    return input.data;
-  },
-  executionMode: "parallel",
-  execute: async (_toolCallId, { path, fromLine, toLine }) => {
-    const pages = await pagesOf(assets);
-    // Only a page the docs list, by its own file: never another of core's
-    // static files.
-    const route = docsRoute(path);
-    const page = pages.find((listed) => listed.route === route);
-    if (page === undefined) {
-      throw new Error(
-        `No page ${path} in the docs. Their pages: ${pages
-          .map((listed) => listed.route)
-          .toSorted()
-          .join(", ")}.`
-      );
-    }
-    return {
-      content: [
-        {
-          type: "text",
-          text: fileLines(
-            await markdownOf(assets, page.route),
-            fromLine,
-            toLine
-          ),
-        },
-      ],
-      details: undefined,
-    };
-  },
-});
+export const readDocs = (assets: Fetcher) =>
+  defineTool({
+    name: "readDocs",
+    outputLimits: resultLimits,
+    description:
+      "Reads one page of Grasp's docs as Markdown: all of it, or the lines `fromLine` to `toLine` (from 1). A long page is cut, and then ends with a note of the lines shown and where to read on.",
+    parameters: readParameters,
+    prepareArguments: (args) => {
+      const input = readInputSchema.safeParse(args);
+      if (!input.success) {
+        throw new Error(
+          "readDocs takes `path`, a page's path in the docs, and optionally `fromLine` and `toLine`, whole numbers from 1."
+        );
+      }
+      return input.data;
+    },
+    executionMode: "parallel",
+    execute: async ({ path, fromLine, toLine }) => {
+      const pages = await pagesOf(assets);
+      // Only a page the docs list, by its own file: never another of core's
+      // static files.
+      const route = docsRoute(path);
+      const page = pages.find((listed) => listed.route === route);
+      if (page === undefined) {
+        throw new Error(
+          `No page ${path} in the docs. Their pages: ${pages
+            .map((listed) => listed.route)
+            .toSorted()
+            .join(", ")}.`
+        );
+      }
+      return {
+        output: [
+          {
+            type: "text" as const,
+            text: fileLines(
+              await markdownOf(assets, page.route),
+              fromLine,
+              toLine
+            ),
+          },
+        ],
+      };
+    },
+  });
