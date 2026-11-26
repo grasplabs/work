@@ -1,6 +1,9 @@
 import { oauthProviderSchema } from "@grasp-os/shared/connect-names";
 import { directorySuiteSchema } from "@grasp-os/shared/directory";
-import type { OnboardingDirectory } from "@grasp-os/shared/directory";
+import type {
+  OnboardingDirectory,
+  OnboardingDirectoryAccount,
+} from "@grasp-os/shared/directory";
 import type { OnboardingPlaces } from "@grasp-os/shared/document-places";
 import type {
   LinkToSend,
@@ -377,6 +380,8 @@ interface Loaded {
   /** The organization's name, as the message to the team is addressed; null when it has none. */
   company: string | null;
   directory: OnboardingDirectory | null;
+  /** Every account's directory connected for the roster, the company's own first. */
+  directoryAccounts: OnboardingDirectoryAccount[];
   places: OnboardingPlaces | null;
   /** What Grasp's AI has to call; null when core can't say. */
   ai: AiReadiness | null;
@@ -446,6 +451,7 @@ export const Route = createFileRoute("/setup")({
         choices,
         company,
         directory,
+        directoryAccounts,
         places,
         review,
         ai,
@@ -459,6 +465,7 @@ export const Route = createFileRoute("/setup")({
         session.onboarding.choices(),
         companyOf(async () => await session.organization.get()),
         session.onboarding.directory(),
+        session.onboarding.directoryAccounts(),
         session.onboarding.documentPlaces(),
         session.onboarding.review(),
         aiReadinessOf(session),
@@ -473,6 +480,7 @@ export const Route = createFileRoute("/setup")({
         choices,
         company,
         directory,
+        directoryAccounts,
         places,
         review,
         ai,

@@ -156,4 +156,81 @@ describe("the onboarding's directory", () => {
       tooMany: "directory.too_large",
     });
   });
+
+  it("lists each account connected for the roster, reads one by its connection, and pins another account's sign-in to that account alone", async () => {
+    const [lead] = [crypto.randomUUID()];
+    await directoryHolds([
+      user({ id: lead, displayName: "Daan Bakker", mail: "daan@acme.test" }),
+    ]);
+    const { admin, back } = await connectedDirectory(idp);
+    const member = await signedInApi(idp, "user");
+    const staff = await asStaff();
+    const accounts = await admin.api.onboarding.directoryAccounts();
+    const [own] = accounts;
+    const read =
+      own === undefined
+        ? undefined
+        : await admin.api.onboarding.readDirectoryAccount(own.id);
+    const otherTenant = crypto.randomUUID();
+    const other = await admin.api.onboarding.connectOtherDirectory(
+      "microsoft",
+      otherTenant,
+      companyStep
+    );
+    expect({
+      accounts: accounts.map(({ id, suite, own: isOwn, status }) => ({
+        back: id === back.searchParams.get("connection"),
+        suite,
+        own: isOwn,
+        status,
+      })),
+      read: read?.people.map(({ name }) => name),
+      // Only that account's sign-in page: its tenant in the path.
+      pinned: new URL(other.url).pathname.startsWith(`/${otherTenant}/`),
+      notADomain: await outcome(
+        admin.api.onboarding.connectOtherDirectory(
+          "microsoft",
+          "not a domain",
+          companyStep
+        )
+      ),
+      elsewhere: await outcome(
+        admin.api.onboarding.connectOtherDirectory(
+          "microsoft",
+          otherTenant,
+          "//evil.test/setup"
+        )
+      ),
+      unknownConnection: await outcome(
+        admin.api.onboarding.readDirectoryAccount(crypto.randomUUID())
+      ),
+      memberAccounts: await outcome(member.api.onboarding.directoryAccounts()),
+      memberRead: await outcome(
+        member.api.onboarding.readDirectoryAccount(own?.id ?? "")
+      ),
+      memberConnect: await outcome(
+        member.api.onboarding.connectOtherDirectory(
+          "microsoft",
+          otherTenant,
+          companyStep
+        )
+      ),
+      staffRead: await outcome(
+        staff.onboarding.readDirectoryAccount(own?.id ?? "")
+      ),
+    }).toStrictEqual({
+      accounts: [
+        { back: true, suite: "microsoft", own: true, status: "active" },
+      ],
+      read: ["Daan Bakker"],
+      pinned: true,
+      notADomain: "directory.invalid",
+      elsewhere: "connection.invalid",
+      unknownConnection: "directory.not_connected",
+      memberAccounts: "role.forbidden",
+      memberRead: "role.forbidden",
+      memberConnect: "role.forbidden",
+      staffRead: "role.forbidden",
+    });
+  });
 });
