@@ -263,6 +263,8 @@ const notSetUp = new Set(["model.not_allowed", "model.unconfigured"]);
  * rest may be.
  */
 const refusalOf = (code: string | undefined): TurnFailedError => {
+  // Which refusal it was is kept for whoever looks into it; the person is told only what to do.
+  log.warn("interview.model_refused", { code: code ?? "unknown" });
   if (code === "model.rate_limited") {
     return new TurnFailedError("Stephen is busy. Try again in a minute.", 429);
   }
