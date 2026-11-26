@@ -54,9 +54,9 @@
  * class names as text: a string, a template's own text or what it puts
  * in, an array's element, either branch of a condition, or a call's
  * argument or what it is called on (`cn("…")`, `["…"].join(" ")`), through
- * TypeScript's wrappers. Spaces alone name nothing (a `join(" ")`), and a class name
- * StyleX made (`stylex.props(…).className`) is no text, so both pass, as
- * does `{...stylex.props(…)}`.
+ * TypeScript's wrappers. Spaces alone name nothing (a `join(" ")`), and a
+ * class name StyleX made (`stylex.props(…).className`) is no text, so both
+ * pass, as does `{...stylex.props(…)}`.
  *
  * no-inline-styles: refuses an inline style object (`style={{ … }}`) and
  * a `style` the lint can't read as a fixed one, with the component
