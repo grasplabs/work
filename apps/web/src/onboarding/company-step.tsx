@@ -37,6 +37,7 @@ import { CompanyDots } from "./company-dots.tsx";
 import { namedOf, useCompanyConcept } from "./company-picture.ts";
 import type { CompanyConcept } from "./company-picture.ts";
 import { CompanyRows } from "./company-rows.tsx";
+import { ConnectionProblem } from "./connection-problem.tsx";
 import { useConnectionReturn } from "./connection-return.ts";
 import {
   csvRows,
@@ -386,6 +387,31 @@ const Pictured = ({
     <CompanyRows roster={roster} />
   );
 
+/** A directory sign-in that didn't connect, and why: one that came back refused (`useConnectionReturn`), or one the step couldn't start. */
+const useNotConnected = (suites: readonly DirectorySuite[]) => {
+  const returnedWhy = useConnectionReturn();
+  const [notConnected, setNotConnected] = useState<{
+    suite: DirectorySuite;
+    why: string;
+  } | null>(null);
+  const [returnSeen, setReturnSeen] = useState<string | null>(null);
+  const [suite] = suites;
+  if (
+    returnedWhy !== null &&
+    returnedWhy !== returnSeen &&
+    suite !== undefined
+  ) {
+    setReturnSeen(returnedWhy);
+    setNotConnected({ suite, why: returnedWhy });
+  }
+  const { t } = useLingui();
+  const title =
+    notConnected === null
+      ? ""
+      : t`${suiteNames[notConnected.suite]} didn't connect`;
+  return [notConnected, setNotConnected, title] as const;
+};
+
 export const CompanyStep = (props: StepProps) => {
   const { t } = useLingui();
   const core = useCore();
@@ -395,15 +421,16 @@ export const CompanyStep = (props: StepProps) => {
   const search: unknown = useSearch({ strict: false });
   const returned = returnedSchema.safeParse(search).success;
   const [reading, setReading] = useState<DirectorySuite | "list" | null>(null);
-  // A sign-in that came back without connecting says so here, as any other problem.
-  const returnedWhy = useConnectionReturn();
-  const [problem, setProblem] = useState<string | null>(returnedWhy);
+  const [problem, setProblem] = useState<string | null>(null);
   // Read on this visit, and from where.
   const [fresh, setFresh] = useState<DirectorySuite | "list" | null>(null);
   // Another list, once there is one: the upload shows again.
   const [another, setAnother] = useState(false);
   const { roster, waiting } = props.data.view;
   const { directory, suites } = props.data;
+  // A sign-in that didn't connect, back refused or not started: said over the step, with the way on.
+  const [notConnected, setNotConnected, notConnectedTitle] =
+    useNotConnected(suites);
   const people = roster?.people.length ?? 0;
   const teams = roster?.teams.length ?? 0;
   const noTeam = t({
@@ -456,9 +483,10 @@ export const CompanyStep = (props: StepProps) => {
     setProblem(null);
     const signIn = suiteNames[suite];
     if (!(await startDirectory(core, suite))) {
-      setProblem(
-        t`I could not reach ${signIn} just now. Try again in a moment, or use a staff list.`
-      );
+      setNotConnected({
+        suite,
+        why: t`I could not reach ${signIn} just now. Try again in a moment, or use a staff list.`,
+      });
       setReading(null);
     }
   };
@@ -579,6 +607,22 @@ export const CompanyStep = (props: StepProps) => {
           <WaitingNote waiting={waiting} />
         </div>
       ) : null}
+      <ConnectionProblem
+        message={notConnected?.why ?? null}
+        onClose={() => {
+          setNotConnected(null);
+        }}
+        other={t`Use a staff list`}
+        retry={{
+          label: t`Try again`,
+          run: async () => {
+            if (notConnected !== null) {
+              await connect(notConnected.suite);
+            }
+          },
+        }}
+        title={notConnectedTitle}
+      />
     </CalmStep>
   );
 };
