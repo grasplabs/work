@@ -34,15 +34,15 @@ import { DitherOver } from "./frame.tsx";
 // The start of the interview as someone meets it on their link: one
 // screen, one decision, agree and start. The title on two lines, one short
 // paragraph whose last words, underlined, open what becomes of their
-// answers in a dialog, the one button, and "Not right now" and "I'd rather skip this" as two link
-// buttons apart at the foot. Two text styles (the serif title, the body's
-// words at one size) and the buttons' label, centred on one axis. Then the
-// ways out of it, as few words as honestly do: "Not now" offers a time to
-// be reminded; "I'd rather skip this" is said once more and taken. And the
-// pause in the conversation, which keeps the place and the minutes.
+// answers in a dialog, the one button, and "Not right now" as a link button
+// at the foot. Two text styles (the serif title, the body's words at one
+// size) and the buttons' label, centred on one axis. Then the way out of
+// it, in as few words as honestly do: "Not now" offers a time to be
+// reminded. And the pause in the conversation, which keeps the place and
+// the minutes.
 
 const styles = stylex.create({
-  // The page's room: the column under the header, the two quiet ways out at its foot.
+  // The page's room: the column under the header, the quiet way out at its foot.
   page: {
     display: "flex",
     flexDirection: "column",
@@ -110,7 +110,7 @@ const styles = stylex.create({
     gap: space["3"],
     width: "100%",
   },
-  // The two quiet ways out, side by side at the foot, centred, apart.
+  // The quiet way out, centred at the foot.
   foot: {
     display: "flex",
     flexWrap: "wrap",
@@ -251,7 +251,6 @@ export const Consent = ({
   refusal,
   onAgree,
   onNotNow,
-  onRatherNot,
 }: {
   name: string;
   /** Who interviews them, by name. */
@@ -262,7 +261,6 @@ export const Consent = ({
   refusal: string | null;
   onAgree: () => void;
   onNotNow: () => void;
-  onRatherNot: () => void;
 }) => {
   const { t } = useLingui();
   const title = useTitleSize();
@@ -317,9 +315,6 @@ to talk about your work?`.split("\n");
       <div {...stylex.props(styles.foot)}>
         <Button onClick={onNotNow} variant="link">
           {t`Not right now`}
-        </Button>
-        <Button onClick={onRatherNot} variant="link">
-          {t`I’d rather skip this`}
         </Button>
       </div>
     </div>
@@ -455,60 +450,6 @@ export const Reminded = ({
       <Actions>
         <Button onClick={onStart} size="lg" variant="outline">
           {t`Actually, let’s start now`}
-        </Button>
-      </Actions>
-    </Page>
-  );
-};
-
-/** "I'd rather skip this": said once more, so a slip of the thumb isn't a no. */
-export const RatherNot = ({
-  onConfirm,
-  onBack,
-}: {
-  onConfirm: () => void;
-  onBack: () => void;
-}) => {
-  const { t } = useLingui();
-  return (
-    <Page>
-      <Words
-        line={t`That’s completely fine. Your company will see that you opted out, but never why. Nothing was recorded.`}
-        title={t`Skip the interview?`}
-      />
-      <Actions>
-        <Button onClick={onConfirm} size="lg">
-          {t`Yes, skip it`}
-        </Button>
-        <Quiet>
-          <Button onClick={onBack} variant="link">
-            {t`Back`}
-          </Button>
-        </Quiet>
-      </Actions>
-    </Page>
-  );
-};
-
-/** "I'd rather skip this" taken. */
-export const Declined = ({
-  closes,
-  onUndo,
-}: {
-  closes: string;
-  onUndo: () => void;
-}) => {
-  const { t } = useLingui();
-  return (
-    <Page>
-      <Words
-        line={t`If you change your mind, this link stays open until ${closes}.`}
-        live
-        title={t`Thanks for letting us know`}
-      />
-      <Actions>
-        <Button onClick={onUndo} size="lg" variant="outline">
-          {t`I changed my mind`}
         </Button>
       </Actions>
     </Page>

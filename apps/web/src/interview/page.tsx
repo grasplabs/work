@@ -59,21 +59,13 @@ import {
 } from "./progress.ts";
 import { readingPose } from "./read-back-story.tsx";
 import { setSound } from "./speech.ts";
-import {
-  Consent,
-  Declined,
-  NotNow,
-  Paused,
-  RatherNot,
-  remindTimes,
-  Reminded,
-} from "./start.tsx";
+import { Consent, NotNow, Paused, remindTimes, Reminded } from "./start.tsx";
 import type { RemindAt } from "./start.tsx";
 import { useLoopWords } from "./words.ts";
 
 // Someone's interview, as their own link opens it: full screen, outside
 // the app, in the calm frame (frame.tsx). First one screen to agree, with
-// its two quiet ways out (start.tsx); then the conversation, Stephen's line
+// its quiet way out (start.tsx); then the conversation, Stephen's line
 // on a stage over the card they answer in, the minutes left over it
 // (conversation.tsx); at the end of the minutes, or when Stephen gets
 // there, the read-back; then his thanks (closed.tsx). The header holds the
@@ -85,9 +77,7 @@ import { useLoopWords } from "./words.ts";
 type Before =
   | { at: "start" }
   | { at: "not-now" }
-  | { at: "reminded"; picked: RemindAt }
-  | { at: "rather-not" }
-  | { at: "declined" };
+  | { at: "reminded"; picked: RemindAt };
 
 const onBeside = (listener: () => void): (() => void) => {
   const query = window.matchMedia(besideQuery);
@@ -363,19 +353,6 @@ const BeforeTalk = ({
     case "reminded": {
       return <Reminded onStart={toStart} picked={before.picked} />;
     }
-    case "rather-not": {
-      return (
-        <RatherNot
-          onBack={toStart}
-          onConfirm={() => {
-            setBefore({ at: "declined" });
-          }}
-        />
-      );
-    }
-    case "declined": {
-      return <Declined closes={closes} onUndo={toStart} />;
-    }
     case "start": {
       return (
         <Consent
@@ -386,9 +363,6 @@ const BeforeTalk = ({
           }}
           onNotNow={() => {
             setBefore({ at: "not-now" });
-          }}
-          onRatherNot={() => {
-            setBefore({ at: "rather-not" });
           }}
           refusal={refusal}
           who={who}
