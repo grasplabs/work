@@ -15,13 +15,14 @@ import {
   Item,
   ItemActions,
   ItemContent,
+  ItemDescription,
   ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import { Separator } from "@grasp-os/ui/components/separator";
 import { Text } from "@grasp-os/ui/components/text";
-import { CircleCheckIcon, Icon } from "@grasp-os/ui/lib/icons";
+import { CircleCheckIcon, FileIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { msg, plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -50,6 +51,7 @@ import {
 } from "./step-parts.ts";
 import type { StepProps } from "./step-parts.ts";
 import { useLeaving } from "./step-voice.tsx";
+import { prepare, say } from "../voice/voice.ts";
 import { XlsxError, xlsxMost, xlsxRows } from "./xlsx.ts";
 
 // Who works there: from the organization's Microsoft or Google sign-in,
@@ -59,14 +61,16 @@ import { XlsxError, xlsxMost, xlsxRows } from "./xlsx.ts";
 // read in this browser. Either way only names, email addresses, teams and
 // jobs are kept, in core. A sign-in is offered for each suite this
 // deployment signs in with, as a row pressed to connect it. Once a list is
-// in, the step moves on by itself: no page in between to confirm it
-// (Ruben), Stephen says what came in as the next step arrives. Coming back,
+// in, it shows on the step as read, Stephen says he has it, and the step
+// moves on by itself: no page in between to confirm it (Ruben). Coming back,
 // the sign-in in use is marked done, and a new list replaces the one kept.
 // Never forced: without a list the admin skips on, and Grasp's own people
 // sort the list out with them in their talks.
 
 const styles = stylex.create({
   stack: { display: "grid", gap: space[4] },
+  // The ways in, kept mounted (the upload is still settling) but out of sight while the list comes in.
+  gone: { display: "none" },
   drop: { display: "grid", gap: space[2] },
   example: { justifySelf: "center" },
   // "Or use a staff list", through the middle of a line either side.
@@ -396,17 +400,70 @@ const CompanyError = ({
   );
 };
 
-/** What Stephen says of the company as the next step arrives: known by now, or left for later. */
+/** What came in on this visit: from where, and how many in how many teams. */
+interface Kept {
+  from: DirectorySuite | "list";
+  people: number;
+  teams: number;
+}
+
+/** "1 person", "12 people": the count with its word, in the page's language. */
+const peopleWords = (count: number): string =>
+  plural(count, { one: "# person", other: "# people" });
+
+/** "1 team", "3 teams". */
+const teamWords = (count: number): string =>
+  plural(count, { one: "# team", other: "# teams" });
+
+/**
+ * The list as it comes in, in place of the ways in, for the moment
+ * Stephen says he has it: where from, done, and how many. Not a page of
+ * its own: the step moves on as he finishes.
+ */
+const ReadRow = ({ kept }: { kept: Kept }) => {
+  const { t } = useLingui();
+  const { from } = kept;
+  const people = peopleWords(kept.people);
+  const teams = teamWords(kept.teams);
+  return (
+    <ItemGroup aria-label={t`What came in`}>
+      <Item variant="outline">
+        <ItemMedia>
+          {from === "list" ? (
+            <Icon icon={FileIcon} />
+          ) : (
+            <BrandIcon
+              decorative
+              logo={suiteLogos[from]}
+              name={suiteNames[from]}
+              size="sm"
+            />
+          )}
+        </ItemMedia>
+        <ItemContent>
+          <ItemTitle>
+            {from === "list"
+              ? t`Your staff list is in`
+              : t`${suiteNames[from]} is connected`}
+          </ItemTitle>
+          <ItemDescription>{t`${people} in ${teams}`}</ItemDescription>
+        </ItemContent>
+        <ItemActions>
+          <Icon icon={CircleCheckIcon} />
+        </ItemActions>
+      </Item>
+    </ItemGroup>
+  );
+};
+
+/** What Stephen says of the company: known by now, as the list comes in; or, as the next step arrives, left for later. */
 const companyLeft = {
   known: msg`Good, now I have a clear picture of who works where.`,
   later: msg`No staff list for now—that’s fine. We’ll add it together later.`,
 };
 
-const companyLeftAs = (known: boolean) =>
-  known ? companyLeft.known : companyLeft.later;
-
 export const CompanyStep = (props: StepProps) => {
-  const { t } = useLingui();
+  const { t, i18n } = useLingui();
   const core = useCore();
   const { run } = useCoreAction();
   const refresh = useRefresh();
@@ -415,21 +472,26 @@ export const CompanyStep = (props: StepProps) => {
   const returned = returnedSchema.safeParse(search).success;
   const [reading, setReading] = useState<DirectorySuite | "list" | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  // Kept on this visit, and from where: the row it came through shows done while the step moves on.
-  const [kept, setKept] = useState<DirectorySuite | "list" | null>(null);
+  // Kept on this visit, from where and how many: shown as read while Stephen says so, then the step moves on.
+  const [kept, setKept] = useState<Kept | null>(null);
   const { roster } = props.data.view;
   const { directory, suites } = props.data;
   // A sign-in that didn't connect, back refused or not started: said over the step, with the way on.
   const [notConnected, setNotConnected] = useNotConnected(suites);
-  // As the next step arrives, Stephen says it's in (or that it can wait): no line for it here.
-  useLeaving(companyLeftAs(roster !== null));
+  // He says it's in right here, as it comes in; the next step only says it can wait, when skipped.
+  useLeaving(roster === null ? companyLeft.later : null);
+  const gotIt = i18n._(companyLeft.known);
+  useEffect(() => {
+    prepare(gotIt);
+  }, [gotIt]);
   const noTeam = t({
     message: "Other",
     context: "the team for people a staff list gives no team",
   });
   const peopleMost = onboardingPeopleMax;
   const teamsMost = onboardingTeamsMax;
-  // Kept in core, and on to the next step by itself: nothing in between to confirm.
+  // Kept in core and shown as read, Stephen says he has it, and on to the next step by itself:
+  // nothing in between to confirm.
   const keep = async (
     found: RosterInput,
     from: DirectorySuite | "list"
@@ -443,8 +505,9 @@ export const CompanyStep = (props: StepProps) => {
     if (saved === undefined) {
       return false;
     }
-    setKept(from);
+    setKept({ from, people: found.people.length, teams: found.teams.length });
     await refresh();
+    await say(gotIt);
     await props.onward();
     return true;
   };
@@ -518,17 +581,23 @@ export const CompanyStep = (props: StepProps) => {
     }
   });
   // The sign-in in use: kept on this visit, or, coming back, the one connected; none for a staff list.
-  const inUse = directoryShown(kept, roster === null ? null : directory);
+  const inUse = directoryShown(kept?.from ?? null, roster === null ? null : directory);
   const listInUse = roster !== null && inUse === null;
   const { title, body, spoken } = useWords(suites);
   return (
     <CalmStep
       body={body}
-      end={<CompanyWay known={roster !== null} onward={props.onward} />}
+      end={
+        // While the list comes in, nothing to press: the step moves on as Stephen finishes.
+        kept === null ? (
+          <CompanyWay known={roster !== null} onward={props.onward} />
+        ) : null
+      }
       spoken={spoken}
       title={title}
     >
-      <div {...stylex.props(styles.stack)}>
+      {kept === null ? null : <ReadRow kept={kept} />}
+      <div {...stylex.props(kept === null ? styles.stack : styles.gone)}>
         {suites.length > 0 ? (
           <>
             <ItemGroup aria-label={t`Your sign-in`}>

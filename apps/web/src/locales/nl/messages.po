@@ -57,6 +57,11 @@ msgstr "{0} acties"
 msgid "{0} didn't connect"
 msgstr "{0} is niet gekoppeld"
 
+#. placeholder {0}: suiteNames[from]
+#: src/onboarding/company-step.tsx
+msgid "{0} is connected"
+msgstr "{0} is gekoppeld"
+
 #. placeholder {0}: countOn(allowed, ofThis)
 #. placeholder {1}: ofThis.length
 #: src/connections/permissions/action-list.tsx
@@ -400,6 +405,7 @@ msgstr "{count, plural, one {# onderdeel dat achter de pagina’s werkt} other {
 msgid "{count, plural, one {# person in the team} other {# people in the team}}"
 msgstr "{count, plural, one {# persoon in het team} other {# mensen in het team}}"
 
+#: src/onboarding/company-step.tsx
 #: src/settings/teams.tsx
 msgid "{count, plural, one {# person} other {# people}}"
 msgstr "{count, plural, one {# persoon} other {# mensen}}"
@@ -423,6 +429,10 @@ msgstr "{count, plural, one {# run} other {# runs}}"
 #: src/brain/brain.ts
 msgid "{count, plural, one {# team, with its roles} other {# teams, with their roles}}"
 msgstr "{count, plural, one {# team, met de rollen} other {# teams, met hun rollen}}"
+
+#: src/onboarding/company-step.tsx
+msgid "{count, plural, one {# team} other {# teams}}"
+msgstr "{count, plural, one {# team} other {# teams}}"
 
 #: src/drafts/share-with-team.tsx
 msgid "{count, plural, one {# test} other {# tests}}"
@@ -1278,6 +1288,10 @@ msgstr "{people, plural, one {Ook de # persoon in {projectName} toegang geven?} 
 #: src/connections/recommended-apps.tsx
 msgid "{people, plural, one {Asked for by # person} other {Asked for by # people}}"
 msgstr "{people, plural, one {Aangevraagd door # persoon} other {Aangevraagd door # mensen}}"
+
+#: src/onboarding/company-step.tsx
+msgid "{people} in {teams}"
+msgstr "{people} in {teams}"
 
 #: src/frame/ui-words.tsx
 msgid "{percent} context"
@@ -20306,6 +20320,10 @@ msgstr "Wat agents via gedeelde verbindingen lezen"
 msgid "What AI costs this month"
 msgstr "Wat AI deze maand kost"
 
+#: src/onboarding/company-step.tsx
+msgid "What came in"
+msgstr "Wat binnenkwam"
+
 #: src/brain/brain-atlas.ts
 msgctxt "the brainstem: every conversation, document and connection"
 msgid "What came in"
@@ -21905,6 +21923,10 @@ msgstr "Je login, die je beheerder wijzigt"
 #: src/brain/skills-page.tsx
 msgid "Your skills"
 msgstr "Je skills"
+
+#: src/onboarding/company-step.tsx
+msgid "Your staff list is in"
+msgstr "Je personeelslijst staat erin"
 
 #: src/onboarding/company-step.tsx
 msgid "Your staff list is in. A new one replaces it."
