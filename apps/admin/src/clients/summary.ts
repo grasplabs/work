@@ -32,6 +32,7 @@ import { toHex } from "@grasp-os/shared/encoding";
 import { log } from "@grasp-os/shared/log";
 import { platformUpdateSignatureHeader } from "@grasp-os/shared/platform-change";
 import { routerSecretHeader } from "@grasp-os/shared/router";
+import { z } from "zod";
 
 import type { Staff } from "../access.ts";
 import { billingOf, stripeKey, stripeLinks } from "../billing/billing.ts";
@@ -74,11 +75,42 @@ export type ClientSummary =
 const cacheName = "admin-summary";
 const cacheSeconds = 60;
 
+/**
+ * How long a forget is remembered: past the life of any answer a read
+ * begun before it could still keep, which keeps a minute from when that
+ * read ends, within its deadline.
+ */
+const forgottenSeconds = 2 * cacheSeconds;
+
 /** Where client `clientId`'s summary is kept: a URL only the admin uses. */
 const cacheKey = (clientId: string): string =>
   `https://admin-summary.admin.invalid/${encodeURIComponent(clientId)}`;
 
-/** Client `clientId`'s summary kept within the last minute, if any; a cache that fails is a miss. */
+/** Where the last time client `clientId`'s summary was forgotten is kept. */
+const forgottenKey = (clientId: string): string =>
+  `https://admin-summary.admin.invalid/forgotten/${encodeURIComponent(clientId)}`;
+
+/** A summary as kept: with when the read that answered it was asked. */
+const keptSchema = z.object({
+  askedAt: z.number(),
+  summary: adminSummarySchema,
+});
+
+/** When client `clientId`'s summary was last forgotten, in Unix milliseconds; 0 for not lately. */
+const forgottenAt = async (cache: Cache, clientId: string): Promise<number> => {
+  const marker = await cache.match(forgottenKey(clientId));
+  if (marker === undefined) {
+    return 0;
+  }
+  const at = z.number().safeParse(await marker.json());
+  return at.success ? at.data : 0;
+};
+
+/**
+ * Client `clientId`'s summary kept within the last minute, if any, and
+ * asked after it was last forgotten: an answer to a read asked before a
+ * forget, kept after it, is never served. A cache that fails is a miss.
+ */
 const cached = async (clientId: string): Promise<AdminSummary | null> => {
   try {
     const cache = await caches.open(cacheName);
@@ -86,8 +118,13 @@ const cached = async (clientId: string): Promise<AdminSummary | null> => {
     if (hit === undefined) {
       return null;
     }
-    const parsed = adminSummarySchema.safeParse(await hit.json());
-    return parsed.success ? parsed.data : null;
+    const parsed = keptSchema.safeParse(await hit.json());
+    if (!parsed.success) {
+      return null;
+    }
+    return parsed.data.askedAt > (await forgottenAt(cache, clientId))
+      ? parsed.data.summary
+      : null;
   } catch (error) {
     log.warn("admin.summary_cache_unread", {
       clientId,
@@ -100,12 +137,21 @@ const cached = async (clientId: string): Promise<AdminSummary | null> => {
 /**
  * Forgets client `clientId`'s kept summary, so the next read asks its
  * core: after staff changed something its summary counts (a command, the
- * kickoff), as the frame reads again then. A cache that fails to forget it
- * is logged: the summary is then at most a minute old, as any kept one.
+ * kickoff), as the frame reads again then. It keeps when, in the cache
+ * every isolate of the location shares, so an answer to a read asked
+ * before now that is kept after it is never served (`cached`). A cache
+ * that fails to forget it is logged: the summary is then at most a minute
+ * old, as any kept one.
  */
 export const forgetSummary = async (clientId: string): Promise<void> => {
   try {
     const cache = await caches.open(cacheName);
+    await cache.put(
+      forgottenKey(clientId),
+      Response.json(Date.now(), {
+        headers: { "cache-control": `max-age=${forgottenSeconds}` },
+      })
+    );
     await cache.delete(cacheKey(clientId));
   } catch (error) {
     log.warn("admin.summary_cache_unforgotten", {
@@ -115,15 +161,23 @@ export const forgetSummary = async (clientId: string): Promise<void> => {
   }
 };
 
-/** Keeps client `clientId`'s summary for a minute; a cache that fails to keep it is logged. */
-const keep = async (clientId: string, summary: AdminSummary): Promise<void> => {
+/**
+ * Keeps client `clientId`'s summary for a minute, with when its read was
+ * asked (`askedAt`); a cache that fails to keep it is logged.
+ */
+const keep = async (
+  clientId: string,
+  summary: AdminSummary,
+  askedAt: number
+): Promise<void> => {
   try {
     const cache = await caches.open(cacheName);
     await cache.put(
       cacheKey(clientId),
-      Response.json(summary, {
-        headers: { "cache-control": `max-age=${cacheSeconds}` },
-      })
+      Response.json(
+        { askedAt, summary },
+        { headers: { "cache-control": `max-age=${cacheSeconds}` } }
+      )
     );
   } catch (error) {
     log.warn("admin.summary_cache_unkept", {
@@ -221,9 +275,10 @@ const summaryOf = async (
   if (kept !== null) {
     return kept;
   }
+  const askedAt = Date.now();
   const read = await askedSummary(env, secrets, row, timeoutMs);
   if (read !== null && read !== "older") {
-    await keep(row.id, read);
+    await keep(row.id, read, askedAt);
   }
   return read;
 };

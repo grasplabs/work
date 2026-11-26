@@ -172,6 +172,12 @@ export interface CoreState {
    */
   summary?: AdminSummary | "absent";
   /**
+   * What its core does once a summary request arrives, before answering it
+   * with the summary it held when the request arrived: waits, as a slow
+   * one does.
+   */
+  summaryHeld?: () => Promise<void>;
+  /**
    * What its core answers the admin's signed admin snapshot request
    * with (@grasp-os/shared/admin-snapshot): a company with nothing begun
    * unless set; `absent` for a core from before the snapshot, which

@@ -10,6 +10,7 @@ import {
   fetchClientAdmins,
   fetchClientSummaries,
 } from "../src/clients/functions.ts";
+import { clientSummaries } from "../src/clients/summary.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
 import { mockAccess } from "./access.ts";
@@ -544,6 +545,54 @@ describe("every client's summary", () => {
       },
       { email: "ada@grasp.test" }
     );
+    const after = await ask();
+
+    expect([before, after]).toMatchObject([
+      { summary: { needs: [{ kind: "paused", count: 1 }] } },
+      { summary: { needs: [] } },
+    ]);
+  });
+
+  it("never keeps an answer to a read asked before a command forgot it: the next read answers what the command changed", async () => {
+    const release = await importedRelease(
+      "feat(core): a read across a command"
+    );
+    const acme = await liveClient(release);
+    acme.core.admin = emptyAdminSnapshot("Acme");
+    acme.core.summary = emptyAdminSummary([{ kind: "paused", count: 1 }]);
+    const ask = async () => {
+      const read = await callServerFn(fetchClientSummaries, undefined, {
+        email: "ada@grasp.test",
+      });
+      return read.find(({ client }) => client.id === acme.clientId);
+    };
+    // A read whose core answers what it held before the command, slowly.
+    const arrived = Promise.withResolvers<null>();
+    const released = Promise.withResolvers<null>();
+    acme.core.summaryHeld = async () => {
+      arrived.resolve(null);
+      await released.promise;
+    };
+    // Read here, in the test's own request, as the frame's read would be.
+    const slow = clientSummaries(env, staff);
+    await arrived.promise;
+    acme.core.summaryHeld = undefined;
+
+    // The command resumes the interviews, and forgets the kept summary.
+    acme.core.summary = emptyAdminSummary();
+    await callServerFn(
+      commandFn,
+      {
+        clientId: acme.clientId,
+        id: crypto.randomUUID(),
+        command: { type: "onboarding.resume", payload: {} },
+      },
+      { email: "ada@grasp.test" }
+    );
+    // The slow read answers after it, with what was before, and keeps it.
+    released.resolve(null);
+    const read = await slow;
+    const before = read.find(({ client }) => client.id === acme.clientId);
     const after = await ask();
 
     expect([before, after]).toMatchObject([

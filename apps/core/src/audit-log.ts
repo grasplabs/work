@@ -1068,12 +1068,23 @@ export class AuditLog extends DurableObject<Env> {
     return await this.ctx.blockConcurrencyWhile(async () => {
       const { entries, conflicts, conflictIds } = await this.#link(incoming);
       const people = new Map(incoming.map(({ id, person }) => [id, person]));
+      const erased = await this.#erasedAmong(
+        entries.flatMap(({ id }) => {
+          const person = people.get(id);
+          return person === undefined || person === null ? [] : [person.userId];
+        })
+      );
       this.#db.transaction((tx) => {
         for (const entry of entries) {
           tx.insert(events).values(entry).run();
-          // Who did it, in its week: once each (`activePeople`).
+          // Who did it, in its week: once each (`activePeople`), never
+          // someone whose erasure was asked for.
           const person = people.get(entry.id);
-          if (person !== undefined && person !== null) {
+          if (
+            person !== undefined &&
+            person !== null &&
+            !erased.has(person.userId)
+          ) {
             tx.insert(activeWeeks).values(person).onConflictDoNothing().run();
           }
         }
@@ -1085,6 +1096,33 @@ export class AuditLog extends DurableObject<Env> {
         conflictIds,
       };
     });
+  }
+
+  /**
+   * Of `userIds`, those whose erasure an admin asked for, as core's
+   * erasure ledger keeps them for good (`person_erasures`, by user ID): an
+   * event of theirs still waiting in an outbox when their erasure ran must
+   * not count them active again once it arrives. Read while nothing else
+   * appends, so an erasure's `forgetPerson` after it runs after the rows it
+   * would remove. When the ledger can't be read, every one of them counts
+   * as erased: the chain never waits on it, and a week counted short is
+   * the safe side.
+   */
+  async #erasedAmong(userIds: readonly string[]): Promise<Set<string>> {
+    if (userIds.length === 0) {
+      return new Set();
+    }
+    try {
+      const { results } = await this.env.DB.prepare(
+        "SELECT user_id AS userId FROM person_erasures WHERE user_id IN (SELECT value FROM json_each(?))"
+      )
+        .bind(JSON.stringify([...new Set(userIds)]))
+        .all<{ userId: string }>();
+      return new Set(results.map(({ userId }) => userId));
+    } catch (error) {
+      log.warn("audit.erasures_unread", errorFields(error));
+      return new Set(userIds);
+    }
   }
 
   /**

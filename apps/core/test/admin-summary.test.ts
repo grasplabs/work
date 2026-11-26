@@ -18,9 +18,12 @@ import {
   waitOnExecutionContext,
 } from "cloudflare:test";
 import { env } from "cloudflare:workers";
+import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
+import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { auditLog } from "../src/audit-log.ts";
+import { outboxedEvent } from "../src/audit-outbox.ts";
 import worker from "../src/index.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { published } from "./apps.ts";
@@ -334,7 +337,7 @@ describe("weekly active people", () => {
     ]);
   });
 
-  it("forgets the weeks of a person who is erased, so the weeks count without them", async () => {
+  it("forgets the weeks of a person who is erased, so the weeks count without them, though an event of theirs from before arrives after", async () => {
     const admin = await signedInApi(idp, "admin");
     const gone = await signedInApi(idp, "builder");
     // Two weeks back: the person, and four others.
@@ -347,13 +350,21 @@ describe("weekly active people", () => {
     const before = await pastWeeks();
     await admin.api.members.remove(gone.userId);
     await admin.api.members.erase(gone.userId, String(gone.person.name));
-
     const after = await pastWeeks();
+    // An event of theirs from that week, still in an outbox when their
+    // erasure ran, reaches the log after it: they stay uncounted.
+    await outboxedEvent(
+      drizzle(env.DB),
+      eventAt(person(gone.userId), weeksBack(2, 4))
+    ).run();
+    await drainAuditOutboxes(env);
+    const late = await pastWeeks();
 
-    expect({ before: before[5], after: after[5] }).toStrictEqual({
-      before: 5,
-      after: "1–4",
-    });
+    expect({
+      before: before[5],
+      after: after[5],
+      late: late[5],
+    }).toStrictEqual({ before: 5, after: "1–4", late: "1–4" });
   });
 
   it("keeps who was active no longer than the summary's weeks and one more, whatever else the log's retention does", async () => {

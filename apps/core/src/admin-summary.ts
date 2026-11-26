@@ -188,8 +188,10 @@ const runningOf = async (
  * `fewPeople` ("1–4"), so staff never learn of one person's activity
  * where the company is one or two people; 5 or more exactly. The table
  * fills from the release that added it on (earlier weeks read 0), and
- * keeps the last 9 weeks: one more than the summary's 8, and the
- * person's rows go when they are erased.
+ * keeps the last 9 weeks: one more than the summary's 8. A person's rows
+ * go when they are erased, and none is written for them after, though an
+ * event of theirs still in an outbox arrives later (core's
+ * `person_erasures` names them).
  */
 const activePeopleOf = async (
   env: Env,

@@ -408,7 +408,9 @@ const answerAdminSummary = async (
   ) {
     return new Response("Forbidden", { status: 403 });
   }
-  return Response.json(core.summary ?? emptyAdminSummary());
+  const summary = core.summary ?? emptyAdminSummary();
+  await core.summaryHeld?.();
+  return Response.json(summary);
 };
 
 /**
