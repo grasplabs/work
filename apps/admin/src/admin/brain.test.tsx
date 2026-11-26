@@ -17,6 +17,10 @@ import { brainReport, heardSnapshot } from "../../test/snapshots.ts";
 
 const acme = gridRow({ id: "acme", name: "Acme" });
 
+/** The Brain at work: its figures, named so. */
+const atWork = (root: Element): Element | null =>
+  root.querySelector('[aria-label="The Brain at work"]');
+
 describe("an organization's brain", () => {
   it("says the brain itself isn't shared, and makes up no source's share", async () => {
     const { main } = await openAdmin("/organizations/acme/brain", {
@@ -69,18 +73,14 @@ describe("an organization's brain", () => {
     const beforeAnswer = {
       counts: headings().includes("What it stands on"),
       reading: main().includes(reading),
-      report:
-        container.querySelector('section[aria-label="The Brain at work"]') !==
-        null,
+      report: atWork(container) !== null,
     };
     held.resolve(brainReport(1_000_000));
     await settle();
 
     expect({
       beforeAnswer,
-      report:
-        container.querySelector('section[aria-label="The Brain at work"]') !==
-        null,
+      report: atWork(container) !== null,
     }).toStrictEqual({
       beforeAnswer: { counts: true, reading: true, report: false },
       report: true,
