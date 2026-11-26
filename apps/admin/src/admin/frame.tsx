@@ -132,7 +132,11 @@ const rowEnd = (
   entry: ClientSummary | undefined,
   needs: number
 ): Partial<SidebarRow> => {
-  if (entry === undefined || entry.state === "answered") {
+  if (
+    entry === undefined ||
+    entry.state === "answered" ||
+    entry.state === "older"
+  ) {
     return needsCount(needs);
   }
   const words = entry.state === "not_deployed" ? "not deployed" : "unreachable";
@@ -162,10 +166,12 @@ const homeGroups = ({
   platform: PlatformCounts;
   isAt: (to: string, fuzzy?: boolean) => boolean;
 }): SidebarGroupEntry[] => {
-  // Each company's apps asked for, added up: one asked for at two counts twice.
+  // Each company's apps asked for, added up: one asked for at two counts
+  // twice. A company that doesn't share it (it ended Grasp's staff
+  // access) isn't counted.
   const asked = [...(organizations?.values() ?? [])].reduce(
     (sum, entry) =>
-      sum + (entry.state === "answered" ? entry.summary.asked : 0),
+      sum + (entry.state === "answered" ? (entry.summary.asked ?? 0) : 0),
     0
   );
   const live = clients.filter(({ status }) => status !== "offboarded");

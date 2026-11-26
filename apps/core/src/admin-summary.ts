@@ -8,6 +8,8 @@ import {
   adminSummaryRunDays,
   adminSummarySchema,
   adminSummaryWeeks,
+  fewPeople,
+  fewPeopleBelow,
 } from "@grasp-os/shared/admin-summary";
 import type {
   AdminSummary,
@@ -23,6 +25,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { snapshotOf } from "./admin-snapshot.ts";
 import { auditLog } from "./audit-log.ts";
 import { organizationId } from "./auth/auth.ts";
+import { signInConfig } from "./auth/config.ts";
 import { consoleSigned } from "./console-signed.ts";
 import {
   agents,
@@ -31,6 +34,7 @@ import {
   workflowResources,
 } from "./db/core/schema.ts";
 import { errorResponse } from "./errors.ts";
+import { staffAccessEnded } from "./onboarding/gate.ts";
 import { summaryOf } from "./onboarding/summary.ts";
 import { activityOf } from "./workflows/activity.ts";
 import { everyRun } from "./workflows/run-view.ts";
@@ -56,10 +60,16 @@ import { everyRun } from "./workflows/run-view.ts";
 // No read is put in the audit log, as none of the onboarding summary's or
 // the AI status report's is: the answer holds no personal data, so there is
 // nothing about anyone for the company to see read. For the same reason it
-// is answered after the company ended Grasp's staff access, as those are;
-// the snapshot, which names people, is not.
+// is answered after the company ended Grasp's staff access, as those are,
+// but then only with what running the service needs: where the onboarding
+// stands, what needs Grasp, and how its connections stand; how it uses
+// Grasp (`activity`, `asked`) is sent as null. The snapshot, which names
+// people, is refused then.
 
 const dayMs = 24 * 60 * 60 * 1000;
+
+/** How the company uses Grasp, while it shares it. */
+type Activity = NonNullable<AdminSummary["activity"]>;
 
 /** `YYYY-MM-DD` of the UTC day `day` days after 1 January 1970. */
 const dateOf = (day: number): string =>
@@ -115,7 +125,7 @@ const connectorsOf = (
 const runningOf = async (
   env: Env,
   at: Date
-): Promise<Omit<AdminSummary["activity"], "activePeople">> => {
+): Promise<Omit<Activity, "activePeople">> => {
   const db = drizzle(env.DB);
   const [workflows, [live], [appsLive], [agentsOn]] = await db.batch([
     db.select({ id: workflowResources.id }).from(workflowResources),
@@ -174,13 +184,17 @@ const runningOf = async (
  * core audits: a chat turn's model calls, a change, an audited read, a
  * press on a card in a chat app. Staff (`staff`), agents working on their
  * own (`agent`), Apps, workflow runs and the platform (`system`) count as
- * nobody. A week without anyone is 0. The table fills from the release
- * that added it on: earlier weeks read 0.
+ * nobody. A week without anyone is 0; one with 1 to 4 people is sent as
+ * `fewPeople` ("1–4"), so staff never learn of one person's activity
+ * where the company is one or two people; 5 or more exactly. The table
+ * fills from the release that added it on (earlier weeks read 0), and
+ * keeps the last 9 weeks: one more than the summary's 8, and the
+ * person's rows go when they are erased.
  */
 const activePeopleOf = async (
   env: Env,
   at: Date
-): Promise<AdminSummary["activity"]["activePeople"]> => {
+): Promise<Activity["activePeople"]> => {
   const today = Math.floor(at.getTime() / dayMs);
   // Days since Monday: 1 January 1970 was a Thursday.
   const monday = today - ((today + 3) % 7);
@@ -189,7 +203,11 @@ const activePeopleOf = async (
   const counted = new Map(weeks.map(({ week, people }) => [week, people]));
   return Array.from({ length: adminSummaryWeeks }, (_, index) => {
     const week = dateOf(first + 7 * index);
-    return { week, people: counted.get(week) ?? 0 };
+    const people = counted.get(week) ?? 0;
+    return {
+      week,
+      people: people > 0 && people < fewPeopleBelow ? fewPeople : people,
+    };
   });
 };
 
@@ -199,11 +217,24 @@ export const adminSummaryOf = async (
   at: Date
 ): Promise<AdminSummary> => {
   const now = at.toISOString();
-  const [snapshot, running, activePeople] = await Promise.all([
+  // Once the company ended Grasp's staff access, only what running the
+  // service needs: how it uses Grasp isn't read at all.
+  const shared = !(await staffAccessEnded(
+    env,
+    signInConfig(env)?.staff?.opened
+  ));
+  const [snapshot, activity] = await Promise.all([
     // Read as the admin reads it: what the admin's view is worked out from.
     (async () => adminSnapshotSchema.parse(await snapshotOf(env, now)))(),
-    runningOf(env, at),
-    activePeopleOf(env, at),
+    shared
+      ? (async () => {
+          const [running, activePeople] = await Promise.all([
+            runningOf(env, at),
+            activePeopleOf(env, at),
+          ]);
+          return { ...running, activePeople };
+        })()
+      : null,
   ]);
   const { gate } = snapshot;
   const { stage, day, days, known } = summaryOf(snapshot, gate, now);
@@ -223,8 +254,8 @@ export const adminSummaryOf = async (
     },
     needs: needsOf(snapshot),
     connectors: connectorsOf(snapshot.integrations),
-    asked: snapshot.asked.length,
-    activity: { ...running, activePeople },
+    asked: shared ? snapshot.asked.length : null,
+    activity,
   };
 };
 

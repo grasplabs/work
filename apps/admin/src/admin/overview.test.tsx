@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   act,
   answeredAdmin,
+  answeredSummary,
   gridRow,
   openAdmin,
   settle,
@@ -203,6 +204,80 @@ describe("the admin's frame", () => {
       ],
       snapshots: 0,
     });
+  });
+
+  it("reads what needs Grasp at a core from before the summary in full, and asks first for its update", async () => {
+    const ready = row("ready");
+    const { container } = await openAdmin("/platform/releases", {
+      fetchClientGrid: [ready],
+      fetchClientSummaries: [
+        {
+          client: ready,
+          state: "older",
+          admin: answeredAdmin({
+            client: ready,
+            snapshot: readySnapshot("Ready"),
+          }),
+        },
+      ],
+      fetchReleases: { releases: [], older: null, channelsOn: {} },
+    });
+    const counted =
+      sidebarEntry(container, ready.name)?.textContent?.includes(
+        "things need Grasp"
+      ) ?? false;
+    const inbox = [
+      ...container.querySelectorAll<HTMLElement>('[role="tab"]'),
+    ].find((tab) => tab.textContent?.includes("Inbox"));
+    await act(() => {
+      inbox?.click();
+    });
+    await settle();
+    const lines = [
+      ...container.querySelectorAll(
+        '[data-slot="sidebar"] a[href^="/organizations/ready/"]'
+      ),
+    ].map((link) => [link.textContent ?? "", link.getAttribute("href")]);
+
+    expect({
+      counted,
+      first: lines[0],
+      // Said in full, as its snapshot has it.
+      go: lines.some(([line]) =>
+        (line ?? "").includes("85% of what Grasp needs is known")
+      ),
+    }).toStrictEqual({
+      counted: true,
+      first: [
+        expect.stringContaining("Update to see its counts"),
+        "/organizations/ready/setup",
+      ],
+      go: true,
+    });
+  });
+
+  it("leaves out of the Apps asked for count a company that doesn't share it", async () => {
+    const acme = row("acme");
+    const ended = row("ended");
+    const shared = answeredSummary({ client: acme, asked: 2 });
+    const notShared = answeredSummary({ client: ended, asked: 5 });
+    const { container } = await openAdmin("/platform/releases", {
+      fetchClientGrid: [acme, ended],
+      fetchClientSummaries: [
+        shared,
+        notShared.state === "answered"
+          ? {
+              ...notShared,
+              summary: { ...notShared.summary, asked: null, activity: null },
+            }
+          : notShared,
+      ],
+      fetchReleases: { releases: [], older: null, channelsOn: {} },
+    });
+    const sidebar =
+      container.querySelector('[data-slot="sidebar"]')?.textContent ?? "";
+
+    expect(sidebar).toContain("2 apps asked for");
   });
 
   it("says nothing is asked for yet where the table of apps goes, with nothing to act on", async () => {

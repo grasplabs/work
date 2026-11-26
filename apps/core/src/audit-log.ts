@@ -1,3 +1,4 @@
+import { adminSummaryWeeks } from "@grasp-os/shared/admin-summary";
 import {
   auditEventMaxBytes,
   auditEventSchema,
@@ -117,6 +118,9 @@ const mondayOf = (at: string | Date): string => {
   // 1 January 1970 was a Thursday, three days after a Monday.
   return new Date((day - ((day + 3) % 7)) * dayMs).toISOString().slice(0, 10);
 };
+
+/** The weeks `active_weeks` keeps: the admin summary's, this one included, and one more. */
+const activeWeeksKept = adminSummaryWeeks + 1;
 
 /** Most stretches one retention pass archives, and purges. */
 const stretchesPerPass = 10;
@@ -461,19 +465,15 @@ export class AuditLog extends DurableObject<Env> {
    */
   override async alarm(): Promise<void> {
     await this.#rearm(Date.now() + dayMs);
+    // First, and on its own: a retention pass that fails never keeps it.
+    try {
+      this.#forgetOldWeeks();
+    } catch (error) {
+      log.error("audit.active_weeks_unpruned", errorFields(error));
+    }
     let moved = false;
     try {
       moved = await retainAuditLog(this);
-      // Who was active when, kept no longer than the events it was read from.
-      this.#db
-        .delete(activeWeeks)
-        .where(
-          lt(
-            activeWeeks.week,
-            mondayOf(new Date(Date.now() - auditRetentionDays * dayMs))
-          )
-        )
-        .run();
     } catch (error) {
       log.error("audit.retention_failed", errorFields(error));
     }
@@ -509,6 +509,27 @@ export class AuditLog extends DurableObject<Env> {
   head(): ChainLink {
     const { seq, hash } = this.#tail();
     return { seq, hash };
+  }
+
+  /**
+   * Forgets who was active when before the weeks the admin's summary
+   * counts, and one more: kept no longer than that purpose needs.
+   */
+  #forgetOldWeeks(): void {
+    // The Monday of the oldest week kept, this one counted.
+    const oldest = mondayOf(
+      new Date(Date.now() - (activeWeeksKept - 1) * 7 * dayMs)
+    );
+    this.#db.delete(activeWeeks).where(lt(activeWeeks.week, oldest)).run();
+  }
+
+  /**
+   * Forgets the weeks person `userId` was active in, as their erasure
+   * does (person-erasure.ts, the `identity` area): their events stay, as
+   * the audit log's always do (D2).
+   */
+  forgetPerson(userId: string): void {
+    this.#db.delete(activeWeeks).where(eq(activeWeeks.userId, userId)).run();
   }
 
   /**

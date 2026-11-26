@@ -75,8 +75,9 @@ export const archives = sqliteTable("archives", {
  * (core's admin-summary.ts): one row for each person in each week in which
  * the log appended an event whose actor is them (`actor.type` `person`),
  * written with that event, in its transaction (`AuditLog.#append`). The
- * week is the Monday, in UTC, of the event's own `at`. Kept as long as the
- * events are (retention removes older weeks). It fills from the release
+ * week is the Monday, in UTC, of the event's own `at`. Kept 9 weeks, the
+ * summary's 8 and one more (the log's alarm forgets older ones), and a
+ * person's rows go when they are erased (`AuditLog.forgetPerson`). It fills from the release
  * that added it on: weeks before hold no rows, with nothing filled in
  * after the fact, as nothing is before the first release.
  */

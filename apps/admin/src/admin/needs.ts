@@ -4,9 +4,14 @@ import type { Need } from "@grasp-os/shared/admin/onboarding-admin";
 import type { ClientSummary } from "../clients/summary.ts";
 import { needWhere } from "./sections.ts";
 import type { OrgSection } from "./sections.ts";
-import { billingNeeds, rolloutNeedLine, rolloutNeeds } from "./views.ts";
+import {
+  billingNeeds,
+  organizationOf,
+  rolloutNeedLine,
+  rolloutNeeds,
+} from "./views.ts";
 import type { Organization } from "./views.ts";
-import { needKindLines, needLine } from "./words.ts";
+import { needKindLines, needLine, olderLine } from "./words.ts";
 
 /**
  * Something that needs Grasp at one organization, how many of it there
@@ -51,9 +56,23 @@ export const needsOf = ({ admin, view }: Organization): OrgNeed[] => [
  * What needs Grasp at one organization as its summary says it, the most
  * pressing first: what its own platform needs, then what its summary and
  * its billing say, a line for each kind with how many of it, naming
- * nothing (`needKindLines`). The sidebar's counts and its Inbox list it.
+ * nothing (`needKindLines`); for a core from before the summary, in full
+ * from its snapshot. The sidebar's counts and its Inbox list it.
  */
 export const summaryNeedsOf = (entry: ClientSummary): OrgNeed[] => {
+  // A core from before the summary: its update first, settled from its
+  // Setup, then its needs in full, as before, until it updates.
+  if (entry.state === "older") {
+    return [
+      {
+        text: olderLine,
+        count: 1,
+        section: setupSection,
+        search: undefined,
+      },
+      ...needsOf(organizationOf(entry.admin)),
+    ];
+  }
   const rollout = rolloutOf(entry.client);
   if (entry.state !== "answered") {
     return rollout;

@@ -13,6 +13,8 @@ import { platformUpdateSignatureHeader } from "@grasp-os/shared/platform-change"
 import { routerSecretHeader } from "@grasp-os/shared/router";
 import {
   createExecutionContext,
+  runDurableObjectAlarm,
+  runInDurableObject,
   waitOnExecutionContext,
 } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -143,15 +145,15 @@ describe("the admin summary", () => {
       needs: summary.needs,
       connectors: summary.connectors,
       asked: summary.asked,
-      runDays: summary.activity.runs.length,
-      ran: summary.activity.runs.some(({ done, failed }) => done + failed > 0),
+      runDays: summary.activity?.runs.length,
+      ran: summary.activity?.runs.some(({ done, failed }) => done + failed > 0),
       live: [
-        summary.activity.workflowsLive,
-        summary.activity.appsLive,
-        summary.activity.agentsOn,
+        summary.activity?.workflowsLive,
+        summary.activity?.appsLive,
+        summary.activity?.agentsOn,
       ],
-      weeks: summary.activity.activePeople.length,
-      lastWeek: summary.activity.activePeople.at(-1)?.week,
+      weeks: summary.activity?.activePeople.length,
+      lastWeek: summary.activity?.activePeople.at(-1)?.week,
     }).toStrictEqual({
       status: 200,
       cache: "no-store",
@@ -260,44 +262,151 @@ const eventAt = (actor: AuditActor, at: Date) =>
     action: "chat.created",
   });
 
+/** Wednesday noon `weeks` weeks before this one, or another day of that week. */
+const weeksBack = (weeks: number, day = 2): Date => {
+  const today = Math.floor(Date.now() / dayMs);
+  const monday = today - ((today + 3) % 7);
+  return new Date((monday - 7 * weeks + day) * dayMs + 12 * 60 * 60 * 1000);
+};
+
+/** A person actor. */
+const person = (userId: string) => ({ type: "person", userId }) as const;
+
+/** The summary's weekly counts, oldest first, this week left out. */
+const pastWeeks = async () => {
+  const response = await askAsAdmin();
+  const { activity } = adminSummarySchema.parse(await response.json());
+  return (activity?.activePeople ?? [])
+    .slice(0, -1)
+    .map(({ people }) => people);
+};
+
+/** The weeks `active_weeks` holds, as the log keeps them. */
+const weeksKept = async (): Promise<string[]> =>
+  await runInDurableObject(auditLog(env), (_instance, state) =>
+    state.storage.sql
+      .exec<{ week: string }>(
+        "SELECT DISTINCT week FROM active_weeks ORDER BY week"
+      )
+      .toArray()
+      .map(({ week }) => week)
+  );
+
 describe("weekly active people", () => {
-  it("counts each person once a week, from what they did themselves, and a week without anyone as 0", async () => {
-    // Wednesday noon, weeks back from this one.
-    const today = Math.floor(Date.now() / dayMs);
-    const monday = today - ((today + 3) % 7);
-    const weeksBack = (weeks: number, day = 2) =>
-      new Date((monday - 7 * weeks + day) * dayMs + 12 * 60 * 60 * 1000);
-    const ada = { type: "person", userId: "user-ada" } as const;
-    const ben = { type: "person", userId: "user-ben" } as const;
+  it("counts each person once a week, from what they did themselves: 0 exactly, 1 to 4 as a band, 5 and more exactly", async () => {
+    const five = ["a", "b", "c", "d", "e"].map((name) =>
+      person(`user-${name}`)
+    );
+    const [a, b] = five;
+    if (a === undefined || b === undefined) {
+      throw new Error("Five people");
+    }
     await auditLog(env).append([
-      // Three weeks back: Ada twice, on two days, and Ben once.
-      eventAt(ada, weeksBack(3, 0)),
-      eventAt(ada, weeksBack(3, 6)),
-      eventAt(ben, weeksBack(3)),
-      // Two weeks back: nobody, but staff, an agent of Ada's on its own,
+      // Six weeks back: five people, one of them twice: 5.
+      ...five.map((actor) => eventAt(actor, weeksBack(6))),
+      eventAt(a, weeksBack(6, 5)),
+      // Five weeks back: four people, one twice, on two days: still 4.
+      ...five.slice(0, 4).map((actor) => eventAt(actor, weeksBack(5))),
+      eventAt(b, weeksBack(5, 6)),
+      // Four weeks back: one person.
+      eventAt(a, weeksBack(4)),
+      // Three weeks back: nobody, but staff, an agent of A's on its own,
       // and the platform.
-      eventAt({ type: "staff", userId: "staff@grasp.test" }, weeksBack(2)),
+      eventAt({ type: "staff", userId: "staff@grasp.test" }, weeksBack(3)),
       eventAt(
-        { type: "agent", agentId: "stephen", onBehalfOf: "user-ada" },
-        weeksBack(2)
+        { type: "agent", agentId: "stephen", onBehalfOf: "user-a" },
+        weeksBack(3)
       ),
-      eventAt({ type: "system" }, weeksBack(2)),
-      // Last week: Ben alone.
-      eventAt(ben, weeksBack(1)),
+      eventAt({ type: "system" }, weeksBack(3)),
       // Before the eight weeks: not counted.
-      eventAt(ada, weeksBack(8)),
+      eventAt(a, weeksBack(8)),
     ]);
 
-    const response = await askAsAdmin();
-    const summary = adminSummarySchema.parse(await response.json());
-
     // This week is left out: whoever this file signed in did something in it.
-    expect(
-      summary.activity.activePeople.slice(0, -1).map(({ people }) => people)
-    ).toStrictEqual([0, 0, 0, 0, 2, 0, 1]);
-    expect(summary.activity.activePeople[4]?.week).toBe(
-      weeksBack(3, 0).toISOString().slice(0, 10)
-    );
+    await expect(pastWeeks()).resolves.toStrictEqual([
+      0,
+      5,
+      "1–4",
+      "1–4",
+      0,
+      0,
+      0,
+    ]);
+  });
+
+  it("forgets the weeks of a person who is erased, so the weeks count without them", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const gone = await signedInApi(idp, "builder");
+    // Two weeks back: the person, and four others.
+    await auditLog(env).append([
+      eventAt(person(gone.userId), weeksBack(2)),
+      ...["f", "g", "h", "i"].map((name) =>
+        eventAt(person(`user-${name}`), weeksBack(2))
+      ),
+    ]);
+    const before = await pastWeeks();
+    await admin.api.members.remove(gone.userId);
+    await admin.api.members.erase(gone.userId, String(gone.person.name));
+
+    const after = await pastWeeks();
+
+    expect({ before: before[5], after: after[5] }).toStrictEqual({
+      before: 5,
+      after: "1–4",
+    });
+  });
+
+  it("keeps who was active no longer than the summary's weeks and one more, whatever else the log's retention does", async () => {
+    await auditLog(env).append([
+      eventAt(person("user-j"), weeksBack(9)),
+      eventAt(person("user-j"), weeksBack(10)),
+    ]);
+    const before = await weeksKept();
+    await runDurableObjectAlarm(auditLog(env));
+    const after = await weeksKept();
+    const monday = (weeks: number) =>
+      weeksBack(weeks, 0).toISOString().slice(0, 10);
+
+    expect({
+      before: [9, 10, 8].map((weeks) => before.includes(monday(weeks))),
+      after: [9, 10, 8].map((weeks) => after.includes(monday(weeks))),
+    }).toStrictEqual({
+      before: [true, true, true],
+      // Eight weeks back is the ninth kept, this one counted.
+      after: [false, false, true],
+    });
+  });
+});
+
+describe("the admin summary once the company ended Grasp's staff access", () => {
+  it("sends only what running the service needs: how the company uses Grasp is left out", async () => {
+    const { api: admin } = await signedInApi(idp, "admin");
+    const read = async () => {
+      const response = await askAsAdmin();
+      return adminSummarySchema.parse(await response.json());
+    };
+    const shared = await read();
+    await admin.onboardingGate.endStaffAccess();
+    const ended = await read();
+    await env.DB.prepare(
+      "UPDATE onboarding_gate SET staff_ended_at = NULL"
+    ).run();
+
+    expect({
+      shared: [shared.activity === null, shared.asked],
+      ended: {
+        activity: ended.activity,
+        asked: ended.asked,
+        kept: [ended.onboarding.stage, ended.connectors !== null, ended.needs],
+      },
+    }).toStrictEqual({
+      shared: [false, 0],
+      ended: {
+        activity: null,
+        asked: null,
+        kept: [shared.onboarding.stage, true, shared.needs],
+      },
+    });
   });
 });
 
@@ -412,6 +521,9 @@ describe("what runs in the company", () => {
 
     const response = await askAsAdmin();
     const { activity } = adminSummarySchema.parse(await response.json());
+    if (activity === null) {
+      throw new Error("Its activity is shared");
+    }
     const ran = activity.runs.filter(({ done, failed }) => done + failed > 0);
 
     expect({

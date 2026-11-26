@@ -94,11 +94,13 @@ export const fetchClientLive = createServerFn({ method: "GET" })
 
 /**
  * Every client's summary (`clientSummaries`): counts and dates only, for
- * the sidebar and the Inbox. A GET: no core audits it, as it names nobody,
- * and nothing is kept of it.
+ * the sidebar and the Inbox. No core audits it, as it names nobody; but a
+ * core from before the summary is read in full instead, as staff, which its
+ * audit log records, as before the summary: a POST, for the reasons
+ * `fetchClientAdmins` is.
  */
-export const fetchClientSummaries = createServerFn({ method: "GET" }).handler(
-  async () => await clientSummaries(env)
+export const fetchClientSummaries = createServerFn({ method: "POST" }).handler(
+  async ({ context }) => await clientSummaries(env, context.staff)
 );
 
 /**

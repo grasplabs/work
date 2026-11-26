@@ -439,14 +439,12 @@ describe("every client's summary", () => {
       .where(eq(clients.status, "active"));
   });
 
-  it("gives every client's counts as its core answers them, signed for the summary alone, one not answering or older as unreachable, one provisioning as not deployed, and records no reader", async () => {
+  it("gives every client's counts as its core answers them, signed for the summary alone, one not answering as unreachable, one provisioning as not deployed, and records no reader", async () => {
     const release = await importedRelease("feat(core): the summary");
     const acme = await liveClient(release);
     acme.core.summary = emptyAdminSummary([{ kind: "lead", count: 2 }]);
     const down = await liveClient(release);
     down.core.unhealthy = 1000;
-    const older = await liveClient(release);
-    older.core.summary = "absent";
     const waiting = await recordClient("provisioning");
 
     const read = await callServerFn(fetchClientSummaries, undefined, {
@@ -458,10 +456,9 @@ describe("every client's summary", () => {
     expect({
       acme: entry(acme.clientId),
       down: entry(down.clientId)?.state,
-      older: entry(older.clientId)?.state,
       waiting: entry(waiting.clientId)?.state,
-      readers: [acme, down, older].flatMap(({ core }) => core.adminReaders),
-      kept: await storedReads([acme.clientId, older.clientId]),
+      readers: [acme, down].flatMap(({ core }) => core.adminReaders),
+      kept: await storedReads([acme.clientId]),
     }).toMatchObject({
       acme: {
         state: "answered",
@@ -469,10 +466,36 @@ describe("every client's summary", () => {
         billing: { state: "not_connected" },
       },
       down: "unreachable",
-      older: "unreachable",
       waiting: "not_deployed",
       readers: [],
       kept: [],
+    });
+  });
+
+  it("reads a core from before the summary in full, as before, as the staff member asking, and that one alone", async () => {
+    const release = await importedRelease("feat(core): an older core");
+    const older = await liveClient(release);
+    older.core.summary = "absent";
+    older.core.admin = { ...emptyAdminSnapshot("Older"), paused: true };
+    const acme = await liveClient(release);
+
+    const read = await callServerFn(fetchClientSummaries, undefined, {
+      email: "ada@grasp.test",
+    });
+    const entry = (clientId: string) =>
+      read.find(({ client }) => client.id === clientId);
+
+    expect({
+      older: entry(older.clientId),
+      acme: entry(acme.clientId)?.state,
+      readers: [older.core.adminReaders, acme.core.adminReaders],
+    }).toMatchObject({
+      older: {
+        state: "older",
+        admin: { state: "answered", snapshot: { paused: true } },
+      },
+      acme: "answered",
+      readers: [["ada@grasp.test"], []],
     });
   });
 

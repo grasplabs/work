@@ -44,6 +44,17 @@ export const adminSummaryRunDays = 30;
 export const adminSummaryWeeks = 8;
 
 /**
+ * What the summary says for a week in which 1 to 4 people were active:
+ * staff get no insight into one person, and in a company of one or two an
+ * exact count would show a known person's activity. 0 and 5 or more are
+ * exact.
+ */
+export const fewPeople = "1–4";
+
+/** Fewer active people than this in a week, but some, are said as `fewPeople`. */
+export const fewPeopleBelow = 5;
+
+/**
  * The needs core can know: every kind the admin's view of a snapshot
  * gives (`adminViewOf`), which core works out as the admin does. Not
  * `overdue`, which the admin reads from Stripe. A kind added to `Need`
@@ -124,20 +135,35 @@ export const adminSummarySchema = z.object({
   connectors: z
     .object({ works: count, again: count, stopped: count })
     .nullable(),
-  /** How many apps the company asked Grasp to add. */
-  asked: count,
-  activity: z.object({
-    /** Workflow runs started on each of the last 30 UTC days, oldest first, as they stand now. */
-    runs: z.array(z.object({ day: z.iso.date(), done: count, failed: count })),
-    /** Workflows published and not paused, Apps live, agents on. */
-    workflowsLive: count,
-    appsLive: count,
-    agentsOn: count,
-    /**
-     * People who did something themselves in each of the last 8 weeks,
-     * oldest first, each week from its Monday (UTC).
-     */
-    activePeople: z.array(z.object({ week: z.iso.date(), people: count })),
-  }),
+  /**
+   * How many apps the company asked Grasp to add; null once the company
+   * ended Grasp's staff access, as it then gets only what running the
+   * service needs (onboarding, needs, connectors).
+   */
+  asked: count.nullable(),
+  /** How the company uses Grasp; null once it ended Grasp's staff access, as `asked`. */
+  activity: z
+    .object({
+      /** Workflow runs started on each of the last 30 UTC days, oldest first, as they stand now. */
+      runs: z.array(
+        z.object({ day: z.iso.date(), done: count, failed: count })
+      ),
+      /** Workflows published and not paused, Apps live, agents on. */
+      workflowsLive: count,
+      appsLive: count,
+      agentsOn: count,
+      /**
+       * People who did something themselves in each of the last 8 weeks,
+       * oldest first, each week from its Monday (UTC): 0, `fewPeople`
+       * for 1 to 4, else how many.
+       */
+      activePeople: z.array(
+        z.object({
+          week: z.iso.date(),
+          people: z.union([count, z.literal(fewPeople)]),
+        })
+      ),
+    })
+    .nullable(),
 });
 export type AdminSummary = z.output<typeof adminSummarySchema>;

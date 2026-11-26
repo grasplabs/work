@@ -416,6 +416,9 @@ export const needLine = (need: Need, view: OrgView): string => {
   }
 };
 
+/** What a company whose Grasp is from before the summary needs: an update, to see its counts. */
+export const olderLine = "Update to see its counts";
+
 /**
  * Each kind of need as a label that names nothing (no team, lead, piece of
  * work or app) and reads right beside how many there are of it, as the
