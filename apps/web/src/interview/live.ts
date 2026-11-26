@@ -1,3 +1,4 @@
+import type { PartialOptions, VoiceConversation } from "@elevenlabs/client";
 import {
   interviewLimits,
   interviewPhases,
@@ -93,6 +94,15 @@ export interface Live {
    * said in the room goes on, but nothing of it is played.
    */
   hush: (hushed: boolean) => void;
+  /**
+   * Their words as our own ear hears them while they talk, stretch by
+   * stretch (`ended` once it fell quiet): shown until the session's own
+   * words for their turn come. Null where the session streams their words
+   * itself.
+   */
+  overheard: ((stretch: number, text: string, ended: boolean) => void) | null;
+  /** How loud he is and how loud they are, 0 to 1, as the session hears it now. */
+  levels: () => { his: number; theirs: number };
   /** Leaves the room and closes the session at Mistral; again does nothing. */
   close: () => Promise<void>;
 }
@@ -221,6 +231,8 @@ const joinMistral = async (
         }
       },
       said: () => null,
+      overheard: null,
+      levels: () => ({ his: 0, theirs: 0 }),
       type: null,
       setMuted: async (muted) => {
         if (!closed) {
@@ -253,15 +265,57 @@ const firstLineMs = 10_000;
 const tookIt = "ok";
 
 /**
+ * How long their words as our ear heard them stay over the box once they
+ * fell quiet, if the agent never takes them up as their turn, in ms.
+ */
+const overheardMs = 6000;
+
+/**
  * Starts the conversation with Grasp's ElevenLabs agent core opened
  * (`join`), through ElevenLabs's own SDK, over WebRTC: with the token core
  * asked for, and what core says Stephen is told and says first as the
  * agent's overrides. Its audio worklets come from this origin, as the
  * page's policy lets scripts come from nowhere else.
  */
-const joinAgent = async (
+/** What starts a conversation with the agent: the SDK's own, loaded once it is needed (`loadAgentSdk`). */
+export type StartAgent = (
+  options: PartialOptions
+) => Promise<
+  Pick<
+    VoiceConversation,
+    | "sendContextualUpdate"
+    | "sendUserMessage"
+    | "setMicMuted"
+    | "setVolume"
+    | "getInputVolume"
+    | "getOutputVolume"
+    | "endSession"
+  >
+>;
+
+/** The SDK, with its audio worklets served from this site (the CSP refuses them inline). */
+const loadAgentSdk = async (): Promise<StartAgent> => {
+  const [{ Conversation }, raw, concat] = await Promise.all([
+    import("@elevenlabs/client"),
+    import("@elevenlabs/client/worklets/rawAudioProcessor.js?url"),
+    import("@elevenlabs/client/worklets/audioConcatProcessor.js?url"),
+  ]);
+  return async (options) =>
+    await Conversation.startSession({
+      ...options,
+      textOnly: false,
+      workletPaths: {
+        rawAudioProcessor: raw.default,
+        audioConcatProcessor: concat.default,
+      },
+    });
+};
+
+/** Joins the conversation core opened with the agent, started by `start`; null when it can't be. */
+export const joinAgent = async (
   join: AgentJoin,
-  on: LiveHandlers
+  on: LiveHandlers,
+  start?: StartAgent
 ): Promise<Live | null> => {
   let closed = false;
   /** The conversation as heard here: what core writes down from. */
@@ -275,6 +329,21 @@ const joinAgent = async (
   let begun = false;
   /** Ends a conversation his first line never came in: set once it began. */
   let fail: ((why: string) => void) | null = null;
+  /** Our own ear's stretches of their turn now, not yet taken up by the agent's own words for it. */
+  const overheardNow = new Map<number, string>();
+  /** Stretches the agent's words for a turn stood in for: whatever still comes of them is old. */
+  const takenUp = new Set<number>();
+  /** Whether the agent streams their words as they talk (its `tentative_user_transcript` event). */
+  let streamsTheirs = false;
+  /** Their turn's words as our ear heard them so far, over the box. */
+  const showOverheard = (): void => {
+    on.segment({
+      id: `you-${theirs}`,
+      from: "person",
+      text: [...overheardNow.values()].join(" "),
+      final: false,
+    });
+  };
   const keep = (line: VoiceLine): void => {
     said.push({
       from: line.from,
@@ -285,20 +354,12 @@ const joinAgent = async (
     }
   };
   try {
-    const [{ Conversation }, raw, concat] = await Promise.all([
-      import("@elevenlabs/client"),
-      import("@elevenlabs/client/worklets/rawAudioProcessor.js?url"),
-      import("@elevenlabs/client/worklets/audioConcatProcessor.js?url"),
-    ]);
-    const conversation = await Conversation.startSession({
+    const startSession = start ?? (await loadAgentSdk());
+    const conversation = await startSession({
       conversationToken: join.conversationToken,
       connectionType: "webrtc",
       // The agent takes no overrides: its own prompt and first line stand; who they are comes as context.
       stripAudioTags: true,
-      workletPaths: {
-        rawAudioProcessor: raw.default,
-        audioConcatProcessor: concat.default,
-      },
       clientTools: {
         // He goes to another part: the page follows; the notes hear of it from the page.
         [partFunction]: (parameters: unknown) => {
@@ -336,6 +397,8 @@ const joinAgent = async (
         ) {
           return;
         }
+        // The agent streams their words itself: our ear's are not needed.
+        streamsTheirs = true;
         const heard = event.tentative_user_transcription_event;
         const text =
           typeof heard === "object" &&
@@ -364,6 +427,11 @@ const joinAgent = async (
             return;
           }
           keep({ from: "person", text: message });
+          // The agent's words for their turn stand in for what our ear heard of it.
+          for (const stretch of overheardNow.keys()) {
+            takenUp.add(stretch);
+          }
+          overheardNow.clear();
           on.segment({
             id: `you-${theirs}`,
             from: "person",
@@ -449,6 +517,35 @@ const joinAgent = async (
         await Promise.resolve();
       },
       said: () => [...said],
+      overheard: (stretch, text, ended) => {
+        if (closed || streamsTheirs || takenUp.has(stretch)) {
+          return;
+        }
+        if (text.trim() !== "") {
+          overheardNow.set(stretch, text.trim());
+          showOverheard();
+        }
+        if (ended) {
+          // Heard by us, but never taken up as their turn (a cough, the room): gone again after a while.
+          window.setTimeout(() => {
+            if (
+              !closed &&
+              !takenUp.has(stretch) &&
+              overheardNow.delete(stretch)
+            ) {
+              takenUp.add(stretch);
+              showOverheard();
+            }
+          }, overheardMs);
+        }
+      },
+      levels: () =>
+        closed
+          ? { his: 0, theirs: 0 }
+          : {
+              his: conversation.getOutputVolume(),
+              theirs: conversation.getInputVolume(),
+            },
       type: (text) => {
         if (closed) {
           return;

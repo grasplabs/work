@@ -15,6 +15,7 @@ import { Guide } from "./guide.tsx";
 import { keepNow, update, useInterviewer, useProgress } from "./kept.ts";
 import { sendTyped, useLoop } from "./loop.ts";
 import { micProblem } from "./mic.ts";
+import { StephenOrb } from "./orb.tsx";
 import { partAt, withLineText, withoutLine } from "./progress.ts";
 import { ReadBack, ReadBackFoot } from "./read-back-story.tsx";
 import { say, stopSpeaking, useSaidOf } from "./speech.ts";
@@ -206,9 +207,14 @@ const Asking = () => {
   } else if (mode !== "talk" || loop.doing !== "speaking") {
     shown = <SaidLine line={loop.line} said={said} />;
   }
+  // Talking, his orb alone stands in the middle, alive to the conversation, and what was said
+  // is in the transcript beside it (the owner's ask, 2026-11-26). Typing, nobody hears him: his
+  // question stands under it, to be read.
+  const talking = mode === "talk";
   return (
     <div {...stylex.props(styles.question)}>
-      {loop.line === "" || shown === null ? null : (
+      <StephenOrb />
+      {talking || loop.line === "" || shown === null ? null : (
         <div
           aria-live="polite"
           key={loop.saying}
@@ -217,6 +223,12 @@ const Asking = () => {
           {shown}
         </div>
       )}
+      {talking && loop.line !== "" ? (
+        // What he says is still given to a screen reader, once it rests.
+        <div aria-live="polite" {...stylex.props(visuallyHidden)}>
+          {loop.doing === "speaking" ? "" : loop.line}
+        </div>
+      ) : null}
     </div>
   );
 };

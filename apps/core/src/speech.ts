@@ -2,7 +2,7 @@ import type { SpeechSynthesis } from "@grasp-os/shared/voice";
 
 import { models } from "./models.ts";
 import type { SpeechCall } from "./models.ts";
-import { platformAi } from "./platform-ai.ts";
+import { liveInterviewOf, platformAi } from "./platform-ai.ts";
 
 // Speech synthesis as core implements it: Grasp's own speech feature,
 // Mistral's Voxtral for an interview and ElevenLabs for the admin's
@@ -20,13 +20,29 @@ export type SpeechCaller = Omit<
 /** Who a line is said to: someone in their interview, or an admin in their onboarding. */
 export type SpeechAudience = "interview" | "onboarding";
 
-/** The speech model and voices a line to `audience` is said with. */
-export const speechOf = (audience: SpeechAudience = "interview") =>
-  audience === "onboarding" ? platformAi.onboardingSpeech : platformAi.speech;
+/**
+ * The speech model and voices a line to `audience` is said with: an
+ * interview held with the ElevenLabs agent is said in the agent's voice,
+ * so Stephen sounds as one throughout.
+ */
+export const speechOf = (
+  audience: SpeechAudience = "interview",
+  env?: Pick<Env, "INTERVIEW_LIVE_VOICE">
+) => {
+  if (audience === "onboarding") {
+    return platformAi.onboardingSpeech;
+  }
+  return liveInterviewOf(env) === "elevenlabs"
+    ? platformAi.agentSpeech
+    : platformAi.speech;
+};
 
 /** The speech model, as the gateway names it. */
-export const speechModelOf = (audience?: SpeechAudience): string => {
-  const { provider, model } = speechOf(audience);
+export const speechModelOf = (
+  audience?: SpeechAudience,
+  env?: Pick<Env, "INTERVIEW_LIVE_VOICE">
+): string => {
+  const { provider, model } = speechOf(audience, env);
   return `${provider}/${model}`;
 };
 
