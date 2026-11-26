@@ -120,7 +120,6 @@ import {
   ChevronRightIcon,
   Icon,
   InfoIcon,
-  KeyboardIcon,
   LoaderIcon,
   MicIcon,
   MicOffIcon,
@@ -4681,13 +4680,8 @@ export const PromptInputVoice = ({
             off: false,
             slot: "prompt-input-voice-close",
             onClick: onClose,
-            // Closing gives the text back: said so in words, with a keyboard.
-            children: (
-              <>
-                <Icon icon={KeyboardIcon} />
-                {words.voice.close}
-              </>
-            ),
+            // Closing gives the text back: said so in words.
+            children: words.voice.close,
           })}
         </div>
       </div>

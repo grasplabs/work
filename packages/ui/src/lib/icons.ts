@@ -97,7 +97,6 @@ import {
   LabsIcon,
   LaptopIcon as HugeLaptopIcon,
   LeftToRightListBulletIcon,
-  KeyboardIcon as HugeKeyboardIcon,
   LeftToRightListDashIcon,
   Link04Icon,
   Loading03Icon,
@@ -469,8 +468,6 @@ export const InfoIcon: IconData = InformationCircleIcon;
 export const ItalicIcon: IconData = TextItalicIcon;
 /** A key: an AI provider's key, an API key, a secret. Key01Icon. */
 export const KeyIcon: IconData = Key01Icon;
-/** Type instead of speaking. KeyboardIcon. */
-export const KeyboardIcon: IconData = HugeKeyboardIcon;
 /** A desktop's width: shown as on a laptop or a desktop. LaptopIcon. */
 export const LaptopIcon: IconData = HugeLaptopIcon;
 /** Apps, as panels on a page. DashboardSquare01Icon. */
