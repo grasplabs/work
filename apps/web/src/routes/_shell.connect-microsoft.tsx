@@ -1,4 +1,8 @@
+import { Heading } from "@grasp-os/ui/components/heading";
+import { Text } from "@grasp-os/ui/components/text";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { NotLoadedState } from "../frame/page-states.tsx";
@@ -12,17 +16,30 @@ import { loadFromCore } from "../load-from-core.tsx";
 // Once it finishes, core tells them in the chat app and carries on there;
 // the browser lands on Integrations.
 
+const styles = stylex.create({
+  // A short column in the middle of the card, while the browser leaves.
+  column: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["3"],
+    width: "100%",
+    maxWidth: "28rem",
+    marginInline: "auto",
+    padding: space["8"],
+  },
+});
+
 const ConnectMicrosoft = () => {
   const page = Route.useLoaderData();
   return (
-    <main className="mx-auto flex max-w-md flex-col gap-3 p-8 text-sm">
-      <h1 className="text-base font-medium">
+    <main {...stylex.props(styles.column)}>
+      <Heading level={1} size="2xs">
         <Trans>Connecting your Microsoft 365</Trans>
-      </h1>
+      </Heading>
       {page.state === "ready" ? (
-        <p className="text-muted-foreground">
+        <Text color="muted" size="sm">
           <Trans>Taking you to the Microsoft sign-in…</Trans>
-        </p>
+        </Text>
       ) : (
         <NotLoadedState heading="h2" page={page} />
       )}

@@ -122,6 +122,7 @@ const isolateServer = async (
     connector: manifest.name,
     connectionId: connection.id,
     hosts: manifest.hosts,
+    credentialHosts: manifest.credentialHosts,
     ...egress,
     ...(await connectorCredentialFor(env, connection.id)),
     // The egress closes when connect's MCP client gives up on the call.
