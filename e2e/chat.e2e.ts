@@ -354,10 +354,31 @@ test("a person reads an answer in blocks: a table, a formula, code and a diagram
   ).toBeVisible();
   // The formula, drawn by KaTeX as maths a screen reader reads.
   await expect(answer.locator("math")).toHaveCount(1);
-  // The code, which can be saved as a file as well as copied.
+  // The code, which can be saved as a file as well as copied, coloured by
+  // the code block's worker, which the frontend's policy lets start: its
+  // words in more than one colour.
   await expect(
     answer.getByRole("button", { name: "Download", exact: true })
   ).toBeVisible();
+  await expect
+    .poll(
+      async () =>
+        await answer
+          .locator('[data-slot="code-block"] code[data-language="python"]')
+          .evaluate(
+            (code) =>
+              new Set(
+                [...code.querySelectorAll("span")]
+                  .filter(
+                    (span) =>
+                      span.children.length === 0 &&
+                      (span.textContent ?? "").trim() !== ""
+                  )
+                  .map((span) => getComputedStyle(span).color)
+              ).size
+          )
+    )
+    .toBeGreaterThan(1);
   // The diagram, drawn by Mermaid, and its own download.
   await expect(
     answer.getByRole("application", { name: "Mermaid diagram" })
