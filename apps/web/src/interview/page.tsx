@@ -25,7 +25,12 @@ import {
 import type { OpenSession } from "./api.ts";
 import { Page, Words } from "./calm.tsx";
 import { Closed, DeleteInterview } from "./closed.tsx";
-import { besideQuery, Conversation, TimeUp } from "./conversation.tsx";
+import {
+  besideQuery,
+  Conversation,
+  PausedConversation,
+  TimeUp,
+} from "./conversation.tsx";
 import {
   Countdown,
   secondsLeft,
@@ -60,7 +65,7 @@ import {
 } from "./progress.ts";
 import { readingPose } from "./read-back-story.tsx";
 import { setSound } from "./speech.ts";
-import { Consent, NotNow, Paused, remindTimes, Reminded } from "./start.tsx";
+import { Consent, NotNow, remindTimes, Reminded } from "./start.tsx";
 import type { RemindAt } from "./start.tsx";
 import { useLoopWords } from "./words.ts";
 
@@ -687,11 +692,10 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
   if (ended !== null) {
     stage = ended;
   } else if (stopped) {
+    // Paused where they were: his orb asleep, and the box a button to go on.
     stage = (
-      <Paused
-        closes={closes}
-        minutesLeft={Math.ceil(left / 60)}
-        onCarryOn={() => {
+      <PausedConversation
+        onResume={() => {
           carryOn();
           setStopped(false);
         }}
