@@ -1,5 +1,6 @@
 import { isThemeMode, ThemeToggle } from "@grasp-os/ui/components/theme-toggle";
 import { Icon } from "@grasp-os/ui/lib/icons";
+import { fadeIn } from "@grasp-os/ui/lib/styles";
 import {
   colors,
   font,
@@ -10,7 +11,7 @@ import {
 import { iconVars, pixel } from "@grasp-os/ui/lib/vars.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 
 import { GraspLogo } from "../connections/brand-logos.ts";
@@ -164,8 +165,11 @@ export const Frame = ({
   strip = true,
   pose,
   actions,
+  scene,
   children,
 }: {
+  /** Which screen this is, as far as a change of it should be seen: once it changes, each screen fades in. */
+  scene?: string;
   /** The texture behind the header. */
   strip?: boolean;
   /** Where Stephen's field rests behind the screen; left out, he keeps out of the way and the header has its texture. */
@@ -174,6 +178,11 @@ export const Frame = ({
   actions?: ReactNode;
   children: ReactNode;
 }) => {
+  // The screen it opened on is there at once; after a change (a pause, back from it), each fades in.
+  const [seen, setSeen] = useState({ scene, moved: false });
+  if (seen.scene !== scene) {
+    setSeen({ scene, moved: true });
+  }
   const screen = (
     <>
       <header {...stylex.props(styles.header)}>
@@ -189,11 +198,16 @@ export const Frame = ({
         </div>
       </header>
       {strip && pose === undefined ? (
-        <div aria-hidden="true" {...stylex.props(styles.field, styles.strip)}>
+        <div
+          aria-hidden="true"
+          {...stylex.props(styles.field, styles.strip, seen.moved && fadeIn)}
+        >
           <span {...stylex.props(styles.texture)} />
         </div>
       ) : null}
-      <main {...stylex.props(styles.main)}>{children}</main>
+      <main key={scene} {...stylex.props(styles.main, seen.moved && fadeIn)}>
+        {children}
+      </main>
     </>
   );
   // Always on his field, so a screen that changes to or from the conversation never takes the
