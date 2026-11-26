@@ -3,6 +3,7 @@ import type { CodedError } from "@grasp-os/shared/errors";
 import { log } from "@grasp-os/shared/log";
 import { memberErrors } from "@grasp-os/shared/members";
 import type { Guest } from "@grasp-os/shared/members";
+import { newOrganizationName } from "@grasp-os/shared/organization";
 import { canBuild, guestRole, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, asc, eq, sql } from "drizzle-orm";
@@ -159,7 +160,7 @@ export const inviteGuest = async (
     .insert(organizations)
     .values({
       id: organizationId,
-      name: "Organization",
+      name: newOrganizationName(signInConfig(env)?.domains ?? []),
       slug: organizationId,
       createdAt: new Date(now),
     })

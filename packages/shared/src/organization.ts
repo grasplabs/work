@@ -21,6 +21,54 @@ export const organizationNameSchema = z
   // as one line.
   .regex(/^[^\p{Cc}\p{Zl}\p{Zp}]*$/u);
 
+/**
+ * What core names the organization when it is made, before anyone said
+ * what the company is called: never shown as its name (`companyNameOf`).
+ */
+export const placeholderOrganizationName = "Organization";
+
+/** Second-level labels that are part of a country's suffix, as in `acme.co.uk`. */
+const suffixLabels = new Set(["ac", "co", "com", "gov", "net", "org"]);
+
+/**
+ * A company's name as its email domain spells it: `noordkade.nl` gives
+ * "Noordkade", `acme.co.uk` and `mail.acme.com` "Acme", `van-dijk.nl`
+ * "Van Dijk". Null when the domain gives no name.
+ */
+export const nameOfDomain = (domain: string): string | null => {
+  const labels = domain.trim().toLowerCase().split(".").slice(0, -1);
+  if (labels.length > 1 && suffixLabels.has(labels.at(-1) ?? "")) {
+    labels.pop();
+  }
+  const label = labels.at(-1) ?? "";
+  if (!/^[\p{L}\p{N}-]+$/u.test(label)) {
+    return null;
+  }
+  const words = label.split("-").filter((word) => word !== "");
+  return words.length === 0
+    ? null
+    : words
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" ");
+};
+
+/**
+ * What the company is called, for what people read: the organization's
+ * own name, or, while it has only the one core gave it, the name its
+ * first sign-in domain spells. Null when neither gives one.
+ */
+export const companyNameOf = (
+  name: string,
+  domains: readonly string[]
+): string | null => {
+  const own = name.trim();
+  if (own !== "" && own !== placeholderOrganizationName) {
+    return own;
+  }
+  const [domain] = domains;
+  return domain === undefined ? null : nameOfDomain(domain);
+};
+
 /** An IANA time zone the runtime knows, such as `Europe/Amsterdam`. */
 export const organizationTimeZoneSchema = z.string().max(64).refine(isTimeZone);
 
@@ -114,3 +162,10 @@ export const organizationErrors = defineErrorFamily({
   "organization.changes_invalid":
     "Say what to change: the name, the time zone or both.",
 });
+
+/**
+ * The name core gives the organization as it makes it: the one its first
+ * sign-in domain spells, or the placeholder when that gives none.
+ */
+export const newOrganizationName = (domains: readonly string[]): string =>
+  companyNameOf("", domains) ?? placeholderOrganizationName;
