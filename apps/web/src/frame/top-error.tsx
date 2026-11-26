@@ -4,8 +4,11 @@ import {
   AlertDescription,
   AlertTitle,
 } from "@grasp-os/ui/components/alert";
+import { alertVars } from "@grasp-os/ui/components/alert.stylex";
 import { Button } from "@grasp-os/ui/components/button";
-import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { Icon, XIcon } from "@grasp-os/ui/lib/icons";
+import { duration, media } from "@grasp-os/ui/lib/tokens.stylex";
+import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import {
   useEffect,
@@ -22,8 +25,8 @@ import { alarmField } from "../onboarding/field/engine.ts";
 // page (the owner's rule: no exceptions). A screen says what went wrong
 // with <TopError> where it would have written it; the frame it stands in
 // shows it with <TopErrorBar>. The newest one shows; closing it puts it
-// away until its words change. It lies over the page, so nothing under it
-// moves when it comes or goes.
+// away until its words change. It stands above the header, in the page's
+// flow, so it never covers anything: the page moves down with it, gently.
 
 /** Something to do about it, beside its words: trying again, mostly. */
 export interface TopErrorAction {
@@ -32,12 +35,15 @@ export interface TopErrorAction {
 }
 
 interface Shown {
+  /** Which one it is: each put is a new one. */
+  id: number;
   title: string | undefined;
   message: string;
   action: TopErrorAction | undefined;
   onClose: (() => void) | undefined;
 }
 
+let made = 0;
 let shown: readonly { key: string; error: Shown }[] = [];
 const listeners = new Set<() => void>();
 
@@ -70,8 +76,12 @@ const alarm = (on: boolean): void => {
   changed();
 };
 
-const put = (key: string, error: Shown): void => {
-  shown = [...shown.filter((one) => one.key !== key), { key, error }];
+const put = (key: string, error: Omit<Shown, "id">): void => {
+  made += 1;
+  shown = [
+    ...shown.filter((one) => one.key !== key),
+    { key, error: { ...error, id: made } },
+  ];
   changed();
 };
 
@@ -131,36 +141,38 @@ export const TopError = ({
 };
 
 const styles = stylex.create({
-  // Across the top of the page, just under the header, so its controls stay clear and usable;
-  // above everything on the page.
-  bar: {
-    position: "fixed",
-    insetBlockStart: {
-      default: `calc(4rem + ${space["2"]})`,
-      [media.sm]: `calc(5rem + ${space["2"]})`,
+  // Above the header, across the whole window, as Damsko lays a banner over an app (app-shell-01):
+  // a band with square ends, in the page's flow, so it never covers the header or the page. It
+  // opens and closes by its height, gently, and the page moves down and back up with it.
+  band: {
+    display: "grid",
+    gridTemplateRows: "0fr",
+    flexShrink: 0,
+    transitionProperty: {
+      default: "grid-template-rows",
+      [media.reducedMotion]: "none",
     },
-    insetInline: space["3"],
-    zIndex: 50,
-    display: "flex",
-    justifyContent: "center",
-    pointerEvents: "none",
+    transitionDuration: duration.ui,
+    transitionTimingFunction: duration.easeInOut,
+    [alertVars.bannerCorner]: "0px",
   },
-  // Its own box takes the pointer; the window's edges around it don't.
-  hold: {
-    display: "flex",
-    width: "100%",
-    maxWidth: "48rem",
-    pointerEvents: "auto",
-  },
+  open: { gridTemplateRows: "1fr" },
+  inner: { minHeight: 0, overflow: "hidden" },
   alert: { width: "100%" },
 });
 
-/** The bar every error of the onboarding and the interview is said in: one per frame. */
+/** The bar every error of the onboarding and the interview is said in: one per frame, at its top. */
 export const TopErrorBar = () => {
+  const { t } = useLingui();
   const error = useSyncExternalStore(subscribe, newest, newest);
   // Closed, it stays away until it is put there again: a new error, or the same one said anew.
   const [closed, setClosed] = useState<Shown | null>(null);
   const showing = error !== null && error !== closed;
+  // What it said last stays in it while it closes, so it closes with its words, not empty.
+  const [said, setSaid] = useState<Shown | null>(null);
+  if (showing && said !== error) {
+    setSaid(error);
+  }
   // While it shows, Stephen's light behind the page turns red with it.
   useEffect(() => {
     alarm(showing);
@@ -168,40 +180,53 @@ export const TopErrorBar = () => {
       alarm(false);
     };
   }, [showing]);
-  if (error === null || error === closed) {
-    return null;
-  }
+  const close = (): void => {
+    setClosed(error);
+    error?.onClose?.();
+  };
   return (
-    <div {...stylex.props(styles.bar)}>
-      <div {...stylex.props(styles.hold)}>
-        <Alert
-          appearance="banner"
-          onClose={() => {
-            setClosed(error);
-            error.onClose?.();
-          }}
-          style={styles.alert}
-          variant="destructive"
-        >
-          {error.title === undefined ? null : (
-            <AlertTitle>{error.title}</AlertTitle>
-          )}
-          <AlertDescription>{error.message}</AlertDescription>
-          {error.action === undefined ? null : (
+    <div
+      data-slot="top-error"
+      inert={!showing}
+      {...stylex.props(styles.band, showing && styles.open)}
+    >
+      <div {...stylex.props(styles.inner)}>
+        {said === null ? null : (
+          <Alert
+            appearance="banner"
+            // Each error its own: a new one is said as it comes.
+            key={said.id}
+            style={styles.alert}
+            variant="destructive"
+          >
+            {said.title === undefined ? null : (
+              <AlertTitle>{said.title}</AlertTitle>
+            )}
+            <AlertDescription>{said.message}</AlertDescription>
             <AlertAction>
+              {said.action === undefined ? null : (
+                <Button
+                  onClick={async () => {
+                    setClosed(error);
+                    await said.action?.run();
+                  }}
+                  size="xs"
+                  variant="outline"
+                >
+                  {said.action.label}
+                </Button>
+              )}
               <Button
-                onClick={async () => {
-                  setClosed(error);
-                  await error.action?.run();
-                }}
-                size="xs"
-                variant="outline"
+                aria-label={t`Close`}
+                onClick={close}
+                size="icon-xs"
+                variant="ghost"
               >
-                {error.action.label}
+                <Icon icon={XIcon} />
               </Button>
             </AlertAction>
-          )}
-        </Alert>
+          </Alert>
+        )}
       </div>
     </div>
   );
