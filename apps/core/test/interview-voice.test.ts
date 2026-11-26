@@ -278,7 +278,7 @@ describe("an interview as a live voice session", { timeout: 60_000 }, () => {
         voice: asked.includes('"voice_id":"voice_485"'),
         interrupts: asked.includes('"allow_interruptions":true'),
         listens: asked.includes('"turn_detection":{}'),
-        welcome: asked.includes("What do you do here, in a sentence or two?"),
+        welcome: asked.includes("In a sentence or two, what do you do here?"),
         part: asked.includes('"name":"part"'),
       },
       early: {

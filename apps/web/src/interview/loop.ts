@@ -2090,6 +2090,17 @@ const goLive = async (): Promise<boolean> => {
           listen();
         }
       },
+      failed: () => {
+        if (liveCount === count && on) {
+          // It never began: that stands in the bar at the top, and he begins turn by turn.
+          if (words !== null) {
+            set({ trouble: words.trouble });
+          }
+          void leaveLive({ quick: true });
+          withoutLive();
+          void ask(openingEvent(progressNow()));
+        }
+      },
     }
   );
   if (joined === null || isRefused(joined)) {
