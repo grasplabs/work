@@ -39,59 +39,46 @@ import {
 } from "@grasp-os/ui/components/empty";
 import { PageHeader } from "@grasp-os/ui/components/page-header";
 import {
-  Select,
-  SelectContent,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/ui/components/select";
-import type { SelectItems } from "@grasp-os/ui/components/select";
-import {
-  Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
-  SidebarHeader,
+  SidebarLevel,
+  SidebarLevelHeader,
+  SidebarLevelTitle,
   SidebarMenu,
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarProvider,
-  SidebarTrigger,
+  SidebarMenuSkeleton,
   useSidebar,
 } from "@grasp-os/ui/components/sidebar";
 import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import { Text } from "@grasp-os/ui/components/text";
 import {
+  BuildingIcon,
+  ChevronLeftIcon,
   CircleAlertIcon,
   ClockIcon,
   Icon,
   RefreshCwIcon,
 } from "@grasp-os/ui/lib/icons";
 import { visuallyHidden } from "@grasp-os/ui/lib/styles";
-import {
-  colors,
-  font,
-  media,
-  size,
-  space,
-} from "@grasp-os/ui/lib/tokens.stylex";
+import { colors, font, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import {
   Link,
   Outlet,
   useChildMatches,
-  useNavigate,
   useMatchRoute,
   useRouter,
 } from "@tanstack/react-router";
 import { createContext, Suspense, use, useState } from "react";
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps } from "react";
 
 import type { ClientAdmin } from "../clients/admin.ts";
 import type { GridRow } from "../clients/grid.ts";
-import type { AnsweredAdmin, OrgRead } from "./org-reads.ts";
+import type { OrgRead } from "./org-reads.ts";
 import { AdminHeader, PageBody } from "./page.tsx";
 import { KnowledgeDots } from "./parts.tsx";
 import {
@@ -110,25 +97,6 @@ import { organizationOf, unreadWhy, whyUnread } from "./views.ts";
 import { formatDate, stageLines } from "./words.ts";
 
 const styles = stylex.create({
-  // Under the bar, the column beside the section, each as tall as the
-  // card: the section scrolls on its own, the column stays.
-  row: { flexGrow: 1, minHeight: 0 },
-  section: {
-    position: "relative",
-    flexGrow: 1,
-    minWidth: 0,
-    overflowY: "auto",
-  },
-  // The column's head: the organization's name, the fold at the end.
-  head: {
-    display: "flex",
-    alignItems: "center",
-    gap: space["2"],
-    minHeight: size.sidebarIconButton,
-    paddingInlineStart: size.sidebarRowInline,
-  },
-  headFolded: { justifyContent: "center", paddingInlineStart: 0 },
-  name: { flexGrow: 1, minWidth: 0 },
   // How much is known: the dots over a line that says when it opens, in
   // the warning's colour once it waits on Grasp's go.
   knowing: {
@@ -143,11 +111,17 @@ const styles = stylex.create({
     color: colors.mutedForeground,
   },
   opensWaits: { color: colors.warning },
-  // The day the interviews are on, at the column's foot.
-  day: { display: "flex", flexDirection: "column", gap: space["1"] },
-  // Under a desktop's width the sections are the select at the top of the
-  // page, as the column has no room beside the admin's sidebar there.
-  narrowOnly: { display: { default: null, [media.lg]: "none" } },
+  // The day the interviews are on, at the foot of the organization's
+  // level, in the rows' inset.
+  day: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["1"],
+    paddingInline: size.sidebarRowInline,
+  },
+  // Under the page's title, its sentence, then where its figures come
+  // from and when they were read, a line each.
+  lines: { display: "flex", flexDirection: "column", gap: space["1"] },
   buttons: {
     display: "flex",
     flexWrap: "wrap",
@@ -159,6 +133,8 @@ const styles = stylex.create({
   skeletonCard: { height: "7rem" },
   skeletonTable: { height: "12rem" },
   readNote: { display: "flex", alignItems: "center", gap: space["1"] },
+  // What the page says under its title, kept as one block of its lines.
+  meta: { display: "flex", flexDirection: "column", gap: space["2"] },
 });
 
 /** A client whose core answered, with its view. */
@@ -325,9 +301,14 @@ const Knowing = ({ clientId, view }: { clientId: string; view: AdminView }) => {
 
 /** The day the interviews are on, which is not today once they are over. */
 const InterviewDay = ({ view }: { view: AdminView }) => {
+  const { state, isMobile } = useSidebar();
   const date = formatDate(dateOn(view.org, view.day));
   // The last day the links worked: the plan's days count from day 0.
   const lastDay = formatDate(dateOn(view.org, listenDays(view.org) - 1));
+  // Folded to the icons, the rail has no room for words.
+  if (state === "collapsed" && !isMobile) {
+    return null;
+  }
   return (
     <div {...stylex.props(styles.day)}>
       <Text as="span" color="muted" size="xs">
@@ -342,26 +323,8 @@ const InterviewDay = ({ view }: { view: AdminView }) => {
   );
 };
 
-/** The column's head: the organization's name and the fold; folded, the fold alone. */
-const ColumnHead = ({ name }: { name: string }) => {
-  const { state } = useSidebar();
-  const folded = state === "collapsed";
-  return (
-    <div {...stylex.props(styles.head, folded && styles.headFolded)}>
-      {folded ? null : (
-        <h2 {...stylex.props(styles.name)}>
-          <Text as="span" color="default" size="sm" truncate weight="medium">
-            {name}
-          </Text>
-        </h2>
-      )}
-      <SidebarTrigger aria-label="Show or hide the sections" />
-    </div>
-  );
-};
-
-/** What the column says on top while its core isn't read: reading it, or why not. */
-const ColumnState = ({
+/** What the level says on top while its core isn't read: reading it, or why not. Not on the rail. */
+const LevelState = ({
   clientId,
   view,
   reading,
@@ -370,8 +333,8 @@ const ColumnState = ({
   view: AdminView | null;
   reading: boolean;
 }) => {
-  const { state } = useSidebar();
-  if (state === "collapsed") {
+  const { state, isMobile } = useSidebar();
+  if (state === "collapsed" && !isMobile) {
     return null;
   }
   if (view !== null) {
@@ -380,7 +343,7 @@ const ColumnState = ({
   return (
     <SidebarMenuItem>
       {reading ? (
-        <Skeleton style={styles.skeletonSmall} variant="rectangular" />
+        <SidebarMenuSkeleton />
       ) : (
         // Nothing of it is known now: where to see why, in sight on every section.
         <Badge asChild variant="warning">
@@ -393,50 +356,46 @@ const ColumnState = ({
   );
 };
 
-/** The day the interviews are on, at the column's foot once the team is told; not on the rail. */
-const ColumnFoot = ({ view }: { view: AdminView | null }) => {
-  const { state } = useSidebar();
-  return view?.told === true && state !== "collapsed" ? (
-    <SidebarFooter>
-      <InterviewDay view={view} />
-    </SidebarFooter>
-  ) : null;
-};
-
-/**
- * The column beside the organization, as the workspace's pages have one:
- * its name and how much Grasp knows on top, then every section in its
- * groups, and once the team is told, the day its interviews are on.
- * Folded, a rail of the sections' icons.
- */
-const ColumnLayout = ({
-  name,
-  clientId,
+const LevelBody = ({
+  client,
   view,
   reading,
 }: {
-  name: string;
-  clientId: string;
-  /** Null when its core isn't read now: the column then says so on top. */
+  client: GridRow;
+  /** Null when its core isn't read now: the level then says so on top. */
   view: AdminView | null;
   /** Its core's answer isn't in yet. */
   reading: boolean;
 }) => {
+  const { id: clientId, name } = client;
   const waiting = new Map<OrgSection, number>();
   for (const need of view?.needs ?? []) {
     const section = needSection(need);
     waiting.set(section, (waiting.get(section) ?? 0) + 1);
   }
   return (
-    <Sidebar aria-label="Sections" collapsible="icon">
-      <SidebarHeader>
-        <ColumnHead name={name} />
-      </SidebarHeader>
+    <SidebarLevel value={clientId}>
+      <SidebarLevelHeader>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton asChild tooltip="Back to the admin">
+              <Link to="/">
+                <Icon icon={ChevronLeftIcon} />
+                Admin
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+        <SidebarLevelTitle>
+          <Icon icon={BuildingIcon} />
+          {name}
+        </SidebarLevelTitle>
+      </SidebarLevelHeader>
       <SidebarContent aria-label={name}>
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              <ColumnState clientId={clientId} reading={reading} view={view} />
+              <LevelState clientId={clientId} reading={reading} view={view} />
               <SectionItem
                 clientId={clientId}
                 section="overview"
@@ -462,25 +421,28 @@ const ColumnLayout = ({
             </SidebarGroupContent>
           </SidebarGroup>
         ))}
+        {view?.told === true ? (
+          <SidebarGroup>
+            <InterviewDay view={view} />
+          </SidebarGroup>
+        ) : null}
       </SidebarContent>
-      <ColumnFoot view={view} />
-    </Sidebar>
+    </SidebarLevel>
   );
 };
 
-/** The column once its core's answer is in. */
-const SettledColumn = ({
-  name,
-  clientId,
+/** The level once its core's answer is in. */
+const SettledLevel = ({
+  client,
+  read,
 }: {
-  name: string;
-  clientId: string;
+  client: GridRow;
+  read: Deferred<OrgRead>;
 }) => {
-  const { admin } = useOrgRead();
+  const { admin } = useSettled(read);
   return (
-    <ColumnLayout
-      clientId={clientId}
-      name={name}
+    <LevelBody
+      client={client}
       reading={false}
       view={organizationOf(admin).view}
     />
@@ -488,73 +450,26 @@ const SettledColumn = ({
 };
 
 /**
- * The column, and the section beside it, under the page's bar: a Sidebar
- * of its own, with its own fold, which stays as it was left. Every
- * section at once, what waits where once its core answered. Only the
- * column waits on that answer, never the section beside it, so a Setup
- * being typed in keeps what was typed. From a desktop's width on only:
- * below it the sections are the select at the top of the page, as the
- * admin's own sidebar takes the room there.
+ * The organization as a level of the admin's sidebar, as the frontend's
+ * Settings is a level of its own (apps/web/src/frame/app-sidebar.tsx):
+ * the way back to the admin, the organization's name, how much Grasp
+ * knows about it, and every section in its groups, each with how many
+ * things wait for Grasp there; once the team is told, the day its
+ * interviews are on. Every section at once, from what the admin recorded;
+ * what waits where once its page's read of its core (`read`, undefined
+ * until it is asked) is in.
  */
-const OrgColumn = ({
-  name,
-  clientId,
-  children,
+export const OrganizationLevel = ({
+  client,
+  read,
 }: {
-  name: string;
-  clientId: string;
-  children: ReactNode;
+  client: GridRow;
+  read: Deferred<OrgRead> | undefined;
 }) => (
-  <SidebarProvider keyboardShortcut={false} style={styles.row}>
-    <Suspense
-      fallback={
-        <ColumnLayout clientId={clientId} name={name} reading view={null} />
-      }
-    >
-      <SettledColumn clientId={clientId} name={name} />
-    </Suspense>
-    {children}
-  </SidebarProvider>
+  <Suspense fallback={<LevelBody client={client} reading view={null} />}>
+    <SettledLevel client={client} read={read ?? notAsked} />
+  </Suspense>
 );
-
-/** Without room for the column, the sections are one choice at the top of the page. */
-const SectionSelect = ({
-  clientId,
-  section,
-}: {
-  clientId: string;
-  section: OrgSection;
-}) => {
-  const navigate = useNavigate();
-  const items: SelectItems = [
-    { value: "overview", label: sectionWords.overview.title },
-    ...sectionGroups.map((group) => ({
-      type: "group" as const,
-      label: group.label,
-      items: group.sections.map((each) => ({
-        value: each,
-        label: sectionWords[each].title,
-      })),
-    })),
-  ];
-  return (
-    <Select
-      items={items}
-      onValueChange={(value) => {
-        const chosen = orgSections.find((each) => each === value);
-        if (chosen !== undefined) {
-          void navigate({ to: sectionTo[chosen], params: { clientId } });
-        }
-      }}
-      value={section}
-    >
-      <SelectTrigger aria-label="Section" style={styles.narrowOnly}>
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent />
-    </Select>
-  );
-};
 
 /** A part not read yet, in a sentence: core doesn't hold it, or its system isn't connected. */
 const laterLine = ({ source, what = "This" }: Origin): string =>
@@ -569,7 +484,7 @@ const laterLine = ({ source, what = "This" }: Origin): string =>
 const SourceNote = ({ origins }: { origins: readonly Origin[] }) => {
   const lines = origins.filter((origin) => !origin.read).map(laterLine);
   return lines.length === 0 ? null : (
-    <Text color="muted" size="sm">
+    <Text as="span" color="muted" size="sm">
       {lines.join(" ")}
     </Text>
   );
@@ -674,22 +589,32 @@ const capitalized = (text: string): string =>
   `${text.slice(0, 1).toUpperCase()}${text.slice(1)}`;
 
 /**
- * When what the page shows was read, and a way to read it again; when
- * reading it again failed just now, why, above what it last answered.
+ * When what the page shows was read, and a way to read it again: a line
+ * under the page's title, in its description.
  */
-const ReadNote = ({ read }: { read: OrgRead & { admin: AnsweredAdmin } }) => {
+const ReadLine = ({ at }: { at: string }) => {
   const { busy, readAgain } = useReadAgain();
-  if (read.stale === null) {
-    return (
-      <div {...stylex.props(styles.readNote)}>
-        <Text as="span" color="muted" size="xs">
-          Read <Ago at={read.admin.at} />.
-        </Text>
-        <Button disabled={busy} onClick={readAgain} size="xs" variant="link">
-          {busy ? "Reading…" : "Read again"}
-        </Button>
-      </div>
-    );
+  return (
+    <span {...stylex.props(styles.readNote)}>
+      <Text as="span" color="muted" size="xs">
+        Read <Ago at={at} />.
+      </Text>
+      <Button disabled={busy} onClick={readAgain} size="xs" variant="link">
+        {busy ? "Reading…" : "Read again"}
+      </Button>
+    </span>
+  );
+};
+
+/**
+ * Reading it again failed just now: why, above what it last answered,
+ * with Try again. Under the page's header, as a note set into the page.
+ */
+const StaleNote = () => {
+  const read = useOrgRead();
+  const { busy, readAgain } = useReadAgain();
+  if (read.admin.state !== "answered" || read.stale === null) {
+    return null;
   }
   return (
     <Alert live="polite" variant="warning">
@@ -742,7 +667,11 @@ const OverviewAbout = () => {
   return admin.state === "answered" ? "" : unreadWhy(admin);
 };
 
-/** Where a section's figures come from, and when they were read, once its core answered. */
+/**
+ * Where a section's figures come from, and when they were read, once its
+ * core answered: lines of the page's description, as the frontend's pages
+ * set what they say of a page under its title.
+ */
 const ReadNotes = ({ section }: { section: OrgSection }) => {
   const read = useOrgRead();
   const { admin } = read;
@@ -760,7 +689,7 @@ const ReadNotes = ({ section }: { section: OrgSection }) => {
           )[section]
         }
       />
-      <ReadNote read={{ ...read, admin }} />
+      {read.stale === null ? <ReadLine at={admin.at} /> : null}
     </>
   );
 };
@@ -783,42 +712,44 @@ export const OrganizationPage = ({
   client: GridRow;
   read: Deferred<OrgRead> | undefined;
 }) => {
-  const { id: clientId, name } = client;
+  const { name } = client;
   const { section, withoutCore } = useShownSection();
   const { title, about } = sectionWords[section];
   return (
     <OrgReadContext value={read}>
       <AdminHeader page={name} />
-      <OrgColumn clientId={clientId} name={name}>
-        <div {...stylex.props(styles.section)}>
-          <PageBody>
-            <SectionSelect clientId={clientId} section={section} />
-            <PageHeader
-              description={
-                section === "overview" ? (
-                  <Suspense fallback={null}>
-                    <OverviewAbout />
-                  </Suspense>
-                ) : (
-                  about
-                )
-              }
-              title={section === "overview" ? name : title}
-            />
-            <Suspense fallback={null}>
-              <ReadNotes section={section} />
-            </Suspense>
-            {withoutCore ? (
-              // Shown at once, and never swapped for anything as the answer comes.
-              <Outlet />
-            ) : (
-              <Suspense fallback={<SectionLoading />}>
-                <SectionGate section={section} />
+      <PageBody>
+        <PageHeader
+          description={
+            <span {...stylex.props(styles.meta)}>
+              {section === "overview" ? (
+                <Suspense fallback={null}>
+                  <OverviewAbout />
+                </Suspense>
+              ) : (
+                <span>{about}</span>
+              )}
+              <Suspense fallback={null}>
+                <span {...stylex.props(styles.lines)}>
+                  <ReadNotes section={section} />
+                </span>
               </Suspense>
-            )}
-          </PageBody>
-        </div>
-      </OrgColumn>
+            </span>
+          }
+          title={section === "overview" ? name : title}
+        />
+        <Suspense fallback={null}>
+          <StaleNote />
+        </Suspense>
+        {withoutCore ? (
+          // Shown at once, and never swapped for anything as the answer comes.
+          <Outlet />
+        ) : (
+          <Suspense fallback={<SectionLoading />}>
+            <SectionGate section={section} />
+          </Suspense>
+        )}
+      </PageBody>
     </OrgReadContext>
   );
 };

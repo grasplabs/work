@@ -40,6 +40,10 @@ const openAcme = async (path: string, snapshot: AdminSnapshot, crm?: Crm) =>
     ...setupAnswers,
   });
 
+/** What the organization's level of the sidebar says. */
+const levelOf = (root: Element): string =>
+  root.querySelector('[data-slot="sidebar"]')?.textContent ?? "";
+
 /** The organization's column of sections. */
 const columnOf = (root: Element): Element | null =>
   root.querySelector(`nav[aria-label="${acme.name}"]`);
@@ -129,9 +133,9 @@ describe("an organization's page", () => {
     const last = new Date(`${snapshot.plan?.start ?? ""}T12:00:00Z`);
     last.setUTCDate(last.getUTCDate() + 4);
 
-    const { main } = await openAcme("", snapshot);
+    const { container } = await openAcme("", snapshot);
 
-    expect(main()).toContain(
+    expect(levelOf(container)).toContain(
       `The interviews closed on ${formatDate(last.toISOString().slice(0, 10))}`
     );
   });
@@ -362,12 +366,12 @@ describe("an organization's overview", () => {
   });
 
   it("counts the interviews' days to the company's own plan", async () => {
-    const { main } = await openAcme(
+    const { container } = await openAcme(
       "",
       toldSnapshot("Acme", { days: 21, daysIn: 3, leadTalked: true })
     );
 
-    expect(main()).toMatch(/Day \d+ of 21/u);
+    expect(levelOf(container)).toMatch(/Day \d+ of 21/u);
   });
 });
 
