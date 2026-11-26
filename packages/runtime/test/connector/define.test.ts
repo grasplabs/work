@@ -498,6 +498,7 @@ describe("a connector's definition", () => {
             "GET /v1/senders",
             "GET /v1/publications",
             "GET /v1.0/me/mailFolders/sentitems/messages",
+            "GET /api/chat.scheduledMessages.list",
           ],
           args: {},
         })
@@ -574,14 +575,16 @@ describe("a connector's definition", () => {
     ).toThrow(
       "channel.history: it is read-only, but a route's path says it changes or delivers something"
     );
-    expect(
-      named(
-        "channel.info",
-        declared({ ...read, routes: ["GET /api/conversations.archive"] })
-      )
-    ).toThrow(
-      "channel.info: it is read-only, but a route's path says it changes or delivers something"
-    );
+    for (const route of [
+      "GET /api/conversations.archive",
+      "GET /api/conversations.aRchive",
+    ] as const) {
+      expect(
+        named("channel.info", declared({ ...read, routes: [route] }))
+      ).toThrow(
+        "channel.info: it is read-only, but a route's path says it changes or delivers something"
+      );
+    }
     expect(
       named(
         "channel.history",

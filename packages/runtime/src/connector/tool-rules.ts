@@ -602,6 +602,13 @@ const delivers = (word: string): boolean =>
   isOneOf(sendingWords, word) || isOneOf(answeringWords, word);
 
 /**
+ * The fewest letters a word for what people say has to be found inside a
+ * path's joined words: `dm` would be found in `scheduledMessages`, which a
+ * read lists. A separate `dm` is still a word (`sendDm`).
+ */
+const joinedSaidMinLength = 4;
+
+/**
  * Whether a path's literal `piece` says it delivers to people: by a word
  * that delivers, or, in its letters run together whatever their case, a
  * sending word or `schedule` right before what people say
@@ -613,9 +620,9 @@ const pieceDelivers = (piece: string): boolean => {
   return (
     wordsOf(piece).some(delivers) ||
     [...sendingWords, "schedule"].some((sending) =>
-      [...conversationWords].some((said) =>
-        joined.includes(`${sending}${said}`)
-      )
+      [...conversationWords]
+        .filter((said) => said.length >= joinedSaidMinLength)
+        .some((said) => joined.includes(`${sending}${said}`))
     )
   );
 };
@@ -1013,7 +1020,9 @@ const findingsOf = (
       pieces.some(
         (piece) =>
           pieceDelivers(piece) ||
-          wordsOf(piece).some((word) => isOneOf(changeWords, word))
+          [...wordsOf(piece), ...wordsOf(piece.toLowerCase())].some((word) =>
+            isOneOf(changeWords, word)
+          )
       ),
     recipients:
       (!draft && names(recipientWords, "first")) ||
