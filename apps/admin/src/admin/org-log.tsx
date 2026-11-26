@@ -6,10 +6,9 @@
  * who came in, each workflow going live), and what a person at Grasp did by
  * hand in this admin. It can be narrowed by what an entry is about, who
  * did it, a team, a day, words in it, or to what went wrong only; a chart
- * shows how busy each day was once the log is long (`chartFrom`), and the
- * day is then picked beside the search, as Damsko's chart draws one series
- * to a bar and takes no press on one. The entries are the model's
- * (`logItemsOf`, `logDays`, `logHours`).
+ * shows how busy each day was, by who did it, once the log is long
+ * (`chartFrom`), and a day is picked by pressing its bar. The entries are
+ * the model's (`logItemsOf`, `logDays`, `logHours`).
  *
  * Not here, as the prototype has it: what the prototype's Worker noted with
  * its time (each link, each interview, each drawing), which core's snapshot
@@ -33,6 +32,7 @@ import {
   ChartBar,
   ChartContainer,
   ChartGrid,
+  ChartLegend,
   ChartTooltip,
   ChartXAxis,
   ChartYAxis,
@@ -52,18 +52,13 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@grasp-os/ui/components/input-group";
-import {
-  Select,
-  SelectContent,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/ui/components/select";
 import { Text } from "@grasp-os/ui/components/text";
 import {
   Icon,
   SearchIcon,
   SlidersHorizontalIcon,
   TriangleAlertIcon,
+  XIcon,
 } from "@grasp-os/ui/lib/icons";
 import { colors, font, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
@@ -83,10 +78,10 @@ const chartFrom = 30;
 /** What two entries saying the same thing may lie apart and still be one. */
 const sameMinuteMs = 60_000;
 
-/** Every day together, as the choice of day says it. */
-const everyDay = "all";
-
-const busyConfig: ChartConfig = { entries: { label: "Entries" } };
+/** Who did it, each a part of a day's bar, in the chart's tones in this order. */
+const busyConfig: ChartConfig = Object.fromEntries(
+  LOG_ACTORS.map((actor) => [actor, { label: actorWords[actor] }])
+);
 
 /** A page too narrow for the count beside the tools. */
 const narrow = "@media (max-width: 39.99rem)";
@@ -127,7 +122,6 @@ const styles = stylex.create({
     flexBasis: { default: "10rem", "@media (min-width: 40rem)": "auto" },
     width: { default: null, "@media (min-width: 40rem)": "14rem" },
   },
-  day: { width: "11rem", maxWidth: "100%" },
   entries: {
     display: "flex",
     flexDirection: "column",
@@ -177,9 +171,9 @@ const two = (value: number): string => String(value).padStart(2, "0");
 /** The time of a moment, in UTC as the admin's other times are. */
 const timeOf = (at: number): string => new Date(at).toISOString().slice(11, 16);
 
-/** "2026-10-14" as "14 Oct", for under the chart. */
-const shortDate = (day: string): string =>
-  formatDate(day).split(" ").slice(0, 2).join(" ");
+/** "14 Oct 2026" as "14 Oct", along the chart's foot. */
+const shortDate = (said: string | number): string =>
+  String(said).split(" ").slice(0, 2).join(" ");
 
 /** `count` entries, in words. */
 const entriesWords = (count: number): string =>
@@ -220,30 +214,48 @@ const entriesIn = (row: Record<string, unknown>): number => {
   return entries;
 };
 
-/** How busy each day was, or each hour of a log that is one day long. */
-const BusyChart = ({ items }: { items: LogItem[] }) => {
+/** What each of who did it did in a day's or an hour's row. */
+const countsOf = (row: Record<string, unknown>): Record<string, number> =>
+  Object.fromEntries(
+    LOG_ACTORS.map((actor) => [actor, Number(row[actor] ?? 0)])
+  );
+
+/** How busy each day was, or each hour of a log that is one day long, by who did it. */
+const BusyChart = ({
+  items,
+  day,
+  onDay,
+}: {
+  items: LogItem[];
+  day: string | null;
+  onDay: (day: string | null) => void;
+}) => {
   const days = logDays(items);
   // A log of one day is drawn by the hour.
   const hourly = days.length === 1 && items.some((item) => item.at !== null);
+  // Each row as it is read ("14 Oct 2026", "09:00"), with who did how much.
   const data = hourly
-    ? logHours(items).map((row) => ({ at: row.hour, entries: entriesIn(row) }))
-    : days.map((row) => ({ at: row.day, entries: entriesIn(row) }));
-  const said = (value: string | number): string =>
-    hourly ? `${two(Number(value))}:00` : shortDate(String(value));
-  let [busiest] = data;
+    ? logHours(items).map((row) => ({
+        at: `${two(row.hour)}:00`,
+        ...countsOf(row),
+      }))
+    : days.map((row) => ({ at: formatDate(row.day), ...countsOf(row) }));
+  let busiest: { at: string; entries: number } | undefined;
   for (const row of data) {
-    if (busiest === undefined || row.entries > busiest.entries) {
-      busiest = row;
+    const entries = entriesIn(row);
+    if (busiest === undefined || entries > busiest.entries) {
+      busiest = { at: row.at, entries };
     }
   }
+  const picked = days.findIndex((each) => each.day === day);
   return (
     <Panel
       description={
         hourly
           ? "Everything so far happened on one day: here by the hour (UTC)."
-          : "How many entries each day has. Pick a day beside the search to see only that day."
+          : "Press a day to see only that day."
       }
-      title="What happened, day by day"
+      title="What happened, by who did it"
     >
       <CardContent>
         <ChartContainer
@@ -254,49 +266,37 @@ const BusyChart = ({ items }: { items: LogItem[] }) => {
           summary={
             busiest === undefined
               ? "Nothing yet."
-              : `The busiest: ${entriesWords(busiest.entries)} ${hourly ? "at" : "on"} ${said(busiest.at)}.`
+              : `The busiest: ${entriesWords(busiest.entries)} ${hourly ? "at" : "on"} ${busiest.at}.`
           }
           xKey="at"
+          {...(hourly
+            ? {}
+            : {
+                // Pressing the day shown alone shows every day again.
+                onRowClick: (_row: unknown, index: number) => {
+                  const pressed = days[index]?.day ?? null;
+                  onDay(pressed === day ? null : pressed);
+                },
+                selectedIndex: picked === -1 ? null : picked,
+              })}
         >
           <ChartGrid />
-          <ChartXAxis valueFormatter={said} />
+          <ChartXAxis valueFormatter={hourly ? undefined : shortDate} />
           <ChartYAxis width={28} />
-          <ChartBar dataKey="entries" />
+          {LOG_ACTORS.map((actor) => (
+            <ChartBar
+              dataKey={actor}
+              key={actor}
+              stackId={hourly ? "hour" : "day"}
+            />
+          ))}
           <ChartTooltip />
+          <ChartLegend />
         </ChartContainer>
       </CardContent>
     </Panel>
   );
 };
-
-/** The choice of day: every day, or one of them, the latest first. */
-const DaySelect = ({
-  days,
-  value,
-  onChange,
-}: {
-  days: string[];
-  value: string | null;
-  onChange: (day: string | null) => void;
-}) => (
-  <Select
-    items={[
-      { value: everyDay, label: "Every day" },
-      ...days
-        .toReversed()
-        .map((day) => ({ value: day, label: formatDate(day) })),
-    ]}
-    onValueChange={(next) => {
-      onChange(next === null || next === everyDay ? null : next);
-    }}
-    value={value ?? everyDay}
-  >
-    <SelectTrigger aria-label="Which day to show" size="sm" style={styles.day}>
-      <SelectValue />
-    </SelectTrigger>
-    <SelectContent />
-  </Select>
-);
 
 /** One choice the log can be narrowed by, with how many entries each option keeps. */
 interface FacetOptions {
@@ -460,9 +460,11 @@ export const OrgLog = ({
       {/* Only a long log is charted: a short one is read as it is. The chart keeps every day in view while one is picked, so another can be picked. */}
       {charted ? (
         <BusyChart
+          day={day}
           items={all
             .filter((each) => matches(each, "day"))
             .map((each) => each.item)}
+          onDay={setDay}
         />
       ) : null}
       <Card aria-label="Every entry" asChild size="sm">
@@ -477,15 +479,19 @@ export const OrgLog = ({
                 </span>
               </Text>
               <div {...stylex.props(styles.tools)}>
-                {charted || day !== null ? (
-                  <DaySelect
-                    days={logDays(all.map((each) => each.item)).map(
-                      (each) => each.day
-                    )}
-                    onChange={setDay}
-                    value={day}
-                  />
-                ) : null}
+                {day === null ? null : (
+                  <Button
+                    aria-label="Show every day again"
+                    onClick={() => {
+                      setDay(null);
+                    }}
+                    size="sm"
+                    variant="secondary"
+                  >
+                    {formatDate(day)}
+                    <Icon icon={XIcon} />
+                  </Button>
+                )}
                 {wrong > 0 ? (
                   <Button
                     aria-pressed={problems}
