@@ -187,6 +187,7 @@ export const ChatConversation = ({
         output={view.output}
         partial={view.partial}
         checking={view.checking}
+        modelWait={view.waiting}
         running={view.running}
         sources={
           <ChatSources names={sourceNames} sources={view.provenance.sources} />

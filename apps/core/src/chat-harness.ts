@@ -36,7 +36,7 @@ import { delegateActorOf } from "@grasp-os/shared/audit";
 import type { ChatMake } from "@grasp-os/shared/chat";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
-import type { ModelEffort } from "@grasp-os/shared/models";
+import type { ModelEffort, ModelWait } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { quietLoader } from "@grasp-os/shared/quiet-loader";
 import { z } from "zod";
@@ -625,16 +625,23 @@ export class ChatHarness {
   #running = false;
   /** The answer streaming in, as `pi.live` has it now. */
   #partial: AssistantMessage | null = null;
+  /** What the turn's model request waits on now, as the gateway says. */
+  #waiting: ModelWait | null = null;
   /** Where the response streaming in began: the chat's newest entry then. */
   #streamedAfter: EntryId | null | undefined;
   /** The thinking of the response streaming in, as `thinkingClock` times it. */
   readonly #thinking = thinkingClock();
   /** Each response's thinking time, by its entry, until it is copied. */
   readonly #thought = new Map<EntryId, number>();
-  /** What the Workspace was told last: the partial, and whether a turn runs. */
-  readonly #told: { partial: AssistantMessage | null; running?: boolean } = {
-    partial: null,
-  };
+  /**
+   * What the Workspace was told last: the partial, what the model waits
+   * on, and whether a turn runs.
+   */
+  readonly #told: {
+    partial: AssistantMessage | null;
+    waiting: ModelWait | null;
+    running?: boolean;
+  } = { partial: null, waiting: null };
   /** The Workspace brought up to date (`#sync`), once at a time. */
   #syncing: Promise<void> | undefined;
   /** Whether something changed since the sync under way began. */
@@ -1361,7 +1368,15 @@ export class ChatHarness {
         provenance: this.#sources,
         work: { authority, context: chatContext(scope) },
       },
-      () => this.#sources
+      () => this.#sources,
+      // Shown in the chat as it goes (`#sync`): a rate limit waited out,
+      // another model answering instead.
+      (waiting) => {
+        if (waiting !== this.#waiting) {
+          this.#waiting = waiting;
+          this.#syncSoon();
+        }
+      }
     );
     // The turn's answers reach pi without the tags that mark what was read
     // from outside as data (untrusted-tags.ts), should the model copy one:
@@ -1586,10 +1601,11 @@ export class ChatHarness {
   /**
    * Brings the chat's Workspace up to date from the turn's record, in this
    * order: what was committed since the last copy (`#copy`), the answer
-   * streaming in, whether a turn runs, and, once the turn is settled, its
-   * capture for the Brain. A turn whose runs ended with no `run` waiting
-   * on it (a restart left it) is settled here. Each the latest, never an
-   * older one after it; each told again until it is through.
+   * streaming in, what its model waits on, whether a turn runs, and, once
+   * the turn is settled, its capture for the Brain. A turn whose runs
+   * ended with no `run` waiting on it (a restart left it) is settled here.
+   * Each the latest, never an older one after it; each told again until
+   * it is through.
    */
   async #sync(): Promise<void> {
     const before = await this.#harness.snapshot(TurnDoc, context);
@@ -1613,6 +1629,13 @@ export class ChatHarness {
         await this.#host(scope).showPartial(scope.chatId, partial);
       });
       this.#told.partial = partial;
+    }
+    const waiting = this.#waiting;
+    if (waiting !== this.#told.waiting) {
+      await callObject(async () => {
+        await this.#host(scope).turnWaiting(scope.chatId, waiting);
+      });
+      this.#told.waiting = waiting;
     }
     if (left) {
       const settled = await this.#endOfTurn(turnId);

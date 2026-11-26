@@ -1411,6 +1411,11 @@ msgstr "{scheduled, plural, one {# planification} other {# planifications}}"
 msgid "{seconds, plural, one {Thought for # second} other {Thought for # seconds}}"
 msgstr "{seconds, plural, one {A réfléchi # seconde} other {A réfléchi # secondes}}"
 
+#. The AI provider asked Grasp to wait before asking again (its rate limit); Grasp waits, then asks again by itself.
+#: src/chat/thread.tsx
+msgid "{seconds, plural, one {Your AI provider is busy. Grasp tries again in # second.} other {Your AI provider is busy. Grasp tries again in # seconds.}}"
+msgstr "{seconds, plural, one {Votre fournisseur d'IA est surchargé. Grasp réessaie dans # seconde.} other {Votre fournisseur d'IA est surchargé. Grasp réessaie dans # secondes.}}"
+
 #: src/activity/audit-log.tsx
 msgid "{set, plural, one {Filters, # set} other {Filters, # set}}"
 msgstr "{set, plural, one {Filtres, # actif} other {Filtres, # actifs}}"
@@ -3087,6 +3092,11 @@ msgstr "Répondu : {title}"
 #: src/chat/sidebar-chats.tsx
 msgid "Answering"
 msgstr "Répond"
+
+#. The chosen model couldn't take the question (its provider refused or was busy), so another of the organization's models answers it; {model} is that model's name.
+#: src/chat/thread.tsx
+msgid "Answering with {model} instead."
+msgstr "{model} répond à la place."
 
 #: src/agents/agent-page.tsx
 msgid "Answers"
@@ -17939,6 +17949,10 @@ msgstr "La migration {name} réécrit chaque enregistrement de {table} dès que 
 msgid "The model couldn't answer. Try again."
 msgstr "Le modèle n’a pas pu répondre. Réessayez."
 
+#: src/chat/failure.ts
+msgid "The model declined to answer this."
+msgstr "Le modèle a refusé de répondre à cette demande."
+
 #: src/agents/setup/review-step.tsx
 msgid "The model picked in the chat"
 msgstr "Le modèle choisi dans le chat"
@@ -18409,6 +18423,10 @@ msgstr "Cela modifie les données de l’App d’une façon qui demande une migr
 #: src/settings/chat-accounts.tsx
 msgid "This chat account is linked to someone else. They need to unlink it first."
 msgstr "Ce compte de chat est relié à quelqu’un d’autre. Cette personne doit d’abord le dissocier."
+
+#: src/chat/failure.ts
+msgid "This chat is too long for the model, even after Grasp summarized its earlier messages. Start a new chat to go on."
+msgstr "Ce chat est trop long pour le modèle, même après que Grasp a résumé les messages précédents. Commencez un nouveau chat pour continuer."
 
 #: src/chat/held-writes.tsx
 msgid "This chat read private or restricted data: this may send it out"
@@ -21249,6 +21267,10 @@ msgstr "Votre fournisseur d'IA refuse votre clé. Demandez à votre admin de la 
 #: src/chat/failure.ts
 msgid "Your AI provider isn't answering. This is usually an outage on their side; try again in a while."
 msgstr "Votre fournisseur d'IA ne répond pas. Il s'agit généralement d'une panne de son côté ; réessayez dans un moment."
+
+#: src/chat/failure.ts
+msgid "Your AI provider sent nothing for too long, so Grasp gave up on this answer. Try again."
+msgstr "Votre fournisseur d'IA n'a rien envoyé pendant trop longtemps, Grasp a donc abandonné cette réponse. Réessayez."
 
 #: src/settings/ai-providers.tsx
 msgid "Your AI runs on Grasp’s AI"

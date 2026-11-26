@@ -51,6 +51,52 @@ export const deadline = (ms: number, caller?: AbortSignal): Deadline => {
   };
 };
 
+/** A deadline that waits for silence, as {@link idleDeadline} makes it. */
+export interface IdleDeadline extends Deadline {
+  /** Says the work made progress: the quiet starts again from now. */
+  touch: () => void;
+}
+
+/**
+ * Ends work once `idleMs` pass with no {@link IdleDeadline.touch}, or `ms`
+ * pass in all, or when its caller cancels it: for work, such as a stream,
+ * that may rightly take long but not go silent. Both count as time
+ * running out (`timeout`). It looks at the quiet once per `idleMs` at
+ * most, however often it is touched, and leaves no timer once cleared.
+ */
+export const idleDeadline = (
+  idleMs: number,
+  ms: number,
+  caller?: AbortSignal
+): IdleDeadline => {
+  const total = deadline(ms, caller);
+  const idle = new AbortController();
+  let last = Date.now();
+  let handle: ReturnType<typeof setTimeout> | undefined = undefined;
+  const look = () => {
+    const quiet = Date.now() - last;
+    if (quiet >= idleMs) {
+      idle.abort();
+    } else {
+      handle = setTimeout(look, idleMs - quiet);
+    }
+  };
+  handle = setTimeout(look, idleMs);
+  return {
+    signal: AbortSignal.any([total.signal, idle.signal]),
+    stopped: () =>
+      total.stopped() ?? (idle.signal.aborted ? "timeout" : undefined),
+    touch: () => {
+      last = Date.now();
+    },
+    clear: () => {
+      total.clear();
+      clearTimeout(handle);
+    },
+    endsAt: total.endsAt,
+  };
+};
+
 /**
  * Rejects with the signal's reason once it aborts: to race work against a
  * deadline that doesn't stop the work itself. It no longer listens once
