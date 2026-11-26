@@ -189,6 +189,11 @@ export interface ConnectApiKeyProps {
   }) => Promise<void>;
   /** Disconnects the connected provider, once asked and answered. Return a Promise to wait on it. */
   onDisconnect?: () => unknown;
+  /**
+   * Its form's id, for a page that sends it with a button of its own (a setup's Continue, with
+   * `form` set to it): the form then shows no Connect of its own.
+   */
+  formId?: string;
   /** What disconnecting loses, in the question before it. */
   disconnectDetail?: ReactNode;
   /** Its words in the product's language; each one left out keeps its English. */
@@ -254,7 +259,9 @@ const ConnectForm = ({
   onConnect,
   onChange,
   words,
+  formId,
 }: {
+  formId: string | undefined;
   provider: ConnectApiKeyProvider;
   onConnect: ConnectApiKeyProps["onConnect"];
   onChange: () => void;
@@ -296,6 +303,7 @@ const ConnectForm = ({
   return (
     <Form
       ref={form}
+      id={formId}
       aria-label={words.connectName(provider.name)}
       onSubmit={(event) => {
         event.preventDefault();
@@ -356,16 +364,18 @@ const ConnectForm = ({
           <FieldError match="valueMissing">{words.keyMissing}</FieldError>
           {refused !== null && <FieldError match>{refused}</FieldError>}
         </Field>
-        <FormFooter align="start">
-          <Button
-            type="submit"
-            status={connect.status}
-            successText={words.connected}
-            errorText={words.notConnected}
-          >
-            {words.connect}
-          </Button>
-        </FormFooter>
+        {formId === undefined && (
+          <FormFooter align="start">
+            <Button
+              type="submit"
+              status={connect.status}
+              successText={words.connected}
+              errorText={words.notConnected}
+            >
+              {words.connect}
+            </Button>
+          </FormFooter>
+        )}
       </div>
     </Form>
   );
@@ -480,6 +490,7 @@ export const ConnectApiKey = ({
   onDisconnect,
   disconnectDetail,
   labels,
+  formId,
   style,
 }: ConnectApiKeyProps) => {
   const words = { ...LABELS, ...labels };
@@ -566,6 +577,7 @@ export const ConnectApiKey = ({
           }}
           onChange={change}
           words={words}
+          formId={formId}
         />
       )}
       {live === undefined && form === undefined && (

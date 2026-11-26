@@ -12,7 +12,7 @@ import { ErrorText } from "../error-text.tsx";
 import { chooseLocale, isLocale } from "../i18n.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { speak } from "../voice/voice.ts";
-import { AiChoice, firstWay, useChooseGrasp } from "./ai-choice.tsx";
+import { AiChoice, aiKeyForm, firstWay, useChooseGrasp } from "./ai-choice.tsx";
 import type { AiWay } from "./ai-choice.tsx";
 import { CalmStep } from "./calm-frame.tsx";
 import { CompanyStep } from "./company-step.tsx";
@@ -113,10 +113,21 @@ const Ai = ({ data, askedFor, path, go, onward }: StepProps) => {
       go(next);
     }
   };
-  // Ours, once core has it chosen; their own key already in use goes straight on.
+  const [connecting, setConnecting] = useState(false);
+  // Ours, once core has it chosen. Their own: a key in the form is sent (the
+  // block tests it, and goes on once it answers); else a key already in use goes on.
   const onContinue = async () => {
+    if (way === "own") {
+      const form = document.querySelector(`#${aiKeyForm}`);
+      if (form instanceof HTMLFormElement) {
+        form.requestSubmit();
+      } else if (ready) {
+        onReady();
+      }
+      return;
+    }
     const onOurs = ready && ai?.listing.source === "grasp";
-    if (way === "grasp" && !onOurs && !(await grasp.choose())) {
+    if (!onOurs && !(await grasp.choose())) {
       return;
     }
     onReady();
@@ -127,10 +138,10 @@ const Ai = ({ data, askedFor, path, go, onward }: StepProps) => {
   const because = t`Good, that’s settled. Before we really start, one thing: everything in Grasp runs on AI. Reading your documents, the interviews, the plan, all of it. So we need an AI attached to get it working.`;
   let spoken = `${because} ${t`Paste a key from your company’s provider here. You pay them directly, and I’ll check that it works.`}`;
   if (ready && ai?.listing.source === "grasp") {
-    body = `${why} ${t`You’re on our own system, and it’s ready.`}`;
+    body = `${why} ${t`You’re on our own system, and it works.`}`;
     spoken = `${because} ${t`You’re already on our own system, and it works, so just press Continue.`}`;
   } else if (ready && ai !== null) {
-    body = `${why} ${t`Your own key works, and it’s ready.`}`;
+    body = `${why} ${t`Your own key is connected and works.`}`;
     spoken = `${because} ${t`Your own key works, so just press Continue.`}`;
   } else if (graspOffered) {
     body = `${why} ${t`Use our own system and you’re set, or connect a provider of your own.`}`;
@@ -140,19 +151,20 @@ const Ai = ({ data, askedFor, path, go, onward }: StepProps) => {
     body = `${why} ${t`You can set it up later in Settings.`}`;
     spoken = `${because} ${t`Don’t let it hold you up, you can set it up later in Settings.`}`;
   }
-  const canContinue = ready || (way === "grasp" && graspOffered);
+  const canContinue = ready || way === "own" || graspOffered;
+  const busy = grasp.busy || connecting;
   return (
     <CalmStep
       body={body}
       end={
         canContinue ? (
           <Button
-            disabled={grasp.busy}
+            disabled={busy}
             onClick={() => {
               void onContinue();
             }}
             size="lg"
-            status={grasp.busy ? "loading" : "idle"}
+            status={busy ? "loading" : "idle"}
           >
             {t`Continue`}
           </Button>
@@ -161,7 +173,13 @@ const Ai = ({ data, askedFor, path, go, onward }: StepProps) => {
       spoken={spoken}
       title={t`Grasp needs an AI to work`}
     >
-      <AiChoice ai={ai} onReady={onReady} onWay={setWay} way={way} />
+      <AiChoice
+        ai={ai}
+        onConnecting={setConnecting}
+        onReady={onReady}
+        onWay={setWay}
+        way={way}
+      />
       <ErrorText>{grasp.failure}</ErrorText>
     </CalmStep>
   );

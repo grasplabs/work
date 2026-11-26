@@ -4245,6 +4245,11 @@ msgstr "Cases a week: {cases}."
 msgid "Change"
 msgstr "Change"
 
+#: src/onboarding/ai-choice.tsx
+msgctxt "button"
+msgid "Change"
+msgstr "Change"
+
 #: src/onboarding/review-parts.tsx
 msgctxt "change how it was settled"
 msgid "Change"
@@ -5078,6 +5083,7 @@ msgstr "Confirmed. Carry on."
 #: src/connections/app/words.ts
 #: src/connections/integration-item.tsx
 #: src/connections/request-app-dialog.tsx
+#: src/onboarding/ai-choice.tsx
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
 msgid "Connect"
@@ -5096,6 +5102,7 @@ msgstr "Connect {app} again"
 msgid "Connect {appName}"
 msgstr "Connect {appName}"
 
+#: src/onboarding/ai-choice.tsx
 #: src/onboarding/hr-leads.tsx
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
@@ -5154,6 +5161,7 @@ msgstr "connected"
 
 #: src/agents/setup/apps-picker.tsx
 #: src/agents/setup/apps-step.tsx
+#: src/onboarding/ai-choice.tsx
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
 msgid "Connected"
@@ -5202,6 +5210,7 @@ msgstr "Connected, direct"
 msgid "Connected, via Composio"
 msgstr "Connected, via Composio"
 
+#: src/onboarding/ai-choice.tsx
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
 msgid "Connecting"
@@ -5584,6 +5593,10 @@ msgstr "Couldn't delete"
 #: src/connections/connection-list.tsx
 msgid "Couldn't disconnect"
 msgstr "Couldn't disconnect"
+
+#: src/onboarding/ai-choice.tsx
+msgid "Couldn’t disconnect"
+msgstr "Couldn’t disconnect"
 
 #: src/connections/connection-audience.tsx
 msgid "Couldn't erase"
@@ -6280,6 +6293,7 @@ msgstr "Directory"
 
 #: src/connections/app/words.ts
 #: src/connections/connection-list.tsx
+#: src/onboarding/ai-choice.tsx
 msgid "Disconnect"
 msgstr "Disconnect"
 
@@ -6290,6 +6304,10 @@ msgstr "Disconnect {label}"
 #: src/connections/connection-list.tsx
 msgid "Disconnect {label}?"
 msgstr "Disconnect {label}?"
+
+#: src/onboarding/ai-choice.tsx
+msgid "Disconnect {name}?"
+msgstr "Disconnect {name}?"
 
 #: src/connections/connection-list.tsx
 msgid "Disconnect it"
@@ -6302,6 +6320,10 @@ msgstr "Disconnected an account"
 #: src/connections/revocations-by-hand.tsx
 msgid "Disconnected on {since}."
 msgstr "Disconnected on {since}."
+
+#: src/onboarding/ai-choice.tsx
+msgid "Disconnecting"
+msgstr "Disconnecting"
 
 #: src/settings/chat-accounts.tsx
 msgid "Dismiss"
@@ -8404,6 +8426,10 @@ msgstr "Grasp staff work from the admin dashboard"
 msgid "Grasp stops sending the App's events there. Its secret can't be used again."
 msgstr "Grasp stops sending the App's events there. Its secret can't be used again."
 
+#: src/onboarding/ai-choice.tsx
+msgid "Grasp stops using it and its key is removed. You can choose another way right after."
+msgstr "Grasp stops using it and its key is removed. You can choose another way right after."
+
 #: src/settings/directory-reads.tsx
 msgid "Grasp tries again every quarter of an hour. If it keeps failing, ask Grasp’s support to help."
 msgstr "Grasp tries again every quarter of an hour. If it keeps failing, ask Grasp’s support to help."
@@ -9815,6 +9841,7 @@ msgid "Keep every client question in one place, and remind us when one waits too
 msgstr "Keep every client question in one place, and remind us when one waits too long for an answer."
 
 #: src/brain/forget.tsx
+#: src/onboarding/ai-choice.tsx
 msgid "Keep it"
 msgstr "Keep it"
 
@@ -9892,16 +9919,19 @@ msgid "Kept something the chat can no longer read from the model"
 msgstr "Kept something the chat can no longer read from the model"
 
 #: src/connections/connect-dialog.tsx
+#: src/onboarding/ai-choice.tsx
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
 #: src/workflows/kept-state.tsx
 msgid "Key"
 msgstr "Key"
 
+#: src/onboarding/ai-choice.tsx
 #: src/settings/ai-providers.tsx
 msgid "Key …{last}"
 msgstr "Key …{last}"
 
+#: src/onboarding/ai-choice.tsx
 #: src/settings/ai-providers.tsx
 msgid "Key …{last} · {region}"
 msgstr "Key …{last} · {region}"
@@ -12025,6 +12055,7 @@ msgid "Not confirmed by the board yet"
 msgstr "Not confirmed by the board yet"
 
 #: src/connections/app/words.ts
+#: src/onboarding/ai-choice.tsx
 #: src/settings/ai-providers.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Not connected"
@@ -13499,6 +13530,7 @@ msgstr "Paste a key from your provider to connect it. You pay them directly."
 msgid "Paste several at once, split by commas or lines."
 msgstr "Paste several at once, split by commas or lines."
 
+#: src/onboarding/ai-choice.tsx
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
 msgid "Paste the key."
@@ -14786,6 +14818,7 @@ msgctxt "a saved key"
 msgid "Replace"
 msgstr "Replace"
 
+#: src/onboarding/ai-choice.tsx
 #: src/settings/ai-providers.tsx
 msgid "Replace key"
 msgstr "Replace key"
@@ -21587,8 +21620,8 @@ msgid "You’re already on our own system, and it works, so just press Continue.
 msgstr "You’re already on our own system, and it works, so just press Continue."
 
 #: src/onboarding/setup-steps.tsx
-msgid "You’re on our own system, and it’s ready."
-msgstr "You’re on our own system, and it’s ready."
+msgid "You’re on our own system, and it works."
+msgstr "You’re on our own system, and it works."
 
 #: src/drafts/share-with-team.tsx
 msgid "You’re seeing your version."
@@ -21774,8 +21807,8 @@ msgid "Your own key"
 msgstr "Your own key"
 
 #: src/onboarding/setup-steps.tsx
-msgid "Your own key works, and it’s ready."
-msgstr "Your own key works, and it’s ready."
+msgid "Your own key is connected and works."
+msgstr "Your own key is connected and works."
 
 #: src/onboarding/setup-steps.tsx
 msgid "Your own key works, so just press Continue."

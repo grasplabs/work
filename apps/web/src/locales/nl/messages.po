@@ -4245,6 +4245,11 @@ msgstr "Gevallen per week: {cases}."
 msgid "Change"
 msgstr "Wijziging"
 
+#: src/onboarding/ai-choice.tsx
+msgctxt "button"
+msgid "Change"
+msgstr "Wijzigen"
+
 #: src/onboarding/review-parts.tsx
 msgctxt "change how it was settled"
 msgid "Change"
@@ -5078,6 +5083,7 @@ msgstr "Bevestigd. Ga verder."
 #: src/connections/app/words.ts
 #: src/connections/integration-item.tsx
 #: src/connections/request-app-dialog.tsx
+#: src/onboarding/ai-choice.tsx
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
 msgid "Connect"
@@ -5096,6 +5102,7 @@ msgstr "{app} opnieuw koppelen"
 msgid "Connect {appName}"
 msgstr "{appName} koppelen"
 
+#: src/onboarding/ai-choice.tsx
 #: src/onboarding/hr-leads.tsx
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
@@ -5154,6 +5161,7 @@ msgstr "verbonden"
 
 #: src/agents/setup/apps-picker.tsx
 #: src/agents/setup/apps-step.tsx
+#: src/onboarding/ai-choice.tsx
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
 msgid "Connected"
@@ -5202,6 +5210,7 @@ msgstr "Gekoppeld, direct"
 msgid "Connected, via Composio"
 msgstr "Gekoppeld, via Composio"
 
+#: src/onboarding/ai-choice.tsx
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
 msgid "Connecting"
@@ -5584,6 +5593,10 @@ msgstr "Verwijderen mislukt"
 #: src/connections/connection-list.tsx
 msgid "Couldn't disconnect"
 msgstr "Loskoppelen mislukt"
+
+#: src/onboarding/ai-choice.tsx
+msgid "Couldn’t disconnect"
+msgstr "Ontkoppelen is niet gelukt"
 
 #: src/connections/connection-audience.tsx
 msgid "Couldn't erase"
@@ -6280,6 +6293,7 @@ msgstr "Directory"
 
 #: src/connections/app/words.ts
 #: src/connections/connection-list.tsx
+#: src/onboarding/ai-choice.tsx
 msgid "Disconnect"
 msgstr "Ontkoppelen"
 
@@ -6290,6 +6304,10 @@ msgstr "{label} ontkoppelen"
 #: src/connections/connection-list.tsx
 msgid "Disconnect {label}?"
 msgstr "{label} ontkoppelen?"
+
+#: src/onboarding/ai-choice.tsx
+msgid "Disconnect {name}?"
+msgstr "{name} ontkoppelen?"
 
 #: src/connections/connection-list.tsx
 msgid "Disconnect it"
@@ -6302,6 +6320,10 @@ msgstr "Een account ontkoppeld"
 #: src/connections/revocations-by-hand.tsx
 msgid "Disconnected on {since}."
 msgstr "Ontkoppeld op {since}."
+
+#: src/onboarding/ai-choice.tsx
+msgid "Disconnecting"
+msgstr "Ontkoppelen"
 
 #: src/settings/chat-accounts.tsx
 msgid "Dismiss"
@@ -8404,6 +8426,10 @@ msgstr "Medewerkers van Grasp werken vanuit het admin-dashboard"
 msgid "Grasp stops sending the App's events there. Its secret can't be used again."
 msgstr "Grasp stuurt de gebeurtenissen van de App daar niet meer heen. Het geheim kan niet opnieuw worden gebruikt."
 
+#: src/onboarding/ai-choice.tsx
+msgid "Grasp stops using it and its key is removed. You can choose another way right after."
+msgstr "Grasp gebruikt hem niet meer en de sleutel wordt verwijderd. Daarna kun je meteen iets anders kiezen."
+
 #: src/settings/directory-reads.tsx
 msgid "Grasp tries again every quarter of an hour. If it keeps failing, ask Grasp’s support to help."
 msgstr "Grasp probeert het elk kwartier opnieuw. Blijft het mislukken, vraag dan de support van Grasp om hulp."
@@ -9815,6 +9841,7 @@ msgid "Keep every client question in one place, and remind us when one waits too
 msgstr "Houd elke klantvraag op één plek bij, en herinner ons eraan als er een te lang op antwoord wacht."
 
 #: src/brain/forget.tsx
+#: src/onboarding/ai-choice.tsx
 msgid "Keep it"
 msgstr "Bewaren"
 
@@ -9892,16 +9919,19 @@ msgid "Kept something the chat can no longer read from the model"
 msgstr "Iets wat de chat niet meer kan lezen, voor het model weggehouden"
 
 #: src/connections/connect-dialog.tsx
+#: src/onboarding/ai-choice.tsx
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
 #: src/workflows/kept-state.tsx
 msgid "Key"
 msgstr "Sleutel"
 
+#: src/onboarding/ai-choice.tsx
 #: src/settings/ai-providers.tsx
 msgid "Key …{last}"
 msgstr "Sleutel …{last}"
 
+#: src/onboarding/ai-choice.tsx
 #: src/settings/ai-providers.tsx
 msgid "Key …{last} · {region}"
 msgstr "Sleutel …{last} · {region}"
@@ -12025,6 +12055,7 @@ msgid "Not confirmed by the board yet"
 msgstr "Nog niet bevestigd door het bestuur"
 
 #: src/connections/app/words.ts
+#: src/onboarding/ai-choice.tsx
 #: src/settings/ai-providers.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Not connected"
@@ -13499,6 +13530,7 @@ msgstr "Plak een sleutel van je aanbieder om hem te koppelen. Je betaalt hen rec
 msgid "Paste several at once, split by commas or lines."
 msgstr "Plak er meerdere tegelijk, gescheiden door komma's of regels."
 
+#: src/onboarding/ai-choice.tsx
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
 msgid "Paste the key."
@@ -14786,6 +14818,7 @@ msgctxt "a saved key"
 msgid "Replace"
 msgstr "Vervangen"
 
+#: src/onboarding/ai-choice.tsx
 #: src/settings/ai-providers.tsx
 msgid "Replace key"
 msgstr "Sleutel vervangen"
@@ -21587,8 +21620,8 @@ msgid "You’re already on our own system, and it works, so just press Continue.
 msgstr "Je gebruikt ons eigen systeem al en het werkt, dus druk gewoon op Doorgaan."
 
 #: src/onboarding/setup-steps.tsx
-msgid "You’re on our own system, and it’s ready."
-msgstr "Je gebruikt ons eigen systeem, en het is klaar."
+msgid "You’re on our own system, and it works."
+msgstr "Je gebruikt ons eigen systeem, en dat werkt."
 
 #: src/drafts/share-with-team.tsx
 msgid "You’re seeing your version."
@@ -21774,8 +21807,8 @@ msgid "Your own key"
 msgstr "Je eigen sleutel"
 
 #: src/onboarding/setup-steps.tsx
-msgid "Your own key works, and it’s ready."
-msgstr "Je eigen sleutel werkt, en het is klaar."
+msgid "Your own key is connected and works."
+msgstr "Je eigen sleutel is gekoppeld en werkt."
 
 #: src/onboarding/setup-steps.tsx
 msgid "Your own key works, so just press Continue."
