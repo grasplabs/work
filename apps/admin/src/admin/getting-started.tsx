@@ -1,14 +1,5 @@
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { Button } from "@grasp-os/ui/components/button";
-import { CardContent } from "@grasp-os/ui/components/card";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemGroup,
-  ItemTitle,
-} from "@grasp-os/ui/components/item";
 import { Text } from "@grasp-os/ui/components/text";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
@@ -19,8 +10,8 @@ import { AgreementsAction } from "./agreements.tsx";
 import { CommandButton } from "./commands.tsx";
 import { startItems, started } from "./getting-started.ts";
 import type { StartFacts, StartItem } from "./getting-started.ts";
-import { Panel } from "./panel.tsx";
-import { Attention, Done } from "./parts.tsx";
+import { Attention, Done } from "./marks.tsx";
+import { Panel, PanelRow, PanelRows } from "./panel.tsx";
 
 const styles = stylex.create({
   // How a row stands, then what Grasp does about it.
@@ -140,29 +131,21 @@ export const GettingStarted = ({
       description="What has to be in place before its admins get in and its people get their interview links, in order. What is Grasp’s to do can be done from here."
       title="Getting started"
     >
-      <CardContent flush>
-        <ItemGroup separated>
-          {startItems(facts).map((item) => (
-            <Item key={item.id} size="sm">
-              <ItemContent>
-                <ItemTitle>{item.title}</ItemTitle>
-                <ItemDescription>{item.detail}</ItemDescription>
-              </ItemContent>
-              <ItemActions>
-                <span {...stylex.props(styles.end)}>
-                  <Standing item={item} />
-                  <ActionOf
-                    agreements={agreements}
-                    clientId={clientId}
-                    item={item}
-                    told={facts.told}
-                  />
-                </span>
-              </ItemActions>
-            </Item>
-          ))}
-        </ItemGroup>
-      </CardContent>
+      <PanelRows>
+        {startItems(facts).map((item) => (
+          <PanelRow description={item.detail} key={item.id} label={item.title}>
+            <span {...stylex.props(styles.end)}>
+              <Standing item={item} />
+              <ActionOf
+                agreements={agreements}
+                clientId={clientId}
+                item={item}
+                told={facts.told}
+              />
+            </span>
+          </PanelRow>
+        ))}
+      </PanelRows>
     </Panel>
   );
 };

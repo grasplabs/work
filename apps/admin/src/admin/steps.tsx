@@ -33,13 +33,6 @@ import type {
 import type { OnboardingFlow } from "@grasp-os/shared/onboarding-flow";
 import { Button } from "@grasp-os/ui/components/button";
 import { Card, CardContent } from "@grasp-os/ui/components/card";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemGroup,
-  ItemTitle,
-} from "@grasp-os/ui/components/item";
 import { Progress } from "@grasp-os/ui/components/progress";
 import { Stat } from "@grasp-os/ui/components/stat";
 import { Text } from "@grasp-os/ui/components/text";
@@ -76,15 +69,25 @@ import { GateControls } from "./commands.tsx";
 import type { GateState } from "./commands.tsx";
 import { opensElsewhere, stageShown, stagesIn } from "./flow-stages.ts";
 import { Kickoff, visionWords } from "./kickoff.tsx";
-import { Panel, PanelNote } from "./panel.tsx";
-import { Attention, Done, KnowledgeDots } from "./parts.tsx";
+import { Attention, Done, KnowledgeDots } from "./marks.tsx";
+import { Panel, PanelNote, PanelRow, PanelRows } from "./panel.tsx";
 import { sectionTo } from "./sections.ts";
 import { formatDate, stageWords } from "./words.ts";
 
 const hairline = `${size.hairline} solid ${colors.border}`;
 
 const styles = stylex.create({
-  mark: { display: "inline-flex", flexShrink: 0 },
+  mark: { position: "relative", display: "inline-flex", flexShrink: 0 },
+  nowDot: {
+    position: "absolute",
+    insetBlockStart: "50%",
+    insetInlineStart: "50%",
+    width: "0.375rem",
+    height: "0.375rem",
+    borderRadius: "50%",
+    backgroundColor: "currentColor",
+    transform: "translate(-50%, -50%)",
+  },
   done: { color: colors.success },
   later: { color: colors.border },
   waits: { color: colors.warning },
@@ -363,6 +366,8 @@ const stageMarks: Record<
 const StageMark = ({ status }: { status: StageStatus }) => (
   <span aria-hidden {...stylex.props(styles.mark, stageMarks[status].tone)}>
     <Icon icon={stageMarks[status].icon} />
+    {/* The step that is now: a dot inside its circle, so it differs from a later one by shape, not only by colour. */}
+    {status === "now" ? <span {...stylex.props(styles.nowDot)} /> : null}
   </span>
 );
 
@@ -768,18 +773,13 @@ const Company = ({ view }: { view: OrgView }) => {
   ];
   return (
     <Panel title="What the company does itself">
-      <CardContent flush>
-        <ItemGroup separated>
-          {rows.map((row) => (
-            <Item key={row.label} size="sm">
-              <ItemContent>
-                <ItemTitle>{row.label}</ItemTitle>
-              </ItemContent>
-              <ItemActions>{row.value}</ItemActions>
-            </Item>
-          ))}
-        </ItemGroup>
-      </CardContent>
+      <PanelRows>
+        {rows.map((row) => (
+          <PanelRow key={row.label} label={row.label}>
+            {row.value}
+          </PanelRow>
+        ))}
+      </PanelRows>
     </Panel>
   );
 };

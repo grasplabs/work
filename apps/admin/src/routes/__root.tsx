@@ -12,6 +12,7 @@ import { openClientId, readAdmins } from "../admin/org-loads.ts";
 import { freshMs } from "../admin/org-reads.ts";
 import type { OrgReads } from "../admin/org-reads.ts";
 import { platformCounts } from "../admin/platform.ts";
+import { uiWords } from "../admin/ui-words.ts";
 import { fetchClientGrid } from "../clients/functions.ts";
 
 import styles from "../styles.css?url";
@@ -55,7 +56,9 @@ const RootDocument = ({ children }: { children: ReactNode }) => (
       <HeadContent />
     </head>
     <body>
-      <I18nProvider locale="en-GB">{children}</I18nProvider>
+      <I18nProvider catalog={uiWords} locale="en-GB">
+        {children}
+      </I18nProvider>
       <Scripts />
     </body>
   </html>

@@ -13,7 +13,6 @@ import type {
   FlowStep,
   OnboardingFlow,
 } from "@grasp-os/shared/onboarding-flow";
-import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
 import { CardContent } from "@grasp-os/ui/components/card";
 import { Field, FieldLabel } from "@grasp-os/ui/components/field";
@@ -33,6 +32,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
 import { CommandFailure, useCommand } from "./commands.tsx";
+import { Attention } from "./marks.tsx";
 import { EmptyPanel, Panel } from "./panel.tsx";
 
 const styles = stylex.create({
@@ -273,9 +273,9 @@ export const OrgFlow = ({
       </Panel>
       <div {...stylex.props(styles.foot)}>
         {problem === null ? null : (
-          <Alert appearance="subtle" variant="warning">
-            <AlertDescription>{problemWords[problem]}</AlertDescription>
-          </Alert>
+          <output>
+            <Attention>{problemWords[problem]}</Attention>
+          </output>
         )}
         <CommandFailure failure={failure} />
         <div {...stylex.props(styles.row)}>

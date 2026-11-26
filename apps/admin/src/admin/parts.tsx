@@ -14,7 +14,6 @@ import type {
   Stage,
   StageStatus,
 } from "@grasp-os/shared/admin/onboarding-admin";
-import { CheckIcon } from "lucide-react";
 import { Fragment } from "react";
 import type { ReactNode } from "react";
 
@@ -115,14 +114,6 @@ export const Attention = ({
   <span className={cn("flex items-baseline gap-1.5", className)}>
     <AttentionDot />
     <span className="min-w-0">{children}</span>
-  </span>
-);
-
-/** Something that is in place: a check and a word, in the colour of agreed. */
-export const Done = ({ children }: { children: ReactNode }) => (
-  <span className="text-muted-foreground flex items-center gap-1.5">
-    <CheckIcon aria-hidden className="text-status-agreed size-4 flex-none" />
-    {children}
   </span>
 );
 
