@@ -16229,6 +16229,10 @@ msgstr "El inicio de sesión caducó o se empezó en otro sitio. Vuelve a intent
 msgid "Signals"
 msgstr "Señales"
 
+#: src/activity/audit-words.ts
+msgid "Signed a connection in again with its login"
+msgstr "Se volvió a iniciar sesión en una conexión con sus credenciales"
+
 #: src/routes/_shell.settings.security.tsx
 msgid "Signed in {time}"
 msgstr "Sesión iniciada el {time}"

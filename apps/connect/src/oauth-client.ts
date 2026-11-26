@@ -208,7 +208,7 @@ const grantedScope = (
 export const maxAccountField = 256;
 
 /** What `pointer` (RFC 6901, plain names and indexes) names in `value`. */
-const at = (value: unknown, pointer: string): unknown => {
+export const valueAt = (value: unknown, pointer: string): unknown => {
   let current = value;
   for (const name of pointer.split("/").slice(1)) {
     if (Array.isArray(current) && /^\d+$/u.test(name)) {
@@ -229,7 +229,7 @@ const at = (value: unknown, pointer: string): unknown => {
 
 /** A field of the account, as text, if it is some. */
 const textAt = (value: unknown, pointer: string | undefined): string | null => {
-  const found = pointer === undefined ? undefined : at(value, pointer);
+  const found = pointer === undefined ? undefined : valueAt(value, pointer);
   const text =
     typeof found === "number" && Number.isSafeInteger(found)
       ? String(found)

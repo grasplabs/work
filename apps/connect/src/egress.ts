@@ -17,6 +17,7 @@ import { z } from "zod";
 import { outbound } from "./company-network.ts";
 import { credentialForms, withoutCredential } from "./credential-copies.ts";
 import { pauseAsked } from "./pause.ts";
+import { sessionAfterRefusal } from "./tokens.ts";
 
 // A native connector's only way out. Connect loads each call's connector
 // isolate with this as its `globalOutbound`, so every request the
@@ -38,6 +39,10 @@ import { pauseAsked } from "./pause.ts";
 // without cookies and with any copy of the credential in their headers
 // replaced (`answerHeaders`), so a session a vendor hands out, or a
 // credential it echoes in a header, never reaches connector code.
+// A session login's session (session-login.ts) the vendor answers 401 is
+// logged in for again once, however many calls it refused, and a read is
+// sent again with the new one; never a write, which may have done
+// something first (threat model LG9).
 // Redirects aren't followed, except one from a route that names the hosts
 // it may lead to (a download), which the handler follows itself,
 // once, without the token or anything of the connector's request. A
@@ -175,6 +180,13 @@ const egressPropsSchema = z.strictObject({
    * address its requests go to, as an origin (company-network.ts).
    */
   companyNetwork: z.string().min(1).optional(),
+  /**
+   * For a session login's connection, which session `credential` is: one
+   * the vendor refuses (a 401) is logged in for again, once for that
+   * session, and a read sent again with the new one (tokens.ts
+   * `sessionAfterRefusal`).
+   */
+  session: z.number().int().optional(),
   /** When this call's egress closes, in ms since the epoch. */
   expiresAt: z.number().int(),
 });
@@ -327,9 +339,11 @@ const throughDownload = async (
  */
 const answerHeaders = (
   response: Response,
-  { value, secret }: EgressProps["credential"]
+  credentials: readonly EgressProps["credential"][]
 ): Headers => {
-  const forms = credentialForms([value, secret]);
+  const forms = credentialForms(
+    credentials.flatMap(({ value, secret }) => [value, secret])
+  );
   const headers = new Headers();
   for (const [name, sent] of response.headers) {
     if (!responseHeadersDropped.has(name)) {
@@ -459,38 +473,62 @@ export class ConnectorEgress extends WorkerEntrypoint<Env, EgressProps> {
     if (route === undefined) {
       return refuse(call, "route", url, method);
     }
-    const headers = new Headers(request.headers);
-    // The credential's own header too: the connector can't send another
-    // key there, or a second copy that a provider might read first.
-    for (const name of [...connectorHeadersRefused, credential.header]) {
-      headers.delete(name);
-    }
-    if (credentialHosts.includes(declared)) {
-      headers.set(credential.header, credential.value);
-    }
-    let response: Response;
-    try {
-      response = await outbound(
-        this.env,
-        companyNetwork
-      )(
-        new Request(target, {
+    const carries = credentialHosts.includes(declared);
+    const send = async (
+      sent: EgressProps["credential"]
+    ): Promise<Response | undefined> => {
+      const headers = new Headers(request.headers);
+      // The credential's own header too: the connector can't send another
+      // key there, or a second copy that a provider might read first.
+      for (const name of [...connectorHeadersRefused, sent.header]) {
+        headers.delete(name);
+      }
+      if (carries) {
+        headers.set(sent.header, sent.value);
+      }
+      try {
+        return await outbound(
+          this.env,
+          companyNetwork
+        )(
+          new Request(target, {
+            method,
+            headers,
+            body: request.body,
+            // A redirect could carry the token to another host: never follow.
+            redirect: "manual",
+            signal: AbortSignal.timeout(remainingMs),
+          })
+        );
+      } catch {
+        log.warn("egress.failed", {
+          connector,
+          callId,
+          host: declared,
           method,
-          headers,
-          body: request.body,
-          // A redirect could carry the token to another host: never follow.
-          redirect: "manual",
-          signal: AbortSignal.timeout(remainingMs),
-        })
+          route: route.path,
+        });
+        return undefined;
+      }
+    };
+    const credentials = [credential];
+    let response = await send(credential);
+    // A session the vendor refused: logged in for again, and a read sent
+    // again with the new one, once. A write isn't: it may have done
+    // something before it was refused (threat model LG9).
+    if (response?.status === 401 && carries && call.session !== undefined) {
+      const renewed = await sessionAfterRefusal(
+        this.env,
+        call.connectionId,
+        call.session
       );
-    } catch {
-      log.warn("egress.failed", {
-        connector,
-        callId,
-        host: declared,
-        method,
-        route: route.path,
-      });
+      if (renewed !== undefined && (method === "GET" || method === "HEAD")) {
+        await response.body?.cancel();
+        credentials.push(renewed);
+        response = await send(renewed);
+      }
+    }
+    if (response === undefined) {
       return egressAnswer(egressKind.failed);
     }
     // Hosts, methods, declared paths and statuses only: never the path as
@@ -538,7 +576,11 @@ export class ConnectorEgress extends WorkerEntrypoint<Env, EgressProps> {
       response,
       { connector, callId }
     );
-    return capped(response, answerHeaders(response, credential), pausedSeconds);
+    return capped(
+      response,
+      answerHeaders(response, credentials),
+      pausedSeconds
+    );
   }
 
   /** Raw TCP (`cloudflare:sockets`) never leaves: only HTTPS requests. */

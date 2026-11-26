@@ -165,6 +165,7 @@ Connect runs the sign-in the connector declares, and keeps the token or key:
 
 - `auth.apiKey({ header, prefix, account })`: a key the person pastes, sent in `header` on every request, after `prefix` (such as `"Bearer "`) if there is one.
 - `auth.oauth2({ authorizeUrl, tokenUrl, revokeUrl, scopes, account })`: OAuth 2.0 with the authorization code, PKCE and refresh. `scopes` maps each scope it may ask for to what it allows, and its tools' `scopes` are among them. Without `revokeUrl`, disconnecting deletes the tokens only.
+- `auth.login({ fields, account, request, token, expiresIn })`: a sign-in with a call, for a system with no API key or OAuth, such as an ERP that takes a user name and a password and answers with a session. See [Session logins](#session-logins).
 
 ```ts oauth.ts
 import { auth } from "@grasp-os/sdk/connector";
@@ -212,7 +213,7 @@ Before the connector's code reads an answer, connect drops its `Set-Cookie` and 
 A host that differs from one connection to the next is a template in `hosts`:
 
 - `{name}.<host>`: one DNS label in front of a fixed name, such as `{company}.boards.example`.
-- `{name}` alone: a whole host, such as a company's own server, with `auth.apiKey` only. Only an admin gives it: its connections are shared ones.
+- `{name}` alone: a whole host, such as a company's own server, with `auth.apiKey` or `auth.login` only. Only an admin gives it: its connections are shared ones.
 
 Routes name a template like any other host, and the connector's code never learns the host it stands for: connect fills it in as each request leaves. Code that calls `fetch` itself sends to the template's stand-in, `company.boards.example.invalid` for `{company}.boards.example` and `host.invalid` for `{host}`. With `auth.apiKey`, whoever connects gives each template's host along with the key. With `auth.oauth2`, the token response names the host. `hostsFrom` maps each template to a JSON Pointer into that response, pointing at a host or an HTTPS origin, and the account is read with a lookup, never from an ID token:
 
@@ -234,6 +235,37 @@ export const companySignIn = auth.oauth2({
 ```
 
 A filled host is read as a URL parser reads it, in lower case, and must fit its template: a DNS name with no address, port, userinfo or path, and for `{name}.<host>` one label in front of the fixed name. Connect checks this before anything is sent there, the account lookup included. A sign-in whose host doesn't fit connects nothing. The hosts are sealed with the credential, so a connection's host never changes: the same account at another host is another connection, and moving to another host means connecting again.
+
+### Session logins
+
+`auth.login` declares the call that signs in, and connect makes it: with the fields the person gave, and again whenever the session runs out. The connector's code never sees the fields, the login's answer or the session.
+
+```ts login.ts
+import { auth, v } from "@grasp-os/sdk/connector";
+
+// The connector's one host is erp.example.
+export const erpLogin = auth.login({
+  fields: { userName: v.string(), password: v.string() },
+  account: "userName",
+  request: {
+    url: "https://erp.example/api/auth/login",
+    json: { userName: "{userName}", password: "{password}" },
+  },
+  token: { from: "/token", header: "authorization", prefix: "Bearer " },
+  expiresIn: "/expires_in",
+});
+```
+
+- `fields`: what the person gives, each a plain `v.string()`. `account` names the one that names the account, which is shown; every other field is a secret. The account is that field's value, so the same user name is the same connection.
+- `request`: one POST to `url`, on a host the credential goes to, over HTTPS, with no query string. Its body is `json` or `form` (form-encoded). Each value is a field's placeholder, such as `"{password}"`, replaced by the whole of what the person gave, or a constant without braces. Every field is sent, and nothing is ever spliced into text, so a password holding quotes or braces is sent as it is.
+- `token`: where the answer holds the session. `{ from, header, prefix }` reads a token at a JSON Pointer into the answer and sends it in `header` after `prefix`, as an API key is. `{ cookie }` reads the cookie of that name the answer sets and sends it as that one cookie. Its `Domain`, `Path` and other attributes are ignored, and no other cookie is kept.
+- `expiresIn`: a JSON Pointer to how many seconds the session lasts. Without it, a session that is a JWT lasts until its `exp`. Otherwise, it lasts a day. Whatever it says, connect logs in again after two minutes at the earliest and a day at the latest.
+
+A login answered with anything but a success, a `429` or a `5xx` (a redirect included, which is never followed) marks the connection as needing sign-in. Its fields are deleted, so nothing logs in with them again until a person gives them anew: a password changed at the vendor can't lock the account with retries. A login answered `429` or `5xx`, or not at all, pauses the connection for as long as the vendor's `retry-after` says, or a minute.
+
+When the vendor refuses a session with a `401`, connect logs in once more, however many calls were refused that session at once. A read is sent again with the new session, but a write is not: it fails, and its caller decides. A call refused the new session too gets the `401`, and doesn't log in again.
+
+As with an API key, whoever connects gives each [host template](#hosts-set-per-connection)'s host with the fields, and an admin may reach a shared connection through the company network: the login and every call then go to the address the admin gave.
 
 ### A suite's sign-in
 

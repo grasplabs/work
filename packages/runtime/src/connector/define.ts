@@ -300,6 +300,35 @@ export type OAuth2Declaration = {
   | { idToken: IdTokenDeclaration; account?: never }
 );
 
+/**
+ * A sign-in with a call (`auth.login`): the fields the person gives, each a
+ * `v.string()`; the one that names the account, shown where the others
+ * never are; the POST that signs in, to `url` with a body as JSON or as a
+ * form, whose values are a field's placeholder (`"{password}"`, replaced by
+ * the whole of what the person gave) or a constant; and where its answer
+ * holds the session: a token at a JSON Pointer, sent in `header` after
+ * `prefix`, or a cookie, sent as that cookie alone. `expiresIn` points at
+ * the seconds the answer says it lasts.
+ */
+export interface LoginDeclaration<
+  Fields extends Readonly<Record<string, AnySchema>>,
+> {
+  fields: Fields;
+  account: Extract<keyof Fields, string>;
+  request: { url: string } & (
+    | {
+        json: Readonly<Record<string, string | number | boolean | null>>;
+        form?: never;
+      }
+    | { form: Readonly<Record<string, string>>; json?: never }
+  );
+  token: { from: string; header: string; prefix?: string } | { cookie: string };
+  expiresIn?: string;
+}
+
+/** What `v.string()` declares, which each login field is, with nothing added. */
+const plainText = JSON.stringify(v.string().descriptor);
+
 /** The sign-ins connect runs for a connector. Connector code never sees a token. */
 export const auth = Object.freeze({
   /** OAuth 2.0 with the authorization code, PKCE and refresh. */
@@ -339,6 +368,27 @@ export const auth = Object.freeze({
     ...(hosts === undefined ? {} : { hosts }),
     signIn: { kind: "api_key", ...declaration },
   }),
+  /**
+   * A sign-in with a call (`LoginDeclaration`), which connect makes, holding
+   * the fields and the session, and makes again when the session runs out.
+   * Throws for a field that isn't a plain `v.string()`.
+   */
+  login: <const Fields extends Readonly<Record<string, AnySchema>>>({
+    fields,
+    hosts,
+    ...declaration
+  }: LoginDeclaration<Fields> &
+    Pick<ConnectorAuth, "hosts">): ConnectorAuth => {
+    for (const [name, schema] of Object.entries(fields)) {
+      if (JSON.stringify(schema.descriptor) !== plainText) {
+        throw new Error(`${name}: a login field is a plain v.string()`);
+      }
+    }
+    return {
+      ...(hosts === undefined ? {} : { hosts }),
+      signIn: { kind: "login", fields: Object.keys(fields), ...declaration },
+    };
+  },
 });
 
 export interface ConnectorDeclaration {

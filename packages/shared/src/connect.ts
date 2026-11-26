@@ -376,42 +376,59 @@ export type FinishConnection = z.input<typeof finishConnectionSchema>;
 /** Longest API key connect takes. */
 export const apiKeyMaxLength = 4096;
 
+/** Longest value a person gives a login's field (a user name, a password). */
+export const loginFieldMaxLength = 1024;
+
 /**
  * Connects an app that signs in with an API key, which the person typed:
  * connect checks it with the app (its provider record's account lookup)
  * and seals it in the token vault, as it does OAuth tokens. It never comes
  * back out, and never reaches the connector's code.
  */
-export const connectWithKeySchema = z.strictObject({
-  person: connectionPersonSchema,
-  /**
-   * An app's provider, or an HR platform's read-only admin connection,
-   * which no connector's calls use.
-   */
-  provider: z.union([appProviderSchema, hrProviderSchema, connectorIdSchema]),
-  scope: connectionScopeSchema,
-  /** Printable ASCII only: it goes into a request header as it is. */
-  key: z
-    .string()
-    .min(1)
-    .max(apiKeyMaxLength)
-    .regex(/^[\u0021-\u007E]+$/u, "Not an API key"),
-  /**
-   * For an app's shared connection to a system inside the company's own
-   * network: the one address its requests go to, through the
-   * deployment's company network, as an http or https origin with its
-   * port (`http://10.0.0.8:8080`). Sealed with the key, so another
-   * address takes the key again (GRA-2327). A connector made from a URL
-   * names its own (`AddConnector.companyNetwork`).
-   */
-  companyNetwork: z.string().max(connectorUrlMaxLength).optional(),
-  /**
-   * The host for each of the app's connector's host templates, such as
-   * `{ "{host}": "erp.example.com" }`: sealed with the key, so another
-   * host takes signing in again. Connect checks each against its template.
-   */
-  hosts: z.record(z.string().max(253), z.string().max(253)).optional(),
-});
+export const connectWithKeySchema = z
+  .strictObject({
+    person: connectionPersonSchema,
+    /**
+     * An app's provider, or an HR platform's read-only admin connection,
+     * which no connector's calls use.
+     */
+    provider: z.union([appProviderSchema, hrProviderSchema, connectorIdSchema]),
+    scope: connectionScopeSchema,
+    /** Printable ASCII only: it goes into a request header as it is. */
+    key: z
+      .string()
+      .min(1)
+      .max(apiKeyMaxLength)
+      .regex(/^[\u0021-\u007E]+$/u, "Not an API key")
+      .optional(),
+    /**
+     * For an app that signs in with a call (`auth.login`), in place of a
+     * key: each field its login asks for, by name, as the person gave it.
+     * Sealed, and sent only in its login.
+     */
+    fields: z
+      .record(z.string().max(64), z.string().min(1).max(loginFieldMaxLength))
+      .optional(),
+    /**
+     * For an app's shared connection to a system inside the company's own
+     * network: the one address its requests go to, through the
+     * deployment's company network, as an http or https origin with its
+     * port (`http://10.0.0.8:8080`). Sealed with the key, so another
+     * address takes the key again (GRA-2327). A connector made from a URL
+     * names its own (`AddConnector.companyNetwork`).
+     */
+    companyNetwork: z.string().max(connectorUrlMaxLength).optional(),
+    /**
+     * The host for each of the app's connector's host templates, such as
+     * `{ "{host}": "erp.example.com" }`: sealed with the key, so another
+     * host takes signing in again. Connect checks each against its template.
+     */
+    hosts: z.record(z.string().max(253), z.string().max(253)).optional(),
+  })
+  .refine(
+    ({ key, fields }) => (key === undefined) !== (fields === undefined),
+    "A key or a login's fields, one of them"
+  );
 export type ConnectWithKey = z.input<typeof connectWithKeySchema>;
 
 /**

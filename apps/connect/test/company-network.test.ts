@@ -9,7 +9,11 @@ import { outbound } from "../src/company-network.ts";
 import { connections } from "../src/db/schema.ts";
 import { addConnector } from "../src/mcp-connectors.ts";
 import { connectWithKey } from "../src/oauth.ts";
-import { companyNetworkKey } from "./company-network-fake.ts";
+import {
+  companyLogin,
+  companyNetworkKey,
+  companySession,
+} from "./company-network-fake.ts";
 import type { CompanyRequest } from "./company-network-fake.ts";
 import { auditEvents, clientOrigin, outcome, someone } from "./connect.ts";
 import { egressProps } from "./connectors-harness.ts";
@@ -56,6 +60,7 @@ const sentSchema = z.array(
     method: z.string(),
     path: z.string(),
     headers: z.record(z.string(), z.string()),
+    body: z.string(),
   })
 );
 
@@ -104,9 +109,11 @@ const companySystem = (): void => {
     // Each test connects the app's one account afresh.
     await env.DB.batch([
       env.DB.prepare(
-        "DELETE FROM connection_tokens WHERE connection_id IN (SELECT id FROM connections WHERE provider = 'sample-erp')"
+        "DELETE FROM connection_tokens WHERE connection_id IN (SELECT id FROM connections WHERE provider IN ('sample-erp', 'sample-cookie'))"
       ),
-      env.DB.prepare("DELETE FROM connections WHERE provider = 'sample-erp'"),
+      env.DB.prepare(
+        "DELETE FROM connections WHERE provider IN ('sample-erp', 'sample-cookie')"
+      ),
     ]);
   });
 };
@@ -427,6 +434,62 @@ describe("a shared connection reached through the company network", () => {
       server: "connection.company_network_unavailable",
       company: [],
       internet: [],
+    });
+  });
+});
+
+describe("a session login reached through the company network", () => {
+  it("logs in there with its form, sends the session as its cookie there alone, and is audited once", async () => {
+    const person = admin();
+    const { connectionId } = await exports.default.connectWithKey({
+      person,
+      provider: "sample-cookie",
+      scope: "shared",
+      fields: companyLogin,
+      companyNetwork: address,
+    });
+    const listed = await callErp(connectionId, person, "orders.list");
+    const events = await eventsOf(audit);
+    const sent = await companySent();
+
+    expect({
+      listed: outputOf(listed),
+      company: sent.map(({ method, path, headers, body }) => ({
+        method,
+        path,
+        cookie: headers.cookie,
+        body,
+      })),
+      internet: internet.sent,
+      events: events.filter(({ action }) => action !== "connection.call"),
+    }).toStrictEqual({
+      listed: { items: [{ id: "order-1", title: "First" }], next: null },
+      company: [
+        {
+          method: "POST",
+          path: "/session/login",
+          cookie: undefined,
+          body: "user=erp-user&secret=erp-secret&client=grasp",
+        },
+        {
+          method: "GET",
+          path: "/session/orders",
+          cookie: `ERPSESSION=${companySession}`,
+          body: "",
+        },
+      ],
+      internet: [],
+      events: [
+        {
+          action: "connection.connect",
+          detail: {
+            provider: "sample-cookie",
+            scope: "shared",
+            companyNetwork: address,
+            outcome: "ok",
+          },
+        },
+      ],
     });
   });
 });

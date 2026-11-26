@@ -16229,6 +16229,10 @@ msgstr "La connexion a expiré ou a été lancée ailleurs. Réessayez."
 msgid "Signals"
 msgstr "Signaux"
 
+#: src/activity/audit-words.ts
+msgid "Signed a connection in again with its login"
+msgstr "Connexion réouverte avec ses identifiants"
+
 #: src/routes/_shell.settings.security.tsx
 msgid "Signed in {time}"
 msgstr "Connecté le {time}"

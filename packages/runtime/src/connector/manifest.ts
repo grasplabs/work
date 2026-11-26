@@ -334,7 +334,7 @@ export const connectorManifestSchema = z
       (signIn.kind === "oauth2"
         ? scopes.every((scope) => signIn.scopes.includes(scope))
         : scopes.length === 0),
-    "A connector's scopes are among those its record asks for; an API key has none"
+    "A connector's scopes are among those its record asks for; an API key or a login has none"
   )
   .refine(
     ({ hosts, credentialHosts }) =>
@@ -344,9 +344,17 @@ export const connectorManifestSchema = z
   .refine(
     ({ signIn, credentialHosts }) =>
       signIn?.account === undefined ||
+      typeof signIn.account === "string" ||
       credentialHosts.includes(endpointHost(signIn.account.url) ?? ""),
     // The lookup carries the token or key: only where the credential goes.
     "The account lookup goes to one of the hosts the credential goes to"
+  )
+  .refine(
+    ({ signIn, credentialHosts }) =>
+      signIn?.kind !== "login" ||
+      credentialHosts.includes(endpointHost(signIn.request.url) ?? ""),
+    // It carries the password: only where the session it answers goes.
+    "The login goes to one of the hosts the credential goes to"
   )
   .refine(
     ({ signIn, hosts }) =>
@@ -355,14 +363,16 @@ export const connectorManifestSchema = z
         return (
           template === undefined ||
           signIn?.kind === "api_key" ||
+          signIn?.kind === "login" ||
           (signIn?.kind === "oauth2" &&
             template.suffix !== null &&
             Object.hasOwn(signIn.hostsFrom ?? {}, host))
         );
       }),
-    // Given with the key when a connection signs in, or named by the token
-    // response under a fixed name: a whole host only an admin types.
-    "A host template is filled by an API key's sign-in, or by the token response (hostsFrom) under a fixed name"
+    // Given with the key or the login's fields when a connection signs
+    // in, or named by the token response under a fixed name: a whole host
+    // only an admin types.
+    "A host template is filled by an API key's sign-in or a login's, or by the token response (hostsFrom) under a fixed name"
   )
   .refine(
     ({ hosts }) => {

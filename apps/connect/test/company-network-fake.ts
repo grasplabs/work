@@ -19,11 +19,18 @@ import { z } from "zod";
 /** The one key the system takes, in `x-api-key`. */
 export const companyNetworkKey = "company-network-key";
 
+/** The one user and secret its form login (`/session/login`) takes. */
+export const companyLogin = { user: "erp-user", secret: "erp-secret" };
+
+/** The session its form login answers with, in a cookie. */
+export const companySession = "company-session-1";
+
 /** One request the system got. */
 export interface CompanyRequest {
   method: string;
   path: string;
   headers: Record<string, string>;
+  body: string;
 }
 
 const json = (body: unknown, status = 200): Response =>
@@ -69,8 +76,39 @@ const mcp = async (request: Request): Promise<Response> => {
   );
 };
 
+/**
+ * How the system answers what is under `/session/`: a form login that
+ * sets its session in a cookie, and the orders, for that cookie alone.
+ */
+const sessionAnswer = async (request: Request, url: URL): Promise<Response> => {
+  if (request.method === "POST" && url.pathname === "/session/login") {
+    const form = new URLSearchParams(await request.text());
+    if (
+      form.get("user") !== companyLogin.user ||
+      form.get("secret") !== companyLogin.secret
+    ) {
+      return json({ message: "Unauthorized" }, 401);
+    }
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "set-cookie": `ERPSESSION=${companySession}; Path=/; HttpOnly`,
+      },
+    });
+  }
+  if (request.headers.get("cookie") !== `ERPSESSION=${companySession}`) {
+    return json({ message: "Unauthorized" }, 401);
+  }
+  return url.pathname === "/session/orders"
+    ? json({ items: [{ id: "order-1", title: "First" }] })
+    : json({ message: "Not found" }, 404);
+};
+
 /** How the system answers `request`. */
 const answer = async (request: Request, url: URL): Promise<Response> => {
+  if (url.pathname.startsWith("/session/")) {
+    return await sessionAnswer(request, url);
+  }
   if (request.headers.get("x-api-key") !== companyNetworkKey) {
     return json({ message: "Unauthorized" }, 401);
   }
@@ -151,6 +189,7 @@ export const startCompanyNetwork = async (): Promise<string> => {
             method,
             path: `${url.pathname}${url.search}`,
             headers: Object.fromEntries(headers),
+            body,
           });
           response = await answer(
             new Request(url, {

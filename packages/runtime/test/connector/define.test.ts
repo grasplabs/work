@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import type { AnySchema } from "../../src/common/value-schema.ts";
 import {
   auth,
   defineConnector,
@@ -724,6 +725,59 @@ describe("a connector's definition", () => {
     expect(several(["evil.test"])).toThrow("only to hosts of the connector's");
     // The account lookup carries the key: only where the key goes.
     expect(several([files])).toThrow("one of the hosts the credential goes to");
+  });
+
+  it("signs in with a login connect makes, of plain text fields it sends whole, only where the session goes", () => {
+    const login = (
+      overrides: { url?: string; fields?: Record<string, AnySchema> } = {}
+    ) =>
+      defineConnector({
+        name: "stock",
+        title: "Stock",
+        hosts: [host, "files.stock.test"],
+        auth: auth.login({
+          hosts: [host],
+          fields: overrides.fields ?? {
+            user: v.string(),
+            password: v.string(),
+          },
+          account: "user",
+          request: {
+            url: overrides.url ?? `https://${host}/api/login`,
+            json: { user: "{user}", password: "{password}", remember: true },
+          },
+          token: { from: "/token", header: "authorization", prefix: "Bearer " },
+          expiresIn: "/expiresIn",
+        }),
+        tools: {},
+      });
+    expect(login().manifest.signIn).toStrictEqual({
+      kind: "login",
+      name: "Stock",
+      fields: ["user", "password"],
+      account: "user",
+      request: {
+        url: `https://${host}/api/login`,
+        json: { user: "{user}", password: "{password}", remember: true },
+      },
+      token: { from: "/token", header: "authorization", prefix: "Bearer " },
+      expiresIn: "/expiresIn",
+    });
+    expect(() =>
+      login({ fields: { user: v.string(), password: v.number() } })
+    ).toThrow("password: a login field is a plain v.string()");
+    // The login carries the password: only where the session goes.
+    expect(() => login({ url: "https://files.stock.test/api/login" })).toThrow(
+      "The login goes to one of the hosts the credential goes to"
+    );
+    expect(() => login({ url: `https://${host}/api/login?as=admin` })).toThrow(
+      "without a query string"
+    );
+    expect(() =>
+      login({
+        fields: { user: v.string(), password: v.string(), code: v.string() },
+      })
+    ).toThrow("The login request sends each field");
   });
 
   it("takes a host set per connection as a template, and refuses one that isn't", () => {

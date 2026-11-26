@@ -16229,6 +16229,10 @@ msgstr "Die Anmeldung ist abgelaufen oder wurde anderswo gestartet. Versuchen Si
 msgid "Signals"
 msgstr "Signale"
 
+#: src/activity/audit-words.ts
+msgid "Signed a connection in again with its login"
+msgstr "Eine Verbindung erneut mit ihrer Anmeldung angemeldet"
+
 #: src/routes/_shell.settings.security.tsx
 msgid "Signed in {time}"
 msgstr "Angemeldet am {time}"

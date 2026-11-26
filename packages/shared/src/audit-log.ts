@@ -116,6 +116,9 @@ const typeRules: readonly {
   { action: "connection.app.pointed", type: "config" },
   // A connection's tokens stopped working: it needs signing in again.
   { action: "connection.needs_reauth", type: "config" },
+  // Connect logging a session login's connection in again, because its
+  // session ran out or the vendor refused it (connect's tokens.ts).
+  { action: "connection.session_renewed", type: "config" },
   // A renewal of a connection's tokens found its account's address changed,
   // or no longer confirmed (connect's tokens.ts, GRA-1761).
   { action: "connection.account_changed", type: "config" },

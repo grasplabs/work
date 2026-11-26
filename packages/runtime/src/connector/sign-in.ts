@@ -30,6 +30,10 @@ import { hostPattern, hostTemplateOf } from "./hosts.ts";
 //   of the connector's own hosts, as its calls do.
 // - An API key goes in the one header the record names, never in the URL,
 //   and never in a header that would carry it somewhere else.
+// - A login's fields go only in its one POST, each the whole of a value
+//   in its body, never spliced into text; the session it answers with goes
+//   in one header, or as its one cookie, as an API key does (threat model
+//   LG1 to LG9, in connect's test/session-login.test.ts).
 //
 // A record may also say what the suites' sign-ins need (AP10 to AP18, in
 // connect's test/declared-sign-in.test.ts):
@@ -544,6 +548,107 @@ const apiKeySignInSchema = z.strictObject({
   account: accountLookupSchema,
 });
 
+/** A login field's name, as its placeholder (`{name}`) names it too. */
+const fieldNameSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u);
+
+/** The field `value` stands for, when it is a placeholder (`{name}`). */
+export const loginPlaceholderOf = (value: unknown): string | undefined =>
+  typeof value === "string" && value.startsWith("{") && value.endsWith("}")
+    ? value.slice(1, -1)
+    : undefined;
+
+/** A name in a login request's body. */
+const bodyNameSchema = z.string().min(1).max(64);
+
+/**
+ * A value in a login request's body: a field's placeholder, which is
+ * replaced by the whole of what the person gave, or a constant without
+ * braces, so nothing is ever spliced into a string.
+ */
+const bodyTextSchema = z
+  .string()
+  .max(256)
+  .refine(
+    (value) =>
+      loginPlaceholderOf(value) !== undefined ||
+      !(value.includes("{") || value.includes("}")),
+    "A field's whole placeholder ({name}), or text without braces"
+  );
+
+/** A cookie's name (RFC 6265 §4.1.1, a token of RFC 7230). */
+const cookieNameSchema = z.string().regex(/^[!#$%&'*+.^`|~\w-]{1,64}$/u);
+
+/**
+ * A sign-in with a call: the fields the person gives (a user name and a
+ * password, say), sent in one POST, as JSON or a form, to an endpoint on
+ * one of the hosts the credential goes to, whose answer holds the session
+ * the connection's calls carry: a token at a pointer, sent in a header, or
+ * a cookie, sent as that cookie alone. Connect makes the call and holds
+ * the fields and the session; a connector's code sees neither.
+ */
+const loginSignInSchema = z
+  .strictObject({
+    kind: z.literal("login"),
+    name: appNameSchema,
+    fields: z
+      .array(fieldNameSchema)
+      .min(1)
+      .max(8)
+      .refine((names) => new Set(names).size === names.length, "A field twice"),
+    /** The field that names the account, which is shown; every other is secret. */
+    account: fieldNameSchema,
+    request: z
+      .strictObject({
+        /** On a host template too, filled as the connection's calls are. */
+        url: z
+          .string()
+          .max(512)
+          .refine(
+            (value) => isEndpoint(value, true) && urlOf(value)?.search === "",
+            "Not an HTTPS endpoint on a DNS name or a host template, without a query string"
+          ),
+        json: z
+          .record(
+            bodyNameSchema,
+            z.union([bodyTextSchema, z.number(), z.boolean(), z.null()])
+          )
+          .optional(),
+        form: z.record(bodyNameSchema, bodyTextSchema).optional(),
+      })
+      .refine(
+        ({ json, form }) => (json === undefined) !== (form === undefined),
+        "A body as JSON or as a form, one of them"
+      ),
+    token: z.union([
+      z.strictObject({
+        /** Where the answer's JSON holds it. */
+        from: pointerSchema,
+        header: keyHeaderSchema,
+        /** Text before it in the header, such as `Bearer `. */
+        prefix: z
+          .string()
+          .regex(/^[!-~]{1,32} ?$/u)
+          .optional(),
+      }),
+      z.strictObject({ cookie: cookieNameSchema }),
+    ]),
+    /** Where the answer's JSON says, in seconds, how long the session lasts. */
+    expiresIn: pointerSchema.optional(),
+  })
+  .refine(
+    ({ fields, account }) => fields.includes(account),
+    "The account is one of the fields"
+  )
+  .refine(({ fields, request }) => {
+    const used = Object.values(request.json ?? request.form ?? {}).flatMap(
+      (value) => loginPlaceholderOf(value) ?? []
+    );
+    return (
+      used.every((name) => fields.includes(name)) &&
+      fields.every((name) => used.includes(name))
+    );
+  }, "The login request sends each field, and nothing it doesn't declare");
+
 /** The host an endpoint names, once it is one (`isEndpoint`). */
 export const endpointHost = (value: string): string | undefined =>
   urlOf(value)?.hostname;
@@ -552,6 +657,8 @@ export const endpointHost = (value: string): string | undefined =>
 export const signInSchema = z.discriminatedUnion("kind", [
   oauth2SignInSchema,
   apiKeySignInSchema,
+  loginSignInSchema,
 ]);
+export type LoginSignIn = z.output<typeof loginSignInSchema>;
 export type SignIn = z.output<typeof signInSchema>;
 export type SignInInput = z.input<typeof signInSchema>;

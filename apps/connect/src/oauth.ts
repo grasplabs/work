@@ -44,6 +44,7 @@ import type { AccountAddresses } from "./account-addresses.ts";
 import { recordEventIf, recordEvents } from "./audit.ts";
 import { nativeConnector } from "./bundled-connectors.ts";
 import { companyAddressOf, companyRoute, outbound } from "./company-network.ts";
+import type { Outbound } from "./company-network.ts";
 import {
   abandonToolkitFlow,
   composioAccountStates,
@@ -76,14 +77,15 @@ import {
 import { readDirectory } from "./directory.ts";
 import { erasureBegan, ownerErased } from "./erased-people.ts";
 import { httpSummaries } from "./http-connections.ts";
-import { exchangeCode } from "./oauth-client.ts";
+import { exchangeCode, maxAccountField } from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
 import { oweRevoke } from "./owed-revokes.ts";
 import { dropPendingActions } from "./pending.ts";
 import { rightsFor } from "./provider-rights.ts";
-import { grantedAsAsked, renewedAsGranted } from "./providers.ts";
+import { atHosts, grantedAsAsked, renewedAsGranted } from "./providers.ts";
 import type {
   ApiKeyProviderConfig,
+  LoginProviderConfig,
   OAuthClientCredentials,
   OAuthProviderConfig,
   ProviderAccount,
@@ -477,7 +479,7 @@ type Kept = Parameters<typeof firstTokens>[2];
 
 /** The address a key was sealed with, of a connection reached through the company network. */
 const companyNetworkOf = (kept: Kept): string | null =>
-  "apiKey" in kept ? (kept.companyNetwork ?? null) : null;
+  "refreshToken" in kept ? null : (kept.companyNetwork ?? null);
 
 /**
  * What a connection's event says of the company network it is reached
@@ -1365,7 +1367,7 @@ export const finishConnection = async (
  */
 const replaceKey = async (
   env: Env,
-  { provider, vault }: { provider: ApiKeyProviderConfig; vault: Vault },
+  { provider, vault }: { provider: TypedProviderConfig; vault: Vault },
   scope: ConnectionScope,
   person: ConnectionPerson,
   account: ProviderAccount,
@@ -1443,7 +1445,7 @@ const replaceKey = async (
  */
 const keyCompanyNetwork = async (
   env: Env,
-  provider: ApiKeyProviderConfig,
+  provider: TypedProviderConfig,
   scope: ConnectionScope,
   asked: string | undefined,
   refuse: Refuse
@@ -1473,6 +1475,75 @@ const keyCompanyNetwork = async (
   return companyNetwork;
 };
 
+/** A provider whose sign-in the person types: a key, or a login's fields. */
+type TypedProviderConfig = ApiKeyProviderConfig | LoginProviderConfig;
+
+/**
+ * Whether the person gave what `provider`'s sign-in asks for: a key, or
+ * each of a login's fields and no other, the one that names the account
+ * no longer than an account's name may be.
+ */
+const givesWhatItAsks = (
+  provider: TypedProviderConfig,
+  key: string | undefined,
+  fields: Readonly<Record<string, string>> | undefined
+): boolean =>
+  provider.kind === "api_key"
+    ? key !== undefined
+    : fields !== undefined &&
+      Object.keys(fields).length === provider.fields.length &&
+      provider.fields.every((name) => Object.hasOwn(fields, name)) &&
+      (fields[provider.account] ?? "").length <= maxAccountField;
+
+/**
+ * Signs in with what the person typed: a key, checked by the app's own
+ * lookup, which names its account; or a login's fields, logged in with,
+ * the account the one its record names, at the connection's hosts. What
+ * is kept, or why nothing is: the app refused it, or couldn't answer.
+ */
+const typedSignIn = async (
+  provider: TypedProviderConfig,
+  { key, fields }: { key?: string; fields?: Readonly<Record<string, string>> },
+  owner: string,
+  send: Outbound,
+  hosts: Readonly<Record<string, string>>
+): Promise<
+  | { account: ProviderAccount; kept: Kept }
+  | {
+      refused:
+        | "connection.provider_refused"
+        | "connection.provider_unavailable";
+    }
+> => {
+  if (provider.kind === "api_key") {
+    const account =
+      key === undefined
+        ? null
+        : await provider.account(key, owner, send, hosts);
+    return account === null || key === undefined
+      ? { refused: "connection.provider_refused" }
+      : { account, kept: { apiKey: key, expiresAt: apiKeyExpiresAt } };
+  }
+  const given = fields ?? {};
+  const answer = await provider.logIn(given, send, hosts);
+  if ("refused" in answer) {
+    return {
+      refused: answer.refused
+        ? "connection.provider_refused"
+        : "connection.provider_unavailable",
+    };
+  }
+  const name = given[provider.account] ?? "";
+  return {
+    account: atHosts({ id: name, name, email: null }, hosts),
+    kept: {
+      login: given,
+      session: answer.session,
+      expiresAt: answer.expiresAt,
+    },
+  };
+};
+
 /**
  * Connects an app that signs in with an API key: the key the person gave,
  * once the app's own lookup takes it and names its account, kept sealed
@@ -1489,6 +1560,7 @@ export const connectWithKey = async (
     provider: providerId,
     scope,
     key,
+    fields,
     companyNetwork: asked,
     hosts: given = {},
   } = connectionErrors.parse(
@@ -1508,8 +1580,15 @@ export const connectWithKey = async (
   }
   const provider = await providerConfigFor(env, providerId);
   const vault = await vaultFor(env);
-  if (provider?.kind !== "api_key" || vault === undefined) {
+  if (
+    provider === undefined ||
+    provider.kind === "oauth" ||
+    vault === undefined
+  ) {
     throw connectionErrors.create("connection.provider_unavailable");
+  }
+  if (!givesWhatItAsks(provider, key, fields)) {
+    throw connectionErrors.create("connection.invalid");
   }
   // The HR platform's connection reads the whole company: the
   // organization's, never a person's own.
@@ -1556,19 +1635,20 @@ export const connectWithKey = async (
     asked,
     refuse
   );
-  const account = await provider.account(
-    key,
+  const signedIn = await typedSignIn(
+    provider,
+    { key, fields },
     ownerOf({ scope }, person),
     outbound(env, companyNetwork),
     hosts
   );
-  if (account === null) {
-    await refuse("connection.provider_refused", { outcome: "failed" });
-    throw connectionErrors.create("connection.provider_refused");
+  if (!("kept" in signedIn)) {
+    await refuse(signedIn.refused, { outcome: "failed" });
+    throw connectionErrors.create(signedIn.refused);
   }
+  const { account } = signedIn;
   const kept: Kept = {
-    apiKey: key,
-    expiresAt: apiKeyExpiresAt,
+    ...signedIn.kept,
     ...(companyNetwork === undefined ? {} : { companyNetwork }),
     ...(templates.length === 0 ? {} : { hosts }),
   };
@@ -1586,7 +1666,7 @@ export const connectWithKey = async (
   const connectionId = await keepAccount(
     env,
     { provider, vault } satisfies {
-      provider: ApiKeyProviderConfig;
+      provider: TypedProviderConfig;
       vault: Vault;
     },
     { scope, tenant: "" },

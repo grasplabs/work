@@ -8,6 +8,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { recordEventIf } from "./audit.ts";
+import { outbound } from "./company-network.ts";
 import { pastAddressesAfter } from "./connections.ts";
 import { providerConfigFor } from "./connector-providers.ts";
 import {
@@ -28,14 +29,15 @@ import {
 } from "./providers.ts";
 import type {
   Credential,
+  LoginProviderConfig,
   OAuthClientCredentials,
   OAuthProviderConfig,
 } from "./providers.ts";
 import { resealBatchSize, VaultError, vaultFor } from "./vault.ts";
 import type { Vault } from "./vault.ts";
 
-// The token vault: each connection's tokens, or its API key, sealed
-// (src/vault.ts), in connect's D1. Nothing here is reachable over RPC:
+// The token vault: each connection's tokens, its API key, or its login's
+// fields and session, sealed (src/vault.ts), in connect's D1. Nothing here is reachable over RPC:
 // tokens and keys never leave connect, except as the credential of one
 // call, which a connector's egress handler adds to the call's requests
 // (threat model R1). A refresh token never leaves at all: only its token
@@ -66,9 +68,18 @@ const storedTokensSchema = z.union([
     companyNetwork: z.string().min(1).optional(),
     hosts: connectionHostsSchema,
   }),
+  // A login's fields, by name, as the person gave them, and the session
+  // the last login answered with (session-login.ts).
+  z.strictObject({
+    login: z.record(z.string(), z.string()),
+    session: z.string().min(1),
+    companyNetwork: z.string().min(1).optional(),
+    hosts: connectionHostsSchema,
+  }),
 ]);
 type StoredTokens = z.infer<typeof storedTokensSchema>;
 type StoredOAuthTokens = Extract<StoredTokens, { refreshToken: string }>;
+type StoredLogin = Extract<StoredTokens, { login: unknown }>;
 
 /**
  * When an API key's "access" expires: never, as far as connect goes. A key
@@ -127,6 +138,21 @@ const accessTokenOf = async (
   return accessToken;
 };
 
+/** What of a sign-in's tokens, key or login is sealed. */
+const sealedOf = (tokens: StoredTokens): StoredTokens => {
+  const { hosts } = tokens;
+  if ("apiKey" in tokens) {
+    const { apiKey, companyNetwork } = tokens;
+    return { apiKey, companyNetwork, hosts };
+  }
+  if ("login" in tokens) {
+    const { login, session, companyNetwork } = tokens;
+    return { login, session, companyNetwork, hosts };
+  }
+  const { accessToken, refreshToken } = tokens;
+  return { accessToken, refreshToken, hosts };
+};
+
 /**
  * The row that stores the tokens of a new grant: a new connection's, or a
  * reconnected one's. Its generation starts at the time, which no earlier
@@ -140,21 +166,7 @@ export const firstTokens = async (
   now: Date
 ): Promise<TokenRow> => ({
   connectionId,
-  sealed: await sealTokens(
-    vault,
-    connectionId,
-    "apiKey" in tokens
-      ? {
-          apiKey: tokens.apiKey,
-          companyNetwork: tokens.companyNetwork,
-          hosts: tokens.hosts,
-        }
-      : {
-          accessToken: tokens.accessToken,
-          refreshToken: tokens.refreshToken,
-          hosts: tokens.hosts,
-        }
-  ),
+  sealed: await sealTokens(vault, connectionId, sealedOf(tokens)),
   accessExpiresAt: new Date(tokens.expiresAt),
   generation: now.getTime(),
   refreshUntil: null,
@@ -280,15 +292,21 @@ const releaseLease = async (db: D1Database, row: TokenRow): Promise<void> => {
  * Whether it did.
  */
 /** Whether a connection marked for `reason` still holds a valid grant. */
-const grantStillValid = (
-  reason: "invalid_grant" | "unreadable" | "scopes_changed" | "scopes_missing"
-): boolean => reason === "scopes_changed" || reason === "scopes_missing";
+type DeadReason =
+  | "invalid_grant"
+  | "unreadable"
+  | "scopes_changed"
+  | "scopes_missing"
+  | "login_refused";
+
+const grantStillValid = (reason: DeadReason): boolean =>
+  reason === "scopes_changed" || reason === "scopes_missing";
 
 const markDead = async (
   env: Env,
   provider: string,
   row: TokenRow,
-  reason: "invalid_grant" | "unreadable" | "scopes_changed" | "scopes_missing"
+  reason: DeadReason
 ): Promise<boolean> => {
   const db = drizzle(env.DB);
   const owesRevoke =
@@ -599,49 +617,6 @@ const refreshUnderLease = async (
   }
 };
 
-/**
- * A fresh access token, refreshing it first when it is about to expire.
- * One refresh at a time per connection, in this isolate or any other: the
- * first call takes a lease in D1 and refreshes; the others wait for its
- * result. A lease whose holder died lapses, and the next call takes it.
- */
-const refreshed = async (
-  context: RefreshContext,
-  connectionId: string
-): Promise<string> => {
-  const deadline = Date.now() + refreshLeaseMs + refreshPollMs;
-  while (Date.now() < deadline) {
-    // oxlint-disable-next-line no-await-in-loop -- waits for the lease holder
-    const row = await readRow(context.env.DB, connectionId);
-    // Gone, or its connection stopped meanwhile.
-    const stopped =
-      row === undefined ||
-      // oxlint-disable-next-line no-await-in-loop -- one of the loop's exits
-      (await disconnected(context.env.DB, connectionId));
-    if (stopped) {
-      throw connectErrors.create("connect.connection_inactive");
-    }
-    const now = Date.now();
-    if (isFresh(row, now)) {
-      // oxlint-disable-next-line no-await-in-loop -- one of the loop's exits
-      return await accessTokenOf(context.vault, row);
-    }
-    // oxlint-disable-next-line no-await-in-loop -- one of the loop's exits
-    if (await takeLease(context.env.DB, row, now)) {
-      // oxlint-disable-next-line no-await-in-loop -- one of the loop's exits
-      const token = await refreshUnderLease(context, row);
-      if (token !== undefined) {
-        return token;
-      }
-      // Lost to a change: what is stored now decides.
-      continue;
-    }
-    // oxlint-disable-next-line no-await-in-loop -- waits for the lease holder
-    await scheduler.wait(refreshPollMs);
-  }
-  throw connectionErrors.create("connection.refresh_failed");
-};
-
 /** The whole seconds left until `until`, at least one. */
 const secondsUntil = (until: Date, now: number): number =>
   Math.max(Math.ceil((until.getTime() - now) / 1000), 1);
@@ -758,6 +733,231 @@ const activeConnection = async (env: Env, connectionId: string) => {
 
 type Active = Awaited<ReturnType<typeof activeConnection>>;
 
+/**
+ * What a connection's stored row gives once it needs no renewal (`done`),
+ * renewing it first where it does (`renew`). One renewal at a time per
+ * connection, in this isolate or any other: the first call takes a lease
+ * in D1 and renews; the others wait for its result. A lease whose holder
+ * died lapses, and the next call takes it. A connection paused meanwhile
+ * (a vendor's 429, or a login that couldn't be made) refuses its waiters
+ * too, so they don't each try again.
+ */
+const leased = async <Value>(
+  db: D1Database,
+  connectionId: string,
+  {
+    done,
+    read,
+    renew,
+  }: {
+    done: (row: TokenRow, now: number) => boolean;
+    read: (row: TokenRow) => Promise<Value>;
+    /** `undefined` when it lost to a change: what is stored now decides. */
+    renew: (row: TokenRow) => Promise<Value | undefined>;
+  }
+): Promise<Value> => {
+  const deadline = Date.now() + refreshLeaseMs + refreshPollMs;
+  while (Date.now() < deadline) {
+    // oxlint-disable-next-line no-await-in-loop -- waits for the lease holder
+    const row = await readRow(db, connectionId);
+    // Gone, or its connection stopped meanwhile.
+    const stopped =
+      row === undefined ||
+      // oxlint-disable-next-line no-await-in-loop -- one of the loop's exits
+      (await disconnected(db, connectionId));
+    if (stopped) {
+      throw connectErrors.create("connect.connection_inactive");
+    }
+    refuseIfPaused(row.pausedUntil);
+    const now = Date.now();
+    if (done(row, now)) {
+      // oxlint-disable-next-line no-await-in-loop -- one of the loop's exits
+      return await read(row);
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one of the loop's exits
+    if (await takeLease(db, row, now)) {
+      // oxlint-disable-next-line no-await-in-loop -- one of the loop's exits
+      const value = await renew(row);
+      if (value !== undefined) {
+        return value;
+      }
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- waits for the lease holder
+    await scheduler.wait(refreshPollMs);
+  }
+  throw connectionErrors.create("connection.refresh_failed");
+};
+
+/** A fresh access token, refreshing it first when it is about to expire. */
+const refreshed = async (
+  context: RefreshContext,
+  connectionId: string
+): Promise<string> =>
+  await leased(context.env.DB, connectionId, {
+    done: isFresh,
+    read: async (row) => await accessTokenOf(context.vault, row),
+    renew: async (row) => await refreshUnderLease(context, row),
+  });
+
+/** How long a login that couldn't be made pauses its connection, unless it said. */
+const loginBackoffSeconds = 60;
+
+/** A session login's connection's current session, and which it is. */
+interface Session {
+  session: string;
+  generation: number;
+}
+
+interface LoginContext {
+  env: Env;
+  vault: Vault;
+  provider: LoginProviderConfig;
+}
+
+/** The login a row holds; any other row's has none. */
+const openLogin = async (
+  vault: Vault,
+  row: Pick<TokenRow, "connectionId" | "sealed">
+): Promise<StoredLogin> => {
+  const tokens = await openTokens(vault, row);
+  if (!("login" in tokens)) {
+    throw connectErrors.create("connect.connection_inactive");
+  }
+  return tokens;
+};
+
+const sessionOf = async (vault: Vault, row: TokenRow): Promise<Session> => {
+  const { session } = await openLogin(vault, row);
+  return { session, generation: row.generation };
+};
+
+/**
+ * Logs in again under the lease just taken on `row`, with the fields it
+ * holds, because its session ran out or was refused (`reason`), and keeps
+ * the new session with one `connection.session_renewed` event, only if
+ * `row` is still the current generation of a connection not
+ * disconnected: a session minted for one disconnected meanwhile is never
+ * kept. A login the vendor refuses (threat model LG5) marks the
+ * connection for a person to give its fields again, and its fields go, so
+ * nothing logs in with them again; one it couldn't answer pauses the
+ * connection for as long as it asked, or `loginBackoffSeconds`, so no call
+ * logs in until then. `undefined` when it lost to a change meanwhile. The
+ * lease is let go whatever goes wrong.
+ */
+const logInUnderLease = async (
+  { env, vault, provider }: LoginContext,
+  row: TokenRow,
+  reason: "expired" | "refused"
+): Promise<Session | undefined> => {
+  try {
+    const { login, companyNetwork, hosts = {} } = await openLogin(vault, row);
+    const answer = await provider.logIn(
+      login,
+      outbound(env, companyNetwork),
+      hosts
+    );
+    if ("refused" in answer) {
+      if (answer.refused) {
+        if (!(await markDead(env, provider.id, row, "login_refused"))) {
+          return undefined;
+        }
+        throw connectErrors.create("connect.connection_inactive");
+      }
+      const seconds = await pauseFor(
+        env.DB,
+        row.connectionId,
+        answer.retryAfterSeconds ?? loginBackoffSeconds
+      );
+      throw connectErrors.create("connect.rate_limited", {
+        retryAfterSeconds: seconds,
+      });
+    }
+    const current = sql`${unchanged(row)} AND ${notDisconnected(row)}`;
+    const kept = await recordEventIf(
+      env,
+      {
+        actor: { type: "system" },
+        action: "connection.session_renewed",
+        target: { type: "connection", id: row.connectionId },
+        detail: { provider: provider.id, reason },
+      },
+      { from: connectionTokens, where: current },
+      [
+        drizzle(env.DB)
+          .update(connectionTokens)
+          .set({
+            sealed: await sealTokens(vault, row.connectionId, {
+              login,
+              session: answer.session,
+              companyNetwork,
+              hosts: Object.keys(hosts).length === 0 ? undefined : hosts,
+            }),
+            accessExpiresAt: new Date(answer.expiresAt),
+            generation: row.generation + 1,
+            refreshUntil: null,
+            updatedAt: new Date(),
+          })
+          .where(current),
+      ]
+    );
+    return kept
+      ? { session: answer.session, generation: row.generation + 1 }
+      : undefined;
+  } catch (error) {
+    await releaseLease(env.DB, row);
+    throw error;
+  }
+};
+
+/** A session login's connection's session, logging in again once it ran out. */
+const freshSession = async (
+  context: LoginContext,
+  connectionId: string
+): Promise<Session> =>
+  await leased(context.env.DB, connectionId, {
+    done: isFresh,
+    read: async (row) => await sessionOf(context.vault, row),
+    renew: async (row) => await logInUnderLease(context, row, "expired"),
+  });
+
+/**
+ * What a call of session login's connection `connectionId` sends its
+ * requests with once the vendor refused its session of `generation` (a
+ * 401, egress.ts): a session logged in for anew, once for that generation,
+ * however many calls were refused it; or the one another call already
+ * logged in for. A session refused again by a call that got the new one
+ * is answered with the same, never logged in for again by that call
+ * (threat model LG5, LG9). `undefined` when there is none: the
+ * connection needs its fields again, is paused or stopped.
+ */
+export const sessionAfterRefusal = async (
+  env: Env,
+  connectionId: string,
+  generation: number
+): Promise<(Credential & { secret: string }) | undefined> => {
+  try {
+    const active = await activeConnection(env, connectionId);
+    const { provider, vault } = active;
+    if (provider.kind !== "login") {
+      return undefined;
+    }
+    const context = { env, vault, provider };
+    const { session } = await leased(env.DB, connectionId, {
+      done: (row) => row.generation !== generation,
+      read: async (row) => await sessionOf(vault, row),
+      renew: async (row) => await logInUnderLease(context, row, "refused"),
+    });
+    return { ...provider.credential(session), secret: session };
+  } catch (error) {
+    log.warn("login.renewal_failed", {
+      connection: connectionId,
+      ...errorFields(error),
+    });
+    return undefined;
+  }
+};
+
 /** An active OAuth connection's access token, refreshed if it must be. */
 const freshAccessToken = async (
   env: Env,
@@ -811,11 +1011,27 @@ export const connectorCredentialFor = async (
   credential: Credential & { secret: string };
   connectionHosts: Record<string, string>;
   companyNetwork: string | undefined;
+  /** A session login's: which session the credential is (`sessionAfterRefusal`). */
+  session?: number;
 }> => {
   const active = await activeConnection(env, connectionId);
   const { provider, row, vault } = active;
   const tokens = await openTokens(vault, row);
   const connectionHosts = tokens.hosts ?? {};
+  if (provider.kind === "login") {
+    if (!("login" in tokens)) {
+      throw connectErrors.create("connect.connection_inactive");
+    }
+    const { session, generation } = isFresh(row, Date.now())
+      ? { session: tokens.session, generation: row.generation }
+      : await freshSession({ env, vault, provider }, connectionId);
+    return {
+      credential: { ...provider.credential(session), secret: session },
+      connectionHosts,
+      companyNetwork: tokens.companyNetwork,
+      session: generation,
+    };
+  }
   if (provider.kind === "oauth") {
     const accessToken = await freshAccessToken(env, active);
     return {

@@ -16229,6 +16229,10 @@ msgstr "Het inloggen is verlopen of elders gestart. Probeer het opnieuw."
 msgid "Signals"
 msgstr "Signalen"
 
+#: src/activity/audit-words.ts
+msgid "Signed a connection in again with its login"
+msgstr "Een verbinding opnieuw aangemeld met haar inloggegevens"
+
 #: src/routes/_shell.settings.security.tsx
 msgid "Signed in {time}"
 msgstr "Ingelogd op {time}"

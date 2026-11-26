@@ -16229,6 +16229,10 @@ msgstr "Sign-in timed out or was started elsewhere. Try again."
 msgid "Signals"
 msgstr "Signals"
 
+#: src/activity/audit-words.ts
+msgid "Signed a connection in again with its login"
+msgstr "Signed a connection in again with its login"
+
 #: src/routes/_shell.settings.security.tsx
 msgid "Signed in {time}"
 msgstr "Signed in {time}"

@@ -39,6 +39,8 @@ import {
   rightsFor,
   rightsHeld,
 } from "./provider-rights.ts";
+import { logIn, sessionCredential } from "./session-login.ts";
+import type { LoginAnswer } from "./session-login.ts";
 
 // The providers people connect accounts from, as config records: one
 // generic OAuth flow (src/oauth.ts) runs them all, and one API-key sign-in
@@ -261,7 +263,39 @@ export interface ApiKeyProviderConfig {
   companyNetwork?: string;
 }
 
-export type ProviderConfig = OAuthProviderConfig | ApiKeyProviderConfig;
+/**
+ * An app people connect with the fields its login asks for (a user name
+ * and a password, say), which connect logs in with, and logs in with again
+ * when the session runs out (session-login.ts, tokens.ts).
+ */
+export interface LoginProviderConfig {
+  kind: "login";
+  id: string;
+  server: string;
+  /** The fields, by name: `account` names the account, the rest are secret. */
+  fields: readonly string[];
+  account: string;
+  /** The session, as a call's requests carry it. */
+  credential: (session: string) => Credential;
+  /**
+   * Logs in with `fields`, sent by `send`, the login's host filled with
+   * `hosts`: the session, or why there is none.
+   */
+  logIn: (
+    fields: Readonly<Record<string, string>>,
+    send: Outbound,
+    hosts: Readonly<Record<string, string>>
+  ) => Promise<LoginAnswer>;
+  /** As an API key's (`ApiKeyProviderConfig`). */
+  hostTemplates?: readonly string[];
+  sharedOnly?: boolean;
+  companyNetwork?: never;
+}
+
+export type ProviderConfig =
+  | OAuthProviderConfig
+  | ApiKeyProviderConfig
+  | LoginProviderConfig;
 
 const credentials = (
   id: string | undefined,
@@ -750,6 +784,23 @@ const appClient = (
 };
 
 /**
+ * `account` as the account at the hosts a connection signed in with: one
+ * with the same ID at another host is another account.
+ */
+export const atHosts = (
+  account: ProviderAccount,
+  hosts: Readonly<Record<string, string>>
+): ProviderAccount => {
+  const templates = Object.keys(hosts).toSorted();
+  return templates.length === 0
+    ? account
+    : {
+        ...account,
+        id: `${account.id}@${templates.map((template) => hosts[template]).join(",")}`,
+      };
+};
+
+/**
  * The account an app's lookup names, with `credential`, sent by `send`,
  * its host filled with the connection's (`hosts`) where it is a template;
  * none if it has no host that fits. An account at hosts set per
@@ -773,13 +824,7 @@ const accountAt = async (
     credential,
     send
   );
-  const templates = Object.keys(hosts).toSorted();
-  return found === null || templates.length === 0
-    ? found
-    : {
-        ...found,
-        id: `${found.id}@${templates.map((template) => hosts[template]).join(",")}`,
-      };
+  return found === null ? null : atHosts(found, hosts);
 };
 
 /** A claim's value, when it's there: `undefined` when it isn't. */
@@ -852,14 +897,30 @@ export const appProvider = ({
   signIn,
   hosts,
 }: AppRecord): ProviderConfig => {
+  const templates = hosts.filter((host) => hostTemplateOf(host) !== undefined);
+  // A whole host is an admin's to give: on a shared connection alone.
+  const sharedOnly = templates.some(
+    (host) => hostTemplateOf(host)?.suffix === null
+  );
+  if (signIn.kind === "login") {
+    return {
+      kind: "login",
+      id: provider,
+      server,
+      fields: signIn.fields,
+      account: signIn.account,
+      credential: (session) => sessionCredential(signIn.token, session),
+      logIn: async (fields, send, given) =>
+        await logIn(provider, signIn, fields, send, given),
+      hostTemplates: templates,
+      ...(sharedOnly ? { sharedOnly } : {}),
+    };
+  }
   if (signIn.kind === "api_key") {
     const credential = (key: string): Credential => ({
       header: signIn.header,
       value: `${signIn.prefix ?? ""}${key}`,
     });
-    const templates = hosts.filter(
-      (host) => hostTemplateOf(host) !== undefined
-    );
     return {
       kind: "api_key",
       id: provider,
@@ -868,10 +929,7 @@ export const appProvider = ({
       account: async (key, _owner, send, given) =>
         await accountAt(signIn.account, credential(key), send, given),
       hostTemplates: templates,
-      // A whole host is an admin's to give: on a shared connection alone.
-      ...(templates.some((host) => hostTemplateOf(host)?.suffix === null)
-        ? { sharedOnly: true }
-        : {}),
+      ...(sharedOnly ? { sharedOnly } : {}),
     };
   }
   const { account, idToken, tenant } = signIn;
