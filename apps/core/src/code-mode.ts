@@ -237,14 +237,20 @@ const show = (value) => {
 };
 
 // What the code returned, as JSON, a string too, so core reads back the
-// value it was (a string of JSON's text stays that string); a string too
-// long for that as itself, cut.
+// value it was (a string of JSON's text stays that string); a string
+// whose JSON passes room, cut until it fits: each round keeps the share
+// of it that room is of its JSON, always less, so it ends.
 const returned = (value) => {
   if (typeof value !== "string") {
     return show(value);
   }
-  const json = stringify(value);
-  return json.length <= room ? json : slice(value, 0, room);
+  let part = value;
+  let json = stringify(part);
+  while (json.length > room) {
+    part = slice(part, 0, (part.length * room) / json.length);
+    json = stringify(part);
+  }
+  return json;
 };
 
 // What the code threw, as text: its stack when it has one, never

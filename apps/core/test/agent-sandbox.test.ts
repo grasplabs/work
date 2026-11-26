@@ -497,6 +497,28 @@ describe("chat agent sandbox", () => {
     ]);
   });
 
+  it("hands back a string of JSON's text as that string, however much of it JSON escapes", async () => {
+    const short = await runStep(
+      `export default async () => ${JSON.stringify(JSON.stringify({ status: "approved" }))};`
+    );
+    // Shorter than a result's room, twice as long once escaped: cut, and
+    // still a string.
+    const long = await runStep(
+      `export default async () => JSON.stringify({ status: "approved", note: '"'.repeat(50_000) });`
+    );
+    const returned = returnedOf(long?.text);
+
+    expect({
+      short: returnedOf(short?.text),
+      long:
+        typeof returned === "string" &&
+        returned.startsWith('{"status":"approved","note":"\\"'),
+    }).toStrictEqual({
+      short: JSON.stringify({ status: "approved" }),
+      long: true,
+    });
+  });
+
   it("has no Cache API to hand data to another chat", async () => {
     await expect(
       runStep("export default async () => typeof caches;")

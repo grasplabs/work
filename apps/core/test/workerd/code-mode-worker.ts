@@ -111,14 +111,14 @@ const runCase = async ({ code, timeoutMs, cancelAfterMs }: Case) => {
     }
   );
   const text = describeRun(run);
+  const result: unknown = JSON.parse(text);
   return {
     status: run.status,
     text: text.slice(0, 400),
     ending: text.slice(-200),
     ms: Date.now() - started,
     bytes: utf8Bytes(text),
-    // `cut` is a result's last field (code-mode.ts `describeRun`).
-    cut: text.endsWith(',"cut":true}'),
+    cut: typeof result === "object" && result !== null && "cut" in result,
     streamed: streamed.length,
   };
 };
