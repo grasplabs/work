@@ -1,13 +1,14 @@
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@grasp-os/app-kit/components/alert-dialog";
+} from "@grasp-os/ui/components/alert-dialog";
+import { Button } from "@grasp-os/ui/components/button";
+import { Text } from "@grasp-os/ui/components/text";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useEffect, useRef, useState } from "react";
 
@@ -114,24 +115,40 @@ export const LinkConfirmDialog = ({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{t`Open a link outside Grasp?`}</AlertDialogTitle>
+          {/* The address on lines of its own in the description, the one
+              part of an alert dialog that holds more than its title. */}
           <AlertDialogDescription>
             <Trans>
               This page wants to open another site in a new tab. Open it only if
               you expected to go there.
             </Trans>
+            <br />
+            <Text
+              as="span"
+              color="default"
+              size="sm"
+              weight="medium"
+              wrap="anywhere"
+            >
+              {address?.origin}
+            </Text>
+            {pending?.url === undefined ? null : (
+              <>
+                <br />
+                <Text as="span" color="muted" size="xs" wrap="anywhere">
+                  {address?.href}
+                </Text>
+              </>
+            )}
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <p className="font-mono text-sm break-all">{address?.origin}</p>
-        {pending?.url === undefined ? null : (
-          <p className="text-muted-foreground font-mono text-xs break-all">
-            {address?.href}
-          </p>
-        )}
         <AlertDialogFooter>
           <AlertDialogCancel>
             <Trans>Cancel</Trans>
           </AlertDialogCancel>
-          <AlertDialogAction
+          {/* A Button, not the closing action: a click the gate doesn't
+              count leaves the dialog open, as it found it. */}
+          <Button
             disabled={ready !== pending}
             onClick={(event) => {
               const opened = gate.current;
@@ -152,7 +169,7 @@ export const LinkConfirmDialog = ({
             onPointerDown={press}
           >
             <Trans context="open a link to another site">Open</Trans>
-          </AlertDialogAction>
+          </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

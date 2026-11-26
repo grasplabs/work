@@ -4772,7 +4772,6 @@ msgstr "Falaises"
 #: src/interview/destination.tsx
 #: src/projects/project-chats.tsx
 #: src/settings/erasures.tsx
-#: src/shown-once.tsx
 #: src/workflows/start-run.tsx
 msgid "Close"
 msgstr "Fermer"
@@ -5297,7 +5296,6 @@ msgstr "Copenhague"
 #: src/settings/event-sources.tsx
 #: src/settings/guests.tsx
 #: src/settings/invitations.tsx
-#: src/shown-once.tsx
 msgid "Copied"
 msgstr "Copié"
 
@@ -5321,7 +5319,6 @@ msgstr "Copies"
 #: src/frame/ui-words.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
-#: src/shown-once.tsx
 msgid "Copy"
 msgstr "Copier"
 
@@ -5343,7 +5340,6 @@ msgstr "Copier l’e-mail"
 msgid "Copy into the Brain from {label}"
 msgstr "Copier dans le Brain depuis {label}"
 
-#: src/settings/event-sources.tsx
 #: src/shown-once.tsx
 msgid "Copy it now: you won't see it again. Lost, it can only be replaced."
 msgstr "Copiez-le maintenant : vous ne le reverrez pas. Perdu, il ne peut qu'être remplacé."
@@ -5364,7 +5360,6 @@ msgstr "Copier le lien de {name}"
 msgid "Copy the output"
 msgstr "Copier la sortie"
 
-#: src/settings/event-sources.tsx
 #: src/shown-once.tsx
 msgid "Copy the secret"
 msgstr "Copier le secret"
@@ -15603,7 +15598,6 @@ msgid "Searching the docs for {query}"
 msgstr "Recherche de {query} dans la documentation"
 
 #: src/connections/http-connections.tsx
-#: src/shown-once.tsx
 msgid "Secret"
 msgstr "Secret"
 
