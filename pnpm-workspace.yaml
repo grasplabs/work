@@ -6,10 +6,6 @@ packages:
 # Supply-chain defaults: new versions wait 3 days, exotic sub-dependencies are
 # blocked, and only the packages listed here may run install scripts.
 minimumReleaseAge: 4320
-# Waived by the owner for Damsko's code block highlighter, younger than
-# the rule until 2026-11-29 01:53 UTC; removed again once it is 3 days old.
-minimumReleaseAgeExclude:
-  - "@pierre/highlights@0.6.0"
 blockExoticSubdeps: true
 strictDepBuilds: true
 allowBuilds:
