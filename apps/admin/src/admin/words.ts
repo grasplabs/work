@@ -6,7 +6,6 @@
  * and nothing more: numbers, days, and names (the company's, its teams',
  * its leads' and its works'), never anything someone wrote or said.
  */
-import type { AdminPhase } from "@grasp-os/shared/admin/admin-health";
 import { VISION_FIELDS } from "@grasp-os/shared/admin/interviews";
 import type { Phase, WorkflowState } from "@grasp-os/shared/admin/interviews";
 import {
@@ -15,7 +14,6 @@ import {
   mayInvite,
 } from "@grasp-os/shared/admin/onboarding-admin";
 import type {
-  ContractState,
   KnowledgeSource,
   LinkState,
   Need,
@@ -178,15 +176,6 @@ export const workflowWords: Record<WorkflowState, string> = {
   blocked: "Waits on an answer",
 };
 
-/** The phases the list of organizations is cut into. */
-export const phaseWords: Record<AdminPhase, string> = {
-  start: "Starting",
-  agreements: "Agreements",
-  interviews: "Interviews",
-  ready: "Ready",
-  open: "Open",
-};
-
 /** What each source of what Grasp knows about a company is (`knowledge-words.ts`). */
 export const knowledgeWords: Record<KnowledgeSource, string> = {
   vision: "The first conversation and the research",
@@ -198,13 +187,6 @@ export const knowledgeWords: Record<KnowledgeSource, string> = {
   leadsHeard: "Team leads interviewed",
   everyoneHeard: "Everyone else interviewed",
   review: "Workflows known",
-};
-
-/** Where a contract stands. */
-export const contractWords: Record<ContractState, string> = {
-  draft: "Being written",
-  sent: "Sent, not signed",
-  signed: "Signed",
 };
 
 /** How many things the first conversation left open, to ask the sponsor. */

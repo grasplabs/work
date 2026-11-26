@@ -13927,6 +13927,10 @@ msgstr "Vraag"
 msgid "Question {current} of {total}"
 msgstr "Vraag {current} van {total}"
 
+#: src/chat/thread.tsx
+msgid "Queued"
+msgstr "In de wachtrij"
+
 #: src/agents/setup/thinking-step.tsx
 msgid "Quick and careful. Good for most jobs."
 msgstr "Snel en zorgvuldig. Goed voor de meeste taken."
@@ -15692,6 +15696,10 @@ msgstr "Uitnodigingen sturen"
 msgid "Send it when"
 msgstr "Versturen als"
 
+#: src/chat/thread.tsx
+msgid "Send now"
+msgstr "Nu verzenden"
+
 #: src/settings/event-sources.tsx
 msgid "Send one event"
 msgstr "Eén event sturen"
@@ -16869,6 +16877,7 @@ msgctxt "stop a workflow's run"
 msgid "Stop"
 msgstr "Stoppen"
 
+#: src/chat/composer.tsx
 #: src/frame/ui-words.tsx
 msgctxt "stop an answer"
 msgid "Stop"

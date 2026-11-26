@@ -5,6 +5,7 @@ import type {
   ChatPartial,
   ChatPartialUpdate,
   ChatProvenance,
+  ChatQueued,
   ChatToolEvent,
   ChatUpdate,
 } from "@grasp-os/shared/chat";
@@ -20,6 +21,8 @@ export interface ChatState {
   /** The running code step's output so far; `null` while none runs. */
   output: ChatOutput | null;
   running: boolean;
+  /** The questions sent meanwhile that its turn hasn't taken yet. */
+  queued: ChatQueued[];
   stopped: string | null;
   held: number;
   /** Changes whenever the chat's agent writes an App's draft. */
@@ -163,6 +166,7 @@ export class ChatWatch {
       partial,
       output,
       running,
+      queued,
       stopped,
       held,
       worked,
@@ -177,6 +181,7 @@ export class ChatWatch {
       ...outputChange(this.#shownOutput, output),
       ...(tools.length === 0 ? {} : { tools }),
       running,
+      ...(queued.length === 0 ? {} : { queued }),
       stopped,
       held,
       worked,

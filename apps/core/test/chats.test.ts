@@ -1696,7 +1696,7 @@ describe("chats", () => {
     );
   });
 
-  it("take one question at a time, and aren't deleted under their agent", async () => {
+  it("take a question while their agent works, to queue (chat-queued.test.ts), and aren't deleted under it", async () => {
     const ann = await person();
     await answering(ann, { hang: true });
     const chat = await ann.chats.create("Busy");
@@ -1708,7 +1708,7 @@ describe("chats", () => {
         outcome(ann.chats.send(chat.id, { text: "Second.", model })),
         outcome(ann.chats.remove(chat.id)),
       ])
-    ).resolves.toStrictEqual(["agent.busy", "agent.busy"]);
+    ).resolves.toStrictEqual(["ok", "agent.busy"]);
 
     await expect(ann.chats.cancel(chat.id)).resolves.toBeTruthy();
     await settled(follower);

@@ -111,6 +111,7 @@ const showThread = async (
     path: "/",
     component: () => (
       <ChatThread
+        sourceNames={new Map()}
         chatId="chat-1"
         loaded
         messages={messages}

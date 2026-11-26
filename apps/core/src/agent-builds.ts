@@ -1102,7 +1102,8 @@ export const turnCheck = async (
       return undefined;
     }
     // The chat shows the check while it runs: the turn goes on past its
-    // answer, and takes no question meanwhile.
+    // answer, and a question sent meanwhile joins it (chat-harness.ts
+    // `queueQuestion`).
     shown = true;
     await chats.turnChecking(scope.chatId, true);
     const found = await Promise.all(

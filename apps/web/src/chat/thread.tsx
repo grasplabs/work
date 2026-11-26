@@ -6,6 +6,7 @@ import type {
   ChatMessage,
   ChatOutput,
   ChatPartial,
+  ChatQueued,
   ChatReasoning,
   ChatToolCall,
   ChatToolEvent,
@@ -574,6 +575,14 @@ type Row =
     }
   | AnswerTurn
   | { kind: "after"; id: string; at?: undefined; children: ReactNode }
+  | {
+      kind: "queued";
+      id: string;
+      at?: undefined;
+      text: string;
+      /** Only on the newest: has Grasp take them all now. */
+      onSendNow: (() => void) | undefined;
+    }
   | { kind: "new"; id: string; at?: undefined }
   | {
       kind: "day";
@@ -886,6 +895,37 @@ const Question = ({
     </Message>
   );
 };
+
+/**
+ * A question sent while Grasp works that it hasn't taken yet, at the
+ * thread's end, as T3 Code and Claude Code list theirs: the person's own
+ * words in an outlined bubble, as it isn't asked yet, saying it is queued.
+ * On the newest, Send now (Claude Code's and T3 Code's) has Grasp take
+ * them all at once.
+ */
+const QueuedQuestion = ({
+  row: { text, onSendNow },
+}: {
+  row: Extract<Row, { kind: "queued" }>;
+}) => (
+  <Message align="end">
+    <MessageContent>
+      <Bubble align="end" variant="outline">
+        <BubbleContent>{text}</BubbleContent>
+      </Bubble>
+      <MessageFooter>
+        <Text color="muted" size="sm">
+          <Trans>Queued</Trans>
+        </Text>
+        {onSendNow === undefined ? null : (
+          <Button onClick={onSendNow} size="sm" variant="ghost">
+            <Trans>Send now</Trans>
+          </Button>
+        )}
+      </MessageFooter>
+    </MessageContent>
+  </Message>
+);
 
 /** Everything an answer is drawn from, beyond its own replies. */
 interface AnswerContext extends StepContext {
@@ -1359,6 +1399,9 @@ const AnswerRow = ({
 /** Where the page passes no calls of the chat's code. */
 const noTools: readonly ChatToolEvent[] = [];
 
+/** Where nothing is queued. */
+const noQueued: readonly ChatQueued[] = [];
+
 /** Where the page passes no agents. */
 const noAgents: readonly ChatAgent[] = [];
 
@@ -1390,9 +1433,6 @@ export const answerAgentsOf = (
 /** The keys of the loading pairs: the same each time. */
 const loadingPairs = ["first", "second"] as const;
 
-/** Where no connection's name is known. */
-const noSourceNames: ReadonlyMap<string, SourceName> = new Map();
-
 /** The chat's messages, and the response being written, oldest first. */
 export const ChatThread = ({
   agents = noAgents,
@@ -1402,6 +1442,8 @@ export const ChatThread = ({
   output,
   partial,
   running,
+  queued = noQueued,
+  onSendNow,
   checking = false,
   modelWait = null,
   tools = noTools,
@@ -1410,7 +1452,7 @@ export const ChatThread = ({
   build,
   newLineBefore,
   sources,
-  sourceNames = noSourceNames,
+  sourceNames,
   children,
 }: {
   /**
@@ -1429,6 +1471,10 @@ export const ChatThread = ({
   partial: ChatPartial | null;
   /** Whether the agent is working on the chat now. */
   running: boolean;
+  /** The questions sent meanwhile that it hasn't taken yet, oldest first. */
+  queued?: readonly ChatQueued[];
+  /** Has the agent take the queued questions at once, while it works. */
+  onSendNow?: () => void;
   /** Whether its turn checks the drafts it wrote now, past its answer. */
   checking?: boolean;
   /**
@@ -1463,7 +1509,7 @@ export const ChatThread = ({
    */
   sources?: ReactNode;
   /** The connections' names, by ID, which name where a step read from. */
-  sourceNames?: ReadonlyMap<string, SourceName>;
+  sourceNames: ReadonlyMap<string, SourceName>;
   /** Shown after the messages, in the thread: what is held, why it stopped. */
   children?: ReactNode;
 }) => {
@@ -1590,10 +1636,16 @@ export const ChatThread = ({
   };
   const lined = withNewLine(withDayLines(rows), newLineBefore);
   const logId = useId();
+  const waitingRows: Row[] = queued.map(({ id, text }, index) => ({
+    kind: "queued",
+    id: `queued:${id}`,
+    text,
+    onSendNow: running && index === queued.length - 1 ? onSendNow : undefined,
+  }));
   const items: Row[] =
     children === undefined || children === null
-      ? lined
-      : [...lined, { kind: "after", id: "after", children }];
+      ? [...lined, ...waitingRows]
+      : [...lined, ...waitingRows, { kind: "after", id: "after", children }];
   const column: { style?: LayoutStyle } = compact
     ? {}
     : { style: styles.column };
@@ -1622,6 +1674,9 @@ export const ChatThread = ({
                         ) : null}
                         {row.kind === "answer" ? (
                           <AnswerRow context={contextOf(row)} turn={row} />
+                        ) : null}
+                        {row.kind === "queued" ? (
+                          <QueuedQuestion row={row} />
                         ) : null}
                         {row.kind === "after" ? row.children : null}
                         {row.kind === "new" ? <NewLine /> : null}
