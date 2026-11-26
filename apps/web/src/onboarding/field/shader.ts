@@ -152,9 +152,14 @@ float levelAt(vec2 p, vec2 window, float seed, float t) {
   float roll = 0.5 + 0.5 * sin(p.x / 150.0 - t * 0.55 + hills * 5.0 + p.y / 260.0);
   float flow = hills * 0.9 + roll * 0.55;
   float level = restAt(p) * u_mood.z * (0.05 + 0.95 * flow);
-  level += trailAt(p, 40.0) * 0.16;
+  // Where there is little of him there is none: no stray dots scattered over the page, only his
+  // own places, thinning out at their edges.
+  level = max(level - 0.16, 0.0) * 1.25;
+  level += trailAt(p, 40.0) * 0.11;
   level *= columnAt(p, window);
-  level = max(level - 0.06, 0.0) * 1.08;
+  // The bar along the top stays clean, as the corner past its last button does: his dots begin
+  // below it, fading in.
+  level *= smoothstep(64.0, 132.0, p.y);
   level *= clearAt(p);
   level += haloAt(p, fbm(p / 190.0 + vec2(t * 0.35, -t * 0.28) + seed));
   return level;
