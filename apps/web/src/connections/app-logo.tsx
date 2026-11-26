@@ -43,7 +43,7 @@ const styles = stylex.create({
     width: `calc(${space["8"]} + ${space["1"]})`,
     height: `calc(${space["8"]} + ${space["1"]})`,
     padding: `calc(${space["3"]} / 2)`,
-    borderRadius: radius.xl,
+    borderRadius: `min(${radius.xl}, calc((${space["8"]} + ${space["1"]}) / 2))`,
     cornerShape: radius.shape,
   },
   // `lg` stands on its own, as on a block.
