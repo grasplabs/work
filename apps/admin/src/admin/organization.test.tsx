@@ -41,8 +41,9 @@ const openAcme = async (path: string, snapshot: AdminSnapshot, crm?: Crm) =>
   });
 
 /** What the organization's level of the sidebar says. */
-const levelOf = (root: Element): string =>
-  root.querySelector('[data-slot="sidebar"]')?.textContent ?? "";
+/** Where the organization stands, over each of its sections, in the page. */
+const statusOf = (root: Element): string =>
+  root.querySelector("main")?.textContent ?? "";
 
 /** The organization's column of sections. */
 const columnOf = (root: Element): Element | null =>
@@ -70,7 +71,7 @@ const partOf = (root: Element, title: string): Element | undefined =>
   );
 
 describe("an organization's page", () => {
-  it("lays out an organization: its column of sections in order, and what waits where", async () => {
+  it("lays out an organization: its column of sections in order, what waits where, and over the page how much is known", async () => {
     const { container } = await openAcme("", readySnapshot("Acme"));
     const titles = [
       "Overview",
@@ -101,7 +102,7 @@ describe("an organization's page", () => {
           .every((at, i) => at === positions[i]),
       onOverview: entryOf(container, "Overview")?.getAttribute("aria-current"),
       title: container.querySelector("main h1")?.textContent,
-      known: column.includes("85% known. Ready for Grasp’s go"),
+      known: text.includes("85% known. Ready for Grasp’s go"),
       waits: ["Steps", "Details", "Interviews"].map((title) =>
         waitsMark.test(
           entryOf(container, title)?.closest("li")?.textContent ?? ""
@@ -162,7 +163,7 @@ describe("an organization's page", () => {
 
     const { container } = await openAcme("", snapshot);
 
-    expect(levelOf(container)).toContain(
+    expect(statusOf(container)).toContain(
       `The interviews closed on ${formatDate(last.toISOString().slice(0, 10))}`
     );
   });
@@ -398,7 +399,7 @@ describe("an organization's overview", () => {
       toldSnapshot("Acme", { days: 21, daysIn: 3, leadTalked: true })
     );
 
-    expect(levelOf(container)).toMatch(/Day \d+ of 21/u);
+    expect(statusOf(container)).toMatch(/Day \d+ of 21/u);
   });
 });
 

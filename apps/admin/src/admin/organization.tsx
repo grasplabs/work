@@ -38,54 +38,34 @@ import {
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
 import { PageHeader } from "@grasp-os/ui/components/page-header";
-import {
-  SidebarContent,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarLevel,
-  SidebarLevelHeader,
-  SidebarLevelTitle,
-  SidebarMenu,
-  SidebarMenuBadge,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarMenuSkeleton,
-  useSidebar,
-} from "@grasp-os/ui/components/sidebar";
 import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import { Text } from "@grasp-os/ui/components/text";
 import {
-  BuildingIcon,
-  ChevronLeftIcon,
   CircleAlertIcon,
   ClockIcon,
   Icon,
   RefreshCwIcon,
 } from "@grasp-os/ui/lib/icons";
 import { visuallyHidden } from "@grasp-os/ui/lib/styles";
-import { colors, font, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { colors, font, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import {
   Link,
   Outlet,
   useChildMatches,
-  useMatchRoute,
   useRouter,
 } from "@tanstack/react-router";
 import { createContext, Suspense, use, useState } from "react";
-import type { ComponentProps } from "react";
 
 import type { ClientAdmin } from "../clients/admin.ts";
 import type { GridRow } from "../clients/grid.ts";
+import { PageBar } from "../frame/page-bar.tsx";
 import type { OrgRead } from "./org-reads.ts";
-import { AdminHeader, PageBody } from "./page.tsx";
+import { AdminHeader, barLabels, PageBody } from "./page.tsx";
 import { KnowledgeDots } from "./parts.tsx";
 import {
-  needSection,
   orgSections,
   originsOf,
-  sectionGroups,
   sectionTo,
   sectionWords,
   sourceNames,
@@ -111,14 +91,16 @@ const styles = stylex.create({
     color: colors.mutedForeground,
   },
   opensWaits: { color: colors.warning },
-  // The day the interviews are on, at the foot of the organization's
-  // level, in the rows' inset.
-  day: {
+  // Where the organization stands, over every section: how much is known
+  // and, once the team is told, the day the interviews are on.
+  status: {
     display: "flex",
-    flexDirection: "column",
-    gap: space["1"],
-    paddingInline: size.sidebarRowInline,
+    flexWrap: "wrap",
+    alignItems: "center",
+    columnGap: space["4"],
+    rowGap: space["2"],
   },
+  statusLink: { color: "inherit", textDecoration: "none" },
   // Under the page's title, its sentence, then where its figures come
   // from and when they were read, a line each.
   lines: { display: "flex", flexDirection: "column", gap: space["1"] },
@@ -172,9 +154,6 @@ export const useOrganization = (): AnsweredOrganization => {
   return organization;
 };
 
-/** How many dots say how much is known, in the column. */
-const knowledgeDots = 20;
-
 /** The organization's section a path is, if it is one. */
 const sectionAt = (fullPath: string): OrgSection | undefined => {
   const path = fullPath.endsWith("/") ? fullPath.slice(0, -1) : fullPath;
@@ -203,280 +182,6 @@ const useShownSection = (): { section: OrgSection; withoutCore: boolean } => {
     withoutCore: shown.withoutCore,
   };
 };
-
-/**
- * A section's link, with whatever else an anchor takes (a button renders
- * as one): for the overview, only itself is where the page is.
- */
-const SectionLink = ({
-  section,
-  clientId,
-  ...props
-}: { section: OrgSection; clientId: string } & Omit<
-  ComponentProps<"a">,
-  "href" | "ref"
->) => (
-  <Link
-    {...props}
-    activeOptions={{ exact: section === "overview", includeSearch: false }}
-    params={{ clientId }}
-    to={sectionTo[section]}
-  />
-);
-
-/** What waits for Grasp in a section, in words: "1 thing needs Grasp". */
-const waitsWords = (waits: number): string =>
-  `${waits} ${waits === 1 ? "thing needs" : "things need"} Grasp`;
-
-/**
- * An entry of the column: its icon and its title, and how many things
- * wait for Grasp there. Folded to its icons, its tooltip says the title
- * and what waits.
- */
-const SectionItem = ({
-  section,
-  clientId,
-  waits,
-}: {
-  section: OrgSection;
-  clientId: string;
-  waits: number;
-}) => {
-  const matchRoute = useMatchRoute();
-  const { title, icon } = sectionWords[section];
-  const active =
-    matchRoute({
-      to: sectionTo[section],
-      params: { clientId },
-      fuzzy: section !== "overview",
-    }) !== false;
-  return (
-    <SidebarMenuItem>
-      <SidebarMenuButton
-        asChild
-        isActive={active}
-        tooltip={waits === 0 ? undefined : `${title}: ${waitsWords(waits)}`}
-      >
-        <SectionLink clientId={clientId} section={section}>
-          <Icon icon={icon} />
-          {title}
-        </SectionLink>
-      </SidebarMenuButton>
-      {waits === 0 ? null : (
-        <SidebarMenuBadge>
-          {waits}
-          <span {...stylex.props(visuallyHidden)}>{waitsWords(waits)}</span>
-        </SidebarMenuBadge>
-      )}
-    </SidebarMenuItem>
-  );
-};
-
-/** How much is known, and whether it is ready to open: in sight on every section. */
-const Knowing = ({ clientId, view }: { clientId: string; view: AdminView }) => {
-  const opens = stageLines(view).open;
-  const waits = view.knowledge.ready && view.knowledge.opened === null;
-  return (
-    <SidebarMenuItem>
-      <SidebarMenuButton asChild size="lg">
-        <SectionLink clientId={clientId} section="steps">
-          <span {...stylex.props(styles.knowing)}>
-            <KnowledgeDots
-              count={knowledgeDots}
-              knowledge={view.knowledge}
-              label={opens}
-            />
-            <span
-              aria-hidden
-              {...stylex.props(styles.opens, waits && styles.opensWaits)}
-            >
-              {opens}
-            </span>
-          </span>
-        </SectionLink>
-      </SidebarMenuButton>
-    </SidebarMenuItem>
-  );
-};
-
-/** The day the interviews are on, which is not today once they are over. */
-const InterviewDay = ({ view }: { view: AdminView }) => {
-  const { state, isMobile } = useSidebar();
-  const date = formatDate(dateOn(view.org, view.day));
-  // The last day the links worked: the plan's days count from day 0.
-  const lastDay = formatDate(dateOn(view.org, listenDays(view.org) - 1));
-  // Folded to the icons, the rail has no room for words.
-  if (state === "collapsed" && !isMobile) {
-    return null;
-  }
-  return (
-    <div {...stylex.props(styles.day)}>
-      <Text as="span" color="muted" size="xs">
-        {view.closed
-          ? `The interviews closed on ${lastDay}`
-          : `The interviews, on ${date}`}
-      </Text>
-      <Text as="span" color="default" size="xs">
-        Day {view.day} of {listenDays(view.org)}
-      </Text>
-    </div>
-  );
-};
-
-/**
- * The name of an organization's level of the sidebar: never a client's id
- * alone, which could be the main list's own name ("main").
- */
-export const organizationLevel = (clientId: string): string =>
-  `organization:${clientId}`;
-
-/** What the level says on top while its core isn't read: reading it, or why not. Not on the rail. */
-const LevelState = ({
-  clientId,
-  view,
-  reading,
-}: {
-  clientId: string;
-  view: AdminView | null;
-  reading: boolean;
-}) => {
-  const { state, isMobile } = useSidebar();
-  if (state === "collapsed" && !isMobile) {
-    return null;
-  }
-  if (view !== null) {
-    return <Knowing clientId={clientId} view={view} />;
-  }
-  return (
-    <SidebarMenuItem>
-      {reading ? (
-        <SidebarMenuSkeleton />
-      ) : (
-        // Nothing of it is known now: where to see why, in sight on every section.
-        <Badge asChild variant="warning">
-          <SectionLink clientId={clientId} section="setup">
-            Not read now: see its Setup
-          </SectionLink>
-        </Badge>
-      )}
-    </SidebarMenuItem>
-  );
-};
-
-const LevelBody = ({
-  client,
-  view,
-  reading,
-}: {
-  client: GridRow;
-  /** Null when its core isn't read now: the level then says so on top. */
-  view: AdminView | null;
-  /** Its core's answer isn't in yet. */
-  reading: boolean;
-}) => {
-  const { id: clientId, name } = client;
-  const waiting = new Map<OrgSection, number>();
-  for (const need of view?.needs ?? []) {
-    const section = needSection(need);
-    waiting.set(section, (waiting.get(section) ?? 0) + 1);
-  }
-  return (
-    <SidebarLevel value={organizationLevel(clientId)}>
-      <SidebarLevelHeader>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton asChild tooltip="Back to the admin">
-              <Link to="/">
-                <Icon icon={ChevronLeftIcon} />
-                Admin
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-        <SidebarLevelTitle>
-          <Icon icon={BuildingIcon} />
-          {name}
-        </SidebarLevelTitle>
-      </SidebarLevelHeader>
-      <SidebarContent aria-label={name}>
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <LevelState clientId={clientId} reading={reading} view={view} />
-              <SectionItem
-                clientId={clientId}
-                section="overview"
-                waits={waiting.get("overview") ?? 0}
-              />
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        {sectionGroups.map((group) => (
-          <SidebarGroup key={group.id}>
-            <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {group.sections.map((section) => (
-                  <SectionItem
-                    clientId={clientId}
-                    key={section}
-                    section={section}
-                    waits={waiting.get(section) ?? 0}
-                  />
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        ))}
-        {view?.told === true ? (
-          <SidebarGroup>
-            <InterviewDay view={view} />
-          </SidebarGroup>
-        ) : null}
-      </SidebarContent>
-    </SidebarLevel>
-  );
-};
-
-/** The level once its core's answer is in. */
-const SettledLevel = ({
-  client,
-  read,
-}: {
-  client: GridRow;
-  read: Deferred<OrgRead>;
-}) => {
-  const { admin } = useSettled(read);
-  return (
-    <LevelBody
-      client={client}
-      reading={false}
-      view={organizationOf(admin).view}
-    />
-  );
-};
-
-/**
- * The organization as a level of the admin's sidebar, as the frontend's
- * Settings is a level of its own (apps/web/src/frame/app-sidebar.tsx):
- * the way back to the admin, the organization's name, how much Grasp
- * knows about it, and every section in its groups, each with how many
- * things wait for Grasp there; once the team is told, the day its
- * interviews are on. Every section at once, from what the admin recorded;
- * what waits where once its page's read of its core (`read`, undefined
- * until it is asked) is in.
- */
-export const OrganizationLevel = ({
-  client,
-  read,
-}: {
-  client: GridRow;
-  read: Deferred<OrgRead> | undefined;
-}) => (
-  <Suspense fallback={<LevelBody client={client} reading view={null} />}>
-    <SettledLevel client={client} read={read ?? notAsked} />
-  </Suspense>
-);
 
 /** A part not read yet, in a sentence: core doesn't hold it, or its system isn't connected. */
 const laterLine = ({ source, what = "This" }: Origin): string =>
@@ -674,6 +379,65 @@ const OverviewAbout = () => {
   return admin.state === "answered" ? "" : unreadWhy(admin);
 };
 
+/** How many dots say how much is known. */
+const knowledgeDots = 20;
+
+/**
+ * Where the organization stands, in sight on every section: how much Grasp
+ * knows and whether it is ready to open (to its Steps), and, once the team
+ * is told, the day its interviews are on; while its core isn't read, where
+ * to see why (its Setup).
+ */
+const OrgStatus = ({ clientId }: { clientId: string }) => {
+  const { admin } = useOrgRead();
+  const { view } = organizationOf(admin);
+  if (view === null) {
+    return admin.state === "answered" ? null : (
+      <Badge asChild variant="warning">
+        <Link params={{ clientId }} to="/organizations/$clientId/setup">
+          Not read now: see its Setup
+        </Link>
+      </Badge>
+    );
+  }
+  const opens = stageLines(view).open;
+  const waits = view.knowledge.ready && view.knowledge.opened === null;
+  const days = listenDays(view.org);
+  return (
+    <span {...stylex.props(styles.status)}>
+      <Link
+        params={{ clientId }}
+        to="/organizations/$clientId/steps"
+        {...stylex.props(styles.statusLink, styles.knowing)}
+      >
+        <KnowledgeDots
+          count={knowledgeDots}
+          knowledge={view.knowledge}
+          label={opens}
+        />
+        <span
+          aria-hidden
+          {...stylex.props(styles.opens, waits && styles.opensWaits)}
+        >
+          {opens}
+        </span>
+      </Link>
+      {view.told ? (
+        <span {...stylex.props(styles.knowing)}>
+          <Text as="span" color="default" size="xs">
+            Day {view.day} of {days}
+          </Text>
+          <Text as="span" color="muted" size="xs">
+            {view.closed
+              ? `The interviews closed on ${formatDate(dateOn(view.org, days - 1))}`
+              : `The interviews, on ${formatDate(dateOn(view.org, view.day))}`}
+          </Text>
+        </span>
+      ) : null}
+    </span>
+  );
+};
+
 /**
  * Where a section's figures come from, and when they were read, once its
  * core answered: lines of the page's description, as the frontend's pages
@@ -724,7 +488,26 @@ export const OrganizationPage = ({
   const { title, about } = sectionWords[section];
   return (
     <OrgReadContext value={read}>
-      <AdminHeader page={name} />
+      <PageBar
+        crumbs={
+          section === "overview"
+            ? [{ label: name }]
+            : [
+                {
+                  label: name,
+                  render: (look) => (
+                    <Link
+                      {...look}
+                      params={{ clientId: client.id }}
+                      to="/organizations/$clientId"
+                    />
+                  ),
+                },
+                { label: title },
+              ]
+        }
+        labels={barLabels}
+      />
       <PageBody>
         <PageHeader
           description={
@@ -737,6 +520,7 @@ export const OrganizationPage = ({
                 <span>{about}</span>
               )}
               <Suspense fallback={null}>
+                <OrgStatus clientId={client.id} />
                 <span {...stylex.props(styles.lines)}>
                   <ReadNotes section={section} />
                 </span>

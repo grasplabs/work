@@ -308,6 +308,8 @@ export const openAdmin = async (
   const answered: Answers = {
     fetchClientGrid: [] satisfies GridRow[],
     fetchClientAdmins: [] satisfies ClientAdmin[],
+    fetchStaff: { email: "staff@grasp.test", name: "Sam Staff" },
+    fetchReadiness: { checks: [], blocking: 0 },
     reportPageErrorFn: { logged: true },
     ...answers,
   };

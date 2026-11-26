@@ -12,6 +12,8 @@ import { openClientId, readAdmins } from "../admin/org-loads.ts";
 import { freshMs } from "../admin/org-reads.ts";
 import type { OrgReads } from "../admin/org-reads.ts";
 import { platformCounts } from "../admin/platform.ts";
+import { fetchReadiness } from "../admin/readiness.ts";
+import { fetchStaff } from "../admin/staff-functions.ts";
 import { fetchClientGrid } from "../clients/functions.ts";
 
 import styles from "../styles.css?url";
@@ -62,8 +64,16 @@ const RootDocument = ({ children }: { children: ReactNode }) => (
 );
 
 const Frame = () => {
-  const { clients, admins, platform } = Route.useLoaderData();
-  return <AdminFrame admins={admins} clients={clients} platform={platform} />;
+  const { clients, admins, platform, staff, readiness } = Route.useLoaderData();
+  return (
+    <AdminFrame
+      admins={admins}
+      clients={clients}
+      platform={platform}
+      readiness={readiness}
+      staff={staff}
+    />
+  );
 };
 
 /**
@@ -90,6 +100,8 @@ export const Route = createRootRouteWithContext<AdminContext>()({
   // Every client's core is asked at once, beside the grid, never after it.
   loader: async ({ context, location, preload }) => {
     const grid = fetchClientGrid();
+    const staff = fetchStaff();
+    const readiness = fetchReadiness();
     const open = openClientId(location.pathname);
     const frame = readAdmins(
       context.reads,
@@ -101,6 +113,8 @@ export const Route = createRootRouteWithContext<AdminContext>()({
     const clients = await grid;
     return {
       clients,
+      staff: await staff,
+      readiness: await readiness,
       platform: platformCounts(clients),
       admins: frame.admins,
       adminsAsked: frame.asked,

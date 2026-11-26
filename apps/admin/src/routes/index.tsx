@@ -20,8 +20,6 @@ import { WithAdmins } from "../admin/admins.tsx";
 import { PageLoading } from "../admin/failure.tsx";
 import { AdminPage } from "../admin/page.tsx";
 import { Figure, KnowledgeDots, StageBar } from "../admin/parts.tsx";
-import { ReadinessBanner } from "../admin/readiness-parts.tsx";
-import { fetchReadiness } from "../admin/readiness.ts";
 import { Section } from "../admin/section.tsx";
 import {
   organizationsOf,
@@ -544,26 +542,22 @@ const Organizations = ({ admins }: { admins: readonly ClientAdmin[] }) => {
   );
 };
 
-/** The overview's title, its action and readiness at once; the organizations once their cores answered. */
-const Overview = () => {
-  const readiness = Route.useLoaderData();
-  return (
-    <AdminPage
-      action={
-        <Button nativeButton={false} render={<Link to="/new-organization" />}>
-          <PlusIcon data-icon="inline-start" />
-          New organization
-        </Button>
-      }
-      description="Every company with Grasp, from its first conversation on. Only Grasp sees this: a company sees numbers per team, never names."
-      overview
-      title="Organizations"
-    >
-      <ReadinessBanner readiness={readiness} />
-      <WithAdmins>{(admins) => <Organizations admins={admins} />}</WithAdmins>
-    </AdminPage>
-  );
-};
+/** The overview's title and its action at once; the organizations once their cores answered. */
+const Overview = () => (
+  <AdminPage
+    action={
+      <Button nativeButton={false} render={<Link to="/new-organization" />}>
+        <PlusIcon data-icon="inline-start" />
+        New organization
+      </Button>
+    }
+    description="Every company with Grasp, from its first conversation on. Only Grasp sees this: a company sees numbers per team, never names."
+    overview
+    title="Organizations"
+  >
+    <WithAdmins>{(admins) => <Organizations admins={admins} />}</WithAdmins>
+  </AdminPage>
+);
 
 /** The admin's overview: every organization together. */
 export const Route = createFileRoute("/")({
@@ -571,7 +565,6 @@ export const Route = createFileRoute("/")({
     const phase = ADMIN_PHASES.find((each) => each === search.phase);
     return phase === undefined ? {} : { phase };
   },
-  loader: async () => await fetchReadiness(),
   component: Overview,
   pendingComponent: PageLoading,
 });
