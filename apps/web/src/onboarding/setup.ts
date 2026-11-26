@@ -223,6 +223,12 @@ export const closesOn = (plan: Pick<Plan, "start" | "days">): string =>
 export const readingSeconds = (line: string): number =>
   lengthOf(readingTiming(line));
 
+/** The screen after the team step, where the flow has one; 0 where it has no team step. */
+const afterTeam = (path: SetupPath): number => {
+  const team = stepIndex("team", path);
+  return team === -1 ? 0 : team + 1;
+};
+
 /** How far the admin went before: the furthest step, as far as core says they are. */
 export const reachedOf = (
   stored: number,
@@ -230,8 +236,8 @@ export const reachedOf = (
   path: SetupPath = steps
 ): number =>
   Math.min(
-    // A plan saved means the team is being listened to, where the flow has that.
-    Math.max(stored, plan === null ? 0 : stepIndex("listening", path), 0),
+    // A plan saved means the team was told: on past the team step, where the flow has it.
+    Math.max(stored, plan === null ? 0 : afterTeam(path), 0),
     Math.max(path.length - 1, 0)
   );
 
@@ -410,12 +416,12 @@ export const teamNumbersOf = (team: {
 /**
  * The few parts the setup is told in, so it feels like a few steps, not a
  * dozen screens: getting to know each other, the company, the team. The
- * screens after the interviews (the review, the opening) are in none.
+ * story of what happens next closes the team's part, and the setup.
  */
 export const setupParts = [
-  ["welcome", "ai", "about"],
+  ["welcome", "ai"],
   ["company", "sources", "documents", "pulse"],
-  ["leads", "team"],
+  ["leads", "team", "about"],
 ] as const satisfies readonly (readonly SetupStep[])[];
 
 /**

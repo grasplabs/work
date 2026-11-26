@@ -161,10 +161,10 @@ describe("the places and sign-ins offered", () => {
 });
 
 describe("how far the admin went", () => {
-  it("is at least the interviews once they are planned", () => {
+  it("is past the team step once the interviews are planned", () => {
     expect(reachedOf(2, { plan: null })).toBe(2);
     expect(reachedOf(2, { plan: { ...plan, start: "2026-10-06" } })).toBe(
-      stepIndex("listening")
+      stepIndex("about")
     );
     expect(reachedOf(99, { plan: null })).toBe(steps.length - 1);
   });
@@ -177,7 +177,7 @@ describe("what this browser keeps of how far the admin went", () => {
       "company",
       "documents",
       "leads",
-      "about",
+      "sources",
       "company",
     ] as const) {
       kept = keptAt(kept, stepIndex(step));
@@ -245,11 +245,11 @@ describe("the AI step", () => {
     });
   });
 
-  it("goes on to how this works, or to the step an admin held on it asked for", () => {
+  it("goes on to the company, or to the step an admin held on it asked for", () => {
     expect({
       first: afterAi(stepIndex("ai")),
       sentBack: afterAi(listening),
-    }).toStrictEqual({ first: "about", sentBack: "listening" });
+    }).toStrictEqual({ first: "company", sentBack: "listening" });
   });
 });
 
@@ -291,22 +291,13 @@ describe("how far the admin went, as core keeps it", () => {
     expect({
       start: finishedAt(0),
       company: finishedAt(stepIndex("company")),
-    }).toStrictEqual({ start: [], company: ["welcome", "ai", "about"] });
+    }).toStrictEqual({ start: [], company: ["welcome", "ai"] });
   });
 });
 
 describe("a company's own path of screens", () => {
   // A short flow: no story, nowhere documents live, no documents, no tools.
-  const short: SetupPath = [
-    "welcome",
-    "ai",
-    "company",
-    "leads",
-    "team",
-    "listening",
-    "review",
-    "open",
-  ];
+  const short: SetupPath = ["welcome", "ai", "company", "leads", "team"];
   // Setting up only: nobody is interviewed, and the AI is set in Settings.
   const setup: SetupPath = ["welcome", "company", "documents"];
 
@@ -317,7 +308,7 @@ describe("a company's own path of screens", () => {
       // A screen finished that the flow no longer has counts for nothing.
       reached: reachedByPlace({ done: ["welcome", "ai", "about"] }, short),
       finished: finishedAt(3, short),
-      // A plan saved: the team is being listened to, where the flow has that.
+      // A plan saved: the team was told, so on past the team step, where the flow has one.
       planned: [
         reachedOf(0, { plan: { start: "2026-10-12", days: 14 } }, short),
         reachedOf(1, { plan: { start: "2026-10-12", days: 14 } }, setup),
@@ -327,7 +318,7 @@ describe("a company's own path of screens", () => {
       notOnIt: -1,
       reached: 2,
       finished: ["welcome", "ai", "company"],
-      planned: [5, 1],
+      planned: [4, 1],
     });
   });
 
@@ -355,14 +346,14 @@ describe("a company's own path of screens", () => {
       // No AI step in this flow: its admin sets it in Settings, and nothing holds them.
       notAsked: heldAt(2, { ready: false }, setup),
       next: afterAi(1, short),
-      sentBack: afterAi(5, short),
+      sentBack: afterAi(4, short),
       // The AI step as the last screen: nothing after it.
       last: afterAi(1, ["welcome", "ai"]),
     }).toStrictEqual({
       held: 1,
       notAsked: 2,
       next: "company",
-      sentBack: "listening",
+      sentBack: "team",
       last: undefined,
     });
   });
@@ -394,10 +385,12 @@ describe("the parts the setup is told in", () => {
       at: 0,
       of: 3,
       part: 0,
-      share: 1 / 9,
+      share: 1 / 6,
     });
     expect(partOf("documents")).toMatchObject({ at: 1, of: 3, part: 1 });
-    expect(partOf("team")).toStrictEqual({ at: 2, of: 3, part: 2, share: 1 });
+    expect(partOf("team")).toMatchObject({ at: 2, of: 3, part: 2 });
+    // The story of what comes next closes the setup.
+    expect(partOf("about")).toStrictEqual({ at: 2, of: 3, part: 2, share: 1 });
   });
 
   it("leaves out a part the company's path has none of", () => {

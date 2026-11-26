@@ -59,14 +59,14 @@ import type {
   SetupPlace,
   SetupStepId,
 } from "@grasp-os/shared/onboarding-flow";
-import { requireAdmin } from "@grasp-os/shared/roles";
+import { isMemberAdmin, requireAdmin } from "@grasp-os/shared/roles";
 import { uploadMaxBytes } from "@grasp-os/shared/uploads";
 import { waitUntil } from "cloudflare:workers";
 import { z } from "zod";
 
 import { readDirectoriesNow } from "../directory-people.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
-import { withPerson } from "../session-check.ts";
+import { reachesWorkspace, withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import { intoMembersTeams, syncTeams } from "../staff-list-teams.ts";
 import {
@@ -133,14 +133,16 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
   }
 
   async behind(): Promise<boolean> {
-    return await withPerson(this.#check, async () => {
+    return await withPerson(this.#check, async (person) => {
       const store = onboardingStore(this.#env);
       const [{ flow }, place, open] = await Promise.all([
         store.flow(),
         store.place(),
         gateOpen(this.#env),
       ]);
-      return onboardingBehind({ flow, done: place.done, open });
+      // An admin who finished the screens goes on into the platform; everyone else waits for the go.
+      const admin = isMemberAdmin(person) && reachesWorkspace(person);
+      return onboardingBehind({ flow, done: place.done, open, admin });
     });
   }
 

@@ -15,13 +15,13 @@ import { z } from "zod";
 export const flowSteps = [
   "welcome",
   "ai",
-  "about",
   "company",
   "sources",
   "documents",
   "pulse",
   "leads",
   "interviews",
+  "about",
 ] as const;
 export type FlowStep = (typeof flowSteps)[number];
 
@@ -33,13 +33,13 @@ export type FlowStep = (typeof flowSteps)[number];
 export const setupSteps = [
   "welcome",
   "ai",
-  "about",
   "company",
   "sources",
   "documents",
   "pulse",
   "leads",
   "team",
+  "about",
   "listening",
   "review",
   "open",
@@ -240,19 +240,21 @@ export const withStepMoved = (
   return { ...flow, steps: [...rest.slice(0, at), moved, ...rest.slice(at)] };
 };
 
-/** The screens that come with the flow's `interviews` step, in their own order. */
-const interviewScreens: readonly SetupStepId[] = [
-  "team",
-  "listening",
-  "review",
-  "open",
-];
+/**
+ * The screens that come with the flow's `interviews` step: telling the
+ * team and planning the day. The screens after it (Stephen listening,
+ * what needs the admin, the way in) are no longer shown: once the team is
+ * told, the admin goes into the platform. Their names stay in
+ * `setupSteps` so places kept with them still read.
+ */
+const interviewScreens: readonly SetupStepId[] = ["team"];
 
 /**
  * The screens the admin goes through in this flow, in order; none where
- * there is no onboarding. The interviews' screens come last wherever the
- * flow has the step: once the team is told the admin waits, and the way
- * in is the end of it.
+ * there is no onboarding. The interviews' screens come after the others
+ * wherever the flow has the step, and the story of what happens next
+ * (`about`) last of all, wherever staff put it: it tells what the admin
+ * just chose, and leads into the platform.
  */
 export const flowScreens = (flow: OnboardingFlow): SetupStepId[] => {
   if (!flow.on) {
@@ -260,36 +262,44 @@ export const flowScreens = (flow: OnboardingFlow): SetupStepId[] => {
   }
   const on = flow.steps.filter((step) => step.on).map(({ id }) => id);
   return [
-    ...on.flatMap((id): SetupStepId[] => (id === "interviews" ? [] : [id])),
+    ...on.flatMap((id): SetupStepId[] =>
+      id === "interviews" || id === "about" ? [] : [id]
+    ),
     ...(on.includes("interviews") ? interviewScreens : []),
+    ...(on.includes("about") ? (["about"] as const) : []),
   ];
 };
 
 /**
  * Whether the company has its onboarding behind it, by its flow: at once
- * where it has no screens; where its people are interviewed, once Grasp
- * gave its go (`open`); and where nobody is, once its admins finished
- * every screen it has. Until then the platform waits: its admins are
- * taken to the onboarding, everyone else is asked to wait for them.
+ * where it has no screens; once its admins finished every screen it has;
+ * and where its people are interviewed, for everyone else only once
+ * Grasp gave its go (`open`). So an admin who told the team goes on into
+ * the platform while the interviews run, and everyone else waits for the
+ * go, as the sign-in gate keeps them out until then anyway.
  */
 export const onboardingBehind = ({
   flow,
   done,
   open,
+  admin = false,
 }: {
   flow: OnboardingFlow;
   /** The screens the admins finished, as core keeps them. */
   done: readonly SetupStepId[];
-  /** Whether the company's Grasp is open to its people. */
   open: boolean;
+  /** Whether it is asked for one of the company's admins, who did the screens. */
+  admin?: boolean;
 }): boolean => {
   const screens = flowScreens(flow);
   if (screens.length === 0) {
     return true;
   }
-  return flowInterviews(flow)
-    ? open
-    : screens.every((screen) => done.includes(screen));
+  const finished = screens.every((screen) => done.includes(screen));
+  if (!flowInterviews(flow)) {
+    return finished;
+  }
+  return open || (admin && finished);
 };
 
 /**
