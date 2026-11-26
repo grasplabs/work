@@ -48,6 +48,8 @@ export interface McpTool {
   resourceField: string | undefined;
   /** The properties its input schema declares, if it declares any. */
   inputProperties: readonly string[] | undefined;
+  /** It reads, changes or sends email, as a native connector's manifest says (`mail`). */
+  mail?: true;
 }
 
 /**

@@ -133,6 +133,14 @@ export interface ToolDefinition<
    */
   takesFiles?: true;
   /**
+   * The tool reads or changes email (`true`), or mails someone: a write
+   * whose `recipients` input properties hold the addresses it mails.
+   * The platform's mail rules hold it, as the SDK's `mail` says.
+   */
+  mail?:
+    | true
+    | { recipients: readonly Extract<keyof z.input<Input>, string>[] };
+  /**
    * Carries the call out. `effect.key` is the call's effect key
    * (`effectKeyMetaKey`), for a side effect connect sent one for; null
    * otherwise. A tool that can recover gives it to its provider.
@@ -362,6 +370,7 @@ const checkDeclared = (
     | "takesFiles"
     | "answersFile"
     | "answersItem"
+    | "mail"
   >,
   inputSchema: JsonObject
 ): void => {
@@ -378,6 +387,19 @@ const checkDeclared = (
   }
   if (definition.answersItem === true && !readOnly) {
     throw new Error(`${name}: only a read answers an item`);
+  }
+  const { mail } = definition;
+  if (
+    typeof mail === "object" &&
+    (readOnly ||
+      mail.recipients.length === 0 ||
+      !mail.recipients.every((recipient) =>
+        Object.hasOwn(inputSchema.properties ?? {}, recipient)
+      ))
+  ) {
+    throw new Error(
+      `${name}: only a write mails someone, at its own input properties`
+    );
   }
   if (definition.answersFile === true && !answersFileShape(definition)) {
     throw new Error(
@@ -434,6 +456,14 @@ export const defineTool = <
         ? { answersItem: true as const }
         : {}),
       ...(definition.takesFiles === true ? { takesFiles: true as const } : {}),
+      ...(definition.mail === undefined
+        ? {}
+        : {
+            mail:
+              definition.mail === true
+                ? (true as const)
+                : { recipients: [...definition.mail.recipients] },
+          }),
       contract: {
         input:
           definition.takesFiles === true
