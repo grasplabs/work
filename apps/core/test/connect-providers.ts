@@ -106,6 +106,9 @@ export const documentsControlUrl = "https://graph-control.test/documents";
 export const documentsGranted =
   "openid profile email User.Read Files.Read.All Sites.Read.All";
 
+/** In a code in place of what was granted: what the consent asked for. */
+const asAsked = "-";
+
 /**
  * The code Entra sends back once `subject` in `tenant` consents at `url`:
  * it carries the authorization's PKCE challenge, so only the flow's own
@@ -121,9 +124,12 @@ export const consentCode = (
     url.searchParams.get("code_challenge"),
     tenant,
     subject,
-    // What Entra says it granted (`scope`), when the test gives it: base64,
-    // since rights have dots of their own.
-    ...(granted === undefined ? [] : [btoa(granted)]),
+    // What Entra says it granted (`scope`), base64 since rights have dots of
+    // their own: the test's, or else what the consent asked for, as Entra
+    // lists it in every token answer.
+    ...(granted === undefined
+      ? [asAsked, btoa(url.searchParams.get("scope") ?? "")]
+      : [btoa(granted)]),
   ].join(".");
 
 /**
@@ -1213,7 +1219,7 @@ export default {
         scope: directory.granted ?? ${JSON.stringify(directoryGranted)},
       });
     }
-    const [challenge, tenant, subject, granted] = (form.get("code") ?? "").split(".");
+    const [challenge, tenant, subject, granted, asked] = (form.get("code") ?? "").split(".");
     const verifier = new TextEncoder().encode(form.get("code_verifier") ?? "");
     const digest = base64Url(
       new Uint8Array(await crypto.subtle.digest("SHA-256", verifier))
@@ -1246,9 +1252,16 @@ export default {
       refresh_token: "refresh." + subject,
       expires_in: 3600,
       id_token: [encoded({ alg: "RS256" }), encoded(claims), "signature"].join("."),
-      ...(forDirectory ? { scope: directory.granted ?? ${JSON.stringify(directoryGranted)} } : {}),
-      ...(forDocuments ? { scope: ${JSON.stringify(documentsGranted)} } : {}),
-      ...(granted === undefined ? {} : { scope: atob(granted) }),
+      // The test's grant; else the directory's or the documents' app's, or
+      // what the consent asked for.
+      scope:
+        granted !== ${JSON.stringify(asAsked)}
+          ? atob(granted)
+          : forDirectory
+            ? directory.granted ?? ${JSON.stringify(directoryGranted)}
+            : forDocuments
+              ? ${JSON.stringify(documentsGranted)}
+              : atob(asked),
     });
   },
 };
