@@ -446,7 +446,6 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
         audio_format: z.unknown(),
         language: z.string(),
         target_streaming_delay_ms: z.number(),
-        context_bias: z.array(z.string()),
       })
       .parse(opened?.session);
     expect({
@@ -455,10 +454,8 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       authorization: opened?.authorization,
       format: session.audio_format,
       language: session.language,
-      // What to listen out for is the store's: the team, and its people.
-      keyterms: ["Ops", "Person"].every((term) =>
-        session.context_bias.some((bias) => bias.includes(term))
-      ),
+      // The realtime model takes no words to listen out for.
+      biased: JSON.stringify(opened?.session).includes("context_bias"),
       events: opened?.events,
       // A tenth of a second at 16 kHz, as the session takes it.
       audio: opened?.audioBytes,
@@ -474,7 +471,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       authorization: `Bearer ${platformMistralKey}`,
       format: { encoding: "pcm_s16le", sample_rate: 16_000 },
       language: "nl",
-      keyterms: true,
+      biased: false,
       events: ["session.update", "input_audio.append", "input_audio.append"],
       // A tenth of a second, then the silence after the stretch.
       audio: 3198 + 15_360,

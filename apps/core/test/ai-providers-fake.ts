@@ -243,6 +243,17 @@ export const aiProvidersFake = () => {
       }
       record.events.push(parsed.type);
       if (parsed.type === "session.update") {
+        if (isRecord(parsed.session) && "context_bias" in parsed.session) {
+          send({
+            type: "error",
+            error: {
+              message:
+                "Model 'voxtral-mini-transcribe-realtime-2602' does not support context biasing.",
+              code: 3051,
+            },
+          });
+          return;
+        }
         if (started) {
           send({
             type: "error",
