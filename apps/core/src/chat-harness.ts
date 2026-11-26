@@ -1,8 +1,10 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { getCurrentTools } from "@earendil-works/pi-ai";
 import type {
   AssistantMessage,
   Message,
   ToolResultMessage,
+  TranscriptContext,
 } from "@earendil-works/pi-ai";
 import { createModels, createProvider } from "@earendil-works/pi-ai/models";
 import type { MutableModels } from "@earendil-works/pi-ai/models";
@@ -77,6 +79,7 @@ import { chatTurnPurpose } from "./model-spend.ts";
 import { models } from "./models.ts";
 import { sessionHost } from "./sandboxed.ts";
 import { recallForTurn, turnRecallTool } from "./turn-recall.ts";
+import { withoutUntrustedTagsIn } from "./untrusted-tags.ts";
 
 // A chat's turns on pi-durable (GRA-1529), in the chat's own object
 // (chat-session.ts): one Harness on the object's SQLite, its root
@@ -192,6 +195,13 @@ const context = BACKGROUND_CONTEXT;
 
 /** The provider every request of the chat goes through: the model gateway. */
 const gateway = "grasp";
+
+/**
+ * Whether a request offers the model tools: every one of a turn does, as
+ * the chat agent always has some; pi's summary of the chat offers none.
+ */
+const declaresTools = ({ messages }: TranscriptContext): boolean =>
+  getCurrentTools(messages).length > 0;
 
 /**
  * How the request ID of a notice to turn `turnId` begins: pi keeps it with
@@ -1353,6 +1363,16 @@ export class ChatHarness {
       },
       () => this.#sources
     );
+    // The turn's answers reach pi without the tags that mark what was read
+    // from outside as data (untrusted-tags.ts), should the model copy one:
+    // the answer's text as pi stores and streams it, and all that is made
+    // of it (the chat, its channels, the Brain), never shows one. Not pi's
+    // summary of the chat, a request that declares no tools, which only
+    // the model reads.
+    const stream: typeof admitted.stream = (model, sent, options) => {
+      const events = admitted.stream(model, sent, options);
+      return declaresTools(sent) ? withoutUntrustedTagsIn(events) : events;
+    };
     this.#models.setProvider(
       createProvider({
         id: gateway,
@@ -1363,7 +1383,7 @@ export class ChatHarness {
           },
         },
         models: [{ ...admitted.model, provider: gateway }],
-        api: { stream: admitted.stream, streamSimple: admitted.stream },
+        api: { stream, streamSimple: stream },
       })
     );
     /** The lines the turn's runs sent the Workspace, one after another. */
