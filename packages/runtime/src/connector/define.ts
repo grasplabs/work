@@ -305,8 +305,8 @@ const issuesText = (
 
 const asJsonObject = (schema: Record<string, JsonValue>): JsonObject => schema;
 
-/** A declared tool as the runtime's server serves it. */
-const toolOf = <Args extends ValueShape, Returns extends AnySchema>(
+/** A declared tool as the runtime's server serves it, built whole. */
+const builtTool = <Args extends ValueShape, Returns extends AnySchema>(
   connector: Pick<ConnectorDeclaration, "title" | "hosts" | "base">,
   name: string,
   declaration: ToolDeclaration<Args, Returns>
@@ -455,6 +455,32 @@ const toolOf = <Args extends ValueShape, Returns extends AnySchema>(
 };
 
 /**
+ * A declared tool as the runtime's server serves it, built when first
+ * read: an isolate serves one call, and builds only the tool it calls (or
+ * every description, for `tools/list`). Outside an isolate the manifest
+ * check reads every tool's action at once, so `defineConnector` throws
+ * there for a tool that breaks the contract (manifest-check.ts).
+ */
+const toolOf = <Args extends ValueShape, Returns extends AnySchema>(
+  connector: Pick<ConnectorDeclaration, "title" | "hosts" | "base">,
+  name: string,
+  declaration: ToolDeclaration<Args, Returns>
+): Tool => {
+  let built: Tool | undefined;
+  const build = (): Tool => (built ??= builtTool(connector, name, declaration));
+  return {
+    name,
+    get action() {
+      return build().action;
+    },
+    get description() {
+      return build().description;
+    },
+    call: async (input, sent) => await build().call(input, sent),
+  };
+};
+
+/**
  * A tool: one route of the vendor's API. Throws if it declares more than
  * one write, or both `repeatable` and `find`.
  */
@@ -518,8 +544,10 @@ export const defineConnector = (
     }
   }
   const scopes = new Set(Object.values(tools).flatMap((each) => each.scopes));
-  return {
-    ...serveConnector(
+  // Assigned, not spread: spreading would read the manifest, which an
+  // isolate builds only when it is read.
+  return Object.assign(
+    serveConnector(
       {
         name,
         provider: name,
@@ -531,6 +559,6 @@ export const defineConnector = (
         each.serve(toolName, declaration)
       )
     ),
-    declaration,
-  };
+    { declaration }
+  );
 };
