@@ -37,6 +37,7 @@ import {
 } from "./connection-audit.ts";
 import type { Connection } from "./connections.ts";
 import {
+  builtIn,
   builtInAt,
   connectorRow,
   isDuplicate,
@@ -1014,7 +1015,11 @@ export const connectorTools = async (
   if (!isAdmin(person.role)) {
     throw roleErrors.create("role.forbidden");
   }
-  await requireConnector(env, connector);
+  // A built-in has its row only once someone connects it: until then it
+  // has no connections, and so no tools, to show.
+  if (builtIn(connector) === undefined) {
+    await requireConnector(env, connector);
+  }
   const db = drizzle(env.DB);
   // One row a name, as the list read last holds it, however many people
   // connected: what is read grows with the connector's tools alone.

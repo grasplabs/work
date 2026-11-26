@@ -521,19 +521,19 @@ const confirmedAddressOf = (
 /**
  * What a connection is connected for: its scope, and its tenant if pinned.
  * `stateHash` is the sign-in flow it came back through; `checkedAt` the
- * connector and the server URL a key was checked at.
+ * connector, server URL and header a key was checked at.
  */
 type Target = Pick<FlowRow, "scope" | "tenant"> & {
   stateHash?: string;
-  checkedAt?: { connector: string; url: string };
+  checkedAt?: { connector: string; url: string; header: string };
 };
 
 /**
  * That what `target` was checked against still stands, as SQL. A move of
  * its connector's server (connector-providers.ts `prepareBuiltIn`)
- * deletes its sign-in flows and changes the connector's URL, and then
- * what a flow's code was exchanged for, or a key checked at the old
- * server, is kept nowhere: the new server never gets it.
+ * deletes its sign-in flows and changes the connector's URL or how it
+ * signs in, and then what a flow's code was exchanged for, or a key
+ * checked at the old server or in the old header, is kept nowhere.
  */
 const flowStands = ({ stateHash, checkedAt }: Target): SQL =>
   sql.join(
@@ -543,7 +543,7 @@ const flowStands = ({ stateHash, checkedAt }: Target): SQL =>
         : sql`EXISTS (SELECT 1 FROM ${oauthFlows} WHERE ${oauthFlows.stateHash} = ${stateHash})`,
       checkedAt === undefined
         ? sql`1`
-        : sql`EXISTS (SELECT 1 FROM ${connectors} WHERE ${connectors.id} = ${checkedAt.connector} AND ${connectors.url} = ${checkedAt.url})`,
+        : sql`EXISTS (SELECT 1 FROM ${connectors} WHERE ${connectors.id} = ${checkedAt.connector} AND ${connectors.url} = ${checkedAt.url} AND ${connectors.header} = ${checkedAt.header})`,
     ],
     sql` AND `
   );
@@ -1588,9 +1588,9 @@ export const connectWithKey = async (
   const target: Target = {
     scope,
     tenant: "",
-    ...(provider.url === undefined
+    ...(provider.checkedAt === undefined
       ? {}
-      : { checkedAt: { connector: provider.id, url: provider.url } }),
+      : { checkedAt: { connector: provider.id, ...provider.checkedAt } }),
   };
   const replaced = await replaceKey(
     env,

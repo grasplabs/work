@@ -223,10 +223,11 @@ export interface ApiKeyProviderConfig {
   id: string;
   server: string;
   /**
-   * For a connector's MCP server, the URL `account` checks a key at: the
-   * key is kept only while the connector still serves it.
+   * For a connector's MCP server, where `account` checks a key: the
+   * server's URL and the header the key goes in. The key is kept only
+   * while the connector still has both.
    */
-  url?: string;
+  checkedAt?: { url: string; header: string };
   /** The key, as a call's requests carry it. */
   credential: (key: string) => Credential;
   /**

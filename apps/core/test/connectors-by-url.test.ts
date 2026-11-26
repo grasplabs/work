@@ -140,7 +140,7 @@ describe("a connector made from a URL", slow, () => {
       group: "Other",
       auth: "managed",
       offered: true,
-      signInHost: "mcp.linear.app",
+      signInHost: "mcp.linear-copy.example",
     });
     // Its server lists its tools only to a connection.
     await expect(

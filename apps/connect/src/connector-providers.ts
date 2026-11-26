@@ -382,7 +382,7 @@ const providerOf = async (
       kind: "api_key",
       id: row.id,
       server: row.id,
-      url: row.url,
+      checkedAt: { url: row.url, header },
       credential: (key) => ({ header, value: key }),
       account: async (key, owner, send) =>
         (await keyWorks(row.url, header, key, send)) ? ownAccount(owner) : null,

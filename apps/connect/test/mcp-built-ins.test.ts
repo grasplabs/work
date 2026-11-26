@@ -77,6 +77,12 @@ const parkEarlierLinears = async (): Promise<void> => {
   ]);
 };
 
+/** Where the catalog says people sign in to the built-in Linear. */
+const linearSignInHost = async (): Promise<string | undefined> => {
+  const { entries } = await exports.default.catalog();
+  return entries.find(({ id }) => id === "linear")?.signInHost;
+};
+
 /** A table's columns, as `"name"` each. */
 const columnsOf = async (table: string): Promise<string[]> => {
   const { results } = await env.DB.prepare(
@@ -150,6 +156,10 @@ describe("a built-in connector serving its vendor's MCP server", () => {
     );
     await expect(
       exports.default.catalogTools({ source: "connector", id: "linear" })
+    ).resolves.toStrictEqual([]);
+    // No one connected Notion, so it has no row yet, and no tools.
+    await expect(
+      exports.default.connectorTools({ person: admin(), connector: "notion" })
     ).resolves.toStrictEqual([]);
   });
 
@@ -257,6 +267,16 @@ describe("a built-in connector serving its vendor's MCP server", () => {
       added: "connection.connector_built_in",
       asked: 0,
       rows: [],
+    });
+  });
+
+  it("names the host its people sign in at only while its row is for its server", async () => {
+    await connectLinear("linear", someone(), "personal", linearItself);
+    const atItsServer = await linearSignInHost();
+    await madeForAnotherUrl();
+    expect({ atItsServer, moved: await linearSignInHost() }).toStrictEqual({
+      atItsServer: new URL(linearItself.origin).host,
+      moved: undefined,
     });
   });
 
@@ -735,62 +755,70 @@ describe("a built-in serving its vendor's MCP server with a person's key", () =>
     });
   });
 
-  it("keeps no key checked at the server its connector moved from, nor connects again one the move asked to", async () => {
-    keyServer(sampleTrackerOrigin, "tracker-key");
-    const anna = someone();
-    const connectWith = async () =>
-      await exports.default.connectWithKey({
-        person: anna,
-        provider: "sample-tracker",
-        scope: "personal",
-        key: "tracker-key",
+  it.each([
+    ["its server", "url", "https://mcp.tracker-next.example/mcp"],
+    ["the header its key goes in", "header", "x-tracker-key"],
+  ])(
+    "keeps no key checked before its connector moved, by %s, nor connects again one the move asked to",
+    async (_, column, value) => {
+      keyServer(sampleTrackerOrigin, "tracker-key");
+      const anna = someone();
+      const connectWith = async () =>
+        await exports.default.connectWithKey({
+          person: anna,
+          provider: "sample-tracker",
+          scope: "personal",
+          key: "tracker-key",
+        });
+      const { connectionId } = await connectWith();
+      // Another release moves the connector as its server checks the key:
+      // its row to the server it names, and its connections asked to
+      // connect again, their keys dropped.
+      const serve = servers.get(sampleTrackerOrigin);
+      let moved = false;
+      servers.set(sampleTrackerOrigin, async (request) => {
+        if (!moved) {
+          moved = true;
+          await env.DB.batch([
+            env.DB.prepare(
+              `UPDATE connectors SET ${column} = ? WHERE id = ?`
+            ).bind(value, "sample-tracker"),
+            env.DB.prepare(
+              "UPDATE connections SET status = 'needs_reauth' WHERE id = ?"
+            ).bind(connectionId),
+            env.DB.prepare(
+              "DELETE FROM connection_tokens WHERE connection_id = ?"
+            ).bind(connectionId),
+          ]);
+        }
+        return await (serve?.(request) ?? new Response(null, { status: 404 }));
       });
-    const { connectionId } = await connectWith();
-    // Another release moves the connector as its server checks the key:
-    // its row to the server it names, and its connections asked to
-    // connect again, their keys dropped.
-    const serve = servers.get(sampleTrackerOrigin);
-    let moved = false;
-    servers.set(sampleTrackerOrigin, async (request) => {
-      if (!moved) {
-        moved = true;
-        await env.DB.batch([
-          env.DB.prepare("UPDATE connectors SET url = ? WHERE id = ?").bind(
-            "https://mcp.tracker-next.example/mcp",
-            "sample-tracker"
-          ),
-          env.DB.prepare(
-            "UPDATE connections SET status = 'needs_reauth' WHERE id = ?"
-          ).bind(connectionId),
-          env.DB.prepare(
-            "DELETE FROM connection_tokens WHERE connection_id = ?"
-          ).bind(connectionId),
-        ]);
-      }
-      return await (serve?.(request) ?? new Response(null, { status: 404 }));
-    });
 
-    const kept = await outcome(connectWith());
-    const after = await env.DB.prepare(
-      "SELECT status, (SELECT COUNT(*) FROM connection_tokens WHERE connection_id = connections.id) AS keys FROM connections WHERE id = ?"
-    )
-      .bind(connectionId)
-      .first();
-    const { results: others } = await env.DB.prepare(
-      "SELECT id FROM connections WHERE provider = 'sample-tracker' AND owner_user_id = ? AND id != ?"
-    )
-      .bind(anna.userId, connectionId)
-      .all();
-    await env.DB.prepare("UPDATE connectors SET url = ? WHERE id = ?")
-      .bind(`${sampleTrackerOrigin}/mcp`, "sample-tracker")
-      .run();
-    expect({ moved, kept, after, others }).toStrictEqual({
-      moved: true,
-      kept: "connection.flow_invalid",
-      after: { status: "needs_reauth", keys: 0 },
-      others: [],
-    });
-  });
+      const kept = await outcome(connectWith());
+      const after = await env.DB.prepare(
+        "SELECT status, (SELECT COUNT(*) FROM connection_tokens WHERE connection_id = connections.id) AS keys FROM connections WHERE id = ?"
+      )
+        .bind(connectionId)
+        .first();
+      const { results: others } = await env.DB.prepare(
+        "SELECT id FROM connections WHERE provider = 'sample-tracker' AND owner_user_id = ? AND id != ?"
+      )
+        .bind(anna.userId, connectionId)
+        .all();
+      await env.DB.prepare(
+        "UPDATE connectors SET url = ?, header = 'x-api-key' WHERE id = ?"
+      )
+        .bind(`${sampleTrackerOrigin}/mcp`, "sample-tracker")
+        .run();
+      servers.set(sampleTrackerOrigin, serve ?? (() => new Response(null)));
+      expect({ moved, kept, after, others }).toStrictEqual({
+        moved: true,
+        kept: "connection.flow_invalid",
+        after: { status: "needs_reauth", keys: 0 },
+        others: [],
+      });
+    }
+  );
 });
 
 /** Anna's connection to the built-in Linear, and a call of list_issues through it. */

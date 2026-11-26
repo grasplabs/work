@@ -455,14 +455,23 @@ const connectorEntries = async (env: Env): Promise<CatalogEntry[]> => {
     .orderBy(connectors.name, connectors.id);
   const rowOf = new Map(rows.map((row) => [row.id, row]));
   return [
-    ...builtIns().map(({ name, title, mcp }) => ({
-      id: name,
-      name: title,
-      url: mcp.url,
-      auth: typeof mcp.registration === "object" ? "header" : "oauth",
-      companyNetwork: false,
-      authorizationEndpoint: rowOf.get(name)?.authorizationEndpoint ?? null,
-    })),
+    ...builtIns().map(({ name, title, mcp }) => {
+      const auth = typeof mcp.registration === "object" ? "header" : "oauth";
+      const row = rowOf.get(name);
+      return {
+        id: name,
+        name: title,
+        url: mcp.url,
+        auth,
+        companyNetwork: false,
+        // Its row's sign-in only while the row is for the server it names:
+        // a release's move learns the new one on its next connection.
+        authorizationEndpoint:
+          row?.url === mcp.url && row.auth === auth
+            ? row.authorizationEndpoint
+            : null,
+      };
+    }),
     // A built-in's row is its state, listed above as the built-in.
     ...rows.filter(({ id }) => urlConnectorIdSchema.safeParse(id).success),
   ].map(({ id, name, url, auth, companyNetwork, authorizationEndpoint }) => {
