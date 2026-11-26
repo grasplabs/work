@@ -13,7 +13,7 @@ import { minutesAt, ticked } from "./progress.ts";
 // words, with tabular numbers and no leading zero (19:42, 5:00, 0:00).
 // Each digit stands in a cell of its own that cannot be seen and only
 // clips the roll: when a digit changes, the old one
-// slides up and out as the new one comes in from below, like an airport
+// slides up and fades as the new one comes in from below, inside the digits' own height, like an airport
 // board. Only the digits that change move. No fill, edge or shadow; the
 // colon is plain text. From 5:00 left it takes the warning colour; at 0:00
 // it stands still. Each roll is over within the library's `ui` duration on
@@ -85,12 +85,12 @@ export const useCountdownMarks = (left: number, running: boolean): void => {
 };
 
 const rollOut = stylex.keyframes({
-  from: { transform: "translateY(0)" },
-  to: { transform: "translateY(-100%)" },
+  from: { transform: "translateY(0)", opacity: 1 },
+  to: { transform: "translateY(-25%)", opacity: 0 },
 });
 const rollIn = stylex.keyframes({
-  from: { transform: "translateY(100%)" },
-  to: { transform: "translateY(0)" },
+  from: { transform: "translateY(25%)", opacity: 0 },
+  to: { transform: "translateY(0)", opacity: 1 },
 });
 
 const styles = stylex.create({
@@ -105,12 +105,14 @@ const styles = stylex.create({
     color: colors.bodyForeground,
   },
   warning: { color: colors.warning },
-  // One digit's cell: a tabular digit wide and a line high, clipped top and bottom only, so a
-  // resting digit is never cut at its sides.
+  // One digit's cell: a tabular digit wide and as high as the digits themselves, clipped top and
+  // bottom only, so a resting digit is never cut at its sides and a rolling one never stands
+  // above or below the others.
   cell: {
     display: "inline-grid",
     width: "1ch",
-    height: font.textBaseLine,
+    height: "1.2em",
+    lineHeight: "1.2em",
     overflowX: "visible",
     overflowY: "clip",
     textAlign: "center",
