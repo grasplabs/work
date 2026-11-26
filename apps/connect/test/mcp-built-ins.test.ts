@@ -30,6 +30,7 @@ import {
   keyServer,
   mcpInternet,
   sent,
+  servers,
   startLinear,
 } from "./mcp-connectors-harness.ts";
 import { racingDb, racingRead } from "./racing-db.ts";
@@ -731,6 +732,63 @@ describe("a built-in serving its vendor's MCP server with a person's key", () =>
           created_by: "release",
         },
       ],
+    });
+  });
+
+  it("keeps no key checked at the server its connector moved from, nor connects again one the move asked to", async () => {
+    keyServer(sampleTrackerOrigin, "tracker-key");
+    const anna = someone();
+    const connectWith = async () =>
+      await exports.default.connectWithKey({
+        person: anna,
+        provider: "sample-tracker",
+        scope: "personal",
+        key: "tracker-key",
+      });
+    const { connectionId } = await connectWith();
+    // Another release moves the connector as its server checks the key:
+    // its row to the server it names, and its connections asked to
+    // connect again, their keys dropped.
+    const serve = servers.get(sampleTrackerOrigin);
+    let moved = false;
+    servers.set(sampleTrackerOrigin, async (request) => {
+      if (!moved) {
+        moved = true;
+        await env.DB.batch([
+          env.DB.prepare("UPDATE connectors SET url = ? WHERE id = ?").bind(
+            "https://mcp.tracker-next.example/mcp",
+            "sample-tracker"
+          ),
+          env.DB.prepare(
+            "UPDATE connections SET status = 'needs_reauth' WHERE id = ?"
+          ).bind(connectionId),
+          env.DB.prepare(
+            "DELETE FROM connection_tokens WHERE connection_id = ?"
+          ).bind(connectionId),
+        ]);
+      }
+      return await (serve?.(request) ?? new Response(null, { status: 404 }));
+    });
+
+    const kept = await outcome(connectWith());
+    const after = await env.DB.prepare(
+      "SELECT status, (SELECT COUNT(*) FROM connection_tokens WHERE connection_id = connections.id) AS keys FROM connections WHERE id = ?"
+    )
+      .bind(connectionId)
+      .first();
+    const { results: others } = await env.DB.prepare(
+      "SELECT id FROM connections WHERE provider = 'sample-tracker' AND owner_user_id = ? AND id != ?"
+    )
+      .bind(anna.userId, connectionId)
+      .all();
+    await env.DB.prepare("UPDATE connectors SET url = ? WHERE id = ?")
+      .bind(`${sampleTrackerOrigin}/mcp`, "sample-tracker")
+      .run();
+    expect({ moved, kept, after, others }).toStrictEqual({
+      moved: true,
+      kept: "connection.flow_invalid",
+      after: { status: "needs_reauth", keys: 0 },
+      others: [],
     });
   });
 });

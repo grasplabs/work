@@ -41,7 +41,6 @@ import {
   connectorRow,
   isDuplicate,
   maxListedTools,
-  secretContext,
   signInRow,
 } from "./connector-providers.ts";
 import {

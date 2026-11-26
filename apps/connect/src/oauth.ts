@@ -70,6 +70,7 @@ import {
   connections,
   connectionTokens,
   connectionTools,
+  connectors,
   httpConnections,
   oauthFlows,
   pendingActions,
@@ -517,19 +518,35 @@ const confirmedAddressOf = (
     ? (account.email?.toLowerCase() ?? null)
     : null;
 
-/** What a connection is connected for: its scope, and its tenant if pinned. */
-type Target = Pick<FlowRow, "scope" | "tenant"> & { stateHash?: string };
+/**
+ * What a connection is connected for: its scope, and its tenant if pinned.
+ * `stateHash` is the sign-in flow it came back through; `checkedAt` the
+ * connector and the server URL a key was checked at.
+ */
+type Target = Pick<FlowRow, "scope" | "tenant"> & {
+  stateHash?: string;
+  checkedAt?: { connector: string; url: string };
+};
 
 /**
- * That the sign-in flow `target` came back through still stands, as SQL:
- * a move of its connector's sign-in deletes it (connector-providers.ts
- * `prepareBuiltIn`), and then what its code was exchanged for is kept
- * nowhere. Nothing to stand for a key, which no flow brings.
+ * That what `target` was checked against still stands, as SQL. A move of
+ * its connector's server (connector-providers.ts `prepareBuiltIn`)
+ * deletes its sign-in flows and changes the connector's URL, and then
+ * what a flow's code was exchanged for, or a key checked at the old
+ * server, is kept nowhere: the new server never gets it.
  */
-const flowStands = (target: Target): SQL =>
-  target.stateHash === undefined
-    ? sql`1`
-    : sql`EXISTS (SELECT 1 FROM ${oauthFlows} WHERE ${oauthFlows.stateHash} = ${target.stateHash})`;
+const flowStands = ({ stateHash, checkedAt }: Target): SQL =>
+  sql.join(
+    [
+      stateHash === undefined
+        ? sql`1`
+        : sql`EXISTS (SELECT 1 FROM ${oauthFlows} WHERE ${oauthFlows.stateHash} = ${stateHash})`,
+      checkedAt === undefined
+        ? sql`1`
+        : sql`EXISTS (SELECT 1 FROM ${connectors} WHERE ${connectors.id} = ${checkedAt.connector} AND ${connectors.url} = ${checkedAt.url})`,
+    ],
+    sql` AND `
+  );
 
 /** A connection's tenant: none (`null`) for an app's (`""`). */
 const tenantOf = ({ tenant }: Target): string | null =>
@@ -1380,7 +1397,7 @@ export const finishConnection = async (
 const replaceKey = async (
   env: Env,
   { provider, vault }: { provider: ApiKeyProviderConfig; vault: Vault },
-  scope: ConnectionScope,
+  target: Target,
   person: ConnectionPerson,
   account: ProviderAccount,
   tokens: Kept
@@ -1388,14 +1405,14 @@ const replaceKey = async (
   const held = await connectionHolding(env, provider.id, account.id);
   if (
     held?.status !== "active" ||
-    held.scope !== scope ||
-    (scope === "personal" && held.ownerUserId !== person.userId)
+    held.scope !== target.scope ||
+    (target.scope === "personal" && held.ownerUserId !== person.userId)
   ) {
     return undefined;
   }
   const now = new Date();
   const row = await firstTokens(vault, held.id, tokens, now);
-  const stillActive = sql`${connections.id} = ${held.id} AND ${connections.status} = 'active' AND NOT ${ownerErased(held.id)}`;
+  const stillActive = sql`${connections.id} = ${held.id} AND ${connections.status} = 'active' AND NOT ${ownerErased(held.id)} AND ${flowStands(target)}`;
   const db = drizzle(env.DB);
   const replaced = await recordEventIf(
     env,
@@ -1568,10 +1585,17 @@ export const connectWithKey = async (
     expiresAt: apiKeyExpiresAt,
     ...(companyNetwork === undefined ? {} : { companyNetwork }),
   };
+  const target: Target = {
+    scope,
+    tenant: "",
+    ...(provider.url === undefined
+      ? {}
+      : { checkedAt: { connector: provider.id, url: provider.url } }),
+  };
   const replaced = await replaceKey(
     env,
     { provider, vault },
-    scope,
+    target,
     person,
     account,
     kept
@@ -1585,7 +1609,7 @@ export const connectWithKey = async (
       provider: ApiKeyProviderConfig;
       vault: Vault;
     },
-    { scope, tenant: "" },
+    target,
     person,
     account,
     kept,
