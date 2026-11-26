@@ -320,7 +320,7 @@ const Retry = ({ channel }: { channel: ChannelProgress }) => {
         </AlertDialogTrigger>
         <ConfirmMove
           action="Retry"
-          description={`${companies(failed)} on ${name} whose deploy failed ${failed === 1 ? "tries" : "try"} ${channel.releaseId ?? "its release"} again, and new deploys start again.`}
+          description={`${companies(failed)} on ${name} whose deploy failed ${failed === 1 ? "tries" : "try"} again, each with the release it was being given, and new deploys start again.`}
           onConfirm={() => {
             void run(
               async () =>

@@ -285,7 +285,7 @@ describe("moving a channel's companies", () => {
     expect({
       title: words.includes("Retry Beta’s failed deploys?"),
       reach: words.includes(
-        "2 companies on Beta whose deploy failed try 39.01.09 again"
+        "2 companies on Beta whose deploy failed try again, each with the release it was being given"
       ),
       sent: page.sent("retryChannelFn"),
     }).toStrictEqual({ title: true, reach: true, sent: [{ channel: "beta" }] });
