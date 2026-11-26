@@ -1,6 +1,7 @@
 import type {
   AssistantMessage,
   Message,
+  ToolCall,
   ToolResultMessage,
   Usage,
 } from "@earendil-works/pi-ai";
@@ -37,6 +38,7 @@ import {
   showThinkingName,
 } from "./agent-messages.ts";
 import { contextWindowOf, modelFailureOf } from "./models.ts";
+import { withoutUntrustedMarking } from "./untrusted-tags.ts";
 
 // A chat's transcript as pi keeps it (workspace.ts), shown as the person
 // reads it: their questions, the agent's answers with the code it ran and
@@ -121,6 +123,48 @@ const cutTexts = (value: unknown, chars: number): unknown => {
   return value;
 };
 
+/** `value` with each text in it as a person is shown it, at any depth. */
+const shownTexts = (value: unknown): unknown => {
+  if (typeof value === "string") {
+    return withoutUntrustedMarking(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item: unknown) => shownTexts(item));
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, shownTexts(item)])
+    );
+  }
+  return value;
+};
+
+/**
+ * A call's input as a person is shown it, never as it is kept: without the
+ * tags that mark what was read from outside, should the model copy one.
+ */
+const shownInput = (part: ToolCall): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(part.arguments).map(([key, value]) => [
+      key,
+      shownTexts(value),
+    ])
+  );
+
+/**
+ * A call's input as `schema` took it, as a person is shown it: none when
+ * the tool refused it as the model wrote it; as written when what is shown
+ * would no longer pass (a text that was nothing but a tag).
+ */
+const takenAs = <T>(schema: z.ZodType<T>, part: ToolCall): T | undefined => {
+  const taken = schema.safeParse(part.arguments);
+  if (!taken.success) {
+    return undefined;
+  }
+  const shown = schema.safeParse(shownInput(part));
+  return shown.success ? shown.data : taken.data;
+};
+
 /**
  * The calls a response made of the agent's dedicated tools (agent-tools.ts),
  * as far as they have streamed in, each text of their input cut to
@@ -136,11 +180,12 @@ const toolsOf = (message: AssistantMessage, chars?: number): ChatToolCall[] =>
       .filter(
         (before) => before.type === "toolCall" && before.name === "executeCode"
       ).length;
+    const shown = shownInput(part);
     const input: Record<string, unknown> =
       chars === undefined
-        ? part.arguments
+        ? shown
         : Object.fromEntries(
-            Object.entries(part.arguments).map(([key, value]) => [
+            Object.entries(shown).map(([key, value]) => [
               key,
               cutTexts(value, chars),
             ])
@@ -156,9 +201,9 @@ const toolsOf = (message: AssistantMessage, chars?: number): ChatToolCall[] =>
 const askedOf = (message: AssistantMessage): ChatAsked | undefined => {
   for (const part of message.content) {
     if (part.type === "toolCall" && part.name === "askQuestions") {
-      const ask = chatAskSchema.safeParse(part.arguments);
-      if (ask.success) {
-        return { callId: part.id, ...ask.data };
+      const ask = takenAs(chatAskSchema, part);
+      if (ask !== undefined) {
+        return { callId: part.id, ...ask };
       }
     }
   }
@@ -172,9 +217,9 @@ const askedOf = (message: AssistantMessage): ChatAsked | undefined => {
 const plannedOf = (message: AssistantMessage): ChatPlanned | undefined => {
   for (const part of message.content) {
     if (part.type === "toolCall" && part.name === "proposePlan") {
-      const plan = chatPlanSchema.safeParse(part.arguments);
-      if (plan.success) {
-        return { callId: part.id, ...plan.data };
+      const plan = takenAs(chatPlanSchema, part);
+      if (plan !== undefined) {
+        return { callId: part.id, ...plan };
       }
     }
   }
@@ -188,9 +233,9 @@ const plannedOf = (message: AssistantMessage): ChatPlanned | undefined => {
 const draftedOf = (message: AssistantMessage): AgentDrafted | undefined => {
   for (const part of message.content) {
     if (part.type === "toolCall" && part.name === "draftAgent") {
-      const draft = agentDraftSchema.safeParse(part.arguments);
-      if (draft.success) {
-        return { callId: part.id, ...draft.data };
+      const draft = takenAs(agentDraftSchema, part);
+      if (draft !== undefined) {
+        return { callId: part.id, ...draft };
       }
     }
   }
@@ -203,9 +248,9 @@ const changeDraftedOf = (
 ): AgentChangeDrafted | undefined => {
   for (const part of message.content) {
     if (part.type === "toolCall" && part.name === "draftAgentChange") {
-      const change = agentChangeDraftSchema.safeParse(part.arguments);
-      if (change.success) {
-        return { callId: part.id, ...change.data };
+      const change = takenAs(agentChangeDraftSchema, part);
+      if (change !== undefined) {
+        return { callId: part.id, ...change };
       }
     }
   }
@@ -235,18 +280,25 @@ const cardsOf = (
 };
 
 /**
- * What a response thought, as far as it has streamed in: each thinking
- * part the provider showed, joined. A redacted part holds only pi's own
- * placeholder, never the model's words, so it shows nothing.
+ * What a response thought, as far as it has streamed in (`more`): each
+ * thinking part the provider showed, joined, without the marking of what
+ * was read from outside should the model copy it (kept as it came: the
+ * provider signs it). A redacted part holds only pi's own placeholder,
+ * never the model's words, so it shows nothing.
  */
-const thoughtOf = (message: AssistantMessage): string =>
-  message.content
-    .flatMap((part) =>
-      part.type === "thinking" && part.redacted !== true && part.thinking !== ""
-        ? [part.thinking]
-        : []
-    )
-    .join("\n\n");
+const thoughtOf = (message: AssistantMessage, more = false): string =>
+  withoutUntrustedMarking(
+    message.content
+      .flatMap((part) =>
+        part.type === "thinking" &&
+        part.redacted !== true &&
+        part.thinking !== ""
+          ? [part.thinking]
+          : []
+      )
+      .join("\n\n"),
+    more
+  );
 
 /** Whether a response thought at all, shown or redacted. */
 const thought = (message: AssistantMessage): boolean =>
@@ -309,7 +361,7 @@ export const partialOf = (message: AssistantMessage): ChatPartial => ({
   text: textOf(message.content),
   code: codeOf(message),
   tools: toolsOf(message, chatToolPreviewChars),
-  reasoning: thoughtOf(message),
+  reasoning: thoughtOf(message, true),
 });
 
 /**
@@ -368,7 +420,7 @@ export const chatMessageOf = (
       id,
       role: "result",
       callId: message.toolCallId,
-      text: textOf(message.content),
+      text: withoutUntrustedMarking(textOf(message.content)),
       failed: message.isError,
       at,
       ...(thinking === undefined ? {} : { thinking }),

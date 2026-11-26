@@ -7,7 +7,8 @@ import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/e
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  untrustedTag,
+  untrustedMarking,
+  withoutUntrustedMarking,
   withoutUntrustedTags,
   withoutUntrustedTagsIn,
 } from "../src/untrusted-tags.ts";
@@ -15,7 +16,9 @@ import {
 // The model's answer without the tags that mark what a run read from
 // outside as data: what a person sees of an answer that copied one.
 
-const tag = untrustedTag();
+const marking = untrustedMarking("connection c1 (mail.search)");
+/** The marking's tag name, as its closing tag holds it. */
+const tag = marking.close.slice("\n</".length, -">".length);
 
 /** The text of a message's text blocks. */
 const textOf = (message: AssistantMessage): string =>
@@ -132,6 +135,28 @@ describe("an answer without the marking's tags", () => {
       ],
       deltas: ["1 ", "< 2 and ", "<untrue>", ", then ", "<untrusted-"],
       final: "1 < 2 and <untrue>, then <untrusted-",
+    });
+  });
+});
+
+describe("text shown with the marking of what was read from outside", () => {
+  it("shows what it marked without its line and tags", () => {
+    expect(
+      withoutUntrustedMarking(
+        `${marking.open}Returned:\n{"issues":["GRA-1"]}${marking.close}`
+      )
+    ).toBe('Returned:\n{"issues":["GRA-1"]}');
+  });
+
+  it("shows a tag the model copied as nothing, and holds one's beginning back while more is to come", () => {
+    expect({
+      whole: withoutUntrustedMarking(`It read <${tag}> the list.`),
+      streaming: withoutUntrustedMarking("It read <untr", true),
+      kept: withoutUntrustedMarking("It read <untr"),
+    }).toStrictEqual({
+      whole: "It read  the list.",
+      streaming: "It read ",
+      kept: "It read <untr",
     });
   });
 });
