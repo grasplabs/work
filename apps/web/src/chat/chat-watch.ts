@@ -42,8 +42,12 @@ const watches = new Map<string, Watch>();
 /** How many chats' last views the tab keeps. */
 export const keptViews = 20;
 
-/** The last view of each chat nobody shows now, by person and chat, the newest last. */
-const kept = new Map<string, ChatView>();
+/**
+ * The last view of each chat nobody shows now, by person and chat, the
+ * newest last: as it is shown again, stale (`ChatView.stale`), with no
+ * word of where the person had read to, which only core may say.
+ */
+const kept = new Map<string, FollowedChat>();
 
 const keptKey = (userId: string, chatId: string): string =>
   JSON.stringify([userId, chatId]);
@@ -51,7 +55,10 @@ const keptKey = (userId: string, chatId: string): string =>
 /** Keeps `view` as the last of its chat, the oldest kept let go past the most. */
 const keep = (key: string, view: ChatView): void => {
   kept.delete(key);
-  kept.set(key, view);
+  kept.set(key, {
+    view: { ...view, seenUpTo: undefined, stale: true },
+    failure: undefined,
+  });
   for (const oldest of kept.keys()) {
     if (kept.size <= keptViews) {
       break;
@@ -82,6 +89,20 @@ const changed = (watch: Watch, state: FollowedChat): void => {
 };
 
 /**
+ * The person read chat `chatId` up to message `id` (`markRead`, from any
+ * view of it): the tab's watch of it says so from now on, so another view
+ * of it opened after (the dock after the page) draws no New line over what
+ * was read meanwhile.
+ */
+export const readTo = (chatId: string, id: number): void => {
+  const watch = watches.get(chatId);
+  const { view } = watch?.state ?? notStarted;
+  if (watch !== undefined && view.loaded && (view.seenUpTo ?? 0) < id) {
+    changed(watch, { ...watch.state, view: { ...view, seenUpTo: id } });
+  }
+};
+
+/**
  * One subscribe function per chat (and connection), so React keeps its
  * subscription from render to render rather than letting go and taking it
  * again; let go of with the watch.
@@ -107,12 +128,7 @@ const subscribe = (
   if (watch === undefined) {
     const last = kept.get(key);
     const started: Watch = {
-      // Where they had read to is the new watch's to say: the line is
-      // decided from that, never from when the view was kept.
-      state:
-        last === undefined
-          ? notStarted
-          : { view: { ...last, seenUpTo: undefined }, failure: undefined },
+      state: last ?? notStarted,
       listeners: new Set(),
       kept: last !== undefined,
     };
@@ -193,6 +209,8 @@ export const useFollowedChat = (chatId: string | undefined): FollowedChat => {
     () =>
       chatId === undefined
         ? notStarted
-        : (watches.get(chatId)?.state ?? notStarted)
+        : (watches.get(chatId)?.state ??
+          kept.get(keptKey(identity?.userId ?? "", chatId)) ??
+          notStarted)
   );
 };
