@@ -5,7 +5,7 @@ import type { SpokenWord } from "@grasp-os/shared/voice";
 // models of pi's catalog: our own small catalog, as pi's has no voice
 // models. Each speech model is Mistral's or ElevenLabs's, priced per
 // character it is asked to say, which is how both bill speech. Each transcription
-// model is OpenAI's, priced per second it hears, at a price never below
+// model is OpenAI's or Mistral's, priced per second it hears, at a price never below
 // what the provider bills for it. Grasp pays for these on its own keys:
 // what each cost is recorded for Grasp's spend overview (model-usage.ts).
 
@@ -47,8 +47,8 @@ const dollarsPer1000Chars = {
 /** The providers that say a line: Mistral and ElevenLabs (platform-ai.ts). */
 const speechProviders = ["mistral", "elevenlabs"] as const;
 
-/** The providers that write down speech: OpenAI (platform-ai.ts). */
-const transcriptionProviders = ["openai"] as const;
+/** The providers that write down speech: OpenAI and Mistral (platform-ai.ts). */
+const transcriptionProviders = ["openai", "mistral"] as const;
 
 /** A speech model the gateway offers. */
 export type VoiceRef = {
@@ -107,11 +107,29 @@ export const speechCostOf = (ref: VoiceRef, characters: number): number =>
  * $0.003 (mini $0.0015): charged $0.01 a minute ($0.005 for mini), above
  * both together, and the prompt of words to listen out for with them.
  */
-const dollarsPerHour = {
+const openAiDollarsPerHour = {
   "gpt-4o-transcribe": 0.6,
   "gpt-4o-mini-transcribe": 0.3,
   "whisper-1": 0.36,
 } as const;
+
+/**
+ * Mistral's prices for speech to text, in US dollars per hour of audio.
+ * Voxtral Mini Transcribe Realtime is billed per minute heard, $0.006
+ * (Mistral's launch of Voxtral Realtime, read on 2026-11-26): charged
+ * $0.01 a minute, above it, as OpenAI's are.
+ */
+const mistralDollarsPerHour = {
+  "voxtral-mini-transcribe-realtime-2602": 0.6,
+} as const;
+
+/** Each transcription provider's models, with their prices. */
+const hearingPrices = {
+  openai: openAiDollarsPerHour,
+  mistral: mistralDollarsPerHour,
+} as const;
+
+const dollarsPerHour = { ...openAiDollarsPerHour, ...mistralDollarsPerHour };
 
 /** A transcription model the gateway offers. */
 export interface HearingRef {
@@ -119,8 +137,11 @@ export interface HearingRef {
   id: keyof typeof dollarsPerHour;
 }
 
-const isHearingModel = (id: string): id is HearingRef["id"] =>
-  Object.hasOwn(dollarsPerHour, id);
+/** Whether `id` is one of `provider`'s transcription models. */
+const isHearingModel = (
+  provider: HearingRef["provider"],
+  id: string
+): id is HearingRef["id"] => Object.hasOwn(hearingPrices[provider], id);
 
 const isTranscriptionProvider = (
   provider: string
@@ -138,7 +159,7 @@ export const parseHearingRef = (ref: string): HearingRef | undefined => {
     isTranscriptionProvider(provider) &&
     id !== undefined &&
     rest.length === 0 &&
-    isHearingModel(id)
+    isHearingModel(provider, id)
     ? { provider, id }
     : undefined;
 };

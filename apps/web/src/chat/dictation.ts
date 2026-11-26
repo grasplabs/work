@@ -165,6 +165,10 @@ export interface Dictation {
 /** Where a dictation is. */
 type Stage = "asking" | "opening" | "listening" | "settling" | "over";
 
+/** Two parts of what was said, one after the other. */
+const joined = (before: string, after: string): string =>
+  [before.trim(), after.trim()].filter((part) => part !== "").join(" ");
+
 /** Starts one dictation in `locale`: asks for the microphone, then opens core's line. */
 export const dictate = (
   locale: Locale,
@@ -176,6 +180,8 @@ export const dictate = (
   let line: LiveLine | undefined;
   let waiting = 0;
   let partial = "";
+  /** What was heard before the line last went down: what comes after follows it. */
+  let kept = "";
   let muted = false;
   /** Every way out ends here, once: the microphone let go of, the line closed. */
   const end = (): void => {
@@ -199,6 +205,15 @@ export const dictate = (
     }
     listener.problem(problem);
   };
+  /** The line takes this long at most to come back once it went down: then it stopped. */
+  const waitForLine = (): void => {
+    window.clearTimeout(waiting);
+    waiting = window.setTimeout(() => {
+      if (stage === "opening") {
+        stopped("failed");
+      }
+    }, lineReadyMs);
+  };
   const onSound = (sound: Int16Array): void => {
     if (stage === "listening" && !muted) {
       line?.send(sound);
@@ -217,8 +232,8 @@ export const dictate = (
       locale,
       onPartial: (text) => {
         if (stage === "listening") {
-          partial = text;
-          listener.heard(text);
+          partial = joined(kept, text);
+          listener.heard(partial);
         }
       },
       // Core won't listen: no use trying again.
@@ -227,8 +242,14 @@ export const dictate = (
       },
       onLive: (live) => {
         if (!live) {
-          // The line went down, before it listened or mid-way.
-          stopped("failed");
+          // The line went down a moment: it opens again by itself, and
+          // what was heard so far is kept. Only a line that won't come
+          // back stops the dictation.
+          if (stage === "listening") {
+            kept = partial;
+            stage = "opening";
+            waitForLine();
+          }
         } else if (stage === "opening" && line !== undefined) {
           window.clearTimeout(waiting);
           if (line.begin(new Int16Array(0))) {
@@ -243,11 +264,7 @@ export const dictate = (
       return;
     }
     line = opened;
-    waiting = window.setTimeout(() => {
-      if (stage === "opening") {
-        stopped("failed");
-      }
-    }, lineReadyMs);
+    waitForLine();
   };
   void (async () => {
     try {
@@ -266,7 +283,7 @@ export const dictate = (
   return {
     finish: async () => {
       if (stage !== "listening") {
-        // Nothing listened yet: nothing to write down.
+        // Not listening now: what was heard is all there is.
         end();
         return partial;
       }
@@ -276,7 +293,7 @@ export const dictate = (
       mic = undefined;
       const words = (await line?.end()) ?? null;
       end();
-      return words ?? partial;
+      return words === null ? partial : joined(kept, words);
     },
     cancel: () => {
       if (stage !== "over") {

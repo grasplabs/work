@@ -85,7 +85,8 @@ export interface AiProviderSpec {
   queries: readonly string[];
   /**
    * The paths below its host a realtime WebSocket may open, with the one
-   * query each takes, and nothing else: OpenAI's realtime transcription,
+   * query each takes, and nothing else: OpenAI's and Mistral's realtime
+   * transcription,
    * for Grasp's live listening (platform features only, never an
    * organization's key). Empty for a provider with none.
    */
@@ -183,7 +184,13 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     // (Voxtral), on Grasp's key alone.
     paths: ["/v1/chat/completions", "/v1/audio/speech"],
     queries: [""],
-    realtime: [],
+    // Voxtral's realtime transcription, for Grasp's live listening.
+    realtime: [
+      {
+        path: "/v1/audio/transcriptions/realtime",
+        query: "?model=voxtral-mini-transcribe-realtime-2602",
+      },
+    ],
     // Its voice agents' sessions, for Grasp's interviews.
     sessions: "/v1/audio/sessions",
     keyHeader: "authorization",
