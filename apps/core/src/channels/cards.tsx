@@ -493,8 +493,20 @@ export interface HeldWriteView {
  */
 export type ReadCheck = { read: "mail" } | { read: "record"; where: string };
 
-/** How a press ended, said once at the foot of the card. */
-export type PressOutcome = Extract<
+/**
+ * A press that a connection's pause refused before connect took a write:
+ * that write and every one after it on the card (`waiting`) still wait, to
+ * confirm again in `minutes`, the pause's time left, on a new card, or,
+ * where none could be posted (`newCard` false), by asking again.
+ */
+export interface Paused {
+  waiting: number;
+  minutes: number;
+  newCard: boolean;
+}
+
+/** How a press ended, by the line said once at the foot of the card. */
+export type PressLine = Extract<
   LineName,
   | "allDone"
   | "cancelled"
@@ -503,6 +515,9 @@ export type PressOutcome = Extract<
   | "expired"
   | "changedSince"
 >;
+
+/** How a press ended, said once at the foot of the card. */
+export type PressOutcome = PressLine | Paused;
 
 /** A turn's held writes on one card. */
 export interface HeldWritesCard {
@@ -529,25 +544,31 @@ export const cancelAction = "held-writes.cancel";
 
 /**
  * What a press on the card's buttons carries: exactly the writes it
- * showed, a write to an App with the chat it is held in.
+ * showed, a write to an App with the chat it is held in, and what it warned
+ * of (`check`: mail, the only warning a read gives until GRA-719), for a
+ * card posted again for some of them (press.ts). It
+ * comes from the card itself, and runs only the presser's own writes, so a
+ * press that drops it drops only their own warning.
  */
-const pressSchema = z
-  .array(
-    z
-      .object({
+const pressSchema = z.strictObject({
+  writes: z
+    .array(
+      z.strictObject({
         id: z.string().min(1),
         inputHash: z.string().min(1),
         chatId: z.string().min(1).optional(),
       })
-      .strict()
-  )
-  .min(1)
-  .max(maxWritesOnCard);
+    )
+    .min(1)
+    .max(maxWritesOnCard),
+  check: z.strictObject({ read: z.literal("mail") }).optional(),
+});
 export type Press = z.infer<typeof pressSchema>;
 
 /**
- * The writes a press names, from its button's value, or null when the
- * value isn't one a card of held writes carries.
+ * The writes a press names, and what their card warned of, from its
+ * button's value, or null when the value isn't one a card of held writes
+ * carries.
  */
 export const pressOf = (value?: string): Press | null => {
   if (value === undefined) {
@@ -589,13 +610,41 @@ const checkLine = (check: ReadCheck, locale: ChannelLocale, room: Room) =>
         where: fit(check.where, maxTitleChars, room).text,
       });
 
-/** What a press on a card of `writes` carries: each write's id and hash, a write to an App's with its chat. */
-const pressOfWrites = (writes: readonly HeldWriteView[]): string =>
-  JSON.stringify(
-    writes.map(({ id, inputHash, chatId }) =>
+/**
+ * What a press on a card of `writes` carries (`Press`): each write's id
+ * and hash, a write to an App's with its chat, and what the card warns of.
+ */
+const pressOfWrites = (
+  writes: readonly HeldWriteView[],
+  check?: Press["check"]
+): string =>
+  JSON.stringify({
+    writes: writes.map(({ id, inputHash, chatId }) =>
       chatId === undefined ? { id, inputHash } : { id, inputHash, chatId }
-    )
-  );
+    ),
+    ...(check === undefined ? {} : { check }),
+  });
+
+/** The line at the foot of a card whose press ended as `outcome`. */
+const outcomeLine = (outcome: PressOutcome, locale: ChannelLocale): string => {
+  if (typeof outcome === "string") {
+    return say(outcome, locale);
+  }
+  const { waiting, minutes, newCard } = outcome;
+  if (!newCard) {
+    return waiting === 1
+      ? say("pausedOneAskAgain", locale)
+      : say("pausedManyAskAgain", locale);
+  }
+  if (waiting === 1) {
+    return minutes === 1
+      ? say("pausedOneMinute", locale)
+      : say("pausedOneMinutes", locale, { minutes });
+  }
+  return minutes === 1
+    ? say("pausedManyMinute", locale)
+    : say("pausedManyMinutes", locale, { minutes });
+};
 
 /**
  * `writes` as a card on `platform` lays them out, in `locale`, within the
@@ -611,7 +660,10 @@ const laidOut = ({
 }: Pick<HeldWritesCard, "locale" | "platform" | "writes" | "check">) => {
   const room: Room = { left: outsideBytes };
   const shown = writes.slice(0, maxWritesOnCard);
-  const press = pressOfWrites(shown);
+  const press = pressOfWrites(
+    shown,
+    check?.read === "mail" ? check : undefined
+  );
   // A press that names more than a button carries can't be on the card.
   const pressFits = press.length <= buttonValueChars;
   room.left -= sizeOf(press);
@@ -635,10 +687,11 @@ const laidOut = ({
 };
 
 /**
- * The warning a card to confirm is measured with, whether or not it shows
- * one (`heldWritesCards`, `confirmableOn`): the longest it can show, so a
- * write never fits only because a turn had no warning, and a press, which
- * can't tell whether its card had one, measures it the same.
+ * The warning a card to confirm is measured with, in its lines and in the
+ * press that carries it, whether or not it shows one (`heldWritesCards`,
+ * `confirmableOn`): the longest it can show, so a write never fits only
+ * because a turn had no warning, and a press measures it the same,
+ * whatever its card warned of.
  */
 const measuredCheck: ReadCheck = { read: "mail" };
 
@@ -731,7 +784,7 @@ export const heldWritesCard = ({
       ))}
       {why === null ? null : <CardText>{say(why, locale)}</CardText>}
       {outcome === undefined ? null : (
-        <CardText style="bold">{say(outcome, locale)}</CardText>
+        <CardText style="bold">{outcomeLine(outcome, locale)}</CardText>
       )}
       {cancellable ? (
         <Actions>

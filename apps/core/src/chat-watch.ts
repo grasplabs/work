@@ -8,6 +8,7 @@ import type {
   ChatToolEvent,
   ChatUpdate,
 } from "@grasp-os/shared/chat";
+import type { ModelWait } from "@grasp-os/shared/models";
 
 /** Where a watcher's updates go: the frontend's callback, through core. */
 export type ChatListener = Rpc.Stub<(update: ChatUpdate) => Promise<void>>;
@@ -27,6 +28,8 @@ export interface ChatState {
   provenanceVersion: number;
   /** Whether its turn checks the drafts it wrote now. */
   checking: boolean;
+  /** What its turn's model request waits on now, if anything. */
+  waiting: ModelWait | null;
 }
 
 /** A text the watcher has, and the one there is now: what it gains. */
@@ -165,6 +168,7 @@ export class ChatWatch {
       worked,
       provenanceVersion,
       checking,
+      waiting,
     } = this.#state();
     const tools = this.#unsentTools.splice(0);
     const update: ChatUpdate = {
@@ -177,6 +181,7 @@ export class ChatWatch {
       held,
       worked,
       checking,
+      waiting,
       ...(provenanceVersion === this.#provenanceSent
         ? {}
         : { provenance: this.#provenance() }),

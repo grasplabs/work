@@ -1,6 +1,9 @@
 import { auditIdentifierMaxLength } from "@grasp-os/shared/audit";
 import {
+  appProviderSchema,
+  connectorKeyHeaderSchema,
   connectorProviderSchema,
+  connectorUrlMaxLength,
   oauthProviderSchema,
   toolReachSchema,
 } from "@grasp-os/shared/connect";
@@ -9,7 +12,14 @@ import { permissionActionSchema } from "@grasp-os/shared/permissions";
 import { syncCursorSchema, syncItemKindSchema } from "@grasp-os/shared/sync";
 import { z } from "zod";
 
-import { httpMethods, isBatchSegment, parameterSegment } from "./protocol.ts";
+import { isBatchSegment } from "../common/value-formats.ts";
+import { dnsLabel, hostPattern, hostTemplateOf } from "./hosts.ts";
+import {
+  httpMethods,
+  maxProvenanceItems,
+  parameterSegment,
+  readAs,
+} from "./protocol.ts";
 import { endpointHost, signInSchema } from "./sign-in.ts";
 import { declarationProblem, isDeliveringPath } from "./tool-rules.ts";
 
@@ -19,11 +29,8 @@ import { declarationProblem, isDeliveringPath } from "./tool-rules.ts";
 // provider's token a call gets, and where that call may go (threat model
 // R9, Q11): the connector's code can't widen either.
 
-/**
- * How a caller wants a file's content, in a tool that answers a file
- * (`answersFile`): as text, or base64 for extraction.
- */
-export const readAsSchema = z.enum(["text", "base64"]);
+/** How a caller wants a file's content (`readAs`). */
+export const readAsSchema = z.enum(readAs);
 
 /**
  * How connect may recover a call of an action once its outcome is unknown
@@ -36,21 +43,10 @@ export const readAsSchema = z.enum(["text", "base64"]);
 export const recoveryModes = ["none", "repeat", "find"] as const;
 export type RecoveryMode = (typeof recoveryModes)[number];
 
-/** Most resource IDs one call may report reading. */
-export const maxProvenanceItems = 1000;
-
 /** The IDs of the resources a call read, as a tool reports them. */
 export const provenanceSchema = z
   .array(z.string().min(1).max(auditIdentifierMaxLength))
   .max(maxProvenanceItems);
-
-/**
- * A provider host, as the egress handler compares it: a lowercase DNS name
- * with at least two labels and a top-level label that starts with a letter,
- * so never an IP address, a port or userinfo.
- */
-const hostPattern =
-  /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 
 /** A path segment an action names as it is, such as `v1.0` or `$value`. */
 const literalSegment = /^[\w.~$:@()'-]+$/u;
@@ -74,6 +70,17 @@ const isPathTemplate = (path: string): boolean => {
   );
 };
 
+/** A host a connector declares: fixed (`hostPattern`), or a template. */
+export const declaredHostSchema = z
+  .string()
+  .max(253)
+  .refine(
+    (host) =>
+      (hostPattern.test(host) && !host.endsWith(".invalid")) ||
+      hostTemplateOf(host) !== undefined,
+    "Not a host, or a host template: {name}.<host> or {name}"
+  );
+
 /** A host a connector may reach (`hostPattern`). */
 export const hostSchema = z.string().regex(hostPattern);
 
@@ -88,9 +95,6 @@ const redirectHostSchema = z
     (pattern) => pattern.startsWith("*.") && hostPattern.test(pattern.slice(2)),
     "Not a redirect host: *.<host>"
   );
-
-/** One DNS label, as a redirect host's `*` stands for. */
-const dnsLabel = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 
 /** Whether `hostname` (lowercase, as a URL has it) is one `pattern` allows. */
 export const redirectHostMatches = (
@@ -121,7 +125,7 @@ export const redirectHostMatches = (
 export const routeSchema = z
   .strictObject({
     method: z.enum(httpMethods),
-    host: hostSchema,
+    host: declaredHostSchema,
     path: z.string().max(512).refine(isPathTemplate, "Not a path template"),
     redirects: z.array(redirectHostSchema).min(1).max(4).optional(),
   })
@@ -203,6 +207,25 @@ const actionManifestSchema = z.strictObject({
    * turns into the digests and bytes. Only a write takes files.
    */
   takesFiles: z.literal(true).optional(),
+  /**
+   * It reads or changes email (`true`), or mails someone: a write whose
+   * `recipients` input properties hold the addresses it mails. Mail tools
+   * are held by the platform's mail rules: a chat's agent reaches only its
+   * person's own mailbox or one pointed at for them (with resource
+   * `mailbox`), a card says the turn read mail, and a run's mail is
+   * stamped with its recipients (core's workflows/mail-stamps.ts).
+   */
+  mail: z
+    .union([
+      z.literal(true),
+      z.strictObject({
+        recipients: z
+          .array(z.string().regex(/^[A-Za-z_]\w*$/u))
+          .min(1)
+          .max(16),
+      }),
+    ])
+    .optional(),
   /**
    * Its input and its output, as the JSON Schemas the connector's own
    * schemas make: the generated contract an App's resource binding is
@@ -290,9 +313,43 @@ export const syncParamsSchema = z.strictObject({
 });
 export type SyncParams = z.infer<typeof syncParamsSchema>;
 
+/**
+ * The vendor's own MCP server a connector serves (`defineConnector`'s
+ * `mcp`): its URL, https and as the URL parser writes it, with no
+ * credentials, query or fragment; and how Grasp gets a client there.
+ * `dcr`: the server registers it (RFC 7591, or a client metadata
+ * document). `{ header }`: each person's key goes in that header.
+ */
+export const mcpManifestSchema = z.strictObject({
+  url: z
+    .url({ protocol: /^https$/u })
+    .max(connectorUrlMaxLength)
+    .refine((url) => {
+      const parsed = new URL(url);
+      return (
+        parsed.href === url &&
+        parsed.username === "" &&
+        parsed.password === "" &&
+        parsed.search === "" &&
+        parsed.hash === ""
+      );
+    }, "Not a server URL: https, as the URL parser writes it, without credentials, query or fragment"),
+  registration: z.union([
+    z.literal("dcr"),
+    z.strictObject({ header: connectorKeyHeaderSchema }),
+  ]),
+});
+export type McpManifest = z.output<typeof mcpManifestSchema>;
+export type McpManifestInput = z.input<typeof mcpManifestSchema>;
+
 export const connectorManifestSchema = z
   .strictObject({
     name: connectorNameSchema,
+    /**
+     * Its vendor's name, as people read it (`Tracker`): what the catalog
+     * shows of a connector without a provider record to name it.
+     */
+    title: z.string().min(1).max(80).optional(),
     /**
      * Whose token or key a call gets: a connection with this provider's.
      * A suite (`microsoft`, `google`) or an app with its own record.
@@ -300,14 +357,31 @@ export const connectorManifestSchema = z
     provider: connectorProviderSchema,
     /**
      * An app's provider record: how a person signs in to it (sign-in.ts).
-     * Required for an app, and never for a suite, whose sign-in connect
-     * handles itself.
+     * Required for an app; a suite's connector may leave it to connect's
+     * own config for the suite, which wins while connect has one.
      */
     signIn: signInSchema.optional(),
     /** The OAuth scopes its actions need, all among those connect asks for. */
     scopes: z.array(z.string().min(1).max(256)).max(64),
-    /** Every host it may reach, exactly. */
-    hosts: z.array(hostSchema).min(1).max(maxHosts),
+    /**
+     * Every host it may reach, exactly, or as a template (`filledHost`):
+     * at least one, but none for a connector that serves its vendor's MCP
+     * server (`mcp`).
+     */
+    hosts: z.array(declaredHostSchema).max(maxHosts),
+    /**
+     * Those of its hosts the connection's credential goes to: connect's
+     * egress adds it to a request for one of these alone, and sends one
+     * for any other host without it. None for one serving an MCP server.
+     */
+    credentialHosts: z.array(declaredHostSchema).max(maxHosts),
+    /**
+     * The vendor's own MCP server it serves: its tools are the server's,
+     * as `tools/list` names them, and connect signs in there as the
+     * server says (RFC 9728 and 8414) or with a person's key. Such a
+     * connector has no hosts, sign-in, scopes, actions or syncs of its own.
+     */
+    mcp: mcpManifestSchema.optional(),
     /** Each action (tool) by name, and the only requests it may send. */
     actions: z.record(permissionActionSchema, actionManifestSchema),
     /**
@@ -317,10 +391,31 @@ export const connectorManifestSchema = z
     syncs: z.record(syncNameSchema, syncManifestSchema).optional(),
   })
   .refine(
-    ({ provider, signIn }) =>
-      oauthProviderSchema.safeParse(provider).success ===
-      (signIn === undefined),
-    "An app's connector carries its provider record, and a suite's none"
+    ({ mcp, hosts }) => mcp !== undefined || hosts.length > 0,
+    "A connector reaches at least one host, or serves an MCP server"
+  )
+  .refine(
+    ({ name, title, provider, signIn, mcp }) =>
+      mcp === undefined
+        ? signIn !== undefined ||
+          oauthProviderSchema.safeParse(provider).success
+        : provider === name &&
+          appProviderSchema.safeParse(name).success &&
+          signIn === undefined &&
+          title !== undefined,
+    // An MCP server's sign-in is its own, learned from it: the connection
+    // is to the connector, by its name, which is never a suite's or
+    // another reserved provider's.
+    "An app's connector carries its provider record, and one serving an MCP server none, as its own provider by an app's name, with its title"
+  )
+  .refine(
+    ({ mcp, hosts, scopes, actions, syncs = {} }) =>
+      mcp === undefined ||
+      (hosts.length === 0 &&
+        scopes.length === 0 &&
+        Object.keys(actions).length === 0 &&
+        Object.keys(syncs).length === 0),
+    "A connector serving an MCP server has no hosts, scopes, actions or syncs of its own"
   )
   .refine(
     ({ signIn, scopes }) =>
@@ -331,11 +426,53 @@ export const connectorManifestSchema = z
     "A connector's scopes are among those its record asks for; an API key has none"
   )
   .refine(
+    ({ mcp, credentialHosts }) =>
+      (mcp === undefined) === credentialHosts.length > 0,
+    "A connector's credential goes to at least one of its hosts, and one serving an MCP server has none"
+  )
+  .refine(
+    ({ hosts, credentialHosts }) =>
+      credentialHosts.every((host) => hosts.includes(host)),
+    "The credential goes only to hosts of the connector's"
+  )
+  .refine(
+    ({ signIn, credentialHosts }) =>
+      signIn?.account === undefined ||
+      credentialHosts.includes(endpointHost(signIn.account.url) ?? ""),
+    // The lookup carries the token or key: only where the credential goes.
+    "The account lookup goes to one of the hosts the credential goes to"
+  )
+  .refine(
     ({ signIn, hosts }) =>
-      signIn === undefined ||
-      hosts.includes(endpointHost(signIn.account.url) ?? ""),
-    // The lookup carries the token or key: only where the calls go.
-    "The account lookup goes to one of the connector's hosts"
+      hosts.every((host) => {
+        const template = hostTemplateOf(host);
+        return (
+          template === undefined ||
+          signIn?.kind === "api_key" ||
+          (signIn?.kind === "oauth2" &&
+            template.suffix !== null &&
+            Object.hasOwn(signIn.hostsFrom ?? {}, host))
+        );
+      }),
+    // Given with the key when a connection signs in, or named by the token
+    // response under a fixed name: a whole host only an admin types.
+    "A host template is filled by an API key's sign-in, or by the token response (hostsFrom) under a fixed name"
+  )
+  .refine(
+    ({ hosts }) => {
+      const names = hosts.flatMap((host) => hostTemplateOf(host)?.name ?? []);
+      return new Set(names).size === names.length;
+    },
+    // A connection's hosts are told apart, and audited, by name.
+    "Each host template has a name of its own"
+  )
+  .refine(
+    ({ signIn, hosts }) =>
+      signIn?.kind !== "oauth2" ||
+      Object.keys(signIn.hostsFrom ?? {}).every(
+        (host) => hosts.includes(host) && hostTemplateOf(host) !== undefined
+      ),
+    "hostsFrom names only the connector's host templates"
   )
   .refine(
     ({ hosts, actions, syncs = {} }) =>
@@ -388,6 +525,16 @@ export const connectorManifestSchema = z
   .refine(
     ({ actions }) =>
       Object.values(actions).every(
+        ({ mail, readOnly, input }) =>
+          typeof mail !== "object" ||
+          (!readOnly &&
+            mail.recipients.every((recipient) => input.includes(recipient)))
+      ),
+    "Only a write mails someone, at its own input properties"
+  )
+  .refine(
+    ({ actions }) =>
+      Object.values(actions).every(
         ({ readOnly, recovery, routes }) =>
           (!readOnly || recovery === "none") &&
           (recovery !== "find" || routes.some(({ method }) => method === "GET"))
@@ -425,6 +572,60 @@ export const connectorManifestSchema = z
   });
 export type ConnectorManifest = z.infer<typeof connectorManifestSchema>;
 
+/**
+ * The connectors among `manifests` that serve an MCP server under a name
+ * another connector has as its provider: a connection to one, by its
+ * name, would be taken for a connection to that provider. A release holds
+ * none (connect's build.ts).
+ */
+export const shadowingConnectors = (
+  manifests: readonly ConnectorManifest[]
+): string[] =>
+  manifests
+    .filter(
+      ({ name, mcp }) =>
+        mcp !== undefined &&
+        manifests.some(
+          (other) => other.name !== name && other.provider === name
+        )
+    )
+    .map(({ name }) => name);
+
+/**
+ * An MCP server's URL as compared: its origin, which the parser lowercases,
+ * and its path without a trailing slash. Two connectors at one server are
+ * one: a release holds no two (connect's build.ts), and a URL a built-in
+ * serves can't be added again (connect's `builtInAt`).
+ */
+export const mcpServerKey = (url: string): string => {
+  const { origin, pathname } = new URL(url);
+  return `${origin}${pathname.replace(/\/+$/u, "")}`;
+};
+
+/**
+ * The connectors among `manifests` that serve an MCP server one before
+ * them serves (`mcpServerKey`), each named after that one: a connection
+ * to a server is to one built-in. A release holds none (connect's
+ * build.ts).
+ */
+export const sharedMcpServers = (
+  manifests: readonly ConnectorManifest[]
+): [string, string][] => {
+  const servers = new Map<string, string>();
+  return manifests.flatMap(({ name, mcp }): [string, string][] => {
+    if (mcp === undefined) {
+      return [];
+    }
+    const server = mcpServerKey(mcp.url);
+    const first = servers.get(server);
+    if (first !== undefined) {
+      return [[first, name]];
+    }
+    servers.set(server, name);
+    return [];
+  });
+};
+
 /** One action of a generated connector contract, and the tool it calls. */
 export interface ContractAction {
   /** The connector's tool, e.g. `mail.send`. */
@@ -445,8 +646,8 @@ const contractActionPattern = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/u;
 /**
  * The contracts `manifest` generates (spec 12): one per family of its
  * tools, `<connector>.<family>@1`, holding each tool of the family under
- * its name after the family (`mail.send` is `send` of
- * `microsoft-365.mail@1`). The family is all of the name but its last
+ * its name after the family (`users.messages.list` is `list` of
+ * `microsoft-365.users.messages@1`). The family is all of the name but its last
  * part, as the mirror rule names a tool (`deals.followers.list` is `list`
  * of `crm.deals.followers@1`). Connect serves contracts from this, and the
  * SDK's connector catalog is typed from it, so both name the same

@@ -59,8 +59,28 @@ export type OwedEnd =
   | "connection.revoke_superseded"
   | "connection.revoke_abandoned";
 
-/** Why a revoke was given up. */
-export type GivenUpReason = "expired" | "unreadable";
+/**
+ * Why a revoke was given up: its retries ran out, its tokens stopped
+ * opening, or its connector's server moved (connector-providers.ts
+ * `prepareBuiltIn`), whose new server never gets the old token.
+ */
+export type GivenUpReason = "expired" | "unreadable" | "moved";
+
+/**
+ * The statement that keeps the owed revokes `where` picks as given up for
+ * `reason`, without what they held to revoke with, for the company's
+ * admins to revoke by hand (src/revocations-by-hand.ts). Goes in the
+ * batch that deletes them, before it.
+ */
+export const giveUpOwed = (
+  db: DrizzleD1Database,
+  where: SQL,
+  reason: GivenUpReason
+) =>
+  db.insert(givenUpRevocations).select(
+    sql`SELECT ${tokenRevocations.id}, ${tokenRevocations.connectionId}, ${tokenRevocations.reason}, ${reason}, ${tokenRevocations.attempts}, ${tokenRevocations.createdAt}, ${Date.now()}
+      FROM ${tokenRevocations} WHERE ${where}`
+  );
 
 /**
  * Ends the owed revoke `id` of connection `connectionId` as `action`, with
@@ -78,7 +98,6 @@ export const endOwedRevoke = async (
 ): Promise<void> => {
   const db = drizzle(env.DB);
   const still = eq(tokenRevocations.id, owed.id);
-  const now = Date.now();
   await recordEventIf(
     env,
     {
@@ -89,14 +108,7 @@ export const endOwedRevoke = async (
     },
     { from: tokenRevocations, where: still },
     [
-      ...(givenUp === undefined
-        ? []
-        : [
-            db.insert(givenUpRevocations).select(
-              sql`SELECT ${tokenRevocations.id}, ${tokenRevocations.connectionId}, ${tokenRevocations.reason}, ${givenUp}, ${tokenRevocations.attempts}, ${tokenRevocations.createdAt}, ${now}
-                FROM ${tokenRevocations} WHERE ${still}`
-            ),
-          ]),
+      ...(givenUp === undefined ? [] : [giveUpOwed(db, still, givenUp)]),
       db.delete(tokenRevocations).where(still),
     ]
   );

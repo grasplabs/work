@@ -8,6 +8,7 @@ import {
   codeStep,
   personalChatsOf,
   says,
+  returnedText,
 } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { actingFor } from "./contexts.ts";
@@ -40,7 +41,7 @@ const agentOf = (userId: string) =>
 
 /** What the chat's code returned of a skill: whether it was selected, and read. */
 const said = (selected: boolean, read: string): string =>
-  `Returned:\n${JSON.stringify({ selected, read })}`;
+  returnedText(JSON.stringify({ selected, read }));
 
 /** Every string in `value`, however deep: what a request to the model carried. */
 const stringsIn = (value: unknown): string[] => {
@@ -82,10 +83,7 @@ describe("what a skill needs", setUpTime, () => {
   });
 
   it("lists, selects and reads a skill in a chat only once its agent holds the connection and tool it needs", async () => {
-    const [author, admin] = await Promise.all([
-      signedInApi(idp, "user"),
-      signedInApi(idp, "admin"),
-    ]);
+    const author = await signedInApi(idp, "user");
     const suffix = unique();
     const needing = `send-the-tender-${suffix}`;
     const plain = `plan-the-tender-${suffix}`;
@@ -125,13 +123,9 @@ describe("what a skill needs", setUpTime, () => {
       says("Done.")
     );
     await chat.ask("Send the tender.");
-    const mail = await mailConnection([], mailWithSearch);
-    await requestGranted(idp, admin, {
-      subject: chat.agent,
-      object: { type: "connection", connectionId: mail.id },
-      actions: ["mail.send", "mail.search"],
-      binding: "MAIL",
-    });
+    // A shared mailbox everyone may use: the agent holds it with no grant
+    // (GRA-2322), as `env.connections.list()` lists it.
+    await mailConnection([], mailWithSearch, { audience: "everyone" });
     await chat.ask("Send the tender.");
     const results = await codeResults(chat.stub, chat.chat.id);
     const listedIn = (name: string) =>
@@ -148,8 +142,13 @@ describe("what a skill needs", setUpTime, () => {
       },
     }).toStrictEqual({
       results: [
-        `Returned:\n${JSON.stringify({ selected: [plain], read: "refused" })}`,
-        `Returned:\n${JSON.stringify({ selected: [plain, needing].toSorted(), read: "read" })}`,
+        returnedText(JSON.stringify({ selected: [plain], read: "refused" })),
+        returnedText(
+          JSON.stringify({
+            selected: [plain, needing].toSorted(),
+            read: "read",
+          })
+        ),
       ],
       listed: {
         needing: [false, false, true, true],
@@ -251,7 +250,9 @@ describe("what a skill needs", setUpTime, () => {
       step,
       says("Done.")
     );
-    const mail = await mailConnection([], mailWithSearch);
+    const mail = await mailConnection([], mailWithSearch, {
+      audience: "everyone",
+    });
     await requestGranted(idp, admin, {
       subject: chats.agent,
       object: { type: "connection", connectionId: mail.id },

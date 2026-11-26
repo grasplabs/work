@@ -90,6 +90,9 @@ catalog:
   # Same workerd as Wrangler; runs the on-prem smoke test.
   workerd: 1.20261113.1
   wrangler: 4.162.0
+  # Runs a connector's bundle on workerd at connect's build, to replay its
+  # recorded vendor answers (apps/connect/build.ts): the one Wrangler runs.
+  miniflare: 5.20261113.0-beta
 
   # Workers runtime and data
   "@cloudflare/vite-plugin": 1.66.0

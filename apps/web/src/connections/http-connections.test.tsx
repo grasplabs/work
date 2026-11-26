@@ -21,9 +21,10 @@ import { HttpConnections } from "./http-connections.tsx";
 
 // The Integrations page's HTTP connections (http-connections.tsx), against
 // core's `connections` as the page reaches it, faked: only an admin who
-// isn't Grasp staff is offered the form and Revoke; what they type is
-// exactly what core is asked to approve; the credential is never shown
-// back, nor kept in the form; revoking asks first. Core and connect decide
+// isn't Grasp staff is offered the form, Revoke and who may use each
+// connection; what they type is exactly what core is asked to approve;
+// the credential is never shown back, nor kept in the form; revoking and
+// opening one to anyone ask first. Core and connect decide
 // all of it again (connect's http-connections.test.ts).
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -44,6 +45,7 @@ const billing: ListedConnection = {
   id: "connection-billing",
   source: "http",
   provider: "http",
+  name: "Billing API",
   scope: "shared",
   status: "active",
   ownerUserId: null,
@@ -123,11 +125,23 @@ const shown = async (
       }
       return { revoked: true };
     },
+    // As core lists them: none has an audience yet.
+    audiences: async () => await Promise.resolve([]),
+    setAudience: async (...given: unknown[]) => {
+      await Promise.resolve();
+      asked.push({ setAudience: given });
+    },
+  };
+  const organization = {
+    teams: async () => await Promise.resolve([{ id: "t1", name: "Finance" }]),
   };
   const core = {
     withSession: async <T,>(
-      action: (session: { connections: typeof connections }) => Promise<T>
-    ): Promise<T> => await action({ connections }),
+      action: (session: {
+        connections: typeof connections;
+        organization: typeof organization;
+      }) => Promise<T>
+    ): Promise<T> => await action({ connections, organization }),
   };
   const Page = () => {
     const read: ListedConnection[] | null = useLoaderData({ strict: false });
@@ -209,6 +223,29 @@ const field = (
     : null;
 };
 
+/** Chooses the option named `name` in the audience's select: opens it and picks it. */
+const choose = async (name: string): Promise<void> => {
+  const trigger = document.querySelector<HTMLElement>('[role="combobox"]');
+  await act(async () => {
+    trigger?.click();
+    await Promise.resolve();
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+  const option = [
+    ...document.querySelectorAll<HTMLElement>('[role="option"]'),
+  ].find((each) => each.textContent.trim() === name);
+  await act(async () => {
+    option?.click();
+    await Promise.resolve();
+  });
+};
+
+/** The open dialog's words, or nothing. */
+const dialogText = (): string =>
+  document.querySelector('[role="alertdialog"]')?.textContent ?? "";
+
 /** The words of the head of the card titled `title`: its title and what stands beside it. */
 const headOf = (title: string): string =>
   [...document.querySelectorAll("h2, h3")].find(
@@ -234,8 +271,8 @@ const fill = async (label: string, value: string): Promise<void> => {
 describe(HttpConnections, () => {
   afterEach(takenDown);
 
-  it("offers the form and Revoke to admins only, never to Grasp staff", async () => {
-    const seen: Record<string, string[]> = {};
+  it("offers the form, Revoke and who may use it to admins only, never to Grasp staff", async () => {
+    const seen: Record<string, { buttons: string[]; audience: boolean }> = {};
     for (const [who, viewer] of [
       ["admin", identityOf("admin")],
       ["staff", identityOf("admin", true)],
@@ -244,15 +281,52 @@ describe(HttpConnections, () => {
     ] as const) {
       // oxlint-disable-next-line no-await-in-loop -- one page at a time
       await shown(viewer, [billing]);
-      seen[who] = buttons();
+      // oxlint-disable-next-line no-await-in-loop -- one page at a time
+      await settled();
+      seen[who] = {
+        buttons: buttons(),
+        audience: document.body.textContent.includes(
+          "Who may use this connection"
+        ),
+      };
       takenDown();
     }
 
+    // The audience's choice shows the one held: nobody, until an admin chooses.
     expect(seen).toStrictEqual({
-      admin: ["Add", "Revoke"],
-      staff: [],
-      builder: [],
-      user: [],
+      admin: { buttons: ["Add", "Revoke", "Nobody"], audience: true },
+      staff: { buttons: [], audience: false },
+      builder: { buttons: [], audience: false },
+      user: { buttons: [], audience: false },
+    });
+  });
+
+  it("opens a connection to everyone only once the admin confirms, said as Apps use it, with nothing to erase", async () => {
+    const asked = await shown(identityOf("admin"), [billing]);
+    await settled();
+    await choose("Everyone in the company");
+    const asking = dialogText();
+    await press("Open it to them");
+
+    expect({
+      asking: asking.includes(
+        "Apps that use Billing API, with its credential, can then be shared with everyone in the company. Choose a team if not everyone should have this."
+      ),
+      erase: buttons().includes("Erase what the Brain kept"),
+      asked,
+    }).toStrictEqual({
+      asking: true,
+      erase: false,
+      asked: [
+        {
+          setAudience: [
+            "connection-billing",
+            { kind: "everyone" },
+            { kind: "nobody" },
+            { kind: "everyone" },
+          ],
+        },
+      ],
     });
   });
 

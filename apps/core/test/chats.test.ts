@@ -25,7 +25,14 @@ import { confirmPendingAction } from "../src/pending-actions.ts";
 import { sessionRecheckMs } from "../src/session-check.ts";
 import { maxChatsPerPerson } from "../src/workspace.ts";
 import { newTeam } from "./admin-teams.ts";
-import { codeStep, model, pausedReply, says } from "./agent-chat.ts";
+import {
+  codeStep,
+  model,
+  pausedReply,
+  says,
+  returnedText,
+  setObjectEnv,
+} from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { connectionIn } from "./contexts.ts";
@@ -698,7 +705,9 @@ describe("chats", () => {
     const ann = await person();
     const ben = await person();
     const admin = await signedInApi(idp, "admin");
-    const mail = await mailConnection();
+    const mail = await mailConnection([], ["mail.send"], {
+      audience: "everyone",
+    });
     // The workspace's agent may send mail, held for its person each time:
     // one grant, for everyone's chats, each in its person's own object.
     const agent = { type: "agent" as const, agentId: chatAgentId };
@@ -884,7 +893,9 @@ describe("chats", () => {
   it("tell a follower the moment its agent has a write held, mid-turn", async () => {
     const ann = await person();
     const admin = await signedInApi(idp, "admin");
-    const mail = await mailConnection();
+    const mail = await mailConnection([], ["mail.send"], {
+      audience: "everyone",
+    });
     await requestGranted(idp, admin, {
       subject: { type: "agent", agentId: chatAgentId },
       object: { type: "connection", connectionId: mail.id },
@@ -924,11 +935,21 @@ describe("chats", () => {
     // connect fails unexpectedly on the fourth once it took it, and the
     // fifth's server sends the mail and loses its answer.
     const mails = {
-      OUTCOME_SENT: await mailConnection(),
-      OUTCOME_DECLINED: await mailConnection(),
-      OUTCOME_FAILED: await mailConnection(["invalid"]),
-      OUTCOME_BROKEN: await mailConnection(),
-      OUTCOME_UNKNOWN: await mailConnection(["lost"]),
+      OUTCOME_SENT: await mailConnection([], ["mail.send"], {
+        audience: "everyone",
+      }),
+      OUTCOME_DECLINED: await mailConnection([], ["mail.send"], {
+        audience: "everyone",
+      }),
+      OUTCOME_FAILED: await mailConnection(["invalid"], ["mail.send"], {
+        audience: "everyone",
+      }),
+      OUTCOME_BROKEN: await mailConnection([], ["mail.send"], {
+        audience: "everyone",
+      }),
+      OUTCOME_UNKNOWN: await mailConnection(["lost"], ["mail.send"], {
+        audience: "everyone",
+      }),
     };
     for (const [binding, { id }] of Object.entries(mails)) {
       // oxlint-disable-next-line no-await-in-loop -- one grant after the other
@@ -1059,7 +1080,9 @@ describe("chats", () => {
   it("tell their agent one outcome of a write when a refused confirmation races the one that runs it", async () => {
     const ann = await person();
     const admin = await signedInApi(idp, "admin");
-    const mail = await mailConnection();
+    const mail = await mailConnection([], ["mail.send"], {
+      audience: "everyone",
+    });
     await requestGranted(idp, admin, {
       subject: { type: "agent", agentId: chatAgentId },
       object: { type: "connection", connectionId: mail.id },
@@ -1252,7 +1275,20 @@ describe("chats", () => {
         status: 429,
         errorType: "rate_limit_error",
         headers: { "retry-after": "1" },
-      }))
+      })),
+      // The model declined, after its first words.
+      { ...says("I can't help with that."), refused: true },
+      // Past the model's window: a chat this new has nothing to summarize.
+      {
+        status: 400,
+        body: {
+          type: "error",
+          error: {
+            type: "invalid_request_error",
+            message: "prompt is too long: 213462 tokens > 200000 maximum",
+          },
+        },
+      }
     );
     const failedReply = async (question: string) => {
       const chat = await ann.chats.create(question);
@@ -1264,21 +1300,30 @@ describe("chats", () => {
 
     const refused = await failedReply("Hi.");
     const limited = await failedReply("Hi again.");
+    const declined = await failedReply("Something it won't.");
+    const tooLong = await failedReply("Something long.");
+    const replies = [refused, limited, declined, tooLong];
 
-    expect([refused, limited]).toMatchObject([
+    expect(replies).toMatchObject([
       { end: "failed", failure: "model.failed" },
       { end: "failed", failure: "model.rate_limited" },
+      {
+        end: "failed",
+        failure: "model.declined",
+        text: "I can't help with that.",
+      },
+      { end: "failed", failure: "model.context_too_long" },
     ]);
     // Its own times left out: one ending in .400Z or .429Z says nothing
     // of the provider.
-    const said = JSON.stringify([refused, limited], (_key, value: unknown) =>
+    const said = JSON.stringify(replies, (_key, value: unknown) =>
       typeof value === "string" && isoTime.test(value) ? undefined : value
     );
     expect({
-      said: /invalid_request_error|rate_limit_error|400|429/u.test(said),
-      error: [refused, limited].some(
-        (reply) => reply !== undefined && "error" in reply
+      said: /invalid_request_error|rate_limit_error|refusal|prompt is too long|400|429/u.test(
+        said
       ),
+      error: replies.some((reply) => reply !== undefined && "error" in reply),
     }).toStrictEqual({ said: false, error: false });
   });
 
@@ -1319,7 +1364,7 @@ describe("chats", () => {
           end: "done",
         },
         // The step's result, paired with its code.
-        { role: "result", callId, text: "Returned:\n4", failed: false },
+        { role: "result", callId, text: returnedText(4), failed: false },
         { role: "assistant", text: "Two plus two is four.", end: "done" },
       ],
       // Once stored, the answer is no longer shown as being written.
@@ -1851,18 +1896,62 @@ describe("chats", () => {
     expect(answer?.role === "assistant" && "reasoning" in answer).toBeFalsy();
   });
 
-  it("show a failed answer with the gateway's code for it, and nothing as stopped", async () => {
+  it.each([
+    ["fails", { status: 500 }, "model.provider_unavailable", {}],
+    // For an idle time lowered from minutes here.
+    [
+      "sends nothing for too long",
+      { hang: true } as const,
+      "model.timeout",
+      { MODEL_STREAM_IDLE_MS: "400" },
+    ],
+  ])(
+    "show a failed answer whose provider %s with the gateway's code for it, and nothing as stopped",
+    async (_case, reply, failure, vars) => {
+      const ann = await person();
+      await answering(ann, reply);
+      const restore = await setObjectEnv(objectOf(ann), vars);
+      try {
+        const chat = await ann.chats.create("Failed");
+        const follower = await follow(ann.chats, chat.id);
+        await ann.chats.send(chat.id, { text: "Look it up.", model });
+        await settled(follower);
+        const last = follower.messages().at(-1);
+        expect(
+          last?.role === "assistant" ? [last.end, last.failure] : last
+        ).toStrictEqual(["failed", failure]);
+        expect(follower.now()?.stopped).toBeNull();
+      } finally {
+        await restore();
+      }
+    }
+  );
+
+  it("show whoever follows while the model waits on its provider's rate limit, and no longer once it answers", async () => {
     const ann = await person();
-    await answering(ann, { status: 500 });
-    const chat = await ann.chats.create("Failed");
+    await answering(
+      ann,
+      {
+        status: 429,
+        errorType: "rate_limit_error",
+        headers: { "retry-after": "1" },
+      },
+      says("Here it is.")
+    );
+    const chat = await ann.chats.create("Busy");
     const follower = await follow(ann.chats, chat.id);
-    await ann.chats.send(chat.id, { text: "Look it up.", model });
+
+    await ann.chats.send(chat.id, { text: "Anything?", model });
     await settled(follower);
-    const last = follower.messages().at(-1);
-    expect(
-      last?.role === "assistant" ? [last.end, last.failure] : last
-    ).toStrictEqual(["failed", "model.provider_unavailable"]);
-    expect(follower.now()?.stopped).toBeNull();
+
+    expect({
+      waited: follower.updates.some(
+        ({ waiting }) =>
+          waiting?.kind === "rate_limited" && waiting.seconds === 1
+      ),
+      now: follower.updates.at(-1)?.waiting,
+      answer: follower.messages().at(-1)?.text,
+    }).toStrictEqual({ waited: true, now: null, answer: "Here it is." });
   });
 
   it("keep their object up while a turn nobody waits on runs", async () => {

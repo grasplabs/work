@@ -10,7 +10,8 @@ import {
   codeStep,
   personalChatsOf,
   says,
-  withoutMarking,
+  withoutReadFrom,
+  returnedText,
 } from "./agent-chat.ts";
 import { grantReviewed, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -91,7 +92,7 @@ type Stub = Awaited<ReturnType<typeof personalChatsOf>>["stub"];
 /** What each code step of the chat returned, as the model read it. */
 const results = async (stub: Stub, chatId: string): Promise<string[]> => {
   const steps = await codeResults(stub, chatId);
-  return steps.map(({ text }) => withoutMarking(text));
+  return steps.map(({ text }) => withoutReadFrom(text));
 };
 
 /** What code step `index` of the chat returned. */
@@ -117,10 +118,10 @@ const notes = (
     .map(({ body }) => JSON.stringify(body).replaceAll('\\"', '"'))
     .filter((body) => body.includes(asked));
 
-const returned = (value: unknown) => `Returned:\n${JSON.stringify(value)}`;
+const returned = (value: unknown) => returnedText(value);
 
 /** A code step that caught a refusal and returned its message. */
-const refusedWith = (message: string) => `Returned:\n${message}`;
+const refusedWith = (message: string) => returnedText(message);
 
 /** The permission events of the permission `id`, once there are `count`. */
 const permissionEvents = async (
@@ -237,13 +238,12 @@ describe("a connection the chat's agent asks for", setUpTime, () => {
     }).toStrictEqual({
       shown: {
         connectionId: mail.id,
-        provider: "mail",
+        name: "mail",
         accountName: null,
         resource: null,
         actions: ["mail.search"],
         binding: "MAIL",
         reason: "To find the invoice you asked about.",
-        decidedBy: "you",
       },
       requestedAt: "string",
       more: 0,
@@ -276,7 +276,7 @@ describe("a connection the chat's agent asks for", setUpTime, () => {
       listed: { before, after },
     }).toStrictEqual({
       first: [
-        returned({ id, binding: "MAIL", decidedBy: "person" }),
+        returned({ id, binding: "MAIL" }),
         returned({ messages: ["invoice-1"] }),
         // Only what was asked for: search, not send.
         refusedWith(denied.message),
@@ -377,27 +377,20 @@ describe("a connection the chat's agent asks for", setUpTime, () => {
     const someone = await signedInApi(idp, "user");
     const admin = await signedInApi(idp, "admin");
     const mine = await personalMail(person.userId);
-    const shared = await mailConnection([], mailWithSearch);
     // First: someone else's chats, before this person's provider answers.
     const theirs = await personalChatsOf(someone.userId);
     const theirChat = await theirs.newChat();
     const chats = await personalChatsOf(
       person.userId,
       asks(mine.id, "MINE"),
-      asks(shared.id, "SHARED"),
-      says("Both wait.")
+      says("It waits.")
     );
     const { chat, ask } = await chats.newChat();
     await ask("Find the invoice.");
     const requests = await person.api.chats.connectionRequests(chat.id);
     const idOf = (binding: string) =>
       requests.find((request) => request.binding === binding)?.id ?? "";
-    expect(
-      requests.map(({ binding, decidedBy }) => ({ binding, decidedBy }))
-    ).toStrictEqual([
-      { binding: "MINE", decidedBy: "you" },
-      { binding: "SHARED", decidedBy: "admin" },
-    ]);
+    expect(requests.map(({ binding }) => binding)).toStrictEqual(["MINE"]);
 
     expect({
       // Someone else, naming the person's chat, or their own.
@@ -412,17 +405,13 @@ describe("a connection the chat's agent asks for", setUpTime, () => {
         person.api.chats.grantConnection(chat.id, crypto.randomUUID())
       ),
       notAnId: await outcome(person.api.chats.grantConnection(chat.id, "MINE")),
-      // A shared connection is an admin's; a personal one its owner's.
-      shared: await outcome(
-        person.api.chats.grantConnection(chat.id, idOf("SHARED"))
-      ),
+      // A personal one is its owner's alone.
       adminPersonal: await outcome(grantReviewed(admin.api, idOf("MINE"))),
     }).toStrictEqual({
       othersChat: "agent.chat_not_found",
       ownChat: "permission.not_found",
       forged: "permission.not_found",
       notAnId: "permission.not_found",
-      shared: "permission.admin_decides",
       adminPersonal: "permission.not_found",
     });
 
@@ -440,20 +429,15 @@ describe("a connection the chat's agent asks for", setUpTime, () => {
       denied: "permission.not_requested",
     });
     // Each decision refused past the chat check is on record, and why.
-    const refused = await refusedDecisions([idOf("MINE"), idOf("SHARED")], 4);
-    // An admin neither sees nor revokes the personal one; the shared one
-    // they see as one chat's, without the agent's words.
+    const refused = await refusedDecisions([idOf("MINE")], 3);
+    // An admin neither sees nor revokes the personal one.
     const listed = await admin.api.permissions.list(chats.agent);
     expect({
       refused,
-      listed: listed.map(({ binding, chat: of, ...rest }) => ({
-        binding,
-        chat: of,
-        reason: "reason" in rest,
-      })),
+      listed,
       revoke: await outcome(admin.api.permissions.revoke(idOf("MINE"))),
     }).toStrictEqual({
-      listed: [{ binding: "SHARED", chat: chat.id, reason: false }],
+      listed: [],
       revoke: "permission.not_found",
       refused: [
         {
@@ -461,12 +445,6 @@ describe("a connection the chat's agent asks for", setUpTime, () => {
           by: someone.userId,
           target: idOf("MINE"),
           reason: "permission.not_found",
-        },
-        {
-          action: "permission.granted",
-          by: person.userId,
-          target: idOf("SHARED"),
-          reason: "permission.admin_decides",
         },
         {
           action: "permission.granted",
@@ -482,16 +460,37 @@ describe("a connection the chat's agent asks for", setUpTime, () => {
         },
       ].toSorted(byFields),
     });
-    // An admin grants the shared one, in that chat alone.
-    const granted = await grantReviewed(admin.api, idOf("SHARED"));
+  });
+
+  it("names a shared connection for what the chat builds or sets up, but never asks for it, as its audience alone decides who uses it", async () => {
+    const person = await signedInApi(idp, "user");
+    const shared = await mailConnection([], mailWithSearch);
+    const chats = await personalChatsOf(
+      person.userId,
+      codeStep(
+        `export default async (self, env) => {
+          const named = (await env.connections.available()).filter(({ connectionId }) => connectionId === ${JSON.stringify(shared.id)}).map(({ scope, decidedBy }) => ({ scope, decidedBy }));
+          const asked = await env.connections.request({ connectionId: ${JSON.stringify(shared.id)}, actions: ["mail.search"], binding: "SHARED", reason: "To find the invoice." }).then(({ binding }) => binding, (error) => error.message);
+          return JSON.stringify({ named, asked });
+        };`
+      ),
+      says("No need.")
+    );
+    const { chat, ask } = await chats.newChat();
+    await ask("Find the invoice.");
+
+    const [asked] = await results(chats.stub, chat.id);
     expect({
-      status: granted.status,
-      chat: granted.chat,
-      actions: granted.actions,
+      asked,
+      waiting: await person.api.chats.connectionRequests(chat.id),
     }).toStrictEqual({
-      status: "active",
-      chat: chat.id,
-      actions: ["mail.search"],
+      asked: returnedText(
+        JSON.stringify({
+          named: [{ scope: "shared", decidedBy: "admin" }],
+          asked: permissionErrors.create("permission.invalid").message,
+        })
+      ),
+      waiting: [],
     });
   });
 
@@ -809,31 +808,6 @@ describe("a connection the chat's agent asks for", setUpTime, () => {
         detail: { chat: chat.id, why: "person_removed" },
       },
     });
-  });
-
-  it("is decided when an admin revokes a shared one that waits: the agent told, the card gone", async () => {
-    const person = await signedInApi(idp, "user");
-    const admin = await signedInApi(idp, "admin");
-    const shared = await mailConnection([], mailWithSearch);
-    const chats = await personalChatsOf(
-      person.userId,
-      asks(shared.id, "SHARED"),
-      says("An admin decides."),
-      says("It was denied.")
-    );
-    const { chat, ask } = await chats.newChat();
-    await ask("Find the invoice.");
-    const [request] = await person.api.chats.connectionRequests(chat.id);
-    const id = request?.id ?? "";
-
-    await admin.api.permissions.revoke(id);
-    await ask("Is it decided?");
-
-    const told = notes(chats.provider, "Is it decided?");
-    expect({
-      waiting: await person.api.chats.connectionRequests(chat.id),
-      told: told.some((note) => note.includes('"SHARED" was denied')),
-    }).toStrictEqual({ waiting: [], told: true });
   });
 
   it("goes with its person even when their removal's revoke didn't finish: the retry revokes it", async () => {

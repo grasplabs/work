@@ -214,6 +214,7 @@ const listMessages = defineTool({
   readOnly: true,
   reach: "company",
   resource: "mailbox",
+  mail: true,
   routes: [get("/messages"), get("/mailFolders/{folder}/messages")],
   run: async ({
     mailbox,
@@ -325,6 +326,7 @@ const threadMessages = defineTool({
   readOnly: true,
   reach: "company",
   resource: "mailbox",
+  mail: true,
   routes: [get("/messages")],
   run: async ({ mailbox, conversation }) => {
     // The newest messages first, so a long conversation keeps its last
@@ -453,6 +455,7 @@ const getMessage = defineTool({
   readOnly: true,
   reach: "company",
   resource: "mailbox",
+  mail: true,
   routes: [get("/messages/{message}"), get("/messages/{message}/attachments")],
   run: async ({ mailbox, message: id, bodyType }) => {
     const path = `/users/${segment(mailbox)}/messages/${segment(id)}`;
@@ -512,6 +515,7 @@ const readAttachment = defineTool({
   // A workflow action may keep it as a file of its run (GRA-886).
   answersFile: true,
   resource: "mailbox",
+  mail: true,
   routes: [get("/messages/{message}/attachments/{attachment}")],
   run: async ({ mailbox, message, attachment, as }) => {
     const path = `/users/${segment(mailbox)}/messages/${segment(message)}/attachments/${segment(attachment)}`;
@@ -570,6 +574,7 @@ const moveMessage = defineTool({
   reach: "own",
   destructive: true,
   resource: "mailbox",
+  mail: true,
   routes: [
     meRoute,
     get("/messages/{message}"),
@@ -753,6 +758,7 @@ const sendMail = defineTool({
   destructive: false,
   takesFiles: true,
   resource: "mailbox",
+  mail: { recipients: ["to", "cc", "bcc"] },
   // Recovery `none`: a sent email of unknown outcome stays unknown. Not
   // finding its Sent Items copy doesn't prove it wasn't sent: a shared
   // mailbox's copy can land in the delegate's own mailbox, a copy can be
@@ -793,6 +799,7 @@ const createDraft = defineTool({
   destructive: false,
   takesFiles: true,
   resource: "mailbox",
+  mail: { recipients: ["to", "cc", "bcc"] },
   routes: [get("/messages"), post("/messages")],
   describe: { title: "Create a draft email", fields: draftFields },
   run: async (input, effect) => {

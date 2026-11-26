@@ -20,6 +20,7 @@ import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
 import { appHost, inJurisdiction, workspace } from "../src/durable-objects.ts";
 import { heldStartMs } from "../src/held-starts.ts";
 import { turnRecallBudget } from "../src/turn-recall.ts";
+import { newTeam } from "./admin-teams.ts";
 import {
   codeResults,
   codeStep,
@@ -27,10 +28,12 @@ import {
   personalChatsOf,
   says,
   toolStep,
-  withoutMarking,
+  returnedOf,
+  returnedText,
 } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { chooseAudience } from "./brain-audiences.ts";
 import { mockIdp } from "./idp.ts";
 import { saveInstructions } from "./instruction-saves.ts";
 import { mailConnection, mailWithSearch } from "./mail-connection.ts";
@@ -152,9 +155,7 @@ const answers = async (
 ) => {
   const results = await codeResults(stub, chatId);
   return results.map(({ text }) => {
-    const answered = answeredSchema.parse(
-      JSON.parse(withoutMarking(text).replace("Returned:\n", ""))
-    );
+    const answered = answeredSchema.parse(returnedOf(text));
     if ("held" in answered) {
       return "held";
     }
@@ -710,7 +711,9 @@ describe("what a chat writes for others once it used something only its person m
         searchesThenWrites(app, release, "MAIL", sharedTitle),
         says("Written."),
       ]);
-      const company = await mailConnection([], mailWithSearch);
+      const company = await mailConnection([], mailWithSearch, {
+        audience: "everyone",
+      });
       await requestGranted(idp, shared.admin, {
         subject: shared.chats.agent,
         object: { type: "connection", connectionId: company.id },
@@ -888,63 +891,26 @@ describe("what a chat writes for others once it used something only its person m
   );
 
   it(
-    "refuses asking for a shared connection once the chat recalled the person's own source, as admins read why",
-    slow,
-    async () => {
-      const depot = word();
-      const shared = await mailConnection([], mailWithSearch);
-      const asks = (binding: string) =>
-        codeStep(
-          `export default async (self, env) => { try { return (await env.connections.request(${JSON.stringify(
-            {
-              connectionId: shared.id,
-              actions: ["mail.search"],
-              binding,
-              reason: "To find the invoice.",
-            }
-          )})).binding; } catch (error) { return { refused: error.code ?? error.message }; } };`
-        );
-      const notes = await notesChat(() => [
-        asks("BEFORE"),
-        says("Asked."),
-        asks("AFTER"),
-        says("Refused."),
-      ]);
-      const { builder, chats, chat, ask } = notes;
-      await ownSource(builder.userId, `Depot ${depot} opens at seven.`);
-      await ask(`Find the ${word()} invoice.`);
-      await ask(`When does depot ${depot} open? Find its invoice.`);
-
-      const results = await codeResults(chats.stub, chat.id);
-      const requests = await builder.api.chats.connectionRequests(chat.id);
-
-      expect({
-        results: results.map(({ text }) => text.replace("Returned:\n", "")),
-        requests: requests.map(({ binding }) => binding),
-      }).toStrictEqual({
-        results: [
-          "BEFORE",
-          JSON.stringify({ refused: "agent.private_shared_request" }),
-        ],
-        requests: ["BEFORE"],
-      });
-    }
-  );
-
-  it(
-    "is marked by an App's answer when the App may read through the person's own mailbox, and not when its connections are all shared",
+    "is marked by an App's answer when the App may read through the person's own mailbox or a shared one only a team may use, and not when everyone may use its connections",
     slow,
     async () => {
       const ownTitle = `inbox-${unique()}`;
       const plainTitle = `plain-${unique()}`;
-      const builder = await signedInApi(idp, "builder");
+      const teamTitle = `team-${unique()}`;
+      const [builder, admin] = await Promise.all([
+        signedInApi(idp, "builder"),
+        signedInApi(idp, "admin"),
+      ]);
       const inbox = await liveNotes(builder);
       const plain = await liveNotes(builder);
+      const teamed = await liveNotes(builder);
       const mine = await mailConnection([], mailWithSearch, {
         provider: "mail_own",
         owner: builder.userId,
       });
-      const company = await mailConnection([], mailWithSearch);
+      const company = await mailConnection([], mailWithSearch, {
+        audience: "everyone",
+      });
       await requestGranted(idp, builder, {
         subject: { type: "app", appId: inbox.app },
         object: { type: "connection", connectionId: mine.id },
@@ -954,6 +920,17 @@ describe("what a chat writes for others once it used something only its person m
       await requestGranted(idp, builder, {
         subject: { type: "app", appId: plain.app },
         object: { type: "connection", connectionId: company.id },
+        actions: ["mail.search"],
+        binding: "MAIL",
+      });
+      const team = await mailConnection([], mailWithSearch);
+      await chooseAudience(admin.api, team.id, {
+        kind: "team",
+        teamId: await newTeam(admin, [builder]),
+      });
+      await requestGranted(idp, builder, {
+        subject: { type: "app", appId: teamed.app },
+        object: { type: "connection", connectionId: team.id },
         actions: ["mail.search"],
         binding: "MAIL",
       });
@@ -977,17 +954,22 @@ describe("what a chat writes for others once it used something only its person m
       };
       const own = await copiesFrom(inbox, ownTitle);
       const shared = await copiesFrom(plain, plainTitle);
+      const ofTeam = await copiesFrom(teamed, teamTitle);
 
       expect({
         own: await answers(own.chats.stub, own.chat.id),
         ownTitles: await own.titles(),
         shared: await answers(shared.chats.stub, shared.chat.id),
         sharedTitles: await shared.titles(),
+        team: await answers(ofTeam.chats.stub, ofTeam.chat.id),
+        teamTitles: await ofTeam.titles(),
       }).toStrictEqual({
         own: ["held"],
         ownTitles: [],
         shared: ["written"],
         sharedTitles: [plainTitle],
+        team: ["held"],
+        teamTitles: [],
       });
     }
   );
@@ -1103,12 +1085,7 @@ describe("what a chat writes for others once it used something only its person m
       expect({
         confirmedSend,
         last: answeredSchema.safeParse(
-          JSON.parse(
-            withoutMarking(results.at(-1)?.text ?? "Returned:\n{}").replace(
-              "Returned:\n",
-              ""
-            )
-          )
+          returnedOf(results.at(-1)?.text ?? returnedText({}))
         ).data,
         after: await titles(),
       }).toMatchObject({

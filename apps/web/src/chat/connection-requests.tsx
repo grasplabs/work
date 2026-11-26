@@ -1,12 +1,6 @@
 import type { ChatConnectionRequest } from "@grasp-os/shared/chat";
 import { messageOf } from "@grasp-os/shared/errors";
 import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@grasp-os/ui/components/alert";
-import { Button } from "@grasp-os/ui/components/button";
-import {
   Confirmation,
   ConfirmationActions,
   ConfirmationRequest,
@@ -30,10 +24,11 @@ import { DecisionButton } from "./decision-button.tsx";
 import { FailureLine } from "./failure-line.tsx";
 
 // The connections the chat's agent asked to use in this chat (core's
-// chat-connections.ts), each on a card: the person grants or denies their
-// own personal connection here; a shared one waits for an admin, and they
-// may withdraw it. The card shows the request exactly as stored, and
-// granting names only its ID: what is granted is what it shows.
+// chat-connections.ts), each on a card: always the person's own personal
+// connection, which they grant or deny here. A shared connection is never
+// asked for in a chat: its audience decides who may use it
+// (connection-audience.tsx). The card shows the request exactly as stored,
+// and granting names only its ID: what is granted is what it shows.
 
 /** What the page read of the chat's requests. */
 type Requests =
@@ -68,9 +63,9 @@ const styles = stylex.create({
   list: { display: "grid", gap: space["2"] },
 });
 
-/** The connection a request names: its provider and account, else its ID. */
+/** The connection a request names: what it reaches and its account, else its ID. */
 const nameOf = (request: ChatConnectionRequest): string => {
-  const connection = [request.provider, request.accountName]
+  const connection = [request.name, request.accountName]
     .filter((part) => part !== null)
     .join(", ");
   return connection === "" ? request.connectionId : connection;
@@ -142,73 +137,39 @@ const ConnectionRequest = ({
       await session.chats.denyConnection(chatId, request.id);
     });
   };
-  if (request.decidedBy === "you") {
-    return (
-      <Confirmation approval={{ id: request.id }} state="approval-requested">
-        {note}
-        <ConfirmationTitle>
-          <ConfirmationRequest>{t`Use ${name} in this chat`}</ConfirmationRequest>
-        </ConfirmationTitle>
-        <RequestDetails request={request} />
-        <FailureLine>{failure}</FailureLine>
-        <ConfirmationActions>
-          {/* Named for what each decides, so several requests read apart. */}
-          <DecisionButton
-            disabled={busy}
-            label={t`Deny ${name}`}
-            onPress={deny}
-            pausedBy={pausedBy}
-            variant="outline"
-          >
-            {t`Deny`}
-          </DecisionButton>
-          <DecisionButton
-            disabled={busy}
-            label={t`Grant ${name}`}
-            onPress={async () => {
-              await decide(async (session) => {
-                await session.chats.grantConnection(chatId, request.id);
-              });
-            }}
-            pausedBy={pausedBy}
-          >
-            {t`Grant`}
-          </DecisionButton>
-        </ConfirmationActions>
-      </Confirmation>
-    );
-  }
   return (
-    <Alert>
-      <AlertTitle>{t`The agent asked an admin for ${name}`}</AlertTitle>
-      <AlertDescription>
-        <span {...stylex.props(styles.details)}>
-          {note}
-          {t`An admin decides. It holds in this chat only.`}
-          <Button
-            asChild
-            disabled={busy || pause.held}
-            focusableWhenDisabled={pause.held}
-            size="xs"
-            variant="outline"
-          >
-            <button
-              aria-describedby={pausedBy}
-              aria-label={t`Withdraw ${name}`}
-              onClick={() => {
-                if (!busy && !pause.held) {
-                  void deny();
-                }
-              }}
-              type="button"
-            >
-              {t`Withdraw`}
-            </button>
-          </Button>
-          <FailureLine>{failure}</FailureLine>
-        </span>
-      </AlertDescription>
-    </Alert>
+    <Confirmation approval={{ id: request.id }} state="approval-requested">
+      {note}
+      <ConfirmationTitle>
+        <ConfirmationRequest>{t`Use ${name} in this chat`}</ConfirmationRequest>
+      </ConfirmationTitle>
+      <RequestDetails request={request} />
+      <FailureLine>{failure}</FailureLine>
+      <ConfirmationActions>
+        {/* Named for what each decides, so several requests read apart. */}
+        <DecisionButton
+          disabled={busy}
+          label={t`Deny ${name}`}
+          onPress={deny}
+          pausedBy={pausedBy}
+          variant="outline"
+        >
+          {t`Deny`}
+        </DecisionButton>
+        <DecisionButton
+          disabled={busy}
+          label={t`Grant ${name}`}
+          onPress={async () => {
+            await decide(async (session) => {
+              await session.chats.grantConnection(chatId, request.id);
+            });
+          }}
+          pausedBy={pausedBy}
+        >
+          {t`Grant`}
+        </DecisionButton>
+      </ConfirmationActions>
+    </Confirmation>
   );
 };
 

@@ -146,9 +146,11 @@ const sectionOf = async (
     title:
       container.querySelector("main h1")?.textContent ===
       (section === "overview" ? client.name : sectionWords[section].title),
+    // Its sections in the sidebar's level, and over each one where to see
+    // why it isn't read.
     column:
       (column?.includes("Details") ?? false) &&
-      (column?.includes("Not read now") ?? false),
+      page.includes("Not read now: see its Setup"),
     failed: page.includes("This couldn’t be shown"),
     fromCore: ["Needs Grasp", "% known", "From the company"].some((words) =>
       page.includes(words)

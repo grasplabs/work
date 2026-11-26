@@ -1,4 +1,4 @@
-import type { ConnectionBrainAudience } from "@grasp-os/shared/connect";
+import type { ConnectionAudience } from "@grasp-os/shared/connect";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -301,7 +301,7 @@ describe("picking a shared connection's places to sync", setUpTime, () => {
     await chooseAudience(admin.api, connectionId, forSales);
     const save = async (
       places: string[],
-      acknowledged?: ConnectionBrainAudience
+      acknowledged?: ConnectionAudience
     ): Promise<string> => {
       const page = await admin.api.connections.syncPlaces(connectionId);
       return await outcome(

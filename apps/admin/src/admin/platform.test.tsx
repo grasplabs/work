@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vite-plus/test";
 
-import { gridRow, openAdmin } from "../../test/app.tsx";
+import { act, gridRow, openAdmin, settle, until } from "../../test/app.tsx";
 import type { Answers } from "../../test/app.tsx";
 import type { OffboardedClient } from "../hosting/offboarding.ts";
+import type { ChannelProgress } from "../rollout/progress.ts";
 import type { Readiness } from "./readiness.ts";
 
 // Platform's pages and Home's banner as the browser shows them from what
@@ -60,7 +61,7 @@ const offboardedItem = (root: Element, name: string) => {
   const button = [...(item?.querySelectorAll("button") ?? [])].find(
     (each) => each.textContent === "Delete its resources"
   );
-  const confirm = item?.querySelector('[id^="no-export-"]');
+  const confirm = item?.querySelector('[role="checkbox"]');
   return {
     text: item?.textContent ?? "",
     deleteOff: button?.hasAttribute("disabled") ?? null,
@@ -163,5 +164,162 @@ describe("Platform's Offboarded and Releases", () => {
       notHere: main().includes("This page is not here"),
       asked: calls.some(({ fn }) => fn === "fetchRelease"),
     }).toStrictEqual({ notHere: true, asked: false });
+  });
+});
+
+/** Beta: on 39.01.09, three companies following it, two of them failed, 39.01.10 to promote. */
+const beta: ChannelProgress = {
+  channel: "beta",
+  releaseId: "39.01.09",
+  notes: "",
+  total: 3,
+  upToDate: 1,
+  following: 3,
+  failed: true,
+  clients: [
+    {
+      id: "a",
+      name: "Acme",
+      state: "failed",
+      running: null,
+      pinnedReleaseId: null,
+      error: "deploy_failed",
+    },
+    {
+      id: "b",
+      name: "Bolt",
+      state: "failed",
+      running: null,
+      pinnedReleaseId: null,
+      error: "deploy_failed",
+    },
+    {
+      id: "c",
+      name: "Cork",
+      state: "up_to_date",
+      running: "39.01.09",
+      pinnedReleaseId: null,
+      error: null,
+    },
+  ],
+  promotable: [{ releaseId: "39.01.10", back: false }],
+};
+
+/** Platform with Beta, every move applied; what it sent, by function. */
+const openPlatform = async () => {
+  const page = await openAdmin("/platform", {
+    ...platformAnswers(ready),
+    fetchPlatform: { channels: [beta], history: [], events: [] },
+    fetchChannels: [beta],
+    promoteReleaseFn: { done: true, refused: null },
+    retryChannelFn: { done: true, refused: null },
+  });
+  const sent = (fn: string) =>
+    page.calls.filter((call) => call.fn === fn).map((call) => call.data);
+  return { ...page, sent };
+};
+
+/** The button named `name` (its words) in `root`. */
+const buttonIn = (root: Element | Document, name: string) =>
+  [...root.querySelectorAll("button")].find(
+    (button) => button.textContent?.trim() === name
+  );
+
+/** Presses `name` in what `root` gives, once it is there. */
+const press = async (root: () => Element | Document, name: string) => {
+  await until(() => buttonIn(root(), name) !== undefined);
+  await act(() => {
+    buttonIn(root(), name)?.click();
+  });
+  await settle();
+};
+
+/** The question, while it stands. */
+const question = () => document.querySelector('[role="alertdialog"]');
+
+/** Beta's panel. */
+const betaPanel = (root: Element) =>
+  root.querySelector('section[aria-label="Beta"]') ?? root;
+
+/** Presses Escape where focus is. */
+const escape = async () => {
+  await act(() => {
+    (document.activeElement ?? document.body).dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+    );
+  });
+  await settle();
+};
+
+describe("moving a channel's companies", () => {
+  it("promotes a release only once staff confirm, naming the channel, the release and how many companies move", async () => {
+    const page = await openPlatform();
+    await press(() => betaPanel(page.container), "Promote");
+    const asked = {
+      words: question()?.textContent ?? "",
+      focus: document.activeElement?.textContent?.trim(),
+    };
+    await press(() => question() ?? document, "Promote");
+    await until(() => page.sent("promoteReleaseFn").length > 0);
+
+    expect({
+      title: asked.words.includes("Promote 39.01.10 to Beta?"),
+      reach: asked.words.includes("3 companies on Beta move to 39.01.10"),
+      focus: asked.focus,
+      sent: page.sent("promoteReleaseFn"),
+    }).toStrictEqual({
+      title: true,
+      reach: true,
+      focus: "Cancel",
+      sent: [{ channel: "beta", releaseId: "39.01.10" }],
+    });
+  });
+
+  it("retries a channel's failed deploys only once staff confirm, naming how many companies try again", async () => {
+    const page = await openPlatform();
+    await press(() => betaPanel(page.container), "Retry");
+    const words = question()?.textContent ?? "";
+    await press(() => question() ?? document, "Retry");
+    await until(() => page.sent("retryChannelFn").length > 0);
+
+    expect({
+      title: words.includes("Retry Beta’s failed deploys?"),
+      reach: words.includes(
+        "2 companies on Beta whose deploy failed try again, each with the release it was being given"
+      ),
+      sent: page.sent("retryChannelFn"),
+    }).toStrictEqual({ title: true, reach: true, sent: [{ channel: "beta" }] });
+  });
+
+  it("moves nothing when staff cancel or press Escape", async () => {
+    const page = await openPlatform();
+    /** Asks `name`, cancels, asks again and presses Escape: whether the question stayed open each time. */
+    const askAndLeave = async (name: string) => {
+      await press(() => betaPanel(page.container), name);
+      await press(() => question() ?? document, "Cancel");
+      const cancelled = { open: question() !== null };
+      await press(() => betaPanel(page.container), name);
+      await escape();
+      return [cancelled, { open: question() !== null }];
+    };
+    const outcomes = [
+      ...(await askAndLeave("Promote")),
+      ...(await askAndLeave("Retry")),
+    ];
+
+    expect({
+      outcomes,
+      promoted: page.sent("promoteReleaseFn"),
+      retried: page.sent("retryChannelFn"),
+    }).toStrictEqual({
+      outcomes: [
+        { open: false },
+        { open: false },
+        { open: false },
+        { open: false },
+      ],
+      promoted: [],
+      retried: [],
+    });
   });
 });

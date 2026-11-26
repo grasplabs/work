@@ -46,6 +46,7 @@ import {
   openTestRun,
   personalChatsOf,
   model,
+  returnedOf,
   says,
   setObjectEnv,
   toolResults,
@@ -413,7 +414,7 @@ const lookElsewhereSchema = z.object({
 
 /** Where else to look, as `recall` (what the recall handed over) names it. */
 const lookElsewhereIn = (recall: string): string[] | undefined =>
-  lookElsewhereSchema.parse(JSON.parse(recall.slice(recall.indexOf("{"))))
+  lookElsewhereSchema.parse(returnedOf(recall.slice(recall.indexOf("{"))))
     .lookElsewhere;
 
 /**
@@ -1294,7 +1295,7 @@ describe("what the recall before a question may reach", setUpTime, () => {
     };
     const [sharedOne, own, others, disconnected, sends, otherAgents] =
       await Promise.all([
-        mailConnection([], searches),
+        mailConnection([], searches, { audience: "everyone" }),
         mailConnection([], searches, { owner: person.userId }),
         mailConnection([], searches, { owner: other.userId }),
         mailConnection([], searches, { owner: person.userId }),
@@ -1403,6 +1404,13 @@ describe("what the recall before a question may reach", setUpTime, () => {
     };
     const direct = await through("slack");
     const thread = await through("slack", true);
+    // Every turn's reader asks connect about each audience there is: one
+    // left would hold later tests' turns that hold connect.
+    await env.DB.prepare(
+      "DELETE FROM connection_brain_audiences WHERE connection_id = ?"
+    )
+      .bind(sharedOne.id)
+      .run();
 
     const none = Object.fromEntries(
       Object.keys(names).map((kind) => [kind, false])
@@ -2428,7 +2436,7 @@ const handedSchema = z.object({
 /** What the recall before the question handed the model in `body`, parsed. */
 const handedIn = (body: unknown) => {
   const handed = recallIn(body) ?? "";
-  return handedSchema.parse(JSON.parse(handed.slice(handed.indexOf("{"))));
+  return handedSchema.parse(returnedOf(handed.slice(handed.indexOf("{"))));
 };
 
 /** The budget both passes of the merge tests recall within. */

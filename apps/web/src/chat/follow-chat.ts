@@ -13,6 +13,7 @@ import type {
   ChatUpdate,
 } from "@grasp-os/shared/chat";
 import { failureText } from "@grasp-os/shared/errors";
+import type { ModelWait } from "@grasp-os/shared/models";
 import { RpcStub } from "capnweb";
 
 import type { CoreConnection } from "../core-connection.ts";
@@ -42,6 +43,8 @@ export interface ChatView {
   worked: number;
   /** Whether the turn checks the drafts it wrote now, past its answer. */
   checking: boolean;
+  /** What the turn's model request waits on now, if anything. */
+  waiting: ModelWait | null;
   /** Whether the first update has come. */
   loaded: boolean;
 }
@@ -57,6 +60,7 @@ export const emptyView: ChatView = {
   held: 0,
   worked: 0,
   checking: false,
+  waiting: null,
   loaded: false,
 };
 
@@ -95,6 +99,7 @@ export const applyUpdate = (view: ChatView, update: ChatUpdate): ChatView => {
     held: update.held,
     worked: update.worked,
     checking: update.checking ?? false,
+    waiting: update.waiting ?? null,
     loaded: true,
   };
 };

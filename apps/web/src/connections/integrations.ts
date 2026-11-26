@@ -1,4 +1,7 @@
-import { catalogSourceSchema } from "@grasp-os/shared/connect";
+import {
+  catalogSourceSchema,
+  urlConnectorIdSchema,
+} from "@grasp-os/shared/connect";
 import type {
   CatalogAuth,
   CatalogGroup,
@@ -37,6 +40,8 @@ export interface Integration {
   description: string | null;
   /** Whose sign-in app connecting it takes; unknown where the catalog doesn't list it. */
   auth: CatalogAuth | undefined;
+  /** The host of a connector's sign-in page, as the catalog sends it (`CatalogEntry.signInHost`). */
+  signInHost?: string;
   /** Where core serves its logo, or `null`: its first letter stands in. */
   logo: string | null;
   /** How many tools it has; unknown where the catalog doesn't list it, or doesn't count them (a connector's). */
@@ -126,6 +131,7 @@ export const integrationsOf = (
     group: entry.group,
     description: entry.description,
     auth: entry.auth,
+    ...(entry.signInHost === undefined ? {} : { signInHost: entry.signInHost }),
     logo: entry.logo,
     toolCount: entry.toolCount ?? undefined,
     offered: entry.offered,
@@ -144,12 +150,12 @@ export const integrationsOf = (
         key,
         source: connection.source,
         id: connection.provider,
-        // The catalog has its name, or the product we know it as; else its ID stands in.
+        // The product we know it as, else connect's name for it.
         name:
           (connection.source === "native" &&
           Object.hasOwn(unlistedNames, connection.provider)
             ? unlistedNames[connection.provider]
-            : undefined) ?? connection.provider,
+            : undefined) ?? connection.name,
         categories: [],
         group: "Other",
         description: null,
@@ -346,6 +352,39 @@ export const httpConnectionsOf = (
       ? [{ connection, http: connection.http }]
       : []
   );
+
+/** A connection's name: its app's, with its account's where the provider names one. */
+export const connectionLabel = (
+  connection: Pick<ListedConnection, "accountName">,
+  integration: Pick<Integration, "name">
+): string =>
+  connection.accountName === null
+    ? integration.name
+    : `${integration.name} (${connection.accountName})`;
+
+/**
+ * Every live connection's name, by ID, as the Connectors page shows it:
+ * a catalog entry's (`connectionLabel`), an HTTP connection's own. A
+ * connector known by nothing but its ID is left unnamed.
+ */
+export const connectionNames = (
+  entries: readonly Entry[],
+  connections: readonly ListedConnection[]
+): Map<string, string> =>
+  new Map([
+    ...integrationsOf(entries, connections).flatMap((integration) =>
+      integration.connections.flatMap((connection): [string, string][] =>
+        // A connector known by nothing but its ID (connect's name falls
+        // back to it) is left unnamed: never shown by its ID.
+        urlConnectorIdSchema.safeParse(integration.name).success
+          ? []
+          : [[connection.id, connectionLabel(connection, integration)]]
+      )
+    ),
+    ...httpConnectionsOf(connections).map(
+      ({ connection, http }): [string, string] => [connection.id, http.name]
+    ),
+  ]);
 
 /** A name as it is compared: letters and digits only, so "Google Sheets" is "google_sheets". */
 export const plain = (name: string): string =>

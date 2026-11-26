@@ -129,9 +129,9 @@ const useBoundTo = () => {
       if (label.connection === null) {
         return t`Permission ${permission}`;
       }
-      const { provider } = label.connection;
-      const account = label.connection.account ?? provider;
-      return t`${account} on ${provider}`;
+      const { name } = label.connection;
+      const account = label.connection.account ?? name;
+      return t`${account} on ${name}`;
     }
     // The platform's statistics or the Brain: one of the App's
     // platform permissions.

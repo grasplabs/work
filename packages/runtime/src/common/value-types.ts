@@ -92,6 +92,17 @@ export interface StringSchema<
   readonly min: (length: number) => StringSchema<Input, Output>;
   readonly nullable: () => StringSchema<Input | null, Output | null>;
   readonly optional: () => StringSchema<Input | undefined, Output | undefined>;
+  /**
+   * One whole segment of a URL's path, as a connector's route takes a
+   * `{name}` parameter: no `/ \ ? # % ; :` or control character, not `.`
+   * or `..`, and not a batch endpoint (`batch`, `$batch`). Exactly what
+   * connect's egress sends in a segment the parameter fills whole, so a
+   * value it would refuse there is refused where it is checked, before any
+   * request is built. A parameter inside literal text (`('{id}')`) is held
+   * to a looser rule there, which the connector's API checks before it
+   * sends. Kept as the text it was. A string has one format at most.
+   */
+  readonly segment: () => StringSchema<Input, Output>;
   /** Removes whitespace at both ends before the length is checked. */
   readonly trim: () => StringSchema<Input, Output>;
   /**

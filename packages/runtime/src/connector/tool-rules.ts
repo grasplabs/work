@@ -1100,6 +1100,24 @@ export const classByRules = (
   });
 };
 
+/**
+ * Parts of a word that say what is read is mail, found anywhere in it
+ * (`email`, `mailbox`, `inboxes`, a server called `Gmail`): no vendor's
+ * name, which is never one of the rules.
+ */
+const mailParts: readonly string[] = ["inbox", "mail"];
+
+/**
+ * Whether a server's read tool `name`, on the server called `serverName`,
+ * reads mail, by the rules: a word of either holds one of `mailParts`, in
+ * any case. It leans towards yes, as a held write's card then only says
+ * once more that the turn read mail, which others wrote.
+ */
+export const readsMailByRules = (name: string, serverName: string): boolean =>
+  [...wordsOf(name), ...wordsOf(serverName)].some((word) =>
+    mailParts.some((part) => word.includes(part))
+  );
+
 /** The methods a read sends. */
 const readMethods: ReadonlySet<string> = new Set(["GET", "HEAD"]);
 

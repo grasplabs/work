@@ -8,6 +8,7 @@ import type {
   ChatPartial,
   ChatToolEvent,
 } from "@grasp-os/shared/chat";
+import type { ModelWait } from "@grasp-os/shared/models";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -17,6 +18,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { act } from "react";
+import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -63,7 +65,11 @@ const thread = async (
   /** The agents the person may ask, which name the answers. */
   agents?: readonly ChatAgent[],
   /** The answer the New line goes over, the first the person hadn't seen. */
-  newLineBefore?: number
+  newLineBefore?: number,
+  /** What the chat read, as the page passes it. */
+  sources?: ReactNode,
+  /** What the turn's model request waits on, as core says. */
+  modelWait?: ModelWait
 ): Promise<void> => {
   const core = {
     withSession: async <T,>(
@@ -105,10 +111,14 @@ const thread = async (
         }}
         output={null}
         partial={partial}
-        running={partial !== null || checking !== undefined}
+        running={
+          partial !== null || checking !== undefined || modelWait !== undefined
+        }
         checking={checking}
+        modelWait={modelWait ?? null}
         tools={tools}
         newLineBefore={newLineBefore}
+        sources={sources}
       />
     ),
   });
@@ -168,6 +178,12 @@ const firstStep = () => {
 /** Grasp's answer in the thread. */
 const answer = () =>
   document.querySelector<HTMLElement>('article[aria-label="Grasp"]');
+
+/** Which of Grasp's answers hold what the chat read, in order. */
+const holdingWhatWasRead = () =>
+  [...document.querySelectorAll('article[aria-label="Grasp"]')].map(
+    (each) => each.querySelector('[data-testid="read"]') !== null
+  );
 
 /** What the line over the answer says while Grasp works on it. */
 const workingLine = () =>
@@ -536,6 +552,56 @@ describe(ChatThread, () => {
     });
   });
 
+  it("says while the model waits on its provider's rate limit, or which model answers instead, before its answer and between its replies", async () => {
+    const answered: ChatMessage[] = [
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: "Let me look.",
+        code: [],
+        tools: [],
+        end: "done",
+        at: "2026-10-27T09:00:05.000Z",
+      },
+    ];
+    const lineFor = async (
+      messages: readonly ChatMessage[],
+      modelWait: ModelWait
+    ) => {
+      await thread(
+        messages,
+        null,
+        [],
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        modelWait
+      );
+      const line = workingLine();
+      act(() => {
+        root?.unmount();
+      });
+      document.body.replaceChildren();
+      return line;
+    };
+
+    expect({
+      before: await lineFor([asked], { kind: "rate_limited", seconds: 20 }),
+      between: await lineFor(answered, { kind: "rate_limited", seconds: 1 }),
+      instead: await lineFor([asked], {
+        kind: "fallback",
+        model: "mistral/mistral-large-latest",
+      }),
+    }).toStrictEqual({
+      before: "Your AI provider is busy. Grasp tries again in 20 seconds.",
+      between: "Your AI provider is busy. Grasp tries again in 1 second.",
+      instead: "Answering with mistral-large-latest instead.",
+    });
+  });
+
   it("shows the working mark in the line's own mark place while it works closed, and none on the line once open", async () => {
     await thread(
       [
@@ -881,6 +947,51 @@ describe(ChatThread, () => {
     }).toStrictEqual({
       writing: { status: "streaming", words: true },
       kept: "done",
+    });
+  });
+
+  it("folds what the chat read under its last answer's words once that is done, and under no other", async () => {
+    const read = <p data-testid="read">Read Linear</p>;
+    const four: ChatMessage = {
+      id: 2,
+      role: "assistant",
+      text: "Four.",
+      code: [],
+      tools: [],
+      end: "done",
+      at: "2026-10-27T09:00:05.000Z",
+    };
+    const again: ChatMessage = { ...asked, id: 3, text: "And 3 + 3?" };
+    const six: ChatMessage = { ...four, id: 4, text: "Six." };
+    await thread(
+      [asked, four, again],
+      { text: "Six", code: [], tools: [], reasoning: "" },
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      read
+    );
+    const writing = holdingWhatWasRead();
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    await thread(
+      [asked, four, again, six],
+      null,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      read
+    );
+
+    expect({ writing, done: holdingWhatWasRead() }).toStrictEqual({
+      writing: [false, false],
+      done: [false, true],
     });
   });
 

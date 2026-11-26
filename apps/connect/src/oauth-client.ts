@@ -1,3 +1,4 @@
+import { fitsTemplate, hostOf, scopeToken } from "@grasp-os/runtime/connector";
 import type { AccountLookup } from "@grasp-os/runtime/connector";
 import { fromBase64Url } from "@grasp-os/shared/encoding";
 
@@ -60,8 +61,16 @@ export interface TokenSet {
   /** Epoch milliseconds, counted from before the request. */
   expiresAt: number;
   idToken?: string;
-  /** The scopes the provider says it granted, as its answer lists them. */
+  /**
+   * The scopes the provider says it granted, joined with a space; none
+   * where its answer lists none or isn't a valid list (`grantedScope`).
+   */
   scope?: string;
+  /**
+   * Each host template's host, as the token response names it where the
+   * provider's `hostsFrom` points; none unless every one fits its template.
+   */
+  hosts?: Readonly<Record<string, string>>;
 }
 
 /** The first `maxResponseBytes` of the body; more than that is refused. */
@@ -173,7 +182,86 @@ const lifetimeSeconds = (value: unknown): number => {
     : defaultLifetimeSeconds;
 };
 
+/**
+ * The scopes a token answer lists (RFC 6749 §5.1), as §3.3 writes them:
+ * scope tokens, each after the last and a space, or the separator
+ * `provider` joins its own with. Joined with a space, they are read one
+ * way, by every check and as stored. An answer that isn't such a list,
+ * an empty one too, is as absent: refused at consent where the grant must
+ * be listed, and a renewal's keeps the earlier grant. Only a provider
+ * breaking the RFC sends one, and it still enforces the token's own grant.
+ */
+const grantedScope = (
+  { scopeSeparator }: OAuthProviderConfig,
+  scope: unknown
+): string | undefined => {
+  if (typeof scope !== "string") {
+    return undefined;
+  }
+  const listed = scope.split(" ").flatMap((each) => each.split(scopeSeparator));
+  return listed.every((each) => scopeToken.test(each))
+    ? listed.join(" ")
+    : undefined;
+};
+
+/** Longest account ID, name or address taken from an app's lookup. */
+export const maxAccountField = 256;
+
+/** What `pointer` (RFC 6901, plain names and indexes) names in `value`. */
+const at = (value: unknown, pointer: string): unknown => {
+  let current = value;
+  for (const name of pointer.split("/").slice(1)) {
+    if (Array.isArray(current) && /^\d+$/u.test(name)) {
+      current = current[Number(name)];
+    } else if (
+      typeof current === "object" &&
+      current !== null &&
+      !Array.isArray(current) &&
+      Object.hasOwn(current, name)
+    ) {
+      current = Reflect.get(current, name);
+    } else {
+      return undefined;
+    }
+  }
+  return current;
+};
+
+/** A field of the account, as text, if it is some. */
+const textAt = (value: unknown, pointer: string | undefined): string | null => {
+  const found = pointer === undefined ? undefined : at(value, pointer);
+  const text =
+    typeof found === "number" && Number.isSafeInteger(found)
+      ? String(found)
+      : found;
+  return typeof text === "string" &&
+    text !== "" &&
+    text.length <= maxAccountField
+    ? text
+    : null;
+};
+
+/** Each template's host the token response names, if every one fits it. */
+const hostsNamed = (
+  hostsFrom: Readonly<Record<string, string>>,
+  body: Record<string, unknown>
+): Record<string, string> | undefined => {
+  const hosts: Record<string, string> = {};
+  for (const [template, pointer] of Object.entries(hostsFrom)) {
+    // Not textAt: its cap is an account field's, and an origin is
+    // "https://" longer than the longest host, which fitsTemplate bounds.
+    const named = at(body, pointer);
+    const host = typeof named === "string" ? hostOf(named) : undefined;
+    if (host === undefined || !fitsTemplate(template, host)) {
+      return undefined;
+    }
+    hosts[template] = host;
+  }
+  return hosts;
+};
+
 const tokenSet = (
+  provider: OAuthProviderConfig,
   body: Record<string, unknown>,
   requestedAt: number
 ): TokenSet => {
@@ -195,7 +283,11 @@ const tokenSet = (
         : undefined,
     expiresAt: requestedAt + lifetimeSeconds(expiresIn) * 1000,
     idToken: typeof idToken === "string" ? idToken : undefined,
-    scope: typeof scope === "string" ? scope : undefined,
+    scope: grantedScope(provider, scope),
+    hosts:
+      provider.hostsFrom === undefined
+        ? undefined
+        : hostsNamed(provider.hostsFrom, body),
   };
 };
 
@@ -212,6 +304,7 @@ export const exchangeCode = async (
 ): Promise<TokenSet> => {
   const requestedAt = Date.now();
   return tokenSet(
+    provider,
     await post(provider.tokenEndpoint(tenant), provider, client, {
       grant_type: "authorization_code",
       code,
@@ -232,6 +325,7 @@ export const refreshTokens = async (
 ): Promise<TokenSet> => {
   const requestedAt = Date.now();
   return tokenSet(
+    provider,
     await post(provider.tokenEndpoint(tenant), provider, client, {
       grant_type: "refresh_token",
       refresh_token: refreshToken,
@@ -294,43 +388,6 @@ export const idTokenClaims = (idToken: string | undefined): unknown => {
   } catch {
     return undefined;
   }
-};
-
-/** Longest account ID, name or address taken from an app's lookup. */
-const maxAccountField = 256;
-
-/** What `pointer` (RFC 6901, plain names and indexes) names in `value`. */
-const at = (value: unknown, pointer: string): unknown => {
-  let current = value;
-  for (const name of pointer.split("/").slice(1)) {
-    if (Array.isArray(current) && /^\d+$/u.test(name)) {
-      current = current[Number(name)];
-    } else if (
-      typeof current === "object" &&
-      current !== null &&
-      !Array.isArray(current) &&
-      Object.hasOwn(current, name)
-    ) {
-      current = Reflect.get(current, name);
-    } else {
-      return undefined;
-    }
-  }
-  return current;
-};
-
-/** A field of the account, as text, if it is some. */
-const textAt = (value: unknown, pointer: string | undefined): string | null => {
-  const found = pointer === undefined ? undefined : at(value, pointer);
-  const text =
-    typeof found === "number" && Number.isSafeInteger(found)
-      ? String(found)
-      : found;
-  return typeof text === "string" &&
-    text !== "" &&
-    text.length <= maxAccountField
-    ? text
-    : null;
 };
 
 /**

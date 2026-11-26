@@ -13,6 +13,7 @@ import {
   personalChatsOf,
   says,
   toolStep,
+  returnedText,
 } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
@@ -749,7 +750,7 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
       made: listed.some((agent) => agent.name === name),
       requests: provider.requests.length,
     }).toStrictEqual({
-      code: "Returned:\nnothing",
+      code: returnedText("nothing"),
       drafted: true,
       made: false,
       requests: 2,

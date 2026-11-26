@@ -48,4 +48,12 @@ export const teamsBot = {
 /** Grasp's apps at the apps that aren't suites, as test/app-provider.ts knows them. */
 export const appClients = {
   "sample-oauth": { id: "grasp-sample-oauth", secret: "sample-oauth-secret" },
+  "sample-tenant": {
+    id: "grasp-sample-tenant",
+    secret: "sample-tenant-secret",
+  },
+  "sample-company": {
+    id: "grasp-sample-company",
+    secret: "sample-company-secret",
+  },
 } as const;

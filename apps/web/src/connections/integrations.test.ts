@@ -7,6 +7,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   beyond,
+  connectionNames,
   find,
   integrationsOf,
   keeps,
@@ -57,6 +58,7 @@ const connection = (
   id: crypto.randomUUID(),
   source: "native",
   provider,
+  name: provider,
   scope,
   status,
   ownerUserId: scope === "personal" ? "me" : null,
@@ -113,6 +115,80 @@ describe(integrationsOf, () => {
     expect(microsoft === undefined ? undefined : stateOf(microsoft)).toBe(
       "not_connected"
     );
+  });
+});
+
+describe(connectionNames, () => {
+  const connector = "mcp_779f118c28fe4d5abc44822751adce18";
+
+  it("names each connection as the Connectors page does: its app's name, with its account's", () => {
+    const outlook = {
+      ...connection("microsoft", "personal", "active"),
+      accountName: "sanne@acme.test",
+    };
+    const tracker = {
+      ...connection(connector, "shared", "active"),
+      source: "connector" as const,
+      name: "Tracker",
+    };
+    const billing: ListedConnection = {
+      ...connection("http", "shared", "active"),
+      source: "http",
+      http: {
+        name: "Acme billing",
+        origin: "https://api.acme-billing.test",
+        pathPrefixes: ["/v1"],
+        methods: ["GET"],
+        credentialHeader: "authorization",
+      },
+    };
+    expect(
+      connectionNames(
+        [
+          entry("microsoft", [], { name: "Microsoft 365" }),
+          entry(connector, [], { source: "connector", name: "Issue tracker" }),
+        ],
+        [outlook, tracker, billing]
+      )
+    ).toStrictEqual(
+      new Map([
+        [outlook.id, "Microsoft 365 (sanne@acme.test)"],
+        [tracker.id, "Issue tracker"],
+        [billing.id, "Acme billing"],
+      ])
+    );
+  });
+
+  it("names a connector the catalog doesn't list by the name its admin gave it, never its ID", () => {
+    const tracker = {
+      ...connection(connector, "shared", "active"),
+      source: "connector" as const,
+      name: "Issue tracker",
+    };
+    expect(connectionNames([], [tracker]).get(tracker.id)).toBe(
+      "Issue tracker"
+    );
+  });
+
+  it("leaves a connector known by nothing but its ID unnamed", () => {
+    const tracker = {
+      ...connection(connector, "shared", "active"),
+      source: "connector" as const,
+    };
+    expect(connectionNames([], [tracker]).has(tracker.id)).toBeFalsy();
+  });
+
+  it("names an app the catalog doesn't list by its product, else by its vendor's own ID", () => {
+    const directory = connection("microsoft-directory", "shared", "active");
+    const gmail = {
+      ...connection("gmail", "personal", "active"),
+      source: "composio" as const,
+    };
+    const names = connectionNames([], [directory, gmail]);
+    expect([names.get(directory.id), names.get(gmail.id)]).toStrictEqual([
+      "Microsoft Entra ID",
+      "gmail",
+    ]);
   });
 });
 

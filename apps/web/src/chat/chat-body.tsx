@@ -1,3 +1,4 @@
+import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { MessageSkeleton } from "@grasp-os/ui/components/message";
 import {
@@ -32,10 +33,11 @@ import { WaitingForYou } from "./waiting-for-you.tsx";
 
 // One chat's conversation and the box to ask in under it, as the chat
 // beside a page (chat-panel.tsx) and a chat's own page (chat-page.tsx)
-// both show it: the thread, with what waits on the person under its last
-// answer (the writes held for them, the connections and packages asked
-// for), or nothing before anything is asked; and the box, or the agent's
-// questions in its place.
+// both show it: the thread, its last answer folding what the chat read
+// under its words, with what waits on the person under that answer (the
+// writes held for them, the connections and packages asked for), or
+// nothing before anything is asked; and the box, or the agent's questions
+// in its place.
 
 const styles = stylex.create({
   grow: {
@@ -127,8 +129,17 @@ export const ChatConversation = ({
   seen: boolean;
 }) => {
   const { t, i18n } = useLingui();
-  const { chatId, finding, view, failure, empty, ask, composer, offered } =
-    chat;
+  const {
+    chatId,
+    finding,
+    view,
+    failure,
+    empty,
+    ask,
+    composer,
+    offered,
+    sourceNames,
+  } = chat;
   // Read as it opens here; the New line over what the person hadn't seen.
   const newLine = useNewLine(chatId, view, seen);
   // A subject's chat, while core finds it, or why it gave none.
@@ -176,7 +187,11 @@ export const ChatConversation = ({
         output={view.output}
         partial={view.partial}
         checking={view.checking}
+        modelWait={view.waiting}
         running={view.running}
+        sources={
+          <ChatSources names={sourceNames} sources={view.provenance.sources} />
+        }
         tools={view.tools}
         build={{
           model: composer.model,
@@ -262,7 +277,6 @@ export const ChatFooter = ({
     ask,
     modelsUnavailable,
     retry,
-    sourceNames,
     summary,
     offered,
   } = chat;
@@ -297,7 +311,13 @@ export const ChatFooter = ({
   return (
     <div {...stylex.props(styles.footer, inColumn && styles.footerInColumn)}>
       <BuildsFailure read={builds} />
-      <ChatSources names={sourceNames} provenance={view.provenance} />
+      {/* A restricted chat stays so for good: said over the box, where the
+        next question is asked, whatever the thread is doing. */}
+      {view.provenance.restricted ? (
+        <div>
+          <Badge variant="warning">{t`Restricted`}</Badge>
+        </div>
+      ) : null}
       <AskOrCompose
         {...composer}
         {...(unavailable === undefined ? {} : { unavailable })}

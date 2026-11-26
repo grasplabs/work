@@ -41,6 +41,9 @@ const everyCode: Readonly<Record<ModelErrorCode, true>> = {
   "model.failed": true,
   "model.request_refused": true,
   "model.invalid_output": true,
+  "model.timeout": true,
+  "model.declined": true,
+  "model.context_too_long": true,
 };
 
 /** The codes, as the model gateway's error family has them. */
@@ -286,6 +289,40 @@ describe("a failed answer", () => {
       },
       member: askAdmin,
       staff: askAdmin,
+    });
+  });
+
+  it("offers Try again only where asking the same again may mend it: never under a decline, or a chat past the model's window", async () => {
+    const offered = async (failure: ModelErrorCode) => {
+      await showThread(failedWith([failure]));
+      const alert = document.querySelector('[role="alert"]');
+      const again = [...document.querySelectorAll("button")].some(
+        (button) => button.textContent.trim() === "Try again"
+      );
+      const shown = { said: alert?.textContent.trim(), again };
+      cleared();
+      return shown;
+    };
+
+    expect({
+      declined: await offered("model.declined"),
+      tooLong: await offered("model.context_too_long"),
+      timeout: await offered("model.timeout"),
+      outage: await offered("model.provider_unavailable"),
+    }).toStrictEqual({
+      declined: { said: "The model declined to answer this.", again: false },
+      tooLong: {
+        said: "This chat is too long for the model. Start a new chat to go on.",
+        again: false,
+      },
+      timeout: {
+        said: "Your AI provider sent nothing for too long, so Grasp gave up on this answer. Try again.",
+        again: true,
+      },
+      outage: {
+        said: "Your AI provider isn't answering. This is usually an outage on their side; try again in a while.",
+        again: true,
+      },
     });
   });
 

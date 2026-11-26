@@ -1,30 +1,35 @@
 import {
   classByRules,
   isJsonArray,
+  readsMailByRules,
   topNames,
 } from "@grasp-os/runtime/connector";
 import type { ToolHints } from "@grasp-os/runtime/connector";
 import {
   addConnectorSchema,
+  blockConnectorToolSchema,
   connectErrors,
   connectionErrors,
   connectionOwnersSchema,
+  connectorToolNameSchema,
+  connectorToolsRequestSchema,
 } from "@grasp-os/shared/connect";
 import type {
   ActionShape,
   ConnectorContract,
   ConnectorContractAction,
+  ConnectorToolView,
   ToolClass,
 } from "@grasp-os/shared/connect";
 import { connectionIdSchema } from "@grasp-os/shared/ids";
-import { isRecord } from "@grasp-os/shared/json";
+import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import { and, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { recordEvents } from "./audit.ts";
+import { recordEventIf, recordEvents, recordEventsIf } from "./audit.ts";
 import { companyAddressOf, companyRoute, outbound } from "./company-network.ts";
 import {
   auditRefusal,
@@ -32,10 +37,24 @@ import {
   refuseStaff,
 } from "./connection-audit.ts";
 import type { Connection } from "./connections.ts";
-import { maxListedTools, secretContext } from "./connector-providers.ts";
-import { connections, connectionTools, connectors } from "./db/schema.ts";
+import {
+  builtIn,
+  builtInAt,
+  connectorRow,
+  isDuplicate,
+  maxListedTools,
+  sameServer,
+  signInRow,
+} from "./connector-providers.ts";
+import type { ConnectorRow } from "./connector-providers.ts";
+import {
+  connections,
+  connectionTools,
+  connectorBlockedTools,
+  connectors,
+} from "./db/schema.ts";
 import { ownerErased } from "./erased-people.ts";
-import { clientFor, discoverSignIn, isPublicName } from "./mcp-discovery.ts";
+import { isPublicName } from "./mcp-discovery.ts";
 import { McpError, mcpHeaderValue, modernMcpServer } from "./mcp.ts";
 import type { ListedServerTool, McpServer, McpTool } from "./mcp.ts";
 import { pauseAsked } from "./pause.ts";
@@ -50,13 +69,18 @@ import { connectorCredentialFor, pausedWait } from "./tokens.ts";
 import { classesOf, keptToolClasses, storedSchema } from "./tool-rules.ts";
 import { vaultFor } from "./vault.ts";
 
-// Connectors made from an MCP server's URL (GRA-1375), and connections to
-// them: the one connection kind, always to a connector. An admin enters a
-// server's URL; connect checks where it leads, learns how it signs in and
-// registers there (mcp-discovery.ts), and keeps it as the one-line
-// `defineConnector({ name, mcp: { url } })` in `connectors`. People then
-// connect to it as to any app (oauth.ts, connector-providers.ts), and
-// connect alone holds their tokens.
+// Connectors served through a vendor's MCP server, and connections to
+// them: the one connection kind, always to a connector. A built-in of the
+// release declares its server in its manifest (`defineConnector`'s
+// `mcp`), and connect learns how it signs in and registers there on its
+// first connection (connector-providers.ts `prepareBuiltIn`). Any other
+// is made from its URL (GRA-1375): an admin enters it, and connect checks
+// where it leads, learns how it signs in and registers there
+// (mcp-discovery.ts), and keeps it as the one-line
+// `defineConnector({ name, mcp: { url } })` in `connectors`; moving that
+// onto generated source is GRA-2325's second part. People then connect to
+// either as to any app (oauth.ts, connector-providers.ts), and connect
+// alone holds their tokens.
 //
 // Everything the server says is untrusted (threat model on GRA-1375):
 // - its tool list is read when the last read's `ttlMs` (an hour at most)
@@ -64,9 +88,15 @@ import { vaultFor } from "./vault.ts";
 //   are too deep or too large, whose name a call couldn't carry, or that
 //   asks for headers connect won't send, isn't kept, and a name listed
 //   twice is kept for neither;
+// - each change of a list is audited once, with counts of the tools
+//   added, removed and changed (a new tool is callable at once when its
+//   class is on: Nick's decision on GRA-2306), and a list is fresh for a
+//   minute at least, so no server makes connect read it on every call;
 // - each tool's class is computed from the list as kept now
 //   (tool-rules.ts), never stored, so a changed tool is classed again and
 //   a removed one serves no call, contract or binding;
+// - a tool an admin blocked on the connector is offered to nobody and
+//   refused at the call, before anything goes out;
 // - a call goes only to the server's own URL, by POST, as `tools/call` of
 //   the one tool it names, or as `tools/list` (`serverFor`), with the
 //   connection's credential added there and nowhere else; no redirect is
@@ -80,6 +110,9 @@ const maxDescriptionLength = 4096;
 
 /** Longest a tool list is fresh, whatever the server says. */
 const maxListTtlMs = 60 * 60 * 1000;
+
+/** Shortest a tool list is fresh, whatever the server says. */
+const minListTtlMs = 60 * 1000;
 
 /** How long a tool list is fresh when the server doesn't say. */
 const defaultListTtlMs = 5 * 60 * 1000;
@@ -99,12 +132,6 @@ const laterReadGapMs = 5 * 60 * 1000;
  */
 const toolsPerInsert = 14;
 
-/**
- * A tool name connect sends: MCP's own rule for names (1 to 128 of
- * letters, digits, `_`, `-` and `.`).
- */
-const toolNamePattern = /^[A-Za-z0-9_.-]{1,128}$/u;
-
 /** An `x-mcp-header` name: an HTTP token (RFC 9110). */
 const paramHeaderPattern = /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,64}$/u;
 
@@ -123,13 +150,6 @@ export interface ConnectorTool {
   outputSchema: Json | undefined;
   annotations: ToolHints;
 }
-
-/** A unique index refused the row: another connector has that URL. */
-const isDuplicate = (error: unknown): boolean =>
-  error instanceof Error &&
-  [error.message, error.cause instanceof Error ? error.cause.message : ""].some(
-    (message) => message.includes("UNIQUE") && message.includes("connectors")
-  );
 
 /**
  * Adds a connector by its server's URL, for an admin who isn't staff: the
@@ -167,6 +187,13 @@ export const addConnector = async (
     });
     throw roleErrors.create("role.forbidden");
   }
+  // One catalog entry per server: a built-in's is connected as it is.
+  const served = builtInAt(server.href);
+  if (served !== undefined) {
+    throw connectionErrors.create("connection.connector_built_in", {
+      connector: served.name,
+    });
+  }
   if (companyNetwork === true) {
     // Its sign-in, discovered and registered at the server, would be read
     // from the public internet: a key in a header only, for now.
@@ -186,38 +213,23 @@ export const addConnector = async (
   const id = `mcp_${crypto.randomUUID().replaceAll("-", "")}`;
   const now = new Date();
   const common = { id, name, createdBy: person.userId, createdAt: now };
-  let row: typeof connectors.$inferInsert;
-  if (auth.kind === "header") {
-    row = {
-      ...common,
-      url: server.href,
-      auth: "header",
-      header: auth.header,
-      companyNetwork: address !== undefined,
-    };
-  } else {
-    const signIn = await discoverSignIn(server);
-    const client = await clientFor(signIn, new URL(origin).origin, auth.client);
-    row = {
-      ...common,
-      url: server.href,
-      resource: signIn.resource,
-      auth: "oauth",
-      issuer: signIn.issuer,
-      authorizationEndpoint: signIn.authorizationEndpoint,
-      tokenEndpoint: signIn.tokenEndpoint,
-      revocationEndpoint: signIn.revocationEndpoint ?? null,
-      scopes: signIn.scopes,
-      issParameter: signIn.issParameter,
-      registration: client.registration,
-      clientId: client.id,
-      clientSecret:
-        client.secret === undefined
-          ? null
-          : await vault.seal(client.secret, secretContext(id, signIn.issuer)),
-      clientAuthentication: client.authentication,
-    };
-  }
+  const row: typeof connectors.$inferInsert = {
+    ...common,
+    url: server.href,
+    ...(auth.kind === "header"
+      ? {
+          auth: "header",
+          header: auth.header,
+          companyNetwork: address !== undefined,
+        }
+      : await signInRow(
+          vault,
+          id,
+          server,
+          new URL(origin).origin,
+          auth.client
+        )),
+  };
   try {
     await recordEvents(
       env,
@@ -314,7 +326,7 @@ const toolOf = (listed: ListedServerTool): ConnectorTool | undefined => {
       ? undefined
       : schemaOf(listed.outputSchema);
   if (
-    !toolNamePattern.test(listed.name) ||
+    !connectorToolNameSchema.safeParse(listed.name).success ||
     inputSchema === undefined ||
     (listed.outputSchema !== undefined && outputSchema === undefined) ||
     paramHeadersOf(inputSchema) === undefined
@@ -343,25 +355,34 @@ const toolOf = (listed: ListedServerTool): ConnectorTool | undefined => {
 
 /**
  * A client for `connection`'s server that sends only what `allows` lets
- * through, to the connector's own URL, with the connection's credential.
+ * through, to the connector's own URL, with the connection's credential;
+ * none once its connector moved from `admitted`, the server a call's tool
+ * was read from.
  */
 const serverFor = async (
   env: Env,
   connection: Connection,
-  allows: (method: string, name: string | null) => boolean
+  allows: (method: string, name: string | null) => boolean,
+  admitted?: ConnectorRow
 ) => {
-  const row = await drizzle(env.DB)
-    .select({ url: connectors.url, companyNetwork: connectors.companyNetwork })
-    .from(connectors)
-    .where(eq(connectors.id, connection.server))
-    .get();
-  if (row === undefined) {
+  const row = await connectorRow(env.DB, connection.server);
+  if (
+    row === undefined ||
+    (admitted !== undefined && !sameServer(row, admitted))
+  ) {
     throw connectErrors.create("connect.server_unavailable");
   }
   const { credential, companyNetwork } = await connectorCredentialFor(
     env,
     connection.id
   );
+  // A release may have moved the connector while its credential was read,
+  // and the credential read since be the new server's: it goes only to
+  // the server the row still names.
+  const still = await connectorRow(env.DB, connection.server);
+  if (!sameServer(still, row) || still?.companyNetwork !== row.companyNetwork) {
+    throw connectErrors.create("connect.server_unavailable");
+  }
   // A server inside the network is never sent to over the internet.
   if (row.companyNetwork === true && companyNetwork === undefined) {
     throw connectErrors.create("connect.server_unavailable");
@@ -392,6 +413,10 @@ const serverFor = async (
   });
 };
 
+/** A tool as JSON whose keys a server may reorder without changing it. */
+const toolJson = (tool: ConnectorTool): string =>
+  canonicalJson({ ...tool, annotations: { ...tool.annotations } });
+
 /** Orders tools by name, which a list holds each of once. */
 const byName = (a: ConnectorTool, b: ConnectorTool): number =>
   a.name < b.name ? -1 : 1;
@@ -416,6 +441,34 @@ const keptTools = async (
     .from(connectionTools)
     .where(eq(connectionTools.connectionId, connectionId));
   return rows.map(keptTool);
+};
+
+/**
+ * How `after` differs from `before`, lists of one connection's tools:
+ * how many tools it added and removed, how many it kept by name but
+ * changed, and of those how many the rules class otherwise now.
+ */
+const listChanges = (
+  before: readonly ConnectorTool[],
+  after: readonly ConnectorTool[],
+  scope: Connection["scope"]
+): { added: number; removed: number; changed: number; reclassed: number } => {
+  const old = new Map(before.map((tool) => [tool.name, tool]));
+  const kept = after.flatMap((tool) => {
+    const was = old.get(tool.name);
+    return was === undefined ? [] : [{ was, now: tool }];
+  });
+  const changed = kept.filter(
+    ({ was, now }) => toolJson(was) !== toolJson(now)
+  );
+  return {
+    added: after.length - kept.length,
+    removed: before.length - kept.length,
+    changed: changed.length,
+    reclassed: changed.filter(
+      ({ was, now }) => classByRules(was, scope) !== classByRules(now, scope)
+    ).length,
+  };
 };
 
 /**
@@ -463,27 +516,46 @@ export const currentTools = async (
   });
   const db = drizzle(env.DB);
   // Kept only for the connection as it was when the list was asked for:
-  // still active, not changed since (signed in again, disconnected), and
-  // its person not being erased. A list that comes back after that is
-  // used for this call alone.
-  const asAsked = sql`EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'active' AND ${connections.updatedAt} = ${connection.updatedAt.getTime()} AND NOT ${ownerErased(connection.id)})`;
+  // still active, not changed since (signed in again, disconnected), its
+  // person not being erased, and its list not kept since by another read,
+  // so of reads at once one keeps its list and records the change.
+  const asAsked = sql`EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'active' AND ${connections.updatedAt} = ${connection.updatedAt.getTime()} AND ${connections.toolListReadAt} IS ${connection.toolListReadAt?.getTime() ?? null} AND NOT ${ownerErased(connection.id)})`;
   const read = db
     .update(connections)
     .set({
       toolListReadAt: new Date(now),
       toolListFreshUntil: new Date(
-        now + Math.min(listed.ttlMs ?? defaultListTtlMs, maxListTtlMs)
+        now +
+          Math.min(
+            Math.max(listed.ttlMs ?? defaultListTtlMs, minListTtlMs),
+            maxListTtlMs
+          )
       ),
     })
     .where(and(eq(connections.id, connection.id), asAsked));
+  // A list this read didn't keep: another read kept its own first, and
+  // what is callable is what that one kept and recorded; or the connection
+  // changed since (signed in again, disconnected), and the list serves
+  // this call alone.
+  const notKept = async (): Promise<ConnectorTool[]> => {
+    const row = await db
+      .select({ status: connections.status, updatedAt: connections.updatedAt })
+      .from(connections)
+      .where(eq(connections.id, connection.id))
+      .get();
+    return row?.status === "active" &&
+      row.updatedAt.getTime() === connection.updatedAt.getTime()
+      ? await keptTools(env.DB, connection.id)
+      : tools;
+  };
   // An unchanged list is kept as it is: only its freshness moves.
   const kept = await keptTools(env.DB, connection.id);
   if (
-    JSON.stringify(kept.toSorted(byName)) ===
-    JSON.stringify(tools.toSorted(byName))
+    kept.toSorted(byName).map(toolJson).join("\n") ===
+    tools.toSorted(byName).map(toolJson).join("\n")
   ) {
-    await read;
-    return tools;
+    const moved = await read.returning({ id: connections.id });
+    return moved.length > 0 ? tools : await notKept();
   }
   const rows = tools.map(
     (tool) =>
@@ -499,14 +571,55 @@ export const currentTools = async (
         )
     );
   }
-  await db.batch([
+  const writes = [
     db
       .delete(connectionTools)
       .where(and(eq(connectionTools.connectionId, connection.id), asAsked)),
     ...inserts,
     read,
+  ] as const;
+  // Recorded once, exactly when the list it read is kept: a first read
+  // too, as every tool it adds is callable from then on.
+  const [recorded] = await recordEventsIf(env, [
+    {
+      entry: connectionEvent(null, "connector.tools.changed", connection.id, {
+        connector: connection.server,
+        first: connection.toolListReadAt === null,
+        ...listChanges(kept, tools, connection.scope),
+      }),
+      from: connections,
+      where: asAsked,
+      writes,
+    },
   ]);
-  return tools;
+  return recorded === true ? tools : await notKept();
+};
+
+/** The names of the tools an admin blocked on connector `connectorId`. */
+const blockedToolsOf = async (
+  db: D1Database,
+  connectorId: string
+): Promise<Set<string>> => {
+  const rows = await drizzle(db)
+    .select({ name: connectorBlockedTools.name })
+    .from(connectorBlockedTools)
+    .where(eq(connectorBlockedTools.connectorId, connectorId));
+  return new Set(rows.map(({ name }) => name));
+};
+
+/**
+ * `connection`'s tools as its server lists them now (`currentTools`),
+ * but those an admin blocked on its connector: what it offers.
+ */
+export const offeredTools = async (
+  env: Env,
+  connection: Connection
+): Promise<ConnectorTool[]> => {
+  const [tools, blocked] = await Promise.all([
+    currentTools(env, connection),
+    blockedToolsOf(env.DB, connection.server),
+  ]);
+  return tools.filter(({ name }) => !blocked.has(name));
 };
 
 /**
@@ -595,7 +708,8 @@ const refreshLater = (
 
 /**
  * `connection`'s tools as kept, answered at once, so no server holds up a
- * search; a list stale or never read is read again after (`later`).
+ * search, but those an admin blocked on its connector; a list stale or
+ * never read is read again after (`later`).
  */
 export const keptToolsNow = async (
   env: Env,
@@ -603,7 +717,11 @@ export const keptToolsNow = async (
   later: (work: Promise<unknown>) => void
 ): Promise<ConnectorTool[]> => {
   refreshLater(env, connection, later);
-  return await keptTools(env.DB, connection.id);
+  const [tools, blocked] = await Promise.all([
+    keptTools(env.DB, connection.id),
+    blockedToolsOf(env.DB, connection.server),
+  ]);
+  return tools.filter(({ name }) => !blocked.has(name));
 };
 
 /**
@@ -703,7 +821,7 @@ export const connectorToolClasses = async (
   ) {
     return {};
   }
-  return classesOf(await currentTools(env, connection), connection.scope);
+  return classesOf(await offeredTools(env, connection), connection.scope);
 };
 
 /** Whether `toolClass` only reads. */
@@ -726,7 +844,8 @@ const named = (
 /**
  * The tool a call of `action` on `connection` names, as connect takes it
  * now, and how to reach it: a server that sends nothing but that tool's
- * call. Throws `connect.never` for a tool Grasp never runs,
+ * call. Throws `connect.tool_blocked` for one an admin blocked on the
+ * connector, `connect.never` for a tool Grasp never runs,
  * `connect.action_not_found` for one the server doesn't list now,
  * `connect.class_changed` when core let the call through as `checked`
  * (`CapabilityClaims.toolClass`) and the rules class it otherwise now, and
@@ -738,6 +857,17 @@ export const connectorAction = async (
   action: string,
   checked: ToolClass | undefined
 ): Promise<{ tool: McpTool; open: () => Promise<Pick<McpServer, "call">> }> => {
+  // Refused before its list is read: nothing goes out for it.
+  const blocked = await blockedToolsOf(env.DB, connection.server);
+  if (blocked.has(action)) {
+    throw connectErrors.create("connect.tool_blocked");
+  }
+  // The server its tool is read from, before it is: the call goes to that
+  // server or nowhere, should a release move its connector meanwhile.
+  const admitted = await connectorRow(env.DB, connection.server);
+  if (admitted === undefined) {
+    throw connectErrors.create("connect.server_unavailable");
+  }
   const listed = named(await currentTools(env, connection), action);
   if (listed === undefined) {
     throw connectErrors.create("connect.action_not_found");
@@ -763,10 +893,18 @@ export const connectorAction = async (
       const server = await serverFor(
         env,
         connection,
-        (method, name) => method === "tools/call" && name === callName
+        (method, name) => method === "tools/call" && name === callName,
+        admitted
       );
       return {
         call: async (name, input) => {
+          // Checked again last, after its list and credential were read
+          // and a write's key claimed: a tool blocked by then gets nothing
+          // (call.ts frees the key).
+          const blockedSince = await blockedToolsOf(env.DB, connection.server);
+          if (blockedSince.has(action)) {
+            throw connectErrors.create("connect.tool_blocked");
+          }
           const sent: Record<string, string> = {};
           for (const [property, header] of headers) {
             const value = input[property];
@@ -808,7 +946,7 @@ export const connectorContract = async (
   env: Env,
   connection: Connection
 ): Promise<ConnectorContract> => {
-  const tools = await currentTools(env, connection);
+  const tools = await offeredTools(env, connection);
   const actions: Record<string, ConnectorContractAction> = Object.fromEntries(
     tools.flatMap((tool) => {
       const toolClass = classByRules(tool, connection.scope);
@@ -844,22 +982,175 @@ export const connectorContract = async (
 
 /**
  * What core needs of `action` before a chat's agent calls it: whether it
- * reads, by the rules, and its input's properties.
+ * reads, by the rules, its input's properties, and whether a read reads
+ * mail, by the rules, from its name and the name its server was added
+ * under.
  */
 export const connectorActionShape = async (
   env: Env,
   connection: Connection,
   action: string
 ): Promise<ActionShape> => {
-  const listed = named(await currentTools(env, connection), action);
+  const listed = named(await offeredTools(env, connection), action);
   const toolClass =
     listed === undefined ? "never" : classByRules(listed, connection.scope);
   if (listed === undefined || toolClass === "never") {
     throw connectErrors.create("connect.action_not_found");
   }
+  const readOnly = reads(toolClass);
+  const server = readOnly
+    ? await drizzle(env.DB)
+        .select({ name: connectors.name })
+        .from(connectors)
+        .where(eq(connectors.id, connection.server))
+        .get()
+    : undefined;
   return {
-    readOnly: reads(toolClass),
+    readOnly,
     inputs: topProperties(listed.inputSchema),
     provider: connection.provider,
+    ...(readOnly && readsMailByRules(listed.name, server?.name ?? "")
+      ? { mail: true as const }
+      : {}),
   };
+};
+
+/** Connector `id`, or `connect.catalog_entry_not_found` when there's none. */
+const requireConnector = async (env: Env, id: string): Promise<void> => {
+  if ((await connectorRow(env.DB, id)) === undefined) {
+    throw connectErrors.create("connect.catalog_entry_not_found");
+  }
+};
+
+/**
+ * A connector's tools for an admin (`ConnectApi.connectorTools`): each
+ * tool its active connections' lists hold as last read, by name, as the
+ * list read last holds it, with its class by the rules on a shared
+ * connection; and each name an admin blocked, held or not.
+ */
+export const connectorTools = async (
+  env: Env,
+  request: unknown
+): Promise<ConnectorToolView[]> => {
+  const { person, connector } = connectionErrors.parse(
+    "connection.invalid",
+    connectorToolsRequestSchema,
+    request
+  );
+  if (!isAdmin(person.role)) {
+    throw roleErrors.create("role.forbidden");
+  }
+  // A built-in has its row only once someone connects it: until then it
+  // has no connections, and so no tools, to show.
+  if (builtIn(connector) === undefined) {
+    await requireConnector(env, connector);
+  }
+  const db = drizzle(env.DB);
+  // One row a name, as the list read last holds it, however many people
+  // connected: what is read grows with the connector's tools alone.
+  const newest = db
+    .select({
+      name: connectionTools.name,
+      description: connectionTools.description,
+      inputSchema: connectionTools.inputSchema,
+      annotations: connectionTools.annotations,
+      rank: sql<number>`ROW_NUMBER() OVER (PARTITION BY ${connectionTools.name} ORDER BY ${connections.toolListReadAt} DESC)`.as(
+        "rank"
+      ),
+    })
+    .from(connectionTools)
+    .innerJoin(connections, eq(connections.id, connectionTools.connectionId))
+    .where(
+      and(
+        eq(connections.server, connector),
+        eq(connections.serverKind, "connector"),
+        eq(connections.status, "active")
+      )
+    )
+    .as("newest");
+  const [rows, blocked] = await Promise.all([
+    db.select().from(newest).where(eq(newest.rank, 1)),
+    blockedToolsOf(env.DB, connector),
+  ]);
+  const listed = new Map(rows.map((row) => [row.name, row]));
+  return [...new Set([...listed.keys(), ...blocked])].toSorted().map((name) => {
+    const tool = listed.get(name);
+    return {
+      name,
+      description: tool?.description ?? null,
+      class:
+        tool === undefined
+          ? null
+          : classByRules(
+              {
+                name,
+                inputSchema: storedSchema(tool.inputSchema),
+                annotations: tool.annotations,
+              },
+              "shared"
+            ),
+      blocked: blocked.has(name),
+    };
+  });
+};
+
+/**
+ * Blocks one of a connector's tools by name, or lets it through again
+ * (`ConnectApi.blockConnectorTool`), for an admin who isn't staff. Its
+ * event is recorded exactly when it changes something: blocking a tool
+ * already blocked records nothing.
+ */
+export const blockConnectorTool = async (
+  env: Env,
+  request: unknown
+): Promise<void> => {
+  const { person, connector, tool, blocked } = connectionErrors.parse(
+    "connection.invalid",
+    blockConnectorToolSchema,
+    request
+  );
+  const action = blocked
+    ? "connector.tool.blocked"
+    : "connector.tool.unblocked";
+  const detail = { connector, tool };
+  await refuseStaff(env, person, detail, action);
+  if (!isAdmin(person.role)) {
+    await auditRefusal(env, person, action, {
+      ...detail,
+      outcome: "refused",
+      reason: "role.forbidden",
+    });
+    throw roleErrors.create("role.forbidden");
+  }
+  await requireConnector(env, connector);
+  const db = drizzle(env.DB);
+  const isBlocked = sql`EXISTS (SELECT 1 FROM ${connectorBlockedTools} WHERE ${connectorBlockedTools.connectorId} = ${connector} AND ${connectorBlockedTools.name} = ${tool})`;
+  await recordEventIf(
+    env,
+    connectionEvent(person, action, undefined, { ...detail, outcome: "ok" }),
+    {
+      from: connectors,
+      where: sql`${connectors.id} = ${connector} AND ${blocked ? sql`NOT ${isBlocked}` : isBlocked}`,
+    },
+    [
+      blocked
+        ? db
+            .insert(connectorBlockedTools)
+            .values({
+              connectorId: connector,
+              name: tool,
+              blockedBy: person.userId,
+              blockedAt: new Date(),
+            })
+            .onConflictDoNothing()
+        : db
+            .delete(connectorBlockedTools)
+            .where(
+              and(
+                eq(connectorBlockedTools.connectorId, connector),
+                eq(connectorBlockedTools.name, tool)
+              )
+            ),
+    ]
+  );
 };

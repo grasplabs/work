@@ -48,6 +48,8 @@ export interface McpTool {
   resourceField: string | undefined;
   /** The properties its input schema declares, if it declares any. */
   inputProperties: readonly string[] | undefined;
+  /** It reads, changes or sends email, as a native connector's manifest says (`mail`). */
+  mail?: true;
 }
 
 /**
@@ -117,9 +119,13 @@ export interface McpToolResult {
  * key (call.ts).
  */
 export class McpError extends Error {
-  constructor(message: string, cause?: unknown) {
+  /** Whether the server answered, with more than connect reads. */
+  readonly answerTooLarge: boolean;
+
+  constructor(message: string, cause?: unknown, answerTooLarge = false) {
     super(message, { cause });
     this.name = "McpError";
+    this.answerTooLarge = answerTooLarge;
   }
 }
 
@@ -269,7 +275,11 @@ const readResponse = async (
       }
       bytes += bytesRead.byteLength;
       if (bytes > maxBytes) {
-        throw new McpError(`The response is over ${maxBytes} bytes`);
+        throw new McpError(
+          `The response is over ${maxBytes} bytes`,
+          undefined,
+          true
+        );
       }
       const answer = add(decoder.decode(bytesRead, { stream: true }));
       if (answer !== undefined) {
@@ -316,9 +326,10 @@ const resultOf = (result: unknown): McpToolResult => {
   const text = texts.every((part) => part !== undefined)
     ? texts.join("\n")
     : undefined;
+  // Other content (images, resources) goes as the blocks themselves.
+  const output = JSON.stringify(structuredContent ?? text ?? content);
   return {
-    // Other content (images, resources) goes as the blocks themselves.
-    output: JSON.stringify(structuredContent ?? text ?? content),
+    output,
     provenance: provenance.data,
     isError,
     notPerformed:

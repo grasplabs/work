@@ -30,6 +30,7 @@ import type {
   ConnectApi,
   ConnectCall,
   ConnectionOwner,
+  ConnectorToolView,
   PersonalAccount,
   ConnectionPerson,
   ConnectionSummary,
@@ -155,7 +156,9 @@ import { createHttpConnection } from "./http-connections.ts";
 import { catalogLogo } from "./logos.ts";
 import {
   addConnector,
+  blockConnectorTool,
   connectorToolClasses,
+  connectorTools,
   keepToolList,
   offeredConnectorTools,
 } from "./mcp-connectors.ts";
@@ -241,6 +244,7 @@ const outcomeOf = (code: string | undefined): CallOutcome => {
       return "unknown";
     }
     case "connect.action_failed":
+    case "connect.answer_too_large":
     case "connect.server_unavailable":
     case undefined: {
       return "failed";
@@ -410,7 +414,9 @@ export default class Connect
   // Connecting accounts (src/oauth.ts). Core calls these for a signed-in
   // person, whom it names; none of them returns a token.
 
-  async startConnection(request: StartConnection): Promise<{ url: string }> {
+  async startConnection(
+    request: StartConnection
+  ): Promise<{ url: string; relayed: boolean }> {
     return await startConnection(this.env, request);
   }
 
@@ -460,6 +466,14 @@ export default class Connect
     return await offeredConnectorTools(this.env, connectionIds, (work) => {
       this.ctx.waitUntil(work);
     });
+  }
+
+  async connectorTools(request: unknown): Promise<ConnectorToolView[]> {
+    return await connectorTools(this.env, request);
+  }
+
+  async blockConnectorTool(request: unknown): Promise<void> {
+    await blockConnectorTool(this.env, request);
   }
 
   async personalAccounts(userId: unknown): Promise<PersonalAccount[]> {

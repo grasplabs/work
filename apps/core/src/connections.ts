@@ -11,6 +11,7 @@ import type {
 import { actorOf } from "@grasp-os/shared/audit";
 import {
   addConnectorSchema,
+  blockConnectorToolSchema,
   catalogLogoPath,
   catalogSourceSchema,
   composioToolkitSchema,
@@ -21,6 +22,7 @@ import {
   connectionScopeSchema,
   connectorClientMetadataPath,
   connectorIdSchema,
+  connectorToolsRequestSchema,
   oauthProviderSchema,
   returnPathMaxLength,
 } from "@grasp-os/shared/connect";
@@ -37,6 +39,7 @@ import type {
   ConnectionPerson,
   ConnectionSummary,
   ConnectionsApi,
+  ConnectorToolView,
   ListedConnection,
   RevocationToDo,
   OAuthProvider,
@@ -44,13 +47,14 @@ import type {
   AppPointerSetting,
   SharedMailboxSetting,
   SharedSyncPlaces,
-  ConnectionBrainAudienceSetting,
+  ConnectionAudienceSetting,
   ToolClassSetting,
   ToolkitKeyField,
 } from "@grasp-os/shared/connect";
 import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import { authErrors, requestErrors } from "@grasp-os/shared/errors";
 import { httpConnectionSchema } from "@grasp-os/shared/http-connections";
+import { identifierMaxLength } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import {
@@ -168,7 +172,8 @@ type ConnectToolkitWithKeyRequest = Parameters<
 
 /**
  * What the frontend sends to start: checked here, as it came over the
- * wire. A native suite, or a connector made from a URL by its ID.
+ * wire. A native suite, or a connector: a built-in by its name, or one
+ * made from a URL by its ID.
  */
 const startRequestSchema = z.strictObject({
   provider: z.union([oauthProviderSchema, connectorIdSchema]),
@@ -440,6 +445,22 @@ export const requireOfferedConnection = async (
 };
 
 /**
+ * Refuses `id` unless connect's catalog lists it as a connector, as
+ * `connection.invalid`: a connector's name is shaped as an app's, and
+ * connect keeps records of apps no person starts here.
+ */
+const requireConnector = async (env: Env, id: string): Promise<void> => {
+  try {
+    await env.CONNECT.catalogTools({ source: "connector", id });
+  } catch (error) {
+    if (connectErrors.codeOf(error) === "connect.catalog_entry_not_found") {
+      throw connectionErrors.create("connection.invalid");
+    }
+    throw error;
+  }
+};
+
+/**
  * Refuses to start connecting the entry `source` `id`, as a `scope`
  * connection, while it is hidden, and records the refusal as connect
  * records its own (`provider`, `scope`, `outcome`, `reason`): someone went
@@ -523,6 +544,9 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
     }
     const { provider, scope, returnTo } = parsed.data;
     const suite = oauthProviderSchema.safeParse(provider);
+    if (!suite.success) {
+      await requireConnector(this.#env, provider);
+    }
     await requireOffered(this.#env, person, {
       source: suite.success ? "native" : "connector",
       id: provider,
@@ -548,13 +572,10 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
       scope,
       ...(tenant === undefined ? {} : { tenant }),
       returnTo: `${back.pathname}${back.search}`,
-      // What a suite's sign-in asks for; a connector's server decides its own.
-      ...(suite.success
-        ? {
-            classes: await classesOn(this.#env),
-            sharedMailbox: await anyMailboxPointed(this.#env),
-          }
-        : {}),
+      // What a sign-in asked by class asks for (a suite's, or a connector's
+      // that declares its rights); connect asks the rest for all they declare.
+      classes: await classesOn(this.#env),
+      sharedMailbox: await anyMailboxPointed(this.#env),
     });
   }
 
@@ -787,6 +808,7 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
       throw connectionErrors.create("connection.invalid");
     }
     const { provider, scope, key } = parsed.data;
+    await requireConnector(this.#env, provider);
     await requireOffered(this.#env, person, {
       source: "connector",
       id: provider,
@@ -826,6 +848,36 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
       person,
       origin: config.origin,
     });
+  }
+
+  /**
+   * A connector's tools for an admin, with their classes and the names
+   * blocked, as the signed-in person: connect checks the role.
+   */
+  async connectorTools(connector: unknown): Promise<ConnectorToolView[]> {
+    const person = await this.#person();
+    const parsed = connectorToolsRequestSchema
+      .omit({ person: true })
+      .safeParse({ connector });
+    if (!parsed.success) {
+      throw connectionErrors.create("connection.invalid");
+    }
+    return await this.#env.CONNECT.connectorTools({ ...parsed.data, person });
+  }
+
+  /**
+   * Blocks a connector's tool by its name, or lets it through again, as
+   * the signed-in person: connect checks the role and staff, and audits it.
+   */
+  async blockConnectorTool(request: unknown): Promise<void> {
+    const person = await this.#person();
+    const parsed = blockConnectorToolSchema
+      .omit({ person: true })
+      .safeParse(request);
+    if (!parsed.success) {
+      throw connectionErrors.create("connection.invalid");
+    }
+    await this.#env.CONNECT.blockConnectorTool({ ...parsed.data, person });
   }
 
   async disconnect(connectionId: string): Promise<{ revoked: boolean }> {
@@ -978,14 +1030,14 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
     });
   }
 
-  async brainAudiences(): Promise<ConnectionBrainAudienceSetting[]> {
+  async audiences(): Promise<ConnectionAudienceSetting[]> {
     return await withPerson(
       this.#check,
       async (identity) => await readConnectionAudiences(this.#env, identity)
     );
   }
 
-  async setBrainAudience(
+  async setAudience(
     connectionId: unknown,
     audience: unknown,
     from: unknown,
@@ -1350,6 +1402,10 @@ export const clientMetadataResponse = (
   });
 };
 
+/** A hint on Composio's redirect, or `undefined` when empty or over `max`. */
+const composioHint = (value: string | null, max: number): string | undefined =>
+  value === null || value === "" || value.length > max ? undefined : value;
+
 /**
  * The provider's redirect back, on the client's origin. The session cookie
  * comes along (a top-level navigation sends `SameSite=Lax` cookies), and
@@ -1403,6 +1459,14 @@ export const handleConnectionCallback = async (
       // Which authorization server answered (RFC 9207), for connect to
       // check against the one the sign-in started at.
       iss: params.get("iss") ?? undefined,
+      // What Composio appends to the callback it was given: hints, which
+      // connect checks against the flow and Composio itself. Left out
+      // when empty, or an ID too long to be one, never failing the flow.
+      status: composioHint(params.get("status"), 64),
+      connectedAccountId: composioHint(
+        params.get("connected_account_id"),
+        identifierMaxLength
+      ),
     });
     // The accounts it proves are theirs, for the reader lists the Brain
     // copies (GRA-1761): failed, the flow fails, and connecting again in

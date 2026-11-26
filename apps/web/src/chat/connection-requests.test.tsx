@@ -19,8 +19,7 @@ import { ConnectionRequests } from "./connection-requests.tsx";
 // The connections a chat's agent asked to use, against core's chats as
 // the page reaches them over RPC, faked: the person grants or denies their
 // own connection, naming only the request, each press named for the
-// connection it decides; a shared one waits for an admin, and the person
-// may withdraw it; a refusal is said on the card. A card that moves up
+// connection it decides; a refusal is said on the card. A card that moves up
 // into the place of one decided holds its answers a moment.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -28,31 +27,21 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 const own: ChatConnectionRequest = {
   id: "request-1",
   connectionId: "connection-1",
-  provider: "Gmail",
+  name: "Gmail",
   accountName: "sanne@acme.test",
   resource: null,
   actions: ["send"],
   binding: "sanne@acme.test",
   reason: "To send the invoice to Northwind.",
   requestedAt: "2026-11-17T10:00:00.000Z",
-  decidedBy: "you",
 };
 
 const other: ChatConnectionRequest = {
   ...own,
   id: "request-3",
   connectionId: "connection-3",
-  provider: "Outlook",
+  name: "Outlook",
   accountName: "sanne@acme.test",
-};
-
-const shared: ChatConnectionRequest = {
-  ...own,
-  id: "request-2",
-  connectionId: "connection-2",
-  provider: "Slack",
-  accountName: "Acme",
-  decidedBy: "admin",
 };
 
 let root: Root | undefined;
@@ -256,18 +245,6 @@ describe("the chat's connection requests", () => {
     await press("Deny Gmail, sanne@acme.test");
 
     expect(decided).toStrictEqual(["deny request-1"]);
-  });
-
-  it("lets the person withdraw a shared connection an admin decides, with nothing to grant", async () => {
-    const { decided } = await shown([shared]);
-    const names = buttonNames();
-
-    await press("Withdraw Slack, Acme");
-
-    expect({ names, decided }).toStrictEqual({
-      names: ["Withdraw Slack, Acme"],
-      decided: ["deny request-2"],
-    });
   });
 
   it("says a grant core refused on the card, and keeps it", async () => {

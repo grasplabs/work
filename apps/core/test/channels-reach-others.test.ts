@@ -212,9 +212,9 @@ describe("reaching others from a Teams chat", setUpTime, () => {
       replyToId: turn.card?.id,
       value: {
         actionId: confirmAction,
-        value: JSON.stringify(
-          writes.map(({ id, inputHash }) => ({ id, inputHash }))
-        ),
+        value: JSON.stringify({
+          writes: writes.map(({ id, inputHash }) => ({ id, inputHash })),
+        }),
       },
     };
     await post(press);

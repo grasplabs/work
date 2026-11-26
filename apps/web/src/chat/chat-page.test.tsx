@@ -1,7 +1,11 @@
 // @vitest-environment happy-dom
 
 import { agentErrors } from "@grasp-os/shared/agent";
-import type { ChatQuestion, ChatSummary } from "@grasp-os/shared/chat";
+import type {
+  ChatQuestion,
+  ChatSummary,
+  ChatUpdate,
+} from "@grasp-os/shared/chat";
 import { internalErrors } from "@grasp-os/shared/errors";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
@@ -105,9 +109,12 @@ const opened = async (
   first: string,
   summary: (id: string) => Promise<ChatSummary> = async (id) =>
     await Promise.resolve(summaryOf(id)),
-  /** How core's watch of a chat ends: never, by default. */
-  watch: () => Promise<never> = async () =>
-    await Promise.withResolvers<never>().promise
+  /** How core's watch of a chat goes: it never ends, and sends nothing by default. */
+  watch: (
+    chatId: string,
+    after: number | null,
+    onUpdate: (update: ChatUpdate) => void
+  ) => Promise<never> = async () => await Promise.withResolvers<never>().promise
 ) => {
   const asked: string[] = [];
   const chats = {
@@ -203,6 +210,39 @@ const buttonNamed = (name: string): HTMLButtonElement | undefined =>
     (each) => wordsOf(each) === name
   );
 
+/** A watch that sends the restricted chat as `now` has it, then holds. */
+const restricted =
+  (now: Pick<ChatUpdate, "partial" | "held">) =>
+  async (
+    _chatId: string,
+    _after: number | null,
+    onUpdate: (update: ChatUpdate) => void
+  ): Promise<never> => {
+    await Promise.resolve();
+    onUpdate({
+      messages: [
+        {
+          id: 1,
+          role: "user",
+          text: "Which deals closed?",
+          at: "2026-11-01T08:00:00.000Z",
+        },
+      ],
+      running: true,
+      stopped: null,
+      worked: 0,
+      provenance: { sources: ["conn-1"], restricted: true },
+      ...now,
+    });
+    return await Promise.withResolvers<never>().promise;
+  };
+
+/** Whether the page says the chat is restricted. */
+const saysRestricted = () =>
+  [...document.querySelectorAll('[data-slot="badge"]')].some(
+    (badge) => wordsOf(badge) === "Restricted"
+  );
+
 describe("a chat's own page", () => {
   afterEach(() => {
     act(() => {
@@ -295,6 +335,41 @@ describe("a chat's own page", () => {
     await settled();
 
     expect(seen.chat?.summary?.title).toBe("Chat chat-b");
+  });
+
+  it("says a restricted chat is restricted over the box while an answer is written, and while a held write waits on the person", async () => {
+    // Chats of their own: each page follows its chat from its own watch.
+    await opened(
+      "chat-writing",
+      undefined,
+      restricted({
+        partial: {
+          from: 0,
+          text: "Three closed",
+          code: [],
+          tools: [],
+          reasoning: { from: 0, text: "" },
+        },
+        held: 0,
+      })
+    );
+    await settled();
+    const writing = saysRestricted();
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    await opened(
+      "chat-held",
+      undefined,
+      restricted({ partial: null, held: 1 })
+    );
+    await settled();
+
+    expect({ writing, held: saysRestricted() }).toStrictEqual({
+      writing: true,
+      held: true,
+    });
   });
 
   it("is not found once core has none of its chat any more, and never selects it again", async () => {

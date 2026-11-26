@@ -349,6 +349,9 @@ catalogs:
     mime:
       specifier: 4.1.2
       version: 4.1.2
+    miniflare:
+      specifier: 5.20261113.0-beta
+      version: 5.20261113.0-beta
     modern-tar:
       specifier: 0.8.6
       version: 0.8.6
@@ -599,7 +602,7 @@ importers:
         version: 4.1.1
       '@earendil-works/pi-ai':
         specifier: 'catalog:'
-        version: 1.4.0(@aws-sdk/credential-provider-node@3.972.84)(@modelcontextprotocol/sdk@1.32.2(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.6.7))(@smithy/signature-v4@5.7.3)(supports-color@10.2.2)(undici@7.30.1)(ws@8.21.3)(zod@4.6.7)
+        version: 1.4.0(@aws-sdk/credential-provider-node@3.972.84)(@modelcontextprotocol/sdk@1.32.2(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.6.7))(@smithy/signature-v4@5.7.3)(supports-color@10.2.2)(undici@8.13.1)(ws@8.21.3)(zod@4.6.7)
       '@fontsource-variable/geist':
         specifier: 'catalog:'
         version: 5.2.8
@@ -636,6 +639,9 @@ importers:
       '@tanstack/react-start':
         specifier: 'catalog:'
         version: 1.169.4(@voidzero-dev/vite-plus-core@0.3.3(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))(esbuild@0.28.2)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(rolldown@1.2.16)(supports-color@10.2.2)
+      '@ui-sdk/react':
+        specifier: 'catalog:'
+        version: 0.1.0-beta.13(@types/react@19.3.0)(@ui-sdk/core@0.1.0-beta.13)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       drizzle-orm:
         specifier: 'catalog:'
         version: 0.45.3(@cloudflare/workers-types@5.20261113.1)(@opentelemetry/api@1.9.1)(kysely@0.29.6)
@@ -770,6 +776,9 @@ importers:
       fflate:
         specifier: 'catalog:'
         version: 0.8.3
+      miniflare:
+        specifier: 'catalog:'
+        version: 5.20261113.0-beta(patch_hash=97e8c42aed95b5053bf8704f0a49e85c250f4d15d12298618ad0bdd5b31c0ed1)(@types/node@26.6.2)
       vite-plus:
         specifier: 'catalog:'
         version: 0.3.3(@opentelemetry/api@1.9.1)(@types/node@26.6.2)(@vitest/browser-playwright@4.1.11)(esbuild@0.28.2)(happy-dom@21.0.4)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1)
@@ -1494,6 +1503,16 @@ importers:
         specifier: 'catalog:'
         version: 5.20261113.1
 
+  packages/connectors/linear:
+    dependencies:
+      '@grasp-os/sdk':
+        specifier: workspace:*
+        version: link:../../sdk
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: 'catalog:'
+        version: 5.20261113.1
+
   packages/connectors/microsoft-365:
     dependencies:
       '@grasp-os/connector-kit':
@@ -1514,6 +1533,16 @@ importers:
       zod:
         specifier: 'catalog:'
         version: 4.6.7
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: 'catalog:'
+        version: 5.20261113.1
+
+  packages/connectors/notion:
+    dependencies:
+      '@grasp-os/sdk':
+        specifier: workspace:*
+        version: link:../../sdk
     devDependencies:
       '@cloudflare/workers-types':
         specifier: 'catalog:'
@@ -12687,31 +12716,6 @@ snapshots:
       - ws
       - zod
 
-  '@earendil-works/pi-ai@1.4.0(@aws-sdk/credential-provider-node@3.972.84)(@modelcontextprotocol/sdk@1.32.2(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.6.7))(@smithy/signature-v4@5.7.3)(supports-color@10.2.2)(undici@7.30.1)(ws@8.21.3)(zod@4.6.7)':
-    dependencies:
-      '@anthropic-ai/sdk': 0.129.0(zod@4.6.7)
-      '@aws-sdk/client-bedrock-runtime': 3.1127.0
-      '@earendil-works/pi-telemetry': 1.4.0
-      '@google/genai': 2.21.0(@modelcontextprotocol/sdk@1.32.2(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.6.7))(supports-color@10.2.2)
-      '@smithy/node-http-handler': 4.12.1
-      http-proxy-agent: 9.1.0(supports-color@10.2.2)
-      https-proxy-agent: 9.1.0(supports-color@10.2.2)
-      openai: 7.19.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.3)(undici@7.30.1)(ws@8.21.3)(zod@4.6.7)
-      partial-json: 0.1.7
-      typebox: 1.3.27
-    transitivePeerDependencies:
-      - '@aws-sdk/credential-provider-node'
-      - '@modelcontextprotocol/sdk'
-      - '@smithy/hash-node'
-      - '@smithy/signature-v4'
-      - bufferutil
-      - kerberos
-      - supports-color
-      - undici
-      - utf-8-validate
-      - ws
-      - zod
-
   '@earendil-works/pi-ai@1.4.0(@aws-sdk/credential-provider-node@3.972.84)(@modelcontextprotocol/sdk@1.32.2(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.6.7))(@smithy/signature-v4@5.7.3)(supports-color@10.2.2)(undici@8.13.1)(ws@8.21.3)(zod@4.6.7)':
     dependencies:
       '@anthropic-ai/sdk': 0.129.0(zod@4.6.7)
@@ -19353,14 +19357,6 @@ snapshots:
       is-docker: 2.2.1
       is-wsl: 2.2.0
 
-  openai@7.19.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.3)(undici@7.30.1)(ws@8.21.3)(zod@4.6.7):
-    optionalDependencies:
-      '@aws-sdk/credential-provider-node': 3.972.84
-      '@smithy/signature-v4': 5.7.3
-      undici: 7.30.1
-      ws: 8.21.3
-      zod: 4.6.7
-
   openai@7.19.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.3)(undici@8.13.1)(ws@8.21.3)(zod@4.6.7):
     optionalDependencies:
       '@aws-sdk/credential-provider-node': 3.972.84
@@ -21015,7 +21011,7 @@ snapshots:
       css-tree: 3.2.1
       fnv1a-64: 0.1.2
       std-env: 4.2.0
-      undici: 8.12.3
+      undici: 8.13.1
 
   unist-util-is@6.0.1:
     dependencies:

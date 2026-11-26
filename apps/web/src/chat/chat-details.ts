@@ -1,7 +1,9 @@
 import type { ChatSummary } from "@grasp-os/shared/chat";
 import { useEffect, useState } from "react";
 
+import { connectionNames } from "../connections/integrations.ts";
 import type { CoreConnection } from "../core-connection.ts";
+import { withTimeout } from "../core.ts";
 import type { Session } from "../core.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -19,22 +21,46 @@ export interface ChatNames {
 }
 
 /**
- * The names of the connections the person can see, by ID: a list refused
- * only leaves those IDs unnamed.
+ * How long the names wait on the catalog, well inside the read's own few
+ * seconds (`timeoutMs`): an uncached catalog waits on Composio, which can
+ * take longer, and the connection list names every source without it.
+ */
+export const catalogWaitMs = 2000;
+
+/** The catalog's entries, or none where core refused them or was slow to. */
+const catalogEntries = async (session: Session) => {
+  try {
+    const { entries } = await withTimeout(
+      session.connections.catalog(),
+      catalogWaitMs
+    );
+    return entries;
+  } catch {
+    return [];
+  }
+};
+
+/**
+ * The names of the connections the person can see, by ID, as the
+ * Connectors page names them: a list refused only leaves those IDs
+ * unnamed, a catalog refused or slow names each by what the list says
+ * alone.
  */
 const readSourceNames = async (
   session: Session
 ): Promise<ReadonlyMap<string, SourceName>> => {
   const names = new Map<string, SourceName>();
   try {
-    for (const {
-      id,
-      provider,
-      accountName,
-    } of await session.connections.list()) {
-      names.set(id, {
-        name: accountName === null ? provider : `${provider} (${accountName})`,
-      });
+    const [listed, entries] = await Promise.all([
+      session.connections.list(),
+      catalogEntries(session),
+    ]);
+    const named = connectionNames(entries, listed);
+    for (const { id, provider } of listed) {
+      const name = named.get(id);
+      if (name !== undefined) {
+        names.set(id, { name, provider });
+      }
     }
   } catch {
     // Refused: the IDs stay unnamed.

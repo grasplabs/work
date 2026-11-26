@@ -27,6 +27,7 @@ import {
 } from "./chat-tool-events.ts";
 import { permissions } from "./db/core/schema.ts";
 import { workspace } from "./durable-objects.ts";
+import type { OutsideTextNote } from "./outside-text.ts";
 import type { WorkContext } from "./restricted.ts";
 
 // What every API of a chat's code (agent-apis.ts) knows of the call: who
@@ -209,6 +210,32 @@ export const recordSources = async (
   );
   if (recorded !== "open") {
     throw runRefusal(recorded);
+  }
+};
+
+/**
+ * Notes with the run the connections whose own words a call hands over
+ * without calling them (`told`), before the call hands them over, so the
+ * run's result names them as read from outside (`describeRun`'s
+ * `readFrom`).
+ * A run that ended since the call began notes nothing, and the call is
+ * refused.
+ */
+export const noteOutsideText = async (
+  env: Env,
+  { workspaceId, chatId, runId }: AgentScope,
+  told: readonly OutsideTextNote[]
+): Promise<void> => {
+  if (told.length === 0) {
+    return;
+  }
+  const noted = await workspace(env, workspaceId).noteOutsideText(
+    chatId,
+    runId,
+    told
+  );
+  if (noted !== "open") {
+    throw runRefusal(noted);
   }
 };
 

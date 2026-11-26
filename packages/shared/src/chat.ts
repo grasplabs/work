@@ -9,7 +9,12 @@ import type {
 import type { ChatSavedMemory } from "./brain-memories.ts";
 import type { DependencyRequest } from "./dependencies.ts";
 import type { AppId } from "./ids.ts";
-import type { ModelEffort, ModelEfforts, ModelErrorCode } from "./models.ts";
+import type {
+  ModelEffort,
+  ModelEfforts,
+  ModelErrorCode,
+  ModelWait,
+} from "./models.ts";
 import type { PageBundle } from "./pages.ts";
 import type { Role } from "./roles.ts";
 import type { Subject, SubjectKind } from "./subject.ts";
@@ -1209,13 +1214,18 @@ export interface ChatUpdate {
    * until it ends. Left out by an earlier release.
    */
   checking?: boolean;
+  /**
+   * What the turn's model request waits on now, if anything: its AI
+   * provider's rate limit, or another model answering instead (the model
+   * gateway's `ModelWait`). Left out by an earlier release.
+   */
+  waiting?: ModelWait | null;
 }
 
 /**
  * A connection the chat's agent asked to use in this chat alone, waiting
  * for a decision: the person's own personal connection, which they grant
- * or deny themselves (`decidedBy: "you"`), or a shared one, which only an
- * admin grants (`"admin"`) and they may still withdraw. Everything but
+ * or deny themselves. Everything but
  * the connection's name is the request as stored: granting it grants
  * exactly this.
  */
@@ -1223,8 +1233,11 @@ export interface ChatConnectionRequest {
   /** The permission it would be. */
   id: string;
   connectionId: string;
-  /** The connection's provider and account, while connect lists it. */
-  provider: string | null;
+  /**
+   * What the connection reaches, as people know it
+   * (`ConnectionSummary.name`), and its account, while connect lists it.
+   */
+  name: string | null;
   accountName: string | null;
   resource: string | null;
   actions: string[];
@@ -1234,7 +1247,6 @@ export interface ChatConnectionRequest {
   reason: string | null;
   /** ISO 8601. */
   requestedAt: string;
-  decidedBy: "you" | "admin";
 }
 
 /** A question for the chat's agent, and the model to answer it with. */

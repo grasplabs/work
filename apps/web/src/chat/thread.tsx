@@ -10,6 +10,7 @@ import type {
   ChatToolCall,
   ChatToolEvent,
 } from "@grasp-os/shared/chat";
+import type { ModelWait } from "@grasp-os/shared/models";
 import { Bubble, BubbleContent } from "@grasp-os/ui/components/bubble";
 import { Button } from "@grasp-os/ui/components/button";
 import { CopyButton } from "@grasp-os/ui/components/copy-button";
@@ -78,8 +79,9 @@ import { ThreadPlan } from "./build-progress.tsx";
 import type { ThreadBuild } from "./build-progress.tsx";
 import { FileCards } from "./chat-files.tsx";
 import { answerStatusOf, stepFinished, stepStatusOf } from "./chat-states.ts";
+import { modelName } from "./composer.tsx";
 import { ConnectAiProvider } from "./connect-ai-provider.tsx";
-import { failureMessage } from "./failure.ts";
+import { failureMessage, retryMends } from "./failure.ts";
 import { pendingCard } from "./make-card.tsx";
 import { recoveredSteps } from "./recovered.ts";
 import { SavedMemoryLine } from "./saved-memory.tsx";
@@ -374,15 +376,35 @@ const useAnswerSteps = (): ((
 const useWorkingLabel = (): ((
   doing: WorkState,
   file: string | undefined,
-  checking: boolean
+  checking: boolean,
+  modelWait: ModelWait | null
 ) => string) => {
   const { t } = useLingui();
-  return (doing, file, checking) => {
+  return (doing, file, checking, modelWait) => {
     if (checking) {
       return t({
         message: "Checking the App…",
         comment:
           "Grasp checks the App it changed (its types, lint and preview) before its turn ends.",
+      });
+    }
+    if (modelWait?.kind === "rate_limited") {
+      const { seconds } = modelWait;
+      return t({
+        message: plural(seconds, {
+          one: "Your AI provider is busy. Grasp tries again in # second.",
+          other: "Your AI provider is busy. Grasp tries again in # seconds.",
+        }),
+        comment:
+          "The AI provider asked Grasp to wait before asking again (its rate limit); Grasp waits, then asks again by itself.",
+      });
+    }
+    if (modelWait?.kind === "fallback") {
+      const model = modelName(modelWait.model);
+      return t({
+        message: `Answering with ${model} instead.`,
+        comment:
+          "The chosen model couldn't take the question (its provider refused or was busy), so another of the organization's models answers it; {model} is that model's name.",
       });
     }
     if (file !== undefined) {
@@ -868,6 +890,11 @@ interface AnswerContext extends StepContext {
   workingLabel: string;
   /** Grasp checks the drafts it wrote, past its answer. */
   checking: boolean;
+  /**
+   * The model's request waits (its provider's rate limit, another model
+   * answering instead): the line says so, not what Grasp does.
+   */
+  modelWaits: boolean;
   /** How long Grasp worked on each question, in milliseconds, by the ID of its first reply. */
   worked: ReadonlyMap<number, number>;
   /** Asks the last question again: offered under its answer only. */
@@ -881,6 +908,8 @@ interface AnswerContext extends StepContext {
   waiting: string | undefined;
   /** Who gave it, named where the chat has answers from more than one agent. */
   agentName: string | undefined;
+  /** What the chat read, folded under its words: the last answer's alone, once it is done. */
+  sources: ReactNode;
 }
 
 /** What follows a stored reply: the questions it asked, and the plan or agent it drafted. */
@@ -1035,7 +1064,9 @@ const AnswerBody = ({
   // What Grasp does next is work, never a second "Thinking": the thought's
   // own line has said that.
   const working =
-    !context.checking && (context.doing ?? "thinking") === "thinking"
+    !context.checking &&
+    !context.modelWaits &&
+    (context.doing ?? "thinking") === "thinking"
       ? t`Working on it`
       : context.workingLabel;
   // Done: what the steps came to, and how long Grasp worked, quieter.
@@ -1080,6 +1111,7 @@ const AnswerBody = ({
         <MessageResponse streaming={partial !== null}>{text}</MessageResponse>
       )}
       <AnswerEnding ending={ending} retry={context.onRetry} />
+      {context.sources}
       {replies.map((reply) => (
         <AnswerAfter context={context} key={reply.id} reply={reply} />
       ))}
@@ -1288,7 +1320,13 @@ const AnswerRow = ({
           />
         )}
         {status === "error" ? (
-          <MessageError {...(retry === undefined ? {} : { onRetry: retry })}>
+          <MessageError
+            // Only where asking the same again may mend it: never under a
+            // decline, or a chat past the model's window.
+            {...(retry === undefined || !retryMends(last?.failure)
+              ? {}
+              : { onRetry: retry })}
+          >
             {ending.keyFailedForAdmin ? (
               <>
                 {t`Your AI provider is refusing your key.`}{" "}
@@ -1355,11 +1393,13 @@ export const ChatThread = ({
   partial,
   running,
   checking = false,
+  modelWait = null,
   tools = noTools,
   onRetry,
   compact = false,
   build,
   newLineBefore,
+  sources,
   children,
 }: {
   /**
@@ -1381,6 +1421,11 @@ export const ChatThread = ({
   /** Whether its turn checks the drafts it wrote now, past its answer. */
   checking?: boolean;
   /**
+   * What its turn's model request waits on now (`ChatUpdate.waiting`):
+   * said in the line over the answer while it waits.
+   */
+  modelWait?: ModelWait | null;
+  /**
    * The calls the chat's code made: what it reads, while it reads it.
    */
   tools?: readonly ChatToolEvent[];
@@ -1400,6 +1445,12 @@ export const ChatThread = ({
    * None, and it opens at its end.
    */
   newLineBefore?: number;
+  /**
+   * What the chat read (its provenance, kept for the chat as a whole):
+   * under the last answer's words once it is done, as Damsko's Sources
+   * folds what an answer drew on under it.
+   */
+  sources?: ReactNode;
   /** Shown after the messages, in the thread: what is held, why it stopped. */
   children?: ReactNode;
 }) => {
@@ -1424,11 +1475,19 @@ export const ChatThread = ({
   const liveRow = rows.findLast(
     (row): row is AnswerTurn => row.kind === "answer" && row.live
   );
+  const lastAnswerRow = rows.findLast(
+    (row): row is AnswerTurn => row.kind === "answer"
+  );
   const liveThinking =
     liveRow?.replies[0] === undefined
       ? undefined
       : answerThinking.byReply.get(liveRow.replies[0].id);
-  const fallback = workingLabelOf(doing ?? "thinking", file, checking);
+  const fallback = workingLabelOf(
+    doing ?? "thinking",
+    file,
+    checking,
+    modelWait
+  );
   const thinkingStep = useThinkingStep(
     liveThinking,
     liveThinking === undefined ? [] : answerThinking.arrivals(liveThinking),
@@ -1436,7 +1495,9 @@ export const ChatThread = ({
   );
   // While Grasp shows its thinking in the brain, the line says the step it is at.
   const workingLabel =
-    checking || liveThinking === undefined ? fallback : thinkingStep;
+    checking || modelWait !== null || liveThinking === undefined
+      ? fallback
+      : thinkingStep;
   const recovered = recoveredSteps(messages);
   // The one card that waits for the person, whichever it is.
   const waiting = pendingCard(messages, running)?.callId;
@@ -1495,6 +1556,7 @@ export const ChatThread = ({
       doing: turn.live ? doing : undefined,
       workingLabel,
       checking: turn.live && checking,
+      modelWaits: turn.live && modelWait !== null,
       worked,
       onRetry:
         !running &&
@@ -1508,6 +1570,8 @@ export const ChatThread = ({
       build,
       waiting,
       agentName: agentNameOf(turn),
+      sources:
+        turn.id === lastAnswerRow?.id && !turn.live ? sources : undefined,
     };
   };
   const lined = withNewLine(withDayLines(rows), newLineBefore);

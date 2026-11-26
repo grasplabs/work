@@ -1,3 +1,4 @@
+import { v } from "@grasp-os/runtime/connector";
 import { signCapability } from "@grasp-os/shared/capability";
 import { companyToolClasses, toolClassOf } from "@grasp-os/shared/connect";
 import { env, exports } from "cloudflare:workers";
@@ -53,6 +54,9 @@ const rateLimited = (seconds: number): ResponseInit => ({
  * answered its first read with `answer`.
  */
 const pausedBy = async (answer: ResponseInit) => {
+  // `vi.waitUntil` moves a faked clock on as it polls: the answer comes, and
+  // is read, at the instant the call began, however long the wait took.
+  const asked = Date.now();
   const connection = await connectionTo("sample");
   const list = async () =>
     await retryable(
@@ -61,6 +65,7 @@ const pausedBy = async (answer: ResponseInit) => {
   api.holdingReads = 1;
   const limited = list();
   await vi.waitUntil(() => api.held.length === 1, { timeout: 10_000 });
+  vi.setSystemTime(asked);
   const [read] = api.held.splice(0, 1);
   if (read === undefined) {
     throw new Error("The read is held");
@@ -719,6 +724,49 @@ describe("a connector's code", { timeout: 60_000 }, () => {
     );
   });
 
+  it("sends in a path parameter exactly the values v.string().segment() takes", async () => {
+    const connection = await connectionTo("sample");
+    const values = [
+      "a1",
+      "AAMkAD=",
+      "O'Brien & Co",
+      "münchen",
+      "v1.0",
+      "$value",
+      "batches",
+      "",
+      ".",
+      "..",
+      "a1/..",
+      "a\\b",
+      "a?b",
+      "a#b",
+      "a%2Fb",
+      "a;b",
+      "19:chat",
+      "a\nb",
+      "batch",
+      "$Batch",
+    ];
+    const sentPaths = new Set<string>();
+    for (const value of values) {
+      const path = `/v1/probe/${encodeURIComponent(value)}`;
+      // oxlint-disable-next-line no-await-in-loop -- one at a time, to tell which went out
+      await probe(connection, { url: `https://${sampleHost}${path}` });
+      if (api.sent.some((request) => request.path === path)) {
+        sentPaths.add(path);
+      }
+    }
+    const segment = v.string().segment();
+    const taken = values.filter(
+      (value) => segment["~standard"].validate(value).issues === undefined
+    );
+    expect(taken).toHaveLength(7);
+    expect([...sentPaths]).toStrictEqual(
+      taken.map((value) => `/v1/probe/${encodeURIComponent(value)}`)
+    );
+  });
+
   it("reaches only the resource its capability names", async () => {
     const connection = await connectionTo("sample");
     const scoped = async (mailbox: string) =>
@@ -738,7 +786,7 @@ describe("a connector's code", { timeout: 60_000 }, () => {
     expect(api.sent).toHaveLength(1);
   });
 
-  it("can't override the method its action declares", async () => {
+  it("can't override the method or the path its action declares", async () => {
     const connection = await connectionTo("sample");
     await probe(connection, {
       url: `https://${sampleHost}/v1/probe/ok`,
@@ -747,6 +795,8 @@ describe("a connector's code", { timeout: 60_000 }, () => {
         ["x-http-method-override", "DELETE"],
         ["x-http-method", "DELETE"],
         ["x-method-override", "DELETE"],
+        ["x-original-url", "/v1/admin"],
+        ["x-rewrite-url", "/v1/admin"],
         ["te", "trailers"],
       ],
     });
@@ -755,6 +805,8 @@ describe("a connector's code", { timeout: 60_000 }, () => {
       "x-http-method-override",
       "x-http-method",
       "x-method-override",
+      "x-original-url",
+      "x-rewrite-url",
       "te",
     ]) {
       expect(api.sent[0]?.headers).not.toHaveProperty(name);
@@ -1003,7 +1055,9 @@ describe("the egress handler", () => {
   it("sends nothing for a caller without a whole call's props", async () => {
     // As another Worker naming this entrypoint gets it: no call behind it.
     for (const props of [
-      egressProps({ credential: { header: "authorization", value: "" } }),
+      egressProps({
+        credential: { header: "authorization", value: "", secret: "" },
+      }),
       egressProps({ hosts: [] }),
       egressProps({ expiresAt: Number.NaN }),
     ]) {
@@ -1012,6 +1066,43 @@ describe("the egress handler", () => {
       expect(response.status).toBe(403);
     }
     expect(api.sent).toStrictEqual([]);
+  });
+
+  it("sends a host template's request only to the host sealed with the connection, when it fits the template", async () => {
+    const template = "{company}.boards.test";
+    const props = (connectionHosts: Record<string, string>) =>
+      egressProps({
+        hosts: [template],
+        credentialHosts: [template],
+        connectionHosts,
+        routes: [{ method: "GET", host: template, path: "/v1/items" }],
+      });
+    const standIn = "https://company.boards.test.invalid/v1/items";
+    const unfit: Record<string, string>[] = [
+      {},
+      { [template]: "evil.test" },
+      { [template]: "acme.boards.test.evil.test" },
+      { [template]: "a.b.boards.test" },
+      { [template]: "10.0.0.1" },
+      { "{other}.boards.test": "acme.boards.test" },
+    ];
+    const statuses = await Promise.all(
+      unfit.map(async (connectionHosts) => {
+        const response = await exports
+          .ConnectorEgress({ props: props(connectionHosts) })
+          .fetch(standIn);
+        return response.status;
+      })
+    );
+    expect(statuses).toStrictEqual(unfit.map(() => 403));
+    expect(api.sent).toStrictEqual([]);
+    const sealed = exports.ConnectorEgress({
+      props: props({ [template]: "acme.boards.test" }),
+    });
+    await expect(sealed.fetch(standIn)).resolves.toMatchObject({ status: 200 });
+    expect(api.sent.map(({ host, path }) => ({ host, path }))).toStrictEqual([
+      { host: "acme.boards.test", path: "/v1/items" },
+    ]);
   });
 
   it("closes when the call's time is up", async () => {

@@ -5,7 +5,7 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { recordEventIf } from "./audit.ts";
-import { providerConfigFor } from "./connector-providers.ts";
+import { providerConfigFor, stillServes } from "./connector-providers.ts";
 import {
   connections,
   connectionTokens,
@@ -129,6 +129,11 @@ const revokeWith = async (
   const token = await tokenOf();
   if (token === "none") {
     return "nothing";
+  }
+  // Its connector moved as the token was read, and the token may be the
+  // new server's: owed, and tried again with the provider then.
+  if (!(await stillServes(env.DB, provider.connector))) {
+    return "failed";
   }
   if (token === "unreadable") {
     return "unreadable";
@@ -446,11 +451,21 @@ const tryOwed = async (
     });
     return;
   }
-  const outcome = await revokeWith(
-    env,
-    connection,
-    async () => await Promise.resolve(copy)
-  );
+  // A move of its connector's sign-in deletes it (connector-providers.ts
+  // `prepareBuiltIn`): read again once its provider is, the token goes to
+  // no server it wasn't issued by.
+  let moved = false;
+  const outcome = await revokeWith(env, connection, async () => {
+    const [standing] = await db
+      .select({ id: tokenRevocations.id })
+      .from(tokenRevocations)
+      .where(eq(tokenRevocations.id, owed.id));
+    moved = standing === undefined;
+    return moved ? "none" : copy;
+  });
+  if (moved) {
+    return;
+  }
   if (outcome === "unreadable") {
     log.error("oauth.revoke_abandoned", {
       provider: connection.provider,

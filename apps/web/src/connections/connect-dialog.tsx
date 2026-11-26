@@ -367,8 +367,15 @@ const signInHosts: Readonly<Record<OAuthProvider, string>> = {
   google: "accounts.google.com",
 };
 
-/** The sign-in host of `integration`, when it is a native provider's. */
+/**
+ * The sign-in host of `integration`: a native provider's, or the one the
+ * catalog names for a connector made from a URL, as any public host can
+ * draw a look-alike sign-in page.
+ */
 export const signInHostOf = (integration: Integration): string | undefined => {
+  if (integration.source === "connector") {
+    return integration.signInHost;
+  }
   if (integration.source !== "native") {
     return undefined;
   }
@@ -449,9 +456,9 @@ const ScopeChoice = ({
           value="shared"
         />
         <FieldContent>
-          <FieldLabel>{t`For everyone`}</FieldLabel>
+          <FieldLabel>{t`For the company`}</FieldLabel>
           <FieldDescription>
-            {t`Your organization uses it through the permissions you grant.`}
+            {t`Nobody uses it in chat until you choose who may, and Apps and workflows only through the permissions you grant.`}
           </FieldDescription>
         </FieldContent>
       </Field>

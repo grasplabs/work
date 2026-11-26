@@ -6,9 +6,19 @@
 
 export { v } from "../common/values.ts";
 export type { Infer, InferInput } from "../common/value-types.ts";
-export { auth, defineConnector, event, page, sync, tool } from "./define.ts";
+export {
+  attachedFiles,
+  attachments,
+  auth,
+  defineConnector,
+  event,
+  page,
+  sync,
+  tool,
+} from "./define.ts";
 export type {
   AccountDeclaration,
+  AttachedFile,
   Checkpoint,
   ConnectorAuth,
   ConnectorDeclaration,
@@ -16,6 +26,10 @@ export type {
   ConnectorTool,
   DefinedConnector,
   EventDeclaration,
+  IdTokenDeclaration,
+  McpDeclaration,
+  OAuth2Declaration,
+  RightsDeclaration,
   SyncDeclaration,
   ToolArgs,
   ToolCall,
@@ -29,6 +43,20 @@ export type {
   RouteMethod,
   RouteText,
 } from "./api.ts";
+export {
+  credentialStandIn,
+  fixtureVendor,
+  fixturesSchema,
+  recordedFixtures,
+} from "./fixtures.ts";
+export type {
+  Captured,
+  Exchange,
+  FixtureCall,
+  FixtureCase,
+  Fixtures,
+  Seen,
+} from "./fixtures.ts";
 export {
   ToolError,
   callMetaOf,
@@ -62,12 +90,14 @@ export {
   generatedContractMajor,
   generatedContracts,
   hostSchema,
-  maxProvenanceItems,
+  mcpServerKey,
   provenanceSchema,
   readAsSchema,
   recoveryModes,
   redirectHostMatches,
   routeSchema,
+  shadowingConnectors,
+  sharedMcpServers,
   syncManifestSchema,
   syncNameSchema,
   syncParamsSchema,
@@ -78,6 +108,7 @@ export type {
   ActionManifest,
   ConnectorManifest,
   ContractAction,
+  McpManifest,
   RecoveryMode,
   Route,
   SyncManifest,
@@ -94,9 +125,9 @@ export {
   egressKind,
   egressTooLargeMessage,
   findMetaKey,
-  forbiddenInValue,
   httpMethods,
   maxChangeBytes,
+  maxProvenanceItems,
   maxRetryAfterSeconds,
   mcpProtocolVersion,
   notPerformedMetaKey,
@@ -104,7 +135,6 @@ export {
   pathMatches,
   provenanceMetaKey,
   resourceMetaKey,
-  segmentValuePattern,
   stampHeader,
   stampMetaKey,
   stampPattern,
@@ -113,17 +143,38 @@ export {
 } from "./protocol.ts";
 export type { EgressKind } from "./protocol.ts";
 export {
+  forbiddenInValue,
+  segmentValuePattern,
+} from "../common/value-formats.ts";
+export {
   accountLookupSchema,
   endpointHost,
   keyHeaderSchema,
   plainEndpointSchema,
   reservedAuthorizationParams,
+  scopeToken,
   signInSchema,
   signInScopesSchema,
+  tenantKinds,
+  withTenant,
 } from "./sign-in.ts";
+export {
+  filledHost,
+  fitsTemplate,
+  hostOf,
+  hostTemplateOf,
+  requestHost,
+} from "./hosts.ts";
 export { addressesOf } from "./mail-addresses.ts";
 export type { Address } from "./mail-addresses.ts";
-export type { AccountLookup, SignIn, SignInInput } from "./sign-in.ts";
+export type {
+  AccountLookup,
+  DeclaredRights,
+  IdTokenCheck,
+  SignIn,
+  SignInInput,
+  TenantKind,
+} from "./sign-in.ts";
 export { jsonSchemaOf } from "../common/json-schema.ts";
 export { jsonBody, providerFetch, retryAfterOf, segment } from "./provider.ts";
 export {
@@ -131,6 +182,7 @@ export {
   isJsonArray,
   isNeverPath,
   isNeverTool,
+  readsMailByRules,
   ruledDeclaration,
   topNames,
 } from "./tool-rules.ts";

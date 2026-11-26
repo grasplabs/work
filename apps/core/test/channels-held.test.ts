@@ -5,9 +5,8 @@ import {
 } from "@grasp-os/shared/permissions";
 import { describe, expect, it } from "vite-plus/test";
 
-import { connectionRead } from "../src/agent-scope.ts";
 import { confirmAction } from "../src/channels/cards.tsx";
-import { checkOf, viewOf } from "../src/channels/held.ts";
+import { viewOf } from "../src/channels/held.ts";
 import { say } from "../src/channels/words.ts";
 import { chatAgentId } from "../src/chats-rpc.ts";
 import { codeStep, says } from "./agent-chat.ts";
@@ -114,17 +113,6 @@ describe("a held write on the card", () => {
   });
 });
 
-describe("the card's check line", () => {
-  it("warns only when the turn read mail", () => {
-    expect([
-      checkOf([connectionRead("connection-1", "mail.search", null)]),
-      checkOf([connectionRead("connection-1", "calendar.list", null)]),
-      checkOf(["note:doc-1"]),
-      checkOf([]),
-    ]).toStrictEqual([{ read: "mail" }, undefined, undefined, undefined]);
-  });
-});
-
 /** A paragraph of `words`, said over and over: long enough to fill a message. */
 const paragraph = (words: string): string =>
   Array.from({ length: 300 }, () => `${words}.`).join(" ");
@@ -134,7 +122,9 @@ describe("a Teams turn that holds writes", setUpTime, () => {
     const admin = await signedInApi(idp, "admin");
     // A send whose fields its server lists, so core can check a chat
     // app's write against them (channels/stephen-rules.ts).
-    const mail = await mailConnection([], ["MAIL_SEND"]);
+    const mail = await mailConnection([], ["MAIL_SEND"], {
+      audience: "everyone",
+    });
     const binding = `MAIL${unique()}`.toUpperCase();
     await requestGranted(idp, admin, {
       subject: { type: "agent", agentId: chatAgentId },
@@ -211,7 +201,9 @@ describe("a Teams turn that holds writes", setUpTime, () => {
 
   it("still gets its card, and the line that something went wrong, when Teams refuses a part of a long answer, and nothing is posted twice", async () => {
     const admin = await signedInApi(idp, "admin");
-    const mail = await mailConnection([], ["MAIL_SEND"]);
+    const mail = await mailConnection([], ["MAIL_SEND"], {
+      audience: "everyone",
+    });
     const binding = `MAIL${unique()}`.toUpperCase();
     await requestGranted(idp, admin, {
       subject: { type: "agent", agentId: chatAgentId },

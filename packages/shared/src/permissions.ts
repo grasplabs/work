@@ -716,8 +716,6 @@ export const permissionErrors = defineErrorFamily({
     "This request was answered already, so it can no longer be granted or declined.",
   "permission.conflict":
     "This App or agent already has a permission with that binding name.",
-  "permission.admin_decides":
-    "A shared connection is granted by an admin. You can withdraw the request.",
   "permission.denied_before":
     "The person already turned this down in this chat. Don't ask again unless they say so.",
   "permission.team_brain_workflow":

@@ -2,9 +2,11 @@ import {
   egressHeader,
   egressKind,
   egressTooLargeMessage,
+  filledHost,
   httpMethods,
   pathMatches,
   redirectHostMatches,
+  requestHost,
   routeSchema,
 } from "@grasp-os/runtime/connector";
 import type { EgressKind, Route } from "@grasp-os/runtime/connector";
@@ -13,6 +15,7 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import { z } from "zod";
 
 import { outbound } from "./company-network.ts";
+import { credentialForms, withoutCredential } from "./credential-copies.ts";
 import { pauseAsked } from "./pause.ts";
 
 // A native connector's only way out. Connect loads each call's connector
@@ -23,10 +26,20 @@ import { pauseAsked } from "./pause.ts";
 // the requests the called action declares
 // (threat model R9, Q11, EG1 to EG7). A request goes out only to one of
 // the connector's hosts, over HTTPS, as a method and path template the
-// action declares, with the connector's credential and method-override
-// headers stripped and the call's credential added; anything else is refused before it
-// leaves. Redirects aren't followed, except one from a route that names
-// the hosts it may lead to (a download), which the handler follows itself,
+// action declares, with the connector's credential, method-override and
+// path-rewrite headers stripped; anything else is refused before it leaves.
+// The call's credential is added only for the hosts the connector says it
+// goes to (`credentialHosts`), so a connector that lists a host of its own
+// choosing (one written by a client's agent, or generated from a spec naming
+// a second server) can reach it but never hand it the credential (GN2). A
+// host filled per connection (`{company}.example.com`) is named by the
+// connector's code as declared and filled here alone, from the values the
+// connection signed in with (GRA-2350). Answers reach the connector
+// without cookies and with any copy of the credential in their headers
+// replaced (`answerHeaders`), so a session a vendor hands out, or a
+// credential it echoes in a header, never reaches connector code.
+// Redirects aren't followed, except one from a route that names the hosts
+// it may lead to (a download), which the handler follows itself,
 // once, without the token or anything of the connector's request. A
 // response is cut off once its bytes pass a size limit. Raw sockets are
 // refused. What keeps an allowed name that resolves to a private address
@@ -99,7 +112,9 @@ const egressAnswer = (
  * Request headers the connector can't send: credentials (the token is
  * connect's to add); method overrides, which some providers (Google)
  * honour on a POST, turning it into a method the action doesn't declare
- * (Q11); and hop-by-hop headers that could change the connection itself.
+ * (Q11); path rewrites, which some servers and proxies (IIS) honour,
+ * turning it into a path the action doesn't declare; and hop-by-hop
+ * headers that could change the connection itself.
  */
 const connectorHeadersRefused = [
   "authorization",
@@ -109,17 +124,25 @@ const connectorHeadersRefused = [
   "x-http-method-override",
   "x-http-method",
   "x-method-override",
+  "x-original-url",
+  "x-rewrite-url",
   "upgrade",
   "connection",
   "te",
 ];
 
-/** Response headers that no longer hold for the body as passed on. */
-const responseHeadersDropped = [
+/**
+ * Response headers never passed on: cookies, which may hold a session
+ * worth as much as the credential, and those that no longer hold for the
+ * body as passed on.
+ */
+const responseHeadersDropped = new Set([
+  "set-cookie",
+  "set-cookie2",
   "content-encoding",
   "content-length",
   egressHeader,
-];
+]);
 
 const egressPropsSchema = z.strictObject({
   /** Which connector, for the log: its name and version. */
@@ -128,8 +151,12 @@ const egressPropsSchema = z.strictObject({
   connectionId: z.string().min(1),
   /** Which call, for the log: its capability's ID. */
   callId: z.string().min(1),
-  /** The connector's hosts. */
+  /** The connector's hosts, as declared: templates unfilled. */
   hosts: z.array(z.string().min(1)).min(1),
+  /** Those of `hosts` the credential goes to. */
+  credentialHosts: z.array(z.string().min(1)).min(1),
+  /** The host the connection signed in with for each host template. */
+  connectionHosts: z.record(z.string(), z.string()),
   /** The requests the called action declares. */
   routes: z.array(routeSchema),
   /**
@@ -144,6 +171,8 @@ const egressPropsSchema = z.strictObject({
   credential: z.strictObject({
     header: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
     value: z.string().min(1),
+    /** The token or key itself, as the vendor issued it. */
+    secret: z.string().min(1),
   }),
   /**
    * For a shared connection reached through the company network, the one
@@ -156,6 +185,13 @@ const egressPropsSchema = z.strictObject({
 export type EgressProps = z.infer<typeof egressPropsSchema>;
 
 const knownMethods: ReadonlySet<string> = new Set(httpMethods);
+
+/**
+ * The connector's host `url` is for, as declared: one it lists, or a
+ * template by its stand-in (`requestHost`).
+ */
+const declaredHost = (hosts: readonly string[], url: URL): string | undefined =>
+  hosts.find((declared) => requestHost(declared) === url.hostname);
 
 /**
  * Refuses a request, and logs it by the connector's own host and a known
@@ -172,7 +208,7 @@ const refuse = (
     connector: call.connector,
     callId: call.callId,
     reason,
-    host: call.hosts.includes(url.hostname) ? url.hostname : "other",
+    host: declaredHost(call.hosts, url) ?? "other",
     method: knownMethods.has(method) ? method : "other",
   });
   return egressAnswer(
@@ -181,16 +217,17 @@ const refuse = (
   );
 };
 
-/** The route the request is for, if the call declares it. */
+/** The route the request is for, on `host` as declared, if the call declares it. */
 const routeFor = (
   { routes, values }: Pick<EgressProps, "routes" | "values">,
   method: string,
+  host: string,
   url: URL
 ): Route | undefined =>
   routes.find(
     (route) =>
       route.method === method &&
-      route.host === url.hostname &&
+      route.host === host &&
       pathMatches(route.path, url.pathname, values)
   );
 
@@ -284,17 +321,40 @@ const throughDownload = async (
 };
 
 /**
+ * An answer's headers as the connector gets them: without cookies or
+ * what no longer holds for the body, and with every exact copy of the
+ * credential, as sent or bare, replaced. A vendor that echoes the
+ * request's headers (an error that quotes them) can't hand the connector
+ * the credential to send on to a host that doesn't take it. Its body
+ * goes as it came: that a vendor encodes it some other way, or echoes it
+ * in a body, is the connector's review to catch.
+ */
+const answerHeaders = (
+  response: Response,
+  { value, secret }: EgressProps["credential"]
+): Headers => {
+  const forms = credentialForms([value, secret]);
+  const headers = new Headers();
+  for (const [name, sent] of response.headers) {
+    if (!responseHeadersDropped.has(name)) {
+      headers.append(name, withoutCredential(sent, forms));
+    }
+  }
+  return headers;
+};
+
+/**
  * The response with its body cut off once its bytes pass the size limit:
  * the connector's read fails there, and nothing past it is held in memory.
  * The bytes are counted as they arrive (decoded), never taken from what
  * `content-length` claims. A rate limit's answer says in `retry-after`
  * how long its connection's pause has left (`pausedSeconds`).
  */
-const capped = (response: Response, pausedSeconds?: number): Response => {
-  const headers = new Headers(response.headers);
-  for (const name of responseHeadersDropped) {
-    headers.delete(name);
-  }
+const capped = (
+  response: Response,
+  headers: Headers,
+  pausedSeconds?: number
+): Response => {
   if (pausedSeconds !== undefined) {
     headers.set("retry-after", String(pausedSeconds));
   }
@@ -333,6 +393,36 @@ const capped = (response: Response, pausedSeconds?: number): Response => {
 };
 
 /**
+ * The connector's host a request's URL names, and the URL it goes to on
+ * this connection: exactly one of the connector's hosts, over HTTPS on
+ * its own port, without credentials in the URL; a template filled with
+ * the host the connection signed in with, checked against it again.
+ * Through the company network, its only one. None for any other.
+ */
+const reachedHost = (
+  { hosts, connectionHosts, companyNetwork }: EgressProps,
+  url: URL
+): { declared: string; target: URL } | undefined => {
+  const declared = declaredHost(hosts, url);
+  const host =
+    declared === undefined ? undefined : filledHost(declared, connectionHosts);
+  if (
+    url.protocol !== "https:" ||
+    url.username !== "" ||
+    url.password !== "" ||
+    url.port !== "" ||
+    declared === undefined ||
+    host === undefined ||
+    (companyNetwork !== undefined && hosts.length !== 1)
+  ) {
+    return undefined;
+  }
+  const target = new URL(url);
+  target.hostname = host;
+  return { declared, target };
+};
+
+/**
  * The egress handler. Reached only as a connector isolate's
  * `globalOutbound`, with props connect sets for one call; without them
  * (another Worker naming this entrypoint), nothing goes out.
@@ -352,26 +442,24 @@ export class ConnectorEgress extends WorkerEntrypoint<Env, EgressProps> {
       );
     }
     const call = props.data;
-    const { connector, callId, hosts, credential, companyNetwork, expiresAt } =
-      call;
+    const {
+      connector,
+      callId,
+      credentialHosts,
+      credential,
+      companyNetwork,
+      expiresAt,
+    } = call;
     const remainingMs = expiresAt - Date.now();
     if (remainingMs <= 0) {
       return refuse(call, "expired", url, method);
     }
-    // Exactly one of the connector's hosts, over HTTPS on its own port,
-    // without credentials in the URL; through the company network, its
-    // only one.
-    if (
-      url.protocol !== "https:" ||
-      url.username !== "" ||
-      url.password !== "" ||
-      url.port !== "" ||
-      !hosts.includes(url.hostname) ||
-      (companyNetwork !== undefined && hosts.length !== 1)
-    ) {
+    const reached = reachedHost(call, url);
+    if (reached === undefined) {
       return refuse(call, "host", url, method);
     }
-    const route = routeFor(call, method, url);
+    const { declared, target } = reached;
+    const route = routeFor(call, method, declared, url);
     if (route === undefined) {
       return refuse(call, "route", url, method);
     }
@@ -381,14 +469,16 @@ export class ConnectorEgress extends WorkerEntrypoint<Env, EgressProps> {
     for (const name of [...connectorHeadersRefused, credential.header]) {
       headers.delete(name);
     }
-    headers.set(credential.header, credential.value);
+    if (credentialHosts.includes(declared)) {
+      headers.set(credential.header, credential.value);
+    }
     let response: Response;
     try {
       response = await outbound(
         this.env,
         companyNetwork
       )(
-        new Request(url, {
+        new Request(target, {
           method,
           headers,
           body: request.body,
@@ -401,7 +491,7 @@ export class ConnectorEgress extends WorkerEntrypoint<Env, EgressProps> {
       log.warn("egress.failed", {
         connector,
         callId,
-        host: url.hostname,
+        host: declared,
         method,
         route: route.path,
       });
@@ -412,7 +502,7 @@ export class ConnectorEgress extends WorkerEntrypoint<Env, EgressProps> {
     log.info("egress.request", {
       connector,
       callId,
-      host: url.hostname,
+      host: declared,
       method,
       route: route.path,
       status: response.status,
@@ -424,7 +514,7 @@ export class ConnectorEgress extends WorkerEntrypoint<Env, EgressProps> {
     // gets only its answer, never the URL. A second redirect is refused
     // below, as any other is.
     if (companyNetwork === undefined) {
-      response = await throughDownload(call, route, url, response);
+      response = await throughDownload(call, route, target, response);
     }
     if (ownAnswers.has(response)) {
       return response;
@@ -440,7 +530,7 @@ export class ConnectorEgress extends WorkerEntrypoint<Env, EgressProps> {
         connector,
         callId,
         reason: "redirect",
-        host: url.hostname,
+        host: declared,
         method,
       });
       return egressAnswer(egressKind.failed);
@@ -452,7 +542,7 @@ export class ConnectorEgress extends WorkerEntrypoint<Env, EgressProps> {
       response,
       { connector, callId }
     );
-    return capped(response, pausedSeconds);
+    return capped(response, answerHeaders(response, credential), pausedSeconds);
   }
 
   /** Raw TCP (`cloudflare:sockets`) never leaves: only HTTPS requests. */

@@ -1,13 +1,13 @@
 import { Input } from "@grasp-os/ui/components/input";
 import { Textarea } from "@grasp-os/ui/components/textarea";
+import type { LayoutStyle } from "@grasp-os/ui/lib/utils";
 import { useState } from "react";
 
 // A setting's text, saved as the person leaves the field (or presses
 // Enter in a one-line field), as the workspace's name is: an emptied
 // field saves none, Escape puts back what was saved, and nothing is sent
-// while it is what was saved. The Field round it names it. On Damsko, for
-// every settings page (an App's, the organization's); settings/
-// saved-field.tsx is the old library's, until its last page moves.
+// while it is what was saved. The Field round it names it. For every
+// settings page (an App's, the organization's).
 
 /** What a field is saved as: its text, trimmed; null when emptied. */
 const savedAs = (draft: string): string | null => {
@@ -21,6 +21,7 @@ export const SavedField = ({
   maxLength,
   multiline = false,
   readOnly = false,
+  style,
 }: {
   value: string | null;
   onSave: (value: string | null) => void;
@@ -29,6 +30,8 @@ export const SavedField = ({
   multiline?: boolean;
   /** Shown, not changed: for whoever may not change it. */
   readOnly?: boolean;
+  /** Placement only. */
+  style?: LayoutStyle;
 }) => {
   const [draft, setDraft] = useState<string | null>(null);
   const save = (): void => {
@@ -55,6 +58,7 @@ export const SavedField = ({
         onValueChange={setDraft}
         readOnly={readOnly}
         rows={2}
+        style={style}
         value={shown}
       />
     );
@@ -75,6 +79,7 @@ export const SavedField = ({
       readOnly={readOnly}
       // A row's control is the small size, as every settings row's: rows line up.
       size="sm"
+      style={style}
       value={shown}
     />
   );

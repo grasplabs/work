@@ -10,13 +10,23 @@ import { connections } from "../src/db/schema.ts";
 import type { EgressProps } from "../src/egress.ts";
 import { connectApp, fakeApps } from "./app-provider.ts";
 import type { AppName } from "./app-provider.ts";
+import {
+  companyAccountOf,
+  connectCompanyApp,
+  fakeCompanyApp,
+} from "./company-app.ts";
 import { companyNetworkKey } from "./company-network-fake.ts";
 import { connectAccount, ownAccount, someone } from "./connect.ts";
 import type { Call } from "./connect.ts";
 import { sampleHost } from "./fixtures/sample-connector.ts";
 import { fakeProviders } from "./oauth-provider.ts";
 import type { ProviderName } from "./oauth-provider.ts";
-import { fakeSampleApi } from "./sample-api.ts";
+import { fakeSampleApi, sampleHostHost } from "./sample-api.ts";
+import {
+  connectTenantApp,
+  fakeTenantApp,
+  tenantAccountOf,
+} from "./tenant-app.ts";
 import { callTool as call } from "./tool-calls.ts";
 
 // What connectors*.test.ts and native-tools-*.test.ts share: the fake
@@ -26,6 +36,8 @@ import { callTool as call } from "./tool-calls.ts";
 export const providers = fakeProviders();
 export const apps = fakeApps();
 export const api = fakeSampleApi();
+export const tenantApp = fakeTenantApp();
+export const companyApp = fakeCompanyApp();
 
 /** A person's own Microsoft account, connected to `server`. */
 export const connectionTo = async (
@@ -55,7 +67,10 @@ export const isApp = (provider: string): provider is AppName =>
 /**
  * A person's own account at `provider`, connected to `server`: through
  * the app's own sign-in for an app, whose connector is the one it names;
- * the sample ERP's account through the company network.
+ * the sample ERP's account through the company network; the sample
+ * tenant app's at its own authorization server; the sample company app's
+ * at the host its token response names; and an admin's shared one for an
+ * app on a host of its own.
  */
 export const connectionOf = async (
   server: string,
@@ -72,6 +87,39 @@ export const connectionOf = async (
       key: companyNetworkKey,
       companyNetwork: String(Reflect.get(env, "COMPANY_NETWORK_TEST_ORIGIN")),
     });
+    return { id: connectionId, person };
+  }
+  if (provider === "sample-tenant") {
+    const person = someone();
+    const id = await connectTenantApp(
+      tenantApp,
+      person,
+      tenantAccountOf(person)
+    );
+    return { id, person };
+  }
+  if (provider === "sample-company") {
+    const person = someone();
+    const id = await connectCompanyApp(
+      companyApp,
+      person,
+      companyAccountOf(person, "https://acme.sample-company.test")
+    );
+    return { id, person };
+  }
+  // An app on a host of its own: a shared connection an admin gives the
+  // host of, with a key the sample API takes.
+  if (provider === "sample-host") {
+    const person = someone("admin");
+    const { connectionId } = await exports.default.connectWithKey({
+      person,
+      provider,
+      scope: "shared",
+      key: "a-key",
+      hosts: { "{host}": sampleHostHost },
+    });
+    // Its account lookup isn't what the test reads back.
+    api.sent.length = 0;
     return { id: connectionId, person };
   }
   if (!isApp(provider)) {
@@ -145,9 +193,15 @@ export const egressProps = (
   connectionId: "connection-1",
   callId: "call-1",
   hosts: [sampleHost],
+  credentialHosts: [sampleHost],
+  connectionHosts: {},
   routes: [{ method: "GET", host: sampleHost, path: "/v1/probe/{case}" }],
   values: {},
-  credential: { header: "authorization", value: "Bearer a-token-for-one-call" },
+  credential: {
+    header: "authorization",
+    value: "Bearer a-token-for-one-call",
+    secret: "a-token-for-one-call",
+  },
   expiresAt: Date.now() + 30_000,
   ...fields,
 });
@@ -158,8 +212,9 @@ export const egressProps = (
 // connector refuses the rest itself, before anything goes out.
 export const tools = bundled.flatMap(({ manifest }) => {
   const parsed = connectorManifestSchema.safeParse(manifest);
-  if (!parsed.success) {
-    // `sample-unreached`, which connect refuses whole (above).
+  // `sample-unreached`, which connect refuses whole (above); and one
+  // serving an MCP server, whose own tools aren't served as native ones.
+  if (!parsed.success || parsed.data.mcp !== undefined) {
     return [];
   }
   const { name, provider, actions } = parsed.data;

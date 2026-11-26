@@ -294,6 +294,7 @@ describe("an app's panel", () => {
       id: "c-hubspot",
       source: "composio",
       provider: "hubspot",
+      name: "hubspot",
       scope: "shared",
       status: "needs_reauth",
       ownerUserId: null,
@@ -315,7 +316,7 @@ describe("an app's panel", () => {
     await press(dialogAction("Connect"));
 
     // Only the connect: the stopped connection stays, with its consent, its
-    // Brain audience and its permissions, until someone disconnects it.
+    // audience and its permissions, until someone disconnects it.
     expect(
       sent.map((each) => ("toolkit" in each ? each.tools : each))
     ).toStrictEqual([
@@ -331,6 +332,7 @@ describe("an app's panel", () => {
       id: "c-hubspot",
       source: "composio",
       provider: "hubspot",
+      name: "hubspot",
       scope: "shared",
       status: "needs_reauth",
       ownerUserId: null,
@@ -363,6 +365,7 @@ describe("an app's panel", () => {
       id: "c-hubspot",
       source: "composio",
       provider: "hubspot",
+      name: "hubspot",
       scope: "shared",
       status: "needs_reauth",
       ownerUserId: null,
@@ -391,6 +394,7 @@ describe("an app's panel", () => {
       id: "c-working",
       source: "composio",
       provider: "hubspot",
+      name: "hubspot",
       scope: "shared",
       status: "active",
       ownerUserId: null,
@@ -540,6 +544,7 @@ describe("an app's panel", () => {
         id: "c1",
         source: "native",
         provider: "microsoft",
+        name: "Microsoft 365",
         scope: "personal",
         status: "needs_reauth",
         ownerUserId: "u1",
@@ -563,6 +568,7 @@ describe("an app's panel", () => {
         id: "c1",
         source: "native",
         provider: "microsoft",
+        name: "Microsoft 365",
         scope: "personal",
         status: "active",
         ownerUserId: "u1",

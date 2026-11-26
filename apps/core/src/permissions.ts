@@ -71,7 +71,6 @@ import { activeMember, organizationId } from "./auth/auth.ts";
 import { memberRole } from "./auth/identity.ts";
 import type { Acting } from "./auth/identity.ts";
 import { storedTeamsOf, unreadableTeam } from "./brain-grant-teams.ts";
-import { personOf, requireOfferedConnection } from "./connections.ts";
 import { madeSensitiveByGrant, widenedByGrant } from "./data-policy.ts";
 import type { Grantee } from "./data-policy.ts";
 import {
@@ -97,8 +96,9 @@ import { appHost, callObject, workspace } from "./durable-objects.ts";
 //
 // A connection the chat's agent asks for in a chat holds in that chat
 // alone (chat-connections.ts): its person grants their own personal
-// connection there, an admin a shared one, and every read and check here
-// leaves it out anywhere else (`holdsIn`).
+// connection there, and every read and check here leaves it out anywhere
+// else (`holdsIn`). A shared one is never asked for in a chat: its
+// audience decides who uses it (GRA-2322).
 
 type Row = typeof permissions.$inferSelect;
 
@@ -1335,18 +1335,11 @@ export const grantPermission = async (
   if (!found) {
     throw permissionErrors.create("permission.not_found");
   }
-  // A chat's own request: an admin grants only a shared connection, still
-  // connected and offered. A personal one is its person's alone: to anyone
-  // else it doesn't exist.
-  if (found.personal) {
+  // A chat's own request is for its person's own connection, theirs alone
+  // to decide: to anyone else it doesn't exist. A shared one is never
+  // asked for in a chat, as its audience decides (GRA-2322).
+  if (found.personal || found.chatId !== null) {
     throw permissionErrors.create("permission.not_found");
-  }
-  if (found.chatId !== null) {
-    await requireOfferedConnection(
-      env,
-      await personOf(env, by),
-      found.objectId
-    );
   }
   await requireNoBindingClash(env, found);
   await requireServedFunction(env, found);

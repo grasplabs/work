@@ -33,12 +33,13 @@ const smokeBindings = Object.fromEntries(
     "GOOGLE_SMOKE_CALENDAR",
     "GOOGLE_SMOKE_DRIVE",
     "GOOGLE_SMOKE_WRITES",
-    "MCP_LIVE_URL",
+    "MCP_LIVE_CONNECTOR",
     "MCP_LIVE_CALLBACK",
     "MCP_LIVE_READ",
     "MCP_LIVE_READ_INPUT",
     "MCP_LIVE_WRITE",
     "MCP_LIVE_WRITE_INPUT",
+    "RECORD_CREDENTIAL",
   ].flatMap((name) => {
     const value = process.env[name];
     return value === undefined || value === "" ? [] : [[name, value]];
@@ -73,6 +74,8 @@ export default defineProject({
     },
   },
   test: {
+    // Its tests, in workerd; build.test.ts is Node's (the root's `scripts`).
+    include: ["test/**/*.test.ts"],
     // Builds the connectors the tests load, once per run.
     globalSetup: ["./test/global-setup.ts"],
     // Checks the runtime is workerd, then brings the connect database up to

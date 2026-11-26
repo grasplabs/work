@@ -10,9 +10,13 @@
  * `graphControlUrl`. Imported by vite.config.ts (Node) and the tests
  * (workerd), so it only holds data.
  */
+import { fixturesSchema, fixtureVendor } from "@grasp-os/runtime/connector";
+import type { Exchange } from "@grasp-os/runtime/connector";
+
 import { botFrameworkKeysFake } from "../../connect/test/bot-framework-keys-fake.ts";
+import pipedriveFixtures from "../../connect/test/fixtures/pipedrive/fixtures.json" with { type: "json" };
+import sampleKeyFixtures from "../../connect/test/fixtures/sample-key/fixtures.json" with { type: "json" };
 import { graphEventsFake } from "../../connect/test/graph-events-fake.ts";
-import { linearOrigin } from "../../connect/test/linear-mcp-fake.ts";
 import { npmRegistryFake } from "../../connect/test/npm-registry-fake.ts";
 import { osvFake } from "../../connect/test/osv-fake.ts";
 import {
@@ -26,10 +30,12 @@ import { aiProvidersFake } from "./ai-providers-fake.ts";
 import { botConnectorFake } from "./bot-connector-fake.ts";
 import { composioApiScript, composioLogoScript } from "./composio-api.ts";
 import { driveSyncControlUrl, driveSyncFake } from "./drive-sync-fake.ts";
-import { linearConsentUrl } from "./linear-service.ts";
+import {
+  linearConsentUrl,
+  linearOrigins,
+  linearToolErrorUrl,
+} from "./linear-service.ts";
 import { mailServerScript } from "./mail-server.ts";
-import { pipedriveControlUrl, pipedriveFake } from "./pipedrive-fake.ts";
-import { sampleKeyControlUrl, sampleKeyFake } from "./sample-key-fake.ts";
 import { sampleSyncControlUrl, sampleSyncFake } from "./sample-sync-fake.ts";
 import { stephenGoogleFake } from "./stephen-google-fake.ts";
 import { stephenGraphFake } from "./stephen-graph-fake.ts";
@@ -42,6 +48,26 @@ import { stephenGraphFake } from "./stephen-graph-fake.ts";
 export const platformOpenAiKey = "test-platform-openai-key-0001";
 export const platformAnthropicKey = "test-platform-anthropic-key-0001";
 export const platformMistralKey = "test-platform-mistral-key-0001";
+
+/**
+ * The vendors that answer from their connectors' recorded answers
+ * (fixtures.json beside each connector, @grasp-os/runtime/connector's
+ * `fixtureVendor`): connect's Pipedrive fixture and its sample API-key app.
+ */
+const recordedExchanges: Exchange[] = [pipedriveFixtures, sampleKeyFixtures]
+  .map((each) => fixturesSchema.parse(each))
+  .flatMap(({ account, cases }) => [
+    ...(account === undefined ? [] : [account]),
+    ...cases.flatMap(({ calls }) =>
+      calls.flatMap(({ exchanges }) => exchanges)
+    ),
+  ]);
+
+/**
+ * Where tests read every request those vendors were sent, with its
+ * headers: GET, as JSON, oldest first (`fixtureVendor`'s `received`).
+ */
+export const recordedControlUrl = "https://recorded-control.test/received";
 
 /** Connect's version metadata, as set on connect in the tests. */
 export const connectVersionMetadata = {
@@ -106,6 +132,9 @@ export const documentsControlUrl = "https://graph-control.test/documents";
 export const documentsGranted =
   "openid profile email User.Read Files.Read.All Sites.Read.All";
 
+/** In a code in place of what was granted: what the consent asked for. */
+const asAsked = "-";
+
 /**
  * The code Entra sends back once `subject` in `tenant` consents at `url`:
  * it carries the authorization's PKCE challenge, so only the flow's own
@@ -121,9 +150,12 @@ export const consentCode = (
     url.searchParams.get("code_challenge"),
     tenant,
     subject,
-    // What Entra says it granted (`scope`), when the test gives it: base64,
-    // since rights have dots of their own.
-    ...(granted === undefined ? [] : [btoa(granted)]),
+    // What Entra says it granted (`scope`), base64 since rights have dots of
+    // their own: the test's, or else what the consent asked for, as Entra
+    // lists it in every token answer.
+    ...(granted === undefined
+      ? [asAsked, btoa(url.searchParams.get("scope") ?? "")]
+      : [btoa(granted)]),
   ].join(".");
 
 /**
@@ -552,8 +584,7 @@ const stephenGraph = (${stephenGraphFake.toString()})();
 const stephenGoogle = (${stephenGoogleFake.toString()})();
 const driveSync = (${driveSyncFake.toString()})();
 const sampleSync = (${sampleSyncFake.toString()})();
-const sampleKey = (${sampleKeyFake.toString()})();
-const pipedrive = (${pipedriveFake.toString()})();
+const recorded = (${fixtureVendor.toString()})(${JSON.stringify(recordedExchanges)});
 const graphSent = [];
 const graphLosing = new Map();
 const graphThrottled = new Map();
@@ -771,11 +802,11 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     // Linear's MCP server, run in Node (test/linear-service.ts), at a
-    // public address as its name resolves.
-    if (url.origin === ${JSON.stringify(linearOrigin)} || url.href === ${JSON.stringify(linearConsentUrl)}) {
+    // public address as its names resolve.
+    if (${JSON.stringify(linearOrigins)}.includes(url.origin) || [${JSON.stringify(linearConsentUrl)}, ${JSON.stringify(linearToolErrorUrl)}].includes(url.href)) {
       return await env.LINEAR.fetch(request);
     }
-    if (url.hostname === "cloudflare-dns.com" && url.searchParams.get("name") === ${JSON.stringify(new URL(linearOrigin).hostname)}) {
+    if (url.hostname === "cloudflare-dns.com" && ${JSON.stringify(linearOrigins.map((origin) => new URL(origin).hostname))}.includes(url.searchParams.get("name"))) {
       const type = url.searchParams.get("type") === "AAAA" ? 28 : 1;
       return Response.json({
         Status: 0,
@@ -1072,19 +1103,12 @@ export default {
     if (fromSampleSync !== undefined) {
       return fromSampleSync;
     }
-    if (url.origin + url.pathname === ${JSON.stringify(sampleKeyControlUrl)}) {
-      return await sampleKey.control(request);
+    if (url.href === ${JSON.stringify(recordedControlUrl)}) {
+      return Response.json(recorded.received);
     }
-    const fromSampleKey = sampleKey.answer(request, url);
-    if (fromSampleKey !== undefined) {
-      return fromSampleKey;
-    }
-    if (url.origin + url.pathname === ${JSON.stringify(pipedriveControlUrl)}) {
-      return await pipedrive.control(request);
-    }
-    const fromPipedrive = pipedrive.answer(request, url);
-    if (fromPipedrive !== undefined) {
-      return fromPipedrive;
+    const fromRecorded = await recorded.answer(request);
+    if (fromRecorded !== undefined) {
+      return fromRecorded;
     }
     if (url.href === ${JSON.stringify(stephenGoogleUrl)}) {
       return await stephenGoogle.control(request);
@@ -1213,7 +1237,7 @@ export default {
         scope: directory.granted ?? ${JSON.stringify(directoryGranted)},
       });
     }
-    const [challenge, tenant, subject, granted] = (form.get("code") ?? "").split(".");
+    const [challenge, tenant, subject, granted, asked] = (form.get("code") ?? "").split(".");
     const verifier = new TextEncoder().encode(form.get("code_verifier") ?? "");
     const digest = base64Url(
       new Uint8Array(await crypto.subtle.digest("SHA-256", verifier))
@@ -1246,9 +1270,16 @@ export default {
       refresh_token: "refresh." + subject,
       expires_in: 3600,
       id_token: [encoded({ alg: "RS256" }), encoded(claims), "signature"].join("."),
-      ...(forDirectory ? { scope: directory.granted ?? ${JSON.stringify(directoryGranted)} } : {}),
-      ...(forDocuments ? { scope: ${JSON.stringify(documentsGranted)} } : {}),
-      ...(granted === undefined ? {} : { scope: atob(granted) }),
+      // The test's grant; else the directory's or the documents' app's, or
+      // what the consent asked for.
+      scope:
+        granted !== ${JSON.stringify(asAsked)}
+          ? atob(granted)
+          : forDirectory
+            ? directory.granted ?? ${JSON.stringify(directoryGranted)}
+            : forDocuments
+              ? ${JSON.stringify(documentsGranted)}
+              : atob(asked),
     });
   },
 };

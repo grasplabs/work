@@ -197,8 +197,8 @@ export const connections = sqliteTable(
     /**
      * For a connection to a connector made from a URL: when its server's
      * tool list was last read (`connection_tools`), and until when that
-     * read is fresh, as the server's `ttlMs` said, an hour at most. Null
-     * until the first read.
+     * read is fresh, as the server's `ttlMs` said, a minute at least and
+     * an hour at most. Null until the first read.
      */
     toolListReadAt: timestamp("tool_list_read_at"),
     toolListFreshUntil: timestamp("tool_list_fresh_until"),
@@ -252,6 +252,13 @@ export const connections = sqliteTable(
  * that issuer: `client_secret` sealed for this connector and issuer, and
  * null for a public client. One that takes a fixed key (`auth = 'header'`)
  * has the header it goes in; each connection keeps its own key.
+ *
+ * A built-in of the release that serves its vendor's MCP server (its
+ * manifest's `mcp`) has a row too, keyed by its name and made on the
+ * first connection to it in the deployment: its state. Its `url` is the
+ * manifest's URL it was made for; once a release moves the server, the
+ * next connection learns the sign-in there again and moves the row
+ * (connect's src/connector-providers.ts `prepareBuiltIn`).
  */
 export const connectors = sqliteTable(
   "connectors",
@@ -291,10 +298,30 @@ export const connectors = sqliteTable(
     clientAuthentication: text("client_authentication", {
       enum: ["none", "client_secret_post", "client_secret_basic"],
     }),
+    /** The admin who added it from a URL; `release` for a built-in. */
     createdBy: text("created_by").notNull(),
     createdAt: timestamp("created_at").notNull(),
   },
   (table) => [uniqueIndex("connectors_url_idx").on(table.url)]
+);
+
+/**
+ * The tools an admin blocked on a connector made from a URL, by the name
+ * its server lists them under: offered to nobody, and refused at the call
+ * before anything goes out (src/mcp-connectors.ts). A name may be blocked
+ * before any list holds it.
+ */
+export const connectorBlockedTools = sqliteTable(
+  "connector_blocked_tools",
+  {
+    connectorId: text("connector_id")
+      .notNull()
+      .references(() => connectors.id),
+    name: text().notNull(),
+    blockedBy: text("blocked_by").notNull(),
+    blockedAt: timestamp("blocked_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.connectorId, table.name] })]
 );
 
 /**
@@ -789,7 +816,7 @@ export const givenUpRevocations = sqliteTable(
     owedFor: text("owed_for", {
       enum: ["disconnected", "needs_reauth"],
     }).notNull(),
-    reason: text({ enum: ["expired", "unreadable"] }).notNull(),
+    reason: text({ enum: ["expired", "unreadable", "moved"] }).notNull(),
     attempts: integer().notNull(),
     owedAt: timestamp("owed_at").notNull(),
     givenUpAt: timestamp("given_up_at").notNull(),

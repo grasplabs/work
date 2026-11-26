@@ -107,6 +107,7 @@ const connection = (
   id,
   source: "native",
   provider: "microsoft",
+  name: "Microsoft 365",
   scope,
   status,
   ownerUserId: scope === "personal" ? "me" : null,

@@ -1,9 +1,6 @@
 import { z } from "zod";
 
-import {
-  connectionBrainAudienceSchema,
-  connectionPersonSchema,
-} from "./connect.ts";
+import { connectionAudienceSchema, connectionPersonSchema } from "./connect.ts";
 import { defineErrorFamily } from "./errors.ts";
 
 // Native sync (GRA-1758, GRA-1759): what one synced item is, whichever
@@ -313,11 +310,11 @@ export const pickSyncPlacesSchema = z.strictObject({
   from: syncPicksSchema,
   places: syncPicksSchema,
   /**
-   * The connection's Brain audience the save was made under, as core
+   * The connection's audience the save was made under, as core
    * holds it: who will read everything in the places picked, whatever
    * the source's permissions (GRA-2207). For the save's audit event.
    */
-  audience: connectionBrainAudienceSchema,
+  audience: connectionAudienceSchema,
 });
 export type PickSyncPlaces = z.input<typeof pickSyncPlacesSchema>;
 export const syncErrors = defineErrorFamily({

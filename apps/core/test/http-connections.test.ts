@@ -18,10 +18,17 @@ import {
   httpCatalogContract,
   httpReadCatalogContract,
 } from "../src/release-contracts.ts";
-import { codeResults, codeStep, personalChatsOf, says } from "./agent-chat.ts";
+import {
+  codeResults,
+  codeStep,
+  personalChatsOf,
+  says,
+  returnedText,
+} from "./agent-chat.ts";
 import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { commitApp, requestGranted } from "./apps.ts";
+import { chooseAudience } from "./brain-audiences.ts";
 import { httpApiReceivedUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -328,6 +335,8 @@ describe("the chat and an outside API", () => {
       methods: ["GET"],
       credential: { kind: "bearer", token: secret },
     });
+    // Its audience holds the person: only the chat's own refusal is left.
+    await chooseAudience(admin.api, connectionId, { kind: "everyone" });
     const id = JSON.stringify(connectionId);
     const chats = await personalChatsOf(
       person.userId,
@@ -339,6 +348,7 @@ describe("the chat and an outside API", () => {
             listed: available.filter(({ connectionId }) => connectionId === ${id}),
             asked: await tried(() => env.connections.request({ connectionId: ${id}, actions: ["get"], binding: "ASKED", reason: "To list invoices." })),
             called: await tried(() => env.connections.call("API", "get", { path: "/v1/invoices" })),
+            byId: await tried(() => env.connections.call(${id}, "get", { path: "/v1/invoices" })),
           };
         };`
       ),
@@ -358,7 +368,7 @@ describe("the chat and an outside API", () => {
     const after = await received();
 
     expect(steps.map(({ text }) => text)).toStrictEqual([
-      `Returned:\n${JSON.stringify({
+      returnedText({
         listed: [
           {
             connectionId,
@@ -372,7 +382,8 @@ describe("the chat and an outside API", () => {
         ],
         asked: permissionErrors.create("permission.invalid").message,
         called: connectErrors.create("connect.class_unknown").message,
-      })}`,
+        byId: connectErrors.create("connect.connection_not_found").message,
+      }),
     ]);
     expect(after).toHaveLength(before.length);
   });

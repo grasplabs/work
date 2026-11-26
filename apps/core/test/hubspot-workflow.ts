@@ -60,8 +60,11 @@ export const connectHubspot = async (by: Admin): Promise<string> => {
     consent: composioConsentText,
     returnTo: "/connectors",
   });
-  const state = new URL(url).searchParams.get("state") ?? "";
-  await backFromProvider(by.session, { state, status: "success" });
+  // Composio's redirect: the callback, with its own query appended.
+  await backFromProvider(
+    by.session,
+    Object.fromEntries(new URL(url).searchParams)
+  );
   const listed = await by.connections.list();
   const hubspot = listed.find(({ provider }) => provider === "hubspot");
   if (hubspot === undefined) {
