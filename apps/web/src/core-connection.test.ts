@@ -15,6 +15,7 @@ import { slotOf } from "./chat/chat-subject.ts";
 import {
   CoreConnection,
   frameReadMs,
+  heartbeatMs,
   shellStatus,
   signOut,
 } from "./core-connection.ts";
@@ -55,6 +56,8 @@ interface Fake {
   disposed: boolean;
   /** Breaks it, as a dropped socket does. */
   break: () => void;
+  /** Stops it answering anything, without saying so, as a socket the network died under. */
+  silence: () => void;
   readonly session: object;
 }
 
@@ -68,6 +71,7 @@ const tab = (answers: Answer[]) => {
   /** What the tab asked core, by name, on any connection. */
   const asked: string[] = [];
   let back: (() => void) | undefined;
+  let offline: (() => void) | undefined;
   const core = new CoreConnection({
     onSessionEnded: () => {
       ended.push("page reloads");
@@ -78,6 +82,7 @@ const tab = (answers: Answer[]) => {
         throw new Error("No answer scripted.");
       }
       let broken: (() => void) | undefined;
+      let silent = false;
       const session = {
         whoami: async () => {
           asked.push("whoami");
@@ -100,6 +105,9 @@ const tab = (answers: Answer[]) => {
         break: () => {
           broken?.();
         },
+        silence: () => {
+          silent = true;
+        },
         session,
       };
       opened.push(fake);
@@ -116,6 +124,9 @@ const tab = (answers: Answer[]) => {
         },
         ping: async () => {
           asked.push("ping");
+          if (silent) {
+            return await Promise.withResolvers<never>().promise;
+          }
           return await Promise.resolve("pong");
         },
         signInOptions: async () => {
@@ -133,8 +144,9 @@ const tab = (answers: Answer[]) => {
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
       return stub as never;
     },
-    watchPage: (onBack) => {
+    watchPage: (onBack, onOffline) => {
       back = onBack;
+      offline = onOffline;
     },
   });
   return {
@@ -144,6 +156,9 @@ const tab = (answers: Answer[]) => {
     asked,
     comeBack: () => {
       back?.();
+    },
+    goOffline: () => {
+      offline?.();
     },
   };
 };
@@ -452,6 +467,63 @@ describe("the tab's one connection to core", () => {
       "checking",
       "reachable",
     ]);
+  });
+
+  it("finds a connection that died without saying so within seconds while something depends on it, and asks nothing once nothing does", async () => {
+    const { core, opened, asked } = tab([one, one]);
+    await core.session();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const pings = () => asked.filter((name) => name === "ping").length;
+    const letGo = core.keepAlive();
+    // Asked at once, then every 2.5 s, while it answers.
+    await vi.advanceTimersByTimeAsync(5000);
+    const answering = { pings: pings(), reach: core.reach };
+
+    // The network dies under it: nothing answers, nothing closes.
+    opened[0]?.silence();
+    await vi.advanceTimersByTimeAsync(heartbeatMs + 5000);
+    const noticed = opened[0]?.disposed;
+    await vi.advanceTimersByTimeAsync(1);
+    // Connected again, and still kept alive on the new connection.
+    const again = { opened: opened.length, reach: core.reach };
+
+    letGo();
+    const before = pings();
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect({
+      answering,
+      noticed,
+      again,
+      afterLettingGo: pings() - before,
+    }).toStrictEqual({
+      answering: { pings: 3, reach: "reachable" },
+      noticed: true,
+      again: { opened: 2, reach: "reachable" },
+      afterLettingGo: 0,
+    });
+  });
+
+  it("lets go of the connection at once when the browser goes offline, and connects again as it comes back online", async () => {
+    const { core, opened, goOffline, comeBack } = tab([one, "down", one]);
+    await core.session();
+    vi.spyOn(Math, "random").mockReturnValue(1);
+
+    goOffline();
+    // The first try after it fails, as nothing connects offline.
+    await vi.advanceTimersByTimeAsync(1000);
+    const offline = { disposed: opened[0]?.disposed, reach: core.reach };
+    // Online again: it tries at once, not after its next pause.
+    comeBack();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect({ offline, opened: opened.length, reach: core.reach }).toStrictEqual(
+      {
+        offline: { disposed: true, reach: "unreachable" },
+        opened: 3,
+        reach: "reachable",
+      }
+    );
   });
 
   it("tries at once when the page comes back, once per pause however often it does", async () => {

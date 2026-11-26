@@ -80,16 +80,23 @@ const answered = async (api: RpcStub<CoreApi>): Promise<Connected> => {
 /**
  * Listens for the page coming back (to the tab, or online), when a socket
  * may have died without saying so and a reconnect wait is worth cutting
- * short.
+ * short, and for the browser going offline, when no socket can work.
  */
-const onPageBack = (back: () => void): void => {
+const onPageBack = (back: () => void, offline: () => void): void => {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
       back();
     }
   });
   window.addEventListener("online", back);
+  window.addEventListener("offline", offline);
 };
+
+/**
+ * How often the open connection is asked whether it still answers while
+ * something depends on hearing from core (`keepAlive`).
+ */
+export const heartbeatMs = 2500;
 
 /**
  * Whether core answers, as the connection last found: trying to reach it,
@@ -117,8 +124,11 @@ export interface CoreConnectionOptions {
   onSessionEnded: () => void;
   /** Opens a connection to core: a stand-in in tests. */
   connect?: () => RpcStub<CoreApi>;
-  /** Calls `back` when the page comes back: never in tests. */
-  watchPage?: (back: () => void) => void;
+  /**
+   * Calls `back` when the page comes back, and `offline` when the browser
+   * goes offline: never in tests.
+   */
+  watchPage?: (back: () => void, offline: () => void) => void;
 }
 
 /**
@@ -162,7 +172,7 @@ export interface CoreConnectionOptions {
 export class CoreConnection {
   readonly #onSessionEnded: () => void;
   readonly #connectCore: () => RpcStub<CoreApi>;
-  readonly #watchPage: (back: () => void) => void;
+  readonly #watchPage: (back: () => void, offline: () => void) => void;
   #closed = false;
   /** Refuses whoever waits for a connection once the connection closed. */
   readonly #closing = new AbortController();
@@ -182,6 +192,9 @@ export class CoreConnection {
   readonly #reachWatchers = new Set<() => void>();
   /** Told each time a connection answers. */
   readonly #answered = new Set<() => void>();
+  /** How many depend on hearing from core now (`keepAlive`). */
+  #keptAlive = 0;
+  #heartbeat: ReturnType<typeof setInterval> | undefined;
 
   constructor({
     onSessionEnded,
@@ -282,6 +295,39 @@ export class CoreConnection {
     };
   }
 
+  /**
+   * Asks the open connection whether it still answers, at once and every
+   * {@link heartbeatMs} after, for as long as something depends on hearing
+   * from core (an answer coming in, a question on its way). A socket can
+   * die without saying so, the network gone under it, and a call on it
+   * then waits for good; one that doesn't answer a ping in a few seconds
+   * (`timeoutMs`) is let go of, as a dropped one is, so whoever waits on
+   * it fails, the page connects again and says so, and a followed chat
+   * picks up where it was. Noticed within 7.5 s at most. Returns what lets
+   * go of it; once nothing holds it, it asks no more.
+   */
+  keepAlive(): () => void {
+    this.#keptAlive += 1;
+    if (this.#keptAlive === 1) {
+      void this.#probe();
+      this.#heartbeat = setInterval(() => {
+        void this.#probe();
+      }, heartbeatMs);
+    }
+    let held = true;
+    return () => {
+      if (!held) {
+        return;
+      }
+      held = false;
+      this.#keptAlive -= 1;
+      if (this.#keptAlive === 0) {
+        clearInterval(this.#heartbeat);
+        this.#heartbeat = undefined;
+      }
+    };
+  }
+
   /** Whether a connection is open now, one that answered and hasn't dropped. */
   get connected(): boolean {
     return !this.#closed && this.#live !== undefined;
@@ -350,6 +396,7 @@ export class CoreConnection {
     this.#closed = true;
     this.#closing.abort(reason);
     this.#wake?.();
+    clearInterval(this.#heartbeat);
     if (this.#live !== undefined) {
       disposeQuietly(this.#live);
       this.#live = undefined;
@@ -401,9 +448,14 @@ export class CoreConnection {
   async #opened(): Promise<Connected> {
     if (this.#connected === undefined) {
       this.#connected = this.#connect();
-      this.#watchPage(() => {
-        this.#back();
-      });
+      this.#watchPage(
+        () => {
+          this.#back();
+        },
+        () => {
+          this.#offline();
+        }
+      );
     }
     return await this.#connected;
   }
@@ -520,9 +572,25 @@ export class CoreConnection {
     try {
       await withTimeout(api.ping());
     } catch {
-      this.#lost(api);
-      disposeQuietly(api);
+      this.#drop(api);
     }
+  }
+
+  /**
+   * The browser went offline: no socket works now, though one may not say
+   * so, so the open one is let go of at once, and the page reconnects as
+   * the browser comes back online.
+   */
+  #offline(): void {
+    if (this.#live !== undefined) {
+      this.#drop(this.#live);
+    }
+  }
+
+  /** Lets go of `api`, which answers no more, as a connection that broke. */
+  #drop(api: RpcStub<CoreApi>): void {
+    this.#lost(api);
+    disposeQuietly(api);
   }
 }
 

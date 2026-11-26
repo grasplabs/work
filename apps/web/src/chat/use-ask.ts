@@ -11,6 +11,8 @@ import type { Subject } from "@grasp-os/shared/subject";
 import { useRouteContext } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 
+import { CoreTimeoutError, isConnectionFailure, timeoutMs } from "../core.ts";
+import type { Session } from "../core.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { activeChat, setActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
@@ -24,6 +26,7 @@ import {
   writeChoice,
 } from "./model-choice.ts";
 import type { ModelChoice } from "./model-choice.ts";
+import { useReconnecting } from "./reconnecting.ts";
 
 // Asking in a chat, from the chat page or the chat dock on any other page:
 // the box's text, model, effort and files, and asking in the open chat, or
@@ -56,6 +59,24 @@ const problemOf = (file: File): string | undefined => {
   return undefined;
 };
 
+/**
+ * `asking`, where a connection that broke on the way says Grasp can't be
+ * reached: a socket's own words ("Peer closed WebSocket") are nobody's to
+ * read, and whether the question got there is core's to say once it is
+ * back (its key, `questionKeyFor`).
+ */
+const reaching =
+  <T>(asking: (session: Session) => Promise<T>) =>
+  async (session: Session): Promise<T> => {
+    try {
+      return await asking(session);
+    } catch (error) {
+      throw isConnectionFailure(error)
+        ? new CoreTimeoutError(timeoutMs)
+        : error;
+    }
+  };
+
 /** No model takes an effort, as before core says which do. */
 const noModelEfforts: Readonly<Record<string, ModelEfforts>> = {};
 
@@ -77,31 +98,41 @@ export interface AskOptions {
    * `chats.agents()`; the company's first one by default.
    */
   agentId?: string;
+  /** Whether Grasp answers in the chat now: the connection is kept checked. */
+  running?: boolean;
 }
 
 const noOptions: AskOptions = {};
 
-/** A new chat made for a question that then failed to send. */
-export interface UnsentChat {
-  id: string;
+/** A question that failed to send, and the key it went with. */
+export interface Unsent {
+  key: string;
   question: string;
-  /** The agent it was made with; none named: the company's first. */
+  /** The chat it was asked in; none: a new one. */
+  chatId: string | undefined;
+  /** The agent a new chat for it was made with; none named: the company's first. */
   agentId: string | undefined;
 }
 
 /**
- * The chat asking `question` again goes into: the one made for it when
- * it failed to send, while the same agent is still picked; else none, and
- * a new chat is made with the agent picked now.
+ * The key asking `question` goes with (`ChatQuestion.key`): the one it
+ * failed to send with, asked again in the same chat (or a new one, while
+ * the same agent is picked), so core takes it once however often it is
+ * asked again, and answers the chat a first try made, which may have
+ * reached core with only its answer lost on the way; else a new one, and a
+ * new chat with the agent picked now.
  */
-export const unsentChatFor = (
-  unsent: UnsentChat | null,
+export const questionKeyFor = (
+  unsent: Unsent | null,
   question: string,
+  chatId?: string,
   agentId?: string
-): string | undefined =>
-  unsent?.question === question && unsent.agentId === agentId
-    ? unsent.id
-    : undefined;
+): string =>
+  unsent?.question === question &&
+  unsent.chatId === chatId &&
+  unsent.agentId === agentId
+    ? unsent.key
+    : crypto.randomUUID();
 
 /**
  * What the box to ask in needs: the text, model and effort, and asking in
@@ -115,10 +146,11 @@ export const useAsk = (
   efforts: Readonly<Record<string, ModelEfforts>> = noModelEfforts,
   /** Which of the tab's open chats a new chat becomes. */
   slot: ChatSlot = "chat",
-  { onAsked, subject, make, agentId }: AskOptions = noOptions
+  { onAsked, subject, make, agentId, running = false }: AskOptions = noOptions
 ) => {
   const { identity } = useRouteContext({ from: "/_shell" });
   const { busy, failure, run } = useCoreAction();
+  const reconnecting = useReconnecting(busy || running);
   const [text, setText] = useState("");
   // Why dictating into the text stopped on its own, kept with it: the box
   // it stopped in may have gone (dictation.ts).
@@ -164,11 +196,10 @@ export const useAsk = (
   // is on its way would ask it twice. A ref, as `busy` is only seen on the
   // next render.
   const sending = useRef(false);
-  // A new chat made for a question that then failed to send: asking the
-  // same question again asks in it, rather than making another.
-  // Only for the agent it was made with: picking another one before
-  // asking again makes a new chat, with that agent.
-  const unsent = useRef<UnsentChat | null>(null);
+  // A question that failed to send: asked again, it goes with the same
+  // key, so a chat made for it, or the question itself, is never made
+  // twice (`questionKeyFor`).
+  const unsent = useRef<Unsent | null>(null);
   const attach = (chosen: readonly File[]): void => {
     const problems = chosen.flatMap((file) => problemOf(file) ?? []);
     const added = chosen
@@ -214,16 +245,16 @@ export const useAsk = (
     // A new chat starts with the agent picked, else the first one the
     // question mentions: the first agent, paused, never stops it.
     const startWith = agentId ?? named.find(({ kind }) => kind === "agent")?.id;
-    let created: string | undefined;
-    const sent = await run(async (session) => {
-      let id = chatId ?? unsentChatFor(unsent.current, question, startWith);
+    const key = questionKeyFor(unsent.current, question, chatId, startWith);
+    const asking = async (session: Session): Promise<string> => {
+      let id = chatId;
       if (id === undefined) {
         ({ id } = await session.chats.create(
           titleOf(question),
           startWith,
-          make
+          make,
+          key
         ));
-        created = id;
       }
       const askedIn = id;
       const fileIds: string[] = [];
@@ -250,16 +281,15 @@ export const useAsk = (
         ...(fileIds.length === 0 ? {} : { files: fileIds }),
         ...(subject === undefined ? {} : { subject }),
         ...(named.length === 0 ? {} : { mentions: named }),
+        key,
       });
       return askedIn;
-    });
+    };
+    const sent = await run(reaching(asking));
     sending.current = false;
     if (sent === undefined) {
-      // The box keeps the question and says why it wasn't sent; a new chat
-      // made for it waits to be asked in again.
-      if (created !== undefined) {
-        unsent.current = { id: created, question, agentId: startWith };
-      }
+      // The box keeps the question and says why it wasn't sent.
+      unsent.current = { key, question, chatId, agentId: startWith };
       return false;
     }
     unsent.current = null;
@@ -304,6 +334,7 @@ export const useAsk = (
       },
       busy,
       failure: fileProblem ?? failure,
+      reconnecting,
       files: files.map(({ id, file }) => ({
         id,
         name: file.name,

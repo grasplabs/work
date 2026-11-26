@@ -1,27 +1,43 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { unsentChatFor } from "./use-ask.ts";
+import { questionKeyFor } from "./use-ask.ts";
 
-// Asking again after a question failed to send. These start from the way
-// it can fail: the question going to the agent picked the first time
-// after the person picked another one.
+// Asking again after a question failed to send, which may have reached
+// core with only its answer lost on the way: the same question goes with
+// the same key, which core takes once. These start from the ways it can
+// go wrong: the key going to another chat (core refuses a key another
+// chat took), or to a new chat with the agent picked after the first try.
 
-const unsent = { id: "chat-1", question: "Who owes us?", agentId: "claire" };
+const unsent = {
+  key: "key-1",
+  question: "Who owes us?",
+  chatId: undefined,
+  agentId: "claire",
+};
 
 describe("asking again after a question failed to send", () => {
-  it("asks in the chat made for it while the same agent is picked", () => {
-    expect(unsentChatFor(unsent, "Who owes us?", "claire")).toBe("chat-1");
+  it("goes with the key it failed with, in the same chat, with the same agent", () => {
+    expect(questionKeyFor(unsent, "Who owes us?", undefined, "claire")).toBe(
+      "key-1"
+    );
     expect(
-      unsentChatFor({ ...unsent, agentId: undefined }, "Who owes us?")
-    ).toBe("chat-1");
+      questionKeyFor(
+        { ...unsent, chatId: "chat-1", agentId: undefined },
+        "Who owes us?",
+        "chat-1"
+      )
+    ).toBe("key-1");
   });
 
-  it("makes a new chat once another agent is picked, or another question asked", () => {
-    expect(
-      unsentChatFor(unsent, "Who owes us?", "organization")
-    ).toBeUndefined();
-    expect(unsentChatFor(unsent, "Who owes us?")).toBeUndefined();
-    expect(unsentChatFor(unsent, "Something else", "claire")).toBeUndefined();
-    expect(unsentChatFor(null, "Who owes us?", "claire")).toBeUndefined();
+  it("goes with a new key in another chat, with another agent, or for another question", () => {
+    const keys = [
+      questionKeyFor(unsent, "Who owes us?", undefined, "organization"),
+      questionKeyFor(unsent, "Who owes us?"),
+      questionKeyFor(unsent, "Who owes us?", "chat-2", "claire"),
+      questionKeyFor(unsent, "Something else", undefined, "claire"),
+      questionKeyFor(null, "Who owes us?", undefined, "claire"),
+    ];
+    expect(keys).not.toContain("key-1");
+    expect(new Set(keys).size).toBe(keys.length);
   });
 });

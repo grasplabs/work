@@ -14241,6 +14241,10 @@ msgstr "Neu verbinden"
 msgid "Reconnect it so the Apps and workflows that use it work again."
 msgstr "Verbinden Sie es neu, damit die Apps und Workflows, die es nutzen, wieder laufen."
 
+#: src/chat/composer.tsx
+msgid "Reconnecting to Grasp…"
+msgstr "Verbindung zu Grasp wird wiederhergestellt…"
+
 #: src/apps/app-data.tsx
 msgid "record"
 msgstr "Datensatz"

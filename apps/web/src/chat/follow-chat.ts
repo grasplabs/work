@@ -106,9 +106,11 @@ export const applyUpdate = (view: ChatView, update: ChatUpdate): ChatView => {
 
 /**
  * The pauses before trying again to start following while core fails: only
- * a few, so a chat whose core keeps failing says so. A try made while the
- * tab's connection is down waits a few seconds for the next connection,
- * and says core can't be reached if none comes.
+ * a few, so a chat whose core keeps failing says so. The first try, as the
+ * chat opens, waits a few seconds for the tab's connection, and says core
+ * can't be reached if none comes; a try after the connection dropped waits
+ * for the next one as long as it takes, so a chat is followed again the
+ * moment core is back, however long it was gone.
  */
 const startRetryMs = [1000, 2000, 4000] as const;
 
@@ -131,12 +133,14 @@ const releaseQuietly = async (subscription: {
  * only says why. Returns what stops it.
  */
 export const followChat = (
-  core: CoreConnection,
+  core: Pick<CoreConnection, "withSession">,
   chatId: string,
   onUpdate: (update: ChatUpdate) => void,
   onFailed: (reason: string, gone: boolean) => void
 ): (() => void) => {
   let closed = false;
+  // Gives up waiting for a connection once following stops.
+  const stopping = new AbortController();
   let after: number | null = null;
   let release: (() => void) | undefined;
   const received = (update: ChatUpdate): void => {
@@ -146,13 +150,14 @@ export const followChat = (
     }
     onUpdate(update);
   };
-  const watch = async (): Promise<void> => {
+  const watch = async (again: boolean): Promise<void> => {
     try {
       const subscription = await retrying(
         async () =>
           await core.withSession(
             async (session) =>
-              await session.chats.watch(chatId, after, received)
+              await session.chats.watch(chatId, after, received),
+            again ? stopping.signal : undefined
           ),
         startRetryMs,
         // No connection came in its few seconds: say so, rather than wait
@@ -174,7 +179,7 @@ export const followChat = (
       if (stub instanceof RpcStub) {
         stub.onRpcBroken(() => {
           if (!closed) {
-            void watch();
+            void watch(true);
           }
         });
       }
@@ -187,9 +192,10 @@ export const followChat = (
       }
     }
   };
-  void watch();
+  void watch(false);
   return () => {
     closed = true;
+    stopping.abort();
     release?.();
   };
 };
