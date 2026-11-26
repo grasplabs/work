@@ -40,30 +40,11 @@ export const Mark = ({ state }: { state: "known" | "waiting" | "open" }) => (
   <span {...stylex.props(styles.mark, styles[state])} />
 );
 
-/**
- * The list's own look, with what the caller places it by: the atlas
- * (atlas-canvas.tsx) still hands its popover's place as the old kit's
- * classes, which go on the same element.
- */
-const withPlacement = (
-  own: ReturnType<typeof stylex.props>,
-  className: string | undefined
-): ReturnType<typeof stylex.props> =>
-  className === undefined
-    ? own
-    : { ...own, className: [own.className, className].join(" ") };
-
 /** What a region holds, one line per mark: what is known, what is still waiting, and how many questions are open. Only the lines there is something to say on. */
-export const RegionMarks = ({
-  region,
-  className,
-}: {
-  region: AtlasRegion;
-  className?: string;
-}) => {
+export const RegionMarks = ({ region }: { region: AtlasRegion }) => {
   const open = region.open.length;
   return (
-    <ul {...withPlacement(stylex.props(styles.list), className)}>
+    <ul {...stylex.props(styles.list)}>
       <li {...stylex.props(styles.line)}>
         <Mark state="known" />
         <Text as="span" size="xs" color="default">

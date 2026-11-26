@@ -1,7 +1,12 @@
-// Light, dark, or the system's colour scheme, through the theme's `dark`
-// class and, for Damsko's components, the `data-mode` attribute; and
-// Damsko's theme, its colours (Evergreen, Pine, Paper), as the root's
-// `data-theme`, which index.html starts at Evergreen. Loaded as a classic
+// Light, dark, or the system's colour scheme, through the root's
+// `data-mode`, which Damsko's colours follow, and the `dark` class, the
+// scheme as it resolves: an App page's frame follows it
+// (src/pages/page-bridge.ts), and the drawings on a canvas repaint when
+// it changes, as it does when the system's scheme flips under "system"
+// (the dot brain, the chat's backdrop, an agent's figure); and Damsko's
+// theme, its colours (Evergreen,
+// Pine, Paper), as the root's `data-theme`, which index.html starts at
+// Evergreen. Loaded as a classic
 // script in <head>, so it runs before first paint and nothing flashes. A
 // file, not inline: the CSP allows no inline script.
 //
@@ -32,9 +37,9 @@ globalThis.__zod_globalConfig = { jitless: true };
     }
     const isDark = theme === "dark" || (theme !== "light" && dark.matches);
     document.documentElement.classList.toggle("dark", isDark);
-    // Damsko's components (packages/ui) read the same choice from
-    // `data-mode`: their colours follow the root's `color-scheme`, which
-    // its themes.css sets from it.
+    // Damsko's colours (packages/ui) read the choice from `data-mode`:
+    // they follow the root's `color-scheme`, which its themes.css sets
+    // from it.
     document.documentElement.dataset.mode =
       theme === "light" || theme === "dark" ? theme : "system";
     document.documentElement.dataset.theme = ids.has(id) ? id : "evergreen";
