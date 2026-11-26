@@ -14,6 +14,7 @@ import {
   mayInvite,
 } from "@grasp-os/shared/admin/onboarding-admin";
 import type {
+  ContractState,
   KnowledgeSource,
   LinkState,
   Need,
@@ -174,6 +175,13 @@ export const workflowWords: Record<WorkflowState, string> = {
   complete: "Complete",
   variants: "Complete, in more than one way",
   blocked: "Waits on an answer",
+};
+
+/** Where a contract stands. */
+export const contractWords: Record<ContractState, string> = {
+  draft: "Being written",
+  sent: "Sent, not signed",
+  signed: "Signed",
 };
 
 /** What each source of what Grasp knows about a company is (`knowledge-words.ts`). */

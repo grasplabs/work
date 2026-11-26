@@ -624,7 +624,7 @@ describe("Home", () => {
       cards: [
         cards.includes("12 runs, 0 failed; 9 active last week"),
         cards.includes("Progress 3 workflows live, 2 Apps, 1 agent on"),
-        cards.includes("Last 7 days Not shared"),
+        cards.includes("Use, 7 days Not shared"),
       ],
       sharing: ["3 workflows live", "12 runs", "9 active last week"].map(
         (text) => rowText(container, "sharing").includes(text)
