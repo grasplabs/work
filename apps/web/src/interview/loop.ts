@@ -1387,6 +1387,12 @@ const heardBy =
         break;
       }
       case "unheard": {
+        if (event.reason === "limited") {
+          // Their voice for today is used up: said at the top, and they type from here.
+          // oxlint-disable-next-line no-use-before-define -- as above
+          voiceSpent();
+          break;
+        }
         // oxlint-disable-next-line no-use-before-define -- as above
         happen({ type: "unheard", at, stretch });
         break;
@@ -1400,6 +1406,20 @@ const heardBy =
       }
     }
   };
+
+/**
+ * Their voice for today is used up (core's `interview.voice_budget_spent`):
+ * the bar at the top says so, and from then on they type, as without a
+ * microphone; listening would only be refused again.
+ */
+const voiceSpent = (): void => {
+  if (words !== null) {
+    set({ trouble: words.voiceSpent });
+  }
+  update((progress) => ({ ...progress, mode: "type" }));
+  // oxlint-disable-next-line no-use-before-define -- the floor stops listening by ear
+  happen({ type: "voice", at: performance.now(), on: false });
+};
 
 /** Without a microphone, he says so, and from then on they type. */
 const noMicrophone = (): void => {
@@ -2173,6 +2193,11 @@ const goLive = async (): Promise<boolean> => {
       },
     }
   );
+  if (joined !== null && isRefused(joined) && joined.status === 429) {
+    // Their voice for today is used up: it stands in the bar at the top, and they go on typing.
+    voiceSpent();
+    return false;
+  }
   if (joined === null || isRefused(joined)) {
     return false;
   }

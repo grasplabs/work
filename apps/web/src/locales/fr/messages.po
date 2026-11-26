@@ -8963,6 +8963,10 @@ msgstr "Je n’ai pas trouvé les colonnes. La première ligne doit les nommer�
 msgid "I could not hear that. Say it once more, or type it."
 msgstr "Je n’ai pas entendu. Redites-le, ou écrivez-le."
 
+#: src/interview/words.ts
+msgid "You have talked as long as you can today. Type your answers to go on, or come back tomorrow to talk."
+msgstr "Vous avez parlé aussi longtemps que possible aujourd’hui. Tapez vos réponses pour continuer, ou revenez demain pour parler."
+
 #: src/onboarding/company-step.tsx
 msgid "I could not keep it. Try again in a moment."
 msgstr "Je n’ai pas pu l’enregistrer. Réessayez dans un instant."

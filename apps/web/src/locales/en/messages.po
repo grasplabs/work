@@ -8963,6 +8963,10 @@ msgstr "I could not find the columns. The first row should name them: name, emai
 msgid "I could not hear that. Say it once more, or type it."
 msgstr "I could not hear that. Say it once more, or type it."
 
+#: src/interview/words.ts
+msgid "You have talked as long as you can today. Type your answers to go on, or come back tomorrow to talk."
+msgstr "You have talked as long as you can today. Type your answers to go on, or come back tomorrow to talk."
+
 #: src/onboarding/company-step.tsx
 msgid "I could not keep it. Try again in a moment."
 msgstr "I could not keep it. Try again in a moment."
