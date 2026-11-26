@@ -7,12 +7,30 @@
  *
  * Not here yet, as the prototype has it: the hours in short and workflow
  * by workflow. Core doesn't send the drawn work yet, so the model knows no
- * hours, and the section says so; those come with the work.
+ * hours, and the section says so, as the product says a page has nothing
+ * yet, with the way to where the hours will come from; those come with
+ * the work.
  */
-import { SectionToCome, useOrganization } from "./organization.tsx";
-import { Section } from "./section.tsx";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@grasp-os/ui/components/empty";
+import { Link } from "@tanstack/react-router";
 
-/** Why no hours are known yet: the interviews haven't started, are under way, or the work drawn from them isn't read. */
+import { SectionToCome, useOrganization } from "./organization.tsx";
+import { sectionTo, sectionWords } from "./sections.ts";
+import type { OrgSection } from "./sections.ts";
+
+/**
+ * Why no hours are known yet, and where to go about it: the interviews
+ * haven't started (its steps), are under way (its interviews), or the
+ * work drawn from them isn't read (nowhere to go yet).
+ */
 const whyNone = ({
   told,
   approved,
@@ -21,33 +39,55 @@ const whyNone = ({
   told: boolean;
   approved: boolean;
   unread: boolean;
-}): string => {
+}): { why: string; way?: { section: OrgSection; words: string } } => {
   if (approved && unread) {
-    return "People agreed to what they said, but the work drawn from it isn’t read yet: the company’s own Grasp doesn’t hold it.";
+    return {
+      why: "People agreed to what they said, but the work drawn from it isn’t read yet: the company’s own Grasp doesn’t hold it.",
+    };
   }
   return told
-    ? "The team leads go first. Their teams follow the same day."
-    : "The interviews start once the company has told its team.";
+    ? {
+        why: "The team leads go first. Their teams follow the same day.",
+        way: { section: "interviews", words: "To the interviews" },
+      }
+    : {
+        why: "The interviews start once the company has told its team.",
+        way: { section: "steps", words: "To its steps" },
+      };
 };
 
 /** An organization's hours: none known yet, and why. */
 export const Hours = () => {
-  const { view } = useOrganization();
+  const { admin, view } = useOrganization();
   if (view.value.works.length > 0) {
     return <SectionToCome />;
   }
+  const { why, way } = whyNone({
+    told: view.told,
+    approved: view.interviews.some((interview) => interview.approved),
+    unread: view.unknown.works,
+  });
   return (
-    <Section
-      description="They come from the interviews: how many of each piece of work there are, and how long one takes."
-      title="No hours known yet"
-    >
-      <p className="text-muted-foreground border-t px-5 py-4">
-        {whyNone({
-          told: view.told,
-          approved: view.interviews.some((interview) => interview.approved),
-          unread: view.unknown.works,
-        })}
-      </p>
-    </Section>
+    <Empty>
+      <EmptyHeader>
+        <EmptyMedia icon={sectionWords.value.icon} />
+        <EmptyTitle level={2}>No hours known yet</EmptyTitle>
+        <EmptyDescription>
+          {`They come from the interviews: how many of each piece of work there are, and how long one takes. ${why}`}
+        </EmptyDescription>
+      </EmptyHeader>
+      {way === undefined ? null : (
+        <EmptyContent>
+          <Button asChild variant="outline">
+            <Link
+              params={{ clientId: admin.client.id }}
+              to={sectionTo[way.section]}
+            >
+              {way.words}
+            </Link>
+          </Button>
+        </EmptyContent>
+      )}
+    </Empty>
   );
 };

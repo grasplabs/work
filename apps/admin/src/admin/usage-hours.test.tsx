@@ -63,10 +63,13 @@ describe("an organization's AI use and hours", () => {
   /** A company answering `snapshot`: its page's path. */
   const liveClient = async (snapshot: AdminSnapshot): Promise<string> =>
     await Promise.resolve(shown.add(snapshot));
-  /** The page at `path`, its markup as the browser shows it. */
+  /** The page at `path`, its markup as the browser shows it, and its main part's alone. */
   const page = async (path: string) => {
     const opened = await shown.open(path);
-    return { html: opened.html() };
+    return {
+      html: opened.html(),
+      main: opened.container.querySelector("main")?.innerHTML ?? "",
+    };
   };
 
   it("shows what core counted: this month and in all, the tokens and minutes, and each use by model", async () => {
@@ -236,7 +239,7 @@ describe("an organization's AI use and hours", () => {
     }).toStrictEqual({ nothing: false, figures: true, byUse: true });
   });
 
-  it("knows no hours while core sends no drawn work, saying why", async () => {
+  it("knows no hours while core sends no drawn work, saying why and leading to where they will come from", async () => {
     const untold = await liveClient(emptyAdminSnapshot("Acme"));
     const empty = emptyAdminSnapshot("Acme");
     // Told today, with its interviews from today on.
@@ -262,11 +265,17 @@ describe("an organization's AI use and hours", () => {
       toCome: [before, during].some(({ html }) =>
         html.includes("This section isn’t in the admin yet.")
       ),
+      // Before its interviews, its steps; during them, the interviews.
+      ways: [
+        before.main.includes(`href="${untold}/steps"`),
+        during.main.includes(`href="${told}/interviews"`),
+      ],
     }).toStrictEqual({
       none: [true, true],
       before: true,
       during: true,
       toCome: false,
+      ways: [true, true],
     });
   });
 });
