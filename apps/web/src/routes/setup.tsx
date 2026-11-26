@@ -280,7 +280,7 @@ const Setup = () => {
       userId={identity.userId}
       ways={waysOf(index, furthest, path, go)}
       progress={progressOf(partOf(step, path), partNames)}
-      centred={step === "company"}
+      screen={step}
       // The story covers the frame and has its own bar.
       covered={step === "about"}
       language={step !== "welcome"}

@@ -30,7 +30,7 @@ const WaitingPage = () => {
     };
   }, [router]);
   return (
-    <CalmFrame centred userId={identity.userId}>
+    <CalmFrame userId={identity.userId}>
       <CalmStep
         body={t`Your admins are setting up Grasp. This page opens it for you once they’re done.`}
         spoken={t`Hi, I’m Stephen. Your admins are still setting things up for you. As soon as they’re done, this page opens Grasp by itself, so you can just leave it open.`}
