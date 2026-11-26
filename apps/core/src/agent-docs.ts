@@ -22,7 +22,7 @@ import { docsPath } from "./security-headers.ts";
 // reference is generated from the SDK's own types.
 //
 // Only a person who builds gets them (`TurnContext.builds`). The guides
-// go whole into the system prompt, right after the instructions, the
+// go whole into the system prompt, right after the building rules, the
 // same text for every chat that builds (build-agent-docs.ts embeds them
 // at build time); the section ends where the part of the prompt every
 // chat shares ends, which the gateway caches apart (prompt-cache.ts). The

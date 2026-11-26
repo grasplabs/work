@@ -300,7 +300,7 @@ export const proposePlan = (): AgentTool<typeof planParameters> => ({
 const draftSchemaFor = (
   schema: z.ZodType,
   drafts: "company" | "own",
-  companyOnly: readonly string[]
+  companyOnly: readonly (keyof AgentDraft | keyof AgentChangeDraft)[]
 ) => {
   const { $schema: _dialect, ...json } = z.toJSONSchema(schema, {
     io: "input",
@@ -312,7 +312,9 @@ const draftSchemaFor = (
   return {
     ...json,
     properties: Object.fromEntries(
-      Object.entries(properties).filter(([key]) => !companyOnly.includes(key))
+      Object.entries(properties).filter(
+        ([key]) => !new Set<string>(companyOnly).has(key)
+      )
     ),
   };
 };
@@ -623,8 +625,8 @@ const agentSetupText = `The person, an admin, started this chat from New agent, 
 
 /**
  * What the model reads beside a question in a chat "Make something"
- * started: what the person came to make. How making goes is in its
- * instructions, for every chat; an agent's setup is its own.
+ * started: what the person came to make. How making goes is in the
+ * prompt's making section; an agent's setup is its own.
  */
 const makeNoteText = ({ kind }: ChatMake): string => {
   if (kind === "agent") {
@@ -875,6 +877,7 @@ export interface PromptTurn {
  * Whether a turn proposes what to make (`proposePlan`): one that builds,
  * never one nobody asked for (a wake-up), as a plan waits on the person's
  * press, nor a chat started to set up an agent, which drafts it instead.
+ * A turn in a chat app never builds (`buildsIn`, workspace.ts).
  */
 export const offersPlans = (context: TurnContext, unattended: boolean) =>
   context.builds === true && !unattended && context.make?.kind !== "agent";
@@ -895,11 +898,13 @@ const promptSections: readonly {
     name: "building",
     text: ({ context }) => (context.builds === true ? building : null),
   },
-  { name: "making", text: ({ plans }) => (plans ? making : null) },
   {
     name: "docs",
     text: ({ context }) => (context.builds === true ? docsSection : null),
   },
+  // After the docs, so their cached part is the same whether or not the
+  // turn may propose a plan.
+  { name: "making", text: ({ plans }) => (plans ? making : null) },
   { name: "apis", text: ({ apis }) => apisSection(apis) },
   // Not `instructions`: pi keeps that key for a conversation's own.
   {
