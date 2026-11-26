@@ -211,6 +211,9 @@ export interface ConnectApiKeyProps {
 
 const styles = stylex.create({
   form: { display: "grid", rowGap: space["5"] },
+  // Connect stands in from the field's end as Change stands in from its row's (Item sm's inline
+  // padding), so the two buttons line up one above the other.
+  keyAction: { marginInlineEnd: space["4"] },
   lead: { marginBlockEnd: space["4"] },
   // The tiles: equal, as many in a row as fit at their least width, one a row on a phone; every
   // tile in a row as tall as the tallest, a long name wrapping inside.
@@ -404,6 +407,7 @@ const ConnectForm = ({
             <InputGroupButton
               type="submit"
               status={connect.status === "loading" ? "loading" : "idle"}
+              style={styles.keyAction}
             >
               {words.connect}
             </InputGroupButton>
