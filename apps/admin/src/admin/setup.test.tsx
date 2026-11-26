@@ -103,7 +103,7 @@ describe("an organization's Setup", () => {
     const { container } = await openSetup(setupOf(), "nothing");
 
     expect(
-      container.querySelector('section[aria-label="How it stands"]')
+      container.querySelector('section[aria-labelledby="stands"]')
     ).not.toBeNull();
   });
 
