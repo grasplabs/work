@@ -257,6 +257,72 @@ const deployerCheck = async (
   }
 };
 
+/**
+ * Composio's MCP servers, as connect makes one for each Composio
+ * connection (connect's src/composio-connections.ts): what the key needs
+ * besides auth configs and connected accounts.
+ */
+const composioMcpServers = "https://backend.composio.dev/api/v3.1/mcp/servers";
+
+/** The Composio check, but for its status and words. */
+const composioLine = { id: "composio", title: "Composio key", required: false };
+
+/**
+ * Whether the Composio key every organization gets may use Composio's
+ * MCP servers, which connecting a toolkit makes: a scoped project key
+ * without Composio's "MCP (Legacy)" permission is refused there (403), and
+ * every Composio connection ends as `server:http_403`. Read with a list of
+ * one, so nothing is made; a key that may only read them still passes
+ * here, and shows at the connection.
+ */
+const composioCheck = async (
+  envOf: Env,
+  keyMissing: boolean
+): Promise<ReadinessCheck> => {
+  if (keyMissing) {
+    return {
+      ...composioLine,
+      status: "waiting",
+      words: "Checked once COMPOSIO_API_KEY is in Secrets Store.",
+    };
+  }
+  let status: number | undefined;
+  try {
+    const response = await fetch(`${composioMcpServers}?limit=1`, {
+      headers: {
+        "x-api-key": await storeSecret(envOf, "COMPOSIO_API_KEY"),
+        accept: "application/json",
+      },
+      redirect: "manual",
+      signal: AbortSignal.timeout(reachTimeoutMs),
+    });
+    ({ status } = response);
+    await response.body?.cancel();
+  } catch {
+    status = undefined;
+  }
+  if (status !== undefined && status >= 200 && status < 300) {
+    return {
+      ...composioLine,
+      status: "ready",
+      words:
+        "Composio's key reaches its MCP servers. Connecting a toolkit makes one, so the key needs MCP (Legacy) with Read and write, as well as Auth configs and Connected accounts with Read and write.",
+    };
+  }
+  if (status === 401 || status === 403) {
+    return {
+      ...composioLine,
+      status: "blocked",
+      words: `Composio refuses this key its MCP servers (${status}), so every Composio connection fails at server:http_${status}. In Composio's dashboard, give the project a default API key, or a scoped one with MCP (Legacy), Auth configs and Connected accounts each Read and write and Toolkits and Tools Read only, put it in the stage's 1Password Environment as COMPOSIO_API_KEY, then run Deploy platform and redeploy the organizations, so their connect gets it.`,
+    };
+  }
+  return {
+    ...composioLine,
+    status: "blocked",
+    words: `Composio couldn't be asked whether this key reaches its MCP servers (${status ?? "no answer"}). Check again shortly.`,
+  };
+};
+
 /** The checklist, as this admin stands now. */
 const readinessOf = async (envOf: Env): Promise<Readiness> => {
   const db = adminDatabase(envOf.DB);
@@ -271,6 +337,7 @@ const readinessOf = async (envOf: Env): Promise<Readiness> => {
     releaseCheck(imported?.n ?? 0, newestId),
     secretsCheck(missing),
     await deployerCheck(envOf, missing.includes("DEPLOYER_API_TOKEN")),
+    await composioCheck(envOf, missing.includes("COMPOSIO_API_KEY")),
   ];
   return {
     checks,

@@ -405,15 +405,11 @@ describe("connecting a Composio toolkit with a key", () => {
     const admin = someone("admin");
     const ends = [];
     const failing = [
-      ["POST /auth_configs", "auth_config:http_403"],
-      ["POST /connected_accounts", "account:http_403"],
+      ["POST /auth_configs", 403],
+      ["POST /connected_accounts", 403],
     ] as const;
-    for (const [prefix, why] of failing) {
-      composio.state.failingFor = {
-        prefix,
-        times: 1,
-        status: Number(why.slice(-3)),
-      };
+    for (const [prefix, status] of failing) {
+      composio.state.failingFor = { prefix, times: 1, status, code: 1002 };
       // oxlint-disable-next-line no-await-in-loop -- one connect at a time
       ends.push(await outcome(connectWithKey(admin)));
     }
@@ -429,11 +425,15 @@ describe("connecting a Composio toolkit with a key", () => {
       held: heldAtComposio(),
     }).toStrictEqual({
       ends: [
-        "connection.provider_refused",
-        "connection.provider_refused",
+        "connection.provider_forbidden",
+        "connection.provider_forbidden",
         "connection.provider_refused",
       ],
-      why: ["auth_config:http_403", "account:http_403", "mismatch:toolkit"],
+      why: [
+        "auth_config:http_403:1002",
+        "account:http_403:1002",
+        "mismatch:toolkit",
+      ],
       held: nothingHeld,
     });
   });

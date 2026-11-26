@@ -994,6 +994,9 @@ const readBody = async (request: Request): Promise<unknown> => {
  * sent in place of `fetch` (`fetch`), until it's emptied (`reset`). Add
  * accounts with `addAccount`; plan failures with `failCall`.
  */
+/** Composio's MCP server list, as the admin's readiness reads it. */
+const composioMcpServers = "https://backend.composio.dev/api/v3.1/mcp/servers";
+
 export const fakeCloudflareApi = (token: string) => {
   const accounts = new Map<string, AccountState>();
   const calls: ApiCall[] = [];
@@ -1401,11 +1404,39 @@ export const fakeCloudflareApi = (token: string) => {
   };
 
   /** What the API, or a client's hostname through the router, answers `fetch(input, init)` with. */
+  /**
+   * Composio's MCP server list, as the readiness check reads it with the
+   * shared key: `allowed` lists none, `forbidden` refuses the key (403),
+   * as Composio does a scoped key without MCP (Legacy).
+   */
+  const composio: { mcp: "allowed" | "forbidden"; keys: string[] } = {
+    mcp: "allowed",
+    keys: [],
+  };
+  const composioAnswer = (request: Request): Response => {
+    composio.keys.push(request.headers.get("x-api-key") ?? "");
+    return composio.mcp === "allowed"
+      ? Response.json({ items: [], next_cursor: null })
+      : Response.json(
+          {
+            error: {
+              message: "The API key doesn't have permissions",
+              code: 1001,
+              status: 403,
+            },
+          },
+          { status: 403 }
+        );
+  };
+
   const answerFetch = async (
     input: RequestInfo | URL,
     init?: RequestInit
   ): Promise<Response> => {
     const request = new Request(input, init);
+    if (request.url.startsWith(composioMcpServers)) {
+      return composioAnswer(request);
+    }
     if (!request.url.startsWith(`${base}/`)) {
       const url = new URL(request.url);
       const core = await routedCore(url);
@@ -1472,6 +1503,8 @@ export const fakeCloudflareApi = (token: string) => {
 
   /** Empties the fake: no accounts, calls or plans left. */
   const reset = (): void => {
+    composio.mcp = "allowed";
+    composio.keys.length = 0;
     accounts.clear();
     cores.clear();
     coreRequests.length = 0;
@@ -1507,6 +1540,8 @@ export const fakeCloudflareApi = (token: string) => {
       script: string;
       url: string;
     }[] => dispatched,
+    /** Composio's MCP server list, and the keys it was read with. */
+    composio,
     /** Empties the fake. */
     reset,
     /** Every call the fake got in this test, in order. */
