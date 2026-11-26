@@ -53,7 +53,7 @@ test("the admin drops three documents and goes on to the HR platform", async ({
   await page.goto("/setup?step=documents");
   await expect(
     page.getByRole("heading", {
-      name: "Do you have anything that explains how you work?",
+      name: "Share documents that explain how you work",
     })
   ).toBeVisible();
 

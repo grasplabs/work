@@ -167,7 +167,10 @@ describe("chat agent code run leases", () => {
     await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
       {
         isError: true,
-        text: `Error (revoked):\n${agentErrors.create("agent.run_revoked").message}`,
+        text: JSON.stringify({
+          status: "revoked",
+          error: agentErrors.create("agent.run_revoked").message,
+        }),
       },
     ]);
     await expect(
@@ -233,7 +236,10 @@ describe("chat agent code run leases", () => {
     await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
       {
         isError: true,
-        text: `Error (revoked):\n${agentErrors.create("agent.run_revoked").message}`,
+        text: JSON.stringify({
+          status: "revoked",
+          error: agentErrors.create("agent.run_revoked").message,
+        }),
       },
     ]);
     await expect(
@@ -330,7 +336,10 @@ describe("chat agent code run leases", () => {
     await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
       {
         isError: true,
-        text: `Error (revoked):\n${agentErrors.create("agent.run_revoked").message}`,
+        text: JSON.stringify({
+          status: "revoked",
+          error: agentErrors.create("agent.run_revoked").message,
+        }),
       },
     ]);
     const [record] = await runRecords(stub, chat.id);

@@ -8,6 +8,7 @@ import type {
   ChatPartial,
   ChatToolEvent,
 } from "@grasp-os/shared/chat";
+import type { ModelWait } from "@grasp-os/shared/models";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -66,7 +67,9 @@ const thread = async (
   /** The answer the New line goes over, the first the person hadn't seen. */
   newLineBefore?: number,
   /** What the chat read, as the page passes it. */
-  sources?: ReactNode
+  sources?: ReactNode,
+  /** What the turn's model request waits on, as core says. */
+  modelWait?: ModelWait
 ): Promise<void> => {
   const core = {
     withSession: async <T,>(
@@ -108,8 +111,11 @@ const thread = async (
         }}
         output={null}
         partial={partial}
-        running={partial !== null || checking !== undefined}
+        running={
+          partial !== null || checking !== undefined || modelWait !== undefined
+        }
         checking={checking}
+        modelWait={modelWait ?? null}
         tools={tools}
         newLineBefore={newLineBefore}
         sources={sources}
@@ -543,6 +549,56 @@ describe(ChatThread, () => {
     expect({ checking, otherwise: workingLine() }).toStrictEqual({
       checking: "Checking the App…",
       otherwise: "Working on it",
+    });
+  });
+
+  it("says while the model waits on its provider's rate limit, or which model answers instead, before its answer and between its replies", async () => {
+    const answered: ChatMessage[] = [
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: "Let me look.",
+        code: [],
+        tools: [],
+        end: "done",
+        at: "2026-10-27T09:00:05.000Z",
+      },
+    ];
+    const lineFor = async (
+      messages: readonly ChatMessage[],
+      modelWait: ModelWait
+    ) => {
+      await thread(
+        messages,
+        null,
+        [],
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        modelWait
+      );
+      const line = workingLine();
+      act(() => {
+        root?.unmount();
+      });
+      document.body.replaceChildren();
+      return line;
+    };
+
+    expect({
+      before: await lineFor([asked], { kind: "rate_limited", seconds: 20 }),
+      between: await lineFor(answered, { kind: "rate_limited", seconds: 1 }),
+      instead: await lineFor([asked], {
+        kind: "fallback",
+        model: "mistral/mistral-large-latest",
+      }),
+    }).toStrictEqual({
+      before: "Your AI provider is busy. Grasp tries again in 20 seconds.",
+      between: "Your AI provider is busy. Grasp tries again in 1 second.",
+      instead: "Answering with mistral-large-latest instead.",
     });
   });
 

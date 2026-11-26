@@ -14,7 +14,7 @@ A connector is written on `@grasp-os/sdk/connector`. This guide shows how.
 A connector runs in connect, each call of a tool in an isolate of its own, and holds nothing from one call to the next. Three rules hold for all its code:
 
 - It imports only `@grasp-os/sdk/connector` and its own files.
-- It never sees a token or a key. Connect adds the connection's credential to each request on its way out, after the connector's code is done with it.
+- It never sees a token or a key. Connect adds the connection's credential to each request on its way out, after the connector's code is done with it, and only for the hosts the sign-in names. The answers it reads carry no cookies, and no exact copy of the credential in their headers.
 - Every request goes through connect's egress, and only to a route the called tool declares, on one of the connector's hosts. Anything else is refused before it leaves.
 
 ## A connector
@@ -48,7 +48,7 @@ export default defineConnector({
       reach: "company",
       resource: "board",
       routes: ["GET /v1/boards/{board}/items"],
-      args: { board: v.string().min(1), cursor: v.string().optional() },
+      args: { board: v.string().segment(), cursor: v.string().optional() },
       returns: page(Item),
       handler: async ({ board, cursor }, api) => {
         const answer = await api.get("/v1/boards/{board}/items", {
@@ -77,10 +77,11 @@ A tool's name is its family and its action: `items.list`. The tools of one famil
 - `returns`: what it answers, an object. The answer is checked against it before anyone sees it: one that doesn't fit fails the call, and its caller gets the failure, never the answer.
 - `readOnly`: `true` for a tool that only reads, `false` for one that changes something at the vendor.
 - `reach`: whom it reaches, as far as any call of it can: `own` (only the person it acts for), `company` (what the company keeps together), `others` (anything that reaches other people, such as sending them something) or `conversations` (what other people said where the person was, such as a chat or a meeting's transcript). With `readOnly`, it decides the tool's class, which an admin allows or not.
-- `routes`: the only requests it may send, as `"METHOD /path"` with `{name}` for a path parameter. A connector with several hosts names the host too: `"GET api.boards.example/v1/me"`. At most one route is a write (anything but GET and HEAD).
+- `routes`: the only requests it may send, as `"METHOD /path"` with `{name}` for a path parameter. A connector with several hosts names the host too: `"GET api.boards.example/v1/me"`. At most one route is a write (anything but GET and HEAD). The argument named after a path parameter that fills a whole segment (`/deals/{id}`) is `v.string().segment()` (exactly what connect's egress sends in such a segment), a number, or fixed values that are each one segment; the build refuses a tool whose path argument is any other text. A parameter inside literal text, such as `/items('{id}')`, is held to a looser rule by the egress, and `api` refuses a value it wouldn't send there before anything goes out.
 - `resource`: the one string argument that names the record a call acts on, such as a board. A permission can be held to one record, and a path parameter of that name is held to the record the call's permission names.
 - `scopes`: the OAuth scopes it needs, among those its connector's `auth` asks for.
-- `handler`: the call, as `(args, api, call)`. It gets the arguments, already checked, and the vendor's API.
+- `redirects`: for a GET route of its own, the hosts its answer may redirect to, as `*.<host>` where `*` is one label: `{ "GET /v1/files/{file}": ["*.storage.boards.example"] }`. Connect's egress follows one such redirect itself, without the token. Any other redirect is refused.
+- `handler`: the call, as `(args, api, call)`. It gets the arguments, already checked, and the vendor's API. It refuses a call by throwing a `ToolError` with a `code`, such as `new ToolError("This list is shared", { code: "access_denied" })` or `invalid` for an argument `v` can't check: thrown before the tool's write, the call failed and nothing was done. Anything else it throws fails a read, and leaves a write's outcome unknown.
 
 `readOnly` and `reach` are checked against the rules that class every tool by its name, its arguments and its routes' paths, and a connector that claims less than they find isn't built:
 
@@ -93,11 +94,17 @@ Type every value the vendor gives a shape. A free-form `v.json()` in a connector
 
 ## The API
 
-`api` sends a request to one of the tool's routes, as the route is declared: `api.get("/v1/boards/{board}/items", { path, query, body, returns })`, and `post`, `put`, `patch` and `head` the same way. It fills in each path parameter from `path` as one segment of the path (a value can't be empty, `.` or `..`, or hold `/ \ ? # % ; :` or a control character; it's refused before anything is sent), adds `query` (leaving out undefined and null values) and sends `body` as JSON. A route the tool doesn't declare is refused before anything is sent.
+`api` sends a request to one of the tool's routes, as the route is declared: `api.get("/v1/boards/{board}/items", { path, query, body, returns })`, and `post`, `put`, `patch` and `head` the same way. It fills in each path parameter from `path` as one segment of the path, refusing before anything is sent a value connect's egress wouldn't send there, adds `query` (leaving out undefined and null values) and sends `body` as JSON. A route the tool doesn't declare is refused before anything is sent.
 
 `returns` is optional. With it, the answer is checked against it and typed by it, and one that doesn't fit fails the call. Fields it doesn't name are left out, so a field the vendor adds never breaks a call: name only what the connector reads. Without it, the answer is `unknown`: the JSON, or the text when the answer isn't JSON. Either way, the tool's own `returns` checks what the handler makes of it.
 
 A call sends at most one write, as its last request: a write sent while another request is still out is refused, and once the write is sent, any other request is refused. That's how connect can tell a caller whether nothing was done.
+
+`api` takes more than JSON:
+
+- `headers`: request headers the call adds, such as `if-match` with an etag, or `prefer`. Names are lowercase, and values are visible ASCII and spaces. A header that connect's egress or the body sets is refused before anything is sent: `authorization`, `proxy-authorization`, `cookie`, `host`, `connection`, `content-length`, `content-type`, `transfer-encoding`, `te`, `upgrade`, `forwarded`, any `x-forwarded-*`, the method overrides (`x-http-method-override`, `x-http-method`, `x-method-override`), the path rewrites (`x-original-url`, `x-rewrite-url`) and `grasp-egress`.
+- `contentType`: a media type, such as `text/html`. With it, a string `body` or a `Uint8Array` one goes out exactly as it is, under that type. Without it, `body` goes out as JSON. Bytes always need it, and it can't be set without a string or bytes body.
+- `as: "bytes"`: the answer is the body's exact bytes, a `Uint8Array`, within the same size limit as any answer. It takes no `returns`.
 
 ## Writes that can be recovered
 
@@ -120,7 +127,7 @@ export const finish = tool({
   reach: "company",
   resource: "board",
   routes: ["PATCH /v1/boards/{board}/items/{item}"],
-  args: { board: v.string(), item: v.string() },
+  args: { board: v.string().segment(), item: v.string().segment() },
   returns: Item,
   repeatable: true,
   handler: async ({ board, item }, api) =>
@@ -138,7 +145,7 @@ export const add = tool({
   reach: "company",
   resource: "board",
   routes: ["GET /v1/boards/{board}/items", "POST /v1/boards/{board}/items"],
-  args: { board: v.string(), title: v.string().min(1) },
+  args: { board: v.string().segment(), title: v.string().min(1) },
   returns: Item,
   handler: async ({ board, title }, api, call) =>
     await api.post("/v1/boards/{board}/items", {
@@ -158,6 +165,141 @@ export const add = tool({
 ```
 
 Each goes into the connector's `tools` under its name, such as `"items.finish": finish`.
+
+## What a call read and changed
+
+Connect records which of the vendor's records each read returned, by their IDs, from its answer: the `id` of each of its `items`, or else the answer's own `id`, or else nothing. An `id` is a string, or a number, recorded as its text. A handler never reports it, and a write reports nothing: what it answers is what it made or changed, not what it read.
+
+So a list answers `page(item)`, `{ items, next }`, with each item's `id` in it, as the build already requires of a tool named `list`. Where the vendor keeps its list elsewhere, such as under `data`, the handler maps it into `items`, as `items.list` above does. A read of one record answers the record itself, with its `id` at the top; one that answers the vendor's envelope instead (`{ success, data: { id } }`) records nothing.
+
+A read that answers one item, such as a message or a page, says `answersItem: true`. Its answer's own `id` then names exactly that item, and one without it fails the call. Core may keep what such a tool reads of the person's own things as a source in the Brain.
+
+A write reports what it changed with `call.changed({ before, after })`, once, for the audit's record of old and new values. A change past 256 KiB of JSON, or a second one, leaves the call's outcome unknown, as does any answer that isn't what the tool declares once its write went out.
+
+## Confirmation
+
+A write may say how a call reads to the person asked to confirm it: `describe`, a `title` and the args that matter, each under a `label`. The person sees each value exactly as the call holds it, and is told when the call holds more than these show, so list every arg that changes what it does. Without it they see the tool's name and the raw args. `call.confirmed` says whether the person confirmed this call on such a card.
+
+```ts notes-tools.ts
+import { tool, v } from "@grasp-os/sdk/connector";
+
+/** Replaces an item's notes, unless someone changed them since. */
+export const writeNotes = tool({
+  description: "Replaces an item's notes",
+  readOnly: false,
+  reach: "company",
+  resource: "board",
+  routes: ["PUT /v1/boards/{board}/items/{item}/notes"],
+  args: {
+    board: v.string().segment(),
+    item: v.string().segment(),
+    notes: v.string(),
+    etag: v.string(),
+  },
+  describe: {
+    title: "Replace an item's notes",
+    fields: [
+      { label: "Item", arg: "item" },
+      { label: "Notes", arg: "notes" },
+      { label: "Version", arg: "etag" },
+    ],
+  },
+  returns: v.object({ id: v.string(), etag: v.string() }),
+  handler: async ({ board, item, notes, etag }, api, call) => {
+    const answer = await api.put("/v1/boards/{board}/items/{item}/notes", {
+      path: { board, item },
+      headers: { "if-match": etag },
+      body: notes,
+      contentType: "text/markdown",
+      returns: v.object({ etag: v.string(), previous: v.string() }),
+    });
+    call.changed({ before: answer.previous, after: notes });
+    return { id: item, etag: answer.etag };
+  },
+});
+```
+
+## Files
+
+A read that answers a file says `answersFile: true`. It takes an `as` arg of `"text"` or `"base64"` and answers `name`, `contentType`, `encoding` and `content`, as `contentAs(bytes, as)` makes the last two. A workflow may then keep the answer as a file of its run instead of passing the bytes on.
+
+A write that attaches files says `takesFiles: true` and has exactly the SDK's `attachments` as its `attachments` arg: each file by name, type, size and SHA-256. A workflow names its run's files, and connect hands the call their bytes beside its args. They are checked against the digests before the handler runs, with none missing or extra, and `attachedFiles(args.attachments, call)` gives each file with its bytes. A handler refuses a call it can't carry out by throwing a `ToolError` before its write.
+
+```ts file-tools.ts
+import {
+  attachedFiles,
+  attachments,
+  contentAs,
+  tool,
+  ToolError,
+  v,
+} from "@grasp-os/sdk/connector";
+
+/** Reads an item's file, which the vendor serves from its storage. */
+export const readFile = tool({
+  description: "Reads the file on an item",
+  readOnly: true,
+  reach: "company",
+  answersFile: true,
+  routes: ["GET /v1/items/{item}/file"],
+  redirects: { "GET /v1/items/{item}/file": ["*.storage.boards.example"] },
+  args: { item: v.string().segment(), as: v.enum(["text", "base64"]) },
+  returns: v.object({
+    name: v.string(),
+    contentType: v.string(),
+    encoding: v.enum(["text", "base64"]),
+    content: v.string(),
+  }),
+  handler: async ({ item, as }, api) => {
+    const bytes = await api.get("/v1/items/{item}/file", {
+      path: { item },
+      as: "bytes",
+    });
+    return {
+      name: `${item}.bin`,
+      contentType: "application/octet-stream",
+      ...contentAs(bytes, as),
+    };
+  },
+});
+
+/** Puts one file on an item. */
+export const putFile = tool({
+  description: "Puts a file on an item",
+  readOnly: false,
+  reach: "company",
+  takesFiles: true,
+  routes: ["PUT /v1/items/{item}/file"],
+  args: { item: v.string().segment(), attachments },
+  describe: {
+    title: "Put a file on an item",
+    fields: [
+      { label: "Item", arg: "item" },
+      { label: "File", arg: "attachments" },
+    ],
+  },
+  returns: v.object({ id: v.string() }),
+  handler: async ({ item, attachments: named }, api, call) => {
+    const [file, ...more] = attachedFiles(named, call);
+    if (file === undefined || more.length > 0) {
+      throw new ToolError("Put exactly one file", { code: "invalid" });
+    }
+    return await api.put("/v1/items/{item}/file", {
+      path: { item },
+      query: { name: file.name },
+      body: file.bytes,
+      contentType: file.type,
+      returns: v.object({ id: v.string() }),
+    });
+  },
+});
+```
+
+## Mail
+
+A tool that reads or changes email says `mail: true`, and a write that mails someone, sending or drafting, says `mail: { recipients: [...] }`, naming the args that hold the addresses it mails, as address strings or within objects. The platform holds mail tools to its mail rules: through one whose `resource` is `"mailbox"`, a chat's agent reaches only its person's own mailbox or one the company pointed it at for them; a card confirming a write tells the person when the turn read mail, which others wrote; and core records a workflow run's mail with its recipients.
+
+A mail tool puts `call.stamp`, when a workflow run sends the mail, on what it sends or drafts as the message's `stampHeader` header, so a copy that reaches a watched mailbox names the run that sent it.
 
 ## Signing in
 
@@ -185,9 +327,55 @@ export const boardsSignIn = auth.oauth2({
 });
 ```
 
-Both name an `account` lookup: a GET to a URL on one of the connector's hosts, sent with the new token or key, and JSON Pointers into its answer for the account's stable `id` and, if the vendor has them, its `name` and `email`. The email, as the vendor vouches for it, is what lets a person connect their own account. Without it, the vendor's accounts are connected only as shared ones, by an admin.
+Both name an `account` lookup: a GET to a URL on one of the hosts the credential goes to, sent with the new token or key, and JSON Pointers into its answer for the account's stable `id` and, if the vendor has them, its `name` and `email`. The email, as the vendor vouches for it, is what lets a person connect their own account. Without it, the vendor's accounts are connected only as shared ones, by an admin.
 
 Grasp's client at the vendor, its ID and secret, is the deployment's, found by the provider's name: a connector never names one.
+
+### Where the credential goes
+
+The credential goes only to the hosts the sign-in names in `hosts`. A request to any other host of the connector goes without it. A connector with one host needs no `hosts`: the credential goes to that host. A connector with several hosts must name them, and its `account` lookup must go to one of them:
+
+```ts hosts.ts
+import { auth } from "@grasp-os/sdk/connector";
+
+// The connector's hosts are api.boards.example and files.boards.example:
+// downloads from files.boards.example go without the key.
+export const boardsKey = auth.apiKey({
+  header: "x-api-key",
+  hosts: ["api.boards.example"],
+  account: { url: "https://api.boards.example/v1/me", id: "/account/id" },
+});
+```
+
+Before the connector's code reads an answer, connect drops its `Set-Cookie` and `Set-Cookie2` headers and replaces each copy of the credential in its headers, as sent, bare or JSON-escaped, with `[credential]`. The body comes as the vendor sent it: a vendor that echoes the credential in a body, or encodes it some other way, hands it to the connector's code. A redirect is followed only to a host a route's `redirects` names, and never with the credential.
+
+### Hosts set per connection
+
+A host that differs from one connection to the next is a template in `hosts`:
+
+- `{name}.<host>`: one DNS label in front of a fixed name, such as `{company}.boards.example`.
+- `{name}` alone: a whole host, such as a company's own server, with `auth.apiKey` only. Only an admin gives it: its connections are shared ones.
+
+Routes name a template like any other host, and the connector's code never learns the host it stands for: connect fills it in as each request leaves. Code that calls `fetch` itself sends to the template's stand-in, `company.boards.example.invalid` for `{company}.boards.example` and `host.invalid` for `{host}`. With `auth.apiKey`, whoever connects gives each template's host along with the key. With `auth.oauth2`, the token response names the host. `hostsFrom` maps each template to a JSON Pointer into that response, pointing at a host or an HTTPS origin, and the account is read with a lookup, never from an ID token:
+
+```ts company.ts
+import { auth } from "@grasp-os/sdk/connector";
+
+// The connector's hosts are ["{company}.boards.example"].
+export const companySignIn = auth.oauth2({
+  authorizeUrl: "https://boards.example/oauth/authorize",
+  tokenUrl: "https://boards.example/oauth/token",
+  scopes: { "items:read": "Read the items on boards" },
+  hostsFrom: { "{company}.boards.example": "/api_domain" },
+  account: {
+    url: "https://{company}.boards.example/v1/me",
+    id: "/id",
+    email: "/email",
+  },
+});
+```
+
+A filled host is read as a URL parser reads it, in lower case, and must fit its template: a DNS name with no address, port, userinfo or path, and for `{name}.<host>` one label in front of the fixed name. Connect checks this before anything is sent there, the account lookup included. A sign-in whose host doesn't fit connects nothing. The hosts are sealed with the credential, so a connection's host never changes: the same account at another host is another connection, and moving to another host means connecting again.
 
 ### A suite's sign-in
 
@@ -265,6 +453,58 @@ export default defineConnector({
 ## Lists
 
 `page(Item)` is what a list answers, one page at a time: `{ items, next }`, where `next` is where the next page starts, or `null` after the last. `items.list` above takes the next page's start as its `cursor` argument.
+
+## Recorded answers
+
+A connector can keep its vendor's real answers beside its entry, in `fixtures.json`. Each case there is one tool called with some arguments, and each call of it: every request it sent, with what the vendor answered, and what the call answered. When a connector has the file, connect's build replays every case on workerd, running the connector's bundle as connect ships it, with the recordings as its only network in place of connect's egress, and refuses the connector when:
+
+- its output doesn't match its recordings: a call answers other than it was recorded answering, or fails where it answered (say, its `returns` doesn't take what the vendor answered), or it sends a request that wasn't recorded, sends one again, or leaves out one that was;
+- its paging never ends: past the vendor's last recorded page it still answers a `next`, or a `next` comes back;
+- an error maps to the wrong kind: an error case doesn't fail with the kind it names.
+
+Tests use the same recordings as the vendor, so nobody writes a fake of it by hand.
+
+You write the cases; a recording run fills in each call:
+
+```json fixtures.json
+{
+  "personal": ["name", "email"],
+  "secret": ["signing_secret"],
+  "cases": [
+    { "tool": "items.list", "args": { "board": "b-1" }, "cursor": "cursor" },
+    { "tool": "items.list", "args": { "board": "gone" }, "error": "not_found" }
+  ]
+}
+```
+
+- `tool` and `args`: a tool that only reads, and what it's called with. A recording run changes nothing at the vendor, so tools that write aren't recorded. The arguments are kept as you wrote them, so call by an id: a case whose arguments hold personal data isn't recorded.
+- `cursor`: for a list, the argument the next page's start goes in. The run follows `next` until the vendor's last page, at most 10 pages. A list recorded on one page proves nothing of its paging and is refused, so pick arguments that list a few pages.
+- `error`: for a call the vendor refuses, the kind it must fail with, as the vendor's docs say its answer means: `invalid`, `access_denied`, `not_found`, `conflict`, `throttled`, `unavailable` or `failed`. A vendor that answers its rate limit with a 403 is `throttled`, not `access_denied`.
+- `personal`: the fields whose values are personal data, wherever they are. Name them narrowly: every string under a field of that name is replaced, a pipeline's `name` as much as a person's. Leave out a field of digits alone, such as a postcode: its digits are replaced wherever they show, in a date too.
+- `secret`: the fields whose values are secrets other than the connection's own, such as a webhook's signing secret or a signed download URL. Leave it out when there are none. A tool whose call reaches a host the connector doesn't declare, such as a download's signed URL, isn't recorded.
+
+A call that doesn't end as its case says, one that fails in a case without `error` or succeeds in one with it, stops the run, with why. So does a request or an answer that isn't text, such as a file's bytes. A request that depends on the time or on chance (a date computed from now, a random nonce) is never sent the same way again, so its case can't replay: record it with arguments that fix those values, or leave it unrecorded.
+
+Nothing secret or personal may be kept. The first guard is how you record: only tools that read, from an account Grasp owns that holds only made-up data, and a person reading the plain-text recording in review, like code. The rules below are the second guard. They find only what they know of, so they catch a slip but can't make an account with real people's data safe to record: an encoding they don't know of gets past them.
+
+- Requests keep no headers, and answers keep only `content-type`, `link` and `retry-after`.
+- The connection's key or token is never replaced: a recording that would carry it anywhere, as is, percent-encoded, escaped in JSON or in base64, isn't written, and the run names the case, or the account lookup, that carried it. A vendor whose answers echo it, its account lookup's too, can't be recorded.
+- Every value under a field `secret` names is replaced by `[credential]` wherever it shows, in the same forms. A secret shorter than 8 characters, more likely a placeholder such as `hidden`, is replaced only where a whole JSON value is it.
+- Every string under a field `personal` names, and every email address anywhere, is replaced by a stand-in (`person-1`, or `person-1@example.com` for an address). The same value gets the same stand-in wherever it shows: as a whole value in JSON, and within any text (a URL, a header, a longer string), as a word, when it's at least 4 characters long. So the recording still links what the vendor linked. Personal fields are found in JSON: in an answer that isn't JSON, only email addresses are.
+- A recording that would still carry a secret or a personal value where no rule can replace it, such as within a cursor in base64, isn't written. Record that case with other arguments.
+
+A call's output is recorded last, by calling the tool again with only what is kept of its recording as the vendor. So an output holds only stand-ins, whatever the tool makes of them, such as a name it joins from two. Outputs are still checked for the credential and the personal values found, in case the tool decodes one the check couldn't see, such as from an HTML entity.
+
+Record on an account of Grasp's own that holds only made-up data, never a client's, and say so: the run doesn't start without `RECORD_MADE_UP_DATA=yes`. In Grasp's repository, from its root:
+
+```sh
+RECORD_MADE_UP_DATA=yes \
+RECORD_CONNECTOR=packages/connectors/boards/src/index.ts \
+RECORD_CREDENTIAL=<the API key, or an access token with the tools' scopes> \
+vp test run --project @grasp-os/connect test/fixtures.live.test.ts -u
+```
+
+The run makes each call through connect, as any call goes, and writes `fixtures.json` with what it recorded. Run it again when the vendor's answers change, and review the difference like code.
 
 ## Events and syncs
 

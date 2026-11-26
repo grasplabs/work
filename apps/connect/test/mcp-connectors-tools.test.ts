@@ -10,6 +10,7 @@ import { callAs, outcome, someone } from "./connect.ts";
 import type { LinearTool } from "./linear-mcp-fake.ts";
 import {
   addLinear,
+  admin,
   chatAgent,
   connectLinear,
   linear,
@@ -896,6 +897,65 @@ describe("a connector's tools", () => {
       get_fanout: "reach-others",
       get_anchored: "reach-others",
       get_chained: "reach-others",
+    });
+  });
+
+  it("read mail, by the rules, when a word of a read's name holds mail or inbox, and changes never say so", async () => {
+    const names = [
+      "list_issues",
+      "search_mail",
+      "getInboxThreads",
+      "list_mailboxes",
+      "fetch_emails",
+      "list_outlook_folders",
+      "send_mail",
+    ];
+    linear.tools = [
+      ...linear.tools,
+      ...names
+        .filter((name) => name !== "list_issues")
+        .map((name) => tool(name)),
+    ];
+    const { connectionId } = await connected();
+
+    const shapes = await Promise.all(
+      names.map(
+        async (action) =>
+          await exports.default.actionShape({ connectionId, action })
+      )
+    );
+    expect(
+      Object.fromEntries(
+        names.map((name, index) => [name, shapes[index]?.mail ?? false])
+      )
+    ).toStrictEqual({
+      list_issues: false,
+      search_mail: true,
+      getInboxThreads: true,
+      list_mailboxes: true,
+      fetch_emails: true,
+      list_outlook_folders: false,
+      send_mail: false,
+    });
+  });
+
+  it("read mail, by the rules, on a server added under a name that holds mail, whatever a read is called", async () => {
+    linear.tools = [...linear.tools, tool("send_update")];
+    const anna = someone();
+    const connectionId = await connectLinear(
+      await addLinear(admin(), linear.url, "Gmail"),
+      anna
+    );
+
+    const [read, change] = await Promise.all(
+      ["list_issues", "send_update"].map(
+        async (action) =>
+          await exports.default.actionShape({ connectionId, action })
+      )
+    );
+    expect({ read: read?.mail, change: change?.mail }).toStrictEqual({
+      read: true,
+      change: undefined,
     });
   });
 

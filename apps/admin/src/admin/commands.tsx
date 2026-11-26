@@ -5,6 +5,10 @@
  * organization again, so the page shows where it stands either way.
  */
 
+import type { AdminCommand } from "@grasp-os/shared/admin-command";
+import { gateThresholds } from "@grasp-os/shared/onboarding-gate";
+import type { GateThreshold } from "@grasp-os/shared/onboarding-gate";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,22 +19,39 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@grasp-os/app-kit/components/alert-dialog";
-import { Button } from "@grasp-os/app-kit/components/button";
+} from "@grasp-os/ui/components/alert-dialog";
+import { Button } from "@grasp-os/ui/components/button";
+import type { ButtonVariant } from "@grasp-os/ui/components/button";
 import {
   NativeSelect,
   NativeSelectOption,
-} from "@grasp-os/app-kit/components/native-select";
-import type { AdminCommand } from "@grasp-os/shared/admin-command";
-import { gateThresholds } from "@grasp-os/shared/onboarding-gate";
-import type { GateThreshold } from "@grasp-os/shared/onboarding-gate";
+} from "@grasp-os/ui/components/native-select";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import type { ComponentProps, ReactNode } from "react";
-import { useId, useRef } from "react";
+import type { ReactNode } from "react";
+import { useRef } from "react";
 
 import { commandFn } from "../clients/command-functions.ts";
 import type { CommandRefusal } from "../clients/commands.ts";
 import { thenRefresh, useAction } from "../use-action.ts";
+
+const styles = stylex.create({
+  // A button, why its command didn't apply under it, at the end of its row.
+  given: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: space["1"],
+  },
+  controls: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: space["2"],
+  },
+});
 
 /** What staff read when a command didn't apply, by why. */
 const refusals: Readonly<Record<CommandRefusal, string>> = {
@@ -108,9 +129,9 @@ export const useCommand = (clientId: string) => {
 /** Why the last command didn't apply, where it was given. */
 export const CommandFailure = ({ failure }: { failure: string | null }) =>
   failure === null ? null : (
-    <p className="text-destructive" role="alert">
-      {failure}
-    </p>
+    <Alert appearance="subtle" variant="destructive">
+      <AlertDescription>{failure}</AlertDescription>
+    </Alert>
   );
 
 /** What a command needs said before it is given: it can't be undone, or touches everyone. */
@@ -140,7 +161,7 @@ export const CommandButton = ({
   disabled?: boolean;
   /** Its name for a screen reader, when its words don't say whom it is for. */
   label?: string;
-  variant?: ComponentProps<typeof Button>["variant"];
+  variant?: ButtonVariant;
 }) => {
   const { busy, failure, give } = useCommand(clientId);
   const button =
@@ -158,11 +179,15 @@ export const CommandButton = ({
       </Button>
     ) : (
       <AlertDialog>
-        <AlertDialogTrigger
-          disabled={disabled || busy}
-          render={<Button aria-label={label} size="sm" variant={variant} />}
-        >
-          {children}
+        <AlertDialogTrigger asChild>
+          <Button
+            aria-label={label}
+            disabled={disabled || busy}
+            size="sm"
+            variant={variant}
+          >
+            {children}
+          </Button>
         </AlertDialogTrigger>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -186,7 +211,7 @@ export const CommandButton = ({
       </AlertDialog>
     );
   return (
-    <span className="flex flex-col items-end gap-1">
+    <span {...stylex.props(styles.given)}>
       {button}
       <CommandFailure failure={failure} />
     </span>
@@ -276,18 +301,14 @@ export const GateControls = ({
   gate: GateState;
   paused: boolean;
 }) => {
-  const thresholdId = useId();
   const threshold = useCommand(clientId);
   const go = goCommand(gate);
   return (
-    <div className="flex flex-col items-end gap-1">
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <label className="sr-only" htmlFor={thresholdId}>
-          How much has to be known before it opens
-        </label>
+    <div {...stylex.props(styles.given)}>
+      <div {...stylex.props(styles.controls)}>
         <NativeSelect
+          aria-label="How much has to be known before it opens"
           disabled={threshold.busy || gate.open}
-          id={thresholdId}
           onChange={(event) => {
             const chosen = Number(event.target.value);
             if (isThreshold(chosen)) {

@@ -19,7 +19,7 @@ import {
 import {
   sampleKeyApiHost,
   sampleKeyHeader,
-} from "./fixtures/sample-key-connector.ts";
+} from "./fixtures/sample-key/connector.ts";
 import {
   sampleOAuthApiHost,
   sampleOAuthAuthHost,

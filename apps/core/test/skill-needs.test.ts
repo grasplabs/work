@@ -8,6 +8,7 @@ import {
   codeStep,
   personalChatsOf,
   says,
+  returnedText,
 } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { actingFor } from "./contexts.ts";
@@ -40,7 +41,7 @@ const agentOf = (userId: string) =>
 
 /** What the chat's code returned of a skill: whether it was selected, and read. */
 const said = (selected: boolean, read: string): string =>
-  `Returned:\n${JSON.stringify({ selected, read })}`;
+  returnedText(JSON.stringify({ selected, read }));
 
 /** Every string in `value`, however deep: what a request to the model carried. */
 const stringsIn = (value: unknown): string[] => {
@@ -141,8 +142,13 @@ describe("what a skill needs", setUpTime, () => {
       },
     }).toStrictEqual({
       results: [
-        `Returned:\n${JSON.stringify({ selected: [plain], read: "refused" })}`,
-        `Returned:\n${JSON.stringify({ selected: [plain, needing].toSorted(), read: "read" })}`,
+        returnedText(JSON.stringify({ selected: [plain], read: "refused" })),
+        returnedText(
+          JSON.stringify({
+            selected: [plain, needing].toSorted(),
+            read: "read",
+          })
+        ),
       ],
       listed: {
         needing: [false, false, true, true],

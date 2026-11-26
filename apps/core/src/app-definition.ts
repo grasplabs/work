@@ -400,7 +400,12 @@ const fieldTypeOf = (type: ValueDescriptor): FieldType => {
   if (type.kind === "string") {
     // A format other than email is edited in code alone: the editor's
     // kinds have no place for it, and would drop it.
-    if (type.datetime === true || type.date === true || type.url === true) {
+    if (
+      type.datetime === true ||
+      type.date === true ||
+      type.url === true ||
+      type.segment === true
+    ) {
       return { kind: "other" };
     }
     return {

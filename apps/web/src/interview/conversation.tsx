@@ -8,6 +8,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
+import { TopError } from "../frame/top-error.tsx";
 import { Composer, SaveTrouble } from "./composer.tsx";
 import { Countdown, budgetMinutes } from "./countdown.tsx";
 import { keepNow, update, useInterviewer, useProgress } from "./kept.ts";
@@ -219,6 +220,12 @@ const Asking = () => {
   );
 };
 
+/** A turn that could not be had: in the bar at the top, as every error here, never as his line. */
+const TurnTrouble = () => {
+  const loop = useLoop();
+  return <TopError>{loop.trouble}</TopError>;
+};
+
 /** The box at the bottom, with what they must know about saving over it. */
 const AnswerBox = ({
   reading,
@@ -235,7 +242,7 @@ const AnswerBox = ({
     <div {...stylex.props(styles.composer)}>
       <SaveTrouble />
       <Composer
-        blocked={mode === "type" && micProblem() === "blocked"}
+        micTrouble={mode === "type" ? micProblem() : null}
         doing={loop.doing}
         line={loop.saying}
         names={words.tag}
@@ -322,6 +329,7 @@ export const Conversation = ({
   const footed = reading && changingAt !== answer;
   return (
     <>
+      <TurnTrouble />
       <Room alone={alone} transcript={transcript}>
         <div {...stylex.props(styles.stage)}>
           {reading ? (

@@ -14,6 +14,9 @@ import { maxEgressResponseBytes } from "../src/egress.ts";
 import { sampleHost, storageHost } from "./fixtures/sample-connector.ts";
 import { fakeInternet } from "./internet.ts";
 
+/** The host an admin gives the sample app on a host of its own. */
+export const sampleHostHost = "erp.sample-host.test";
+
 /** More than the egress handler lets a connector read. */
 const floodBytes = maxEgressResponseBytes + 2 * 1024 * 1024;
 const floodChunk = new Uint8Array(64 * 1024);
@@ -181,6 +184,10 @@ export const fakeSampleApi = () => {
   const { sent } = fakeInternet(async (request, url) => {
     if (url.hostname === sampleHost) {
       return await answerItems(request.method, url);
+    }
+    // An app on a host of its own (sample-host): its account lookup.
+    if (url.hostname === sampleHostHost && url.pathname === "/v1/whoami") {
+      return Response.json({ account: { id: "api", name: "API user" } });
     }
     return url.hostname.endsWith(".storage.test")
       ? storage(url)

@@ -155,6 +155,8 @@ export interface LoopState {
   talking: boolean;
   /** The sign beside him: what he is doing, or the little he feels. */
   sign: DotSign | null;
+  /** A turn could not be had: why, for the bar at the top, never as his line. */
+  trouble: string | null;
 }
 
 /** What happens in the conversation, as it is told on `window` (`loopEventName`). */
@@ -205,6 +207,7 @@ const idle: LoopState = {
   said: null,
   talking: false,
   sign: null,
+  trouble: null,
 };
 
 let state: LoopState = idle;
@@ -540,7 +543,8 @@ const tryAgain = (): void => {
 
 /**
  * A turn could not be had, however often it was asked for. The first time
- * he says so himself, as his own line: their connection when nothing came
+ * it shows in the bar at the top, and he says it out loud while the stage
+ * keeps his question: their connection when nothing came
  * back, our side when core or the model said no or took too long. What they
  * typed is kept. Then he waits for them, and asks again by himself, longer
  * apart each time, and at once when the connection is back; whatever they
@@ -569,7 +573,10 @@ const trouble = (status: number, retry: () => void): void => {
     wait();
     return;
   }
-  speak(told[line], sorry, { after: wait });
+  // What went wrong stands in the bar at the top; out loud he says it, and the stage keeps his question.
+  set({ trouble: told[line] });
+  // oxlint-disable-next-line no-use-before-define -- said as any notice is
+  notice(told[line], wait);
 };
 
 /** The lines he may have to say when nothing can be fetched any more are fetched ahead, a sentence at a time as he says them. */
@@ -590,8 +597,9 @@ const readyToTell = (told: LoopWords): void => {
 
 /**
  * Something he has to tell them that is no part of the conversation: he
- * couldn't hear them, or can't listen here. He says it himself, and then
- * his own line stands there again.
+ * couldn't hear them, or can't listen here. He only says it: the screen
+ * keeps his own line, whole, as what went wrong shows in the top bar
+ * alone, never as a line of his on screen.
  */
 const notice = (line: string, then: () => void): void => {
   const was = state.line;
@@ -599,10 +607,11 @@ const notice = (line: string, then: () => void): void => {
   speak(line, sorry, {
     after: () => {
       asked = question;
-      set({ line: was });
+      set({ line: was, from: was.length });
       then();
     },
   });
+  set({ line: was, from: was.length });
 };
 
 /** What core is told: what was said and written down, and what just happened. */
@@ -1095,6 +1104,7 @@ const earlyOf = (
     }
     pending = null;
     troubled = 0;
+    set({ trouble: null });
     mine.spoke = true;
     meter.line(performance.now());
     known.answered = conversed(said);
@@ -1145,6 +1155,7 @@ const earlyOf = (
 const answer = (turn: StephenTurn, known: Turn, after: () => void): void => {
   const { inRead, part, said, mine } = known;
   troubled = 0;
+  set({ trouble: null });
   if (turn.more) {
     // They stopped in the middle of a sentence: he waits for the rest, and answers with what there is.
     show("listening");

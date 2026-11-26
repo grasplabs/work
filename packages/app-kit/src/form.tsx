@@ -367,7 +367,8 @@ const isRequired = (descriptor: ValueDescriptor | undefined): boolean => {
       descriptor.email ||
       descriptor.datetime === true ||
       descriptor.date === true ||
-      descriptor.url === true
+      descriptor.url === true ||
+      descriptor.segment === true
     );
   }
   if (descriptor.kind === "array") {

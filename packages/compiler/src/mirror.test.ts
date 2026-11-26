@@ -197,6 +197,68 @@ describe("a tool held to the vendor's spec", () => {
     ).toStrictEqual([]);
   });
 
+  it("may narrow a path argument to fixed values, each one segment", async () => {
+    const stages = await readSpec(
+      JSON.stringify({
+        openapi: "3.1.0",
+        info: { title: "Stages", version: "1" },
+        servers: [{ url: "https://api.example.test/api/v2" }],
+        paths: {
+          "/stages/{status}": {
+            get: {
+              operationId: "getStage",
+              parameters: [
+                {
+                  name: "status",
+                  in: "path",
+                  required: true,
+                  schema: { type: "string" },
+                },
+              ],
+              responses: {
+                "200": {
+                  description: "ok",
+                  content: {
+                    "application/json": {
+                      schema: {
+                        type: "object",
+                        properties: { id: { type: "integer" } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+      "https://developers.example.test/stages.json"
+    );
+    const getting = (status: { descriptor: ValueDescriptor }): MirrorTool => ({
+      name: "stages.get",
+      routes: ["GET /stages/{status}"],
+      args: shape({ status }),
+      returns: v.object({ id: v.number().integer().optional() }).descriptor,
+    });
+    expect(
+      checkMirror(
+        [
+          getting(v.string().segment()),
+          getting(v.enum(["open", "won"])),
+          getting(v.literal("open")),
+          getting(v.enum(["open", "a/b"])),
+          getting(v.literal("..")),
+        ],
+        stages
+      ).map((problem) => `${problem.tool}: ${problem.message}`)
+    ).toStrictEqual(
+      Array.from({ length: 2 }, () => [
+        "stages.get: args.status doesn't keep the vendor's type.",
+        "stages.get: args.status fills the path parameter {status}: declare it v.string().segment(), a number or fixed values.",
+      ]).flat()
+    );
+  });
+
   it("is refused a renamed argument or field", () => {
     expect(
       messages([
@@ -469,6 +531,43 @@ describe("a tool with no spec to hold it to", () => {
       "me.drive.get: GET /me/drive/root:/{folder}/{name} is named me.drive.<the vendor's operation name>.",
       "drive.children.list: A list answers page(item): { items, next }.",
       "me.chats.listMessages: GET /me/chats/19:{chat}/messages is named me.chats.messages.list.",
+    ]);
+  });
+
+  it("is refused a path argument that may not be one segment", () => {
+    const getting = (
+      fields: Record<string, { descriptor: ValueDescriptor }>
+    ): MirrorTool => ({
+      ...tool("deals.get", "GET /deals/{id}"),
+      args: shape(fields),
+    });
+    expect(
+      messages(
+        [
+          getting({ id: v.string().segment() }),
+          getting({ id: v.number().integer() }),
+          getting({ id: v.enum(["open", "won"]) }),
+          getting({ id: v.literal(7) }),
+          getting({ id: v.string() }),
+          getting({ id: v.string().min(1).max(64) }),
+          getting({ id: v.string().segment().nullable() }),
+          getting({ id: v.enum(["open", "a/.."]) }),
+          getting({ id: v.json() }),
+          {
+            ...tool("deals.update", "PATCH /deals/{id}"),
+            routes: ["PATCH /deals/{id}", "GET /deals/{deal}"],
+            args: shape({ id: v.string().segment(), deal: v.string() }),
+          },
+        ],
+        false
+      )
+    ).toStrictEqual([
+      ...Array.from(
+        { length: 5 },
+        () =>
+          "deals.get: args.id fills the path parameter {id}: declare it v.string().segment(), a number or fixed values."
+      ),
+      "deals.update: args.deal fills the path parameter {deal}: declare it v.string().segment(), a number or fixed values.",
     ]);
   });
 });

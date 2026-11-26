@@ -10,7 +10,12 @@
  * `graphControlUrl`. Imported by vite.config.ts (Node) and the tests
  * (workerd), so it only holds data.
  */
+import { fixturesSchema, fixtureVendor } from "@grasp-os/runtime/connector";
+import type { Exchange } from "@grasp-os/runtime/connector";
+
 import { botFrameworkKeysFake } from "../../connect/test/bot-framework-keys-fake.ts";
+import pipedriveFixtures from "../../connect/test/fixtures/pipedrive/fixtures.json" with { type: "json" };
+import sampleKeyFixtures from "../../connect/test/fixtures/sample-key/fixtures.json" with { type: "json" };
 import { graphEventsFake } from "../../connect/test/graph-events-fake.ts";
 import { npmRegistryFake } from "../../connect/test/npm-registry-fake.ts";
 import { osvFake } from "../../connect/test/osv-fake.ts";
@@ -31,8 +36,6 @@ import {
   linearToolErrorUrl,
 } from "./linear-service.ts";
 import { mailServerScript } from "./mail-server.ts";
-import { pipedriveControlUrl, pipedriveFake } from "./pipedrive-fake.ts";
-import { sampleKeyControlUrl, sampleKeyFake } from "./sample-key-fake.ts";
 import { sampleSyncControlUrl, sampleSyncFake } from "./sample-sync-fake.ts";
 import { stephenGoogleFake } from "./stephen-google-fake.ts";
 import { stephenGraphFake } from "./stephen-graph-fake.ts";
@@ -46,6 +49,26 @@ export const platformOpenAiKey = "test-platform-openai-key-0001";
 export const platformAnthropicKey = "test-platform-anthropic-key-0001";
 export const platformMistralKey = "test-platform-mistral-key-0001";
 export const platformElevenLabsKey = "test-platform-elevenlabs-key-0001";
+
+/**
+ * The vendors that answer from their connectors' recorded answers
+ * (fixtures.json beside each connector, @grasp-os/runtime/connector's
+ * `fixtureVendor`): connect's Pipedrive fixture and its sample API-key app.
+ */
+const recordedExchanges: Exchange[] = [pipedriveFixtures, sampleKeyFixtures]
+  .map((each) => fixturesSchema.parse(each))
+  .flatMap(({ account, cases }) => [
+    ...(account === undefined ? [] : [account]),
+    ...cases.flatMap(({ calls }) =>
+      calls.flatMap(({ exchanges }) => exchanges)
+    ),
+  ]);
+
+/**
+ * Where tests read every request those vendors were sent, with its
+ * headers: GET, as JSON, oldest first (`fixtureVendor`'s `received`).
+ */
+export const recordedControlUrl = "https://recorded-control.test/received";
 
 /** Connect's version metadata, as set on connect in the tests. */
 export const connectVersionMetadata = {
@@ -562,8 +585,7 @@ const stephenGraph = (${stephenGraphFake.toString()})();
 const stephenGoogle = (${stephenGoogleFake.toString()})();
 const driveSync = (${driveSyncFake.toString()})();
 const sampleSync = (${sampleSyncFake.toString()})();
-const sampleKey = (${sampleKeyFake.toString()})();
-const pipedrive = (${pipedriveFake.toString()})();
+const recorded = (${fixtureVendor.toString()})(${JSON.stringify(recordedExchanges)});
 const graphSent = [];
 const graphLosing = new Map();
 const graphThrottled = new Map();
@@ -1082,19 +1104,12 @@ export default {
     if (fromSampleSync !== undefined) {
       return fromSampleSync;
     }
-    if (url.origin + url.pathname === ${JSON.stringify(sampleKeyControlUrl)}) {
-      return await sampleKey.control(request);
+    if (url.href === ${JSON.stringify(recordedControlUrl)}) {
+      return Response.json(recorded.received);
     }
-    const fromSampleKey = sampleKey.answer(request, url);
-    if (fromSampleKey !== undefined) {
-      return fromSampleKey;
-    }
-    if (url.origin + url.pathname === ${JSON.stringify(pipedriveControlUrl)}) {
-      return await pipedrive.control(request);
-    }
-    const fromPipedrive = pipedrive.answer(request, url);
-    if (fromPipedrive !== undefined) {
-      return fromPipedrive;
+    const fromRecorded = await recorded.answer(request);
+    if (fromRecorded !== undefined) {
+      return fromRecorded;
     }
     if (url.href === ${JSON.stringify(stephenGoogleUrl)}) {
       return await stephenGoogle.control(request);

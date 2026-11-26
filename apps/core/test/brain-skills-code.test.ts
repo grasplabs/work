@@ -42,7 +42,13 @@ import { shareWorkflowResource } from "../src/workflow-members.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
-import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
+import {
+  chatOf,
+  codeResults,
+  codeStep,
+  says,
+  returnedOf,
+} from "./agent-chat.ts";
 import { testApp } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
@@ -442,10 +448,6 @@ const chatCode = (asked: string) =>
   codeStep(
     `export default async (self, env) => { const { skills } = await env.skills.select({ task: ${JSON.stringify(asked)} }); return { skills, read: skills[0] === undefined ? null : await env.skills.read({ skill: skills[0] }) }; };`
   );
-
-/** What a chat's code returned, its last step's. */
-const returnedOf = (text: string | undefined): unknown =>
-  JSON.parse((text ?? "").replace(/^Returned:\n/u, ""));
 
 const refusal = z.object({ failed: z.string() });
 

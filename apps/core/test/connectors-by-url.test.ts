@@ -13,14 +13,14 @@ import {
   codeResults,
   codeStep,
   personalChatsOf,
-  readOutside,
+  readResult,
+  returnedOf,
   says,
-  withoutMarking,
+  returnedText,
 } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
 import { linearConsentUrl, linearToolErrorUrl } from "./linear-service.ts";
 import { mailConnection, mailWithSearch } from "./mail-connection.ts";
-import { sampleKeyControlUrl } from "./sample-key-fake.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import {
   openRpc,
@@ -434,14 +434,16 @@ describe("a connector made from a URL", slow, () => {
 
     const steps = await codeResults(chats.stub, chat.chat.id);
     const [offered, asked] = steps.map(({ text }) => text);
-    expect(offered).toContain(
+    expect(returnedOf(offered)).toBe(
       JSON.stringify([
         { connectionId, actions: [] },
         { connectionId: mail.id, actions: ["mail.send", "mail.search"] },
       ])
     );
     expect(asked).toBe(
-      "Returned:\nThis connection isn't active: it needs to be connected again."
+      returnedText(
+        "This connection isn't active: it needs to be connected again."
+      )
     );
   });
 
@@ -475,21 +477,20 @@ describe("a connector made from a URL", slow, () => {
 
     const steps = await codeResults(chats.stub, chat.chat.id);
     const [offered, asked] = steps.map(({ text }) => text);
-    const marked = readOutside(offered);
+    const marked = readResult(offered);
     expect({
-      offered: marked?.text,
+      offered: marked.returned,
       // Its tools' names are its server's words: handed over as data.
-      markedAsItsTools: marked?.from
-        .split("; ")
-        .includes(
-          `connection ${connectionId} (its tools' names, descriptions and schemas)`
-        ),
+      markedAsItsTools: marked.readFrom?.includes(
+        `connection ${connectionId} (its tools' names, descriptions and schemas)`
+      ),
       asked,
     }).toStrictEqual({
-      offered: "Returned:\ntrue",
+      offered: "true",
       markedAsItsTools: true,
-      asked:
-        "Returned:\nThis connection isn't active: it needs to be connected again.",
+      asked: returnedText(
+        "This connection isn't active: it needs to be connected again."
+      ),
     });
   });
 });
@@ -646,15 +647,26 @@ const nearlyMiBOfBlanks = " ".repeat(1024 * 1024 - 4096);
 const lead = "The action reported an error. Its server said: ";
 
 /**
- * Whether `text` is marked as read from outside (agent-chat.ts
- * `readOutside`), and the one string literal after the lead.
+ * Whether `text`, a result the model read or the words a card shows, says
+ * it was read from outside (`readFrom`), and the one string literal after
+ * the lead.
  */
 const serverSaid = (text: string) => {
-  const inner = withoutMarking(text);
-  const at = inner.indexOf(lead);
-  const [line = ""] = inner.slice(at + lead.length).split("\n");
+  let words = text;
+  let marked = false;
+  if (text.startsWith("{")) {
+    const { readFrom, returned, error } = readResult(text);
+    marked = readFrom !== undefined;
+    words =
+      [error, returned].find(
+        (part): part is string =>
+          typeof part === "string" && part.includes(lead)
+      ) ?? "";
+  }
+  const at = words.indexOf(lead);
+  const [line = ""] = words.slice(at + lead.length).split("\n");
   const quoted: unknown = at === -1 ? undefined : JSON.parse(line);
-  return { marked: readOutside(text) !== undefined, quoted };
+  return { marked, quoted };
 };
 
 describe("a vendor's own error", slow, () => {
@@ -754,18 +766,8 @@ describe("a vendor's own error", slow, () => {
 describe("an app that isn't a connector", slow, () => {
   it("can't be started or connected with a key through core, though its key works at the app", async () => {
     const member = await signedInApi(idp, "user");
-    const internet = testBinding("CONNECT_PROVIDERS");
-    if (!isFetcher(internet)) {
-      throw new TypeError("Expected the providers Worker as CONNECT_PROVIDERS");
-    }
-    // The key would sign in at the app, were connect asked.
-    await internet.fetch(sampleKeyControlUrl, {
-      method: "POST",
-      body: JSON.stringify({
-        key: "sample-key-0001",
-        account: { id: "acct-1", name: "Acme", email: member.person.email },
-      }),
-    });
+    // The key would sign in at the app, were connect asked: its recorded
+    // answers take any key.
     const started = await outcome(
       member.api.connections.start({
         provider: "sample-key",
