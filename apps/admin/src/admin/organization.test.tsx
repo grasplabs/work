@@ -561,6 +561,42 @@ describe("an organization's overview", () => {
     });
   });
 
+  it("says a connection Composio couldn't be asked about isn't checked, never that all work", async () => {
+    const ready = readySnapshot("Acme");
+    const { container } = await openAdmin("/organizations/acme", {
+      fetchClientGrid: [acme],
+      fetchClientAdmin: answeredAdmin({
+        client: acme,
+        snapshot: {
+          ...ready,
+          gate: { ...ready.gate, open: true, openedAt: ready.now },
+          integrations: {
+            connected: [
+              {
+                source: "composio",
+                provider: "exact",
+                state: "unread",
+                hidden: false,
+                connectedBy: null,
+                connectedAt: ready.now,
+                account: null,
+                tools: null,
+              },
+            ],
+            personal: [],
+            needed: [],
+            requests: [],
+          },
+        },
+      }),
+      ...setupAnswers,
+    });
+
+    expect(figuresOf(container)).toContain(
+      "Connectors working0 of 11 not checked now"
+    );
+  });
+
   it("lists what staff and the admin did lately, from the admin's own record", async () => {
     const at = new Date();
     const { container } = await openAdmin("/organizations/acme", {
