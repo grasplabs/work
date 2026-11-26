@@ -6,34 +6,66 @@ import type {
 } from "@grasp-os/shared/ai-providers";
 import { ConnectApiKey } from "@grasp-os/ui/blocks/connect-api-key-01/connect-api-key-01";
 import type { ConnectApiKeyProvider } from "@grasp-os/ui/blocks/connect-api-key-01/connect-api-key-01";
+import { Badge } from "@grasp-os/ui/components/badge";
 import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemTitle,
-} from "@grasp-os/ui/components/item";
-import { CheckIcon, Icon } from "@grasp-os/ui/lib/icons";
-import { space } from "@grasp-os/ui/lib/tokens.stylex";
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+} from "@grasp-os/ui/components/field";
+import {
+  RadioGroup,
+  RadioGroupItem,
+} from "@grasp-os/ui/components/radio-group";
+import { colors, radius, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
 
 import { failureMessage } from "../chat/failure.ts";
 import { aiProviderLogos } from "../connections/brands.ts";
-import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import type { AiReadiness } from "./setup.ts";
 
-// The AI step's one question: Grasp's AI, where this deployment offers
-// it, or a key of the organization's own, on Damsko's Connect API key
-// block. Grasp's AI is one row above the block, pressed to choose it (it
-// takes no key, so it is no tile of the block's); a key goes in through
-// the block, which tests it on Connect and says a refusal under it in the
-// provider's words. The model is the provider's first featured one:
-// choosing another is for Settings › AI providers.
+// The AI step's one question: our own system (Grasp's AI, on Grasp's key,
+// where this deployment offers it) or a key of the organization's own.
+// Two radio rows, ours first and recommended, so an admin with no key and
+// no idea what one is just presses Continue (Ruben: "so they are not
+// getting stuck"). Choosing their own key opens Damsko's Connect API key
+// block under the rows, which tests the key on Connect and says a refusal
+// under it in the provider's words. The model is the provider's first
+// featured one: choosing another is for Settings › AI providers.
 
 const styles = stylex.create({
   stack: { display: "grid", gap: space[4], width: "100%" },
+  // The two ways as one list, as the connect step's permission answers stand.
+  list: {
+    display: "grid",
+    overflow: "hidden",
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+  },
+  way: {
+    paddingInline: space[3],
+    paddingBlock: space[2],
+    transitionProperty: "background-color",
+    transitionDuration: "150ms",
+  },
+  between: {
+    borderTopWidth: 1,
+    borderTopStyle: "solid",
+    borderTopColor: colors.border,
+  },
+  chosen: { backgroundColor: colors.card },
+  head: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    columnGap: space[2],
+    rowGap: space[1],
+  },
 });
 
 type Offered = AiProvidersListing["offered"][number];
@@ -110,62 +142,59 @@ const useConnect = (listing: AiProvidersListing | undefined) => {
   };
 };
 
-/** Grasp's AI as one row, pressed to choose it; marked once it is the one in use. */
-const GraspRow = ({
-  inUse,
-  onChosen,
-}: {
-  inUse: boolean;
-  onChosen: () => void;
-}) => {
-  const { t } = useLingui();
+/** The step's two ways: our own system (Grasp's AI, on Grasp's key) or a key of their own. */
+export type AiWay = "grasp" | "own";
+
+/** The way to show chosen first: the one in use once a model answers, else ours where it's offered. */
+export const firstWay = (ai: AiReadiness | null): AiWay => {
+  if (ai === null) {
+    return "own";
+  }
+  if (ai.ready) {
+    return ai.listing.source;
+  }
+  return ai.listing.grasp.available ? "grasp" : "own";
+};
+
+/**
+ * Our own system chosen in core: admin-only, audited, and refused where
+ * this deployment has no key of Grasp's for it (ai-providers.ts setSource).
+ * True once it's set and the page has read it again.
+ */
+export const useChooseGrasp = () => {
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
-  const choose = async () => {
+  const choose = async (): Promise<boolean> => {
     if (busy) {
-      return;
+      return false;
     }
     const set = await run(async (session) => {
       await session.aiProviders.setSource("grasp");
       return true;
     });
-    if (set === true) {
-      await router.invalidate({ sync: true });
-      onChosen();
+    if (set !== true) {
+      return false;
     }
+    await router.invalidate({ sync: true });
+    return true;
   };
-  return (
-    <>
-      <Item
-        active={inUse}
-        onClick={() => {
-          void choose();
-        }}
-        variant="outline"
-      >
-        <ItemContent>
-          <ItemTitle>{t`Use Grasp’s AI`}</ItemTitle>
-        </ItemContent>
-        {inUse ? (
-          <ItemActions>
-            <Icon icon={CheckIcon} label={t`In use`} />
-          </ItemActions>
-        ) : null}
-      </Item>
-      <ErrorText>{failure}</ErrorText>
-    </>
-  );
+  return { busy, failure, choose };
 };
 
 /**
- * Which AI Grasp thinks with: Grasp's AI where this deployment offers it,
- * or a key of their own. `onReady` once a model answers.
+ * Which AI Grasp thinks with: our own system where this deployment offers
+ * it, or a key of their own. The step's Continue takes our own; a key goes
+ * in through the block, and `onReady` once a model answers.
  */
 export const AiChoice = ({
   ai,
+  way,
+  onWay,
   onReady,
 }: {
   ai: AiReadiness | null;
+  way: AiWay;
+  onWay: (way: AiWay) => void;
   onReady: () => void;
 }) => {
   const { t } = useLingui();
@@ -195,31 +224,89 @@ export const AiChoice = ({
     ready && own !== undefined
       ? { provider: own.provider, last: own.mask.replace("…", "") }
       : null;
+  const keyBlock = (
+    <ConnectApiKey
+      // Two and two: the four providers stand as a square, not three and one.
+      // On the page, no card: the step's own title and line already say what the card's would.
+      bare
+      columns={2}
+      connected={connected}
+      labels={{
+        keyNote: t`We store it sealed. You’ll only see its last four characters again.`,
+      }}
+      onConnect={async (choice) => {
+        await connect(choice);
+        await router.invalidate({ sync: true });
+        onReady();
+      }}
+      providers={providers}
+      title={t`Your own key`}
+    />
+  );
+  // Without ours on this deployment, a key is the one way: no choice to make.
+  if (!listing.grasp.available) {
+    return keyBlock;
+  }
+  const ways: {
+    value: AiWay;
+    label: string;
+    description: string;
+    recommended?: true;
+  }[] = [
+    {
+      value: "grasp",
+      label: t`Use our own system`,
+      description: t`Ready right away, nothing to set up.`,
+      recommended: true,
+    },
+    {
+      value: "own",
+      label: t`Use your own API key`,
+      description: t`For a provider your company already works with. You pay them directly.`,
+    },
+  ];
   return (
     <div {...stylex.props(styles.stack)}>
-      {listing.grasp.available ? (
-        <GraspRow
-          inUse={ready && listing.source === "grasp"}
-          onChosen={onReady}
-        />
-      ) : null}
-      <ConnectApiKey
-        // Two and two: the four providers stand as a square, not three and one.
-        // On the page, no card: the step's own title and line already say what the card's would.
-        bare
-        columns={2}
-        connected={connected}
-        labels={{
-          keyNote: t`We store it sealed. You’ll only see its last four characters again.`,
+      <RadioGroup
+        aria-label={t`Which AI to use`}
+        onValueChange={(value) => {
+          if (value === "grasp" || value === "own") {
+            onWay(value);
+          }
         }}
-        onConnect={async (choice) => {
-          await connect(choice);
-          await router.invalidate({ sync: true });
-          onReady();
-        }}
-        providers={providers}
-        title={t`Your own key`}
-      />
+        value={way}
+      >
+        <div {...stylex.props(styles.list)}>
+          {ways.map(({ value, label, description, recommended }, index) => (
+            <div
+              key={value}
+              {...stylex.props(
+                styles.way,
+                index > 0 && styles.between,
+                way === value && styles.chosen
+              )}
+            >
+              <Field orientation="horizontal">
+                <RadioGroupItem value={value} />
+                <FieldContent>
+                  <FieldLabel>
+                    <span {...stylex.props(styles.head)}>
+                      {label}
+                      {recommended === true ? (
+                        <Badge size="sm" variant="success">
+                          {t`Recommended`}
+                        </Badge>
+                      ) : null}
+                    </span>
+                  </FieldLabel>
+                  <FieldDescription>{description}</FieldDescription>
+                </FieldContent>
+              </Field>
+            </div>
+          ))}
+        </div>
+      </RadioGroup>
+      {way === "own" ? keyBlock : null}
     </div>
   );
 };

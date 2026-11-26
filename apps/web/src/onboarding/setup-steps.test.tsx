@@ -401,7 +401,7 @@ describe("the AI step", () => {
     });
   });
 
-  it("offers Grasp's AI, and says so, only where this deployment offers it", () => {
+  it("offers our own system first where this deployment has it, so Continue goes on with no key", () => {
     const own = aiOf({ ready: false });
     const offered: AiReadiness = {
       ...own,
@@ -410,16 +410,22 @@ describe("the AI step", () => {
         grasp: { ...own.listing.grasp, available: true },
       },
     };
+    const shown = said("ai", { ai: offered });
+    const notOffered = said("ai", { ai: own });
     expect({
       offered: [
-        said("ai", { ai: offered }).includes("Use Grasp’s AI"),
-        said("ai", { ai: offered }).includes("Grasp’s AI works right away"),
+        shown.includes("Use our own system"),
+        shown.includes("Use your own API key"),
+        shown.includes("Continue"),
       ],
       notOffered: [
-        said("ai", { ai: own }).includes("Use Grasp’s AI"),
-        said("ai", { ai: own }).includes("Grasp’s AI works right away"),
+        notOffered.includes("Use our own system"),
+        notOffered.includes("Continue"),
       ],
-    }).toStrictEqual({ offered: [true, true], notOffered: [false, false] });
+    }).toStrictEqual({
+      offered: [true, true, true],
+      notOffered: [false, false],
+    });
   });
 });
 

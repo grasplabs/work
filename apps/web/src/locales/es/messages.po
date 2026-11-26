@@ -7275,29 +7275,13 @@ msgstr "Todo, desde la primera conversación con un cliente hasta que el dinero 
 msgid "Everything from ordering from a supplier until their invoice is paid."
 msgstr "Todo, desde el pedido a un proveedor hasta que se paga su factura."
 
+#: src/onboarding/setup-steps.tsx
+msgid "Everything Grasp does runs on AI, from reading your documents to every interview."
+msgstr "Todo lo que hace Grasp funciona con IA, desde leer tus documentos hasta cada entrevista."
+
 #: src/brain/brain.ts
 msgid "Everything Grasp learned about {company}, each fact traceable to the conversation, document or connection it came from."
 msgstr "Todo lo que Grasp aprendió sobre {company}, cada dato rastreable hasta la conversación, el documento o la conexión de donde vino."
-
-#: src/onboarding/setup-steps.tsx
-msgid "Everything I read and say runs on it. Grasp’s AI works right away, or you can use your own key."
-msgstr "Todo lo que leo y digo funciona con ella. La IA de Grasp funciona al momento, o puedes usar tu propia clave."
-
-#: src/onboarding/setup-steps.tsx
-msgid "Everything I read and say runs on it. Paste a key from your provider, and you pay them directly."
-msgstr "Todo lo que leo y digo funciona con ella. Pega una clave de tu proveedor y le pagas directamente."
-
-#: src/onboarding/setup-steps.tsx
-msgid "Everything I read and say runs on it. You can set it up later in Settings."
-msgstr "Todo lo que leo y digo funciona con ello. Puedes configurarlo más tarde en Ajustes."
-
-#: src/onboarding/setup-steps.tsx
-msgid "Everything I read and say runs on it. You use Grasp’s AI, and it’s ready."
-msgstr "Todo lo que leo y digo funciona con ella. Usas la IA de Grasp y está lista."
-
-#: src/onboarding/setup-steps.tsx
-msgid "Everything I read and say runs on it. Your own key works, and it’s ready."
-msgstr "Todo lo que leo y digo funciona con ella. Tu propia clave funciona y está lista."
 
 #: src/connections/connection-audience.tsx
 msgid "Everything the Brain kept from it is erased for good, and nobody may use it from now on. This can't be undone. To open it again, choose who may use it once the erasure is done."
@@ -7753,6 +7737,10 @@ msgstr "Para {person}: {opening}"
 msgid "For {person}: {opening} · {last}"
 msgstr "Para {person}: {opening} · {last}"
 
+#: src/onboarding/ai-choice.tsx
+msgid "For a provider your company already works with. You pay them directly."
+msgstr "Para un proveedor con el que tu empresa ya trabaja. Le pagas directamente."
+
 #: src/connections/add-connector.tsx
 msgid "For a server inside your company's own network, with no public address."
 msgstr "Para un servidor dentro de la red propia de tu empresa, sin dirección pública."
@@ -8147,8 +8135,8 @@ msgid "Going well."
 msgstr "Va bien."
 
 #: src/onboarding/setup-steps.tsx
-msgid "Good, that’s settled. Now, before I can do anything, I need something to think with. That’s the AI on this screen: everything I read and everything I say runs on it."
-msgstr "Bien, eso ya está. Antes de poder hacer nada, necesito algo con lo que pensar. Es la IA de esta pantalla: todo lo que leo y todo lo que digo pasa por ella."
+msgid "Good, that’s settled. Before we really start, one thing: everything in Grasp runs on AI. Reading your documents, the interviews, the plan, all of it. So we need an AI attached to get it working."
+msgstr "Bien, eso ya está. Una cosa antes de empezar de verdad: todo en Grasp funciona con IA. Leer tus documentos, las entrevistas, el plan, todo. Así que necesitamos conectar una IA para que funcione."
 
 #: src/onboarding/document-visitors.tsx
 msgid "Got a checklist? Toss it in!"
@@ -8332,6 +8320,10 @@ msgstr "Grasp puede leer y escribir en {app}, solo para lo que permitas."
 #: src/connections/connected-dialog.tsx
 msgid "Grasp may use {app} only through the tools you allowed."
 msgstr "Grasp solo puede usar {app} con las herramientas que permitiste."
+
+#: src/onboarding/setup-steps.tsx
+msgid "Grasp needs an AI to work"
+msgstr "Grasp necesita una IA para funcionar"
 
 #: src/connections/connector-tools.tsx
 msgid "Grasp never runs it"
@@ -9018,10 +9010,6 @@ msgstr "Si cambias de opinión, este enlace sigue abierto hasta el {closes}."
 msgid "If you were invited, a code is on its way to you. It works for five minutes."
 msgstr "Si te invitaron, tienes un código en camino. Sirve durante cinco minutos."
 
-#: src/onboarding/setup-steps.tsx
-msgid "If your company works with a provider of its own, paste its key here, and you pay them directly."
-msgstr "Si tu empresa trabaja con un proveedor propio, pega aquí su clave y le pagas directamente."
-
 #: src/apps/app-data.tsx
 msgid "Import"
 msgstr "Importar"
@@ -9107,10 +9095,6 @@ msgstr "En la Consola del administrador de Google, ve a Aplicaciones, luego a Go
 #: src/chat/connection-requests.tsx
 msgid "In this chat only, until you delete it. Anything it sends or changes still waits for you to confirm."
 msgstr "Solo en este chat, hasta que lo borres. Todo lo que envíe o cambie sigue esperando a que lo confirmes."
-
-#: src/onboarding/ai-choice.tsx
-msgid "In use"
-msgstr "En uso"
 
 #: src/brain/brain.ts
 msgctxt "note property: the drawn version of this workflow on the Workflows page"
@@ -13507,6 +13491,14 @@ msgstr "Traspaso"
 msgid "Paste"
 msgstr "Pegar"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Paste a key from your company’s provider here. You pay them directly, and I’ll check that it works."
+msgstr "Pega aquí una clave del proveedor de tu empresa. Le pagas directamente, y yo compruebo que funcione."
+
+#: src/onboarding/setup-steps.tsx
+msgid "Paste a key from your provider to connect it. You pay them directly."
+msgstr "Pega una clave de tu proveedor para conectarlo. Le pagas directamente."
+
 #: src/settings/invitations.tsx
 msgid "Paste several at once, split by commas or lines."
 msgstr "Pega varias a la vez, separadas por comas o líneas."
@@ -14398,6 +14390,10 @@ msgstr "Lee las personas de tu organización: nombres, correos y equipos."
 msgid "Reads, and asks before each change"
 msgstr "Lee, y pregunta antes de cada cambio"
 
+#: src/onboarding/ai-choice.tsx
+msgid "Ready right away, nothing to set up."
+msgstr "Listo al momento, nada que configurar."
+
 #: src/agents/setup/review-step.tsx
 msgid "Ready to make {name}?"
 msgstr "¿Todo listo para crear {name}?"
@@ -14431,6 +14427,7 @@ msgstr "Ejecuciones recientes"
 #: src/agents/setup/apps-step.tsx
 #: src/connections/permissions/permission-choice.tsx
 #: src/frame/ui-words.tsx
+#: src/onboarding/ai-choice.tsx
 #: src/settings/ai-providers.tsx
 msgid "Recommended"
 msgstr "Recomendados"
@@ -18091,10 +18088,6 @@ msgstr "El borrador todavía no pasa la comprobación: corrígelo en Definición
 msgid "The draft's code doesn't build."
 msgstr "El código del borrador no se compila."
 
-#: src/onboarding/setup-steps.tsx
-msgid "The easiest is Grasp’s own, it works straight away. If your company would rather use its own provider, you can paste a key instead."
-msgstr "Lo más fácil es la de Grasp, funciona al momento. Si tu empresa prefiere su propio proveedor, puedes pegar una clave."
-
 #: src/workflows/binding-approvals.tsx
 msgid "The events its contract admits"
 msgstr "Los eventos que admite su contrato"
@@ -18380,6 +18373,10 @@ msgstr "El inicio de sesión no terminó, así que no se conectó nada. Inténta
 #: src/onboarding/connection-return.ts
 msgid "The sign-in took too long, so nothing was connected. Try again."
 msgstr "El inicio de sesión tardó demasiado, así que no se conectó nada. Inténtalo de nuevo."
+
+#: src/onboarding/setup-steps.tsx
+msgid "The simplest is our own system: leave it chosen and press Continue, and you’re ready. If your company already works with a provider like OpenAI or Mistral, choose your own key and paste it instead."
+msgstr "Lo más sencillo es nuestro propio sistema: déjalo elegido, pulsa Continuar y listo. Si tu empresa ya trabaja con un proveedor como OpenAI o Mistral, elige tu propia clave y pégala en su lugar."
 
 #: src/workflows/version-source.tsx
 msgid "The source files of version {sourceVersion}"
@@ -19590,8 +19587,12 @@ msgid "Use capital letters, digits and underscores, starting with a letter, and 
 msgstr "Use mayúsculas, dígitos y guiones bajos, empezando por una letra, y no un nombre que use la propia plataforma."
 
 #: src/onboarding/ai-choice.tsx
-msgid "Use Grasp’s AI"
-msgstr "Usar la IA de Grasp"
+msgid "Use our own system"
+msgstr "Usar nuestro propio sistema"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Use our own system and you’re set, or connect a provider of your own."
+msgstr "Usa nuestro propio sistema y listo, o conecta un proveedor propio."
 
 #: src/workflows/resource-params.tsx
 msgid "Use the default"
@@ -19600,6 +19601,10 @@ msgstr "Usar el predeterminado"
 #: src/routes/interview.tsx
 msgid "Use the work account your link was sent to."
 msgstr "Usa la cuenta de trabajo a la que se envió tu enlace."
+
+#: src/onboarding/ai-choice.tsx
+msgid "Use your own API key"
+msgstr "Usar tu propia clave de API"
 
 #: src/chat/thread.tsx
 msgid "Used {tool}"
@@ -20850,9 +20855,9 @@ msgstr "Adónde van tus líneas"
 msgid "Wherever your endpoint runs"
 msgstr "Donde se ejecute tu endpoint"
 
-#: src/onboarding/setup-steps.tsx
-msgid "Which AI should I use?"
-msgstr "¿Qué IA debo usar?"
+#: src/onboarding/ai-choice.tsx
+msgid "Which AI to use"
+msgstr "Qué IA usar"
 
 #: src/routes/_shell.connectors.$integration.tsx
 msgid "Which Apps and agents hold permissions"
@@ -21473,6 +21478,10 @@ msgstr "Ya no puedes leer este recuerdo."
 msgid "You can no longer read what the Brain learned from this version."
 msgstr "Ya no puedes leer lo que el Brain aprendió de esta versión."
 
+#: src/onboarding/setup-steps.tsx
+msgid "You can set it up later in Settings."
+msgstr "Puedes configurarlo más tarde en Ajustes."
+
 #: src/brain/memories-page.tsx
 msgid "You can share with a team of yours, or with everyone, once it has three people or more."
 msgstr "Puedes compartir con uno de tus equipos, o con todos, cuando tenga tres personas o más."
@@ -21568,8 +21577,12 @@ msgid "You’re about to visit an external website."
 msgstr "Vas a visitar un sitio web externo."
 
 #: src/onboarding/setup-steps.tsx
-msgid "You’re on Grasp’s own, and it’s ready, so we can carry on."
-msgstr "Usas la de Grasp y ya está lista, así que podemos seguir."
+msgid "You’re already on our own system, and it works, so just press Continue."
+msgstr "Ya usas nuestro propio sistema y funciona, así que pulsa Continuar."
+
+#: src/onboarding/setup-steps.tsx
+msgid "You’re on our own system, and it’s ready."
+msgstr "Usas nuestro propio sistema y está listo."
 
 #: src/drafts/share-with-team.tsx
 msgid "You’re seeing your version."
@@ -21755,8 +21768,12 @@ msgid "Your own key"
 msgstr "Tu propia clave"
 
 #: src/onboarding/setup-steps.tsx
-msgid "Your own key works, so we can carry on."
-msgstr "Tu propia clave funciona, así que podemos seguir."
+msgid "Your own key works, and it’s ready."
+msgstr "Tu propia clave funciona y está lista."
+
+#: src/onboarding/setup-steps.tsx
+msgid "Your own key works, so just press Continue."
+msgstr "Tu propia clave funciona, así que pulsa Continuar."
 
 #: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
