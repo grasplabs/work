@@ -303,12 +303,6 @@
   }
 }
 
-/* Room at the foot of whatever scrolls up and down into the bottom right corner, where the chat
-   box floats over the page: what is last on a page can then always be moved clear of it. */
-@utility pb-chat {
-  padding-bottom: calc(var(--spacing) * 24);
-}
-
 /* The lines of the experiment's chain. A drawing says how its lines are printed (`data-lines`)
    and whether its workflow is live (`data-live`), and every line in it follows (`WireLine` in
    `inside-flow.tsx`: `wire-base` is the line, `wire-grain` every third dot again a little larger,
