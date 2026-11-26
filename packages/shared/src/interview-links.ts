@@ -485,6 +485,11 @@ export interface InterviewSession {
   /** The interviews are over: what was said can be read and deleted, no more. */
   closed: boolean;
   /**
+   * The 7 days (DELETE_DAYS) after they first approved what was read back
+   * are over: the link only reads, and nothing is added or deleted through it.
+   */
+  readOnly: boolean;
+  /**
    * What was said, none before anything was saved. Whether they read what
    * this is (`told`) and which facts they agreed to (`agreed`) are core's,
    * from what they agreed to there, never what the page last said.

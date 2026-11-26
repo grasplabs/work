@@ -70,6 +70,7 @@ const sessionSchema = z.object({
   company: z.string().optional(),
   closes: z.string(),
   closed: z.boolean(),
+  readOnly: z.boolean(),
   progress: interviewProgressSchema.nullable(),
   version: z.int().min(0),
   withdrawn: z.boolean(),

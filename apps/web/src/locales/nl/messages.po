@@ -9526,6 +9526,10 @@ msgid "It starts nothing until an admin allows it to start this workflow."
 msgstr "Hij start niets tot een beheerder hem deze workflow laat starten."
 
 #: src/interview/page.tsx
+msgid "It stays here for you to read."
+msgstr "{'nl': 'Het blijft hier staan zodat je het kunt lezen.', 'de': 'Es bleibt hier, damit du es lesen kannst.', 'fr': 'Il reste ici pour que vous puissiez le lire.', 'es': 'Se queda aquí para que puedas leerlo.'}"
+
+#: src/interview/page.tsx
 msgid "It stays here for you to read. You can still delete it."
 msgstr "Het blijft hier voor jou om te lezen. Je kunt het nog steeds verwijderen."
 
@@ -20772,6 +20776,10 @@ msgstr "Wat had het beter gemaakt?"
 #: src/interview/closed.tsx
 msgid "What you approved is saved. Forgot something? This link works for 7 days."
 msgstr "Wat je hebt goedgekeurd is opgeslagen. Iets vergeten? Deze link blijft 7 dagen werken."
+
+#: src/interview/closed.tsx
+msgid "What you approved is saved. The 7 days to add something or delete it have passed."
+msgstr "{'nl': 'Wat je hebt goedgekeurd is opgeslagen. De 7 dagen om iets toe te voegen of het te verwijderen zijn voorbij.', 'de': 'Was du freigegeben hast, ist gespeichert. Die 7 Tage, um etwas hinzuzufügen oder es zu löschen, sind vorbei.', 'fr': 'Ce que vous avez validé est enregistré. Les 7 jours pour ajouter quelque chose ou le supprimer sont passés.', 'es': 'Lo que has aprobado está guardado. Ya han pasado los 7 días para añadir algo o eliminarlo.'}"
 
 #: src/brain/skills-page.tsx
 msgid "What you asked to share"
