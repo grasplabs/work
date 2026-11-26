@@ -188,9 +188,8 @@ const styles = stylex.create({
 /**
  * Says where the page's column stands in the window, on the document, as
  * the sidebar folds, a panel opens beside it and the window resizes: its
- * start, the card's, for the chat gone full screen over it (the kit's
- * DockablePanel reads `--app-shell-main-left`), and its end and foot for
- * the dock, which so stands in the middle of the page and not of its panel.
+ * start, end and foot, for the dock, which so stands in the middle of the
+ * page and not of its panel.
  */
 const usePublishedPage = () => {
   const page = useRef<HTMLDivElement>(null);

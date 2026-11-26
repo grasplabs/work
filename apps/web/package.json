@@ -11,24 +11,17 @@
     "i18n:extract": "lingui extract --clean"
   },
   "dependencies": {
-    "@base-ui/react": "catalog:",
-    "@fontsource-variable/geist": "catalog:",
-    "@fontsource-variable/jetbrains-mono": "catalog:",
-    "@fontsource-variable/newsreader": "catalog:",
-    "@grasp-os/app-kit": "workspace:*",
     "@grasp-os/runtime": "workspace:*",
     "@grasp-os/shared": "workspace:*",
     "@grasp-os/ui": "workspace:*",
     "@lingui/core": "catalog:",
     "@lingui/react": "catalog:",
-    "@pierre/diffs": "catalog:",
     "@stylexjs/stylex": "catalog:",
     "@tanstack/react-router": "catalog:",
     "@ui-sdk/core": "catalog:",
     "@ui-sdk/react": "catalog:",
     "capnweb": "catalog:",
     "country-flag-icons": "catalog:",
-    "lucide-react": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
     "react-markdown": "catalog:",
@@ -37,6 +30,7 @@
   },
   "devDependencies": {
     "@babel/core": "catalog:",
+    "@grasp-os/app-kit": "workspace:*",
     "@lingui/babel-plugin-lingui-macro": "catalog:",
     "@lingui/cli": "catalog:",
     "@lingui/conf": "catalog:",
@@ -45,7 +39,6 @@
     "@messageformat/parser": "catalog:",
     "@rolldown/plugin-babel": "catalog:",
     "@stylexjs/unplugin": "catalog:",
-    "@tailwindcss/vite": "catalog:",
     "@tanstack/router-plugin": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
@@ -53,7 +46,6 @@
     "babel-plugin-react-compiler": "catalog:",
     "happy-dom": "catalog:",
     "lightningcss": "catalog:",
-    "tailwindcss": "catalog:",
     "vite-plus": "catalog:"
   }
 }

@@ -4181,6 +4181,11 @@ msgstr "Casos por semana"
 msgid "Cases a week: {cases}."
 msgstr "Casos por semana: {cases}."
 
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Caution"
+msgstr "Precaución"
+
 #: src/agents/new-agent.tsx
 #: src/apps/app-workflows.tsx
 #: src/drafts/share-with-team.tsx
@@ -5343,6 +5348,10 @@ msgstr "Cópialo ahora: no lo volverás a ver. Si se pierde, solo se puede susti
 msgid "Copy link"
 msgstr "Copiar enlace"
 
+#: src/frame/ui-words.tsx
+msgid "Copy table"
+msgstr "Copiar la tabla"
+
 #: src/chat/thread.tsx
 msgid "Copy the answer"
 msgstr "Copiar la respuesta"
@@ -6038,6 +6047,10 @@ msgctxt "what else an answer to a decision says"
 msgid "Details"
 msgstr "Detalles"
 
+#: src/connections/support-details.tsx
+msgid "Details for support: {reason} (release {release}, connect {version})"
+msgstr "Detalles para soporte: {reason} (versión {release}, connect {version})"
+
 #: src/settings/event-sources.tsx
 msgid "Details of {name}"
 msgstr "Detalles de {name}"
@@ -6365,6 +6378,7 @@ msgstr "Puntos"
 msgid "Double-click or press F2 to rename"
 msgstr "Haz doble clic o pulsa F2 para cambiar el nombre"
 
+#: src/frame/ui-words.tsx
 #: src/workflows/run-files.tsx
 #: src/workflows/version-source.tsx
 msgctxt "download a file"
@@ -6389,6 +6403,14 @@ msgstr "Descargar como Markdown"
 #: src/chat/chat-more.tsx
 msgid "Download as PDF"
 msgstr "Descargar como PDF"
+
+#: src/frame/ui-words.tsx
+msgid "Download diagram"
+msgstr "Descargar el diagrama"
+
+#: src/frame/ui-words.tsx
+msgid "Download table"
+msgstr "Descargar la tabla"
 
 #: src/apps/app-code.tsx
 msgid "Download the file"
@@ -8846,6 +8868,11 @@ msgstr "Importar en {name}"
 msgid "Import or export"
 msgstr "Importar o exportar"
 
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Important"
+msgstr "Importante"
+
 #: src/onboarding/hr-leads.tsx
 msgid "In {name}, make a service user that may read people’s basic and work details, and paste its ID and token here."
 msgstr "En {name}, crea un usuario de servicio que pueda leer los datos básicos y laborales de las personas, y pega aquí su ID y su token."
@@ -10607,6 +10634,10 @@ msgid "Mentioned"
 msgstr "Mencionadas"
 
 #: src/frame/ui-words.tsx
+msgid "Mermaid diagram"
+msgstr "Diagrama de Mermaid"
+
+#: src/frame/ui-words.tsx
 msgid "Message actions"
 msgstr "Acciones del mensaje"
 
@@ -12076,6 +12107,11 @@ msgstr "No funciona"
 
 #: src/frame/ui-words.tsx
 msgctxt "a badge's dot"
+msgid "Note"
+msgstr "Nota"
+
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
 msgid "Note"
 msgstr "Nota"
 
@@ -14655,6 +14691,10 @@ msgstr "Restablecer lo que guarda"
 #: src/workflows/kept-state.tsx
 msgid "Reset what it keeps?"
 msgstr "¿Restablecer lo que guarda?"
+
+#: src/frame/ui-words.tsx
+msgid "Reset zoom"
+msgstr "Restablecer el zoom"
 
 #: src/apps/app-reset.tsx
 #: src/apps/reset-test-data.tsx
@@ -18652,6 +18692,11 @@ msgstr "Zona horaria"
 msgid "Timeline"
 msgstr "Cronología"
 
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Tip"
+msgstr "Consejo"
+
 #: src/apps/app-access-requests.tsx
 msgid "To"
 msgstr "Hasta"
@@ -19445,6 +19490,10 @@ msgstr "Ver todo"
 msgid "View changes"
 msgstr "Ver cambios"
 
+#: src/frame/ui-words.tsx
+msgid "View full screen"
+msgstr "Ver a pantalla completa"
+
 #: src/brain/note-actions.tsx
 msgid "View in map"
 msgstr "Ver en el mapa"
@@ -19647,6 +19696,11 @@ msgstr "Caminante"
 msgctxt "a badge's dot"
 msgid "Warning"
 msgstr "Aviso"
+
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Warning"
+msgstr "Advertencia"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -21448,12 +21502,14 @@ msgid "Zoom"
 msgstr "Zoom"
 
 #: src/brain/atlas-overlays.tsx
+#: src/frame/ui-words.tsx
 #: src/inbox/report-viewer.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Zoom in"
 msgstr "Acercar"
 
 #: src/brain/atlas-overlays.tsx
+#: src/frame/ui-words.tsx
 #: src/inbox/report-viewer.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Zoom out"

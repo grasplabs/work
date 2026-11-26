@@ -17,7 +17,7 @@ import type { Crumb } from "./site-header.tsx";
 // no page yet asks one question in its main area (`ItemStart`).
 
 // The shell's width, which its bar's parts give way to, narrowest last.
-// Named "bar" for the Tailwind queries of what pages put in it (`@max-5xl/bar`).
+// Named "bar" for the container queries of what pages put in it (`@container bar`).
 const BAR = "@container bar";
 
 const styles = stylex.create({
