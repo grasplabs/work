@@ -124,9 +124,9 @@ describe("in a group chat", setUpTime, () => {
     const told = (index: number) =>
       JSON.stringify(ann.provider.requests[index]?.body ?? null);
     // Neither has Knowledge, which no chat reads since the Brain replaced
-    // it: in private the agent's APIs, the Brain's with no grant, in the
-    // group none of them.
-    expect(told(1)).toContain(sent("connections,apps,build,workflows,brain"));
+    // it: in private the agent's APIs, the Brain's with no grant, but
+    // building's, as she doesn't build; in the group none of them.
+    expect(told(1)).toContain(sent("connections,apps,workflows,brain"));
     expect(told(3)).toContain(sent(""));
     // Nor any of the tools that write, ask for a connection or read the
     // brain: each calls an API the group's chat doesn't have.
