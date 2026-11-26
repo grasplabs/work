@@ -123,47 +123,39 @@ const cutTexts = (value: unknown, chars: number): unknown => {
   return value;
 };
 
-/** `value` with each text in it as a person is shown it, at any depth. */
-const shownTexts = (value: unknown): unknown => {
+/**
+ * `value` with each text in it as a person is shown it, at any depth; a
+ * tag's beginning at a text's end held back while more may come (`more`).
+ */
+const shownTexts = (value: unknown, more: boolean): unknown => {
   if (typeof value === "string") {
-    return withoutUntrustedMarking(value);
+    return withoutUntrustedMarking(value, more);
   }
   if (Array.isArray(value)) {
-    return value.map((item: unknown) => shownTexts(item));
+    return value.map((item: unknown) => shownTexts(item, more));
   }
   if (typeof value === "object" && value !== null) {
     return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, shownTexts(item)])
+      Object.entries(value).map(([key, item]) => [key, shownTexts(item, more)])
     );
   }
   return value;
 };
 
 /**
- * A call's input as a person is shown it, never as it is kept: without the
- * tags that mark what was read from outside, should the model copy one.
+ * A tool call's input as its line shows it, never as it is kept: without
+ * the tags that mark what was read from outside, should the model copy
+ * one; a tag's beginning held back while the call streams in (`more`).
+ * Only for a line that tells what was done: a card the person acts on
+ * shows its call as the tool took it, which is what their press acts on.
  */
-const shownInput = (part: ToolCall): Record<string, unknown> =>
+const shownInput = (part: ToolCall, more: boolean): Record<string, unknown> =>
   Object.fromEntries(
     Object.entries(part.arguments).map(([key, value]) => [
       key,
-      shownTexts(value),
+      shownTexts(value, more),
     ])
   );
-
-/**
- * A call's input as `schema` took it, as a person is shown it: none when
- * the tool refused it as the model wrote it; as written when what is shown
- * would no longer pass (a text that was nothing but a tag).
- */
-const takenAs = <T>(schema: z.ZodType<T>, part: ToolCall): T | undefined => {
-  const taken = schema.safeParse(part.arguments);
-  if (!taken.success) {
-    return undefined;
-  }
-  const shown = schema.safeParse(shownInput(part));
-  return shown.success ? shown.data : taken.data;
-};
 
 /**
  * The calls a response made of the agent's dedicated tools (agent-tools.ts),
@@ -180,7 +172,8 @@ const toolsOf = (message: AssistantMessage, chars?: number): ChatToolCall[] =>
       .filter(
         (before) => before.type === "toolCall" && before.name === "executeCode"
       ).length;
-    const shown = shownInput(part);
+    // Cut short only while the response is written, when more may come.
+    const shown = shownInput(part, chars !== undefined);
     const input: Record<string, unknown> =
       chars === undefined
         ? shown
@@ -201,9 +194,9 @@ const toolsOf = (message: AssistantMessage, chars?: number): ChatToolCall[] =>
 const askedOf = (message: AssistantMessage): ChatAsked | undefined => {
   for (const part of message.content) {
     if (part.type === "toolCall" && part.name === "askQuestions") {
-      const ask = takenAs(chatAskSchema, part);
-      if (ask !== undefined) {
-        return { callId: part.id, ...ask };
+      const ask = chatAskSchema.safeParse(part.arguments);
+      if (ask.success) {
+        return { callId: part.id, ...ask.data };
       }
     }
   }
@@ -217,9 +210,9 @@ const askedOf = (message: AssistantMessage): ChatAsked | undefined => {
 const plannedOf = (message: AssistantMessage): ChatPlanned | undefined => {
   for (const part of message.content) {
     if (part.type === "toolCall" && part.name === "proposePlan") {
-      const plan = takenAs(chatPlanSchema, part);
-      if (plan !== undefined) {
-        return { callId: part.id, ...plan };
+      const plan = chatPlanSchema.safeParse(part.arguments);
+      if (plan.success) {
+        return { callId: part.id, ...plan.data };
       }
     }
   }
@@ -233,9 +226,9 @@ const plannedOf = (message: AssistantMessage): ChatPlanned | undefined => {
 const draftedOf = (message: AssistantMessage): AgentDrafted | undefined => {
   for (const part of message.content) {
     if (part.type === "toolCall" && part.name === "draftAgent") {
-      const draft = takenAs(agentDraftSchema, part);
-      if (draft !== undefined) {
-        return { callId: part.id, ...draft };
+      const draft = agentDraftSchema.safeParse(part.arguments);
+      if (draft.success) {
+        return { callId: part.id, ...draft.data };
       }
     }
   }
@@ -248,9 +241,9 @@ const changeDraftedOf = (
 ): AgentChangeDrafted | undefined => {
   for (const part of message.content) {
     if (part.type === "toolCall" && part.name === "draftAgentChange") {
-      const change = takenAs(agentChangeDraftSchema, part);
-      if (change !== undefined) {
-        return { callId: part.id, ...change };
+      const change = agentChangeDraftSchema.safeParse(part.arguments);
+      if (change.success) {
+        return { callId: part.id, ...change.data };
       }
     }
   }
