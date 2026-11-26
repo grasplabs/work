@@ -623,6 +623,68 @@ describe("Home", () => {
     });
   });
 
+  it("says how each organization's platform runs, and when core hasn't counted last week's people yet", async () => {
+    const open = { stage: "open", open: true, openedAt: daysAgo(5) } as const;
+    const failed = row("failed", {
+      rollout: {
+        failed: { releaseId: "2026.11.20-1", error: null },
+        behind: 0,
+        channelStopped: null,
+      },
+    });
+    const behind = row("behind", {
+      rollout: { failed: null, behind: 2, channelStopped: null },
+    });
+    const rows = [
+      row("unread"),
+      row("stopped"),
+      row("again"),
+      failed,
+      behind,
+      row("fine"),
+    ];
+    const connectors: Record<string, AdminSummary["connectors"]> = {
+      unread: null,
+      stopped: { works: 2, again: 0, stopped: 1 },
+      again: { works: 1, again: 2, stopped: 0 },
+    };
+    const { container } = await openAdmin("/", {
+      fetchClientGrid: rows,
+      fetchClientSummaries: rows.map((client) =>
+        summaryWith(client, open, {
+          connectors: Object.hasOwn(connectors, client.id)
+            ? (connectors[client.id] ?? null)
+            : { works: 1, again: 0, stopped: 0 },
+          // One week counted: the release that counts them is a week old.
+          activity: used({ people: [7] }),
+        })
+      ),
+      fetchPlatformSpend: null,
+    });
+    const health = (id: string) =>
+      container
+        .querySelector(`main table a[href="/organizations/${id}"]`)
+        ?.closest("tr")
+        ?.querySelectorAll("td")[4]?.textContent;
+
+    expect({
+      health: rows.map(({ id }) => health(id)),
+      people: rowText(container, "fine").includes(
+        "Active people not counted yet"
+      ),
+    }).toStrictEqual({
+      health: [
+        "Connectors not read",
+        "1 connector stopped",
+        "2 connectors wait for a sign-in",
+        "Last deploy failed",
+        "2 releases behind",
+        "Running",
+      ],
+      people: true,
+    });
+  });
+
   it("lists what needs Grasp as rows that open where each is settled, every organization's first before any one's next, and the rest in the Inbox", async () => {
     const failing = row("failing", {
       name: "Failing",
@@ -693,7 +755,8 @@ describe("Home", () => {
           {
             clientId: "near",
             name: "Near Co",
-            thisMonth: 191_000_000,
+            // Its own AI, and $30 of transcription.
+            thisMonth: 221_000_000,
             lastMonth: 42_000_000,
             graspAi: { spent: 191_000_000, limit: 200_000_000 },
           },
@@ -705,7 +768,7 @@ describe("Home", () => {
             graspAi: null,
           },
         ],
-        { thisMonth: 191_000_000, lastMonth: 100_000_000 },
+        { thisMonth: 221_000_000, lastMonth: 100_000_000 },
         // Its release doesn't report what AI cost.
         [{ clientId: "old", name: "Old Co" }]
       ),
@@ -713,12 +776,14 @@ describe("Home", () => {
 
     expect({
       figure: figureOf(container, "Grasp AI this month"),
-      near: rowText(container, "near").includes("$191 of $200"),
+      near: ["$221 on Grasp’s keys", "Its AI $191 of $200"].every((text) =>
+        rowText(container, "near").includes(text)
+      ),
       own: rowText(container, "own").includes("No limit reported"),
       old: rowText(container, "old").includes("Not reported by its release"),
     }).toStrictEqual({
       figure:
-        "Grasp AI this month$191$100 last month · 1 near its limit · 1 not counted",
+        "Grasp AI this month$221$100 last month · 1 near its limit · 1 not counted",
       near: true,
       own: true,
       old: true,

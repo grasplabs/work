@@ -284,6 +284,15 @@ const AiFigure = ({ rows, spend }: { rows: Row[]; spend: Spend }) => {
   }
   const near = rows.filter((row) => nearLimit(spendOf(spend, row))).length;
   const unread = spend.unread.length + spend.unreported.length;
+  if (spend.byOrganization.length === 0 && unread > 0) {
+    return (
+      <Stat
+        change={`${unread} not counted`}
+        label="Grasp AI this month"
+        value="Not read"
+      />
+    );
+  }
   return (
     <Stat
       // Last month in full beside this month so far: never a share of a
@@ -589,14 +598,15 @@ const Ai = ({ row, spend }: { row: Row; spend: Spend }) => {
     );
   }
   const { graspAi } = own;
+  // What Grasp's keys cost for it, as the figure adds it up: its own AI on
+  // Grasp's key and Grasp's features alike.
+  const spent = `${dollarsOf(own.thisMonth)} on Grasp’s keys`;
   if (graspAi === null || graspAi.limit === 0) {
     // On its own key, or a release that doesn't report the limit.
     return (
       <span {...stylex.props(styles.cell)}>
-        <span>No limit reported</span>
-        <span
-          {...stylex.props(styles.quiet)}
-        >{`${dollarsOf(own.thisMonth)} on Grasp’s keys`}</span>
+        <span>{spent}</span>
+        <span {...stylex.props(styles.quiet)}>No limit reported</span>
       </span>
     );
   }
@@ -606,14 +616,15 @@ const Ai = ({ row, spend }: { row: Row; spend: Spend }) => {
   );
   return (
     <span {...stylex.props(styles.meter)}>
+      <span>{spent}</span>
       <Progress
-        aria-label={`${row.name}: ${share}% of its AI limit`}
+        aria-label={`${row.name}: its own AI at ${share}% of its limit`}
         value={share}
         variant={nearLimit(own) ? "warning" : "default"}
       />
       <span
         {...stylex.props(styles.quiet)}
-      >{`${dollarsOf(graspAi.spent)} of ${dollarsOf(graspAi.limit)}`}</span>
+      >{`Its AI ${dollarsOf(graspAi.spent)} of ${dollarsOf(graspAi.limit)}`}</span>
     </span>
   );
 };
@@ -624,9 +635,10 @@ const aiWords = (row: Row, spend: Spend): string => {
   if (own === undefined) {
     return unspentWords(row, spend);
   }
+  const spent = `${dollarsOf(own.thisMonth)} on Grasp’s keys`;
   return own.graspAi === null || own.graspAi.limit === 0
-    ? `${dollarsOf(own.thisMonth)}, no limit reported`
-    : `${dollarsOf(own.graspAi.spent)} of ${dollarsOf(own.graspAi.limit)}`;
+    ? `${spent}, no limit reported`
+    : `${spent}; its AI ${dollarsOf(own.graspAi.spent)} of ${dollarsOf(own.graspAi.limit)}`;
 };
 
 /**
