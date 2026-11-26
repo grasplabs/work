@@ -2,13 +2,11 @@ import {
   connectorIsolateRequests,
   syncMethod,
   syncPlacesMethod,
-} from "@grasp-os/connector-kit/manifest";
-import type { SyncManifest } from "@grasp-os/connector-kit/manifest";
-import {
+  syncFailureSchema,
   syncPlacesResultSchema,
   syncResultSchema,
-} from "@grasp-os/connector-kit/sync";
-import type { SyncFailure } from "@grasp-os/connector-kit/sync";
+} from "@grasp-os/runtime/connector";
+import type { SyncFailure, SyncManifest } from "@grasp-os/runtime/connector";
 import { createAuditEvent } from "@grasp-os/shared/audit";
 import {
   connectErrors,
@@ -38,6 +36,7 @@ import type {
 } from "@grasp-os/shared/sync";
 import { and, asc, eq, gt, not, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
 import { nativeConnector } from "./bundled-connectors.ts";
 import { auditRefusal, connectionEvent } from "./connection-audit.ts";
@@ -46,11 +45,15 @@ import { syncServer } from "./connectors.ts";
 import { auditOutbox, connections, syncPicks } from "./db/schema.ts";
 import { erasureBegan, ownerErased } from "./erased-people.ts";
 import { McpError } from "./mcp.ts";
+import { pausedWait, pauseFor } from "./tokens.ts";
+
+/** A connector's answer that failed, as any of its sync's methods says. */
+const failedSchema = z.object({ failure: syncFailureSchema });
 
 // Native sync's read (GRA-1758): one page of one source's changes, for
 // core, which applies it to the Brain and keeps the cursor. A source is a
 // connection and a place in it, read by one of its connector's syncs
-// (the connector kit's sync.ts). The ways it can fail, which the tests
+// (runtime/connector's sync.ts). The ways it can fail, which the tests
 // start from:
 //
 // - The token leaving connect: the page is read in a fresh isolate of the
@@ -262,13 +265,34 @@ const sendToSync = async (
       sync.routes,
       place
     );
-    return await server.send(method, params);
+    const result = await server.send(method, params);
+    // A rate limit the connector names, with how long its provider asks
+    // to wait (by `isThrottled`, say), pauses the connection for every
+    // caller, as the egress does for one it can see.
+    const failure = failedSchema.safeParse(result).data?.failure;
+    if (
+      failure?.code === "throttled" &&
+      failure.retryAfterSeconds !== undefined
+    ) {
+      // What the pause in force has left, which may be longer.
+      const wait = await pauseFor(
+        env.DB,
+        connection.id,
+        failure.retryAfterSeconds
+      );
+      return { failure: { ...failure, retryAfterSeconds: wait } };
+    }
+    return result;
   } catch (error) {
     // A grant that ran out, or a renewal granted other access, is for its
     // person to reconnect; a renewal the provider didn't answer, or a
     // connector that didn't answer, a failure.
     if (connectErrors.codeOf(error) === "connect.connection_inactive") {
       throw syncErrors.create("sync.inactive");
+    }
+    const paused = pausedWait(error);
+    if (paused !== undefined) {
+      throw syncErrors.create("sync.throttled", paused);
     }
     if (
       connectionErrors.codeOf(error) !== undefined ||

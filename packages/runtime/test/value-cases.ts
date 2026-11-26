@@ -5,8 +5,9 @@
 // that passes in one and fails in the other is a value the browser and the
 // host would disagree about.
 import { schemaFromDescriptor } from "../src/app/descriptor-text.ts";
+import { validateValue } from "../src/common/value-interpreter.ts";
 import { ValueDefinitionError, v } from "../src/common/values.ts";
-import type { ValueSchema } from "../src/common/values.ts";
+import type { JsonValue, ValueSchema } from "../src/common/values.ts";
 
 type AnySchema = ValueSchema<unknown, unknown>;
 
@@ -39,6 +40,15 @@ const stored = (schema: AnySchema): unknown => {
 };
 
 const base = { descriptorVersion: 1, nullable: false, presence: "required" };
+
+/** A number inside arrays, `levels` deep, the number included. */
+const nest = (levels: number): JsonValue => {
+  let value: JsonValue = 1;
+  for (let level = 1; level < levels; level += 1) {
+    value = [value];
+  }
+  return value;
+};
 
 /**
  * Cron expressions `v.schedule()` accepts. Each must also be one the parser
@@ -421,6 +431,192 @@ add(
   "an email address is not trimmed unless asked",
   () => check(v.string().email(), " ada@example.com"),
   { issues: [["value.invalid_email"]] }
+);
+add(
+  "a date and time is RFC 3339's, with its offset, kept as written",
+  () =>
+    [
+      "2026-11-25T14:30:00Z",
+      "2026-11-25t14:30:00.123456z",
+      "2026-11-25T15:30:00+01:00",
+      "2024-02-29T00:00:00-12:00",
+      "1998-12-31T23:59:60Z",
+      "1998-12-31T15:59:60.5-08:00",
+      "2026-11-25T14:30:00",
+      "2026-11-25 14:30:00Z",
+      "2026-11-25T14:30Z",
+      "2026-11-25T24:00:00Z",
+      "2026-11-25T14:60:00Z",
+      "2026-11-25T14:30:61Z",
+      "1998-12-31T23:58:60Z",
+      "2023-02-29T00:00:00Z",
+      "2026-13-01T00:00:00Z",
+      "2026-11-25T14:30:00+24:00",
+      "2026-11-25T14:30:00.Z",
+      "２026-11-25T14:30:00Z",
+      1_764_081_000_000,
+    ].map((value) => check(v.string().datetime(), value)),
+  [
+    { value: "2026-11-25T14:30:00Z" },
+    { value: "2026-11-25t14:30:00.123456z" },
+    { value: "2026-11-25T15:30:00+01:00" },
+    { value: "2024-02-29T00:00:00-12:00" },
+    { value: "1998-12-31T23:59:60Z" },
+    { value: "1998-12-31T15:59:60.5-08:00" },
+    ...Array.from({ length: 12 }, () => ({
+      issues: [["value.invalid_datetime"]],
+    })),
+    { issues: [["value.invalid_type"]] },
+  ]
+);
+add(
+  "a date is a day the calendar has, as YYYY-MM-DD",
+  () =>
+    [
+      "2026-11-25",
+      "2024-02-29",
+      "2000-02-29",
+      "0000-02-29",
+      "1900-02-29",
+      "2026-04-31",
+      "2026-00-10",
+      "2026-11-25T00:00:00Z",
+      "26-11-25",
+      " 2026-11-25",
+    ].map((value) => check(v.string().date(), value)),
+  [
+    { value: "2026-11-25" },
+    { value: "2024-02-29" },
+    { value: "2000-02-29" },
+    { value: "0000-02-29" },
+    ...Array.from({ length: 6 }, () => ({ issues: [["value.invalid_date"]] })),
+  ]
+);
+add(
+  "a URL is an absolute http or https one, kept as written",
+  () =>
+    [
+      "https://example.com",
+      "http://localhost:8080/a?b=c#d",
+      "https://münchen.example/straße",
+      "HTTPS://Example.com",
+      "https://example.com/?q=\u2764\uFE0F",
+      "https://example.com/a b",
+      "https:example.com",
+      "http:/example.com",
+      "https:\\\\evil.com\\@good.com",
+      "https://example.com\\path",
+      "https:///example.com",
+      "https://good.example@evil.example",
+      "https://user:pw@example.com",
+      "https://@example.com",
+      "https://goo\u200Bgle.com",
+      "https://ex\u00ADample.com",
+      "https://goo%E2%80%8Bgle.com",
+      "https://goo%E2gle.com",
+      "https://example.com/\uD800",
+      " https://example.com",
+      "https://example.com\n",
+      "/relative/path",
+      "example.com",
+      ["javascript", "alert(1)"].join(":"),
+      "mailto:ada@example.com",
+      "ftp://example.com",
+      "https://",
+    ].map((value) => check(v.string().url(), value)),
+  [
+    { value: "https://example.com" },
+    { value: "http://localhost:8080/a?b=c#d" },
+    { value: "https://münchen.example/straße" },
+    { value: "HTTPS://Example.com" },
+    { value: "https://example.com/?q=\u2764\uFE0F" },
+    ...Array.from({ length: 22 }, () => ({ issues: [["value.invalid_url"]] })),
+  ]
+);
+add(
+  "a format is checked after trimming, within the bounds",
+  () => [
+    check(v.string().trim().date(), " 2026-11-25 "),
+    check(v.string().max(10).url(), "https://example.com"),
+    check(v.string().url().nullable(), null),
+  ],
+  [{ value: "2026-11-25" }, { issues: [["value.too_long"]] }, { value: null }]
+);
+add(
+  "a string has one format at most",
+  () =>
+    [
+      () => v.string().date().datetime(),
+      () => v.string().url().email(),
+      () => v.string().email().date(),
+      () => v.string().datetime().datetime(),
+      () =>
+        fromData({
+          ...base,
+          kind: "string",
+          trim: false,
+          email: true,
+          url: true,
+        }),
+    ].map(declare),
+  [
+    "definition.invalid_schema",
+    "definition.invalid_schema",
+    "definition.invalid_schema",
+    "declared",
+    "definition.invalid_schema",
+  ]
+);
+add(
+  "a format is in a descriptor only when set, so one written before formats reads the same",
+  () => {
+    const before = {
+      ...base,
+      kind: "string",
+      trim: true,
+      email: false,
+      max: 9,
+    };
+    return [
+      JSON.stringify(stored(fromData(before))) === JSON.stringify(before),
+      JSON.stringify(stored(v.string().trim().max(9))) ===
+        JSON.stringify(before),
+      stored(v.string().datetime()),
+      stored(
+        fromData({
+          ...base,
+          kind: "string",
+          trim: false,
+          email: false,
+          url: false,
+        })
+      ),
+      declare(() =>
+        fromData({
+          ...base,
+          kind: "string",
+          trim: false,
+          email: false,
+          date: "yes",
+        })
+      ),
+    ];
+  },
+  [
+    true,
+    true,
+    { ...base, kind: "string", trim: false, email: false, datetime: true },
+    { ...base, kind: "string", trim: false, email: false },
+    "definition.invalid_descriptor",
+  ]
+);
+add(
+  "a default must fit the format set after it",
+  () => [
+    declare(() => v.string().default("soon").datetime()),
+    check(v.string().default("2026-11-25").date()),
+  ],
+  ["definition.invalid_default", { value: "2026-11-25" }]
 );
 
 // Presence: left out, null, default
@@ -1551,6 +1747,214 @@ add(
     { value: 1000 },
     { value: { id: "f1" } },
     "definition.invalid_default",
+  ]
+);
+
+// Any JSON, and answers from outside
+
+add(
+  "a JSON value is any JSON, copied",
+  () => {
+    const value = { a: [1, "two", null, true, { b: -0.5 }], c: {} };
+    const result = v.json()["~standard"].validate(value);
+    return [
+      result,
+      "value" in result && result.value !== value,
+      ...[null, false, 0, "", []].map((entry) => check(v.json(), entry)),
+    ];
+  },
+  [
+    { value: { a: [1, "two", null, true, { b: -0.5 }], c: {} } },
+    true,
+    { value: null },
+    { value: false },
+    { value: 0 },
+    { value: "" },
+    { value: [] },
+  ]
+);
+add(
+  "a JSON value refuses what JSON can't hold, where it is",
+  () => [
+    check(v.json(), { a: [1, Number.NaN] }),
+    check(v.json(), { a: new Date(0) }),
+    check(v.json(), [undefined]),
+    check(v.json(), { a: () => 1 }),
+    check(v.json(), JSON.parse('{"x":{"__proto__":1}}')),
+    check(v.json(), { ["k".repeat(300)]: 1 }),
+    check(v.json()),
+    check(v.json().optional()),
+  ],
+  [
+    { issues: [["value.not_finite", "a", 1]] },
+    { issues: [["value.invalid_type", "a"]] },
+    { issues: [["value.required", 0]] },
+    { issues: [["value.invalid_type", "a"]] },
+    { issues: [["value.unsafe_key", "x", "__proto__"]] },
+    { issues: [["value.key_too_long"]] },
+    { issues: [["value.required"]] },
+    {},
+  ]
+);
+add(
+  "a JSON value nested past the depth limit is refused, and one that holds itself is not followed",
+  () => {
+    let deep: unknown = 1;
+    for (let level = 0; level < 200; level += 1) {
+      deep = [deep];
+    }
+    const loop: Record<string, unknown> = {};
+    loop.self = loop;
+    return [
+      check(v.json(), deep),
+      check(v.json(), loop),
+      check(v.object({ data: v.json() }), { data: [[["fine"]]] }),
+    ];
+  },
+  [
+    { issues: [["value.too_complex"]] },
+    { issues: [["value.too_complex"]] },
+    { value: { data: [[["fine"]]] } },
+  ]
+);
+add(
+  "a JSON default counts its own depth, so a schema around it never fills in a value too deep to check",
+  () => {
+    const fits = v.object({ payload: v.json().default(nest(31)) });
+    const filled = fits["~standard"].validate({});
+    return [
+      declare(() => v.json().default(nest(32))),
+      declare(() => v.object({ payload: v.json().default(nest(32)) })),
+      "value" in filled &&
+        fits["~standard"].validate(filled.value).issues === undefined,
+    ];
+  },
+  ["declared", "definition.too_large", true]
+);
+add(
+  "an answer read with unknownFields drop loses the fields its schema doesn't name, at any depth",
+  () => {
+    const deal = v.object({
+      id: v.number().integer(),
+      owner: v.object({ name: v.string() }),
+      tags: v.array(v.object({ label: v.string() })),
+    });
+    const answer = {
+      id: 7,
+      added: "by the vendor",
+      owner: { name: "Ada", email: "ada@example.com" },
+      tags: [{ label: "hot", color: "red" }],
+    };
+    return [
+      validateValue(deal.descriptor, answer, { unknownFields: "drop" }),
+      check(deal, answer),
+    ];
+  },
+  [
+    { value: { id: 7, owner: { name: "Ada" }, tags: [{ label: "hot" }] } },
+    {
+      issues: [
+        ["value.unknown_key", "added"],
+        ["value.unknown_key", "owner", "email"],
+        ["value.unknown_key", "tags", 0, "color"],
+      ],
+    },
+  ]
+);
+add(
+  "an answer read with unknownFields drop takes the union member that drops the fewest keys",
+  () => {
+    const drop = { unknownFields: "drop" } as const;
+    const person = v.union(
+      v.object({ id: v.number() }),
+      v.object({ id: v.number(), name: v.string() }),
+      v.object({ id: v.number(), name: v.string(), team: v.string() })
+    );
+    const inList = v.array(person);
+    return [
+      validateValue(
+        person.descriptor,
+        { id: 1, name: "Ada", extra: true },
+        drop
+      ),
+      validateValue(person.descriptor, { id: 2, extra: true }, drop),
+      validateValue(
+        inList.descriptor,
+        [
+          { id: 3, name: "Bo", team: "x" },
+          { id: 4, team: "y" },
+        ],
+        drop
+      ),
+    ];
+  },
+  [
+    { value: { id: 1, name: "Ada" } },
+    { value: { id: 2 } },
+    { value: [{ id: 3, name: "Bo", team: "x" }, { id: 4 }] },
+  ]
+);
+add(
+  "an answer read with unknownFields drop counts each key it drops towards the check's limit",
+  () => {
+    const answer: Record<string, number> = {};
+    for (let index = 0; index < 20_000; index += 1) {
+      answer[`extra${index}`] = index;
+    }
+    // Every member drops all the keys before its missing field refuses it.
+    const members = Array.from({ length: 64 }, (_entry, index) =>
+      v.object({ [`needed${index}`]: v.number() })
+    );
+    const [first, ...rest] = members;
+    if (first === undefined) {
+      return "no members";
+    }
+    return validateValue(v.union(first, ...rest).descriptor, answer, {
+      unknownFields: "drop",
+    }).issues?.map((issue) => issue.code);
+  },
+  ["value.too_complex"]
+);
+add(
+  "any JSON is already nullable, so .nullable() declares the same",
+  () => [
+    JSON.stringify(v.json().nullable().descriptor) ===
+      JSON.stringify(v.json().descriptor),
+    JSON.stringify(v.union(v.json(), v.null()).descriptor) ===
+      JSON.stringify(v.json().descriptor),
+  ],
+  [true, true]
+);
+add(
+  "an answer read with unknownFields drop still refuses a wrong or missing value",
+  () => {
+    const deal = v.object({
+      id: v.number().integer(),
+      update_time: v.string().datetime(),
+    });
+    const drop = { unknownFields: "drop" } as const;
+    return [
+      validateValue(
+        deal.descriptor,
+        { id: "7", update_time: "x", extra: 1 },
+        drop
+      ),
+      validateValue(deal.descriptor, { extra: 1 }, drop),
+      validateValue(deal.descriptor, "not an object", drop),
+    ].map((result) =>
+      result.issues?.map((issue) => [issue.code, ...issue.path])
+    );
+  },
+  [
+    [
+      ["value.invalid_type", "id"],
+      ["value.invalid_datetime", "update_time"],
+    ],
+    [
+      ["value.required", "id"],
+      ["value.required", "update_time"],
+    ],
+    [["value.invalid_type"]],
   ]
 );
 

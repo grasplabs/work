@@ -10,13 +10,19 @@ import type {
 } from "@grasp-os/shared/agents";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
+  addConnectorSchema,
+  blockConnectorToolSchema,
   catalogLogoPath,
   catalogSourceSchema,
   composioToolkitSchema,
   connectErrors,
   connectionErrors,
   connectionOwnersMax,
+  connectionCallbackPath,
   connectionScopeSchema,
+  connectorClientMetadataPath,
+  connectorIdSchema,
+  connectorToolsRequestSchema,
   oauthProviderSchema,
   returnPathMaxLength,
 } from "@grasp-os/shared/connect";
@@ -33,6 +39,7 @@ import type {
   ConnectionPerson,
   ConnectionSummary,
   ConnectionsApi,
+  ConnectorToolView,
   ListedConnection,
   RevocationToDo,
   OAuthProvider,
@@ -162,13 +169,28 @@ type ConnectToolkitWithKeyRequest = Parameters<
   ConnectionsApi["connectToolkitWithKey"]
 >[0];
 
-/** What the frontend sends to start: checked here, as it came over the wire. */
+/**
+ * What the frontend sends to start: checked here, as it came over the
+ * wire. A native suite, or a connector made from a URL by its ID.
+ */
 const startRequestSchema = z.strictObject({
-  provider: oauthProviderSchema,
+  provider: z.union([oauthProviderSchema, connectorIdSchema]),
   scope: connectionScopeSchema,
   returnTo: z.string().default("/"),
 });
 type StartRequest = Parameters<ConnectionsApi["start"]>[0];
+
+/**
+ * What the frontend sends to connect a connector with a key; the key's
+ * own form is connect's to check.
+ */
+const connectWithKeyRequestSchema = z.strictObject({
+  provider: connectorIdSchema,
+  scope: connectionScopeSchema,
+  key: z.string(),
+  returnTo: z.string().default("/"),
+});
+type ConnectWithKeyRequest = Parameters<ConnectionsApi["connectWithKey"]>[0];
 
 /**
  * The person as connect needs them: who, their role, and the accounts they
@@ -304,6 +326,11 @@ const offerSchema = z.discriminatedUnion("source", [
   z.strictObject({
     source: z.literal("composio"),
     id: composioToolkitSchema,
+    offered: z.boolean(),
+  }),
+  z.strictObject({
+    source: z.literal("connector"),
+    id: connectorIdSchema,
     offered: z.boolean(),
   }),
 ]);
@@ -498,15 +525,20 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
       throw connectionErrors.create("connection.invalid");
     }
     const { provider, scope, returnTo } = parsed.data;
+    const suite = oauthProviderSchema.safeParse(provider);
     await requireOffered(this.#env, person, {
-      source: "native",
+      source: suite.success ? "native" : "connector",
       id: provider,
       scope,
     });
     const config = signInConfig(this.#env);
+    // A suite's sign-in is pinned to the organization's tenant there; a
+    // connector's names none.
     const tenant =
-      config === undefined ? undefined : tenantOf(config, provider);
-    if (config === undefined || tenant === undefined) {
+      config === undefined || !suite.success
+        ? undefined
+        : tenantOf(config, suite.data);
+    if (config === undefined || (suite.success && tenant === undefined)) {
       throw connectionErrors.create("connection.provider_unavailable");
     }
     const back = onOrigin(config.origin, returnTo);
@@ -517,8 +549,10 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
       person,
       provider,
       scope,
-      tenant,
+      ...(tenant === undefined ? {} : { tenant }),
       returnTo: `${back.pathname}${back.search}`,
+      // What a sign-in asked by class asks for (a suite's, or a connector's
+      // that declares its rights); connect asks the rest for all they declare.
       classes: await classesOn(this.#env),
       sharedMailbox: await anyMailboxPointed(this.#env),
     });
@@ -729,6 +763,99 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
       person,
       connection: parsed.data,
     });
+  }
+
+  /**
+   * Connects a connector whose server takes a key, with the key the
+   * person typed: core passes it on and keeps nothing of it; connect
+   * checks the rest (who may connect it for whom, the key with the
+   * server), and audits it.
+   */
+  async connectWithKey(
+    request: ConnectWithKeyRequest
+  ): Promise<{ url: string }> {
+    const person = await this.#person();
+    const parsed = connectWithKeyRequestSchema.safeParse(request);
+    const config = signInConfig(this.#env);
+    if (config === undefined) {
+      throw connectionErrors.create("connection.provider_unavailable");
+    }
+    const back = parsed.success
+      ? onOrigin(config.origin, parsed.data.returnTo)
+      : undefined;
+    if (!parsed.success || back === undefined) {
+      throw connectionErrors.create("connection.invalid");
+    }
+    const { provider, scope, key } = parsed.data;
+    await requireOffered(this.#env, person, {
+      source: "connector",
+      id: provider,
+      scope,
+    });
+    const { connectionId } = await this.#env.CONNECT.connectWithKey({
+      person,
+      provider,
+      scope,
+      key,
+    });
+    back.searchParams.set("connection", connectionId);
+    return { url: back.href };
+  }
+
+  /**
+   * Adds a connector by its MCP server's URL, as the signed-in person,
+   * with this deployment's origin from its config, where the server's
+   * sign-in returns: connect checks the rest (the role, staff, the URL
+   * and where it leads, the server's sign-in) and audits it (GRA-1375).
+   */
+  async addConnector(request: unknown): Promise<{ id: string }> {
+    const person = await this.#person();
+    const config = signInConfig(this.#env);
+    if (config === undefined) {
+      throw connectionErrors.create("connection.provider_unavailable");
+    }
+    // Read here to name what is wrong; connect reads it again.
+    const parsed = addConnectorSchema
+      .omit({ person: true, origin: true })
+      .safeParse(request);
+    if (!parsed.success) {
+      throw connectionErrors.create("connection.invalid");
+    }
+    return await this.#env.CONNECT.addConnector({
+      ...parsed.data,
+      person,
+      origin: config.origin,
+    });
+  }
+
+  /**
+   * A connector's tools for an admin, with their classes and the names
+   * blocked, as the signed-in person: connect checks the role.
+   */
+  async connectorTools(connector: unknown): Promise<ConnectorToolView[]> {
+    const person = await this.#person();
+    const parsed = connectorToolsRequestSchema
+      .omit({ person: true })
+      .safeParse({ connector });
+    if (!parsed.success) {
+      throw connectionErrors.create("connection.invalid");
+    }
+    return await this.#env.CONNECT.connectorTools({ ...parsed.data, person });
+  }
+
+  /**
+   * Blocks a connector's tool by its name, or lets it through again, as
+   * the signed-in person: connect checks the role and staff, and audits it.
+   */
+  async blockConnectorTool(request: unknown): Promise<void> {
+    const person = await this.#person();
+    const parsed = blockConnectorToolSchema
+      .omit({ person: true })
+      .safeParse(request);
+    if (!parsed.success) {
+      throw connectionErrors.create("connection.invalid");
+    }
+    await this.#env.CONNECT.blockConnectorTool({ ...parsed.data, person });
   }
 
   async disconnect(connectionId: string): Promise<{ revoked: boolean }> {
@@ -1236,6 +1363,31 @@ const redirect = (to: URL): Response =>
   });
 
 /**
+ * The deployment's client metadata document (MCP 2026-07-28), where an
+ * MCP server's authorization server reads who connect is when connect
+ * signs in there without registering (connect's mcp-discovery.ts): a
+ * public client that returns to this origin's callback alone. Public, as
+ * the specification has it: it names no secret.
+ */
+export const clientMetadataResponse = (
+  request: Request,
+  env: Env
+): Response | undefined => {
+  const config = signInConfig(env);
+  if (request.method !== "GET" || config === undefined) {
+    return undefined;
+  }
+  return Response.json({
+    client_id: new URL(connectorClientMetadataPath, config.origin).href,
+    client_name: "Grasp",
+    redirect_uris: [new URL(connectionCallbackPath, config.origin).href],
+    grant_types: ["authorization_code", "refresh_token"],
+    response_types: ["code"],
+    token_endpoint_auth_method: "none",
+  });
+};
+
+/**
  * The provider's redirect back, on the client's origin. The session cookie
  * comes along (a top-level navigation sends `SameSite=Lax` cookies), and
  * connect finishes the flow only for the person who started it, so a
@@ -1300,6 +1452,9 @@ export const handleConnectionCallback = async (
       code: params.get("code") ?? undefined,
       // Only whether there is one matters; the provider's text isn't kept.
       error: params.get("error")?.slice(0, 64) ?? undefined,
+      // Which authorization server answered (RFC 9207), for connect to
+      // check against the one the sign-in started at.
+      iss: params.get("iss") ?? undefined,
     });
     // The accounts it proves are theirs, for the reader lists the Brain
     // copies (GRA-1761): failed, the flow fails, and connecting again in

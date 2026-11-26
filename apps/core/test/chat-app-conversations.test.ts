@@ -581,6 +581,28 @@ describe("a conversation with the agent in Teams", setUpTime, () => {
     });
   });
 
+  it("shows no tool of the person's own connection to ask for, which only a chat in Grasp can grant", async () => {
+    const provider = await fakeProvider(
+      codeStep(
+        `export default async (self, env) => (await env.connections.search({ queries: ["search mail"] }))[0].matches.map(({ connection }) => connection);`
+      ),
+      says("Only the shared one.")
+    );
+    const { userId, teams } = await memberAnsweredBy(idp, provider);
+    const [own, shared] = await Promise.all([
+      mailConnection([], ["mail.search"], { owner: userId }),
+      mailConnection([], ["mail.search"]),
+    ]);
+
+    await post(messageFrom(teams, { text: "Find the invoice in my mail." }));
+
+    const read = JSON.stringify(provider.requests.at(-1)?.body);
+    expect({
+      own: read.includes(own.id),
+      shared: read.includes(shared.id),
+    }).toStrictEqual({ own: false, shared: true });
+  });
+
   it("is never an App's chat, though it worked on the App last", async () => {
     const { api, userId, teams } = await memberAnsweredBy(
       idp,

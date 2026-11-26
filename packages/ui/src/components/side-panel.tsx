@@ -46,6 +46,7 @@ import {
   focusRingInset,
   focusRingText,
   scrollbarHidden,
+  tapTarget,
   visuallyHidden,
 } from "../lib/styles";
 import {
@@ -334,6 +335,8 @@ const headerStyles = stylex.create({
     alignItems: "center",
     justifyContent: "flex-end",
     gap: space["2"],
+    // Each control's touch target reaches the middle of the gap to the next (tapTarget).
+    "--tap-room-inline": `calc(${space["2"]} / 2)`,
     boxSizing: "border-box",
     height: sizes.sidePanelBar,
     paddingInline: space["2"],
@@ -463,8 +466,10 @@ const headerStyles = stylex.create({
     gap: space["1"],
     maxWidth: `calc(100% - 2 * ${space.sidePanelPad})`,
     marginInline: space.sidePanelPad,
-    // Room for a finger's target round each tab, without a scrollbar.
+    // Room for a finger's target round each tab, without a scrollbar; each reaches the middle of
+    // the gap to the next (tapTarget).
     overflow: "visible",
+    "--tap-room-inline": `calc(${space["1"]} / 2)`,
   },
   tab: {
     [iconVars.size]: sizes.iconSm,
@@ -497,20 +502,6 @@ const headerStyles = stylex.create({
     transitionProperty: "background-color, color",
     transitionDuration: motionVars.hover,
     transitionTimingFunction: duration.ease,
-    // A finger's target: 44px round the 28px tab, drawn unseen.
-    "::after": {
-      content: '""',
-      position: "absolute",
-      // By the tab's own inner height, so its edge's width does not come off the 44.
-      insetBlock: {
-        default: 0,
-        [COARSE]: `calc((100% - ${sizes.tapTarget}) / 2)`,
-      },
-      insetInline: {
-        default: 0,
-        [COARSE]: `calc((${sizes.controlXs} - ${sizes.tapTarget}) / 2)`,
-      },
-    },
   },
   tabLive: {
     color: {
@@ -882,6 +873,7 @@ const Views = ({ views, label, list, alone = false }: ViewsProps) => {
             )
           }
         >
+          <span aria-hidden="true" {...stylex.props(tapTarget)} />
           <Icon icon={view.icon} />
           <span
             data-side-panel-view-words=""

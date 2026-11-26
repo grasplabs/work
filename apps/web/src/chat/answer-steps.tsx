@@ -3,7 +3,6 @@ import { Button } from "@grasp-os/ui/components/button";
 import {
   ChainOfThought,
   ChainOfThoughtContent,
-  ChainOfThoughtHeader,
 } from "@grasp-os/ui/components/chain-of-thought";
 import { Shimmer } from "@grasp-os/ui/components/shimmer";
 import {
@@ -52,7 +51,7 @@ import type { StepStatus } from "./chat-states.ts";
 export interface AnswerStep {
   id: string;
   /** What kind of step it is, for the line that says what the steps came to. */
-  kind: "search" | "read" | "write" | "tool";
+  kind: "search" | "read" | "write" | "remember" | "tool";
   /** What it did, in the past once finished; as it goes until then. */
   label: string;
   /** What it does while it works: the line over the steps says it. */
@@ -394,17 +393,29 @@ export const AnswerSteps = ({
       }}
       open={open}
     >
-      <ChainOfThoughtHeader>
-        {working ? (
-          <>
-            {/* One mark in view: on the line while it is closed, on the working step once open. */}
-            {open ? null : <AgentIndicator />}
-            <Shimmer>{current?.active ?? workingLabel}</Shimmer>
-          </>
-        ) : (
-          line
-        )}
-      </ChainOfThoughtHeader>
+      {/* Trace's own trigger line, not ChainOfThoughtHeader: that one holds
+        only words, and the working mark put among them touched them and
+        sat on their baseline. As the line's TraceIcon it stands where a
+        step's mark stands, its words where a step's words start. Given,
+        not Trace's status mark, which turns to a dot once a working step
+        is drawn in the (closed) panel. */}
+      <TraceCollapsibleTrigger>
+        <TraceLine>
+          {/* One mark in view: on the line while it is closed, on the working step once open. */}
+          {working && !open ? (
+            <TraceIcon>
+              <AgentIndicator />
+            </TraceIcon>
+          ) : null}
+          <TraceTitle>
+            {working ? (
+              <Shimmer>{current?.active ?? workingLabel}</Shimmer>
+            ) : (
+              line
+            )}
+          </TraceTitle>
+        </TraceLine>
+      </TraceCollapsibleTrigger>
       <ChainOfThoughtContent>
         {opened || open
           ? steps.map((step) => <Step key={step.id} step={step} />)

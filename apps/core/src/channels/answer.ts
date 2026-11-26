@@ -15,7 +15,7 @@ import {
 } from "./connect-own.ts";
 import type { Conversation } from "./connect-own.ts";
 import type { ChannelHandoff, ChannelMessage } from "./door.ts";
-import { checkOf, inertView, turnHeldWrites } from "./held.ts";
+import { inertView, turnHeldWrites } from "./held.ts";
 import { inTeams } from "./inert.ts";
 import { postRemembered } from "./remembered.ts";
 import { sortRequest } from "./request-sorting.ts";
@@ -527,7 +527,11 @@ const answerOne = async (
       requestId,
       writes.map(({ id }) => `write:${id}`)
     );
-    const check = checkOf(answer.provenance.sources);
+    // What the turn's code read that the card warns of: mail, which other
+    // people wrote. Other reads wait for the rules that know a company's
+    // records (GRA-719).
+    const check =
+      answer.check?.read === "mail" ? ({ read: "mail" } as const) : undefined;
     const heldCards = heldWritesCards({
       locale,
       platform,

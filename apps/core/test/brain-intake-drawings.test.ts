@@ -113,6 +113,16 @@ const drawingReply = (value: unknown): ProviderReply => ({
 });
 
 /** A team whose tickets are drawn as `reply` says, given to the brain. */
+/** A piece of work as the map's model names it, with who does it. */
+const mappedWork = (name: string, local: string, doers: string[]) => ({
+  name,
+  local,
+  one: "one",
+  many: "many",
+  doers,
+  share: 0.3,
+});
+
 const givenWith = async (
   reply: (ids: Ids) => ProviderReply,
   part?: PartJudge
@@ -637,6 +647,130 @@ describe("what a drawing gives the brain", { timeout: 120_000 }, () => {
       volumes: [],
       takes: [3, 45],
       wrong: 2,
+    });
+  });
+
+  it("tells the next interview about the work what the brain shows of it, once two others told how it goes: never to the lead, and never a name", async () => {
+    const ids = await givenWith(fiveToldReply);
+    const store = onboardingStore(env);
+    const knownTo = async (person: string) => {
+      const context = await store.contextOf(person);
+      return (context?.known ?? "")
+        .split("\n\n")
+        .find((part) => part.startsWith("What the team already told"));
+    };
+    await expect(
+      Promise.all([knownTo(ids.mia), knownTo(ids.lea)])
+    ).resolves.toStrictEqual([
+      [
+        "What the team already told about nieuwe tickets afhandelen (how it goes, no names):",
+        "- A customer email arrives as a ticket in Zendesk.",
+        "- Open the ticket.",
+        // Max alone told it: the name in it taken out by the brain.
+        "- Ask someone when the customer number is missing.",
+        "- Send the answer.",
+        "- They decide by: The priority of the ticket.",
+      ].join("\n"),
+      undefined,
+    ]);
+  });
+
+  it("tells the next interview nothing while one colleague alone told how the work goes, whoever the drawing's model names as its tellers", async () => {
+    const ids = await sevenTeam();
+    await mapped(ids);
+    const store = onboardingStore(env);
+    const toldTo = async (person: string) => {
+      const context = await store.contextOf(person);
+      return context?.known.includes("What the team already told") ?? false;
+    };
+    await agree(ids.max, [fact("m1", "step", "Opens the ticket in Zendesk.")]);
+    // Mia left only a wish: nothing of how the tickets go.
+    await agree(ids.mia, [fact("i1", "wish", "Would like fewer meetings.")]);
+    // The model names Max, Mia and Mo for the steps all the same, and the
+    // fake checker backs every part.
+    await answering([ticketsReply(ids)], async () => await store.drawNext());
+    await intake(ids, []);
+    const standing = await store.standingDrawings();
+    const one = await toldTo(ids.noor);
+    await agree(ids.mo, [fact("o1", "step", "Opens the ticket.")]);
+    await answering([ticketsReply(ids)], async () => await store.drawNext());
+    await intake(ids, []);
+    expect({
+      stands: standing.length > 0,
+      one,
+      two: await toldTo(ids.noor),
+      // For Max only Mo told it besides him.
+      own: await toldTo(ids.max),
+    }).toStrictEqual({ stands: true, one: false, two: true, own: false });
+  });
+
+  it("counts as a teller of a piece of work only someone asked about it: two who do it too and told other work leave one colleague's account untold", async () => {
+    const ids = await sevenTeam();
+    await mapped(ids, {
+      map: {
+        text: JSON.stringify({
+          does: "Answers customers' questions",
+          works: [
+            mappedWork("handling new tickets", "tickets", [
+              ids.max,
+              ids.mia,
+              ids.mo,
+            ]),
+            mappedWork("paying refunds", "refunds", [ids.mia]),
+            mappedWork("calling customers back", "callbacks", [ids.mo]),
+          ],
+        }),
+        inputTokens: 2000,
+        outputTokens: 300,
+      },
+    });
+    const store = onboardingStore(env);
+    const contextOf = async (person: string) => {
+      const context = await store.contextOf(person);
+      return {
+        work: context?.work ?? "",
+        told: context?.known.includes("What the team already told") ?? false,
+      };
+    };
+    const [max, mia, mo] = await Promise.all(
+      [ids.max, ids.mia, ids.mo].map(contextOf)
+    );
+    const asked = { max: max?.work, mia: mia?.work, mo: mo?.work };
+    // Max tells the tickets; Mia and Mo, who do them too, tell the work
+    // they were asked about instead.
+    await agree(ids.max, [fact("m1", "step", "Opens the ticket in Zendesk.")]);
+    await agree(ids.mia, [fact("i1", "step", "Checks the refund amount.")]);
+    await agree(ids.mo, [fact("o1", "step", "Calls the customer back.")]);
+    await answering(
+      [
+        ticketsReply(ids),
+        ticketsReply(ids),
+        ticketsReply(ids),
+        ticketsReply(ids),
+      ],
+      async () => [
+        await store.drawNext(),
+        await store.drawNext(),
+        await store.drawNext(),
+        await store.drawNext(),
+      ]
+    );
+    await intake(ids, []);
+    const others = await Promise.all(
+      [ids.noor, ids.pim, ids.rik, ids.sam].map(contextOf)
+    );
+    const standing = await store.standingDrawings();
+    expect({
+      asked,
+      stands: standing.length > 0,
+      // Whoever else is asked about the tickets hears nothing of them.
+      aboutTickets: others.some((each) => each.work === "tickets"),
+      told: others.filter((each) => each.work === "tickets" && each.told),
+    }).toStrictEqual({
+      asked: { max: "tickets", mia: "refunds", mo: "callbacks" },
+      stands: true,
+      aboutTickets: true,
+      told: [],
     });
   });
 

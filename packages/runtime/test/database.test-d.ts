@@ -3,6 +3,8 @@
 // must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
+import { defineSchema } from "../src/app/define-schema.ts";
+import { defineTable } from "../src/app/define-table.ts";
 import type {
   DatabaseReader,
   Doc,
@@ -10,7 +12,7 @@ import type {
   Withheld,
 } from "../src/app/server.ts";
 import type { Id, Infer } from "../src/common/value-types.ts";
-import { defineSchema, defineTable, v } from "../src/common/values.ts";
+import { v } from "../src/common/values.ts";
 import type { paginationOptionsValidator } from "../src/common/values.ts";
 
 const schema = defineSchema({

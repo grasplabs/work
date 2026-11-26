@@ -415,6 +415,24 @@ describe("someone's own link", () => {
     }).toStrictEqual({ newSession: true, version: 1, said: sentinel });
   });
 
+  it("gives back their place in the read-back only when it was kept under the order its parts are read in now: otherwise it starts over", async () => {
+    const { secrets, me } = await running();
+    await opened(secrets.oli, me);
+    await takePart(secrets.oli, me);
+    const reading = { ...progress(), wants: "readback", confirmed: 1 };
+    // Kept by a page from before the order changed: it names no order.
+    await save(secrets.oli, me, 0, reading);
+    const before = await opened(secrets.oli, me);
+    // Kept again by the page as it holds it now.
+    await save(secrets.oli, me, 1, { ...before.progress, confirmed: 1 });
+    const now = await opened(secrets.oli, me);
+    expect({
+      before: before.progress?.confirmed,
+      now: now.progress?.confirmed,
+      said: now.progress?.lines[1]?.text,
+    }).toStrictEqual({ before: 0, now: 1, said: sentinel });
+  });
+
   it("keeps the clock that leaves time away out of the minutes, and gives it back (GRA-1468)", async () => {
     const { secrets, me } = await running();
     await opened(secrets.oli, me);

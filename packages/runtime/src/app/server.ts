@@ -1,5 +1,3 @@
-import { tablesOf } from "../common/define-schema.ts";
-import type { SchemaDefinition } from "../common/schema-types.ts";
 import type { AnySchema } from "../common/value-schema.ts";
 import type { Infer, ObjectSchema, ValueShape } from "../common/value-types.ts";
 import { v } from "../common/values.ts";
@@ -11,6 +9,8 @@ import type {
   QueryDefinition,
   StreamActionDefinition,
 } from "./define-function.ts";
+import { tablesOf } from "./define-schema.ts";
+import type { SchemaDefinition } from "./schema-types.ts";
 import type {
   ActionCtx,
   MutationCtx,

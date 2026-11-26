@@ -47,6 +47,7 @@ import { formatList } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { FactRow, RowAlert, SettingsRows } from "./app/rows.tsx";
 import { BrainAudience, useBrainAudiences } from "./brain-audience.tsx";
+import { ChatReads } from "./chat-reads.tsx";
 import { canReconnect, ConnectDialog } from "./connect-dialog.tsx";
 import type { Integration } from "./integrations.ts";
 import { SectionCard } from "./section-card.tsx";
@@ -608,6 +609,8 @@ export const ConnectionsAccess = ({
       !canReconnect(connection, integration.offered, identity);
     const consented = connection.source === "composio";
     const chooses = choosesBrainAudience(connection, identity);
+    // A connector's shared connection: an admin chooses for whom chats read in it.
+    const points = chooses && connection.source === "connector";
     const holding =
       holders === undefined ? [] : holdingOf(holders, connection.id);
     if (!stuck && !consented && !chooses && holding.length === 0) {
@@ -624,8 +627,10 @@ export const ConnectionsAccess = ({
             {stuck ? (
               <RowAlert variant="warning">
                 {ranOutText(
-                  connection.source === "native" &&
-                    oauthProviderSchema.safeParse(connection.provider).success,
+                  connection.source === "connector" ||
+                    (connection.source === "native" &&
+                      oauthProviderSchema.safeParse(connection.provider)
+                        .success),
                   integration.offered,
                   identity.staff
                 )}
@@ -642,6 +647,7 @@ export const ConnectionsAccess = ({
             onChanged={onChanged}
           />
         ) : null}
+        {points ? <ChatReads connection={connection} label={label} /> : null}
         {holders === undefined || holding.length === 0 ? null : (
           <Holders
             appNames={holders.appNames}

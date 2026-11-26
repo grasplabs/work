@@ -1,6 +1,8 @@
 import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
+import { connectorCatalogSource } from "@grasp-os/runtime/host";
+
 import { writeAgentDocs } from "../build-agent-docs.ts";
 import {
   blueprintsDir,
@@ -8,12 +10,22 @@ import {
   testBlueprintsModule,
   writeBlueprints,
 } from "../build-blueprints.ts";
+import { catalogOf } from "../build-connector-catalog.ts";
 import buildExtractor from "../build-extractor.ts";
-import { bundleConnect, connectBundle } from "./build-connect.ts";
+import {
+  bundleConnect,
+  connectBundle,
+  testConnectorEntries,
+} from "./build-connect.ts";
 import { testVersionModule } from "./compiler-version.ts";
 import { prebuiltKey, restorePrebuilt, savePrebuilt } from "./prebuilt.ts";
 import { runNode } from "./run-node.ts";
-import { removeEndedRuns, removeTestRun, testAssets } from "./test-run.ts";
+import {
+  removeEndedRuns,
+  removeTestRun,
+  testAssets,
+  testRun,
+} from "./test-run.ts";
 
 /**
  * Builds the App compiler as core's build does, in a process of its
@@ -22,11 +34,23 @@ import { removeEndedRuns, removeTestRun, testAssets } from "./test-run.ts";
  * test runner transformed, and some of that ends up in the kit.
  */
 const buildAppCompiler = async (): Promise<void> => {
+  // Core's tests call connect's sample API-key app through an App
+  // (resource-connectors-sdk.test.ts), and it isn't a release connector:
+  // the test kit's catalog, which App code is type-checked against, lists
+  // the contracts of every connector the tests bundle, the release's and
+  // the fixtures', made as the release's is (build-connector-catalog.ts).
+  const catalog = path.join(testRun, "connector-catalog.ts");
+  mkdirSync(testRun, { recursive: true });
+  writeFileSync(
+    catalog,
+    connectorCatalogSource(await catalogOf(testConnectorEntries()))
+  );
   await runNode(
     [
       path.join(import.meta.dirname, "../../../packages/compiler/build.ts"),
       testAssets,
       testVersionModule,
+      catalog,
     ],
     { output: "inherit" }
   );

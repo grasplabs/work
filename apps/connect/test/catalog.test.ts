@@ -146,29 +146,37 @@ describe("the catalog", () => {
     });
   });
 
-  it("describes each entry in one sentence and places it in one of Grasp's groups", async () => {
+  it("describes each Composio toolkit in one sentence, leaves a native entry's words to the web with the products it reaches, and places each in one of Grasp's groups", async () => {
     const { entries } = await exports.default.catalog();
     expect(
-      entries.map(({ id, description, group }) => [id, description, group])
+      entries.map(({ id, description, products, group }) => [
+        id,
+        description,
+        products,
+        group,
+      ])
     ).toStrictEqual([
       [
         "microsoft",
-        "Outlook mail and calendars, and files in OneDrive and SharePoint.",
+        null,
+        ["Outlook", "OneDrive", "SharePoint"],
         "Email and calendar",
       ],
       [
         "google",
-        "Gmail, Google Calendar, and files in Google Drive.",
+        null,
+        ["Gmail", "Google Calendar", "Google Drive"],
         "Email and calendar",
       ],
       [
         "hubspot",
         "HubSpot is a CRM platform for marketing, sales and service.",
+        undefined,
         "CRM",
       ],
-      ["linear", null, "Projects and tasks"],
-      ["acme_erp", "Acme ERP toolkit", "Other"],
-      ["notion", null, "Other"],
+      ["linear", null, undefined, "Projects and tasks"],
+      ["acme_erp", "Acme ERP toolkit", undefined, "Other"],
+      ["notion", null, undefined, "Other"],
     ]);
   });
 
@@ -237,7 +245,7 @@ describe("the catalog", () => {
         .filter(({ source }) => source === "native")
         .map(async ({ source, id, toolCount }) => {
           const tools = await exports.default.catalogTools({ source, id });
-          return toolCount > 0 && tools.length === toolCount;
+          return (toolCount ?? 0) > 0 && tools.length === toolCount;
         })
     );
     expect(counts).toStrictEqual([true, true]);
@@ -402,7 +410,10 @@ describe("a catalog entry's tools", () => {
       id: "microsoft",
     });
     expect(tools.length).toBeGreaterThan(0);
-    expect(tools.every(({ description }) => description === null)).toBeTruthy();
+    // Each described, as its connector's tool says.
+    expect(
+      tools.every(({ description }) => (description ?? "").length > 0)
+    ).toBeTruthy();
     // Its input properties, as its manifest declares them.
     expect(tools.some(({ inputs }) => inputs.length > 0)).toBeTruthy();
     // Read-only as its manifest says: its reads, and not its writes.

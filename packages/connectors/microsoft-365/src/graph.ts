@@ -1,6 +1,9 @@
-import { invalidCode, ToolError } from "@grasp-os/connector-kit/connector";
-import { segmentValuePattern } from "@grasp-os/connector-kit/manifest";
-import { providerFetch } from "@grasp-os/connector-kit/provider";
+import {
+  invalidCode,
+  providerFetch,
+  segmentValuePattern,
+  ToolError,
+} from "@grasp-os/runtime/connector";
 import { z } from "zod";
 
 // Microsoft Graph, as this connector's tools reach it: plain `fetch` to

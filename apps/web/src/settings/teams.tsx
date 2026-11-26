@@ -39,6 +39,7 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemGroup,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import { Text } from "@grasp-os/ui/components/text";
@@ -61,7 +62,6 @@ import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
-import { SeparatedItems } from "../workflows/separated-items.tsx";
 import { DirectoryPlacementSections } from "./directory-placement.tsx";
 import { LoadingLines, RowNote, SettingsGroup } from "./section.tsx";
 import { createTeam, deleteTeam } from "./team-changes.ts";
@@ -408,22 +408,19 @@ const TeamsList = ({
         {teams.length === 0 ? (
           <Text color="muted">{t`No teams yet.`}</Text>
         ) : (
-          <SeparatedItems
-            aria-label={t`Teams`}
-            rows={teams.map((team) => ({
-              key: team.id,
-              row: (
-                <TeamRow
-                  members={members}
-                  onChanged={onChanged}
-                  onOpen={() => {
-                    setOpened(team.id);
-                  }}
-                  team={team}
-                />
-              ),
-            }))}
-          />
+          <ItemGroup separated aria-label={t`Teams`}>
+            {teams.map((team) => (
+              <TeamRow
+                key={team.id}
+                members={members}
+                onChanged={onChanged}
+                onOpen={() => {
+                  setOpened(team.id);
+                }}
+                team={team}
+              />
+            ))}
+          </ItemGroup>
         )}
         {/* A new dialog for each team opened, so it starts from that team's name and people. */}
         <TeamDialog
@@ -479,13 +476,7 @@ export const TeamsPanel = () => {
     <TeamsList data={loaded.data} onChanged={reload} />
   ) : (
     <SettingsGroup title={t`Teams`}>
-      <NotLoadedState
-        again={() => {
-          void reload();
-        }}
-        heading="h3"
-        page={loaded}
-      />
+      <NotLoadedState heading="h3" page={loaded} reread={reload} />
     </SettingsGroup>
   );
 };

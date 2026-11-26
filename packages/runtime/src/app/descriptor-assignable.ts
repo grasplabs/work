@@ -1,3 +1,4 @@
+import { allowsNull } from "../common/schema-fields.ts";
 import type { ValueDescriptor } from "../common/value-descriptor.ts";
 import { validateValue } from "../common/value-interpreter.ts";
 
@@ -98,6 +99,9 @@ const scalarAssignable = (
       to.kind === "string" &&
       within(from, to) &&
       (from.email || !to.email) &&
+      (from.datetime === true || to.datetime !== true) &&
+      (from.date === true || to.date !== true) &&
+      (from.url === true || to.url !== true) &&
       (from.trim || !to.trim)
     );
   }
@@ -118,7 +122,12 @@ const scalarAssignable = (
  * constraints are compared; anything not proved is false.
  */
 export const assignable: Check = (from, to) => {
-  if (from.nullable && !to.nullable) {
+  // Any JSON takes every value a descriptor normalizes to, null included:
+  // their keys and depth are held to the same rules.
+  if (to.kind === "json") {
+    return true;
+  }
+  if (from.nullable && !allowsNull(to)) {
     return false;
   }
   if (from.kind === "union") {

@@ -55,6 +55,7 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -98,7 +99,6 @@ import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import { SeparatedItems } from "../workflows/separated-items.tsx";
 import { RefusedBadge, SourceActivity } from "./event-source-activity.tsx";
 import { SettingsGroup, SettingsStack } from "./section.tsx";
 
@@ -1028,23 +1028,20 @@ export const EventSourcesSettings = ({
         </Empty>
       ) : null}
       {sources.length > 0 ? (
-        <SeparatedItems
-          aria-label={t`Sources`}
-          rows={sources.map((source) => ({
-            key: source.id,
-            row: (
-              <SourceRow
-                onChanged={changed}
-                onOpen={() => {
-                  setOpened(source.id);
-                }}
-                onSecret={setSecret}
-                source={source}
-                starts={startsOf(source.id)?.length}
-              />
-            ),
-          }))}
-        />
+        <ItemGroup separated aria-label={t`Sources`}>
+          {sources.map((source) => (
+            <SourceRow
+              key={source.id}
+              onChanged={changed}
+              onOpen={() => {
+                setOpened(source.id);
+              }}
+              onSecret={setSecret}
+              source={source}
+              starts={startsOf(source.id)?.length}
+            />
+          ))}
+        </ItemGroup>
       ) : null}
     </SettingsGroup>
   );

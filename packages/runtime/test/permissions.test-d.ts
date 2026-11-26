@@ -12,6 +12,8 @@
 // below must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
+import { defineSchema } from "../src/app/define-schema.ts";
+import { defineTable } from "../src/app/define-table.ts";
 import { defineApp, permission } from "../src/app/index.ts";
 import type {
   BrainCard,
@@ -24,7 +26,7 @@ import type {
 import { serverModule } from "../src/app/server.ts";
 import type { ActionCtx } from "../src/app/server.ts";
 import type { JsonValue } from "../src/common/value-descriptor.ts";
-import { defineSchema, defineTable, v } from "../src/common/values.ts";
+import { v } from "../src/common/values.ts";
 
 const mail = permission.connection("mail", {
   contract: "microsoft-365.mail@1",

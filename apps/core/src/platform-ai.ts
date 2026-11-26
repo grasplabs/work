@@ -46,7 +46,11 @@ const onboardingVoices = {
  * interviewer says while someone waits for it: Mistral Small, the model
  * Mistral's own voice agents answer with, for how soon its first words
  * come. Its `notes` model writes down what was said, which nobody waits
- * for and the interview is for: Mistral Medium.
+ * for and the interview is for: Mistral Medium. An interview can also be
+ * held as one live voice session at Mistral (`conversation`, its voice
+ * agents): Mistral Small answers, Voxtral's realtime transcription
+ * listens and Voxtral TTS 3 speaks, in Stephen's voice, the models
+ * Mistral names for a voice agent.
  */
 export const platformAi = {
   transcription: { provider: "openai", model: "gpt-4o-transcribe" },
@@ -64,6 +68,13 @@ export const platformAi = {
     provider: "mistral",
     line: "mistral/mistral-small-latest",
     notes: "mistral/mistral-medium-latest",
+  },
+  conversation: {
+    provider: "mistral",
+    model: "mistral-small-latest",
+    listening: "voxtral-mini-transcribe-realtime-3",
+    speaking: "voxtral-mini-tts-3",
+    voice: voices.stephen,
   },
 } as const;
 

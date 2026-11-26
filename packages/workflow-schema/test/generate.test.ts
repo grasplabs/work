@@ -207,6 +207,26 @@ describe("generating a workflow", () => {
     expect(source).not.toMatch(/[{,] __proto__: /u);
   });
 
+  it("declares a string's format and any JSON as `v` does", () => {
+    const { source } = generated({
+      ...everyStep(),
+      args: {
+        kind: "object",
+        fields: {
+          ...everyStep().args.fields,
+          since: { kind: "string", datetime: true },
+          day: { kind: "string", date: true, optional: true },
+          link: { kind: "string", url: true, nullable: true },
+          custom: { kind: "json" },
+        },
+      },
+    });
+    expect(source).toContain("since: v.string().datetime()");
+    expect(source).toContain("day: v.string().date().optional()");
+    expect(source).toContain("link: v.string().url().nullable()");
+    expect(source).toContain("custom: v.json()");
+  });
+
   it("binds each step's result to a `const` of its ID, and nothing else of the document", () => {
     const { source, tasks } = generated(withLoops());
     const resulting = new Set(

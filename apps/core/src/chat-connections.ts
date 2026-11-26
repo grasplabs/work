@@ -2,6 +2,7 @@ import { agentErrors } from "@grasp-os/shared/agent";
 import { actorOf, delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type { ChatConnectionRequest } from "@grasp-os/shared/chat";
+import { connectionOwnersMax } from "@grasp-os/shared/connect";
 import type {
   ConnectionPerson,
   ConnectionSummary,
@@ -146,8 +147,12 @@ const decisionActions = {
 
 /**
  * The actions of each connection in `offered`, by its ID: a native
- * provider's manifest's (one lookup per provider), a toolkit's those the
- * admin allowed as they connected it.
+ * provider's manifest's (one lookup per provider), a connector's those of
+ * its server's list as connect keeps it that the rules class, answered at
+ * once and read again for the next ask once stale
+ * (`offeredConnectorTools`), so a tool its server just added is offered
+ * from the ask after, and a toolkit's those the admin allowed as they
+ * connected it.
  */
 const actionsOf = async (
   env: Env,
@@ -164,7 +169,6 @@ const actionsOf = async (
     await Promise.all(
       natives.map(async (provider) => {
         const tools = await env.CONNECT.catalogTools({
-          composio: false,
           source: "native",
           id: provider,
         });
@@ -172,14 +176,27 @@ const actionsOf = async (
       })
     )
   );
+  const connectors = offered.flatMap(({ id, source }) =>
+    source === "connector" ? [id] : []
+  );
+  const pages: string[][] = [];
+  for (let start = 0; start < connectors.length; start += connectionOwnersMax) {
+    pages.push(connectors.slice(start, start + connectionOwnersMax));
+  }
+  const offers = await Promise.all(
+    pages.map(async (page) => await env.CONNECT.offeredConnectorTools(page))
+  );
+  const listed = new Map(offers.flatMap((page) => Object.entries(page)));
   return new Map(
-    // A Composio connection's tools Grasp classed.
-    offered.map(({ id, source, provider, offeredTools }) => [
-      id,
-      source === "native"
-        ? (manifests.get(provider) ?? [])
-        : (offeredTools ?? []),
-    ])
+    offered.map(({ id, source, provider, offeredTools }) => {
+      if (source === "native") {
+        return [id, manifests.get(provider) ?? []];
+      }
+      if (source === "connector") {
+        return [id, listed.get(id) ?? []];
+      }
+      return [id, offeredTools ?? []];
+    })
   );
 };
 
@@ -238,6 +255,17 @@ const waitingChanged = async (env: Env, scope: AgentScope): Promise<void> => {
     });
   }
 };
+
+/**
+ * Whether a connection asked for in this chat could be granted: a shared
+ * one by an admin, anywhere; the person's own only by them, on a card in
+ * the chat, and a chat app's conversation is no chat in Grasp (GRA-1919):
+ * asked there, nobody could ever decide it.
+ */
+export const grantableIn = (
+  scope: Pick<AgentScope, "via">,
+  personal: boolean
+): boolean => !personal || scope.via === undefined || scope.via === "web";
 
 /**
  * The connections the chat's agent may ask for: its person's own personal
@@ -396,8 +424,13 @@ export const askInChat = async (
       ],
     });
   }
-  const actionsOfIt = await actionsOf(env, [connection]);
-  const known = actionsOfIt.get(connection.id) ?? [];
+  // A connector's list as its server answers now, or why it can't.
+  const known =
+    connection.source === "connector"
+      ? Object.keys(await env.CONNECT.connectorToolClasses(connection.id))
+      : await actionsOf(env, [connection]).then(
+          (all) => all.get(connection.id) ?? []
+        );
   const unknown = actions.filter((action) => !known.includes(action));
   if (unknown.length > 0) {
     throw permissionErrors.create("permission.invalid", {
@@ -405,10 +438,7 @@ export const askInChat = async (
     });
   }
   const personal = connection.ownerUserId !== null;
-  // Only its person grants their own connection, on a card in the chat, and
-  // a chat app's conversation is no chat in Grasp (GRA-1919): asked there,
-  // nobody could ever decide it. A shared one waits for an admin anywhere.
-  if (personal && scope.via !== undefined && scope.via !== "web") {
+  if (!grantableIn(scope, personal)) {
     throw permissionErrors.create("permission.own_in_chat_app");
   }
   // Admins read why a shared connection is asked for, and nothing holds a

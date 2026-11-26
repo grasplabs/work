@@ -14,6 +14,7 @@ import {
   Item,
   ItemContent,
   ItemDescription,
+  ItemGroup,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import {
@@ -40,7 +41,6 @@ import type {
   TriggersByWorkflow,
   WorkflowState,
 } from "./overview.ts";
-import { SeparatedItems } from "./separated-items.tsx";
 import { triggerBlockText } from "./trigger-block.ts";
 
 // The Workflows page (direction C, Ruben's pick of 23 November): one
@@ -476,19 +476,16 @@ export const WorkflowRows = ({
         </Table>
       </div>
       <div {...stylex.props(styles.cards)}>
-        <SeparatedItems
-          aria-label={label}
-          rows={rows.map((row) => ({
-            key: row.id,
-            row: (
-              <WorkflowCard
-                admin={admin}
-                row={row}
-                triggers={triggers.get(row.id)}
-              />
-            ),
-          }))}
-        />
+        <ItemGroup separated aria-label={label}>
+          {rows.map((row) => (
+            <WorkflowCard
+              key={row.id}
+              admin={admin}
+              row={row}
+              triggers={triggers.get(row.id)}
+            />
+          ))}
+        </ItemGroup>
       </div>
     </>
   );

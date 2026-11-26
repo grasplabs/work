@@ -1,6 +1,5 @@
 import type { Json } from "@grasp-os/shared/json";
 
-import type { SchemaDefinition } from "../common/schema-types.ts";
 import type { DatabaseWriter } from "./database-writer.ts";
 import type {
   FunctionArgs,
@@ -9,6 +8,7 @@ import type {
   FunctionReturn,
   SingleAnswer,
 } from "./function-references.ts";
+import type { SchemaDefinition } from "./schema-types.ts";
 import type { AnyTables } from "./server-function.ts";
 import type {
   AnyWorkflowReference,

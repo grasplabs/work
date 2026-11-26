@@ -460,11 +460,12 @@ const projectedUnion = (
  * stored are left out, however deep (spec 32.7). A value that holds an
  * object or a list where its type holds neither, or that no member of a
  * union can be shown as, fails (`data.incompatible_record`) rather than
- * show what the pinned schema doesn't declare.
+ * show what the pinned schema doesn't declare. Any JSON (`json`) declares
+ * all it holds, so it is shown whole.
  */
 const projected = (value: unknown, descriptor: ValueDescriptor): unknown => {
-  if (value === null) {
-    return null;
+  if (value === null || descriptor.kind === "json") {
+    return value;
   }
   const kept = semanticKeys[descriptor.kind];
   if (descriptor.kind === "object" || kept !== undefined) {

@@ -21,7 +21,7 @@ import type { ReactNode } from "react";
 import { useScrollEdges } from "../hooks/use-scroll-edges";
 import { useI18n } from "../lib/i18n";
 import { edgeFade, scrollbarHidden } from "../lib/styles";
-import { size, space } from "../lib/tokens.stylex";
+import { media, size, space } from "../lib/tokens.stylex";
 import type { LayoutStyle } from "../lib/utils";
 import { Button } from "./button";
 import type { ButtonVariant } from "./button";
@@ -71,11 +71,17 @@ export interface SuggestionProps {
 
 // The room the keyboard's ring takes round a button: kept inside the scroller so it is never cut.
 const RING_ROOM = `calc(${size.ringWidth} + ${size.ringOffset})`;
+// Above and below, on a touch screen, the room a finger's 44px target takes round the smallest
+// button too, so the scroller never cuts it.
+const BLOCK_ROOM = {
+  default: RING_ROOM,
+  [media.pointerCoarse]: `max(${RING_ROOM}, calc((${size.tapTarget} - ${size.controlXs}) / 2))`,
+};
 
 const styles = stylex.create({
   // The scroller, with the suggestions in one line: sideways only, no bar, and the sideways wheel
-  // stays in it. It stands out by the
-  // ring's room on every side, so the buttons inside keep the column's edges.
+  // stays in it. It stands out by the ring's room on every side (and a finger's target's above and
+  // below), so the buttons inside keep the column's edges.
   scroller: {
     display: "flex",
     flexWrap: "nowrap",
@@ -84,8 +90,13 @@ const styles = stylex.create({
     boxSizing: "border-box",
     minWidth: 0,
     maxWidth: `calc(100% + 2 * ${RING_ROOM})`,
-    margin: `calc(-1 * ${RING_ROOM})`,
-    padding: RING_ROOM,
+    marginInline: `calc(-1 * ${RING_ROOM})`,
+    marginBlock: {
+      default: `calc(-1 * ${RING_ROOM})`,
+      [media.pointerCoarse]: `calc(-1 * ${BLOCK_ROOM[media.pointerCoarse]})`,
+    },
+    paddingInline: RING_ROOM,
+    paddingBlock: BLOCK_ROOM,
     overflowX: "auto",
     overflowY: "hidden",
     overscrollBehaviorX: "contain",

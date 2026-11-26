@@ -4,7 +4,8 @@ import type { JsonValue, ValueDescriptor } from "./value-descriptor.ts";
 // Schema: a model told the shape its answer must take, say. It describes;
 // it never decides. Every value is still checked by the descriptor itself
 // (`schemaFromDescriptor`), which holds rules JSON Schema can't say here
-// (trimming, canonical form), so this may be looser, never stricter.
+// (trimming, canonical form), so this may be looser, and is stricter only
+// where a format is (`date-time` and `iri`, see `scalarSchema`).
 
 /** A JSON Schema, as plain data. */
 export type JsonSchema = Record<string, JsonValue>;
@@ -63,6 +64,16 @@ const scalarSchema = (descriptor: ValueDescriptor): JsonSchema | undefined => {
         : { minLength: Math.ceil(descriptor.min / 2) }),
       ...(descriptor.max === undefined ? {} : { maxLength: descriptor.max }),
       ...(descriptor.email ? { format: "email" } : {}),
+      ...(descriptor.datetime === true ? { format: "date-time" } : {}),
+      ...(descriptor.date === true ? { format: "date" } : {}),
+      // An IRI, since the descriptor takes international addresses. The
+      // descriptor narrows it to http and https, but takes characters RFC
+      // 3987 refuses and the WHATWG parser percent-encodes (`|`, `{`, `^`,
+      // an unpaired `%`), so here `format` is stricter than the check, as
+      // `date-time` is for a reader that refuses RFC 3339's lower-case `t`
+      // and `z` or a leap second (Zod does). Both are rare in what a model
+      // writes, and `format` is an annotation most readers don't enforce.
+      ...(descriptor.url === true ? { format: "iri" } : {}),
     };
   }
   if (descriptor.kind === "number") {
@@ -74,6 +85,9 @@ const scalarSchema = (descriptor: ValueDescriptor): JsonSchema | undefined => {
   }
   if (descriptor.kind === "boolean" || descriptor.kind === "null") {
     return { type: descriptor.kind };
+  }
+  if (descriptor.kind === "json") {
+    return {};
   }
   if (descriptor.kind === "literal") {
     return { const: descriptor.value };

@@ -23,7 +23,7 @@ import { ownerErased } from "./erased-people.ts";
 import { SourceError, readFromProvider, requestBudget } from "./event-kinds.ts";
 import type { ProviderAccess, RequestBudget } from "./event-kinds.ts";
 import { googleUserinfoAddress } from "./providers.ts";
-import { accessTokenFor } from "./tokens.ts";
+import { accessTokenFor, pausedWait } from "./tokens.ts";
 
 // The groups each person's own suite account is in, nested ones included
 // (GRA-1761; the threat model is on GRA-1719, "Group members"): what core
@@ -444,6 +444,12 @@ export const readReaderGroups = async (
         // Not a suspended person's, a read under way of theirs included:
         // it goes on, from where it was, once they're back.
         sql`${connections.ownerUserId} NOT IN (SELECT value FROM json_each(${JSON.stringify(paused)}))`,
+        // Nor one whose vendor asked every caller to wait: its read waits
+        // too, kept for when the wait is over.
+        or(
+          isNull(connectionTokens.pausedUntil),
+          lt(connectionTokens.pausedUntil, new Date())
+        ),
         or(
           isNotNull(connections.readerGroupsReading),
           isNull(connections.readerGroupsTriedAt),
@@ -519,7 +525,13 @@ export const readReaderGroups = async (
           : {}),
         ...errorFields(error),
       });
-      set = { readerGroupsReading: null, readerGroupsTriedAt: new Date() };
+      // A paused connection keeps the read, under way or about to start,
+      // to go on with once its vendor's wait is over.
+      set = {
+        readerGroupsReading:
+          pausedWait(error) === undefined ? null : (reading ?? null),
+        readerGroupsTriedAt: new Date(),
+      };
     }
     // oxlint-disable-next-line no-await-in-loop -- one connection at a time
     await db

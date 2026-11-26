@@ -13,6 +13,7 @@ import {
   ItemContent,
   ItemDescription,
   ItemDetail,
+  ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -32,7 +33,6 @@ import { projectCountsWords } from "../projects/project-counts.tsx";
 import { ProjectDialog } from "../projects/project-dialog.tsx";
 import { projectIconShapes } from "../projects/project-icon.tsx";
 import { ProjectsSkeleton } from "../projects/skeletons.tsx";
-import { SeparatedItems } from "../workflows/separated-items.tsx";
 
 // Projects (GRA-1458): the projects the person is in, one row each, its
 // icon, name and goal, and what it holds that the person may open; the
@@ -108,13 +108,11 @@ const Projects = () => {
               {builds ? <EmptyContent>{make}</EmptyContent> : null}
             </Empty>
           ) : (
-            <SeparatedItems
-              aria-label={t`Projects`}
-              rows={page.data.map((project) => ({
-                key: project.id,
-                row: <ProjectRow key={project.id} project={project} />,
-              }))}
-            />
+            <ItemGroup separated aria-label={t`Projects`}>
+              {page.data.map((project) => (
+                <ProjectRow key={project.id} project={project} />
+              ))}
+            </ItemGroup>
           )}
         </div>
       </Page>

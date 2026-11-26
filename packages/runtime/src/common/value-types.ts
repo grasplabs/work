@@ -70,7 +70,22 @@ export interface StringSchema<
   readonly default: (
     value: Exclude<Input, undefined>
   ) => StringSchema<Input | undefined, Exclude<Output, undefined>>;
-  /** A practical format check, not proof that mail arrives. */
+  /**
+   * A calendar date, `YYYY-MM-DD` (RFC 3339's `full-date`), kept as the
+   * text it was. A string has one format at most.
+   */
+  readonly date: () => StringSchema<Input, Output>;
+  /**
+   * A date and time with its offset, such as `2026-11-25T14:30:00Z` or
+   * `2026-11-25T15:30:00.5+01:00` (RFC 3339's `date-time`), kept as the
+   * text it was: a vendor's own time, which an App turns into a
+   * `v.timestamp()` where it stores one. A string has one format at most.
+   */
+  readonly datetime: () => StringSchema<Input, Output>;
+  /**
+   * A practical format check, not proof that mail arrives. A string has one
+   * format at most.
+   */
   readonly email: () => StringSchema<Input, Output>;
   /** In UTF-16 code units, as `String.length` counts. */
   readonly max: (length: number) => StringSchema<Input, Output>;
@@ -79,6 +94,14 @@ export interface StringSchema<
   readonly optional: () => StringSchema<Input | undefined, Output | undefined>;
   /** Removes whitespace at both ends before the length is checked. */
   readonly trim: () => StringSchema<Input, Output>;
+  /**
+   * An absolute `http` or `https` URL, as the WHATWG URL parser reads one
+   * (`new URL`), written out in full: `//` and a host, no user name or
+   * password, no ASCII spaces, ASCII control characters or backslashes,
+   * and no host with a character IDNA drops unseen (a zero-width space).
+   * Kept as the text it was. A string has one format at most.
+   */
+  readonly url: () => StringSchema<Input, Output>;
 }
 
 export interface NumberSchema<

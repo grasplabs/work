@@ -83,6 +83,11 @@ const still: PanelPlaceValue = {
 /** The shell's panels as a panel's head sees them (AppShellPanelHead). */
 export const PanelPlaceContext = createContext<PanelPlaceValue>(still);
 
+// The resize corner's square, which the edges leave free at their ends: its
+// own size, not the card's corner (a squircle's radius is larger than the
+// curve it draws).
+const HANDLE = space["3"];
+
 const styles = stylex.create({
   // The window: over the page's card and its line, its own card with its own line, lifted off the
   // page. On a phone, before the script knows it is one, the narrow look (the panels over the window
@@ -99,6 +104,7 @@ const styles = stylex.create({
     marginBlock: 0,
     marginInlineEnd: 0,
     borderRadius: { default: radius.md, [NARROW]: 0 },
+    cornerShape: radius.shape,
     // A layer over the page's content: the Dialog's lift, and in dark the shell's raised ground (a
     // step above the page's card, as its menus), so it reads as lying over the page, not beside it.
     backgroundColor: { default: SHELL_POPUP, [NARROW]: "transparent" },
@@ -134,6 +140,7 @@ const styles = stylex.create({
     zIndex: `calc(${SHELL_LAYER} + 1)`,
     boxSizing: "border-box",
     borderRadius: radius.md,
+    cornerShape: radius.shape,
     borderWidth: size.hairline,
     borderStyle: "solid",
     borderColor: {
@@ -159,13 +166,13 @@ const styles = stylex.create({
     touchAction: "none",
   },
   start: {
-    insetBlock: radius.md,
+    insetBlock: HANDLE,
     insetInlineStart: 0,
     width: space["2"],
     cursor: "ew-resize",
   },
   top: {
-    insetInline: radius.md,
+    insetInline: HANDLE,
     insetBlockStart: 0,
     height: space["2"],
     cursor: "ns-resize",
@@ -173,8 +180,8 @@ const styles = stylex.create({
   corner: {
     insetBlockStart: 0,
     insetInlineStart: 0,
-    width: radius.md,
-    height: radius.md,
+    width: HANDLE,
+    height: HANDLE,
     cursor: { default: "nwse-resize", ":dir(rtl)": "nesw-resize" },
   },
 });

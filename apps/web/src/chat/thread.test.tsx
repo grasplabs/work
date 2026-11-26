@@ -1,3 +1,5 @@
+import { setTimeout as sleep } from "node:timers/promises";
+
 // @vitest-environment happy-dom
 import type { ThinkingGround } from "@grasp-os/shared/brain";
 import type {
@@ -20,6 +22,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { answerAgentsOf, ChatThread } from "./thread.tsx";
+import { newLineRow } from "./unread.ts";
 
 // An answer's steps as one chain of thought in the thread. What the model
 // thought: while it thinks, its words stream in, open under "Thinking";
@@ -58,7 +61,9 @@ const thread = async (
   /** Whether the turn runs on past its answer, checking its drafts. */
   checking?: boolean,
   /** The agents the person may ask, which name the answers. */
-  agents?: readonly ChatAgent[]
+  agents?: readonly ChatAgent[],
+  /** The answer the New line goes over, the first the person hadn't seen. */
+  newLineBefore?: number
 ): Promise<void> => {
   const core = {
     withSession: async <T,>(
@@ -103,6 +108,7 @@ const thread = async (
         running={partial !== null || checking !== undefined}
         checking={checking}
         tools={tools}
+        newLineBefore={newLineBefore}
       />
     ),
   });
@@ -167,6 +173,24 @@ const answer = () =>
 const workingLine = () =>
   spoken(document.querySelector('[data-slot="shimmer"]'));
 
+/**
+ * Where the working mark on the line over the answer stands: in the mark's
+ * place before its words, as a step's mark does; inside its words; or none.
+ */
+const markOnLine = () => {
+  const line = document.querySelector(
+    '[data-slot="chain-of-thought"] button[aria-expanded] > [data-slot="trace-line"]'
+  );
+  const mark = line?.querySelector('[data-slot="agent-indicator"]');
+  if (mark === null || mark === undefined) {
+    return "none";
+  }
+  return mark.closest('[data-slot="trace-title"]') === null &&
+    mark.closest('[data-slot="trace-icon"]') === line?.firstElementChild
+    ? "in the mark's place"
+    : "in the words";
+};
+
 /** The answer's steps, in order: each step's words. */
 const stepLines = () =>
   [
@@ -216,49 +240,6 @@ describe(ChatThread, () => {
     document.body.replaceChildren();
     forgotten.length = 0;
     forgetAnswer = "done";
-  });
-
-  it("says under a call of remember that it is an instruction, with the value it holds", async () => {
-    const at = "2026-10-27T09:00:05.000Z";
-    await thread([
-      asked,
-      {
-        id: 2,
-        role: "assistant",
-        text: "",
-        code: [],
-        tools: [
-          {
-            callId: "remember",
-            tool: "remember",
-            codeBefore: 0,
-            input: { statement: "Answer in Dutch" },
-          },
-        ],
-        end: "done",
-        at,
-      },
-      {
-        id: 3,
-        role: "result",
-        callId: "remember",
-        text: "Saved.",
-        failed: false,
-        at,
-        saved: {
-          memory: "3f1c4a8e-5d6b-4c2a-9e7f-1a2b3c4d5e6f",
-          type: "instruction",
-          statement: "Always answer in Dutch",
-          value: "Dutch",
-        },
-      },
-    ]);
-    const text = document.body.textContent;
-
-    expect({
-      kind: text.includes("Saved an instruction"),
-      saved: text.includes("Always answer in Dutch"),
-    }).toStrictEqual({ kind: true, saved: true });
   });
 
   it("says under a call of remember who or what it is about, when it isn't the person", async () => {
@@ -338,9 +319,23 @@ describe(ChatThread, () => {
       },
     ]);
 
-    expect(document.body.textContent).toContain(
-      "In place of: Loves pizza and Loves pasta"
-    );
+    const saying = document.body.textContent;
+    await act(async () => {
+      [...document.querySelectorAll("button")]
+        .find((button) => button.textContent === "Undo")
+        ?.click();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain("Removed from memory");
+    });
+
+    expect({
+      saved: saying.includes("In place of: Loves pizza and Loves pasta"),
+      undone: document.body.textContent.includes(
+        "Restored: Loves pizza and Loves pasta"
+      ),
+    }).toStrictEqual({ saved: true, undone: true });
   });
 
   it("says when an undo found nothing to undo, never that it was forgotten", async () => {
@@ -390,14 +385,12 @@ describe(ChatThread, () => {
     const text = document.body.textContent;
 
     expect({
-      told: text.includes(
-        "There was nothing to undo: Grasp no longer uses this."
-      ),
-      claimedForgotten: text.includes("Grasp no longer remembers this."),
-    }).toStrictEqual({ told: true, claimedForgotten: false });
+      told: text.includes("Already removed"),
+      claimedRemoved: text.includes("Removed from memory"),
+    }).toStrictEqual({ told: true, claimedRemoved: false });
   });
 
-  it("says under a call of remember what Grasp will remember, in the person's words, and undoes it there", async () => {
+  it("says under a call of remember what it saved to memory, in the person's words, and undoes it there", async () => {
     const at = "2026-10-27T09:00:05.000Z";
     const memory = "3f1c4a8e-5d6b-4c2a-9e7f-1a2b3c4d5e6f";
     await thread([
@@ -429,33 +422,40 @@ describe(ChatThread, () => {
       },
     ]);
     // The steps are drawn once opened.
+    const summary = firstStep().line;
     await openSteps();
+    const steps = stepLines();
     const shown = document.body.textContent;
     const undo = [...document.querySelectorAll("button")].find(
       (button) => button.textContent === "Undo"
     );
     await act(async () => {
+      undo?.focus();
       undo?.click();
       await Promise.resolve();
     });
     await vi.waitFor(() => {
       expect(document.body.textContent).toContain(
-        "Grasp no longer remembers this."
+        "Removed from memory, Acme renews on 1 March"
       );
     });
 
     expect({
-      line: shown.includes("Saved to your memory"),
-      notice: shown.includes("Saved a memory, Acme renews on 1 March"),
+      summary,
+      line: steps,
+      notice: shown.includes("Saved to memory, Acme renews on 1 March"),
       forgotten,
       undoLeft: [...document.querySelectorAll("button")].some(
         (button) => button.textContent === "Undo"
       ),
+      focusInAnswer: document.activeElement === answer(),
     }).toStrictEqual({
-      line: true,
+      summary: "Saved 1 memory 5.0s",
+      line: ["Saved to memory"],
       notice: true,
       forgotten: [memory],
       undoLeft: false,
+      focusInAnswer: true,
     });
   });
 
@@ -467,10 +467,15 @@ describe(ChatThread, () => {
       reasoning: "Add two to two.",
     });
 
-    expect(firstStep()).toStrictEqual({
-      line: "Thinking",
-      open: true,
-      shows: "Add two to two.",
+    // Whole words while it is written: the last waits for what follows it,
+    // then shows once nothing more has come for a moment.
+    const atFirst = firstStep();
+    await act(async () => {
+      await sleep(250);
+    });
+    expect({ atFirst, later: firstStep() }).toStrictEqual({
+      atFirst: { line: "Thinking", open: true, shows: "Add two to" },
+      later: { line: "Thinking", open: true, shows: "Add two to two." },
     });
   });
 
@@ -491,10 +496,15 @@ describe(ChatThread, () => {
       { text: "", code: [], tools: [], reasoning: "Add two to two." }
     );
 
-    expect(firstStep()).toStrictEqual({
-      line: "Thinking",
-      open: true,
-      shows: "Add two to two.",
+    // Whole words while it is written: the last waits for what follows it,
+    // then shows once nothing more has come for a moment.
+    const atFirst = firstStep();
+    await act(async () => {
+      await sleep(250);
+    });
+    expect({ atFirst, later: firstStep() }).toStrictEqual({
+      atFirst: { line: "Thinking", open: true, shows: "Add two to" },
+      later: { line: "Thinking", open: true, shows: "Add two to two." },
     });
   });
 
@@ -523,6 +533,34 @@ describe(ChatThread, () => {
     expect({ checking, otherwise: workingLine() }).toStrictEqual({
       checking: "Checking the App…",
       otherwise: "Working on it",
+    });
+  });
+
+  it("shows the working mark in the line's own mark place while it works closed, and none on the line once open", async () => {
+    await thread(
+      [
+        asked,
+        {
+          id: 2,
+          role: "assistant",
+          text: "Let me check.",
+          code: [],
+          tools: [],
+          end: "done",
+          at: "2026-10-27T09:00:05.000Z",
+        },
+      ],
+      null,
+      [],
+      undefined,
+      false
+    );
+    const closed = markOnLine();
+    await openSteps();
+
+    expect({ closed, open: markOnLine() }).toStrictEqual({
+      closed: "in the mark's place",
+      open: "none",
     });
   });
 
@@ -1133,6 +1171,182 @@ describe("a thread's day lines", () => {
     expect({ earlier, today: dayLines() }).toStrictEqual({
       earlier: ["Monday, October 26", "Yesterday", "Today"],
       today: [],
+    });
+  });
+});
+
+/** The thread's New line: the separator named New, if there is one. */
+const newLine = () =>
+  [
+    ...document.querySelectorAll<HTMLElement>(
+      "[role='log'] [role='separator'][aria-labelledby]"
+    ),
+  ].find(
+    (line) =>
+      document.querySelector(
+        `[id="${line.getAttribute("aria-labelledby") ?? ""}"]`
+      )?.textContent === "New"
+  ) ?? null;
+
+/** Whether `first` stands before `second` in the thread. */
+const before = (first: Element | null, second: Element | null): boolean => {
+  const all = [...document.querySelectorAll("[role='log'] *")];
+  const at = first === null ? -1 : all.indexOf(first);
+  return at !== -1 && second !== null && all.indexOf(second) > at;
+};
+
+/** The element holding exactly `words`. */
+const said = (words: string): HTMLElement | null =>
+  [...document.querySelectorAll<HTMLElement>("[role='log'] *")].findLast(
+    (element) => element.textContent.trim() === words
+  ) ?? null;
+
+/** A chat answered while the person was away: their question, and the answer they hadn't seen. */
+const cameBack = [
+  questionOf(1, "What do we owe?"),
+  answerBy(2, "About 4,000."),
+  questionOf(3, "And next month?"),
+  answerBy(4, "About 3,500."),
+];
+
+/** Whether `element` is the log that scrolls. */
+const isLog = (element: Element): boolean =>
+  element instanceof HTMLElement &&
+  element.dataset.slot === "message-scroller-viewport";
+
+// Where the thread opens with a New line, as the browser lays it out:
+// happy-dom lays nothing out, so the rows' sizes, which rows the browser
+// has drawn (the rest skipped while out of view) and the size changes
+// that place the line are given here. The view is 600px tall and the
+// line 900px down the rows.
+const laidOut = ({
+  height,
+  drawnRows,
+}: {
+  height: number;
+  drawnRows: readonly string[];
+}) => {
+  vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(
+    function scrollHeight(this: HTMLElement) {
+      return isLog(this) ? height : 0;
+    }
+  );
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(
+    function clientHeight(this: HTMLElement) {
+      return isLog(this) ? 600 : 0;
+    }
+  );
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    function rect(this: HTMLElement) {
+      const top = this.dataset.messageId === newLineRow ? 900 : 0;
+      return DOMRect.fromRect({ x: 0, y: top, width: 600, height: 40 });
+    }
+  );
+  vi.spyOn(Element.prototype, "checkVisibility").mockImplementation(
+    function checkVisibility(this: Element) {
+      const row = this.parentElement?.dataset.messageId;
+      return row !== undefined && drawnRows.includes(row);
+    }
+  );
+  // Each size watch hears the sizes once, as the browser's first does.
+  vi.stubGlobal(
+    "ResizeObserver",
+    class implements ResizeObserver {
+      readonly #heard: ResizeObserverCallback;
+      #watching = false;
+      constructor(heard: ResizeObserverCallback) {
+        this.#heard = heard;
+      }
+      observe() {
+        this.#watching = true;
+        queueMicrotask(() => {
+          if (this.#watching) {
+            this.#heard([], this);
+          }
+        });
+      }
+      unobserve() {
+        this.#watching = false;
+      }
+      disconnect() {
+        this.#watching = false;
+      }
+    }
+  );
+  return vi.spyOn(HTMLElement.prototype, "scrollTo");
+};
+
+describe("a thread's New line", () => {
+  afterEach(() => {
+    act(() => {
+      root?.unmount();
+    });
+    root = undefined;
+    document.body.replaceChildren();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("stands over the first answer the person hadn't seen, after their own question, as a separator named New that takes no focus", async () => {
+    await thread(cameBack, null, [], undefined, undefined, undefined, 4);
+    const line = newLine();
+
+    expect({
+      after: before(said("And next month?"), line),
+      over: before(line, said("About 3,500.")),
+      words: line?.textContent,
+      focusable: line?.querySelector("[tabindex], a, button") ?? null,
+      focused: document.activeElement === document.body,
+    }).toStrictEqual({
+      after: true,
+      over: true,
+      words: "New",
+      focusable: null,
+      focused: true,
+    });
+  });
+
+  it("is not drawn when nothing was unread", async () => {
+    await thread(cameBack);
+    expect(newLine()).toBeNull();
+  });
+
+  /** The thread's rows' ids, in order: the line, and the answer under it. */
+  const cameBackRows = ["q1", "a2", "q3", newLineRow, "a4"];
+
+  it("goes to the New line when it lies further from the view than the browser draws: the end not drawn, as after scrolling back before the dock closed", async () => {
+    const scrolled = laidOut({ height: 2000, drawnRows: ["q1", "a2"] });
+    await thread(cameBack, null, [], undefined, undefined, undefined, 4);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // At once, never animated.
+    expect(scrolled).toHaveBeenCalledWith(
+      expect.objectContaining({ behavior: "auto" })
+    );
+  });
+
+  it("waits, going nowhere, while the browser has drawn no row yet, and stays at the end when what is unread fits", async () => {
+    const waiting = laidOut({ height: 2000, drawnRows: [] });
+    await thread(cameBack, null, [], undefined, undefined, undefined, 4);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const whileNoneDrawn = waiting.mock.calls.length;
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    vi.restoreAllMocks();
+    const fitting = laidOut({ height: 1400, drawnRows: cameBackRows });
+    await thread(cameBack, null, [], undefined, undefined, undefined, 4);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect({ whileNoneDrawn, fits: fitting.mock.calls.length }).toStrictEqual({
+      whileNoneDrawn: 0,
+      fits: 0,
     });
   });
 });

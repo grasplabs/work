@@ -29,6 +29,7 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemGroup,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import { Section, SectionHeader } from "@grasp-os/ui/components/section-header";
@@ -74,7 +75,6 @@ import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import { SeparatedItems } from "../workflows/separated-items.tsx";
 import { isConflict, publishFailureText, settled } from "./publish-errors.ts";
 import { hasChanges, useDraft } from "./use-draft.ts";
 
@@ -432,28 +432,26 @@ const DraftCheckpoints = ({
       ) : null}
       {checkpoints.length === 0 ? null : (
         <Card padding="none">
-          <SeparatedItems
-            rows={checkpoints.map((checkpoint) => ({
-              key: String(checkpoint.number),
-              row: (
-                <CheckpointItem
-                  busy={busy}
-                  checkpoint={checkpoint}
-                  latest={checkpoint.number === newest?.number}
-                  name={
-                    typeof read === "object"
-                      ? (read.people.get(checkpoint.personId) ??
-                        checkpoint.personId)
-                      : checkpoint.personId
-                  }
-                  onRestore={() => {
-                    setAsked({ kind: "restore", number: checkpoint.number });
-                  }}
-                  subject={subject}
-                />
-              ),
-            }))}
-          />
+          <ItemGroup separated>
+            {checkpoints.map((checkpoint) => (
+              <CheckpointItem
+                key={String(checkpoint.number)}
+                busy={busy}
+                checkpoint={checkpoint}
+                latest={checkpoint.number === newest?.number}
+                name={
+                  typeof read === "object"
+                    ? (read.people.get(checkpoint.personId) ??
+                      checkpoint.personId)
+                    : checkpoint.personId
+                }
+                onRestore={() => {
+                  setAsked({ kind: "restore", number: checkpoint.number });
+                }}
+                subject={subject}
+              />
+            ))}
+          </ItemGroup>
         </Card>
       )}
       <ConfirmChange
@@ -888,41 +886,39 @@ const VersionsView = ({
   return (
     <div {...stylex.props(styles.list)}>
       <ErrorText>{failure}</ErrorText>
-      <SeparatedItems
-        rows={versions.map((each) => ({
-          key: String(each.version),
-          row: (
-            <VersionItem
-              by={
-                each.author === identity.userId
-                  ? t`You`
-                  : (people.get(each.author) ?? each.author)
-              }
-              details={renderDetails?.(each)}
-              live={each.version === live}
-              menu={
-                acts ? (
-                  <VersionMenu
-                    builds={builds}
-                    disabled={busy}
-                    live={live}
-                    onAsk={setAsked}
-                    onMove={askMove}
-                    onShowChanges={() => {
-                      setShowing(each);
-                    }}
-                    release={releases.get(each.version)}
-                    subject={subject}
-                    version={each}
-                  />
-                ) : null
-              }
-              release={releases.get(each.version)}
-              version={each}
-            />
-          ),
-        }))}
-      />
+      <ItemGroup separated>
+        {versions.map((each) => (
+          <VersionItem
+            key={String(each.version)}
+            by={
+              each.author === identity.userId
+                ? t`You`
+                : (people.get(each.author) ?? each.author)
+            }
+            details={renderDetails?.(each)}
+            live={each.version === live}
+            menu={
+              acts ? (
+                <VersionMenu
+                  builds={builds}
+                  disabled={busy}
+                  live={live}
+                  onAsk={setAsked}
+                  onMove={askMove}
+                  onShowChanges={() => {
+                    setShowing(each);
+                  }}
+                  release={releases.get(each.version)}
+                  subject={subject}
+                  version={each}
+                />
+              ) : null
+            }
+            release={releases.get(each.version)}
+            version={each}
+          />
+        ))}
+      </ItemGroup>
       {next === null ? null : (
         <Button
           disabled={more}

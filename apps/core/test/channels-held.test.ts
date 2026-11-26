@@ -5,9 +5,8 @@ import {
 } from "@grasp-os/shared/permissions";
 import { describe, expect, it } from "vite-plus/test";
 
-import { connectionRead } from "../src/agent-scope.ts";
 import { confirmAction } from "../src/channels/cards.tsx";
-import { checkOf, viewOf } from "../src/channels/held.ts";
+import { viewOf } from "../src/channels/held.ts";
 import { say } from "../src/channels/words.ts";
 import { chatAgentId } from "../src/chats-rpc.ts";
 import { codeStep, says } from "./agent-chat.ts";
@@ -111,17 +110,6 @@ describe("a held write on the card", () => {
         ],
       }),
     ]);
-  });
-});
-
-describe("the card's check line", () => {
-  it("warns only when the turn read mail", () => {
-    expect([
-      checkOf([connectionRead("connection-1", "mail.search", null)]),
-      checkOf([connectionRead("connection-1", "calendar.list", null)]),
-      checkOf(["note:doc-1"]),
-      checkOf([]),
-    ]).toStrictEqual([{ read: "mail" }, undefined, undefined, undefined]);
   });
 });
 

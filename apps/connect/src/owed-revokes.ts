@@ -9,7 +9,7 @@ import {
   givenUpRevocations,
   tokenRevocations,
 } from "./db/schema.ts";
-import { providerFor } from "./providers.ts";
+import type { ProviderConfig } from "./providers.ts";
 
 // Revokes owed at a provider (src/revocations.ts; GRA-1191, GRA-1196): how
 // one is owed, in the same write as what gives the tokens up, and how one
@@ -29,10 +29,8 @@ export const firstRevokeRetryMs = 10 * 60 * 1000;
 export type OwedReason = "disconnected" | "needs_reauth";
 
 /** Whether `provider`'s grants can be revoked at all: an RFC 7009 endpoint. */
-export const revocable = (provider: string): boolean => {
-  const config = providerFor(provider);
-  return config?.kind === "oauth" && config.revocationEndpoint !== undefined;
-};
+export const revocable = (provider: ProviderConfig | undefined): boolean =>
+  provider?.kind === "oauth" && provider.revocationEndpoint !== undefined;
 
 /**
  * The statement that owes the revoke of connection `connectionId`'s

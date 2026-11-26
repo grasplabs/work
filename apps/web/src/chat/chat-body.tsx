@@ -27,6 +27,7 @@ import {
 import { ChatSources } from "./sources.tsx";
 import { useSubjectBar } from "./subject-bar.tsx";
 import type { ChatThread as ChatThreadType } from "./thread.tsx";
+import { useNewLine } from "./unread.ts";
 import { WaitingForYou } from "./waiting-for-you.tsx";
 
 // One chat's conversation and the box to ask in under it, as the chat
@@ -103,20 +104,33 @@ const Loading = () => {
   );
 };
 
-/** The conversation, or what to ask before there is one; `focusBox` takes the person to the box. */
+/**
+ * The conversation, or what to ask before there is one; `focusBox` takes
+ * the person to the box. One chat a mount: its caller keys it by chat, so
+ * each chat opens afresh, with its own New line.
+ */
 export const ChatConversation = ({
   chat,
   compact,
   focusBox,
+  seen,
 }: {
   chat: GlobalChat;
   /** Narrow, beside the page: the thread's own reading column is left out. */
   compact: boolean;
   focusBox: () => void;
+  /**
+   * Whether it is in front of the person: on a chat's page, and in the
+   * dock while it is open, never while it is closed to its bar. Only then
+   * is it read (unread.ts).
+   */
+  seen: boolean;
 }) => {
   const { t, i18n } = useLingui();
   const { chatId, finding, view, failure, empty, ask, composer, offered } =
     chat;
+  // Read as it opens here; the New line over what the person hadn't seen.
+  const newLine = useNewLine(chatId, view, seen);
   // A subject's chat, while core finds it, or why it gave none.
   if (finding.searching || finding.failure !== undefined) {
     return finding.failure === undefined ? (
@@ -148,8 +162,9 @@ export const ChatConversation = ({
         agents={offered?.agents}
         chatId={chatId}
         compact={compact}
-        loaded={view.loaded || failure !== undefined}
+        loaded={newLine.decided || failure !== undefined}
         messages={view.messages}
+        newLineBefore={newLine.before}
         // Ask again goes as its answer is drawn anew: the person is taken
         // to the box, not left on the page.
         onRetry={() => {

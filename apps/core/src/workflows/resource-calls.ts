@@ -334,7 +334,7 @@ const workflowPermission = async (env: Env, run: CallingRun, id: string) => {
   return row;
 };
 
-/** A read that answers a file's own fields, as connector-kit's `contentAs` makes them. */
+/** A read that answers a file's own fields, as the connector runtime's `contentAs` makes them. */
 const fileAnswerSchema = z
   .object({
     name: z.string().nullable(),

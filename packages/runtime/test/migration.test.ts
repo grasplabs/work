@@ -1,9 +1,11 @@
 import { describe, expect, test } from "vite-plus/test";
 
+import { defineSchema } from "../src/app/define-schema.ts";
+import { defineTable } from "../src/app/define-table.ts";
 import { inspectApp, readAppManifest, registerApp } from "../src/app/host.ts";
 import { defineApp, defineMigration } from "../src/app/index.ts";
 import { runMigration } from "../src/app/runner.ts";
-import { defineSchema, defineTable, v } from "../src/common/values.ts";
+import { v } from "../src/common/values.ts";
 
 // How an App declares an explicit migration (spec 17.2), what its manifest
 // records of it, and how the runner calls its handler: pure checks of a

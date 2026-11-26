@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
-import { connectorIsolateRequests } from "@grasp-os/connector-kit/manifest";
 import { mailSync } from "@grasp-os/connector-microsoft-365/mail-sync";
+import { connectorIsolateRequests } from "@grasp-os/runtime/connector";
 import { syncErrors } from "@grasp-os/shared/sync";
 import type { SyncPage } from "@grasp-os/shared/sync";
 import { exports } from "cloudflare:workers";

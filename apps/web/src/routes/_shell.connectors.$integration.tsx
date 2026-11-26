@@ -1,3 +1,4 @@
+import { isMemberAdmin } from "@grasp-os/shared/roles";
 import { Alert, AlertTitle } from "@grasp-os/ui/components/alert";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -10,6 +11,7 @@ import {
 } from "../connections/connected-dialog.tsx";
 import { ConnectionsAccess } from "../connections/connection-list.tsx";
 import type { HeldPermissions } from "../connections/connection-list.tsx";
+import { ConnectorTools } from "../connections/connector-tools.tsx";
 import { useWhyNoConnect } from "../connections/integration-facts.ts";
 import { loadIntegrations } from "../connections/integrations-data.ts";
 import { IntegrationSkeleton } from "../connections/integrations-skeleton.tsx";
@@ -110,13 +112,14 @@ const Notices = ({
 
 /** One app's page: the library's app page, with its notices and its connections' access in its column. */
 const IntegrationPage = ({ integration }: { integration: Integration }) => {
-  const { held, tools, catalog, uses } = Route.useLoaderData();
+  const { held, tools, catalog, uses, connectorTools } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const { connection, again = false } = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
   const { t } = useLingui();
   const read = useSettled(integration.listed ? tools : undefined);
   const used = useSettled(uses);
+  const blockable = useSettled(connectorTools);
   // Only a connection the page lists, that works: anyone can put an ID in
   // a link. "Again" where it signed in again (`again`), or took the place
   // of one that stopped working (`returnedOf`).
@@ -157,6 +160,11 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
             held={held}
             identity={identity}
             integration={integration}
+          />
+          <ConnectorTools
+            connector={integration.id}
+            signInHost={integration.signInHost}
+            tools={blockable}
           />
         </IntegrationAppPage>
       </Page>
@@ -238,8 +246,18 @@ export const Route = createFileRoute("/_shell/connectors/$integration")({
             async (session) =>
               await session.connections.catalogTools(parsed.source, parsed.id)
           );
+    // A connector's tools as its admin blocks them (connector-tools.tsx),
+    // not awaited either.
+    const connectorTools =
+      parsed?.source === "connector" && isMemberAdmin(identity)
+        ? loadFromCore(
+            core,
+            async (session) =>
+              await session.connections.connectorTools(parsed.id)
+          )
+        : undefined;
     const read = await loadIntegrations(core, identity, { held: true });
-    return { ...read, tools };
+    return { ...read, tools, connectorTools };
   },
   // No `shouldReload`: a tab, or a notice dropped (the search), keeps what
   // was read; opening this app or another reads it again, as does a change

@@ -54,6 +54,25 @@ const opened = {
   expires_at: "2026-11-25T11:00:00.000Z",
 };
 
+/** What Mistral kept of a call: he spoke three times, and was talked over once. */
+const kept = {
+  id: "sess_1a2b",
+  status: "ended",
+  num_participants: 0,
+  created_at: "2026-11-25T10:00:00.000Z",
+  transcripts: [
+    {
+      role: "assistant",
+      content: "What do you do here?",
+      is_interruption: false,
+    },
+    { role: "user", content: "I plan the routes." },
+    { role: "assistant", content: "And how do you", is_interruption: true },
+    { role: "user", content: "Wait, one more thing." },
+    { role: "assistant", content: "Go on.", is_interruption: false },
+  ],
+};
+
 const open = async (input: VoiceLabInput) =>
   await callServerFn(openVoiceSessionFn, input, { email: staff.email });
 
@@ -83,8 +102,11 @@ describe("the Voice Lab's session", () => {
         authorization: request.headers.get("authorization"),
         body: text === "" ? null : JSON.parse(text),
       });
-      return request.method === "DELETE"
-        ? new Response(null, { status: 204 })
+      if (request.method === "DELETE") {
+        return new Response(null, { status: 204 });
+      }
+      return request.method === "GET"
+        ? Response.json(kept)
         : Response.json(mistral.answer, { status: mistral.status });
     });
   });
@@ -117,9 +139,11 @@ describe("the Voice Lab's session", () => {
       // He is Stephen, speaks German, and his first line is said for him.
       stephen: asked.includes("You are Stephen,"),
       german: asked.includes("Every word you say is German"),
-      welcome: asked.includes("Nutzen Sie in Ihrer Arbeit schon KI"),
+      welcome: asked.includes("Was machen Sie hier, in ein oder zwei Sätzen?"),
       voice: asked.includes('"voice_id":"voice_485"'),
       interrupts: asked.includes('"allow_interruptions":true'),
+      // Talking over him is listened for at a set threshold, never left empty.
+      listens: asked.includes('"start_threshold":0.3'),
       // Nothing of what only core's own turns need.
       notes: asked.includes("What you write down"),
       keyInAnswer: JSON.stringify(session).includes("grasp-mistral-key"),
@@ -140,6 +164,7 @@ describe("the Voice Lab's session", () => {
       welcome: true,
       voice: true,
       interrupts: true,
+      listens: true,
       notes: false,
       keyInAnswer: false,
       events: [{ detail: JSON.stringify({ locale: "de" }) }],
@@ -177,13 +202,13 @@ describe("the Voice Lab's session", () => {
     });
   });
 
-  it("closes a session at Mistral by its ID, and takes none that reads as a path", async () => {
+  it("closes a session at Mistral by its ID, answers what it kept as counts alone, and takes no ID that reads as a path", async () => {
     await setStoreSecret(
       env.MISTRAL_API_KEY,
       "MISTRAL_API_KEY",
       "grasp-mistral-key"
     );
-    await callServerFn(
+    const record = await callServerFn(
       closeVoiceSessionFn,
       { sessionId: "sess_1a2b" },
       { email: staff.email }
@@ -199,6 +224,7 @@ describe("the Voice Lab's session", () => {
       refused = true;
     }
     expect(refused).toBeTruthy();
+    expect(record).toStrictEqual({ spoke: 3, cutOff: 1 });
     expect(
       mistral.sent.map(({ method, url, authorization }) => ({
         method,
@@ -206,6 +232,11 @@ describe("the Voice Lab's session", () => {
         authorization,
       }))
     ).toStrictEqual([
+      {
+        method: "GET",
+        url: `${sessionsUrl}/sess_1a2b`,
+        authorization: "Bearer grasp-mistral-key",
+      },
       {
         method: "DELETE",
         url: `${sessionsUrl}/sess_1a2b`,

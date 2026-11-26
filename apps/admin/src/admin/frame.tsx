@@ -12,13 +12,13 @@
  * need a look, as the admin recorded them (`platformCounts`).
  * Beside Apps asked for, how many apps the companies asked for
  * (`askedApps`).
+ *
+ * Drawn with Damsko's Sidebar parts, composed as its app-shell-01 block
+ * composes them, not the block itself: the block draws the page's bar from
+ * props and folds off the side, where each admin page draws its own bar
+ * (page.tsx) and the sidebar folds to its icons.
  */
-import {
-  AppShell,
-  AppShellContent,
-  AppShellMain,
-} from "@grasp-os/app-kit/components/app-shell";
-import { BrandHeader } from "@grasp-os/app-kit/components/brand-header";
+import { TooltipProvider as KitTooltipProvider } from "@grasp-os/app-kit/components/tooltip";
 import {
   Sidebar,
   SidebarContent,
@@ -26,49 +26,114 @@ import {
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
+  SidebarInset,
+  SidebarLevel,
+  SidebarLevels,
   SidebarMenu,
+  SidebarMenuAction,
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuSkeleton,
+  SidebarProvider,
+  SidebarTrigger,
   useSidebar,
-} from "@grasp-os/app-kit/components/sidebar";
+} from "@grasp-os/ui/components/sidebar";
+import { Text } from "@grasp-os/ui/components/text";
 import {
   Tooltip,
   TooltipContent,
-  TooltipProvider,
   TooltipTrigger,
-} from "@grasp-os/app-kit/components/tooltip";
-import { Link, Outlet, useMatchRoute, useRouter } from "@tanstack/react-router";
+} from "@grasp-os/ui/components/tooltip";
 import {
-  AudioLinesIcon,
+  AudioWaveformIcon,
   BuildingIcon,
+  CircleAlertIcon,
+  ClockIcon,
   FlaskConicalIcon,
-  HourglassIcon,
+  Icon,
   LayoutDashboardIcon,
   ServerIcon,
   SparklesIcon,
-  UnplugIcon,
   WrenchIcon,
-} from "lucide-react";
+} from "@grasp-os/ui/lib/icons";
+import type { IconData } from "@grasp-os/ui/lib/icons";
+import { visuallyHidden } from "@grasp-os/ui/lib/styles";
+import { colors, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
+import {
+  Link,
+  Outlet,
+  useMatch,
+  useMatchRoute,
+  useRouter,
+} from "@tanstack/react-router";
 import { Suspense, useEffect } from "react";
-import type { ComponentType, SVGProps } from "react";
+import type { ReactNode } from "react";
 
 import type { ClientAdmin } from "../clients/admin.ts";
 import type { GridRow } from "../clients/grid.ts";
 import { PageLoading } from "./failure.tsx";
+import { GraspMark } from "./grasp-mark.ts";
 import { askedApps } from "./integrations-asked.ts";
+import { OrganizationLevel, organizationLevel } from "./organization.tsx";
 import type { PlatformCounts } from "./platform.ts";
 import { useSettled } from "./settled.tsx";
 import type { Deferred } from "./settled.tsx";
 import { organizationsOf, unreadWords } from "./views.ts";
 import type { Organization } from "./views.ts";
 
+const styles = stylex.create({
+  // The sidebar's head: Grasp's mark and the admin's name, the fold at the
+  // end; folded to the icons, the fold alone, over the icons' column.
+  brand: {
+    display: "flex",
+    alignItems: "center",
+    gap: space["2"],
+    minHeight: size.sidebarIconButton,
+    paddingInlineStart: size.sidebarRowInline,
+    color: colors.sidebarForeground,
+  },
+  folded: { justifyContent: "center", paddingInlineStart: 0 },
+  name: { display: "flex", flexDirection: "column", flexGrow: 1, minWidth: 0 },
+  // What the card holds, laid over its box, as app-shell-01 lays it: the
+  // card is as tall as the window, never as the page, so the page scrolls
+  // inside it and its bar (page.tsx) stays.
+  card: {
+    position: "absolute",
+    inset: 0,
+    display: "flex",
+    flexDirection: "column",
+    overflow: "clip",
+    backgroundColor: colors.sidebarCard,
+    borderRadius: "inherit",
+  },
+  // The page, down the card: it scrolls up and down only, what is wider
+  // than the card is cut at its edge.
+  page: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+    overflowX: "clip",
+    overflowY: "auto",
+  },
+});
+
+/**
+ * Where the admin's sidebar keeps, in this browser, whether staff folded
+ * it to its icons. Not drawn before the page wakes: Damsko's
+ * `sidebarStateScript` is an inline script, and the admin runs none
+ * (public/theme.js is a file for that reason); the frame's first paint is
+ * its loading skeleton, which takes the kept fold as the page wakes.
+ */
+const sidebarKey = "grasp.admin.sidebar";
+
 /** One of the admin's own places, down the top of its sidebar. */
 interface Place {
   to: "/" | "/connectors" | "/platform" | "/ask" | "/lab" | "/voice-lab";
   label: string;
-  icon: ComponentType<SVGProps<SVGSVGElement>>;
+  icon: IconData;
 }
 
 const places: readonly Place[] = [
@@ -81,7 +146,7 @@ const places: readonly Place[] = [
   { to: "/platform", label: "Platform", icon: ServerIcon },
   { to: "/ask", label: "Ask Grasp", icon: SparklesIcon },
   { to: "/lab", label: "Stephen Lab", icon: FlaskConicalIcon },
-  { to: "/voice-lab", label: "Voice Lab", icon: AudioLinesIcon },
+  { to: "/voice-lab", label: "Voice Lab", icon: AudioWaveformIcon },
 ];
 
 /**
@@ -91,13 +156,13 @@ const places: readonly Place[] = [
  */
 const unreadOf = (
   admin: ClientAdmin
-): { words: string; Mark: ComponentType<SVGProps<SVGSVGElement>> } | null => {
+): { words: string; mark: IconData } | null => {
   if (admin.state === "answered") {
     return null;
   }
   return {
     words: unreadWords(admin),
-    Mark: admin.error === "not_deployed" ? HourglassIcon : UnplugIcon,
+    mark: admin.error === "not_deployed" ? ClockIcon : CircleAlertIcon,
   };
 };
 
@@ -152,6 +217,14 @@ const badgeOf = (
   return to === "/connectors" ? integrationsBadge(asked) : null;
 };
 
+/** A row's badge: what it shows, and in words for a screen reader what it means. */
+const RowBadge = ({ shown, words }: { shown: ReactNode; words: string }) => (
+  <SidebarMenuBadge>
+    {shown}
+    <span {...stylex.props(visuallyHidden)}>{words}</span>
+  </SidebarMenuBadge>
+);
+
 const PlaceItem = ({
   place,
   badge = null,
@@ -160,25 +233,24 @@ const PlaceItem = ({
   badge?: PlaceBadge | null;
 }) => {
   const matchRoute = useMatchRoute();
-  const { to, label, icon: Icon } = place;
+  const { to, label, icon } = place;
   // The overview is only itself; any other place holds the pages under it.
   const active = matchRoute({ to, fuzzy: to !== "/" }) !== false;
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
+        asChild
         isActive={active}
-        render={<Link to={to} />}
         // The folded sidebar hides the badge, so its tooltip says the count.
-        tooltip={badge === null ? label : `${label}: ${badge.words}`}
+        tooltip={badge === null ? undefined : `${label}: ${badge.words}`}
       >
-        <Icon />
-        <span>{label}</span>
+        <Link to={to}>
+          <Icon icon={icon} />
+          {label}
+        </Link>
       </SidebarMenuButton>
       {badge === null ? null : (
-        <SidebarMenuBadge>
-          {badge.count}
-          <span className="sr-only">{`: ${badge.words}`}</span>
-        </SidebarMenuBadge>
+        <RowBadge shown={badge.count} words={`: ${badge.words}`} />
       )}
     </SidebarMenuItem>
   );
@@ -210,37 +282,38 @@ const OrganizationItem = ({
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
-        // Room for the mark or count, so a long name ends before it.
-        className={unread === null && needs === 0 ? undefined : "pr-8"}
+        asChild
         isActive={active}
-        render={
-          <Link params={{ clientId: id }} to="/organizations/$clientId" />
-        }
         tooltip={tooltipOf(name, unread, needs)}
       >
-        <BuildingIcon />
-        <span>{name}</span>
+        <Link params={{ clientId: id }} to="/organizations/$clientId">
+          <Icon icon={BuildingIcon} />
+          {name}
+        </Link>
       </SidebarMenuButton>
       {unread === null ? null : (
-        // Its own tooltip: the button's shows only while the sidebar is
-        // folded, and the badge would let no pointer through to it.
+        // Why it isn't read, said by the mark's own tooltip whether the
+        // sidebar is open or folded; it leads to its Setup, which says more.
         <Tooltip>
-          <TooltipTrigger
-            render={<SidebarMenuBadge className="pointer-events-auto" />}
-          >
-            <unread.Mark aria-hidden className="size-4" />
-            <span className="sr-only">{unread.words}</span>
+          <TooltipTrigger asChild>
+            <SidebarMenuAction asChild>
+              <Link
+                aria-label={`${name}: ${unread.words}. Open its Setup`}
+                params={{ clientId: id }}
+                to="/organizations/$clientId/setup"
+              >
+                <Icon icon={unread.mark} />
+              </Link>
+            </SidebarMenuAction>
           </TooltipTrigger>
           <TooltipContent side="right">{unread.words}</TooltipContent>
         </Tooltip>
       )}
       {needs > 0 ? (
-        <SidebarMenuBadge>
-          {needs}
-          <span className="sr-only">
-            {needs === 1 ? "thing needs Grasp" : "things need Grasp"}
-          </span>
-        </SidebarMenuBadge>
+        <RowBadge
+          shown={needs}
+          words={needs === 1 ? "thing needs Grasp" : "things need Grasp"}
+        />
       ) : null}
     </SidebarMenuItem>
   );
@@ -268,26 +341,25 @@ const SidebarLists = ({
   );
   const asked = askedApps(admins ?? []).length;
   return (
-    <>
+    <SidebarContent aria-label="Admin">
       <SidebarGroup>
         <SidebarGroupContent>
-          <nav aria-label="Admin">
-            <SidebarMenu>
-              {places.map((place) => (
-                <PlaceItem
-                  badge={badgeOf(place.to, platform, asked)}
-                  key={place.to}
-                  place={place}
-                />
-              ))}
-            </SidebarMenu>
-          </nav>
+          <SidebarMenu>
+            {places.map((place) => (
+              <PlaceItem
+                badge={badgeOf(place.to, platform, asked)}
+                key={place.to}
+                place={place}
+              />
+            ))}
+          </SidebarMenu>
         </SidebarGroupContent>
       </SidebarGroup>
-      <SidebarGroup>
-        <SidebarGroupLabel>Organizations</SidebarGroupLabel>
-        <SidebarGroupContent>
-          <nav aria-label="Organizations">
+      {/* A landmark of its own, so staff can jump to the organizations. */}
+      <nav aria-label="Organizations">
+        <SidebarGroup>
+          <SidebarGroupLabel>Organizations</SidebarGroupLabel>
+          <SidebarGroupContent>
             <SidebarMenu>
               {clients
                 .filter(({ status }) => status !== "offboarded")
@@ -299,10 +371,10 @@ const SidebarLists = ({
                   />
                 ))}
             </SidebarMenu>
-          </nav>
-        </SidebarGroupContent>
-      </SidebarGroup>
-    </>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </nav>
+    </SidebarContent>
   );
 };
 
@@ -315,6 +387,90 @@ const SettledLists = ({
   admins: Deferred<ClientAdmin[] | null>;
   platform: PlatformCounts;
 }) => <SidebarLists {...lists} admins={useSettled(admins)} />;
+
+/**
+ * The sidebar's levels: the admin's places and organizations, and while
+ * an organization's page is open, that organization's sections in their
+ * place, as the frontend's areas with a navigation of their own.
+ */
+const Levels = ({
+  clients,
+  admins,
+  platform,
+}: {
+  clients: readonly GridRow[];
+  admins: Deferred<ClientAdmin[] | null>;
+  platform: PlatformCounts;
+}) => {
+  // The open organization's page, as its route loaded it: the level shows
+  // what that page read of its core.
+  const open = useMatch({
+    from: "/organizations/$clientId",
+    shouldThrow: false,
+  })?.loaderData;
+  const shown = open?.state === "open" ? open : undefined;
+  return (
+    <SidebarLevels
+      value={shown === undefined ? "main" : organizationLevel(shown.client.id)}
+    >
+      <SidebarLevel value="main">
+        {/* Every organization by name at once; what needs Grasp in each once its core answered. */}
+        <Suspense
+          fallback={
+            <SidebarLists admins={null} clients={clients} platform={platform} />
+          }
+        >
+          <SettledLists admins={admins} clients={clients} platform={platform} />
+        </Suspense>
+      </SidebarLevel>
+      {shown === undefined ? null : (
+        <OrganizationLevel
+          client={shown.client}
+          key={shown.client.id}
+          read={shown.read}
+        />
+      )}
+    </SidebarLevels>
+  );
+};
+
+/**
+ * The sidebar's head: Grasp's mark, "Grasp" with "Admin" under it, and
+ * the fold. Folded to the icons, the fold alone, so the sidebar opens
+ * again from where it folded.
+ */
+const Brand = () => {
+  const { state, isMobile } = useSidebar();
+  const folded = state === "collapsed" && !isMobile;
+  return (
+    <div {...stylex.props(styles.brand, folded && styles.folded)}>
+      {folded ? null : (
+        <>
+          <Icon icon={GraspMark} />
+          <span {...stylex.props(styles.name)}>
+            <Text as="span" color="default" size="sm" truncate weight="medium">
+              Grasp
+            </Text>
+            <Text as="span" color="muted" size="xs" truncate>
+              Admin
+            </Text>
+          </span>
+        </>
+      )}
+      <SidebarTrigger />
+    </div>
+  );
+};
+
+/** The admin's sidebar, folded to its icons or open, around what it lists. */
+const AdminSidebarFrame = ({ children }: { children: ReactNode }) => (
+  <Sidebar collapsible="icon" variant="inset">
+    <SidebarHeader>
+      <Brand />
+    </SidebarHeader>
+    {children}
+  </Sidebar>
+);
 
 const AdminSidebar = ({
   clients,
@@ -337,32 +493,38 @@ const AdminSidebar = ({
     [router, setOpenMobile]
   );
   return (
-    <Sidebar collapsible="icon" label="Admin" variant="inset">
-      <SidebarHeader>
-        <BrandHeader
-          subtitle="Admin"
-          title="Grasp"
-          toggleLabel="Show or hide the sidebar"
-        />
-      </SidebarHeader>
-      <SidebarContent>
-        {/* Every organization by name at once; what needs Grasp in each once its core answered. */}
-        <Suspense
-          fallback={
-            <SidebarLists admins={null} clients={clients} platform={platform} />
-          }
-        >
-          <SettledLists admins={admins} clients={clients} platform={platform} />
-        </Suspense>
-      </SidebarContent>
-    </Sidebar>
+    <AdminSidebarFrame>
+      <Levels admins={admins} clients={clients} platform={platform} />
+    </AdminSidebarFrame>
   );
 };
 
 /**
- * The admin's frame around its pages: its sidebar beside the page, which
- * scrolls inside it so its bar stays in view, as the platform's frame does.
+ * The frame's row: the sidebar beside the page's card (Damsko's
+ * SidebarInset, the main landmark), the page scrolling inside it so its
+ * bar stays in view. The kit's tooltips stay for the pages still on the
+ * kit.
  */
+const Shell = ({
+  sidebar,
+  children,
+}: {
+  sidebar: ReactNode;
+  children: ReactNode;
+}) => (
+  <KitTooltipProvider>
+    <SidebarProvider storageKey={sidebarKey}>
+      {sidebar}
+      <SidebarInset>
+        <div {...stylex.props(styles.card)}>
+          <div {...stylex.props(styles.page)}>{children}</div>
+        </div>
+      </SidebarInset>
+    </SidebarProvider>
+  </KitTooltipProvider>
+);
+
+/** The admin's frame around its pages: its sidebar beside the page. */
 export const AdminFrame = ({
   clients,
   admins,
@@ -372,16 +534,13 @@ export const AdminFrame = ({
   admins: Deferred<ClientAdmin[] | null>;
   platform: PlatformCounts;
 }) => (
-  <TooltipProvider>
-    <AppShell>
+  <Shell
+    sidebar={
       <AdminSidebar admins={admins} clients={clients} platform={platform} />
-      <AppShellMain>
-        <AppShellContent>
-          <Outlet />
-        </AppShellContent>
-      </AppShellMain>
-    </AppShell>
-  </TooltipProvider>
+    }
+  >
+    <Outlet />
+  </Shell>
 );
 
 /** How many organizations the sidebar's skeleton stands in for. */
@@ -394,35 +553,25 @@ const loadingEntries = 6;
  * page while its script loads.
  */
 export const FrameLoading = () => (
-  <TooltipProvider>
-    <AppShell>
-      <Sidebar collapsible="icon" label="Admin" variant="inset">
-        <SidebarHeader>
-          <BrandHeader
-            subtitle="Admin"
-            title="Grasp"
-            toggleLabel="Show or hide the sidebar"
-          />
-        </SidebarHeader>
-        <SidebarContent>
+  <Shell
+    sidebar={
+      <AdminSidebarFrame>
+        <SidebarContent aria-label="Admin">
           <SidebarGroup>
             <SidebarGroupContent>
-              <SidebarMenu>
+              <SidebarMenu aria-busy>
                 {Array.from({ length: loadingEntries }, (_, entry) => (
                   <SidebarMenuItem key={entry}>
-                    <SidebarMenuSkeleton />
+                    <SidebarMenuSkeleton showIcon />
                   </SidebarMenuItem>
                 ))}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
-      </Sidebar>
-      <AppShellMain>
-        <AppShellContent>
-          <PageLoading />
-        </AppShellContent>
-      </AppShellMain>
-    </AppShell>
-  </TooltipProvider>
+      </AdminSidebarFrame>
+    }
+  >
+    <PageLoading />
+  </Shell>
 );

@@ -44,8 +44,9 @@ const shown = async (alone: boolean, lines: InterviewLine[]) => {
   });
 };
 
+/** The page's polite live region: UI SDK's, which Damsko's `announce` speaks through. */
 const region = (): Element | null =>
-  document.querySelector("[data-slot=live-region][aria-live=polite]");
+  document.querySelector('[data-ui-sdk-announcer=""]');
 
 /** What was said of the lines themselves: the log's own count ("1 new message") is said beside them. */
 const linesIn = (heard: string[]): string[] =>

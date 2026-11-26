@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import googleWorkspace from "../../../packages/connectors/google-workspace/src/index.ts";
 import microsoft365 from "../../../packages/connectors/microsoft-365/src/index.ts";
+import pipedrive from "../../connect/test/fixtures/pipedrive/connector.ts";
 import { readContractSchema } from "../src/connector-contracts.ts";
 
 // Reading a generated connector contract's JSON Schemas as value
@@ -11,7 +12,9 @@ import { readContractSchema } from "../src/connector-contracts.ts";
 // descriptor can't say it), and anything a descriptor can't say fails
 // closed.
 
-const connectors = [microsoft365, googleWorkspace];
+// Pipedrive is generated from its OpenAPI spec (GRA-2319), so its contracts
+// hold what a spec makes: free-form JSON, dates and the rest.
+const connectors = [microsoft365, googleWorkspace, pipedrive];
 
 /** `schema` read from its JSON text; fails the test if it can't be. */
 const read = (schema: unknown) => {
@@ -157,7 +160,7 @@ describe("generated connector contracts", () => {
       { type: "object", properties: { a: { type: "string" } } },
       { oneOf: [{ type: "string" }, { type: "number" }] },
       { type: "array", prefixItems: [{ type: "string" }] },
-      {},
+      { properties: { a: { type: "string" } } },
     ].map((schema) => readContractSchema(JSON.stringify(schema)));
     expect(unreadable).toStrictEqual([
       undefined,
@@ -166,5 +169,34 @@ describe("generated connector contracts", () => {
       undefined,
       undefined,
     ]);
+  });
+
+  it("read free-form JSON, a day and a web address as the SDK's values check them", () => {
+    const schema = read({
+      type: "object",
+      properties: {
+        custom: { description: "Anything" },
+        due: { type: "string", format: "date" },
+        site: { type: "string", format: "iri" },
+      },
+      required: ["custom", "due", "site"],
+      additionalProperties: false,
+    });
+    const value = {
+      custom: { a: [1, null] },
+      due: "2028-02-29",
+      site: "https://acme.test/",
+    };
+    expect({
+      valid: passes(schema, value),
+      noSuchDay: passes(schema, { ...value, due: "2027-02-29" }),
+      notADay: passes(schema, { ...value, due: "2028-02-29T00:00:00Z" }),
+      notWeb: passes(schema, { ...value, site: "ftp://acme.test/" }),
+    }).toStrictEqual({
+      valid: true,
+      noSuchDay: false,
+      notADay: false,
+      notWeb: false,
+    });
   });
 });

@@ -19,7 +19,8 @@ import type {
 // `{ "kind": "string", "max": 200, "optional": true }` is
 // `v.string().max(200).optional()`. Everything a descriptor holds by
 // default is left out (`descriptorVersion`, `nullable: false`, `presence:
-// "required"`, `trim: false`, `email: false`, `integer: false`), a flag is
+// "required"`, `trim: false`, `email: false`, `integer: false`, and the
+// formats `datetime`, `date` and `url` when they aren't set), a flag is
 // only ever `true`, and a default is the `default` it falls back to.
 //
 // One reader, one writer: `descriptorFromCompact` reads the compact form
@@ -45,6 +46,9 @@ export type CompactKind =
       readonly kind: "string";
       readonly trim?: true;
       readonly email?: true;
+      readonly datetime?: true;
+      readonly date?: true;
+      readonly url?: true;
       readonly min?: number;
       readonly max?: number;
     }
@@ -54,7 +58,7 @@ export type CompactKind =
       readonly min?: number;
       readonly max?: number;
     }
-  | { readonly kind: "boolean" | "null" | SemanticKind }
+  | { readonly kind: "boolean" | "null" | "json" | SemanticKind }
   | {
       readonly kind: "literal";
       readonly value: null | boolean | number | string;
@@ -91,12 +95,13 @@ const kindKeys: Readonly<Record<string, readonly string[]>> = {
   boolean: [],
   enum: ["values"],
   id: ["tableName", "onDelete"],
+  json: [],
   literal: ["value"],
   null: [],
   number: ["integer", "min", "max"],
   object: ["fields"],
   record: ["value"],
-  string: ["trim", "email", "min", "max"],
+  string: ["trim", "email", "datetime", "date", "url", "min", "max"],
   union: ["members"],
   duration: [],
   file: [],
@@ -114,6 +119,9 @@ const flagKeys: ReadonlySet<string> = new Set([
   "optional",
   "trim",
   "email",
+  "datetime",
+  "date",
+  "url",
   "integer",
 ]);
 
@@ -149,6 +157,9 @@ const scalarPart = (
     return {
       ...(descriptor.trim ? { trim: true } : {}),
       ...(descriptor.email ? { email: true } : {}),
+      ...(descriptor.datetime === true ? { datetime: true } : {}),
+      ...(descriptor.date === true ? { date: true } : {}),
+      ...(descriptor.url === true ? { url: true } : {}),
       ...boundsOf(descriptor),
     };
   }
@@ -355,7 +366,10 @@ const canonicalOnly = (
   );
 };
 
-/** The flags a kind has, each false where the compact form leaves it out. */
+/**
+ * The flags a kind always has, each false where the compact form leaves it
+ * out. A format is one only where it is set, so it stays in `rest`.
+ */
 const flagsOf = (
   kind: string,
   { trim, email, integer }: Record<string, unknown>
@@ -445,7 +459,15 @@ const count = { type: "integer", minimum: 0 } as const;
 
 /** What each kind adds, as JSON Schema properties. */
 const kindProperties: Readonly<Record<string, Record<string, unknown>>> = {
-  string: { trim: flag, email: flag, min: count, max: count },
+  string: {
+    trim: flag,
+    email: flag,
+    datetime: flag,
+    date: flag,
+    url: flag,
+    min: count,
+    max: count,
+  },
   number: { integer: flag, min: { type: "number" }, max: { type: "number" } },
   literal: { value: { type: ["null", "boolean", "number", "string"] } },
   enum: {

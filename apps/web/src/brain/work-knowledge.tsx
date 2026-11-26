@@ -407,11 +407,9 @@ export const WorkKnowledgeTab = ({ work }: { work: string }) => {
   if (loaded.state !== "ready") {
     return (
       <NotLoadedState
-        again={() => {
+        reread={async () => {
           // What was read stays until the new read lands.
-          void (async () => {
-            setLoaded(await readWork());
-          })();
+          setLoaded(await readWork());
         }}
         page={loaded}
       />

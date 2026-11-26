@@ -1,3 +1,4 @@
+import { catalogSourceSchema } from "@grasp-os/shared/connect";
 import type {
   CatalogAuth,
   CatalogGroup,
@@ -10,6 +11,8 @@ import type {
   ConnectionWorkflow,
   ConnectionWorkflows,
 } from "@grasp-os/shared/workflows";
+
+import { matchedDescriptionOf } from "./native-descriptions.ts";
 
 // Integrations, as the prototype lists them (`routes/integrations`): every
 // app Grasp can work in, one per catalog entry, each with the connections
@@ -24,22 +27,29 @@ export interface Integration {
   /** `source:id`, as the address names it. */
   key: string;
   source: CatalogSource;
-  /** A native provider (`microsoft`), or a Composio toolkit's slug. */
+  /** A native provider (`microsoft`), a Composio toolkit's slug, or a connector's ID. */
   id: string;
   name: string;
   categories: string[];
   /** Which of Grasp's kinds of app it is; `Other` where the catalog doesn't list it. */
   group: CatalogGroup;
-  /** What it is for, in a sentence, where the catalog says. */
+  /** What it is for, in a sentence, as the catalog sends it: none for a native one (`descriptionOf`). */
   description: string | null;
   /** Whose sign-in app connecting it takes; unknown where the catalog doesn't list it. */
   auth: CatalogAuth | undefined;
+  /** The host of a connector's sign-in page, as the catalog sends it (`CatalogEntry.signInHost`). */
+  signInHost?: string;
   /** Where core serves its logo, or `null`: its first letter stands in. */
   logo: string | null;
-  /** How many tools it has; unknown where the catalog doesn't list it. */
+  /** How many tools it has; unknown where the catalog doesn't list it, or doesn't count them (a connector's). */
   toolCount: number | undefined;
   /** Whether people are offered it; an entry the catalog doesn't list counts as not. */
   offered: boolean;
+  /**
+   * For a server inside the company's own network, the one address it is
+   * reached at through the company network: only admins connect it, shared.
+   */
+  companyNetwork?: string;
   /** Whether the catalog lists it to this person. */
   listed: boolean;
   /** Its connections this person can see, newest first. */
@@ -65,15 +75,11 @@ export const parseIntegrationKey = (
   key: string
 ): { source: CatalogSource; id: string } | undefined => {
   const [source, id, ...rest] = key.split(":");
-  if (
-    (source !== "native" && source !== "composio") ||
-    id === undefined ||
-    id === "" ||
-    rest.length > 0
-  ) {
+  const parsed = catalogSourceSchema.safeParse(source);
+  if (!parsed.success || id === undefined || id === "" || rest.length > 0) {
     return undefined;
   }
-  return { source, id };
+  return { source: parsed.data, id };
 };
 
 /**
@@ -122,9 +128,13 @@ export const integrationsOf = (
     group: entry.group,
     description: entry.description,
     auth: entry.auth,
+    ...(entry.signInHost === undefined ? {} : { signInHost: entry.signInHost }),
     logo: entry.logo,
-    toolCount: entry.toolCount,
+    toolCount: entry.toolCount ?? undefined,
     offered: entry.offered,
+    ...(entry.companyNetwork === undefined
+      ? {}
+      : { companyNetwork: entry.companyNetwork }),
     listed: true,
     connections: of(entry.source, entry.id),
   }));
@@ -306,8 +316,8 @@ export const find = (
   const byUse = integrations.filter(
     (integration) =>
       !named.has(integration) &&
-      [...integration.categories, integration.description ?? ""].some((text) =>
-        text.toLocaleLowerCase().includes(needle)
+      [...integration.categories, matchedDescriptionOf(integration)].some(
+        (text) => text.toLocaleLowerCase().includes(needle)
       )
   );
   const starts = (integration: Integration): number =>

@@ -52,6 +52,7 @@ import {
   choiceBoxStyles,
   focusRingInset,
   scrollbarHidden,
+  tapTargetAfter,
   visuallyHidden,
 } from "../../lib/styles";
 import {
@@ -285,17 +286,9 @@ const styles = stylex.create({
       ":focus-visible": `calc(-1 * ${size.ringWidth} - ${space[1]})`,
     },
   },
-  // On a touch screen the button takes a finger's reach, a little taller than the head it is drawn
-  // in, which keeps its height.
-  sortsReach: {
-    position: "relative",
-    "::after": {
-      content: { default: null, [media.pointerCoarse]: '""' },
-      position: "absolute",
-      insetInline: 0,
-      insetBlock: `calc((${size.dataGridHeadHeight} - ${size.hairline} - ${size.tapTarget}) / 2)`,
-    },
-  },
+  // On a touch screen the button takes a finger's reach (tapTargetAfter), a little taller than the
+  // head it is drawn in, which keeps its height.
+  sortsReach: { position: "relative" },
   sorted: { color: colors.foreground },
   nameEnd: { justifyContent: "flex-end" },
   nameCentre: { justifyContent: "center", paddingInline: space[2] },
@@ -1545,6 +1538,7 @@ const HeadName = <Row,>({
         place,
         styles.sorts,
         styles.sortsReach,
+        tapTargetAfter,
         sort !== undefined && styles.sorted,
         focusRingInset,
         styles.sortsRing

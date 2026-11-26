@@ -1,3 +1,4 @@
+import { I18nProvider } from "@grasp-os/ui/lib/i18n";
 import {
   createRootRouteWithContext,
   HeadContent,
@@ -15,6 +16,21 @@ import { fetchClientGrid } from "../clients/functions.ts";
 
 import styles from "../styles.css?url";
 
+/**
+ * Damsko's styles in development (packages/ui is StyleX): its Vite plugin
+ * serves them at an address of its own, with a script that fetches them
+ * again after an edit, and adds both to an `index.html`, which the admin,
+ * whose document is `RootDocument`, has none of; so they are added here,
+ * as the plugin's README says for such a shell. A build joins them to
+ * styles.css.
+ */
+const stylexDev = import.meta.env.DEV
+  ? {
+      links: [{ rel: "stylesheet", href: "/virtual:stylex.css" }],
+      scripts: [{ type: "module", src: "/@id/virtual:stylex:runtime" }],
+    }
+  : { links: [], scripts: [] };
+
 /** What every route's loader is given (src/router.tsx). */
 interface AdminContext {
   /** The router's own reads of clients' cores. */
@@ -23,14 +39,23 @@ interface AdminContext {
   shown: () => string | undefined;
 }
 
-/** The document every page renders in. */
+/**
+ * The document every page renders in, in Damsko's Evergreen theme, as
+ * apps/web's. What Damsko's parts say themselves ("Close", "Show more")
+ * is its own English, as the admin is English only; their numbers and
+ * dates are in British English, as the admin's own (src/admin/words.ts),
+ * never the browser's language.
+ */
 const RootDocument = ({ children }: { children: ReactNode }) => (
-  <html lang="en">
+  // Marked before React wakes, by public/theme.js (light or dark) and by
+  // Damsko, which notes on the root how focus last came (lib/styles.ts):
+  // neither is a fault in the document the Worker sent.
+  <html data-theme="evergreen" lang="en" suppressHydrationWarning>
     <head>
       <HeadContent />
     </head>
     <body>
-      {children}
+      <I18nProvider locale="en-GB">{children}</I18nProvider>
       <Scripts />
     </body>
   </html>
@@ -88,10 +113,10 @@ export const Route = createRootRouteWithContext<AdminContext>()({
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Grasp admin" },
     ],
-    links: [{ rel: "stylesheet", href: styles }],
+    links: [{ rel: "stylesheet", href: styles }, ...stylexDev.links],
     // Light or dark as the system has it, set before first paint
     // (public/theme.js, the admin's own), so the admin never flashes light.
-    scripts: [{ src: "/theme.js" }],
+    scripts: [{ src: "/theme.js" }, ...stylexDev.scripts],
   }),
   shellComponent: RootDocument,
   // The document's body until the frame's records are in: also what the

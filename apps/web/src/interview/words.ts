@@ -49,15 +49,16 @@ export const useLoopWords = (locale: Locale): LoopWords => {
   const { t } = useLingui();
   const intros: Record<ReadBackGroup, [string, string]> = {
     you: [
-      t`Before the work: what you told me about AI.`,
+      t`Last: what you told me about AI.`,
       t`More of what you told me about AI.`,
     ],
-    steps: [t`First, the steps.`, t`More of the steps.`],
+    tasks: [t`Your recurring work.`, t`More of your recurring work.`],
+    steps: [t`The steps.`, t`More of the steps.`],
     differently: [
       t`Then, when it goes differently.`,
       t`More of when it goes differently.`,
     ],
-    result: [t`Last, the numbers and the result.`, t`And the rest.`],
+    result: [t`Then, the numbers and the result.`, t`And the rest.`],
     together: [t`This is what I wrote down.`, t`And the rest.`],
   };
   return {
@@ -93,6 +94,7 @@ export const useInterviewWords = () => {
   const { t } = useLingui();
   const phase: Record<InterviewPhase, string> = {
     open: t`Hello`,
+    week: t`Your week`,
     you: t`You and AI`,
     anchor: t`One real case`,
     story: t`Your story`,
@@ -121,6 +123,7 @@ export const useInterviewWords = () => {
     next: t`Next person`,
     work: t`Work of the team`,
     who: t`Who does it`,
+    task: t`Recurring work`,
   };
   return { phase, tag };
 };

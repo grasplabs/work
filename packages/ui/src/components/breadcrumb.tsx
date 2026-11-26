@@ -49,7 +49,7 @@ import {
   EllipsisIcon,
   Icon,
 } from "../lib/icons";
-import { focusRingText } from "../lib/styles";
+import { focusRingText, tapTargetAfter } from "../lib/styles";
 import {
   duration,
   font,
@@ -168,7 +168,6 @@ export interface BreadcrumbEllipsisProps {
 }
 
 const PHONE = media.maxSm;
-const COARSE = media.pointerCoarse;
 
 // A link stands a little wider than its words, into the gap round it, so its ring keeps off the
 // first and last letter as it does off the line above and below.
@@ -239,19 +238,9 @@ const styles = stylex.create({
     transitionProperty: "color",
     transitionDuration: motionVars.mark,
     transitionTimingFunction: duration.ease,
-    // An unseen area makes the link 24px tall, and 44px each way on a touch screen.
-    "::after": {
-      content: '""',
-      position: "absolute",
-      insetInline: {
-        default: 0,
-        [COARSE]: `min(0px, calc((100% - ${size.tapTarget}) / 2))`,
-      },
-      insetBlock: {
-        default: `calc((${font.textSmLine} - ${space["6"]}) / 2)`,
-        [COARSE]: `calc((${font.textSmLine} - ${size.tapTarget}) / 2)`,
-      },
-    },
+    // An unseen area makes the link 24px tall, and 44px each way on a touch screen
+    // (tapTargetAfter).
+    "--tap-rest-block": `calc((${font.textSmLine} - ${space["6"]}) / 2)`,
   },
   // A step drawn as a button: none of a button's own look, so it reads as the links beside it.
   press: {
@@ -490,7 +479,7 @@ export const BreadcrumbLink = ({
     return (
       <span
         data-slot="breadcrumb-link"
-        {...stylex.props(styles.link, styles.end, style)}
+        {...stylex.props(styles.link, tapTargetAfter, styles.end, style)}
       >
         {content}
       </span>
@@ -508,6 +497,7 @@ export const BreadcrumbLink = ({
       "data-slot": "breadcrumb-link",
       ...stylex.props(
         styles.link,
+        tapTargetAfter,
         own !== undefined && styles.press,
         focusRingText,
         style

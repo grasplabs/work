@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { toolClasses } from "./connect.ts";
+import type { ToolClass } from "./connect.ts";
 import { fromBase64Url, toBase64Url } from "./encoding.ts";
 import { defineErrorFamily } from "./errors.ts";
 import {
@@ -187,6 +189,14 @@ export const capabilityClaimsSchema = z.strictObject({
    * may name only these. Absent is the whole app.
    */
   resources: z.array(identifierSchema).max(50).optional(),
+  /**
+   * Only for a chat's agent on a company app: the class core let the call
+   * through as (core's tool-classes.ts). Connect classes a connector's
+   * tool again from its server's list as it is at the call, and refuses
+   * the call (`connect.class_changed`) when the two differ; a Composio
+   * tool's class is the one core read.
+   */
+  toolClass: z.enum(toolClasses).optional(),
 });
 export type CapabilityClaims = z.infer<typeof capabilityClaimsSchema>;
 
@@ -227,6 +237,8 @@ export interface CapabilityScope extends CapabilityCall {
   mailboxes?: readonly string[] | undefined;
   /** Only for a chat's agent: `CapabilityClaims.resources`. */
   resources?: readonly string[] | undefined;
+  /** Only for a chat's agent: `CapabilityClaims.toolClass`. */
+  toolClass?: ToolClass | undefined;
 }
 
 /** Why connect refuses a call before looking at it any further. */
@@ -298,6 +310,7 @@ export const signCapability = async (
     ...(scope.resources === undefined
       ? {}
       : { resources: [...scope.resources] }),
+    ...(scope.toolClass === undefined ? {} : { toolClass: scope.toolClass }),
   };
   capabilityClaimsSchema.parse(claims);
   const payload = toBase64Url(new TextEncoder().encode(JSON.stringify(claims)));
@@ -476,13 +489,25 @@ export const modelGrantClaimsSchema = z.strictObject({
    * request to the provider within its few seconds.
    */
   body: z.string().regex(/^[\da-f]{64}$/u),
+  /**
+   * The request's method where it isn't POST: reading (GET) or closing
+   * (DELETE) a live voice session, whose body is empty. Absent for every
+   * other request, which is a POST.
+   */
+  method: z.enum(["GET", "DELETE"]).optional(),
 });
 export type ModelGrantClaims = z.infer<typeof modelGrantClaimsSchema>;
 
 /** What core signs a model grant for. */
 export type ModelGrantScope = Pick<
   ModelGrantClaims,
-  "credential" | "provider" | "host" | "request" | "notAfter" | "body"
+  | "credential"
+  | "provider"
+  | "host"
+  | "request"
+  | "notAfter"
+  | "body"
+  | "method"
 >;
 
 /** Makes the grant for one provider request, valid to start for {@link capabilityTtlMs}. */
@@ -503,6 +528,7 @@ export const signModelGrant = async (
     host: scope.host.toLowerCase(),
     request: scope.request,
     body: scope.body,
+    ...(scope.method === undefined ? {} : { method: scope.method }),
   });
   const payload = toBase64Url(new TextEncoder().encode(JSON.stringify(claims)));
   const mac = await crypto.subtle.sign(
