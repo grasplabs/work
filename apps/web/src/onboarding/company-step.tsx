@@ -24,7 +24,7 @@ import { Separator } from "@grasp-os/ui/components/separator";
 import { Text } from "@grasp-os/ui/components/text";
 import { CircleCheckIcon, FileIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
-import { plural } from "@lingui/core/macro";
+import { msg, plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useNavigate, useSearch } from "@tanstack/react-router";
@@ -56,6 +56,7 @@ import {
   useRefresh,
 } from "./step-parts.ts";
 import type { StepProps } from "./step-parts.ts";
+import { useLeaving } from "./step-voice.tsx";
 import { SupportLink } from "./support-link.tsx";
 import { XlsxError, xlsxMost, xlsxRows } from "./xlsx.ts";
 
@@ -503,6 +504,15 @@ const CompanyError = ({
   );
 };
 
+/** What Stephen says of the company as the next step arrives: known by now, or left for later. */
+const companyLeft = {
+  known: msg`Good, now I know who works where.`,
+  later: msg`No staff list for now, that’s fine. We’ll sort it out together later.`,
+};
+
+const companyLeftAs = (known: boolean) =>
+  known ? companyLeft.known : companyLeft.later;
+
 export const CompanyStep = (props: StepProps) => {
   const { t } = useLingui();
   const core = useCore();
@@ -523,6 +533,9 @@ export const CompanyStep = (props: StepProps) => {
   const [notConnected, setNotConnected] = useNotConnected(suites);
   const people = roster?.people.length ?? 0;
   const teams = roster?.teams.length ?? 0;
+  // Connected or shared, he has already said what he found (spokenFound): as the next step
+  // arrives, a word that it's in; skipped, that it can wait.
+  useLeaving(companyLeftAs(roster !== null));
   const noTeam = t({
     message: "Other",
     context: "the team for people a staff list gives no team",

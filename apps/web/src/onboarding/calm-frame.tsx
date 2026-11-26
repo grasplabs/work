@@ -47,7 +47,11 @@ import { fromTheTop } from "./field/poses.ts";
 import { StephenField } from "./field/stephen-field.tsx";
 import { LanguagePicker } from "./language-picker.tsx";
 import { StartOver } from "./start-over.tsx";
-import { useRememberLines } from "./step-voice.tsx";
+import {
+  answeredLately,
+  useRememberLines,
+  useStepTalk,
+} from "./step-voice.tsx";
 
 // The frame of the setup and of the page a member waits on: full screen,
 // outside the app. One quiet bar on top, Grasp's mark at its start, the
@@ -533,10 +537,13 @@ const saidOnArrival = new Set<string>();
  * Stephen says `line` as its step arrives, after `delay` ms: once in a visit, not again on the way
  * back. It is fetched from the moment the step opens (if the step before hasn't already), so he
  * starts on time, and remembered as what the step says, to be fetched ahead the next time through
- * (step-voice.tsx).
+ * (step-voice.tsx). Come on from the step before, he first answers the choice made there; and
+ * when he has just answered something on this step (something gone wrong), the line waits for him
+ * to finish it.
  */
 const useSayOnce = (line: string, delay: number, when: boolean): void => {
   const remember = useRememberLines();
+  const talk = useStepTalk();
   useEffect(() => {
     const due = when && !saidOnArrival.has(line);
     if (due) {
@@ -545,14 +552,22 @@ const useSayOnce = (line: string, delay: number, when: boolean): void => {
     const id = due
       ? window.setTimeout(() => {
           saidOnArrival.add(line);
-          speak(line);
+          if (answeredLately()) {
+            speak(line, { after: true });
+          } else {
+            const first = talk?.arriving() ?? null;
+            if (first !== null) {
+              speak(first);
+            }
+            speak(line, { after: first !== null });
+          }
           remember?.([line]);
         }, delay)
       : undefined;
     return () => {
       window.clearTimeout(id);
     };
-  }, [line, delay, when, remember]);
+  }, [line, delay, when, remember, talk]);
 };
 
 /**
