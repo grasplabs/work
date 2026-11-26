@@ -142,6 +142,9 @@ const useConnect = (listing: AiProvidersListing | undefined) => {
   };
 };
 
+/** The id of the key's form, which the step's Continue sends. */
+export const aiKeyForm = "ai-key";
+
 /** The step's two ways: our own system (Grasp's AI, on Grasp's key) or a key of their own. */
 export type AiWay = "grasp" | "own";
 
@@ -191,14 +194,18 @@ export const AiChoice = ({
   way,
   onWay,
   onReady,
+  onConnecting,
 }: {
   ai: AiReadiness | null;
   way: AiWay;
   onWay: (way: AiWay) => void;
   onReady: () => void;
+  /** While a key is tested: the step's Continue, which sent it, shows it. */
+  onConnecting: (connecting: boolean) => void;
 }) => {
   const { t } = useLingui();
   const router = useRouter();
+  const { run } = useCoreAction();
   const listing = ai?.listing;
   const connect = useConnect(listing);
   if (listing === undefined) {
@@ -231,13 +238,58 @@ export const AiChoice = ({
       bare
       columns={2}
       connected={connected}
+      // Sent by the step's own Continue in the foot, not a Connect of the block's.
+      formId={aiKeyForm}
       labels={{
+        change: t({ context: "button", message: "Change" }),
+        connect: t`Connect`,
+        connectName: (name) => t`Connect ${name}`,
+        connected: t`Connected`,
+        connecting: t`Connecting`,
+        disconnect: t`Disconnect`,
+        disconnectTitle: (name) => t`Disconnect ${name}?`,
+        disconnecting: t`Disconnecting`,
+        keep: t`Keep it`,
+        key: t`Key`,
+        keyLine: (last, region) =>
+          region === undefined ? t`Key …${last}` : t`Key …${last} · ${region}`,
+        keyMissing: t`Paste the key.`,
         keyNote: t`We store it sealed. You’ll only see its last four characters again.`,
+        notConnected: t`Not connected`,
+        notDisconnected: t`Couldn’t disconnect`,
+        replaceKey: t`Replace key`,
       }}
+      disconnectDetail={t`Grasp stops using it and its key is removed. You can choose another way right after.`}
       onConnect={async (choice) => {
-        await connect(choice);
-        await router.invalidate({ sync: true });
+        onConnecting(true);
+        // The block says a refusal in the provider's words: thrown on, once Continue is free again.
+        const failed = await connect(choice).then(
+          () => null,
+          (error: unknown) =>
+            error instanceof Error ? error : new Error(String(error))
+        );
+        if (failed === null) {
+          await router.invalidate({ sync: true });
+        }
+        onConnecting(false);
+        if (failed !== null) {
+          throw failed;
+        }
         onReady();
+      }}
+      // Removed, they choose again: another provider, or our own system above.
+      onDisconnect={async () => {
+        if (own === undefined) {
+          return;
+        }
+        const removed = await run(async (session) => {
+          await session.aiProviders.remove(own.provider);
+          return true;
+        });
+        if (removed !== true) {
+          throw new Error(t`Couldn’t disconnect`);
+        }
+        await router.invalidate({ sync: true });
       }}
       providers={providers}
       title={t`Your own key`}
