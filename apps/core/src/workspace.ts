@@ -3057,7 +3057,9 @@ export class Workspace extends DurableObject<Env> {
   /**
    * Takes the question `send` was asked, and tells `started` once it is
    * taken, or why it wasn't: queued into the chat's turn while one runs
-   * here (`#queueInto`), else asked in a turn of its own (`#sentTurns`),
+   * here (`#queueInto`), or into the one this object's restart left
+   * running in its ChatSession (`#queueIntoLeft`), else asked in a turn of
+   * its own (`#sentTurns`),
    * as it is once the turn it was meant for takes no more. Whether a turn
    * runs is decided with nothing awaited before the new one claims the
    * chat, so of two questions at once one starts it and the other queues.
@@ -3069,17 +3071,41 @@ export class Workspace extends DurableObject<Env> {
   ): Promise<void> {
     // The question's own ID in its turn: the same however often it is sent there.
     const id = crypto.randomUUID();
+    // Whether the chat's ChatSession was asked for a turn this object's
+    // restart left running there: once, and only when the chat shows one.
+    let askedLeft = false;
     try {
       for (;;) {
         const live = this.#turns.get(chat.id);
+        if (live === undefined && !askedLeft && this.#isRunning(chat.id)) {
+          askedLeft = true;
+          // oxlint-disable-next-line no-await-in-loop -- once, see above
+          if (await this.#queueIntoLeft(chat, id, question)) {
+            started.resolve(true);
+            return;
+          }
+          // A turn may have started here meanwhile: looked for again.
+          continue;
+        }
         if (live === undefined) {
           const ended = this.#sentTurns(chat, question, started);
           this.#sent.add(ended);
           void this.#forget(ended);
           return;
         }
-        // oxlint-disable-next-line no-await-in-loop -- once more only when that turn ended meanwhile
-        if (await this.#queueInto(chat, live, id, question)) {
+        if (
+          // oxlint-disable-next-line no-await-in-loop -- once more only when that turn ended meanwhile
+          await this.#queueInto(
+            chat,
+            {
+              id: live.id,
+              agentId: live.agentId,
+              underWay: live.underWay.promise,
+            },
+            id,
+            question
+          )
+        ) {
           started.resolve(true);
           return;
         }
@@ -3100,13 +3126,14 @@ export class Workspace extends DurableObject<Env> {
    * same model. Checked as a question of a turn of its own is, for what
    * still holds of it (its person, the chat's room, its files). One that
    * addresses another agent, which answers in a turn of its own, is
-   * refused as before (`agent.busy`), as is one sent while a turn nobody
-   * asked for runs (a wake), which only reads, so never answers in the
-   * person's own scope. False when the turn takes no more.
+   * refused as before (`agent.busy`), as the turn's ChatSession refuses
+   * one sent while a turn nobody asked for runs (a wake), which only
+   * reads, so never answers in the person's own scope. False when the
+   * turn takes no more.
    */
   async #queueInto(
     chat: Chat,
-    live: LiveTurn,
+    live: Pick<LiveTurn, "id" | "agentId"> & { underWay: Promise<boolean> },
     id: string,
     question: Question
   ): Promise<boolean> {
@@ -3123,13 +3150,12 @@ export class Workspace extends DurableObject<Env> {
       followUp,
     } = parsed.data;
     if (
-      live.unattended ||
       followUp === true ||
       mentions?.some(({ kind }) => kind === "agent") === true
     ) {
       throw agentErrors.create("agent.busy");
     }
-    if (!(await live.underWay.promise)) {
+    if (!(await live.underWay)) {
       return false;
     }
     if (this.#deleting.has(chat.id)) {
@@ -3153,6 +3179,36 @@ export class Workspace extends DurableObject<Env> {
     return await this.#toSession(
       chat.id,
       async (session) => await session.queueQuestion(live.id, queued)
+    );
+  }
+
+  /**
+   * Queues `question` into the chat's turn that runs in its ChatSession
+   * though this object holds none (`#turns`): one this object's restart
+   * left there, which goes on answering. As `#queueInto` does, the turn
+   * under way and running as the chat's agent, which it became as the turn
+   * began. False when there is none, or it takes no more: the question is
+   * then asked in a turn of its own, refused while that one settles
+   * (`agent.busy`), as before.
+   */
+  async #queueIntoLeft(
+    chat: Chat,
+    id: string,
+    question: Question
+  ): Promise<boolean> {
+    const turnId = await this.#activeTurn(chat.id);
+    if (turnId === undefined || this.#turns.has(chat.id)) {
+      return false;
+    }
+    return await this.#queueInto(
+      chat,
+      {
+        id: turnId,
+        agentId: this.#chat(chat.id).agentId,
+        underWay: Promise.resolve(true),
+      },
+      id,
+      question
     );
   }
 
