@@ -19,7 +19,7 @@
 
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { ClipboardEvent, ReactNode } from "react";
 
 import {
   AlertDialog,
@@ -45,8 +45,13 @@ import {
   FieldError,
   FieldLabel,
 } from "../../components/field";
-import { Form, FormFooter } from "../../components/form";
-import { Input, SecretInput } from "../../components/input";
+import { Form } from "../../components/form";
+import { Input } from "../../components/input";
+import {
+  InputGroup,
+  InputGroupButton,
+  InputGroupInput,
+} from "../../components/input-group";
 import {
   Item,
   ItemActions,
@@ -194,10 +199,7 @@ export interface ConnectApiKeyProps {
   onRefused?: (reason: string) => void;
   /** Disconnects the connected provider, once asked and answered. Return a Promise to wait on it. */
   onDisconnect?: () => unknown;
-  /**
-   * Its form's id, for a page that sends it with a button of its own (a setup's Continue, with
-   * `form` set to it): the form then shows no Connect of its own.
-   */
+  /** Its form's id, for a page that also sends it with a button of its own (a setup's Continue, with `form` set to it). */
   formId?: string;
   /** What disconnecting loses, in the question before it. */
   disconnectDetail?: ReactNode;
@@ -257,6 +259,22 @@ const Logo = ({ provider }: { provider: ConnectApiKeyProvider }) => (
     <BrandIcon logo={provider.logo} name={provider.name} decorative />
   </ItemMedia>
 );
+
+/** Pastes the clipboard's key whole, the spaces and line breaks round it taken off. */
+const pasteTrimmed = (event: ClipboardEvent<HTMLInputElement>) => {
+  const pasted = event.clipboardData.getData("text");
+  const trimmed = pasted.trim();
+  if (trimmed === pasted) {
+    return;
+  }
+  event.preventDefault();
+  const field = event.currentTarget;
+  const start = field.selectionStart ?? field.value.length;
+  const end = field.selectionEnd ?? field.value.length;
+  field.setRangeText(trimmed, start, end, "end");
+  // Told as typing is, so the form hears it.
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+};
 
 /** The form: the chosen provider with Change, its address when it asks, its key, and Connect. */
 const ConnectForm = ({
@@ -363,30 +381,38 @@ const ConnectForm = ({
         {/* Invalid only when refused: left out otherwise, so the browser's own check still says a missing key. */}
         <Field name="key" {...(refused === null ? {} : { invalid: true })}>
           <FieldLabel>{words.key}</FieldLabel>
-          <SecretInput
-            required
-            readOnly={connect.status === "loading"}
-            placeholder={provider.placeholder}
-            onValueChange={() => {
-              setRefused(null);
-            }}
-          />
-          <FieldDescription>{words.keyNote}</FieldDescription>
-          <FieldError match="valueMissing">{words.keyMissing}</FieldError>
-          {refused !== null && <FieldError match>{refused}</FieldError>}
-        </Field>
-        {formId === undefined && (
-          <FormFooter align="start">
-            <Button
+          {/* Connect inside the key's field, at its end: the form keeps no button row under it. */}
+          <InputGroup>
+            <InputGroupInput
+              type="password"
+              required
+              dir="ltr"
+              autoComplete="off"
+              spellCheck={false}
+              data-agent-secret=""
+              data-1p-ignore=""
+              data-lpignore="true"
+              readOnly={connect.status === "loading"}
+              placeholder={provider.placeholder}
+              onPaste={pasteTrimmed}
+              onValueChange={() => {
+                setRefused(null);
+              }}
+            />
+            <InputGroupButton
               type="submit"
+              variant="secondary"
               status={connect.status}
               successText={words.connected}
               errorText={words.notConnected}
             >
               {words.connect}
-            </Button>
-          </FormFooter>
-        )}
+            </InputGroupButton>
+          </InputGroup>
+          <FieldDescription>{words.keyNote}</FieldDescription>
+          <FieldError match="valueMissing">{words.keyMissing}</FieldError>
+          {refused !== null && <FieldError match>{refused}</FieldError>}
+        </Field>
       </div>
     </Form>
   );
@@ -532,16 +558,15 @@ export const ConnectApiKey = ({
       buttons?.[next]?.focus();
     }
   }, [view]);
-  // Change: back to the tile it came from; while a key is replaced, back to Replace key.
   // The tiles first, then the lines of those that run at an address of your own: the order the
   // buttons stand in.
   const tiles = providers.filter((provider) => provider.address !== true);
   const lines = providers.filter((provider) => provider.address === true);
   const placeOf = (id: string | null) =>
     [...tiles, ...lines].findIndex((provider) => provider.id === id);
+  // Change: back to every provider, also while a key is replaced, so another one can be chosen.
   const change = () => {
-    focusNext.current = replacing ? "replace" : placeOf(chosen);
-    setReplacing(false);
+    focusNext.current = placeOf(chosen);
     setChosen(null);
   };
   const views = (
