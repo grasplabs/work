@@ -494,7 +494,12 @@ const useClock = (progress: InterviewProgress, asking: boolean) => {
 
 /** The transcript goes with the conversation, beside the stage or in its place; Escape puts it away. */
 const useTranscript = (running: boolean) => {
-  const [transcript, setTranscript] = useState(false);
+  // Open from the start where it has room beside the stage (the owner's ask, 2026-11-26); on a
+  // narrow window it would take the stage's place, so there it waits to be asked for.
+  const [transcript, setTranscript] = useState(
+    () =>
+      typeof window !== "undefined" && window.matchMedia(besideQuery).matches
+  );
   const floating = transcript && running;
   const besideStage = useSyncExternalStore(
     onBeside,
@@ -647,8 +652,8 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
     actions = (
       <TalkActions
         onPause={() => {
+          // The transcript stays as it was: it is there again once they carry on.
           pauseNow();
-          setTranscript(false);
           setStopped(true);
         }}
         onTranscript={() => {

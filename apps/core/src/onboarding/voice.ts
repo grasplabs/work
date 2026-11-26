@@ -34,7 +34,7 @@ import { z } from "zod";
 import { derivedHmacKey } from "../derived-keys.ts";
 import { errorResponse } from "../errors.ts";
 import { models } from "../models.ts";
-import { platformAi } from "../platform-ai.ts";
+import { liveInterviewOf, platformAi } from "../platform-ai.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { interviewCaller } from "./interview-caller.ts";
 import {
@@ -622,15 +622,6 @@ interface Asked {
   requestId: string;
   ctx: Pick<ExecutionContext, "waitUntil">;
 }
-
-/** Where a live interview is held here: as the deployment says, or as `platformAi` does. */
-const liveInterviewOf = (
-  env: Pick<Env, "INTERVIEW_LIVE_VOICE">
-): "mistral" | "elevenlabs" =>
-  env.INTERVIEW_LIVE_VOICE === "mistral" ||
-  env.INTERVIEW_LIVE_VOICE === "elevenlabs"
-    ? env.INTERVIEW_LIVE_VOICE
-    : platformAi.liveInterview;
 
 /** What a conversation with the agent is opened with: all decided before it is asked for. */
 interface AgentOpening {

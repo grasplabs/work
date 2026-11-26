@@ -1598,6 +1598,8 @@ let live: Live | null = null;
 let livePass: string | null = null;
 /** What the session heard, kept with its pass, for core to write down from where it reads no transcript of its own. */
 let liveSaid: (() => VoiceLine[] | null) | null = null;
+/** Our own ear beside the session, for their words as they talk (`overhearLive`). */
+let liveEar: Ear | null = null;
 /** The pass of the session left last: a new one closes it, should it still be open. */
 let lastPass: string | null = null;
 /** How many of their answers in the session are written down. */
@@ -1870,6 +1872,8 @@ const liveSegment = ({ id, from, text, final }: LiveSegment): void => {
           }
         }, restMs);
       }
+    } else if (heardText === "") {
+      liveHeard.delete(id);
     } else {
       liveHeard.set(id, heardText);
     }
@@ -1952,6 +1956,8 @@ const livePart = (part: InterviewPhase): void => {
  */
 const leaveLive = async ({ quick = false } = {}): Promise<void> => {
   const session = live;
+  liveEar?.close();
+  liveEar = null;
   // Nothing more of him is heard from now: what is still noted below takes a moment.
   session?.hush(true);
   void session?.setMuted(true);
@@ -1986,6 +1992,24 @@ const leaveLive = async ({ quick = false } = {}): Promise<void> => {
   livePass = null;
   liveSaid = null;
   await session.close();
+};
+
+/**
+ * The agent summed up what they said, heard whether it is right and said
+ * goodbye, then hung up: the session is left, what was said written down,
+ * and it is agreed as it stands. No second summary is read back here.
+ */
+const toEnd = async (): Promise<void> => {
+  const count = liveCount;
+  show("thinking");
+  await leaveLive();
+  if (!on || liveCount !== count + 1) {
+    return;
+  }
+  rest();
+  show("idle", { line: "", said: null, sign: null });
+  update(approved);
+  approveWhenKept();
 };
 
 /** The read-back, after his line that says so: the session is left, and he reads back here. */
@@ -2028,6 +2052,46 @@ const eventOf = (
     return opening;
   }
   return switched ? "language" : "resume";
+};
+
+/**
+ * Our own ear beside a session that only says their words once their turn
+ * is over (the ElevenLabs agent): what it hears while they talk stands over
+ * the box at once, until the session's words for that turn come. It only
+ * shows: the session hears their answer.
+ */
+const overhearLive = async (session: Live, count: number): Promise<void> => {
+  const { overheard } = session;
+  const link = linkNow();
+  if (overheard === null || words === null || link === null) {
+    return;
+  }
+  const opened = await openEar({
+    locale: words.locale,
+    link,
+    // While he speaks, only a voice that stays is theirs: his own, from the speaker, never.
+    wary: () => state.doing === "speaking",
+  });
+  if (opened === null) {
+    return;
+  }
+  if (!on || liveCount !== count || live !== session) {
+    opened.close();
+    return;
+  }
+  liveEar = opened;
+  opened.on((event) => {
+    if (liveEar !== opened) {
+      return;
+    }
+    if (event.type === "partial") {
+      overheard(event.stretch, event.text, false);
+    } else if (event.type === "final") {
+      overheard(event.stretch, event.text, true);
+    } else if (event.type === "unheard") {
+      overheard(event.stretch, "", true);
+    }
+  });
 };
 
 /**
@@ -2092,8 +2156,8 @@ const goLive = async (): Promise<boolean> => {
       },
       finished: () => {
         if (liveCount === count && on) {
-          // He said goodbye and hung up: what was said is written down, and the read-back is here.
-          void toReadBack();
+          // He summed it up, they agreed and he said goodbye: what was said is written down, and that is the end.
+          void toEnd();
         }
       },
       failed: () => {
@@ -2127,8 +2191,13 @@ const goLive = async (): Promise<boolean> => {
   liveMuting = watchMute(() => {
     void muteQuietly(joined, micMuted());
   });
+  void overhearLive(joined, count);
   return true;
 };
+
+/** How loud he and they are in the session now, 0 to 1: nothing outside one. */
+export const liveLevels = (): { his: number; theirs: number } =>
+  live?.levels() ?? { his: 0, theirs: 0 };
 
 /** What they typed is their answer: typing over him stops him at once. */
 export const sendTyped = (text: string): void => {

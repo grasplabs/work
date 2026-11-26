@@ -465,11 +465,16 @@ const say = async ({
   requestId,
   ctx,
 }: Said): Promise<Response> => {
-  // An interview is said with Mistral, an admin's onboarding with
-  // ElevenLabs (platform-ai.ts).
+  // An admin's onboarding is said with ElevenLabs; an interview in the
+  // voice of whoever holds it live, the ElevenLabs agent or Mistral (platform-ai.ts).
   const audience = asked.link === undefined ? "onboarding" : "interview";
-  const model = speechModelOf(audience);
-  const voice = speechOf(audience).voices[asked.speaker];
+  const speech = speechOf(audience, env);
+  const model = speechModelOf(audience, env);
+  const voice = speech.voices[asked.speaker];
+  // An interview's page reads its lines as a stream: Mistral's voice makes one in pieces, as it
+  // goes; any other is made whole, then sent as that stream's one piece and its words.
+  const streamed = asked.stream && audience === "interview";
+  const streams = streamed && speech.provider === "mistral";
   const spoken = spokenOf(asked.text);
   const key: SpokenKey = {
     text: asked.text,
@@ -480,22 +485,19 @@ const say = async ({
   };
   const kept = await keptAnswer(env, key, requestId);
   if (kept !== undefined) {
-    return asked.stream && audience === "interview"
-      ? keptStreamed(kept)
-      : answered(kept);
+    return streamed ? keptStreamed(kept) : answered(kept);
   }
   // Only a new line costs anything, so only a new line counts against a
   // budget.
   if (listener.said >= listener.budget) {
     return refused(429, speechErrors.create("speech.limited"), requestId);
   }
-  // Only an interview's voice makes a line in pieces; any other is answered whole, which the page reads as well.
-  if (asked.stream && audience === "interview") {
+  if (streams) {
     return await sayStreamed({ env, listener, stored, key, requestId, ctx });
   }
-  let speech: Awaited<ReturnType<ReturnType<typeof platformSpeech>["speak"]>>;
+  let said: Awaited<ReturnType<ReturnType<typeof platformSpeech>["speak"]>>;
   try {
-    speech = await platformSpeech(env, {
+    said = await platformSpeech(env, {
       purpose,
       trigger: listener.trigger,
       work: { onboarding: true },
@@ -505,16 +507,16 @@ const say = async ({
     return failed(error, requestId);
   }
   const answer: SpeechAnswer = {
-    audio: toBase64(speech.audio),
-    mime: speech.mime,
-    words: speech.words,
+    audio: toBase64(said.audio),
+    mime: said.mime,
+    words: said.words,
   };
   const body = JSON.stringify(answer);
   await Promise.all([
     keepUnlessErased(env, listener.who, stored, key, body, requestId),
-    countSaid(env, listener, secondsOf(speech.words), requestId),
+    countSaid(env, listener, secondsOf(said.words), requestId),
   ]);
-  return answered(body);
+  return streamed ? keptStreamed(body) : answered(body);
 };
 
 /** `POST /api/speech`: a line said, for someone's interview link or an admin. */

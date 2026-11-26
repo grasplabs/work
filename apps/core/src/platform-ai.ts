@@ -44,6 +44,17 @@ const onboardingVoices = {
 const liveInterview: "elevenlabs" | "mistral" = "elevenlabs";
 
 /**
+ * Stephen's voice in an interview held with the ElevenLabs agent: the
+ * agent's own voice, so the guide before it and anything said outside the
+ * conversation sound like the one who talks with them (the owner's ask,
+ * 2026-11-26). The sample speakers keep the admin's onboarding's.
+ */
+const agentVoices = {
+  ...onboardingVoices,
+  stephen: "cjVigY5qzO86Huf0OWal",
+} as const satisfies Record<Speaker, string>;
+
+/**
  * Each feature's provider and model: OpenAI's GPT-4o Transcribe writes
  * down a recording, and Mistral's Voxtral realtime transcription speech as
  * it is said, live (`liveTranscription`: a dictation, an interview typed
@@ -75,6 +86,12 @@ export const platformAi = {
     provider: "elevenlabs",
     model: "eleven_v4",
     voices: onboardingVoices,
+  },
+  /** An interview's lines while it is held with the ElevenLabs agent: in the agent's voice. */
+  agentSpeech: {
+    provider: "elevenlabs",
+    model: "eleven_v4",
+    voices: agentVoices,
   },
   interview: {
     provider: "mistral",
@@ -110,3 +127,12 @@ export const platformAi = {
 /** Whether `model` is one the interview runs on, as the gateway names it. */
 export const isInterviewModel = (model: string): boolean =>
   model === platformAi.interview.line || model === platformAi.interview.notes;
+
+/** Where a live interview is held here: as the deployment says (`INTERVIEW_LIVE_VOICE`), or as `platformAi` does. */
+export const liveInterviewOf = (
+  env: Pick<Env, "INTERVIEW_LIVE_VOICE"> | undefined
+): "mistral" | "elevenlabs" =>
+  env?.INTERVIEW_LIVE_VOICE === "mistral" ||
+  env?.INTERVIEW_LIVE_VOICE === "elevenlabs"
+    ? env.INTERVIEW_LIVE_VOICE
+    : platformAi.liveInterview;
