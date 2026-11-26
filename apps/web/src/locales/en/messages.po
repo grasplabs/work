@@ -2332,10 +2332,6 @@ msgstr "Add a fallback"
 msgid "Add a goal"
 msgstr "Add a goal"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Add a group"
-msgstr "Add a group"
-
 #: src/settings/workspace-name.tsx
 msgid "Add a logo"
 msgstr "Add a logo"
@@ -3922,7 +3918,6 @@ msgstr "Bound to"
 #: src/brain/brain-section.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.brain.tsx
-#: src/settings/sections.ts
 msgid "Brain"
 msgstr "Brain"
 
@@ -4185,6 +4180,11 @@ msgstr "Cases a week"
 #: src/brain/opportunity-drafts.ts
 msgid "Cases a week: {cases}."
 msgstr "Cases a week: {cases}."
+
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Caution"
+msgstr "Caution"
 
 #: src/agents/new-agent.tsx
 #: src/apps/app-workflows.tsx
@@ -5348,6 +5348,10 @@ msgstr "Copy it now: you won't see it again. Lost, it can only be replaced."
 msgid "Copy link"
 msgstr "Copy link"
 
+#: src/frame/ui-words.tsx
+msgid "Copy table"
+msgstr "Copy table"
+
 #: src/chat/thread.tsx
 msgid "Copy the answer"
 msgstr "Copy the answer"
@@ -6370,6 +6374,7 @@ msgstr "Dots"
 msgid "Double-click or press F2 to rename"
 msgstr "Double-click or press F2 to rename"
 
+#: src/frame/ui-words.tsx
 #: src/workflows/run-files.tsx
 #: src/workflows/version-source.tsx
 msgctxt "download a file"
@@ -6394,6 +6399,14 @@ msgstr "Download as Markdown"
 #: src/chat/chat-more.tsx
 msgid "Download as PDF"
 msgstr "Download as PDF"
+
+#: src/frame/ui-words.tsx
+msgid "Download diagram"
+msgstr "Download diagram"
+
+#: src/frame/ui-words.tsx
+msgid "Download table"
+msgstr "Download table"
 
 #: src/apps/app-code.tsx
 msgid "Download the file"
@@ -8295,14 +8308,6 @@ msgstr "Grasp's team can help here until then"
 msgid "Grid"
 msgstr "Grid"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Group {number}"
-msgstr "Group {number}"
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "Groups of teams"
-msgstr "Groups of teams"
-
 #: src/drafts/sharing.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/erasures.tsx
@@ -8858,6 +8863,11 @@ msgstr "Import into {name}"
 #: src/apps/app-data.tsx
 msgid "Import or export"
 msgstr "Import or export"
+
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Important"
+msgstr "Important"
 
 #: src/onboarding/hr-leads.tsx
 msgid "In {name}, make a service user that may read people’s basic and work details, and paste its ID and token here."
@@ -10620,6 +10630,10 @@ msgid "Mentioned"
 msgstr "Mentioned"
 
 #: src/frame/ui-words.tsx
+msgid "Mermaid diagram"
+msgstr "Mermaid diagram"
+
+#: src/frame/ui-words.tsx
 msgid "Message actions"
 msgstr "Message actions"
 
@@ -11131,10 +11145,6 @@ msgstr "New chat"
 msgid "New field"
 msgstr "New field"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "New group"
-msgstr "New group"
-
 #: src/settings/ai-providers.tsx
 msgid "New key"
 msgstr "New key"
@@ -11414,10 +11424,6 @@ msgstr "No first line"
 #: src/brain/goals-editor.tsx
 msgid "No goals yet."
 msgstr "No goals yet."
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "No group"
-msgstr "No group"
 
 #: src/agents/agents-overview.tsx
 msgid "No job written yet"
@@ -12097,6 +12103,11 @@ msgstr "Not working"
 
 #: src/frame/ui-words.tsx
 msgctxt "a badge's dot"
+msgid "Note"
+msgstr "Note"
+
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
 msgid "Note"
 msgstr "Note"
 
@@ -14677,6 +14688,10 @@ msgstr "Reset what it keeps"
 msgid "Reset what it keeps?"
 msgstr "Reset what it keeps?"
 
+#: src/frame/ui-words.tsx
+msgid "Reset zoom"
+msgstr "Reset zoom"
+
 #: src/apps/app-reset.tsx
 #: src/apps/reset-test-data.tsx
 msgid "Resetting"
@@ -15284,10 +15299,6 @@ msgstr "Save changes"
 #: src/pages/page-frame.tsx
 msgid "Save first"
 msgstr "Save first"
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "Save groups"
-msgstr "Save groups"
 
 #: src/apps/app-own-link.tsx
 msgid "Save link"
@@ -17183,7 +17194,6 @@ msgstr "Team size unknown."
 #: src/agents/setup/audience-step.tsx
 #: src/brain/brain.ts
 #: src/people/people-teams-picker.tsx
-#: src/routes/_shell.settings.brain.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/sections.ts
 #: src/settings/teams.tsx
@@ -17575,10 +17585,6 @@ msgstr "The best part of its passage"
 msgid "The board"
 msgstr "The board"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "The brain has no teams to group yet."
-msgstr "The brain has no teams to group yet."
-
 #: src/brain/learned-section.tsx
 msgid "The Brain hasn't learned anything from this version."
 msgstr "The Brain hasn't learned anything from this version."
@@ -17602,10 +17608,6 @@ msgstr "The Brain, as each run's person may read it"
 #: src/brain/brain-section.tsx
 msgid "The Brain's pages"
 msgstr "The Brain's pages"
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "The brain's regions: your teams, grouped the way your company is. Grasp groups new teams by itself; rename a group or move a team here."
-msgstr "The brain's regions: your teams, grouped the way your company is. Grasp groups new teams by itself; rename a group or move a team here."
 
 #: src/brain/atlas-overlays.tsx
 msgid "The brain's view"
@@ -18686,6 +18688,11 @@ msgstr "Time zone"
 msgid "Timeline"
 msgstr "Timeline"
 
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Tip"
+msgstr "Tip"
+
 #: src/apps/app-access-requests.tsx
 msgid "To"
 msgstr "To"
@@ -19479,6 +19486,10 @@ msgstr "View all"
 msgid "View changes"
 msgstr "View changes"
 
+#: src/frame/ui-words.tsx
+msgid "View full screen"
+msgstr "View full screen"
+
 #: src/brain/note-actions.tsx
 msgid "View in map"
 msgstr "View in map"
@@ -19679,6 +19690,11 @@ msgstr "Wanderer"
 
 #: src/frame/ui-words.tsx
 msgctxt "a badge's dot"
+msgid "Warning"
+msgstr "Warning"
+
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
 msgid "Warning"
 msgstr "Warning"
 
@@ -21482,12 +21498,14 @@ msgid "Zoom"
 msgstr "Zoom"
 
 #: src/brain/atlas-overlays.tsx
+#: src/frame/ui-words.tsx
 #: src/inbox/report-viewer.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Zoom in"
 msgstr "Zoom in"
 
 #: src/brain/atlas-overlays.tsx
+#: src/frame/ui-words.tsx
 #: src/inbox/report-viewer.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Zoom out"
