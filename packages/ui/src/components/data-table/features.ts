@@ -24,6 +24,8 @@ import {
   rowSortingFeature,
 } from "@tanstack/react-table";
 
+import { csvOf, saveFile } from "../../lib/utils";
+
 /** One feature a table takes beyond its own: the TanStack features it registers, by name. */
 export interface DataTableFeature {
   /** Its name, unique among features ("resizing"). */
@@ -289,40 +291,20 @@ export const searchParamsLocation = (prefix = "table"): DataTableLocation => {
 
 // ---- Export --------------------------------------------------------------------------------------
 
-// Words that start like a formula (=, +, -, @, a tab or a return) run as one when a spreadsheet
-// opens the file: a leading apostrophe keeps them text. Figures are numbers and are left alone.
-const formula = /^[=+\-@\t\r]/u;
-
-const cell = (value: string | number) => {
-  const text =
-    typeof value === "string" && formula.test(value)
-      ? `'${value}`
-      : String(value);
-  return /[",\r\n]/u.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-};
-
 /**
- * The head and the rows as CSV, each line ended as a spreadsheet expects, after UTF-8's byte-order
- * mark: without it, Excel reads the file in the machine's own code page and garbles any letter
- * outside ASCII ("Zoë", "東京").
+ * The head and the rows as CSV (csvOf), after UTF-8's byte-order mark: without it, Excel reads the
+ * file in the machine's own code page and garbles any letter outside ASCII ("Zoë", "東京").
  */
 export const toCsv = (
   head: readonly string[],
   rows: readonly (readonly (string | number)[])[]
-) =>
-  `\uFEFF${[head, ...rows].map((line) => line.map(cell).join(",")).join("\r\n")}`;
+) => `\uFEFF${csvOf([head, ...rows])}`;
 
 /** Saves the text as a CSV file of that name, which the browser downloads. */
 export const saveCsv = (text: string, name: string) => {
-  const href = URL.createObjectURL(
-    new Blob([text], { type: "text/csv;charset=utf-8" })
+  saveFile(
+    text,
+    name.endsWith(".csv") ? name : `${name}.csv`,
+    "text/csv;charset=utf-8"
   );
-  const link = document.createElement("a");
-  link.href = href;
-  link.download = name.endsWith(".csv") ? name : `${name}.csv`;
-  link.click();
-  // Freed once the download has started: some browsers drop a download whose address is gone.
-  setTimeout(() => {
-    URL.revokeObjectURL(href);
-  }, 0);
 };

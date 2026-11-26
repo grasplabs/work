@@ -2,20 +2,23 @@
 // GitHub's additions) while it is the same, and the end still being written made whole by remend.
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmFromMarkdown } from "mdast-util-gfm";
+import { mathFromMarkdown } from "mdast-util-math";
 import { gfm } from "micromark-extension-gfm";
+import { math } from "micromark-extension-math";
 import remend from "remend";
 
 /** A Markdown syntax tree (mdast). */
 export type MarkdownRoot = ReturnType<typeof fromMarkdown>;
 export type RootContent = MarkdownRoot["children"][number];
 
-// Strike-through is two tildes, as a model writes it (`20~25°C` is a tilde). micromark weighs each
-// emphasis or link mark of a paragraph against those before it, so many unmatched ones cost their
-// number squared (`a*` repeated: 1.7 s for 40 KB): a block with a paragraph of more than 1,000, or
-// with more than 5,000 in all (its fenced code aside), is read without them, as words, and without
-// `![^1]`, a note's mark after a `!`, which looks back for its picture. A paragraph is counted from
-// each line that may start a part, so the total holds where such a line only goes on with it
-// (`1a*a*…` lines: 19 s for 80 KB).
+// Strike-through is two tildes, as a model writes it (`20~25°C` is a tilde); maths is between two
+// dollars, as Streamdown reads it (`$5 and $6` are prices), in a sentence or as lines of its own.
+// micromark weighs each emphasis or link mark of a paragraph against those before it, so many
+// unmatched ones cost their number squared (`a*` repeated: 1.7 s for 40 KB): a block with a
+// paragraph of more than 1,000, or with more than 5,000 in all (its fenced code aside), is read
+// without them, as words, and without `![^1]`, a note's mark after a `!`, which looks back for its
+// picture. A paragraph is counted from each line that may start a part, so the total holds where
+// such a line only goes on with it (`1a*a*…` lines: 19 s for 80 KB).
 const MARKS =
   "attention strikethrough labelStartLink labelStartImage labelEnd gfmPotentialFootnoteCall".split(
     " "
@@ -26,6 +29,8 @@ const MARKS =
 // aside) is read without bare addresses.
 const ADDRESSES = ["wwwAutolink", "protocolAutolink", "emailAutolink"];
 const GFM = gfm({ singleTilde: false });
+const MATH = math({ singleDollarTextMath: false });
+const MATH_FROM = mathFromMarkdown();
 const FROM = gfmFromMarkdown();
 const NO_ADDRESSES = FROM.map((extension) => ({
   ...extension,
@@ -86,9 +91,18 @@ const told = (names: Names, asked: Asked[]) => {
   // Before a link's or a picture's first mark (`[`, `!`).
   return { text: { 33: construct, 91: construct } };
 };
-const FENCE = /^ {0,3}(?<fence>`{3,}|~{3,})(?<info>.*)$/u;
+// A fence: of code, or (`$$`) of maths, whose words after it hold no dollar (`$$x$$` is maths in a
+// sentence).
+const FENCE = /^ {0,3}(?<fence>`{3,}|~{3,}|\${2,})(?<info>.*)$/u;
+const fenceOf = (line: string) => {
+  const found = FENCE.exec(line)?.groups;
+  return found?.fence?.startsWith("$") === true &&
+    found.info?.includes("$") === true
+    ? undefined
+    : found;
+};
 const closes = (line: string, open: string) => {
-  const { fence = "", info = "x" } = FENCE.exec(line)?.groups ?? {};
+  const { fence = "", info = "x" } = fenceOf(line) ?? {};
   return (
     fence.startsWith(open.slice(0, 1)) &&
     fence.length >= open.length &&
@@ -98,7 +112,7 @@ const closes = (line: string, open: string) => {
 /** The fence open after `line`, `fence` the one open before it (`` when none). */
 const fenceAfter = (fence: string, line: string) => {
   if (fence === "") {
-    return FENCE.exec(line)?.groups?.fence ?? "";
+    return fenceOf(line)?.fence ?? "";
   }
   return closes(line, fence) ? "" : fence;
 };
@@ -144,8 +158,13 @@ const read = (
   const { text, many, long } = bounded(source);
   try {
     const off = [...(many ? MARKS : []), ...(long ? ADDRESSES : [])];
-    const extensions = [GFM, { disable: { null: off } }, told(names, asked)];
-    const mdastExtensions = long ? NO_ADDRESSES : FROM;
+    const extensions = [
+      GFM,
+      MATH,
+      { disable: { null: off } },
+      told(names, asked),
+    ];
+    const mdastExtensions = [...(long ? NO_ADDRESSES : FROM), MATH_FROM];
     return fromMarkdown(text, { extensions, mdastExtensions });
   } catch {
     // Nesting deep enough to exhaust the stack (thousands of `>` on a line): its words.
@@ -192,7 +211,7 @@ const sectionEnd =
 
 /** What ends the block `line` opens, if it does not end on that line. */
 const endOf = (line: string): End | null => {
-  const fence = FENCE.exec(line)?.groups?.fence;
+  const fence = fenceOf(line)?.fence;
   if (fence !== undefined) {
     return until((next) => closes(next, fence));
   }
@@ -278,8 +297,13 @@ export const inOpenFence = (text: string) => {
  */
 export const openCode = (block: string) => {
   const [first = "", ...lines] = block.split("\n");
-  const { fence, info = "" } = FENCE.exec(first)?.groups ?? {};
-  if (fence === undefined || lines.some((line) => closes(line, fence))) {
+  const { fence, info = "" } = fenceOf(first) ?? {};
+  // Maths still being written is read, made whole by remend.
+  if (
+    fence === undefined ||
+    fence.startsWith("$") ||
+    lines.some((line) => closes(line, fence))
+  ) {
     return null;
   }
   const last = lines.at(-1)?.trim() ?? "";
@@ -293,12 +317,11 @@ export const openCode = (block: string) => {
 const REPAIR = {
   singleTilde: false,
   comparisonOperators: false,
-  katex: false,
   htmlTags: false,
 } as const;
 /**
  * The block still being written made whole (remend: bold from its first letter, a half link one to
- * nowhere, a half picture's address nowhere), with none of its rewrites that would draw a whole
+ * nowhere, a half picture's address nowhere, maths closed), with none of its rewrites that would draw a whole
  * answer otherwise. remend closes no emphasis opened before the half link it ends in, so that is
  * closed after it, as remend closes it for the words before.
  */
@@ -407,27 +430,39 @@ const sectionOf = (
 };
 
 const DASH_ROW = /^ {0,3}\|?[ \t]*:?-+:?[ \t]*(?:\||$)/u;
+// What ends a table's rows, as micromark reads them: a blank line, or a line that starts a heading,
+// a quote, a list item, a break, indented code, a fence or HTML that may hold blank lines.
+const ROWS_END =
+  /^(?:[ \t]*$| {0,3}\t| {4}| {0,3}(?:#{1,6}(?:[ \t]|$)|>|(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)|(?<mark>[-*_])(?:[ \t]*\k<mark>){2,}[ \t]*$))/u;
+const endsRows = (line: string) => {
+  // A backtick fence's info has no backtick: ``` `a` ``` is code in a row.
+  const { fence = "", info = "" } = FENCE.exec(line)?.groups ?? {};
+  const fenced = fence !== "" && !(fence.startsWith("`") && info.includes("`"));
+  return ROWS_END.test(line) || fenced || HTML.test(line) || OPENS.test(line);
+};
 /**
  * A table from a model has no bound: past its first 1,000 rows, only how many more there are is
- * read (`more` on the table).
+ * read (`more` on the table); what follows the table is read as written.
  */
 const lessRows = (block: string) => {
   const head = block.indexOf("\n");
   const second = block.indexOf("\n", head + 1);
   const dashes = block.slice(head + 1, second === -1 ? undefined : second);
-  let cut = head;
-  for (let row = 0; row <= 1000 && cut !== -1; row += 1) {
-    cut = block.indexOf("\n", cut + 1);
-  }
   const table =
     head !== -1 && block.slice(0, head).includes("|") && DASH_ROW.test(dashes);
-  if (!table || cut === -1) {
+  if (!table) {
     return { text: block, more: 0 };
   }
-  const rest = block.slice(cut + 1).split("\n");
+  const lines = block.split("\n");
+  const end = lines.findIndex((line, at) => at > 1 && endsRows(line));
+  const rows = (end === -1 ? lines.length : end) - 2;
+  if (rows <= 1000) {
+    return { text: block, more: 0 };
+  }
+  const after = end === -1 ? [] : lines.slice(end);
   return {
-    text: block.slice(0, cut),
-    more: rest.filter((line) => line.trim() !== "").length,
+    text: [...lines.slice(0, 1002), ...after].join("\n"),
+    more: rows - 1000,
   };
 };
 

@@ -217,6 +217,8 @@ export interface I18nCatalog {
   codeBlock: {
     /** Show less's words. */
     collapse: string;
+    /** The download button's name: it saves the code as a file. */
+    download: string;
     /** Show more's words. */
     expand: string;
     /** Under the last line drawn of a very long block: how many lines are not drawn. */
@@ -567,16 +569,26 @@ export interface I18nCatalog {
   markdown: {
     /** The link from a footnote back to where it is used, from its number and which mark it is. */
     back: (number: number, mark: number) => string;
+    /** The name of a table's copy button, whose menu holds the formats. */
+    copyTable: string;
+    /** A format in a table's copy and download menus: comma-separated values. */
+    csv: string;
     /** What a ticked task says to a screen reader. */
     done: string;
+    /** The name of a table's download button, whose menu holds the formats. */
+    downloadTable: string;
     /** A footnote's mark, said to a screen reader, from its number. */
     footnote: (number: number) => string;
+    /** A format in a table's copy and download menus: the table as Markdown. */
+    markdown: string;
     /** Under a table drawn only in part, how many rows are not drawn. */
     moreRows: (count: number) => string;
     /** What a task not yet ticked says. */
     notDone: string;
     /** A table's name when no heading stands above it (`tableLabel`). */
     table: string;
+    /** A format in a table's copy menu: tab-separated values. */
+    tsv: string;
   };
   /** The menus' items: a context menu's and a menubar's. */
   menu: {
@@ -1013,6 +1025,7 @@ const english: I18nCatalog = {
   },
   codeBlock: {
     collapse: "Show less",
+    download: "Download",
     expand: "Show more",
     moreLines: (count: number) =>
       count === 1 ? "1 more line" : `${count} more lines`,
@@ -1318,12 +1331,17 @@ const english: I18nCatalog = {
       mark > 1
         ? `Back to reference ${number}-${mark}`
         : `Back to reference ${number}`,
+    copyTable: "Copy table",
+    csv: "CSV",
     done: "Done",
+    downloadTable: "Download table",
     footnote: (number: number) => `Footnote ${number}`,
+    markdown: "Markdown",
     moreRows: (count: number) =>
       count === 1 ? "1 more row" : `${count} more rows`,
     notDone: "Not done",
     table: "Table",
+    tsv: "TSV",
   },
   menu: {
     error: "Failed",
