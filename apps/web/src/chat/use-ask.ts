@@ -9,7 +9,7 @@ import { failureText } from "@grasp-os/shared/errors";
 import type { ModelEffort, ModelEfforts } from "@grasp-os/shared/models";
 import type { Subject } from "@grasp-os/shared/subject";
 import { useRouteContext } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useCoreAction } from "../use-core-action.ts";
 import { activeChat, setActiveChat } from "./active-chat.ts";
@@ -144,6 +144,11 @@ export const useAsk = (
   // The chat what is typed belongs to, and the chat a question asked here
   // made: the box is that one's still once it opens.
   const [draftOf, setDraftOf] = useState(chatId);
+  // The chat the box is now, for what comes back after an await.
+  const boxOf = useRef(chatId);
+  useEffect(() => {
+    boxOf.current = chatId;
+  }, [chatId]);
   const [made, setMade] = useState<string>();
   // Which box the draft is in: another once the box shows another chat's
   // draft, the same when a question made the chat it shows from its own.
@@ -296,8 +301,33 @@ export const useAsk = (
     onAsked?.(sent);
     return true;
   };
+  // A stop drops what was queued behind the answer (core's `cancel` says
+  // which): it comes back into the box, the oldest first and before what
+  // is typed there, as Codex hands queued messages back on an interrupt,
+  // to send again or let go. Only while the box is still that chat's.
   const stop = async (id: string): Promise<void> => {
-    await run(async (session) => await session.chats.cancel(id));
+    const ended = await run(async (session) => await session.chats.cancel(id));
+    if (
+      ended === undefined ||
+      ended === false ||
+      ended.dropped.length === 0 ||
+      boxOf.current !== id
+    ) {
+      return;
+    }
+    const { dropped } = ended;
+    changeDraft((now) => ({
+      ...now,
+      text: [...dropped, now.text]
+        .filter((each) => each.trim() !== "")
+        .join("\n\n"),
+    }));
+  };
+  /** Has the agent take the questions queued behind its answer at once. */
+  const sendNow = async (id: string): Promise<void> => {
+    await run(async (session) => {
+      await session.chats.sendNow(id);
+    });
   };
   return {
     composer: {
@@ -348,5 +378,6 @@ export const useAsk = (
      * made the chat it shows: the box's editor starts afresh with it.
      */
     box,
+    sendNow,
   };
 };

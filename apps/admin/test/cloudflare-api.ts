@@ -14,6 +14,11 @@ import {
   adminSnapshotRequestSchema,
 } from "@grasp-os/shared/admin-snapshot";
 import {
+  adminSummaryPath,
+  adminSummaryPurpose,
+  adminSummaryRequestSchema,
+} from "@grasp-os/shared/admin-summary";
+import {
   aiStatusReportPath,
   aiStatusReportPurpose,
   aiStatusReportRequestSchema,
@@ -95,7 +100,12 @@ import {
   forgetDatabases,
   workerRoutes,
 } from "./cloudflare-api-workers.ts";
-import { aiStatusOf, emptyAdminSnapshot, emptyKickoff } from "./snapshots.ts";
+import {
+  aiStatusOf,
+  emptyAdminSnapshot,
+  emptyAdminSummary,
+  emptyKickoff,
+} from "./snapshots.ts";
 
 /** A client's core where it runs: the account its scripts are in, and its own state. */
 interface CoreHost {
@@ -363,6 +373,44 @@ const answerSummary = async (
     return new Response("Forbidden", { status: 403 });
   }
   return Response.json(core.onboarding ?? noOnboarding);
+};
+
+/**
+ * What a client's core answers the admin's summary request with, as core
+ * does (core's src/admin-summary.ts): the account's summary once the
+ * signature checks out, with the key its live version's auth secret
+ * gives, and the request parses; 403 otherwise; 404 from a core from
+ * before the summary. It names nobody, so no reader is kept.
+ */
+const answerAdminSummary = async (
+  { core }: CoreHost,
+  live: VersionState,
+  request: Request
+): Promise<Response> => {
+  if (core.summary === "absent") {
+    return new Response("Not found", { status: 404 });
+  }
+  const body = await request.text();
+  const key = await hkdfHmacKey(
+    live.secrets.get("BETTER_AUTH_SECRET") ?? "",
+    adminSummaryPurpose,
+    ["sign"]
+  );
+  const expected = toHex(
+    new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))
+    )
+  );
+  const asked = adminSummaryRequestSchema.safeParse(JSON.parse(body));
+  if (
+    request.headers.get(platformUpdateSignatureHeader) !== expected ||
+    !asked.success
+  ) {
+    return new Response("Forbidden", { status: 403 });
+  }
+  const summary = core.summary ?? emptyAdminSummary();
+  await core.summaryHeld?.();
+  return Response.json(summary);
 };
 
 /**
@@ -643,6 +691,7 @@ const signedPosts: ReadonlyMap<
   (host: CoreHost, live: VersionState, request: Request) => Promise<Response>
 > = new Map([
   [onboardingSummaryPath, answerSummary],
+  [adminSummaryPath, answerAdminSummary],
   [provisionProbePath, answerProbe],
   [connectVersionPath, answerConnectVersion],
   [adminKickoffPath, answerKickoff],

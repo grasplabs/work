@@ -11,6 +11,9 @@ minimumReleaseAge: 4320
 # published by Pi's release workflow with provenance and no install scripts.
 # Removed (#2781) after 28 November 2026, 13:37 UTC, when 1.6.1 is three
 # days old.
+# And Damsko's code block highlighter, approved by the owner, younger than
+# the rule until 29 November 2026, 01:53 UTC; removed (#2795) once it is
+# three days old.
 minimumReleaseAgeExclude:
   - "@earendil-works/chord@1.6.1"
   - "@earendil-works/pi-ai@1.6.1"
@@ -18,6 +21,7 @@ minimumReleaseAgeExclude:
   - "@earendil-works/pi-durable@1.6.1"
   - "@earendil-works/pi-schema@1.6.1"
   - "@earendil-works/pi-telemetry@1.6.1"
+  - "@pierre/highlights@0.6.0"
 blockExoticSubdeps: true
 strictDepBuilds: true
 allowBuilds:
@@ -326,7 +330,9 @@ catalog:
   recharts: 3.10.1
   # Damsko's code block (packages/ui): its highlighter, on the page, each
   # language's grammar loaded when a block first shows it.
-  "@pierre/highlights": 0.5.2
+  "@pierre/highlights": 0.6.0
+  # DiffViewer's diffs (packages/ui): jsdiff.
+  diff: 9.0.0
   remark-gfm: 4.0.1
   shadcn: 4.23.0
   tailwind-merge: 3.7.0
