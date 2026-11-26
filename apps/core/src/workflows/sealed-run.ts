@@ -22,6 +22,7 @@ import {
   expressionFailed,
   paramsStep,
   placeholderOf,
+  retryWaitMsOf,
   stepIdempotencyKey,
   uncatchableFailureName,
   workflowErrors,
@@ -2987,6 +2988,10 @@ class SealedRun implements SealedRunKind {
           // Held for the person: the step waits, and runs again once they
           // decided, connect answering what they decided under its key.
           attempt.held ||= connectErrors.codeOf(error) === "connect.held";
+          // Its connection paused, or its vendor asking to wait: the step
+          // waits that long before it runs again (host.ts,
+          // `throttledMarker`), a wait the isolate never hears of.
+          attempt.retryWaitMs = retryWaitMsOf(error);
           throw fixedMessage(error);
         }
       }

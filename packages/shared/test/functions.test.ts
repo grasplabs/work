@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vite-plus/test";
 
 import { categoryOf, jsonWithin } from "../src/functions.ts";
-import { isRetryable } from "../src/workflows.ts";
+import { isRetryable, retryWaitMsOf } from "../src/workflows.ts";
 
 // Reading a value as bounded JSON, and how a failure's code is classified:
 // pure, so unit tests.
@@ -102,6 +102,36 @@ describe(isRetryable, () => {
       "model.rate_limited": true,
       "function.cpu_exceeded": false,
       "permission.declined": false,
+    });
+  });
+});
+
+/** The wait a step's failure of `code`, with `details`, names. */
+const waitOf = (code: string, details?: unknown) =>
+  retryWaitMsOf({ code, details });
+
+describe(retryWaitMsOf, () => {
+  test("waits as long as a failure a retry may fix names, in either unit, and never for one it can't", () => {
+    expect({
+      paused: waitOf("connect.rate_limited", { retryAfterSeconds: 90 }),
+      throttled: waitOf("connect.server_unavailable", { retryAfterMs: 1500 }),
+      fraction: waitOf("connect.rate_limited", { retryAfterSeconds: 0.0015 }),
+      none: waitOf("connect.rate_limited", { retryAfterSeconds: 0 }),
+      unnamed: waitOf("connect.rate_limited"),
+      notANumber: waitOf("connect.rate_limited", { retryAfterSeconds: "90" }),
+      // An outcome unknown names when it may be recovered: a retry can't
+      // fix it, so the step doesn't wait for it.
+      notRetryable: waitOf("connect.outcome_unknown", {
+        retryAfterSeconds: 90,
+      }),
+    }).toStrictEqual({
+      paused: 90_000,
+      throttled: 1500,
+      fraction: 2,
+      none: undefined,
+      unnamed: undefined,
+      notANumber: undefined,
+      notRetryable: undefined,
     });
   });
 });

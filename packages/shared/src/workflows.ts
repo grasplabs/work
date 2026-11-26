@@ -449,6 +449,33 @@ export const isRetryable = (error: unknown): boolean =>
     ("name" in error && error.name === "TimeoutError"));
 
 /**
+ * How long a step that failed with `error` waits before it is tried again,
+ * in ms, when the error names that wait itself: a connection its vendor
+ * paused (`connect.rate_limited`, `retryAfterSeconds`), or a reader its
+ * provider throttles (`retryAfterMs`). Only for a failure `isRetryable`
+ * holds for, and only a wait of more than none. The step waits it out,
+ * spending no retry (core's workflows/host.ts), so a pause longer than its
+ * retries' backoff doesn't fail a run that never reached the vendor.
+ */
+export const retryWaitMsOf = (error: unknown): number | undefined => {
+  if (typeof error !== "object" || error === null || !isRetryable(error)) {
+    return undefined;
+  }
+  const details: unknown = Reflect.get(error, "details");
+  if (typeof details !== "object" || details === null) {
+    return undefined;
+  }
+  const seconds: unknown = Reflect.get(details, "retryAfterSeconds");
+  const wait: unknown =
+    typeof seconds === "number"
+      ? seconds * 1000
+      : Reflect.get(details, "retryAfterMs");
+  return typeof wait === "number" && Number.isFinite(wait) && wait > 0
+    ? Math.ceil(wait)
+    : undefined;
+};
+
+/**
  * What a failure report keeps of a step's input: its type, and for an
  * object the names of fields shaped like code's own (letters, `_` and
  * `-`, at most 32) with their types. No values, which can hold anything

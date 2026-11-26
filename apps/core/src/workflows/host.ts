@@ -168,6 +168,13 @@ export interface StepAttempt {
    */
   aiTrouble?: AiWait;
   /**
+   * How long its failed call said to wait before it is tried again, in
+   * ms (`retryWaitMsOf`): its connection paused by its vendor, or a reader
+   * throttled. The step then waits it out (`throttledMarker`), should the
+   * attempt fail with a failure trying again may fix.
+   */
+  retryWaitMs?: number;
+  /**
    * Whether it was held because a call of it under the step's key came
    * back of unknown outcome, for its person to resolve (`heldNoted`): its
    * wait sleeps before its first check and ends by a deadline.
@@ -273,6 +280,26 @@ export interface Busy {
   maxWaitMs: number;
 }
 
+/** The field of a step's result that says its call named a wait (`throttledMarker`). */
+const throttledField = `${coreStepPrefix}throttled`;
+
+/**
+ * What an attempt of a step answers when it failed with a failure trying
+ * again may fix, and its call named how long to wait first
+ * (`StepAttempt.retryWaitMs`): a connection its vendor paused
+ * (`connect.rate_limited`, an hour at most), or a reader its provider
+ * throttles. Recorded as the step's result, with the wait in ms, so the
+ * run waits it out durably, holding no compute, and runs the step again
+ * under a step of its own, as a busy step does. The wait spends none of
+ * the step's retries, which a pause longer than their backoff would
+ * otherwise use up on calls that never reach the vendor, and none of the
+ * run's steps (`uncountedWaitStep`): the vendor ends it, not the run's
+ * code. A step's rounds wait `workflowQueuedStepMs` in all at most; past
+ * that its failure is retried as any other. Workflow code can't return
+ * it (`do` refuses it).
+ */
+const throttledMarker = (waitMs: number) => ({ [throttledField]: waitMs });
+
 /** The field of a step's result that says its AI provider failed it (`keyMarkerOf`). */
 const keyField = `${coreStepPrefix}aiWait`;
 
@@ -295,6 +322,32 @@ const aiWaitRecordSchema = z.object({
 export const keyMarkerOf = (at: number, { provider, trouble }: AiWait) => ({
   [keyField]: { at, provider, trouble },
 });
+
+/**
+ * What an attempt that still holds its lease answers in place of how it
+ * settled (`settled`), when its step waits before it runs again: its
+ * model call failed for what its AI provider showed (`keyMarkerOf`),
+ * whatever its code made of that; or it failed with a failure trying
+ * again may fix, and its call named a wait (`throttledMarker`) that the
+ * step's rounds, having waited `throttledMs` so already, may still wait.
+ * None otherwise.
+ */
+const waitMarkerOf = (
+  attempt: StepAttempt,
+  settled: Settled<unknown>,
+  throttledMs: number
+) => {
+  if (attempt.aiTrouble !== undefined) {
+    return keyMarkerOf(Date.now(), attempt.aiTrouble);
+  }
+  const wait = attempt.retryWaitMs;
+  const waits =
+    !settled.ok &&
+    wait !== undefined &&
+    isRetryable(settled.error) &&
+    throttledMs + wait <= platformLimits.workflowQueuedStepMs;
+  return waits ? throttledMarker(wait) : undefined;
+};
 
 /** The schema of what the gateway tells of a provider's trouble (models.ts, `troubleError`). */
 const aiWaitSchema = z.object({
@@ -326,7 +379,9 @@ export const isCoreMarker = (value: unknown): boolean =>
   isHeldMarker(value) ||
   (typeof value === "object" &&
     value !== null &&
-    (Object.hasOwn(value, busyField) || Object.hasOwn(value, keyField)));
+    (Object.hasOwn(value, busyField) ||
+      Object.hasOwn(value, keyField) ||
+      Object.hasOwn(value, throttledField)));
 
 const busyRecordSchema = z.object({
   busyFor: z.number(),
@@ -337,10 +392,11 @@ const busyRecordSchema = z.object({
  * One of core's markers, as a step's recorded result says it: a step held
  * for its person (`heldMarkerOf`), on an unknown outcome or not, with the
  * keys it waits on; or refused for load (`busyMarker`), with the seconds
- * to wait and how long a step may wait in all; or its model call failed for what its AI provider showed (`keyMarkerOf`), and when.
+ * to wait and how long a step may wait in all; or its model call failed for what its AI provider showed (`keyMarkerOf`), and when; or its call named a wait (`throttledMarker`), in ms.
  */
 export type CoreMarker =
   | { kind: "held"; keys: string[]; unknown: boolean }
+  | { kind: "throttled"; waitMs: number }
   | ({ kind: "key" } & z.infer<typeof aiWaitRecordSchema>)
   | ({ kind: "busy" } & z.infer<typeof busyRecordSchema>);
 
@@ -365,6 +421,12 @@ export const markerOf = (value: unknown): CoreMarker | undefined => {
   }
   if (Object.hasOwn(value, keyField)) {
     return { kind: "key", ...aiWaitRecordSchema.parse(field(keyField)) };
+  }
+  if (Object.hasOwn(value, throttledField)) {
+    return {
+      kind: "throttled",
+      waitMs: z.int().positive().parse(field(throttledField)),
+    };
   }
   return {
     kind: "busy",
@@ -451,13 +513,13 @@ export const loadWaitStart: LoadWait = {
 
 /**
  * The step's wait for load once its attempt answered `marker`: after a
- * hold or a refused key, none (an attempt was admitted); after a refusal for load, one
+ * hold, a refused key or a named wait, none (an attempt was admitted); after a refusal for load, one
  * round more, sleeping as long as `askAgainMs` says, added to what its
  * rounds wait in all. A round left nothing to sleep (`sleepMs` 0) has
  * waited as long as a step may.
  */
 export const loadWaitAfter = (wait: LoadWait, marker: CoreMarker): LoadWait => {
-  if (marker.kind === "held" || marker.kind === "key") {
+  if (marker.kind !== "busy") {
     return loadWaitStart;
   }
   const sleepMs = askAgainMs({
@@ -476,7 +538,10 @@ export const loadWaitAfter = (wait: LoadWait, marker: CoreMarker): LoadWait => {
 /** A round of a step's wait (`#waitBefore`). */
 interface WaitRound {
   round: number;
-  /** How long a busy step sleeps this round (admission.ts, `askAgainMs`). */
+  /**
+   * How long a busy step sleeps this round (admission.ts, `askAgainMs`),
+   * or a throttled one (`throttledMarker`).
+   */
   sleepMs: number;
 }
 
@@ -736,7 +801,7 @@ const maxUnknownWaits = 60;
  * What a round of a step's wait waits for (`#waitBefore`), or, for a
  * catch's retry of it, decides and sleeps before (`#retried`).
  */
-type WaitKind = "busy" | "held" | "unknown" | "key" | "retry";
+type WaitKind = "busy" | "held" | "unknown" | "key" | "throttled" | "retry";
 
 /**
  * The prefix of the steps of round `round` of the wait of the step keyed
@@ -754,6 +819,9 @@ export const waitStep = (key: string, kind: WaitKind, round: number): string =>
  *   allowance, or a run queued long enough behind other Apps' work would
  *   fail for it; `workflowQueuedStepMs` bounds how long it waits
  *   (quotas.ts, admission.ts);
+ * - a wait its call named (`throttled`): its sleep and the step's run
+ *   again. The vendor ends it, not the run's code; `workflowQueuedStepMs`
+ *   bounds how long a step waits so (`throttledMarker`);
  * - a held wait's record of waiting (`held:<round>:waiting:`);
  * - a hold on an unknown outcome (`unknown`): its checks, sleeps and the
  *   step's run again, bounded by its deadline (`unknownHoldMsOf`) and the
@@ -771,14 +839,14 @@ export const waitStep = (key: string, kind: WaitKind, round: number): string =>
  *   bounded by its decision's deadline and its test's lifetime.
  */
 const uncountedWaitStep =
-  /^\$grasp:wait:[0-9a-f]{16}:(?:busy:\d+(?::|$)|key:\d+(?::|$)|held:\d+:waiting:|unknown:[1-9]\d*:|again:[1-9]\d*$|woken:\d+$)/u;
+  /^\$grasp:wait:[0-9a-f]{16}:(?:busy:\d+(?::|$)|key:\d+(?::|$)|throttled:\d+(?::|$)|held:\d+:waiting:|unknown:[1-9]\d*:|again:[1-9]\d*$|woken:\d+$)/u;
 
 /**
  * A wait's step that runs the step it holds again (`#waitBefore`), of any
  * kind: its key names that step (`waitKeyOf`).
  */
 const waitRunStep =
-  /^\$grasp:wait:(?<key>[0-9a-f]{16}):(?:busy|held|unknown|key):\d+:run$/u;
+  /^\$grasp:wait:(?<key>[0-9a-f]{16}):(?:busy|held|unknown|key|throttled):\d+:run$/u;
 
 /**
  * Tries of one check whether a held side effect still waits, after the
@@ -1985,8 +2053,8 @@ export class RunHost extends RpcTarget {
   /**
    * Waits durably before the step `step` runs again, its attempt having
    * answered `marker`, in round `round`: until the person decided on its
-   * held side effect (`#waitWhileHeld`), or the seconds its busy lineage
-   * said, as long as `sleepMs` (a sleep, which holds no attempt).
+   * held side effect (`#waitWhileHeld`), or, busy or throttled, as long
+   * as `sleepMs` (a sleep, which holds no attempt).
    * `unknown` carries when the step was first held on its current unknown
    * outcome across rounds. Answers the prefix of the steps it waited in,
    * which the step's next run is named after.
@@ -2039,7 +2107,7 @@ export class RunHost extends RpcTarget {
       }
       return prefix;
     }
-    const prefix = waitStep(key, "busy", round);
+    const prefix = waitStep(key, marker.kind, round);
     await this.#step.sleep(prefix, sleepMs);
     return prefix;
   }
@@ -2123,6 +2191,9 @@ export class RunHost extends RpcTarget {
       let tries = 0;
       // The step's wait for load since its last admission (`LoadWait`).
       let load = loadWaitStart;
+      // What the step's rounds waited in all for the waits its calls named
+      // (`throttledMarker`).
+      let throttledMs = 0;
       // Whether the next attempts collect a held call's decided outcome.
       let collecting = false;
       const attemptStep = async (context?: unknown): Promise<unknown> => {
@@ -2204,10 +2275,13 @@ export class RunHost extends RpcTarget {
           return heldMarkerOf(attempt.heldKeys, attempt.unknown);
         }
         // Its model call was refused for the organization's AI provider
-        // key: the step waits for a working one, not failed, using no
-        // retry, whatever the workflow code made of the refusal.
-        if (current && attempt.aiTrouble !== undefined) {
-          return keyMarkerOf(Date.now(), attempt.aiTrouble);
+        // key, or its call named how long to wait before it is tried
+        // again: the step waits, not failed, using no retry.
+        if (current) {
+          const waits = waitMarkerOf(attempt, result, throttledMs);
+          if (waits !== undefined) {
+            return waits;
+          }
         }
         if (!result.ok) {
           failed = result.error;
@@ -2268,13 +2342,14 @@ export class RunHost extends RpcTarget {
         await this.#hooks.waiting({ reason: "ai_provider", ...aiWait });
       };
       // The step run under `base` (its own name, or a retry's), then run
-      // again while it is held, or its lineage busy: wait until the person
-      // decided, or the seconds the lineage said, then run the step again
+      // again while it is held, its lineage busy or its call named a wait:
+      // wait until the person decided, or as long as the wait, then run the step again
       // under the same key, in a step of its own each time, its names
       // `base`'s, so every execution replays the same steps.
       const rounds = async (base: string): Promise<unknown> => {
         tries = 0;
         load = loadWaitStart;
+        throttledMs = 0;
         failed = undefined;
         collecting = false;
         let value = await this.#step.do(base, config, attemptStep);
@@ -2295,6 +2370,9 @@ export class RunHost extends RpcTarget {
           // Read off the markers alone, journaled as the step's results,
           // so every replay counts the same.
           load = loadWaitAfter(load, marker);
+          if (marker.kind === "throttled") {
+            throttledMs += marker.waitMs;
+          }
           if (marker.kind === "busy" && load.sleepMs <= 0) {
             failed = queueTimedOut(step, marker.maxWaitMs);
             throw toStepError(failed);
@@ -2340,7 +2418,11 @@ export class RunHost extends RpcTarget {
             step,
             base,
             marker,
-            { round, sleepMs: load.sleepMs },
+            {
+              round,
+              sleepMs:
+                marker.kind === "throttled" ? marker.waitMs : load.sleepMs,
+            },
             unknown
           );
           tries = 0;

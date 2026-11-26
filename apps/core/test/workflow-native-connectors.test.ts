@@ -23,10 +23,17 @@ import {
   candidateRunFor,
   startCandidateRun,
 } from "../src/workflows/candidate-runs.ts";
+import { waitStepPrefix } from "../src/workflows/host.ts";
+import { resourceRunTrace } from "../src/workflows/resource-run-trace.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
-import { consentCode, graphAttachmentUrl } from "./connect-providers.ts";
+import {
+  consentCode,
+  graphAttachmentUrl,
+  graphThrottleUrl,
+} from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
+import { resumed, sleeping, stopped } from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi, unique } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
@@ -136,6 +143,17 @@ const attach = async (
       contentType: "text/plain",
       contentBytes: btoa(attachment.text),
     }),
+  });
+};
+
+/**
+ * Has Graph answer `mailbox`'s next request 429, asking to wait
+ * `retryAfter` seconds: connect pauses the connection that long.
+ */
+const throttle = async (mailbox: string, retryAfter: number): Promise<void> => {
+  await providers().fetch(graphThrottleUrl, {
+    method: "POST",
+    body: JSON.stringify({ mailbox, requests: 1, retryAfter }),
   });
 };
 
@@ -267,11 +285,15 @@ const readingWorkflow = async () => {
   return { builder, workflow, mailbox };
 };
 
-/** Runs version 1 of workflow `id` for `by` on `input`: how it ended. */
+/**
+ * Runs version 1 of workflow `id` for `by` on `input`, doing
+ * `meanwhile` to the run as it goes: how it ended.
+ */
 const ran = async (
   by: Identity,
   id: string,
-  input: { mailbox: string; message: string; attachment: string }
+  input: { mailbox: string; message: string; attachment: string },
+  meanwhile?: (runId: string) => Promise<void>
 ) => {
   const { runId } = await startWorkflow(
     env,
@@ -282,6 +304,7 @@ const ran = async (
   if (runId === null) {
     throw new Error("The start admitted no run");
   }
+  await meanwhile?.(runId);
   const run: WorkflowResourceRun = await vi.waitFor(
     async () => {
       const read = await resourceRunFor(env, by, id, runId);
@@ -459,6 +482,37 @@ describe("a workflow binding a native connector's operation", () => {
     expect({ read, unpatterned }).toStrictEqual({
       read: { status: "completed", output: { status: "due 2026-11-01" } },
       unpatterned: { status: "failed", code: "workflow.call_invalid" },
+    });
+  });
+
+  it("waits out the pause its connection's vendor asked for, past its step's retries, then calls", async () => {
+    const { builder, workflow, mailbox } = await readingWorkflow();
+    await attach(mailbox, "m1", {
+      id: "a1",
+      name: "notes.txt",
+      text: "due 2026-11-01",
+    });
+    // Longer than a sealed step's retries take in all (a second, then two).
+    await throttle(mailbox, 6);
+    let run = "";
+    const read = await ran(
+      builder,
+      workflow.id,
+      { mailbox, message: "m1", attachment: "a1" },
+      // Stopped and resumed as it waits: a new activation replays the
+      // wait, and waits on.
+      async (runId) => {
+        run = runId;
+        await sleeping(runId, waitStepPrefix);
+        await stopped(runId);
+        await resumed(runId);
+      }
+    );
+    const { tasks } = await resourceRunTrace(env, builder, workflow.id, run);
+    expect({ read, tasks }).toStrictEqual({
+      read: { status: "completed", output: { status: "due 2026-11-01" } },
+      // The attempt its vendor turned away, then the one after the wait.
+      tasks: [{ task: "read", state: "reached", attempts: 2 }],
     });
   });
 
