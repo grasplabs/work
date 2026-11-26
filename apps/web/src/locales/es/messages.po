@@ -5346,6 +5346,7 @@ msgstr "Contexto"
 msgid "Context used"
 msgstr "Contexto usado"
 
+#: src/interview/rating.tsx
 #: src/interview/start.tsx
 #: src/onboarding/company-step.tsx
 #: src/onboarding/documents-step.tsx
@@ -7197,6 +7198,10 @@ msgstr "Todos los días laborables a las {time}"
 msgid "Every weekday at 9:00"
 msgstr "Cada día laborable a las 9:00"
 
+#: src/interview/rating.tsx
+msgid "Every word helps {who} get better at this."
+msgstr "Cada palabra ayuda a {who} a mejorar en esto."
+
 #: src/agents/agent-facts.tsx
 #: src/agents/agents-overview.tsx
 #: src/agents/setup/words.ts
@@ -8925,10 +8930,6 @@ msgstr "Veo a {people} en {teams}. Entre ellas, {names}."
 msgid "I can’t plan that day. Type one like {example}, from {earliest} to {latest}."
 msgstr "No puedo planificar ese día. Escribe uno como {example}, del {earliest} al {latest}."
 
-#: src/interview/start.tsx
-msgid "I changed my mind"
-msgstr "He cambiado de opinión"
-
 #: src/onboarding/company-step.tsx
 #: src/onboarding/people-add.tsx
 msgid "I could not find the columns. The first row should name them: name, email, team and job."
@@ -8990,10 +8991,6 @@ msgstr "He perdido la conexión. Comprueba tu internet. He guardado lo que has d
 #: src/interview/parts/consent.tsx
 msgid "I'd rather skip this"
 msgstr "Prefiero saltarme esto"
-
-#: src/interview/start.tsx
-msgid "I’d rather skip this"
-msgstr "Prefiero saltármelo"
 
 #: src/onboarding/setup-steps.tsx
 msgid "I’ll set up Grasp with you, one step at a time. Which language would you like?"
@@ -9078,10 +9075,6 @@ msgstr "Si no hay nada que hacer, dilo en una línea y para."
 #: src/agents/agent-templates.ts
 msgid "If you can't find the answer, say so and say who might know."
 msgstr "Si no encuentras la respuesta, dilo e indica quién podría saberla."
-
-#: src/interview/start.tsx
-msgid "If you change your mind, this link stays open until {closes}."
-msgstr "Si cambias de opinión, este enlace sigue abierto hasta el {closes}."
 
 #: src/guest-sign-in.tsx
 msgid "If you were invited, a code is on its way to you. It works for five minutes."
@@ -16729,10 +16722,6 @@ msgstr "Saltar por ahora"
 msgid "Skip leads marked lost or not interested."
 msgstr "Omite los leads marcados como perdidos o no interesados."
 
-#: src/interview/start.tsx
-msgid "Skip the interview?"
-msgstr "¿Saltarte la entrevista?"
-
 #: src/frame/ui-words.tsx
 msgid "Skipped {name}"
 msgstr "{name} omitida"
@@ -17708,10 +17697,6 @@ msgstr "Gracias, {name}."
 msgid "Thank you. Want to say why?"
 msgstr "Gracias. ¿Quieres decir por qué?"
 
-#: src/interview/start.tsx
-msgid "Thanks for letting us know"
-msgstr "Gracias por avisarnos"
-
 #: src/onboarding/documents-step.tsx
 msgid "Thanks for the document. I’ll read it before I talk to anyone."
 msgstr "Gracias por el documento. Lo leeré antes de hablar con nadie."
@@ -17811,10 +17796,6 @@ msgstr "Esa presentación de formación también ayuda"
 #: src/sign-in-errors.ts
 msgid "That way of signing in isn't set up here."
 msgstr "Esa forma de iniciar sesión no está configurada aquí."
-
-#: src/interview/start.tsx
-msgid "That’s completely fine. Your company will see that you opted out, but never why. Nothing was recorded."
-msgstr "No pasa nada. Tu empresa verá que no participas, pero nunca por qué. No se ha grabado nada."
 
 #: src/onboarding/plan-story.tsx
 msgid "That’s everything. Here’s a quick look at what happens next."
@@ -21535,10 +21516,6 @@ msgstr "Sí"
 msgctxt "a kind of field"
 msgid "Yes or no"
 msgstr "Sí o no"
-
-#: src/interview/start.tsx
-msgid "Yes, skip it"
-msgstr "Sí, saltarla"
 
 #: src/interview/read-back-story.tsx
 msgid "Yes, that’s correct"

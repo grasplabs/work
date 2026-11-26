@@ -106,7 +106,7 @@ vec4 ambient(vec2 p, vec2 cellAt, vec2 window, float b, float seed, float t) {
     // over, whatever lies behind the page. Only its edge carries his line.
     float clear = 1.0;
     // How far out from round words his cells thin away, in CSS pixels.
-    const float fade = 44.0;
+    const float fade = 112.0;
     for (int i = 0; i < 4; i++) {
       vec3 look = u_holdLooks[i];
       if (look.x < 0.004) continue;
@@ -114,13 +114,17 @@ vec4 ambient(vec2 p, vec2 cellAt, vec2 window, float b, float seed, float t) {
       // One that paints its own ground needs no clearing: its own smooth corner covers his cells,
       // where cleared cells would stand in steps round the curve.
       if (look.y > 0.5) continue;
-      // Round one without a ground of its own (words, a link) he thins out softly, from a little
-      // outside its edge to clear inside it: no hard block of cleared cells round the words.
-      clear = min(clear, mix(1.0, smoothstep(4.0, fade, roundBox(p, u_holds[i], look.z)), look.x));
+      // Round one without a ground of its own (words, a link) he thins out softly, from its edge
+      // outward, round as a pill whatever its corners: no block of cleared cells round the words,
+      // only his own dither growing sparser towards them.
+      vec4 box = u_holds[i];
+      vec2 half_ = box.zw * 0.5;
+      float pill = min(half_.x, half_.y);
+      vec2 q = abs(p - (box.xy + half_)) - half_ + pill;
+      float away = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - pill;
+      clear = min(clear, mix(1.0, smoothstep(0.0, fade, away), look.x));
     }
     level *= clear;
-    // The cleared cells come back by the dither as the ring fades, not all at once.
-    level = clear < 1.0 && b > clear ? 0.0 : level;
     for (int i = 0; i < 4; i++) {
       vec3 look = u_holdLooks[i];
       if (look.x < 0.004) continue;

@@ -5346,6 +5346,7 @@ msgstr "Context"
 msgid "Context used"
 msgstr "Gebruikte context"
 
+#: src/interview/rating.tsx
 #: src/interview/start.tsx
 #: src/onboarding/company-step.tsx
 #: src/onboarding/documents-step.tsx
@@ -7197,6 +7198,10 @@ msgstr "Elke werkdag om {time}"
 msgid "Every weekday at 9:00"
 msgstr "Elke werkdag om 9:00"
 
+#: src/interview/rating.tsx
+msgid "Every word helps {who} get better at this."
+msgstr "Elk woord helpt {who} hier beter in te worden."
+
 #: src/agents/agent-facts.tsx
 #: src/agents/agents-overview.tsx
 #: src/agents/setup/words.ts
@@ -8925,10 +8930,6 @@ msgstr "Ik zie {people} in {teams}. Onder hen {names}."
 msgid "I can’t plan that day. Type one like {example}, from {earliest} to {latest}."
 msgstr "Die dag kan ik niet plannen. Typ er een zoals {example}, van {earliest} tot en met {latest}."
 
-#: src/interview/start.tsx
-msgid "I changed my mind"
-msgstr "Ik heb me bedacht"
-
 #: src/onboarding/company-step.tsx
 #: src/onboarding/people-add.tsx
 msgid "I could not find the columns. The first row should name them: name, email, team and job."
@@ -8989,10 +8990,6 @@ msgstr "Ik ben de verbinding kwijt. Controleer je internet. Ik heb bewaard wat j
 
 #: src/interview/parts/consent.tsx
 msgid "I'd rather skip this"
-msgstr "Ik sla dit liever over"
-
-#: src/interview/start.tsx
-msgid "I’d rather skip this"
 msgstr "Ik sla dit liever over"
 
 #: src/onboarding/setup-steps.tsx
@@ -9078,10 +9075,6 @@ msgstr "Is er niets te doen, zeg dat dan in één regel en stop."
 #: src/agents/agent-templates.ts
 msgid "If you can't find the answer, say so and say who might know."
 msgstr "Vind je het antwoord niet, zeg dat dan en zeg wie het misschien weet."
-
-#: src/interview/start.tsx
-msgid "If you change your mind, this link stays open until {closes}."
-msgstr "Bedenk je je, dan blijft deze link open tot {closes}."
 
 #: src/guest-sign-in.tsx
 msgid "If you were invited, a code is on its way to you. It works for five minutes."
@@ -16729,10 +16722,6 @@ msgstr "Nu overslaan"
 msgid "Skip leads marked lost or not interested."
 msgstr "Sla leads over die als verloren of niet geïnteresseerd zijn gemarkeerd."
 
-#: src/interview/start.tsx
-msgid "Skip the interview?"
-msgstr "Het interview overslaan?"
-
 #: src/frame/ui-words.tsx
 msgid "Skipped {name}"
 msgstr "{name} overgeslagen"
@@ -17708,10 +17697,6 @@ msgstr "Dank je, {name}."
 msgid "Thank you. Want to say why?"
 msgstr "Dank je. Wil je zeggen waarom?"
 
-#: src/interview/start.tsx
-msgid "Thanks for letting us know"
-msgstr "Bedankt dat je het laat weten"
-
 #: src/onboarding/documents-step.tsx
 msgid "Thanks for the document. I’ll read it before I talk to anyone."
 msgstr "Dank je voor het document. Ik lees het voordat ik met iemand praat."
@@ -17811,10 +17796,6 @@ msgstr "Die trainingsslides helpen ook"
 #: src/sign-in-errors.ts
 msgid "That way of signing in isn't set up here."
 msgstr "Die manier van inloggen is hier niet ingesteld."
-
-#: src/interview/start.tsx
-msgid "That’s completely fine. Your company will see that you opted out, but never why. Nothing was recorded."
-msgstr "Dat is helemaal goed. Je bedrijf ziet dat je hebt afgezien, maar nooit waarom. Er is niets opgenomen."
 
 #: src/onboarding/plan-story.tsx
 msgid "That’s everything. Here’s a quick look at what happens next."
@@ -21535,10 +21516,6 @@ msgstr "Ja"
 msgctxt "a kind of field"
 msgid "Yes or no"
 msgstr "Ja of nee"
-
-#: src/interview/start.tsx
-msgid "Yes, skip it"
-msgstr "Ja, sla het over"
 
 #: src/interview/read-back-story.tsx
 msgid "Yes, that’s correct"
