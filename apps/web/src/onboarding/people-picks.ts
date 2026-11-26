@@ -143,7 +143,11 @@ export interface TeamRows {
 export const teamRowsOf = (
   picks: Picks,
   people: readonly RosterPerson[],
-  noTeamId: string
+  noTeamId: string,
+  /** Who stands first in their team: the leads as the list opened, so marking one moves no row. */
+  first: ReadonlySet<string> = new Set(
+    picks.teams.flatMap(({ lead }) => (lead === null ? [] : [lead]))
+  )
 ): TeamRows[] => {
   const byTeam = new Map<string, RosterPerson[]>();
   for (const person of people) {
@@ -159,11 +163,8 @@ export const teamRowsOf = (
       team,
       // The lead first, then the rest by name.
       people: (byTeam.get(team.id) ?? []).toSorted((a, b) => {
-        if (a.id === team.lead) {
-          return -1;
-        }
-        if (b.id === team.lead) {
-          return 1;
+        if (first.has(a.id) !== first.has(b.id)) {
+          return first.has(a.id) ? -1 : 1;
         }
         return a.name.localeCompare(b.name);
       }),

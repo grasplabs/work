@@ -712,7 +712,9 @@ export const ReadBack = () => {
             </h1>
           </div>
         </div>
-        <p key={at} {...stylex.props(styles.story, fadeIn)}>
+        {/* A div, not a p: each sentence's tooltip renders its panel in
+            place, and a div can't sit inside a p. */}
+        <div key={at} {...stylex.props(styles.story, fadeIn)}>
           {units.map((unit, place) => (
             <span key={unit.key}>
               {place > 0 ? " " : null}
@@ -730,7 +732,7 @@ export const ReadBack = () => {
               />
             </span>
           ))}
-        </p>
+        </div>
         {left.length > 0 ? (
           <Badge
             icon={most === "team" ? UsersIcon : EyeOffIcon}

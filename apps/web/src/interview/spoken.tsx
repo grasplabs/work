@@ -133,13 +133,29 @@ export const SpokenText = ({
   </>
 );
 
-/** A line as it is shown: all of it large; or, when it is long, its first sentence large and the rest under it. */
+/** A first sentence shorter than this is a word of thanks before the question: they stand large together. */
+const titleAtLeast = 32;
+
+/**
+ * A line as it is shown: its first sentence large and the rest under it,
+ * from where the rest starts in the line; a short first sentence ("Got
+ * it.") stays large with the one after it, which carries the question.
+ * The cut is where a sentence ends, decided by what comes before it alone,
+ * so it never moves while the line grows as he says it: a word once shown
+ * stays where it stands, never taken from the title into the text under it.
+ */
 export const shownAs = (
-  line: string,
-  long = 140
-): { title: string; rest: string } => {
-  const cut = line.length > long ? line.search(/(?<=[.?!…])\s/u) : -1;
-  return cut < 0
-    ? { title: line, rest: "" }
-    : { title: line.slice(0, cut), rest: line.slice(cut + 1) };
+  line: string
+): { title: string; rest: string; restAt: number } => {
+  for (const end of line.matchAll(/(?<=[.?!…])\s+(?=\S)/gu)) {
+    if (end.index >= titleAtLeast) {
+      const restAt = end.index + end[0].length;
+      return {
+        title: line.slice(0, end.index),
+        rest: line.slice(restAt),
+        restAt,
+      };
+    }
+  }
+  return { title: line, rest: "", restAt: line.length };
 };

@@ -295,7 +295,8 @@ to talk about your work?`.split("\n");
           ))}
         </Heading>
         <div {...stylex.props(styles.block)}>
-          <Text size="lg">
+          {/* A box, not a paragraph: the dialog it opens stands in it. */}
+          <Text as="div" size="lg">
             <Trans>
               Your company asked everyone to have a short chat with {who}, our
               AI interviewer. It takes {minutes} minutes at most, and you decide{" "}

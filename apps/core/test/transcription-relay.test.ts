@@ -454,8 +454,10 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       authorization: opened?.authorization,
       format: session.audio_format,
       language: session.language,
-      // The realtime model takes no words to listen out for.
-      biased: JSON.stringify(opened?.session).includes("context_bias"),
+      // What to listen out for is the store's: the team, and its people.
+      keyterms: ["Ops", "Person"].every((term) =>
+        JSON.stringify(opened?.session).includes(term)
+      ),
       events: opened?.events,
       // A tenth of a second at 16 kHz, as the session takes it.
       audio: opened?.audioBytes,
@@ -466,12 +468,12 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       flushed: { type: "partial", text: "Hello there" },
       // The session times no words.
       final: { type: "final", text: "Hello there", words: [] },
-      path: "/v1/audio/transcriptions/realtime?model=voxtral-mini-transcribe-realtime-2602",
+      path: "/v1/audio/transcriptions/realtime?model=voxtral-mini-transcribe-realtime-3",
       // Grasp's key, which connect added: core sent none.
       authorization: `Bearer ${platformMistralKey}`,
       format: { encoding: "pcm_s16le", sample_rate: 16_000 },
       language: "nl",
-      biased: false,
+      keyterms: true,
       events: ["session.update", "input_audio.append", "input_audio.append"],
       // A tenth of a second, then the silence after the stretch.
       audio: 3198 + 15_360,
@@ -1260,7 +1262,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     ]).toStrictEqual([
       "ready",
       "api.mistral.ai",
-      "/v1/audio/transcriptions/realtime?model=voxtral-mini-transcribe-realtime-2602",
+      "/v1/audio/transcriptions/realtime?model=voxtral-mini-transcribe-realtime-3",
     ]);
   });
 });

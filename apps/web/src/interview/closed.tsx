@@ -57,7 +57,13 @@ const styles = stylex.create({
     maxWidth: "28rem",
     textAlign: "center",
   },
-  words: { display: "flex", flexDirection: "column", gap: space["3"] },
+  // Balanced, so the date never wraps alone onto a line of its own.
+  words: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["3"],
+    textWrap: "balance",
+  },
   // The one thing to do, and the quiet way to where the lines go under it.
   ways: {
     display: "flex",
