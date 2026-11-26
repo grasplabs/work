@@ -71,19 +71,8 @@ import { useCore } from "../use-core.ts";
 /** The suites whose directory the company step offers, in order. */
 const directorySuites = directorySuiteSchema.options;
 
-/**
- * Screens core's flow may still list that the setup no longer shows:
- * Pulse, on the work laptops, is set up with the company outside it.
- */
-const dropped: ReadonlySet<SetupStep> = new Set(["pulse"]);
-
 /** Screens no flow has any more, kept by name only so places kept with them still read. */
-const gone: ReadonlySet<SetupStep> = new Set([
-  "pulse",
-  "listening",
-  "review",
-  "open",
-]);
+const gone: ReadonlySet<SetupStep> = new Set(["listening", "review", "open"]);
 const framed = (step: SetupStep): step is ShownStep => !gone.has(step);
 
 /** Which list of steps a kept place counts in: core keeps the place by the screens' names, this browser only the message and what was settled. */
@@ -219,9 +208,7 @@ const Setup = () => {
   const data = loaded.state === "ready" ? loaded.data : null;
   // The screens this company's flow has, in its order; all of them where core can't say.
   // The same list while the flow is the same, so what goes by it runs once per change.
-  const screens: SetupPath = (
-    data === null ? steps : flowScreens(data.flow)
-  ).filter((each) => !dropped.has(each));
+  const screens: SetupPath = data === null ? steps : flowScreens(data.flow);
   const [path, setPath] = useState(screens);
   if (path.join(",") !== screens.join(",")) {
     setPath(screens);

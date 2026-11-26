@@ -4955,14 +4955,20 @@ export class Onboarding extends DurableObject<Env> {
       .where(eq(onboarding.id, 1))
       .all();
     const stored = row?.choices ?? null;
-    return stored === null
-      ? noChoices
-      : setupChoicesSchema.parse(JSON.parse(stored));
+    if (stored === null) {
+      return noChoices;
+    }
+    // Choices kept while the setup still asked about Pulse hold its
+    // answer too: read without it, as the setup no longer has that step.
+    const { pulse: _asked, ...kept } = z
+      .looseObject({})
+      .parse(JSON.parse(stored));
+    return setupChoicesSchema.parse(kept);
   }
 
   /**
    * Keeps what the admin chose. In the log and the audit log by which
-   * places and what of Pulse and the HR platform, never what they typed.
+   * places and what of the HR platform, never what they typed.
    */
   saveChoices(choices: SetupChoices, by: AuditActor): SetupChoices {
     this.ctx.storage.transactionSync(() => {
@@ -4974,7 +4980,6 @@ export class Onboarding extends DurableObject<Env> {
       this.#changed(by, "onboarding.choices.saved", {
         sources: choices.sources.join(" "),
         asked: choices.sourcesWanted.length,
-        pulse: choices.pulse ?? "",
         hr: choices.hr?.kind ?? "",
       });
     });
@@ -5002,7 +5007,10 @@ export class Onboarding extends DurableObject<Env> {
       name: kept.name,
       at: new Date().toISOString(),
       by: whoIs(by),
-      reading: JSON.stringify(kept.reading),
+      // With no question to the admin (`ask`), as the release before this
+      // one reads it: a deployment rolled back still reads these documents.
+      // Left out once that release is no longer rolled back to.
+      reading: JSON.stringify({ ...kept.reading, ask: null }),
     };
     this.ctx.storage.transactionSync(() => {
       this.#db.insert(documents).values(row).run();

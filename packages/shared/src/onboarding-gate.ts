@@ -16,8 +16,6 @@ export const knownWeights = {
   sources: 5,
   /** The documents shared. */
   documents: 5,
-  /** Pulse: the tools in use. */
-  tools: 5,
   /** Who leads which team. */
   leads: 10,
   /** The interviews: the leads', then everyone else's, half each. */
@@ -33,7 +31,6 @@ const knownSources: readonly KnownSource[] = [
   "people",
   "sources",
   "documents",
-  "tools",
   "leads",
   "conversations",
   "review",
@@ -57,7 +54,6 @@ export const knownSourcesOf = (flow: OnboardingFlow): KnownSource[] => {
     people: on("company"),
     sources: on("sources"),
     documents: on("documents"),
-    tools: on("pulse"),
     leads: on("leads"),
     conversations: on("interviews"),
     review: on("interviews"),
@@ -67,7 +63,7 @@ export const knownSourcesOf = (flow: OnboardingFlow): KnownSource[] => {
 
 /**
  * How much Grasp knows, in percent of what `parts` could come to: of all
- * of it for the whole onboarding, whose weights add up to 100. Where
+ * of it for the whole onboarding. Where
  * nothing is asked, there is nothing left to know.
  */
 export const knownPercent = (

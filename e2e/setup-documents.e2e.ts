@@ -70,7 +70,7 @@ test("the admin drops three documents and goes on to the HR platform", async ({
     ).toBeVisible();
   }
 
-  // The way on: the HR platform, as Pulse is not on the admin's path.
+  // The way on: the HR platform.
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(
     page.getByRole("heading", { name: "Which HR platform do you use?" })

@@ -97,7 +97,7 @@ describe("an admin's onboarding being behind them", () => {
   });
 
   it("is so once they finished every screen where nobody is interviewed, open or not", () => {
-    const flow = flowWithout(["about", "pulse", "leads", "interviews"]);
+    const flow = flowWithout(["about", "leads", "interviews"]);
     expect([
       onboardingBehind({
         flow,

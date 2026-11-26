@@ -18,7 +18,6 @@ export const flowSteps = [
   "company",
   "sources",
   "documents",
-  "pulse",
   "leads",
   "interviews",
   "about",
@@ -36,7 +35,6 @@ export const setupSteps = [
   "company",
   "sources",
   "documents",
-  "pulse",
   "leads",
   "team",
   "about",
@@ -195,12 +193,12 @@ export const flowPresets = {
   full: defaultFlow,
   short: {
     on: true,
-    steps: without(["about", "sources", "documents", "pulse"]),
+    steps: without(["about", "sources", "documents"]),
     grasp: defaultFlow.grasp,
   },
   setup: {
     on: true,
-    steps: without(["about", "pulse", "leads", "interviews"]),
+    steps: without(["about", "leads", "interviews"]),
     grasp: {
       kickoff: false,
       agreements: { processing: false, assessment: false, council: false },

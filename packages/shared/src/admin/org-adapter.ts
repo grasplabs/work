@@ -444,14 +444,11 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
     ...(snapshot.unknown === undefined ? {} : { unknown: snapshot.unknown }),
   };
 
-  const skipped: ("sources" | "documents" | "pulse")[] = [
+  const skipped: ("sources" | "documents")[] = [
     ...(client.sources.length === 0 && client.sourcesWanted.length === 0
       ? (["sources"] as const)
       : []),
     ...(client.documents.length === 0 ? (["documents"] as const) : []),
-    ...(client.pulse === null || client.pulse === "skipped"
-      ? (["pulse"] as const)
-      : []),
   ];
   const seed: OrgState = {
     conversation: "none",
