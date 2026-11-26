@@ -272,7 +272,8 @@ describe("an organization's onboarding in the admin", () => {
 
     const { html } = await page(`${base}/steps`);
 
-    expect(html).toContain("Day 9 of 21");
+    // Counted from 1 on the day they start, as core counts it.
+    expect(html).toContain("Day 10 of 21");
   });
 
   it("says a team's links are out only once a colleague's link went out, not when its lead talked", async () => {
