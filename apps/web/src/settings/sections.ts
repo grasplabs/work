@@ -1,7 +1,6 @@
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
 import {
-  BrainIcon,
   BuildingIcon,
   CableIcon,
   CircleUserIcon,
@@ -34,7 +33,6 @@ type SettingsHref =
   | "/settings/audit"
   | "/settings/webhooks"
   | "/settings/billing"
-  | "/settings/brain"
   | "/settings/profile"
   | "/settings/appearance"
   | "/settings/instructions"
@@ -174,18 +172,6 @@ const settingsSections: readonly SettingsSection[] = [
     href: "/settings/billing",
     group: "workspace",
     icon: FileInvoiceIcon,
-    audience: "admins",
-  },
-  // Not in the reference, which dropped it: no other page lets an admin
-  // rename the brain's groups of teams or move a team between them. Last,
-  // so the reference's sections keep their places.
-  {
-    // Its groups of teams, the brain's regions.
-    id: "brain",
-    label: msg`Brain`,
-    href: "/settings/brain",
-    group: "workspace",
-    icon: BrainIcon,
     audience: "admins",
   },
 ];

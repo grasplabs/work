@@ -2397,10 +2397,6 @@ msgstr "Add a fallback"
 msgid "Add a goal"
 msgstr "Add a goal"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Add a group"
-msgstr "Add a group"
-
 #: src/settings/workspace-name.tsx
 msgid "Add a logo"
 msgstr "Add a logo"
@@ -4012,7 +4008,6 @@ msgstr "Bound to"
 #: src/brain/brain-section.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.brain.tsx
-#: src/settings/sections.ts
 msgid "Brain"
 msgstr "Brain"
 
@@ -8609,14 +8604,6 @@ msgstr "Green lines: new that day"
 msgid "Grid"
 msgstr "Grid"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Group {number}"
-msgstr "Group {number}"
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "Groups of teams"
-msgstr "Groups of teams"
-
 #: src/drafts/sharing.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/erasures.tsx
@@ -11372,10 +11359,6 @@ msgstr "New chat"
 msgid "New field"
 msgstr "New field"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "New group"
-msgstr "New group"
-
 #: src/settings/ai-providers.tsx
 msgid "New key"
 msgstr "New key"
@@ -11675,10 +11658,6 @@ msgstr "No first line"
 #: src/brain/goals-editor.tsx
 msgid "No goals yet."
 msgstr "No goals yet."
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "No group"
-msgstr "No group"
 
 #: src/onboarding/campaign/concepts/canvas.tsx
 msgid "No ideas yet. They come once we see how the work runs."
@@ -15583,10 +15562,6 @@ msgstr "Save changes"
 msgid "Save first"
 msgstr "Save first"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Save groups"
-msgstr "Save groups"
-
 #: src/apps/app-own-link.tsx
 msgid "Save link"
 msgstr "Save link"
@@ -17544,7 +17519,6 @@ msgstr "Team size unknown."
 #: src/agents/setup/audience-step.tsx
 #: src/brain/brain.ts
 #: src/people/people-teams-picker.tsx
-#: src/routes/_shell.settings.brain.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/sections.ts
 #: src/settings/teams.tsx
@@ -18009,10 +17983,6 @@ msgstr "The best part of its passage"
 msgid "The board"
 msgstr "The board"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "The brain has no teams to group yet."
-msgstr "The brain has no teams to group yet."
-
 #: src/brain/learned-section.tsx
 msgid "The Brain hasn't learned anything from this version."
 msgstr "The Brain hasn't learned anything from this version."
@@ -18036,10 +18006,6 @@ msgstr "The Brain, as each run's person may read it"
 #: src/brain/brain-section.tsx
 msgid "The Brain's pages"
 msgstr "The Brain's pages"
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "The brain's regions: your teams, grouped the way your company is. Grasp groups new teams by itself; rename a group or move a team here."
-msgstr "The brain's regions: your teams, grouped the way your company is. Grasp groups new teams by itself; rename a group or move a team here."
 
 #: src/brain/atlas-overlays.tsx
 msgid "The brain's view"

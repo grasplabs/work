@@ -11,7 +11,6 @@ import type {
   Stakeholder,
   Statement,
   Team,
-  TeamGroup,
   ThinkingGround,
   Tool,
   Vision,
@@ -58,7 +57,7 @@ import {
   stepsOf,
 } from "./brain-records.ts";
 import type { HeldRecords, OnboardingHeld } from "./brain-records.ts";
-import { saveTeamGroups, teamGroupsOf } from "./brain-team-groups.ts";
+import { teamGroupsOf } from "./brain-team-groups.ts";
 import { askMorePeople, workKnowledge } from "./brain-work.ts";
 import { mayHoldCapturesOf } from "./connection-capture-key.ts";
 import { catalogEntries, personOf } from "./connections.ts";
@@ -1154,7 +1153,7 @@ const readBrainCore = async (
 /**
  * The brain's teams, every one, as an admin reads them: the ones its
  * regions may name (brain-team-groups.ts). The one place that says which
- * teams the Brain has, for regrouping them and for arranging them.
+ * teams the Brain has, for arranging them.
  */
 export const brainTeams = async (env: Env): Promise<Team[]> => {
   const { teams } = await readBrainCore(env, { role: "admin" });
@@ -1405,19 +1404,6 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
     return await withPerson(
       this.#check,
       async (person) => await forget(this.#env, person, target)
-    );
-  }
-
-  async saveTeamGroups(groups: unknown): Promise<TeamGroup[]> {
-    return await withPerson(
-      this.#check,
-      async (person) =>
-        await saveTeamGroups(
-          this.#env,
-          person,
-          groups,
-          async () => await brainTeams(this.#env)
-        )
     );
   }
 
