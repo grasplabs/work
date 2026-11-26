@@ -17,6 +17,7 @@ import {
   holdAlarm,
   onLink,
   opened,
+  openedFor,
   openLinkAs,
   participate,
   postedOnLink,
@@ -113,6 +114,10 @@ const openedTwo = async (): Promise<[Device, Device]> => {
   }
   return [first, second];
 };
+
+/** A minute of one morning, as an ISO 8601 time. */
+const at = (minute: number): string =>
+  new Date(Date.UTC(2031, 4, 6, 9, minute)).toISOString();
 
 const ask = async (link: Device, body: Record<string, unknown>) =>
   await postedOnLink(interviewVoicePath, { ...link, ...body });
@@ -420,31 +425,62 @@ describe("an interview as a live conversation", { timeout: 60_000 }, () => {
     });
   });
 
-  it("opens no more conversations on a link than a day's listening allows, also asked for all at once", async () => {
-    const link = await opened();
+  it("counts a conversation at how long it was open once the page closes it, and opens none once the day's listening is spent", async () => {
+    const { link, person } = await openedFor();
+    const store = onboardingStore(env);
+    const who = `link:${person}:heard`;
     const before = await tokensAsked();
-    const usedBefore = await conversationsUsed();
-    // Each held at the 15 minutes it is expected to last: four fill the
-    // hour, side by side as one after the other.
-    const joins = await Promise.all(
-      [1, 2, 3, 4, 5].map(
-        async () =>
-          await ask(link, { action: "open", event: "start", ...standing })
-      )
-    );
+    const joined = await join(link);
+    // Held at the 15 minutes an interview may take, until it is closed.
+    const held = await store.voiceSaid(who);
+    await ask(link, { action: "close", pass: joined.pass });
+    const closed = await store.voiceSaid(who);
+    // Closed again: nothing more comes back.
+    await ask(link, { action: "close", pass: joined.pass });
+    const again = await store.voiceSaid(who);
+    // The rest of the hour heard: no conversation fits any more.
+    await store.countHeard(who, "interviews", 60 * 60 - again);
+    const spent = await ask(link, {
+      action: "open",
+      event: "start",
+      ...standing,
+    });
     const after = await tokensAsked();
-    const used = await conversationsUsed();
     expect({
-      statuses: joins
-        .map(({ status }) => status)
-        .toSorted((one, other) => one - other),
+      held,
+      // A few seconds open, never the 15 minutes.
+      closedUnder: closed < 30,
+      again: again === closed,
+      spent: spent.status,
       // The one that didn't fit asked ElevenLabs for nothing.
       asked: after.length - before.length,
-      used: used - usedBefore,
     }).toStrictEqual({
-      statuses: [200, 200, 200, 200, 429],
-      asked: 4,
-      used: 4 * 15 * 60,
+      held: 15 * 60,
+      closedUnder: true,
+      again: true,
+      spent: 429,
+      asked: 1,
+    });
+  });
+
+  it("holds one conversation a link at a time: the next one opened settles the one never closed, at two minutes at least", async () => {
+    const store = onboardingStore(env);
+    const who = `link:hold-${unique()}:heard`;
+    const hour = 60 * 60;
+    // Opened and left without a close, as a page reloaded does.
+    await store.reserveListening(who, 900, hour, at(0));
+    // A minute later the next one: the first counts two minutes, not one.
+    await store.reserveListening(who, 900, hour, at(1));
+    const afterReload = await store.voiceSaid(who, at(1));
+    // Ten minutes on, another: the second counts the ten it was open.
+    await store.reserveListening(who, 900, hour, at(11));
+    const afterTen = await store.voiceSaid(who, at(11));
+    // One that would not fit is not held.
+    const tooMuch = await store.reserveListening(who, 3600, hour, at(12));
+    expect({ afterReload, afterTen, tooMuch }).toStrictEqual({
+      afterReload: 120 + 900,
+      afterTen: 120 + 600 + 900,
+      tooMuch: null,
     });
   });
 
