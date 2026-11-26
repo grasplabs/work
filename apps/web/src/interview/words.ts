@@ -1,4 +1,3 @@
-import type { ReadBackGroup } from "@grasp-os/shared/interview-story";
 import type { FactTag, InterviewPhase } from "@grasp-os/shared/interview-turn";
 import { useLingui } from "@lingui/react/macro";
 
@@ -12,12 +11,21 @@ import type { Locale } from "../i18n.ts";
 /** What the conversation needs to say and to know by itself. */
 export interface LoopWords {
   locale: Locale;
-  /** "Is that correct?", and their "Yes, that's correct." */
+  /** "Is that correct?" on screen, and their "Yes, that's correct." */
   question: string;
   yes: string;
-  /** What he says first in a part of the read-back; and when he reads back only what was added. */
-  intro: (group: ReadBackGroup, first: boolean) => string;
+  /**
+   * The read-back: its heading on screen, and what he says around it,
+   * which is not what the screen shows: how he brings the summary in, and
+   * how he asks whether it is right once he told it back.
+   */
+  summary: string;
+  summaryIntro: string;
+  summaryAsk: string;
+  /** What heads and opens the read-back when he reads back only what was added. */
   added: string;
+  /** His goodbye once they agreed to it, by their first name when there is one. */
+  farewell: (name: string) => string;
   /** A plain yes, in their words: then nobody has to think about it. */
   agrees: RegExp;
   /** What they say when they put a line of the read-back right themselves. */
@@ -51,9 +59,14 @@ export const useLoopWords = (locale: Locale): LoopWords => {
     locale,
     question: t`Is that correct?`,
     yes: t`Yes, that’s correct.`,
-    // Every part is headed the same: the bar under it says which part of how many.
-    intro: () => t`Summary`,
+    summary: t`Summary`,
+    summaryIntro: t`Based on our conversation, I’ve made a summary for you. This is how it looks.`,
+    summaryAsk: t`Does that sound like a good summary, or is there anything you’d like to add?`,
     added: t`This is what is new.`,
+    farewell: (name) =>
+      name === ""
+        ? t`Well, thank you. It was great talking to you. You can always come back to this link if you want to change something. For now, I have enough. Have a great rest of your week.`
+        : t`Well, thank you, ${name}. It was great talking to you. You can always come back to this link if you want to change something. For now, I have enough. Have a great rest of your week.`,
     agrees: agreesIn[locale],
     changed: (was, now) => t`Change “${was}” to “${now}”.`,
     offline: t`I lost the connection. Please check your internet. I have kept what you said, and I keep trying.`,

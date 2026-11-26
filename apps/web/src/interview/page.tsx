@@ -43,7 +43,7 @@ import {
   useInterviewer,
   useProgress,
 } from "./kept.ts";
-import { setLoopWords, startLoop, stopLoop } from "./loop.ts";
+import { setLoopName, setLoopWords, startLoop, stopLoop } from "./loop.ts";
 import { reachMic } from "./mic.ts";
 import {
   begun,
@@ -568,6 +568,10 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
   const { left, timeUp } = useClock(progress, talking && !reading);
 
   useWordsOnScreen();
+  // He says goodbye by the name they are greeted by.
+  useEffect(() => {
+    setLoopName(session.name);
+  }, [session.name]);
   // The conversation runs while it is on screen; a moment after, so a screen that only flashes by asks nothing.
   const running = talking && !timeUp;
   useEffect(() => (running ? runLoop() : undefined), [running]);

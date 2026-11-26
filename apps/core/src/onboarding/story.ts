@@ -32,8 +32,8 @@ import { onboardingStore } from "./store.ts";
 // name, and counts as carrying sensitive data; and what it took is counted
 // in the onboarding's AI use.
 
-/** The most a story takes to write: a part is a few short sentences. */
-const storyTokens = 1000;
+/** The most a story takes to write: the whole summary, a few short sentences per handful of lines. */
+const storyTokens = 3000;
 
 /** What the page does when there is no story: it reads the lines as they stand. */
 const asTheyStand = (status: number): Response =>
@@ -96,7 +96,7 @@ export const interviewStoryResponse = async (
       work: { onboarding: true },
       effort: "low",
       system,
-      input: `The lines of this part:\n${asked.lines.map(({ id, text }) => `- [${id}] ${text}`).join("\n")}\n\nTell them back.`,
+      input: `The lines of the summary:\n${asked.lines.map(({ id, text }) => `- [${id}] ${text}`).join("\n")}\n\nTell them back.`,
       schema: storySchema,
       maxTokens: storyTokens,
       signal: request.signal,
