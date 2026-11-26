@@ -46,7 +46,6 @@ import { Route as ShellSettingsAiProvidersRouteImport } from './routes/_shell.se
 import { Route as ShellSettingsAppearanceRouteImport } from './routes/_shell.settings.appearance'
 import { Route as ShellSettingsAuditRouteImport } from './routes/_shell.settings.audit'
 import { Route as ShellSettingsBillingRouteImport } from './routes/_shell.settings.billing'
-import { Route as ShellSettingsBrainRouteImport } from './routes/_shell.settings.brain'
 import { Route as ShellSettingsInstructionsRouteImport } from './routes/_shell.settings.instructions'
 import { Route as ShellSettingsMembersRouteImport } from './routes/_shell.settings.members'
 import { Route as ShellSettingsOnboardingRouteImport } from './routes/_shell.settings.onboarding'
@@ -253,11 +252,6 @@ const ShellSettingsBillingRoute = ShellSettingsBillingRouteImport.update({
   path: '/billing',
   getParentRoute: () => ShellSettingsRoute,
 } as any)
-const ShellSettingsBrainRoute = ShellSettingsBrainRouteImport.update({
-  id: '/brain',
-  path: '/brain',
-  getParentRoute: () => ShellSettingsRoute,
-} as any)
 const ShellSettingsInstructionsRoute =
   ShellSettingsInstructionsRouteImport.update({
     id: '/instructions',
@@ -388,7 +382,6 @@ export interface FileRoutesByFullPath {
   '/settings/appearance': typeof ShellSettingsAppearanceRoute
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/billing': typeof ShellSettingsBillingRoute
-  '/settings/brain': typeof ShellSettingsBrainRoute
   '/settings/instructions': typeof ShellSettingsInstructionsRoute
   '/settings/members': typeof ShellSettingsMembersRoute
   '/settings/onboarding': typeof ShellSettingsOnboardingRoute
@@ -444,7 +437,6 @@ export interface FileRoutesByTo {
   '/settings/appearance': typeof ShellSettingsAppearanceRoute
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/billing': typeof ShellSettingsBillingRoute
-  '/settings/brain': typeof ShellSettingsBrainRoute
   '/settings/instructions': typeof ShellSettingsInstructionsRoute
   '/settings/members': typeof ShellSettingsMembersRoute
   '/settings/onboarding': typeof ShellSettingsOnboardingRoute
@@ -504,7 +496,6 @@ export interface FileRoutesById {
   '/_shell/settings/appearance': typeof ShellSettingsAppearanceRoute
   '/_shell/settings/audit': typeof ShellSettingsAuditRoute
   '/_shell/settings/billing': typeof ShellSettingsBillingRoute
-  '/_shell/settings/brain': typeof ShellSettingsBrainRoute
   '/_shell/settings/instructions': typeof ShellSettingsInstructionsRoute
   '/_shell/settings/members': typeof ShellSettingsMembersRoute
   '/_shell/settings/onboarding': typeof ShellSettingsOnboardingRoute
@@ -564,7 +555,6 @@ export interface FileRouteTypes {
     | '/settings/appearance'
     | '/settings/audit'
     | '/settings/billing'
-    | '/settings/brain'
     | '/settings/instructions'
     | '/settings/members'
     | '/settings/onboarding'
@@ -620,7 +610,6 @@ export interface FileRouteTypes {
     | '/settings/appearance'
     | '/settings/audit'
     | '/settings/billing'
-    | '/settings/brain'
     | '/settings/instructions'
     | '/settings/members'
     | '/settings/onboarding'
@@ -679,7 +668,6 @@ export interface FileRouteTypes {
     | '/_shell/settings/appearance'
     | '/_shell/settings/audit'
     | '/_shell/settings/billing'
-    | '/_shell/settings/brain'
     | '/_shell/settings/instructions'
     | '/_shell/settings/members'
     | '/_shell/settings/onboarding'
@@ -982,13 +970,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellSettingsBillingRouteImport
       parentRoute: typeof ShellSettingsRoute
     }
-    '/_shell/settings/brain': {
-      id: '/_shell/settings/brain'
-      path: '/brain'
-      fullPath: '/settings/brain'
-      preLoaderRoute: typeof ShellSettingsBrainRouteImport
-      parentRoute: typeof ShellSettingsRoute
-    }
     '/_shell/settings/instructions': {
       id: '/_shell/settings/instructions'
       path: '/instructions'
@@ -1156,7 +1137,6 @@ interface ShellSettingsRouteChildren {
   ShellSettingsAppearanceRoute: typeof ShellSettingsAppearanceRoute
   ShellSettingsAuditRoute: typeof ShellSettingsAuditRoute
   ShellSettingsBillingRoute: typeof ShellSettingsBillingRoute
-  ShellSettingsBrainRoute: typeof ShellSettingsBrainRoute
   ShellSettingsInstructionsRoute: typeof ShellSettingsInstructionsRoute
   ShellSettingsMembersRoute: typeof ShellSettingsMembersRoute
   ShellSettingsOnboardingRoute: typeof ShellSettingsOnboardingRoute
@@ -1173,7 +1153,6 @@ const ShellSettingsRouteChildren: ShellSettingsRouteChildren = {
   ShellSettingsAppearanceRoute: ShellSettingsAppearanceRoute,
   ShellSettingsAuditRoute: ShellSettingsAuditRoute,
   ShellSettingsBillingRoute: ShellSettingsBillingRoute,
-  ShellSettingsBrainRoute: ShellSettingsBrainRoute,
   ShellSettingsInstructionsRoute: ShellSettingsInstructionsRoute,
   ShellSettingsMembersRoute: ShellSettingsMembersRoute,
   ShellSettingsOnboardingRoute: ShellSettingsOnboardingRoute,
