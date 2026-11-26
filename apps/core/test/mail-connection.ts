@@ -50,7 +50,7 @@ export const mailForApps = [
  * changing the company's things and reaching others. The classes' defaults
  * are tested in tool-classes.test.ts and app-pointers.test.ts.
  */
-const agentMayUse = async (connectionId: string): Promise<void> => {
+export const agentMayUse = async (connectionId: string): Promise<void> => {
   const now = Date.now();
   await env.DB.batch([
     env.DB.prepare(

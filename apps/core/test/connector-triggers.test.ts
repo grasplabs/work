@@ -695,6 +695,52 @@ describe("connector triggers", { timeout: 120_000 }, () => {
     });
   });
 
+  it("stamp a run's mail only by the recipients its connection's own provider declares", async () => {
+    const admin = await person("admin");
+    const workflow = await filing(admin);
+    const microsoft = await connection();
+    const mailbox = await accountOf(microsoft);
+    const trigger = await connectorTrigger(admin, workflow.id, microsoft);
+    await deliverConnectorEvent(env, mailEvent(microsoft));
+    const [run] = await runsOf(trigger.id);
+    if (run === undefined) {
+      throw new Error("Expected a run");
+    }
+    const crm = `connection-${unique()}`;
+    const now = Date.now();
+    await connectDb()
+      .prepare(
+        "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tools, account_name, account_email, created_at, updated_at) VALUES (?, 'crm', 'shared', NULL, 'active', 'native', 'crm', '[]', ?, ?, ?, ?)"
+      )
+      .bind(crm, mailbox, mailbox, now, now)
+      .run();
+    const stampOf = async (
+      connectionId: string,
+      input: Record<string, string | string[]>
+    ) => {
+      const { stamp } = await stampedMail(
+        env,
+        { run: run.id, stepKey: `step-${unique()}` },
+        {
+          connectionId,
+          action: "mail.send",
+          input: { mailbox, subject: "Again", body: "Again.", ...input },
+        }
+      );
+      return stamp === undefined ? "unstamped" : "stamped";
+    };
+
+    expect({
+      declared: await stampOf(microsoft, { to: [mailbox] }),
+      undeclared: await stampOf(microsoft, { replyTo: [mailbox] }),
+      otherProvider: await stampOf(crm, { to: [mailbox] }),
+    }).toStrictEqual({
+      declared: "stamped",
+      undeclared: "unstamped",
+      otherProvider: "unstamped",
+    });
+  });
+
   it("refuse an event that isn't one", async () => {
     const shared = await connection();
 

@@ -10,7 +10,8 @@ import {
   codeStep,
   personalChatsOf,
   says,
-  withoutMarking,
+  withoutReadFrom,
+  returnedText,
 } from "./agent-chat.ts";
 import { grantReviewed, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -91,7 +92,7 @@ type Stub = Awaited<ReturnType<typeof personalChatsOf>>["stub"];
 /** What each code step of the chat returned, as the model read it. */
 const results = async (stub: Stub, chatId: string): Promise<string[]> => {
   const steps = await codeResults(stub, chatId);
-  return steps.map(({ text }) => withoutMarking(text));
+  return steps.map(({ text }) => withoutReadFrom(text));
 };
 
 /** What code step `index` of the chat returned. */
@@ -117,10 +118,10 @@ const notes = (
     .map(({ body }) => JSON.stringify(body).replaceAll('\\"', '"'))
     .filter((body) => body.includes(asked));
 
-const returned = (value: unknown) => `Returned:\n${JSON.stringify(value)}`;
+const returned = (value: unknown) => returnedText(value);
 
 /** A code step that caught a refusal and returned its message. */
-const refusedWith = (message: string) => `Returned:\n${message}`;
+const refusedWith = (message: string) => returnedText(message);
 
 /** The permission events of the permission `id`, once there are `count`. */
 const permissionEvents = async (
@@ -483,10 +484,12 @@ describe("a connection the chat's agent asks for", setUpTime, () => {
       asked,
       waiting: await person.api.chats.connectionRequests(chat.id),
     }).toStrictEqual({
-      asked: `Returned:\n${JSON.stringify({
-        named: [{ scope: "shared", decidedBy: "admin" }],
-        asked: permissionErrors.create("permission.invalid").message,
-      })}`,
+      asked: returnedText(
+        JSON.stringify({
+          named: [{ scope: "shared", decidedBy: "admin" }],
+          asked: permissionErrors.create("permission.invalid").message,
+        })
+      ),
       waiting: [],
     });
   });

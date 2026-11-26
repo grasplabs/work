@@ -36,7 +36,10 @@ import {
   toolClassSettings,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
-import { nativeToolClasses } from "./native-tool-classes.gen.ts";
+import {
+  nativeMailTools,
+  nativeToolClasses,
+} from "./native-tool-classes.gen.ts";
 
 // Which classes of tools a company turned on, and for whom (D11, D13 in
 // GRA-699): the record an admin keeps, and the check core makes before it
@@ -485,6 +488,21 @@ const requireAppClassOn = async (
   return { toolClass };
 };
 
+/**
+ * Each native mail tool whose resource is a mailbox (`nativeMailTools`), by
+ * its provider, then its name.
+ */
+const mailboxTools: ReadonlyMap<string, ReadonlySet<string>> = new Map(
+  Object.entries(nativeMailTools).map(([provider, tools]) => [
+    provider,
+    new Set(
+      Object.entries(tools).flatMap(([tool, { mailbox }]) =>
+        mailbox ? [tool] : []
+      )
+    ),
+  ])
+);
+
 /** A mail tool's class in its person's own mailbox. */
 const inOwnMailbox: Readonly<Record<CompanyToolClass, CompanyToolClass>> = {
   "read-own": "read-own",
@@ -501,14 +519,15 @@ const inMailbox = (
   action: string,
   toolClass: CompanyToolClass
 ): CompanyToolClass =>
-  provider === "microsoft" && action.startsWith("mail.")
+  mailboxTools.get(provider)?.has(action) === true
     ? inOwnMailbox[toolClass]
     : toolClass;
 
 /**
  * The class core checks a call of the chat's agent of the native tool
- * `action` against: its class, but for a Microsoft 365 mail tool, which
- * takes any mailbox the account may open. The mailbox it reaches is
+ * `action` against: its class, but for a mail tool whose resource is a
+ * mailbox (its manifest's `mail` and `resource`), which takes any
+ * mailbox the account may open. The mailbox it reaches is
  * checked in connect, which knows it (its own, or one the company pointed
  * the agent at: shared-mailboxes.ts), so here it has the class it has in
  * the person's own mailbox. Undefined for a tool the table hasn't got.
@@ -568,7 +587,7 @@ const requireToolClassOf = async (
     throw connectErrors.create("connect.class_off");
   }
   // An agent narrows both the class the company checked the call as (a
-  // mail tool in a mailbox is its person's own, `inMailbox`) and the
+  // mailbox tool's mailbox is its person's own, `inMailbox`) and the
   // tool's own class, which its app narrows: off for either is off.
   const checked = inMailbox(owner.provider, action, toolClass);
   await requireAgentHasClass(env, authority, checked);

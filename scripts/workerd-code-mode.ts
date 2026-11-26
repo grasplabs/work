@@ -212,11 +212,11 @@ try {
   }
   const { complete, flood, throwsAsItLoads } = results;
   if (
-    complete?.text !== 'Returned:\n{"self":null,"ctx":["waitUntil"],"sum":6}'
+    complete?.text !== '{"returned":{"self":null,"ctx":["waitUntil"],"sum":6}}'
   ) {
     problems.push(`complete: ${complete?.text}`);
   }
-  if (!(throwsAsItLoads?.text.startsWith("Logs:\nloading") ?? false)) {
+  if (!(throwsAsItLoads?.text.startsWith('{"logs":["loading') ?? false)) {
     problems.push(`throwsAsItLoads kept no log: ${throwsAsItLoads?.text}`);
   }
   if (
@@ -226,7 +226,7 @@ try {
     flood.streamed === 0 ||
     // Never more lines than a run may log, whatever it wrote.
     flood.streamed > LOG_LINES ||
-    !flood.ending.includes("Error (threw):\nError: the end")
+    !flood.ending.includes('"status":"threw","error":"Error: the end')
   ) {
     problems.push(`flood: ${JSON.stringify(flood)}`);
   }

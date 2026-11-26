@@ -3,8 +3,11 @@
 // sync, the egress's own answers, and how a route's path template matches
 // a request. Plain values, with no schema: every connector bundles this
 // and evaluates it each time an isolate loads, once per call, so it
-// imports nothing. The manifest's schemas, which only connect and its build
+// imports nothing but the path segment rule `v` shares, which imports
+// nothing either. The manifest's schemas, which only connect and its build
 // read, are in manifest.ts.
+
+import { isPathSegment, segmentValuePattern } from "../common/value-formats.ts";
 
 /**
  * Tool `_meta` key: the name of the one input property that selects the
@@ -170,6 +173,15 @@ export const mcpProtocolVersion = "2025-06-18";
 export const maxRetryAfterSeconds = 3600;
 
 /**
+ * How a caller wants a file's content, in a tool that answers a file
+ * (`answersFile`): as text, or base64 for extraction.
+ */
+export const readAs = ["text", "base64"] as const;
+
+/** Most resource IDs one call may report reading. */
+export const maxProvenanceItems = 1000;
+
+/**
  * The methods an action may declare. Never DELETE: deleting is what Grasp
  * never does (tool-rules.ts), whatever a tool is called.
  */
@@ -186,16 +198,6 @@ export const httpMethods = ["GET", "HEAD", "POST", "PUT", "PATCH"] as const;
 export const parameterSegment =
   /^(?<prefix>[\w.~$@()'=-]*:?)\{(?<name>[A-Za-z_]\w*)\}(?<suffix>[\w.~$:@()'=-]*)$/u;
 
-/**
- * Batch endpoints (Graph's `/$batch`, Google's `/batch/...`) carry any
- * number of requests to any path in one body, past the path allowlist:
- * never declared.
- */
-export const isBatchSegment = (segment: string): boolean => {
-  const lower = segment.toLowerCase();
-  return lower === "batch" || lower.startsWith("$batch");
-};
-
 /** The JSON-RPC method connect asks a connector for a sync page by. */
 export const syncMethod = "grasp-os/sync";
 
@@ -210,28 +212,14 @@ const decodedSegment = (segment: string): string | undefined => {
   }
 };
 
-/**
- * The characters a parameter's value may not decode to, as a regex
- * character class's contents: path and query delimiters, matrix and
- * custom-method separators (`;`, `:`), a percent sign (so it isn't decoded
- * a second time), a backslash, and controls.
- */
-export const forbiddenInValue = String.raw`/\\?#%;:\u0000-\u001F\u007F`;
-
-/**
- * A parameter's value, decoded: text with none of `forbiddenInValue`. A
- * connector checks its path inputs by it, so a bad value is refused with a
- * clear message before anything goes out.
- */
-export const segmentValuePattern = new RegExp(`^[^${forbiddenInValue}]+$`, "u");
-
 /** A run of quotes of odd length: one that ends a quoted literal. */
 const unpairedQuote = /(?<!')(?:'')*'(?!')/u;
 
 /**
  * Whether a parameter's decoded value is plain text where it stands. On
- * its own in a segment, the value is the segment, so it may not be a dot
- * segment or a batch endpoint; inside literal text it is neither. Inside
+ * its own in a segment, the value is the segment, held to `isPathSegment`,
+ * the rule `v.string().segment()` checks too; inside literal text it is
+ * no dot segment or batch endpoint, so only its characters are. Inside
  * quotes (OData's `'...'`), a quote may only come doubled, as OData
  * escapes it, so the value can't end the literal early.
  */
@@ -240,11 +228,11 @@ const isValueAllowed = (
   prefix: string,
   suffix: string
 ): boolean => {
+  if (prefix === "" && suffix === "") {
+    return isPathSegment(decoded);
+  }
   if (!segmentValuePattern.test(decoded)) {
     return false;
-  }
-  if (prefix === "" && suffix === "") {
-    return decoded !== "." && decoded !== ".." && !isBatchSegment(decoded);
   }
   const quoted = prefix.endsWith("'") && suffix.startsWith("'");
   return !(quoted && unpairedQuote.test(decoded));

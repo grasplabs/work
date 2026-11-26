@@ -4,7 +4,13 @@ import { z } from "zod";
 
 import { loadRelease } from "../../src/app-releases.ts";
 import type { Release } from "../../src/app-releases.ts";
-import { chatOf, codeResults, codeStep, says } from "../agent-chat.ts";
+import {
+  chatOf,
+  codeResults,
+  codeStep,
+  says,
+  returnedOf,
+} from "../agent-chat.ts";
 import { testApp } from "../app-definitions.ts";
 import type { TestApp } from "../app-definitions.ts";
 import { commitApp, requestGranted } from "../apps.ts";
@@ -97,9 +103,7 @@ const run = async (
   });
   await chat.ask("Use the Notes App.");
   const [result] = await codeResults(chat.stub, chat.chat.id);
-  return z
-    .unknown()
-    .parse(JSON.parse(result?.text.replace("Returned:\n", "") ?? "null"));
+  return z.unknown().parse(returnedOf(result?.text));
 };
 
 /** Code that runs `calls` (each a call's JSON), all at once, and returns their results. */

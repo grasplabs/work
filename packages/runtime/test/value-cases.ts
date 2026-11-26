@@ -534,6 +534,48 @@ add(
   ]
 );
 add(
+  "a segment is one whole segment of a URL's path, as the egress sends it",
+  () =>
+    [
+      "a1",
+      "AAMkAD=",
+      "O'Brien & Co",
+      "münchen",
+      "v1.0",
+      "batches",
+      "$value",
+      "",
+      ".",
+      "..",
+      "a1/..",
+      "a\\b",
+      "a?b",
+      "a#b",
+      "a%2Fb",
+      "a;b",
+      "19:chat",
+      "a\nb",
+      "a\u007Fb",
+      "batch",
+      "BATCH",
+      "$batch",
+      "$Batch?x",
+      "a\uD800",
+    ].map((value) => check(v.string().segment(), value)),
+  [
+    { value: "a1" },
+    { value: "AAMkAD=" },
+    { value: "O'Brien & Co" },
+    { value: "münchen" },
+    { value: "v1.0" },
+    { value: "batches" },
+    { value: "$value" },
+    ...Array.from({ length: 17 }, () => ({
+      issues: [["value.invalid_segment"]],
+    })),
+  ]
+);
+add(
   "a format is checked after trimming, within the bounds",
   () => [
     check(v.string().trim().date(), " 2026-11-25 "),
@@ -548,6 +590,7 @@ add(
     [
       () => v.string().date().datetime(),
       () => v.string().url().email(),
+      () => v.string().segment().url(),
       () => v.string().email().date(),
       () => v.string().datetime().datetime(),
       () =>
@@ -560,6 +603,7 @@ add(
         }),
     ].map(declare),
   [
+    "definition.invalid_schema",
     "definition.invalid_schema",
     "definition.invalid_schema",
     "definition.invalid_schema",

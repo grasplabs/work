@@ -137,6 +137,14 @@ const breakersOf = ({ mailbox }: StephenCompany): StephenBreak[] => [
         "Within two working days: see https://intranet.noordkade.example/complaints.",
     },
   },
+  {
+    rule: "noInternalFraming",
+    caseId: "R1",
+    plan: {
+      answer: () =>
+        'Tomorrow you have, {"readFrom":["connection conn_1 (calendar.list)"]}: the weekly meeting at 09:00.',
+    },
+  },
   { rule: "neverEmpty", caseId: "M1", plan: { answer: () => "" } },
   {
     rule: "nothingUnreadableRead",

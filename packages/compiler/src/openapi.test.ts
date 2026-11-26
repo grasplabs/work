@@ -382,6 +382,42 @@ describe("a spec as tools", () => {
     });
   });
 
+  it("takes text in a path as one segment, whatever format the spec gives it", async () => {
+    const read = await Promise.all(
+      [{}, { format: "date-time" }].map(async (format) => {
+        const parameters = [
+          {
+            name: "key",
+            in: "path",
+            required: true,
+            schema: { type: "string", ...format },
+          },
+        ];
+        const text = specText(
+          operation("Things", "/things/{key}", {
+            parameters,
+            responses: ok({ type: "object", properties: {} }),
+          })
+        );
+        const [spec, { source }] = await Promise.all([
+          readSpec(text, url),
+          generateConnector(text, url),
+        ]);
+        const args = spec.operations[0]?.args;
+        return {
+          key: args?.kind === "object" ? args.fields.key : undefined,
+          written: source.includes("key: v.string().segment()"),
+        };
+      })
+    );
+    expect(read).toStrictEqual(
+      Array.from({ length: 2 }, () => ({
+        key: v.string().segment().descriptor,
+        written: true,
+      }))
+    );
+  });
+
   it("signs in with the scheme the connector picks, and refuses one it can't", async () => {
     const text = specText(pipedrivePaths, {
       security: [{ oauth2: [] }, { api_key: [] }],

@@ -1,4 +1,5 @@
 import type { ValueDescriptor } from "@grasp-os/runtime/app";
+import { isPathSegment, validateValue } from "@grasp-os/runtime/host";
 
 import { servedElsewhere } from "./openapi.ts";
 import type { Spec, SpecOperation } from "./openapi.ts";
@@ -27,7 +28,12 @@ import type { DeclaredRoute, HttpMethod } from "./tool-names.ts";
 // operation name, and only such a path does. Renaming and reshaping are
 // refused.
 //
-// Every tool is held to the naming rule. Where the vendor's spec is known
+// Every tool is held to the naming rule, and each argument named after a
+// path parameter that fills a whole segment of its routes to one segment,
+// exactly as the egress sends one there; a parameter inside literal text
+// (`('{id}')`) is held to the egress's looser rule by `api`, which refuses
+// a value the egress wouldn't send before anything goes out. Where the
+// vendor's spec is known
 // (a generated connector, or one narrowed from it), each tool on one of its
 // routes is held to the spec's operation field by field: an argument or a
 // field the vendor doesn't have is a renamed one.
@@ -83,14 +89,63 @@ const valuesOf = (
 /** A string's format, if it has one. */
 const formatOf = (descriptor: ValueDescriptor): string | undefined =>
   descriptor.kind === "string"
-    ? ["email", "datetime", "date", "url"].find(
+    ? ["email", "datetime", "date", "url", "segment"].find(
         (name) =>
           Object.hasOwn(descriptor, name) &&
           Reflect.get(descriptor, name) === true
       )
     : undefined;
 
-/** Whether every value of a scalar `inner` is one of scalar `outer`'s. */
+/**
+ * Whether an argument put into a path parameter is one segment whatever it
+ * holds: a string held to `segment`, a number, or fixed values that each
+ * are one.
+ */
+const isOneSegment = (descriptor: ValueDescriptor): boolean => {
+  if (descriptor.nullable) {
+    return false;
+  }
+  if (descriptor.kind === "string") {
+    return descriptor.segment === true;
+  }
+  return (
+    descriptor.kind === "number" ||
+    valuesOf(descriptor)?.every(
+      (value) =>
+        typeof value === "number" ||
+        (typeof value === "string" && isPathSegment(value))
+    ) === true
+  );
+};
+
+/** Each argument a tool's routes put into a path parameter that isn't one segment. */
+const pathArgsOf = (
+  tool: MirrorTool,
+  routes: readonly DeclaredRoute[]
+): string[] => {
+  const names = new Set(
+    routes.flatMap(({ path }) =>
+      (pathSegments(path) ?? []).flatMap((segment) =>
+        segment.kind === "parameter" ? [segment.name] : []
+      )
+    )
+  );
+  return [...names]
+    .filter((name) => {
+      const arg = Object.hasOwn(tool.args, name) ? tool.args[name] : undefined;
+      return arg !== undefined && !isOneSegment(arg);
+    })
+    .map(
+      (name) =>
+        `args.${name} fills the path parameter {${name}}: declare it v.string().segment(), a number or fixed values.`
+    );
+};
+
+/**
+ * Whether every value of a scalar `inner` is one of scalar `outer`'s. Fixed
+ * strings are when `outer` takes each, its format included (a `segment`
+ * the spec's path parameter has).
+ */
 const scalarWithin = (
   inner: ValueDescriptor,
   outer: ValueDescriptor
@@ -98,10 +153,14 @@ const scalarWithin = (
   const values = valuesOf(inner);
   if (outer.kind === "string") {
     const format = formatOf(outer);
+    const required = { ...outer, presence: "required" as const };
     return inner.kind === "string"
       ? format === undefined || formatOf(inner) === format
-      : format === undefined &&
-          values?.every((value) => typeof value === "string") === true;
+      : values?.every(
+          (value) =>
+            typeof value === "string" &&
+            "value" in validateValue(required, value)
+        ) === true;
   }
   if (outer.kind === "number") {
     const integers =
@@ -423,6 +482,7 @@ export const checkMirror = (
         .filter((route) => route !== primary && !writes.includes(route))
         .flatMap(againstOther),
       ...routes.flatMap(offHost),
+      ...pathArgsOf(tool, routes),
     ];
     return problems.map((message) => ({ tool: tool.name, message }));
   });

@@ -46,6 +46,7 @@ import {
   openTestRun,
   personalChatsOf,
   model,
+  returnedOf,
   says,
   setObjectEnv,
   toolResults,
@@ -413,7 +414,7 @@ const lookElsewhereSchema = z.object({
 
 /** Where else to look, as `recall` (what the recall handed over) names it. */
 const lookElsewhereIn = (recall: string): string[] | undefined =>
-  lookElsewhereSchema.parse(JSON.parse(recall.slice(recall.indexOf("{"))))
+  lookElsewhereSchema.parse(returnedOf(recall.slice(recall.indexOf("{"))))
     .lookElsewhere;
 
 /**
@@ -2435,7 +2436,7 @@ const handedSchema = z.object({
 /** What the recall before the question handed the model in `body`, parsed. */
 const handedIn = (body: unknown) => {
   const handed = recallIn(body) ?? "";
-  return handedSchema.parse(JSON.parse(handed.slice(handed.indexOf("{"))));
+  return handedSchema.parse(returnedOf(handed.slice(handed.indexOf("{"))));
 };
 
 /** The budget both passes of the merge tests recall within. */

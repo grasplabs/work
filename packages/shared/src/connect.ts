@@ -2940,12 +2940,20 @@ export type ActionShapeRequest = z.input<typeof actionShapeRequestSchema>;
  * What core needs to know of an action before a chat's agent calls it,
  * without calling it: whether it only reads (as connect decides whether
  * it holds a call), the input properties it takes (`null` when connect
- * can't read them now), and the connection's provider.
+ * can't read them now), the connection's provider, and whether it reads
+ * or changes mail.
  */
 export interface ActionShape {
   readOnly: boolean;
   inputs: string[] | null;
   provider: string;
+  /**
+   * It reads or changes mail, which other people wrote: as a native
+   * connector's manifest says (`mail`), as Grasp's review of a Composio
+   * tool says (connect's composio-classes.ts), or, for a read of a server
+   * connected by its URL, by the rules (`readsMailByRules`).
+   */
+  mail?: true;
 }
 
 /** One action of a generated contract. */

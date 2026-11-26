@@ -7,7 +7,8 @@ import {
   codeStep,
   chatOf,
   says,
-  withoutMarking,
+  withoutReadFrom,
+  returnedText,
 } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { chooseAudience } from "./brain-audiences.ts";
@@ -125,12 +126,12 @@ const chatSorting = async (
   return async () => {
     await chat.ask("Sort the shared inbox.");
     const [result] = await codeResults(chat.stub, chat.chat.id);
-    return result === undefined ? undefined : withoutMarking(result.text);
+    return result === undefined ? undefined : withoutReadFrom(result.text);
   };
 };
 
 const answer = (answers: { list: string; move: string }) =>
-  `Returned:\n${JSON.stringify(answers)}`;
+  returnedText(answers);
 
 /** The rights a person's own consent asks Microsoft for. */
 const askedRights = async (person: Admin) => {
