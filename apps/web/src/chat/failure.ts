@@ -22,14 +22,14 @@ const failureWords: Readonly<Record<ModelErrorCode, MessageDescriptor>> = {
   "model.invalid_output": msg`The model's answer came back in the wrong shape. Try again.`,
   "model.timeout": msg`Your AI provider sent nothing for too long, so Grasp gave up on this answer. Try again.`,
   "model.declined": msg`The model declined to answer this.`,
-  "model.context_too_long": msg`This chat is too long for the model, even after Grasp summarized its earlier messages. Start a new chat to go on.`,
+  "model.context_too_long": msg`This chat is too long for the model. Start a new chat to go on.`,
 };
 
 const unreachable = msg`Grasp could not be reached. Try again.`;
 
 /**
  * The failures asking the same again can't mend: the model declined, or
- * the chat is past its window even summarized. Their answers offer no Try
+ * the chat is past its window. Their answers offer no Try
  * again, and their words say what helps instead.
  */
 const unmendable: ReadonlySet<unknown> = new Set<ModelErrorCode>([

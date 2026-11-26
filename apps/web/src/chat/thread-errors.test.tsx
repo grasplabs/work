@@ -312,7 +312,7 @@ describe("a failed answer", () => {
     }).toStrictEqual({
       declined: { said: "The model declined to answer this.", again: false },
       tooLong: {
-        said: "This chat is too long for the model, even after Grasp summarized its earlier messages. Start a new chat to go on.",
+        said: "This chat is too long for the model. Start a new chat to go on.",
         again: false,
       },
       timeout: {

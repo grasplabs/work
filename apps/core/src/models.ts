@@ -2399,8 +2399,10 @@ const streamTimeoutMessage =
  * (`answerFaultOf`), its provider's rate limit with the wait it asked
  * for, or the provider's trouble; else the status and error type, which
  * name no code (`model.failed`). A window too small is said in words pi's
- * `isContextOverflow` knows, so pi compacts the conversation and asks
- * once more before the turn fails of it.
+ * `isContextOverflow` knows, so pi compacts the conversation, where it
+ * has something to summarize, and asks once more before the turn fails
+ * of it: the provider's own words, which the gateway put in their place
+ * before, never let it.
  */
 const streamFailureMessage = (
   route: Route,

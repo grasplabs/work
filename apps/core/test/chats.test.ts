@@ -1896,17 +1896,20 @@ describe("chats", () => {
   });
 
   it.each([
-    ["fails", { status: 500 }, "model.provider_unavailable"],
-    // For the idle time, lowered from minutes here.
-    ["sends nothing for too long", { hang: true } as const, "model.timeout"],
+    ["fails", { status: 500 }, "model.provider_unavailable", {}],
+    // For an idle time lowered from minutes here.
+    [
+      "sends nothing for too long",
+      { hang: true } as const,
+      "model.timeout",
+      { MODEL_STREAM_IDLE_MS: "400" },
+    ],
   ])(
     "show a failed answer whose provider %s with the gateway's code for it, and nothing as stopped",
-    async (_case, reply, failure) => {
+    async (_case, reply, failure, vars) => {
       const ann = await person();
       await answering(ann, reply);
-      const restore = await setObjectEnv(objectOf(ann), {
-        MODEL_STREAM_IDLE_MS: "400",
-      });
+      const restore = await setObjectEnv(objectOf(ann), vars);
       try {
         const chat = await ann.chats.create("Failed");
         const follower = await follow(ann.chats, chat.id);

@@ -635,13 +635,15 @@ export class ChatHarness {
   readonly #thought = new Map<EntryId, number>();
   /**
    * What the Workspace was told last: the partial, what the model waits
-   * on, and whether a turn runs.
+   * on, and whether a turn runs. What the model waits on is unknown as the
+   * object opens (`undefined`): a wait an earlier run of the object told
+   * is cleared by its first sync.
    */
   readonly #told: {
     partial: AssistantMessage | null;
-    waiting: ModelWait | null;
+    waiting?: ModelWait | null;
     running?: boolean;
-  } = { partial: null, waiting: null };
+  } = { partial: null };
   /** The Workspace brought up to date (`#sync`), once at a time. */
   #syncing: Promise<void> | undefined;
   /** Whether something changed since the sync under way began. */

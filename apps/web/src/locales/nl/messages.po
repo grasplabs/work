@@ -18425,8 +18425,8 @@ msgid "This chat account is linked to someone else. They need to unlink it first
 msgstr "Dit chataccount is aan iemand anders gekoppeld. Die moet het eerst ontkoppelen."
 
 #: src/chat/failure.ts
-msgid "This chat is too long for the model, even after Grasp summarized its earlier messages. Start a new chat to go on."
-msgstr "Deze chat is te lang voor het model, ook nadat Grasp de eerdere berichten heeft samengevat. Begin een nieuwe chat om verder te gaan."
+msgid "This chat is too long for the model. Start a new chat to go on."
+msgstr "Deze chat is te lang voor het model. Begin een nieuwe chat om verder te gaan."
 
 #: src/chat/held-writes.tsx
 msgid "This chat read private or restricted data: this may send it out"

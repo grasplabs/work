@@ -39,11 +39,11 @@ export const modelErrors = defineErrorFamily({
    */
   "model.declined": "The model declined to answer.",
   /**
-   * The conversation is past the model's context window, even after its
-   * earlier part was summarized: asking the same again gets the same.
+   * The conversation is past the model's context window, also once pi
+   * summarized what of it could be: asking the same again gets the same.
    */
   "model.context_too_long":
-    "The conversation is too long for the model's context window, even after its earlier part was summarized. Start a new conversation.",
+    "The conversation is too long for the model's context window. Start a new conversation.",
 });
 
 /**
