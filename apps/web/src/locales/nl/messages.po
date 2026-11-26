@@ -35,6 +35,11 @@ msgstr "{0, plural, one {# ding dat erin gezegd is gaat mee.} other {# dingen di
 msgid "{0} actions"
 msgstr "{0} acties"
 
+#. placeholder {0}: suiteNames[notConnected.suite]
+#: src/onboarding/company-step.tsx
+msgid "{0} didn't connect"
+msgstr "{0} is niet gekoppeld"
+
 #. placeholder {0}: countOn(allowed, ofThis)
 #. placeholder {1}: ofThis.length
 #: src/connections/permissions/action-list.tsx
@@ -4711,6 +4716,10 @@ msgstr "Kies een workflow"
 msgid "Choose an app"
 msgstr "Kies een app"
 
+#: src/onboarding/sources-step.tsx
+msgid "Choose an app again"
+msgstr "Kies opnieuw een app"
+
 #: src/frame/ui-words.tsx
 msgid "Choose date"
 msgstr "Kies een datum"
@@ -4832,6 +4841,7 @@ msgstr "Kliffen"
 #: src/frame/ui-words.tsx
 #: src/interview/destination.tsx
 #: src/onboarding/campaign/campaign-page.tsx
+#: src/onboarding/sources-step.tsx
 #: src/projects/project-chats.tsx
 #: src/settings/erasures.tsx
 #: src/shown-once.tsx
@@ -17736,6 +17746,10 @@ msgstr "Het antwoord is afgekapt op de limiet van het model."
 msgid "The answer, and who gave it, are taken away for good. The question stays closed."
 msgstr "Het antwoord, en wie het gaf, worden definitief weggehaald. De vraag blijft gesloten."
 
+#: src/onboarding/sources-step.tsx
+msgid "The app didn't connect"
+msgstr "De app is niet gekoppeld"
+
 #: src/apps/resource-bindings.tsx
 msgid "The App has no permission to read the Brain. Grant one first."
 msgstr "De app heeft geen recht om het Brein te lezen. Verleen er eerst een."
@@ -19204,6 +19218,7 @@ msgstr "Proberen"
 #: src/inbox/inbox-page.tsx
 #: src/interview-routes.tsx
 #: src/interview/destination.tsx
+#: src/onboarding/company-step.tsx
 #: src/onboarding/document-shelf.tsx
 #: src/settings/sign-in-settings.tsx
 msgid "Try again"
@@ -19536,6 +19551,10 @@ msgstr "Uploads die met een team of iedereen gedeeld zijn en die alleen een behe
 #: src/chat/connection-requests.tsx
 msgid "Use {name} in this chat"
 msgstr "{name} in deze chat gebruiken"
+
+#: src/onboarding/company-step.tsx
+msgid "Use a staff list"
+msgstr "Gebruik een personeelslijst"
 
 #: src/onboarding/company-step.tsx
 msgid "Use a staff list instead"
