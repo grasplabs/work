@@ -11,7 +11,7 @@ import type {
   TurnEnd,
   TurnRequest,
 } from "./chat-harness.ts";
-import { callObject, workspace } from "./durable-objects.ts";
+import { workspace } from "./durable-objects.ts";
 
 // One chat's agent: the object that runs its turns on pi-durable
 // (chat-harness.ts), named by its Workspace and chat (`chatSession` in
@@ -59,9 +59,6 @@ const opensMost = 6;
 
 /** Most a Harness that failed may take to close before the object resets. */
 const closeMs = 30_000;
-
-/** Most the Workspace may take to hear a chat was given up on (`#giveUp`). */
-const noticeMs = 20_000;
 
 /**
  * Kept once the object is erased (`erase`), and nothing else: it never
@@ -427,35 +424,24 @@ export class ChatSession extends DurableObject<Env> {
         chatSession: name,
         failedOpens: this.#failedOpens(),
       });
-      // A fallback first: a notice that fails, takes too long or resets
-      // the object leaves an alarm that tells it again.
+      // A fallback first: a notice that fails, or resets the object, leaves
+      // an alarm that tells it again. One attempt, inside the block, with
+      // no retry that could land after a later open said the turn runs.
       await this.ctx.storage.setAlarm(Date.now() + backoffMs(opensMost));
       const [workspaceId, chatId] = name.split("/");
-      const telling = (async () => {
-        try {
-          await callObject(async () => {
-            await workspace(
-              this.env,
-              workspaceIdSchema.parse(workspaceId)
-            ).turnRunning(chatIdSchema.parse(chatId), false);
-          });
-          return true;
-        } catch (error) {
-          log.error("chat.gave_up_untold", {
-            chatSession: name,
-            ...errorFields(error),
-          });
-          return false;
-        }
-      })();
-      // Within the block's own time limit.
-      const told = await Promise.race([
-        telling,
-        scheduler.wait(noticeMs).then(() => false),
-      ]);
-      if (told) {
-        await this.ctx.storage.deleteAlarm();
+      try {
+        await workspace(
+          this.env,
+          workspaceIdSchema.parse(workspaceId)
+        ).turnRunning(chatIdSchema.parse(chatId), false);
+      } catch (error) {
+        log.error("chat.gave_up_untold", {
+          chatSession: name,
+          ...errorFields(error),
+        });
+        return;
       }
+      await this.ctx.storage.deleteAlarm();
     });
   }
 }
