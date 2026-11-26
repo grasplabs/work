@@ -33,6 +33,7 @@ import { PlanPictures } from "./plan-pictures.tsx";
 import type { Scene } from "./plan-scenes.ts";
 import { dayAt, leadsOf, weekdayOf } from "./plan.ts";
 import { closesOn } from "./setup.ts";
+import { StartOver } from "./start-over.tsx";
 import type { SetupData } from "./step-parts.ts";
 import { useRememberLines } from "./step-voice.tsx";
 
@@ -72,6 +73,12 @@ const styles = stylex.create({
   // way on at the foot.
   bar: {
     justifySelf: "end",
+    display: "flex",
+    alignItems: "center",
+    gap: space[1],
+    // A little night behind his tools, so they show on a bright picture too.
+    backgroundImage:
+      "radial-gradient(closest-side, color-mix(in srgb, var(--damsko-brand-night) 60%, transparent), transparent)",
     paddingBlock: space[4],
     paddingInline: { default: space[8], [media.maxSm]: space[4] },
   },
@@ -540,6 +547,8 @@ export const PlanStory = ({
       <PlanPictures scene={scene} still={reduce} />
       <div {...stylex.props(styles.bar, entering && styles.leaving)}>
         <Sound />
+        {/* Over the frame's bar, so its way to start over (local only) is here too. */}
+        <StartOver size="icon-sm" />
       </div>
       <span />
       <div {...stylex.props(styles.words, entering && styles.leaving)}>

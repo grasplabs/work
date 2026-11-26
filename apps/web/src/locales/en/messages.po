@@ -8599,10 +8599,6 @@ msgstr "Here's what Grasp will make"
 msgid "Here’s your company"
 msgstr "Here’s your company"
 
-#: src/onboarding/platform-entry.tsx
-msgid "Here’s your Grasp."
-msgstr "Here’s your Grasp."
-
 #: src/onboarding/setup-steps.tsx
 msgid "Hi {admin}, I’m Stephen"
 msgstr "Hi {admin}, I’m Stephen"
@@ -10206,6 +10202,10 @@ msgstr "Let them use {label}?"
 #: src/activity/audit-words.ts
 msgid "Let webhook events no run waited for expire"
 msgstr "Let webhook events no run waited for expire"
+
+#: src/onboarding/platform-entry.tsx
+msgid "Let’s start exploring Grasp."
+msgstr "Let’s start exploring Grasp."
 
 #: src/apps/data-model-changes.tsx
 msgid "Lets {field} in {table} hold more. Every record already fits."
@@ -13190,10 +13190,6 @@ msgstr "Opened Grasp to the whole company"
 #: src/frame/sign-in/sign-in.tsx
 msgid "Opening {provider}"
 msgstr "Opening {provider}"
-
-#: src/onboarding/platform-entry.tsx
-msgid "Opening Grasp"
-msgstr "Opening Grasp"
 
 #: src/brain/note-reveal.tsx
 msgid "Opening the note"
