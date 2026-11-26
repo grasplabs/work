@@ -694,15 +694,48 @@ const sameAgent = (
   return before === undefined || agentId === undefined || before === agentId;
 };
 
-/** The thread's rows: each question, then its replies as one answer per agent, the reply being written joined to it. */
+/**
+ * Whether `message` asks again what was asked last, after it was stopped
+ * or failed (Try again, Ask again, or the same words sent again): the
+ * question it repeats is the last one, and nothing after it was answered
+ * to the end.
+ */
+const asksAgain = (rows: readonly Row[], message: Asked): boolean => {
+  const at = rows.findLastIndex(({ kind }) => kind === "question");
+  const asked = rows[at];
+  return (
+    asked?.kind === "question" &&
+    asked.message.text === message.text &&
+    rows
+      .slice(at + 1)
+      .every(
+        (row) =>
+          row.kind === "answer" &&
+          ["cancelled", "failed"].includes(row.replies.at(-1)?.end ?? "")
+      )
+  );
+};
+
+/**
+ * The thread's rows: each question, then its replies as one answer per
+ * agent, the reply being written joined to it. A question asked again
+ * after it was stopped or failed is drawn once, as the references draw a
+ * retry: its new answer follows the one that stopped, under it.
+ */
 const rowsOf = (
   messages: readonly ChatMessage[],
   partial: ChatPartial | null,
   live: boolean
 ): Row[] => {
   const rows: Row[] = [];
+  // Asked again: its answer starts a row of its own, never joined to the
+  // answer that stopped.
+  let again = false;
   for (const message of messages) {
-    if (message.role === "user") {
+    if (message.role === "user" && asksAgain(rows, message)) {
+      again = true;
+    } else if (message.role === "user") {
+      again = false;
       const before = rows.at(-1);
       rows.push({
         kind: "question",
@@ -714,7 +747,10 @@ const rowsOf = (
       });
     } else if (message.role === "assistant") {
       const last = rows.at(-1);
-      if (last?.kind === "answer" && sameAgent(last, message.agentId)) {
+      const joins =
+        !again && last?.kind === "answer" && sameAgent(last, message.agentId);
+      again = false;
+      if (joins) {
         last.replies.push(message);
       } else {
         rows.push({
@@ -733,7 +769,7 @@ const rowsOf = (
   }
   // Grasp works on the last question: its answer goes on, or begins.
   const last = rows.at(-1);
-  if (last?.kind === "answer" && sameAgent(last, partial?.agentId)) {
+  if (!again && last?.kind === "answer" && sameAgent(last, partial?.agentId)) {
     last.partial = partial;
     last.live = true;
   } else {

@@ -701,6 +701,42 @@ describe(ChatThread, () => {
     });
   });
 
+  it("draws a question asked again after it stopped once, its new answer after the one that stopped; the same words after an answer that ended are a new question", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    const reply = (
+      id: number,
+      text: string,
+      end: "done" | "cancelled"
+    ): ChatMessage => ({
+      id,
+      role: "assistant",
+      text,
+      code: [],
+      tools: [],
+      end,
+      at,
+    });
+    await thread([
+      asked,
+      reply(2, "Let me", "cancelled"),
+      { ...asked, id: 3 },
+      reply(4, "Four.", "done"),
+      { ...asked, id: 5 },
+      reply(6, "Still four.", "done"),
+    ]);
+
+    const rows = [...document.querySelectorAll("article")].map(
+      (row) => `${row.getAttribute("aria-label") ?? "You"}: ${row.textContent}`
+    );
+    expect(rows).toStrictEqual([
+      expect.stringMatching(/^You: What is 2 \+ 2\?/u),
+      expect.stringMatching(/^Grasp: Let me.*Stopped/u),
+      expect.stringMatching(/^Grasp: Four\./u),
+      expect.stringMatching(/^You: What is 2 \+ 2\?/u),
+      expect.stringMatching(/^Grasp: Still four\./u),
+    ]);
+  });
+
   it("says what each call of Grasp's tools did in one line, and unfolds what it was given and what came of it", async () => {
     const at = "2026-10-27T09:00:05.000Z";
     await thread([
