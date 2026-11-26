@@ -78,6 +78,18 @@ describe("the question on its way", () => {
     });
   });
 
+  it("sent before the chat's messages were read, is drawn until its words are the last question, never hidden by earlier history", () => {
+    const unknown = { ...pending, after: undefined, text: "And last month?" };
+
+    expect({
+      history: shownPending(unknown, [asked(1, "Yes"), asked(2, "Done?")]),
+      taken: shownPending(unknown, [
+        asked(1, "Yes"),
+        asked(3, "And last month?"),
+      ]),
+    }).toStrictEqual({ history: unknown, taken: undefined });
+  });
+
   it("is taken back by the box that sent it while it is on the page, and by the box showing its chat once it is gone", () => {
     const start = boxOnPage();
     const question = { ...refused, owner: start.owner };

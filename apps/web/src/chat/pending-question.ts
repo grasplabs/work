@@ -30,9 +30,10 @@ export interface PendingQuestion {
   files: readonly PendingFile[];
   /**
    * The chat's last message when it was sent: the first question after it
-   * is core's copy of this one.
+   * is core's copy of this one. Unknown (the chat's messages not read yet
+   * as it went): its copy is the last question, in its words.
    */
-  after: number;
+  after: number | undefined;
   /** When it was sent, as this browser's clock says. */
   at: string;
   /**
@@ -136,8 +137,12 @@ export const takesBack = (
 export const taken = (
   question: PendingQuestion,
   messages: readonly ChatMessage[]
-): boolean =>
-  messages.some(({ id, role }) => role === "user" && id > question.after);
+): boolean => {
+  const { after } = question;
+  return after === undefined
+    ? messages.findLast(({ role }) => role === "user")?.text === question.text
+    : messages.some(({ id, role }) => role === "user" && id > after);
+};
 
 /**
  * The question to draw in a chat of `messages`: one on its way, or taken,

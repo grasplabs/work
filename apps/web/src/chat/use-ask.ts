@@ -153,6 +153,8 @@ export const useAsk = (
   const [files, setFiles] = useState<readonly BoxFile[]>([]);
   // Why a file the person chose stays out of the box.
   const [fileProblem, setFileProblem] = useState<string>();
+  // Why the question the box took back didn't go, until the next is sent.
+  const [returnedWhy, setReturnedWhy] = useState<string>();
   // The chat what is typed belongs to, and the chat a question asked here
   // made: the box is that one's still once it opens.
   const [draftOf, setDraftOf] = useState(chatId);
@@ -165,6 +167,7 @@ export const useAsk = (
       setFiles([]);
       setFileProblem(undefined);
       setStopped(undefined);
+      setReturnedWhy(undefined);
     }
   }
   // The question on its way here (pending-question.ts), and the box's own
@@ -172,9 +175,7 @@ export const useAsk = (
   const owner = useBoxOwner();
   const pendingHere = pendingKey(chatId, slot);
   const here = usePending(pendingHere);
-  const { messages } = useFollowedChat(chatId).view;
-  // Why the question the box took back didn't go, until the next is sent.
-  const [returnedWhy, setReturnedWhy] = useState<string>();
+  const { messages, loaded } = useFollowedChat(chatId).view;
   // A question from the box that failed to send comes back into it, which
   // says why: the box that sent it, or, once that one is gone (Chat's
   // start, after it opened the chat's page), the one that shows its chat.
@@ -193,7 +194,13 @@ export const useAsk = (
           )
       ),
     ]);
-    setFiles((now) => [...here.files, ...now]);
+    // At most as many as a question carries, its own first: any over that
+    // stay out, and the box says so.
+    const back = [...here.files, ...files];
+    setFiles(back.slice(0, chatFilesPerQuestionMax));
+    if (back.length > chatFilesPerQuestionMax) {
+      setFileProblem(failureText(agentErrors.create("agent.too_many_files")));
+    }
   }
   // Taken back, or core's copy in the thread: it is no longer on its way.
   useEffect(() => {
@@ -287,7 +294,8 @@ export const useAsk = (
       text: question,
       mentions: mentioned,
       files: carried,
-      after: messages.at(-1)?.id ?? 0,
+      after:
+        chatId === undefined || loaded ? (messages.at(-1)?.id ?? 0) : undefined,
       at: new Date().toISOString(),
       owner,
       fromBox,
