@@ -970,7 +970,8 @@ describe("the agent remembering in a person's own chat", () => {
           chatId: chat.id,
           personId: member.userId,
         },
-        "Not pizza any more, it's sushi now.",
+        async () =>
+          await Promise.resolve("Not pizza any more, it's sushi now."),
         () => {}
       );
       // The model's call as it comes in, checked by the tool's own schema.

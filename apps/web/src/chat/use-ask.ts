@@ -286,15 +286,18 @@ export const useAsk = (
     return true;
   };
   // A stop drops what was queued behind the answer (core's `cancel`): it
-  // comes back into an empty box, the oldest first, as Codex hands queued
-  // messages back on an interrupt, to send again or let go.
+  // comes back into the box, the oldest first and before what is typed
+  // there, as Codex hands queued messages back on an interrupt, to send
+  // again or let go.
   const stop = async (id: string): Promise<void> => {
     const dropped = queued.map((each) => each.text);
     const cancelled = await run(
       async (session) => await session.chats.cancel(id)
     );
     if (cancelled === true && dropped.length > 0) {
-      setText((now) => (now.trim() === "" ? dropped.join("\n\n") : now));
+      setText((now) =>
+        [...dropped, now].filter((each) => each.trim() !== "").join("\n\n")
+      );
     }
   };
   /** Has the agent take the questions queued behind its answer at once. */

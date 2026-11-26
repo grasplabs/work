@@ -181,7 +181,7 @@ export const modelScripts = {
     replies: [
       (): Answer => ({
         ...says("First the goals, then the budget and who owns each part."),
-        pause: { at: 15, until: sleep(8000) },
+        pause: { at: 15, until: sleep(12_000) },
       }),
       says("The budget is set by the end of the month."),
     ],

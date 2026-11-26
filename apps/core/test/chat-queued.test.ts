@@ -12,6 +12,7 @@ import { z } from "zod";
 
 import { chatSession } from "../src/durable-objects.ts";
 import { chatOf, model, pausedReply, says } from "./agent-chat.ts";
+import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider, fakeProviderFor } from "./model-provider.ts";
 import { turnRecordsOf } from "./model-usage.ts";
@@ -80,6 +81,16 @@ const settled = async (follower: Follower) => {
     },
     { timeout: 20_000 }
   );
+};
+
+/** How many answers of `personId`'s chat `chatId` were noted for their Brain. */
+const notedFor = async (personId: string, chatId: string): Promise<number> => {
+  const logged = await allEvents();
+  return logged.filter(
+    ({ action, target }) =>
+      action === "chat.turn_noted" &&
+      target?.id.startsWith(`${personId}/${chatId}`) === true
+  ).length;
 };
 
 /** Restarts `stub`'s object, as an eviction or a deploy does, mid-call. */
@@ -163,6 +174,55 @@ describe("a question sent while the agent answers", slow, () => {
         secondAsked: true,
         requests: 2,
         record: { outcome: "answered", queued: 1 },
+      });
+      // Each question answered is noted for the person's Brain, as two
+      // turns' would be.
+      await vi.waitFor(
+        async () => {
+          await expect(notedFor(ann.userId, chat.id)).resolves.toBe(2);
+        },
+        { timeout: 10_000 }
+      );
+    } finally {
+      first.release();
+    }
+  });
+
+  it("is queued when it comes as the first starts, both sent at once, and answered after it", async () => {
+    const ann = await signedInApi(idp, "user");
+    const first = pausedReply(says("Paris."), 2);
+    const provider = await fakeProvider(first.reply, says("Berlin."));
+    const chat = await ann.api.chats.create("At once");
+    const tab = await follow(ann, chat.id);
+    try {
+      // The second comes while the first is still being prepared.
+      const sent = Promise.all([
+        ann.api.chats.send(chat.id, { text: "France?", model }),
+        ann.api.chats.send(chat.id, { text: "Germany?", model }),
+      ]);
+      await vi.waitFor(
+        () => {
+          expect(provider.requests).toHaveLength(1);
+        },
+        { timeout: 10_000 }
+      );
+      await sent;
+      await vi.waitFor(() => {
+        expect(tab.queued()).toStrictEqual(["Germany?"]);
+      });
+      first.release();
+      await settled(tab);
+      expect({
+        shown: tab.shown(),
+        requests: provider.requests.length,
+      }).toStrictEqual({
+        shown: [
+          { role: "user", text: "France?" },
+          { role: "assistant", text: "Paris." },
+          { role: "user", text: "Germany?" },
+          { role: "assistant", text: "Berlin." },
+        ],
+        requests: 2,
       });
     } finally {
       first.release();

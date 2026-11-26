@@ -3122,7 +3122,12 @@ export class Workspace extends DurableObject<Env> {
     if (this.#deleting.has(chat.id)) {
       throw agentErrors.create("agent.chat_not_found");
     }
-    await this.#mayTakeTurn(chat.id, chat.personId);
+    // Its person still a member, the chat with room, and the turn's agent
+    // not paused or deleted since it started: checked as a turn's are.
+    await allInOrder([
+      this.#mayTakeTurn(chat.id, chat.personId),
+      turnAgent(this.env, live.agentId),
+    ]);
     const carried = this.#unsentFiles(chat.id, files);
     const queued: QueuedQuestion = {
       id,
