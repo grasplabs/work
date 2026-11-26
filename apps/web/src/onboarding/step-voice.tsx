@@ -13,7 +13,7 @@ import {
 import type { ReactNode } from "react";
 
 import { useNewestError } from "../frame/top-error.tsx";
-import { prepare, speak } from "../voice/voice.ts";
+import { isPrepared, prepare, speak } from "../voice/voice.ts";
 import { keptKey } from "./kept.ts";
 
 // Stephen on the setup's steps, as one conversation (Ruben: "react on what
@@ -102,9 +102,15 @@ export const useRememberLines = (): Remember | undefined =>
 /** How a step was left, as its own line for Stephen to say as the next arrives. */
 let leftAs: { step: string; line: MessageDescriptor | null } | null = null;
 
-/** When Stephen last answered something done, on the page's clock, and with what. */
+/** When Stephen last answered something done, on the page's clock, with what, and on which step. */
 let answeredAt = Number.NEGATIVE_INFINITY;
 let answered = "";
+let answeredOn = "";
+/** Whether that answer was to something gone wrong. */
+let answeredWrong = false;
+
+/** The steps Stephen told as they arrived, in this visit: back on one, he doesn't tell it again. */
+const told = new Set<string>();
 
 /** An answer this soon after the last is left out: one at a time, never a pile. */
 const answerGapMs = 2500;
@@ -112,7 +118,9 @@ const answerGapMs = 2500;
 const sameAnswerGapMs = 4500;
 /** How long after a step opens a choice made on the step before is still worth answering. */
 const arrivalMs = 3000;
-/** A choice is fetched ahead once it has stood this long: one clicked through isn't asked for. */
+/** A choice is fetched ahead once it has stood this long: long enough for the step's own line to go first. */
+const leaveAheadMs = 300;
+/** What a step may answer is fetched once its own line is on its way. */
 const aheadMs = 900;
 
 /**
@@ -120,22 +128,29 @@ const aheadMs = 900;
  * he is saying. Left out when he answered a moment ago, unless `always`
  * (something went wrong): never two answers on top of each other.
  */
-const answer = (line: string, always: boolean): void => {
+const answer = (line: string, step: string, always: boolean): void => {
   const now = performance.now();
   if (line === answered && now - answeredAt < sameAnswerGapMs) {
     return;
   }
-  if (!always && now - answeredAt < answerGapMs) {
+  // Something gone wrong goes before any other answer, but not over another of its own kind.
+  if ((!always || answeredWrong) && now - answeredAt < answerGapMs) {
     return;
   }
   answeredAt = now;
   answered = line;
+  answeredOn = step;
+  answeredWrong = always;
   speak(line, { soon: true });
 };
 
-/** Whether Stephen answered something a moment ago: a step arriving then waits for him to finish. */
-export const answeredLately = (): boolean =>
-  performance.now() - answeredAt < answerGapMs;
+/**
+ * Whether Stephen answered something on `step` a moment ago (something gone wrong as it opened):
+ * its own line then waits for him to finish. An answer on the step before doesn't hold it up: the
+ * new step's line cuts it, as it always has.
+ */
+export const answeredLately = (step: string): boolean =>
+  answeredOn === step && performance.now() - answeredAt < answerGapMs;
 
 /** What Stephen says when the bar at the top tells of something gone wrong: in turn, so twice isn't word for word. */
 const wentWrong = [
@@ -150,7 +165,14 @@ let heardError = 0;
 interface Talk {
   /** The step, by name. */
   step: string;
-  /** What Stephen says first as the step arrives, of how the step before was left; once, and only right as it arrives. */
+  /** Whether he told this step as it arrived before, in this visit: then he doesn't again. */
+  toldBefore: boolean;
+  /** He told the step as it arrived. */
+  tell: () => void;
+  /**
+   * What Stephen says first as the step arrives, of how the step before was left; once, only
+   * right as it arrives, and only when it is fetched already: it never holds up the step's own line.
+   */
   arriving: () => string | null;
 }
 
@@ -178,7 +200,7 @@ export const useLeaving = (line: MessageDescriptor | null): void => {
         ? undefined
         : window.setTimeout(() => {
             prepare(i18n._(line));
-          }, aheadMs);
+          }, leaveAheadMs);
     return () => {
       window.clearTimeout(id);
     };
@@ -196,6 +218,7 @@ export const useAnswer = (
   ahead: readonly MessageDescriptor[] = []
 ): ((line: MessageDescriptor, always?: boolean) => void) => {
   const { i18n } = useLingui();
+  const step = useStepTalk()?.step ?? "";
   // The lines in the page's language, one per row: fetched again only when those change.
   const texts = ahead.map((line) => i18n._(line)).join("\n");
   useEffect(() => {
@@ -210,9 +233,9 @@ export const useAnswer = (
   }, [texts]);
   return useCallback(
     (line: MessageDescriptor, always = false) => {
-      answer(i18n._(line), always);
+      answer(i18n._(line), step, always);
     },
-    [i18n]
+    [i18n, step]
   );
 };
 
@@ -262,13 +285,16 @@ export const StepVoice = ({
     },
     [userId, language, step]
   );
-  // How the step before was left, read as this one opens (before the step's own sets it anew):
-  // only when the admin came on from it. Given once, it's gone.
-  const [cameFrom, setCameFrom] = useState(() =>
-    leftAs !== null && previous !== undefined && leftAs.step === previous
-      ? leftAs.line
-      : null
-  );
+  // Read as the step opens, so each holds for its whole stay. How the step before was left (before
+  // the step's own sets it anew), only when the admin came on from it: given once, it's gone. And
+  // whether he told this step as it arrived before, in this visit.
+  const [opening, setOpening] = useState(() => ({
+    cameFrom:
+      leftAs !== null && previous !== undefined && leftAs.step === previous
+        ? leftAs.line
+        : null,
+    toldBefore: told.has(step),
+  }));
   const openedAt = useRef(Number.POSITIVE_INFINITY);
   useEffect(() => {
     openedAt.current = performance.now();
@@ -276,18 +302,25 @@ export const StepVoice = ({
   const talk = useMemo<Talk>(
     () => ({
       step,
+      toldBefore: opening.toldBefore,
+      tell: () => {
+        told.add(step);
+      },
       arriving: () => {
+        const { cameFrom } = opening;
         if (
           cameFrom === null ||
           performance.now() - openedAt.current > arrivalMs
         ) {
           return null;
         }
-        setCameFrom(null);
-        return i18n._(cameFrom);
+        setOpening((was) => ({ ...was, cameFrom: null }));
+        const line = i18n._(cameFrom);
+        // Not fetched yet (made by the voice for the first time): left out, so the step starts at once.
+        return isPrepared(line) ? line : null;
       },
     }),
-    [step, cameFrom, i18n]
+    [step, opening, i18n]
   );
   // What he says when something goes wrong, fetched ahead once this step's own lines are on their way.
   const wrongTexts = wentWrong.map((line) => i18n._(line)).join("\n");
@@ -311,9 +344,9 @@ export const StepVoice = ({
     const line = wentWrong[wrongTurn % wentWrong.length];
     wrongTurn += 1;
     if (line !== undefined) {
-      answer(i18n._(line), true);
+      answer(i18n._(line), step, true);
     }
-  }, [newestError, i18n]);
+  }, [newestError, i18n, step]);
   return (
     <StepTalk.Provider value={talk}>
       <RememberLines.Provider value={remember}>
