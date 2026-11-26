@@ -4875,6 +4875,7 @@ msgstr "Kliffen"
 #: src/connections/request-app-dialog.tsx
 #: src/frame/app-sidebar.tsx
 #: src/frame/panels/head.tsx
+#: src/frame/top-error.tsx
 #: src/frame/ui-words.tsx
 #: src/interview/destination.tsx
 #: src/onboarding/campaign/campaign-page.tsx
