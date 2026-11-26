@@ -63,8 +63,8 @@ export const plantedHtml: Readonly<
   // A drawing draws only its text elements' characters, and a formula
   // its shown parts.
   drawnAlone: {
-    html: `<p>${shownText}</p><svg><g>${plantedInstruction}</g>${plantedInstruction}<foo>${plantedInstruction}</foo><text hidden>Due<rect>${plantedInstruction}</rect></text><switch><g/><text>${plantedInstruction}</text></switch><filter><text>${plantedInstruction}</text></filter><linearGradient><text>${plantedInstruction}</text></linearGradient><foreignObject><p>soon</p><svg>${plantedInstruction}</svg></foreignObject></svg><p><math><mphantom><mi>${plantedInstruction}</mi></mphantom><semantics><mi>y</mi><mtext>${plantedInstruction}</mtext></semantics><maction><mi>z</mi><mtext>${plantedInstruction}</mtext></maction></math></p>`,
-    shown: `${shownText}\nDue\nsoon\nyz`,
+    html: `<p>${shownText}</p><svg><g>${plantedInstruction}</g>${plantedInstruction}<foo>${plantedInstruction}</foo><text hidden>Due <a>by</a> <tspan>Friday<a>!</a></tspan><rect>${plantedInstruction}</rect></text><switch><text systemLanguage="zz">${plantedInstruction}</text><g/><text>${plantedInstruction}</text></switch><filter><text>${plantedInstruction}</text></filter><linearGradient><text>${plantedInstruction}</text></linearGradient><radialGradient><text>${plantedInstruction}</text></radialGradient><g><tspan>${plantedInstruction}</tspan><a>${plantedInstruction}</a></g><text display="none">${plantedInstruction}</text><text visibility="hidden">${plantedInstruction}</text><text requiredExtensions="urn:x">${plantedInstruction}</text><foreignObject> at noon<p>soon</p><svg>${plantedInstruction}</svg></foreignObject></svg><p><math><mphantom><mi>${plantedInstruction}</mi></mphantom><semantics><mi>y</mi><mtext>${plantedInstruction}</mtext></semantics><maction><mi>z</mi><mtext>${plantedInstruction}</mtext></maction></math></p>`,
+    shown: `${shownText}\nDue by Friday! at noon\nsoon\nyz`,
   },
   // What only an SVG drawing hides, a page shows.
   drawingNamesElsewhere: {

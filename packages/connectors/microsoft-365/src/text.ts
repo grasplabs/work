@@ -98,12 +98,30 @@ const unread: Readonly<Record<string, ReadonlySet<string>>> = {
 const hasAttribute = ({ attrs }: Element, attribute: string): boolean =>
   attrs.some(({ name }) => name === attribute);
 
+const attributeOf = (
+  { attrs }: Element,
+  attribute: string
+): string | undefined => attrs.find(({ name }) => name === attribute)?.value;
+
 const isHtml = ({ namespaceURI }: Element): boolean =>
   namespaceURI === htmlSpec.NS.HTML;
+
+/**
+ * Whether a drawing's own attributes keep it from being drawn: `display`
+ * or `visibility` set so, or a condition (`requiredExtensions`,
+ * `systemLanguage`) a page's drawings rarely set and the reader can't
+ * judge, so takes as unmet.
+ */
+const isUndrawn = (element: Element): boolean =>
+  attributeOf(element, "display") === "none" ||
+  ["hidden", "collapse"].includes(attributeOf(element, "visibility") ?? "") ||
+  hasAttribute(element, "requiredExtensions") ||
+  hasAttribute(element, "systemLanguage");
 
 /** Whether a browser hides `element` and all it holds. */
 const isUnread = (element: Element): boolean =>
   unread[element.namespaceURI]?.has(element.tagName) === true ||
+  (element.namespaceURI === htmlSpec.NS.SVG && isUndrawn(element)) ||
   (isHtml(element) &&
     (hasAttribute(element, "hidden") ||
       hasAttribute(element, "popover") ||
@@ -112,8 +130,7 @@ const isUnread = (element: Element): boolean =>
 /**
  * Elements that show their first element alone, by their namespace: a
  * formula's `semantics` and `maction` (MathML Core), and a drawing's
- * `switch`, whose first child meeting its conditions, which a page's
- * drawings rarely set, is the one drawn.
+ * `switch`, which draws its first child that is drawn at all.
  */
 const firstShown: Readonly<Record<string, ReadonlySet<string>>> = {
   [htmlSpec.NS.MATHML]: new Set(["semantics", "maction"]),
@@ -128,7 +145,9 @@ const firstShown: Readonly<Record<string, ReadonlySet<string>>> = {
 const shownChildren = (element: Element): readonly Node[] => {
   let shown: Node | undefined;
   if (firstShown[element.namespaceURI]?.has(element.tagName) === true) {
-    shown = element.childNodes.find((node) => "tagName" in node);
+    shown = element.childNodes.find(
+      (node) => "tagName" in node && !isUnread(node)
+    );
   } else if (
     element.tagName === "details" &&
     isHtml(element) &&
@@ -144,20 +163,15 @@ const shownChildren = (element: Element): readonly Node[] => {
 };
 
 /**
- * Drawing elements whose own characters a browser draws: a drawing's
- * characters in any other are never shown (SVG 2, 11.1). What a
- * `foreignObject` holds is HTML, read as a page's.
+ * Drawing elements whose characters a browser draws, wherever they are:
+ * a drawing's text, and a `foreignObject`, which lays out what it holds
+ * as a page's. A drawing's characters elsewhere are never shown (SVG 2,
+ * 11.1), but in {@link drawnWithin}.
  */
-const drawnText: ReadonlySet<string> = new Set(["text", "tspan", "textPath"]);
+const drawnText: ReadonlySet<string> = new Set(["text", "foreignObject"]);
 
-/** Whether a browser shows `text`'s characters, by what holds them. */
-const isShownText = ({
-  parentNode,
-}: DefaultTreeAdapterTypes.TextNode): boolean =>
-  parentNode === null ||
-  !("namespaceURI" in parentNode) ||
-  parentNode.namespaceURI !== htmlSpec.NS.SVG ||
-  drawnText.has(parentNode.tagName);
+/** Drawing elements whose characters a browser draws inside drawn text. */
+const drawnWithin: ReadonlySet<string> = new Set(["tspan", "textPath", "a"]);
 
 /** Elements on lines of their own: paragraphs, headings, list items, table rows, sections. */
 const lineEnds: ReadonlySet<string> = new Set([
@@ -373,8 +387,25 @@ export const htmlText = (html: string): string => {
       .replaceAll(whitespace, " ");
     push(atBreak || spaced ? collapsed.trimStart() : collapsed);
   };
+  /** The drawing's elements entered whose characters it draws. */
+  const drawn = new Set<object>();
+  /** Whether a browser shows `text`'s characters, by what holds them. */
+  const isShownText = ({
+    parentNode,
+  }: DefaultTreeAdapterTypes.TextNode): boolean =>
+    parentNode === null ||
+    !("namespaceURI" in parentNode) ||
+    parentNode.namespaceURI !== htmlSpec.NS.SVG ||
+    drawn.has(parentNode);
   const enter = (element: Element): void => {
     const { tagName } = element;
+    if (
+      element.namespaceURI === htmlSpec.NS.SVG &&
+      (drawnText.has(tagName) ||
+        (drawnWithin.has(tagName) && drawn.has(element.parentNode ?? {})))
+    ) {
+      drawn.add(element);
+    }
     if (tagName === "br" && cells > 0) {
       space();
     } else if (tagName === "br") {
