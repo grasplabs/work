@@ -51,12 +51,19 @@ const rateLimited = (seconds: number): ResponseInit => ({
 
 /**
  * What a read of a new sample connection gets right after the provider
- * answered its first read with `answer`.
+ * answered its first read with `answerAt(now)`: `now` is the instant of
+ * the answer, in Unix seconds, for an answer that names a time (a reset
+ * as a Unix time, a `retry-after` date) rather than a number of seconds.
  */
-const pausedBy = async (answer: ResponseInit) => {
+const pausedBy = async (answerAt: (now: number) => ResponseInit) => {
   // `vi.waitUntil` moves a faked clock on as it polls: the answer comes, and
   // is read, at the instant the call began, however long the wait took.
-  const asked = Date.now();
+  // That instant is on a whole second, so a time the answer names is whole
+  // seconds away, and it is this call's own: the clock a call leaves behind
+  // isn't where the test began (in the merge queue a date 75 s on was read
+  // as 74 s, its seventh call a second past the test's start).
+  const asked = Math.ceil(Date.now() / 1000) * 1000;
+  vi.setSystemTime(asked);
   const connection = await connectionTo("sample");
   const list = async () =>
     await retryable(
@@ -70,7 +77,7 @@ const pausedBy = async (answer: ResponseInit) => {
   if (read === undefined) {
     throw new Error("The read is held");
   }
-  read.answer = answer;
+  read.answer = answerAt(asked / 1000);
   await limited;
   return await list();
 };
@@ -299,69 +306,66 @@ describe("a native connector", () => {
     onTestFinished(() => {
       vi.useRealTimers();
     });
-    // On a whole second, so a reset given as a Unix time is whole seconds away.
-    const now = Math.floor(Date.now() / 1000);
-    vi.setSystemTime(now * 1000);
     expect({
-      resetAt: await pausedBy({
+      resetAt: await pausedBy((now) => ({
         status: 429,
         headers: {
           "x-ratelimit-reset": String(now + 90),
           "x-ratelimit-remaining": "0",
         },
-      }),
+      })),
       // A limit not used up isn't the one the 429 is for: a minute.
-      notUsedUp: await pausedBy({
+      notUsedUp: await pausedBy((now) => ({
         status: 429,
         headers: {
           "x-ratelimit-reset": String(now + 3000),
           "x-ratelimit-remaining": "12",
         },
-      }),
-      resetIn: await pausedBy({
+      })),
+      resetIn: await pausedBy(() => ({
         status: 429,
         headers: { "X-HubSpot-RateLimit-Reset": "45" },
-      }),
+      })),
       // Of a vendor's limits per minute and per day, the earliest reset.
-      earliest: await pausedBy({
+      earliest: await pausedBy((now) => ({
         status: 429,
         headers: [
           ["x-ratelimit-reset-minute", "40"],
           ["x-ratelimit-reset-day", String(now + 3000)],
         ],
-      }),
+      })),
       // A reset in milliseconds, or one already past, isn't read: a minute.
-      inMilliseconds: await pausedBy({
+      inMilliseconds: await pausedBy((now) => ({
         status: 429,
         headers: { "x-ratelimit-reset": String((now + 30) * 1000) },
-      }),
-      past: await pausedBy({
+      })),
+      past: await pausedBy((now) => ({
         status: 429,
         headers: { "x-ratelimit-reset": String(now - 5) },
-      }),
-      date: await pausedBy({
+      })),
+      date: await pausedBy((now) => ({
         status: 429,
         headers: {
           "retry-after": new Date((now + 75) * 1000).toUTCString(),
         },
-      }),
+      })),
       // Not an HTTP-date, so ignored, as RFC 9110 says: a minute.
-      notADate: await pausedBy({
+      notADate: await pausedBy(() => ({
         status: 429,
         headers: { "retry-after": "1.5" },
-      }),
-      unavailable: await pausedBy({
+      })),
+      unavailable: await pausedBy(() => ({
         status: 503,
         headers: { "retry-after": "20" },
-      }),
-      forbidden: await pausedBy({
+      })),
+      forbidden: await pausedBy(() => ({
         status: 403,
         headers: { "retry-after": "25" },
-      }),
+      })),
       // A 503 or 403 that names no wait is an outage or a refusal, not a
       // rate limit.
-      outage: await pausedBy({ status: 503 }),
-      refusal: await pausedBy({ status: 403 }),
+      outage: await pausedBy(() => ({ status: 503 })),
+      refusal: await pausedBy(() => ({ status: 403 })),
     }).toStrictEqual({
       resetAt: { code: "connect.rate_limited", retryAfterSeconds: 90 },
       notUsedUp: { code: "connect.rate_limited", retryAfterSeconds: 60 },
