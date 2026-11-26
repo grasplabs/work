@@ -33,23 +33,28 @@ import { callObject, workspace } from "./durable-objects.ts";
 //   sees a chat half open. One that fails to open isn't kept: the next call
 //   or alarm opens it again.
 // - pi failed by its storage stays closed (it retries nothing): the object
-//   drops it once it has closed, never opening a second over the same
-//   storage, and its alarm opens it again at once, so the turn goes on.
-// - Opens that keep failing are tried again by the alarm, 30 s doubling to
-//   10 min, counted in storage before each try, so a reset (out of memory)
-//   counts too. After `opensMost` in a row the object stops waking itself
-//   and tells its Workspace the chat's turn no longer runs, so it never
-//   shows busy for good; a call still tries.
+//   drops it at once and opens another only once it has closed (or resets
+//   when that takes past `closeMs`), never two over the same storage; its
+//   alarm opens it again at once, so the turn goes on.
+// - Every open is counted in storage before it is tried, so a reset (out of
+//   memory) counts too; one that works clears the count. The alarm tries
+//   one that failed again after 30 s, then 1, 2, 4 and 8 min. After
+//   `opensMost` failed in a row, a call's among them, the object stops
+//   waking itself and tells its Workspace the chat's turn no longer runs,
+//   so it never shows busy for good; a call still tries.
 // - An erased object never opens pi again.
 
 /** How long a turn under way may go unwatched before its alarm checks on it. */
 const heartbeatMs = 60_000;
 
-/** How soon the alarm tries an open that failed again: at first, and at most, doubling. */
-const reopenMs = { first: 30_000, most: 10 * 60_000 };
+/** How soon the alarm first tries an open that failed again, doubling after. */
+const reopenMs = 30_000;
 
 /** Opens that fail in a row before the object stops waking itself. */
 const opensMost = 6;
+
+/** Most a Harness that failed may take to close before the object resets. */
+const closeMs = 30_000;
 
 /**
  * Kept once the object is erased (`erase`), and nothing else: it never
@@ -121,11 +126,6 @@ export class ChatSession extends DurableObject<Env> {
       return await this.#opened;
     } catch (error) {
       this.#opened = undefined;
-      log.warn("chat.open_failed", {
-        chatSession: this.ctx.id.name,
-        failedOpens: this.#failedOpens(),
-        ...errorFields(error),
-      });
       throw error;
     }
   }
@@ -139,8 +139,12 @@ export class ChatSession extends DurableObject<Env> {
    */
   async #open(): Promise<ChatHarness> {
     // Never two over one storage: pi writes its last as it closes. Waited
-    // for outside the block, as a tool that ignores its abort can hold it.
-    await this.#lastClosed;
+    // for outside the block, and at most `closeMs`: a tool call that never
+    // answers holds pi's close, and the object then resets, which ends it.
+    await this.#closedOrReset();
+    if (this.#erased()) {
+      throw agentErrors.create("agent.chat_not_found");
+    }
     const opened = await this.ctx.blockConcurrencyWhile(
       async (): Promise<{ harness: ChatHarness } | { error: unknown }> => {
         // A fallback before anything can fail: an object whose open or
@@ -168,6 +172,12 @@ export class ChatSession extends DurableObject<Env> {
           // Armed before anything runs, as for any call that can start work.
           await this.#arm(opening.wake());
           await opening.setUpStored();
+          if (this.#current !== opening) {
+            throw new Error("pi closed as it opened");
+          }
+          // Before pi runs anything: only pi writes this storage meanwhile.
+          this.ctx.storage.kv.delete(failedOpensKey);
+          opening.resume();
         } catch (error) {
           if (harness !== undefined) {
             // Closed, so the next open is the only pi over this storage.
@@ -180,18 +190,36 @@ export class ChatSession extends DurableObject<Env> {
           }
           return { error };
         }
-        // Before pi runs anything: only pi writes this storage meanwhile.
-        this.ctx.storage.kv.delete(failedOpensKey);
         // Only once open: a failure while it opens is the backoff's.
         void this.#onFailed(harness);
-        harness.resume();
         return { harness };
       }
     );
     if ("error" in opened) {
+      log.warn("chat.open_failed", {
+        chatSession: this.ctx.id.name,
+        failedOpens: this.#failedOpens(),
+        ...errorFields(opened.error),
+      });
       throw opened.error;
     }
     return opened.harness;
+  }
+
+  /**
+   * Waits until the last Harness dropped has closed, or resets the object
+   * once that takes past `closeMs`: either way no other pi is left over
+   * this storage.
+   */
+  async #closedOrReset(): Promise<void> {
+    const waited = await Promise.race([
+      this.#lastClosed.then(() => "closed" as const),
+      scheduler.wait(closeMs).then(() => "late" as const),
+    ]);
+    if (waited === "late") {
+      log.error("chat.close_overdue", { chatSession: this.ctx.id.name });
+      this.ctx.abort("pi did not close");
+    }
   }
 
   /**
@@ -361,10 +389,7 @@ export class ChatSession extends DurableObject<Env> {
   async #retry(): Promise<void> {
     const failed = this.#failedOpens();
     if (failed < opensMost) {
-      const backoff =
-        failed === 0
-          ? heartbeatMs
-          : Math.min(reopenMs.first * 2 ** (failed - 1), reopenMs.most);
+      const backoff = failed === 0 ? heartbeatMs : reopenMs * 2 ** (failed - 1);
       await this.ctx.storage.setAlarm(Date.now() + backoff);
       return;
     }
