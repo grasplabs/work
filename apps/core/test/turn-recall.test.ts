@@ -46,6 +46,7 @@ import {
   openTestRun,
   personalChatsOf,
   model,
+  readApiStep,
   returnedOf,
   says,
   setObjectEnv,
@@ -614,23 +615,35 @@ describe("the recall before a chat's question", setUpTime, () => {
     }).toStrictEqual({ past500: true, found: true });
   });
 
-  it("hands the model the recall in a tag of its own and asks for no citation, so nothing in the request reads as a label to write into the answer", async () => {
+  it("hands the model the recall in a tag of its own and asks for no citation, so nothing it reads is a label to write into the answer", async () => {
     const depot = word();
     const fact = `Depot ${depot} opens at seven`;
-    const chat = await recallingChat(says("Seven."));
+    const chat = await recallingChat(
+      readApiStep(
+        "chat",
+        "connections",
+        "apps",
+        "workflows",
+        "skills",
+        "brain"
+      ),
+      says("Seven.")
+    );
     await added(fact, owner(chat.personId));
 
     await chat.ask(`When does depot ${depot} open?`);
 
-    // The system prompt, the tools and the messages: everything it read.
-    const sent = stringsIn(chat.provider.requests[0]?.body);
+    // The system prompt, the tools, the messages and every API's
+    // declaration: everything it read.
+    const sent = chat.provider.requests.flatMap(({ body }) => stringsIn(body));
     expect({
       tagged: sent.some(
         (text) => recallPart.test(text) && text.includes(depot)
       ),
       labels: sent.filter((text) => /^\[[^\]\n]+\]/mu.test(text)),
+      declared: sent.some((text) => text.includes("whoKnows(input")),
       cite: sent.filter((text) => /\bcite\b/iu.test(text)),
-    }).toStrictEqual({ tagged: true, labels: [], cite: [] });
+    }).toStrictEqual({ tagged: true, labels: [], declared: true, cite: [] });
   });
 
   it("records the recall in the audit log, with its run and how many versions it hands over and never what they say, before the model gets any of it", async () => {
