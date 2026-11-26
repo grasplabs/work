@@ -233,8 +233,24 @@ const field = (name: string): HTMLInputElement => {
   return found;
 };
 
+/** Presses "Other day" under the day's tiles, so the field to type a day in shows. */
+const otherDay = async (): Promise<void> => {
+  if (document.querySelector('input[aria-label="Another day"]') !== null) {
+    return;
+  }
+  const button = [...document.querySelectorAll("button")].find(
+    (each) => each.textContent?.trim() === "Other day"
+  );
+  await act(async () => {
+    button?.click();
+    await Promise.resolve();
+  });
+  await settled();
+};
+
 /** Types `typed` into the first day's field and leaves it, as a person does. */
 const typeDay = async (typed: string): Promise<void> => {
+  await otherDay();
   const day = field("Another day");
   await act(async () => {
     day.focus();

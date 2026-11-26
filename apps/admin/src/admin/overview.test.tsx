@@ -88,12 +88,14 @@ describe("the admin's frame", () => {
     const sidebar =
       container.querySelector('[data-slot="sidebar"]')?.textContent ?? "";
     const places = [
-      "Overview",
-      "Apps asked for",
+      "Home",
       "Platform",
+      "Apps asked for",
+      "Organizations",
+      "Labs",
       "Ask Grasp",
       "Stephen Lab",
-      "Organizations",
+      "Voice Lab",
     ].map((text) => sidebar.indexOf(text));
     const [acmeEntry, downEntry, waitingEntry] = [acme, down, waiting].map(
       ({ name }) => sidebarEntry(container, name)
@@ -129,15 +131,9 @@ describe("the admin's frame", () => {
       downUnreachable: true,
       waitingNotDeployed: true,
       downExplained: true,
-      // The sidebar, its places and its organizations each a landmark of
-      // their own, then the page's bar and Platform's places.
-      landmarks: [
-        "Sidebar",
-        "Admin",
-        "Organizations",
-        "Breadcrumb",
-        "Platform",
-      ],
+      // The sidebar, its main list and its organizations each a landmark
+      // of their own, then the page's bar and Platform's places.
+      landmarks: ["Sidebar", "Main", "Organizations", "Breadcrumb", "Platform"],
       opensAcme: true,
       oldBar: false,
     });
@@ -295,7 +291,7 @@ describe("the admin's overview", () => {
         tileOf(label).includes("—")
       ),
       acmeCount: sidebarEntry(container, acme.name)?.textContent?.includes(
-        "3things need Grasp"
+        "3 things need Grasp"
       ),
     }).toStrictEqual({
       title: "Organizations",
@@ -475,7 +471,7 @@ describe("the overview's counts and filters", () => {
     }).toStrictEqual({ waiting: true, talking: true });
   });
 
-  it("counts an organization's days to its own plan beside its page", async () => {
+  it("counts an organization's days to its own plan over its page", async () => {
     const company = row("company");
     const admin = answeredAdmin({
       client: company,
@@ -490,10 +486,10 @@ describe("the overview's counts and filters", () => {
       frameOf([company], [], { fetchClientAdmin: admin })
     );
 
-    // Beside its page: in its level of the sidebar.
-    expect(
-      container.querySelector('[data-slot="sidebar"]')?.textContent
-    ).toMatch(/Day \d+ of 21/u);
+    // Over its page, under its title, on every section.
+    expect(container.querySelector("main")?.textContent).toMatch(
+      /Day \d+ of 21/u
+    );
   });
 
   it("shows only the organizations in a phase when one is chosen", async () => {

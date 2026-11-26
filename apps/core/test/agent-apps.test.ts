@@ -3,7 +3,13 @@ import type { AuditEvent } from "@grasp-os/shared/audit";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { turnRecallMethod } from "../src/brain-search.ts";
-import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
+import {
+  chatOf,
+  codeResults,
+  codeStep,
+  says,
+  returnedText,
+} from "./agent-chat.ts";
 import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -107,7 +113,7 @@ describe("a chat's Apps", () => {
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
     expect(result?.text).toBe(
-      `Returned:\n${JSON.stringify({ apps: [app], files: true, versions: [1] })}`
+      returnedText({ apps: [app], files: true, versions: [1] })
     );
     const calls = await callsOf(chat.agent.agentId, 3);
     expect(
@@ -128,11 +134,11 @@ describe("a chat's Apps", () => {
     const [result] = await codeResults(chat.stub, chat.chat.id);
     const notFound = appErrors.create("app.not_found").message;
     expect(result?.text).toBe(
-      `Returned:\n${JSON.stringify({
+      returnedText({
         apps: [],
         files: notFound,
         versions: notFound,
-      })}`
+      })
     );
   });
 });

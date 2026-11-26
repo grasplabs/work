@@ -53,7 +53,14 @@ describe("an organization's interviews", () => {
             JSON.stringify(data) === JSON.stringify({ clientId: client.id })
         ) ?? null,
     });
-    return { html: opened.html() };
+    return {
+      html: opened.html(),
+      /** Every button on the page by its name: its `aria-label`, or else its words. */
+      buttons: [...opened.container.querySelectorAll("button")].map(
+        (button) =>
+          button.getAttribute("aria-label") ?? button.textContent?.trim() ?? ""
+      ),
+    };
   };
 
   it("shows every team, everyone by name with their interview’s numbers, and how Stephen did, in numbers only", async () => {
@@ -98,7 +105,6 @@ describe("an organization's interviews", () => {
           "What anyone said stays in the company’s own Grasp.",
           // Everyone still without their one reminder, to mark at once.
           "people can still be reminded, once each.",
-          "people reminded</button>",
         ]),
         interviewers: missingIn(interviewers.html, [
           "What people thought of it",
@@ -119,6 +125,10 @@ describe("an organization's interviews", () => {
       toCome: pages.some((each) =>
         each.html.includes("This section isn’t in the admin yet.")
       ),
+      // Everyone still without their one reminder, marked at once by one button.
+      remindAll: people.buttons.filter((name) =>
+        /^Mark \d+ people reminded$/u.test(name)
+      ).length,
     }).toStrictEqual({
       missing: {
         teams: [],
@@ -128,6 +138,7 @@ describe("an organization's interviews", () => {
       },
       leaked: [],
       toCome: false,
+      remindAll: 1,
     });
   });
 

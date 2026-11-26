@@ -77,7 +77,7 @@ export const ForgetKickoff = ({
     return (
       <output aria-live="polite" {...stylex.props(styles.said)}>
         <Text as="span" size="lg">
-          {t`Forgotten. Nothing of our first conversation is kept.`}
+          {t`Done. Nothing from our first conversation was kept.`}
         </Text>
       </output>
     );
@@ -86,7 +86,7 @@ export const ForgetKickoff = ({
     return (
       <output aria-live="polite" {...stylex.props(styles.said)}>
         <Text as="span" size="lg">
-          {t`Our first conversation is deleted. I’m still erasing what I took from it, and I finish that by myself.`}
+          {t`Our first conversation is deleted. I’m still clearing what I learned from it—I’ll finish that automatically.`}
         </Text>
       </output>
     );
@@ -112,7 +112,7 @@ export const ForgetKickoff = ({
           <AlertDialogHeader>
             <AlertDialogTitle>{t`Forget our first conversation?`}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t`I delete what was said and everything I took from it: what I know about your company from it, and what your Brain learned from it. I then know less about your company, which can put off the day your Grasp opens. This can’t be undone.`}
+              {t`I’ll delete what was said and everything I learned from it, including what your Brain saved. I’ll know less about your company, which may delay when Grasp is ready. This can’t be undone.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -123,7 +123,7 @@ export const ForgetKickoff = ({
               }}
               variant="destructive"
             >
-              {t`Forget it`}
+              {t`Delete conversation`}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

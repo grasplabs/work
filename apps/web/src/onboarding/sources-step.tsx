@@ -136,8 +136,8 @@ export const kindsOf = (words: ContextWords | undefined): string | null => {
 /** What Stephen says of the places pointed to, as the next step arrives. */
 const sourcesLeft = {
   shared: msg`Thanks. I’ll only read what you’ve shared with me there.`,
-  noted: msg`Good to know where the work lives. That already helps.`,
-  none: msg`No tools for now, that’s fine. You can add them later too.`,
+  noted: msg`Good to know where everything lives—that already helps.`,
+  none: msg`No tools for now, that’s fine. You can always connect them later.`,
 };
 
 /** What Stephen answers as a place is pointed to: one to connect now, or one noted. */
@@ -269,13 +269,15 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
     if (!noted.includes(source.id)) {
       return null;
     }
-    return isConnected(source) ? t`connected` : t`noted`;
+    return isConnected(source)
+      ? t({ context: "setup", message: "connected" })
+      : t`noted`;
   };
   return (
     <CalmStep
       body={
         kinds === null
-          ? t`The files, pages and folders your team works from. Connect the tools they’re in, and I’ll only read what you share with me.`
+          ? t`Connect the tools where your team keeps files, notes, and internal docs. I’ll only read what you explicitly share.`
           : t`${kinds}. Connect where they live, and I’ll only read what you share with me.`
       }
       also={
@@ -291,8 +293,8 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
           {t`Continue`}
         </Button>
       }
-      spoken={t`Next, I’d like to understand how the work actually gets done. Most of it lives in the tools your team already uses: shared drives, Teams channels and wikis, full of the files and pages people work from every day. Point me to the ones you use, and I’ll only read what you choose to share with me.`}
-      title={t`Where does the work get written down?`}
+      spoken={t`Next, let’s connect the tools where your team stores files, notes, and internal docs—like shared drives, wikis, or chat channels. Select what you use; I’ll only read what you explicitly share with me.`}
+      title={t`Where does your team store its work?`}
     >
       <div {...stylex.props(styles.stack)}>
         <ItemGrid aria-label={t`Where your documents live`} columns={3}>
@@ -342,7 +344,7 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
                     {name}
                     {asked ? (
                       <span {...stylex.props(visuallyHidden)}>
-                        , {t`asked for`}
+                        , {t`requested`}
                       </span>
                     ) : null}
                   </ItemTitle>
@@ -378,7 +380,7 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
                   <ItemTitle>
                     {name}
                     <span {...stylex.props(visuallyHidden)}>
-                      , {t`asked for`}
+                      , {t`requested`}
                     </span>
                   </ItemTitle>
                 </ItemContent>

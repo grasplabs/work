@@ -1,6 +1,7 @@
 import {
   classByRules,
   isJsonArray,
+  readsMailByRules,
   topNames,
 } from "@grasp-os/runtime/connector";
 import type { ToolHints } from "@grasp-os/runtime/connector";
@@ -981,7 +982,9 @@ export const connectorContract = async (
 
 /**
  * What core needs of `action` before a chat's agent calls it: whether it
- * reads, by the rules, and its input's properties.
+ * reads, by the rules, its input's properties, and whether a read reads
+ * mail, by the rules, from its name and the name its server was added
+ * under.
  */
 export const connectorActionShape = async (
   env: Env,
@@ -994,10 +997,21 @@ export const connectorActionShape = async (
   if (listed === undefined || toolClass === "never") {
     throw connectErrors.create("connect.action_not_found");
   }
+  const readOnly = reads(toolClass);
+  const server = readOnly
+    ? await drizzle(env.DB)
+        .select({ name: connectors.name })
+        .from(connectors)
+        .where(eq(connectors.id, connection.server))
+        .get()
+    : undefined;
   return {
-    readOnly: reads(toolClass),
+    readOnly,
     inputs: topProperties(listed.inputSchema),
     provider: connection.provider,
+    ...(readOnly && readsMailByRules(listed.name, server?.name ?? "")
+      ? { mail: true as const }
+      : {}),
   };
 };
 

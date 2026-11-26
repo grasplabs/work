@@ -29,17 +29,15 @@ export type StubTurn =
 /** Sections each search reads, in the agent arm as in the full-text arm. */
 export const searchedSections = 5;
 
-/** The code result's prefix, as the agent hands it back to the model. */
-const returned = "Returned:\n";
-
 /** A code result's value, when it returned a string: as the model reads it. */
 const returnedText = (text: string): string => {
-  if (!text.startsWith(returned)) {
-    return text;
-  }
   try {
-    const value: unknown = JSON.parse(text.slice(returned.length));
-    return typeof value === "string" ? value : text;
+    const value: unknown = JSON.parse(text);
+    const returned =
+      typeof value === "object" && value !== null && "returned" in value
+        ? value.returned
+        : undefined;
+    return typeof returned === "string" ? returned : text;
   } catch {
     return text;
   }

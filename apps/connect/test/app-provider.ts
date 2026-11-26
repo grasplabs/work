@@ -1,6 +1,6 @@
 /**
  * Stand-ins for the apps that sign in with their own provider records
- * (test/fixtures/sample-oauth-connector.ts, sample-key-connector.ts): the
+ * (test/fixtures/sample-oauth-connector.ts, sample-key/connector.ts): the
  * OAuth app's authorization server (token and revocation endpoints) and
  * both apps' account lookups. The token endpoint checks what a real one
  * does: the client, in HTTP Basic as the record says; PKCE, so a code only
@@ -25,7 +25,7 @@ import { clientOrigin, stateOf } from "./connect.ts";
 import {
   sampleKeyApiHost,
   sampleKeyHeader,
-} from "./fixtures/sample-key-connector.ts";
+} from "./fixtures/sample-key/connector.ts";
 import {
   sampleOAuthApiHost,
   sampleOAuthAuthHost,

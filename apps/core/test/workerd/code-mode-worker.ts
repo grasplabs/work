@@ -3,7 +3,6 @@ import { WorkerEntrypoint, env, exports } from "cloudflare:workers";
 import {
   codeLimits,
   codeRuntime,
-  cutMarker,
   describeRun,
   runCode,
   utf8Bytes,
@@ -112,13 +111,14 @@ const runCase = async ({ code, timeoutMs, cancelAfterMs }: Case) => {
     }
   );
   const text = describeRun(run);
+  const result: unknown = JSON.parse(text);
   return {
     status: run.status,
     text: text.slice(0, 400),
     ending: text.slice(-200),
     ms: Date.now() - started,
     bytes: utf8Bytes(text),
-    cut: text.includes(cutMarker),
+    cut: typeof result === "object" && result !== null && "cut" in result,
     streamed: streamed.length,
   };
 };

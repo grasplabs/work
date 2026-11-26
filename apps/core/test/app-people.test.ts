@@ -19,7 +19,13 @@ import {
 } from "../src/db/core/schema.ts";
 import { rollback } from "../src/publish.ts";
 import { revokeRelease } from "../src/release-retention.ts";
-import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
+import {
+  chatOf,
+  codeResults,
+  codeStep,
+  says,
+  returnedOf,
+} from "./agent-chat.ts";
 import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { commitApp, requestGranted } from "./apps.ts";
@@ -654,7 +660,7 @@ describe("a chat's agent and who calls an App", { timeout: 180_000 }, () => {
           value: z.object({ people: z.array(z.unknown()) }),
         }),
       })
-      .parse(JSON.parse(result?.text.replace("Returned:\n", "") ?? "{}"));
+      .parse(returnedOf(result?.text));
     const events = await allEvents();
 
     expect({

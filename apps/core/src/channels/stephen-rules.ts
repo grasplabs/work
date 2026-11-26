@@ -225,7 +225,3 @@ export interface TurnCheck {
 /** Of what a turn read, what its check line shows; `null` for nothing read. */
 export const turnCheckOf = (reads: readonly TurnCheck[]): TurnCheck | null =>
   reads.find(({ read }) => read === "mail") ?? reads[0] ?? null;
-
-/** Whether a read action reads mail, by its name (`mail.search`, `MAIL_SEARCH`). */
-export const readsMail = (action: string): boolean =>
-  /^(?:mail|gmail|outlook)[._]/iu.test(action);

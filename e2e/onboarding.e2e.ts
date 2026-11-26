@@ -453,7 +453,7 @@ test("the company's admin goes through their onboarding: the staff list, the org
   await page.getByRole("button", { name: "Skip for now" }).click();
   await expect(
     page.getByRole("heading", {
-      name: "Do you have anything that explains how you work?",
+      name: "Share documents that explain how you work",
     })
   ).toBeVisible();
   await readOn(page, page.getByRole("button", { name: "Skip for now" }));
@@ -492,11 +492,17 @@ test("the company's admin goes through their onboarding: the staff list, the org
       name: "Before I reach out, let your team know",
     })
   ).toBeVisible();
-  await page.getByRole("button", { name: "The day after" }).click();
+  // The second of the day's tiles, then its date in the field "Other day" shows.
+  await page
+    .getByRole("group", { name: "Day" })
+    .getByRole("button")
+    .nth(1)
+    .click();
+  await page.getByRole("button", { name: "Other day" }).click();
   const start = isoOf(await page.getByLabel("Another day").inputValue());
   // Only the teams that take part are there to hold back.
-  await expect(page.getByRole("checkbox", { name: /^Legal/u })).toHaveCount(0);
-  await page.getByRole("checkbox", { name: /^Ops/u }).click();
+  await expect(page.getByRole("button", { name: /^Legal/u })).toHaveCount(0);
+  await page.getByRole("button", { name: /^Ops/u }).click();
   await page.getByRole("button", { name: "On a later day" }).click();
   const later = isoOf(
     await page

@@ -12,7 +12,15 @@ import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
-import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
+import {
+  chatOf,
+  codeResults,
+  codeStep,
+  model,
+  says,
+  returnedOf,
+  returnedText,
+} from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -158,7 +166,7 @@ const pagingCode = (name: string) =>
 /** The model's answer to a code step, as JSON. */
 const returnedSchema = z
   .string()
-  .transform((text): unknown => JSON.parse(text.replace(/^Returned:\n/u, "")));
+  .transform((text): unknown => returnedOf(text));
 
 /** Code that returns the names `env.brain.findEntities` finds by the reference `ref`. */
 const namesByRefCode = (ref: string) =>
@@ -682,15 +690,15 @@ describe("a chat's code reading the Brain's entities", setUpTime, () => {
       asked: {
         own: true,
         byCode: ["brain"],
-        read: `Returned:\n${JSON.stringify([`found ${teamName}: ${teamStatement}`])}`,
+        read: returnedText([`found ${teamName}: ${teamStatement}`]),
       },
       // A turn nobody started reads as the company alone.
-      woken: { byCode: ["brain"], read: "Returned:\n[]" },
+      woken: { byCode: ["brain"], read: returnedText([]) },
       // Their direct message is their own chat (GRA-1821): as asked.
       direct: {
         own: true,
         byCode: ["brain"],
-        read: `Returned:\n${JSON.stringify([`found ${teamName}: ${teamStatement}`])}`,
+        read: returnedText([`found ${teamName}: ${teamStatement}`]),
       },
     });
   });
@@ -786,9 +794,9 @@ describe("a chat's code reading the Brain's entities", setUpTime, () => {
         refused: detail?.refused,
       })),
     }).toStrictEqual({
-      read: `Returned:\n${JSON.stringify([
+      read: returnedText([
         "failed An answer not as code is handed one reached the Brain's entities",
-      ])}`,
+      ]),
       audited: [{ found: undefined, refused: "internal.unexpected" }],
     });
   });

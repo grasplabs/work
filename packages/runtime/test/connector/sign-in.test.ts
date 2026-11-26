@@ -37,6 +37,7 @@ const manifest = (fields: Record<string, unknown>) => ({
   signIn: oauth2,
   scopes: ["read"],
   hosts: [apiHost],
+  credentialHosts: [apiHost],
   actions: {},
   ...fields,
 });

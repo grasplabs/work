@@ -52,4 +52,8 @@ export const appClients = {
     id: "grasp-sample-tenant",
     secret: "sample-tenant-secret",
   },
+  "sample-company": {
+    id: "grasp-sample-company",
+    secret: "sample-company-secret",
+  },
 } as const;

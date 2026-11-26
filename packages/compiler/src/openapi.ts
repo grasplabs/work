@@ -409,6 +409,15 @@ const holdsSegment = (descriptor: ValueDescriptor): boolean => {
   return ["string", "number", "enum"].includes(descriptor.kind);
 };
 
+/**
+ * Text in a path as one segment, whatever format the spec gives it: a
+ * string has one format, and the route can carry only this one.
+ */
+const pathTyped = (schema: Modifiable | undefined): Modifiable | undefined =>
+  schema?.descriptor.kind === "string" && !schema.descriptor.nullable
+    ? v.string().segment()
+    : schema;
+
 /** One parameter as an argument, or undefined where it can't be typed. */
 const parameterOf = (
   { name, where, node }: Declared,
@@ -424,7 +433,8 @@ const parameterOf = (
   if (where !== "path" && where !== "query") {
     return undefined;
   }
-  const schema = schemaOf(node.schema, reading, 1);
+  const read = schemaOf(node.schema, reading, 1);
+  const schema = where === "path" ? pathTyped(read) : read;
   const descriptor = schema?.descriptor;
   if (schema === undefined || descriptor === undefined) {
     return undefined;

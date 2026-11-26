@@ -6,9 +6,19 @@
 
 export { v } from "../common/values.ts";
 export type { Infer, InferInput } from "../common/value-types.ts";
-export { auth, defineConnector, event, page, sync, tool } from "./define.ts";
+export {
+  attachedFiles,
+  attachments,
+  auth,
+  defineConnector,
+  event,
+  page,
+  sync,
+  tool,
+} from "./define.ts";
 export type {
   AccountDeclaration,
+  AttachedFile,
   Checkpoint,
   ConnectorAuth,
   ConnectorDeclaration,
@@ -33,6 +43,20 @@ export type {
   RouteMethod,
   RouteText,
 } from "./api.ts";
+export {
+  credentialStandIn,
+  fixtureVendor,
+  fixturesSchema,
+  recordedFixtures,
+} from "./fixtures.ts";
+export type {
+  Captured,
+  Exchange,
+  FixtureCall,
+  FixtureCase,
+  Fixtures,
+  Seen,
+} from "./fixtures.ts";
 export {
   ToolError,
   callMetaOf,
@@ -66,7 +90,6 @@ export {
   generatedContractMajor,
   generatedContracts,
   hostSchema,
-  maxProvenanceItems,
   mcpServerKey,
   provenanceSchema,
   readAsSchema,
@@ -102,9 +125,9 @@ export {
   egressKind,
   egressTooLargeMessage,
   findMetaKey,
-  forbiddenInValue,
   httpMethods,
   maxChangeBytes,
+  maxProvenanceItems,
   maxRetryAfterSeconds,
   mcpProtocolVersion,
   notPerformedMetaKey,
@@ -112,7 +135,6 @@ export {
   pathMatches,
   provenanceMetaKey,
   resourceMetaKey,
-  segmentValuePattern,
   stampHeader,
   stampMetaKey,
   stampPattern,
@@ -120,6 +142,10 @@ export {
   syncPlacesMethod,
 } from "./protocol.ts";
 export type { EgressKind } from "./protocol.ts";
+export {
+  forbiddenInValue,
+  segmentValuePattern,
+} from "../common/value-formats.ts";
 export {
   accountLookupSchema,
   endpointHost,
@@ -132,6 +158,13 @@ export {
   tenantKinds,
   withTenant,
 } from "./sign-in.ts";
+export {
+  filledHost,
+  fitsTemplate,
+  hostOf,
+  hostTemplateOf,
+  requestHost,
+} from "./hosts.ts";
 export { addressesOf } from "./mail-addresses.ts";
 export type { Address } from "./mail-addresses.ts";
 export type {
@@ -149,6 +182,7 @@ export {
   isJsonArray,
   isNeverPath,
   isNeverTool,
+  readsMailByRules,
   ruledDeclaration,
   topNames,
 } from "./tool-rules.ts";
