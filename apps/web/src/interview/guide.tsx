@@ -163,23 +163,23 @@ const useGuideWords = (): Record<Spot, { shown: string; spoken: string }> => {
   return {
     answer: {
       shown: t`Talk to me, or type. Whichever feels easiest.`,
-      spoken: t`Before we start, a quick look around. You can simply talk to me, the way you would to a colleague. Rather type? That works just as well.`,
+      spoken: t`Before we start, a quick look around. You can just talk to me like you would to a colleague. Prefer to type? That works just as well.`,
     },
     language: {
       shown: t`Your language, whenever you like.`,
-      spoken: t`Up here you can change the language, even halfway through. I’ll switch right along with you.`,
+      spoken: t`Up here you can switch languages anytime—even halfway through. I’ll switch right along with you.`,
     },
     transcript: {
       shown: t`Everything we say, written down.`,
-      spoken: t`And here you’ll find everything we say, written out. You can read it back, fix a word, or take something out.`,
+      spoken: t`Here you’ll find everything we say, written out. You can read it back, fix a word, or remove anything you want.`,
     },
     pause: {
       shown: t`Need a moment? Pause.`,
-      spoken: t`Need a moment? Press pause, and we’ll carry on right where we left off.`,
+      spoken: t`If you need a break, just hit Pause—we’ll pick up right where we left off.`,
     },
     ready: {
       shown: t`That’s all. There are no wrong answers.`,
-      spoken: t`That’s all there is to it. There are no wrong answers here; I just want to hear how your work really goes. Ready when you are.`,
+      spoken: t`That’s all there is to it. There are no wrong answers here—I just want to hear how your day-to-day really works. Ready when you are.`,
     },
   };
 };
