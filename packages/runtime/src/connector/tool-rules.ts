@@ -289,18 +289,27 @@ const targetWords: readonly string[] = [
 ];
 
 /**
+ * The `sendingWords` a write's path is searched for inside its joined
+ * words too (`sendmail`, `SENDMAIL`). Not `post` or `notify`, which
+ * `posts` and `notifications` hold.
+ */
+const sendingParts: readonly string[] = [
+  "broadcast",
+  "deliver",
+  "dispatch",
+  "publish",
+  "send",
+  "submit",
+];
+
+/**
  * Name words that send something to people: a change named with one
  * reaches others, and a draft named with one is sent, not written.
  */
 const sendingWords: ReadonlySet<string> = new Set([
-  "broadcast",
-  "deliver",
-  "dispatch",
+  ...sendingParts,
   "notify",
   "post",
-  "publish",
-  "send",
-  "submit",
 ]);
 
 /**
@@ -545,12 +554,16 @@ const isOneOf = (words: ReadonlySet<string>, word: string): boolean =>
     (prefix) => word.startsWith(prefix) && words.has(word.slice(prefix.length))
   );
 
+/** `text`'s letters and digits, lowercase, its words run together. */
+const joinedOf = (text: string): string =>
+  text.toLowerCase().replaceAll(/[^a-z0-9]/gu, "");
+
 /**
  * Whether the tool `name` is one Grasp never runs. A name outside plain
  * ASCII can't be read (`dеlete` with a Cyrillic е), so it is one.
  */
 export const isNeverTool = (name: string): boolean => {
-  const joined = name.toLowerCase().replaceAll(/[^a-z0-9]/gu, "");
+  const joined = joinedOf(name);
   const words = wordsOf(name);
   return (
     !plainName.test(name) ||
@@ -598,12 +611,53 @@ const delivers = (word: string): boolean =>
   isOneOf(sendingWords, word) || isOneOf(answeringWords, word);
 
 /**
+ * Whether a path's literal `piece` says it delivers to people: by a word
+ * that delivers, or a sending word joined to what people say
+ * (`chat.postmessage`, `sendmail`). Enough to refuse a read by.
+ */
+const pieceDelivers = (piece: string): boolean =>
+  wordsOf(piece).some(
+    (word) =>
+      delivers(word) ||
+      [...sendingWords].some(
+        (sending) =>
+          word.startsWith(sending) &&
+          conversationWords.has(word.slice(sending.length))
+      )
+  );
+
+/**
+ * Whether a path's literal `piece` may deliver to people: it says so
+ * (`pieceDelivers`), or holds a sending or answering word anywhere in
+ * its joined words (`replyall`, `SENDMAIL`). That also hits reads
+ * (`submissions`, `deliveries`), so it only makes a write reach others,
+ * where a wrong hit only makes its class stricter.
+ */
+const pieceMayDeliver = (piece: string): boolean =>
+  pieceDelivers(piece) ||
+  [...sendingParts, ...answeringWords].some((part) =>
+    joinedOf(piece).includes(part)
+  );
+
+/**
+ * Whether a path's literal `piece` writes a reply as a draft, sending
+ * nothing: `create` and an answering word, for one or for all
+ * (`createReply`, `createReplyAll`), as a vendor's draft route is named.
+ */
+const writesDraftAnswer = (piece: string): boolean => {
+  const joined = joinedOf(piece);
+  return [...answeringWords].some(
+    (answer) => joined === `create${answer}` || joined === `create${answer}all`
+  );
+};
+
+/**
  * Whether a route's `path` delivers to people (`/api/chat.postMessage`):
- * a read that runs on its own, an event's or a sync's, may not send to
- * one, as it would on every run.
+ * a read that runs on its own, a sync's, may not send to one, as it would
+ * on every run.
  */
 export const isDeliveringPath = (path: string): boolean =>
-  literalPieces(path).some((piece) => wordsOf(piece).some(delivers));
+  literalPieces(path).some(pieceDelivers);
 
 /** A property's name and its schema, as a schema's `properties` hold it. */
 type Property = [name: string, schema: Json | undefined];
@@ -944,17 +998,11 @@ const findingsOf = (
           answeringWords.has(word))
     );
   // A path delivers where one of its pieces does, but a draft's piece that
-  // writes what it answers with, sending nothing (`createReply`): the
-  // vendor's draft route. Its sending twin (`reply`) writes nothing.
-  const pieces = paths.flatMap(literalPieces).map(wordsOf);
+  // writes its reply, sending nothing (`createReply`): the vendor's draft
+  // route. Its sending twin (`reply`) writes nothing.
+  const pieces = paths.flatMap(literalPieces);
   const pathDelivers = pieces.some(
-    (piece) =>
-      piece.some(delivers) &&
-      !(
-        draft &&
-        piece.some((word) => writingWords.has(word)) &&
-        !piece.some((word) => isOneOf(sendingWords, word))
-      )
+    (piece) => pieceMayDeliver(piece) && !(draft && writesDraftAnswer(piece))
   );
   const names = (starts: readonly string[], to: "none" | "first" | "either") =>
     properties.some((property) => namesPeople(property, starts, to));
@@ -968,8 +1016,10 @@ const findingsOf = (
       (readVerbs.has(words[1] ?? "") && !delivers(words[0] ?? "")),
     changes:
       words.some((word) => isOneOf(changeWords, word)) ||
-      pieces.some((piece) =>
-        piece.some((word) => isOneOf(changeWords, word) || delivers(word))
+      pieces.some(
+        (piece) =>
+          pieceDelivers(piece) ||
+          wordsOf(piece).some((word) => isOneOf(changeWords, word))
       ),
     recipients:
       (!draft && names(recipientWords, "first")) ||
@@ -1054,7 +1104,7 @@ const readMethods: ReadonlySet<string> = new Set(["GET", "HEAD"]);
 export interface DeclaredTool {
   readOnly: boolean;
   reach: ToolReach;
-  routes: readonly { method: string; path: string }[];
+  routes: readonly { method: string; host: string; path: string }[];
   contract: { input: Json };
 }
 
@@ -1102,6 +1152,9 @@ export const declarationProblem = (
   }
   if (routes.some(({ path }) => isNeverPath(path))) {
     return "a route's path names what Grasp never does";
+  }
+  if (routes.some(({ host }) => host.split(".").some(isNeverTool))) {
+    return "a route's host names what Grasp never does";
   }
   if (readOnly && routes.some(({ method }) => !readMethods.has(method))) {
     return "it is read-only, so it sends only GET and HEAD requests";

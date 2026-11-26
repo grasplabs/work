@@ -11,7 +11,7 @@ import { z } from "zod";
 
 import { httpMethods, isBatchSegment, parameterSegment } from "./protocol.ts";
 import { endpointHost, signInSchema } from "./sign-in.ts";
-import { declarationProblem } from "./tool-rules.ts";
+import { declarationProblem, isDeliveringPath } from "./tool-rules.ts";
 
 // A native connector's manifest: what connect knows of it without running
 // it. Connect's build reads it from the connector's module and ships it
@@ -247,6 +247,11 @@ export const syncManifestSchema = z.strictObject({
     .refine(
       (routes) => routes.every(({ method }) => method === "GET"),
       "A sync only reads: its routes are GETs"
+    )
+    .refine(
+      (routes) => !routes.some(({ path }) => isDeliveringPath(path)),
+      // It runs on its own: one that delivers would on every run.
+      "A sync runs on its own, so its paths may not deliver to people"
     ),
 });
 export type SyncManifest = z.infer<typeof syncManifestSchema>;

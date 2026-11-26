@@ -10,6 +10,7 @@ import {
   tool,
   v,
 } from "../../src/connector/connector.ts";
+import { connectorManifestSchema } from "../../src/connector/manifest.ts";
 import {
   effectKeyMetaKey,
   findMetaKey,
@@ -484,6 +485,42 @@ describe("a connector's definition", () => {
     ).not.toThrow();
   });
 
+  it("reads a delivery word inside a path's joined word only to make a write reach others, never to refuse a read", () => {
+    expect(
+      named(
+        "orders.read",
+        declared({
+          readOnly: true,
+          reach: "company",
+          routes: ["GET /v1/submissions", "GET /v1/deliveries"],
+          args: {},
+        })
+      )
+    ).not.toThrow();
+    expect(
+      named(
+        "mail.store",
+        declared({
+          readOnly: false,
+          reach: "own",
+          routes: ["POST /v1.0/me/sendmail"],
+          args: {},
+        })
+      )
+    ).toThrow("mail.store: a route's path delivers to people");
+    expect(
+      named(
+        "mail.store",
+        declared({
+          readOnly: false,
+          reach: "own",
+          routes: ["POST /v1/messages/{id}/replyall"],
+          args: {},
+        })
+      )
+    ).toThrow("mail.store: a route's path delivers to people");
+  });
+
   it("makes a write whose path delivers, by any method, reach others", () => {
     const write = { readOnly: false, reach: "own", args: {} } as const;
     expect(
@@ -507,6 +544,31 @@ describe("a connector's definition", () => {
         declared({ ...write, routes: ["GET /api/chat.postMessage"] })
       )
     ).toThrow("chat.note: a route's path delivers to people");
+    expect(
+      named(
+        "mail.store",
+        declared({ ...write, routes: ["POST /v1.0/me/sendmail"] })
+      )
+    ).toThrow("mail.store: a route's path delivers to people");
+  });
+
+  it("refuses a route to a host that names what Grasp never does", () => {
+    expect(() =>
+      defineConnector({
+        name: "notes",
+        title: "Notes",
+        hosts: [host, "hooks.slack.com"],
+        auth: keyAuth,
+        tools: {
+          "notes.save": declared({
+            readOnly: false,
+            reach: "own",
+            routes: ["POST hooks.slack.com/services/{a}/{b}/{c}"],
+            args: {},
+          }),
+        },
+      })
+    ).toThrow("notes.save: a route's host names what Grasp never does");
   });
 
   it("refuses a read whose path changes or delivers", () => {
@@ -526,6 +588,14 @@ describe("a connector's definition", () => {
       )
     ).toThrow(
       "channel.info: it is read-only, but a route's path says it changes or delivers something"
+    );
+    expect(
+      named(
+        "channel.history",
+        declared({ ...read, routes: ["GET /api/chat.postmessage"] })
+      )
+    ).toThrow(
+      "channel.history: it is read-only, but a route's path says it changes or delivers something"
     );
   });
 
@@ -564,6 +634,15 @@ describe("a connector's definition", () => {
         })
       )
     ).toThrow("mail.tidy: a route's path delivers to people");
+    expect(
+      named(
+        "mail.createReplyDraft",
+        declared({
+          ...write,
+          routes: ["POST /v1/messages/{id}/addReply"],
+        })
+      )
+    ).toThrow("mail.createReplyDraft: a route's path delivers to people");
   });
 
   it("refuses a route to a host it doesn't list, and a bare path among several hosts", () => {
@@ -693,7 +772,7 @@ describe("a connector's definition", () => {
     expect(() => withSyncs({ products: writing })).toThrow("only reads");
   });
 
-  it("refuses an event or a sync whose path delivers to people, as it would on every run", () => {
+  it("refuses an event or a sync whose path delivers to people, as it would on every run, in its definition and its manifest", () => {
     const withReaders = (route: `GET ${string}`) => [
       () =>
         defineConnector({
@@ -746,6 +825,21 @@ describe("a connector's definition", () => {
     for (const define of withReaders("GET /v1/stock/{sku}/export")) {
       expect(define).not.toThrow();
     }
+    expect(
+      connectorManifestSchema
+        .safeParse({
+          ...stock.manifest,
+          syncs: {
+            products: {
+              kind: "file",
+              routes: [{ method: "GET", host, path: "/api/chat.postMessage" }],
+            },
+          },
+        })
+        .error?.issues.map(({ message }) => message)
+    ).toStrictEqual([
+      "A sync runs on its own, so its paths may not deliver to people",
+    ]);
   });
 
   it("makes the manifest connect decides by: its sign-in, routes, recovery and resource, and what each tool says it does", () => {
