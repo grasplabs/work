@@ -84,6 +84,14 @@ export interface AiProviderSpec {
    * organization's key). Empty for a provider with none.
    */
   realtime: readonly { path: string; query: string }[];
+  /**
+   * The path below its host where a live voice session is opened (POST),
+   * and each one read (GET) and closed (DELETE) at `<path>/<id>`, and
+   * nothing else: Mistral's voice agents, for Grasp's interviews (platform
+   * features only, never an organization's key). None for a provider
+   * without.
+   */
+  sessions: string | undefined;
   /** Where its key goes: `x-api-key: <key>` or `authorization: Bearer <key>`. */
   keyHeader: AiKeyHeader;
   /** Where it runs, in plain words, for the admin. */
@@ -127,6 +135,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     // Anthropic's SDK asks its beta Messages API, which names no data.
     queries: ["", "?beta=true"],
     realtime: [],
+    sessions: undefined,
     keyHeader: "x-api-key",
     whereItRuns: "Anthropic, United States",
     region: "us",
@@ -150,6 +159,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     ],
     queries: [""],
     realtime: [{ path: "/v1/realtime", query: "?intent=transcription" }],
+    sessions: undefined,
     keyHeader: "authorization",
     whereItRuns: "OpenAI, United States",
     region: "us",
@@ -166,6 +176,8 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     paths: ["/v1/chat/completions", "/v1/audio/speech"],
     queries: [""],
     realtime: [],
+    // Its voice agents' sessions, for Grasp's interviews.
+    sessions: "/v1/audio/sessions",
     keyHeader: "authorization",
     whereItRuns: "Mistral AI, European Union (France)",
     region: "eu",
@@ -183,6 +195,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     paths: ["/api/v1/messages", "/api/v1/chat/completions"],
     queries: [""],
     realtime: [],
+    sessions: undefined,
     keyHeader: "authorization",
     whereItRuns:
       "OpenRouter, United States, passing each call on to the model's provider",
@@ -198,6 +211,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     paths: ["/chat/completions"],
     queries: [""],
     realtime: [],
+    sessions: undefined,
     keyHeader: "authorization",
     whereItRuns: "Wherever your endpoint runs",
     region: "custom",
@@ -472,7 +486,11 @@ export interface AiProviderListed extends AiProviderKey {
 }
 
 /** Grasp's own AI features, which Grasp pays for, on its own keys. */
-export const aiPlatformFeatures = ["transcription", "speech"] as const;
+export const aiPlatformFeatures = [
+  "transcription",
+  "speech",
+  "conversation",
+] as const;
 export type AiPlatformFeature = (typeof aiPlatformFeatures)[number];
 
 /**

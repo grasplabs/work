@@ -110,6 +110,58 @@ export const hearingCostOf = ({ id }: HearingRef, seconds: number): number =>
   (seconds * dollarsPerHour[id]) / 3600;
 
 /**
+ * Mistral's prices for a voice agent's session (its voice agents:
+ * listening, the model and the voice in one live session), in US dollars
+ * per hour of the session, by the model that answers in it. The session
+ * is named by that model.
+ *
+ * Source: Mistral's launch of its Voice Agents API, as reported on
+ * 2026-10-26 (its own pricing page names no rate): $0.04 a minute with
+ * Mistral Small, $0.08 with a larger model.
+ */
+const conversationDollarsPerHour = {
+  "mistral-small-latest": 2.4,
+} as const;
+
+/** The providers that hold a live voice session: Mistral. */
+const conversationProviders = ["mistral"] as const;
+
+/** A voice agent's model the gateway offers. */
+export interface ConversingRef {
+  provider: (typeof conversationProviders)[number];
+  id: keyof typeof conversationDollarsPerHour;
+}
+
+const isConversingModel = (id: string): id is ConversingRef["id"] =>
+  Object.hasOwn(conversationDollarsPerHour, id);
+
+const isConversationProvider = (
+  provider: string
+): provider is ConversingRef["provider"] =>
+  conversationProviders.some((one) => one === provider);
+
+/**
+ * A voice agent's model as the gateway names it, `<provider>/<model>`,
+ * such as `mistral/mistral-small-latest`; `undefined` for any other.
+ */
+export const parseConversingRef = (ref: string): ConversingRef | undefined => {
+  const [provider, id, ...rest] = ref.split("/");
+  return provider !== undefined &&
+    isConversationProvider(provider) &&
+    id !== undefined &&
+    rest.length === 0 &&
+    isConversingModel(id)
+    ? { provider, id }
+    : undefined;
+};
+
+/** What `seconds` of a voice session cost on `ref`, in US dollars. */
+export const conversationCostOf = (
+  { id }: ConversingRef,
+  seconds: number
+): number => (seconds * conversationDollarsPerHour[id]) / 3600;
+
+/**
  * Characters a line is charged as: its UTF-16 length, never fewer than
  * the characters (code points) Mistral counts, so what is recorded is
  * never below what the line is billed.
