@@ -13,6 +13,7 @@ import {
   closeVoiceSessionFn,
   openVoiceSessionFn,
 } from "../src/admin/voice-lab-functions.ts";
+import { problemsOf } from "../src/admin/voice-lab.ts";
 import type { VoiceLabInput } from "../src/admin/voice-lab.ts";
 import { adminDatabase } from "../src/db/act.ts";
 import { auditEvents } from "../src/db/schema.ts";
@@ -181,6 +182,19 @@ describe("the Voice Lab's session", () => {
     });
   });
 
+  it("says Grasp's Mistral key can't be read when the store has it but won't hand it over, and asks nothing", async () => {
+    vi.spyOn(env.MISTRAL_API_KEY, "get").mockRejectedValue(
+      new Error("Secret is not available to Workers")
+    );
+    expect({
+      session: await open({ locale: "en" }),
+      sent: mistral.sent.length,
+    }).toStrictEqual({
+      session: { id: null, refused: "unreadable_key" },
+      sent: 0,
+    });
+  });
+
   it.each([
     ["refuses it", 403, { message: "Voice agents are not enabled." }],
     [
@@ -243,5 +257,29 @@ describe("the Voice Lab's session", () => {
         authorization: "Bearer grasp-mistral-key",
       },
     ]);
+  });
+});
+
+describe(problemsOf, () => {
+  it("names the fields Mistral turned down and why, never what was sent", () => {
+    expect(
+      problemsOf({
+        detail: [
+          {
+            loc: ["body", "tts", "voice_id"],
+            msg: "Voice not found",
+            type: "value_error",
+            input: "voice_485",
+          },
+          { type: "missing" },
+          "not a problem",
+        ],
+      })
+    ).toStrictEqual(["body.tts.voice_id: Voice not found", ": missing"]);
+  });
+
+  it("names nothing for an answer that isn't a validation answer", () => {
+    expect(problemsOf({ message: "Unauthorized" })).toStrictEqual([]);
+    expect(problemsOf(null)).toStrictEqual([]);
   });
 });
