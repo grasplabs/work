@@ -338,7 +338,10 @@ const partOf = (call: {
 /** A session as Mistral wrote it down: the conversation, and the part Stephen last went to. */
 interface Heard {
   lines: VoiceLine[];
+  /** The part he went to last. */
   phase: InterviewPhase | null;
+  /** The part their last answer was given in: before he went on from it. */
+  answeredIn: InterviewPhase | null;
 }
 
 /** What Mistral's answer says of a session; null when it isn't one. */
@@ -349,10 +352,12 @@ const heardOf = (answer: unknown): Heard | null => {
   }
   const lines: VoiceLine[] = [];
   let phase: InterviewPhase | null = null;
+  let answeredIn: InterviewPhase | null = null;
   for (const turn of kept.data.transcripts ?? []) {
     const text = turn.content?.trim() ?? "";
     if (turn.role === "user" && text !== "") {
       lines.push({ from: "person", text });
+      answeredIn = phase;
     }
     if (turn.role === "assistant") {
       for (const call of turn.tool_calls ?? []) {
@@ -364,7 +369,7 @@ const heardOf = (answer: unknown): Heard | null => {
       }
     }
   }
-  return { lines, phase };
+  return { lines, phase, answeredIn };
 };
 
 // ---- The route ----------------------------------------------------------
@@ -646,7 +651,8 @@ const answer = async (
     // session too, on a resume. Quotes are checked in this session's alone.
     lines: [...asked.before, ...heard.lines.slice(0, lastAnswer + 1)],
     facts: asked.facts,
-    phase,
+    // The part they answered in, as a turn's brief has it.
+    phase: heard.answeredIn ?? asked.phase,
     minutes: asked.minutes,
     adding: asked.adding,
   };

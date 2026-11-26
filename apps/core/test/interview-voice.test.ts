@@ -287,6 +287,8 @@ describe("an interview as a live voice session", { timeout: 60_000 }, () => {
         ),
       },
       heardForNotes: brief.includes(said),
+      // Written down in the part they answered in, not the one he went on to.
+      notesPart: brief.includes("The part you were in: week."),
       // Read again with nothing new: nothing written twice, no model asked.
       again: { noted: result.again.noted, turn: result.again.turn },
       notesAsked: requests.length,
@@ -348,6 +350,7 @@ describe("an interview as a live voice session", { timeout: 60_000 }, () => {
       },
       toldNow: { written: true, part: true },
       heardForNotes: true,
+      notesPart: true,
       again: { noted: 1, turn: null },
       notesAsked: 1,
       closed: 204,
