@@ -4,8 +4,8 @@ import type { ReactNode } from "react";
 
 /**
  * A section title inside one of the Brain's pages; with `count`, how many it
- * holds beside it, small and quiet. The reference's frame has it
- * (#2503's `frame/page.tsx`); the frame here still draws the old kit's.
+ * holds beside it, small and quiet, as the reference's frame has it
+ * (#2503's `frame/page.tsx`).
  */
 export const SectionTitle = ({
   children,

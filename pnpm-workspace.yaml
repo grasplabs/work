@@ -305,9 +305,6 @@ catalog:
   react-resizable-panels: 4.14.2
   # The kit's charts.
   recharts: 3.10.1
-  # An App's Code tab: its files and a draft's changes, virtualised and
-  # highlighted by the library's own highlighter (Highlights).
-  "@pierre/diffs": 1.6.2
   # Damsko's code block (packages/ui): its highlighter, each language's
   # grammar loaded when a block first shows it.
   prismjs: 1.30.0

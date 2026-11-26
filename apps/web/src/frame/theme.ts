@@ -4,9 +4,9 @@ import type { ThemeId, ThemeMode } from "@grasp-os/ui/components/theme-toggle";
 // Light, dark or the system's (Damsko's modes): a UI preference, the
 // person's own, kept in this browser's storage, one entry per person, so
 // someone else signing in here keeps theirs. public/theme.js applies it,
-// as Damsko's themes.css reads it (the root's `data-mode`) and the kit's
-// theme does (its `dark` class): `grasp-theme` is the choice applied last,
-// which it reads before first paint.
+// as Damsko's themes.css reads it (the root's `data-mode`) and an App
+// page's frame follows it (the `dark` class): `grasp-theme` is the choice
+// applied last, which it reads before first paint.
 
 /** The choice theme.js applies. */
 const appliedKey = "grasp-theme";
