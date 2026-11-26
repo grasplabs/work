@@ -132,6 +132,34 @@ describe("the admin's onboarding", () => {
     }
   });
 
+  it("keeps a team's other leads, and refuses one from another team, twice, or without a first", async () => {
+    const { api } = await signedInApi(idp, "admin");
+    const withLeads = (sales: RosterInput["teams"][number]): RosterInput => ({
+      ...roster,
+      teams: roster.teams.map((team) => (team.id === "sales" ? sales : team)),
+    });
+    await api.onboarding.saveRoster(
+      await teamsMade(
+        withLeads({ id: "sales", name: "Sales", lead: "lea", coLeads: ["sam"] })
+      )
+    );
+    const view = await api.onboarding.view();
+    expect(view.roster?.teams.find(({ id }) => id === "sales")).toMatchObject({
+      lead: "lea",
+      coLeads: ["sam"],
+    });
+    for (const wrong of [
+      withLeads({ id: "sales", name: "Sales", lead: "lea", coLeads: ["oli"] }),
+      withLeads({ id: "sales", name: "Sales", lead: "lea", coLeads: ["lea"] }),
+      withLeads({ id: "sales", name: "Sales", lead: null, coLeads: ["sam"] }),
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one refusal at a time
+      await expect(outcome(api.onboarding.saveRoster(wrong))).resolves.toBe(
+        "onboarding.invalid"
+      );
+    }
+  });
+
   it("refuses a plan that starts in the past, or runs longer than six weeks", async () => {
     const { api } = await signedInApi(idp, "admin");
     await api.onboarding.saveRoster(await teamsMade(roster));
