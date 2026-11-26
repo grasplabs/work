@@ -54,6 +54,11 @@ export interface ChatView {
    * (`ChatUpdate.seenUpTo`), from the first update; none before it.
    */
   seenUpTo?: number | null;
+  /**
+   * Whether it is the tab's last view of the chat (chat-watch.ts), shown
+   * until its watch's first update replaces it.
+   */
+  stale?: boolean;
 }
 
 export const emptyView: ChatView = {

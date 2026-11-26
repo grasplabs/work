@@ -63,10 +63,17 @@ const latestAnswer = (messages: readonly ChatMessage[]): number | undefined =>
  * loaded and core has answered.
  */
 const lineOf = (
-  view: { messages: readonly ChatMessage[]; running: boolean; loaded: boolean },
+  view: {
+    messages: readonly ChatMessage[];
+    running: boolean;
+    loaded: boolean;
+    stale?: boolean;
+  },
   seenUpTo: number | null | false | undefined
 ): { before: number | null; read: number } | undefined => {
-  if (!view.loaded) {
+  // A kept view says nothing of what came since: the chat as core has it
+  // now decides.
+  if (!view.loaded || view.stale === true) {
     return undefined;
   }
   if (view.running) {
@@ -93,18 +100,19 @@ const seenUpToFor = ({
   reply,
   count,
   decided,
-  view,
+  watched,
 }: {
   reply: { count: number; seenUpTo: number | null | false } | undefined;
   count: number;
   /** Whether a line was decided already. */
   decided: boolean;
-  view: { seenUpTo?: number | null };
+  /** Where core's watch said they had read to (`seenUpTo`). */
+  watched: number | null | undefined;
 }): number | null | false | undefined => {
   if (reply?.count === count) {
     return reply.seenUpTo;
   }
-  return decided ? undefined : view.seenUpTo;
+  return decided ? undefined : watched;
 };
 
 /**
@@ -136,6 +144,8 @@ export const useNewLine = (
     loaded: boolean;
     /** Where core's watch said they had read to as the tab began to follow it. */
     seenUpTo?: number | null;
+    /** Whether it is the tab's last view of the chat, not core's yet. */
+    stale?: boolean;
   },
   seen: boolean
 ): NewLine => {
@@ -144,21 +154,26 @@ export const useNewLine = (
   // Each time it is looked at again (opened again, or its tab shown
   // again) counts up: a reply core gives an earlier opening never decides
   // a later one's line. Whether this one is only the tab shown again.
+  // Whether it opened on the tab's kept view of the chat (chat-watch.ts):
+  // the mark then went out before the watch began, and only its answer
+  // says where they had read to.
   const [opening, setOpening] = useState({
     count: 0,
     looking,
     seen,
     byTab: false,
+    fromKept: view.stale === true,
   });
   if (opening.looking !== looking) {
     setOpening({
+      ...opening,
       count: looking ? opening.count + 1 : opening.count,
       looking,
       seen,
       byTab: seen === opening.seen,
     });
   }
-  const { count, byTab } = opening;
+  const { count, byTab, fromKept } = opening;
   // Where core said they had read to, for the opening that asked: a
   // number or null, or `false` when it couldn't say.
   const [reply, setReply] = useState<{
@@ -217,7 +232,7 @@ export const useNewLine = (
     reply,
     count,
     decided: line !== undefined,
-    view,
+    watched: fromKept ? undefined : view.seenUpTo,
   });
   const next = line?.count === count ? undefined : lineOf(view, known);
   if (next !== undefined) {
