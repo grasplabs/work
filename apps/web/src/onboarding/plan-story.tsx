@@ -16,9 +16,9 @@ import { createPortal } from "react-dom";
 import { readingTiming, saidBy, wordsOf } from "../voice/timing.ts";
 import {
   hold,
+  prepare,
   say,
   stopSpeaking,
-  usePrepare,
   useSaid,
   useVoice,
   voiceClock,
@@ -32,8 +32,9 @@ import { dateOf, planStart } from "./plan.ts";
 
 // "Here's the plan", told as a story (as the first onboarding told it,
 // `about-story.tsx` before a955fb8). Stephen tells the admin's own two
-// weeks in one breath, one flowing narration with the plan's own days in
-// it, and the whole window tells it with him in footage: it turns to
+// weeks, a part at a time with the plan's own days in it, each part a line
+// of its own for the voice (one request may say only so much), and the
+// whole window tells it with him in footage: it turns to
 // night and becomes one of the Appearance page's scenes, dithered in the
 // brand's greens by the same shader, and every part of the story is a
 // stock clip of its own that turns into the next as he goes on
@@ -197,25 +198,14 @@ const useParts = (today: string): Part[] => {
   ];
 };
 
-/** Where each part starts in the narration, joined with a space between. */
-const startsOf = (parts: Part[]): number[] => {
-  const starts: number[] = [];
-  let at = 0;
-  for (const part of parts) {
-    starts.push(at);
-    at += part.text.length + 1;
-  }
-  return starts;
-};
-
-/** How many characters of the narration are said by now: by his voice, or by the pace of speech when it is off. */
+/** How many characters of a part are said by now: by his voice, or by the pace of speech when it is off. */
 const useNarrated = (
-  narration: string,
+  text: string,
   began: number | null,
   over: boolean
 ): number => {
   const voice = useVoice();
-  const said = useSaid(narration);
+  const said = useSaid(text);
   const [now, setNow] = useState(voiceClock);
   const silent = !voice.on;
   const ticking = silent && began !== null && !over;
@@ -233,7 +223,7 @@ const useNarrated = (
     };
   }, [ticking]);
   if (over) {
-    return narration.length;
+    return text.length;
   }
   if (began === null) {
     return 0;
@@ -241,7 +231,7 @@ const useNarrated = (
   if (!silent) {
     return Math.max(said, 0);
   }
-  return saidBy(readingTiming(narration), now - began);
+  return saidBy(readingTiming(text), now - began);
 };
 
 /** A part streaming in, word by word as it is said: each word rises out of a blur, briefly in mint. */
@@ -261,6 +251,26 @@ const Streamed = ({ text, said }: { text: string; said: number }) => (
     ))}
   </p>
 );
+
+/**
+ * A part as it is told, its words streaming in as they are said: one for each part, so each
+ * starts from none said, never from where the part before it ended.
+ */
+const Told = ({
+  text,
+  began,
+  over,
+  settled,
+}: {
+  text: string;
+  began: number | null;
+  over: boolean;
+  /** Told before: all of it said and settled, none of it still fresh. */
+  settled: boolean;
+}) => {
+  const said = useNarrated(text, began, over || settled);
+  return <Streamed said={settled ? text.length + 20 : said} text={text} />;
+};
 
 /** The ways on, at the foot: Skip while the story is told; once it is, Continue and to be told again. */
 const Ways = ({
@@ -330,30 +340,30 @@ const Back = () => {
   );
 };
 
-/** The story's narration as it is told, and where it is in it. */
+/** The story as it is told: the part being told, and how much of it is said. */
 const useTelling = (today: string, shown: boolean) => {
   const parts = useParts(today);
-  const narration = parts.map((part) => part.text).join(" ");
-  const starts = startsOf(parts);
+  const texts = parts.map((part) => part.text);
+  const [at, setAt] = useState(0);
   const [began, setBegan] = useState<number | null>(null);
+  // The part being told is said to its end.
   const [over, setOver] = useState(false);
-  usePrepare(narration);
-  const said = useNarrated(narration, began, over || shown);
-  // The part being told: the last one that has begun (from its first word on), or the last once told.
-  let at = shown ? parts.length - 1 : 0;
-  for (const [index, start] of starts.entries()) {
-    if (!shown && said > start) {
-      at = index;
+  // Every part fetched ahead, in turn, so each starts at once when its turn comes.
+  const ahead = texts.join("\n");
+  useEffect(() => {
+    for (const text of ahead.split("\n")) {
+      prepare(text);
     }
-  }
-  const part = parts[at] ?? parts[0];
+  }, [ahead]);
+  // Once told, the last part.
+  const told = shown ? parts.length - 1 : at;
   return {
-    narration,
-    part,
-    at,
-    // Once told, all of it said and settled, none of it still fresh.
-    partSaid: shown ? (part?.text.length ?? 0) + 20 : said - (starts[at] ?? 0),
+    texts,
+    part: parts[told] ?? parts[0],
+    at: told,
+    over,
     began,
+    setAt,
     setBegan,
     setOver,
   };
@@ -371,8 +381,10 @@ export const PlanStory = ({
   const reduce = useLessMotion();
   const [told, setTold] = useState(toldBefore);
   const shown = told || reduce;
-  const { narration, part, at, partSaid, began, setBegan, setOver } =
-    useTelling(today, shown);
+  const { texts, part, at, over, began, setAt, setBegan, setOver } = useTelling(
+    today,
+    shown
+  );
 
   const finish = () => {
     toldBefore = true;
@@ -380,30 +392,39 @@ export const PlanStory = ({
     poseField(poses.about);
     setTold(true);
   };
-  const latest = useRef({ narration, finish, setBegan, setOver });
+  const latest = useRef({ texts, finish, setAt, setBegan, setOver });
   useEffect(() => {
-    latest.current = { narration, finish, setBegan, setOver };
+    latest.current = { texts, finish, setAt, setBegan, setOver };
   });
 
-  // The story: a breath, then the narration in one go, then a breath for it to land.
+  // The story: a breath, then each part in turn, a short breath after each, and a longer one for
+  // the last to land.
   useEffect(() => {
     let left = false;
-    if (!shown) {
-      void (async () => {
-        await hold(700);
-        if (left) {
-          return;
-        }
-        latest.current.setBegan(voiceClock());
-        await say(latest.current.narration);
-        if (left) {
-          return;
-        }
-        latest.current.setOver(true);
-        await hold(1200);
+    const tell = async (index: number): Promise<void> => {
+      const { texts: lines } = latest.current;
+      const text = lines[index];
+      if (left || text === undefined) {
         if (!left) {
           latest.current.finish();
         }
+        return;
+      }
+      latest.current.setAt(index);
+      latest.current.setOver(false);
+      latest.current.setBegan(voiceClock());
+      await say(text);
+      if (left) {
+        return;
+      }
+      latest.current.setOver(true);
+      await hold(index === lines.length - 1 ? 1200 : 300);
+      await tell(index + 1);
+    };
+    if (!shown) {
+      void (async () => {
+        await hold(700);
+        await tell(0);
       })();
     }
     return () => {
@@ -428,9 +449,11 @@ export const PlanStory = ({
       <span />
       <div {...stylex.props(styles.words)}>
         <h1 {...stylex.props(visuallyHidden)}>{t`Here’s the plan`}</h1>
-        <Streamed
+        <Told
+          began={began}
           key={`part-${String(at)}`}
-          said={partSaid}
+          over={over}
+          settled={shown}
           text={part?.text ?? ""}
         />
         <span aria-live="polite" {...stylex.props(visuallyHidden)}>
@@ -442,6 +465,7 @@ export const PlanStory = ({
         <Ways
           again={() => {
             toldBefore = false;
+            setAt(0);
             setBegan(null);
             setOver(false);
             setTold(false);
