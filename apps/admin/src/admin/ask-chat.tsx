@@ -8,26 +8,86 @@
  * and the conversation so far; an answer can be stopped while it comes,
  * copied, and asked again.
  */
-import { Bubble, BubbleContent } from "@grasp-os/app-kit/components/bubble";
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupTextarea,
-} from "@grasp-os/app-kit/components/input-group";
+import { Bubble, BubbleContent } from "@grasp-os/ui/components/bubble";
+import { Button } from "@grasp-os/ui/components/button";
+import { Heading } from "@grasp-os/ui/components/heading";
 import {
   Item,
-  ItemActions,
   ItemContent,
   ItemGroup,
-} from "@grasp-os/app-kit/components/item";
-import { PromptInputSubmit } from "@grasp-os/app-kit/components/prompt-input";
-import { Shimmer } from "@grasp-os/app-kit/components/shimmer";
-import { ChevronRightIcon, CopyIcon, RotateCcwIcon } from "lucide-react";
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import {
+  PromptInput,
+  PromptInputBody,
+  PromptInputFooter,
+  PromptInputSubmit,
+  PromptInputTextarea,
+} from "@grasp-os/ui/components/prompt-input";
+import { Shimmer } from "@grasp-os/ui/components/shimmer";
+import { Text } from "@grasp-os/ui/components/text";
+import { CopyIcon, Icon, RefreshCwIcon } from "@grasp-os/ui/lib/icons";
+import { colors, space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
 
 import { askGraspFn } from "./ask-functions.ts";
 import type { AskAnswer, AskRefusal } from "./ask.ts";
+
+const styles = stylex.create({
+  // Before anything is asked: the heading, the box and the questions to
+  // start from, in the middle of the page.
+  start: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: "100%",
+    paddingInline: space["6"],
+    paddingBlock: space["12"],
+  },
+  startColumn: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["8"],
+    width: "100%",
+    maxWidth: "48rem",
+    paddingBlockEnd: space["10"],
+  },
+  centred: { alignSelf: "center" },
+  // As wide as the column it stands in, as the box was.
+  composer: { width: "100%", maxWidth: "none" },
+  stack: { display: "flex", flexDirection: "column", gap: space["3"] },
+  // The conversation over the box, held to the window.
+  chat: { display: "flex", flexDirection: "column", flexGrow: 1, minHeight: 0 },
+  scroll: { flexGrow: 1, minHeight: 0, overflowY: "auto" },
+  column: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["6"],
+    width: "100%",
+    maxWidth: "48rem",
+    marginInline: "auto",
+    paddingInline: space["6"],
+    paddingBlock: space["6"],
+    margin: 0,
+    listStyle: "none",
+  },
+  mine: { display: "flex", justifyContent: "flex-end" },
+  answer: { display: "flex", flexDirection: "column", gap: space["1"] },
+  words: { whiteSpace: "pre-wrap", margin: 0 },
+  failed: { color: colors.destructive },
+  actions: { display: "flex", gap: space["1"] },
+  foot: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["2"],
+    width: "100%",
+    maxWidth: "48rem",
+    marginInline: "auto",
+    paddingInline: space["6"],
+    paddingBlockEnd: space["4"],
+  },
+});
 
 /** One thing said: a question, an answer, or why an answer didn't come. */
 interface Said {
@@ -63,7 +123,7 @@ const startersFor = (name: string | undefined): string[] => [
 
 const placeholder = "Ask about an organization, or compare them";
 
-/** The box: a line that grows, and the button that sends, or stops the answer coming. */
+/** The box: the question as it is written, and the button that sends it, or stops the answer coming. */
 const Composer = ({
   waiting,
   onSend,
@@ -72,59 +132,27 @@ const Composer = ({
   waiting: boolean;
   onSend: (text: string) => void;
   onStop: () => void;
-}) => {
-  const [text, setText] = useState("");
-  const send = () => {
-    if (text.trim() === "" || waiting) {
-      return;
-    }
-    onSend(text.trim());
-    setText("");
-  };
-  return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        send();
-      }}
-    >
-      <InputGroup size="chat">
-        <InputGroupTextarea
-          aria-label="Your question"
-          className="field-sizing-content max-h-40 min-h-0"
-          maxLength={8000}
-          onChange={(event) => {
-            setText(event.target.value);
-          }}
-          onKeyDown={(event) => {
-            if (
-              event.key === "Enter" &&
-              !event.shiftKey &&
-              !event.nativeEvent.isComposing
-            ) {
-              event.preventDefault();
-              send();
-            }
-          }}
-          placeholder={placeholder}
-          rows={1}
-          value={text}
-        />
-        <InputGroupAddon align="inline-end" className="self-end">
-          <PromptInputSubmit
-            disabled={!waiting && text.trim() === ""}
-            onStop={waiting ? onStop : undefined}
-            sendLabel="Send"
-            size="icon-xs"
-            status={waiting ? "submitted" : "ready"}
-            stopLabel="Stop"
-            variant={waiting || text.trim() !== "" ? "default" : "secondary"}
-          />
-        </InputGroupAddon>
-      </InputGroup>
-    </form>
-  );
-};
+}) => (
+  <PromptInput
+    style={styles.composer}
+    onSubmit={({ text }) => {
+      if (text.trim() !== "" && !waiting) {
+        onSend(text.trim());
+      }
+    }}
+    status={waiting ? "streaming" : "ready"}
+  >
+    <PromptInputBody>
+      <PromptInputTextarea
+        aria-label="Your question"
+        placeholder={placeholder}
+      />
+    </PromptInputBody>
+    <PromptInputFooter>
+      <PromptInputSubmit onStop={onStop} />
+    </PromptInputFooter>
+  </PromptInput>
+);
 
 /** An answer's actions: copy it, and ask its question again. */
 const AnswerActions = ({
@@ -134,7 +162,7 @@ const AnswerActions = ({
   text: string;
   onAgain: (() => void) | null;
 }) => (
-  <div className="flex gap-1">
+  <div {...stylex.props(styles.actions)}>
     <Button
       aria-label="Copy the answer"
       onClick={() => {
@@ -143,7 +171,7 @@ const AnswerActions = ({
       size="icon-xs"
       variant="ghost"
     >
-      <CopyIcon />
+      <Icon icon={CopyIcon} />
     </Button>
     {onAgain === null ? null : (
       <Button
@@ -152,7 +180,7 @@ const AnswerActions = ({
         size="icon-xs"
         variant="ghost"
       >
-        <RotateCcwIcon />
+        <Icon icon={RefreshCwIcon} />
       </Button>
     )}
   </div>
@@ -234,37 +262,27 @@ export const AskChat = ({
 
   if (said.length === 0) {
     return (
-      <div className="flex min-h-full items-center justify-center px-6 py-12">
-        <div className="flex w-full max-w-3xl flex-col gap-8 pb-10">
-          <h2 className="type-display text-center">
+      <div {...stylex.props(styles.start)}>
+        <div {...stylex.props(styles.startColumn)}>
+          <Heading level={2} size="lg" style={styles.centred}>
             Ask about every organization
-          </h2>
-          <div className="flex flex-col gap-3">
+          </Heading>
+          <div {...stylex.props(styles.stack)}>
             <Composer onSend={send} onStop={stop} waiting={waiting} />
-            <ItemGroup
-              aria-label="Questions to start from"
-              render={<ul />}
-              variant="card"
-            >
+            <ItemGroup aria-label="Questions to start from">
               {startersFor(about).map((starter) => (
-                <li key={starter}>
-                  <Item
-                    onClick={() => {
-                      send(starter);
-                    }}
-                    render={<button aria-label={starter} type="button" />}
-                    size="sm"
-                    variant="row"
-                  >
-                    <ItemContent>{starter}</ItemContent>
-                    <ItemActions>
-                      <ChevronRightIcon
-                        aria-hidden="true"
-                        className="text-muted-foreground"
-                      />
-                    </ItemActions>
-                  </Item>
-                </li>
+                <Item
+                  key={starter}
+                  onClick={() => {
+                    send(starter);
+                  }}
+                  size="sm"
+                  variant="outline"
+                >
+                  <ItemContent>
+                    <ItemTitle>{starter}</ItemTitle>
+                  </ItemContent>
+                </Item>
               ))}
             </ItemGroup>
           </div>
@@ -273,30 +291,26 @@ export const AskChat = ({
     );
   }
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <ol
-          aria-label="The conversation"
-          className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6 md:px-6"
-        >
+    <div {...stylex.props(styles.chat)}>
+      <div {...stylex.props(styles.scroll)}>
+        <ol aria-label="The conversation" {...stylex.props(styles.column)}>
           {said.map((turn, index) =>
             turn.role === "user" ? (
-              <li className="flex justify-end" key={index}>
-                <Bubble align="end" variant="secondary">
-                  <BubbleContent className="whitespace-pre-wrap">
-                    {turn.text}
+              <li key={index} {...stylex.props(styles.mine)}>
+                <Bubble align="end">
+                  <BubbleContent>
+                    <span {...stylex.props(styles.words)}>{turn.text}</span>
                   </BubbleContent>
                 </Bubble>
               </li>
             ) : (
-              <li className="flex flex-col gap-1" key={index}>
+              <li key={index} {...stylex.props(styles.answer)}>
                 <p
-                  className={
-                    turn.failed === true
-                      ? "text-destructive whitespace-pre-wrap"
-                      : "whitespace-pre-wrap"
-                  }
                   role={turn.failed === true ? "alert" : undefined}
+                  {...stylex.props(
+                    styles.words,
+                    turn.failed === true && styles.failed
+                  )}
                 >
                   {turn.text}
                 </p>
@@ -314,12 +328,12 @@ export const AskChat = ({
           ) : null}
         </ol>
       </div>
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-4 pb-4 md:px-6">
+      <div {...stylex.props(styles.foot)}>
         <Composer onSend={send} onStop={stop} waiting={waiting} />
-        <p className="text-muted-foreground text-center text-xs">
+        <Text color="muted" size="xs" style={styles.centred}>
           Grasp answers from the admin’s own numbers. It never sees what anyone
           said in an interview.
-        </p>
+        </Text>
       </div>
     </div>
   );

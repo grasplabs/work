@@ -1,8 +1,5 @@
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/app-kit/components/toggle-group";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { TabsLink, TabsNav } from "@grasp-os/ui/components/tabs";
+import { createFileRoute, Link } from "@tanstack/react-router";
 
 import { WithAdmins } from "../admin/admins.tsx";
 import { StephenLab } from "../admin/lab.tsx";
@@ -20,30 +17,30 @@ interface LabSearch {
 const isChannel = (value: unknown): value is Channel =>
   CHANNELS.some((channel) => channel === value);
 
-/** Which release channel, for the whole page. */
-const Channels = ({ search }: { search: LabSearch }) => {
-  const navigate = useNavigate({ from: Route.fullPath });
-  return (
-    <ToggleGroup
-      aria-label="Which channel"
-      size="sm"
-      spacing={0}
-      variant="outline"
-      onValueChange={(value: string[]) => {
-        const where = value.find(isChannel);
-        void navigate({
-          search: { ...search, where },
-        });
-      }}
-      value={[search.where ?? "all"]}
-    >
-      <ToggleGroupItem value="all">All</ToggleGroupItem>
-      <ToggleGroupItem value="edge">Edge</ToggleGroupItem>
-      <ToggleGroupItem value="beta">Beta</ToggleGroupItem>
-      <ToggleGroupItem value="stable">Stable</ToggleGroupItem>
-    </ToggleGroup>
-  );
-};
+/** Each choice of channel, as its link says it: every channel first. */
+const choices: readonly { where?: Channel; label: string }[] = [
+  { label: "All" },
+  { where: "edge", label: "Edge" },
+  { where: "beta", label: "Beta" },
+  { where: "stable", label: "Stable" },
+];
+
+/**
+ * Which release channel, for the whole page: links that set the page's
+ * `where`, drawn as a segmented switch (Damsko's TabsNav), the chosen one
+ * raised.
+ */
+const Channels = ({ search }: { search: LabSearch }) => (
+  <TabsNav aria-label="Which channel" size="sm">
+    {choices.map(({ where, label }) => (
+      <TabsLink asChild current={search.where === where} key={label}>
+        <Link search={{ ...search, where }} to="/lab">
+          {label}
+        </Link>
+      </TabsLink>
+    ))}
+  </TabsNav>
+);
 
 /** Stephen Lab: testing and improving Stephen, in the lab and with real people (src/admin/lab.tsx). */
 const LabPage = () => {
