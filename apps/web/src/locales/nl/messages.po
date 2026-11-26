@@ -401,6 +401,7 @@ msgstr "{count, plural, one {# persoon, geleid door {lead}} other {# mensen, gel
 
 #: src/onboarding/company-dots.tsx
 #: src/onboarding/company-rows.tsx
+#: src/onboarding/company-step.tsx
 #: src/settings/teams.tsx
 msgid "{count, plural, one {# person} other {# people}}"
 msgstr "{count, plural, one {# persoon} other {# mensen}}"
@@ -424,6 +425,10 @@ msgstr "{count, plural, one {# run} other {# runs}}"
 #: src/brain/brain.ts
 msgid "{count, plural, one {# team, with its roles} other {# teams, with their roles}}"
 msgstr "{count, plural, one {# team, met de rollen} other {# teams, met hun rollen}}"
+
+#: src/onboarding/company-step.tsx
+msgid "{count, plural, one {# team} other {# teams}}"
+msgstr "{count, plural, one {# team} other {# teams}}"
 
 #: src/drafts/share-with-team.tsx
 msgid "{count, plural, one {# test} other {# tests}}"
@@ -1466,8 +1471,8 @@ msgid "{shown} runs or more"
 msgstr "{shown} runs of meer"
 
 #: src/onboarding/company-step.tsx
-msgid "{signIn} is connected. I can see {people} people in {teams} teams."
-msgstr "{signIn} is gekoppeld. Ik zie {people} mensen in {teams} teams."
+msgid "{signIn} is connected"
+msgstr "{signIn} is gekoppeld"
 
 #: src/agents/agent-documents.tsx
 msgid "{size} · Added {when}"
@@ -2871,7 +2876,6 @@ msgid "Amber"
 msgstr "Amber"
 
 #: src/onboarding/company-dots.tsx
-#: src/onboarding/company-step.tsx
 msgid "Among them {names}."
 msgstr "Onder hen {names}."
 
@@ -5168,6 +5172,11 @@ msgstr "Koppel eerst: {systems}."
 #: src/connections/integrations-band.tsx
 msgid "Connect the apps your work runs on"
 msgstr "Koppel de apps waar je werk op draait"
+
+#. placeholder {0}: suiteNames[fromDirectory]
+#: src/onboarding/company-step.tsx
+msgid "Connect your {0} account"
+msgstr "Koppel je {0}-account"
 
 #: src/onboarding/company-step.tsx
 msgid "Connect your {signIn} account"
@@ -8008,10 +8017,6 @@ msgstr "Uit jullie documenten en wat mensen aanvroegen."
 msgid "From your interview, version {version}"
 msgstr "Uit je interview, versie {version}"
 
-#: src/onboarding/company-step.tsx
-msgid "From your staff list I can see {people} people in {teams} teams."
-msgstr "In je personeelslijst zie ik {people} mensen in {teams} teams."
-
 #: src/settings/backdrop-settings.tsx
 msgid "Fuji"
 msgstr "Fuji"
@@ -8876,6 +8881,10 @@ msgstr "Akkoord, laten we beginnen"
 #: src/interview/start.tsx
 msgid "I agree, let’s start"
 msgstr "Akkoord, laten we beginnen"
+
+#: src/onboarding/company-step.tsx
+msgid "I can see {people} in {teams}. Among them {names}."
+msgstr "Ik zie {people} in {teams}. Onder hen {names}."
 
 #: src/onboarding/send-plan-form.tsx
 msgid "I can’t plan that day. Type one like {example}, from {earliest} to {latest}."
@@ -18586,9 +18595,11 @@ msgstr "Er is al een team met deze naam."
 msgid "There is nobody in this list."
 msgstr "Er staat niemand in deze lijst."
 
+#. placeholder {0}: peopleWords(people)
+#. placeholder {1}: teamWords(teams)
 #: src/onboarding/company-step.tsx
-msgid "There it is, your company. I can see {people} people in {teams} teams. Have a quick look whether that seems right, and then we’ll move on."
-msgstr "Daar is hij, je bedrijf. Ik zie {people} mensen in {teams} teams. Kijk even of dat klopt, en dan gaan we verder."
+msgid "There it is, your company. I can see {0} in {1}. Have a quick look whether that seems right, and then we’ll move on."
+msgstr "Daar is het, je bedrijf. Ik zie {0} in {1}. Kijk even of dat klopt, dan gaan we verder."
 
 #. placeholder {0}: formatList(wrong.slice(0, 5))
 #: src/onboarding/people-add.tsx
@@ -20364,6 +20375,10 @@ msgstr "Wat hij mag"
 msgid "What he may do in {appName}, with each person's own sign-in: as for the whole company, or for fewer people."
 msgstr "Wat hij in {appName} mag doen, met ieders eigen aanmelding: zoals voor het hele bedrijf, of voor minder mensen."
 
+#: src/onboarding/company-step.tsx
+msgid "What I found"
+msgstr "Wat ik vond"
+
 #: src/brain/memories-page.tsx
 msgid "What is right"
 msgstr "Wat wel klopt"
@@ -21850,6 +21865,10 @@ msgstr "Je login, die je beheerder wijzigt"
 #: src/brain/skills-page.tsx
 msgid "Your skills"
 msgstr "Je skills"
+
+#: src/onboarding/company-step.tsx
+msgid "Your staff list"
+msgstr "Je personeelslijst"
 
 #: src/interview/words.ts
 msgid "Your story"
