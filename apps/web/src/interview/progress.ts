@@ -150,6 +150,36 @@ export const withLine = (
     ? progress
     : { ...progress, lines: [...progress.lines, line] };
 
+/**
+ * A line heard in a live session (live.ts): Mistral hears an answer in
+ * stretches, and says a line of his in stretches too. A stretch after one
+ * of the same speaker is the same line, its words after the others; after
+ * the other's, it is a line of its own.
+ */
+export const withSpoken = (
+  progress: InterviewProgress,
+  line: InterviewLine
+): InterviewProgress => {
+  const last = progress.lines.at(-1);
+  const joined = `${last?.text ?? ""} ${line.text}`.trim();
+  if (
+    last === undefined ||
+    joined.length > interviewLimits.line ||
+    last.from !== line.from ||
+    last.removed === true ||
+    last.typed === true ||
+    last.file !== undefined
+  ) {
+    return withLine(progress, line);
+  }
+  return {
+    ...progress,
+    lines: progress.lines.map((each, at) =>
+      at === progress.lines.length - 1 ? { ...each, text: joined } : each
+    ),
+  };
+};
+
 /** Where the interview goes, known with his line, before what he wrote down. */
 export const steered = (
   progress: InterviewProgress,

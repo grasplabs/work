@@ -1,3 +1,4 @@
+import { voiceRoomSources } from "@grasp-os/shared/content-security-policy";
 import { routerSecretHeader } from "@grasp-os/shared/router";
 import { createExecutionContext } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
@@ -88,7 +89,10 @@ describe("security headers on the frontend", () => {
   it("connects, loads and submits only to its own origin", async () => {
     for (const response of await eachPage()) {
       const policy = policyOf(response);
-      expect(policy.get("connect-src")).toStrictEqual(["'self'"]);
+      expect(policy.get("connect-src")).toStrictEqual([
+        "'self'",
+        ...voiceRoomSources.split(" "),
+      ]);
       expect(policy.get("form-action")).toStrictEqual(["'self'"]);
       expect(policy.get("img-src")).toStrictEqual(["'self'", "data:"]);
     }
