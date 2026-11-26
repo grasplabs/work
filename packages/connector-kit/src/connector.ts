@@ -537,7 +537,10 @@ export const defineTool = <
   };
 };
 
-export interface ConnectorDefinition extends ConnectorBase {
+export interface ConnectorDefinition extends Omit<
+  ConnectorBase,
+  "credentialHosts"
+> {
   tools: readonly Tool[];
   /** Its syncs (the runtime's sync.ts), for native sync; none by default. */
   syncs?: readonly Sync[];
@@ -546,9 +549,13 @@ export interface ConnectorDefinition extends ConnectorBase {
 /**
  * A connector, from its tools. Throws if two tools share a name, or the
  * manifest they make isn't valid (a route to a host it doesn't list).
+ * The kit's connectors are Grasp's own suites, each host reviewed: the
+ * credential goes to every host they list. On the SDK a connector says
+ * which hosts take it (`auth`).
  */
 export const defineConnector = ({
   tools,
   syncs,
   ...base
-}: ConnectorDefinition): Connector => serveConnector(base, tools, syncs);
+}: ConnectorDefinition): Connector =>
+  serveConnector({ ...base, credentialHosts: base.hosts }, tools, syncs);
