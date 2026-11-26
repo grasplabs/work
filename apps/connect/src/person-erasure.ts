@@ -11,6 +11,7 @@ import {
   callChanges,
   composioCleanups,
   connections,
+  connectionTools,
   connectorEvents,
   erasedPeople,
   eventSources,
@@ -209,6 +210,11 @@ export const erasePersonal = async (
       db
         .delete(eventSources)
         .where(sql`${eventSources.connectionId} IN ${theirs}`),
+      // The tools their connections' servers listed for them, which a
+      // server may word for its person.
+      db
+        .delete(connectionTools)
+        .where(sql`${connectionTools.connectionId} IN ${theirs}`),
       db
         .delete(pendingActions)
         .where(eq(pendingActions.onBehalfOf, ownerUserId)),

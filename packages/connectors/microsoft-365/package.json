@@ -11,7 +11,10 @@
   },
   "dependencies": {
     "@grasp-os/connector-kit": "workspace:*",
+    "@grasp-os/runtime": "workspace:*",
     "fflate": "catalog:",
+    "parse5": "catalog:",
+    "saxes": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

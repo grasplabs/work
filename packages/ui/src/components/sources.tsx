@@ -122,7 +122,7 @@ export interface SourceProps {
   /** Its title, as the thing calls itself ("Churn by region, Q3"): the link's words. */
   title: string;
   /**
-   * Where it opens, in a new tab: an http, https or mailto address, or a path on this site. Any
+   * Where it opens, in a new tab: an http, https, mailto or tel address, or a path on this site. Any
    * other (`javascript:`, `data:`, `//elsewhere`) leads nowhere and the title is words, as a link
    * in Markdown is. Leave it out for a source with nowhere to go. An address on another site shows
    * its host after the title.
@@ -353,7 +353,6 @@ const styles = stylex.create({
     flexShrink: 0,
     boxSizing: "border-box",
     overflow: "hidden",
-    cornerShape: radius.shape,
     color: colors.bodyForeground,
     backgroundColor: colors.card,
   },
@@ -364,6 +363,7 @@ const styles = stylex.create({
     width: size.controlSm,
     height: size.controlSm,
     borderRadius: `min(${radius.xl}, calc(${size.controlSm} / 3))`,
+    cornerShape: radius.shape,
   },
   tilePile: {
     [iconVars.size]: size.sourcesMarkInline,

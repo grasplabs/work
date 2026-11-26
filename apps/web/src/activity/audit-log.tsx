@@ -466,6 +466,7 @@ const LogFiltersControl = ({ search }: { search: LogSearch }) => {
         <PopoverFooter>
           <PopoverClose asChild>
             <Button
+              errorText={t`Not cleared`}
               onClick={() => {
                 show();
               }}
@@ -477,6 +478,7 @@ const LogFiltersControl = ({ search }: { search: LogSearch }) => {
           </PopoverClose>
           <PopoverClose asChild>
             <Button
+              errorText={t`Not shown`}
               onClick={() => {
                 show(shown);
               }}

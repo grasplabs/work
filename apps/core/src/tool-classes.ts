@@ -78,14 +78,15 @@ export const nativeClasses: ReadonlyMap<
 
 /**
  * The class connect and the release give the tool `action` of `owner`'s
- * connection: a Composio tool's from its review, a native one's from its
- * manifest. Undefined for one neither knows (an HTTP connection's).
+ * connection: a Composio tool's from its review, a connector's by the
+ * rules from its server's list, a native one's from its manifest.
+ * Undefined for one neither knows (an HTTP connection's).
  */
 export const classOf = (
   owner: Pick<ConnectionOwner, "source" | "provider" | "toolClasses">,
   action: string
 ): ToolClass | undefined =>
-  owner.source === "composio"
+  owner.source === "composio" || owner.source === "connector"
     ? owner.toolClasses?.[action]
     : nativeClasses.get(owner.provider)?.get(action);
 
@@ -386,10 +387,12 @@ const requireAgentHasClass = async (
 
 /**
  * What core signs into the capability of a call it let through: for a read
- * in a company app pointed at within some resources, those resources.
+ * in a company app pointed at within some resources, those resources; for
+ * a company app's tool, the class it let the call through as.
  */
 export interface ClassedCall {
   resources?: string[];
+  toolClass?: ToolClass;
 }
 
 /**
@@ -471,15 +474,15 @@ const requireAppClassOn = async (
       throw connectErrors.create("connect.app_not_pointed");
     }
     return pointer.resources.length === 0
-      ? {}
-      : { resources: pointer.resources };
+      ? { toolClass }
+      : { toolClass, resources: pointer.resources };
   }
   const audience = await audienceNow(env, toolClass);
   if (!(await takesIn(env, audience, authority.onBehalfOf))) {
     throw connectErrors.create("connect.class_off");
   }
   await requireAgentHasClass(env, authority, toolClass);
-  return {};
+  return { toolClass };
 };
 
 /** A mail tool's class in its person's own mailbox. */
@@ -521,27 +524,16 @@ export const checkedClassOf = (
 };
 
 /**
- * Refuses a call of the chat's agent whose class is off for the person it
- * acts for, before core signs anything for connect: `connect.class_off`.
- * A native tool missing from the generated table, or classed `never`, is
- * refused whatever the company turned on (`connect.class_unknown`,
- * `connect.class_off`); a connection connect doesn't know, with
- * `connect.connection_not_found`. Apps and workflows aren't gated.
+ * `requireToolClassOn`, for the agent's call of a connection whose owner
+ * is known.
  */
-export const requireToolClassOn = async (
+const requireToolClassOf = async (
   env: Env,
   authority: Authority,
-  connection: ConnectionObject,
+  owner: ConnectionOwner,
   action: string,
-  unattended = false
+  unattended: boolean
 ): Promise<ClassedCall> => {
-  if (authority.subject.type !== "agent") {
-    return {};
-  }
-  const [owner] = await env.CONNECT.connectionOwners([connection.connectionId]);
-  if (owner === undefined) {
-    throw connectErrors.create("connect.connection_not_found");
-  }
   // The agent's own apps first: one it doesn't have takes no call,
   // whatever its classes (agent-app-access.ts).
   await requireAgentHasApp(
@@ -549,7 +541,7 @@ export const requireToolClassOn = async (
     authority,
     agentAppOf(owner.source, owner.provider)
   );
-  if (owner.source === "composio") {
+  if (owner.source === "composio" || owner.source === "connector") {
     return await requireAppClassOn(env, authority, owner, action, unattended);
   }
   const toolClass = nativeClasses.get(owner.provider)?.get(action);
@@ -584,4 +576,116 @@ export const requireToolClassOn = async (
     await requireAgentHasClass(env, authority, toolClass);
   }
   return {};
+};
+
+/**
+ * Refuses a call of the chat's agent whose class is off for the person it
+ * acts for, before core signs anything for connect: `connect.class_off`.
+ * A native tool missing from the generated table, or classed `never`, is
+ * refused whatever the company turned on (`connect.class_unknown`,
+ * `connect.class_off`); a connection connect doesn't know, with
+ * `connect.connection_not_found`. Apps and workflows aren't gated.
+ */
+export const requireToolClassOn = async (
+  env: Env,
+  authority: Authority,
+  connection: ConnectionObject,
+  action: string,
+  unattended = false
+): Promise<ClassedCall> => {
+  if (authority.subject.type !== "agent") {
+    return {};
+  }
+  const [owner] = await env.CONNECT.connectionOwners([connection.connectionId]);
+  if (owner === undefined) {
+    throw connectErrors.create("connect.connection_not_found");
+  }
+  // A connector's tools are classed from its server's list as it is now,
+  // not as it was last kept.
+  const now =
+    owner.source === "connector"
+      ? {
+          ...owner,
+          toolClasses: await env.CONNECT.connectorToolClasses(owner.id),
+        }
+      : owner;
+  return await requireToolClassOf(env, authority, now, action, unattended);
+};
+
+/** What the class gate refuses a tool with, rather than failing. */
+const gateRefusals: ReadonlySet<string> = new Set([
+  "connect.class_off",
+  "connect.class_unknown",
+  "connect.app_not_pointed",
+  "connect.agent_app_off",
+]);
+
+/** A tool of a connection, as `toolsClassedOn` names it. */
+export const toolKey = ({
+  connectionId,
+  action,
+}: {
+  connectionId: string;
+  action: string;
+}): string => `${connectionId}\n${action}`;
+
+/** Whether the class gate lets the chat's agent call `action` now. */
+const classedOn = async (
+  env: Env,
+  authority: Authority,
+  owner: ConnectionOwner,
+  action: string,
+  unattended: boolean
+): Promise<boolean> => {
+  try {
+    await requireToolClassOf(env, authority, owner, action, unattended);
+    return true;
+  } catch (error) {
+    const code = connectErrors.codeOf(error);
+    if (code !== undefined && gateRefusals.has(code)) {
+      return false;
+    }
+    throw error;
+  }
+};
+
+/**
+ * Which of `tools` the class gate lets the chat's agent call for its
+ * person now (`requireToolClassOn`), each as `toolKey` names it: what
+ * `env.connections.list` counts and tool search ranks. The gate's answer
+ * rests on the tool's connection and on its class as the gate reads it
+ * (`classOf`, `checkedClassOf`), so it is asked once for each such pair,
+ * not for every tool of a connection that has thousands. A native
+ * connection's rests on its provider's settings alone, never the
+ * connection's own, so it is asked once for all of one provider's.
+ * `owners` hold a connector's classes as connect keeps them.
+ */
+export const toolsClassedOn = async (
+  env: Env,
+  authority: Authority,
+  owners: ReadonlyMap<string, ConnectionOwner>,
+  tools: readonly { connectionId: string; action: string }[],
+  unattended: boolean
+): Promise<Set<string>> => {
+  const asked = new Map<string, Promise<boolean>>();
+  const on = await Promise.all(
+    tools.map(async ({ connectionId, action }) => {
+      const owner = owners.get(connectionId);
+      if (owner === undefined) {
+        return false;
+      }
+      const key = [
+        owner.source === "native" ? `native:${owner.provider}` : connectionId,
+        classOf(owner, action),
+        checkedClassOf(owner.provider, action),
+      ].join("\n");
+      const answer =
+        asked.get(key) ?? classedOn(env, authority, owner, action, unattended);
+      asked.set(key, answer);
+      return await answer;
+    })
+  );
+  return new Set(
+    tools.flatMap((tool, index) => (on[index] === true ? [toolKey(tool)] : []))
+  );
 };

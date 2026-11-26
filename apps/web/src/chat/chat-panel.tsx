@@ -276,6 +276,10 @@ const Body = ({ open, expanded }: { open: boolean; expanded: boolean }) => {
               focusBox={() => {
                 boxOf(body.current)?.focus();
               }}
+              // Each chat opened here opens afresh (unread.ts).
+              key={chat.chatId}
+              // The panel stays while it is closed: nobody reads it then.
+              seen={open}
             />
           </div>
         </PanelBody>

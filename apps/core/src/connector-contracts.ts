@@ -4,7 +4,11 @@ import { jsonOf } from "@grasp-os/shared/functions";
 import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 
-import { accepts, admissible } from "./connector-schema-check.ts";
+import {
+  accepts,
+  admissible,
+  annotatesOnly,
+} from "./connector-schema-check.ts";
 
 // A generated connector contract's JSON Schemas (connect's contracts.ts),
 // read as the SDK's value descriptors, so core checks a connector call's
@@ -171,6 +175,9 @@ const draftOf = (
     return members.every((member) => member !== undefined)
       ? unionOf(members)
       : undefined;
+  }
+  if (annotatesOnly(schema)) {
+    return base("json");
   }
   const types: readonly Json[] = isList(type) ? type : [type ?? null];
   const typed = types.map((each) => typedOf(schema, each, depth, draftOf));

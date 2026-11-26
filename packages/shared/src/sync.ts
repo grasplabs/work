@@ -9,7 +9,7 @@ import { defineErrorFamily } from "./errors.ts";
 // Native sync (GRA-1758, GRA-1759): what one synced item is, whichever
 // system it comes from. Connect reads a page of a source's changes with
 // the connection's token, which never leaves it, in an isolate of the
-// connection's own connector (`defineSync` in the connector kit); core
+// connection's own connector (`defineSync` in runtime/connector); core
 // applies the page to the Brain and keeps the cursor. Nothing here names
 // a provider: the Brain knows none.
 
@@ -19,8 +19,9 @@ export type SyncItemKind = z.infer<typeof syncItemKindSchema>;
 
 /**
  * The bounds an item's fields keep, so no vendor's value can make an item
- * unbounded. The connector kit fits every item a sync answers to them
- * (`fitItem`): a title is cut, a part that doesn't fit is left out.
+ * unbounded. `@grasp-os/runtime/connector` fits every item a sync
+ * answers to them (`fitItem`): a title is cut, a part that doesn't fit is
+ * left out.
  */
 export const syncItemLimits = {
   /** An ID: of an item, an account, a group or a domain. */

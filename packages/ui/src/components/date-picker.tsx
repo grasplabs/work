@@ -174,6 +174,8 @@ const styles = stylex.create({
     display: "flex",
     alignItems: "center",
     gap: space[1],
+    // Each control's touch target reaches the middle of the gap to the next (tapTarget).
+    "--tap-room-inline": `calc(${space[1]} / 2)`,
     boxSizing: "border-box",
     width: "100%",
     maxWidth: size.popupWidth,
@@ -181,7 +183,6 @@ const styles = stylex.create({
     borderWidth: { default: 0, [FORCED]: 1 },
     borderStyle: "solid",
     borderColor: "currentColor",
-    cornerShape: radius.shape,
     backgroundColor: colors.inputBg,
     boxShadow: edge,
     transitionProperty: "box-shadow, background-color",
@@ -205,6 +206,7 @@ const styles = stylex.create({
   sm: {
     minHeight: { default: size.controlSm, [COARSE]: size.tapTarget },
     borderRadius: `min(${radius.xl}, calc(${size.controlSm} / 2))`,
+    cornerShape: radius.shape,
     paddingInlineEnd: {
       default: `calc((${size.controlSm} - ${size.controlXs}) / 2)`,
       [COARSE]: `calc((${size.tapTarget} - ${size.controlXs}) / 2)`,
@@ -213,6 +215,7 @@ const styles = stylex.create({
   default: {
     minHeight: { default: size.controlDefault, [COARSE]: size.tapTarget },
     borderRadius: `min(${radius.xl}, calc(${size.controlDefault} / 2))`,
+    cornerShape: radius.shape,
     paddingInlineEnd: {
       default: `calc((${size.controlDefault} - ${size.controlSm}) / 2)`,
       [COARSE]: `calc((${size.tapTarget} - ${size.controlSm}) / 2)`,
@@ -221,6 +224,7 @@ const styles = stylex.create({
   lg: {
     minHeight: size.controlLg,
     borderRadius: `min(${radius.xl}, calc(${size.controlLg} / 2))`,
+    cornerShape: radius.shape,
     paddingInlineEnd: `calc((${size.controlLg} - ${size.controlDefault}) / 2)`,
   },
   // A typed date that is no date, or one that cannot be chosen: Input's destructive edge.

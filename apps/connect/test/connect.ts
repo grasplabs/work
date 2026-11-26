@@ -20,12 +20,13 @@ import { roleErrors } from "@grasp-os/shared/roles";
 import { runClockTasks } from "@grasp-os/workerflow/clock";
 import { createExecutionContext } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { beforeEach } from "vite-plus/test";
 import type { z } from "zod";
 
 import { clockTasks, report } from "../src/clock.ts";
-import { connections } from "../src/db/schema.ts";
+import { connectionTokens, connections } from "../src/db/schema.ts";
 import Connect from "../src/index.ts";
 import type { Account, fakeProviders } from "./oauth-provider.ts";
 import { acmeDomain, acmeTenant } from "./provider-config.ts";
@@ -151,6 +152,7 @@ export type Signed = Partial<
     | "restricted"
     | "readOnly"
     | "unattended"
+    | "toolClass"
     | "origin"
     | "decision"
     | "heldUntil"
@@ -202,6 +204,29 @@ export const runMaintenance = async (
     Date.now(),
     report
   );
+};
+
+const setPause = async (connectionId: string, until: Date | null) => {
+  await drizzle(env.DB)
+    .update(connectionTokens)
+    .set({ pausedUntil: until })
+    .where(eq(connectionTokens.connectionId, connectionId));
+};
+
+/**
+ * What `read` gives while the connection is paused, as a call its vendor
+ * rate limited pauses it for every caller.
+ */
+export const whilePaused = async <T>(
+  connectionId: string,
+  read: () => Promise<T>
+): Promise<T> => {
+  await setPause(connectionId, new Date(Date.now() + 30_000));
+  try {
+    return await read();
+  } finally {
+    await setPause(connectionId, null);
+  }
 };
 
 /** The code connect refused or failed with, or "ok" if it didn't. */

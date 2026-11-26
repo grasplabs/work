@@ -2,18 +2,20 @@ import {
   attachedFiles,
   attachmentsInput,
   defineTool,
-  invalidCode,
-  ToolError,
 } from "@grasp-os/connector-kit/connector";
 import type { Effect } from "@grasp-os/connector-kit/connector";
 import {
   checkReadable,
   contentAs,
   fromBase64,
+  invalidCode,
+  jsonBody,
+  readAsSchema,
+  segment,
+  stampHeader,
   toBase64,
-} from "@grasp-os/connector-kit/content";
-import { readAsSchema, stampHeader } from "@grasp-os/connector-kit/manifest";
-import { jsonBody, segment } from "@grasp-os/connector-kit/provider";
+  ToolError,
+} from "@grasp-os/runtime/connector";
 import { z } from "zod";
 
 import {

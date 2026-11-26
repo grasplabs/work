@@ -206,9 +206,12 @@ const notificationItems = async (
             id: `stoppedEvents:${notification.id}`,
             verdicts: [],
             notification,
-            // An HTTP connection listens for no events: never one of these.
+            // An HTTP connection, or one to a connector made from a URL,
+            // listens for no events: never one of these.
             account:
-              connection === undefined || connection.source === "http"
+              connection === undefined ||
+              connection.source === "http" ||
+              connection.source === "connector"
                 ? null
                 : {
                     name: connection.accountName,

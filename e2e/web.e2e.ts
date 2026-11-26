@@ -3,6 +3,7 @@ import { expect } from "@playwright/test";
 import { callGate } from "./call-gate.ts";
 import { test } from "./csp.ts";
 import { peopleIn, signInTo } from "./people.ts";
+import { toastSaying } from "./said.ts";
 
 // Members and roles, and the workspace, as an admin keeps them: inviting
 // someone, making teams, changing a role, signing someone out everywhere
@@ -21,12 +22,14 @@ test("an admin signs someone out everywhere, then removes them, and is told what
     .getByRole("searchbox", { name: "Search members" })
     .fill(leaving.email);
   const actions = page.getByRole("button", { name: `Actions for ${who}` });
-  // What a change did, said over the people's table.
-  const notice = page.getByRole("status").filter({ hasText: /^Person is/u });
+  // What a change did, said in a toast. Not the page's live region, which
+  // only repeats it for a screen reader and is not a status.
 
   await actions.click();
   await page.getByRole("menuitem", { name: "Sign out everywhere" }).click();
-  await expect(notice).toHaveText("Person is signed out everywhere.");
+  await expect(
+    toastSaying(page, "Person is signed out everywhere.")
+  ).toBeVisible();
   // Still a member.
   await expect(actions).toBeVisible();
 
@@ -35,7 +38,7 @@ test("an admin signs someone out everywhere, then removes them, and is told what
   const confirm = page.getByRole("alertdialog", { name: "Remove Person?" });
   await confirm.getByRole("button", { name: "Remove" }).click();
   // They had no personal connections, so none is counted.
-  await expect(notice).toHaveText("Person is removed.");
+  await expect(toastSaying(page, "Person is removed.")).toBeVisible();
   // They stay in the people's table, a state of their row.
   await expect(
     page

@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { wordsOf } from "../test-words.ts";
 import { FrameFailure } from "./frame-failure.tsx";
 import type { PageState } from "./page-host.ts";
 
@@ -47,7 +48,7 @@ const shown = (
 
 const button = (host: HTMLElement, name: string) =>
   [...host.querySelectorAll("button")].find(
-    (element) => element.textContent?.trim() === name
+    (element) => wordsOf(element) === name
   );
 
 describe("an App's frame whose page failed", () => {

@@ -56,6 +56,12 @@ const rowText = (root: Element, clientId: string): string =>
     .querySelector(`main table a[href="/organizations/${clientId}"]`)
     ?.closest("tr")?.textContent ?? "";
 
+/** Why an entry's organization isn't read, as its mark says it: its name, which its tooltip shows. */
+const markOf = (entry: Element | undefined): string =>
+  entry
+    ?.querySelector('[data-slot="sidebar-menu-action"]')
+    ?.getAttribute("aria-label") ?? "";
+
 /** The sidebar's entry for `name`, under its organizations. */
 const sidebarEntry = (root: Element, name: string): Element | undefined =>
   [...root.querySelectorAll('[data-slot="sidebar"] li')].find((item) =>
@@ -100,13 +106,19 @@ describe("the admin's frame", () => {
       listed: [acmeEntry, downEntry, waitingEntry].map(
         (entry) => entry !== undefined
       ),
-      acmeUnread: acmeEntry?.textContent?.includes("unreachable"),
-      downUnreachable: downEntry?.textContent?.includes("unreachable"),
-      waitingNotDeployed: waitingEntry?.textContent?.includes("not deployed"),
+      acmeUnread: markOf(acmeEntry).includes("unreachable"),
+      downUnreachable: markOf(downEntry).includes("unreachable"),
+      waitingNotDeployed: markOf(waitingEntry).includes("not deployed"),
+      // The mark explains itself to a pointer, open or folded: its tooltip.
+      downExplained:
+        downEntry
+          ?.querySelector('[data-slot="sidebar-menu-action"]')
+          ?.hasAttribute("aria-describedby") ?? false,
+      landmarks: [...container.querySelectorAll("aside, nav")].map((each) =>
+        each.getAttribute("aria-label")
+      ),
       opensAcme:
         container.querySelector('a[href="/organizations/acme"]') !== null,
-      downExplained:
-        downEntry?.querySelector('[data-slot="tooltip-trigger"]') !== null,
       oldBar:
         container.querySelector('[aria-label="Console"]') !== null ||
         (container.textContent ?? "").includes("Back to the console"),
@@ -116,8 +128,17 @@ describe("the admin's frame", () => {
       acmeUnread: false,
       downUnreachable: true,
       waitingNotDeployed: true,
-      opensAcme: true,
       downExplained: true,
+      // The sidebar, its places and its organizations each a landmark of
+      // their own, then the page's bar and Platform's places.
+      landmarks: [
+        "Sidebar",
+        "Admin",
+        "Organizations",
+        "Breadcrumb",
+        "Platform",
+      ],
+      opensAcme: true,
       oldBar: false,
     });
   });
@@ -464,12 +485,15 @@ describe("the overview's counts and filters", () => {
         leadTalked: true,
       }),
     });
-    const { main } = await openAdmin(
+    const { container } = await openAdmin(
       "/organizations/company",
       frameOf([company], [], { fetchClientAdmin: admin })
     );
 
-    expect(main()).toMatch(/Day \d+ of 21/u);
+    // Beside its page: in its level of the sidebar.
+    expect(
+      container.querySelector('[data-slot="sidebar"]')?.textContent
+    ).toMatch(/Day \d+ of 21/u);
   });
 
   it("shows only the organizations in a phase when one is chosen", async () => {

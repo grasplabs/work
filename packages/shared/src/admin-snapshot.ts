@@ -190,7 +190,7 @@ const setupReadSchema = z.object({
  * Who carries out a connection's actions: a native connector, Composio, or
  * connect sending an HTTP connection's requests (GRA-1478).
  */
-const sourceSchema = z.enum(["native", "composio", "http"]);
+const sourceSchema = z.enum(["native", "composio", "http", "connector"]);
 
 /**
  * How a connection stands: it `works`; it needs someone at the company to

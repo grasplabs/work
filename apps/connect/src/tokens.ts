@@ -1,4 +1,6 @@
+import { maxRetryAfterSeconds } from "@grasp-os/runtime/connector";
 import { connectErrors, connectionErrors } from "@grasp-os/shared/connect";
+import { isExpectedError } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { and, eq, exists, isNull, like, lte, not, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -7,6 +9,7 @@ import { z } from "zod";
 
 import { recordEventIf } from "./audit.ts";
 import { pastAddressesAfter } from "./connections.ts";
+import { providerConfigFor } from "./connector-providers.ts";
 import {
   connections,
   connectionTokens,
@@ -38,13 +41,21 @@ import type { Vault } from "./vault.ts";
 // (threat model R1). A refresh token never leaves at all: only its token
 // endpoint sees it.
 
-/** What a connection's sealed value holds: OAuth tokens, or an API key. */
+/**
+ * What a connection's sealed value holds: OAuth tokens, or an API key and,
+ * for a shared connection reached through the company network, the one
+ * address its requests go to (company-network.ts): sealed with the key,
+ * so the address can't be changed apart from it.
+ */
 const storedTokensSchema = z.union([
   z.strictObject({
     accessToken: z.string().min(1),
     refreshToken: z.string().min(1),
   }),
-  z.strictObject({ apiKey: z.string().min(1) }),
+  z.strictObject({
+    apiKey: z.string().min(1),
+    companyNetwork: z.string().min(1).optional(),
+  }),
 ]);
 type StoredTokens = z.infer<typeof storedTokensSchema>;
 type StoredOAuthTokens = Extract<StoredTokens, { refreshToken: string }>;
@@ -123,7 +134,7 @@ export const firstTokens = async (
     vault,
     connectionId,
     "apiKey" in tokens
-      ? { apiKey: tokens.apiKey }
+      ? { apiKey: tokens.apiKey, companyNetwork: tokens.companyNetwork }
       : { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken }
   ),
   accessExpiresAt: new Date(tokens.expiresAt),
@@ -131,6 +142,10 @@ export const firstTokens = async (
   refreshUntil: null,
   grantedScopes: tokens.scope ?? null,
   updatedAt: now,
+  // Stored as a new row (a new connection, or one connected again after
+  // its grant was lost), it starts unpaused; a grant renewed in place
+  // keeps the pause, which is the same account's.
+  pausedUntil: null,
 });
 
 /**
@@ -258,6 +273,9 @@ const markDead = async (
   reason: "invalid_grant" | "unreadable" | "scopes_changed" | "scopes_missing"
 ): Promise<boolean> => {
   const db = drizzle(env.DB);
+  const owesRevoke =
+    grantStillValid(reason) &&
+    revocable(await providerConfigFor(env, provider));
   return await recordEventIf(
     env,
     {
@@ -278,7 +296,7 @@ const markDead = async (
       // stay live with nothing left to revoke it, should the person never
       // connect again; one the provider refused, or that won't open, has
       // nothing to revoke.
-      ...(grantStillValid(reason) && revocable(provider)
+      ...(owesRevoke
         ? [
             oweRevoke(
               db,
@@ -605,6 +623,93 @@ const refreshed = async (
   throw connectionErrors.create("connection.refresh_failed");
 };
 
+/** The whole seconds left until `until`, at least one. */
+const secondsUntil = (until: Date, now: number): number =>
+  Math.max(Math.ceil((until.getTime() - now) / 1000), 1);
+
+/**
+ * Pauses connection `connectionId` for `seconds` from now, for every
+ * caller: each call that reads its credential before then is refused as
+ * `connect.rate_limited`, and never reaches its vendor. A longer pause
+ * already in force is kept, so of two vendor answers that race, the later
+ * end holds whichever is written last. A wait longer than an hour is cut
+ * to one, whoever names it. The seconds the pause in force has left; none,
+ * and nothing stored, for a wait of none. One that can't be stored is
+ * logged, and leaves the wait asked: the answer at hand still names the
+ * vendor's wait, and its next 429 pauses the connection again.
+ */
+export const pauseFor = async (
+  db: D1Database,
+  connectionId: string,
+  asked: number
+): Promise<number> => {
+  if (asked <= 0) {
+    return 0;
+  }
+  const seconds = Math.min(Math.ceil(asked), maxRetryAfterSeconds);
+  const now = Date.now();
+  try {
+    const [row] = await drizzle(db)
+      .update(connectionTokens)
+      .set({
+        pausedUntil: sql`max(coalesce(${connectionTokens.pausedUntil}, 0), ${now + seconds * 1000})`,
+      })
+      .where(eq(connectionTokens.connectionId, connectionId))
+      .returning({ pausedUntil: connectionTokens.pausedUntil });
+    return row?.pausedUntil ? secondsUntil(row.pausedUntil, now) : seconds;
+  } catch (error) {
+    log.error("connection.pause_failed", {
+      connection: connectionId,
+      ...errorFields(error),
+    });
+    return seconds;
+  }
+};
+
+/**
+ * The wait a paused connection's `connect.rate_limited` names, as connect's
+ * own readers (directory, places, HR, sync) pass on their provider's
+ * throttling (`retryAfterMs`); undefined for any other error.
+ */
+export const pausedWait = (
+  error: unknown
+): { retryAfterMs: number } | undefined => {
+  if (
+    !isExpectedError(error) ||
+    connectErrors.codeOf(error) !== "connect.rate_limited"
+  ) {
+    return undefined;
+  }
+  const seconds = error.details?.retryAfterSeconds;
+  return { retryAfterMs: typeof seconds === "number" ? seconds * 1000 : 0 };
+};
+
+/**
+ * Refuses a connection paused until `pausedUntil` (`pauseFor`) as
+ * `connect.rate_limited`, with the seconds the pause has left.
+ */
+const refuseIfPaused = (pausedUntil: Date | null | undefined): void => {
+  const now = Date.now();
+  if (pausedUntil && pausedUntil.getTime() > now) {
+    throw connectErrors.create("connect.rate_limited", {
+      retryAfterSeconds: secondsUntil(pausedUntil, now),
+    });
+  }
+};
+
+/**
+ * Refuses a paused connection before anything is spent on a call to it:
+ * a held action's confirmation, which a refusal leaves waiting. The
+ * credential read checks again, for a pause that begins in between.
+ */
+export const requireUnpaused = async (
+  db: D1Database,
+  connectionId: string
+): Promise<void> => {
+  const row = await readRow(db, connectionId);
+  refuseIfPaused(row?.pausedUntil);
+};
+
 /** An active connection, its provider, its tokens' row and the vault. */
 const activeConnection = async (env: Env, connectionId: string) => {
   const connection = await drizzle(env.DB)
@@ -613,7 +718,9 @@ const activeConnection = async (env: Env, connectionId: string) => {
     .where(eq(connections.id, connectionId))
     .get();
   const provider =
-    connection === undefined ? undefined : providerFor(connection.provider);
+    connection === undefined
+      ? undefined
+      : await providerConfigFor(env, connection.provider);
   const row = await readRow(env.DB, connectionId);
   if (
     connection?.status !== "active" ||
@@ -622,6 +729,7 @@ const activeConnection = async (env: Env, connectionId: string) => {
   ) {
     throw connectErrors.create("connect.connection_inactive");
   }
+  refuseIfPaused(row.pausedUntil);
   const vault = await vaultFor(env);
   if (vault === undefined) {
     throw connectionErrors.create("connection.provider_unavailable");
@@ -670,22 +778,49 @@ export const accessTokenFor = async (
 /**
  * What one call of an active connection's connector sends its requests
  * with: a fresh access token, or the API key, in the header the provider
- * takes it in. Only for connect's egress handler, for that call.
+ * takes it in; and, for a connection reached through the company network,
+ * the address sealed with its key, which its requests go to. Only for
+ * connect's own requests and its egress handler, for that call.
  */
-export const credentialFor = async (
+export const connectorCredentialFor = async (
   env: Env,
   connectionId: string
-): Promise<Credential> => {
+): Promise<{ credential: Credential; companyNetwork: string | undefined }> => {
   const active = await activeConnection(env, connectionId);
   const { provider, row, vault } = active;
   if (provider.kind === "oauth") {
-    return bearer(await freshAccessToken(env, active));
+    return {
+      credential: bearer(await freshAccessToken(env, active)),
+      companyNetwork: undefined,
+    };
   }
   const tokens = await openTokens(vault, row);
   if (!("apiKey" in tokens)) {
     throw connectErrors.create("connect.connection_inactive");
   }
-  return provider.credential(tokens.apiKey);
+  return {
+    credential: provider.credential(tokens.apiKey),
+    companyNetwork: tokens.companyNetwork,
+  };
+};
+
+/**
+ * `connectorCredentialFor`'s credential alone, for a request to the
+ * public internet: refused for a connection reached through the company
+ * network, whose requests go nowhere else.
+ */
+export const credentialFor = async (
+  env: Env,
+  connectionId: string
+): Promise<Credential> => {
+  const { credential, companyNetwork } = await connectorCredentialFor(
+    env,
+    connectionId
+  );
+  if (companyNetwork !== undefined) {
+    throw connectErrors.create("connect.connection_inactive");
+  }
+  return credential;
 };
 
 /**

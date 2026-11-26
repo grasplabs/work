@@ -24,6 +24,7 @@ import {
   Item,
   ItemActions,
   ItemContent,
+  ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -44,7 +45,6 @@ import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import { SeparatedItems } from "../workflows/separated-items.tsx";
 
 // A project's chats: the person's own that they put in it, and nobody
 // else's (core's `chats.setProject`, kept in their own Workspace). They
@@ -186,38 +186,34 @@ export const AddChat = ({
                       </EmptyHeader>
                     </Empty>
                   ) : (
-                    <SeparatedItems
-                      aria-label={t`Your chats`}
-                      rows={found.map((chat) => ({
-                        key: chat.id,
-                        row: (
-                          <Item key={chat.id} size="sm">
-                            <ItemMedia variant="default">
-                              <Icon icon={MessageCircleIcon} />
-                            </ItemMedia>
-                            <ItemContent>
-                              <ItemTitle>{chat.title}</ItemTitle>
-                            </ItemContent>
-                            <ItemActions>
-                              <Button
-                                disabled={adding.busy}
-                                onClick={() => {
-                                  void add(chat.id);
-                                }}
-                                size="sm"
-                                variant="outline"
-                              >
-                                <Icon icon={PlusIcon} />
-                                {t({
-                                  message: "Add",
-                                  context: "put in a project",
-                                })}
-                              </Button>
-                            </ItemActions>
-                          </Item>
-                        ),
-                      }))}
-                    />
+                    <ItemGroup separated aria-label={t`Your chats`}>
+                      {found.map((chat) => (
+                        <Item key={chat.id} size="sm">
+                          <ItemMedia variant="default">
+                            <Icon icon={MessageCircleIcon} />
+                          </ItemMedia>
+                          <ItemContent>
+                            <ItemTitle>{chat.title}</ItemTitle>
+                          </ItemContent>
+                          <ItemActions>
+                            <Button
+                              disabled={adding.busy}
+                              onClick={() => {
+                                void add(chat.id);
+                              }}
+                              size="sm"
+                              variant="outline"
+                            >
+                              <Icon icon={PlusIcon} />
+                              {t({
+                                message: "Add",
+                                context: "put in a project",
+                              })}
+                            </Button>
+                          </ItemActions>
+                        </Item>
+                      ))}
+                    </ItemGroup>
                   )}
                 </ScrollArea>
               </div>
@@ -250,22 +246,18 @@ export const ProjectChatList = ({
   };
   return (
     <>
-      <SeparatedItems
-        aria-label={t`Your chats`}
-        rows={chats.map((chat) => ({
-          key: chat.id,
-          row: (
-            <ChatRow
-              busy={busy}
-              chat={chat}
-              key={chat.id}
-              onTakeOut={() => {
-                void takeOut(chat.id);
-              }}
-            />
-          ),
-        }))}
-      />
+      <ItemGroup separated aria-label={t`Your chats`}>
+        {chats.map((chat) => (
+          <ChatRow
+            busy={busy}
+            chat={chat}
+            key={chat.id}
+            onTakeOut={() => {
+              void takeOut(chat.id);
+            }}
+          />
+        ))}
+      </ItemGroup>
       <ErrorText>{failure}</ErrorText>
     </>
   );

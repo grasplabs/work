@@ -25,6 +25,13 @@ export const flag = (draft: DescriptorDraft, key: string): boolean => {
     : refuse("definition.invalid_descriptor", `\`${key}\` must be a boolean.`);
 };
 
+/**
+ * A flag a descriptor holds only when it is set, so a descriptor written
+ * before the flag existed reads the same.
+ */
+const setFlag = (draft: DescriptorDraft, key: string): boolean =>
+  draft[key] !== undefined && flag(draft, key);
+
 /** A `min` or `max`, when the draft has one. */
 const bound = (
   draft: DescriptorDraft,
@@ -263,20 +270,41 @@ const idBody = (draft: DescriptorDraft): Body => {
       );
 };
 
+/**
+ * A string's kind: its flags and bounds, with one format at most, since
+ * no text is two of them.
+ */
+const stringBody = (draft: DescriptorDraft): Body => {
+  const email = flag(draft, "email");
+  const datetime = setFlag(draft, "datetime");
+  const date = setFlag(draft, "date");
+  const url = setFlag(draft, "url");
+  if ([email, datetime, date, url].filter(Boolean).length > 1) {
+    refuse(
+      "definition.invalid_schema",
+      "A string has one format at most: email, datetime, date or url."
+    );
+  }
+  return {
+    children: [],
+    kind: {
+      kind: "string",
+      trim: flag(draft, "trim"),
+      email,
+      ...(datetime ? { datetime: true } : {}),
+      ...(date ? { date: true } : {}),
+      ...(url ? { url: true } : {}),
+      ...withoutZeroMin(bounds(draft, isLength)),
+    },
+  };
+};
+
 /** What the draft's kind adds, checked; and the descriptors nested in it. */
 export const kindBody = (draft: DescriptorDraft): Body => {
   const { kind } = draft;
   switch (kind) {
     case "string": {
-      return {
-        children: [],
-        kind: {
-          kind,
-          trim: flag(draft, "trim"),
-          email: flag(draft, "email"),
-          ...withoutZeroMin(bounds(draft, isLength)),
-        },
-      };
+      return stringBody(draft);
     }
     case "number": {
       const integer = flag(draft, "integer");
@@ -292,7 +320,8 @@ export const kindBody = (draft: DescriptorDraft): Body => {
       };
     }
     case "boolean":
-    case "null": {
+    case "null":
+    case "json": {
       return { children: [], kind: { kind } };
     }
     case "literal": {

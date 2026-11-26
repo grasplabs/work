@@ -1,4 +1,5 @@
 import type {
+  ConnectorToolView,
   ListedConnection,
   OfferedCatalog,
 } from "@grasp-os/shared/connect";
@@ -29,7 +30,9 @@ import { Route as ListRoute } from "../routes/_shell.connectors.index.tsx";
 // disconnected; the success page says "again" where a stopped connection
 // stands beside the new one, read from what the page lists; and the
 // stopped row says it can be disconnected now, to an admin alone, whose
-// press opens the Disconnect question, which says what goes with it.
+// press opens the Disconnect question, which says what goes with it. A
+// connector made from a URL says where its sign-in page is, and shows its
+// admin its tools, each to block by its switch.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -69,10 +72,57 @@ const microsoft: OfferedCatalog["entries"][number] = {
   categories: ["Productivity"],
   toolCount: 0,
   logo: null,
-  description: "Mail and files.",
+  description: null,
   group: "Other",
   auth: "managed",
   offered: true,
+};
+
+/** A connector made from a URL whose server signs people in at its own host. */
+const linear: OfferedCatalog["entries"][number] = {
+  source: "connector",
+  id: "mcp_0123456789abcdef0123456789abcdef",
+  name: "Linear",
+  categories: [],
+  toolCount: null,
+  logo: null,
+  description: null,
+  group: "Other",
+  auth: "managed",
+  offered: true,
+  signInHost: "mcp.linear.app",
+};
+
+/** What core was asked of a connector's tools: each block, and how often they were read. */
+const toolAsks: {
+  blocks: { connector: string; tool: string; blocked: boolean }[];
+  reads: number;
+} = { blocks: [], reads: 0 };
+
+/** Linear's tools as connect lists them, blocked as last asked: one no list holds now, blocked already. */
+const linearTools = (): ConnectorToolView[] => {
+  const blocked = (tool: string, before: boolean): boolean =>
+    toolAsks.blocks.findLast((block) => block.tool === tool)?.blocked ?? before;
+  return [
+    {
+      name: "create_issue",
+      description: "Creates an issue in a team.",
+      class: "change-company",
+      blocked: blocked("create_issue", false),
+    },
+    {
+      name: "list_issues",
+      description: "Lists the issues of a team.",
+      class: "read-company",
+      blocked: blocked("list_issues", false),
+    },
+    {
+      name: "delete_team",
+      description: null,
+      class: null,
+      blocked: blocked("delete_team", true),
+    },
+  ];
 };
 
 /** HubSpot's shared connection that stopped working: a Composio one names no account. */
@@ -154,7 +204,10 @@ const coreOf = (
   connections: ListedConnection[],
   disconnected: string[],
   catalog: () => Promise<OfferedCatalog> = async () =>
-    await Promise.resolve({ entries: [entry, microsoft], composio: "listed" })
+    await Promise.resolve({
+      entries: [entry, microsoft, linear],
+      composio: "listed",
+    })
 ) => {
   const known = {
     connections: {
@@ -171,6 +224,18 @@ const coreOf = (
           },
         ]),
       brainAudiences: async () => await Promise.resolve([]),
+      connectorTools: async (): Promise<ConnectorToolView[]> => {
+        toolAsks.reads += 1;
+        return await Promise.resolve(linearTools());
+      },
+      blockConnectorTool: async (request: {
+        connector: string;
+        tool: string;
+        blocked: boolean;
+      }): Promise<void> => {
+        toolAsks.blocks.push(request);
+        await Promise.resolve();
+      },
       disconnect: async (id: string): Promise<{ revoked: boolean }> => {
         disconnected.push(id);
         return await Promise.resolve({ revoked: true });
@@ -292,7 +357,28 @@ const unmounted = (): void => {
   });
   root = undefined;
   document.body.innerHTML = "";
+  toolAsks.blocks = [];
+  toolAsks.reads = 0;
 };
+
+/** The section titled `title`, by its heading. */
+const section = (title: string): Element | undefined =>
+  [...document.querySelectorAll("section h2")]
+    .find((heading) => heading.textContent === title)
+    ?.closest("section") ?? undefined;
+
+/** The rows of the connector's tools, each its words and whether its switch lets it through. */
+const toolRows = (): { words: string; on: string | null }[] =>
+  [
+    ...(section("Tools its server lists")?.querySelectorAll(
+      '[data-slot="item"]'
+    ) ?? []),
+  ].map((row) => ({
+    words: row.textContent,
+    on:
+      row.querySelector('[role="switch"]')?.getAttribute("aria-checked") ??
+      null,
+  }));
 
 describe("the Connectors pages, back from a sign-in", () => {
   // The router's plugin splits each page's code from its route: loaded
@@ -485,5 +571,58 @@ describe("the Connectors pages, back from a sign-in", () => {
       disconnectIt: undefined,
       signInAgain: true,
     });
+  });
+
+  it("shows an admin a connector's tools by what they do, and blocks one by its switch, read again from core", async () => {
+    await shown(`/connectors/connector:${linear.id}`, []);
+    const before = toolRows();
+    await press(
+      document.querySelector('[aria-label="Let Grasp use create_issue"]')
+    );
+
+    expect({
+      before,
+      blocks: toolAsks.blocks,
+      after: toolRows(),
+    }).toStrictEqual({
+      before: [
+        { words: "create_issueChangesCreates an issue in a team.", on: "true" },
+        { words: "list_issuesReadsLists the issues of a team.", on: "true" },
+        { words: "delete_teamNot listed now", on: "false" },
+      ],
+      blocks: [{ connector: linear.id, tool: "create_issue", blocked: true }],
+      after: [
+        {
+          words: "create_issueChangesCreates an issue in a team.",
+          on: "false",
+        },
+        { words: "list_issuesReadsLists the issues of a team.", on: "true" },
+        { words: "delete_teamNot listed now", on: "false" },
+      ],
+    });
+  });
+
+  it("shows anyone but an admin none of a connector's tools to block, and never asks core for them", async () => {
+    await shown(
+      `/connectors/connector:${linear.id}`,
+      [],
+      person({ role: "user" })
+    );
+
+    expect({
+      section: section("Tools its server lists"),
+      reads: toolAsks.reads,
+    }).toStrictEqual({ section: undefined, reads: 0 });
+  });
+
+  it("says where a connector made from a URL signs people in, as they connect it", async () => {
+    await shown(`/connectors/connector:${linear.id}`, []);
+    await press(button("Connect"));
+
+    expect(
+      document
+        .querySelector('[role="dialog"]')
+        ?.textContent.includes("You sign in at mcp.linear.app.")
+    ).toBeTruthy();
   });
 });

@@ -9,9 +9,10 @@
 //
 // Titles from `sm` up are the serif at 400, drawn closer; `xs` is the sans at 500, as a card's
 // title, and `2xs` the same at the interface's own size. Every value is a token. A caller may set
-// layout only (the `style` prop).
+// layout only (the `style` prop). With `tabIndex={-1}` and a `ref` it is where focus goes when the
+// control that had it goes away.
 import * as stylex from "@stylexjs/stylex";
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 
 import { colors, font, media } from "../lib/tokens.stylex";
 import type { LayoutStyle } from "../lib/utils";
@@ -34,11 +35,20 @@ export interface HeadingProps {
   size?: HeadingSize;
   /** An id, so a link or `aria-labelledby` can point at it. */
   id?: string;
+  /**
+   * `-1` makes it a place focus can be put from code, never a Tab stop: where focus goes when the
+   * control that had it goes away (a section's only button, done). It shows no ring there.
+   */
+  tabIndex?: -1;
+  /** The heading element, to put focus on it (with `tabIndex={-1}`) or read it. */
+  ref?: Ref<HTMLHeadingElement>;
   /** Layout only: margins, alignment and width. The type belongs to the heading. */
   style?: LayoutStyle;
 }
 
 const styles = stylex.create({
+  // A focus landing from code: a heading is not a control, so focus there draws no ring.
+  landing: { outline: "none" },
   heading: {
     margin: 0,
     color: colors.foreground,
@@ -91,12 +101,16 @@ export const Heading = ({
   level,
   size = bySize[level],
   id,
+  tabIndex,
+  ref,
   style,
 }: HeadingProps) => {
   const Tag = `h${level}` as const;
   return (
     <Tag
       id={id}
+      tabIndex={tabIndex}
+      ref={ref}
       data-slot="heading"
       data-size={size}
       {...stylex.props(
@@ -108,6 +122,7 @@ export const Heading = ({
         size === "sm" && styles.sm,
         size === "xs" && styles.xs,
         size === "2xs" && styles["2xs"],
+        tabIndex !== undefined && styles.landing,
         style
       )}
     >

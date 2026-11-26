@@ -18,6 +18,7 @@ import {
   ownAccount,
   someone,
   startAs,
+  whilePaused,
 } from "./connect.ts";
 import { fakeInternet } from "./internet.ts";
 import { fakeProviders } from "./oauth-provider.ts";
@@ -184,7 +185,7 @@ const directoryAccount = (
 ): Account => ({
   ...ownAccount(admin, suiteOf[provider]),
   audience: clientOf(provider).id,
-  ...(granted === null ? {} : { granted }),
+  granted,
 });
 
 /**
@@ -702,6 +703,10 @@ describe("a directory read", () => {
       notJson: await answered(() => new Response("<html>Sign in</html>")),
       throttled: await answered(answeredWith(429)),
       serverError: await answered(answeredWith(500)),
+      paused: await whilePaused(
+        connectionId,
+        async () => await codeOf(readDeleted(connectionId))
+      ),
     }).toStrictEqual({
       unauthorized: "directory.deleted_refused",
       forbidden: "directory.deleted_refused",
@@ -712,6 +717,7 @@ describe("a directory read", () => {
       notJson: "directory.deleted_unsupported",
       throttled: "directory.throttled",
       serverError: "directory.provider_failed",
+      paused: "directory.throttled",
     });
   });
 

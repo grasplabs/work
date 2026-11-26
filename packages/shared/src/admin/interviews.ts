@@ -25,19 +25,20 @@ export const RECORD_FIELDS = [
 export type RecordField = (typeof RECORD_FIELDS)[number];
 
 /**
- * The nine parts of an employee interview, in order, with how many minutes each takes at least and
- * at most. It starts with the person (`you`): whether they use AI already, how that goes, what
- * worries them and what they wish for. Only then their work.
+ * The ten parts of an employee interview, in order. It starts with their work as a whole
+ * (`week`), then one piece of it up close; them and AI (`you`) is one short question, last
+ * before the read-back.
  */
 export const PHASES = [
   "open",
-  "you",
+  "week",
   "anchor",
   "story",
   "steps",
   "exceptions",
   "numbers",
   "result",
+  "you",
   "readback",
 ] as const;
 export type Phase = (typeof PHASES)[number];
@@ -61,6 +62,7 @@ export const TAGS = [
   "term",
   "next",
   "work",
+  "task",
 ] as const;
 export type Tag = (typeof TAGS)[number];
 

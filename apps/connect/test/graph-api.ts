@@ -1,3 +1,7 @@
+import {
+  effectPropertyId,
+  graphHost,
+} from "@grasp-os/connector-microsoft-365/graph";
 /**
  * Microsoft Graph and the tenant's SharePoint, as the Microsoft 365
  * connector reaches them through connect's egress, serving the recorded
@@ -13,11 +17,7 @@
  * as it answers a delegated `Tasks.ReadWrite` token. Teams chats and
  * meetings are graph-teams-fake.ts's.
  */
-import { egressHeader } from "@grasp-os/connector-kit/manifest";
-import {
-  effectPropertyId,
-  graphHost,
-} from "@grasp-os/connector-microsoft-365/graph";
+import { egressHeader } from "@grasp-os/runtime/connector";
 import { beforeEach } from "vite-plus/test";
 import { z } from "zod";
 
@@ -78,6 +78,7 @@ import {
 import {
   holdMeetings,
   meetingsAnswer,
+  postInChat,
   resetTeams,
   teamsParts,
   teamsRoutes,
@@ -544,6 +545,9 @@ const workbookRoutes: ProviderRoute<Part>[] = [
  * writes and finds them. Cleared before each test.
  */
 const ownFiles = new Map<string, { id: string; bytes: Uint8Array }>();
+
+/** Files of the fixtures saved anew during a test, by ID. Cleared before each test. */
+const savedFiles = new Map<string, Uint8Array>();
 
 const ownFile = String.raw`^/v1\.0/me/drive/root:/[^/]+/[^/:]+`;
 
@@ -1125,12 +1129,14 @@ const sharePointAnswer = (url: URL): Response => {
   }
   const own = [...ownFiles.values()].find((file) => file.id === id);
   const content =
+    savedFiles.get(id ?? "") ??
     {
       [itemIds.pdf]: invoicePdf,
       [itemIds.controls]: new TextEncoder().encode(controlText),
       [itemIds.procedure]: new TextEncoder().encode(procedureTexts["3.0"]),
       [itemIds.contract]: contractDocx,
-    }[id ?? ""] ?? own?.bytes;
+    }[id ?? ""] ??
+    own?.bytes;
   return new Response(content ?? new TextEncoder().encode(reportText), {
     headers: { "content-type": "application/octet-stream" },
   });
@@ -1148,6 +1154,7 @@ export const fakeGraph = (providers?: ReturnType<typeof fakeProviders>) => {
     todoTasks.clear();
     sharedSince.clear();
     ownFiles.clear();
+    savedFiles.clear();
     duringLookup = undefined;
     oversizedVersion = undefined;
     events.clear();
@@ -1248,6 +1255,12 @@ export const fakeGraph = (providers?: ReturnType<typeof fakeProviders>) => {
     },
     /** Makes `mailbox`'s calendar hold Teams meetings (graph-teams-fake.ts). */
     holdMeetings,
+    /** Has a colleague post a message in the person's own chat (graph-teams-fake.ts). */
+    postInChat,
+    /** Someone saves the fixtures' file `file` anew, as they could: `bytes` from now on. */
+    saveFile: (file: string, bytes: Uint8Array): void => {
+      savedFiles.set(file, bytes);
+    },
     /** Has someone invite a guest to the next event read, right after it. */
     inviteDuringRead: () => {
       inviteDuringRead = true;

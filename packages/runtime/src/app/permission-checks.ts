@@ -27,9 +27,11 @@ export const refuse: (message: string) => never = refuser(
   PermissionDefinitionError
 );
 
-/** A contract and its major version, e.g. `grasp.mail@1`. */
-const contractPattern =
-  /^[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)*@[1-9]\d{0,5}$/u;
+/**
+ * A contract and its major version, e.g. `grasp.mail@1`; a connector's
+ * families keep its tools' names (`crm.dealFields@1`).
+ */
+const contractPattern = /^[a-z][a-z0-9_-]*(?:\.[A-Za-z][\w-]*)*@[1-9]\d{0,5}$/u;
 
 /** An action, operation or collection name a declaration lists. */
 const namePattern = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/u;

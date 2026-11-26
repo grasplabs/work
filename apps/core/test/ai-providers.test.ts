@@ -1410,6 +1410,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
         "transcription: OpenAI, European Union",
         "speech: Mistral AI, European Union (France)",
         "interview: Mistral AI, European Union (France)",
+        "conversation: Mistral AI, European Union (France)",
       ]);
     });
   });

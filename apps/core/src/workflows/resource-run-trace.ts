@@ -74,8 +74,8 @@ const pageRecords = 500;
 
 /**
  * One of core's waits of a round of a step (host.ts, `waitStep`), by the
- * round's key: for its turn (`busy`) or its
- * AI provider (`key`), a record of waiting (`:waiting`), the round's run
+ * round's key: for its turn (`busy`), its
+ * AI provider (`key`) or the wait its call named (`throttled`), a record of waiting (`:waiting`), the round's run
  * again (`:run`), and a wait for its AI provider that ran out
  * (`:timed_out`), failed with the step's error; a catch's retry of the
  * step (`retry`) too: its decision (`:decide`), its
@@ -86,7 +86,7 @@ const pageRecords = 500;
  * record of waiting, then its run again (`:run`).
  */
 const coreWait = new RegExp(
-  `^${waitStepPrefix.replaceAll("$", "\\$")}(?<key>[0-9a-f]{16}):(?:(?:busy|key):\\d+(?<rest>:waiting|:run|:timed_out)?|(?:held|unknown):\\d+(?<held>:since|:first|:\\d+(?::check)?|:waiting:held|:run)|retry:[1-9]\\d*:(?<retry>decide|wait|run))$`,
+  `^${waitStepPrefix.replaceAll("$", "\\$")}(?<key>[0-9a-f]{16}):(?:(?:busy|key|throttled):\\d+(?<rest>:waiting|:run|:timed_out)?|(?:held|unknown):\\d+(?<held>:since|:first|:\\d+(?::check)?|:waiting:held|:run)|retry:[1-9]\\d*:(?<retry>decide|wait|run))$`,
   "u"
 );
 

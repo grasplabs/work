@@ -1,5 +1,5 @@
-import { SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
 import { TooltipProvider } from "@grasp-os/app-kit/components/tooltip";
+import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -44,7 +44,10 @@ export const documentOf = async (
  * tested from those real answers rather than copies of them. The pages
  * themselves render in the browser (test/app.tsx).
  */
-/** The admin's frame around a page: its sidebar's and tooltips' providers. */
+/**
+ * The admin's frame around a page: its sidebar's provider (Damsko's), and
+ * the kit's tooltips' for the pages still on the kit.
+ */
 const framed = (children: ReactElement): ReactElement =>
   createElement(
     TooltipProvider,

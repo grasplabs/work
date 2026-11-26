@@ -1,4 +1,6 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { CardContent } from "@grasp-os/ui/components/card";
+import { Link } from "@grasp-os/ui/components/link";
 import {
   Table,
   TableBody,
@@ -6,14 +8,16 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/app-kit/components/table";
-import { createFileRoute, Link } from "@tanstack/react-router";
+} from "@grasp-os/ui/components/table";
+import { Text } from "@grasp-os/ui/components/text";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
+import { createFileRoute, Link as RouterLink } from "@tanstack/react-router";
 
 import { PageLoading } from "../../../admin/failure.tsx";
 import { AdminPage } from "../../../admin/page.tsx";
+import { Panel, PanelNote } from "../../../admin/panel.tsx";
 import { PlatformNav, platformCrumb } from "../../../admin/platform-nav.tsx";
-import { Quiet } from "../../../admin/release-parts.tsx";
-import { Section } from "../../../admin/section.tsx";
 import { formatTime } from "../../../releases/format.ts";
 import { fetchReleases } from "../../../releases/functions.ts";
 import type { ReleaseSummary } from "../../../releases/queries.ts";
@@ -22,12 +26,24 @@ import { channelIds } from "../../../rollout/channel-ids.ts";
 import type { Channel } from "../../../rollout/channel-ids.ts";
 import { channelWords } from "../../../rollout/channel-words.ts";
 
+const styles = stylex.create({
+  badges: { display: "flex", flexWrap: "wrap", gap: space["1"] },
+  release: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: space["1"],
+  },
+});
+
 /** The channels a release has been on, Edge first. */
 const ChannelsOn = ({ on }: { on: readonly Channel[] }) =>
   on.length === 0 ? (
-    <span className="text-muted-foreground">–</span>
+    <Text as="span" color="muted" size="sm">
+      –
+    </Text>
   ) : (
-    <span className="flex flex-wrap gap-1">
+    <span {...stylex.props(styles.badges)}>
       {channelIds
         .filter((channel) => on.includes(channel))
         .map((channel) => (
@@ -48,7 +64,7 @@ const EveryRelease = ({
   older: ReleaseSummary | null;
   channelsOn: Readonly<Record<string, Channel[]>>;
 }) => (
-  <Section
+  <Panel
     description={
       older === null
         ? "As CI made them, the newest first. A release opens what it holds and who runs it."
@@ -57,59 +73,56 @@ const EveryRelease = ({
     title="Every release"
   >
     {releases.length === 0 ? (
-      <Quiet>
+      <PanelNote>
         No releases yet. Every merge to main publishes one, and the admin
         imports it within a minute.
-      </Quiet>
+      </PanelNote>
     ) : (
-      <div className="@container border-t">
-        <Table>
+      <CardContent flush>
+        <Table aria-label="Every release">
           <TableHeader>
             <TableRow>
-              <TableHead variant="card">Release</TableHead>
-              <TableHead className="hidden @xl:table-cell" variant="card">
-                Channels
-              </TableHead>
-              <TableHead className="hidden @2xl:table-cell" variant="card">
-                Built (UTC)
-              </TableHead>
+              <TableHead>Release</TableHead>
+              <TableHead hideBelow="sm">Channels</TableHead>
+              <TableHead hideBelow="md">Built (UTC)</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {releases.map((release) => (
               <TableRow key={release.id}>
-                <TableCell className="whitespace-normal" variant="card">
-                  <div className="flex flex-col gap-0.5">
-                    <Link
-                      className="underline-offset-4 hover:underline"
-                      params={{ releaseId: release.id }}
-                      to="/platform/releases/$releaseId"
-                    >
-                      {release.id}
+                <TableCell rowHeader wrap>
+                  <span {...stylex.props(styles.release)}>
+                    <Link asChild variant="plain">
+                      <RouterLink
+                        params={{ releaseId: release.id }}
+                        to="/platform/releases/$releaseId"
+                      >
+                        {release.id}
+                      </RouterLink>
                     </Link>
                     <span>{releaseTitle(release.notes)}</span>
                     {release.bundleDeletedAt === null ? null : (
-                      <span className="text-muted-foreground text-xs">
+                      <Text as="span" color="muted" size="xs">
                         Bundle deleted: never promoted past Edge
-                      </span>
+                      </Text>
                     )}
-                  </div>
+                  </span>
                 </TableCell>
-                <TableCell className="hidden @xl:table-cell" variant="card">
+                <TableCell hideBelow="sm">
                   <ChannelsOn on={channelsOn[release.id] ?? []} />
                 </TableCell>
-                <TableCell className="hidden @2xl:table-cell" variant="card">
-                  <span className="text-muted-foreground tabular-nums">
+                <TableCell hideBelow="md">
+                  <Text as="span" color="muted" size="sm">
                     {formatTime(release.builtAt)}
-                  </span>
+                  </Text>
                 </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
-      </div>
+      </CardContent>
     )}
-  </Section>
+  </Panel>
 );
 
 /**
@@ -125,13 +138,7 @@ const ReleasesPage = () => {
       title="Releases"
     >
       <PlatformNav />
-      <div className="flex flex-col gap-6 text-sm">
-        <EveryRelease
-          channelsOn={channelsOn}
-          older={older}
-          releases={releases}
-        />
-      </div>
+      <EveryRelease channelsOn={channelsOn} older={older} releases={releases} />
     </AdminPage>
   );
 };

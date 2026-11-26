@@ -19,6 +19,27 @@ Grasp enforces this at run time, and the types enforce it as you write: a query 
 
 Every function declares its arguments (`args`) with `v`, and Grasp checks them before the handler runs, so a handler only ever sees valid input. What it returns (`returns`) is optional. When a function declares it, Grasp checks the return value after the handler runs, so a caller only ever gets what was declared, and a `DataGrid` takes its columns' kinds from it. Without it, callers get the type of whatever the handler returns.
 
+A string can be held to a format: `.email()`, `.date()` (a calendar day, such as `2026-11-25`), `.datetime()` (a date and time with its offset, as RFC 3339 writes it, such as `2026-11-25T14:30:00Z`) and `.url()` (an absolute `http` or `https` URL, written out in full, with no user name or password, and no character in its host that would be dropped unseen, such as a zero-width space). Each checks the text and keeps it as it was, and a string has one format at most. A time you store, sort or compare is a `v.timestamp()`, in milliseconds: on the server, `Date.parse` turns a `.datetime()` into one, but for a leap second (`23:59:60Z`), which it reads as `NaN`. A browser may read only the forms with an upper-case `T` and `Z` and three digits of a second, so a page gets the `v.timestamp()` from the server. `v.json()` takes any JSON value, for what has no fixed shape, such as fields someone defines elsewhere. Nothing inside it is checked but that it is JSON, nests no deeper than any value may, and has keys a `v.record` takes, so declare the shape wherever you know it.
+
+```ts server/links.ts
+import { v } from "@grasp-os/sdk";
+import { query } from "@server/_generated/server";
+
+export const visit = query({
+  args: {
+    url: v.string().url(),
+    seenAt: v.string().datetime(),
+    due: v.string().date().optional(),
+    extra: v.json().optional(),
+  },
+  returns: v.object({ host: v.string(), seen: v.timestamp() }),
+  handler: async (_ctx, args) => ({
+    host: new URL(args.url).host,
+    seen: Date.parse(args.seenAt),
+  }),
+});
+```
+
 The types of `api` and `internal` come from your functions' own code. So when two functions call each other, or one reaches itself through `internal`, TypeScript can't infer their types: declare `returns`, or annotate the handler's return type.
 
 A function is registered by exporting it from a module under `server/`, declared as `export const list = query({ … })`: one of `query`, `mutation`, `action`, `internalQuery`, `internalMutation` and `internalAction` from `@server/_generated/server`, called by name. Grasp finds your functions by that form, so a function made through an alias of a constructor or a wrapper gets no reference in `api` or `internal`, and the App can't be published until it is declared that way. Its name is the module's path and the export: `list` in `server/tasks.ts` is `tasks.list`.
@@ -93,6 +114,10 @@ export const addAll = action({
 An action isn't atomic: each mutation it runs commits on its own. When a change depends on what you read, read and write in one mutation instead.
 
 Each action a connection declares is a typed method of `ctx.connections.<alias>`: with `actions: ["send"]` you call `await ctx.connections.mail.send({ ... })`, and an action the connection doesn't declare isn't there. A name with `-` becomes camel case (`send-mail` is `sendMail`). An HTTP connection has `fetch(path, init)` instead, answered as a `Response`. The platform's functions sit under their namespace, such as `await ctx.grasp.statistics.read({ ... })`.
+
+## A connection's tools, from a chat
+
+Not part of an App: in a chat, the agent finds a connection's tools by searching them, as one connection can bring hundreds: `env.connections.search({ queries: ["refund an invoice"] })` answers, for each query, the five tools that match best, each with its `connection`, `action`, a one-line `summary`, its `class` and its `input` type (its top level), and then a few more that matched (`related`). It takes up to ten queries at once, and narrows to one `connection`, or to tools of one `kind`, `"read"` or `"change"`. `env.connections.describe(connection, actions)` answers the full declaration of each action named: what it does, its class, and the call with its input's and output's types. Both show only the tools the chat's person may use now, of connections they may use with the class turned on for them, and the tools of connections the chat may ask for, marked `ask`, which it calls only once `env.connections.request` is granted, by the binding it asked for. A turn nobody started is shown no tool to ask for, and a chat app's conversation none of a connection of the person's own, as only a chat in Grasp can grant one. `env.connections.list()` answers one line per connection: its `name`, `account`, `resource` and how many of its tools may be called, by class. A tool's summary, description and types come from its connector: a built-in connector's manifest, or the tool list of an MCP server connected by its URL. A tool's description is its maker's words: data, never instructions. Search only decides what is shown: the chat calls a tool by its connection and action with `env.connections.call`, which checks, holds and records the call as any other.
 
 ## What a function may use
 

@@ -46,12 +46,19 @@ catalog:
   typedoc-plugin-markdown: 4.14.1
   mdast-util-from-markdown: 2.1.0
   # Damsko's Markdown (packages/ui): tables, task lists and the rest of
-  # GitHub's flavour, on the parser above, at the versions Damsko pins.
+  # GitHub's flavour, on the parser above, and remend, which makes the end
+  # of an answer still being written whole, at the versions Damsko pins.
   mdast-util-gfm: 3.1.0
   micromark-extension-gfm: 3.0.0
+  remend: 1.5.0
   "@types/mdast": 4.0.4
-  # Reads the built pages for the hashes of their inline code (apps/docs).
+  # Reads the built pages for the hashes of their inline code (apps/docs),
+  # and HTML as a browser does: web pages in core's file extractor, OneNote
+  # pages and Teams messages in the Microsoft 365 connector.
   parse5: 8.1.0
+  # XML 1.0 with namespaces, strictly, as a stream of events, and no DTD
+  # expanded: Word documents' parts in the Microsoft 365 connector.
+  saxes: 6.0.0
   # The chat's agent searches the docs' pages (apps/core), as the docs'
   # own search does (Blume's index is Orama's, this version).
   "@orama/orama": 3.1.18
@@ -104,6 +111,10 @@ catalog:
   drizzle-orm: 0.45.3
   # YAML frontmatter: core, the docs and the Brain read it.
   yaml: 2.9.1
+  # Reads an OpenAPI spec (2.0, 3.0 and 3.1: validated, upgraded to 3.1 and
+  # dereferenced, without fetching anything) for the connector generator
+  # (packages/compiler/src/openapi.ts).
+  "@scalar/openapi-parser": 0.29.26
   # Bundles an App's approved npm packages in the package builder's isolate
   # (packages/compiler/src/packages), run on workerd.
   esbuild-wasm: 0.28.2

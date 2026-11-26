@@ -565,12 +565,14 @@ export interface I18nCatalog {
     external: string;
   };
   markdown: {
-    /** The link from a footnote back to where it is used, from its number. */
-    back: (number: number) => string;
+    /** The link from a footnote back to where it is used, from its number and which mark it is. */
+    back: (number: number, mark: number) => string;
     /** What a ticked task says to a screen reader. */
     done: string;
     /** A footnote's mark, said to a screen reader, from its number. */
     footnote: (number: number) => string;
+    /** Under a table drawn only in part, how many rows are not drawn. */
+    moreRows: (count: number) => string;
     /** What a task not yet ticked says. */
     notDone: string;
     /** A table's name when no heading stands above it (`tableLabel`). */
@@ -763,6 +765,18 @@ export interface I18nCatalog {
     name: string;
     /** The fold button's name. */
     toggle: string;
+  };
+  sortableList: {
+    /** How to move an item from the keyboard: every handle's description. */
+    instructions: string;
+    /** Said as an item is picked up: its name, its place from 1 and how many there are. */
+    grabbed: (name: string, position: number, total: number) => string;
+    /** Said at each step of a move. */
+    moved: (name: string, position: number, total: number) => string;
+    /** Said as it is put down. */
+    dropped: (name: string, position: number, total: number) => string;
+    /** Said as it goes back where it was: Escape, Tab, or a change the host refused. */
+    cancelled: (name: string, position: number, total: number) => string;
   };
   sources: {
     count: (count: number) => string;
@@ -1300,9 +1314,14 @@ const english: I18nCatalog = {
     external: "opens in a new tab",
   },
   markdown: {
-    back: (number: number) => `Back to reference ${number}`,
+    back: (number: number, mark: number) =>
+      mark > 1
+        ? `Back to reference ${number}-${mark}`
+        : `Back to reference ${number}`,
     done: "Done",
     footnote: (number: number) => `Footnote ${number}`,
+    moreRows: (count: number) =>
+      count === 1 ? "1 more row" : `${count} more rows`,
     notDone: "Not done",
     table: "Table",
   },
@@ -1427,6 +1446,18 @@ const english: I18nCatalog = {
     main: "Main",
     name: "Sidebar",
     toggle: "Show or hide the sidebar",
+  },
+  sortableList: {
+    instructions:
+      "Press Space or Enter to pick it up, the arrow keys to move it, Space or Enter to put it down, or Escape to put it back.",
+    grabbed: (name, position, total) =>
+      `Picked up ${name}, position ${position} of ${total}.`,
+    moved: (name, position, total) =>
+      `${name}, position ${position} of ${total}.`,
+    dropped: (name, position, total) =>
+      `Put ${name} down at position ${position} of ${total}.`,
+    cancelled: (name, position, total) =>
+      `Put ${name} back at position ${position} of ${total}.`,
   },
   sources: {
     count: (count) =>

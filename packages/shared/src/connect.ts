@@ -7,7 +7,7 @@ import type { OutboxedAuditEvent, OutboxRejected } from "./audit.ts";
 import type { HeldBinding } from "./capability.ts";
 import { chatPlatformSchema } from "./chat.ts";
 import { oauthProviderSchema } from "./connect-names.ts";
-import type { CatalogGroup, OAuthProvider } from "./connect-names.ts";
+import type { CatalogGroup } from "./connect-names.ts";
 import { attachmentBytesSchema } from "./connector-attachments.ts";
 import type { AttachmentEntry } from "./connector-attachments.ts";
 import { directoryProviderSchema } from "./directory.ts";
@@ -145,7 +145,7 @@ const reservedProviderIds: ReadonlySet<string> = new Set([
 
 /**
  * Any other app a person signs in to, with OAuth 2.0 or an API key, as its
- * native connector's provider record describes it (the connector kit's
+ * native connector's provider record describes it (runtime/connector's
  * `signInSchema`): `hubspot`, `sample-crm`. Never one of the suites' names.
  */
 export const appProviderSchema = z
@@ -211,6 +211,142 @@ export const companyToolClasses = [
 export const companyToolClassSchema = z.enum(companyToolClasses);
 export type CompanyToolClass = z.infer<typeof companyToolClassSchema>;
 
+/**
+ * A connector made from an MCP server's URL (connect's src/mcp-connectors.ts):
+ * `mcp_` and 32 random hex digits. Never an app's provider name, which
+ * takes no underscore.
+ */
+export const connectorIdSchema = z.string().regex(/^mcp_[0-9a-f]{32}$/u);
+
+/**
+ * Where a deployment serves its client metadata document (the client ID
+ * an MCP server's authorization server reads, where it takes one), on its
+ * own origin.
+ */
+export const connectorClientMetadataPath =
+  "/api/connections/client-metadata.json";
+
+/** Longest server URL an admin may enter. */
+export const connectorUrlMaxLength = 2048;
+
+/** Headers a connector's key may not go in: connect and HTTP set them. */
+const forbiddenKeyHeaders: ReadonlySet<string> = new Set([
+  "accept",
+  "connection",
+  "content-length",
+  "content-type",
+  "cookie",
+  "host",
+  "mcp-method",
+  "mcp-name",
+  "mcp-protocol-version",
+  "transfer-encoding",
+]);
+
+/**
+ * An admin adding a connector by its MCP server's URL: the one-line
+ * `defineConnector({ name, mcp: { url } })`, and how its server signs in.
+ * OAuth (MCP's authorization), with the client ID and secret its vendor
+ * issued where the server registers no clients itself; or a fixed key in
+ * a header, which each connection then gives.
+ */
+export const addConnectorSchema = z.strictObject({
+  person: connectionPersonSchema,
+  name: z.string().trim().min(1).max(80),
+  /**
+   * The server's own address: nothing but its origin and path, so no
+   * query, fragment or credentials, not even empty ones. One that isn't a
+   * URL at all is `z.url`'s to refuse. Plain HTTP only for a server
+   * reached through the company network, which connect checks.
+   */
+  url: z
+    .url({ protocol: /^https?$/u })
+    .max(connectorUrlMaxLength)
+    .refine((value) => {
+      const parsed = URL.parse(value);
+      return (
+        parsed === null || parsed.href === `${parsed.origin}${parsed.pathname}`
+      );
+    }),
+  /**
+   * Whether the server sits inside the company's own network, reached
+   * through the deployment's company network (GRA-2327): its URL's host
+   * and port are then the one address that route takes, plain HTTP is
+   * taken, its connections are shared ones only, and it signs in with a
+   * key in a header.
+   */
+  companyNetwork: z.boolean().optional(),
+  /** The deployment's origin, from its config: its sign-in returns there. */
+  origin: z.url(),
+  auth: z.discriminatedUnion("kind", [
+    z.strictObject({
+      kind: z.literal("oauth"),
+      client: z
+        .strictObject({
+          id: z.string().min(1).max(512),
+          secret: z.string().min(1).max(4096).optional(),
+        })
+        .optional(),
+    }),
+    z.strictObject({
+      kind: z.literal("header"),
+      header: z
+        .string()
+        .regex(/^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$/u)
+        .transform((header) => header.toLowerCase())
+        .refine(
+          (header) =>
+            !forbiddenKeyHeaders.has(header) && !header.startsWith("mcp-"),
+          "A header connect sets itself"
+        ),
+    }),
+  ]),
+});
+export type AddConnector = z.input<typeof addConnectorSchema>;
+
+/**
+ * A tool name a connector's server may list: MCP's own rule for names (1
+ * to 128 of letters, digits, `_`, `-` and `.`).
+ */
+export const connectorToolNameSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9_.-]{1,128}$/u);
+
+/** An admin reading a connector's tools (`ConnectApi.connectorTools`). */
+export const connectorToolsRequestSchema = z.strictObject({
+  person: connectionPersonSchema,
+  connector: connectorIdSchema,
+});
+export type ConnectorToolsRequest = z.input<typeof connectorToolsRequestSchema>;
+
+/**
+ * An admin blocking a connector's tool by its name, or letting it through
+ * again (`ConnectApi.blockConnectorTool`). A name no list holds yet may be
+ * blocked before a server lists it.
+ */
+export const blockConnectorToolSchema = z.strictObject({
+  person: connectionPersonSchema,
+  connector: connectorIdSchema,
+  tool: connectorToolNameSchema,
+  blocked: z.boolean(),
+});
+export type BlockConnectorTool = z.input<typeof blockConnectorToolSchema>;
+
+/**
+ * A tool of a connector made from a URL, as an admin sees it: by the name
+ * its server lists it under, its description in the server's own words
+ * (text to show as it is, never to follow), its class by the rules on a
+ * shared connection (on a personal one a `-company` class is `-own`), and
+ * whether an admin blocked it. A blocked name no connection's list holds
+ * now has neither description nor class.
+ */
+export interface ConnectorToolView {
+  name: string;
+  description: string | null;
+  class: ToolClass | null;
+  blocked: boolean;
+}
+
 /** Starts connecting an account through OAuth. */
 export const startConnectionSchema = z.strictObject({
   person: connectionPersonSchema,
@@ -223,6 +359,7 @@ export const startConnectionSchema = z.strictObject({
     connectorProviderSchema,
     directoryProviderSchema,
     placesProviderSchema,
+    connectorIdSchema,
   ]),
   scope: connectionScopeSchema,
   /** The deployment's origin, from its config: the provider returns there. */
@@ -270,6 +407,12 @@ export const finishConnectionSchema = z.strictObject({
   code: z.string().min(1).max(4096).optional(),
   /** The provider's error code, when it sent one instead of a code. */
   error: z.string().min(1).max(256).optional(),
+  /**
+   * The authorization server's `iss` on its answer (RFC 9207), as the
+   * browser brought it: an MCP server's sign-in checks it against the
+   * issuer it recorded before the code is redeemed.
+   */
+  iss: z.string().min(1).max(2048).optional(),
 });
 export type FinishConnection = z.input<typeof finishConnectionSchema>;
 
@@ -295,7 +438,7 @@ export const connectWithKeySchema = z.strictObject({
    * An app's provider, or an HR platform's read-only admin connection,
    * which no connector's calls use.
    */
-  provider: z.union([appProviderSchema, hrProviderSchema]),
+  provider: z.union([appProviderSchema, hrProviderSchema, connectorIdSchema]),
   scope: connectionScopeSchema,
   /** Printable ASCII only: it goes into a request header as it is. */
   key: z
@@ -303,6 +446,15 @@ export const connectWithKeySchema = z.strictObject({
     .min(1)
     .max(apiKeyMaxLength)
     .regex(/^[\u0021-\u007E]+$/u, "Not an API key"),
+  /**
+   * For an app's shared connection to a system inside the company's own
+   * network: the one address its requests go to, through the
+   * deployment's company network, as an http or https origin with its
+   * port (`http://10.0.0.8:8080`). Sealed with the key, so another
+   * address takes the key again (GRA-2327). A connector made from a URL
+   * names its own (`AddConnector.companyNetwork`).
+   */
+  companyNetwork: z.string().max(connectorUrlMaxLength).optional(),
 });
 export type ConnectWithKey = z.input<typeof connectWithKeySchema>;
 
@@ -430,6 +582,11 @@ export interface ConnectionSummary {
   /** ISO 8601. */
   createdAt: string;
   /**
+   * For a shared connection reached through the company network, the one
+   * address its requests go to, as an origin.
+   */
+  companyNetwork?: string;
+  /**
    * How a Composio connection was made, and so which consent was given:
    * signing in (`managed`, {@link composioConsentText}) or with a key
    * (`key`, {@link composioKeyConsentText}). Absent for a native
@@ -514,15 +671,17 @@ export interface ListedConnection extends ConnectionSummary {
 /**
  * Whether a person can sign in again to `connection`: whoever may
  * disconnect it (its owner, or an admin for a shared one), never Grasp
- * staff, only a native one, and only while its catalog entry is offered.
+ * staff, only a native suite's or a connector's made from a URL, and only
+ * while its catalog entry is offered.
  */
 export const canSignInAgain = (
   connection: Pick<ListedConnection, "source" | "provider" | "scope">,
   offered: boolean,
   person: { role: string; staff: boolean }
 ): boolean =>
-  connection.source === "native" &&
-  oauthProviderSchema.safeParse(connection.provider).success &&
+  ((connection.source === "native" &&
+    oauthProviderSchema.safeParse(connection.provider).success) ||
+    connection.source === "connector") &&
   offered &&
   (connection.scope === "personal" || isAdmin(person.role)) &&
   !person.staff;
@@ -609,7 +768,9 @@ export interface ConnectionOwner {
   /**
    * For a Composio connection: the class connect takes each tool it
    * offers to be (its review's, and the admin's rule: connect's
-   * `allowedTool`), by the tool's name. Core holds the chat's agent's calls
+   * `allowedTool`), by the tool's name. For a connection to a connector
+   * made from a URL: each tool's class by the rules, from its server's
+   * tool list as connect last read it. Core holds the chat's agent's calls
    * of them to the classes the company turned on. Absent for a native
    * connection, whose classes core reads from the release.
    */
@@ -665,11 +826,52 @@ export const revocationsListed = 200;
  * finished with the account it holds, it is that connection again.
  */
 export interface ConnectionsApi extends StephenReachApi, AgentsApi {
+  /**
+   * Starts signing in to a native suite (`OAuthProvider`), or to a
+   * connector made from a URL whose server signs in with OAuth, by its ID:
+   * the provider's URL to send the browser to.
+   */
   start: (request: {
-    provider: OAuthProvider;
+    provider: string;
     scope: ConnectionScope;
     returnTo?: string;
   }) => Promise<{ url: string }>;
+  /**
+   * Connects a connector made from a URL whose server takes a key in a
+   * header, with the key the person typed: core passes it on to connect
+   * and keeps nothing of it. The answer is where to send the browser
+   * next, the connector's page by default, with the connection.
+   */
+  connectWithKey: (request: {
+    provider: string;
+    scope: ConnectionScope;
+    key: string;
+    returnTo?: string;
+  }) => Promise<{ url: string }>;
+  /**
+   * Adds a connector by its MCP server's URL (GRA-1375): connect learns
+   * how it signs in and registers there, and it is in the catalog,
+   * offered, from then on. Admins only, never Grasp staff; audited.
+   */
+  addConnector: (
+    request: Omit<AddConnector, "person" | "origin">
+  ) => Promise<{ id: string }>;
+  /**
+   * A connector's tools as its server lists them to its connections now,
+   * with their classes, and the names an admin blocked
+   * (`ConnectorToolView`). Admins only.
+   */
+  connectorTools: (connector: string) => Promise<ConnectorToolView[]>;
+  /**
+   * Blocks one of a connector's tools by its name, or lets it through
+   * again: a blocked tool is offered to nobody and refused at the call,
+   * before anything goes out. Admins only, never Grasp staff; audited.
+   */
+  blockConnectorTool: (request: {
+    connector: string;
+    tool: string;
+    blocked: boolean;
+  }) => Promise<void>;
   list: () => Promise<ListedConnection[]>;
   disconnect: (connectionId: string) => Promise<{ revoked: boolean }>;
   /**
@@ -891,13 +1093,17 @@ export interface SharedSyncPlaces {
 }
 
 // The catalog: everything an admin can connect, in one list. Native
-// providers (our own connectors, whose tokens connect holds) and, next to
-// them, Composio's toolkits, whose tokens sit in Composio's cloud. Each
-// entry says which it is, so people can tell who holds the tokens before
-// they connect anything.
+// providers (our own connectors, whose tokens connect holds), the
+// connectors an admin made from an MCP server's URL (GRA-1375, whose
+// tokens connect holds too) and Composio's toolkits, whose tokens sit in
+// Composio's cloud. Each entry says which it is, so people can tell who
+// holds the tokens before they connect anything.
 
-/** Who carries out a catalog entry's actions: our connector, or Composio. */
-export const catalogSourceSchema = z.enum(["native", "composio"]);
+/**
+ * Who carries out a catalog entry's actions: our connector, a connector
+ * made from an MCP server's URL, or Composio.
+ */
+export const catalogSourceSchema = z.enum(["native", "composio", "connector"]);
 export type CatalogSource = z.infer<typeof catalogSourceSchema>;
 
 /**
@@ -913,13 +1119,15 @@ export const composioToolkitSchema = z
 
 /**
  * A catalog entry by its source and its ID there, as something other than
- * a connection names it (an App's integrations): a native provider, or a
- * Composio toolkit's slug. Checked for form only, so it stays valid while
- * the catalog doesn't list it (Composio not answering, say).
+ * a connection names it (an App's integrations): a native provider, a
+ * Composio toolkit's slug, or a connector's ID. Checked for form only, so
+ * it stays valid while the catalog doesn't list it (Composio not
+ * answering, say).
  */
 export const catalogEntryRefSchema = z.discriminatedUnion("source", [
   z.strictObject({ source: z.literal("native"), id: connectorProviderSchema }),
   z.strictObject({ source: z.literal("composio"), id: composioToolkitSchema }),
+  z.strictObject({ source: z.literal("connector"), id: connectorIdSchema }),
 ]);
 export type CatalogEntryRef = z.infer<typeof catalogEntryRefSchema>;
 
@@ -930,8 +1138,12 @@ export interface CatalogEntry {
   id: string;
   name: string;
   categories: string[];
-  /** How many tools it has; `catalogTools` lists them. */
-  toolCount: number;
+  /**
+   * How many tools it has; `catalogTools` lists them. `null` for a
+   * connector made from a URL, whose server lists its tools only to a
+   * connection.
+   */
+  toolCount: number | null;
   /**
    * Where its logo is, on the deployment's own origin
    * ({@link catalogLogoUrl}), or `null` when it has none: the page draws its
@@ -941,21 +1153,44 @@ export interface CatalogEntry {
   logo: string | null;
   /**
    * What it is for, in its provider's words: the first sentence of its
-   * description ({@link firstSentence}), or `null` when it has none.
+   * description ({@link firstSentence}), or `null` when it has none. Always
+   * `null` for a native one: the web words Grasp's own connectors in each
+   * of its languages, by their ids.
    */
   description: string | null;
+  /**
+   * The products a native one reaches, by their own names, which are never
+   * translated: a routine naming one of them is in it. A Composio toolkit
+   * has none; its name is all it is known by.
+   */
+  products?: string[];
   /** Which of Grasp's kinds of app it is ({@link catalogGroupOf}). */
   group: CatalogGroup;
   /** Whose sign-in app connecting it takes ({@link CatalogAuth}). */
   auth: CatalogAuth;
+  /**
+   * For a connector whose server sits inside the company's own network,
+   * the one address it is reached at through the company network, as an
+   * origin: only an admin connects it, as a shared connection.
+   */
+  companyNetwork?: string;
+
+  /**
+   * For a connector made from a URL whose server signs in with OAuth, the
+   * host its sign-in page is on (its authorization endpoint's), shown
+   * where people connect it: any public host can draw a sign-in page.
+   */
+  signInHost?: string;
 }
 
 /**
  * What connecting an entry takes. `managed`: signing in, with an app Grasp
- * or Composio holds, so connecting needs nothing but consent; every native
- * provider is. `key`: a Composio toolkit Composio connects with a key, a
- * token or a username and password, which an admin types into Grasp's own
- * form (`ConnectionsApi.keyFields`). `own`: a Composio toolkit that only
+ * or Composio holds, or one a connector's server registered, so connecting
+ * needs nothing but consent; every native provider is. `key`: a Composio
+ * toolkit Composio connects with a key, a token or a username and password,
+ * which an admin types into Grasp's own form (`ConnectionsApi.keyFields`),
+ * or a connector whose server takes a key in a header, which each person
+ * types as they connect it (`ConnectionsApi.connectWithKey`). `own`: a Composio toolkit that only
  * signs in with an OAuth app nobody registered for this deployment, which
  * Grasp can't take yet, so connecting it is refused
  * (`connection.own_auth_required`).
@@ -2167,6 +2402,39 @@ export interface ConnectApi
     connectionIds: readonly string[]
   ) => Promise<ConnectionOwner[]>;
   /**
+   * The classes of the tools of a connection to a connector made from a
+   * URL, by the rules, from its server's tool list as it is now (read
+   * again once the last read is stale): what core's class gate checks a
+   * chat agent's call by. Empty for any other connection;
+   * `connect.server_unavailable` when the list can't be read.
+   */
+  connectorToolClasses: (
+    connectionId: string
+  ) => Promise<Record<string, Exclude<ToolClass, "never">>>;
+  /**
+   * The tools each connection to a connector in `connectionIds` (at most
+   * `connectionOwnersMax`) offers to ask for, by ID: those of its list as
+   * connect keeps it that the rules class, answered at once. A list gone
+   * stale or never read is read again after the answer, for the next ask.
+   * Any other connection, an inactive one or an unknown ID is left out.
+   */
+  offeredConnectorTools: (
+    connectionIds: readonly string[]
+  ) => Promise<Record<string, string[]>>;
+  /**
+   * A connector's tools for an admin (`ConnectorToolView`): each its
+   * connections' lists hold now, by name, and each name blocked.
+   */
+  connectorTools: (
+    request: ConnectorToolsRequest
+  ) => Promise<ConnectorToolView[]>;
+  /**
+   * Blocks a connector's tool by name for every connection to it, or lets
+   * it through again, for an admin who isn't staff; audited once for a
+   * change, never for one that changes nothing.
+   */
+  blockConnectorTool: (request: BlockConnectorTool) => Promise<void>;
+  /**
    * The suite accounts the person `userId` connected as their own,
    * disconnected ones too, as connect verified them (`PersonalAccount`):
    * what core counts them as a reader of where it copies who may read an
@@ -2240,9 +2508,9 @@ export interface ConnectApi
    */
   flowReturn: (request: FlowReturn) => Promise<string | undefined>;
   /**
-   * The catalog: the native providers, then Composio's toolkits if
-   * connect has a Composio key. Composio failing to answer leaves the
-   * native entries listed.
+   * The catalog: the native providers, the connectors admins made from a
+   * URL, then Composio's toolkits if connect has a Composio key. Composio
+   * failing to answer leaves the others listed.
    */
   catalog: () => Promise<Catalog>;
   /**
@@ -2321,6 +2589,18 @@ export interface ConnectApi
    * server is asked: `connectorContract` reads each as it is served now.
    */
   connectorContracts: (request: ConnectorContractsRequest) => Promise<string[]>;
+  /**
+   * The tools a call of connection `connectionId` may name, each with its
+   * description and schemas: a native connection's as its connector's
+   * manifest in this release has them; a connector's, in full for
+   * `actions` alone, as its server lists them now, else as connect keeps
+   * them, at once (a stale list is read again after). None for any other
+   * connection, or one that is gone; `connect.server_unavailable` when a
+   * connector's list can't be read for `actions`.
+   */
+  connectionTools: (
+    request: ConnectionToolsRequest
+  ) => Promise<ConnectionTool[]>;
   /**
    * Whether an action of a connection only reads, the input properties it
    * takes and the connection's provider (`ActionShape`), by the rules a
@@ -2525,6 +2805,16 @@ export const connectionErrors = defineErrorFamily({
     "That origin can't be approved: it must be an https origin whose name leads only to public internet addresses.",
   "connection.tools_changed":
     "Someone changed this connection's tools at the same time. Look at them again and make your change once more.",
+  "connection.server_refused":
+    "That server can't be added: its address must be an https URL with a name, not an IP address, that leads only to public internet addresses.",
+  "connection.sign_in_unsupported":
+    "That server's sign-in doesn't follow MCP's authorization (protected-resource and authorization-server metadata, PKCE with S256), so Grasp can't connect to it safely.",
+  "connection.client_required":
+    "That server takes only clients registered with it. Enter the client ID its vendor issued for Grasp.",
+  "connection.connector_exists":
+    "A connector for that server was already added.",
+  "connection.company_network_unavailable":
+    "This deployment can't reach your company's network, so nothing can be connected through it yet.",
 });
 
 /** Which App's held actions of which binding to drop. */
@@ -2552,11 +2842,14 @@ export type AppDropRequest = z.input<typeof appDropRequestSchema>;
 
 /**
  * A generated contract's ID: `<connector>.<family>@<major>`, or
- * `composio.<toolkit>@1`.
+ * `composio.<toolkit>@1`. A family is a tool's name but its last part, so
+ * it is written as tool names are, and may have parts of its own
+ * (`deals.followers` of `deals.followers.list`).
  */
 export const connectorContractIdSchema = z
   .string()
-  .regex(/^[a-z][a-z0-9-]{0,62}\.[a-z][a-z0-9_-]{0,62}@[1-9]\d{0,5}$/u);
+  .max(256)
+  .regex(/^[a-z][a-z0-9-]{0,62}(?:\.[A-Za-z][\w-]*)+@[1-9]\d{0,5}$/u);
 
 /** Which contract to read, and the connection that must serve it. */
 export const connectorContractRequestSchema = z.strictObject({
@@ -2574,6 +2867,38 @@ export const connectorContractsRequestSchema = z.strictObject({
 export type ConnectorContractsRequest = z.input<
   typeof connectorContractsRequestSchema
 >;
+
+/**
+ * The connection whose tools `connectionTools` lists, and the tools to
+ * describe in full, if only some.
+ */
+export const connectionToolsRequestSchema = z.strictObject({
+  connectionId: connectionIdSchema,
+  actions: z.array(permissionActionSchema).min(1).max(20).optional(),
+});
+export type ConnectionToolsRequest = z.input<
+  typeof connectionToolsRequestSchema
+>;
+
+/**
+ * One tool a call of a connection may name, as its connector or server
+ * describes it: what core's tool search ranks and describes to the chat's
+ * agent. Data only: a call is still checked as any other.
+ */
+export interface ConnectionTool {
+  /** The action a call names, exactly. */
+  name: string;
+  /** What it does, as its connector or server says; empty if it says nothing. */
+  description: string;
+  /**
+   * The JSON Schemas of its input and output, as JSON text. In full only
+   * when it was named (`ConnectionToolsRequest.actions`): a search reads
+   * the start of its description, its input's types alone and no output.
+   */
+  input: string;
+  /** Null for a search, or a tool that lists no output schema. */
+  output: string | null;
+}
 
 /** Which action of which connection `actionShape` describes. */
 export const actionShapeRequestSchema = z.strictObject({
@@ -2622,13 +2947,13 @@ export interface ConnectorContractAction {
   input: string;
   output: string;
   /**
-   * It reads a file and answers its content (connector-kit's `contentAs`),
+   * It reads a file and answers its content (the connector runtime's `contentAs`),
    * which a workflow action may have core keep as a file of its run
    * (GRA-886). Only a native connector's read declares it; never Composio's.
    */
   answersFile?: true;
   /**
-   * It attaches files (connector-kit's `takesFiles`): its input has an
+   * It attaches files (a native tool's `takesFiles`): its input has an
    * `attachments` property, which in this contract names run files by ID
    * and which core turns into digests and bytes for a workflow's call
    * (GRA-887). Only a native connector's write declares it.
@@ -2729,6 +3054,8 @@ export const connectErrors = defineErrorFamily({
     "This connection now reaches another account than when the action was asked for, so it wasn't run.",
   "connect.server_unavailable":
     "The connection's server didn't take the call, so nothing was done.",
+  "connect.rate_limited":
+    "The outside system asked Grasp to slow down on this connection, so nothing was sent. Try again after `retryAfterSeconds`.",
   "connect.catalog_entry_not_found": "There's no such entry in the catalog.",
   "connect.catalog_unavailable":
     "Composio's toolkits can't be listed right now. Try again shortly.",
@@ -2738,6 +3065,10 @@ export const connectErrors = defineErrorFamily({
     "Your company hasn't turned this kind of action on for you, so it wasn't done. An admin can turn it on.",
   "connect.class_unknown":
     "It isn't known what kind of action this is, so it wasn't done.",
+  "connect.class_changed":
+    "The app now describes this action as another kind than when it was checked, so it wasn't done. Try again.",
+  "connect.tool_blocked":
+    "An admin blocked this tool of the app, so it wasn't done.",
   "connect.never":
     "Grasp never deletes, shares, forwards, sets rules or settings, or pays, whatever is allowed, so it wasn't done.",
   "connect.app_not_pointed":

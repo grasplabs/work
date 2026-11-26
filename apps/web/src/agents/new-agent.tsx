@@ -26,6 +26,7 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemGroup,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import { KeyValueList } from "@grasp-os/ui/components/key-value";
@@ -55,7 +56,6 @@ import type { ReactNode } from "react";
 
 import { pageText } from "../frame/page-text.ts";
 import { useCoreAction } from "../use-core-action.ts";
-import { SeparatedItems } from "../workflows/separated-items.tsx";
 import { briefOf, instructionsOf } from "./agent-brief.ts";
 import { AgentFailure } from "./agent-facts.tsx";
 import { agentTemplates } from "./agent-templates.ts";
@@ -869,34 +869,30 @@ export const NewAgent = ({
           <DrawerBody>
             {/* Why it wasn't made, from core, above what to change. */}
             <AgentFailure>{failure}</AgentFailure>
-            <SeparatedItems
-              aria-label={t`The new agent`}
-              rows={asked.map((each, index) => ({
-                key: each,
-                row: (
-                  <Item key={each} size="sm">
-                    <ItemContent>
-                      <ItemTitle>{words.short[each]}</ItemTitle>
-                      <ItemDescription>
-                        {words.answerOf(each, draft)}
-                      </ItemDescription>
-                    </ItemContent>
-                    <ItemActions>
-                      <Button
-                        onClick={() => {
-                          setReviewing(false);
-                          setAt(index);
-                        }}
-                        size="sm"
-                        variant="ghost"
-                      >
-                        {t`Change`}
-                      </Button>
-                    </ItemActions>
-                  </Item>
-                ),
-              }))}
-            />
+            <ItemGroup separated aria-label={t`The new agent`}>
+              {asked.map((each, index) => (
+                <Item key={each} size="sm">
+                  <ItemContent>
+                    <ItemTitle>{words.short[each]}</ItemTitle>
+                    <ItemDescription>
+                      {words.answerOf(each, draft)}
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <Button
+                      onClick={() => {
+                        setReviewing(false);
+                        setAt(index);
+                      }}
+                      size="sm"
+                      variant="ghost"
+                    >
+                      {t`Change`}
+                    </Button>
+                  </ItemActions>
+                </Item>
+              ))}
+            </ItemGroup>
           </DrawerBody>
           <DrawerFooter>
             <DrawerClose>{t`Keep editing`}</DrawerClose>

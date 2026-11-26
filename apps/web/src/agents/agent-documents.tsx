@@ -28,6 +28,7 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -40,7 +41,6 @@ import { useState } from "react";
 import type { Session } from "../core.ts";
 import { formatBytes } from "../format.ts";
 import { useHeldDialog } from "../workflows/held-dialog.ts";
-import { SeparatedItems } from "../workflows/separated-items.tsx";
 import { SectionCard } from "./section-card.tsx";
 
 // An agent's documents, on its page's Instructions part (agent-page.tsx):
@@ -219,45 +219,41 @@ export const AgentDocuments = ({
         </Empty>
       ) : null}
       {documents === undefined || documents.length === 0 ? null : (
-        <SeparatedItems
-          aria-label={t`Documents`}
-          rows={documents.map((document) => {
+        <ItemGroup aria-label={t`Documents`} separated>
+          {documents.map((document) => {
             const file = document.name;
             const size = formatBytes(document.bytes);
             const when = added(document.addedAt);
-            return {
-              key: document.id,
-              row: (
-                <Item key={document.id} size="sm">
-                  <ItemMedia variant="default">
-                    <Icon icon={FileIcon} />
-                  </ItemMedia>
-                  <ItemContent>
-                    <ItemTitle>{file}</ItemTitle>
-                    <ItemDescription>{t`${size} · Added ${when}`}</ItemDescription>
-                  </ItemContent>
-                  {editable ? (
-                    <ItemActions>
-                      {/* Asks first: a removed document can't be put back without its file. */}
-                      <RemoveDocument
-                        can={can}
-                        file={file}
-                        remove={async () =>
-                          await change(async (session) => {
-                            await session.connections.removeAgentDocument(
-                              agent.id,
-                              document.id
-                            );
-                          })
-                        }
-                      />
-                    </ItemActions>
-                  ) : null}
-                </Item>
-              ),
-            };
+            return (
+              <Item key={document.id} size="sm">
+                <ItemMedia variant="default">
+                  <Icon icon={FileIcon} />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>{file}</ItemTitle>
+                  <ItemDescription>{t`${size} · Added ${when}`}</ItemDescription>
+                </ItemContent>
+                {editable ? (
+                  <ItemActions>
+                    {/* Asks first: a removed document can't be put back without its file. */}
+                    <RemoveDocument
+                      can={can}
+                      file={file}
+                      remove={async () =>
+                        await change(async (session) => {
+                          await session.connections.removeAgentDocument(
+                            agent.id,
+                            document.id
+                          );
+                        })
+                      }
+                    />
+                  </ItemActions>
+                ) : null}
+              </Item>
+            );
           })}
-        />
+        </ItemGroup>
       )}
     </SectionCard>
   );

@@ -1,15 +1,30 @@
+import { CardContent } from "@grasp-os/ui/components/card";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemGroup,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { Text } from "@grasp-os/ui/components/text";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { PageLoading } from "../../admin/failure.tsx";
 import { AdminPage } from "../../admin/page.tsx";
+import { EmptyPanel, Panel } from "../../admin/panel.tsx";
 import { fetchPlatform } from "../../admin/platform-data.ts";
 import { platformCrumb, PlatformNav } from "../../admin/platform-nav.tsx";
 import { eventWords } from "../../admin/platform-parts.tsx";
 import type { StaffEvent } from "../../admin/platform-reads.ts";
 import { SharedSecrets } from "../../admin/secrets-parts.tsx";
-import { EmptySection, Section } from "../../admin/section.tsx";
 import { formatDate } from "../../admin/words.ts";
 import { fetchClientGrid } from "../../clients/functions.ts";
+
+const styles = stylex.create({
+  page: { display: "flex", flexDirection: "column", gap: space["6"] },
+});
 
 /** A day, as the admin's pages say it. */
 const dayOf = (at: Date): string => formatDate(at.toISOString().slice(0, 10));
@@ -23,25 +38,28 @@ const DoneHere = ({
   names: ReadonlyMap<string, string>;
 }) =>
   events.length === 0 ? (
-    <EmptySection>Nobody at Grasp did anything here yet.</EmptySection>
+    <EmptyPanel>Nobody at Grasp did anything here yet.</EmptyPanel>
   ) : (
-    <Section title="Done here">
-      <ul className="flex flex-col">
-        {events.map((event) => (
-          <li
-            className="flex items-baseline justify-between gap-4 border-t px-5 py-3"
-            key={event.id}
-          >
-            <span className="min-w-0">
-              {eventWords(event, (id) => names.get(id) ?? id)}
-            </span>
-            <span className="text-muted-foreground flex-none text-xs tabular-nums">
-              {dayOf(event.at)}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </Section>
+    <Panel title="Done here">
+      <CardContent flush>
+        <ItemGroup separated>
+          {events.map((event) => (
+            <Item key={event.id} size="sm">
+              <ItemContent>
+                <ItemTitle>
+                  {eventWords(event, (id) => names.get(id) ?? id)}
+                </ItemTitle>
+              </ItemContent>
+              <ItemActions>
+                <Text as="span" color="muted" size="xs">
+                  {dayOf(event.at)}
+                </Text>
+              </ItemActions>
+            </Item>
+          ))}
+        </ItemGroup>
+      </CardContent>
+    </Panel>
   );
 
 /**
@@ -55,7 +73,7 @@ const MaintenancePage = () => {
   return (
     <AdminPage parents={[platformCrumb]} title="Maintenance">
       <PlatformNav />
-      <div className="flex flex-col gap-6 text-sm">
+      <div {...stylex.props(styles.page)}>
         <SharedSecrets />
         <DoneHere events={platform.events} names={names} />
       </div>

@@ -5,6 +5,7 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -22,7 +23,6 @@ import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 
-import { SeparatedItems } from "../../workflows/separated-items.tsx";
 import { SectionCard } from "../section-card.tsx";
 import { toggled } from "./model.ts";
 import type { Ability, StepProps } from "./model.ts";
@@ -78,53 +78,46 @@ export const AbilitiesStep = ({ setup, change, name }: StepProps) => {
             key={group.key}
             title={groupNames[group.key] ?? ""}
           >
-            <SeparatedItems
-              rows={group.abilities.map((ability) => {
+            <ItemGroup separated>
+              {group.abilities.map((ability) => {
                 const { label, info } = abilityNames[ability];
                 const on = setup.abilities.has(ability);
-                return {
-                  key: ability,
-                  row: (
-                    <Item key={ability} size="sm">
-                      <ItemMedia align="center">
-                        <IconTile
-                          icon={marks[ability]}
-                          size="sm"
-                          variant={on ? "tinted" : "default"}
-                        />
-                      </ItemMedia>
-                      <ItemContent>
-                        <ItemTitle>{label}</ItemTitle>
-                        {asksFirst.has(ability) ? (
-                          <span>
-                            <Badge size="sm" variant="warning">
-                              {t`Asks you first`}
-                            </Badge>
-                          </span>
-                        ) : (
-                          <ItemDescription>{info}</ItemDescription>
-                        )}
-                      </ItemContent>
-                      <ItemActions>
-                        <Switch
-                          aria-label={label}
-                          checked={on}
-                          onCheckedChange={(next) => {
-                            change({
-                              abilities: toggled(
-                                setup.abilities,
-                                ability,
-                                next
-                              ),
-                            });
-                          }}
-                        />
-                      </ItemActions>
-                    </Item>
-                  ),
-                };
+                return (
+                  <Item key={ability} size="sm">
+                    <ItemMedia align="center">
+                      <IconTile
+                        icon={marks[ability]}
+                        size="sm"
+                        variant={on ? "tinted" : "default"}
+                      />
+                    </ItemMedia>
+                    <ItemContent>
+                      <ItemTitle>{label}</ItemTitle>
+                      {asksFirst.has(ability) ? (
+                        <span>
+                          <Badge size="sm" variant="warning">
+                            {t`Asks you first`}
+                          </Badge>
+                        </span>
+                      ) : (
+                        <ItemDescription>{info}</ItemDescription>
+                      )}
+                    </ItemContent>
+                    <ItemActions>
+                      <Switch
+                        aria-label={label}
+                        checked={on}
+                        onCheckedChange={(next) => {
+                          change({
+                            abilities: toggled(setup.abilities, ability, next),
+                          });
+                        }}
+                      />
+                    </ItemActions>
+                  </Item>
+                );
               })}
-            />
+            </ItemGroup>
           </SectionCard>
         ))}
       </div>

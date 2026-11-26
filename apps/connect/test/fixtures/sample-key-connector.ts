@@ -1,15 +1,11 @@
 /**
  * An app that signs in with an API key, as connect's tests load it: one
- * connector, its provider record (`signIn`) included, and no change to
- * connect. Its provider is test/app-provider.ts's fake. `items.forge`
- * plays connector code gone wrong: it sends a key of its own.
+ * connector written on `@grasp-os/sdk/connector`, its sign-in included,
+ * and no change to connect. Its provider is test/app-provider.ts's fake.
+ * `boards.items.forge` plays connector code gone wrong: it sends a key of its
+ * own, past the API it is given.
  */
-import {
-  defineConnector,
-  defineTool,
-  ToolError,
-} from "@grasp-os/connector-kit/connector";
-import { z } from "zod";
+import { auth, defineConnector, page, tool, v } from "@grasp-os/sdk/connector";
 
 /** The app's API, which its connector calls and its key is checked at. */
 export const sampleKeyApiHost = "api.sample-key.test";
@@ -17,78 +13,65 @@ export const sampleKeyApiHost = "api.sample-key.test";
 /** The header the app takes its key in. */
 export const sampleKeyHeader = "x-api-key";
 
-const api = `https://${sampleKeyApiHost}`;
-
-const itemSchema = z.object({ id: z.string(), title: z.string() });
-
-const list = async (
-  board: string,
-  headers: Record<string, string> = {}
-): Promise<{ output: { items: z.infer<typeof itemSchema>[] } }> => {
-  const response = await fetch(
-    `${api}/v1/boards/${encodeURIComponent(board)}/items`,
-    { headers }
-  );
-  if (!response.ok) {
-    throw new ToolError(`The app answered ${response.status}`);
-  }
-  const { items } = z
-    .object({ items: z.array(itemSchema) })
-    .parse(await response.json());
-  return { output: { items } };
-};
-
-const boardInput = z.strictObject({ board: z.string().min(1) });
-const itemsOutput = z.strictObject({ items: z.array(itemSchema) });
-const listRoute = {
-  method: "GET",
-  host: sampleKeyApiHost,
-  path: "/v1/boards/{board}/items",
-} as const;
+const Item = v.object({ id: v.string(), title: v.string() });
+const Items = v.object({ items: v.array(Item) });
 
 export default defineConnector({
   name: "sample-key",
-  version: "1.0.0",
-  provider: "sample-key",
-  signIn: {
-    kind: "api_key",
-    name: "Sample key app",
+  title: "Sample key app",
+  hosts: [sampleKeyApiHost],
+  base: "/v1",
+  auth: auth.apiKey({
     header: sampleKeyHeader,
     account: {
-      url: `${api}/v1/whoami`,
+      url: `https://${sampleKeyApiHost}/v1/whoami`,
       id: "/account/id",
       name: "/account/name",
       email: "/account/email",
     },
-  },
-  scopes: [],
-  hosts: [sampleKeyApiHost],
-  tools: [
-    defineTool({
-      name: "items.list",
+  }),
+  tools: {
+    "boards.items.list": tool({
       description: "Lists the items on a board",
-      input: boardInput,
-      output: itemsOutput,
       readOnly: true,
       reach: "own",
       resource: "board",
-      routes: [listRoute],
-      run: async ({ board }) => await list(board),
+      routes: ["GET /boards/{board}/items"],
+      args: { board: v.string().min(1) },
+      returns: page(Item),
+      handler: async ({ board }, api) => {
+        const answer = await api.get("/boards/{board}/items", {
+          path: { board },
+          returns: Items,
+        });
+        return { items: answer.items, next: null };
+      },
     }),
-    defineTool({
-      name: "items.forge",
+    "boards.items.forge": tool({
       description: "Lists the items on a board with a key of its own",
-      input: boardInput,
-      output: itemsOutput,
       readOnly: true,
       reach: "own",
       resource: "board",
-      routes: [listRoute],
-      run: async ({ board }) =>
-        await list(board, {
-          [sampleKeyHeader]: "a-key-the-connector-chose",
-          authorization: "Bearer a-token-the-connector-chose",
-        }),
+      routes: ["GET /boards/{board}/items"],
+      args: { board: v.string().min(1) },
+      returns: Items,
+      handler: async ({ board }) => {
+        const response = await fetch(
+          `https://${sampleKeyApiHost}/v1/boards/${encodeURIComponent(board)}/items`,
+          {
+            headers: {
+              [sampleKeyHeader]: "a-key-the-connector-chose",
+              authorization: "Bearer a-token-the-connector-chose",
+            },
+          }
+        );
+        const answer: unknown = await response.json();
+        const checked = Items["~standard"].validate(answer);
+        if (checked.issues !== undefined) {
+          throw new Error(`The app answered ${response.status}`);
+        }
+        return checked.value;
+      },
     }),
-  ],
+  },
 });

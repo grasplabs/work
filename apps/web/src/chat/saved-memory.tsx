@@ -3,6 +3,7 @@ import type {
   ChatSavedMemory,
 } from "@grasp-os/shared/brain-memories";
 import { Button } from "@grasp-os/ui/components/button";
+import { Text } from "@grasp-os/ui/components/text";
 import {
   Trace,
   TraceDescription,
@@ -11,8 +12,9 @@ import {
   TraceTitle,
 } from "@grasp-os/ui/components/trace";
 import { BrainIcon, Icon } from "@grasp-os/ui/lib/icons";
-import { font, size } from "@grasp-os/ui/lib/tokens.stylex";
-import { Trans } from "@lingui/react/macro";
+import { font, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { announce } from "@grasp-os/ui/lib/utils";
+import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
@@ -20,21 +22,16 @@ import { formatList } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 const styles = stylex.create({
-  // Undo stands in the line of words without making the line taller, so
-  // the words stay level with the line's mark.
-  undo: { marginBlock: `calc((${font.textSmLine} - ${size.controlXs}) / 2)` },
+  // Undo stands in the line of words without making it taller, so the
+  // words stay level with the line's mark in every state; a step after
+  // the statement, so its focus ring stays clear of the last letter.
+  undo: {
+    marginBlock: `calc((${font.textSmLine} - ${size.controlXs}) / 2)`,
+    marginInlineStart: space["1"],
+  },
+  // A note on a row of its own, under the words, where they start.
+  below: { flexBasis: "100%" },
 });
-
-/** What kind of thing Grasp saved, as the line's title. */
-const SavedTitle = ({ type }: Pick<ChatSavedMemory, "type">) => {
-  if (type === "instruction") {
-    return <Trans>Saved an instruction</Trans>;
-  }
-  if (type === "preference") {
-    return <Trans>Saved a preference</Trans>;
-  }
-  return <Trans>Saved a memory</Trans>;
-};
 
 /** Its statement, and who or what it is about when it isn't the person. */
 const SavedText = ({
@@ -50,35 +47,59 @@ const SavedText = ({
     </Trans>
   );
 
-/** What the earlier memories it replaced said, as one sentence. */
-const ReplacedText = ({ statements }: { statements: readonly string[] }) => {
+/** What the earlier memories it replaced said: in their place while it is saved, back once it is undone. */
+const ReplacedText = ({
+  statements,
+  restored,
+}: {
+  statements: readonly string[];
+  restored: boolean;
+}) => {
   const replaced = formatList(statements);
-  return <Trans>In place of: {replaced}</Trans>;
+  return restored ? (
+    <Trans>Restored: {replaced}</Trans>
+  ) : (
+    <Trans>In place of: {replaced}</Trans>
+  );
 };
 
 /**
- * Under a call of `remember`: what Grasp saved of what the person said,
- * as the store keeps it (whether it says how Grasp should act for them,
- * its statement, who or what it is about when it isn't them, and what it
- * replaced), and a way to undo it, which brings back what it
- * replaced, which retires the memory (core's
- * `session.brainMemories.forget`): it never becomes current again, even
- * once a later save replaced it. Said forgotten only when core answers
- * `done` (one undone before, here or elsewhere, too); `nothing` means
- * there was nothing of theirs in use to undo, which pressing again
- * wouldn't change, so it says that instead.
+ * Under a call of `remember`, one step of the answer: that Grasp saved
+ * something to memory (quiet), what it saved in the person's own words
+ * (the reading ink, under the words before it when too long for their
+ * line), and Undo after it. Undo retires the memory (core's
+ * `session.brainMemories.forget`): it never becomes current again, and
+ * what it replaced is current again. Once undone the line says so and
+ * strikes the statement, in the same place; `nothing` (none of theirs in
+ * use: erased, expired or never theirs) says it was already gone, which
+ * pressing again wouldn't change. Either is said to a screen reader; a
+ * failure is the line's own, said as Trace says a failed step.
  */
 export const SavedMemoryLine = ({ saved }: { saved: ChatSavedMemory }) => {
+  const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
   const [outcome, setOutcome] = useState<BrainMemoryOutcome>();
-  const undo = async () => {
+  const titles: Record<BrainMemoryOutcome, string> = {
+    done: t`Removed from memory`,
+    nothing: t`Already removed`,
+  };
+  const undo = async (button: HTMLElement) => {
     const answered = await run(
       async (session) => await session.brainMemories.forget(saved.memory)
     );
-    if (answered !== undefined) {
-      setOutcome(answered);
+    if (answered === undefined) {
+      return;
     }
+    // Undo goes with the answer; the focus it held stays in the answer
+    // (the message, as MessageError gives it back), never the page.
+    if (button.contains(document.activeElement)) {
+      button.closest<HTMLElement>('[data-slot="message"]')?.focus();
+    }
+    setOutcome(answered);
+    announce(titles[answered]);
   };
+  // Gone before Undo: whatever it replaced isn't its to bring back.
+  const replaced = outcome === "nothing" ? undefined : saved.replaced;
   return (
     <Trace>
       <TraceLine status={failure === undefined ? undefined : "error"}>
@@ -86,38 +107,46 @@ export const SavedMemoryLine = ({ saved }: { saved: ChatSavedMemory }) => {
           <Icon icon={BrainIcon} />
         </TraceIcon>
         <TraceTitle>
-          {outcome === "done" ? (
-            <Trans>Grasp no longer remembers this.</Trans>
-          ) : null}
-          {outcome === "nothing" ? (
-            <Trans>There was nothing to undo: Grasp no longer uses this.</Trans>
-          ) : null}
-          {outcome === undefined ? <SavedTitle type={saved.type} /> : null}
+          {outcome === undefined ? t`Saved to memory` : titles[outcome]}
         </TraceTitle>
-        {outcome === undefined ? (
-          <TraceDescription>
-            <SavedText saved={saved} />
+        <TraceDescription>
+          {outcome === undefined ? (
+            <>
+              <Text as="span" color="secondary" size="sm">
+                <SavedText saved={saved} />
+              </Text>{" "}
+              <Button
+                onClick={(event) => {
+                  // Given its status, the Button leaves a press to the
+                  // page: a second one while Undo works does nothing.
+                  if (!busy) {
+                    void undo(event.currentTarget);
+                  }
+                }}
+                size="xs"
+                status={busy ? "loading" : "idle"}
+                style={styles.undo}
+                variant="ghost"
+              >
+                <Trans>Undo</Trans>
+              </Button>
+            </>
+          ) : (
+            <Text as="span" color="muted" size="sm">
+              <del>
+                <SavedText saved={saved} />
+              </del>
+            </Text>
+          )}
+        </TraceDescription>
+        {replaced === undefined ? null : (
+          <TraceDescription style={styles.below}>
+            <ReplacedText restored={outcome === "done"} statements={replaced} />
           </TraceDescription>
-        ) : null}
-        {outcome === undefined && saved.replaced !== undefined ? (
-          <TraceDescription>
-            <ReplacedText statements={saved.replaced} />
-          </TraceDescription>
-        ) : null}
-        {failure === undefined ? null : (
-          <TraceDescription>{failure}</TraceDescription>
         )}
-        {outcome === undefined ? (
-          <Button
-            disabled={busy}
-            onClick={undo}
-            size="xs"
-            style={styles.undo}
-            variant="ghost"
-          >
-            <Trans>Undo</Trans>
-          </Button>
-        ) : null}
+        {failure === undefined ? null : (
+          <TraceDescription style={styles.below}>{failure}</TraceDescription>
+        )}
       </TraceLine>
     </Trace>
   );

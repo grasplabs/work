@@ -55,6 +55,20 @@ const models = {
   tts: "voxtral-mini-tts-3",
 } as const;
 
+/**
+ * When Mistral hears someone start and stop talking, as the chance its
+ * voice detection gives that they are talking. Sent whole, never left to
+ * the session: with every field empty, talking over him was not heard on
+ * the first try-out. Its realtime transcription's own defaults, but for
+ * a lower start, so a few words over him stop him; the record the page
+ * shows after each call (`recordOf`) says whether Mistral heard them.
+ */
+const turnDetection = {
+  start_threshold: 0.3,
+  end_threshold: 0.33,
+  min_silence_ms: 500,
+} as const;
+
 /** Stephen's voice, by its Mistral ID, as core says his lines (apps/core/src/platform-ai.ts). */
 const voice = "voice_485";
 
@@ -64,11 +78,11 @@ const voice = "voice_485";
  * instructions give it in English.
  */
 const firstLines: Record<InterviewLocale, string> = {
-  en: "First a few questions about you and AI, then your work. Do you already use AI in your work, like ChatGPT or Copilot?",
-  nl: "Eerst een paar vragen over jou en AI, daarna je werk. Gebruik je al AI in je werk, zoals ChatGPT of Copilot?",
-  de: "Zuerst ein paar Fragen zu Ihnen und KI, dann zu Ihrer Arbeit. Nutzen Sie in Ihrer Arbeit schon KI, etwa ChatGPT oder Copilot?",
-  fr: "D’abord quelques questions sur vous et l’IA, puis sur votre travail. Utilisez-vous déjà l’IA dans votre travail, comme ChatGPT ou Copilot ?",
-  es: "Primero unas preguntas sobre ti y la IA, luego tu trabajo. ¿Ya usas IA en tu trabajo, como ChatGPT o Copilot?",
+  en: "First your work as a whole, then one part of it up close. What do you do here, in a sentence or two?",
+  nl: "Eerst je werk als geheel, daarna één onderdeel ervan van dichtbij. Wat doe je hier, in een of twee zinnen?",
+  de: "Zuerst Ihre Arbeit als Ganzes, dann ein Teil davon aus der Nähe. Was machen Sie hier, in ein oder zwei Sätzen?",
+  fr: "D’abord votre travail dans son ensemble, puis une partie de plus près. Que faites-vous ici, en une ou deux phrases ?",
+  es: "Primero tu trabajo en conjunto, luego una parte de cerca. ¿Qué haces aquí, en una o dos frases?",
 };
 
 /** How he asks for an example where nothing can be shared. */
@@ -90,7 +104,7 @@ This is a try-out: a colleague at Grasp plays an employee of a practice company,
 - They can talk over you. When they do, stop, take what they said, and go on from there. Do not repeat the line you were cut off in unless they ask.
 - There is no screen, no button and no file: where these instructions point to one, say in a few words that it is not there in this try-out, and go on.
 - You write nothing down here, so nothing carries a mark. What you learned is what was said in this conversation.
-- You do not know their name, their team or their team lead: say "I was told" where a lead would be named. The work to learn about is not named yet: in part 3, ask which work comes back most often or takes most of their time, and learn that one.
+- You do not know their name, their team or their team lead: say "I was told" where a lead would be named. The work to learn about is not named yet: in part 3, take the piece that repeats most and costs them most time, by what they said in part 2, and learn that one. Nothing is told to you each turn about what is still open or what the team already told: keep track of what you still miss yourself.
 - Your first line was said already: "${firstLine}" Their first answer is to that. Do not say it again.`;
 
 /** Everything the session's model is told, in the language of the conversation. */
@@ -143,9 +157,7 @@ const openedSchema = z.object({
 export const sessionRequestOf = ({ locale }: VoiceLabInput) => ({
   instructions: instructionsOf(locale),
   llm: { model: models.llm },
-  // Mistral's own end-of-turn detection, at its defaults: the try-out is
-  // of the session as it comes.
-  stt: { model: models.stt, language: locale, turn_detection: {} },
+  stt: { model: models.stt, language: locale, turn_detection: turnDetection },
   tts: { model: models.tts, voice_id: voice },
   welcome_message: firstLines[locale],
   turn: { allow_interruptions: true },
@@ -209,21 +221,75 @@ export const openVoiceSession = async (
 };
 
 /**
- * Closes a session at Mistral, once the page left its room: it ends by
- * itself when it expires, so one that can't be closed is only logged.
+ * What Mistral kept of a call, in counts alone: how often he spoke, and
+ * how often it heard them talk over him and cut him off. Never what was
+ * said.
+ */
+export interface CallRecord {
+  spoke: number;
+  cutOff: number;
+}
+
+const recordSchema = z.object({
+  transcripts: z
+    .array(
+      z.looseObject({
+        role: z.string(),
+        is_interruption: z.boolean().optional(),
+      })
+    )
+    .nullish(),
+});
+
+/** The counts of a session's record, as Mistral answers it. */
+export const recordOf = (answer: unknown): CallRecord | null => {
+  const parsed = recordSchema.safeParse(answer);
+  if (!parsed.success) {
+    return null;
+  }
+  const his = (parsed.data.transcripts ?? []).filter(
+    ({ role }) => role === "assistant"
+  );
+  return {
+    spoke: his.length,
+    cutOff: his.filter(({ is_interruption }) => is_interruption === true)
+      .length,
+  };
+};
+
+/**
+ * Closes a session at Mistral, once the page left its room, and answers
+ * what Mistral kept of it, as counts (`recordOf`): read before it is
+ * closed, as a closed one may be gone. It ends by itself when it expires,
+ * so one that can't be read or closed is only logged.
  */
 export const closeVoiceSession = async (
   env: Env,
   sessionId: string
-): Promise<void> => {
+): Promise<CallRecord | null> => {
   const apiKey = await keyOf(env);
   if (apiKey === null) {
-    return;
+    return null;
+  }
+  const headers = { authorization: `Bearer ${apiKey}` };
+  let record: CallRecord | null = null;
+  try {
+    const response = await fetch(`${sessionsUrl}/${sessionId}`, {
+      headers,
+      signal: AbortSignal.timeout(sessionTimeoutMs),
+    });
+    record = response.ok ? recordOf(await response.json()) : null;
+    if (!response.ok) {
+      await response.body?.cancel();
+      log.warn("admin.voice_lab_not_read", { status: response.status });
+    }
+  } catch {
+    log.warn("admin.voice_lab_not_read", { status: 0 });
   }
   try {
     const response = await fetch(`${sessionsUrl}/${sessionId}`, {
       method: "DELETE",
-      headers: { authorization: `Bearer ${apiKey}` },
+      headers,
       signal: AbortSignal.timeout(sessionTimeoutMs),
     });
     await response.body?.cancel();
@@ -233,4 +299,5 @@ export const closeVoiceSession = async (
   } catch {
     log.warn("admin.voice_lab_not_closed", { status: 0 });
   }
+  return record;
 };

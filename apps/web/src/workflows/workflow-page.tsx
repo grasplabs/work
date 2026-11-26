@@ -38,7 +38,6 @@ import { ListedCount } from "./listed-count.tsx";
 import { useStartedBy } from "./run-detail.tsx";
 import { useRunTitle } from "./run-page.tsx";
 import { runStatusLabels, runToneOf } from "./run-status.ts";
-import { SeparatedItems } from "./separated-items.tsx";
 import type { WorkflowSettingsSection } from "./settings-sections.ts";
 
 // An independent workflow's own page as direction C (Track) has it: its
@@ -188,13 +187,11 @@ const Runs = ({
   const more = runs.data.length - shown.length;
   return (
     <>
-      <SeparatedItems
-        aria-label={label}
-        rows={shown.map((run) => ({
-          key: run.id,
-          row: <RunRow names={names} run={run} workflow={workflow} />,
-        }))}
-      />
+      <ItemGroup separated aria-label={label}>
+        {shown.map((run) => (
+          <RunRow key={run.id} names={names} run={run} workflow={workflow} />
+        ))}
+      </ItemGroup>
       {more > 0 ? (
         <span>
           <Button

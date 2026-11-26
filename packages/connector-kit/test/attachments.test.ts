@@ -1,3 +1,5 @@
+import { attachmentsMetaKey } from "@grasp-os/runtime/connector";
+import type { Route } from "@grasp-os/runtime/connector";
 import { attachmentLimits } from "@grasp-os/shared/connector-attachments";
 import { sha256HexOfBytes, toBase64 } from "@grasp-os/shared/encoding";
 import { describe, expect, it } from "vite-plus/test";
@@ -9,8 +11,6 @@ import {
   defineConnector,
   defineTool,
 } from "../src/connector.ts";
-import { attachmentsMetaKey } from "../src/manifest.ts";
-import type { Route } from "../src/manifest.ts";
 
 // A write that takes files (GRA-887), as a connector defines it and
 // connect calls it. The ways it can fail come first: bytes beside the
@@ -26,6 +26,8 @@ const route: Route = {
   path: "/v1/send",
 };
 
+const noteRoute: Route = { ...route, path: "/v1/notes" };
+
 /** What the sending tool received: each file's name, type and content. */
 const received: { name: string; type: string; text: string }[][] = [];
 
@@ -38,7 +40,7 @@ const sendTool = defineTool({
   }),
   output: z.strictObject({ sent: z.literal(true) }),
   readOnly: false,
-  reach: "own",
+  reach: "others",
   takesFiles: true,
   resource: "mailbox",
   routes: [route],
@@ -61,13 +63,12 @@ const plainTool = defineTool({
   output: z.strictObject({ done: z.literal(true) }),
   readOnly: false,
   reach: "own",
-  routes: [route],
+  routes: [noteRoute],
   run: async () => await Promise.resolve({ output: { done: true as const } }),
 });
 
 const connector = defineConnector({
   name: "example",
-  version: "1.0.0",
   provider: "microsoft",
   scopes: [],
   hosts: ["api.example.test"],

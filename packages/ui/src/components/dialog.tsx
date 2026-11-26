@@ -45,10 +45,19 @@ import type { ComponentProps, ReactNode } from "react";
 import { useReturnFocus } from "../hooks/use-return-focus";
 import { useI18n } from "../lib/i18n";
 import { Icon, XIcon } from "../lib/icons";
-import { layerStyles, useLayerBody, watchPanel } from "../lib/layer";
-import { focusRingInset, scrollbarHidden } from "../lib/styles";
 import {
-  colors,
+  layerStyles,
+  shadeProps,
+  useLayerBody,
+  watchPanel,
+} from "../lib/layer";
+import {
+  focusRingInset,
+  scrollbarHidden,
+  tapRows,
+  watchRows,
+} from "../lib/styles";
+import {
   duration,
   font,
   media,
@@ -164,11 +173,8 @@ const leaving = ":is([data-ending-style])";
 const arriving = "@starting-style";
 
 const look = stylex.create({
-  // The shade over the page. It follows the panel in and out.
+  // The shade over the page (lib/layer's shade). It follows the panel in and out.
   overlay: {
-    position: "fixed",
-    inset: 0,
-    backgroundColor: colors.dialogScrim,
     opacity: { default: 1, [arriving]: 0, [leaving]: 0 },
     transitionProperty: "opacity",
     transitionDuration: {
@@ -185,6 +191,7 @@ const look = stylex.create({
       default: radius.xl,
       [PHONE]: `${radius.xl} ${radius.xl} 0 0`,
     },
+    cornerShape: radius.shape,
   },
 
   // Over the page: in the middle of the window, clear of its edges by the gutter. On a phone, a
@@ -272,6 +279,9 @@ const look = stylex.create({
     justifyContent: "flex-end",
     alignItems: "center",
     gap: space["2"],
+    // Each action's touch target reaches the middle of the gap to the next, beside it and, once
+    // the actions wrap, above and below (tapRows).
+    "--tap-room-inline": `calc(${space["2"]} / 2)`,
     marginBlockStart: space["6"],
     paddingInline: space["6"],
     paddingBlockEnd: {
@@ -286,6 +296,9 @@ const look = stylex.create({
     insetBlockStart: `calc(${space["6"]} + (${font.textBaseLine} - ${sizes.controlSm}) / 2)`,
     insetInlineEnd: `calc(${space["6"]} - ${space["2"]})`,
     display: "flex",
+    // Drawn in the corner, away from the parts it follows in the page: its touch target reaches
+    // the full 44px towards them (tapTarget).
+    "--tap-room-inline": sizes.tapTarget,
   },
 });
 
@@ -341,10 +354,7 @@ export const DialogContent = ({
   const { close } = useI18n().dialog;
   return (
     <>
-      <BackdropPrimitive
-        render={<div data-slot="dialog-overlay" />}
-        {...stylex.props(styles.overlay)}
-      />
+      <BackdropPrimitive {...shadeProps("dialog-overlay", styles.overlay)} />
       <ContentPrimitive
         {...mergeProps(rest, { ref: watchPanel })}
         {...stylex.props(
@@ -460,8 +470,9 @@ export interface DialogFooterProps extends PartProps {
 export const DialogFooter = ({ children, style }: DialogFooterProps) => (
   // The marker a Button reads to take its share of the line on a phone.
   <div
+    ref={watchRows}
     data-slot="dialog-footer"
-    {...stylex.props(layerFooterMarker, styles.footer, style)}
+    {...stylex.props(layerFooterMarker, styles.footer, tapRows, style)}
   >
     {children}
   </div>

@@ -17,6 +17,7 @@ import { useState } from "react";
 import { canConnect, canReconnect, ConnectDialog } from "./connect-dialog.tsx";
 import type { Integration } from "./integrations.ts";
 import { kindOf, stateOf } from "./integrations.ts";
+import { descriptionOf } from "./native-descriptions.ts";
 import { ProviderMark } from "./provider-mark.tsx";
 import { UsedBy } from "./workflows-using.tsx";
 import type { ConnectionUses } from "./workflows-using.tsx";
@@ -136,7 +137,7 @@ export const IntegrationItem = ({
         <TextLink asChild>
           <Link
             params={{ integration: integration.key }}
-            title={integration.description ?? undefined}
+            title={descriptionOf(integration) ?? undefined}
             to="/connectors/$integration"
           >
             {integration.name}

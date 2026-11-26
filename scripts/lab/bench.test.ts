@@ -260,7 +260,7 @@ describe("the next-question bench", () => {
     const lines = first?.turn.lines ?? [];
     expect({
       who: first?.who,
-      opensOnAi: lines[0]?.text.includes("AI"),
+      opensOnWork: lines[0]?.text.includes("your work as a whole"),
       lines: lines.length,
       typedLast: lines.at(-1)?.typed,
       typedBefore: lines.at(-3)?.typed,
@@ -268,7 +268,7 @@ describe("the next-question bench", () => {
       lineOnly: first?.lineOnly,
     }).toStrictEqual({
       who: misheard.who,
-      opensOnAi: true,
+      opensOnWork: true,
       lines: 6 + misheard.lines.length,
       typedLast: undefined,
       typedBefore: true,

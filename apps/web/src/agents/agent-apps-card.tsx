@@ -21,8 +21,9 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
-  ItemTitle,
+  ItemGroup,
   ItemMedia,
+  ItemTitle,
 } from "@grasp-os/ui/components/item";
 import {
   Select,
@@ -46,7 +47,6 @@ import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
 import { classNames } from "../settings/stephen-settings.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import { SeparatedItems } from "../workflows/separated-items.tsx";
 import { SectionCard } from "./section-card.tsx";
 import { scoreOf, wordsOf } from "./setup/apps-recommend.ts";
 
@@ -295,49 +295,47 @@ const WorkedOut = ({
         </Text>
       )}
       {worked.missing.length === 0 && worked.suggested.length === 0 ? null : (
-        <SeparatedItems
-          rows={[
-            ...worked.missing.map((app) => ({
-              key: app,
-              row: (
-                <MissingApp agent={agent} app={app} can={can} change={change} />
-              ),
-            })),
-            ...worked.suggested.map((toolClass) => {
-              const kind = i18n._(classNames[toolClass]);
-              return {
-                key: toolClass,
-                row: (
-                  <Item size="sm">
-                    <ItemContent>
-                      <ItemDescription>
-                        {t`${name} also needs “${kind}”, which changes or sends things.`}
-                      </ItemDescription>
-                    </ItemContent>
-                    <ItemActions>
-                      <Button
-                        disabled={!can}
-                        onClick={() => {
-                          void change(async (session) => {
-                            await session.connections.setAgentToolClass(
-                              agent.id,
-                              toolClass,
-                              { who: "asClass" }
-                            );
-                          });
-                        }}
-                        size="sm"
-                        variant="ghost"
-                      >
-                        {t`Turn on`}
-                      </Button>
-                    </ItemActions>
-                  </Item>
-                ),
-              };
-            }),
-          ]}
-        />
+        <ItemGroup separated>
+          {worked.missing.map((app) => (
+            <MissingApp
+              key={app}
+              agent={agent}
+              app={app}
+              can={can}
+              change={change}
+            />
+          ))}
+          {worked.suggested.map((toolClass) => {
+            const kind = i18n._(classNames[toolClass]);
+            return (
+              <Item key={toolClass} size="sm">
+                <ItemContent>
+                  <ItemDescription>
+                    {t`${name} also needs “${kind}”, which changes or sends things.`}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <Button
+                    disabled={!can}
+                    onClick={() => {
+                      void change(async (session) => {
+                        await session.connections.setAgentToolClass(
+                          agent.id,
+                          toolClass,
+                          { who: "asClass" }
+                        );
+                      });
+                    }}
+                    size="sm"
+                    variant="ghost"
+                  >
+                    {t`Turn on`}
+                  </Button>
+                </ItemActions>
+              </Item>
+            );
+          })}
+        </ItemGroup>
       )}
       {worked.schedule === undefined || userId === undefined ? null : (
         <ProposedSchedule
@@ -476,101 +474,93 @@ const AgentApps = ({
         </Empty>
       ) : null}
       {apps === undefined || apps.length === 0 ? null : (
-        <SeparatedItems
-          aria-label={t`Apps`}
-          rows={apps.map((each) => {
+        <ItemGroup separated aria-label={t`Apps`}>
+          {apps.map((each) => {
             const app = each.name;
-            return {
-              key: each.app,
-              row: (
-                <Item key={each.app} size="sm">
-                  <ItemContent>
-                    <ItemTitle>{app}</ItemTitle>
-                    <ItemDescription>{whereFrom(each)}</ItemDescription>
-                  </ItemContent>
-                  {editable ? (
-                    <ItemActions>
-                      <Button
-                        aria-label={
-                          each.state === "on"
-                            ? t`Take ${app} off`
-                            : t`Give ${app} back`
-                        }
-                        disabled={!can}
-                        onClick={() => {
-                          set(each.app, each.state !== "on");
-                        }}
-                        size="sm"
-                        variant="ghost"
-                      >
-                        {each.state === "on" ? t`Take off` : t`Give back`}
-                      </Button>
-                    </ItemActions>
-                  ) : null}
-                </Item>
-              ),
-            };
+            return (
+              <Item key={each.app} size="sm">
+                <ItemContent>
+                  <ItemTitle>{app}</ItemTitle>
+                  <ItemDescription>{whereFrom(each)}</ItemDescription>
+                </ItemContent>
+                {editable ? (
+                  <ItemActions>
+                    <Button
+                      aria-label={
+                        each.state === "on"
+                          ? t`Take ${app} off`
+                          : t`Give ${app} back`
+                      }
+                      disabled={!can}
+                      onClick={() => {
+                        set(each.app, each.state !== "on");
+                      }}
+                      size="sm"
+                      variant="ghost"
+                    >
+                      {each.state === "on" ? t`Take off` : t`Give back`}
+                    </Button>
+                  </ItemActions>
+                ) : null}
+              </Item>
+            );
           })}
-        />
+        </ItemGroup>
       )}
       {editable && suggested.length > 0 ? (
-        <SeparatedItems
-          aria-label={t`Suggested apps`}
-          rows={suggested.map((app) => {
+        <ItemGroup separated aria-label={t`Suggested apps`}>
+          {suggested.map((app) => {
             const linked = connected.includes(app.id);
             const appName = app.name;
-            return {
-              key: agentAppOf(app.source, app.id),
-              row: (
-                <Item key={agentAppOf(app.source, app.id)} size="sm">
-                  <ItemMedia align="center">
-                    <ProviderMark id={app.id} logo={app.logo} name={app.name} />
-                  </ItemMedia>
-                  <ItemContent>
-                    <ItemTitle>{appName}</ItemTitle>
-                    <ItemDescription>
-                      {linked
-                        ? t`Suggested for ${name}`
-                        : t`Suggested for ${name}: connect it first`}
-                    </ItemDescription>
-                  </ItemContent>
-                  <ItemActions>
-                    {linked ? (
-                      <Button
-                        aria-label={t`Add ${appName}`}
-                        disabled={!can}
-                        onClick={() => {
-                          set(agentAppOf(app.source, app.id), true);
+            return (
+              <Item key={agentAppOf(app.source, app.id)} size="sm">
+                <ItemMedia align="center">
+                  <ProviderMark id={app.id} logo={app.logo} name={app.name} />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>{appName}</ItemTitle>
+                  <ItemDescription>
+                    {linked
+                      ? t`Suggested for ${name}`
+                      : t`Suggested for ${name}: connect it first`}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  {linked ? (
+                    <Button
+                      aria-label={t`Add ${appName}`}
+                      disabled={!can}
+                      onClick={() => {
+                        set(agentAppOf(app.source, app.id), true);
+                      }}
+                      size="sm"
+                      variant="outline"
+                    >
+                      <Icon icon={PlusIcon} />
+                      {t`Add`}
+                    </Button>
+                  ) : (
+                    <Button
+                      asChild
+                      aria-label={t`Connect ${appName}`}
+                      size="sm"
+                      variant="outline"
+                    >
+                      <Link
+                        params={{
+                          integration: integrationKey(app.source, app.id),
                         }}
-                        size="sm"
-                        variant="outline"
+                        to="/connectors/$integration"
                       >
-                        <Icon icon={PlusIcon} />
-                        {t`Add`}
-                      </Button>
-                    ) : (
-                      <Button
-                        asChild
-                        aria-label={t`Connect ${appName}`}
-                        size="sm"
-                        variant="outline"
-                      >
-                        <Link
-                          params={{
-                            integration: integrationKey(app.source, app.id),
-                          }}
-                          to="/connectors/$integration"
-                        >
-                          {t`Connect`}
-                        </Link>
-                      </Button>
-                    )}
-                  </ItemActions>
-                </Item>
-              ),
-            };
+                        {t`Connect`}
+                      </Link>
+                    </Button>
+                  )}
+                </ItemActions>
+              </Item>
+            );
           })}
-        />
+        </ItemGroup>
       ) : null}
       {editable && apps !== undefined ? (
         <div {...stylex.props(styles.foot)}>

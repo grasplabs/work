@@ -36,6 +36,7 @@ const leave: ChatSummary = {
   createdAt: "2026-10-20T08:00:00.000Z",
   lastAt: "2026-10-20T08:00:00.000Z",
   running: false,
+  unread: false,
   make: null,
   archived: false,
 };

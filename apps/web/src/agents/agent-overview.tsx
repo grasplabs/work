@@ -386,7 +386,11 @@ const MoreMenu = ({
   );
 };
 
-/** A chip for each app, person and mailbox the instructions name; any other link as Markdown draws it. */
+/**
+ * A chip for each app, person and mailbox the instructions name; any other
+ * link is its words alone, never one to follow (a path in Grasp, a phone
+ * number, a site), as the instructions are what the agent reads, not a page.
+ */
 const chip = ({ href, scheme, children }: MarkdownLink): ReactNode => {
   const kind = mentionOf(href);
   if (kind !== undefined) {
@@ -403,7 +407,9 @@ const chip = ({ href, scheme, children }: MarkdownLink): ReactNode => {
     <Badge icon={LinkIcon} variant="secondary">
       {children}
     </Badge>
-  ) : undefined;
+  ) : (
+    <span>{children}</span>
+  );
 };
 
 /** What the agent is told, in plain words, each app and person it names a chip. */

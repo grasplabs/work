@@ -47,6 +47,7 @@ import {
   hyphenate,
   inputStyles,
   scrollbarHidden,
+  tapTarget,
 } from "../lib/styles";
 import {
   colors,
@@ -258,40 +259,19 @@ const FORCED = media.forcedColors;
 const REDUCED = media.reducedMotion;
 
 const styles = stylex.create({
-  // Closed: Input's box, words at the start and the chevron at the end.
+  // Closed: Input's box (inputStyles.control, with its words at a field's size: a trigger takes no
+  // typing, but beside an Input it reads as one of a row of fields), words at the start and the
+  // chevron at the end.
   trigger: {
     [iconVars.size]: size.iconSm,
     [iconVars.stroke]: size.iconStroke,
-    position: "relative",
     display: "flex",
     alignItems: "center",
     gap: space[2],
-    boxSizing: "border-box",
-    width: "100%",
-    minWidth: 0,
-    margin: 0,
-    appearance: "none",
-    borderWidth: { default: 0, [FORCED]: 1 },
-    borderStyle: "solid",
-    borderColor: "currentColor",
-    cornerShape: radius.shape,
-    backgroundColor: colors.inputBg,
     boxShadow: {
       default: `inset 0 0 0 1px ${colors.input}, ${shadow.inputShadow}`,
       ":focus-visible": size.inputFocus,
     },
-    color: colors.foreground,
-    fontFamily: font.sans,
-    // The words of every field at its size: text-sm, and field-text-touch on a phone or a touch
-    // screen (media.maxSmOrCoarse), as Input, Combobox and Input group take there so the phone does not
-    // zoom. A trigger takes no typing, but beside an Input it reads as one of a row of fields.
-    fontSize: {
-      default: font.textSm,
-      [media.maxSmOrCoarse]: size.inputTextTouch,
-    },
-    lineHeight: font.textSmLine,
-    fontWeight: font.weightNormal,
-    textAlign: "start",
     cursor: "pointer",
     userSelect: "none",
     WebkitTapHighlightColor: "transparent",
@@ -300,9 +280,6 @@ const styles = stylex.create({
     paddingInlineEnd: space[2],
     // Focus is the edge itself (field-focus, as in Input: a step darker and a faint halo, no ring),
     // with focusField (lib/styles) for forced colours.
-    transitionProperty: "box-shadow, background-color",
-    transitionDuration: duration.hover,
-    transitionTimingFunction: duration.ease,
   },
   // Open: the hairline stays at its hover strength while the list is out.
   open: {
@@ -628,12 +605,6 @@ const sizeStyles = {
   default: inputStyles.default,
   lg: inputStyles.lg,
 } as const;
-const targetStyles = {
-  sm: inputStyles.targetSm,
-  default: inputStyles.targetDefault,
-  lg: inputStyles.targetLg,
-} as const;
-
 /** A variant's own look over the field's, for the trigger's state, and its focus. */
 const variantLook = (variant: SelectVariant, state: SelectTriggerState) =>
   variant === "ghost"
@@ -703,6 +674,7 @@ const Closed = ({
           // Without truncate a long value wraps by design, so a second line is no fault.
           data-may-wrap={truncate ? undefined : ""}
           {...stylex.props(
+            inputStyles.control,
             styles.trigger,
             sizeStyles[scale],
             !(state.disabled || state.readOnly) && inputStyles.enabled,
@@ -719,10 +691,7 @@ const Closed = ({
     >
       {(state: SelectTriggerState) => (
         <>
-          <span
-            aria-hidden="true"
-            {...stylex.props(inputStyles.target, targetStyles[scale])}
-          />
+          <span aria-hidden="true" {...stylex.props(tapTarget)} />
           <Truncated value={truncate}>{children}</Truncated>
           <span
             aria-hidden="true"

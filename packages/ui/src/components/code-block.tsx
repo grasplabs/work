@@ -206,7 +206,13 @@ const styles = stylex.create({
     flexDirection: "column",
     minWidth: 0,
     width: "100%",
-    overflow: "hidden",
+    // Clipped, never a box that scrolls. On a touch screen the floating copy button, a step in from
+    // the corner, keeps its 44px target whole past the edge.
+    overflow: "clip",
+    overflowClipMargin: {
+      default: null,
+      [COARSE]: `max(0px, calc((${size.tapTarget} - ${size.controlSm}) / 2 - ${space["1"]}))`,
+    },
   },
   // The header: the title or the language at the start, the copy button at the end, a hairline
   // under it, clear of the code. On a touch screen it is a finger tall and the button stands a
@@ -261,6 +267,8 @@ const styles = stylex.create({
     display: "flex",
     alignItems: "center",
     gap: space["2"],
+    // Each control's touch target reaches the middle of the gap to the next (tapTarget).
+    "--tap-room-inline": `calc(${space["2"]} / 2)`,
     flexShrink: 0,
   },
   floating: {

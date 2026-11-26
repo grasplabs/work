@@ -2590,6 +2590,51 @@ describe("groups copied from the source", () => {
   );
 
   it(
+    "goes on with a person's groups once their connection's pause is over",
+    setUpTime,
+    async () => {
+      const member = await microsoftMember();
+      const group = `paused-${unique()}@acme.test`;
+      await inGroups(member.email, [group]);
+      const { id } = await connectedGoogle(member);
+      const pauseUntil = async (until: number | null): Promise<void> => {
+        await connectDb()
+          .prepare(
+            "UPDATE connection_tokens SET paused_until = ? WHERE connection_id = ?"
+          )
+          .bind(until, id)
+          .run();
+      };
+      const whole = async (): Promise<boolean> => {
+        const row = await connectDb()
+          .prepare(
+            "SELECT reader_groups IS NOT NULL AS whole FROM connections WHERE id = ?"
+          )
+          .bind(id)
+          .first<{ whole: number }>();
+        return row?.whole === 1;
+      };
+      // Its vendor asked every caller to wait: the read waits too, for
+      // when the wait is over.
+      await pauseUntil(Date.now() + 3_600_000);
+      await readGroupsOnce();
+      const wholeWhilePaused = await whole();
+      await pauseUntil(null);
+      let wholeAfter = false;
+      for (let run = 0; run < 50 && !wholeAfter; run += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one run after another, as the clock's
+        await readGroupsOnce();
+        // oxlint-disable-next-line no-await-in-loop -- until it is whole
+        wholeAfter = await whole();
+      }
+      expect({ wholeWhilePaused, wholeAfter }).toStrictEqual({
+        wholeWhilePaused: false,
+        wholeAfter: true,
+      });
+    }
+  );
+
+  it(
     "starts no turn past a run's share of D1 queries, and reads the rest in the next runs",
     setUpTime,
     async () => {

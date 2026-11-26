@@ -1,6 +1,6 @@
-import { connectorManifestSchema } from "@grasp-os/connector-kit/manifest";
+import { connectorManifestSchema } from "@grasp-os/runtime/connector";
 import type { ConnectionPerson } from "@grasp-os/shared/connect";
-import { env } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -10,12 +10,18 @@ import { connections } from "../src/db/schema.ts";
 import type { EgressProps } from "../src/egress.ts";
 import { connectApp, fakeApps } from "./app-provider.ts";
 import type { AppName } from "./app-provider.ts";
+import { companyNetworkKey } from "./company-network-fake.ts";
 import { connectAccount, ownAccount, someone } from "./connect.ts";
 import type { Call } from "./connect.ts";
 import { sampleHost } from "./fixtures/sample-connector.ts";
 import { fakeProviders } from "./oauth-provider.ts";
 import type { ProviderName } from "./oauth-provider.ts";
 import { fakeSampleApi } from "./sample-api.ts";
+import {
+  connectTenantApp,
+  fakeTenantApp,
+  tenantAccountOf,
+} from "./tenant-app.ts";
 import { callTool as call } from "./tool-calls.ts";
 
 // What connectors*.test.ts and native-tools-*.test.ts share: the fake
@@ -25,6 +31,7 @@ import { callTool as call } from "./tool-calls.ts";
 export const providers = fakeProviders();
 export const apps = fakeApps();
 export const api = fakeSampleApi();
+export const tenantApp = fakeTenantApp();
 
 /** A person's own Microsoft account, connected to `server`. */
 export const connectionTo = async (
@@ -53,12 +60,36 @@ export const isApp = (provider: string): provider is AppName =>
 
 /**
  * A person's own account at `provider`, connected to `server`: through
- * the app's own sign-in for an app, whose connector is the one it names.
+ * the app's own sign-in for an app, whose connector is the one it names;
+ * the sample ERP's account through the company network, and the sample
+ * tenant app's at its own authorization server.
  */
 export const connectionOf = async (
   server: string,
   provider: string
 ): Promise<{ id: string; person: ConnectionPerson }> => {
+  if (provider === "sample-erp") {
+    // The system inside the company's network (company-network.test.ts),
+    // connected for everyone by an admin.
+    const person = someone("admin");
+    const { connectionId } = await exports.default.connectWithKey({
+      person,
+      provider,
+      scope: "shared",
+      key: companyNetworkKey,
+      companyNetwork: String(Reflect.get(env, "COMPANY_NETWORK_TEST_ORIGIN")),
+    });
+    return { id: connectionId, person };
+  }
+  if (provider === "sample-tenant") {
+    const person = someone();
+    const id = await connectTenantApp(
+      tenantApp,
+      person,
+      tenantAccountOf(person)
+    );
+    return { id, person };
+  }
   if (!isApp(provider)) {
     return await connectionTo(
       server,
@@ -99,8 +130,19 @@ export const probe = async (
   },
   extra: Partial<Call> = {}
 ): Promise<Attempt> => {
-  const tool = input.mailbox === undefined ? "probe.fetch" : "probe.mailbox";
-  const { output } = await call(connection, tool, input, extra);
+  // A request other than a GET is the write probe's: a read sends none.
+  const writes =
+    input.mailbox === undefined &&
+    input.method !== undefined &&
+    input.method !== "GET";
+  let tool = writes ? "probe.send" : "probe.fetch";
+  if (input.mailbox !== undefined) {
+    tool = "probe.mailbox";
+  }
+  const { output } = await call(connection, tool, input, {
+    ...(writes && { idempotencyKey: `probe:${crypto.randomUUID()}` }),
+    ...extra,
+  });
   const attempt: unknown = JSON.parse(output);
   if (!isAttempt(attempt)) {
     throw new TypeError("Not a probe's report");
@@ -115,7 +157,8 @@ export const refused = { status: 403, error: null };
 export const egressProps = (
   fields: Partial<EgressProps> = {}
 ): EgressProps => ({
-  connector: "sample@1.0.0",
+  connector: "sample",
+  connectionId: "connection-1",
   callId: "call-1",
   hosts: [sampleHost],
   routes: [{ method: "GET", host: sampleHost, path: "/v1/probe/{case}" }],

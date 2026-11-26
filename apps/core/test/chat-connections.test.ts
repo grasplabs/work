@@ -5,7 +5,13 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { retryDisconnects } from "../src/members.ts";
-import { codeResults, codeStep, personalChatsOf, says } from "./agent-chat.ts";
+import {
+  codeResults,
+  codeStep,
+  personalChatsOf,
+  says,
+  withoutMarking,
+} from "./agent-chat.ts";
 import { grantReviewed, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -85,7 +91,7 @@ type Stub = Awaited<ReturnType<typeof personalChatsOf>>["stub"];
 /** What each code step of the chat returned, as the model read it. */
 const results = async (stub: Stub, chatId: string): Promise<string[]> => {
   const steps = await codeResults(stub, chatId);
-  return steps.map(({ text }) => text);
+  return steps.map(({ text }) => withoutMarking(text));
 };
 
 /** What code step `index` of the chat returned. */

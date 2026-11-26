@@ -1,11 +1,12 @@
-import {
-  defineTool,
-  invalidCode,
-  ToolError,
-} from "@grasp-os/connector-kit/connector";
+import { defineTool } from "@grasp-os/connector-kit/connector";
 import type { Effect } from "@grasp-os/connector-kit/connector";
-import { forbiddenInValue } from "@grasp-os/connector-kit/manifest";
-import { jsonBody, segment } from "@grasp-os/connector-kit/provider";
+import {
+  forbiddenInValue,
+  invalidCode,
+  jsonBody,
+  segment,
+  ToolError,
+} from "@grasp-os/runtime/connector";
 import { z } from "zod";
 
 import {

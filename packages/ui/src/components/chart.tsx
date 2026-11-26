@@ -2185,6 +2185,7 @@ const pieStyles = stylex.create({
     width: space[2],
     height: space[2],
     borderRadius: radius.xs,
+    cornerShape: radius.shape,
     alignSelf: "center",
   },
   swatchTone: (colour: string) => ({

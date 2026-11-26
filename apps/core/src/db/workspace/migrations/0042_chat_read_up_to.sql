@@ -1,0 +1,1 @@
+ALTER TABLE `chats` ADD `read_up_to` integer;

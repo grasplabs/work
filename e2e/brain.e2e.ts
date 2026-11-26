@@ -50,4 +50,8 @@ test("a person opens the brain on its atlas, goes into a part of it, opens a not
   await expect(page).toHaveURL(/\/brain\?region=frontal$/u);
   await page.keyboard.press("Escape");
   await expect(page).toHaveURL(/\/brain$/u);
+
+  // The mark in the sidebar is the way home: the chat's start.
+  await page.getByRole("link", { name: "Grasp", exact: true }).click();
+  await expect(page).toHaveURL(/\/$/u);
 });

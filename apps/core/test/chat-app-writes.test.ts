@@ -11,6 +11,7 @@ import {
   model,
   says,
   transcript,
+  withoutMarking,
 } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { heldFor } from "./held-in-connect.ts";
@@ -145,7 +146,7 @@ const outcomeOf = async (
   const held = await heldFor(person, chat.via === "web" ? "grasp" : "chat_app");
   return {
     answer,
-    returned: results.map(({ text }) => text),
+    returned: results.map(({ text }) => withoutMarking(text)),
     held: held.map(({ input }) => input),
   };
 };

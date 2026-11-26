@@ -560,6 +560,7 @@ const cast = {
   teams: { admin: "admin", member: "user" },
   roleChange: { admin: "admin", one: "user" },
   connections: { admin: "admin", user: "user" },
+  connectorsByUrl: { admin: "admin", user: "user" },
   aiSpend: { admin: "admin", builder: "builder" },
   settings: { admin: "admin" },
   ownSessions: { member: "user" },

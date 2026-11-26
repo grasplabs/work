@@ -1,20 +1,20 @@
-import { ToolError } from "@grasp-os/connector-kit/connector";
-import { segment } from "@grasp-os/connector-kit/provider";
 import {
   cursorPart,
   defineSync,
   fetchInRoom,
   fillPage,
+  fromCursorPart,
   fromInPagePart,
   inPagePart,
-  startOfPage,
-  fromCursorPart,
   mayRequest,
   RestartSyncError,
+  segment,
+  startOfPage,
   syncRoom,
   takeContent,
-} from "@grasp-os/connector-kit/sync";
-import type { InPage, SyncRoom } from "@grasp-os/connector-kit/sync";
+  ToolError,
+} from "@grasp-os/runtime/connector";
+import type { InPage, SyncRoom } from "@grasp-os/runtime/connector";
 import type { SyncItem, SyncPage, SyncReader } from "@grasp-os/shared/sync";
 import { ownPlace } from "@grasp-os/shared/sync";
 import { z } from "zod";

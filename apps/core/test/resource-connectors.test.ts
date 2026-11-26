@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
@@ -23,6 +24,7 @@ import {
   sentCount,
   servingEnv,
   someMessages,
+  throttleGraph,
   withOutput,
 } from "./resource-connectors-harness.ts";
 
@@ -32,12 +34,45 @@ import {
 // (spec 12). This runs the real connect and its native Microsoft 365
 // connector, with only Microsoft's sign-in and Graph faked.
 
+/** A failed call's code, and whether it names a wait of two minutes at most. */
+const rateLimitOf = (result: Awaited<ReturnType<typeof call>>) => {
+  if (result.ok) {
+    return null;
+  }
+  const wait = z
+    .object({ retryAfterSeconds: z.number() })
+    .safeParse(result.error.details).data?.retryAfterSeconds;
+  return {
+    code: result.error.code,
+    waits: typeof wait === "number" && wait > 0 && wait <= 120,
+  };
+};
+
 mockIdpWith(idp);
 
 describe("connector resource bindings", { timeout: 120_000 }, () => {
   it("read through connect under the App's connection grant", async () => {
     const mailer = await mailerApp();
     expect(outcomeOf(await call(mailer, "mail.inbox", {}))).toBe(0);
+  });
+
+  it("answer a call on a connection its vendor asked to wait as rate limited, with what is left of the wait", async () => {
+    const mailer = await mailerApp();
+    // A wait of none pauses nothing, and is still a rate limit.
+    await throttleGraph("team@acme.test", 1, 0);
+    const now = await call(mailer, "mail.inbox", {});
+    await throttleGraph("team@acme.test", 1, 120);
+    const limited = await call(mailer, "mail.inbox", {});
+    const paused = await call(mailer, "mail.inbox", {});
+    expect({
+      now: rateLimitOf(now),
+      limited: rateLimitOf(limited),
+      paused: rateLimitOf(paused),
+    }).toStrictEqual({
+      now: { code: "permission.rate_limited", waits: false },
+      limited: { code: "permission.rate_limited", waits: true },
+      paused: { code: "permission.rate_limited", waits: true },
+    });
   });
 
   it("find a call's binding by the index of active bindings, reading no bindings whole", async () => {

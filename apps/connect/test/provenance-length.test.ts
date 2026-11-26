@@ -1,4 +1,4 @@
-import { provenanceSchema } from "@grasp-os/connector-kit/manifest";
+import { provenanceSchema } from "@grasp-os/runtime/connector";
 import { describe, expect, it } from "vite-plus/test";
 
 import { eventId, messageId, pdfAttachmentId } from "./fixtures/graph.ts";

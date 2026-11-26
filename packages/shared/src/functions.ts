@@ -84,7 +84,7 @@ export const functionErrors = defineErrorFamily({
   "permission.budget_busy":
     "Runs still under way take all the room this request may use, so it wasn't started. Try again shortly.",
   "permission.rate_limited":
-    "The model's provider is taking no more requests for now, so this request wasn't answered. Try again after the wait it names.",
+    "The provider is taking no more requests for now, so this request wasn't answered. Try again after the wait it names.",
   "permission.awaiting_confirmation":
     "This request waits for the person it acts for to confirm it. Make the same call again once they have.",
   "permission.declined":
