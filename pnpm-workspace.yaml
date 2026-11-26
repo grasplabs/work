@@ -6,17 +6,6 @@ packages:
 # Supply-chain defaults: new versions wait 3 days, exotic sub-dependencies are
 # blocked, and only the packages listed here may run install scripts.
 minimumReleaseAge: 4320
-# Pi 1.6.1 (25 November 2026) before its three days, approved by the owner
-# for the Pi upgrade: these packages alone, each published by Pi's release
-# workflow with provenance and no install scripts. Remove after 28 November
-# 2026, when 1.6.1 is three days old.
-minimumReleaseAgeExclude:
-  - "@earendil-works/chord"
-  - "@earendil-works/pi-ai"
-  - "@earendil-works/pi-codemode"
-  - "@earendil-works/pi-durable"
-  - "@earendil-works/pi-schema"
-  - "@earendil-works/pi-telemetry"
 blockExoticSubdeps: true
 strictDepBuilds: true
 allowBuilds:
