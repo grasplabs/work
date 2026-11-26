@@ -478,6 +478,10 @@ describe("every client's summary", () => {
     const older = await liveClient(release);
     older.core.summary = "absent";
     older.core.admin = { ...emptyAdminSnapshot("Older"), paused: true };
+    // Its snapshot can't be read either: a core that didn't answer.
+    const down = await liveClient(release);
+    down.core.summary = "absent";
+    down.core.admin = "garbled";
     const acme = await liveClient(release);
 
     const read = await callServerFn(fetchClientSummaries, undefined, {
@@ -488,6 +492,7 @@ describe("every client's summary", () => {
 
     expect({
       older: entry(older.clientId),
+      down: entry(down.clientId)?.state,
       acme: entry(acme.clientId)?.state,
       readers: [older.core.adminReaders, acme.core.adminReaders],
     }).toMatchObject({
@@ -495,6 +500,7 @@ describe("every client's summary", () => {
         state: "older",
         admin: { state: "answered", snapshot: { paused: true } },
       },
+      down: "unreachable",
       acme: "answered",
       readers: [["ada@grasp.test"], []],
     });
