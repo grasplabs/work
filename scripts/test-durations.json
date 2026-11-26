@@ -1110,7 +1110,6 @@
   "scripts scripts/lab/role-card.test.ts": 0.1,
   "scripts scripts/lab/round.test.ts": 0.5,
   "scripts scripts/lab/surface.test.ts": 0.1,
-  "scripts scripts/lint/icon-has-move.test.ts": 0.3,
   "scripts scripts/lint/no-scrollbars.test.ts": 0,
   "scripts scripts/lint/no-slow-motion.test.ts": 0.1,
   "scripts scripts/lint/slow-motion.test.ts": 0,

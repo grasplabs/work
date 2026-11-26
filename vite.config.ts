@@ -107,6 +107,21 @@ const brainModuleImports = {
     "Only the modules the Brain's permission harness probes import src/brain-next.ts: add this one to apps/core/test/brain-next-modules.ts, with its surface in brainSurfaces (test/brain-next-surfaces.ts).",
 };
 
+// apps/web draws with Damsko alone (AGENTS.md, Design): nothing of the old
+// kit, Lucide or Tailwind. Its tests of the kit's App page parts
+// (src/app-kit) are tests, which may import anything.
+const oldDesignImports = {
+  group: [
+    "@grasp-os/app-kit",
+    "@grasp-os/app-kit/**",
+    "lucide-react",
+    "tailwindcss",
+    "@tailwindcss/**",
+  ],
+  message:
+    "apps/web draws with Damsko: components from @grasp-os/ui/components, icons from @grasp-os/ui/lib/icons, styles in StyleX with Damsko's tokens.",
+};
+
 // Test through real interfaces; mock only outside systems, at their
 // boundary. (anti-slop/no-module-mocking only knows `vitest` imports.)
 const noModuleMocks = ["mock", "doMock", "hoisted"].map((property) => ({
@@ -204,18 +219,6 @@ export default defineConfig({
         // The frontend hides every scrollbar (apps/web/src/styles.css).
         files: ["apps/web/src/**"],
         rules: { "grasp/no-scrollbars": "error" },
-      },
-      {
-        // Every icon of a control moves in its own parts when pointed at
-        // (icon-moves.css): the app's icons, not its tests'.
-        files: ["apps/web/src/**"],
-        excludeFiles: ["**/*.test.ts", "**/*.test.tsx"],
-        rules: {
-          "grasp/icon-has-move": [
-            "error",
-            { table: "apps/web/src/icon-moves.css" },
-          ],
-        },
       },
       {
         // Every answer of the interface is over within 300 ms (AGENTS.md,
@@ -410,6 +413,26 @@ export default defineConfig({
             },
           ],
           "grasp/no-unbounded-rpc-target": "error",
+        },
+      },
+      {
+        // The frontend draws with Damsko alone; the rules above, and the
+        // old design's imports refused.
+        files: ["apps/web/src/**"],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            {
+              paths: unboundedTargetPaths,
+              patterns: [
+                brainStoreImports,
+                brainContractImports,
+                brainModuleImports,
+                oldDesignImports,
+              ],
+            },
+          ],
+          "grasp/no-class-strings": "error",
         },
       },
       {
