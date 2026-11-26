@@ -5355,6 +5355,10 @@ msgstr "Continuar con {signIn}"
 msgid "Continue with Grasp staff"
 msgstr "Continuar como personal de Grasp"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Continue with our own system, or add your own API key if you’d rather."
+msgstr "Sigue con nuestro propio sistema, o añade tu propia clave de API si lo prefieres."
+
 #: src/apps/resource-bindings.tsx
 msgid "Contract"
 msgstr "Contrato"
@@ -8152,8 +8156,8 @@ msgid "Going well."
 msgstr "Va bien."
 
 #: src/onboarding/setup-steps.tsx
-msgid "Good, that’s settled. Before we really start, one thing: everything in Grasp runs on AI. Reading your documents, the interviews, the plan, all of it. So we need an AI attached to get it working."
-msgstr "Bien, eso ya está. Una cosa antes de empezar de verdad: todo en Grasp funciona con IA. Leer tus documentos, las entrevistas, el plan, todo. Así que necesitamos conectar una IA para que funcione."
+msgid "Good, that’s settled. Everything in Grasp runs on AI: reading your documents, the interviews, the plan. Here you choose which AI that is."
+msgstr "Bien, eso ya está. Todo en Grasp funciona con IA: leer tus documentos, las entrevistas, el plan. Aquí eliges qué IA es."
 
 #: src/onboarding/document-visitors.tsx
 msgid "Got a checklist? Toss it in!"
@@ -18406,10 +18410,6 @@ msgstr "El inicio de sesión no terminó, así que no se conectó nada. Inténta
 msgid "The sign-in took too long, so nothing was connected. Try again."
 msgstr "El inicio de sesión tardó demasiado, así que no se conectó nada. Inténtalo de nuevo."
 
-#: src/onboarding/setup-steps.tsx
-msgid "The simplest is our own system: leave it chosen and press Continue, and you’re ready. If your company already works with a provider like OpenAI or Mistral, choose your own key and paste it instead."
-msgstr "Lo más sencillo es nuestro propio sistema: déjalo elegido, pulsa Continuar y listo. Si tu empresa ya trabaja con un proveedor como OpenAI o Mistral, elige tu propia clave y pégala en su lugar."
-
 #: src/workflows/version-source.tsx
 msgid "The source files of version {sourceVersion}"
 msgstr "Los archivos fuente de la versión {sourceVersion}"
@@ -19627,10 +19627,6 @@ msgstr "Use mayúsculas, dígitos y guiones bajos, empezando por una letra, y no
 #: src/onboarding/ai-choice.tsx
 msgid "Use our own system"
 msgstr "Usar nuestro propio sistema"
-
-#: src/onboarding/setup-steps.tsx
-msgid "Use our own system and you’re set, or connect a provider of your own."
-msgstr "Usa nuestro propio sistema y listo, o conecta un proveedor propio."
 
 #: src/workflows/resource-params.tsx
 msgid "Use the default"
@@ -21491,6 +21487,10 @@ msgstr "Tú y tus responsables lo revisáis"
 msgid "You can add it now and connect it after the agent is made."
 msgstr "Puedes añadirla ahora y conectarla cuando el agente esté creado."
 
+#: src/onboarding/setup-steps.tsx
+msgid "You can carry on with our own system: it works right away, with nothing to set up. Or, if your company would rather use a provider of its own, you can add your own API key. Either is fine."
+msgstr "Puedes seguir con nuestro propio sistema: funciona al momento, sin nada que configurar. O, si tu empresa prefiere usar un proveedor propio, puedes añadir tu propia clave de API. Las dos opciones están bien."
+
 #: src/agents/setup/review-step.tsx
 msgid "You can change all of this later."
 msgstr "Puedes cambiar todo esto más tarde."
@@ -21609,14 +21609,6 @@ msgstr "Trabajas en {name}"
 #: src/chat/answer-words.tsx
 msgid "You’re about to visit an external website."
 msgstr "Vas a visitar un sitio web externo."
-
-#: src/onboarding/setup-steps.tsx
-msgid "You’re already on our own system, and it works, so just press Continue."
-msgstr "Ya usas nuestro propio sistema y funciona, así que pulsa Continuar."
-
-#: src/onboarding/setup-steps.tsx
-msgid "You’re on our own system, and it works."
-msgstr "Usas nuestro propio sistema y funciona."
 
 #: src/drafts/share-with-team.tsx
 msgid "You’re seeing your version."
@@ -21806,8 +21798,8 @@ msgid "Your own key is connected and works."
 msgstr "Tu propia clave está conectada y funciona."
 
 #: src/onboarding/setup-steps.tsx
-msgid "Your own key works, so just press Continue."
-msgstr "Tu propia clave funciona, así que pulsa Continuar."
+msgid "Your own key is connected and works. You can keep it, or change it here."
+msgstr "Tu propia clave está conectada y funciona. Puedes mantenerla o cambiarla aquí."
 
 #: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
