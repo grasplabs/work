@@ -127,6 +127,7 @@ const connection = (
   id,
   source: "native",
   provider,
+  name: provider,
   scope: "shared",
   status: "active",
   ownerUserId: null,

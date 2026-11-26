@@ -7,6 +7,7 @@ import {
   connectionErrors,
   firstSentence,
   oauthProviderSchema,
+  urlConnectorIdSchema,
 } from "@grasp-os/shared/connect";
 import type {
   Catalog,
@@ -23,7 +24,7 @@ import { z } from "zod";
 
 import { nativeConnector } from "./bundled-connectors.ts";
 import { ComposioError, composioKey, composioRequest } from "./composio.ts";
-import { connectorRow } from "./connector-providers.ts";
+import { builtIn, builtIns, connectorRow } from "./connector-providers.ts";
 import { connectors } from "./db/schema.ts";
 import { providers } from "./providers.ts";
 
@@ -433,10 +434,11 @@ export const lastListedToolkits = async (
   );
 
 /**
- * The connectors admins made from an MCP server's URL
- * (mcp-connectors.ts), by name: what connecting one takes is signing in at
- * its server, or a key its server takes in a header, and for a sign-in,
- * the host its sign-in page is on. Its tools are listed only to a
+ * The connectors served through a vendor's MCP server (mcp-connectors.ts):
+ * this release's built-ins, by their names, then those admins made from a
+ * URL. What connecting one takes is signing in at its server, or a key
+ * its server takes in a header, and for a sign-in, the host its sign-in
+ * page is on. Its tools are listed only to a
  * connection, so none are counted here.
  */
 const connectorEntries = async (env: Env): Promise<CatalogEntry[]> => {
@@ -451,27 +453,37 @@ const connectorEntries = async (env: Env): Promise<CatalogEntry[]> => {
     })
     .from(connectors)
     .orderBy(connectors.name, connectors.id);
-  return rows.map(
-    ({ id, name, url, auth, companyNetwork, authorizationEndpoint }) => {
-      const signInHost =
-        authorizationEndpoint === null
-          ? undefined
-          : URL.parse(authorizationEndpoint)?.host;
-      return {
-        source: "connector",
-        id,
-        name,
-        categories: [],
-        toolCount: null,
-        logo: null,
-        description: null,
-        group: catalogGroupOf([]),
-        auth: auth === "header" ? "key" : "managed",
-        ...(companyNetwork === true && { companyNetwork: new URL(url).origin }),
-        ...(signInHost === undefined ? {} : { signInHost }),
-      };
-    }
-  );
+  const rowOf = new Map(rows.map((row) => [row.id, row]));
+  return [
+    ...builtIns().map(({ name, title, mcp }) => ({
+      id: name,
+      name: title,
+      url: mcp.url,
+      auth: typeof mcp.registration === "object" ? "header" : "oauth",
+      companyNetwork: false,
+      authorizationEndpoint: rowOf.get(name)?.authorizationEndpoint ?? null,
+    })),
+    // A built-in's row is its state, listed above as the built-in.
+    ...rows.filter(({ id }) => urlConnectorIdSchema.safeParse(id).success),
+  ].map(({ id, name, url, auth, companyNetwork, authorizationEndpoint }) => {
+    const signInHost =
+      authorizationEndpoint === null
+        ? undefined
+        : URL.parse(authorizationEndpoint)?.host;
+    return {
+      source: "connector",
+      id,
+      name,
+      categories: [],
+      toolCount: null,
+      logo: null,
+      description: null,
+      group: catalogGroupOf([]),
+      auth: auth === "header" ? "key" : "managed",
+      ...(companyNetwork === true && { companyNetwork: new URL(url).origin }),
+      ...(signInHost === undefined ? {} : { signInHost }),
+    };
+  });
 };
 
 /** The catalog, as `ConnectApi.catalog` describes it. */
@@ -616,7 +628,10 @@ export const catalogTools = async (
   // A connector's server lists its tools only to a connection
   // (mcp-connectors.ts `currentTools`): its entry has none to show.
   if (source === "connector") {
-    if ((await connectorRow(env.DB, id)) === undefined) {
+    if (
+      builtIn(id) === undefined &&
+      (await connectorRow(env.DB, id)) === undefined
+    ) {
       throw connectErrors.create("connect.catalog_entry_not_found");
     }
     return [];

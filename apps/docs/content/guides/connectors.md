@@ -243,6 +243,25 @@ export const suiteSignIn = auth.oauth2({
 });
 ```
 
+## A vendor's MCP server
+
+Where the vendor runs its own MCP server, the connector serves it: `mcp` takes the server's URL (https, without credentials, query or fragment) and how Grasp gets a client there. Every tool the server's `tools/list` names is offered under the server's name for it, classed by Grasp's rules, and connect signs in where the server says it does. Such a connector has no `hosts`, `auth` or `tools` of its own:
+
+```ts tracker.ts
+import { defineConnector } from "@grasp-os/sdk/connector";
+
+export default defineConnector({
+  name: "tracker",
+  title: "Tracker",
+  mcp: { url: "https://mcp.tracker.example/mcp", registration: "dcr" },
+});
+```
+
+`registration` is one of:
+
+- `"dcr"`: the server registers Grasp itself, on the first connection in a deployment.
+- `{ header: "X-Api-Key" }`: each person types a key, which goes in that header.
+
 ## Lists
 
 `page(Item)` is what a list answers, one page at a time: `{ items, next }`, where `next` is where the next page starts, or `null` after the last. `items.list` above takes the next page's start as its `cursor` argument.

@@ -31,6 +31,7 @@ import {
 } from "@grasp-os/shared/oauth-relay";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import { and, desc, eq, isNull, like, lt, lte, ne, or, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -59,7 +60,12 @@ import {
   readToolNames,
   toolResourcesOf,
 } from "./connections.ts";
-import { isConnectorId, providerConfigFor } from "./connector-providers.ts";
+import {
+  builtIn,
+  isConnectorId,
+  prepareBuiltIn,
+  providerConfigFor,
+} from "./connector-providers.ts";
 import {
   connections,
   connectionTokens,
@@ -74,7 +80,7 @@ import { httpSummaries } from "./http-connections.ts";
 import { exchangeCode } from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
 import { oweRevoke } from "./owed-revokes.ts";
-import { dropPendingActions } from "./pending.ts";
+import { dropPendingActions, reachedName, shownConnection } from "./pending.ts";
 import { rightsFor } from "./provider-rights.ts";
 import { grantedAsAsked, renewedAsGranted } from "./providers.ts";
 import type {
@@ -278,7 +284,7 @@ const refusingErased = async <T>(
 export const startConnection = async (
   env: Env,
   request: unknown
-): Promise<{ url: string }> => {
+): Promise<{ url: string; relayed: boolean }> => {
   const {
     person,
     provider: providerId,
@@ -304,6 +310,10 @@ export const startConnection = async (
     });
     throw roleErrors.create("role.forbidden");
   }
+  if (new URL(origin).origin !== origin) {
+    throw connectionErrors.create("connection.provider_unavailable");
+  }
+  await prepareBuiltIn(env, providerId, origin);
   const { provider, client, vault } = await ready(env, providerId);
   // The directory's and the documents' connections read
   // for the organization: its own, never a person's.
@@ -318,7 +328,6 @@ export const startConnection = async (
   const relay = isConnectorId(provider.id) ? undefined : callbackOrigin;
   if (
     !provider.isTenant(tenant) ||
-    new URL(origin).origin !== origin ||
     // Only a stage's relay, for a client hosted in that same stage.
     (relay !== undefined && relayedClientOf(origin, relay) === null)
   ) {
@@ -374,7 +383,7 @@ export const startConnection = async (
       url.searchParams.set(key, value);
     }
   }
-  return { url: url.href };
+  return { url: url.href, relayed: relay !== undefined };
 };
 
 /**
@@ -455,8 +464,11 @@ const dropMint = async (
   }
 };
 
-/** A new connection refused for an owner whose erasure began (`storeConnection`). */
-const isErasedOwner = (error: unknown): boolean =>
+/**
+ * A new connection refused for an owner whose erasure began, or for a
+ * flow that no longer stands (`storeConnection`).
+ */
+const isUnkept = (error: unknown): boolean =>
   error instanceof Error &&
   error.message.includes("NOT NULL") &&
   error.message.includes("connections.id");
@@ -506,7 +518,18 @@ const confirmedAddressOf = (
     : null;
 
 /** What a connection is connected for: its scope, and its tenant if pinned. */
-type Target = Pick<FlowRow, "scope" | "tenant">;
+type Target = Pick<FlowRow, "scope" | "tenant"> & { stateHash?: string };
+
+/**
+ * That the sign-in flow `target` came back through still stands, as SQL:
+ * a move of its connector's sign-in deletes it (connector-providers.ts
+ * `prepareBuiltIn`), and then what its code was exchanged for is kept
+ * nowhere. Nothing to stand for a key, which no flow brings.
+ */
+const flowStands = (target: Target): SQL =>
+  target.stateHash === undefined
+    ? sql`1`
+    : sql`EXISTS (SELECT 1 FROM ${oauthFlows} WHERE ${oauthFlows.stateHash} = ${target.stateHash})`;
 
 /** A connection's tenant: none (`null`) for an app's (`""`). */
 const tenantOf = ({ tenant }: Target): string | null =>
@@ -532,12 +555,14 @@ const storeConnection = async (
   const db = drizzle(env.DB);
   const writes: BatchItem<"sqlite">[] = [
     db.insert(connections).values({
-      // NULL, which fails the batch, for a person whose erasure began: a
-      // flow of theirs still under way connects nothing after it.
-      id:
+      // NULL, which fails the batch, for a person whose erasure began, or
+      // once its flow is gone: a flow of theirs still under way, or one
+      // whose connector's sign-in moved, connects nothing after it.
+      id: sql`(SELECT ${connectionId} WHERE ${flowStands(flow)}${
         flow.scope === "personal"
-          ? sql`(SELECT ${connectionId} WHERE NOT ${erasureBegan(person.userId)})`
-          : connectionId,
+          ? sql` AND NOT ${erasureBegan(person.userId)}`
+          : sql``
+      })`,
       provider: provider.id,
       scope: flow.scope,
       ownerUserId: flow.scope === "personal" ? person.userId : null,
@@ -628,7 +653,7 @@ const reconnect = async (
   const now = new Date();
   const db = drizzle(env.DB);
   const row = await firstTokens(vault, held.id, tokens, now);
-  const stillWaiting = sql`${connections.id} = ${held.id} AND ${connections.status} = 'needs_reauth' AND NOT ${ownerErased(held.id)}`;
+  const stillWaiting = sql`${connections.id} = ${held.id} AND ${connections.status} = 'needs_reauth' AND NOT ${ownerErased(held.id)} AND ${flowStands(flow)}`;
   const reconnected = await recordEventIf(
     env,
     connectionEvent(person, "connection.reconnected", held.id, {
@@ -702,7 +727,7 @@ const renewInPlace = async (
   const now = new Date();
   const db = drizzle(env.DB);
   const row = await firstTokens(vault, held.id, tokens, now);
-  const stillActive = sql`${connections.id} = ${held.id} AND ${connections.status} = 'active' AND NOT ${ownerErased(held.id)}`;
+  const stillActive = sql`${connections.id} = ${held.id} AND ${connections.status} = 'active' AND NOT ${ownerErased(held.id)} AND ${flowStands(flow)}`;
   const renewed = await recordEventIf(
     env,
     connectionEvent(person, "connection.reconnected", held.id, {
@@ -869,9 +894,10 @@ const keepAccount = async (
       ))
     );
   } catch (storeError) {
-    // Their erasure began as the flow finished: nothing of theirs is made
-    // again, and the tokens minted for it are dropped.
-    if (isErasedOwner(storeError)) {
+    // Their erasure began as the flow finished, or its connector's sign-in
+    // moved: nothing is made of it, and the tokens minted for it are
+    // dropped.
+    if (isUnkept(storeError)) {
       await drop?.(account.id);
       await refuse("connection.flow_invalid", { connectionId: held?.id });
       throw connectionErrors.create("connection.flow_invalid");
@@ -1253,6 +1279,17 @@ const finishFlow = async (
     throw connectionErrors.create("connection.provider_refused");
   }
   const setUp = await ready(env, flow.provider);
+  // A move of its connector's sign-in since the flow was taken deletes it
+  // (`flowStands`): its code then goes to no token endpoint, the new
+  // server's least of all.
+  const [standing] = await drizzle(env.DB)
+    .select({ stateHash: oauthFlows.stateHash })
+    .from(oauthFlows)
+    .where(eq(oauthFlows.stateHash, flow.stateHash));
+  if (standing === undefined) {
+    await refuse("connection.flow_invalid");
+    throw connectionErrors.create("connection.flow_invalid");
+  }
   const { provider, client, vault } = setUp;
   // RFC 9207: the answer must come from the issuer the sign-in started at,
   // or its code goes to no token endpoint (a mix-up of servers).
@@ -1482,6 +1519,12 @@ export const connectWithKey = async (
     });
     throw roleErrors.create("role.forbidden");
   }
+  // A built-in that signs in at its server takes no key: nothing is
+  // learned or registered for one.
+  if (builtIn(providerId)?.mcp.registration === "dcr") {
+    throw connectionErrors.create("connection.provider_unavailable");
+  }
+  await prepareBuiltIn(env, providerId);
   const provider = await providerConfigFor(env, providerId);
   const vault = await vaultFor(env);
   if (provider?.kind !== "api_key" || vault === undefined) {
@@ -1562,8 +1605,8 @@ export const listConnections = async (
     connectionPersonSchema,
     request
   );
-  const rows = await drizzle(env.DB)
-    .select()
+  const listed = await drizzle(env.DB)
+    .select({ row: connections, connectorName: shownConnection.connectorName })
     .from(connections)
     .where(
       and(
@@ -1577,12 +1620,15 @@ export const listConnections = async (
     .orderBy(desc(connections.createdAt));
   const http = await httpSummaries(
     env,
-    rows.filter(({ serverKind }) => serverKind === "http").map(({ id }) => id)
+    listed
+      .filter(({ row }) => row.serverKind === "http")
+      .map(({ row }) => row.id)
   );
-  return rows.map((row) => ({
+  return listed.map(({ row, connectorName }) => ({
     id: row.id,
     source: row.serverKind,
     provider: row.provider,
+    name: http.get(row.id)?.name ?? reachedName({ ...row, connectorName }),
     scope: row.scope,
     status: row.status,
     ownerUserId: row.ownerUserId,

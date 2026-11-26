@@ -174,8 +174,9 @@ export const egressProps = (
 // connector refuses the rest itself, before anything goes out.
 export const tools = bundled.flatMap(({ manifest }) => {
   const parsed = connectorManifestSchema.safeParse(manifest);
-  if (!parsed.success) {
-    // `sample-unreached`, which connect refuses whole (above).
+  // `sample-unreached`, which connect refuses whole (above); and one
+  // serving an MCP server, whose own tools aren't served as native ones.
+  if (!parsed.success || parsed.data.mcp !== undefined) {
     return [];
   }
   const { name, provider, actions } = parsed.data;

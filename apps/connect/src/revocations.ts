@@ -446,11 +446,21 @@ const tryOwed = async (
     });
     return;
   }
-  const outcome = await revokeWith(
-    env,
-    connection,
-    async () => await Promise.resolve(copy)
-  );
+  // A move of its connector's sign-in deletes it (connector-providers.ts
+  // `prepareBuiltIn`): read again once its provider is, the token goes to
+  // no server it wasn't issued by.
+  let moved = false;
+  const outcome = await revokeWith(env, connection, async () => {
+    const [standing] = await db
+      .select({ id: tokenRevocations.id })
+      .from(tokenRevocations)
+      .where(eq(tokenRevocations.id, owed.id));
+    moved = standing === undefined;
+    return moved ? "none" : copy;
+  });
+  if (moved) {
+    return;
+  }
   if (outcome === "unreadable") {
     log.error("oauth.revoke_abandoned", {
       provider: connection.provider,

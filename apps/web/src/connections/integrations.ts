@@ -147,12 +147,12 @@ export const integrationsOf = (
         key,
         source: connection.source,
         id: connection.provider,
-        // The catalog has its name, or the product we know it as; else its ID stands in.
+        // The product we know it as, else connect's name for it.
         name:
           (connection.source === "native" &&
           Object.hasOwn(unlistedNames, connection.provider)
             ? unlistedNames[connection.provider]
-            : undefined) ?? connection.provider,
+            : undefined) ?? connection.name,
         categories: [],
         group: "Other",
         description: null,
