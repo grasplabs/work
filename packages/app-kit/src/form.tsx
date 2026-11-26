@@ -361,12 +361,20 @@ const isRequired = (descriptor: ValueDescriptor | undefined): boolean => {
     return false;
   }
   if (descriptor.kind === "string") {
-    return (descriptor.min ?? 0) > 0;
+    // Text held to a format is never empty.
+    return (
+      (descriptor.min ?? 0) > 0 ||
+      descriptor.email ||
+      descriptor.datetime === true ||
+      descriptor.date === true ||
+      descriptor.url === true
+    );
   }
   if (descriptor.kind === "array") {
     return (descriptor.min ?? 0) > 0;
   }
-  return descriptor.kind !== "boolean";
+  // Any JSON takes null, which a cleared control sends, so it is never missing.
+  return descriptor.kind !== "boolean" && descriptor.kind !== "json";
 };
 
 /**
@@ -413,7 +421,10 @@ const FieldShell = <Values,>({
             [errorId]: invalid,
           }),
           descriptor,
-          empty: descriptor?.nullable === true ? null : undefined,
+          empty:
+            descriptor?.nullable === true || descriptor?.kind === "json"
+              ? null
+              : undefined,
           handleChange: (next) => {
             // SAFETY: each field hands on a value of the type its name
             // admits (FieldNameOf), or one the validator then refuses.

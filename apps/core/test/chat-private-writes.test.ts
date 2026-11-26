@@ -27,6 +27,7 @@ import {
   personalChatsOf,
   says,
   toolStep,
+  withoutMarking,
 } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -152,7 +153,7 @@ const answers = async (
   const results = await codeResults(stub, chatId);
   return results.map(({ text }) => {
     const answered = answeredSchema.parse(
-      JSON.parse(text.replace("Returned:\n", ""))
+      JSON.parse(withoutMarking(text).replace("Returned:\n", ""))
     );
     if ("held" in answered) {
       return "held";
@@ -1102,7 +1103,12 @@ describe("what a chat writes for others once it used something only its person m
       expect({
         confirmedSend,
         last: answeredSchema.safeParse(
-          JSON.parse(results.at(-1)?.text.replace("Returned:\n", "") ?? "{}")
+          JSON.parse(
+            withoutMarking(results.at(-1)?.text ?? "Returned:\n{}").replace(
+              "Returned:\n",
+              ""
+            )
+          )
         ).data,
         after: await titles(),
       }).toMatchObject({

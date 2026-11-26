@@ -387,6 +387,21 @@ export const appRoutes = (
 };
 
 export const appControls = {
+  /**
+   * Adds a page of `html` to the own section of the person whose account's
+   * subject is `owner`, as a page made elsewhere could hold it; its ID.
+   */
+  keepNotePage: (owner: string, html: string): string => {
+    const id = `0-${crypto.randomUUID().replaceAll("-", "")}!1-${sectionIds.own}`;
+    pagesOf(owner).push({
+      id,
+      title: "Kept elsewhere",
+      html,
+      section: sectionIds.own,
+      createdDateTime: "2026-10-21T09:00:00Z",
+    });
+    return id;
+  },
   /** The person shares their own notebook `id` with someone. */
   shareNotebook: (id: string): void => {
     sharedSince.add(id);

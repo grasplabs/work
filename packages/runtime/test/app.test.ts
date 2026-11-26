@@ -1,6 +1,8 @@
 import { canonicalText } from "@grasp-os/shared/json";
 import { describe, expect, test } from "vite-plus/test";
 
+import { defineSchema } from "../src/app/define-schema.ts";
+import { defineTable } from "../src/app/define-table.ts";
 import {
   databaseWriter,
   inspectApp,
@@ -13,7 +15,7 @@ import type { AppConfig, WorkflowEventReference } from "../src/app/index.ts";
 import { readPermissionDeclaration } from "../src/app/permission-read.ts";
 import { runFunction } from "../src/app/runner.ts";
 import { serverModule } from "../src/app/server.ts";
-import { defineSchema, defineTable, v } from "../src/common/values.ts";
+import { v } from "../src/common/values.ts";
 
 // How an App registers itself from its parts (its config and schema, and
 // the server functions its modules under `server/` export),

@@ -12,7 +12,6 @@ import type {
   ReadRequest,
 } from "@grasp-os/shared/store-reads";
 
-import type { TableState } from "../common/schema-types.ts";
 import { refuse } from "./query-error.ts";
 import { filterOf, filterTree, nodeCount } from "./query-filter.ts";
 import type { NodeBudget } from "./query-filter.ts";
@@ -23,6 +22,7 @@ import {
   pageTerminal,
   relatedOf,
 } from "./query-terminals.ts";
+import type { TableState } from "./schema-types.ts";
 
 /**
  * Runs one read for the invocation: supplied by the trusted host, which

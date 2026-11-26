@@ -1,9 +1,6 @@
-import { describe, expect, it } from "vite-plus/test";
-import { z } from "zod";
-
-import { defineConnector, defineTool, ToolError } from "../src/connector.ts";
 import {
   connectorManifestSchema,
+  defineSync,
   effectAbsentMetaKey,
   effectKeyMetaKey,
   findMetaKey,
@@ -11,9 +8,13 @@ import {
   outcomeUnknownMetaKey,
   pathMatches,
   redirectHostMatches,
-} from "../src/manifest.ts";
-import type { Route } from "../src/manifest.ts";
-import { defineSync } from "../src/sync.ts";
+  ToolError,
+} from "@grasp-os/runtime/connector";
+import type { Route } from "@grasp-os/runtime/connector";
+import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
+
+import { defineConnector, defineTool } from "../src/connector.ts";
 
 // The connector contract, as a connector is defined: input parsed strictly
 // all the way down, one declared resource property, and only requests to
@@ -43,7 +44,6 @@ const connectorWith = (
 ) =>
   defineConnector({
     name: "example",
-    version: "1.0.0",
     provider: "microsoft",
     scopes: [],
     hosts: ["api.example.test"],
@@ -527,12 +527,12 @@ describe("a connector", () => {
     const withRoute = (extra: Record<string, unknown>) =>
       connectorManifestSchema.parse({
         name: "example",
-        version: "1.0.0",
         provider: "microsoft",
         scopes: [],
         hosts: ["api.example.test"],
         actions: {
           "items.list": {
+            description: "Lists the items",
             routes: [{ ...route, ...extra }],
             readOnly: true,
             reach: "own",
@@ -575,7 +575,7 @@ describe("a connector", () => {
         ],
       });
     expect(() => withWrites(["GET", "HEAD", "POST"], false)).not.toThrow();
-    expect(() => withWrites(["GET", "POST", "DELETE"], false)).toThrow(
+    expect(() => withWrites(["GET", "POST", "PATCH"], false)).toThrow(
       "at most one write"
     );
   });
@@ -630,7 +630,7 @@ describe("a connector", () => {
             input,
             output: z.strictObject({}),
             readOnly: false,
-            reach: "own",
+            reach: "others",
             routes: [{ ...route, method: "POST" }],
             describe: { title: "Send an item", fields },
             run: async () => await Promise.resolve({ output: {} }),
@@ -837,10 +837,11 @@ describe("generated contracts", () => {
         toolNamed("items.list"),
         toolNamed("items.get"),
         toolNamed("people.find"),
-        // No family, or an action name a declaration can't list: in no
-        // contract, so neither served by connect nor in the SDK's catalog.
+        // A family is the name but its last part, which may hold dots.
+        toolNamed("items.reports.list"),
+        // No family: in no contract, so neither served by connect nor in
+        // the SDK's catalog.
         toolNamed("ping"),
-        toolNamed("items.archive.all"),
       ],
     });
     expect(
@@ -854,6 +855,7 @@ describe("generated contracts", () => {
       )
     ).toStrictEqual({
       "example.items@1": { list: "items.list", get: "items.get" },
+      "example.items.reports@1": { list: "items.reports.list" },
       "example.people@1": { find: "people.find" },
     });
   });

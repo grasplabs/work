@@ -31,7 +31,7 @@ import {
   FieldError,
   FieldLabel,
 } from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
+import { Input, SecretInput } from "@grasp-os/ui/components/input";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Text } from "@grasp-os/ui/components/text";
 import {
@@ -64,7 +64,10 @@ import type { AllowedTool } from "./tool-choices.ts";
 // Integrations page and panel, an app's page): the app's logo and name, what
 // happens, the one choice it takes, a trust line, and the main action pinned
 // in the footer. A native provider (Microsoft, Google) asks an admin who
-// uses it, then signs in. A Composio toolkit asks an admin what Grasp may
+// uses it, then signs in. A connector an admin made from a URL is connected
+// as a native provider is: signing in at its server, or typing the key it
+// takes; one whose server is inside the company's own network only by an
+// admin, for everyone. A Composio toolkit asks an admin what Grasp may
 // do (`PermissionChoice`), with the consent word for word behind the trust
 // line, then signs in, or takes the key typed in here. Signing in again to
 // a connection whose access ran out is the same sign-in for its provider and
@@ -89,7 +92,9 @@ export const goTo = (started: { url: string } | undefined): void => {
  * Whether this person can start connecting `integration`: never Grasp
  * staff, never an entry that isn't offered (core refuses admins too), never
  * one that needs the organization's own sign-in app (connect refuses it);
- * a native provider for anyone, a Composio toolkit for admins.
+ * a native provider or a connector made from a URL for anyone, a Composio
+ * toolkit and a connector reached through the company network for admins
+ * (connect takes only a shared connection there, which only admins make).
  */
 export const canConnect = (
   integration: Integration,
@@ -98,10 +103,13 @@ export const canConnect = (
   if (identity.staff || !integration.offered || integration.auth === "own") {
     return false;
   }
+  if (integration.companyNetwork !== undefined) {
+    return isAdmin(identity.role);
+  }
   if (integration.source === "native") {
     return oauthProviderSchema.safeParse(integration.id).success;
   }
-  return isAdmin(identity.role);
+  return integration.source === "connector" || isAdmin(identity.role);
 };
 
 /** Whether an admin connects it for this person: they can't connect it, and they aren't one of the organization's admins. */
@@ -358,8 +366,15 @@ const signInHosts: Readonly<Record<OAuthProvider, string>> = {
   google: "accounts.google.com",
 };
 
-/** The sign-in host of `integration`, when it is a native provider's. */
+/**
+ * The sign-in host of `integration`: a native provider's, or the one the
+ * catalog names for a connector made from a URL, as any public host can
+ * draw a look-alike sign-in page.
+ */
 export const signInHostOf = (integration: Integration): string | undefined => {
+  if (integration.source === "connector") {
+    return integration.signInHost;
+  }
   if (integration.source !== "native") {
     return undefined;
   }
@@ -405,7 +420,56 @@ const ScopeChoice = ({
   );
 };
 
-/** A native provider's sign-in: who uses it (an admin chooses), then signing in. */
+/**
+ * The key a connector's server takes, typed in here and never shown: it
+ * stays in this form until it goes to core, and the form never submits
+ * itself (Enter connects, through `onSubmit`), so it never reaches an
+ * address or the history.
+ */
+const KeyEntry = ({
+  value,
+  disabled,
+  onChange,
+  onSubmit,
+}: {
+  value: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+}) => {
+  const { t } = useLingui();
+  return (
+    <form
+      method="post"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!disabled && value !== "") {
+          onSubmit();
+        }
+      }}
+      {...stylex.props(styles.part)}
+    >
+      <Field>
+        <FieldLabel>{t`Key`}</FieldLabel>
+        <SecretInput
+          disabled={disabled}
+          onValueChange={onChange}
+          required
+          spellCheck={false}
+          value={value}
+        />
+        <FieldDescription>{t`The key its server takes. Grasp keeps it sealed and never shows it again.`}</FieldDescription>
+      </Field>
+    </form>
+  );
+};
+
+/**
+ * Signing in to a native provider or a connector made from a URL: who uses
+ * it (an admin chooses), then signing in, or typing the key a connector's
+ * server takes. A connector reached through the company network is shared
+ * only, so there is nothing to choose.
+ */
 const NativeConnect = ({
   integration,
   identity,
@@ -420,23 +484,44 @@ const NativeConnect = ({
 }) => {
   const { attempt, begin, busy, failure } = useSignInStart();
   const { t } = useLingui();
+  const address = integration.companyNetwork;
   const [scope, setScope] = useState<ConnectionScope>(
-    again?.scope ?? "personal"
+    again?.scope ?? (address === undefined ? "personal" : "shared")
   );
-  const provider = oauthProviderSchema.safeParse(integration.id);
+  const [key, setKey] = useState("");
+  const withKey = integration.auth === "key";
   const app = integration.name;
   const host = signInHostOf(integration);
+  const signInAgain = t`Its access ran out. Sign in again to keep it working.`;
+  const connectWords = withKey
+    ? t`Type the key its server takes to connect it.`
+    : t`Sign in at ${app} to connect it. It takes about a minute.`;
+  const description = again === undefined ? connectWords : signInAgain;
+  const signInTrust =
+    host === undefined
+      ? t`You sign in on ${app}’s own page. The access stays in your deployment, and Grasp uses it only for what you allow.`
+      : t({
+          message: `You sign in at ${host}. The access stays in your deployment, and Grasp uses it only for what you allow.`,
+          comment:
+            "{host} is the web address of the sign-in page, e.g. login.microsoftonline.com.",
+        });
+  const trust = withKey
+    ? t`The key stays in your deployment, and Grasp uses it only for what you allow.`
+    : signInTrust;
   const start = async (): Promise<void> => {
-    if (!provider.success) {
-      return;
-    }
-    await begin(
-      async (session) =>
-        await session.connections.start({
-          provider: provider.data,
-          scope,
-          returnTo,
-        })
+    await begin(async (session) =>
+      withKey
+        ? await session.connections.connectWithKey({
+            provider: integration.id,
+            scope,
+            key,
+            returnTo,
+          })
+        : await session.connections.start({
+            provider: integration.id,
+            scope,
+            returnTo,
+          })
     );
   };
   return (
@@ -446,39 +531,46 @@ const NativeConnect = ({
           app={app}
           attempt={attempt}
           busy={busy}
+          disabled={withKey && key === ""}
           onStart={() => {
             void start();
           }}
+          retries={!withKey}
         >
-          {t`Sign in to ${app}`}
+          {withKey ? t`Connect ${app}` : t`Sign in to ${app}`}
         </MainAction>
       }
-      description={
-        again === undefined
-          ? t`Sign in at ${app} to connect it. It takes about a minute.`
-          : t`Its access ran out. Sign in again to keep it working.`
-      }
+      description={description}
       failure={failure}
       integration={integration}
       title={
         again === undefined ? t`Connect ${app}` : t`Sign in to ${app} again`
       }
-      trust={
-        <TrustLine
-          words={
-            host === undefined
-              ? t`You sign in on ${app}’s own page. The access stays in your deployment, and Grasp uses it only for what you allow.`
-              : t({
-                  message: `You sign in at ${host}. The access stays in your deployment, and Grasp uses it only for what you allow.`,
-                  comment:
-                    "{host} is the web address of the sign-in page, e.g. login.microsoftonline.com.",
-                })
-          }
-        />
-      }
+      trust={<TrustLine words={trust} />}
     >
-      {again === undefined && isAdmin(identity.role) ? (
+      {address === undefined ? null : (
+        <Text color="muted" size="sm">
+          {t({
+            message: `Grasp reaches it through your company network at ${address}. It is connected once, for everyone: your organization uses it through the permissions you grant.`,
+            comment:
+              "{address} is the server's address inside the company's network, e.g. http://10.0.0.8:8080.",
+          })}
+        </Text>
+      )}
+      {again === undefined &&
+      isAdmin(identity.role) &&
+      address === undefined ? (
         <ScopeChoice onScope={setScope} scope={scope} />
+      ) : null}
+      {withKey ? (
+        <KeyEntry
+          disabled={busy}
+          onChange={setKey}
+          onSubmit={() => {
+            void start();
+          }}
+          value={key}
+        />
       ) : null}
     </Parts>
   );
@@ -827,7 +919,7 @@ export const ConnectDialog = ({
   <Dialog onOpenChange={onOpenChange} open={open}>
     <DialogContent>
       {/* Only while open, so each opening starts afresh. */}
-      {open && integration.source === "native" ? (
+      {open && integration.source !== "composio" ? (
         <NativeConnect
           again={again}
           identity={identity}

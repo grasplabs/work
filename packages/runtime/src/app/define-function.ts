@@ -1,13 +1,13 @@
 import { isPlainObject } from "@grasp-os/shared/json";
 
 import { refuser } from "../common/declaration.ts";
-import type { SchemaDefinition } from "../common/schema-types.ts";
 import { descriptorOf } from "../common/sealed-descriptors.ts";
 import type { AnySchema } from "../common/value-schema.ts";
 import type { Infer, ObjectOutput, ValueShape } from "../common/value-types.ts";
 import { v } from "../common/values.ts";
 import type { Grant } from "./ctx-workflows.ts";
 import { serverFunctions } from "./handlers.ts";
+import type { SchemaDefinition } from "./schema-types.ts";
 import type {
   ActionCtx,
   MutationCtx,

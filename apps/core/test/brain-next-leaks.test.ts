@@ -1826,7 +1826,11 @@ describe(
       // and what the recall before it found as them, which every agent
       // makes in their own chat (GRA-2203): their own source, which shares
       // the question's word. The passes count prompts from there, so this
-      // is where any other marker in a prompt then must fail.
+      // is where any other marker in a prompt then must fail. That recall
+      // also names, as where else to look (turn-recall.ts, GRA-1873), the
+      // connections the holder's own chat reads through without a grant:
+      // theirs, and the shared one for their team. Each connection's ID
+      // here carries the marker of what was read through it.
       const chat = promptedAtPlanting["a question in the holder's chat"] ?? [];
       const ownChat = new Set([
         "a question in the holder's chat",
@@ -1834,6 +1838,10 @@ describe(
         "the holder's own skill",
         "a team's skill the outsider isn't in",
         "the holder's own source",
+        "what the holder's agent fetched through a connection",
+        "what the holder's agent fetched through a toolkit",
+        "what the holder's run fetched through a toolkit",
+        "what an agent read through a shared connection for a team the outsider isn't in",
       ]);
 
       expect({

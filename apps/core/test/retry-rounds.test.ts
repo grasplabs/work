@@ -342,6 +342,57 @@ describe("a step its catch's retry policy runs again", () => {
     ]);
   });
 
+  it("tells a step sleeping out the wait its call named as a blocked wait of it, and its runs after as attempts more", async () => {
+    const base = "fetch:task";
+    const throttled = waitStep(await waitKeyOf(base), "throttled", 1);
+    const own = stepOf(1, base);
+    const sleep = stepOf(2, throttled, "sleep");
+    const run = stepOf(3, `${throttled}:run`);
+    const records = [
+      recordOf("attempt_started", own, { attempt: 1 }),
+      // Its end is the wait's start, not the step's.
+      recordOf("attempt_completed", own, { attempt: 1 }),
+      recordOf("sleep_started", sleep, { durationMs: 60_000 }),
+      recordOf("sleep_completed", sleep),
+      recordOf("attempt_started", run, { attempt: 1 }),
+      recordOf("attempt_errored", run, { attempt: 1, error: roundError }),
+      recordOf("attempt_started", run, { attempt: 2 }),
+      recordOf("attempt_completed", run, { attempt: 2 }),
+    ];
+    const tell = await historyTeller(
+      {
+        waits: [
+          identityOf(2, sleep.name, "sleep", 0),
+          identityOf(3, run.name, "do", 2),
+        ],
+        steps: [identityOf(1, base, "do", 1), identityOf(3, run.name, "do", 2)],
+      },
+      { sees: false, taskOf: (name) => (name === base ? "fetch" : null) }
+    );
+    const shown = records.flatMap((record) => {
+      const entry = tell(record);
+      if (entry === undefined) {
+        return [];
+      }
+      const state = "state" in entry ? entry.state : entry.kind;
+      if ("attempt" in entry) {
+        return [`${entry.stepId}:${state}:${entry.attempt}`];
+      }
+      return "waitKind" in entry
+        ? [`${entry.waitId}:${state}:${entry.waitKind}`]
+        : [state];
+    });
+    expect(shown).toStrictEqual([
+      "step-1:started:1",
+      "step-1:opened:blocked",
+      "step-1:closed:blocked",
+      "step-1:started:2",
+      "step-1:retrying:2",
+      "step-1:started:3",
+      "step-1:completed:3",
+    ]);
+  });
+
   it("is traced as rounds of its task's step, waiting while it backs off", async () => {
     const base = "fetch:task";
     const prefix = waitStep(await waitKeyOf(base), "retry", 2);

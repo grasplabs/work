@@ -4,6 +4,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import type { ConnectionWorkflows } from "@grasp-os/shared/workflows";
 import { toast } from "@grasp-os/ui/components/toast";
 import { useLingui } from "@lingui/react/macro";
+import { Fragment } from "react";
 import type { ReactNode } from "react";
 
 import type { Loaded } from "../load-from-core.tsx";
@@ -32,7 +33,8 @@ import { useChange } from "./use-change.ts";
 // An app's own page, as its app page (app/page.tsx) draws it, in one column:
 // its head in the app's own colour with what can be done to it, a row for
 // each account (who connected it and when, who can use it, where it
-// stands, and signing in again and disconnecting from its own buttons),
+// stands, where one reached through the company network goes, and signing
+// in again and disconnecting from its own buttons),
 // the workflows that use it, what Grasp may do with each group of its
 // tools, and under them what the host adds. An admin changes what Grasp
 // may do in a shared Composio connection (GRA-993): each change goes to
@@ -89,21 +91,34 @@ export const IntegrationAppPage = ({
       />,
     ])
   );
-  // A stopped connection's line on its row, beside one of the same account
-  // that works: it can be disconnected now.
+  // A row's line under its account: where one reached through the company
+  // network goes, and for a stopped one beside one of the same account that
+  // works, that it can be disconnected now.
   const rowNotes = new Map(
-    integration.connections
-      .filter((connection) =>
-        stoppedBesideWorking(connection, integration, identity)
-      )
-      .map((connection) => [
-        connection.id,
-        <StoppedNotice
-          connection={connection}
-          integration={integration}
-          key={connection.id}
-        />,
-      ])
+    integration.connections.flatMap((connection) => {
+      const address = connection.companyNetwork;
+      const stopped = stoppedBesideWorking(connection, integration, identity);
+      if (address === undefined && !stopped) {
+        return [];
+      }
+      return [
+        [
+          connection.id,
+          <Fragment key={connection.id}>
+            {address === undefined
+              ? null
+              : t`Reached through your company network at ${address}.`}
+            {address !== undefined && stopped ? " " : null}
+            {stopped ? (
+              <StoppedNotice
+                connection={connection}
+                integration={integration}
+              />
+            ) : null}
+          </Fragment>,
+        ],
+      ];
+    })
   );
   const changeTools = (
     changes: readonly { id: string; choice: AppToolChoice }[]

@@ -330,6 +330,10 @@ msgstr "{count, plural, one {# entrevista en la semana {week}} other {# entrevis
 msgid "{count, plural, one {# more line} other {# more lines}}"
 msgstr "{count, plural, one {# línea más} other {# líneas más}}"
 
+#: src/frame/ui-words.tsx
+msgid "{count, plural, one {# more row} other {# more rows}}"
+msgstr "{count, plural, one {# fila más} other {# filas más}}"
+
 #: src/chat/subject-bar.tsx
 msgid "{count, plural, one {# more thing this chat worked on} other {# more things this chat worked on}}"
 msgstr "{count, plural, one {# elemento más en el que trabajó este chat} other {# elementos más en los que trabajó este chat}}"
@@ -471,6 +475,10 @@ msgstr "{count, plural, one {leyó # archivo} other {leyó # archivos}}"
 #: src/brain/thinking/use-thinking.ts
 msgid "{count, plural, one {Reading # workflow} other {Reading # workflows}}"
 msgstr "{count, plural, one {Leyendo # flujo de trabajo} other {Leyendo # flujos de trabajo}}"
+
+#: src/chat/thread.tsx
+msgid "{count, plural, one {saved # memory} other {saved # memories}}"
+msgstr "{count, plural, one {guardó # recuerdo} other {guardó # recuerdos}}"
 
 #: src/chat/thread.tsx
 msgid "{count, plural, one {searched once} other {searched # times}}"
@@ -1133,6 +1141,10 @@ msgstr "{name}, en {app}"
 #: src/frame/ui-words.tsx
 msgid "{name}, lines"
 msgstr "{name}, líneas"
+
+#: src/frame/ui-words.tsx
+msgid "{name}, position {position} of {total}."
+msgstr "{name}, posición {position} de {total}."
 
 #: src/apps/draft-preview.tsx
 msgid "{name}, your version"
@@ -1953,6 +1965,10 @@ msgstr "Un hueco: esta conexión no puede decirle a Grasp qué cambió en ella, 
 msgid "A JSON value"
 msgstr "Un valor JSON"
 
+#: src/connections/add-connector.tsx
+msgid "A key in a header"
+msgstr "Una clave en un encabezado"
+
 #: src/interview/transcript-looks.tsx
 msgid "A line of mine, removed."
 msgstr "Una intervención mía, eliminada."
@@ -2337,6 +2353,10 @@ msgstr "Añadir una conexión"
 msgid "Add a connector"
 msgstr "Añadir un conector"
 
+#: src/connections/add-connector.tsx
+msgid "Add a connector by URL"
+msgstr "Añadir un conector por URL"
+
 #: src/settings/ai-providers.tsx
 msgid "Add a fallback"
 msgstr "Añadir un modelo de reserva"
@@ -2403,6 +2423,7 @@ msgid "Add another"
 msgstr "Añadir otra"
 
 #: src/agents/setup/apps-step.tsx
+#: src/connections/add-connector.tsx
 msgid "Add connector"
 msgstr "Añadir conector"
 
@@ -2449,6 +2470,10 @@ msgstr "Añade las aplicaciones en las que trabaja."
 #: src/connections/http-connections.tsx
 msgid "Add the connection"
 msgstr "Añadir la conexión"
+
+#: src/connections/add-connector.tsx
+msgid "Add the connector"
+msgstr "Añadir el conector"
 
 #: src/workflows/workflow-triggers.tsx
 msgid "Add the trigger"
@@ -2774,6 +2799,10 @@ msgstr "Ya están aquí, por si te refieres a una de estas"
 #: src/agents/agent-apps-card.tsx
 msgid "Already one of its schedules."
 msgstr "Ya es una de sus programaciones."
+
+#: src/chat/saved-memory.tsx
+msgid "Already removed"
+msgstr "Ya eliminado"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
@@ -3124,6 +3153,10 @@ msgstr "Responde las preguntas del equipo con lo que sabe la empresa."
 #: src/chat/agent-draft-card.tsx
 msgid "Any app its kinds of work allow"
 msgstr "Cualquier app que permitan sus tipos de trabajo"
+
+#: src/connections/add-connector.tsx
+msgid "Any app with its own MCP server. Grasp keeps the access in your deployment, and people connect it from its page."
+msgstr "Cualquier app con su propio servidor MCP. Grasp guarda el acceso en tu implantación, y cada persona la conecta desde su página."
 
 #: src/workflows/binding-approvals.tsx
 msgid "Any event its webhook source sends of the types its contract admits"
@@ -3803,6 +3836,10 @@ msgstr "Retroceder 10 segundos"
 msgid "Back to reference {number}"
 msgstr "Volver a la referencia {number}"
 
+#: src/frame/ui-words.tsx
+msgid "Back to reference {number}-{mark}"
+msgstr "Volver a la referencia {number}-{mark}"
+
 #: src/apps/app-workspace.tsx
 msgid "Back to your version"
 msgstr "Volver a tu versión"
@@ -3836,10 +3873,6 @@ msgstr "Antes de que me ponga en contacto, avisa a tu equipo"
 #: src/agents/agent-templates.ts
 msgid "Before meetings"
 msgstr "Antes de las reuniones"
-
-#: src/interview/words.ts
-msgid "Before the work: what you told me about AI."
-msgstr "Antes del trabajo: lo que me contaste sobre la IA."
 
 #: src/onboarding/setup-steps.tsx
 msgid "Before we open it, we check everything with you once more. You’ll hear from us."
@@ -4133,6 +4166,7 @@ msgstr "No se puede ofrecer Ejecutar: {unread}"
 #: src/chat/chat-window.tsx
 #: src/chat/delete-chat-dialog.tsx
 #: src/confirmed.tsx
+#: src/connections/add-connector.tsx
 #: src/connections/http-connections.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/drafts/share-with-team.tsx
@@ -4460,6 +4494,7 @@ msgid "Changed who reads what a shared connection brings into the Brain"
 msgstr "Cambió quién lee lo que una conexión compartida trae al Brain"
 
 #: src/connections/app/words.ts
+#: src/connections/connector-tools.tsx
 msgid "Changes"
 msgstr "Cambia"
 
@@ -4549,6 +4584,7 @@ msgid "Chat with {name}"
 msgstr "Chatear con {name}"
 
 #: src/chat/chat-window.tsx
+#: src/connections/chat-reads.tsx
 #: src/frame/app-sidebar.tsx
 #: src/projects/project-view.tsx
 msgid "Chats"
@@ -4773,6 +4809,14 @@ msgstr "Borrado"
 #: src/frame/ui-words.tsx
 msgid "Click or drop a picture."
 msgstr "Haz clic o suelta una imagen."
+
+#: src/connections/add-connector.tsx
+msgid "Client ID (optional)"
+msgstr "ID de cliente (opcional)"
+
+#: src/connections/add-connector.tsx
+msgid "Client secret (optional)"
+msgstr "Secreto de cliente (opcional)"
 
 #: src/settings/backdrop-settings.tsx
 msgid "Cliffs"
@@ -6588,6 +6632,10 @@ msgstr "Cada llamada enviada para alguien aparece aquí hasta que esa persona di
 msgid "Each path prefix starts with /, on its own line, with no query or dot segments."
 msgstr "Cada prefijo de ruta empieza por /, en su propia línea, sin consulta ni segmentos de punto."
 
+#: src/connections/add-connector.tsx
+msgid "Each person who connects it types their own key, which goes in this header."
+msgstr "Cada persona que la conecta escribe su propia clave, que va en este encabezado."
+
 #: src/settings/stephen-settings.tsx
 msgid "Each place only narrows who reaches him there, and whether he does things for people there or only answers."
 msgstr "Cada lugar solo limita quién lo contacta allí y si hace cosas por las personas o solo responde."
@@ -7138,6 +7186,7 @@ msgstr "Todos en él · {shownRole}"
 #: src/agents/new-agent.tsx
 #: src/chat/agent-draft-card.tsx
 #: src/connections/brain-audience.tsx
+#: src/connections/chat-reads.tsx
 msgid "Everyone in the company"
 msgstr "Todos en la empresa"
 
@@ -7597,10 +7646,6 @@ msgstr "Busca facturas vencidas y redacta recordatorios amables."
 msgid "First run {when}"
 msgstr "Primera ejecución: {when}"
 
-#: src/interview/words.ts
-msgid "First, the steps."
-msgstr "Primero, los pasos."
-
 #: src/inbox/report-viewer.tsx
 msgid "Fit"
 msgstr "Ajustar"
@@ -7689,6 +7734,10 @@ msgstr "Para {person}: {opening}"
 #: src/agents/agent-wakes.tsx
 msgid "For {person}: {opening} · {last}"
 msgstr "Para {person}: {opening} · {last}"
+
+#: src/connections/add-connector.tsx
+msgid "For a server inside your company's own network, with no public address."
+msgstr "Para un servidor dentro de la red propia de tu empresa, sin dirección pública."
 
 #: src/settings/erasures.tsx
 msgid "For an address your company gave to someone else. Anyone signing in with it then gets in, {name} too if your sign-in provider still has it for them."
@@ -7977,6 +8026,10 @@ msgstr "Devolver"
 msgid "Give it a name of at most {longest} characters."
 msgstr "Dale un nombre de como máximo {longest} caracteres."
 
+#: src/connections/add-connector.tsx
+msgid "Give it a name of at most 80 characters."
+msgstr "Ponle un nombre de 80 caracteres como máximo."
+
 #: src/agents/agent-form.tsx
 msgid "Give it a name."
 msgstr "Dale un nombre."
@@ -8016,6 +8069,10 @@ msgstr "¿Dar a tu equipo esta versión?"
 #: src/connections/revocations-by-hand.tsx
 msgid "Given up {date}"
 msgstr "Abandonado el {date}"
+
+#: src/connections/native-descriptions.ts
+msgid "Gmail, Google Calendar, and files in Google Drive."
+msgstr "Gmail, Google Calendar y archivos en Google Drive."
 
 #: src/drafts/draft-history.tsx
 msgid "Go back"
@@ -8230,6 +8287,10 @@ msgstr "Grasp aún no está abierto. Vuelve a intentarlo más tarde."
 msgid "Grasp itself"
 msgstr "El propio Grasp"
 
+#: src/connections/add-connector.tsx
+msgid "Grasp keeps it sealed and never shows it again."
+msgstr "Grasp lo guarda sellado y no vuelve a mostrarlo."
+
 #: src/settings/erasures.tsx
 msgid "Grasp keeps no copy of it, so type it in full."
 msgstr "Grasp no guarda ninguna copia, así que escríbela completa."
@@ -8254,9 +8315,9 @@ msgstr "Grasp puede leer y escribir en {app}, solo para lo que permitas."
 msgid "Grasp may use {app} only through the tools you allowed."
 msgstr "Grasp solo puede usar {app} con las herramientas que permitiste."
 
-#: src/chat/saved-memory.tsx
-msgid "Grasp no longer remembers this."
-msgstr "Grasp ya no recuerda esto."
+#: src/connections/connector-tools.tsx
+msgid "Grasp never runs it"
+msgstr "Grasp nunca la ejecuta"
 
 #: src/onboarding/campaign/concepts/road.tsx
 msgid "Grasp opens"
@@ -8265,6 +8326,15 @@ msgstr "Grasp abre"
 #: src/onboarding/campaign/concepts/concept-words.ts
 msgid "Grasp opens for everyone"
 msgstr "Grasp se abre para todos"
+
+#: src/connections/connected-dialog.tsx
+msgid "Grasp reaches it at {address}, inside your network."
+msgstr "Grasp lo alcanza en {address}, dentro de tu red."
+
+#. {address} is the server's address inside the company's network, e.g. http://10.0.0.8:8080.
+#: src/connections/connect-dialog.tsx
+msgid "Grasp reaches it through your company network at {address}. It is connected once, for everyone: your organization uses it through the permissions you grant."
+msgstr "Grasp lo alcanza a través de la red de tu empresa en {address}. Se conecta una sola vez, para todos: tu organización lo usa mediante los permisos que concedes."
 
 #: src/connections/integrations-band.tsx
 msgid "Grasp reaches only what you connect."
@@ -8435,6 +8505,7 @@ msgstr "¿Tienes una factura que podamos ver?"
 msgid "He stops answering everywhere outside Grasp, and says so once to whoever writes. Grasp’s chat keeps working."
 msgstr "Deja de responder en todas partes fuera de Grasp y lo dice una vez a quien escriba. El chat de Grasp sigue funcionando."
 
+#: src/connections/add-connector.tsx
 #: src/connections/http-connections.tsx
 msgid "Header name"
 msgstr "Nombre de la cabecera"
@@ -8627,6 +8698,10 @@ msgstr "Cuánto piensa"
 #: src/agents/setup/thinking-step.tsx
 msgid "How hard should {name} think?"
 msgstr "¿Cuánto debe pensar {name}?"
+
+#: src/connections/add-connector.tsx
+msgid "How it signs in"
+msgstr "Cómo se inicia sesión"
 
 #: src/workflows/item-test.tsx
 msgid "How it went then"
@@ -9573,6 +9648,10 @@ msgstr "Sus datos, en JSON"
 msgid "Its definition to keep or move, and a blueprint others can start from."
 msgstr "Su definición para guardarla o moverla, y una plantilla desde la que otros pueden empezar."
 
+#: src/connections/add-connector.tsx
+msgid "Its host and port are the one address Grasp reaches inside your network, and plain HTTP is allowed there. An IP address is safer than a name, which trusts your company's own DNS. It signs in with a key in a header, and only admins connect it, as a shared connection."
+msgstr "Su host y su puerto son la única dirección que Grasp alcanza dentro de tu red, y allí se permite HTTP sin cifrar. Una dirección IP es más segura que un nombre, que confía en el DNS propio de tu empresa. Se autentica con una clave en un encabezado, y solo los administradores lo conectan, como conexión compartida."
+
 #: src/chat/agent-draft-card.tsx
 msgid "Its instructions"
 msgstr "Sus instrucciones"
@@ -9644,6 +9723,10 @@ msgstr "Sus tablas pueden decir quién ve y modifica qué filas."
 #: src/connections/connection-list.tsx
 msgid "Its tokens are deleted, every App and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
 msgstr "Sus tokens se eliminan, todas las aplicaciones y agentes la pierden y las acciones que esperan por ella se descartan. Vuelve a conectarla para usarla de nuevo."
+
+#: src/connections/connector-tools.tsx
+msgid "Its tools show here once someone connects it."
+msgstr "Sus herramientas aparecen aquí cuando alguien la conecta."
 
 #: src/workflows/trigger-block.ts
 msgid "Its trigger can't start it"
@@ -9822,6 +9905,7 @@ msgstr "Mantenido a mano fuera de {team} desde el {date}."
 msgid "Kept something the chat can no longer read from the model"
 msgstr "Ocultó al modelo algo que el chat ya no puede leer"
 
+#: src/connections/connect-dialog.tsx
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
 #: src/workflows/kept-state.tsx
@@ -9954,8 +10038,8 @@ msgid "Last week"
 msgstr "La semana pasada"
 
 #: src/interview/words.ts
-msgid "Last, the numbers and the result."
-msgstr "Por último, las cifras y el resultado."
+msgid "Last: what you told me about AI."
+msgstr "Por último: lo que me contaste sobre la IA."
 
 #: src/routes/_shell.settings.instructions.tsx
 msgid "Lasting facts"
@@ -10076,6 +10160,10 @@ msgstr "Permitió que los datos de una aplicación vayan a un webhook"
 #: src/activity/audit-words.ts
 msgid "Let an erased member's old address in again"
 msgstr "Volvió a admitir la dirección antigua de un miembro borrado"
+
+#: src/connections/connector-tools.tsx
+msgid "Let Grasp use {name}"
+msgstr "Dejar que Grasp use {name}"
 
 #: src/onboarding/review-parts.tsx
 msgid "Let Grasp’s mail through."
@@ -10311,6 +10399,7 @@ msgid "Live, being measured"
 msgstr "En marcha, en medición"
 
 #: src/brain/part-not-loaded.tsx
+#: src/frame/page-states.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Loaded"
 msgstr "Cargado"
@@ -10943,6 +11032,10 @@ msgstr "Más de lo que me contaste sobre la IA."
 msgid "More of when it goes differently."
 msgstr "Más sobre cuando va de otra manera."
 
+#: src/interview/words.ts
+msgid "More of your recurring work."
+msgstr "Más trabajo recurrente."
+
 #: src/brain/work-knowledge.tsx
 msgid "More people are asked about it in the next interviews."
 msgstr "En las próximas entrevistas se preguntará a más personas."
@@ -11048,6 +11141,7 @@ msgstr "Mi versión de la App no arrancó. Averigua por qué y arréglalo:"
 #: src/apps/app-data-model.tsx
 #: src/apps/app-settings.tsx
 #: src/apps/field-editor.tsx
+#: src/connections/add-connector.tsx
 #: src/connections/http-connections.tsx
 #: src/frame/panels/head.tsx
 #: src/frame/panels/rename.tsx
@@ -11188,6 +11282,11 @@ msgstr "Nuevo"
 
 #: src/brain/learned-section.tsx
 msgctxt "an entity the Brain first saw in this version"
+msgid "New"
+msgstr "Nuevo"
+
+#: src/chat/thread.tsx
+msgctxt "the line in a chat over the answers the person hasn't read"
 msgid "New"
 msgstr "Nuevo"
 
@@ -11739,6 +11838,7 @@ msgstr "No: se cambió o no enlaza con el evento anterior."
 
 #: src/apps/access-view.tsx
 #: src/connections/brain-audience.tsx
+#: src/connections/chat-reads.tsx
 msgid "Nobody"
 msgstr "Nadie"
 
@@ -11921,6 +12021,10 @@ msgstr "Sin comprobar"
 msgid "Not checked yet"
 msgstr "Aún no comprobado"
 
+#: src/activity/audit-log.tsx
+msgid "Not cleared"
+msgstr "No se ha borrado"
+
 #: src/brain/brain-atlas.ts
 msgid "Not confirmed by the board yet"
 msgstr "Aún no confirmada por la dirección"
@@ -12012,6 +12116,10 @@ msgstr "No invitados: {notInvited}. {sent, plural, one {La otra invitación se e
 msgid "Not listed"
 msgstr "No indicados"
 
+#: src/connections/connector-tools.tsx
+msgid "Not listed now"
+msgstr "Ahora no aparece"
+
 #: src/drafts/share-with-team.tsx
 msgid "Not live"
 msgstr "Sin publicar"
@@ -12023,6 +12131,7 @@ msgid "Not live yet"
 msgstr "Aún no activo"
 
 #: src/brain/part-not-loaded.tsx
+#: src/frame/page-states.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Not loaded"
 msgstr "No cargado"
@@ -12122,6 +12231,7 @@ msgstr "No compartido con el proyecto"
 msgid "Not shared yet"
 msgstr "Aún no compartido"
 
+#: src/activity/audit-log.tsx
 #: src/agents/agent-overview.tsx
 #: src/agents/agent-page.tsx
 msgid "Not shown"
@@ -12742,6 +12852,10 @@ msgstr "Solo los creadores ven esto."
 msgid "Only counted anonymously"
 msgstr "Solo cuenta de forma anónima"
 
+#: src/connections/add-connector.tsx
+msgid "Only for a server that doesn't register Grasp itself: the client its vendor issued for Grasp."
+msgstr "Solo para un servidor que no registra a Grasp por sí mismo: el cliente que su proveedor emitió para Grasp."
+
 #: src/workflows/workflow-diagram.tsx
 msgid "Only if its condition holds"
 msgstr "Solo si se cumple su condición"
@@ -13176,6 +13290,10 @@ msgstr "Nuestro correo no llegó a {names}. Envíales tú su enlace desde Enlace
 msgid "Our first conversation is deleted. I’m still erasing what I took from it, and I finish that by myself."
 msgstr "Nuestra primera conversación está borrada. Todavía estoy borrando lo que saqué de ella, y lo termino por mi cuenta."
 
+#: src/connections/native-descriptions.ts
+msgid "Outlook mail and calendars, and files in OneDrive and SharePoint."
+msgstr "Correo y calendarios de Outlook, y archivos en OneDrive y SharePoint."
+
 #: src/apps/resource-bindings.tsx
 msgid "Output"
 msgstr "Salida"
@@ -13535,6 +13653,14 @@ msgstr "La gente responde mejor cuando sabe por qué me pongo en contacto. Enví
 msgid "People respond better when they know why I’m reaching out. Send them this message yourself. Grasp’s staff plan the day I start with you."
 msgstr "La gente responde mejor cuando sabe por qué me pongo en contacto. Envíales tú este mensaje. El equipo de Grasp planifica contigo el día en que empiezo."
 
+#: src/connections/connector-tools.tsx
+msgid "People sign in at {host}."
+msgstr "La gente inicia sesión en {host}."
+
+#: src/connections/add-connector.tsx
+msgid "People sign in at the server"
+msgstr "Cada persona inicia sesión en el servidor"
+
 #: src/settings/team-members-dialog.tsx
 msgid "People to tick"
 msgstr "Personas para marcar"
@@ -13634,6 +13760,10 @@ msgstr "Elige qué puede hacer. Puedes cambiarlo más tarde."
 #: src/agents/setup/thinking-step.tsx
 msgid "Picked in the chat"
 msgstr "Elegido en el chat"
+
+#: src/frame/ui-words.tsx
+msgid "Picked up {name}, position {position} of {total}."
+msgstr "Se levantó {name}, posición {position} de {total}."
 
 #: src/onboarding/interviews-progress.tsx
 msgid "pieces of work found"
@@ -13752,6 +13882,10 @@ msgstr "Pulsa Intro para añadirlo."
 #: src/frame/panels/head.tsx
 msgid "Press or press F2 to rename"
 msgstr "Pulsa o pulsa F2 para cambiar el nombre"
+
+#: src/frame/ui-words.tsx
+msgid "Press Space or Enter to pick it up, the arrow keys to move it, Space or Enter to put it down, or Escape to put it back."
+msgstr "Pulse Espacio o Intro para levantarlo, las flechas para moverlo, Espacio o Intro para soltarlo, o Escape para devolverlo a su sitio."
 
 #: src/frame/ui-words.tsx
 msgid "Presses \"{words}\""
@@ -13926,6 +14060,14 @@ msgctxt "what the Brain remembers about something"
 msgid "Purpose"
 msgstr "Propósito"
 
+#: src/frame/ui-words.tsx
+msgid "Put {name} back at position {position} of {total}."
+msgstr "Se devolvió {name} a la posición {position} de {total}."
+
+#: src/frame/ui-words.tsx
+msgid "Put {name} down at position {position} of {total}."
+msgstr "Se soltó {name} en la posición {position} de {total}."
+
 #: src/settings/instruction-file.tsx
 msgid "Put my changes aside"
 msgstr "Apartar mis cambios"
@@ -13994,6 +14136,19 @@ msgstr "Aleatorio"
 #: src/settings/stephen-settings.tsx
 msgid "Reach others"
 msgstr "Contactar a otros"
+
+#: src/connections/add-connector.tsx
+#: src/connections/connected-dialog.tsx
+msgid "Reached through your company network"
+msgstr "Accesible a través de la red de tu empresa"
+
+#: src/connections/app-page.tsx
+msgid "Reached through your company network at {address}."
+msgstr "Accesible a través de la red de tu empresa en {address}."
+
+#: src/connections/connector-tools.tsx
+msgid "Reaches other people"
+msgstr "Llega a otras personas"
 
 #: src/activity/type-labels.ts
 msgid "Read"
@@ -14200,6 +14355,7 @@ msgid "Reading who can own it…"
 msgstr "Leyendo quién puede ser responsable…"
 
 #: src/connections/app/words.ts
+#: src/connections/connector-tools.tsx
 msgid "Reads"
 msgstr "Lee"
 
@@ -14307,6 +14463,10 @@ msgstr "Los registros de {table} sin {field} reciben «{value}»."
 #: src/apps/data-model-changes.tsx
 msgid "Records in {table} that lack {field} need a value before this can be published."
 msgstr "Los registros de {table} sin {field} necesitan un valor antes de poder publicarse."
+
+#: src/interview/words.ts
+msgid "Recurring work"
+msgstr "Trabajo recurrente"
 
 #: src/brain/gap-actions.tsx
 msgid "Redact it"
@@ -14554,6 +14714,10 @@ msgstr "Eliminado tras una semana"
 msgid "Removed by its uploader, {removed}"
 msgstr "Quitado por quien lo subió, {removed}"
 
+#: src/chat/saved-memory.tsx
+msgid "Removed from memory"
+msgstr "Eliminado de la memoria"
+
 #: src/brain/brain.ts
 #: src/brain/forget.tsx
 msgid "Removed from the brain"
@@ -14777,6 +14941,10 @@ msgstr "Restaura la cuenta en el directorio y Grasp levantará la suspensión en
 #: src/drafts/draft-history.tsx
 msgid "Restore this earlier state?"
 msgstr "¿Restaurar este estado anterior?"
+
+#: src/chat/saved-memory.tsx
+msgid "Restored: {replaced}"
+msgstr "Restaurado: {replaced}"
 
 #: src/chat/chat-markdown.ts
 #: src/chat/sources.tsx
@@ -15355,18 +15523,6 @@ msgctxt "a setting saved"
 msgid "Saved"
 msgstr "Guardado"
 
-#: src/chat/saved-memory.tsx
-msgid "Saved a memory"
-msgstr "Recuerdo guardado"
-
-#: src/chat/saved-memory.tsx
-msgid "Saved a preference"
-msgstr "Preferencia guardada"
-
-#: src/chat/saved-memory.tsx
-msgid "Saved an instruction"
-msgstr "Instrucción guardada"
-
 #: src/apps/app-data-model.tsx
 #: src/apps/field-editor.tsx
 msgid "Saved as {named}"
@@ -15392,9 +15548,10 @@ msgstr "Guardado el {date}"
 msgid "Saved the company's groups of teams"
 msgstr "Guardó los grupos de equipos de la empresa"
 
+#: src/chat/saved-memory.tsx
 #: src/chat/thread.tsx
-msgid "Saved to your memory"
-msgstr "Guardado en tu memoria"
+msgid "Saved to memory"
+msgstr "Guardado en la memoria"
 
 #: src/workflows/workflow-flow.tsx
 msgid "Saved, but it doesn't pass yet: Definition says what to fix."
@@ -15419,8 +15576,8 @@ msgid "Saving"
 msgstr "Guardando"
 
 #: src/chat/thread.tsx
-msgid "Saving to your memory"
-msgstr "Guardando en tu memoria"
+msgid "Saving to memory"
+msgstr "Guardando en la memoria"
 
 #: src/interview/destination.tsx
 msgid "Saving…"
@@ -15782,6 +15939,10 @@ msgstr "Enviada a {owner} el {day}"
 #: src/brain/brain.ts
 msgid "Served by"
 msgstr "Flujos que contribuyen"
+
+#: src/connections/add-connector.tsx
+msgid "Server URL"
+msgstr "URL del servidor"
 
 #: src/onboarding/hr-leads.tsx
 msgid "Service user ID"
@@ -16463,6 +16624,7 @@ msgid "So far: {works, plural, one {# piece of work} other {# pieces of work}}, 
 msgstr "Hasta ahora: {works, plural, one {# tarea} other {# tareas}}, {tools, plural, one {# herramienta} other {# herramientas}} y {handoffs, plural, one {# traspaso entre equipos} other {# traspasos entre equipos}}."
 
 #: src/agents/setup/words.ts
+#: src/connections/chat-reads.tsx
 msgid "Some teams"
 msgstr "Algunos equipos"
 
@@ -17224,6 +17386,7 @@ msgstr "Equipo"
 #: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
 #: src/connections/brain-audience.tsx
+#: src/connections/chat-reads.tsx
 msgid "Team {name}"
 msgstr "Equipo {name}"
 
@@ -17524,9 +17687,25 @@ msgstr "La dirección"
 msgid "The address can sign in again."
 msgstr "La dirección puede volver a iniciar sesión."
 
+#: src/connections/add-connector.tsx
+msgid "The address is the server's own http:// or https:// URL inside your network, such as http://10.0.0.8:8080/mcp, with no query, fragment or user name in it."
+msgstr "La dirección es la URL http:// o https:// propia del servidor dentro de tu red, como http://10.0.0.8:8080/mcp, sin consulta, fragmento ni nombre de usuario."
+
+#: src/connections/add-connector.tsx
+msgid "The address is the server's own https:// URL, such as https://mcp.example.com/mcp, with no query, fragment or user name in it."
+msgstr "La dirección es la URL https:// propia del servidor, como https://mcp.example.com/mcp, sin consulta, fragmento ni nombre de usuario."
+
 #: src/frame/page-states.tsx
 msgid "The address may be wrong, or the page was moved or removed."
 msgstr "Puede que la dirección sea incorrecta, o que la página se haya movido o eliminado."
+
+#: src/connections/add-connector.tsx
+msgid "The address of its MCP server, as its vendor gives it."
+msgstr "La dirección de su servidor MCP, tal como la da su proveedor."
+
+#: src/connections/add-connector.tsx
+msgid "The admin who connects it types its key, which goes in this header."
+msgstr "El administrador que la conecta escribe su clave, que va en este encabezado."
 
 #: src/chat/connection-requests.tsx
 msgid "The agent asked an admin for {name}"
@@ -17751,6 +17930,10 @@ msgstr "No se pudo cambiar el nombre del chat. Inténtalo de nuevo."
 msgid "The checks, reviews and records the regulator expects from you."
 msgstr "Los controles, revisiones y registros que el regulador espera de usted."
 
+#: src/connections/add-connector.tsx
+msgid "The client ID is at most 512 characters, and its secret at most 4,096."
+msgstr "El ID de cliente tiene como máximo 512 caracteres, y su secreto como máximo 4096."
+
 #: src/brain/skills-page.tsx
 msgid "The company has no skills of its own yet."
 msgstr "La empresa aún no tiene skills propias."
@@ -17911,6 +18094,10 @@ msgstr "La exportación no ha funcionado. Inténtalo de nuevo."
 msgid "The first way: {way}"
 msgstr "La primera forma: {way}"
 
+#: src/connections/add-connector.tsx
+msgid "The header is a name of letters, digits and dashes, and not one Grasp sets itself."
+msgstr "El encabezado es un nombre de letras, dígitos y guiones, y no uno que Grasp ponga por sí mismo."
+
 #: src/drafts/draft-history.tsx
 msgid "The history of your changes couldn't be read. Try again in a moment."
 msgstr "No se pudo leer el historial de tus cambios. Inténtalo de nuevo en un momento."
@@ -17955,6 +18142,14 @@ msgstr "La invitación a {address} fue devuelta."
 #: src/onboarding/campaign/campaign-asks.tsx
 msgid "The invitation went out again."
 msgstr "La invitación se envió de nuevo."
+
+#: src/connections/connect-dialog.tsx
+msgid "The key its server takes. Grasp keeps it sealed and never shows it again."
+msgstr "La clave que acepta su servidor. Grasp la guarda sellada y no vuelve a mostrarla."
+
+#: src/connections/connect-dialog.tsx
+msgid "The key stays in your deployment, and Grasp uses it only for what you allow."
+msgstr "La clave se queda en tu despliegue y Grasp solo la usa para lo que permitas."
 
 #: src/routes/_shell.settings.profile.tsx
 msgid "The language Grasp speaks to you"
@@ -18179,6 +18374,10 @@ msgstr "Los archivos fuente de la versión {sourceVersion}"
 msgid "The step, as JSON"
 msgstr "El paso, en JSON"
 
+#: src/interview/words.ts
+msgid "The steps."
+msgstr "Los pasos."
+
 #: src/settings/teams.tsx
 msgid "The team couldn't be created. Try again."
 msgstr "No se ha podido crear el equipo. Inténtalo de nuevo."
@@ -18243,6 +18442,10 @@ msgstr "La ejecución del flujo de trabajo que lo preguntó ha terminado, así q
 msgid "The workflows couldn't be read."
 msgstr "No se pudieron leer los flujos de trabajo."
 
+#: src/connections/chat-reads.tsx
+msgid "Their assistant reads in all of {label} for them. Anything it changes there waits for them to confirm it."
+msgstr "Su asistente lee en todo {label} por ellos. Todo lo que cambie allí espera a que lo confirmen."
+
 #: src/settings/directory-placement.tsx
 msgid "Their department in the directory no longer fills this team. They stay until you move them."
 msgstr "Su departamento en el directorio ya no corresponde a este equipo. Se quedan hasta que los muevas."
@@ -18285,6 +18488,10 @@ msgid "Then everyone gets their link"
 msgstr "Después, cada persona recibe su enlace"
 
 #: src/interview/words.ts
+msgid "Then, the numbers and the result."
+msgstr "Después, las cifras y el resultado."
+
+#: src/interview/words.ts
 msgid "Then, when it goes differently."
 msgstr "Después, cuando va de otra manera."
 
@@ -18316,10 +18523,6 @@ msgstr "No hay nadie en esta lista."
 #: src/onboarding/company-step.tsx
 msgid "There it is, your company. I can see {people} people in {teams} teams. Have a quick look whether that seems right, and then we’ll move on."
 msgstr "Aquí está, tu empresa. Veo {people} personas en {teams} equipos. Echa un vistazo rápido a ver si te parece bien, y seguimos."
-
-#: src/chat/saved-memory.tsx
-msgid "There was nothing to undo: Grasp no longer uses this."
-msgstr "No había nada que deshacer: Grasp ya no usa esto."
 
 #: src/brain/forget.tsx
 msgid "These notes rest on nothing else and go too: {named} and {more} more."
@@ -18926,6 +19129,10 @@ msgstr "Herramientas permitidas: {tools}"
 msgid "Tools allowed: none recorded"
 msgstr "Herramientas permitidas: ninguna registrada"
 
+#: src/connections/connector-tools.tsx
+msgid "Tools its server lists"
+msgstr "Herramientas que ofrece su servidor"
+
 #: src/frame/ui-words.tsx
 msgid "Total cost"
 msgstr "Coste total"
@@ -19010,9 +19217,12 @@ msgstr "Vuelve a intentar preparar {name}."
 msgid "Try the search again"
 msgstr "Volver a buscar"
 
+#: src/frame/page-states.tsx
+msgid "Trying again"
+msgstr "Reintentando"
+
 #: src/brain/part-not-loaded.tsx
 #: src/chat/builds.tsx
-#: src/frame/page-states.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Trying again…"
 msgstr "Reintentando…"
@@ -19020,6 +19230,10 @@ msgstr "Reintentando…"
 #: src/agents/agent-templates.ts
 msgid "Turn a full inbox into a short list of what needs a person today."
 msgstr "Convierte una bandeja llena en una lista breve de lo que necesita a una persona hoy."
+
+#: src/connections/connector-tools.tsx
+msgid "Turn a tool off to block it: Grasp offers it to nobody and refuses every call to it."
+msgstr "Desactiva una herramienta para bloquearla: Grasp no se la ofrece a nadie y rechaza cada llamada a ella."
 
 #: src/onboarding/calm-frame.tsx
 msgid "Turn my voice off"
@@ -19105,6 +19319,10 @@ msgstr "Escribe un número entero."
 #: src/frame/ui-words.tsx
 msgid "Type instead"
 msgstr "Prefiero escribir"
+
+#: src/connections/connect-dialog.tsx
+msgid "Type the key its server takes to connect it."
+msgstr "Escribe la clave que pide su servidor para conectarlo."
 
 #: src/interview/conversation.tsx
 msgid "Type what is missing, or yes"
@@ -19231,6 +19449,10 @@ msgstr "Desvinculó una cuenta de una aplicación de chat"
 #: src/frame/ui-words.tsx
 msgid "Unpin"
 msgstr "Desfijar"
+
+#: src/chat/sidebar-chats.tsx
+msgid "Unread"
+msgstr "No leído"
 
 #: src/activity/audit-log.tsx
 msgid "Unreadable event"
@@ -20764,6 +20986,10 @@ msgstr "quien añadió la fila"
 msgid "Whoever you let read {label} in the Brain will be able to read everything in the places you pick, whatever their permissions in {label}."
 msgstr "Quien dejes leer {label} en el Brain podrá leer todo lo que haya en los lugares que elijas, sean cuales sean sus permisos en {label}."
 
+#: src/connections/chat-reads.tsx
+msgid "Whose chats read in it"
+msgstr "De quién son los chats que leen en él"
+
 #: src/chat/agent-draft-card.tsx
 msgid "Whose it is"
 msgstr "De quién es"
@@ -21534,6 +21760,10 @@ msgstr "Tu pregunta"
 msgid "Your quote template, perhaps?"
 msgstr "¿Tu plantilla de presupuesto, quizá?"
 
+#: src/interview/words.ts
+msgid "Your recurring work."
+msgstr "Tu trabajo recurrente."
+
 #: src/inbox/report-row.tsx
 msgid "Your report on week {week} is ready"
 msgstr "Tu informe de la semana {week} está listo"
@@ -21629,6 +21859,10 @@ msgstr "Tu versión de la App"
 #: src/interview/start.tsx
 msgid "Your voice isn’t saved, only your words."
 msgstr "No se guarda tu voz, solo tus palabras."
+
+#: src/interview/words.ts
+msgid "Your week"
+msgstr "Tu semana"
 
 #: src/inbox/report-row.tsx
 msgid "Your weekly report"

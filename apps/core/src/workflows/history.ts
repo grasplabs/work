@@ -51,7 +51,8 @@ import { waitKeyOf, waitStepPrefix } from "./host.ts";
 // an attempt whose answer came after another took over records no
 // outcome. A step whose side effect connect held ends as held, and runs
 // again once the person decided, in steps of core's own
-// (`$grasp:wait:<key>:held:<round>:…`, or `:unknown:`, host.ts): those runs are told as
+// (`$grasp:wait:<key>:held:<round>:…`, or `:unknown:`, host.ts), as is a
+// step sleeping out the wait its call named (`:throttled:`): those runs are told as
 // more attempts of the step that was held, numbered on from its own, and
 // the waits between them as `blocked` waits of it (`outcome_unknown` for
 // an unknown outcome's, which its person resolves), while its held end is
@@ -80,11 +81,12 @@ const stepFailedText = workflowErrors.create("workflow.step_failed").message;
 
 /**
  * One of core's steps of a round of a step (host.ts, `waitStep`): a held
- * step's run again, a wait between them or a check of it; or a retry's
- * decision, backoff or run again.
+ * step's run again, a wait between them or a check of it; a step's sleep
+ * through the wait its call named, or its run again after (`throttled`,
+ * told as a held round is); or a retry's decision, backoff or run again.
  */
 const roundStep =
-  /^\$grasp:wait:(?<key>[0-9a-f]{16}):(?<kind>held|unknown|retry):(?<round>[1-9]\d*):(?<rest>.+)$/u;
+  /^\$grasp:wait:(?<key>[0-9a-f]{16}):(?<kind>held|unknown|throttled|retry):(?<round>[1-9]\d*)(?::(?<rest>.+))?$/u;
 
 /** A step of a round, as `roundStep` reads its name. */
 interface RoundName {
@@ -92,21 +94,23 @@ interface RoundName {
   key: string;
   kind: "held" | "unknown" | "retry";
   round: number;
+  /** What follows its round: none for a throttled round's sleep. */
   rest: string;
 }
 
 const roundOf = (name: string): RoundName | undefined => {
   const parts = roundStep.exec(name)?.groups;
-  if (
-    parts?.key === undefined ||
-    parts.round === undefined ||
-    parts.rest === undefined
-  ) {
+  if (parts?.key === undefined || parts.round === undefined) {
     return undefined;
   }
   const kind =
     parts.kind === "retry" || parts.kind === "unknown" ? parts.kind : "held";
-  return { key: parts.key, kind, round: Number(parts.round), rest: parts.rest };
+  return {
+    key: parts.key,
+    kind,
+    round: Number(parts.round),
+    rest: parts.rest ?? "",
+  };
 };
 
 /** A step run again in rounds of core's, and those runs. */

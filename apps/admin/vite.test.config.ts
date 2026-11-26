@@ -1,12 +1,13 @@
 import { readdirSync, readFileSync } from "node:fs";
 
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
+import stylex from "@stylexjs/unplugin/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import react from "@vitejs/plugin-react";
 import { defineProject } from "vite-plus";
 
 import { accessTeam } from "./test/access-config.ts";
-import { adminDefine } from "./vite.config.ts";
+import { adminDefine, damskoStyles } from "./vite.config.ts";
 
 const migrations = await readD1Migrations(
   `${import.meta.dirname}/src/db/migrations`
@@ -76,6 +77,9 @@ export default defineProject({
   },
   plugins: [
     tanstackStart(),
+    // The pages a test renders here (test/pages.ts) stand in the frame,
+    // whose parts are Damsko's: an uncompiled `stylex.create` throws.
+    stylex(damskoStyles("serve")),
     react(),
     cloudflareTest({
       wrangler: { configPath: "./wrangler.jsonc" },

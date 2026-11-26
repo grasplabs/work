@@ -70,6 +70,29 @@ describe("a descriptor as JSON Schema", () => {
     ]).toStrictEqual([true, false]);
   });
 
+  it("names a string's format and leaves any JSON open", () => {
+    expect(
+      jsonSchemaOf(
+        v.object({
+          at: v.string().datetime(),
+          day: v.string().date().optional(),
+          link: v.string().url().nullable(),
+          custom: v.json(),
+        }).descriptor
+      )
+    ).toStrictEqual({
+      type: "object",
+      properties: {
+        at: { type: "string", format: "date-time" },
+        day: { type: "string", format: "date" },
+        link: { anyOf: [{ type: "string", format: "iri" }, { type: "null" }] },
+        custom: {},
+      },
+      required: ["at", "link", "custom"],
+      additionalProperties: false,
+    });
+  });
+
   it("puts no pattern on a bounded string", () => {
     expect(jsonSchemaOf(v.string().min(3).max(10).descriptor)).toStrictEqual({
       type: "string",

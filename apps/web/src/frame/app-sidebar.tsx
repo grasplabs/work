@@ -14,8 +14,11 @@ import {
   SettingsIcon,
   UserSparklesIcon,
 } from "@grasp-os/ui/lib/icons";
+import { focusRing } from "@grasp-os/ui/lib/styles";
+import { radius } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import {
   Link,
   useLocation,
@@ -71,6 +74,15 @@ const workflowsWaitingLabel = (waiting: number): string =>
   });
 
 /** The sidebar's two views, chosen with the switch under its head. */
+const styles = stylex.create({
+  home: {
+    display: "flex",
+    borderRadius: radius.sm,
+    cornerShape: radius.shape,
+    color: "inherit",
+  },
+});
+
 type SidebarView = "home" | "inbox";
 
 const isView = (value: string): value is SidebarView =>
@@ -327,7 +339,18 @@ export const AppSidebar = ({
         closeLabel={t`Close`}
         foldLabel={t`Show or hide the sidebar`}
         groups={groups}
-        mark={<Icon icon={GraspMark} label="Grasp" />}
+        mark={
+          // The mark is the way home: the chat's start, on the Home view.
+          <Link
+            onClick={() => {
+              setView("home");
+            }}
+            to="/"
+            {...stylex.props(styles.home, focusRing)}
+          >
+            <Icon icon={GraspMark} label="Grasp" />
+          </Link>
+        }
         navLabel={view === "inbox" ? t`Inbox` : t`Main`}
         profile={<PersonMenu core={core} identity={identity} />}
         {...(section === undefined ? {} : { section })}

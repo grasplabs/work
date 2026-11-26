@@ -3,7 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { filePart } from "../../../scripts/test-file-parts.ts";
 import { nativeConnector } from "../src/bundled-connectors.ts";
 import { outcome } from "./connect.ts";
-import { api, connectionOf, tools } from "./connectors-harness.ts";
+import { api, connectionOf, tenantApp, tools } from "./connectors-harness.ts";
 import { callTool as call, toolError } from "./tool-calls.ts";
 
 // The check of every native tool's input, which
@@ -12,6 +12,12 @@ import { callTool as call, toolError } from "./tool-calls.ts";
 // (scripts/test-file-parts.ts), every `parts`-th from its `part`th, each
 // part a mix of connectors. connectors.test.ts reads every such file's
 // name and checks that together they check every tool once.
+
+/**
+ * A refusal of a key the tool doesn't declare: `v`'s code, or Zod's from
+ * the tools still written with the old kit (GRA-2323, GRA-2324).
+ */
+const unknownKey = /value\.unknown_key|unrecognized_keys/u;
 
 /**
  * The native tools the file `file` (a path or URL) checks, from its own
@@ -82,7 +88,7 @@ export const everyNativeTool = (file: string): void => {
         expect(
           refusals
             .slice(0, undeclared.length)
-            .every((text) => String(text).includes("unrecognized_keys"))
+            .every((text) => unknownKey.test(String(text)))
         ).toBeTruthy();
         expect(
           refusals
@@ -106,7 +112,10 @@ export const everyNativeTool = (file: string): void => {
         expect(refusedByConnect).toBe(
           filesField === undefined ? undefined : "connect.invalid"
         );
-        expect(api.sent).toStrictEqual([]);
+        expect({ sample: api.sent, tenant: tenantApp.calls }).toStrictEqual({
+          sample: [],
+          tenant: [],
+        });
       }
     );
   });

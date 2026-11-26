@@ -35,7 +35,7 @@ const maxBackedOffSeconds = 60;
  * so a step that waits long adds a round to its run's journal a minute at
  * most. It starts again from five seconds at the step's next wait.
  */
-const askAgainSeconds = (waited: number): number =>
+export const askAgainSeconds = (waited: number): number =>
   Math.min(
     busyRetryAfterSeconds * 2 ** Math.max(0, waited),
     maxBackedOffSeconds

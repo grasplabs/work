@@ -126,11 +126,11 @@ export const toastRegionMarker = stylex.defineMarker();
 export const layerFooterMarker = stylex.defineMarker();
 
 /**
- * How tall a rectangular Skeleton stands: a default control, or what the box that holds it says (an
- * icon's 16px box sets `100%`, so its placeholder is the box's size in every engine).
+ * How large a rectangular Skeleton stands tall and a circular one across: a default control, or
+ * what the box that holds it says (`100%`, so the placeholder is that box's own size).
  */
 export const skeletonVars = stylex.defineVars({
-  block: "var(--damsko-control-default)",
+  size: "var(--damsko-control-default)",
 });
 
 /** What a pixel grid reads from the part that draws it. */

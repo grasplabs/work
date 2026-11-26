@@ -30,6 +30,7 @@ export const MODELS = [
   "haiku",
   "voice",
   "ears",
+  "conversation",
   "other",
 ] as const;
 export type Model = (typeof MODELS)[number];
@@ -41,6 +42,7 @@ export const MODEL_NAMES: Record<Model, string> = {
   haiku: "Claude Haiku 4.5",
   voice: "Mistral Voxtral TTS 3",
   ears: "OpenAI GPT-4o Transcribe",
+  conversation: "Mistral voice agent (Mistral Small, Voxtral)",
   other: "Other models (not priced)",
 };
 
@@ -62,6 +64,10 @@ export const PRICES: Record<
   // $6 a million audio tokens in ($2.50 a million text tokens in), $10 a million text tokens out,
   // estimated on that page at $0.006 a minute.
   ears: { tokensIn: 0, tokensOut: 0, minute: 0.006 },
+  // An interview held as one live voice session: Mistral's voice agents bill the session by the
+  // minute, $0.04 with Mistral Small (as reported at its launch, October 2026), listening,
+  // answering and speaking together.
+  conversation: { tokensIn: 0, tokensOut: 0, minute: 0.037 },
   // Not known: its tokens count, its spend stays out of the total.
   other: { tokensIn: 0, tokensOut: 0, minute: 0 },
 };
@@ -145,6 +151,7 @@ const byModel = (): Record<Model, Use> => ({
   haiku: nothing(),
   voice: nothing(),
   ears: nothing(),
+  conversation: nothing(),
   other: nothing(),
 });
 /** One of something for each model. */
@@ -154,6 +161,7 @@ const forModels = <T>(make: (model: Model) => T): Record<Model, T> => ({
   haiku: make("haiku"),
   voice: make("voice"),
   ears: make("ears"),
+  conversation: make("conversation"),
   other: make("other"),
 });
 /** One of something for each purpose. */

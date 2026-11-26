@@ -4,9 +4,13 @@
   "name": "grasp-os-connect",
   "main": "src/index.ts",
   "compatibility_date": "2026-09-15",
-  // global_fetch_strictly_public: connect's own calls out (to Composio's API
-  // and MCP servers) can't reach private or internal addresses, even when a
-  // public name resolves to one.
+  // global_fetch_strictly_public: a request connect makes to its own zone's
+  // hosts goes through the front door, as anyone's would, never straight to
+  // the zone's Workers. It doesn't keep calls off private addresses: on
+  // Cloudflare the platform's egress never routes a Worker's subrequests to
+  // private, loopback or metadata addresses, whatever a name resolves to;
+  // on-prem, connect's public-only workerd network does
+  // (scripts/workerd-connect-networks.ts).
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "workers_dev": false,
   "preview_urls": false,

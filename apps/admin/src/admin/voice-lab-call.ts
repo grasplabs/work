@@ -19,7 +19,11 @@ import {
 } from "./voice-lab-functions.ts";
 import { withSegment } from "./voice-lab-heard.ts";
 import type { Moment, Segment } from "./voice-lab-heard.ts";
-import type { VoiceLabInput, VoiceLabRefusal } from "./voice-lab.ts";
+import type {
+  CallRecord,
+  VoiceLabInput,
+  VoiceLabRefusal,
+} from "./voice-lab.ts";
 
 /** What the interviewer is doing, as the session says it. */
 export type AgentState =
@@ -43,6 +47,8 @@ export interface Call {
   trouble: CallTrouble | null;
   /** What the session itself said went wrong, in its own words, for whoever looks into it. */
   detail: string | null;
+  /** What Mistral kept of the call once it was closed, in counts; null until then, or when it couldn't be read. */
+  record: CallRecord | null;
 }
 
 export const noCall: Call = {
@@ -53,6 +59,7 @@ export const noCall: Call = {
   moments: [],
   trouble: null,
   detail: null,
+  record: null,
 };
 
 /** A call under way: how to mute it and how to end it. */
@@ -119,7 +126,10 @@ export const beginCall = (
         };
       },
       deleteSession: async (sessionId) => {
-        await closeVoiceSessionFn({ data: { sessionId } });
+        const record = await closeVoiceSessionFn({ data: { sessionId } });
+        // Shown also once they ended it: it is what the ending gives.
+        call = { ...call, record };
+        show(call);
       },
     });
     mute = async (muted) => {

@@ -1,4 +1,5 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { partFunction } from "@grasp-os/shared/interview-voice";
 import {
   inLanguage,
   leadPartsOf,
@@ -17,9 +18,10 @@ import type {
 // interview goes, what he follows up on, and what he writes down. Ported
 // from the prototype (grasplabs/prototype, packages/grasp:
 // worker/stephen.ts, and WRITING and READ_BACK in worker/interview.ts),
-// word for word: the Stephen Lab measures this text, and a change made
-// here and not there (or the other way round) is a Stephen nobody
-// measured. It changes only through the lab, one change at a time.
+// and since changed here: the whole job first and AI last, a task as a
+// kind of fact, what is still open and what the team already told. The
+// Stephen Lab measures a text by its mark, and has not measured this one
+// yet (lab-marks.ts).
 //
 // Each text has a mark: the SHA-256 of the text as the model gets it, in
 // its language. Every turn and every interview keeps the mark of the text
@@ -32,10 +34,10 @@ import type {
  */
 const WRITING = `# What you write down
 From what they just said, write each new thing down as one fact.
-- tag: work (in a lead's interview: a piece of work the team does, with who does it, how many and how long, as they said; in anyone else's only when they say the work they were asked about is not theirs: the work they do instead, as they named it), step (one action of theirs), system (a tool, screen, file or sheet), handoff (work going to someone else, and how), wait (work sitting still, and what it waits for), exception (a case off the normal path, with how often), rule (a decision by a fixed rule), judgment (a decision that needs experience, with what they look at), workaround (their own sheet, note or unofficial tool), ai (AI and them: a tool they use and what for, what goes well or badly with it, or what worries them about AI at work, as they said it), wish (what they would like taken off their hands, or what they would rather spend their time on), number (how many, how long, how often wrong), done (what right looks like), stop (when to stop and ask), case (a real example shared or named), term (a word of their own and what it means), next (who works on it after them), who (only when they say the work they were asked about is not theirs: who does it or is responsible for it, by the name they said: "Inge prepares the closings.").
+- tag: work (in a lead's interview: a piece of work the team does, with who does it, how many and how long, as they said; in anyone else's only when they say the work they were asked about is not theirs: the work they do instead, as they named it), step (one action of theirs), system (a tool, screen, file or sheet), handoff (work going to someone else, and how), wait (work sitting still, and what it waits for), exception (a case off the normal path, with how often), rule (a decision by a fixed rule), judgment (a decision that needs experience, with what they look at), workaround (their own sheet, note or unofficial tool), ai (AI and them: a tool they use and what for, what goes well or badly with it, or what worries them about AI at work, as they said it), wish (what they would like taken off their hands, or what they would rather spend their time on), number (how many, how long, how often wrong), done (what right looks like), stop (when to stop and ask), task (only in someone's own interview: a piece of work of theirs that comes back, by the short name they gave it, with how often and about how long one takes, as they said: "You handle incoming invoices every day; one takes about ten minutes."), case (a real example shared or named), term (a word of their own and what it means), next (who works on it after them), who (only when they say the work they were asked about is not theirs: who does it or is responsible for it, by the name they said: "Inge prepares the closings.").
 - text: the fact as you will read it back to them, always in ${NAME}, whatever language the company, its people or its systems are named in, and said to them: "You open the invoice in Exact." One thing per fact: "I copy the number and check it in the list" is two facts. At most 20 words, present tense, their own words for things, the same word for the same thing every time.
 - record: the same fact for the record, always in English: an instruction for a step ("Open the invoice in Exact."), a plain statement otherwise ("The invoice waits for approval for about 2 days."). At most 20 words.
-- quote: the exact words in their last answer that the fact comes from, copied letter for letter, as few as carry it.
+- quote: the exact words of theirs that the fact comes from, copied letter for letter, as few as carry it: from their last answer, or from one of the two before it when you had not written it down yet.
 Only what they said, and as sure as they said it. Their "I think", "probably", "maybe" and "about" stay in the fact, in text and in record alike: "You think it was this morning." Not knowing is written as not knowing, never as a fact about the world: "I don't know who measures it" is "You do not know who measures it", not "Nobody measures it". When "it", "him" or "they" could be two things, do not choose one: use their own word, or wait until they said which. A manner of speaking ("half my day") is written as their words, never as a number.
 text and record say the same thing: the same scope, the same doubt, the same number. The record adds nothing that text does not hold: no "often", no "always", no "of their own work", unless they said it. How long something takes is from start to end, unless they said it is their own working time.
 Write a thing down once: when a fact you wrote down already says it, also in other words, write nothing new for it. Never a step they did not name. Nothing about a person, except who does the work they were asked about and do not do. An idea or a wish of theirs is written as a wish, never as a step. Nothing from an answer that is no answer: nonsense, a joke. A number they call a guess is written as their guess: "You guess about 50 a week; you never counted." What they say the procedure is, is written as what the procedure says, not as their own step. What they think a colleague does in another part of the work is not written down. A typed answer is spelled as they mean it; a spoken one is as speech recognition heard it, so expect a wrong word here and there and read it kindly. When what they say now corrects a fact from before, put it in changes with that fact's id and its new text and record; an empty text takes the fact out.
@@ -82,6 +84,40 @@ export const interviewerText = async (
   locale: InterviewLocale
 ): Promise<InterviewerText> => {
   const text = inLanguage(systems[kind], locale);
+  return { text, mark: await sha256Hex(text) };
+};
+
+/** How he asks for an example: the page shows where to drop it. */
+const VOICE_EXAMPLE =
+  "Then ask for one real example to share: their screen shows where to drop it.";
+
+/** What he does in the last part: the screen reads back what was written down. */
+const VOICE_READ_BACK = `Say one short line that you will now read back what was written down, and call ${partFunction} with readback. The screen reads it back.`;
+
+/** What a live session needs that a turn doesn't: everything he writes is said out loud. */
+const SPOKEN = `# This conversation
+You talk and they talk, live and out loud. Everything you write is said exactly as you write it: write only the words you say. No labels, no lists, no brackets, no notes to yourself.
+- They can talk over you. When they do, stop, take what they said, and go on from there. Do not repeat the line you were cut off in unless they ask.
+- What they say is written down for you by someone else, from what they said: you only talk.
+- Each time you go to another part of the interview, call ${partFunction} with the name of that part first, then say your line.
+- What follows is renewed after each of their answers: always go by the latest.`;
+
+/**
+ * The text for an interview held as one live voice session (voice.ts):
+ * who he is and how the interview goes, without what he writes down,
+ * which the notes' model is asked with the turn's own text, and with what
+ * a spoken session needs. Where the interview stands comes after it, and
+ * is renewed after each answer.
+ */
+export const voiceText = async (
+  kind: InterviewKind,
+  locale: InterviewLocale
+): Promise<InterviewerText> => {
+  const parts =
+    kind === "lead"
+      ? leadPartsOf(VOICE_READ_BACK)
+      : partsOf(VOICE_EXAMPLE, VOICE_READ_BACK);
+  const text = inLanguage([WHO, parts, LISTENING, SPOKEN].join("\n\n"), locale);
   return { text, mark: await sha256Hex(text) };
 };
 

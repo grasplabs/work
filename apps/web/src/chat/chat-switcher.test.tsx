@@ -34,6 +34,7 @@ const chat = (id: string, title: string): ChatSummary => ({
   createdAt: today,
   lastAt: today,
   running: false,
+  unread: false,
   make: null,
   archived: false,
 });

@@ -1,4 +1,4 @@
-import { segmentValuePattern } from "@grasp-os/connector-kit/manifest";
+import { segmentValuePattern } from "@grasp-os/runtime/connector";
 import { z } from "zod";
 
 import {

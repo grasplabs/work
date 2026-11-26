@@ -32,7 +32,8 @@
     "micromark-extension-gfm": "catalog:",
     "prismjs": "catalog:",
     "react-is": "catalog:",
-    "recharts": "catalog:"
+    "recharts": "catalog:",
+    "remend": "catalog:"
   },
   "devDependencies": {
     "@types/prismjs": "catalog:",

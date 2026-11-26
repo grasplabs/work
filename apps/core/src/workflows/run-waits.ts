@@ -35,7 +35,8 @@ import type { SealedSteps } from "./sealed-steps.ts";
 //   person it acts for to confirm (`policy`), once a round; or a step
 //   waiting for a share of what runs at once (`quota`), as core's own
 //   steps of that are named (`$grasp:wait:<key>:busy:<round>…`, host.ts),
-//   once a step; each of the task whose step has the key it goes by, or
+//   or for the time an outside system asked its call to wait (`quota`,
+//   `…:throttled:<round>`), once a step; each of the task whose step has the key it goes by, or
 //   of the run if none has;
 // - a person's decision: its wait (`<task>:task#answer`, the SDK's), and
 //   its waits again under core's prefix by that wait's key
@@ -72,7 +73,7 @@ const waitPrefix = `${coreStepPrefix.replaceAll("$", "\\$")}wait:`;
  * hold: a retry of one is a retry (`retryOf`).
  */
 const holdStep = new RegExp(
-  `^${waitPrefix}(?<key>[0-9a-f]{16}):(?<kind>busy|held|unknown):\\d+(?::(?:first|\\d+(?::check)?))?$`,
+  `^${waitPrefix}(?<key>[0-9a-f]{16}):(?<kind>busy|held|throttled|unknown):\\d+(?::(?:first|\\d+(?::check)?))?$`,
   "u"
 );
 
@@ -97,6 +98,12 @@ const holds = {
     reason: "quota",
     title: "Waiting for capacity",
     message: "A step of this run waits for its turn to run.",
+  },
+  throttled: {
+    reason: "quota",
+    title: "Waiting for the outside system",
+    message:
+      "A call of this run waits for the time its outside system asked for.",
   },
 } as const;
 
@@ -237,7 +244,7 @@ const awaitedOf = (
 };
 
 /**
- * The waits one pending wait of core's own steps of a wait for load is:
+ * The waits one pending wait of core's own steps of a hold is:
  * its hold, once a held step (`holding`); a retry of its step's run again;
  * none otherwise. Each of the task `taskOf` names by its step's key, or
  * of the run.
@@ -253,7 +260,10 @@ const coreWaitsOf = (
   const hold = holdStep.exec(wait.name)?.groups;
   if (
     hold?.key !== undefined &&
-    (hold.kind === "busy" || hold.kind === "held" || hold.kind === "unknown")
+    (hold.kind === "busy" ||
+      hold.kind === "held" ||
+      hold.kind === "throttled" ||
+      hold.kind === "unknown")
   ) {
     if (holding.has(hold.key)) {
       return [];

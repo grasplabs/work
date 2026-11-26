@@ -220,6 +220,10 @@ const styles = stylex.create({
       default: space["1"],
       [COARSE]: `calc(${size.tapTarget} - ${size.controlSm})`,
     },
+    "--tap-room-inline": {
+      default: `calc(${space["1"]} / 2)`,
+      [COARSE]: `calc((${size.tapTarget} - ${size.controlSm}) / 2)`,
+    },
     minWidth: 0,
     padding: space["1"],
   },

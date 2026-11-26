@@ -321,23 +321,31 @@ const openings: Readonly<
     lines: [
       {
         from: "stephen",
-        text: "First a few questions about you and AI, then your work. Do you already use AI in your work, like ChatGPT or Copilot?",
+        text: "First your work as a whole, then one part of it up close. What do you do here, in a sentence or two?",
       },
-      { from: "person", text: "no, not really" },
+      { from: "person", text: "I handle what comes in for our team" },
       {
         from: "stephen",
-        text: "Okay. Does anything about AI at work worry you?",
+        text: "Okay. What does most of a normal week go to?",
       },
-      { from: "person", text: "not really" },
+      { from: "person", text: "mostly the same things every day" },
       {
         from: "stephen",
-        text: "Right. What would you like taken off your hands, if you could choose?",
+        text: "Right. Which of it would you hand off first, if you could?",
       },
       { from: "person", text: "less retyping would be nice" },
     ],
     facts: [
-      { id: "a1", tag: "ai", text: "You do not use AI in your work." },
-      { id: "a2", tag: "ai", text: "Nothing about AI at work worries you." },
+      {
+        id: "a1",
+        tag: "task",
+        text: "You handle what comes in for your team.",
+      },
+      {
+        id: "a2",
+        tag: "task",
+        text: "Most of your week goes to the same things every day.",
+      },
       { id: "a3", tag: "wish", text: "You would like less retyping." },
     ],
   },
@@ -345,23 +353,30 @@ const openings: Readonly<
     lines: [
       {
         from: "stephen",
-        text: "Eerst een paar vragen over jou en AI, daarna over je werk. Gebruik je AI al in je werk, zoals ChatGPT of Copilot?",
+        text: "Eerst je werk als geheel, daarna één onderdeel ervan van dichtbij. Wat doe je hier, in een of twee zinnen?",
       },
-      { from: "person", text: "nee, niet echt" },
-      { from: "stephen", text: "Oké. Maakt iets je zorgen bij AI op je werk?" },
-      { from: "person", text: "niet echt" },
+      { from: "person", text: "ik handel af wat er voor ons team binnenkomt" },
       {
         from: "stephen",
-        text: "Helder. Wat zou je het liefst uit handen geven, als je mocht kiezen?",
+        text: "Oké. Waar gaat het grootste deel van een normale week naartoe?",
+      },
+      { from: "person", text: "meestal elke dag dezelfde dingen" },
+      {
+        from: "stephen",
+        text: "Helder. Wat daarvan zou je als eerste uit handen geven, als het kon?",
       },
       { from: "person", text: "minder overtypen zou fijn zijn" },
     ],
     facts: [
-      { id: "a1", tag: "ai", text: "Je gebruikt geen AI in je werk." },
+      {
+        id: "a1",
+        tag: "task",
+        text: "Je handelt af wat er voor je team binnenkomt.",
+      },
       {
         id: "a2",
-        tag: "ai",
-        text: "Niets aan AI op het werk maakt je zorgen.",
+        tag: "task",
+        text: "Het grootste deel van je week gaat naar elke dag dezelfde dingen.",
       },
       { id: "a3", tag: "wish", text: "Je zou graag minder overtypen." },
     ],
@@ -463,7 +478,7 @@ const foundInALine = [
 /** The parts of an interview in which he does not follow up yet. */
 const listens: ReadonlySet<InterviewPhase> = new Set([
   "open",
-  "you",
+  "week",
   "anchor",
   "story",
 ]);
@@ -655,7 +670,7 @@ You get the kind of moment, with the rule for what Stephen should do next. Write
 How an interview goes, so your moment looks like one:
 - Stephen first checks the work: "<lead> told me you <the work>. Is that right?" A short yes. Then: "Think of the last one you handled. When was that?" A short answer.
 - Then he asks for the story ("Walk me through it, from the moment it came in until it was done. Every step, even the small ones. I'll just listen."), then about each step, then what goes differently, then numbers.
-- Stephen asks one short question per line, at most 15 words, and never praises.
+- Stephen asks one short question per line, at most 20 words, and never praises.
 - The employee types as people do in a chat at work: lower case, short, no greeting, a typo now and then.
 
 Make up the company, the people and the work: ordinary work at a small or middle-sized company of the kind you are given. The last line is the employee's, and it shows the kind. Give the notes Stephen has before that last line: one short sentence each, said to the employee ("You open the order in the planning board."), and only things the employee said in the lines before the last one. Nothing from the last line is in the notes yet, and a note is never a hint or an instruction. For "two versions" the notes must hold the earlier version, which the last line does not fit. For "not an answer again" Stephen's line before the last one must already say plainly that he could not use their answer. For "no idea again" the employee has already said once or twice that they do not know, Stephen has already asked who would know, and the last line is one more "no idea" about their own work. Unless the kind is about the story, the moment is after the story: Stephen is asking about the steps, what goes differently, or numbers. Write everything in the language you are given, the notes too.`;

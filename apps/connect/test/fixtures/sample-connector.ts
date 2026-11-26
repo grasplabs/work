@@ -6,11 +6,8 @@
  * say by parsing a crafted provider response: they try every way out of
  * the isolate, and report what they got.
  */
-import {
-  defineConnector,
-  defineTool,
-  ToolError,
-} from "@grasp-os/connector-kit/connector";
+import { defineConnector, defineTool } from "@grasp-os/connector-kit/connector";
+import { ToolError } from "@grasp-os/runtime/connector";
 import { z } from "zod";
 
 /** The sample provider's API. */
@@ -21,6 +18,18 @@ export const storageHost = "tenant.storage.test";
 const api = `https://${sampleHost}`;
 
 const itemSchema = z.object({ id: z.string(), subject: z.string().nullable() });
+
+/**
+ * A 429, as the kit's `providerFetch` reports one: nothing was done, and
+ * the provider asks callers to wait for as long as connect's egress told
+ * it in `retry-after`.
+ */
+const throttled = (response: Response): ToolError =>
+  new ToolError("The provider is rate limiting requests", {
+    code: "throttled",
+    retryAfterSeconds: Number(response.headers.get("retry-after") ?? "60"),
+    notPerformed: true,
+  });
 
 /** What each probe reports: how its attempt ended. */
 const attemptSchema = z.strictObject({
@@ -63,7 +72,6 @@ let remembered: string | null = null;
 
 export default defineConnector({
   name: "sample",
-  version: "1.0.0",
   provider: "microsoft",
   scopes: ["Mail.ReadWrite"],
   hosts: [sampleHost],
@@ -92,6 +100,9 @@ export default defineConnector({
         );
         url.searchParams.set("top", String(top ?? 10));
         const response = await fetch(url);
+        if (response.status === 429) {
+          throw throttled(response);
+        }
         if (!response.ok) {
           // A read changes nothing: a provider's 5xx may pass.
           throw new ToolError(`The provider answered ${response.status}`, {
@@ -116,7 +127,7 @@ export default defineConnector({
         subject: z.string().nullable(),
       }),
       readOnly: false,
-      reach: "own",
+      reach: "others",
       resource: "mailbox",
       routes: [
         {
@@ -137,7 +148,7 @@ export default defineConnector({
         // Rate limited: the provider refused its one write, so nothing
         // happened, and connect may let the call be tried again.
         if (response.status === 429) {
-          throw new ToolError("The provider is busy", { notPerformed: true });
+          throw throttled(response);
         }
         if (!response.ok) {
           throw new ToolError(`The provider answered ${response.status}`);
@@ -208,9 +219,18 @@ export default defineConnector({
       reach: "own",
       routes: [
         { method: "GET", host: sampleHost, path: "/v1/probe/{case}" },
-        { method: "POST", host: sampleHost, path: "/v1/probe/{case}" },
         { method: "GET", host: sampleHost, path: "/v1/probe/{id}:peek" },
       ],
+      run: send,
+    }),
+    defineTool({
+      name: "probe.send",
+      description: "Sends any request it is given, as a write",
+      input: probeInput,
+      output: attemptSchema,
+      readOnly: false,
+      reach: "others",
+      routes: [{ method: "POST", host: sampleHost, path: "/v1/probe/{case}" }],
       run: send,
     }),
     defineTool({

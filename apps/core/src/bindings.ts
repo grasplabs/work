@@ -155,6 +155,9 @@ const capabilityFor = async (
       ...(classed.resources === undefined
         ? {}
         : { resources: classed.resources }),
+      ...(classed.toolClass === undefined
+        ? {}
+        : { toolClass: classed.toolClass }),
     }
   );
   return { capability, scope };

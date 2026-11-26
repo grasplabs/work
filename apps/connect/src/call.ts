@@ -1,12 +1,13 @@
 import {
-  confirmedMetaKey,
   attachmentsMetaKey,
+  confirmedMetaKey,
   effectKeyMetaKey,
   findMetaKey,
-  stampMetaKey,
+  isNeverTool,
   maxRetryAfterSeconds,
-} from "@grasp-os/connector-kit/manifest";
-import type { RecoveryMode } from "@grasp-os/connector-kit/manifest";
+  stampMetaKey,
+} from "@grasp-os/runtime/connector";
+import type { RecoveryMode } from "@grasp-os/runtime/connector";
 import type { CapabilityClaims } from "@grasp-os/shared/capability";
 import { connectErrors } from "@grasp-os/shared/connect";
 import type {
@@ -23,7 +24,7 @@ import {
 import type { AttachmentBytes } from "@grasp-os/shared/connector-attachments";
 import { toBase64 } from "@grasp-os/shared/encoding";
 import type { Json } from "@grasp-os/shared/json";
-import { log } from "@grasp-os/shared/log";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { redact } from "@grasp-os/shared/redact";
 import { eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
@@ -62,6 +63,7 @@ import {
 } from "./idempotency.ts";
 import type { Repeat, Row, StoredAnswer } from "./idempotency.ts";
 import { requirePointedMailbox } from "./mailboxes.ts";
+import { connectorAction } from "./mcp-connectors.ts";
 import { McpError } from "./mcp.ts";
 import type {
   McpServer,
@@ -69,7 +71,6 @@ import type {
   McpTool,
   McpToolResult,
 } from "./mcp.ts";
-import { isNeverTool } from "./never.ts";
 import { heldFilesOf, hold, waitingUnder } from "./pending.ts";
 import type { HeldAction } from "./pending.ts";
 import {
@@ -80,11 +81,15 @@ import {
   uncertainFailure,
   withProvenance,
 } from "./policy.ts";
-import { markIfGrantLacks } from "./tokens.ts";
+import { markIfGrantLacks, pauseFor } from "./tokens.ts";
+
+/** What a call's server is used for: calling its tool. */
+type CallServer = Pick<McpServer, "call">;
 
 const retryAfterSchema = z.object({
   error: z.object({
-    retryAfterSeconds: z.number().int().nonnegative().max(maxRetryAfterSeconds),
+    code: z.string().optional(),
+    retryAfterSeconds: z.number().nonnegative(),
   }),
 });
 
@@ -96,14 +101,21 @@ const httpRefusalSchema = z.object({
 /**
  * `connect.server_unavailable` for a call its tool says did nothing, with
  * the wait the tool passed on, if it did (`{ error: { retryAfterSeconds } }`,
- * as the connector kit reports a provider's `retry-after`). An HTTP
- * connection's refusal of what it was answered (a redirect off what the
- * admin approved) is `connect.http_refused`: trying again won't help.
+ * as runtime/connector reports a provider's `retry-after`). A native
+ * connector's tool that says its provider rate limited it (`{ error: {
+ * code: "throttled" } }`, for a 429 or what its `isThrottled` says is a
+ * rate limit) pauses the connection for the wait first, so every other
+ * caller waits with it (`connect.rate_limited`), and names what the pause
+ * has left: the egress already paused it for a 429 it saw, and told the
+ * connector how long for. An HTTP connection's refusal
+ * of what it was answered (a redirect off what the admin approved) is
+ * `connect.http_refused`: trying again won't help.
  */
-const notPerformed = (
-  kind: Connection["serverKind"],
+const notPerformed = async (
+  env: Env,
+  { id, serverKind: kind }: Connection,
   { output }: McpToolResult
-): Error => {
+): Promise<Error> => {
   let parsed: unknown;
   try {
     parsed = JSON.parse(output);
@@ -116,7 +128,16 @@ const notPerformed = (
       reason: refusal.data.reason,
     });
   }
-  const wait = retryAfterSchema.safeParse(parsed).data?.error.retryAfterSeconds;
+  const error = retryAfterSchema.safeParse(parsed).data?.error;
+  // A vendor's 429 the egress saw is paused already; its time left comes
+  // back here and is stored again from now, longer by the call's latency
+  // at most, as the pause keeps the later end.
+  let wait: number | undefined;
+  if (kind === "native" && error?.code === "throttled") {
+    wait = await pauseFor(env.DB, id, error.retryAfterSeconds);
+  } else if (error !== undefined) {
+    wait = Math.min(Math.ceil(error.retryAfterSeconds), maxRetryAfterSeconds);
+  }
   return connectErrors.create(
     "connect.server_unavailable",
     wait === undefined ? undefined : { retryAfterSeconds: wait }
@@ -129,7 +150,7 @@ const accessDeniedSchema = z.object({
 
 /**
  * Whether a native connector's tool says its provider refused it access
- * (`{ error: { code: "access_denied" } }`, as the connector kit reports a
+ * (`{ error: { code: "access_denied" } }`, as runtime/connector reports a
  * 401 or 403).
  */
 const isAccessDenied = (
@@ -313,8 +334,8 @@ const actionFor = async (
   release: string | null;
   /** It attaches files (GRA-887): only a native connector's write does. */
   takesFiles: boolean;
-  open: () => Promise<McpServer>;
-  openLookup: () => Promise<McpServer>;
+  open: () => Promise<CallServer>;
+  openLookup: () => Promise<CallServer>;
 }> => {
   // Never, whatever is allowed: before anything else is looked up.
   if (isNeverTool(action)) {
@@ -355,6 +376,24 @@ const actionFor = async (
       takesFiles: false,
       open: async () => await Promise.resolve(server),
       openLookup: async () => await Promise.resolve(server),
+    };
+  }
+  if (connection.serverKind === "connector") {
+    // A tool its server lists now, taken to be what the rules make of it.
+    const { tool, open } = await connectorAction(
+      env,
+      connection,
+      action,
+      claims.toolClass
+    );
+    // A remote server's call of unknown outcome is never recovered.
+    return {
+      tool,
+      recovery: "none",
+      release: null,
+      takesFiles: false,
+      open,
+      openLookup: open,
     };
   }
   // Only a tool the admin allowed and Grasp classed, asked for before
@@ -673,10 +712,11 @@ const keepOf = (
 
 /** One call of a read, its answer as the tool gave it. */
 const readOnce = async (
+  env: Env,
   connection: Connection,
   tool: McpTool,
   input: Input,
-  open: () => Promise<McpServer>
+  open: () => Promise<CallServer>
 ): Promise<Omit<CallDone, "sideEffect">> => {
   // Every refusal is behind: only now may a token be read.
   const server = await open();
@@ -690,7 +730,7 @@ const readOnce = async (
   }
   const read = withProvenance(connection, tool.name, answered);
   if (didNothing(connection.serverKind, read)) {
-    throw notPerformed(connection.serverKind, read);
+    throw await notPerformed(env, connection, read);
   }
   const keep = keepOf(connection, answered);
   return {
@@ -735,9 +775,9 @@ interface Sent {
    */
   files: AttachmentBytes;
   store: Store;
-  open: () => Promise<McpServer>;
+  open: () => Promise<CallServer>;
   /** Its server for a lookup (`find`): the action's GET routes only. */
-  openLookup: () => Promise<McpServer>;
+  openLookup: () => Promise<CallServer>;
 }
 
 /**
@@ -768,7 +808,7 @@ const withFiles = (
  */
 const sendClaimed = async (
   { env, callId, connection, tool, input, meta, files, store }: Sent,
-  server: McpServer,
+  server: CallServer,
   recovering = false
 ): Promise<Omit<CallDone, "sideEffect">> => {
   let done: McpToolResult;
@@ -778,7 +818,14 @@ const sendClaimed = async (
       tool.name,
       await server.call(tool.name, input, withFiles(meta, files))
     );
-  } catch {
+  } catch (error) {
+    // Refused by connect itself before anything went out (a tool an admin
+    // blocked meanwhile, mcp-connectors.ts): nothing was sent, so the key
+    // is free, as for a call that did nothing (below).
+    if (connectErrors.codeOf(error) === "connect.tool_blocked") {
+      await (recovering ? store.spend() : store.release());
+      throw error;
+    }
     // However the request failed, it may have reached the tool, and the
     // tool may have acted (mcp.ts `McpError`): the key is spent. Only a
     // native connector that says it did nothing frees it (below).
@@ -811,7 +858,7 @@ const sendClaimed = async (
   // claim (and its connector build) afresh.
   if (didNothing(connection.serverKind, done)) {
     await (recovering ? store.spend() : store.release());
-    throw notPerformed(connection.serverKind, done);
+    throw await notPerformed(env, connection, done);
   }
   // ...or the provider refused it access, and the connection's grant lacks
   // a right its connector asks for now: it is marked for its person to
@@ -848,7 +895,7 @@ const findEffect = async (
   tool: McpTool,
   input: Input,
   meta: Record<string, Json>,
-  server: McpServer,
+  server: CallServer,
   store: Store
 ): Promise<(StoredAnswer & { change?: CallChange }) | undefined> => {
   let found: McpToolResult;
@@ -921,7 +968,25 @@ const recover = async (
     }
     // Claimed anew, while this call still holds it, right before it goes
     // out: a lookup that ran long sends nothing under a claim another took.
-    const fresh = await sent.open();
+    // Its credential refused meanwhile, the call stays unknown, its key
+    // spent as a failed lookup leaves it. A pause or an inactive
+    // connection is answered as itself, to wait out or connect again;
+    // anything else as unknown.
+    let fresh: CallServer;
+    try {
+      fresh = await sent.open();
+    } catch (error) {
+      await sent.store.spend();
+      const code = connectErrors.codeOf(error);
+      if (
+        code === "connect.rate_limited" ||
+        code === "connect.connection_inactive"
+      ) {
+        throw error;
+      }
+      log.error("call.recovery_failed", errorFields(error));
+      throw connectErrors.create("connect.outcome_unknown");
+    }
     await sent.store.restamp();
     return { ...(await sendClaimed(sent, fresh, true)), recovery };
   }
@@ -1106,7 +1171,10 @@ export const carryOut = async (
   }
 
   if (!sideEffect) {
-    return { ...(await readOnce(connection, tool, input, open)), sideEffect };
+    return {
+      ...(await readOnce(env, connection, tool, input, open)),
+      sideEffect,
+    };
   }
   if (store === undefined || scope === undefined) {
     throw connectErrors.create("connect.idempotency_key_required");
@@ -1142,7 +1210,8 @@ export const carryOut = async (
     return { ...earlier, sideEffect, replayed: true };
   }
   // Claimed: the call may go out now, so whatever fails from here on
-  // (spending or freeing the key included) leaves its outcome unknown.
+  // (spending or freeing the key included) leaves its outcome unknown,
+  // but for connect's own refusal before sending (`sendClaimed`).
   progress.claimed = true;
   return { ...(await sendClaimed(sent, server)), sideEffect };
 };

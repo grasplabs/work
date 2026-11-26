@@ -291,4 +291,38 @@ describe("the waits a page is shown of a run on the run host", () => {
       { id: "hold-44", taskId: "fetch", kind: "blocked" },
     ]);
   });
+
+  it("shows a step sleeping out the time its call's outside system asked for as a hold for that quota, and its run again", async () => {
+    const fetch = await waitKeyOf("fetch:task");
+    const keyed = await tasksByKey(["fetch:task"], sealedContext.tasks);
+    expect(
+      shownWaits(
+        [
+          pendingOf(50, waitStep(fetch, "throttled", 1)),
+          pendingOf(51, `${waitStep(fetch, "throttled", 1)}:run`, "retry"),
+        ],
+        { ...sealedContext, keyed }
+      ).map((wait) =>
+        z
+          .object({
+            id: z.string(),
+            taskId: z.string(),
+            kind: z.string(),
+            reason: z.string().optional(),
+            message: z.string().optional(),
+          })
+          .parse(wait)
+      )
+    ).toStrictEqual([
+      {
+        id: "hold-50",
+        taskId: "fetch",
+        kind: "blocked",
+        reason: "quota",
+        message:
+          "A call of this run waits for the time its outside system asked for.",
+      },
+      { id: "wait-51", taskId: "fetch", kind: "timer" },
+    ]);
+  });
 });

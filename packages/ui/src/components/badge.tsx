@@ -193,17 +193,21 @@ const styles = stylex.create({
     outlineOffset: -1,
   },
   // One line of words fills the height, with round ends; more lines grow it, with rounded corners.
+  // A pill by design, as every badge and tag is: round, never the squircle, which would square its
+  // ends (scripts/check-corners.ts names it).
   default: {
     minHeight: sizes.badgeHeight,
     paddingBlock: `calc((${sizes.badgeHeight} - ${font.textXsLine}) / 2)`,
     lineHeight: font.textXsLine,
     borderRadius: `calc(${sizes.badgeHeight} / 2)`,
+    cornerShape: "round",
   },
   sm: {
     minHeight: sizes.badgeHeightSm,
     paddingBlock: 0,
     lineHeight: sizes.badgeHeightSm,
     borderRadius: `calc(${sizes.badgeHeightSm} / 2)`,
+    cornerShape: "round",
   },
   // Default: white on a light ground, a veil on a dark one. Every variant has the system's edge.
   variantDefault: {

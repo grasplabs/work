@@ -35,6 +35,7 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
+import { descriptionOf } from "../../connections/native-descriptions.ts";
 import { ProviderMark } from "../../connections/provider-mark.tsx";
 import type { CatalogApp } from "./model.ts";
 
@@ -133,6 +134,7 @@ const Detail = ({
 }) => {
   const { t } = useLingui();
   const { name, account } = app;
+  const description = descriptionOf(app);
   // Whom it is connected as, or that it can be connected later.
   const connectedAs =
     account === null ? undefined : t`Connected as ${account}.`;
@@ -159,7 +161,7 @@ const Detail = ({
           </Badge>
         ))}
       </div>
-      {app.description === null ? null : <Text>{app.description}</Text>}
+      {description === null ? null : <Text>{description}</Text>}
       {standing === undefined ? null : (
         <Text size="sm" color="muted">
           {standing}

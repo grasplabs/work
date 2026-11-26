@@ -130,7 +130,7 @@ export const useAppActions = ({
   if (
     connectable &&
     !none &&
-    (integration.source === "native" ||
+    (integration.source !== "composio" ||
       (integration.auth === "managed" && stopped.length === 0))
   ) {
     actions.onConnectAnother = openNative();

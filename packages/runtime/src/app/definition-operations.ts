@@ -2,7 +2,6 @@ import { isIdentifier } from "../common/code-print.ts";
 import { refuser } from "../common/declaration.ts";
 import { SchemaDefinitionError } from "../common/schema-error.ts";
 import { descriptorOf } from "../common/sealed-descriptors.ts";
-import type { AccessMode, RowRole } from "../common/table-access.ts";
 import { ValueDefinitionError } from "../common/value-descriptor.ts";
 import type { JsonValue, ValueDescriptor } from "../common/value-descriptor.ts";
 import { v } from "../common/values.ts";
@@ -33,6 +32,7 @@ import {
 } from "./permission-checks.ts";
 import { readPermissionDeclaration } from "./permission-read.ts";
 import { permission } from "./permission.ts";
+import type { AccessMode, RowRole } from "./table-access.ts";
 
 // The operations that change an App's definition (definition-types.ts): what
 // the chat's tools and the workspace's Data view make. Each answers the

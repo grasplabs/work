@@ -1,3 +1,4 @@
+import { CardContent } from "@grasp-os/ui/components/card";
 import {
   Table,
   TableBody,
@@ -5,14 +6,17 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/app-kit/components/table";
+} from "@grasp-os/ui/components/table";
+import { Text } from "@grasp-os/ui/components/text";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ChevronRightIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Channels, PromotionHistory } from "../../admin/channel-parts.tsx";
 import { PageLoading } from "../../admin/failure.tsx";
 import { AdminPage } from "../../admin/page.tsx";
+import { Panel } from "../../admin/panel.tsx";
 import { fetchPlatform } from "../../admin/platform-data.ts";
 import { channelsId, PlatformNav } from "../../admin/platform-nav.tsx";
 import { needWords, StandingMark } from "../../admin/platform-parts.tsx";
@@ -21,11 +25,23 @@ import { companiesOf } from "../../admin/platform.ts";
 import type { PlatformNeed, Standing } from "../../admin/platform.ts";
 import { ReadinessPanel } from "../../admin/readiness-parts.tsx";
 import { fetchReadiness } from "../../admin/readiness.ts";
-import { Section } from "../../admin/section.tsx";
+import { rowTarget } from "../../admin/row-target.ts";
 import { fetchClientGrid, fetchGridLive } from "../../clients/functions.ts";
 import type { GridRow, LiveStatus } from "../../clients/grid.ts";
 import { fetchPlatformSpend } from "../../platform-ai-functions.ts";
 import { channelWords } from "../../rollout/channel-words.ts";
+
+const styles = stylex.create({
+  // A company's name, how it stands and what it needs, down its cell.
+  company: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: space["1"],
+    minWidth: 0,
+  },
+  page: { display: "flex", flexDirection: "column", gap: space["6"] },
+});
 
 /** What the live reads gave for each company: null while reading, `failed` if they did. */
 type Live = Record<string, LiveStatus> | "failed" | null;
@@ -40,45 +56,37 @@ const CompanyRow = ({
   standing: Standing;
   needs: PlatformNeed[];
 }) => (
-  <TableRow className="relative">
-    <TableCell variant="card">
-      <span className="flex min-w-0 flex-col gap-0.5">
+  <TableRow interactive>
+    <TableCell rowHeader wrap>
+      <span {...stylex.props(styles.company)}>
         <Link
-          className="truncate outline-none after:absolute after:inset-0 focus-visible:underline"
+          data-row-target
           params={{ clientId: row.id }}
           to="/organizations/$clientId/setup"
+          {...stylex.props(rowTarget)}
         >
           {row.name}
         </Link>
-        <span className="text-xs">
-          <StandingMark standing={standing} />
-        </span>
+        <StandingMark standing={standing} />
         {needs.map((need) => (
-          <span className="text-muted-foreground text-xs" key={need.kind}>
+          <Text as="span" color="muted" key={need.kind} size="xs">
             {needWords(need)}
-          </span>
+          </Text>
         ))}
       </span>
     </TableCell>
-    <TableCell
-      className="hidden whitespace-normal @xl:table-cell"
-      variant="card"
-    >
+    <TableCell hideBelow="sm" wrap>
       {channelWords[row.channel]}
     </TableCell>
-    <TableCell className="hidden @2xl:table-cell" variant="card">
-      <span className="flex flex-col">
-        <span className="tabular-nums">{row.release ?? "–"}</span>
+    <TableCell hideBelow="md">
+      <span {...stylex.props(styles.company)}>
+        <span>{row.release ?? "–"}</span>
         {row.pinnedReleaseId === null ? null : (
-          <span className="text-muted-foreground text-xs">Pinned</span>
+          <Text as="span" color="muted" size="xs">
+            Pinned
+          </Text>
         )}
       </span>
-    </TableCell>
-    <TableCell variant="card">
-      <ChevronRightIcon
-        aria-hidden="true"
-        className="text-muted-foreground mx-auto size-4"
-      />
     </TableCell>
   </TableRow>
 );
@@ -111,20 +119,17 @@ const NeedsALook = ({ rows, live }: { rows: GridRow[]; live: Live }) => {
     return null;
   }
   return (
-    <Section description={needsALookLine(live)} title="Needs a look">
-      <div className="@container border-t">
-        <Table className="table-fixed">
+    <Panel description={needsALookLine(live)} title="Needs a look">
+      <CardContent flush>
+        <Table aria-label="Needs a look">
           <TableHeader>
             <TableRow>
-              <TableHead variant="card">Company</TableHead>
-              <TableHead className="hidden w-36 @xl:table-cell" variant="card">
+              <TableHead>Company</TableHead>
+              <TableHead hideBelow="sm" width={144}>
                 Channel
               </TableHead>
-              <TableHead className="hidden w-36 @2xl:table-cell" variant="card">
+              <TableHead hideBelow="md" width={144}>
                 Release
-              </TableHead>
-              <TableHead className="w-9" variant="card">
-                <span className="sr-only">Open</span>
               </TableHead>
             </TableRow>
           </TableHeader>
@@ -139,8 +144,8 @@ const NeedsALook = ({ rows, live }: { rows: GridRow[]; live: Live }) => {
             ))}
           </TableBody>
         </Table>
-      </div>
-    </Section>
+      </CardContent>
+    </Panel>
   );
 };
 
@@ -181,7 +186,7 @@ const PlatformPage = () => {
       title="Platform"
     >
       <PlatformNav />
-      <div className="@container flex flex-col gap-6 text-sm">
+      <div {...stylex.props(styles.page)}>
         <ReadinessPanel readiness={readiness} />
         <Channels channels={platform.channels} id={channelsId} />
         <PromotionHistory history={platform.history} />

@@ -24,6 +24,7 @@ import {
   Item,
   ItemContent,
   ItemDescription,
+  ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -60,7 +61,6 @@ import { ErrorText } from "../error-text.tsx";
 import { formatNumber } from "../format.ts";
 import { brands, placeMarks } from "../frame/brands.ts";
 import { useCoreAction } from "../use-core-action.ts";
-import { SeparatedItems } from "../workflows/separated-items.tsx";
 import {
   AudienceControl,
   appAudienceOf,
@@ -487,39 +487,28 @@ export const StephenSettings = ({
         info={t`Each place only narrows who reaches him there, and whether he does things for people there or only answers.`}
         title={t`Where people reach him`}
       >
-        <SeparatedItems
-          aria-label={t`Where people reach him`}
-          rows={[
-            {
-              key: "grasp",
-              row: (
-                <OpenRow
-                  icon={MessageCircleIcon}
-                  line={t`On · for everyone with Grasp`}
-                  name={t`Grasp's chat`}
-                  state="on"
-                />
-              ),
-            },
-            ...reach.places.map((place) => ({
-              key: place.place,
-              row: (
-                <OpenRow
-                  icon={
-                    isBrand(place.place) ? undefined : placeIcon(place.place)
-                  }
-                  line={place.audience.who === "nobody" ? t`Off` : t`On`}
-                  logo={markOf(place.place)}
-                  name={placeName(place.place)}
-                  onOpen={() => {
-                    setOpened({ kind: "place", id: place.place });
-                  }}
-                  state={place.audience.who === "nobody" ? "off" : "on"}
-                />
-              ),
-            })),
-          ]}
-        />
+        <ItemGroup separated aria-label={t`Where people reach him`}>
+          <OpenRow
+            key="grasp"
+            icon={MessageCircleIcon}
+            line={t`On · for everyone with Grasp`}
+            name={t`Grasp's chat`}
+            state="on"
+          />
+          {reach.places.map((place) => (
+            <OpenRow
+              key={place.place}
+              icon={isBrand(place.place) ? undefined : placeIcon(place.place)}
+              line={place.audience.who === "nobody" ? t`Off` : t`On`}
+              logo={markOf(place.place)}
+              name={placeName(place.place)}
+              onOpen={() => {
+                setOpened({ kind: "place", id: place.place });
+              }}
+              state={place.audience.who === "nobody" ? "off" : "on"}
+            />
+          ))}
+        </ItemGroup>
       </SectionCard>
       <SectionCard
         flush
@@ -561,33 +550,30 @@ export const StephenSettings = ({
         info={t`What he can do in each system, as one pack, with each person's own sign-in.`}
         title={t`Apps`}
       >
-        <SeparatedItems
-          aria-label={t`Apps`}
-          rows={reach.apps.map(({ app }) => {
+        <ItemGroup separated aria-label={t`Apps`}>
+          {reach.apps.map(({ app }) => {
             const pack = packs.get(app);
             const done = formatNumber(pack?.done ?? 0);
             const failed = formatNumber(pack?.failed ?? 0);
             const appName = appNames[app] ?? app;
-            return {
-              key: app,
-              row: (
-                <OpenRow
-                  icon={isBrand(app) ? undefined : LayoutDashboardIcon}
-                  line={
-                    pack === undefined
-                      ? t`Not used in the last 30 days`
-                      : t`${done} done · ${failed} failed · 30 days`
-                  }
-                  logo={markOf(app)}
-                  name={appName}
-                  onOpen={() => {
-                    setOpened({ kind: "app", id: app });
-                  }}
-                />
-              ),
-            };
+            return (
+              <OpenRow
+                key={app}
+                icon={isBrand(app) ? undefined : LayoutDashboardIcon}
+                line={
+                  pack === undefined
+                    ? t`Not used in the last 30 days`
+                    : t`${done} done · ${failed} failed · 30 days`
+                }
+                logo={markOf(app)}
+                name={appName}
+                onOpen={() => {
+                  setOpened({ kind: "app", id: app });
+                }}
+              />
+            );
           })}
-        />
+        </ItemGroup>
       </SectionCard>
       {workflows === null ? null : (
         <SectionCard
@@ -604,24 +590,20 @@ export const StephenSettings = ({
               </EmptyHeader>
             </Empty>
           ) : (
-            <SeparatedItems
-              aria-label={t`Workflows`}
-              rows={workflows.map((workflow) => ({
-                key: workflow.id,
-                row: (
-                  <Item asChild key={workflow.id} size="sm">
-                    <Link
-                      params={{ workflow: workflow.id }}
-                      to="/workflows/$workflow"
-                    >
-                      <ItemContent>
-                        <ItemTitle>{workflow.name}</ItemTitle>
-                      </ItemContent>
-                    </Link>
-                  </Item>
-                ),
-              }))}
-            />
+            <ItemGroup separated aria-label={t`Workflows`}>
+              {workflows.map((workflow) => (
+                <Item asChild key={workflow.id} size="sm">
+                  <Link
+                    params={{ workflow: workflow.id }}
+                    to="/workflows/$workflow"
+                  >
+                    <ItemContent>
+                      <ItemTitle>{workflow.name}</ItemTitle>
+                    </ItemContent>
+                  </Link>
+                </Item>
+              ))}
+            </ItemGroup>
           )}
         </SectionCard>
       )}

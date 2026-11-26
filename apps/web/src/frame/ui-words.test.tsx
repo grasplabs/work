@@ -27,15 +27,24 @@ const Part = () => {
   );
 };
 
-const drawn = async (): Promise<HTMLElement> => {
+/** Markdown's words for a note used twice and a table drawn in part. */
+const MarkdownPart = () => {
+  const { markdown } = useI18n();
+  return (
+    <p>
+      {markdown.back(1, 1)}, {markdown.back(1, 2)}, {markdown.moreRows(1)},{" "}
+      {markdown.moreRows(3)}
+    </p>
+  );
+};
+
+const drawn = async (words = <Part />): Promise<HTMLElement> => {
   const host = document.createElement("div");
   document.body.append(host);
   await act(async () => {
     createRoot(host).render(
       <I18nProvider i18n={i18n}>
-        <UiWords>
-          <Part />
-        </UiWords>
+        <UiWords>{words}</UiWords>
       </I18nProvider>
     );
     await Promise.resolve();
@@ -70,5 +79,13 @@ describe("Damsko's own words", () => {
     i18n.loadAndActivate({ locale: "es", messages: spanish });
     const part = await drawn();
     expect(part.textContent).toBe("No copiado, Trabajando, Error");
+  });
+
+  it("name each use of a note and count a table's rows not drawn", async () => {
+    i18n.loadAndActivate({ locale: "nl", messages: dutch });
+    const part = await drawn(<MarkdownPart />);
+    expect(part.textContent).toBe(
+      "Terug naar verwijzing 1, Terug naar verwijzing 1-2, nog 1 rij, nog 3 rijen"
+    );
   });
 });

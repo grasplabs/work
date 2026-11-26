@@ -11,6 +11,7 @@ import { interviewHearPath } from "@grasp-os/shared/interview-hear";
 import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import { interviewStoryPath } from "@grasp-os/shared/interview-story";
 import { interviewTurnPath } from "@grasp-os/shared/interview-turn";
+import { interviewVoicePath } from "@grasp-os/shared/interview-voice";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   mailIngressHeaders,
@@ -249,11 +250,13 @@ const rateLimited = (url: URL, host: string): Response => {
  * (src/onboarding/story.ts), where its lines are said
  * (src/onboarding/speech.ts), and where what is said is written down
  * (src/onboarding/transcription.ts, once per socket opened, or from a
- * recording, src/onboarding/hear.ts).
+ * recording, src/onboarding/hear.ts), and its live voice session
+ * (src/onboarding/voice.ts).
  */
 const interviewLinkPaths: ReadonlySet<string> = new Set([
   interviewApiPath,
   interviewTurnPath,
+  interviewVoicePath,
   interviewStoryPath,
   speechPath,
   transcriptionPath,

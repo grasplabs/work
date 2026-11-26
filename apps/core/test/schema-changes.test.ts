@@ -1,5 +1,6 @@
 import { defineSchema, defineTable, rows, v } from "@grasp-os/runtime/app";
 import type { ValueShape } from "@grasp-os/runtime/app";
+import type { FrozenJson } from "@grasp-os/runtime/definition";
 import { manifestText, schemaManifest } from "@grasp-os/runtime/host";
 import type { StoreFields } from "@grasp-os/shared/stores";
 import { env } from "cloudflare:workers";
@@ -140,6 +141,14 @@ const fieldsOf = async (store: OpenStore): Promise<StoreFields[]> => {
 };
 
 /** What `store` holds: its schema in force and its notes. */
+/** A person's link to a note, beside any JSON and a label of `max` characters. */
+const noteBeside = (note: ValueShape[string], max: number) =>
+  v.object({ note, extra: v.json(), label: v.string().max(max) });
+
+/** JSON `levels` deep, its leaf included: arrays around a string. */
+const deep = (levels: number): FrozenJson =>
+  levels === 1 ? "end" : [deep(levels - 1)];
+
 const heldBy = async (store: OpenStore) => ({
   schema: await schemaHashOf(store),
   notes: await fieldsOf(store),
@@ -353,6 +362,45 @@ describe("a schema change by stable ID", { timeout: 120_000 }, () => {
     ).resolves.toBe("data.referenced");
   });
 
+  it("widens a field beside its reference and any JSON, but refuses the reference made any JSON", async () => {
+    const store = await newStore();
+    const access = { read: "appMembers", write: "appMembers" } as const;
+    const schema = (note: ValueShape[string]) =>
+      manifestText(
+        schemaManifest(
+          defineSchema({
+            notes: defineTable({ title }).access(access),
+            people: defineTable({ note }).access(access),
+          })
+        )
+      );
+    const ids: SchemaIds = {
+      notes: { id: notesId, fields: { title: "field:title" } },
+      people: { id: peopleId, fields: { note: "field:note" } },
+    };
+    const cascade = v.id("notes", { onDelete: "cascade" });
+    await store.applySchema(change(schema(noteBeside(cascade, 100)), ids));
+
+    const widened = await store.applySchema(
+      change(schema(noteBeside(cascade, 200)), ids)
+    );
+    const refused = await store
+      .applySchema(change(schema(noteBeside(v.json(), 200)), ids))
+      .catch((error: unknown) => error);
+
+    expect({ widened: widened.changes.widenedFields, refused }).toMatchObject({
+      widened: [{ table: "people", field: "note" }],
+      refused: {
+        code: "migration.required",
+        details: {
+          refused: [
+            { table: "people", field: "note", reason: "field_changed" },
+          ],
+        },
+      },
+    });
+  });
+
   it("renames a field and fills in another in one change", async () => {
     const { store } = await storeWith({ title: "Launch", category: "news" });
     const v2 = notesText({
@@ -508,7 +556,25 @@ describe(
           })
         )
         .catch((error: unknown) => error);
+      // Any JSON one level deeper than a record holds it, and as deep.
+      const extraIds = idsOf("notes", notesId, {
+        title: "field:title",
+        extra: "field:extra",
+      });
+      const tooDeep = await store
+        .applySchema(
+          change(notesText({ title, extra: v.json() }), extraIds, {
+            answers: [{ table: "notes", field: "extra", value: deep(32) }],
+          })
+        )
+        .catch((error: unknown) => error);
       const held = await heldBy(store);
+      await store.applySchema(
+        change(notesText({ title, extra: v.json() }), extraIds, {
+          answers: [{ table: "notes", field: "extra", value: deep(31) }],
+        })
+      );
+      const deepest = await fieldsOf(store);
       await store.applySchema(
         change(
           notesText({
@@ -520,7 +586,13 @@ describe(
         )
       );
 
-      expect({ unfit, held, notes: await fieldsOf(store) }).toMatchObject({
+      expect({
+        unfit,
+        tooDeep,
+        held,
+        deepest,
+        notes: await fieldsOf(store),
+      }).toMatchObject({
         unfit: {
           code: "migration.required",
           details: {
@@ -529,7 +601,16 @@ describe(
             ],
           },
         },
+        tooDeep: {
+          code: "migration.required",
+          details: {
+            refused: [
+              { table: "notes", field: "extra", reason: "answer_unfit" },
+            ],
+          },
+        },
         held: before,
+        deepest: [{ title: "Launch", extra: deep(31) }],
         notes: [{ title: "Launch", meta: { tag: "general" } }],
       });
     });
@@ -598,6 +679,53 @@ describe(
       expect(widened.changes.widenedFields).toStrictEqual([
         { table: "notes", field: "title" },
       ]);
+    });
+
+    it("applies a field made any JSON as widened, since it takes every value", async () => {
+      const { store } = await storeWith({ title: "Launch", category: "news" });
+      const widened = await store.applySchema(
+        change(notesText({ title, category: v.json().optional() }), v1Ids)
+      );
+      // Any JSON holds null, so a default fills only the records lacking it.
+      const nullable = await newStore();
+      const { schemaHash } = await nullable.applySchema(
+        change(
+          notesText({ title, category: v.string().nullable().optional() }),
+          v1Ids
+        )
+      );
+      await insertAll(nullable, schemaHash, [
+        { title: "Hiring", category: null },
+        { title: "Launch" },
+      ]);
+      const toUnion = await nullable.applySchema(
+        change(
+          notesText({
+            title,
+            category: v.union(v.string(), v.json()).optional(),
+          }),
+          v1Ids
+        )
+      );
+      await nullable.applySchema(
+        change(
+          notesText({ title, category: v.json().default("general") }),
+          v1Ids
+        )
+      );
+
+      expect({
+        widened: widened.changes.widenedFields,
+        toUnion: toUnion.changes.widenedFields,
+        notes: await fieldsOf(nullable),
+      }).toStrictEqual({
+        widened: [{ table: "notes", field: "category" }],
+        toUnion: [{ table: "notes", field: "category" }],
+        notes: [
+          { title: "Hiring", category: null },
+          { title: "Launch", category: "general" },
+        ],
+      });
     });
 
     it("refuses a required field records lack, changing nothing, until it has an answer", async () => {

@@ -4,6 +4,7 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -11,8 +12,8 @@ import { Icon, PlusIcon } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
 import { useState } from "react";
 
+import { descriptionOf } from "../../connections/native-descriptions.ts";
 import { ProviderMark } from "../../connections/provider-mark.tsx";
-import { SeparatedItems } from "../../workflows/separated-items.tsx";
 import { SectionCard } from "../section-card.tsx";
 import { AppsPicker } from "./apps-picker.tsx";
 import { recommendedApps } from "./apps-recommend.ts";
@@ -61,113 +62,100 @@ export const AppsStep = ({ setup, change, name, apps }: StepProps) => {
       {/* The apps on it, as the Integrations page lists apps: a grouped
           card, a slim row each, and Add connector at the end of its last row. */}
       <SectionCard flush title={t`Apps ${name} can use`}>
-        <SeparatedItems
-          rows={[
-            ...chosen.map((app) => {
+        <ItemGroup separated>
+          {chosen.map((app) => {
+            const appName = app.name;
+            return (
+              <Item key={app.id} size="xs">
+                <ItemMedia align="center">
+                  <ProviderMark
+                    id={app.id}
+                    logo={app.logo}
+                    name={appName}
+                    size="sm"
+                  />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>{appName}</ItemTitle>
+                  <ItemDescription>{standing(app)}</ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <Button
+                    aria-label={t`Remove ${appName}`}
+                    onClick={() => {
+                      put(app.id, false);
+                    }}
+                    size="sm"
+                    variant="outline"
+                  >
+                    {t`Remove`}
+                  </Button>
+                </ItemActions>
+              </Item>
+            );
+          })}
+          {/* Its last row, as Linear's: where it stands at the start, Add */}
+          {/* connector at the end. */}
+          <Item key="add" size="xs">
+            <ItemContent>
+              {chosen.length === 0 ? (
+                <ItemDescription>{t`No apps added yet.`}</ItemDescription>
+              ) : null}
+            </ItemContent>
+            <ItemActions>
+              <Button
+                onClick={() => {
+                  setPicking(true);
+                }}
+                size="sm"
+                variant="outline"
+              >
+                <Icon icon={PlusIcon} />
+                {t`Add connector`}
+              </Button>
+            </ItemActions>
+          </Item>
+        </ItemGroup>
+      </SectionCard>
+      {/* The ones that fit and aren't on it yet: Add moves one up. */}
+      {suggested.length === 0 ? null : (
+        <SectionCard flush title={t`Recommended`}>
+          <ItemGroup separated>
+            {suggested.map((app) => {
               const appName = app.name;
-              return {
-                key: app.id,
-                row: (
-                  <Item size="xs">
-                    <ItemMedia align="center">
-                      <ProviderMark
-                        id={app.id}
-                        logo={app.logo}
-                        name={appName}
-                        size="sm"
-                      />
-                    </ItemMedia>
-                    <ItemContent>
-                      <ItemTitle>{appName}</ItemTitle>
-                      <ItemDescription>{standing(app)}</ItemDescription>
-                    </ItemContent>
-                    <ItemActions>
-                      <Button
-                        aria-label={t`Remove ${appName}`}
-                        onClick={() => {
-                          put(app.id, false);
-                        }}
-                        size="sm"
-                        variant="outline"
-                      >
-                        {t`Remove`}
-                      </Button>
-                    </ItemActions>
-                  </Item>
-                ),
-              };
-            }),
-            // Its last row, as Linear's: where it stands at the start, Add
-            // connector at the end.
-            {
-              key: "add",
-              row: (
-                <Item size="xs">
+              return (
+                <Item key={app.id} size="xs">
+                  <ItemMedia align="center">
+                    <ProviderMark
+                      id={app.id}
+                      logo={app.logo}
+                      name={appName}
+                      size="sm"
+                    />
+                  </ItemMedia>
                   <ItemContent>
-                    {chosen.length === 0 ? (
-                      <ItemDescription>{t`No apps added yet.`}</ItemDescription>
-                    ) : null}
+                    <ItemTitle>{appName}</ItemTitle>
+                    <ItemDescription>
+                      {descriptionOf(app) ?? standing(app)}
+                    </ItemDescription>
                   </ItemContent>
                   <ItemActions>
                     <Button
+                      aria-label={t`Add ${appName}`}
                       onClick={() => {
-                        setPicking(true);
+                        put(app.id, true);
                       }}
                       size="sm"
                       variant="outline"
                     >
                       <Icon icon={PlusIcon} />
-                      {t`Add connector`}
+                      {t`Add`}
                     </Button>
                   </ItemActions>
                 </Item>
-              ),
-            },
-          ]}
-        />
-      </SectionCard>
-      {/* The ones that fit and aren't on it yet: Add moves one up. */}
-      {suggested.length === 0 ? null : (
-        <SectionCard flush title={t`Recommended`}>
-          <SeparatedItems
-            rows={suggested.map((app) => {
-              const appName = app.name;
-              return {
-                key: app.id,
-                row: (
-                  <Item key={app.id} size="xs">
-                    <ItemMedia align="center">
-                      <ProviderMark
-                        id={app.id}
-                        logo={app.logo}
-                        name={appName}
-                        size="sm"
-                      />
-                    </ItemMedia>
-                    <ItemContent>
-                      <ItemTitle>{appName}</ItemTitle>
-                      <ItemDescription>
-                        {app.description ?? standing(app)}
-                      </ItemDescription>
-                    </ItemContent>
-                    <ItemActions>
-                      <Button
-                        aria-label={t`Add ${appName}`}
-                        onClick={() => {
-                          put(app.id, true);
-                        }}
-                        size="sm"
-                        variant="outline"
-                      >
-                        <Icon icon={PlusIcon} />
-                        {t`Add`}
-                      </Button>
-                    </ItemActions>
-                  </Item>
-                ),
-              };
+              );
             })}
-          />
+          </ItemGroup>
         </SectionCard>
       )}
       {/* Mounted only while open, so it opens on the best app each time. */}

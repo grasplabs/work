@@ -18,10 +18,13 @@ import type {
 } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { nativeConnector } from "./bundled-connectors.ts";
 import { ComposioError, composioKey, composioRequest } from "./composio.ts";
+import { connectorRow } from "./connector-providers.ts";
+import { connectors } from "./db/schema.ts";
 import { providers } from "./providers.ts";
 
 // The catalog: what an admin can connect. The native providers come from
@@ -35,23 +38,23 @@ import { providers } from "./providers.ts";
 /**
  * How native providers are shown in the catalog. Both suites are first
  * mail and calendar to the people connecting them, so that is their group,
- * whatever their categories would say.
+ * whatever their categories would say. They carry no description: the web
+ * words them in each of its languages, by their ids.
  */
 const nativeShown: Record<
   OAuthProvider,
-  Pick<CatalogEntry, "name" | "categories" | "description" | "group">
+  Pick<CatalogEntry, "name" | "categories" | "products" | "group">
 > = {
   microsoft: {
     name: "Microsoft 365",
     categories: ["Productivity"],
-    description:
-      "Outlook mail and calendars, and files in OneDrive and SharePoint.",
+    products: ["Outlook", "OneDrive", "SharePoint"],
     group: "Email and calendar",
   },
   google: {
     name: "Google Workspace",
     categories: ["Productivity"],
-    description: "Gmail, Google Calendar, and files in Google Drive.",
+    products: ["Gmail", "Google Calendar", "Google Drive"],
     group: "Email and calendar",
   },
 };
@@ -67,7 +70,7 @@ export const providerName = ({
   serverKind,
   provider,
 }: {
-  serverKind: "native" | "composio" | "http";
+  serverKind: "native" | "composio" | "http" | "connector";
   provider: string;
 }): string => {
   const native = oauthProviderSchema.safeParse(provider);
@@ -90,6 +93,7 @@ const nativeEntries = (): CatalogEntry[] =>
         ...nativeShown[id],
         toolCount: Object.keys(connector.manifest.actions).length,
         logo: null,
+        description: null,
         // Connect holds the deployment's own app for each provider.
         auth: "managed",
       },
@@ -428,17 +432,59 @@ export const lastListedToolkits = async (
     { lastKept: true }
   );
 
+/**
+ * The connectors admins made from an MCP server's URL
+ * (mcp-connectors.ts), by name: what connecting one takes is signing in at
+ * its server, or a key its server takes in a header, and for a sign-in,
+ * the host its sign-in page is on. Its tools are listed only to a
+ * connection, so none are counted here.
+ */
+const connectorEntries = async (env: Env): Promise<CatalogEntry[]> => {
+  const rows = await drizzle(env.DB)
+    .select({
+      id: connectors.id,
+      name: connectors.name,
+      url: connectors.url,
+      auth: connectors.auth,
+      companyNetwork: connectors.companyNetwork,
+      authorizationEndpoint: connectors.authorizationEndpoint,
+    })
+    .from(connectors)
+    .orderBy(connectors.name, connectors.id);
+  return rows.map(
+    ({ id, name, url, auth, companyNetwork, authorizationEndpoint }) => {
+      const signInHost =
+        authorizationEndpoint === null
+          ? undefined
+          : URL.parse(authorizationEndpoint)?.host;
+      return {
+        source: "connector",
+        id,
+        name,
+        categories: [],
+        toolCount: null,
+        logo: null,
+        description: null,
+        group: catalogGroupOf([]),
+        auth: auth === "header" ? "key" : "managed",
+        ...(companyNetwork === true && { companyNetwork: new URL(url).origin }),
+        ...(signInHost === undefined ? {} : { signInHost }),
+      };
+    }
+  );
+};
+
 /** The catalog, as `ConnectApi.catalog` describes it. */
 export const catalog = async (env: Env): Promise<Catalog> => {
-  const native = nativeEntries();
+  const own = [...nativeEntries(), ...(await connectorEntries(env))];
   const key = composioKey(env);
   if (key === undefined) {
-    return { entries: native, composio: "off" };
+    return { entries: own, composio: "off" };
   }
   try {
     const toolkits = await listedToolkits(key);
     return {
-      entries: [...native, ...toolkits.map(({ entry }) => entry)],
+      entries: [...own, ...toolkits.map(({ entry }) => entry)],
       composio: "listed",
     };
   } catch (error) {
@@ -446,7 +492,7 @@ export const catalog = async (env: Env): Promise<Catalog> => {
       throw error;
     }
     log.warn("catalog.composio_unavailable", errorFields(error));
-    return { entries: native, composio: "unavailable" };
+    return { entries: own, composio: "unavailable" };
   }
 };
 
@@ -567,6 +613,14 @@ export const catalogTools = async (
     throw connectErrors.create("connect.invalid");
   }
   const { source, id } = parsed.data;
+  // A connector's server lists its tools only to a connection
+  // (mcp-connectors.ts `currentTools`): its entry has none to show.
+  if (source === "connector") {
+    if ((await connectorRow(env.DB, id)) === undefined) {
+      throw connectErrors.create("connect.catalog_entry_not_found");
+    }
+    return [];
+  }
   if (source === "native") {
     const provider = Object.values(providers).find((each) => each.id === id);
     const connector =
@@ -575,9 +629,9 @@ export const catalogTools = async (
       throw connectErrors.create("connect.catalog_entry_not_found");
     }
     return Object.entries(connector.manifest.actions).map(
-      ([name, { input, readOnly }]) => ({
+      ([name, { description, input, readOnly }]) => ({
         name,
-        description: null,
+        description,
         inputs: input,
         readOnly,
       })

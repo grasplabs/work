@@ -1,5 +1,6 @@
 // Inspector: a side panel that inspects one record, built from data: a head (its icon, its title,
-// who and when, its actions), its views as tabs, then sections of rows, facts or words. Built of
+// who and when, its actions), its views as tabs, then sections of rows, facts or words, and a
+// footer under them (each view's own, with views). While the record loads, the head waits as placeholders. Built of
 // SidePanel, SidePanelSection, IconTile, KeyValueList, Item and Empty, so every measure is theirs.
 //
 //   <Inspector
@@ -17,7 +18,7 @@
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
-import { Fragment, isValidElement } from "react";
+import { isValidElement } from "react";
 import type { ReactElement, ReactNode } from "react";
 
 import { Button } from "../../components/button";
@@ -30,7 +31,6 @@ import {
   ItemDetail,
   ItemGroup,
   ItemMedia,
-  ItemSeparator,
   ItemTitle,
 } from "../../components/item";
 import { KeyValueList } from "../../components/key-value";
@@ -48,6 +48,7 @@ import { Icon, LockIcon, PlusIcon, TrashIcon } from "../../lib/icons";
 import type { IconData } from "../../lib/icons";
 import { visuallyHidden } from "../../lib/styles";
 import { colors, space } from "../../lib/tokens.stylex";
+import { isBlank } from "../../lib/utils";
 import type { LayoutStyle } from "../../lib/utils";
 
 /** The words an Inspector says itself: English here; pass the product's as `labels`. */
@@ -119,6 +120,12 @@ export interface InspectorSection {
   action?: ReactNode;
 }
 
+/** One of an Inspector's views: a tab in its head, and what stands under its sections. */
+export interface InspectorView extends SidePanelView {
+  /** Anything under the view's sections: small print, a folded "Advanced settings". */
+  footer?: ReactNode;
+}
+
 /** Every prop an Inspector takes. */
 export interface InspectorProps {
   /** What the panel is about, as a screen reader names the landmark ("Agent details"). */
@@ -139,14 +146,23 @@ export interface InspectorProps {
   actions?: ReactNode;
   /** Shows a close button in the bar, and runs when it is pressed. */
   onClose?: () => void;
-  /** Its views, as tabs under the head; each section names its own with `view`. */
-  views?: SidePanelView[];
+  /** Its views, as tabs under the head; each section names its own with `view`, and each view has its own `footer`. */
+  views?: InspectorView[];
   /** The view shown at first, by its `value`. @default the first view */
   defaultView?: string;
   /** The sections, in order. */
   sections: readonly InspectorSection[];
   /** What the panel says when it has no sections at all ("Nothing is set up yet"). */
   empty?: ReactNode;
+  /** Anything under the sections, when it has no views: small print, a folded "Advanced settings". */
+  footer?: ReactNode;
+  /**
+   * The record is not there yet: its title, and its line when `description` is given (even
+   * empty), wait as placeholders, and the head says it is busy. Give the sections as they will
+   * stand, each fact still on its way with `loading`.
+   * @default false
+   */
+  loading?: boolean;
   /** On the high lift with the panel's corner. Off inside a Sheet. @default true */
   framed?: boolean;
   /** Its words in the product's language; each one left out keeps its English. */
@@ -247,12 +263,9 @@ const Rows = ({
   section: InspectorSection;
   words: InspectorLabels;
 }) => (
-  <ItemGroup aria-label={section.title}>
-    {(section.rows ?? []).map((row, index) => (
-      <Fragment key={row.id}>
-        {index > 0 && <ItemSeparator />}
-        <Row row={row} words={words} />
-      </Fragment>
+  <ItemGroup aria-label={section.title} separated>
+    {(section.rows ?? []).map((row) => (
+      <Row key={row.id} row={row} words={words} />
     ))}
   </ItemGroup>
 );
@@ -310,25 +323,29 @@ const Section = ({
 const Sections = ({
   sections,
   empty,
+  footer,
   words,
 }: {
   sections: readonly InspectorSection[];
   empty: ReactNode;
+  footer: ReactNode;
   words: InspectorLabels;
-}) => {
-  if (sections.length === 0) {
-    return empty === undefined ? null : (
-      <Empty size="sm">
-        <EmptyHeader>
-          <EmptyDescription>{empty}</EmptyDescription>
-        </EmptyHeader>
-      </Empty>
-    );
-  }
-  return sections.map((section) => (
-    <Section key={section.id} section={section} words={words} />
-  ));
-};
+}) => (
+  <>
+    {sections.length === 0
+      ? empty !== undefined && (
+          <Empty size="sm">
+            <EmptyHeader>
+              <EmptyDescription>{empty}</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        )
+      : sections.map((section) => (
+          <Section key={section.id} section={section} words={words} />
+        ))}
+    {footer}
+  </>
+);
 
 /** A side panel that inspects one record: head, views, sections of rows and facts. */
 export const Inspector = ({
@@ -343,6 +360,8 @@ export const Inspector = ({
   defaultView,
   sections,
   empty,
+  footer,
+  loading,
   framed,
   labels,
   style,
@@ -350,7 +369,7 @@ export const Inspector = ({
   const words = { ...LABELS, ...labels };
   const tabs = views ?? [];
   // With nothing under the head and nothing to say about it, the head stands alone.
-  const body = sections.length > 0 || empty !== undefined;
+  const body = sections.length > 0 || empty !== undefined || !isBlank(footer);
   return (
     <div data-slot="inspector" {...stylex.props(styles.root, style)}>
       <SidePanel
@@ -371,8 +390,13 @@ export const Inspector = ({
           meta={meta}
           actions={actions}
           onClose={onClose}
-          views={views}
+          views={views?.map(({ value, label: name, icon: mark }) => ({
+            value,
+            label: name,
+            icon: mark,
+          }))}
           viewsLabel={words.views}
+          loading={loading}
         />
         {tabs.length > 0
           ? tabs.map((view) => (
@@ -382,13 +406,19 @@ export const Inspector = ({
                     (section) => section.view === view.value
                   )}
                   empty={empty}
+                  footer={view.footer}
                   words={words}
                 />
               </SidePanelContent>
             ))
           : body && (
               <SidePanelContent>
-                <Sections sections={sections} empty={empty} words={words} />
+                <Sections
+                  sections={sections}
+                  empty={empty}
+                  footer={footer}
+                  words={words}
+                />
               </SidePanelContent>
             )}
       </SidePanel>

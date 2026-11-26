@@ -46,6 +46,7 @@ import {
   ItemContent,
   ItemDescription,
   ItemDetail,
+  ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -81,7 +82,6 @@ import {
 import { EU, Flag, US } from "../frame/flag.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import { SeparatedItems } from "../workflows/separated-items.tsx";
 import { AddConnection } from "./add-connection/add-connection.tsx";
 import { ReadOnlyRow } from "./read-only-row.tsx";
 import { FactRow, RowAlert, SettingRow, SettingsGroup } from "./section.tsx";
@@ -1287,52 +1287,49 @@ export const AiProvidersSettings = ({
             </FieldGroup>
           )}
           {providers.length > 0 ? (
-            <SeparatedItems
-              aria-label={t`Connected providers`}
-              rows={providers.map((provider) => ({
+            <ItemGroup separated aria-label={t`Connected providers`}>
+              {providers.map((provider) => (
                 // A new key is a new row: no test of the key it replaced stays.
-                key: `${provider.provider}:${provider.mask}:${String(provider.updatedAt)}`,
-                row: (
-                  <ProviderRow
-                    editable={editable}
-                    // Only the key the dialog shows: one another admin
-                    // saved since stays, and the page says nothing was
-                    // deleted, as the dialog goes with the row it was on.
-                    onDelete={async () => {
-                      await changeOrThrow(async (session) => {
-                        await session.aiProviders.remove(
-                          provider.provider,
-                          provider.updatedAt
-                        );
-                        const now = await session.aiProviders.list();
-                        if (
-                          now.providers.some(
-                            (each) => each.provider === provider.provider
-                          )
-                        ) {
-                          const label = providerName(
-                            provider.provider,
-                            provider.label
-                          );
-                          const why = t`Someone saved a new ${label} key since you opened it, so nothing was deleted.`;
-                          setReplaced(why);
-                          throw new Error(why);
-                        }
-                      });
-                    }}
-                    onReplace={async (key) => {
-                      await addKey(
+                <ProviderRow
+                  key={`${provider.provider}:${provider.mask}:${String(provider.updatedAt)}`}
+                  editable={editable}
+                  // Only the key the dialog shows: one another admin
+                  // saved since stays, and the page says nothing was
+                  // deleted, as the dialog goes with the row it was on.
+                  onDelete={async () => {
+                    await changeOrThrow(async (session) => {
+                      await session.aiProviders.remove(
                         provider.provider,
-                        key,
-                        provider.baseUrl ?? ""
+                        provider.updatedAt
                       );
-                    }}
-                    provider={provider}
-                    testModel={testModelOf(provider.provider, choice)}
-                  />
-                ),
-              }))}
-            />
+                      const now = await session.aiProviders.list();
+                      if (
+                        now.providers.some(
+                          (each) => each.provider === provider.provider
+                        )
+                      ) {
+                        const label = providerName(
+                          provider.provider,
+                          provider.label
+                        );
+                        const why = t`Someone saved a new ${label} key since you opened it, so nothing was deleted.`;
+                        setReplaced(why);
+                        throw new Error(why);
+                      }
+                    });
+                  }}
+                  onReplace={async (key) => {
+                    await addKey(
+                      provider.provider,
+                      key,
+                      provider.baseUrl ?? ""
+                    );
+                  }}
+                  provider={provider}
+                  testModel={testModelOf(provider.provider, choice)}
+                />
+              ))}
+            </ItemGroup>
           ) : null}
         </SettingsGroup>
       )}

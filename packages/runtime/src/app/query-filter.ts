@@ -3,9 +3,9 @@ import { filterChildren } from "@grasp-os/shared/store-reads";
 import type { FilterNode, QueryScalar } from "@grasp-os/shared/store-reads";
 
 import type { IndexBase } from "../common/schema-fields.ts";
-import type { TableState } from "../common/schema-types.ts";
 import { refuse } from "./query-error.ts";
 import { baseOf, fits, isPlainRecord, nullableField } from "./query-values.ts";
+import type { TableState } from "./schema-types.ts";
 
 const comparisonOps = ["eq", "neq", "gt", "gte", "lt", "lte"] as const;
 

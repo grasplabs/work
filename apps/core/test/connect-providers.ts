@@ -12,6 +12,7 @@
  */
 import { botFrameworkKeysFake } from "../../connect/test/bot-framework-keys-fake.ts";
 import { graphEventsFake } from "../../connect/test/graph-events-fake.ts";
+import { linearOrigin } from "../../connect/test/linear-mcp-fake.ts";
 import { npmRegistryFake } from "../../connect/test/npm-registry-fake.ts";
 import { osvFake } from "../../connect/test/osv-fake.ts";
 import {
@@ -25,7 +26,10 @@ import { aiProvidersFake } from "./ai-providers-fake.ts";
 import { botConnectorFake } from "./bot-connector-fake.ts";
 import { composioApiScript, composioLogoScript } from "./composio-api.ts";
 import { driveSyncControlUrl, driveSyncFake } from "./drive-sync-fake.ts";
+import { linearConsentUrl } from "./linear-service.ts";
 import { mailServerScript } from "./mail-server.ts";
+import { pipedriveControlUrl, pipedriveFake } from "./pipedrive-fake.ts";
+import { sampleKeyControlUrl, sampleKeyFake } from "./sample-key-fake.ts";
 import { sampleSyncControlUrl, sampleSyncFake } from "./sample-sync-fake.ts";
 import { stephenGoogleFake } from "./stephen-google-fake.ts";
 import { stephenGraphFake } from "./stephen-graph-fake.ts";
@@ -103,6 +107,9 @@ export const documentsControlUrl = "https://graph-control.test/documents";
 export const documentsGranted =
   "openid profile email User.Read Files.Read.All Sites.Read.All";
 
+/** In a code in place of what was granted: what the consent asked for. */
+const asAsked = "-";
+
 /**
  * The code Entra sends back once `subject` in `tenant` consents at `url`:
  * it carries the authorization's PKCE challenge, so only the flow's own
@@ -118,9 +125,12 @@ export const consentCode = (
     url.searchParams.get("code_challenge"),
     tenant,
     subject,
-    // What Entra says it granted (`scope`), when the test gives it: base64,
-    // since rights have dots of their own.
-    ...(granted === undefined ? [] : [btoa(granted)]),
+    // What Entra says it granted (`scope`), base64 since rights have dots of
+    // their own: the test's, or else what the consent asked for, as Entra
+    // lists it in every token answer.
+    ...(granted === undefined
+      ? [asAsked, btoa(url.searchParams.get("scope") ?? "")]
+      : [btoa(granted)]),
   ].join(".");
 
 /**
@@ -143,6 +153,13 @@ export const graphSentUrl = "https://graph-control.test/sent";
  * carried out, then answered with a 502, as a gateway that lost it would.
  */
 export const graphLoseUrl = "https://graph-control.test/lose";
+
+/**
+ * Where tests have Graph rate limit a mailbox's next requests: POST
+ * `{ mailbox, requests, retryAfter }`. Each is answered 429, asking callers
+ * to wait `retryAfter` seconds, and does nothing.
+ */
+export const graphThrottleUrl = "https://graph-control.test/throttle";
 
 /**
  * Where Stephen's eval sets a mailbox's calendar and mail, or a workbook's
@@ -542,8 +559,11 @@ const stephenGraph = (${stephenGraphFake.toString()})();
 const stephenGoogle = (${stephenGoogleFake.toString()})();
 const driveSync = (${driveSyncFake.toString()})();
 const sampleSync = (${sampleSyncFake.toString()})();
+const sampleKey = (${sampleKeyFake.toString()})();
+const pipedrive = (${pipedriveFake.toString()})();
 const graphSent = [];
 const graphLosing = new Map();
+const graphThrottled = new Map();
 const graphDrafts = new Map();
 const graphAttachments = new Map();
 const graphAttachmentReads = new Map();
@@ -755,8 +775,20 @@ const osv = (${osvFake.toString()})();
 const aiProviders = (${aiProvidersFake.toString()})();
 
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     const url = new URL(request.url);
+    // Linear's MCP server, run in Node (test/linear-service.ts), at a
+    // public address as its name resolves.
+    if (url.origin === ${JSON.stringify(linearOrigin)} || url.href === ${JSON.stringify(linearConsentUrl)}) {
+      return await env.LINEAR.fetch(request);
+    }
+    if (url.hostname === "cloudflare-dns.com" && url.searchParams.get("name") === ${JSON.stringify(new URL(linearOrigin).hostname)}) {
+      const type = url.searchParams.get("type") === "AAAA" ? 28 : 1;
+      return Response.json({
+        Status: 0,
+        Answer: type === 1 ? [{ name: url.searchParams.get("name"), type, TTL: 60, data: "34.120.10.1" }] : [],
+      });
+    }
     if (aiProviders.handles(url)) {
       return await aiProviders.answer(request, url);
     }
@@ -871,6 +903,14 @@ export default {
         });
       }
       const [, version, users, mailbox, ...rest] = decodeURIComponent(url.pathname).split("/");
+      const throttled = graphThrottled.get(mailbox);
+      if (users === "users" && throttled !== undefined && throttled.requests > 0) {
+        throttled.requests -= 1;
+        return Response.json(
+          { error: { code: "TooManyRequests" } },
+          { status: 429, headers: { "retry-after": String(throttled.retryAfter) } }
+        );
+      }
       const mailPath = version === "v1.0" && users === "users" && mailbox && rest.length === 1;
       if (request.method === "POST" && mailPath && rest[0] === "sendMail") {
         const { message } = await request.json();
@@ -943,6 +983,11 @@ export default {
     }
     if (url.href === ${JSON.stringify(graphSentUrl)}) {
       return Response.json(graphSent);
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(graphThrottleUrl)}) {
+      const { mailbox, requests, retryAfter } = await request.json();
+      graphThrottled.set(mailbox, { requests, retryAfter });
+      return new Response(null, { status: 204 });
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(graphLoseUrl)}) {
       const { mailbox, writes } = await request.json();
@@ -1033,6 +1078,20 @@ export default {
     const fromSampleSync = sampleSync.answer(request, url);
     if (fromSampleSync !== undefined) {
       return fromSampleSync;
+    }
+    if (url.origin + url.pathname === ${JSON.stringify(sampleKeyControlUrl)}) {
+      return await sampleKey.control(request);
+    }
+    const fromSampleKey = sampleKey.answer(request, url);
+    if (fromSampleKey !== undefined) {
+      return fromSampleKey;
+    }
+    if (url.origin + url.pathname === ${JSON.stringify(pipedriveControlUrl)}) {
+      return await pipedrive.control(request);
+    }
+    const fromPipedrive = pipedrive.answer(request, url);
+    if (fromPipedrive !== undefined) {
+      return fromPipedrive;
     }
     if (url.href === ${JSON.stringify(stephenGoogleUrl)}) {
       return await stephenGoogle.control(request);
@@ -1161,7 +1220,7 @@ export default {
         scope: directory.granted ?? ${JSON.stringify(directoryGranted)},
       });
     }
-    const [challenge, tenant, subject, granted] = (form.get("code") ?? "").split(".");
+    const [challenge, tenant, subject, granted, asked] = (form.get("code") ?? "").split(".");
     const verifier = new TextEncoder().encode(form.get("code_verifier") ?? "");
     const digest = base64Url(
       new Uint8Array(await crypto.subtle.digest("SHA-256", verifier))
@@ -1194,9 +1253,16 @@ export default {
       refresh_token: "refresh." + subject,
       expires_in: 3600,
       id_token: [encoded({ alg: "RS256" }), encoded(claims), "signature"].join("."),
-      ...(forDirectory ? { scope: directory.granted ?? ${JSON.stringify(directoryGranted)} } : {}),
-      ...(forDocuments ? { scope: ${JSON.stringify(documentsGranted)} } : {}),
-      ...(granted === undefined ? {} : { scope: atob(granted) }),
+      // The test's grant; else the directory's or the documents' app's, or
+      // what the consent asked for.
+      scope:
+        granted !== ${JSON.stringify(asAsked)}
+          ? atob(granted)
+          : forDirectory
+            ? directory.granted ?? ${JSON.stringify(directoryGranted)}
+            : forDocuments
+              ? ${JSON.stringify(documentsGranted)}
+              : atob(asked),
     });
   },
 };

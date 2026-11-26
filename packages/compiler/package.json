@@ -22,6 +22,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./inputs": "./src/inputs.ts",
+    "./mirror": "./src/mirror.ts",
+    "./openapi": "./src/openapi.ts",
     "./page-imports": "./src/page-imports.ts",
     "./oxc": "./src/oxc.ts",
     "./oxc-wasm": "./oxc-wasm/wasm.ts",
@@ -35,6 +37,7 @@
     "@grasp-os/runtime": "workspace:*",
     "@grasp-os/sdk": "workspace:*",
     "@grasp-os/shared": "workspace:*",
+    "@scalar/openapi-parser": "catalog:",
     "@tanstack/react-router": "catalog:",
     "@tanstack/router-generator": "catalog:",
     "@tsrs/wasm": "catalog:",

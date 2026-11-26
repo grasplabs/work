@@ -28,6 +28,7 @@ import {
   slackApp,
   teamsBot,
 } from "./test/connect-providers.ts";
+import { linearService } from "./test/linear-service.ts";
 import { shippedModelPlugin } from "./test/shipped-model-plugin.ts";
 import { testSignIn } from "./test/sign-in-config.ts";
 import { testAssets } from "./test/test-run.ts";
@@ -420,6 +421,8 @@ export const coreProject = (
               modules: true,
               script: connectProvidersScript,
               compatibilityDate: "2026-09-15",
+              // Linear's MCP server, in Node (test/linear-service.ts).
+              serviceBindings: { LINEAR: linearService },
               // A fake provider sees its sender drop a request: a bridged
               // one its caller going away, any other connect stopping it
               // (test/ai-providers-fake.ts).

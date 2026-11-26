@@ -3,6 +3,7 @@ import {
   Item,
   ItemContent,
   ItemDescription,
+  ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -10,8 +11,6 @@ import { PageHeader } from "@grasp-os/ui/components/page-header";
 import { SectionHeader } from "@grasp-os/ui/components/section-header";
 import { colors, radius, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
-
-import { SeparatedItems } from "../workflows/separated-items.tsx";
 
 // The Projects pages before what they read arrives, as #2503's library drew
 // them (its page skeletons, list and record, which the rename map moves to
@@ -44,13 +43,13 @@ const QuietRow = () => (
 );
 
 /** Quiet rows, a hairline between. */
-const Rows = ({ rows }: { rows: number }) => {
-  const quiet = Array.from({ length: rows }, (_, index) => ({
-    key: String(index),
-    row: <QuietRow />,
-  }));
-  return <SeparatedItems rows={quiet} />;
-};
+const Rows = ({ rows }: { rows: number }) => (
+  <ItemGroup separated>
+    {Array.from({ length: rows }, (_, index) => (
+      <QuietRow key={index} />
+    ))}
+  </ItemGroup>
+);
 
 /** Projects waiting: its header (it has no description), then a screen of rows. */
 export const ProjectsSkeleton = ({ rows }: { rows: number }) => (
