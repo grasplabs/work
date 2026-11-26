@@ -4,8 +4,8 @@
  * the kit's theme until the last page moves: its tokens under its own
  * names (--damsko-*), its themes (the root's `data-theme`, which the
  * document sets to Evergreen, as apps/web does) and its fonts, served from
- * this origin. With no `data-mode` on the root its colours follow the
- * system, as the admin does (public/theme.js). Not its base.css: Tailwind's
+ * this origin. Its colours follow the root's `data-mode`, which
+ * public/theme.js sets: what staff chose, or the system. Not its base.css: Tailwind's
  * preflight is the reset here.
  */
 @import "@grasp-os/ui/styles/tokens.css";
