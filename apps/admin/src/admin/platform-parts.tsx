@@ -1,11 +1,11 @@
-import { cn } from "@grasp-os/app-kit/lib/utils";
-
 /**
  * The parts and words of the admin's Platform page, ported from the
  * prototype (grasplabs/prototype `components/admin/platform-parts.tsx`
  * and `platform-words.ts`): how a company stands, and the admin's own
  * records in words staff read.
  */
+import { Badge } from "@grasp-os/ui/components/badge";
+
 import type { AttentionReason } from "../hosting/attention.ts";
 import type { NotStarted } from "../hosting/placement.ts";
 import type { ClientProgress } from "../rollout/progress.ts";
@@ -111,26 +111,21 @@ export const eventWords = (
   return `${event.actor} ${what[event.action]}`;
 };
 
-const standingDot: Record<Standing, string> = {
-  attention: "bg-status-attention",
-  setup: "bg-foreground",
-  unread: "bg-muted-foreground",
-  healthy: "bg-status-agreed",
-  offboarded: "bg-border",
+/** How serious each standing is, as the colour of its dot. */
+const standingVariant: Record<
+  Standing,
+  "warning" | "info" | "default" | "success"
+> = {
+  attention: "warning",
+  setup: "info",
+  unread: "default",
+  healthy: "success",
+  offboarded: "default",
 };
 
 /** How a company stands, as a dot and a word. */
 export const StandingMark = ({ standing }: { standing: Standing }) => (
-  <span
-    className={cn(
-      "flex items-center gap-2",
-      standing === "attention" && "text-status-attention"
-    )}
-  >
-    <span
-      aria-hidden="true"
-      className={cn("size-2 flex-none rounded-full", standingDot[standing])}
-    />
+  <Badge dot size="sm" variant={standingVariant[standing]}>
     {standingWords[standing]}
-  </span>
+  </Badge>
 );

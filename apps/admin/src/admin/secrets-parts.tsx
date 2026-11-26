@@ -4,7 +4,12 @@
  * What Secrets Store holds reaches every company by itself: the reconciler
  * deploys it, as it deploys a release.
  */
-import { Button } from "@grasp-os/app-kit/components/button";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import { Button } from "@grasp-os/ui/components/button";
+import { CardContent } from "@grasp-os/ui/components/card";
+import { Text } from "@grasp-os/ui/components/text";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
 import { checkRevocationFn } from "../rollout/functions.ts";
@@ -12,8 +17,11 @@ import type {
   RevocationCheck,
   RevocationRefusal,
 } from "../rollout/shared-secrets.ts";
-import { Attention } from "./parts.tsx";
-import { Section } from "./section.tsx";
+import { Panel } from "./panel.tsx";
+
+const styles = stylex.create({
+  lines: { display: "flex", flexDirection: "column", gap: space["1"] },
+});
 
 /** What a revocation check says, secret by secret, in words. */
 const checkLines = (check: RevocationCheck): string[] => [
@@ -65,6 +73,33 @@ const verdictOf = (
   };
 };
 
+/** What a check found: its lines, or, when an old value must stay, a warning that holds them. */
+const Verdict = ({
+  verdict,
+}: {
+  verdict: { safe: boolean; lines: string[] };
+}) =>
+  verdict.safe ? (
+    <div {...stylex.props(styles.lines)}>
+      {verdict.lines.map((line) => (
+        <Text key={line} size="sm">
+          {line}
+        </Text>
+      ))}
+    </div>
+  ) : (
+    // Something to look at before an old value goes: said when it appears.
+    <Alert variant="warning">
+      <AlertDescription>
+        <span {...stylex.props(styles.lines)}>
+          {verdict.lines.map((line) => (
+            <span key={line}>{line}</span>
+          ))}
+        </span>
+      </AlertDescription>
+    </Alert>
+  );
+
 /** Whether the old shared secrets can be revoked, checked when staff ask. */
 export const SharedSecrets = () => {
   const [verdict, setVerdict] = useState<{
@@ -79,36 +114,34 @@ export const SharedSecrets = () => {
     setVerdict(verdictOf(result));
   };
   return (
-    <Section
+    <Panel
       action={
-        <div className="flex flex-none flex-wrap justify-end gap-2">
-          <Button
-            disabled={reading}
-            onClick={() => {
-              void check();
-            }}
-            size="sm"
-            variant="outline"
-          >
-            Can the old ones go?
-          </Button>
-        </div>
+        <Button
+          disabled={reading}
+          onClick={() => {
+            void check();
+          }}
+          size="sm"
+          variant="outline"
+        >
+          Can the old ones go?
+        </Button>
       }
-      description="Once Deploy platform copies a changed secret into Secrets Store, every company is deployed again with it by itself, as a release is. Check, live, whether the old values can be revoked."
       title="Shared secrets"
     >
-      {verdict === null ? null : (
-        <div
-          className="flex flex-col gap-1 border-t px-5 py-3"
-          role={verdict.safe ? undefined : "alert"}
-        >
-          {verdict.lines.map((line) => (
-            <p key={line}>
-              {verdict.safe ? line : <Attention>{line}</Attention>}
-            </p>
-          ))}
+      {/* What it is for in the card's body, so the card keeps one look
+          before and after a check (a Card's header with nothing under
+          it is drawn as a plain title card). */}
+      <CardContent>
+        <div {...stylex.props(styles.lines)}>
+          <Text color="muted" size="sm">
+            Once Deploy platform copies a changed secret into Secrets Store,
+            every company is deployed again with it by itself, as a release is.
+            Check, live, whether the old values can be revoked.
+          </Text>
+          {verdict === null ? null : <Verdict verdict={verdict} />}
         </div>
-      )}
-    </Section>
+      </CardContent>
+    </Panel>
   );
 };
