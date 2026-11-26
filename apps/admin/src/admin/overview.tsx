@@ -324,10 +324,12 @@ const GraspAiStat = ({
         value="Not read"
       />
     ) : (
+      // Absent on its own key, and from a release before it was reported:
+      // which isn't said.
       <Stat
-        change="It runs its AI on its own key"
+        change="On its own key, or its release doesn’t report it"
         label="Grasp AI this month"
-        value="Own key"
+        value="Not reported"
       />
     );
   }
@@ -908,7 +910,7 @@ const AiUseLine = ({ status }: { status: Promise<AiStatusReport | null> }) => {
   const report = use(status);
   const ai = graspAiOf(report);
   if (ai === null) {
-    return report === null ? "Not read now" : "On its own key";
+    return report === null ? "Not read now" : "Not reported";
   }
   return `${dollars(ai.spent)} this month`;
 };

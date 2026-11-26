@@ -3,11 +3,14 @@ import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  act,
   answeredAdmin,
   answeredSummary,
+  FailedError,
   gridRow,
   lineOf,
   openAdmin,
+  settle,
 } from "../../test/app.tsx";
 import type { Answers } from "../../test/app.tsx";
 import {
@@ -518,6 +521,44 @@ describe("an organization's overview", () => {
       ...setupAnswers,
     });
     expect(figuresOf(container).match(/Not shared/gu)?.length).toBe(4);
+  });
+
+  it("asks again for what failed on the overview when staff read the page again, and says a missing Grasp AI figure isn't reported", async () => {
+    let asked = 0;
+    const { container } = await openAdmin("/organizations/acme", {
+      fetchClientGrid: [acme],
+      fetchClientAdmin: answeredAdmin({
+        client: acme,
+        snapshot: readySnapshot("Acme"),
+      }),
+      ...setupAnswers,
+      // Its core fails the first time, then answers without a Grasp AI figure.
+      fetchClientAiStatus: () => {
+        asked += 1;
+        if (asked === 1) {
+          throw new FailedError();
+        }
+        return { providers: [] };
+      },
+    });
+    const figure = () =>
+      [...container.querySelectorAll("main li")].find((item) =>
+        item.textContent?.startsWith("Grasp AI this month")
+      )?.textContent;
+    const first = figure();
+    const again = [
+      ...container.querySelectorAll<HTMLButtonElement>("main button"),
+    ].find((button) => button.textContent === "Read again");
+    await act(() => {
+      again?.click();
+    });
+    await settle();
+
+    expect({ first, after: figure() }).toStrictEqual({
+      first: "Grasp AI this monthNot readIts core didn’t answer",
+      after:
+        "Grasp AI this monthNot reportedOn its own key, or its release doesn’t report it",
+    });
   });
 
   it("lists what staff and the admin did lately, from the admin's own record", async () => {
