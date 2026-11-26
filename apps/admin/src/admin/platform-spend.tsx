@@ -11,8 +11,18 @@ import { aiProviderIdSchema, aiProviders } from "@grasp-os/shared/ai-providers";
 import type { AiStatusReport } from "@grasp-os/shared/ai-status-report";
 import type { PlatformAiFeature } from "@grasp-os/shared/platform-ai";
 import { CardContent } from "@grasp-os/ui/components/card";
+import { ChartBarList } from "@grasp-os/ui/components/chart";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+} from "@grasp-os/ui/components/empty";
 import { Link } from "@grasp-os/ui/components/link";
-import { Stat } from "@grasp-os/ui/components/stat";
+import {
+  Section as Part,
+  SectionHeader,
+} from "@grasp-os/ui/components/section-header";
+import { Stat, StatGroup } from "@grasp-os/ui/components/stat";
 import {
   Table,
   TableBody,
@@ -24,7 +34,9 @@ import {
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { Await, Link as RouterLink } from "@tanstack/react-router";
+import { Suspense, use } from "react";
 
+import { LoadingLines } from "../frame/page.tsx";
 import { Panel, PanelNote } from "./panel.tsx";
 import {
   microsPerDollar,
@@ -44,6 +56,17 @@ const styles = stylex.create({
     display: "grid",
     gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
     gap: space["4"],
+  },
+  // An organization's figures, then its two tables.
+  spend: { display: "flex", flexDirection: "column", gap: space["8"] },
+  // By feature and by model side by side once there is room for both.
+  splits: {
+    display: "grid",
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      "@media (width >= 64rem)": "repeat(2, minmax(0, 1fr))",
+    },
+    gap: space["8"],
   },
 });
 
@@ -105,7 +128,7 @@ const rowsOf = (
 };
 
 /** A split as a table: its rows, this month's and last month's columns. */
-const SplitTable = ({
+const SplitRowsTable = ({
   label,
   overview,
   rows,
@@ -114,36 +137,58 @@ const SplitTable = ({
   overview: SpendOverview;
   rows: SplitRow[];
 }) => (
-  <CardContent flush>
-    <Table aria-label={label}>
-      <TableHeader>
-        <TableRow>
-          <TableHead>{label}</TableHead>
-          <TableHead align="end">
-            {formatMonth(overview.thisMonth.period)}
-          </TableHead>
-          <TableHead align="end">
-            {formatMonth(overview.lastMonth.period)}
-          </TableHead>
+  <Table aria-label={label}>
+    <TableHeader>
+      <TableRow>
+        <TableHead>{label}</TableHead>
+        <TableHead align="end">
+          {formatMonth(overview.thisMonth.period)}
+        </TableHead>
+        <TableHead align="end">
+          {formatMonth(overview.lastMonth.period)}
+        </TableHead>
+      </TableRow>
+    </TableHeader>
+    <TableBody>
+      {rows.map((row) => (
+        <TableRow key={row.key}>
+          <TableCell rowHeader>{row.label}</TableCell>
+          <TableCell align="end">{spent(row.thisMonth)}</TableCell>
+          <TableCell align="end">{spent(row.lastMonth)}</TableCell>
         </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((row) => (
-          <TableRow key={row.key}>
-            <TableCell rowHeader>{row.label}</TableCell>
-            <TableCell align="end">{spent(row.thisMonth)}</TableCell>
-            <TableCell align="end">{spent(row.lastMonth)}</TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  </CardContent>
+      ))}
+    </TableBody>
+  </Table>
 );
 
-/** This month and last in all, then by feature and by model. */
+/** Both months' parts by feature, the dearest this month first. */
+const featureRows = (overview: SpendOverview): SplitRow[] =>
+  rowsOf(overview, (month) =>
+    month.byFeature.map(({ feature, micros }) => ({
+      key: feature ?? "other",
+      label: featureLabel(feature),
+      micros,
+    }))
+  );
+
+/** Both months' parts by model, the dearest this month first. */
+const modelRows = (overview: SpendOverview): SplitRow[] =>
+  rowsOf(overview, (month) =>
+    month.byModel.map(({ model, micros }) => ({
+      key: model,
+      label: modelLabel(model),
+      micros,
+    }))
+  );
+
+/** Nothing on Grasp's keys in either month. */
+const nothingSpent = ({ thisMonth, lastMonth }: SpendOverview): boolean =>
+  thisMonth.micros + lastMonth.micros === 0;
+
+/** This month and last in all, then by feature and by model, on a card. */
 const SpendBody = ({ overview }: { overview: SpendOverview }) => {
   const { thisMonth, lastMonth } = overview;
-  if (thisMonth.micros + lastMonth.micros === 0) {
+  if (nothingSpent(overview)) {
     return <PanelNote>Nothing on Grasp’s keys this month or last.</PanelNote>;
   }
   return (
@@ -162,72 +207,155 @@ const SpendBody = ({ overview }: { overview: SpendOverview }) => {
           />
         </div>
       </CardContent>
-      <SplitTable
-        label="By feature"
-        overview={overview}
-        rows={rowsOf(overview, (month) =>
-          month.byFeature.map(({ feature, micros }) => ({
-            key: feature ?? "other",
-            label: featureLabel(feature),
-            micros,
-          }))
-        )}
-      />
-      <SplitTable
-        label="By model"
-        overview={overview}
-        rows={rowsOf(overview, (month) =>
-          month.byModel.map(({ model, micros }) => ({
-            key: model,
-            label: modelLabel(model),
-            micros,
-          }))
-        )}
-      />
+      <CardContent flush>
+        <SplitRowsTable
+          label="By feature"
+          overview={overview}
+          rows={featureRows(overview)}
+        />
+      </CardContent>
+      <CardContent flush>
+        <SplitRowsTable
+          label="By model"
+          overview={overview}
+          rows={modelRows(overview)}
+        />
+      </CardContent>
     </>
   );
 };
 
-/** What its core reported, or that its release doesn't report it yet. */
-const OrganizationSpendBody = ({
+/**
+ * A split of an organization's spend as bars across, this month's over
+ * last month's, the dearest this month first, each with its amount.
+ */
+const SplitBars = ({
+  id,
+  label,
   overview,
+  rows,
 }: {
-  overview: SpendOverview | null;
-}) =>
-  overview === null ? (
-    <PanelNote>
-      Not reported by this release: its core runs a release from before these
-      costs were reported. They show once it is updated.
-    </PanelNote>
-  ) : (
-    <SpendBody overview={overview} />
+  id: string;
+  label: string;
+  overview: SpendOverview;
+  rows: SplitRow[];
+}) => {
+  const [dearest] = rows;
+  const thisMonth = formatMonth(overview.thisMonth.period);
+  return (
+    <Part aria-labelledby={id}>
+      <SectionHeader id={id} size="sm" title={label} variant="group" />
+      <ChartBarList
+        aria-label={`${label}, ${thisMonth} and ${formatMonth(overview.lastMonth.period)}`}
+        config={{
+          thisMonth: { label: thisMonth },
+          lastMonth: { label: formatMonth(overview.lastMonth.period) },
+        }}
+        data={rows.map((row) => ({ ...row }))}
+        nameKey="label"
+        sortOrder="none"
+        summary={
+          dearest === undefined || dearest.thisMonth === 0
+            ? `Nothing in ${thisMonth} yet.`
+            : `${dearest.label} cost the most in ${thisMonth}, ${spent(dearest.thisMonth)}.`
+        }
+        valueFormatter={spent}
+      />
+    </Part>
   );
+};
+
+/** A line where there is nothing to show of an organization's spend, and why. */
+const SpendNote = ({ children }: { children: string }) => (
+  <Empty align="start" size="sm">
+    <EmptyHeader>
+      <EmptyDescription>{children}</EmptyDescription>
+    </EmptyHeader>
+  </Empty>
+);
+
+/**
+ * What its core reported, once it answered: this month and last as
+ * figures, then by feature and by model; or, in a line, why that isn't
+ * there.
+ */
+const OrganizationSpendBody = ({
+  status,
+}: {
+  status: Promise<AiStatusReport | null>;
+}) => {
+  const report = use(status);
+  if (report === null) {
+    return (
+      <SpendNote>
+        Its core didn’t answer, so what they cost isn’t known now.
+      </SpendNote>
+    );
+  }
+  const overview = organizationSpendOf(report);
+  if (overview === null) {
+    return (
+      <SpendNote>
+        Not reported by this release: its core runs a release from before these
+        costs were reported. They show once it is updated.
+      </SpendNote>
+    );
+  }
+  if (nothingSpent(overview)) {
+    return <SpendNote>Nothing on Grasp’s keys this month or last.</SpendNote>;
+  }
+  const { thisMonth, lastMonth } = overview;
+  return (
+    <div {...stylex.props(styles.spend)}>
+      <StatGroup aria-label="Grasp’s own AI features in short" columns={2}>
+        <Stat
+          label={formatMonth(thisMonth.period)}
+          value={spent(thisMonth.micros)}
+        />
+        <Stat
+          label={formatMonth(lastMonth.period)}
+          value={spent(lastMonth.micros)}
+        />
+      </StatGroup>
+      <div {...stylex.props(styles.splits)}>
+        <SplitBars
+          id="spend-by-feature"
+          label="By feature"
+          overview={overview}
+          rows={featureRows(overview)}
+        />
+        <SplitBars
+          id="spend-by-model"
+          label="By model"
+          overview={overview}
+          rows={modelRows(overview)}
+        />
+      </div>
+    </div>
+  );
+};
 
 /**
  * One organization's spend on Grasp's keys, as its core reports it now,
- * on its AI use. Read only.
+ * on its AI use, on the page as the rest of it. Read only.
  */
 export const OrganizationPlatformSpend = ({
   status,
 }: {
   status: Promise<AiStatusReport | null>;
 }) => (
-  <Panel
-    description="What transcription and speech cost Grasp on its own keys for this organization: what each call used, recorded after it, in US dollars at list prices, read from its core now. Nothing caps them."
-    title="Grasp’s own AI features"
-  >
-    <Await fallback={<PanelNote>Reading its core…</PanelNote>} promise={status}>
-      {(report) =>
-        report === null ? (
-          <PanelNote>
-            Its core didn’t answer, so what they cost isn’t known now.
-          </PanelNote>
-        ) : (
-          <OrganizationSpendBody overview={organizationSpendOf(report)} />
-        )
-      }
-    </Await>
-  </Panel>
+  <Part aria-labelledby="own-features">
+    <SectionHeader
+      description="What transcription and speech cost Grasp on its own keys for this organization: what each call used, recorded after it, in US dollars at list prices, read from its core now. Nothing caps them."
+      id="own-features"
+      size="sm"
+      title="Grasp’s own AI features"
+      variant="group"
+    />
+    <Suspense fallback={<LoadingLines lines={3} />}>
+      <OrganizationSpendBody status={status} />
+    </Suspense>
+  </Part>
 );
 
 /** The organizations that cost the most this month, then last, each linked to its AI use. */

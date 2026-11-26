@@ -87,6 +87,39 @@ const tableText = (html: string, label: string): string => {
         .trim();
 };
 
+/** Markup as its words, its tags left out. */
+const words = (part: string) =>
+  part
+    .replaceAll(/<[^>]+>/gu, " ")
+    .replaceAll(/\s+/gu, " ")
+    .trim();
+
+/**
+ * The bars named `label` (a split of one organization's spend, this month
+ * over last) on a page: their months as their name says them, then each
+ * row's name with this month's and last month's amounts.
+ */
+const barsText = (html: string, label: string): string[] => {
+  const at = html.indexOf(`>${label}, `);
+  if (at === -1) {
+    return [];
+  }
+  const figure = html.slice(at + 1, html.indexOf("</figure>", at));
+  const rows = figure
+    .split("<li")
+    .slice(1)
+    .map((row) => {
+      const name = words(
+        row.slice(
+          row.indexOf(">", row.indexOf("<span")) + 1,
+          row.indexOf("</span>")
+        )
+      );
+      return [name, ...(words(row).match(/\$[\d,.]+/gu) ?? [])].join(" ");
+    });
+  return [words(figure.slice(0, figure.indexOf("</span>"))), ...rows];
+};
+
 /** "2026-10" as the pages say it: "Oct 2026". */
 const monthWords = (period: string): string =>
   new Date(`${period}-01T00:00:00Z`).toLocaleString("en", {
@@ -140,16 +173,26 @@ describe("what Grasp's own AI features cost", () => {
     ];
 
     expect({
-      byFeature: tableText(html, "By feature"),
-      byModel: tableText(html, "By model"),
+      byFeature: barsText(html, "By feature"),
+      byModel: barsText(html, "By model"),
       dollars: html.includes("US dollars at list prices"),
       // Nothing to cap or change.
       controls: ["<input", "<select", "<button"].some((tag) =>
         html.slice(html.indexOf("Grasp’s own AI features")).includes(tag)
       ),
     }).toStrictEqual({
-      byFeature: `By feature ${thisMonth} ${lastMonth} Transcription $2.00 $0.00 Document conversion $1.25 $0.00 Speech $0.30 $0.50`,
-      byModel: `By model ${thisMonth} ${lastMonth} OpenAI gpt-4o-transcribe $2.00 $0.00 OpenAI gpt-5.4-mini $1.25 $0.00 Mistral AI voxtral-mini-tts-3-0 $0.30 $0.50`,
+      byFeature: [
+        `By feature, ${thisMonth} and ${lastMonth}`,
+        "Transcription $2.00 $0.00",
+        "Document conversion $1.25 $0.00",
+        "Speech $0.30 $0.50",
+      ],
+      byModel: [
+        `By model, ${thisMonth} and ${lastMonth}`,
+        "OpenAI gpt-4o-transcribe $2.00 $0.00",
+        "OpenAI gpt-5.4-mini $1.25 $0.00",
+        "Mistral AI voxtral-mini-tts-3-0 $0.30 $0.50",
+      ],
       dollars: true,
       controls: false,
     });
