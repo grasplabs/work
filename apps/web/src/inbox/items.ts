@@ -16,7 +16,10 @@ import { plural, t } from "@lingui/core/macro";
 
 import { requestAsker, requestQuestion } from "../activity/pending.tsx";
 import type { PendingRequests } from "../activity/pending.tsx";
-import { integrationKey } from "../connections/integrations.ts";
+import {
+  connectionLabel,
+  integrationKey,
+} from "../connections/integrations.ts";
 import { formatDateTime } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import type { NotificationsPage } from "./notifications-page.ts";
@@ -654,10 +657,7 @@ export const inboxItems = (
     : [];
   const reconnect = (readyOf(waiting.reconnect) ?? []).map(
     ({ integration, connection }): InboxItem => {
-      const app =
-        connection.accountName === null
-          ? integration.name
-          : `${integration.name} (${connection.accountName})`;
+      const app = connectionLabel(connection, integration);
       return {
         id: `signIn:${connection.id}`,
         kind: "signInAgain",

@@ -14958,8 +14958,8 @@ msgstr "Restore this earlier state?"
 msgid "Restored: {replaced}"
 msgstr "Restored: {replaced}"
 
+#: src/chat/chat-body.tsx
 #: src/chat/chat-markdown.ts
-#: src/chat/sources.tsx
 msgid "Restricted"
 msgstr "Restricted"
 
@@ -18219,6 +18219,10 @@ msgstr "The model's answer came back in the wrong shape. Try again."
 msgid "The monthly budget for AI is not set yet."
 msgstr "The monthly budget for AI is not set yet."
 
+#: src/connections/add-connector.tsx
+msgid "The name holds a character that doesn't show, such as a zero-width space or a direction mark. Type it again rather than pasting it."
+msgstr "The name holds a character that doesn't show, such as a zero-width space or a direction mark. Type it again rather than pasting it."
+
 #: src/agents/manual-agent.tsx
 #: src/agents/new-agent.tsx
 msgid "The new agent"
@@ -19420,7 +19424,6 @@ msgid "United States"
 msgstr "United States"
 
 #: src/activity/pending.tsx
-#: src/chat/sources.tsx
 msgid "Unknown"
 msgstr "Unknown"
 
@@ -19444,6 +19447,8 @@ msgid "Unknown outcomes"
 msgstr "Unknown outcomes"
 
 #: src/brain/brain.ts
+#: src/chat/chat-markdown.ts
+#: src/chat/sources.tsx
 msgid "Unknown source"
 msgstr "Unknown source"
 

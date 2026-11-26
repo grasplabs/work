@@ -2019,7 +2019,7 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
           period: spendMonth(env),
           personId: `person-${crypto.randomUUID()}`,
           triggerType: "person",
-          model: graspAi.model,
+          model: graspAi.models[0].model,
           credential: "platform",
           feature: "organization",
           inputTokens: 0,

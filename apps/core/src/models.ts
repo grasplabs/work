@@ -21,10 +21,10 @@ import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import {
   aiProviderIdSchema,
   aiProviders,
-  graspAi,
   platformRouteOf,
 } from "@grasp-os/shared/ai-providers";
 import type {
+  AiProviderId,
   AiProviderRoutes,
   PlatformRoute,
   ProviderTrouble,
@@ -67,6 +67,7 @@ import { z } from "zod";
 
 import {
   aiRoutesOf,
+  graspAiOf,
   readAiSource,
   readModelChoice,
   usableModels,
@@ -1538,7 +1539,11 @@ const refuse = async (
  * as long as a step waits for its AI at all (`aiKeyHoldMsOf`,
  * workflows/host.ts): past that the step fails.
  */
-const refuseAtLimit = async (env: Env, call: Session): Promise<never> => {
+const refuseAtLimit = async (
+  env: Env,
+  call: Session,
+  provider: AiProviderId
+): Promise<never> => {
   log.warn("model.refused", { reason: "model.grasp_limit_reached" });
   await keepAuditEvent(
     env,
@@ -1547,7 +1552,7 @@ const refuseAtLimit = async (env: Env, call: Session): Promise<never> => {
   );
   throw modelErrors.create("model.grasp_limit_reached", {
     model: call.model,
-    provider: graspAi.provider,
+    provider,
     trouble: "limiting",
     unbilled: true,
   });
@@ -1656,13 +1661,18 @@ const routesOrFailed = async (env: Env): Promise<AiProviderRoutes> => {
 const graspRouting = async (
   env: Env,
   call: Session,
+  routes: AiProviderRoutes,
   ref: ModelRef | undefined
 ): Promise<{ ref: ModelRef; routing: Routing }> => {
-  // Grasp's AI: its one model, on Grasp's key, and nothing else. The
-  // organization's own key is never used in its place, nor Grasp's for
-  // any model but this one.
-  const platform = platformRouteOf(graspAi.provider, usualHostsOf(env));
-  if (ref === undefined || call.model !== graspAi.model) {
+  // Grasp's AI: its one model on this deployment (`graspAiOf`), on Grasp's
+  // key, and nothing else. The organization's own key is never used in its
+  // place, nor Grasp's for any model but this one.
+  const grasp = graspAiOf(routes);
+  if (grasp === undefined) {
+    throw modelErrors.create("model.unconfigured");
+  }
+  const platform = platformRouteOf(grasp.provider, usualHostsOf(env));
+  if (ref === undefined || call.model !== grasp.model) {
     return await refuse(env, call, { code: "model.not_allowed" });
   }
   if (platform === undefined) {
@@ -1673,11 +1683,11 @@ const graspRouting = async (
   // call already out when the limit is reached still ends.
   const month = await graspAiMonth(env, spendMonth(env));
   if (month.reached) {
-    return await refuseAtLimit(env, call);
+    return await refuseAtLimit(env, call, grasp.provider);
   }
   const target = {
     credential: "platform",
-    provider: graspAi.provider,
+    provider: grasp.provider,
     baseUrl: null,
     platform,
   } as const;
@@ -1785,7 +1795,7 @@ const routingOf = async (
     });
   }
   if (source === "grasp") {
-    return await graspRouting(env, call, ref);
+    return await graspRouting(env, call, routes, ref);
   }
   const at = chosen.indexOf(call.model);
   if (at === -1 || ref === undefined || connected === undefined) {
