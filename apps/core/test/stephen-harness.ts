@@ -873,6 +873,7 @@ const observeCase = async (
     clock: company.clock,
     mailbox: company.mailbox,
     suite,
+    company: company.connections.company,
     finance: company.connections.finance,
   };
   await pointAt(place.stub);

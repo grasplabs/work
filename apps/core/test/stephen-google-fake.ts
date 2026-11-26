@@ -304,6 +304,50 @@ export const stephenGoogleFake = () => {
       : fileById(parts[4])?.drive;
   };
 
+  /**
+   * Google's refusal of a file, a shared drive's files or a spreadsheet
+   * the token's account can't reach: Drive's 404, Sheets' 403.
+   */
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- self-contained: core's tests embed this function's source
+  const refusalOf = (url: URL): Response => {
+    if (url.hostname === "sheets.googleapis.com") {
+      return Response.json(
+        {
+          error: {
+            code: 403,
+            message: "The caller does not have permission",
+            status: "PERMISSION_DENIED",
+          },
+        },
+        { status: 403 }
+      );
+    }
+    // /drive/v3/files[/{file}]
+    const id = decodeURIComponent(url.pathname).split("/").at(4);
+    const message =
+      id === undefined
+        ? `Shared drive not found: ${url.searchParams.get("driveId") ?? ""}`
+        : `File not found: ${id}.`;
+    return Response.json(
+      {
+        error: {
+          code: 404,
+          message,
+          errors: [
+            {
+              domain: "global",
+              reason: "notFound",
+              message,
+              location: id === undefined ? "driveId" : "fileId",
+              locationType: "parameter",
+            },
+          ],
+        },
+      },
+      { status: 404 }
+    );
+  };
+
   /** Google's answer for a world's request, or `undefined` for the rest. */
   const route = (
     request: Request,
@@ -415,16 +459,7 @@ export const stephenGoogleFake = () => {
       const drive = driveOf(decodeURIComponent(url.pathname).split("/"), url);
       const account = drive === undefined ? undefined : accounts.get(drive);
       if (account !== undefined && account !== subject) {
-        return Response.json(
-          {
-            error: {
-              code: 404,
-              message: "File not found.",
-              status: "NOT_FOUND",
-            },
-          },
-          { status: 404 }
-        );
+        return refusalOf(url);
       }
       const answer = route(request, url, subject);
       if (answer === undefined) {

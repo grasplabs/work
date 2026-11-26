@@ -1125,6 +1125,7 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
       await keptForChatApp(this.env, scope, request.action, shape, output);
     }
     await recordSources(this.env, scope, [connectionId], [read]);
+    // Recorded with the chat first: a run that ended since keeps nothing.
     // Kept in the Brain once the agent has its answer, never in its way.
     this.ctx.waitUntil(
       captureRead(this.env, scope, connectionId, request.action, input, {
