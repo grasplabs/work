@@ -72,10 +72,12 @@ export interface Calling {
 class NotOpenedError extends Error {
   override name = "NotOpenedError";
   readonly refused: VoiceLabRefusal;
+  readonly status: number | null;
 
-  constructor(refused: VoiceLabRefusal) {
+  constructor(refused: VoiceLabRefusal, status: number | null) {
     super(`No voice session: ${refused}`);
     this.refused = refused;
+    this.status = status;
   }
 }
 
@@ -115,7 +117,7 @@ export const beginCall = (
       createSession: async () => {
         const opened = await openVoiceSessionFn({ data: input });
         if (opened.refused !== null) {
-          throw new NotOpenedError(opened.refused);
+          throw new NotOpenedError(opened.refused, opened.status);
         }
         return {
           id: opened.id,
@@ -187,15 +189,24 @@ export const beginCall = (
     try {
       await join();
     } catch (error) {
-      // A session the admin didn't open says why itself; anything else is
-      // told in the SDK's own words, for whoever looks into it.
-      const refused = error instanceof NotOpenedError ? error.refused : null;
+      // A session the admin didn't open says why itself, with what Mistral
+      // answered; anything else is told in the SDK's own words, for
+      // whoever looks into it.
+      if (error instanceof NotOpenedError) {
+        set({
+          stands: "over",
+          agent: null,
+          trouble: error.refused,
+          detail:
+            error.status === null ? null : `Mistral answered ${error.status}`,
+        });
+        return;
+      }
       set({
         stands: "over",
         agent: null,
-        trouble: refused ?? "not_connected",
-        detail:
-          refused === null && error instanceof Error ? error.message : null,
+        trouble: "not_connected",
+        detail: error instanceof Error ? error.message : null,
       });
     }
   })();
