@@ -166,12 +166,15 @@ const markedOf = (html: string): number =>
       'nav[aria-label="The steps of this onboarding"] a[aria-current]'
     ).length;
 
-/** The row of the team named `name` among the interviews' teams. */
+/** The row of the team named `name` in the interviews' table of teams: its markup, or none. */
 const teamRowOf = (html: string, name: string): string => {
-  const at = html.indexOf(`aria-label="Open ${name}"`);
-  return at === -1
-    ? ""
-    : html.slice(html.lastIndexOf("<li", at), html.indexOf("</li>", at));
+  const rows = new DOMParser()
+    .parseFromString(html, "text/html")
+    .querySelectorAll('table[aria-label="Teams"] tbody tr');
+  const row = [...rows].find(
+    (each) => each.querySelector("a")?.textContent === name
+  );
+  return row?.outerHTML ?? "";
 };
 
 describe("an organization's onboarding in the admin", () => {
@@ -265,15 +268,19 @@ describe("an organization's onboarding in the admin", () => {
     });
   });
 
-  it("counts the interviews' days to the length the company's plan has", async () => {
+  it("counts the interviews' days to the length the company's plan has, on its steps and its interviews alike", async () => {
     const snapshot = bakery();
     const plan = snapshot.plan ?? { start: "2026-10-05", days: 14 };
     const base = await liveClient({ ...snapshot, plan: { ...plan, days: 21 } });
 
-    const { html } = await page(`${base}/steps`);
+    const steps = await page(`${base}/steps`);
+    const interviews = await page(`${base}/interviews`);
 
     // Counted from 1 on the day they start, as core counts it.
-    expect(html).toContain("Day 10 of 21");
+    expect([
+      steps.html.includes("Day 10 of 21"),
+      interviews.html.includes("by day 10 of 21"),
+    ]).toStrictEqual([true, true]);
   });
 
   it("says a team's links are out only once a colleague's link went out, not when its lead talked", async () => {
@@ -397,7 +404,7 @@ describe("an organization's onboarding in the admin", () => {
         "This team does not take part: nobody in it gets a link",
       ].map((text) => logistics.html.includes(text)),
       // A team the company doesn't have: all of them.
-      unknown: unknown.html.includes('aria-label="Open Sales"'),
+      unknown: teamRowOf(unknown.html, "Sales") !== "",
     }).toStrictEqual({
       sales: Array.from({ length: 11 }, () => true),
       logistics: [true, true],
@@ -414,7 +421,7 @@ describe("an organization's onboarding in the admin", () => {
       empty: html.includes(
         "Nobody is on the list yet. The company’s admin shares its staff list in their onboarding."
       ),
-      teams: html.includes('aria-label="Open '),
+      teams: html.includes('aria-label="Teams"'),
     }).toStrictEqual({ empty: true, teams: false });
   });
 });

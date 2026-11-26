@@ -1,4 +1,3 @@
-import { Avatar, AvatarFallback } from "@grasp-os/app-kit/components/avatar";
 import { Progress } from "@grasp-os/app-kit/components/progress";
 /**
  * Small marks the admin's pages draw what the model counts with, ported
@@ -6,10 +5,6 @@ import { Progress } from "@grasp-os/app-kit/components/progress";
  */
 import { Stat } from "@grasp-os/app-kit/components/stat";
 import { cn } from "@grasp-os/app-kit/lib/utils";
-import type {
-  LinkState,
-  PersonView,
-} from "@grasp-os/shared/admin/onboarding-admin";
 import { CheckIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -94,76 +89,6 @@ export const Figure = ({
       )}
     </span>
   </div>
-);
-
-/** The first letters of a name's capitalised words, at most two: "Anna de Vries" is "AV". */
-const initialsOf = (name: string): string =>
-  name
-    .split(" ")
-    .filter(
-      (part) => part !== "" && part.startsWith(part.charAt(0).toUpperCase())
-    )
-    .map((part) => part.charAt(0))
-    .slice(0, 2)
-    .join("");
-
-/** Someone as the first letters of their name, in a circle. */
-export const Initials = ({ name }: { name: string }) => (
-  <Avatar size="sm">
-    <AvatarFallback>
-      {initialsOf(name) || name.charAt(0).toUpperCase()}
-    </AvatarFallback>
-  </Avatar>
-);
-
-/** How a person shows as a dot: talked, started, has not talked, or has no link yet. */
-export type DotMark = "talked" | "started" | "not" | "none";
-
-export const markOf = (state: LinkState): DotMark => {
-  if (state === "completed") {
-    return "talked";
-  }
-  if (state === "progress" || state === "incomplete") {
-    return "started";
-  }
-  return state === "waiting" ? "none" : "not";
-};
-
-const dot: Record<DotMark, string> = {
-  talked: "bg-foreground",
-  started: "bg-muted-foreground/60",
-  not: "bg-border",
-  none: "border border-border",
-};
-
-export const Dot = ({ mark }: { mark: DotMark }) => (
-  <span
-    aria-hidden
-    className={cn("size-2 flex-none rounded-full", dot[mark])}
-  />
-);
-
-const dotOrder: readonly DotMark[] = ["talked", "started", "not", "none"];
-
-/** A team as dots, one a person: who talked, who started, who has not, who has no link yet. */
-export const PeopleDots = ({
-  people,
-  label,
-}: {
-  people: readonly PersonView[];
-  label: string;
-}) => (
-  <span className="flex flex-wrap gap-1">
-    <span className="sr-only">{label}</span>
-    {people
-      .toSorted(
-        (a, b) =>
-          dotOrder.indexOf(markOf(a.state)) - dotOrder.indexOf(markOf(b.state))
-      )
-      .map((each) => (
-        <Dot key={each.person.id} mark={markOf(each.state)} />
-      ))}
-  </span>
 );
 
 /**
