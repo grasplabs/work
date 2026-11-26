@@ -17,6 +17,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { TopErrorBar } from "../frame/top-error.tsx";
 import { dateLocale } from "./date-locale.ts";
 import { firstChoice, todayInUtc } from "./send-plan.ts";
 import { SetupStepBody } from "./setup-steps.tsx";
@@ -216,6 +217,7 @@ const shown = async (
     root.render(
       <I18nProvider i18n={i18n}>
         <RouterProvider router={router} />
+        <TopErrorBar />
       </I18nProvider>
     );
     await router.load();
@@ -279,9 +281,11 @@ const send = async (): Promise<void> => {
   await settled();
 };
 
-/** The text of the error under the first day's field, if it shows one. */
+/** The text of the error the bar at the top says, if it says one: every error in the setup is said there. */
 const error = (): string | undefined =>
-  document.querySelector('[data-slot="field-error"]')?.textContent?.trim();
+  document
+    .querySelector('[data-slot="alert"] [data-slot="alert-description"]')
+    ?.textContent?.trim();
 
 // Browsers whose first language counts in another calendar. Safari writes
 // "en-SA" in the Islamic one ("22/07/1448 AH"), which the picker reads as no day.
@@ -465,17 +469,10 @@ describe("the team step's day, typed", () => {
       disabled: true,
       next: true,
     });
-    // Said too, by the page's one announcer, a moment after it shows.
-    await act(async () => {
-      const { promise, resolve } = Promise.withResolvers<boolean>();
-      setTimeout(() => {
-        resolve(true);
-      }, 150);
-      await promise;
-    });
+    // Said too: the bar at the top is an alert, which a screen reader says as it appears.
     expect(
-      document.querySelector('[data-ui-sdk-announcer=""]')?.textContent
-    ).toBe(error());
+      document.querySelector('[data-slot="alert"]')?.getAttribute("role")
+    ).toBe("alert");
     await send();
     expect(saved).toStrictEqual([]);
 

@@ -19,8 +19,8 @@ import { useEffect, useState } from "react";
 import { canConnect, ConnectDialog } from "../connections/connect-dialog.tsx";
 import { integrationsOf, stateOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
-import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
+import { TopError } from "../frame/top-error.tsx";
 import { isLocale } from "../i18n.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
@@ -360,7 +360,7 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
             </ItemContent>
           </Item>
         </ItemGrid>
-        <ErrorText>{failure}</ErrorText>
+        <TopError>{failure}</TopError>
       </div>
       <ConnectorSearch
         integrations={integrations}
@@ -384,7 +384,6 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
         onClose={() => {
           setReturnClosed(true);
         }}
-        other={t`Close`}
         retry={{
           label: t`Choose an app again`,
           run: () => {

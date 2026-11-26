@@ -108,6 +108,17 @@ const mix = (from: Rgb, to: Rgb, part: number): Rgb => [
   from[2] + (to[2] - from[2]) * part,
 ];
 
+/** The system's red, as the page resolves it. */
+const destructiveOf = (element: Element): string => {
+  const probe = document.createElement("span");
+  probe.hidden = true;
+  element.parentElement?.append(probe);
+  probe.style.color = "var(--damsko-destructive)";
+  const { color } = getComputedStyle(probe);
+  probe.remove();
+  return color;
+};
+
 /** The page's colours as the shader takes them, read from the tokens as the page resolves them. */
 const coloursOf = (canvas: HTMLCanvasElement) => {
   const tones = readTones(canvas);
@@ -139,7 +150,36 @@ const coloursOf = (canvas: HTMLCanvasElement) => {
   const lime = rgb(tones.lime);
   const paper = rgb(tones.paper);
   const dark = ground[0] + ground[1] + ground[2] < 1.5;
+  // Something went wrong: the same light in the system's own red, its deep and pale tones from it.
+  const red = rgb(destructiveOf(canvas));
+  const blood = mix(red, night, 0.45);
+  const rose = mix(red, paper, 0.4);
+  const alarmed: { amb: Rgb[]; palette: Rgb[] } = {
+    amb: dark
+      ? [
+          mix(ground, blood, 0.3),
+          mix(ground, blood, 0.62),
+          mix(blood, red, 0.35),
+          mix(blood, red, 0.85),
+        ]
+      : [
+          mix(ground, red, 0.3),
+          mix(ground, red, 0.52),
+          mix(red, blood, 0.18),
+          mix(red, blood, 0.42),
+        ],
+    palette: [
+      mix(night, blood, 0.5),
+      mix(ink, blood, 0.6),
+      blood,
+      red,
+      rose,
+      mix(rose, paper, 0.4),
+      paper,
+    ],
+  };
   return {
+    alarmed,
     // At rest he is close to the page's own ground; only where he gathers does he light up. On a
     // light page the palest greens would vanish into it: there he is mint, deepening toward pine.
     amb: dark
@@ -224,6 +264,10 @@ interface Him {
   };
   /** What he holds now and what he still lets go of: each its own light, in its own place. */
   holds: Hold[];
+  /** How red he is: 0 calm, 1 while something went wrong, and on his way between. */
+  alarm: number;
+  /** What his red is on its way to. */
+  alarmed: boolean;
 }
 
 const him: Him = {
@@ -232,10 +276,15 @@ const him: Him = {
   clock: 0,
   pointer: { x: 0, y: 0, tx: 0, ty: 0, on: 0, there: false },
   holds: [],
+  alarm: 0,
+  alarmed: false,
 };
 
 /** What stops the drawing on the canvas he is drawn on now; none between two screens. */
 let stopDrawing: (() => void) | null = null;
+
+/** Draws him once more as he stands, where he is drawn still (reduced motion); none otherwise. */
+let redrawStill: (() => void) | null = null;
 
 const draw = (layer: Layer, colours: Colours) => {
   const { gl, at, canvas } = layer;
@@ -248,8 +297,13 @@ const draw = (layer: Layer, colours: Colours) => {
   gl.uniform2f(u("u_cells"), canvas.width, canvas.height);
   gl.uniform1f(u("u_cell"), CELL);
   gl.uniform1f(u("u_time"), him.clock);
-  gl.uniform3fv(u("u_amb[0]"), colours.amb.flat());
-  gl.uniform3fv(u("u_palette[0]"), colours.palette.flat());
+  const red = (calm: Rgb[], alarmed: Rgb[]): number[] =>
+    calm.flatMap((tone, place) => mix(tone, alarmed[place] ?? tone, him.alarm));
+  gl.uniform3fv(u("u_amb[0]"), red(colours.amb, colours.alarmed.amb));
+  gl.uniform3fv(
+    u("u_palette[0]"),
+    red(colours.palette, colours.alarmed.palette)
+  );
   gl.uniform4f(
     u("u_rest"),
     rest.x * width,
@@ -292,6 +346,7 @@ const settle = (elapsed: number) => {
     rest.h = toward(rest.h, pose.reach[1], elapsed, 260);
     rest.strength = toward(rest.strength, pose.strength, elapsed, 320);
   }
+  him.alarm = toward(him.alarm, him.alarmed ? 1 : 0, elapsed, 180);
   pointer.x = toward(pointer.x, pointer.tx, elapsed, 110);
   pointer.y = toward(pointer.y, pointer.ty, elapsed, 110);
   pointer.on = toward(pointer.on, pointer.there ? 1 : 0, elapsed, 180);
@@ -361,8 +416,12 @@ export const attachField = (
     if (still.matches) {
       rested();
       draw(layer, colours);
+      redrawStill = () => {
+        draw(layer, colours);
+      };
       return;
     }
+    redrawStill = null;
     last = performance.now();
     draw(layer, colours);
     frame = requestAnimationFrame(loop);
@@ -420,12 +479,22 @@ export const attachField = (
     scheme.removeEventListener("change", onColours);
     if (stopDrawing === stop) {
       stopDrawing = null;
+      redrawStill = null;
     }
     drawMarks(marks, [], mint, 0);
   };
   stopDrawing = stop;
   run();
   return stop;
+};
+
+/** Something went wrong (`true`), or it is put right: his light turns red, or calm again. */
+export const alarmField = (alarmed: boolean) => {
+  him.alarmed = alarmed;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    him.alarm = alarmed ? 1 : 0;
+    redrawStill?.();
+  }
 };
 
 /** Where he rests on this screen and how he moves there. */

@@ -9,7 +9,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
-import { ErrorText } from "../error-text.tsx";
+import { TopError } from "../frame/top-error.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { CalmStep } from "./calm-frame.tsx";
 import { MessageCompose } from "./message-compose.tsx";
@@ -206,7 +206,7 @@ export const TeamStep = ({
             today={today}
           />
         ) : null}
-        <ErrorText>{failure}</ErrorText>
+        <TopError>{failure}</TopError>
       </div>
     </CalmStep>
   );

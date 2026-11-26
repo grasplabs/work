@@ -17,7 +17,7 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
-import { ErrorText } from "../error-text.tsx";
+import { TopError } from "../frame/top-error.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
 const styles = stylex.create({
@@ -106,7 +106,7 @@ export const ForgetKickoff = ({
       >
         {t`Forget our first conversation`}
       </Button>
-      <ErrorText>{failure}</ErrorText>
+      <TopError>{failure}</TopError>
       <AlertDialog onOpenChange={setOpen} open={open}>
         <AlertDialogContent>
           <AlertDialogHeader>

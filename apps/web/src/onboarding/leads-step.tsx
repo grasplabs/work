@@ -32,7 +32,7 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
-import { ErrorText } from "../error-text.tsx";
+import { TopError } from "../frame/top-error.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { CalmStep } from "./calm-frame.tsx";
 import { WaitingNote } from "./company-step.tsx";
@@ -184,7 +184,7 @@ const HrPlatformChoice = ({
             </ItemContent>
           </Item>
         </ItemGrid>
-        <ErrorText>{failure}</ErrorText>
+        <TopError>{failure}</TopError>
       </div>
       {/* The catalog's HR apps; one offered as a row is chosen as that platform, any other asked for. */}
       <ConnectorSearch
@@ -360,7 +360,7 @@ const ConfirmOrg = ({
           </output>
         )}
         <WaitingNote waiting={data.view.waiting} />
-        <ErrorText>{failure}</ErrorText>
+        <TopError>{failure}</TopError>
         <HrLeads
           hr={data.hr}
           onRoster={(next) => {

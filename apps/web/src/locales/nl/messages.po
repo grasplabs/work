@@ -4850,7 +4850,6 @@ msgstr "Kliffen"
 #: src/frame/ui-words.tsx
 #: src/interview/destination.tsx
 #: src/onboarding/campaign/campaign-page.tsx
-#: src/onboarding/sources-step.tsx
 #: src/projects/project-chats.tsx
 #: src/settings/erasures.tsx
 #: src/shown-once.tsx
@@ -19596,10 +19595,6 @@ msgstr "Uploads die met een team of iedereen gedeeld zijn en die alleen een behe
 #: src/chat/connection-requests.tsx
 msgid "Use {name} in this chat"
 msgstr "{name} in deze chat gebruiken"
-
-#: src/onboarding/company-step.tsx
-msgid "Use a staff list"
-msgstr "Gebruik een personeelslijst"
 
 #: src/onboarding/company-step.tsx
 msgid "Use a staff list instead"

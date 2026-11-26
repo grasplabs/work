@@ -4850,7 +4850,6 @@ msgstr "Klippen"
 #: src/frame/ui-words.tsx
 #: src/interview/destination.tsx
 #: src/onboarding/campaign/campaign-page.tsx
-#: src/onboarding/sources-step.tsx
 #: src/projects/project-chats.tsx
 #: src/settings/erasures.tsx
 #: src/shown-once.tsx
@@ -19596,10 +19595,6 @@ msgstr "Mit einem Team oder allen geteilte Uploads, die nur ein Admin löschen k
 #: src/chat/connection-requests.tsx
 msgid "Use {name} in this chat"
 msgstr "{name} in diesem Chat nutzen"
-
-#: src/onboarding/company-step.tsx
-msgid "Use a staff list"
-msgstr "Mitarbeiterliste verwenden"
 
 #: src/onboarding/company-step.tsx
 msgid "Use a staff list instead"

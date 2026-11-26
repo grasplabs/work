@@ -4850,7 +4850,6 @@ msgstr "Falaises"
 #: src/frame/ui-words.tsx
 #: src/interview/destination.tsx
 #: src/onboarding/campaign/campaign-page.tsx
-#: src/onboarding/sources-step.tsx
 #: src/projects/project-chats.tsx
 #: src/settings/erasures.tsx
 #: src/shown-once.tsx
@@ -19596,10 +19595,6 @@ msgstr "Fichiers importés partagés avec une équipe ou tout le monde, que seul
 #: src/chat/connection-requests.tsx
 msgid "Use {name} in this chat"
 msgstr "Utiliser {name} dans ce chat"
-
-#: src/onboarding/company-step.tsx
-msgid "Use a staff list"
-msgstr "Utiliser une liste du personnel"
 
 #: src/onboarding/company-step.tsx
 msgid "Use a staff list instead"

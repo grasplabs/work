@@ -28,8 +28,8 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
-import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
+import { TopError } from "../frame/top-error.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { CalmStep } from "./calm-frame.tsx";
@@ -603,7 +603,7 @@ export const CompanyStep = (props: StepProps) => {
               onUpload={upload}
             />
           ) : null}
-          <ErrorText>{problem ?? undefined}</ErrorText>
+          <TopError>{problem ?? undefined}</TopError>
           <WaitingNote waiting={waiting} />
         </div>
       ) : null}
@@ -612,7 +612,6 @@ export const CompanyStep = (props: StepProps) => {
         onClose={() => {
           setNotConnected(null);
         }}
-        other={t`Use a staff list`}
         retry={{
           label: t`Try again`,
           run: async () => {

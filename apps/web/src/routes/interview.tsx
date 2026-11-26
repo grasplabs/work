@@ -10,7 +10,7 @@ import type { ReactNode } from "react";
 
 import { loadCoreStatus, signOut } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
-import { ErrorText } from "../error-text.tsx";
+import { TopError } from "../frame/top-error.tsx";
 import {
   isRefused,
   keepWhileSigningIn,
@@ -194,10 +194,9 @@ const Notice = ({
 }) => (
   <Frame pose={fromTheTop}>
     <Calm>
-      <Words
-        line={failed ? <ErrorText>{message}</ErrorText> : message}
-        title={title}
-      />
+      {/* A refusal is said in the bar at the top, as every error is; the page keeps its title. */}
+      <Words line={failed ? undefined : message} title={title} />
+      {failed ? <TopError>{message}</TopError> : null}
       {children === undefined ? null : <Actions>{children}</Actions>}
     </Calm>
   </Frame>
@@ -280,14 +279,14 @@ const SignIn = ({
           title={t`Sign in to open your interview`}
         />
         <Actions>
-          <ErrorText>
+          <TopError>
             {error === undefined
               ? undefined
               : signInRefusal(
                   error,
                   t`That account can't open this interview. Sign in with the work account your link was sent to.`
                 )}
-          </ErrorText>
+          </TopError>
           <SignInOptions
             error={undefined}
             fit

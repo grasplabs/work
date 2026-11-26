@@ -8,6 +8,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { TopErrorBar } from "../frame/top-error.tsx";
 import { FailedMailNotice } from "./failed-mail.tsx";
 
 // What the company's admin is told among the interviews when Grasp's mail
@@ -22,7 +23,12 @@ const rendered = async (page: ReactNode): Promise<void> => {
   document.body.append(host);
   await act(async () => {
     root = createRoot(host);
-    root.render(<I18nProvider i18n={i18n}>{page}</I18nProvider>);
+    root.render(
+      <I18nProvider i18n={i18n}>
+        {page}
+        <TopErrorBar />
+      </I18nProvider>
+    );
     await Promise.resolve();
   });
 };

@@ -5,6 +5,7 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useState } from "react";
 
+import { TopError } from "../frame/top-error.tsx";
 import { kindOfName } from "./document-pages.tsx";
 import { keysOf, useStill } from "./pixel-cursor.tsx";
 import { PixelPage } from "./pixel-page.tsx";
@@ -100,7 +101,6 @@ const styles = stylex.create({
     fontSize: font.textXs,
     lineHeight: font.textXsLine,
   },
-  problem: { color: colors.destructive },
   // Remove: a plain cross, greyed under the pointer and on focus; no ring of its own, the grey says it.
   remove: {
     display: "inline-grid",
@@ -268,11 +268,7 @@ const ComingChip = ({
   const filled = useFilled(done, problem !== null);
   const { name } = file;
   let line = null;
-  if (problem !== null) {
-    line = (
-      <span {...stylex.props(styles.line, styles.problem)}>{problem}</span>
-    );
-  } else if (!done) {
+  if (!done && problem === null) {
     line = <span {...stylex.props(styles.line)}>{t`Uploading…`}</span>;
   }
   return (
@@ -289,6 +285,10 @@ const ComingChip = ({
       </span>
       {problem === null ? null : (
         <>
+          {/* What went wrong is said in the bar at the top, as every error in the setup is. */}
+          <TopError action={{ label: t`Try again`, run: onRetry }} title={name}>
+            {problem}
+          </TopError>
           <Button onClick={onRetry} size="xs" variant="ghost">
             {t`Try again`}
           </Button>

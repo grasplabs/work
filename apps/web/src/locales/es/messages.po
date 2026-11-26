@@ -4850,7 +4850,6 @@ msgstr "Acantilados"
 #: src/frame/ui-words.tsx
 #: src/interview/destination.tsx
 #: src/onboarding/campaign/campaign-page.tsx
-#: src/onboarding/sources-step.tsx
 #: src/projects/project-chats.tsx
 #: src/settings/erasures.tsx
 #: src/shown-once.tsx
@@ -19596,10 +19595,6 @@ msgstr "Archivos subidos compartidos con un equipo o con todos, que solo un admi
 #: src/chat/connection-requests.tsx
 msgid "Use {name} in this chat"
 msgstr "Usar {name} en este chat"
-
-#: src/onboarding/company-step.tsx
-msgid "Use a staff list"
-msgstr "Usar una lista de personal"
 
 #: src/onboarding/company-step.tsx
 msgid "Use a staff list instead"

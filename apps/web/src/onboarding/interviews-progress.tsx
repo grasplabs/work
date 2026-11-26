@@ -36,8 +36,8 @@ import type { ReactNode } from "react";
 
 import { copyText } from "../copy.ts";
 import { downloadCsv } from "../csv.ts";
-import { ErrorText } from "../error-text.tsx";
 import { formatDate } from "../format.ts";
+import { TopError } from "../frame/top-error.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { FailedMailNotice } from "./failed-mail.tsx";
 import { fullLink, linksCsv, linksOf } from "./links-to-send.ts";
@@ -410,7 +410,7 @@ const LinksToSend = ({ links }: { links: LinkToSend[] }) => {
                   other: "The # links that are out, as a list",
                 })}
           </Button>
-          <ErrorText>{failure}</ErrorText>
+          <TopError>{failure}</TopError>
           <div {...stylex.props(styles.linkList)}>
             {links.map((link) => (
               <LinkRow
