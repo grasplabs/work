@@ -1,16 +1,15 @@
 import { Button } from "@grasp-os/ui/components/button";
 import { Card } from "@grasp-os/ui/components/card";
+import { Checkbox } from "@grasp-os/ui/components/checkbox";
 import { DatePicker } from "@grasp-os/ui/components/date-picker";
-import { Field } from "@grasp-os/ui/components/field";
+import { Field, FieldLabel } from "@grasp-os/ui/components/field";
 import { Input } from "@grasp-os/ui/components/input";
-import { Separator } from "@grasp-os/ui/components/separator";
-import { Switch } from "@grasp-os/ui/components/switch";
 import { Text } from "@grasp-os/ui/components/text";
 import {
   ToggleGroup,
   ToggleGroupItem,
 } from "@grasp-os/ui/components/toggle-group";
-import { colors, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { colors, font, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -26,35 +25,56 @@ import { dayChoices } from "./send-plan.ts";
 import type { SendChoice } from "./send-plan.ts";
 
 const styles = stylex.create({
-  stack: { display: "grid", gap: space[6] },
-  // The sentence, and "Change" a little apart on its baseline, so it reads as the action.
-  all: {
-    display: "flex",
-    flexWrap: "wrap",
-    alignItems: "baseline",
-    columnGap: space[4],
-  },
-  part: { display: "grid", gap: space[4], justifyItems: "start" },
-  // The day typed, the hour beside it; the day's hint or why it can't be hangs below it.
+  stack: { display: "grid", gap: space[5] },
+  // The quick days and the day and hour, on one row while there is room; the day and hour go on
+  // a row of their own together, never one without the other.
   when: {
     display: "flex",
     flexWrap: "wrap",
-    alignItems: "flex-start",
+    minWidth: 0,
+    alignItems: "center",
     gap: space[3],
   },
-  day: { width: "12rem" },
-  hour: { width: "8rem" },
-  // "at" and the hour stay together on one line.
-  hourWith: { display: "flex", alignItems: "center", gap: space[3] },
-  at: { display: "flex" },
-  rows: { margin: 0, padding: 0, listStyle: "none" },
-  row: {
+  quick: { display: "flex", flexWrap: "wrap", gap: space[2] },
+  // The day typed, "at" and the hour beside it.
+  // On a narrow phone "at" and the hour go under the day, together.
+  dayHour: {
     display: "flex",
+    flexWrap: "wrap",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: space[4],
-    paddingBlock: space[3],
-    borderBlockStartWidth: { default: size.hairline, ":first-child": 0 },
+    gap: space[2],
+    minWidth: 0,
+  },
+  atHour: { display: "flex", alignItems: "center", gap: space[2] },
+  day: { width: "11rem" },
+  hour: { width: "7rem" },
+  at: { display: "flex" },
+  // What a part of the card is about, small and quiet over it.
+  label: {
+    color: colors.mutedForeground,
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+  },
+  // A set of choices with none of a fieldset's own frame.
+  set: { margin: 0, padding: 0, borderWidth: 0, minWidth: 0 },
+  legend: { padding: 0, marginBlockEnd: space[2] },
+  part: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    gap: space[2],
+    justifyItems: "start",
+  },
+  // The teams, each a tick and its name, side by side and on as many rows as they need.
+  teams: {
+    display: "flex",
+    flexWrap: "wrap",
+    columnGap: space[5],
+    rowGap: space[1],
+  },
+  // What happens next: the card's foot, under a hairline.
+  summary: {
+    paddingBlockStart: space[4],
+    borderBlockStartWidth: 1,
     borderBlockStartStyle: "solid",
     borderBlockStartColor: colors.border,
   },
@@ -62,8 +82,10 @@ const styles = stylex.create({
 
 // When the links go out, and to whom (prototype
 // `components/onboarding/send-plan.tsx`): set by the one person who sends
-// them. A day, from the three asked for most or any other, and an hour;
-// then the teams, all of them unless one is taken out. For the teams taken
+// them, on one calm card. A day, from the three asked for most (the chosen
+// one filled, so it reads at a glance) or any other, and an hour, on one
+// row; then the teams as ticks, all of them unless one is taken out; then
+// what happens next, in one line on the card's foot. For the teams taken
 // out: a later day and hour, or nothing yet, so a first group can go this
 // week and the rest when they are ready. Leads get theirs at that moment;
 // everyone else once their lead has talked.
@@ -247,21 +269,15 @@ export const SendPlanForm = ({
   const { t } = useLingui();
   const timeField = useId();
   const laterField = useId();
-  const teamsField = useId();
   const offered = dayChoices(today);
   const names = {
     tomorrow: t`Tomorrow`,
     after: t`The day after`,
     week: t`Next week`,
   };
-  const picked = offered.find((each) => each.day === choice.day)?.id ?? "other";
   const held = teams.filter((team) => choice.held.includes(team.id));
   const leftOut = formatList(held.map((team) => team.name));
   const heldCount = held.length;
-  const count = teams.length;
-  // Every team as the leads step left it: one line, until the admin wants to change which.
-  const [choosing, setChoosing] = useState(false);
-  const listed = choosing || heldCount > 0;
   const at = t({
     message: "at",
     context: "at an hour of the day: on Tuesday at 9:00",
@@ -269,24 +285,29 @@ export const SendPlanForm = ({
   return (
     <Card padding="lg">
       <div {...stylex.props(styles.stack)}>
-        <div {...stylex.props(styles.part)}>
-          <ToggleGroup
+        <div {...stylex.props(styles.when)}>
+          <fieldset
             aria-label={t`The day I start`}
-            onValueChange={(value: unknown[]) => {
-              const day = offered.find((each) => each.id === value[0])?.day;
-              if (day !== undefined) {
-                onChange({ ...choice, day });
-              }
-            }}
-            value={[picked]}
+            {...stylex.props(styles.set, styles.quick)}
           >
-            {offered.map((each) => (
-              <ToggleGroupItem key={each.id} value={each.id}>
-                {names[each.id]}
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
-          <div {...stylex.props(styles.when)}>
+            {offered.map((each) => {
+              const on = each.day === choice.day;
+              return (
+                <Button
+                  aria-pressed={on}
+                  key={each.id}
+                  onClick={() => {
+                    onChange({ ...choice, day: each.day });
+                  }}
+                  size="sm"
+                  variant={on ? "default" : "outline"}
+                >
+                  {names[each.id]}
+                </Button>
+              );
+            })}
+          </fieldset>
+          <span {...stylex.props(styles.dayHour)}>
             <DayField
               label={t`Another day`}
               min={today}
@@ -299,7 +320,7 @@ export const SendPlanForm = ({
               today={today}
               value={choice.day}
             />
-            <span {...stylex.props(styles.hourWith)}>
+            <span {...stylex.props(styles.atHour)}>
               <label htmlFor={timeField} {...stylex.props(styles.at)}>
                 <Text as="span">{at}</Text>
               </label>
@@ -308,74 +329,49 @@ export const SendPlanForm = ({
                 onValueChange={(time) => {
                   onChange({ ...choice, time });
                 }}
+                size="sm"
                 style={styles.hour}
                 type="time"
                 value={choice.time}
               />
             </span>
-          </div>
+          </span>
         </div>
-        <Separator />
-        {listed ? (
-          <>
-            <div id={teamsField}>
-              <Text>{t`These teams get links. Switch one off to send its links later.`}</Text>
+        {teams.length > 1 ? (
+          <fieldset {...stylex.props(styles.set, styles.part)}>
+            <legend {...stylex.props(styles.label, styles.legend)}>
+              {t`Teams that get links`}
+            </legend>
+            <div {...stylex.props(styles.teams)}>
+              {teams.map((team) => (
+                <Field key={team.id} orientation="horizontal">
+                  <Checkbox
+                    checked={!choice.held.includes(team.id)}
+                    onCheckedChange={(checked) => {
+                      const on = checked === true;
+                      onChange({
+                        ...choice,
+                        held: on
+                          ? choice.held.filter((id) => id !== team.id)
+                          : [...choice.held, team.id],
+                      });
+                    }}
+                  />
+                  <FieldLabel>{team.name}</FieldLabel>
+                </Field>
+              ))}
             </div>
-            <ul aria-labelledby={teamsField} {...stylex.props(styles.rows)}>
-              {teams.map((team) => {
-                const inIt = !choice.held.includes(team.id);
-                const { name } = team;
-                return (
-                  <li key={team.id} {...stylex.props(styles.row)}>
-                    <Text>{name}</Text>
-                    <Switch
-                      aria-label={t`${name} gets links`}
-                      checked={inIt}
-                      onCheckedChange={(on: boolean) => {
-                        onChange({
-                          ...choice,
-                          held: on
-                            ? choice.held.filter((id) => id !== team.id)
-                            : [...choice.held, team.id],
-                        });
-                      }}
-                    />
-                  </li>
-                );
+          </fieldset>
+        ) : null}
+        {heldCount > 0 ? (
+          <div {...stylex.props(styles.part)}>
+            <span id={laterField} {...stylex.props(styles.label)}>
+              {plural(heldCount, {
+                one: `When ${leftOut} gets links`,
+                other: `When ${leftOut} get links`,
               })}
-            </ul>
-          </>
-        ) : (
-          <div {...stylex.props(styles.all)}>
-            <Text>
-              {plural(count, {
-                one: "Your one team gets links.",
-                other: "All # teams get links.",
-              })}
-            </Text>
-            <Button
-              onClick={() => {
-                setChoosing(true);
-              }}
-              size="lg"
-              variant="link"
-            >
-              {t({ message: "Change", context: "change which teams" })}
-            </Button>
-          </div>
-        )}
-        {held.length > 0 ? (
-          <>
-            <Separator />
-            <div {...stylex.props(styles.part)}>
-              <div id={laterField}>
-                <Text>
-                  {plural(heldCount, {
-                    one: `The team you left out: ${leftOut}.`,
-                    other: `The # teams you left out: ${leftOut}.`,
-                  })}
-                </Text>
-              </div>
+            </span>
+            <div {...stylex.props(styles.when)}>
               <ToggleGroup
                 aria-labelledby={laterField}
                 onValueChange={(value: unknown[]) => {
@@ -389,13 +385,14 @@ export const SendPlanForm = ({
                     });
                   }
                 }}
+                size="sm"
                 value={[choice.heldDay === null ? "open" : "day"]}
               >
                 <ToggleGroupItem value="open">{t`Not planned yet`}</ToggleGroupItem>
                 <ToggleGroupItem value="day">{t`On a later day`}</ToggleGroupItem>
               </ToggleGroup>
               {choice.heldDay === null ? null : (
-                <div {...stylex.props(styles.when)}>
+                <span {...stylex.props(styles.dayHour)}>
                   <DayField
                     label={t`The day the other teams get their links`}
                     min={choice.day}
@@ -408,7 +405,7 @@ export const SendPlanForm = ({
                     today={today}
                     value={choice.heldDay}
                   />
-                  <span {...stylex.props(styles.hourWith)}>
+                  <span {...stylex.props(styles.atHour)}>
                     <span {...stylex.props(styles.at)}>
                       <Text as="span">{at}</Text>
                     </span>
@@ -417,18 +414,18 @@ export const SendPlanForm = ({
                       onValueChange={(heldTime) => {
                         onChange({ ...choice, heldTime });
                       }}
+                      size="sm"
                       style={styles.hour}
                       type="time"
                       value={choice.heldTime}
                     />
                   </span>
-                </div>
+                </span>
               )}
             </div>
-          </>
+          </div>
         ) : null}
-        <Separator />
-        {summary}
+        <div {...stylex.props(styles.summary)}>{summary}</div>
       </div>
     </Card>
   );

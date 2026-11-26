@@ -14,8 +14,8 @@ import { pixelCursor } from "./pixel-cursor.stylex.ts";
 import { between, frames, isStill } from "./pixel-cursor.tsx";
 
 // The team step's message as a new email: a window with its title, who
-// it is for, the message and, on its foot, what the step puts there (copy,
-// the postmark). The first time the step opens, Stephen writes it: his
+// it is for, the message and, on its foot, what the step puts there (the
+// copy button). The first time the step opens, Stephen writes it: his
 // caret carries his name on a pixel flag hanging from it, as a collaborator's does in a
 // shared document (its stepped corners the documents step's visitors'
 // labels', pixel-cursor.stylex.ts), and the words stream in a word at a
@@ -312,7 +312,7 @@ export const MessageCompose = ({
   to: string;
   /** The admin changed the message before: it is theirs, nobody writes it again. */
   changed: boolean;
-  /** What goes on the window's foot: copying it, the postmark. */
+  /** What goes on the window's foot: copying it. */
   foot: ReactNode;
 }) => {
   const { t } = useLingui();
