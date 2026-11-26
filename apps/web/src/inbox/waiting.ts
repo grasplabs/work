@@ -11,6 +11,7 @@ import type {
 
 import type { PendingRequests } from "../activity/pending.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import type { Outcomes } from "./everyones-outcomes.ts";
 import type { NotificationsPage } from "./notifications-page.ts";
 
 // What waits on the person, as the inbox reads it (`read-waiting.ts`),
@@ -39,6 +40,8 @@ export interface Waiting {
   bindings?: Loaded<BindingApprovalItem[]>;
   /** Asks to share a skill with the company or a team, which an admin decides. Admins only. */
   skillShares?: Loaded<SkillShareItem[]>;
+  /** Everyone's open calls of unknown outcome, to follow up. The organization's own admins, on the inbox's page only. */
+  everyonesOutcomes?: Loaded<Outcomes>;
 }
 
 /** Who counts what waits: what they may act on follows from their role. */

@@ -4067,10 +4067,6 @@ msgstr "Een model aangeroepen"
 msgid "Called another App"
 msgstr "Een andere app aangeroepen"
 
-#: src/routes/_shell.settings.outcomes.tsx
-msgid "Calls"
-msgstr "Aanroepen"
-
 #: src/activity/pending.tsx
 msgid "Calls {path} of {app}. Each run can read or change whatever that function reads or changes in the App, as the person it runs for"
 msgstr "Roept {path} van {app} aan. Elke run kan lezen of wijzigen wat die functie in de app leest of wijzigt, als de persoon voor wie hij loopt"
@@ -4123,7 +4119,6 @@ msgstr "Uitvoeren kan niet: {unread}"
 #: src/chat/brain-questions.tsx
 #: src/chat/chat-window.tsx
 #: src/chat/delete-chat-dialog.tsx
-#: src/confirmed.tsx
 #: src/connections/add-connector.tsx
 #: src/connections/app/words.ts
 #: src/connections/connect-dialog.tsx
@@ -4194,7 +4189,6 @@ msgstr "Gevallen per week: {cases}."
 #: src/agents/new-agent.tsx
 #: src/apps/app-workflows.tsx
 #: src/drafts/share-with-team.tsx
-#: src/routes/_shell.settings.outcomes.tsx
 #: src/settings/ai-providers.tsx
 msgid "Change"
 msgstr "Wijziging"
@@ -4451,10 +4445,6 @@ msgstr "Wijzigt"
 msgctxt "a list of changes"
 msgid "Changes"
 msgstr "Wijzigingen"
-
-#: src/routes/_shell.settings.outcomes.tsx
-msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, in their inbox; follow up with them."
-msgstr "Wijzigingen die Grasp voor iemand verstuurde waarvan het antwoord verloren ging, zodat niemand weet of ze effect hadden. Alleen die persoon kan in haar inbox zeggen wat er gebeurde; volg het met haar op."
 
 #: src/drafts/draft-history.tsx
 #: src/drafts/share-with-team.tsx
@@ -4782,7 +4772,6 @@ msgstr "Kliffen"
 #: src/interview/destination.tsx
 #: src/projects/project-chats.tsx
 #: src/settings/erasures.tsx
-#: src/shown-once.tsx
 #: src/workflows/start-run.tsx
 msgid "Close"
 msgstr "Sluiten"
@@ -5142,8 +5131,8 @@ msgstr "Je Microsoft 365 wordt gekoppeld"
 #: src/apps/resource-bindings.tsx
 #: src/chat/sources.tsx
 #: src/connections/app/words.ts
+#: src/inbox/item-detail.tsx
 #: src/inbox/items.ts
-#: src/routes/_shell.settings.outcomes.tsx
 #: src/settings/ai-providers.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Connection"
@@ -5307,7 +5296,6 @@ msgstr "Kopenhagen"
 #: src/settings/event-sources.tsx
 #: src/settings/guests.tsx
 #: src/settings/invitations.tsx
-#: src/shown-once.tsx
 msgid "Copied"
 msgstr "Gekopieerd"
 
@@ -5331,7 +5319,6 @@ msgstr "Kopieën"
 #: src/frame/ui-words.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
-#: src/shown-once.tsx
 msgid "Copy"
 msgstr "Kopiëren"
 
@@ -5353,7 +5340,6 @@ msgstr "E-mail kopiëren"
 msgid "Copy into the Brain from {label}"
 msgstr "Uit {label} naar het Brain kopiëren"
 
-#: src/settings/event-sources.tsx
 #: src/shown-once.tsx
 msgid "Copy it now: you won't see it again. Lost, it can only be replaced."
 msgstr "Kopieer het nu: je ziet het niet nog eens. Kwijt, dan kan het alleen worden vervangen."
@@ -5374,7 +5360,6 @@ msgstr "Kopieer de link voor {name}"
 msgid "Copy the output"
 msgstr "Uitvoer kopiëren"
 
-#: src/settings/event-sources.tsx
 #: src/shown-once.tsx
 msgid "Copy the secret"
 msgstr "Geheim kopiëren"
@@ -6546,10 +6531,6 @@ msgstr "Elk zoals het bedrijf het heeft, of voor minder mensen. Nooit voor meer.
 #: src/routes/_shell.settings.billing.tsx
 msgid "Each invoice to your billing email"
 msgstr "Elke factuur naar je factuur-e-mailadres"
-
-#: src/routes/_shell.settings.outcomes.tsx
-msgid "Each one sent for someone shows here until they say what became of it."
-msgstr "Elke aanroep die voor iemand is verstuurd, staat hier tot die persoon zegt wat ermee is gebeurd."
 
 #: src/connections/http-connections.tsx
 msgid "Each path prefix starts with /, on its own line, with no query or dot segments."
@@ -8323,7 +8304,6 @@ msgid "Groups of teams"
 msgstr "Groepen van teams"
 
 #: src/drafts/sharing.tsx
-#: src/people/person-picker.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/erasures.tsx
 msgid "Guest"
@@ -9432,6 +9412,10 @@ msgstr "De toegang is verlopen. Grasp-medewerkers kunnen hem niet opnieuw koppel
 #: src/settings/ai-providers.tsx
 msgid "Its account is out of credit."
 msgstr "Het tegoed van het account is op."
+
+#: src/inbox/item-detail.tsx
+msgid "Its answer was lost: nobody can tell whether it took effect."
+msgstr "Het antwoord ging verloren: niemand weet of het effect had."
 
 #: src/answer-pause.tsx
 msgid "Its answers can be used in a moment, so a press meant for the one before doesn't answer it."
@@ -11352,10 +11336,6 @@ msgstr "Nog geen factuurgegevens"
 msgid "No business process"
 msgstr "Geen bedrijfsproces"
 
-#: src/routes/_shell.settings.outcomes.tsx
-msgid "No call of unknown outcome is open."
-msgstr "Er staat geen aanroep met onbekende uitkomst open."
-
 #: src/apps/app-data.tsx
 msgid "No changes are kept for this record."
 msgstr "Voor dit record zijn geen wijzigingen bewaard."
@@ -11513,10 +11493,6 @@ msgstr "Nog niemand heeft een app met je gedeeld."
 #: src/settings/teams.tsx
 msgid "No one yet: open it to add people"
 msgstr "Nog niemand: open het om mensen toe te voegen"
-
-#: src/people/person-picker.tsx
-msgid "No owner yet"
-msgstr "Nog geen eigenaar"
 
 #: src/apps/app-page.tsx
 msgid "No page yet"
@@ -11732,10 +11708,6 @@ msgstr "Niemand ziet de records in {table}, ook Sam niet."
 #: src/connections/connected-dialog.tsx
 msgid "Nobody uses it in chat until you choose who may, and Apps and workflows only through the permissions you grant."
 msgstr "Niemand gebruikt het in een chat tot je kiest wie het mag, en Apps en workflows alleen via de rechten die je geeft."
-
-#: src/people/person-picker.tsx
-msgid "Nobody with that name."
-msgstr "Niemand met die naam."
 
 #: src/agents/agent-facts.tsx
 #: src/agents/new-agent.tsx
@@ -12641,6 +12613,10 @@ msgstr "Alleen {accounts}"
 msgid "Only {owner} so far."
 msgstr "Tot nu toe alleen {owner}."
 
+#: src/inbox/item-detail.tsx
+msgid "Only {person} can say whether it happened."
+msgstr "Alleen {person} kan zeggen of het gebeurd is."
+
 #: src/settings/use-team-change.ts
 msgid "Only admins can change teams."
 msgstr "Alleen beheerders kunnen teams wijzigen."
@@ -13187,14 +13163,6 @@ msgctxt "who answers for an app"
 msgid "Owner"
 msgstr "Eigenaar"
 
-#: src/people/person-picker.tsx
-msgid "Owner: {owner}. Change owner"
-msgstr "Eigenaar: {owner}. Eigenaar wijzigen"
-
-#: src/people/person-picker.tsx
-msgid "Owner: nobody yet. Change owner"
-msgstr "Eigenaar: nog niemand. Eigenaar wijzigen"
-
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Owns"
@@ -13519,7 +13487,6 @@ msgid "person"
 msgstr "persoon"
 
 #: src/activity/audit-event.tsx
-#: src/routes/_shell.settings.outcomes.tsx
 msgid "Person"
 msgstr "Persoon"
 
@@ -14170,10 +14137,6 @@ msgstr "Het lezen bleef mislukken, dus je triggers daar starten voorlopig niets 
 msgid "Reading its instructions…"
 msgstr "Leest zijn instructies…"
 
-#: src/people/people-teams-picker.tsx
-msgid "Reading people and teams…"
-msgstr "Mensen en teams worden gelezen…"
-
 #: src/connections/sync-places.tsx
 msgid "Reading the places"
 msgstr "Plekken worden gelezen"
@@ -14193,10 +14156,6 @@ msgstr "Werkruimte wordt gelezen"
 #: src/activity/audit-words.ts
 msgid "Reading what changed at a connection failed"
 msgstr "Lezen wat er bij een verbinding veranderd is, is mislukt"
-
-#: src/people/person-picker.tsx
-msgid "Reading who can own it…"
-msgstr "Lezen wie eigenaar kan zijn…"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Reading your staff list"
@@ -14240,7 +14199,7 @@ msgstr "Redeneren"
 msgid "Recalled from the Brain"
 msgstr "Uit het Brein opgehaald"
 
-#: src/routes/_shell.settings.outcomes.tsx
+#: src/inbox/item-detail.tsx
 msgid "Receipt"
 msgstr "Ontvangstbewijs"
 
@@ -15521,11 +15480,6 @@ msgstr "Leden zoeken"
 msgid "Search models"
 msgstr "Modellen zoeken"
 
-#: src/people/person-picker.tsx
-msgid "Search people"
-msgstr "Personen zoeken"
-
-#: src/people/people-teams-picker.tsx
 #: src/projects/project-people.tsx
 msgid "Search people and teams"
 msgstr "Mensen en teams zoeken"
@@ -15613,7 +15567,6 @@ msgid "Searching the docs for {query}"
 msgstr "Zoekt in de docs naar {query}"
 
 #: src/connections/http-connections.tsx
-#: src/shown-once.tsx
 msgid "Secret"
 msgstr "Geheim"
 
@@ -15726,8 +15679,8 @@ msgstr "Bezig met sturen"
 msgid "Sensitive"
 msgstr "Gevoelig"
 
+#: src/inbox/item-detail.tsx
 #: src/inbox/items.ts
-#: src/routes/_shell.settings.outcomes.tsx
 msgid "Sent"
 msgstr "Verstuurd"
 
@@ -19173,11 +19126,6 @@ msgstr "Onbekend"
 #: src/routes/_shell.settings.security.tsx
 msgid "Unknown device"
 msgstr "Onbekend apparaat"
-
-#: src/routes/_shell.settings.outcomes.tsx
-#: src/settings/sections.ts
-msgid "Unknown outcomes"
-msgstr "Onbekende uitkomsten"
 
 #: src/brain/brain.ts
 #: src/chat/chat-markdown.ts
