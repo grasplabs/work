@@ -1007,7 +1007,9 @@ describe("the egress handler", () => {
   it("sends nothing for a caller without a whole call's props", async () => {
     // As another Worker naming this entrypoint gets it: no call behind it.
     for (const props of [
-      egressProps({ credential: { header: "authorization", value: "" } }),
+      egressProps({
+        credential: { header: "authorization", value: "", secret: "" },
+      }),
       egressProps({ hosts: [] }),
       egressProps({ expiresAt: Number.NaN }),
     ]) {
@@ -1016,6 +1018,43 @@ describe("the egress handler", () => {
       expect(response.status).toBe(403);
     }
     expect(api.sent).toStrictEqual([]);
+  });
+
+  it("sends a host template's request only to the host sealed with the connection, when it fits the template", async () => {
+    const template = "{company}.boards.test";
+    const props = (connectionHosts: Record<string, string>) =>
+      egressProps({
+        hosts: [template],
+        credentialHosts: [template],
+        connectionHosts,
+        routes: [{ method: "GET", host: template, path: "/v1/items" }],
+      });
+    const standIn = "https://company.boards.test.invalid/v1/items";
+    const unfit: Record<string, string>[] = [
+      {},
+      { [template]: "evil.test" },
+      { [template]: "acme.boards.test.evil.test" },
+      { [template]: "a.b.boards.test" },
+      { [template]: "10.0.0.1" },
+      { "{other}.boards.test": "acme.boards.test" },
+    ];
+    const statuses = await Promise.all(
+      unfit.map(async (connectionHosts) => {
+        const response = await exports
+          .ConnectorEgress({ props: props(connectionHosts) })
+          .fetch(standIn);
+        return response.status;
+      })
+    );
+    expect(statuses).toStrictEqual(unfit.map(() => 403));
+    expect(api.sent).toStrictEqual([]);
+    const sealed = exports.ConnectorEgress({
+      props: props({ [template]: "acme.boards.test" }),
+    });
+    await expect(sealed.fetch(standIn)).resolves.toMatchObject({ status: 200 });
+    expect(api.sent.map(({ host, path }) => ({ host, path }))).toStrictEqual([
+      { host: "acme.boards.test", path: "/v1/items" },
+    ]);
   });
 
   it("closes when the call's time is up", async () => {

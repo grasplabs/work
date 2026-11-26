@@ -146,6 +146,13 @@ export {
   tenantKinds,
   withTenant,
 } from "./sign-in.ts";
+export {
+  filledHost,
+  fitsTemplate,
+  hostOf,
+  hostTemplateOf,
+  requestHost,
+} from "./hosts.ts";
 export { addressesOf } from "./mail-addresses.ts";
 export type { Address } from "./mail-addresses.ts";
 export type {

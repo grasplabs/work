@@ -22,6 +22,8 @@ export interface AppRecord {
   provider: string;
   server: string;
   signIn: SignIn;
+  /** Its connector's hosts, host templates included. */
+  hosts: readonly string[];
 }
 
 /** The release's connectors by name. */
@@ -53,6 +55,7 @@ for (const [provider, claimed] of claims) {
       provider,
       server: manifest.name,
       signIn: manifest.signIn,
+      hosts: manifest.hosts,
     });
   } else if (claimed.some(({ signIn }) => signIn !== undefined)) {
     log.error("connectors.duplicate_app", { provider });

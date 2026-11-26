@@ -440,6 +440,8 @@ export interface ConnectorBase {
   mcp?: McpManifestInput;
   scopes: readonly string[];
   hosts: readonly string[];
+  /** Those of `hosts` the connection's credential goes to. */
+  credentialHosts: readonly string[];
 }
 
 /** Whether `value` is absent or an object, as an optional JSON-RPC member is. */
