@@ -105,7 +105,14 @@ const styles = stylex.create({
   meterBar: { flexGrow: 1 },
   numberField: { width: "7rem" },
   form: { display: "flex", flexDirection: "column", gap: space["5"] },
-  dialog: { width: "42rem" },
+  // The dialog's form holds its body and footer: it shrinks with the
+  // dialog so its body scrolls and its buttons stay in sight.
+  dialogForm: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+  },
   settles: { width: "18rem" },
 });
 
@@ -264,7 +271,7 @@ const Rules = ({
   const fewer = draft.people - 1;
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent style={styles.dialog}>
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>When a workflow is known</DialogTitle>
           <DialogDescription>
@@ -273,6 +280,7 @@ const Rules = ({
           </DialogDescription>
         </DialogHeader>
         <form
+          {...stylex.props(styles.dialogForm)}
           onSubmit={(event) => {
             event.preventDefault();
             if (parsed.success) {

@@ -46,7 +46,14 @@ import { CommandFailure, useCommand } from "./commands.tsx";
 
 const styles = stylex.create({
   form: { display: "flex", flexDirection: "column", gap: space["5"] },
-  dialog: { width: "36rem" },
+  // The dialog's form holds its body and footer: it shrinks with the
+  // dialog so its body scrolls and its buttons stay in sight.
+  dialogForm: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+  },
   actions: {
     display: "flex",
     flexDirection: "column",
@@ -136,7 +143,7 @@ const SetupDialog = ({
   };
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent style={styles.dialog}>
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>How Stephen is set up</DialogTitle>
           <DialogDescription>
@@ -144,6 +151,7 @@ const SetupDialog = ({
           </DialogDescription>
         </DialogHeader>
         <form
+          {...stylex.props(styles.dialogForm)}
           onSubmit={(event) => {
             event.preventDefault();
             void save();
