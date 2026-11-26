@@ -1171,7 +1171,18 @@ describe("a call of a tool", () => {
 
   it("refuses a path parameter that would be no segment of its own as the egress does, sending nothing", async () => {
     vendorAnswers(Response.json({ sku: "a", onHand: 1 }));
-    const values = ["..", ".", "", "urn:li:1", "50%", "a;b"];
+    const values = [
+      "..",
+      ".",
+      "",
+      "a1/..",
+      "urn:li:1",
+      "50%",
+      "a;b",
+      "$batch",
+      "Batch",
+      "a\uD800",
+    ];
     const results = await Promise.all(
       values.map(
         async (sku) =>

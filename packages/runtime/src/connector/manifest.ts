@@ -12,10 +12,10 @@ import { permissionActionSchema } from "@grasp-os/shared/permissions";
 import { syncCursorSchema, syncItemKindSchema } from "@grasp-os/shared/sync";
 import { z } from "zod";
 
+import { isBatchSegment } from "../common/value-formats.ts";
 import { dnsLabel, hostPattern, hostTemplateOf } from "./hosts.ts";
 import {
   httpMethods,
-  isBatchSegment,
   maxProvenanceItems,
   parameterSegment,
   readAs,

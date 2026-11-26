@@ -242,7 +242,7 @@ const outgoing = (
 
 /**
  * `path` with each `{name}` replaced by its value, encoded; undefined if a
- * value is missing.
+ * value is missing, or holds a lone surrogate, which no URL can encode.
  */
 const filledPath = (
   path: string,
@@ -251,7 +251,7 @@ const filledPath = (
   let complete = true;
   const filled = path.replaceAll(parameter, (_match, name: string) => {
     const value = Object.hasOwn(values, name) ? values[name] : undefined;
-    if (value === undefined) {
+    if (value === undefined || !String(value).isWellFormed()) {
       complete = false;
       return "";
     }

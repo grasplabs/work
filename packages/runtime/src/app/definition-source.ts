@@ -145,7 +145,13 @@ const kindOf = (descriptor: ValueDescriptor): Code => {
       if (descriptor.trim) {
         made = call(made, "trim");
       }
-      for (const format of ["email", "datetime", "date", "url"] as const) {
+      for (const format of [
+        "email",
+        "datetime",
+        "date",
+        "url",
+        "segment",
+      ] as const) {
         if (descriptor[format] === true) {
           made = call(made, format);
         }

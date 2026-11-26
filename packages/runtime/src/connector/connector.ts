@@ -126,7 +126,6 @@ export {
   egressKind,
   egressTooLargeMessage,
   findMetaKey,
-  forbiddenInValue,
   httpMethods,
   maxChangeBytes,
   maxProvenanceItems,
@@ -137,7 +136,6 @@ export {
   pathMatches,
   provenanceMetaKey,
   resourceMetaKey,
-  segmentValuePattern,
   stampHeader,
   stampMetaKey,
   stampPattern,
@@ -145,6 +143,10 @@ export {
   syncPlacesMethod,
 } from "./protocol.ts";
 export type { EgressKind } from "./protocol.ts";
+export {
+  forbiddenInValue,
+  segmentValuePattern,
+} from "../common/value-formats.ts";
 export {
   accountLookupSchema,
   endpointHost,

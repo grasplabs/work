@@ -1,4 +1,9 @@
-import { isDate, isDateTime, isWebUrl } from "@grasp-os/runtime/host";
+import {
+  isDate,
+  isDateTime,
+  isPathSegment,
+  isWebUrl,
+} from "@grasp-os/runtime/host";
 import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 
@@ -70,6 +75,7 @@ const formats: Readonly<Record<string, (text: string) => boolean>> = {
   "date-time": isDateTime,
   date: isDate,
   iri: isWebUrl,
+  segment: isPathSegment,
 };
 
 /** The most a schema nests here, as the SDK's descriptors do. */

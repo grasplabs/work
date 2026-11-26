@@ -48,7 +48,7 @@ export default defineConnector({
       reach: "company",
       resource: "board",
       routes: ["GET /v1/boards/{board}/items"],
-      args: { board: v.string().min(1), cursor: v.string().optional() },
+      args: { board: v.string().segment(), cursor: v.string().optional() },
       returns: page(Item),
       handler: async ({ board, cursor }, api) => {
         const answer = await api.get("/v1/boards/{board}/items", {
@@ -77,7 +77,7 @@ A tool's name is its family and its action: `items.list`. The tools of one famil
 - `returns`: what it answers, an object. The answer is checked against it before anyone sees it: one that doesn't fit fails the call, and its caller gets the failure, never the answer.
 - `readOnly`: `true` for a tool that only reads, `false` for one that changes something at the vendor.
 - `reach`: whom it reaches, as far as any call of it can: `own` (only the person it acts for), `company` (what the company keeps together), `others` (anything that reaches other people, such as sending them something) or `conversations` (what other people said where the person was, such as a chat or a meeting's transcript). With `readOnly`, it decides the tool's class, which an admin allows or not.
-- `routes`: the only requests it may send, as `"METHOD /path"` with `{name}` for a path parameter. A connector with several hosts names the host too: `"GET api.boards.example/v1/me"`. At most one route is a write (anything but GET and HEAD).
+- `routes`: the only requests it may send, as `"METHOD /path"` with `{name}` for a path parameter. A connector with several hosts names the host too: `"GET api.boards.example/v1/me"`. At most one route is a write (anything but GET and HEAD). The argument named after a path parameter is `v.string().segment()` (one segment of a path, exactly what connect's egress sends there), a number, or fixed values that are each one segment; the build refuses a tool whose path argument is any other text.
 - `resource`: the one string argument that names the record a call acts on, such as a board. A permission can be held to one record, and a path parameter of that name is held to the record the call's permission names.
 - `scopes`: the OAuth scopes it needs, among those its connector's `auth` asks for.
 - `redirects`: for a GET route of its own, the hosts its answer may redirect to, as `*.<host>` where `*` is one label: `{ "GET /v1/files/{file}": ["*.storage.boards.example"] }`. Connect's egress follows one such redirect itself, without the token. Any other redirect is refused.
@@ -94,7 +94,7 @@ Type every value the vendor gives a shape. A free-form `v.json()` in a connector
 
 ## The API
 
-`api` sends a request to one of the tool's routes, as the route is declared: `api.get("/v1/boards/{board}/items", { path, query, body, returns })`, and `post`, `put`, `patch` and `head` the same way. It fills in each path parameter from `path` as one segment of the path (a value can't be empty, `.` or `..`, or hold `/ \ ? # % ; :` or a control character; it's refused before anything is sent), adds `query` (leaving out undefined and null values) and sends `body` as JSON. A route the tool doesn't declare is refused before anything is sent.
+`api` sends a request to one of the tool's routes, as the route is declared: `api.get("/v1/boards/{board}/items", { path, query, body, returns })`, and `post`, `put`, `patch` and `head` the same way. It fills in each path parameter from `path` as one segment of the path, refusing before anything is sent a value connect's egress wouldn't send there, adds `query` (leaving out undefined and null values) and sends `body` as JSON. A route the tool doesn't declare is refused before anything is sent.
 
 `returns` is optional. With it, the answer is checked against it and typed by it, and one that doesn't fit fails the call. Fields it doesn't name are left out, so a field the vendor adds never breaks a call: name only what the connector reads. Without it, the answer is `unknown`: the JSON, or the text when the answer isn't JSON. Either way, the tool's own `returns` checks what the handler makes of it.
 
@@ -127,7 +127,7 @@ export const finish = tool({
   reach: "company",
   resource: "board",
   routes: ["PATCH /v1/boards/{board}/items/{item}"],
-  args: { board: v.string(), item: v.string() },
+  args: { board: v.string().segment(), item: v.string().segment() },
   returns: Item,
   repeatable: true,
   handler: async ({ board, item }, api) =>
@@ -145,7 +145,7 @@ export const add = tool({
   reach: "company",
   resource: "board",
   routes: ["GET /v1/boards/{board}/items", "POST /v1/boards/{board}/items"],
-  args: { board: v.string(), title: v.string().min(1) },
+  args: { board: v.string().segment(), title: v.string().min(1) },
   returns: Item,
   handler: async ({ board, title }, api, call) =>
     await api.post("/v1/boards/{board}/items", {
@@ -189,8 +189,8 @@ export const writeNotes = tool({
   resource: "board",
   routes: ["PUT /v1/boards/{board}/items/{item}/notes"],
   args: {
-    board: v.string(),
-    item: v.string(),
+    board: v.string().segment(),
+    item: v.string().segment(),
     notes: v.string(),
     etag: v.string(),
   },
@@ -241,7 +241,7 @@ export const readFile = tool({
   answersFile: true,
   routes: ["GET /v1/items/{item}/file"],
   redirects: { "GET /v1/items/{item}/file": ["*.storage.boards.example"] },
-  args: { item: v.string(), as: v.enum(["text", "base64"]) },
+  args: { item: v.string().segment(), as: v.enum(["text", "base64"]) },
   returns: v.object({
     name: v.string(),
     contentType: v.string(),
@@ -268,7 +268,7 @@ export const putFile = tool({
   reach: "company",
   takesFiles: true,
   routes: ["PUT /v1/items/{item}/file"],
-  args: { item: v.string(), attachments },
+  args: { item: v.string().segment(), attachments },
   describe: {
     title: "Put a file on an item",
     fields: [

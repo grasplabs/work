@@ -1,3 +1,4 @@
+import { v } from "@grasp-os/runtime/connector";
 import { signCapability } from "@grasp-os/shared/capability";
 import { companyToolClasses, toolClassOf } from "@grasp-os/shared/connect";
 import { env, exports } from "cloudflare:workers";
@@ -720,6 +721,49 @@ describe("a connector's code", { timeout: 60_000 }, () => {
     // Only those two went out.
     expect(api.sent.map(({ path }) => path).toSorted()).toStrictEqual(
       ["/v1/probe/ok?page=2", "/v1/probe/item-1:peek"].toSorted()
+    );
+  });
+
+  it("sends in a path parameter exactly the values v.string().segment() takes", async () => {
+    const connection = await connectionTo("sample");
+    const values = [
+      "a1",
+      "AAMkAD=",
+      "O'Brien & Co",
+      "münchen",
+      "v1.0",
+      "$value",
+      "batches",
+      "",
+      ".",
+      "..",
+      "a1/..",
+      "a\\b",
+      "a?b",
+      "a#b",
+      "a%2Fb",
+      "a;b",
+      "19:chat",
+      "a\nb",
+      "batch",
+      "$Batch",
+    ];
+    const sentPaths = new Set<string>();
+    for (const value of values) {
+      const path = `/v1/probe/${encodeURIComponent(value)}`;
+      // oxlint-disable-next-line no-await-in-loop -- one at a time, to tell which went out
+      await probe(connection, { url: `https://${sampleHost}${path}` });
+      if (api.sent.some((request) => request.path === path)) {
+        sentPaths.add(path);
+      }
+    }
+    const segment = v.string().segment();
+    const taken = values.filter(
+      (value) => segment["~standard"].validate(value).issues === undefined
+    );
+    expect(taken).toHaveLength(7);
+    expect([...sentPaths]).toStrictEqual(
+      taken.map((value) => `/v1/probe/${encodeURIComponent(value)}`)
     );
   });
 
