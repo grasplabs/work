@@ -323,6 +323,13 @@ const InterviewDay = ({ view }: { view: AdminView }) => {
   );
 };
 
+/**
+ * The name of an organization's level of the sidebar: never a client's id
+ * alone, which could be the main list's own name ("main").
+ */
+export const organizationLevel = (clientId: string): string =>
+  `organization:${clientId}`;
+
 /** What the level says on top while its core isn't read: reading it, or why not. Not on the rail. */
 const LevelState = ({
   clientId,
@@ -374,7 +381,7 @@ const LevelBody = ({
     waiting.set(section, (waiting.get(section) ?? 0) + 1);
   }
   return (
-    <SidebarLevel value={clientId}>
+    <SidebarLevel value={organizationLevel(clientId)}>
       <SidebarLevelHeader>
         <SidebarMenu>
           <SidebarMenuItem>
