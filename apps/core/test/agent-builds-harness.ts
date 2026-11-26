@@ -5,7 +5,7 @@ import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { readDraft } from "../src/drafts.ts";
-import { chatOf, setObjectEnv, toolStep } from "./agent-chat.ts";
+import { chatOf, setObjectEnv, toolStep, returnedOf } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
 import { testApp } from "./app-definitions.ts";
 import { release } from "./apps.ts";
@@ -76,7 +76,7 @@ export const findApp = `const [app] = (await env.apps.list()).filter(({ name }) 
 
 /** What a code step returned, as JSON. */
 export const returned = (text: string | undefined): unknown =>
-  z.unknown().parse(JSON.parse(text?.replace("Returned:\n", "") ?? "null"));
+  z.unknown().parse(returnedOf(text));
 
 /** Code that makes each call in turn: what it returned, or its message. */
 export const tryEach = (calls: Record<string, string>, before = ""): string =>

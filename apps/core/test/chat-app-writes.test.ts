@@ -13,7 +13,8 @@ import {
   model,
   says,
   transcript,
-  withoutMarking,
+  withoutReadFrom,
+  returnedText,
 } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { chooseAudience } from "./brain-audiences.ts";
@@ -139,7 +140,7 @@ const replyStep = (input: Record<string, unknown>, read = true) =>
   );
 
 /** What the code step returned, as the model read it. */
-const returned = (text: string) => `Returned:\n${text}`;
+const returned = (text: string) => returnedText(text);
 
 /** The step's results, and what waits for the person. */
 const outcomeOf = async (
@@ -151,7 +152,7 @@ const outcomeOf = async (
   const held = await heldFor(person, chat.via === "web" ? "grasp" : "chat_app");
   return {
     answer,
-    returned: results.map(({ text }) => withoutMarking(text)),
+    returned: results.map(({ text }) => withoutReadFrom(text)),
     held: held.map(({ input }) => input),
   };
 };

@@ -21,6 +21,7 @@ import {
   model,
   pausedReply,
   says,
+  returnedOf,
 } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -290,7 +291,7 @@ describe("files attached to a question", slow, () => {
         z.object({ note: z.string(), name: z.string(), text: z.string() }),
         z.number(),
       ])
-      .parse(JSON.parse(result?.text.replace("Returned:\n", "") ?? "null"));
+      .parse(returnedOf(result?.text));
     const question = followed.messages().find(({ role }) => role === "user");
     const events = await allEvents();
     expect({
