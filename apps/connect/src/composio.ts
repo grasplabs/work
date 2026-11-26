@@ -33,6 +33,19 @@ export const requestTimeoutMs = 10_000;
 /** Largest answer connect reads from Composio's API, in bytes. */
 const maxResponseBytes = 4 * 1024 * 1024;
 
+/** What a {@link ComposioError} knows beyond its message. */
+interface ComposioFailure {
+  /** Composio's HTTP status, when it answered with one. */
+  status?: number;
+  cause?: unknown;
+  /** Composio's name for the error (`error.slug`). */
+  slug?: string;
+  /** Composio's number for the error (`error.code`). */
+  code?: number;
+  /** Composio didn't answer at all. */
+  unanswered?: boolean;
+}
+
 /** Composio didn't answer, or answered something connect can't use. */
 export class ComposioError extends Error {
   /** Composio's HTTP status, when it answered with one. */
@@ -45,23 +58,23 @@ export class ComposioError extends Error {
    */
   readonly slug: string | undefined;
   /**
+   * Composio's number for the error, such as 1803, when its answer gave
+   * one (`error.code`): a stable machine code, safe to name for support.
+   */
+  readonly code: number | undefined;
+  /**
    * Composio didn't answer at all: the request failed on the way, or took
    * longer than it may. Asking again may get an answer.
    */
   readonly unanswered: boolean;
 
-  constructor(
-    message: string,
-    status?: number,
-    cause?: unknown,
-    slug?: string,
-    unanswered = false
-  ) {
-    super(message, { cause });
+  constructor(message: string, failure: ComposioFailure = {}) {
+    super(message, { cause: failure.cause });
     this.name = "ComposioError";
-    this.status = status;
-    this.slug = slug;
-    this.unanswered = unanswered;
+    this.status = failure.status;
+    this.slug = failure.slug;
+    this.code = failure.code;
+    this.unanswered = failure.unanswered ?? false;
   }
 }
 
@@ -93,13 +106,10 @@ export const readCappedBytes = async (
       } catch (error) {
         // The answer broke off, or ran out of time, on the way: asking
         // again may get all of it.
-        throw new ComposioError(
-          "Composio's answer broke off",
-          undefined,
-          error,
-          undefined,
-          true
-        );
+        throw new ComposioError("Composio's answer broke off", {
+          cause: error,
+          unanswered: true,
+        });
       }
       if (chunk === undefined || chunk.done) {
         break;
@@ -129,27 +139,51 @@ export const readCappedBytes = async (
   return body;
 };
 
-/** Largest error answer connect reads, for its slug alone. */
+/** Largest error answer connect reads, for its slug and code alone. */
 const maxErrorBytes = 64 * 1024;
 
-/** Composio's error answer, of which only the slug is read. */
+/**
+ * Composio's error answer, of which only its machine names are read: the
+ * slug and the number (`code`), never its message.
+ */
 const errorAnswerSchema = z.object({
-  error: z.object({ slug: z.string().regex(/^\w{1,128}$/u) }),
+  error: z.object({
+    slug: z.unknown().optional(),
+    code: z.unknown().optional(),
+  }),
 });
 
 /**
- * The slug of Composio's error answer `response`, if it has one connect
- * can read: anything else, a body that fails or runs over
- * `maxErrorBytes` included, is none. The body is cancelled either way.
+ * A slug of Composio's: a machine name such as
+ * `ConnectedAccount_CredentialValidationRejected`, letters, digits and
+ * underscores starting with a letter, never text.
  */
-const errorSlugOf = async (response: Response): Promise<string | undefined> => {
+const errorSlugSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,127}$/u);
+
+/** A number of Composio's for an error. */
+const errorCodeSchema = z.number().int().min(0).max(999_999);
+
+/**
+ * The slug and code of Composio's error answer `response`, those it has
+ * that connect can read: anything else, a body that fails or runs over
+ * `maxErrorBytes` included, is neither. The body is cancelled either way.
+ */
+const errorNamesOf = async (
+  response: Response
+): Promise<{ slug?: string; code?: number }> => {
   try {
     const text = new TextDecoder().decode(
       await readCappedBytes(response, maxErrorBytes)
     );
-    return errorAnswerSchema.safeParse(JSON.parse(text)).data?.error.slug;
+    const named = errorAnswerSchema.safeParse(JSON.parse(text)).data?.error;
+    const slug = errorSlugSchema.safeParse(named?.slug);
+    const code = errorCodeSchema.safeParse(named?.code);
+    return {
+      ...(slug.success ? { slug: slug.data } : {}),
+      ...(code.success ? { code: code.data } : {}),
+    };
   } catch {
-    return undefined;
+    return {};
   }
 };
 
@@ -200,22 +234,17 @@ export const composioRequest = async <Schema extends z.ZodType>(
     });
   } catch (error) {
     log.warn("composio.failed", { method, area, ...errorFields(error) });
-    throw new ComposioError(
-      "Composio didn't answer",
-      undefined,
-      error,
-      undefined,
-      true
-    );
+    throw new ComposioError("Composio didn't answer", {
+      cause: error,
+      unanswered: true,
+    });
   }
   log.info("composio.request", { method, area, status: response.status });
   if (!response.ok) {
-    throw new ComposioError(
-      `Composio answered ${response.status}`,
-      response.status,
-      undefined,
-      await errorSlugOf(response)
-    );
+    throw new ComposioError(`Composio answered ${response.status}`, {
+      status: response.status,
+      ...(await errorNamesOf(response)),
+    });
   }
   let parsed: unknown;
   try {
@@ -226,7 +255,7 @@ export const composioRequest = async <Schema extends z.ZodType>(
   } catch (error) {
     throw error instanceof ComposioError
       ? error
-      : new ComposioError("Composio's answer isn't JSON", undefined, error);
+      : new ComposioError("Composio's answer isn't JSON", { cause: error });
   }
   const result = schema.safeParse(parsed);
   if (!result.success) {

@@ -1,4 +1,4 @@
-import piAgentCore from "@earendil-works/pi-agent-core/package.json" with { type: "json" };
+import piDurable from "@earendil-works/pi-durable/package.json" with { type: "json" };
 import { agentErrors } from "@grasp-os/shared/agent";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
@@ -75,7 +75,7 @@ describe("chat agent code run leases", () => {
       tool_call_id: toolCallId,
       source_hash: await sourceHash(code),
       source_chars: code.length,
-      agent: `@earendil-works/pi-agent-core@${piAgentCore.version}`,
+      agent: `@earendil-works/pi-durable@${piDurable.version}`,
       compatibility_date: "2026-09-15",
       // Plain workerd doesn't enforce the isolate's CPU limit, and the
       // record says so rather than claim it.
