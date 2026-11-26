@@ -186,28 +186,61 @@ test("the product page runs no page module through an escaped path under its own
   const page = await pageOf(builder);
   const moduleAddress = await openPage(page);
   // The browser matches the policy on the path as written, so this passes
-  // as one of the frontend's files; decoded, it is the module's address.
-  // Core answers no such path.
+  // as one of the frontend's files, for a script and, since the frontend
+  // starts its code block's worker from them, for a worker too; decoded, it
+  // is the module's address. Core answers no such path.
   const escaped = moduleAddress.replace(
     "/page-modules/",
     "/assets/..%2Fpage-modules/"
   );
+  // What core answered each request for the escaped path, the worker's
+  // among them: never the module.
+  const answered: number[] = [];
+  page.context().on("response", (response) => {
+    if (response.url() === escaped) {
+      answered.push(response.status());
+    }
+  });
 
   const outcome = await page.evaluate(async (address) => {
+    // In the page, where this runs: nothing from outside it is there.
+    // oxlint-disable-next-line unicorn/consistent-function-scoping -- see above
+    const settled = async (target: EventTarget): Promise<string> => {
+      const { promise, resolve } = Promise.withResolvers<string>();
+      target.addEventListener("load", () => {
+        resolve("loaded");
+      });
+      target.addEventListener("error", () => {
+        resolve("refused");
+      });
+      return await promise;
+    };
     const element = document.createElement("script");
     element.type = "module";
     element.src = address;
-    const { promise, resolve } = Promise.withResolvers<string>();
-    element.addEventListener("load", () => {
-      resolve("loaded");
-    });
-    element.addEventListener("error", () => {
-      resolve("refused");
-    });
+    const script = settled(element);
     document.head.append(element);
+    // A worker the policy lets start from the frontend's files: it fails to
+    // load, by an error event, as core answers nothing for the path.
+    let worker = "";
+    try {
+      worker = await settled(new Worker(address, { type: "module" }));
+    } catch (error) {
+      worker = `refused: ${error instanceof Error ? error.name : "?"}`;
+    }
     const response = await fetch(address);
-    return { script: await promise, fetch: String(response.status) };
+    return {
+      script: await script,
+      worker,
+      fetch: String(response.status),
+    };
   }, escaped);
 
-  expect(outcome).toStrictEqual({ script: "refused", fetch: "404" });
+  expect({
+    outcome,
+    servedTheModule: answered.some((status) => status < 300),
+  }).toStrictEqual({
+    outcome: { script: "refused", worker: "refused", fetch: "404" },
+    servedTheModule: false,
+  });
 });
