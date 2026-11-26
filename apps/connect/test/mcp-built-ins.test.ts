@@ -8,7 +8,7 @@ import { z } from "zod";
 
 import { prepareBuiltIn } from "../src/connector-providers.ts";
 import { connections } from "../src/db/schema.ts";
-import { currentTools } from "../src/mcp-connectors.ts";
+import { connectorAction, currentTools } from "../src/mcp-connectors.ts";
 import { disconnect, finishConnection } from "../src/oauth.ts";
 import { retryRevocations } from "../src/revocations.ts";
 import {
@@ -698,6 +698,48 @@ describe("a built-in connector serving its vendor's MCP server", () => {
         .slice(before)
         .filter(({ url }) => url.startsWith("https://mcp.linear-old.example")),
     }).toStrictEqual({ moved: true, owed: 1, toOld: [] });
+  });
+
+  it("sends a call whose tool was read before its server moved to no server", async () => {
+    await parkEarlierLinears();
+    const anna = someone();
+    const annas = await connectLinear("linear", anna, "personal", linearItself);
+    const connectionOf = async () => {
+      const row = await drizzle(env.DB)
+        .select()
+        .from(connections)
+        .where(eq(connections.id, annas))
+        .get();
+      if (row === undefined) {
+        throw new Error("Expected Anna's connection");
+      }
+      return row;
+    };
+    await currentTools(env, await connectionOf());
+    await madeForAnotherUrl();
+    // Its tool is read while its row names the server it moves from; the
+    // release then moves it, and Anna signs in again, before it is sent.
+    const { open } = await connectorAction(
+      env,
+      await connectionOf(),
+      "list_issues",
+      "read-own"
+    );
+    await startLinear("linear", someone());
+    await connectLinear("linear", anna, "personal", linearItself);
+    const before = sent.length;
+
+    const call = async () => {
+      const server = await open();
+      return await server.call("list_issues", {});
+    };
+
+    expect({
+      called: await outcome(call()),
+      calls: sent
+        .slice(before)
+        .filter(({ headers }) => headers["mcp-method"] === "tools/call"),
+    }).toStrictEqual({ called: "connect.server_unavailable", calls: [] });
   });
 
   it("sends no owed revoke to the server its connector moved to as it was tried", async () => {

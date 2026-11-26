@@ -42,8 +42,10 @@ import {
   connectorRow,
   isDuplicate,
   maxListedTools,
+  sameServer,
   signInRow,
 } from "./connector-providers.ts";
+import type { ConnectorRow } from "./connector-providers.ts";
 import {
   connections,
   connectionTools,
@@ -352,15 +354,21 @@ const toolOf = (listed: ListedServerTool): ConnectorTool | undefined => {
 
 /**
  * A client for `connection`'s server that sends only what `allows` lets
- * through, to the connector's own URL, with the connection's credential.
+ * through, to the connector's own URL, with the connection's credential;
+ * none once its connector moved from `admitted`, the server a call's tool
+ * was read from.
  */
 const serverFor = async (
   env: Env,
   connection: Connection,
-  allows: (method: string, name: string | null) => boolean
+  allows: (method: string, name: string | null) => boolean,
+  admitted?: ConnectorRow
 ) => {
   const row = await connectorRow(env.DB, connection.server);
-  if (row === undefined) {
+  if (
+    row === undefined ||
+    (admitted !== undefined && !sameServer(row, admitted))
+  ) {
     throw connectErrors.create("connect.server_unavailable");
   }
   const { credential, companyNetwork } = await connectorCredentialFor(
@@ -371,12 +379,7 @@ const serverFor = async (
   // and the credential read since be the new server's: it goes only to
   // the server the row still names.
   const still = await connectorRow(env.DB, connection.server);
-  if (
-    still?.url !== row.url ||
-    still.auth !== row.auth ||
-    still.header !== row.header ||
-    still.companyNetwork !== row.companyNetwork
-  ) {
+  if (!sameServer(still, row) || still?.companyNetwork !== row.companyNetwork) {
     throw connectErrors.create("connect.server_unavailable");
   }
   // A server inside the network is never sent to over the internet.
@@ -858,6 +861,12 @@ export const connectorAction = async (
   if (blocked.has(action)) {
     throw connectErrors.create("connect.tool_blocked");
   }
+  // The server its tool is read from, before it is: the call goes to that
+  // server or nowhere, should a release move its connector meanwhile.
+  const admitted = await connectorRow(env.DB, connection.server);
+  if (admitted === undefined) {
+    throw connectErrors.create("connect.server_unavailable");
+  }
   const listed = named(await currentTools(env, connection), action);
   if (listed === undefined) {
     throw connectErrors.create("connect.action_not_found");
@@ -883,7 +892,8 @@ export const connectorAction = async (
       const server = await serverFor(
         env,
         connection,
-        (method, name) => method === "tools/call" && name === callName
+        (method, name) => method === "tools/call" && name === callName,
+        admitted
       );
       return {
         call: async (name, input) => {

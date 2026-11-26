@@ -96,6 +96,15 @@ const serverOf = (row: ConnectorRow): ConnectorServer => ({
   header: row.header,
 });
 
+/** Whether connector row `row` holds `server`: no move came between. */
+export const sameServer = (
+  row: ConnectorRow | undefined,
+  server: ConnectorServer
+): boolean =>
+  row?.url === server.url &&
+  row.auth === server.auth &&
+  row.header === server.header;
+
 /**
  * Whether the connector's row still holds `server`: what was read with a
  * provider read from it is that server's. Always for a provider of no
@@ -104,17 +113,8 @@ const serverOf = (row: ConnectorRow): ConnectorServer => ({
 export const stillServes = async (
   db: D1Database,
   server: ConnectorServer | undefined
-): Promise<boolean> => {
-  if (server === undefined) {
-    return true;
-  }
-  const row = await connectorRow(db, server.id);
-  return (
-    row?.url === server.url &&
-    row.auth === server.auth &&
-    row.header === server.header
-  );
-};
+): Promise<boolean> =>
+  server === undefined || sameServer(await connectorRow(db, server.id), server);
 
 /** That the connector's row still holds `server`, as SQL, for a write. */
 export const serverStands = (server: ConnectorServer): SQL =>
