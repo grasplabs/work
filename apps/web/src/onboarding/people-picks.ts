@@ -1,13 +1,18 @@
-import { onboardingPeopleMax, teamNameKey } from "@grasp-os/shared/onboarding";
+import {
+  leadsOfTeam,
+  onboardingPeopleMax,
+  teamNameKey,
+} from "@grasp-os/shared/onboarding";
 import type { RosterPerson, RosterTeam } from "@grasp-os/shared/onboarding";
 import { z } from "zod";
 
 // Who Stephen talks to, as the admin picks it on the leads step
 // (leads-step.tsx): everyone the directory or a staff list gave, each
-// ticked to take part or not, and one lead marked per team. Kept as core
-// keeps it (a team `off`, a person `away`, a team's `lead`), so nothing
-// new goes to core: a person takes part when their team isn't off and
-// they aren't away. Pure.
+// ticked to take part or not, and the leads marked in each team, as many
+// as it has. Kept as core keeps it (a team `off`, a person `away`, a
+// team's `lead` and `coLeads`): a person takes part when their team isn't
+// off and they aren't away. The first lead marked is the team's `lead`,
+// the others its `coLeads`; the admin sees no difference. Pure.
 
 /** The people and their teams, as the step holds them: empty before anyone is in. */
 export interface Picks {
@@ -22,11 +27,21 @@ export const takesPart = (picks: Picks, person: RosterPerson): boolean =>
   !person.away &&
   picks.teams.some((team) => team.id === person.team && !team.off);
 
-/** Whether `person` leads their team. */
+/** Whether `person` leads their team, first or with others. */
 export const leads = (picks: Picks, person: RosterPerson): boolean =>
   picks.teams.some(
-    (team) => team.id === person.team && team.lead === person.id
+    (team) => team.id === person.team && leadsOfTeam(team).includes(person.id)
   );
+
+/** Everyone who leads in `picks`, by id. */
+export const leadIdsOf = (picks: Picks): Set<string> =>
+  new Set(picks.teams.flatMap((team) => leadsOfTeam(team)));
+
+/** `team` led by `ids`, in that order: the first its `lead`, the rest its `coLeads`. */
+const ledBy = (team: RosterTeam, ids: readonly string[]): RosterTeam => {
+  const [lead = null, ...coLeads] = ids;
+  return { ...team, lead, coLeads };
+};
 
 /**
  * `picks` with the people `ids` taking part (`on`) or not. Each team
@@ -57,9 +72,9 @@ export const withTaking = (
       if (!touched.has(team.id)) {
         return team;
       }
-      const lead =
-        team.lead !== null && taking.has(team.lead) ? team.lead : null;
-      return { ...team, off: !anyIn.has(team.id), lead };
+      // Leads who no longer take part lead no more; the next one leads first.
+      const still = leadsOfTeam(team).filter((id) => taking.has(id));
+      return ledBy({ ...team, off: !anyIn.has(team.id) }, still);
     }),
     people: picks.people.map((person) => {
       if (!touched.has(person.team)) {
@@ -73,8 +88,9 @@ export const withTaking = (
 };
 
 /**
- * `picks` with `id` leading their team (`on`), or no longer. A team has
- * one lead: marking another moves it. A lead takes part.
+ * `picks` with `id` leading their team (`on`), or no longer. A team may
+ * have several leads: marking one adds them, after the ones there are. A
+ * lead takes part.
  */
 export const withLead = (picks: Picks, id: string, on: boolean): Picks => {
   const person = picks.people.find((each) => each.id === id);
@@ -88,10 +104,8 @@ export const withLead = (picks: Picks, id: string, on: boolean): Picks => {
       if (team.id !== person.team) {
         return team;
       }
-      if (on) {
-        return { ...team, lead: id };
-      }
-      return team.lead === id ? { ...team, lead: null } : team;
+      const now = leadsOfTeam(team).filter((each) => each !== id);
+      return ledBy(team, on ? [...now, id] : now);
     }),
   };
 };
@@ -103,7 +117,7 @@ export const countsOf = (
   const taking = picks.people.filter((person) =>
     takesPart(picks, person)
   ).length;
-  const leadIds = new Set(picks.teams.map((team) => team.lead));
+  const leadIds = leadIdsOf(picks);
   return {
     taking,
     leads: picks.people.filter(
@@ -145,9 +159,7 @@ export const teamRowsOf = (
   people: readonly RosterPerson[],
   noTeamId: string,
   /** Who stands first in their team: the leads as the list opened, so marking one moves no row. */
-  first: ReadonlySet<string> = new Set(
-    picks.teams.flatMap(({ lead }) => (lead === null ? [] : [lead]))
-  )
+  first: ReadonlySet<string> = leadIdsOf(picks)
 ): TeamRows[] => {
   const byTeam = new Map<string, RosterPerson[]>();
   for (const person of people) {

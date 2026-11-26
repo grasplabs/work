@@ -229,7 +229,7 @@ const useParts = (data: SetupData): Part[] => {
   });
   const { plan } = data.view;
   const leads = leadsOf(data.view.roster).filter(
-    ({ lead }) => lead !== null
+    ({ leads: named }) => named.length > 0
   ).length;
   const start = plan === null ? null : day.format(dayAt(plan.start));
   const at = plan?.at === undefined ? null : clock.format(new Date(plan.at));
@@ -286,10 +286,13 @@ const useEntryFacts = (data: SetupData): EntryFact[] => {
   for (const { team } of teams.slice(0, most.teams)) {
     facts.push({ kind: "team", text: team });
   }
-  for (const { lead } of teams.slice(0, most.leads)) {
-    if (lead !== null) {
-      facts.push({ kind: "lead", text: lead.split(/\s+/u)[0] ?? lead });
-    }
+  // Each team's first lead before anyone's second, so one big team doesn't fill the glance.
+  const named = [
+    ...teams.flatMap(({ leads }) => leads.slice(0, 1)),
+    ...teams.flatMap(({ leads }) => leads.slice(1)),
+  ];
+  for (const lead of named.slice(0, most.leads)) {
+    facts.push({ kind: "lead", text: lead.split(/\s+/u)[0] ?? lead });
   }
   if (people > 0) {
     facts.push({
