@@ -1,4 +1,5 @@
 import type { ValueDescriptor } from "@grasp-os/runtime/app";
+import { jsonSchemaOf, ruledDeclaration } from "@grasp-os/runtime/connector";
 import type { ToolReach } from "@grasp-os/shared/connect";
 
 import { readSpec } from "./openapi.ts";
@@ -173,6 +174,11 @@ const handlerOf = (operation: SpecOperation, indent: string): string => {
 
 const toolOf = (operation: SpecOperation, reach: ToolReach): string => {
   const indent = "    ";
+  const declared = ruledDeclaration(
+    operation.name,
+    jsonSchemaOf(operation.args),
+    { readOnly: operation.readOnly, reach }
+  );
   const name = json(operation.name);
   let returns = `answers[${name}]`;
   if (operation.page !== undefined) {
@@ -185,8 +191,8 @@ const toolOf = (operation: SpecOperation, reach: ToolReach): string => {
   return [
     `  ${name}: tool({`,
     `${indent}description: ${json(operation.description)},`,
-    `${indent}readOnly: ${String(operation.readOnly)},`,
-    `${indent}reach: ${json(reach)},`,
+    `${indent}readOnly: ${String(declared.readOnly)},`,
+    `${indent}reach: ${json(declared.reach)},`,
     ...(operation.scopes.length === 0
       ? []
       : [`${indent}scopes: ${json(operation.scopes)},`]),
@@ -218,6 +224,8 @@ export interface GenerateOptions {
   /**
    * Whom its tools reach, which no spec says: `others` unless the
    * connector says less, so a tool is never classed below what it may do.
+   * A tool the class rules find reaching others reaches others whatever
+   * this says, and one named for a change is no read.
    */
   readonly reach?: ToolReach;
 }

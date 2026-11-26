@@ -12,6 +12,7 @@ import { log } from "@grasp-os/shared/log";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { z } from "zod";
 
+import { outbound } from "./company-network.ts";
 import { pauseAsked } from "./pause.ts";
 
 // A native connector's only way out. Connect loads each call's connector
@@ -28,8 +29,21 @@ import { pauseAsked } from "./pause.ts";
 // the hosts it may lead to (a download), which the handler follows itself,
 // once, without the token or anything of the connector's request. A
 // response is cut off once its bytes pass a size limit. Raw sockets are
-// refused. Connect's `global_fetch_strictly_public` keeps an allowed name
-// that resolves to a private address from being reached (R9).
+// refused. What keeps an allowed name that resolves to a private address
+// from being reached (R9) is the network the request goes out through:
+// Cloudflare's egress, which doesn't route a Worker's requests to private,
+// loopback or metadata addresses, and on-prem connect's public-only
+// workerd network (GRA-1481). `global_fetch_strictly_public` isn't it: it
+// only sends requests for the Worker's own zone through the front door.
+//
+// A shared connection an admin marked as reached through the company
+// network (company-network.ts, GRA-2327) is the one exception to where a
+// request goes, chosen by connect's props, never by the connector: its
+// connector has one host, and every request for it goes through the
+// company network to the connection's one address, scheme, host and port
+// the address's own, path and query the request's. No redirect is
+// followed there, not a download's either. Plain HTTP goes only there:
+// the connector's own request is HTTPS to its host, as for any other.
 //
 // What the allowlist doesn't constrain: the query string and the body of
 // an allowed request are the connector's own (threat model EG3). Where a
@@ -131,6 +145,11 @@ const egressPropsSchema = z.strictObject({
     header: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
     value: z.string().min(1),
   }),
+  /**
+   * For a shared connection reached through the company network, the one
+   * address its requests go to, as an origin (company-network.ts).
+   */
+  companyNetwork: z.string().min(1).optional(),
   /** When this call's egress closes, in ms since the epoch. */
   expiresAt: z.number().int(),
 });
@@ -333,19 +352,22 @@ export class ConnectorEgress extends WorkerEntrypoint<Env, EgressProps> {
       );
     }
     const call = props.data;
-    const { connector, callId, hosts, credential, expiresAt } = call;
+    const { connector, callId, hosts, credential, companyNetwork, expiresAt } =
+      call;
     const remainingMs = expiresAt - Date.now();
     if (remainingMs <= 0) {
       return refuse(call, "expired", url, method);
     }
     // Exactly one of the connector's hosts, over HTTPS on its own port,
-    // without credentials in the URL.
+    // without credentials in the URL; through the company network, its
+    // only one.
     if (
       url.protocol !== "https:" ||
       url.username !== "" ||
       url.password !== "" ||
       url.port !== "" ||
-      !hosts.includes(url.hostname)
+      !hosts.includes(url.hostname) ||
+      (companyNetwork !== undefined && hosts.length !== 1)
     ) {
       return refuse(call, "host", url, method);
     }
@@ -362,14 +384,19 @@ export class ConnectorEgress extends WorkerEntrypoint<Env, EgressProps> {
     headers.set(credential.header, credential.value);
     let response: Response;
     try {
-      response = await fetch(url, {
-        method,
-        headers,
-        body: request.body,
-        // A redirect could carry the token to another host: never follow.
-        redirect: "manual",
-        signal: AbortSignal.timeout(remainingMs),
-      });
+      response = await outbound(
+        this.env,
+        companyNetwork
+      )(
+        new Request(url, {
+          method,
+          headers,
+          body: request.body,
+          // A redirect could carry the token to another host: never follow.
+          redirect: "manual",
+          signal: AbortSignal.timeout(remainingMs),
+        })
+      );
     } catch {
       log.warn("egress.failed", {
         connector,
@@ -396,7 +423,9 @@ export class ConnectorEgress extends WorkerEntrypoint<Env, EgressProps> {
     // own authority, and isn't the token's audience), and the connector
     // gets only its answer, never the URL. A second redirect is refused
     // below, as any other is.
-    response = await throughDownload(call, route, url, response);
+    if (companyNetwork === undefined) {
+      response = await throughDownload(call, route, url, response);
+    }
     if (ownAnswers.has(response)) {
       return response;
     }

@@ -248,6 +248,8 @@ export const permissionMaxActions = 16;
 const platformBindingNames: ReadonlySet<string> = new Set([
   // One foreground action's invocation (core's src/action-invocation.ts).
   "ACTION_INVOCATIONS",
+  // On-prem, the AI endpoints' network (connect's src/ai-providers.ts).
+  "AI_NETWORK",
   // A workflow run's own App (its server methods), next to its permissions.
   "APP",
   "APP_CALL_TIMEOUT_MS",
@@ -276,6 +278,8 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "CLIENT_ID",
   // The client's clock (core's src/clock.ts).
   "CLOCK",
+  // The route into the company network (connect's src/company-network.ts).
+  "COMPANY_NETWORK",
   "COMPOSIO_API_KEY",
   "CONNECT",
   "DATA_STORES",

@@ -12,7 +12,7 @@ import { z } from "zod";
 
 import type { DedicatedToolName } from "./agent-messages.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
-import type { CodeRuns, CodeStepDetails } from "./agent.ts";
+import type { CodeRunEnd, CodeRuns, CodeStepDetails } from "./agent.ts";
 import { searchBrainFor } from "./brain-search.ts";
 import { codeLimits, describeRun, sourceHash, utf8Bytes } from "./code-mode.ts";
 import type { CodeRunStatus } from "./code-run-statuses.ts";
@@ -81,7 +81,7 @@ const callAs = async (
   // Stopping the turn closes the run at once, as it ends a code run: a
   // call under way is refused as it commits (`admitEffect`), and the
   // guard stops the next one from starting.
-  let closing: Promise<CodeRunStatus> | undefined;
+  let closing: Promise<CodeRunEnd> | undefined;
   const cancel = (): void => {
     closing ??= runs.close(runId, "cancelled");
   };
@@ -94,7 +94,7 @@ const callAs = async (
   let status: CodeRunStatus = "crashed";
   let result: string | undefined;
   let failure: string | undefined;
-  let ended: CodeRunStatus;
+  let end: CodeRunEnd;
   const files: Record<string, string> = {};
   const know: Know = async (path, content) => {
     files[path] = await sha256Hex(content);
@@ -113,8 +113,9 @@ const callAs = async (
     if (signal?.aborted === true) {
       cancel();
     }
-    ended = await (closing ?? runs.close(runId, status));
+    end = await (closing ?? runs.close(runId, status));
   }
+  const { status: ended, readFrom } = end;
   const text =
     ended === "revoked"
       ? describeRun({
@@ -122,12 +123,15 @@ const callAs = async (
           logs: [],
           error: agentErrors.create("agent.run_revoked").message,
         })
-      : describeRun({
-          status: ended,
-          logs: [],
-          ...(result === undefined ? {} : { result }),
-          ...(failure === undefined ? {} : { error: failure }),
-        });
+      : describeRun(
+          {
+            status: ended,
+            logs: [],
+            ...(result === undefined ? {} : { result }),
+            ...(failure === undefined ? {} : { error: failure }),
+          },
+          readFrom
+        );
   const details: ToolStepDetails =
     ended === "completed" && Object.keys(files).length > 0
       ? { status: ended, runId, files }

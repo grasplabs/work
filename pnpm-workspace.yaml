@@ -52,8 +52,13 @@ catalog:
   micromark-extension-gfm: 3.0.0
   remend: 1.5.0
   "@types/mdast": 4.0.4
-  # Reads the built pages for the hashes of their inline code (apps/docs).
+  # Reads the built pages for the hashes of their inline code (apps/docs),
+  # and HTML as a browser does: web pages in core's file extractor, OneNote
+  # pages and Teams messages in the Microsoft 365 connector.
   parse5: 8.1.0
+  # XML 1.0 with namespaces, strictly, as a stream of events, and no DTD
+  # expanded: Word documents' parts in the Microsoft 365 connector.
+  saxes: 6.0.0
   # The chat's agent searches the docs' pages (apps/core), as the docs'
   # own search does (Blume's index is Orama's, this version).
   "@orama/orama": 3.1.18

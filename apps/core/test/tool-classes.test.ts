@@ -8,7 +8,13 @@ import { z } from "zod";
 
 import { nativeToolClasses } from "../src/native-tool-classes.gen.ts";
 import { checkedClassOf } from "../src/tool-classes.ts";
-import { codeResults, codeStep, chatOf, says } from "./agent-chat.ts";
+import {
+  codeResults,
+  codeStep,
+  chatOf,
+  says,
+  withoutMarking,
+} from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { consentCode, graphSentUrl } from "./connect-providers.ts";
@@ -148,7 +154,7 @@ const chatCalling = async (
     answered: async () => {
       await chat.ask("List the mailbox and send Ben the invoice.");
       const [result] = await codeResults(chat.stub, chat.chat.id);
-      return result?.text;
+      return result === undefined ? undefined : withoutMarking(result.text);
     },
   };
 };
@@ -256,7 +262,7 @@ const chatSending = async (
   });
   await chat.ask("Send Ben the invoice.");
   const [result] = await codeResults(chat.stub, chat.chat.id);
-  return result?.text;
+  return result === undefined ? undefined : withoutMarking(result.text);
 };
 
 /** The classes on for everyone until an admin changes them. */

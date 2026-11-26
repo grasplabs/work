@@ -1,3 +1,4 @@
+import { isNeverTool } from "@grasp-os/runtime/connector";
 import { z } from "zod";
 
 /**
@@ -16,12 +17,11 @@ import { z } from "zod";
  *
  * The suggestion is only a start, and never a class: Composio's
  * `readOnlyHint` is best-effort, every CRM record is the company's, and a
- * tool the Never rule refuses (`apps/connect/src/never.ts`) is `never`
+ * tool the Never rule refuses (`isNeverTool`, the runtime's tool-rules.ts) is `never`
  * whatever anyone classes it.
  */
 import { composioClasses } from "../apps/connect/src/composio-classes.ts";
 import type { ComposioClasses } from "../apps/connect/src/composio-classes.ts";
-import { isNeverTool } from "../apps/connect/src/never.ts";
 
 /** One of Composio's tools, as the review reads it. */
 export interface ListedTool {
