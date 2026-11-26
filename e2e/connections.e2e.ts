@@ -227,9 +227,9 @@ test("a person reaches their account on a connector's page while the catalog or 
   const catalogGate = await callGate(slowCatalog, '["connections","catalog"]');
   catalogGate.hold();
   await slowCatalog.goto("/connectors/native:microsoft");
-  // Its name is the catalog's: without it, its ID.
+  // Its name is the catalog's: without it, the one its connections give.
   await expect(
-    slowCatalog.getByRole("heading", { level: 1, name: "microsoft" })
+    slowCatalog.getByRole("heading", { level: 1, name: "Microsoft 365" })
   ).toBeVisible({ timeout: 15_000 });
   await expect(
     slowCatalog.getByText(
@@ -238,7 +238,7 @@ test("a person reaches their account on a connector's page while the catalog or 
   ).toBeVisible();
   await expect(
     rowOf(slowCatalog, mine).getByRole("button", {
-      name: `Disconnect microsoft (${mine.account})`,
+      name: `Disconnect Microsoft 365 (${mine.account})`,
     })
   ).toBeVisible();
   catalogGate.release();

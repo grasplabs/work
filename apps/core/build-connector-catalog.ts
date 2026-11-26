@@ -109,7 +109,11 @@ export const toolClassesOf = (
   manifests: readonly z.infer<typeof connectorManifestSchema>[]
 ): Map<string, Map<string, ToolClass>> => {
   const classes = new Map<string, Map<string, ToolClass>>();
-  for (const { name, provider, actions } of manifests) {
+  // A connector serving its vendor's MCP server isn't native: connect
+  // classes its connections' tools from its server's list, by the rules.
+  for (const { name, provider, actions } of manifests.filter(
+    ({ mcp }) => mcp === undefined
+  )) {
     const tools = classes.get(provider) ?? new Map<string, ToolClass>();
     for (const [tool, action] of Object.entries(actions)) {
       if (tools.has(tool)) {

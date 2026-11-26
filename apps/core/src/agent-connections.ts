@@ -10,6 +10,7 @@ import type {
   PendingReference,
   ToolClass,
 } from "@grasp-os/shared/connect";
+import { isExpectedError } from "@grasp-os/shared/errors";
 import { connectionIdSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
@@ -170,6 +171,75 @@ const callOutcome = (outcome: HeldOutcome): AgentCallOutcome => {
     return { status: outcome.state, output: null, error: outcome.reason };
   }
   return { status: outcome.state, output: null, error: null };
+};
+
+/**
+ * Most characters of what a connection's server said in reporting an
+ * error that reach the model and the person: enough for its reason, never
+ * a flood.
+ */
+const serverWordsMaxChars = 800;
+
+/**
+ * Most UTF-16 units those characters may take: one character can be a
+ * letter with any number of marks on it, so characters alone bound nothing.
+ */
+const serverWordsMaxUnits = serverWordsMaxChars * 4;
+
+const characters = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/**
+ * `text` past {@link serverWordsMaxChars} characters or
+ * {@link serverWordsMaxUnits} units cut, with "…", never inside a
+ * character: read no further than the character after the cut.
+ */
+const cutWords = (text: string): string => {
+  let kept = 0;
+  for (const { index, segment } of characters.segment(text)) {
+    if (
+      kept === serverWordsMaxChars ||
+      index + segment.length > serverWordsMaxUnits
+    ) {
+      return `${text.slice(0, index)}…`;
+    }
+    kept += 1;
+  }
+  return text;
+};
+
+/**
+ * `error` as the chat's code gets it: a tool's own error
+ * (`connect.action_failed`) with what its server said in it, as one
+ * string (a structured error as its JSON), cut, as one string literal:
+ * in its `output`, for code that reads it, and in its message, so the
+ * model can act on the reason and the person reads it where the step
+ * failed; the literal is one line, so where the words end is plain even
+ * with the run's stack after them. The run read them from outside (`call`
+ * records the error's output as read), so the model reads them as
+ * outside data, between the run's own tags (code-mode.ts `describeRun`).
+ * Words that are only blanks go nowhere. Any other error as it is.
+ */
+const withServerWords = (error: unknown): unknown => {
+  const code = connectErrors.codeOf(error);
+  const output = isExpectedError(error) ? error.details?.output : undefined;
+  if (code !== "connect.action_failed" || typeof output !== "string") {
+    return error;
+  }
+  let said: unknown = output;
+  try {
+    said = JSON.parse(output);
+  } catch {
+    // Not JSON: its words as they are, cut like any.
+  }
+  const text = typeof said === "string" ? said : JSON.stringify(said);
+  // Nothing to read in it, so none of it goes on.
+  if (text.trim() === "") {
+    return connectErrors.create(code);
+  }
+  const cut = JSON.stringify(cutWords(text));
+  const marked = connectErrors.create(code, { output: cut });
+  marked.message = `${marked.message} Its server said: ${cut}`;
+  return marked;
 };
 
 /** The ID a held call was answered with (`AgentCallResult.pending`). */
@@ -1104,7 +1174,7 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
         await recordSources(this.env, scope, [connectionId], [read]);
       }
       await recordToolCall(this.env, scope, shown, endedBy(error));
-      throw forSandbox(error);
+      throw forSandbox(withServerWords(error));
     }
     // When the tool answered, before anything else is awaited: what the
     // Brain keeps of it never replaces what a later read kept.

@@ -89,12 +89,27 @@ export const bearer = (accessToken: string): Credential => ({
   value: `Bearer ${accessToken}`,
 });
 
+/**
+ * The row of a connector a provider was read from, as far as a release's
+ * move changes it (connector-providers.ts `prepareBuiltIn`): a token or
+ * key read with the provider is that server's only while the row still
+ * holds this.
+ */
+export interface ConnectorServer {
+  id: string;
+  url: string;
+  auth: string;
+  header: string | null;
+}
+
 /** A provider people connect with the OAuth authorization code flow. */
 export interface OAuthProviderConfig {
   kind: "oauth";
   id: string;
   /** The native connector that carries out the connection's actions. */
   server: string;
+  /** For a connector's MCP server, the row it was read from. */
+  connector?: ConnectorServer;
   /**
    * Whether the flow is pinned to the organization's tenant at the
    * provider (the suites). An app has none: its tenant is always `""`.
@@ -222,6 +237,11 @@ export interface ApiKeyProviderConfig {
   kind: "api_key";
   id: string;
   server: string;
+  /**
+   * For a connector's MCP server, the row it was read from: where
+   * `account` checks a key, and the header the key goes in.
+   */
+  connector?: ConnectorServer;
   /** The key, as a call's requests carry it. */
   credential: (key: string) => Credential;
   /**

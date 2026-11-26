@@ -57,6 +57,7 @@ const connection = (
   id: crypto.randomUUID(),
   source: "native",
   provider,
+  name: provider,
   scope,
   status,
   ownerUserId: scope === "personal" ? "me" : null,

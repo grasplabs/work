@@ -171,7 +171,8 @@ type ConnectToolkitWithKeyRequest = Parameters<
 
 /**
  * What the frontend sends to start: checked here, as it came over the
- * wire. A native suite, or a connector made from a URL by its ID.
+ * wire. A native suite, or a connector: a built-in by its name, or one
+ * made from a URL by its ID.
  */
 const startRequestSchema = z.strictObject({
   provider: z.union([oauthProviderSchema, connectorIdSchema]),
@@ -443,6 +444,22 @@ export const requireOfferedConnection = async (
 };
 
 /**
+ * Refuses `id` unless connect's catalog lists it as a connector, as
+ * `connection.invalid`: a connector's name is shaped as an app's, and
+ * connect keeps records of apps no person starts here.
+ */
+const requireConnector = async (env: Env, id: string): Promise<void> => {
+  try {
+    await env.CONNECT.catalogTools({ source: "connector", id });
+  } catch (error) {
+    if (connectErrors.codeOf(error) === "connect.catalog_entry_not_found") {
+      throw connectionErrors.create("connection.invalid");
+    }
+    throw error;
+  }
+};
+
+/**
  * Refuses to start connecting the entry `source` `id`, as a `scope`
  * connection, while it is hidden, and records the refusal as connect
  * records its own (`provider`, `scope`, `outcome`, `reason`): someone went
@@ -526,6 +543,9 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
     }
     const { provider, scope, returnTo } = parsed.data;
     const suite = oauthProviderSchema.safeParse(provider);
+    if (!suite.success) {
+      await requireConnector(this.#env, provider);
+    }
     await requireOffered(this.#env, person, {
       source: suite.success ? "native" : "connector",
       id: provider,
@@ -787,6 +807,7 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
       throw connectionErrors.create("connection.invalid");
     }
     const { provider, scope, key } = parsed.data;
+    await requireConnector(this.#env, provider);
     await requireOffered(this.#env, person, {
       source: "connector",
       id: provider,

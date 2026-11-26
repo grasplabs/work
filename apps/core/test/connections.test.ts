@@ -103,6 +103,7 @@ describe("connecting an account", () => {
     }).toStrictEqual({ cache: "no-store", referrer: "no-referrer" });
     expect(connection).toMatchObject({
       provider: "microsoft",
+      name: "Microsoft 365",
       scope: "personal",
       status: "active",
       ownerUserId: anna.userId,
@@ -413,6 +414,18 @@ describe("the catalog", () => {
         auth: "managed",
       },
       {
+        entry: "connector:linear",
+        description: null,
+        group: "Other",
+        auth: "managed",
+      },
+      {
+        entry: "connector:notion",
+        description: null,
+        group: "Other",
+        auth: "managed",
+      },
+      {
         entry: "composio:hubspot",
         description:
           "HubSpot is a CRM platform for marketing, sales and service.",
@@ -652,11 +665,19 @@ describe("offering catalog entries", () => {
       admin: [
         "microsoft:true",
         "google:false",
+        "linear:true",
+        "notion:true",
         "hubspot:false",
         "acme_erp:true",
         "acme_crm:true",
       ],
-      anna: ["native:microsoft", "composio:acme_erp", "composio:acme_crm"],
+      anna: [
+        "native:microsoft",
+        "connector:linear",
+        "connector:notion",
+        "composio:acme_erp",
+        "composio:acme_crm",
+      ],
     });
     const refused = await auditedDuring(async () => {
       await expect(
@@ -748,6 +769,8 @@ describe("offering catalog entries", () => {
     await expect(listed(anna.connections)).resolves.toStrictEqual([
       "native:microsoft",
       "native:google",
+      "connector:linear",
+      "connector:notion",
       "composio:hubspot",
       "composio:acme_erp",
       "composio:acme_crm",

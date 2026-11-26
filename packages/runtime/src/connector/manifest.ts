@@ -1,6 +1,9 @@
 import { auditIdentifierMaxLength } from "@grasp-os/shared/audit";
 import {
+  appProviderSchema,
+  connectorKeyHeaderSchema,
   connectorProviderSchema,
+  connectorUrlMaxLength,
   oauthProviderSchema,
   toolReachSchema,
 } from "@grasp-os/shared/connect";
@@ -290,9 +293,43 @@ export const syncParamsSchema = z.strictObject({
 });
 export type SyncParams = z.infer<typeof syncParamsSchema>;
 
+/**
+ * The vendor's own MCP server a connector serves (`defineConnector`'s
+ * `mcp`): its URL, https and as the URL parser writes it, with no
+ * credentials, query or fragment; and how Grasp gets a client there.
+ * `dcr`: the server registers it (RFC 7591, or a client metadata
+ * document). `{ header }`: each person's key goes in that header.
+ */
+export const mcpManifestSchema = z.strictObject({
+  url: z
+    .url({ protocol: /^https$/u })
+    .max(connectorUrlMaxLength)
+    .refine((url) => {
+      const parsed = new URL(url);
+      return (
+        parsed.href === url &&
+        parsed.username === "" &&
+        parsed.password === "" &&
+        parsed.search === "" &&
+        parsed.hash === ""
+      );
+    }, "Not a server URL: https, as the URL parser writes it, without credentials, query or fragment"),
+  registration: z.union([
+    z.literal("dcr"),
+    z.strictObject({ header: connectorKeyHeaderSchema }),
+  ]),
+});
+export type McpManifest = z.output<typeof mcpManifestSchema>;
+export type McpManifestInput = z.input<typeof mcpManifestSchema>;
+
 export const connectorManifestSchema = z
   .strictObject({
     name: connectorNameSchema,
+    /**
+     * Its vendor's name, as people read it (`Tracker`): what the catalog
+     * shows of a connector without a provider record to name it.
+     */
+    title: z.string().min(1).max(80).optional(),
     /**
      * Whose token or key a call gets: a connection with this provider's.
      * A suite (`microsoft`, `google`) or an app with its own record.
@@ -306,8 +343,18 @@ export const connectorManifestSchema = z
     signIn: signInSchema.optional(),
     /** The OAuth scopes its actions need, all among those connect asks for. */
     scopes: z.array(z.string().min(1).max(256)).max(64),
-    /** Every host it may reach, exactly. */
-    hosts: z.array(hostSchema).min(1).max(maxHosts),
+    /**
+     * Every host it may reach, exactly: at least one, but none for a
+     * connector that serves its vendor's MCP server (`mcp`).
+     */
+    hosts: z.array(hostSchema).max(maxHosts),
+    /**
+     * The vendor's own MCP server it serves: its tools are the server's,
+     * as `tools/list` names them, and connect signs in there as the
+     * server says (RFC 9728 and 8414) or with a person's key. Such a
+     * connector has no hosts, sign-in, scopes, actions or syncs of its own.
+     */
+    mcp: mcpManifestSchema.optional(),
     /** Each action (tool) by name, and the only requests it may send. */
     actions: z.record(permissionActionSchema, actionManifestSchema),
     /**
@@ -317,9 +364,31 @@ export const connectorManifestSchema = z
     syncs: z.record(syncNameSchema, syncManifestSchema).optional(),
   })
   .refine(
-    ({ provider, signIn }) =>
-      signIn !== undefined || oauthProviderSchema.safeParse(provider).success,
-    "An app's connector carries its provider record"
+    ({ mcp, hosts }) => mcp !== undefined || hosts.length > 0,
+    "A connector reaches at least one host, or serves an MCP server"
+  )
+  .refine(
+    ({ name, title, provider, signIn, mcp }) =>
+      mcp === undefined
+        ? signIn !== undefined ||
+          oauthProviderSchema.safeParse(provider).success
+        : provider === name &&
+          appProviderSchema.safeParse(name).success &&
+          signIn === undefined &&
+          title !== undefined,
+    // An MCP server's sign-in is its own, learned from it: the connection
+    // is to the connector, by its name, which is never a suite's or
+    // another reserved provider's.
+    "An app's connector carries its provider record, and one serving an MCP server none, as its own provider by an app's name, with its title"
+  )
+  .refine(
+    ({ mcp, hosts, scopes, actions, syncs = {} }) =>
+      mcp === undefined ||
+      (hosts.length === 0 &&
+        scopes.length === 0 &&
+        Object.keys(actions).length === 0 &&
+        Object.keys(syncs).length === 0),
+    "A connector serving an MCP server has no hosts, scopes, actions or syncs of its own"
   )
   .refine(
     ({ signIn, scopes }) =>
@@ -423,6 +492,60 @@ export const connectorManifestSchema = z
     }
   });
 export type ConnectorManifest = z.infer<typeof connectorManifestSchema>;
+
+/**
+ * The connectors among `manifests` that serve an MCP server under a name
+ * another connector has as its provider: a connection to one, by its
+ * name, would be taken for a connection to that provider. A release holds
+ * none (connect's build.ts).
+ */
+export const shadowingConnectors = (
+  manifests: readonly ConnectorManifest[]
+): string[] =>
+  manifests
+    .filter(
+      ({ name, mcp }) =>
+        mcp !== undefined &&
+        manifests.some(
+          (other) => other.name !== name && other.provider === name
+        )
+    )
+    .map(({ name }) => name);
+
+/**
+ * An MCP server's URL as compared: its origin, which the parser lowercases,
+ * and its path without a trailing slash. Two connectors at one server are
+ * one: a release holds no two (connect's build.ts), and a URL a built-in
+ * serves can't be added again (connect's `builtInAt`).
+ */
+export const mcpServerKey = (url: string): string => {
+  const { origin, pathname } = new URL(url);
+  return `${origin}${pathname.replace(/\/+$/u, "")}`;
+};
+
+/**
+ * The connectors among `manifests` that serve an MCP server one before
+ * them serves (`mcpServerKey`), each named after that one: a connection
+ * to a server is to one built-in. A release holds none (connect's
+ * build.ts).
+ */
+export const sharedMcpServers = (
+  manifests: readonly ConnectorManifest[]
+): [string, string][] => {
+  const servers = new Map<string, string>();
+  return manifests.flatMap(({ name, mcp }): [string, string][] => {
+    if (mcp === undefined) {
+      return [];
+    }
+    const server = mcpServerKey(mcp.url);
+    const first = servers.get(server);
+    if (first !== undefined) {
+      return [[first, name]];
+    }
+    servers.set(server, name);
+    return [];
+  });
+};
 
 /** One action of a generated connector contract, and the tool it calls. */
 export interface ContractAction {

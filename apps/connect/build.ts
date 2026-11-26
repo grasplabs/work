@@ -19,7 +19,11 @@ import { pathToFileURL } from "node:url";
 import { checkMirror } from "@grasp-os/compiler/mirror";
 import { readSpec } from "@grasp-os/compiler/openapi";
 import type { Spec } from "@grasp-os/compiler/openapi";
-import { connectorManifestSchema } from "@grasp-os/runtime/connector";
+import {
+  connectorManifestSchema,
+  shadowingConnectors,
+  sharedMcpServers,
+} from "@grasp-os/runtime/connector";
 import type {
   ConnectorDeclaration,
   ConnectorManifest,
@@ -85,7 +89,9 @@ const moduleSchema = z.object({
  */
 const specBeside = async (
   entry: string,
-  openapi: NonNullable<ConnectorDeclaration["openapi"]>
+  openapi: NonNullable<
+    Extract<ConnectorDeclaration, { tools: unknown }>["openapi"]
+  >
 ): Promise<Spec> => {
   const file = ["openapi.yaml", "openapi.json"]
     .map((name) => path.join(path.dirname(entry), name))
@@ -112,7 +118,7 @@ const specBeside = async (
  */
 const checkMirrorOf = async (
   entry: string,
-  declaration: ConnectorDeclaration
+  declaration: Extract<ConnectorDeclaration, { tools: unknown }>
 ): Promise<void> => {
   const spec =
     declaration.openapi === undefined
@@ -328,8 +334,11 @@ export const buildConnectors = async (
     const manifest = connectorManifestSchema.parse(loaded.default.manifest);
     const { declaration } = loaded.default;
     if (declaration !== undefined) {
-      // oxlint-disable-next-line no-await-in-loop -- one connector at a time
-      await checkMirrorOf(entry, declaration);
+      // One serving its vendor's MCP server has no tools of its own.
+      if (declaration.mcp === undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- one connector at a time
+        await checkMirrorOf(entry, declaration);
+      }
     } else if (!oldKit.some((each) => isWithin(each, entry))) {
       throw new Error(
         `${entry} exports no connector made with defineConnector from ${sdkConnector}`
@@ -351,6 +360,18 @@ export const buildConnectors = async (
     }
     // oxlint-disable-next-line no-await-in-loop -- one connector at a time
     connectors.push({ manifest, code: await bundle(entry) });
+  }
+  const [shadowing] = shadowingConnectors(
+    connectors.map(({ manifest }) => manifest)
+  );
+  if (shadowing !== undefined) {
+    throw new Error(
+      `${shadowing} serves an MCP server under another connector's provider`
+    );
+  }
+  const [shared] = sharedMcpServers(connectors.map(({ manifest }) => manifest));
+  if (shared !== undefined) {
+    throw new Error(`${shared.join(" and ")} serve one MCP server`);
   }
   mkdirSync(path.dirname(outFile), { recursive: true });
   writeFileSync(outFile, `export default ${JSON.stringify(connectors)};\n`);

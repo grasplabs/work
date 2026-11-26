@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { connections } from "../src/db/schema.ts";
 import { currentTools } from "../src/mcp-connectors.ts";
 import { appFor, auditEvents, callAs, outcome, someone } from "./connect.ts";
-import { linearOrigin } from "./linear-mcp-fake.ts";
+import { linearCopyOrigin } from "./linear-mcp-fake.ts";
 import type { LinearTool } from "./linear-mcp-fake.ts";
 import {
   addLinear,
@@ -89,7 +89,7 @@ const twoReadsAtOnce = async (connectionId: string) => {
     const request = new Request(input, init);
     const { origin } = new URL(request.url);
     const rpc =
-      origin === linearOrigin && request.method === "POST"
+      origin === linearCopyOrigin && request.method === "POST"
         ? await rpcOf(request)
         : undefined;
     if (serve === undefined) {
@@ -234,7 +234,7 @@ describe("a connector's tool list", () => {
       const request = new Request(input, init);
       const { origin } = new URL(request.url);
       const rpc =
-        origin === linearOrigin && request.method === "POST"
+        origin === linearCopyOrigin && request.method === "POST"
           ? await rpcOf(request)
           : undefined;
       // The admin blocks it while connect waits for the list.
@@ -290,7 +290,7 @@ describe("a connector's tool list", () => {
       const request = new Request(input, init);
       const { origin } = new URL(request.url);
       const rpc =
-        origin === linearOrigin && request.method === "POST"
+        origin === linearCopyOrigin && request.method === "POST"
           ? await rpcOf(request)
           : undefined;
       // The admin blocks it after connect checked it first, while its
@@ -512,7 +512,7 @@ describe("a connector's catalog entry", () => {
     const { entries } = await exports.default.catalog();
 
     expect(entries.find(({ id }) => id === connector)?.signInHost).toBe(
-      "mcp.linear.app"
+      "mcp.linear-copy.example"
     );
   });
 });
