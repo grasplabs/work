@@ -194,6 +194,9 @@ const openChat = async (
     codeTimeoutMs: 10_000,
     history: [],
     withheld: async () => await Promise.resolve(revoked),
+    asking: () => {
+      // pi's retry isn't what these tests are about.
+    },
     stop: (reason) => {
       stopped.push(reason);
     },
@@ -757,6 +760,9 @@ describe("what a chat can no longer read", () => {
   it("fails closed: when it can't tell what is withheld, it sends none of what the chat read, and the turn stops", async () => {
     let failing = false;
     const chat = await openChat({
+      asking: () => {
+        // pi's retry isn't what these tests are about.
+      },
       withheld: async () => {
         if (failing) {
           throw new Error("revocations unreadable");
@@ -880,6 +886,9 @@ describe("a restart", () => {
     const revoked = new Set<string>();
     const chat = await openChat({
       withheld: async () => await Promise.resolve(revoked),
+      asking: () => {
+        // pi's retry isn't what these tests are about.
+      },
       runs: {
         open: async () => await Promise.resolve("run-1"),
         close: async (_runId, status) =>

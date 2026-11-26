@@ -7,16 +7,17 @@ packages:
 # blocked, and only the packages listed here may run install scripts.
 minimumReleaseAge: 4320
 # Pi 1.6.1 (25 November 2026) before its three days, approved by the owner
-# for the Pi upgrade: these packages alone, each published by Pi's release
-# workflow with provenance and no install scripts. Remove after 28 November
-# 2026, when 1.6.1 is three days old.
+# for the Pi upgrade: these packages alone, at this version alone, each
+# published by Pi's release workflow with provenance and no install scripts.
+# Removed (#2781) after 28 November 2026, 13:37 UTC, when 1.6.1 is three
+# days old.
 minimumReleaseAgeExclude:
-  - "@earendil-works/chord"
-  - "@earendil-works/pi-ai"
-  - "@earendil-works/pi-codemode"
-  - "@earendil-works/pi-durable"
-  - "@earendil-works/pi-schema"
-  - "@earendil-works/pi-telemetry"
+  - "@earendil-works/chord@1.6.1"
+  - "@earendil-works/pi-ai@1.6.1"
+  - "@earendil-works/pi-codemode@1.6.1"
+  - "@earendil-works/pi-durable@1.6.1"
+  - "@earendil-works/pi-schema@1.6.1"
+  - "@earendil-works/pi-telemetry@1.6.1"
 blockExoticSubdeps: true
 strictDepBuilds: true
 allowBuilds:
