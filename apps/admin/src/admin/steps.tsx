@@ -1,5 +1,4 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Progress } from "@grasp-os/app-kit/components/progress";
+import { VISION_FIELDS } from "@grasp-os/shared/admin/interviews";
 /**
  * One organization's onboarding, step by step, ported from the prototype
  * (grasplabs/prototype `components/admin/org-steps.tsx` and the
@@ -20,9 +19,6 @@ import { Progress } from "@grasp-os/app-kit/components/progress";
  * said is shown: not the first conversation, not what the research
  * found, only what the model counts.
  */
-import { Stat } from "@grasp-os/app-kit/components/stat";
-import { cn } from "@grasp-os/app-kit/lib/utils";
-import { VISION_FIELDS } from "@grasp-os/shared/admin/interviews";
 import {
   dateOn,
   mayInvite,
@@ -35,33 +31,307 @@ import type {
   StageStatus,
 } from "@grasp-os/shared/admin/onboarding-admin";
 import type { OnboardingFlow } from "@grasp-os/shared/onboarding-flow";
-import { Link } from "@tanstack/react-router";
+import { Button } from "@grasp-os/ui/components/button";
+import { Card, CardContent } from "@grasp-os/ui/components/card";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemGroup,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { Progress } from "@grasp-os/ui/components/progress";
+import { Stat } from "@grasp-os/ui/components/stat";
+import { Text } from "@grasp-os/ui/components/text";
 import {
   ArrowRightIcon,
   ArrowUpRightIcon,
-  BriefcaseIcon,
-  Building2Icon,
+  BuildingIcon,
   CheckIcon,
-  CircleDotIcon,
   CircleIcon,
+  ClockIcon,
+  FileDocIcon,
+  FolderIcon,
   GlobeIcon,
-  HourglassIcon,
-  LibraryIcon,
-  MessageSquareTextIcon,
-  NewspaperIcon,
+  Icon,
+  MessageSquareIcon,
   ScaleIcon,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+  UsersIcon,
+} from "@grasp-os/ui/lib/icons";
+import type { IconData } from "@grasp-os/ui/lib/icons";
+import { focusRingInset, visuallyHidden } from "@grasp-os/ui/lib/styles";
+import {
+  colors,
+  font,
+  media,
+  radius,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
+import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import { GateControls } from "./commands.tsx";
 import type { GateState } from "./commands.tsx";
 import { opensElsewhere, stageShown, stagesIn } from "./flow-stages.ts";
 import { Kickoff, visionWords } from "./kickoff.tsx";
+import { Panel, PanelNote } from "./panel.tsx";
 import { Attention, Done, KnowledgeDots } from "./parts.tsx";
-import { Section, SectionRow } from "./section.tsx";
 import { sectionTo } from "./sections.ts";
 import { formatDate, stageWords } from "./words.ts";
+
+const hairline = `${size.hairline} solid ${colors.border}`;
+
+const styles = stylex.create({
+  mark: { display: "inline-flex", flexShrink: 0 },
+  done: { color: colors.success },
+  later: { color: colors.border },
+  waits: { color: colors.warning },
+  // The steps: one under another, and side by side from a desktop's width.
+  steps: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  // A hairline between the steps: under each, and beside each from a desktop's width.
+  step: {
+    borderColor: colors.border,
+    borderStyle: "solid",
+    borderWidth: 0,
+    borderBlockEndWidth: {
+      default: size.hairline,
+      ":last-child": 0,
+      [media.lg]: 0,
+    },
+    borderInlineEndWidth: {
+      default: 0,
+      [media.lg]: { default: size.hairline, ":last-child": 0 },
+    },
+  },
+  stepLink: {
+    position: "relative",
+    display: "flex",
+    flexDirection: { default: "row", [media.lg]: "column" },
+    alignItems: { default: "center", [media.lg]: "flex-start" },
+    gap: { default: space["3"], [media.lg]: space["2"] },
+    boxSizing: "border-box",
+    width: "100%",
+    height: "100%",
+    paddingBlock: { default: space["3"], [media.lg]: space["4"] },
+    paddingInline: { default: space["5"], [media.lg]: space["4"] },
+    color: colors.foreground,
+    fontFamily: font.sans,
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+    textAlign: "start",
+    textDecoration: "none",
+    outline: "none",
+    backgroundColor: { default: null, ":hover": colors.muted },
+  },
+  // The open step, as a chosen tab is marked: its ground and a bar on its edge.
+  open: {
+    backgroundColor: colors.muted,
+    "::after": {
+      content: '""',
+      position: "absolute",
+      insetBlock: { default: 0, [media.lg]: "auto 0" },
+      insetInlineStart: 0,
+      insetInlineEnd: { default: "auto", [media.lg]: 0 },
+      width: { default: "2px", [media.lg]: "auto" },
+      height: { default: "auto", [media.lg]: "2px" },
+      backgroundColor: colors.foreground,
+    },
+  },
+  stepName: {
+    minWidth: 0,
+    flexGrow: { default: 1, [media.lg]: 0 },
+    fontWeight: font.weightMedium,
+  },
+  leaves: {
+    display: "inline-flex",
+    flexShrink: 0,
+    color: colors.mutedForeground,
+    position: { default: "static", [media.lg]: "absolute" },
+    insetBlockStart: { default: null, [media.lg]: space["4"] },
+    insetInlineEnd: { default: null, [media.lg]: space["4"] },
+  },
+  // What the first conversation brought.
+  brought: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: space["3"],
+  },
+  count: {
+    display: "flex",
+    width: "100%",
+    flexDirection: "column",
+    gap: space["2"],
+  },
+  figures: { fontVariantNumeric: "tabular-nums" },
+  things: {
+    display: "grid",
+    width: "100%",
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      [media.sm]: "repeat(2, minmax(0, 1fr))",
+    },
+    gap: space["2"],
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  thing: {
+    padding: space["3"],
+    borderRadius: radius.lg,
+    border: hairline,
+  },
+  missing: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["1"],
+    padding: space["3"],
+    borderRadius: radius.lg,
+    borderWidth: size.hairline,
+    borderStyle: "dashed",
+    borderColor: colors.warning,
+  },
+  missingWords: { color: colors.warning },
+  // The research: each place a cell, a hairline between them.
+  places: {
+    display: "grid",
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      [media.md]: "repeat(2, minmax(0, 1fr))",
+      [media.xl]: "repeat(3, minmax(0, 1fr))",
+    },
+    gap: size.hairline,
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+    backgroundColor: colors.border,
+  },
+  place: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["2"],
+    padding: space["5"],
+    backgroundColor: colors.card,
+  },
+  library: { gridColumn: "1 / -1" },
+  placeName: {
+    display: "flex",
+    alignItems: "center",
+    gap: space["2"],
+    fontWeight: font.weightMedium,
+  },
+  quiet: {
+    display: "inline-flex",
+    flexShrink: 0,
+    color: colors.mutedForeground,
+  },
+  // Grasp opens: the figure and the go side by side, then where its go stands.
+  opens: { display: "flex", flexDirection: "column", gap: space["5"] },
+  figureRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    columnGap: space["8"],
+    rowGap: space["4"],
+  },
+  figure: {
+    display: "flex",
+    minWidth: 0,
+    flexDirection: "column",
+    gap: space["3"],
+  },
+  fills: { margin: 0, padding: 0, listStyle: "none" },
+  fill: {
+    display: "grid",
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      [media.sm]: "minmax(0, 1fr) minmax(0, 14rem) 4.5rem",
+    },
+    alignItems: "center",
+    columnGap: space["6"],
+    rowGap: space["1"],
+    paddingBlock: space["2"],
+    paddingInline: space["5"],
+    borderBlockStart: hairline,
+  },
+  points: {
+    color: colors.mutedForeground,
+    fontVariantNumeric: "tabular-nums",
+    textAlign: { default: "start", [media.sm]: "end" },
+  },
+  more: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: space["3"],
+  },
+});
+
+/** How many columns the steps take when wide, by how many the flow has: a style each. */
+const stageColumns = stylex.create({
+  c1: {
+    gridTemplateColumns: {
+      default: null,
+      [media.lg]: "repeat(1, minmax(0, 1fr))",
+    },
+  },
+  c2: {
+    gridTemplateColumns: {
+      default: null,
+      [media.lg]: "repeat(2, minmax(0, 1fr))",
+    },
+  },
+  c3: {
+    gridTemplateColumns: {
+      default: null,
+      [media.lg]: "repeat(3, minmax(0, 1fr))",
+    },
+  },
+  c4: {
+    gridTemplateColumns: {
+      default: null,
+      [media.lg]: "repeat(4, minmax(0, 1fr))",
+    },
+  },
+  c5: {
+    gridTemplateColumns: {
+      default: null,
+      [media.lg]: "repeat(5, minmax(0, 1fr))",
+    },
+  },
+  c6: {
+    gridTemplateColumns: {
+      default: null,
+      [media.lg]: "repeat(6, minmax(0, 1fr))",
+    },
+  },
+  c7: {
+    gridTemplateColumns: {
+      default: null,
+      [media.lg]: "repeat(7, minmax(0, 1fr))",
+    },
+  },
+});
+const columnsOf: readonly (stylex.StyleXStyles | null)[] = [
+  null,
+  stageColumns.c1,
+  stageColumns.c2,
+  stageColumns.c3,
+  stageColumns.c4,
+  stageColumns.c5,
+  stageColumns.c6,
+  stageColumns.c7,
+];
 
 /** `count` and the thing it counts: one for one, many for the rest. */
 const counted = (count: number, one: string, other: string): string =>
@@ -79,52 +349,34 @@ const statusWords: Record<StageStatus, string> = {
   later: "Later",
 };
 
-const StageMark = ({ status }: { status: StageStatus }) => {
-  if (status === "done") {
-    return (
-      <CheckIcon aria-hidden className="text-status-agreed size-4 flex-none" />
-    );
-  }
-  if (status === "now") {
-    return <CircleDotIcon aria-hidden className="size-4 flex-none" />;
-  }
-  if (status === "waits") {
-    return (
-      <HourglassIcon
-        aria-hidden
-        className="text-status-attention size-4 flex-none"
-      />
-    );
-  }
-  return <CircleIcon aria-hidden className="text-border size-4 flex-none" />;
+/** Each step's mark, by where it stands. */
+const stageMarks: Record<
+  StageStatus,
+  { icon: IconData; tone?: stylex.StyleXStyles }
+> = {
+  done: { icon: CheckIcon, tone: styles.done },
+  now: { icon: CircleIcon },
+  waits: { icon: ClockIcon, tone: styles.waits },
+  later: { icon: CircleIcon, tone: styles.later },
 };
+
+const StageMark = ({ status }: { status: StageStatus }) => (
+  <span aria-hidden {...stylex.props(styles.mark, stageMarks[status].tone)}>
+    <Icon icon={stageMarks[status].icon} />
+  </span>
+);
 
 /**
  * Where something the prototype does here would be: not in the admin
  * yet, for it writes to the company's Grasp.
  */
 const NotHere = ({ children }: { children: ReactNode }) => (
-  <p
-    className="text-muted-foreground border-t px-5 py-3 text-xs"
-    data-slot="not-in-admin"
-  >
-    {children}
-  </p>
+  <CardContent>
+    <Text color="muted" size="xs">
+      {children}
+    </Text>
+  </CardContent>
 );
-
-/** How many columns the steps take when wide, by how many the flow has: a class each, as a class is never built from a number. */
-const stageColumns: Record<number, string> = {
-  1: "lg:grid-cols-1",
-  2: "lg:grid-cols-2",
-  3: "lg:grid-cols-3",
-  4: "lg:grid-cols-4",
-  5: "lg:grid-cols-5",
-  6: "lg:grid-cols-6",
-  7: "lg:grid-cols-7",
-};
-
-const stageLinkClass =
-  "hover:bg-muted/50 focus-visible:ring-ring/50 relative flex h-full w-full items-center gap-3 px-5 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-inset lg:flex-col lg:items-start lg:gap-2 lg:px-4 lg:py-4";
 
 /** A step's mark and name, with where it stands said to a screen reader. */
 const StageName = ({
@@ -139,16 +391,15 @@ const StageName = ({
 }) => (
   <>
     <StageMark status={status} />
-    <span className="min-w-0 flex-1 font-medium lg:flex-none">
+    <span {...stylex.props(styles.stepName)}>
       {stageWords[stage]}
-      <span className="sr-only">: {statusWords[status]}</span>
+      <span {...stylex.props(visuallyHidden)}>: {statusWords[status]}</span>
     </span>
     {/* In the same corner of every step that leads elsewhere, so the names line up whether or not one does. */}
     {leaves ? (
-      <ArrowUpRightIcon
-        aria-hidden
-        className="text-muted-foreground size-3.5 flex-none lg:absolute lg:top-4 lg:right-4"
-      />
+      <span aria-hidden {...stylex.props(styles.leaves)}>
+        <Icon icon={ArrowUpRightIcon} />
+      </span>
     ) : null}
   </>
 );
@@ -166,10 +417,10 @@ const StageElsewhere = ({
   const { section, search } = opensElsewhere[stage];
   return (
     <Link
-      className={stageLinkClass}
       params={{ clientId }}
       search={search}
       to={sectionTo[section]}
+      {...stylex.props(styles.stepLink, focusRingInset)}
     >
       <StageName leaves stage={stage} status={status} />
     </Link>
@@ -189,49 +440,45 @@ const StageList = ({
   shown: readonly Stage[];
   clientId: string;
 }) => (
-  <nav
-    aria-label="The steps of this onboarding"
-    className="bg-card overflow-hidden rounded-xl border"
-  >
-    <ol className={cn("grid", stageColumns[shown.length])}>
-      {shown.map((each) => {
-        const open = each === stage;
-        const status = view.stages[each];
-        return (
-          <li
-            className="border-b last:border-b-0 lg:border-r lg:border-b-0 lg:last:border-r-0"
-            key={each}
-          >
-            {each in opensElsewhere ? (
-              <StageElsewhere
-                clientId={clientId}
-                // SAFETY: just checked to be one of its keys.
-                // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-                stage={each as keyof typeof opensElsewhere}
-                status={status}
-              />
-            ) : (
-              <Link
-                // The router marks the link the page is on itself, as the page.
-                activeOptions={{ exact: true }}
-                aria-current={open ? "page" : undefined}
-                className={cn(
-                  stageLinkClass,
-                  open &&
-                    "bg-muted/50 after:bg-foreground after:absolute after:inset-y-0 after:left-0 after:w-0.5 lg:after:inset-x-0 lg:after:top-auto lg:after:bottom-0 lg:after:h-0.5 lg:after:w-auto"
-                )}
-                params={{ clientId }}
-                search={{ stage: each }}
-                to={sectionTo.steps}
-              >
-                <StageName stage={each} status={status} />
-              </Link>
-            )}
-          </li>
-        );
-      })}
-    </ol>
-  </nav>
+  <Card asChild padding="none">
+    <nav aria-label="The steps of this onboarding">
+      <ol {...stylex.props(styles.steps, columnsOf[shown.length])}>
+        {shown.map((each) => {
+          const open = each === stage;
+          const status = view.stages[each];
+          return (
+            <li key={each} {...stylex.props(styles.step)}>
+              {each in opensElsewhere ? (
+                <StageElsewhere
+                  clientId={clientId}
+                  // SAFETY: just checked to be one of its keys.
+                  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+                  stage={each as keyof typeof opensElsewhere}
+                  status={status}
+                />
+              ) : (
+                <Link
+                  // The router marks the link the page is on itself, as the page.
+                  activeOptions={{ exact: true }}
+                  aria-current={open ? "page" : undefined}
+                  params={{ clientId }}
+                  search={{ stage: each }}
+                  to={sectionTo.steps}
+                  {...stylex.props(
+                    styles.stepLink,
+                    focusRingInset,
+                    open && styles.open
+                  )}
+                >
+                  <StageName stage={each} status={status} />
+                </Link>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
+  </Card>
 );
 
 /**
@@ -242,37 +489,38 @@ const Brought = ({ view }: { view: OrgView }) => {
   const { vision } = view;
   if (vision === null) {
     return (
-      <p className="text-muted-foreground">
+      <Text color="muted" size="sm">
         Stephen has read it. What it brought stays in the company’s own Grasp.
-      </p>
+      </Text>
     );
   }
   const inNow = VISION_FIELDS.filter((field) => vision.fields[field]).length;
   return (
     <>
-      <div className="flex w-full flex-col gap-2">
-        <span className="text-muted-foreground tabular-nums">
-          {inNow} of {VISION_FIELDS.length} in
+      <div {...stylex.props(styles.count)}>
+        <span {...stylex.props(styles.figures)}>
+          <Text color="muted" size="sm">
+            {inNow} of {VISION_FIELDS.length} in
+          </Text>
         </span>
         <Progress
           aria-label="What it brought"
           value={(inNow / VISION_FIELDS.length) * 100}
         />
       </div>
-      <ul className="grid w-full gap-2 sm:grid-cols-2">
+      <ul {...stylex.props(styles.things)}>
         {VISION_FIELDS.map((field) =>
           vision.fields[field] ? (
-            <li className="rounded-lg border p-3" key={field}>
+            <li key={field} {...stylex.props(styles.thing)}>
               <Done>{visionWords[field]}</Done>
             </li>
           ) : (
-            <li
-              className="border-status-attention/60 flex flex-col gap-0.5 rounded-lg border border-dashed p-3"
-              key={field}
-            >
-              <span className="font-medium">{visionWords[field]}</span>
-              <span className="text-status-attention">
-                Missing: ask the sponsor
+            <li key={field} {...stylex.props(styles.missing)}>
+              <Text size="sm" weight="medium">
+                {visionWords[field]}
+              </Text>
+              <span {...stylex.props(styles.missingWords)}>
+                <Text size="sm">Missing: ask the sponsor</Text>
               </span>
             </li>
           )
@@ -296,32 +544,36 @@ const Conversation = ({
 }) => {
   const { conversation } = view.state;
   return (
-    <Section title="The first conversation">
-      <div className="flex flex-col items-start gap-3 border-t px-5 py-4">
-        <span className="font-medium">What it brought</span>
-        {conversation === "read" ? (
-          <Brought view={view} />
-        ) : (
-          <p className="text-muted-foreground">
-            {conversation === "in"
-              ? "Stephen has not read this transcript yet."
-              : "Once the transcript is in, Stephen reads it for the ten things he needs before his first interview."}
-          </p>
-        )}
-      </div>
+    <Panel title="The first conversation">
+      <CardContent>
+        <div {...stylex.props(styles.brought)}>
+          <Text size="sm" weight="medium">
+            What it brought
+          </Text>
+          {conversation === "read" ? (
+            <Brought view={view} />
+          ) : (
+            <Text color="muted" size="sm">
+              {conversation === "in"
+                ? "Stephen has not read this transcript yet."
+                : "Once the transcript is in, Stephen reads it for the ten things he needs before his first interview."}
+            </Text>
+          )}
+        </div>
+      </CardContent>
       {/* Keyed by the company: another's drafts and answers never carry over. */}
       <Kickoff clientId={clientId} key={clientId} />
-    </Section>
+    </Panel>
   );
 };
 
-const sourceIcons: Record<ResearchSource, LucideIcon> = {
-  register: Building2Icon,
+const sourceIcons: Record<ResearchSource, IconData> = {
+  register: BuildingIcon,
   website: GlobeIcon,
-  news: NewspaperIcon,
-  jobs: BriefcaseIcon,
+  news: FileDocIcon,
+  jobs: UsersIcon,
   regulator: ScaleIcon,
-  reviews: MessageSquareTextIcon,
+  reviews: MessageSquareIcon,
 };
 
 /** Each public place the research looks, and what it gives. */
@@ -364,65 +616,72 @@ const Research = ({ view }: { view: OrgView }) => {
   const { org, state } = view;
   const done = state.research === "done";
   const notYet = (
-    <span className="text-muted-foreground">Not looked up yet</span>
+    <Text color="muted" size="sm">
+      Not looked up yet
+    </Text>
   );
   return (
-    <Section title="The research">
+    <Panel title="The research">
       {state.conversation === "read" || done ? null : (
-        <p className="text-muted-foreground border-t px-5 py-3">
+        <PanelNote>
           It starts once Stephen has read the first conversation: that tells him
           what to look for.
-        </p>
+        </PanelNote>
       )}
-      <ul className="bg-border grid gap-px border-t md:grid-cols-2 xl:grid-cols-3">
-        {RESEARCH_SOURCES.map((source) => {
-          const Icon = sourceIcons[source];
-          const finding = org.research.find((each) => each.source === source);
-          const disagrees = (finding?.conflict ?? "") !== "";
-          return (
-            <li className="bg-card flex flex-col gap-2 p-5" key={source}>
-              <span className="flex items-center gap-2">
-                <Icon
-                  aria-hidden
-                  className="text-muted-foreground size-4 flex-none"
-                />
-                <span className="font-medium">{sourceWords[source].label}</span>
+      <CardContent flush>
+        <ul {...stylex.props(styles.places)}>
+          {RESEARCH_SOURCES.map((source) => {
+            const finding = org.research.find((each) => each.source === source);
+            const disagrees = (finding?.conflict ?? "") !== "";
+            return (
+              <li key={source} {...stylex.props(styles.place)}>
+                <span {...stylex.props(styles.placeName)}>
+                  <span aria-hidden {...stylex.props(styles.quiet)}>
+                    <Icon icon={sourceIcons[source]} />
+                  </span>
+                  <Text size="sm" weight="medium">
+                    {sourceWords[source].label}
+                  </Text>
+                </span>
+                <Text color="muted" size="xs">
+                  {sourceWords[source].gives}
+                </Text>
+                {done && finding !== undefined ? (
+                  <Done>Looked up</Done>
+                ) : (
+                  notYet
+                )}
+                {done && disagrees ? (
+                  <Attention>
+                    {state.passed.includes(source)
+                      ? "It disagrees with the company’s own account: passed on to its admin."
+                      : "It disagrees with the company’s own account. Its admin says which is right."}
+                  </Attention>
+                ) : null}
+              </li>
+            );
+          })}
+          <li {...stylex.props(styles.place, styles.library)}>
+            <span {...stylex.props(styles.placeName)}>
+              <span aria-hidden {...stylex.props(styles.quiet)}>
+                <Icon icon={FolderIcon} />
               </span>
-              <span className="text-muted-foreground text-xs">
-                {sourceWords[source].gives}
-              </span>
-              {done && finding !== undefined ? <Done>Looked up</Done> : notYet}
-              {done && disagrees ? (
-                <Attention>
-                  {state.passed.includes(source)
-                    ? "It disagrees with the company’s own account: passed on to its admin."
-                    : "It disagrees with the company’s own account. Its admin says which is right."}
-                </Attention>
-              ) : null}
-            </li>
-          );
-        })}
-        <li className="bg-card col-span-full flex flex-col gap-2 p-5">
-          <span className="flex items-center gap-2">
-            <LibraryIcon
-              aria-hidden
-              className="text-muted-foreground size-4 flex-none"
-            />
-            <span className="font-medium">
-              What companies like this usually do
+              <Text size="sm" weight="medium">
+                What companies like this usually do
+              </Text>
             </span>
-          </span>
-          <span className="text-muted-foreground text-xs">
-            The work such a company usually does, and where it usually stalls.
-          </span>
-          {done && org.library !== "" ? <Done>Looked up</Done> : notYet}
-        </li>
-      </ul>
+            <Text color="muted" size="xs">
+              The work such a company usually does, and where it usually stalls.
+            </Text>
+            {done && org.library !== "" ? <Done>Looked up</Done> : notYet}
+          </li>
+        </ul>
+      </CardContent>
       <NotHere>
         Starting the research and passing a disagreement on to the company’s
         admin aren’t in the admin yet.
       </NotHere>
-    </Section>
+    </Panel>
   );
 };
 
@@ -458,46 +717,70 @@ const Company = ({ view }: { view: OrgView }) => {
   const teams = view.teams.length;
   const connected = state.client !== "none";
   const named = state.client === "leads" || state.client === "told";
-  const waits = <span className="text-muted-foreground">Not yet</span>;
+  const waits = (
+    <Text color="muted" size="sm">
+      Not yet
+    </Text>
+  );
   let told = waits;
   if (view.told) {
     told = <Done>On {dayDate(view, 0)}</Done>;
   } else if (!mayInvite(state.agreed)) {
     told = (
-      <span className="text-status-attention sm:text-right">
-        Waits until everything is agreed
+      <span {...stylex.props(styles.waits)}>
+        <Text size="sm">Waits until everything is agreed</Text>
       </span>
     );
   }
-  return (
-    <Section title="What the company does itself">
-      <SectionRow label="Where its admin is">
-        {view.org.adminStep === undefined ? (
-          <span className="text-muted-foreground">Not started</span>
+  const rows: { label: string; value: ReactNode }[] = [
+    {
+      label: "Where its admin is",
+      value:
+        view.org.adminStep === undefined ? (
+          <Text color="muted" size="sm">
+            Not started
+          </Text>
         ) : (
-          <span>
+          <Text size="sm">
             {adminStepWords[view.org.adminStep] ?? view.org.adminStep}
-          </span>
-        )}
-      </SectionRow>
-      <SectionRow label="The sign-in is connected">
-        {connected ? (
-          <Done>
-            {people} people in {counted(teams, "team", "teams")}
-          </Done>
-        ) : (
-          waits
-        )}
-      </SectionRow>
-      <SectionRow label="The team leads are named">
-        {named ? (
-          <Done>{counted(teams, "team lead", "team leads")}</Done>
-        ) : (
-          waits
-        )}
-      </SectionRow>
-      <SectionRow label="The team is told">{told}</SectionRow>
-    </Section>
+          </Text>
+        ),
+    },
+    {
+      label: "The sign-in is connected",
+      value: connected ? (
+        <Done>
+          {people} people in {counted(teams, "team", "teams")}
+        </Done>
+      ) : (
+        waits
+      ),
+    },
+    {
+      label: "The team leads are named",
+      value: named ? (
+        <Done>{counted(teams, "team lead", "team leads")}</Done>
+      ) : (
+        waits
+      ),
+    },
+    { label: "The team is told", value: told },
+  ];
+  return (
+    <Panel title="What the company does itself">
+      <CardContent flush>
+        <ItemGroup separated>
+          {rows.map((row) => (
+            <Item key={row.label} size="sm">
+              <ItemContent>
+                <ItemTitle>{row.label}</ItemTitle>
+              </ItemContent>
+              <ItemActions>{row.value}</ItemActions>
+            </Item>
+          ))}
+        </ItemGroup>
+      </CardContent>
+    </Panel>
   );
 };
 
@@ -546,9 +829,9 @@ const goLine = (view: OrgView): ReactNode => {
     );
   }
   return (
-    <span className="text-muted-foreground">
+    <Text color="muted" size="sm">
       Not enough is known yet. It can open once it is past {threshold}%.
-    </span>
+    </Text>
   );
 };
 
@@ -579,59 +862,59 @@ const Opens = ({
       work.state === "saturating"
   ).length;
   return (
-    <Section
+    <Panel
       description="What is not known by then shows to the company as still open."
       title="Grasp opens"
     >
-      <div className="flex flex-col gap-5 border-t px-5 py-5">
-        <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
-          <div className="flex min-w-0 flex-col gap-3">
-            <Stat>{knowledge.percent}%</Stat>
-            <KnowledgeDots count={40} knowledge={knowledge} label={known} />
+      <CardContent>
+        <div {...stylex.props(styles.opens)}>
+          <div {...stylex.props(styles.figureRow)}>
+            <div {...stylex.props(styles.figure)}>
+              <Stat label="Known" unstyled value={`${knowledge.percent}%`} />
+              <KnowledgeDots count={40} knowledge={knowledge} label={known} />
+            </div>
+            <GateControls clientId={clientId} gate={gate} paused={paused} />
           </div>
-          <GateControls clientId={clientId} gate={gate} paused={paused} />
+          <div aria-live="polite">{goLine(view)}</div>
+          {paused ? <Attention>{pausedLine}</Attention> : null}
         </div>
-        <div aria-live="polite">{goLine(view)}</div>
-        {paused ? <Attention>{pausedLine}</Attention> : null}
-      </div>
-
+      </CardContent>
       {knowledge.sources.length > 0 ? (
-        <ul aria-label="How the brain fills" className="flex flex-col">
-          {knowledge.sources.map((each) => (
-            <li
-              className="grid items-center gap-x-6 gap-y-1.5 border-t px-5 py-2.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,14rem)_4.5rem]"
-              key={each.source}
-            >
-              <span className="min-w-0">{knowledgeWords[each.source]}</span>
-              <Progress
-                aria-label={knowledgeWords[each.source]}
-                value={each.known * 100}
-              />
-              <span className="text-muted-foreground tabular-nums sm:text-right">
-                {each.points} of {each.weight}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <CardContent flush>
+          <ul aria-label="How the brain fills" {...stylex.props(styles.fills)}>
+            {knowledge.sources.map((each) => (
+              <li key={each.source} {...stylex.props(styles.fill)}>
+                <Text size="sm">{knowledgeWords[each.source]}</Text>
+                <Progress
+                  aria-label={knowledgeWords[each.source]}
+                  value={each.known * 100}
+                />
+                <span {...stylex.props(styles.points)}>
+                  <Text color="muted" size="sm">
+                    {each.points} of {each.weight}
+                  </Text>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </CardContent>
       ) : null}
-
       {view.told && notKnown > 0 ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3">
-          <span className="text-muted-foreground">
-            {counted(notKnown, "workflow is", "workflows are")} not known yet.
-          </span>
-          <Button
-            nativeButton={false}
-            render={<Link params={{ clientId }} to={sectionTo.workflows} />}
-            size="sm"
-            variant="outline"
-          >
-            All workflows
-            <ArrowRightIcon data-icon="inline-end" />
-          </Button>
-        </div>
+        <CardContent>
+          <div {...stylex.props(styles.more)}>
+            <Text color="muted" size="sm">
+              {counted(notKnown, "workflow is", "workflows are")} not known yet.
+            </Text>
+            <Button asChild size="sm" variant="outline">
+              <Link params={{ clientId }} to={sectionTo.workflows}>
+                All workflows
+                <Icon icon={ArrowRightIcon} />
+              </Link>
+            </Button>
+          </div>
+        </CardContent>
       ) : null}
-    </Section>
+    </Panel>
   );
 };
 

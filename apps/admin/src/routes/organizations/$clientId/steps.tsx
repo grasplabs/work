@@ -1,12 +1,14 @@
+import { STAGES } from "@grasp-os/shared/admin/onboarding-admin";
+import type { Stage } from "@grasp-os/shared/admin/onboarding-admin";
+import { flowInterviews } from "@grasp-os/shared/onboarding-flow";
 import {
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
-} from "@grasp-os/app-kit/components/tabs";
-import { STAGES } from "@grasp-os/shared/admin/onboarding-admin";
-import type { Stage } from "@grasp-os/shared/admin/onboarding-admin";
-import { flowInterviews } from "@grasp-os/shared/onboarding-flow";
+} from "@grasp-os/ui/components/tabs";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 
 import { OrgFlow } from "../../../admin/flow.tsx";
@@ -14,6 +16,16 @@ import { GettingStarted } from "../../../admin/getting-started.tsx";
 import { useOrganization } from "../../../admin/organization.tsx";
 import { OrgSteps } from "../../../admin/steps.tsx";
 import { fetchClientSetup } from "../../../clients/functions.ts";
+
+const styles = stylex.create({
+  // Each tab's parts, under the tabs.
+  tab: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["6"],
+    paddingBlockStart: space["4"],
+  },
+});
 
 interface StepsSearch {
   /** The step that is open; the one the organization is at when none is. */
@@ -30,21 +42,17 @@ const Steps = () => {
   const navigate = useNavigate({ from: Route.fullPath });
   return (
     <Tabs
-      onValueChange={(value: string) => {
+      onValueChange={(value) => {
         void navigate({ search: value === "flow" ? { tab: "flow" } : {} });
       }}
       value={tab}
     >
       <TabsList aria-label="Steps" variant="line">
-        <TabsTrigger className="flex-none" value="steps">
-          Steps
-        </TabsTrigger>
-        <TabsTrigger className="flex-none" value="flow">
-          Flow
-        </TabsTrigger>
+        <TabsTrigger value="steps">Steps</TabsTrigger>
+        <TabsTrigger value="flow">Flow</TabsTrigger>
       </TabsList>
       <TabsContent value="steps">
-        <div className="mt-4 flex flex-col gap-6">
+        <div {...stylex.props(styles.tab)}>
           <GettingStarted
             agreements={snapshot.agreements}
             clientId={admin.client.id}
@@ -80,7 +88,7 @@ const Steps = () => {
         </div>
       </TabsContent>
       <TabsContent value="flow">
-        <div className="mt-4 flex flex-col gap-6">
+        <div {...stylex.props(styles.tab)}>
           <OrgFlow clientId={admin.client.id} flow={admin.snapshot.flow} />
         </div>
       </TabsContent>

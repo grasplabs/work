@@ -1,5 +1,17 @@
-import { Button } from "@grasp-os/app-kit/components/button";
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import { Button } from "@grasp-os/ui/components/button";
+import { CardContent } from "@grasp-os/ui/components/card";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { Text } from "@grasp-os/ui/components/text";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
@@ -7,8 +19,19 @@ import { AgreementsAction } from "./agreements.tsx";
 import { CommandButton } from "./commands.tsx";
 import { startItems, started } from "./getting-started.ts";
 import type { StartFacts, StartItem } from "./getting-started.ts";
+import { Panel } from "./panel.tsx";
 import { Attention, Done } from "./parts.tsx";
-import { Section, SectionRow } from "./section.tsx";
+
+const styles = stylex.create({
+  // How a row stands, then what Grasp does about it.
+  end: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: space["3"],
+  },
+});
 
 type AgreementsRead = AdminSnapshot["agreements"];
 
@@ -27,19 +50,14 @@ const ToSettings = ({
   clientId: string;
   children: ReactNode;
 }) => (
-  <Button
-    nativeButton={false}
-    render={
-      <Link
-        params={{ clientId }}
-        search={{ tab: "settings" }}
-        to="/organizations/$clientId/setup"
-      />
-    }
-    size="sm"
-    variant="outline"
-  >
-    {children}
+  <Button asChild size="sm" variant="outline">
+    <Link
+      params={{ clientId }}
+      search={{ tab: "settings" }}
+      to="/organizations/$clientId/setup"
+    >
+      {children}
+    </Link>
   </Button>
 );
 
@@ -51,7 +69,9 @@ const Standing = ({ item }: { item: StartItem }) => {
   return item.state === "todo" ? (
     <Attention>For Grasp to do</Attention>
   ) : (
-    <span className="text-muted-foreground">Waits</span>
+    <Text color="muted" size="sm">
+      Waits
+    </Text>
   );
 };
 
@@ -116,23 +136,33 @@ export const GettingStarted = ({
     return null;
   }
   return (
-    <Section
+    <Panel
       description="What has to be in place before its admins get in and its people get their interview links, in order. What is Grasp’s to do can be done from here."
       title="Getting started"
     >
-      {startItems(facts).map((item) => (
-        <SectionRow description={item.detail} key={item.id} label={item.title}>
-          <span className="flex flex-wrap items-center justify-end gap-3">
-            <Standing item={item} />
-            <ActionOf
-              agreements={agreements}
-              clientId={clientId}
-              item={item}
-              told={facts.told}
-            />
-          </span>
-        </SectionRow>
-      ))}
-    </Section>
+      <CardContent flush>
+        <ItemGroup separated>
+          {startItems(facts).map((item) => (
+            <Item key={item.id} size="sm">
+              <ItemContent>
+                <ItemTitle>{item.title}</ItemTitle>
+                <ItemDescription>{item.detail}</ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <span {...stylex.props(styles.end)}>
+                  <Standing item={item} />
+                  <ActionOf
+                    agreements={agreements}
+                    clientId={clientId}
+                    item={item}
+                    told={facts.told}
+                  />
+                </span>
+              </ItemActions>
+            </Item>
+          ))}
+        </ItemGroup>
+      </CardContent>
+    </Panel>
   );
 };
