@@ -71,8 +71,8 @@ describe("an admin's onboarding being behind them", () => {
     ]).toStrictEqual([true, true]);
   });
 
-  it("waits for Grasp's go where its people are interviewed, for everyone but an admin who finished every screen", () => {
-    const done = [...setupSteps];
+  it("waits for Grasp's go where its people are interviewed, for everyone but an admin who finished every screen but the one the interviews are watched on", () => {
+    const done = setupSteps.filter((step) => step !== "listening");
     expect({
       member: onboardingBehind({ flow: defaultFlow, done, open: false }),
       go: onboardingBehind({ flow: defaultFlow, done: [], open: true }),

@@ -282,6 +282,27 @@ describe("a real organization as the admin reads it", () => {
     });
   });
 
+  it("shows everyone who leads a team as a lead, the first before the others, and none asked about a piece of work", () => {
+    const two = orgOfSnapshot({
+      ...snapshot,
+      roster: snapshot.roster && {
+        ...snapshot.roster,
+        teams: snapshot.roster.teams.map((team) =>
+          team.id === "t-service" ? { ...team, coLeads: ["tim"] } : team
+        ),
+      },
+    });
+    expect(
+      adminViewOf(two, two.seed, "2026-10-06")
+        .people.filter((each) => each.person.team === "t-service")
+        .map((each) => [each.person.id, each.person.lead, each.person.work])
+    ).toStrictEqual([
+      ["daan", true, null],
+      ["tim", true, null],
+      ["lisa", false, "w-tickets"],
+    ]);
+  });
+
   it("waits for a lead who has not talked, though their team's links went out without them", () => {
     // Mark has not talked; after waiting for him, his team's links went out anyway.
     const without = orgOfSnapshot({

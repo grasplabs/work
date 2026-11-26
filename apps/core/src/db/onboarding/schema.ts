@@ -125,6 +125,11 @@ export const teams = sqliteTable("teams", {
    * an edit or a withdrawal since keeps them out until it is drawn again.
    */
   mappedFrom: text("mapped_from"),
+  /**
+   * The day (ISO, UTC) the company's admin last nudged it (`nudge`): a team
+   * takes one nudge a day. None before the first.
+   */
+  nudgedOn: text("nudged_on"),
 });
 
 /** The people, in the order the admin gave them. */
@@ -210,6 +215,12 @@ export const links = sqliteTable("links", {
    * None before it ever was.
    */
   brainMark: text("brain_mark"),
+  /**
+   * When the reminder they asked for themselves goes (ISO 8601), while it
+   * hasn't: "not now" on their link (`remindLater`). None otherwise, and
+   * again once it went or was no longer owed.
+   */
+  laterAt: text("later_at"),
 });
 
 /**

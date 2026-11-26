@@ -179,6 +179,14 @@ const inLanguage = (code: string | null, message: string): string => {
       t`You withdrew from this interview. Nothing more is taken from it.`,
     ],
     [
+      "interview.finished",
+      t`You talked with Stephen already. There is nothing to remind you of.`,
+    ],
+    [
+      "interview.no_address",
+      t`We have no email address to remind you at. This link stays open: come back when it suits you.`,
+    ],
+    [
       "That is as long as the interview can run today. Come back tomorrow to go on.",
       t`That is as long as the interview can run today. Come back tomorrow to go on.`,
     ],
@@ -331,6 +339,20 @@ export const approveFacts = async (
     interviewApiPath,
     { action: "approve", secret, facts } satisfies InterviewRequest,
     approvalSchema
+  );
+
+/** When core sends the reminder they asked for (ISO 8601). */
+const laterSchema = z.object({ at: z.iso.datetime() });
+
+/** Not now: core reminds them at `at`, and answers the moment it keeps. */
+export const remindLater = async (
+  secret: string,
+  at: string
+): Promise<z.output<typeof laterSchema> | Refused> =>
+  await posted(
+    interviewApiPath,
+    { action: "later", secret, at } satisfies InterviewRequest,
+    laterSchema
   );
 
 /** They withdraw: nothing of their interview is used from now on. */
