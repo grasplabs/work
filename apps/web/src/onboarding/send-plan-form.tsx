@@ -31,7 +31,7 @@ import { flushSync } from "react-dom";
 import { formatList } from "../format.ts";
 import { TopError } from "../frame/top-error.tsx";
 import { dateLocale } from "./date-locale.ts";
-import { dayChoices, workingDaysAfter } from "./send-plan.ts";
+import { dayChoices, dayTiles } from "./send-plan.ts";
 import type { SendChoice } from "./send-plan.ts";
 
 const styles = stylex.create({
@@ -347,9 +347,6 @@ const DayField = ({
 /** An ISO day as a Date at its noon, in UTC. */
 const dateOf = (day: string) => new Date(`${day}T12:00:00Z`);
 
-/** How many working days the strip offers, from the next one. */
-const stripLength = 5;
-
 export const SendPlanForm = ({
   today,
   teams,
@@ -372,10 +369,9 @@ export const SendPlanForm = ({
   const laterField = useId();
   const dayLabel = useId();
   const teamsLabel = useId();
-  // Today first, as a plan can start today; then the next working days.
-  const strip = [today, ...workingDaysAfter(today, stripLength - 1)];
+  const strip = dayTiles(today);
   const inStrip = strip.includes(choice.day);
-  // Another day asked for, or one set before that the strip has no tile for: the day field shows.
+  // Other day asked for, or one set before that the strip has no tile for: the day field shows.
   const [picking, setPicking] = useState(!inStrip);
   const other = picking || !inStrip;
   const offered = dayChoices(today);
@@ -464,7 +460,7 @@ export const SendPlanForm = ({
               </fieldset>
               {other ? (
                 <DayField
-                  label={t`Another day`}
+                  label={t`Other day`}
                   min={today}
                   onDay={(day) => {
                     onChange({ ...choice, day });
