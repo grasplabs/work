@@ -152,9 +152,12 @@ const sectionOf = async (
       (column?.includes("Details") ?? false) &&
       ["Not answering", "Being set up"].some((words) => page.includes(words)),
     failed: page.includes("This couldn’t be shown"),
-    fromCore: ["Needs Grasp", "% known", "From the company"].some((words) =>
-      page.includes(words)
-    ),
+    fromCore: [
+      "What else needs Grasp",
+      "People active last week",
+      "Talked",
+      "From the company",
+    ].some((words) => page.includes(words)),
     toSetup:
       container.querySelector(
         `main a[href="/organizations/${client.id}/setup"]`

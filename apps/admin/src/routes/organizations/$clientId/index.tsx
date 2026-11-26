@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
+import { freshMs } from "../../../admin/org-reads.ts";
 import { Overview } from "../../../admin/overview.tsx";
 import {
   fetchClientAiStatus,
@@ -38,6 +39,8 @@ export const Route = createFileRoute("/organizations/$clientId/")({
         : orNull(async () => await fetchClientAiStatus({ data })),
     };
   },
+  // Moving between its sections reads it no more often than the page's own read.
+  staleTime: freshMs,
   preloadStaleTime: 0,
   component: OverviewPage,
 });
