@@ -11,7 +11,9 @@ import {
 } from "@grasp-os/shared/interview-hear";
 import type { HearFields } from "@grasp-os/shared/interview-hear";
 import {
+  factTags,
   interviewApiPath,
+  interviewPhases,
   interviewProgressSchema,
   participationNotice,
 } from "@grasp-os/shared/interview-links";
@@ -31,6 +33,12 @@ import type {
   StephenTurn,
   TurnEvent,
 } from "@grasp-os/shared/interview-turn";
+import { interviewVoicePath } from "@grasp-os/shared/interview-voice";
+import type {
+  InterviewVoiceRequest,
+  VoiceAnswered,
+  VoiceSessionJoin,
+} from "@grasp-os/shared/interview-voice";
 import { interviewKindSchema } from "@grasp-os/shared/onboarding";
 import { t } from "@lingui/core/macro";
 import { z } from "zod";
@@ -440,4 +448,63 @@ export const hearRecording = async ({
   } catch {
     return { reason: "failed" };
   }
+};
+
+const voiceJoinSchema = z.object({
+  id: z.string().min(1),
+  participantToken: z.string().min(1),
+  serverUrl: z.url({ protocol: /^wss$/u }),
+  expiresAt: z.string(),
+  pass: z.string().min(1),
+}) satisfies z.ZodType<VoiceSessionJoin>;
+
+const voiceAnsweredSchema = z.object({
+  noted: z.int().min(0),
+  lines: z.array(
+    z.object({ from: z.enum(["person", "stephen"]), text: z.string() })
+  ),
+  turn: z
+    .object({
+      facts: z.array(
+        z.object({
+          tag: z.enum(factTags),
+          text: z.string(),
+          record: z.string(),
+          quote: z.string(),
+        })
+      ),
+      changes: z.array(
+        z.object({
+          id: z.string(),
+          text: z.string().nullable(),
+          record: z.string().nullable(),
+        })
+      ),
+      phase: z.enum(interviewPhases),
+    })
+    .nullable(),
+  instructions: z.string(),
+}) satisfies z.ZodType<VoiceAnswered>;
+
+/**
+ * Opens the interview's live voice session at Mistral, through core
+ * (`/api/interview/voice`): what the page joins its room with, never
+ * Grasp's key.
+ */
+export const openVoice = async (
+  request: Extract<InterviewVoiceRequest, { action: "open" }>
+): Promise<VoiceSessionJoin | Refused> =>
+  await posted(interviewVoicePath, request, voiceJoinSchema);
+
+/** Has core write down what was said in the session since `noted` of their answers. */
+export const answerVoice = async (
+  request: Extract<InterviewVoiceRequest, { action: "answer" }>
+): Promise<VoiceAnswered | Refused> =>
+  await posted(interviewVoicePath, request, voiceAnsweredSchema);
+
+/** Closes the session at Mistral: also as the page is left, so it outlives the page. */
+export const closeVoice = async (
+  request: Extract<InterviewVoiceRequest, { action: "close" }>
+): Promise<void> => {
+  await posted(interviewVoicePath, request, z.unknown(), { keepalive: true });
 };

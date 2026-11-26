@@ -62,13 +62,22 @@ const frontendTheme = "/theme.js";
  * the policy names none of its scripts; sign-in and RPC already work only
  * on `SIGN_IN.origin`.
  */
+/**
+ * Where the interview's live voice session is held (core's
+ * onboarding/voice.ts hands the page a room at Mistral, which its SDK joins
+ * over LiveKit): the room's socket, and the region lookup LiveKit makes on
+ * the same host. Sound itself goes over WebRTC, which this policy doesn't govern.
+ */
+export const voiceRoomSources =
+  "wss://*.livekit.cloud https://*.livekit.cloud wss://*.mistral.ai https://*.mistral.ai";
+
 export const frontendDirectives = (origin: string): Record<string, string> => ({
   "default-src": "'self'",
   "script-src": `${origin}${frontendAssets} ${origin}${frontendTheme} 'wasm-unsafe-eval'`,
   "style-src": `${origin}${frontendAssets} 'unsafe-inline'`,
   "worker-src": "'none'",
   "img-src": "'self' data:",
-  "connect-src": "'self'",
+  "connect-src": `'self' ${voiceRoomSources}`,
   "object-src": "'none'",
   "base-uri": "'none'",
   "form-action": "'self'",

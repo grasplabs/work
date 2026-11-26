@@ -255,7 +255,8 @@ export const muteMic = (on: boolean): void => {
 /** Whether the person muted themselves. */
 export const micMuted = (): boolean => muted;
 
-const watchMute = (watcher: () => void): (() => void) => {
+/** Tells `watcher` each time they mute themselves or come back; gives back how to stop telling it. */
+export const watchMute = (watcher: () => void): (() => void) => {
   muteWatchers.add(watcher);
   return () => {
     muteWatchers.delete(watcher);
