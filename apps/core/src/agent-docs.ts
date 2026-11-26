@@ -1,5 +1,5 @@
-import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-durable";
+import { int, obj, opt, str } from "@earendil-works/pi-schema";
 import {
   docsMarkdownFile,
   docsPagesSchema,
@@ -175,17 +175,14 @@ const linesOf = async (
   }
 };
 
-const searchParameters = Type.Object(
-  {
-    query: Type.String({
-      minLength: 1,
-      maxLength: 200,
-      description:
-        "What to look for, in words or by name: `row rules`, `withIndex`, `useWorkflow`.",
-    }),
-  },
-  { additionalProperties: false }
-);
+const searchParameters = obj({
+  query: str({
+    minLength: 1,
+    maxLength: 200,
+    description:
+      "What to look for, in words or by name: `row rules`, `withIndex`, `useWorkflow`.",
+  }),
+});
 
 const searchInputSchema = z.strictObject({
   query: z.string().trim().min(1).max(200),
@@ -235,19 +232,16 @@ export const searchDocs = (assets: Fetcher) =>
     },
   });
 
-const readParameters = Type.Object(
-  {
-    path: Type.String({
-      minLength: 1,
-      maxLength: 200,
-      description:
-        "The page, by its path in the docs or a link to it as the docs write it: `/reference/server`, `/guides/data`, `/docs/reference/server.md#query`.",
-    }),
-    fromLine: Type.Optional(Type.Integer({ minimum: 1 })),
-    toLine: Type.Optional(Type.Integer({ minimum: 1 })),
-  },
-  { additionalProperties: false }
-);
+const readParameters = obj({
+  path: str({
+    minLength: 1,
+    maxLength: 200,
+    description:
+      "The page, by its path in the docs or a link to it as the docs write it: `/reference/server`, `/guides/data`, `/docs/reference/server.md#query`.",
+  }),
+  fromLine: opt(int({ minimum: 1 })),
+  toLine: opt(int({ minimum: 1 })),
+});
 
 const readInputSchema = z.strictObject({
   path: z.string().min(1).max(200),

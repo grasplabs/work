@@ -270,7 +270,7 @@ export class ChatSession extends DurableObject<Env> {
    */
   async #onFailed(harness: ChatHarness): Promise<void> {
     const end = await harness.closed;
-    if (end.reason !== "failed") {
+    if (end.kind !== "failed") {
       return;
     }
     // Counted, so storage that fails again after each open that works

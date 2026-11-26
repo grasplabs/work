@@ -1,3 +1,4 @@
+import { isRetryableAssistantError } from "@earendil-works/pi-ai";
 import { agentErrors } from "@grasp-os/shared/agent";
 import type { ChatUpdate } from "@grasp-os/shared/chat";
 import { chatIdSchema } from "@grasp-os/shared/ids";
@@ -13,13 +14,18 @@ import { chatSession, workspace } from "../src/durable-objects.ts";
 import { analysisPurpose } from "../src/turn-recall.ts";
 import {
   chatOf,
+  codeResults,
+  codeStep,
   model,
   pausedReply,
   personalChatsOf,
   says,
   setObjectEnv,
 } from "./agent-chat.ts";
+import { runRecords } from "./agent-code-runs.ts";
 import { allEvents } from "./audit-events.ts";
+import midRequestOnPi14 from "./fixtures/pi-1.4/mid-request.json" with { type: "json" };
+import settledOnPi14 from "./fixtures/pi-1.4/settled.json" with { type: "json" };
 import { mockIdp } from "./idp.ts";
 import { fakeProvider, fakeProviderFor } from "./model-provider.ts";
 import { signedInApi, signedInWithRole } from "./sign-in.ts";
@@ -1016,6 +1022,400 @@ describe("a chat's ChatSession", () => {
       before: [true, true],
       after: [[], []],
     });
+  });
+});
+
+/** Restarts the chat's object, as an eviction or a deploy does, mid-call. */
+const restart = async (
+  stub: ReturnType<typeof chatSession> | ReturnType<typeof workspace>
+): Promise<void> => {
+  await runInDurableObject(stub, (_instance, state) => {
+    state.abort("Restarted by the test");
+  }).catch(() => {
+    // Aborting fails the call that aborted: that is the restart.
+  });
+};
+
+describe("a turn a restart cuts off", () => {
+  it.each([
+    ["before its first word", 0, false],
+    ["after its first words, stored", 5, true],
+  ])(
+    "asks the model again when the cut came %s, and the chat shows the answer once",
+    async (_when, at, stored) => {
+      const { userId } = await signedInWithRole(idp, "user");
+      const asking = await chatOf(userId);
+      const cut = pausedReply(says("Zebra crossings ahead."), at);
+      const provider = await fakeProviderFor(
+        [model],
+        cut.reply,
+        says("Zebra crossings ahead.")
+      );
+      const { session, request } = sessionOf(asking, userId);
+      /** How many of pi's records hold `text`. */
+      const piHolds = async (text: string): Promise<number> =>
+        await runInDurableObject(session(), (_instance, state) =>
+          ["pi_document_revisions", "pi_entries"]
+            .map(
+              (table) =>
+                state.storage.sql
+                  .exec<{ count: number }>(
+                    `SELECT count(*) AS count FROM ${table} WHERE ${table === "pi_entries" ? "record" : "content"} LIKE ?`,
+                    `%${text}%`
+                  )
+                  .one().count
+            )
+            .reduce((sum, count) => sum + count, 0)
+        );
+      try {
+        void session()
+          .run(request("turn-a", "Answer?"))
+          .catch(() => "cut short");
+        await vi.waitFor(
+          async () => {
+            expect(provider.requests).toHaveLength(1);
+            // pi stores the words streamed so far within a second.
+            expect((await piHolds("Zebra")) > 0 || !stored).toBeTruthy();
+          },
+          { timeout: 10_000 }
+        );
+        await restart(session());
+        // As its Workspace asks again once its call broke.
+        const end = await session().run(request("turn-a", "Answer?"));
+        expect({
+          answer: end.answer,
+          requests: provider.requests.length,
+          // The words the cut answer got to, kept by pi as aborted.
+          cutKept: (await piHolds('"stopReason":"aborted"')) > 0,
+          kept: await keptOf(asking.stub, asking.chat.id),
+        }).toStrictEqual({
+          answer: "Zebra crossings ahead.",
+          requests: 2,
+          cutKept: stored,
+          kept: ["user", "assistant:toolUse", "toolResult", "assistant:stop"],
+        });
+      } finally {
+        cut.release();
+      }
+    }
+  );
+
+  it("ends a code step a restart cut off as failed, never runs it again, and asks the model on", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId);
+    const provider = await fakeProviderFor(
+      [model],
+      codeStep(
+        "export default async (self, env) => { await env.chat.info(); await scheduler.wait(5_000); return 1; };"
+      ),
+      says("Done.")
+    );
+    const { session, request } = sessionOf(asking, userId);
+    void session()
+      .run(request("turn-a", "Run it."))
+      .catch(() => "cut short");
+    await vi.waitFor(
+      async () => {
+        await expect(
+          runRecords(asking.stub, asking.chat.id).then(
+            (records) => records.length
+          )
+        ).resolves.toBe(1);
+      },
+      { timeout: 10_000 }
+    );
+    await restart(session());
+    const end = await session().run(request("turn-a", "Run it."));
+    const [results, runs] = await Promise.all([
+      codeResults(asking.stub, asking.chat.id),
+      runRecords(asking.stub, asking.chat.id),
+    ]);
+    expect({
+      answer: end.answer,
+      requests: provider.requests.length,
+      failed: results.map(({ isError }) => isError),
+      runs: runs.length,
+    }).toStrictEqual({
+      answer: "Done.",
+      requests: 2,
+      failed: [true],
+      runs: 1,
+    });
+  });
+
+  it("asks again at most four times in a row, then ends the turn as cut off too often", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId);
+    const never = Promise.withResolvers<boolean>();
+    const stuck = { ...says("Never."), pause: { at: 0, until: never.promise } };
+    const provider = await fakeProviderFor(
+      [model],
+      ...Array.from({ length: 6 }, () => stuck)
+    );
+    const { session, request } = sessionOf(asking, userId);
+    try {
+      void session()
+        .run(request("turn-a", "Again?"))
+        .catch(() => "cut short");
+      for (let sent = 1; sent <= 5; sent += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one cut after another
+        await vi.waitFor(
+          async () => {
+            // Woken by its alarm, as nothing calls it.
+            await runDurableObjectAlarm(session());
+            expect(provider.requests).toHaveLength(sent);
+          },
+          { timeout: 15_000 }
+        );
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await restart(session());
+      }
+      const end = await session().run(request("turn-a", "Again?"));
+      expect({
+        outcome: end.outcome,
+        error: end.error,
+        requests: provider.requests.length,
+      }).toStrictEqual({
+        outcome: "failed",
+        error: "Restarts cut the turn off too often for it to go on.",
+        requests: 5,
+      });
+    } finally {
+      never.resolve(true);
+    }
+  });
+
+  it.each([
+    // A failure pi's own classifier wouldn't retry anyway, and two it would.
+    ["fails", { status: 500 } as const, {}, false],
+    [
+      "sends nothing for too long",
+      { hang: true } as const,
+      { MODEL_STREAM_IDLE_MS: "400" },
+      true,
+    ],
+    [
+      "limits requests for longer than the call may wait",
+      { status: 429, headers: { "retry-after": "3600" } } as const,
+      {},
+      true,
+    ],
+  ])(
+    "sends nothing again when the provider %s: the gateway's failure is final",
+    async (_case, reply, vars, retryable) => {
+      const { userId } = await signedInWithRole(idp, "user");
+      const asking = await chatOf(userId);
+      const provider = await fakeProviderFor(
+        [model],
+        reply,
+        says("Never sent.")
+      );
+      const { session, request } = sessionOf(asking, userId);
+      const restore = await setObjectEnv(session(), vars);
+      try {
+        const end = await session().run(request("turn-a", "Fail?"));
+        const failed = await runInDurableObject(
+          asking.stub,
+          (_instance, state) =>
+            state.storage.sql
+              .exec<{ message: string }>(
+                "SELECT message FROM chat_messages WHERE chat_id = ? ORDER BY id DESC LIMIT 1",
+                asking.chat.id
+              )
+              .one().message
+        );
+        const answer = z
+          .object({ errorMessage: z.string() })
+          .parse(JSON.parse(failed));
+        expect({
+          outcome: end.outcome,
+          requests: provider.requests.length,
+          // Whether pi would send it again, were its retry on.
+          retryable: isRetryableAssistantError({
+            role: "assistant",
+            content: [],
+            api: "openai-responses",
+            provider: "grasp",
+            model,
+            usage: {
+              input: 0,
+              output: 0,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: 0,
+              cost: {
+                input: 0,
+                output: 0,
+                cacheRead: 0,
+                cacheWrite: 0,
+                total: 0,
+              },
+            },
+            stopReason: "error",
+            errorMessage: answer.errorMessage,
+            timestamp: 0,
+          }),
+        }).toStrictEqual({ outcome: "failed", requests: 1, retryable });
+      } finally {
+        await restore();
+      }
+    }
+  );
+});
+
+/** A ChatSession's storage as Pi 1.4 wrote it (test/fixtures/pi-1.4). */
+const piFixtureSchema = z.object({
+  ids: z.object({
+    workspaceId: z.string(),
+    chatId: z.string(),
+    personId: z.string(),
+    agentId: z.string(),
+  }),
+  objects: z.array(
+    z.object({
+      type: z.string(),
+      name: z.string(),
+      sql: z.string(),
+      rows: z.array(
+        z.record(z.string(), z.union([z.string(), z.number(), z.null()]))
+      ),
+    })
+  ),
+});
+
+/**
+ * Puts `fixture`'s tables into `chat`'s own object, before it opens pi,
+ * each ID of the chat it was taken from replaced with `chat`'s.
+ */
+const restoreFixture = async (
+  fixture: unknown,
+  { id, chat, personId }: Awaited<ReturnType<typeof chatOf>>
+): Promise<void> => {
+  const { ids, objects } = piFixtureSchema.parse(fixture);
+  const now: Record<string, string> = {
+    [ids.workspaceId]: id,
+    [ids.chatId]: chat.id,
+    [ids.personId]: personId,
+    [ids.agentId]: chat.agentId,
+  };
+  const swapped = (value: string | number | null) => {
+    if (typeof value !== "string") {
+      return value;
+    }
+    let text = value;
+    for (const [was, is] of Object.entries(now)) {
+      text = text.replaceAll(was, is);
+    }
+    return text;
+  };
+  await runInDurableObject(
+    chatSession(env, id, chatIdSchema.parse(chat.id)),
+    (_instance, state) => {
+      for (const { sql } of objects) {
+        state.storage.sql.exec(sql);
+      }
+      for (const { name, rows } of objects) {
+        for (const row of rows) {
+          const columns = Object.keys(row);
+          state.storage.sql.exec(
+            `INSERT INTO ${name} (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`,
+            ...columns.map((column) => swapped(row[column] ?? null))
+          );
+        }
+      }
+    }
+  );
+};
+
+// Captured on Pi 1.4.0 (before the 1.6.1 upgrade) from a chat of two
+// answered turns, a code step in the second; `mid-request` again as a third
+// turn's request was in flight and the object was evicted. Its turn record
+// as the release before writes it, without `startedAt`.
+describe("a chat Pi 1.4 wrote", () => {
+  it("opens on this Pi and goes on, its model reading the chat so far", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId, says("Again, on this Pi."));
+    await restoreFixture(settledOnPi14, asking);
+    const { answer } = await asking.ask("Still there?");
+    const sent = JSON.stringify(asking.provider.requests[0]?.body);
+    expect({
+      answer,
+      read: ["Hello from Pi 1.4.", "It is 42.", "Still there?"].map((said) =>
+        sent.includes(said)
+      ),
+    }).toStrictEqual({
+      answer: "Again, on this Pi.",
+      read: [true, true, true],
+    });
+  });
+
+  it("is left as Pi 1.4 wrote it by an open alone: only a turn writes this Pi's versions", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId, says("Again, on this Pi."));
+    await restoreFixture(settledOnPi14, asking);
+    const session = chatSession(
+      env,
+      asking.id,
+      chatIdSchema.parse(asking.chat.id)
+    );
+    /** The newest version each of pi's own documents is stored at. */
+    const versions = async () =>
+      await runInDurableObject(session, (_instance, state) =>
+        Object.fromEntries(
+          state.storage.sql
+            .exec<{ kind: string; version: number }>(
+              `SELECT d.kind AS kind, max(r.version) AS version FROM pi_documents d JOIN pi_document_revisions r ON r.document_id = d.id WHERE d.kind LIKE '"pi.%' GROUP BY d.kind`
+            )
+            .toArray()
+            .map(({ kind, version }) => [kind, version])
+        )
+      );
+    const before = await versions();
+    // As the Workspace asks before a question: opens pi on this version.
+    await session.activeTurn();
+    const opened = await versions();
+    await asking.ask("Still there?");
+    const answered = await versions();
+    expect({
+      opened: opened['"pi.live"'],
+      unchanged: opened,
+      answered: answered['"pi.live"'],
+    }).toStrictEqual({ opened: 1, unchanged: before, answered: 3 });
+  });
+
+  it("answers the turn whose request an eviction cut off on Pi 1.4", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId, says("Answered on this Pi."));
+    await restoreFixture(midRequestOnPi14, asking);
+    const session = chatSession(
+      env,
+      asking.id,
+      chatIdSchema.parse(asking.chat.id)
+    );
+    // Opened as the object next serves a call: the turn its record holds
+    // is the one under way, and goes on, its alarms waking it.
+    const active = await session.activeTurn();
+    await vi.waitFor(
+      async () => {
+        await runDurableObjectAlarm(session);
+        expect(asking.provider.requests).toHaveLength(1);
+      },
+      { timeout: 15_000 }
+    );
+    await vi.waitFor(
+      async () => {
+        await expect(session.activeTurn()).resolves.toBeUndefined();
+      },
+      { timeout: 15_000 }
+    );
+    const kept = await keptOf(asking.stub, asking.chat.id);
+    expect({
+      active: active !== undefined,
+      sent: JSON.stringify(asking.provider.requests[0]?.body).includes(
+        "And now?"
+      ),
+      last: kept.at(-1),
+    }).toStrictEqual({ active: true, sent: true, last: "assistant:stop" });
   });
 });
 

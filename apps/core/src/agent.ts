@@ -1,7 +1,7 @@
-import { Type } from "@earendil-works/pi-ai";
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-durable";
 import type { JsonObject } from "@earendil-works/pi-durable";
+import { arr, obj, str, unsafe } from "@earendil-works/pi-schema";
 import {
   agentChangeDraftSchema,
   agentDraftSchema,
@@ -93,16 +93,13 @@ const declarationsOf = (apis: readonly AgentApi[]): string =>
     "}",
   ].join("\n");
 
-const readApiParameters = Type.Object(
-  {
-    names: Type.Array(Type.String(), {
-      minItems: 1,
-      description:
-        "The APIs to read, by their names in `env`, such as `connections`.",
-    }),
-  },
-  { additionalProperties: false }
-);
+const readApiParameters = obj({
+  names: arr(str(), {
+    minItems: 1,
+    description:
+      "The APIs to read, by their names in `env`, such as `connections`.",
+  }),
+});
 
 /** `readApi`'s input, checked: only `names`, a non-empty list of names. */
 const readApiInputSchema = z.strictObject({
@@ -162,7 +159,7 @@ export const readApi = (apis: readonly AgentApi[]) =>
  */
 const askParameters = (() => {
   const { $schema: _dialect, ...schema } = z.toJSONSchema(chatAskSchema);
-  return Type.Unsafe<ChatAsk>(schema);
+  return unsafe<ChatAsk>(schema);
 })();
 
 /**
@@ -252,7 +249,7 @@ export const makeQuestionsLeft = (
 /** `chatPlanSchema` as JSON Schema: what the model is told is what core checks. */
 const planParameters = (() => {
   const { $schema: _dialect, ...schema } = z.toJSONSchema(chatPlanSchema);
-  return Type.Unsafe<ChatPlan>(schema);
+  return unsafe<ChatPlan>(schema);
 })();
 
 /**
@@ -318,7 +315,7 @@ const draftSchemaFor = (
 };
 
 const draftParameters = (drafts: "company" | "own") =>
-  Type.Unsafe<AgentDraft>(
+  unsafe<AgentDraft>(
     draftSchemaFor(agentDraftSchema, drafts, [
       "audience",
       "classes",
@@ -387,7 +384,7 @@ export const draftAgent = (
   });
 
 const changeParameters = (drafts: "company" | "own") =>
-  Type.Unsafe<AgentChangeDraft>(
+  unsafe<AgentChangeDraft>(
     draftSchemaFor(agentChangeDraftSchema, drafts, [
       "audience",
       "turnOn",
@@ -922,15 +919,12 @@ export const sectionsOf = (
 ): { name: string; text: string | null }[] =>
   promptSections.map(({ name, text }) => ({ name, text: text(turn) }));
 
-const codeParameters = Type.Object(
-  {
-    code: Type.String({
-      description:
-        "A complete JavaScript module whose default export is an async function of `(self, env, ctx)`: `export default async (self, env, ctx) => { ... }`.",
-    }),
-  },
-  { additionalProperties: false }
-);
+const codeParameters = obj({
+  code: str({
+    description:
+      "A complete JavaScript module whose default export is an async function of `(self, env, ctx)`: `export default async (self, env, ctx) => { ... }`.",
+  }),
+});
 
 /**
  * The tool's input, checked before Pi's own validation: only `code`, a

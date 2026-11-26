@@ -1,10 +1,11 @@
-import type { JsonValue } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Message, Static, TSchema } from "@earendil-works/pi-ai";
+import type { JsonValue } from "@earendil-works/chord/json";
+import type { Message } from "@earendil-works/pi-ai";
 import type {
   ToolExecutionApi,
   ToolRegistration,
 } from "@earendil-works/pi-durable";
+import type { Schema, Static } from "@earendil-works/pi-schema";
 import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { ChatId } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
@@ -29,7 +30,7 @@ export const model = testModel;
  * Calls one of the chat's tools as pi's tool task does, outside a turn:
  * with the call's ID and a context, all of pi's API the chat's tools read.
  */
-export const callTool = async <P extends TSchema, D extends JsonValue>(
+export const callTool = async <P extends Schema, D extends JsonValue>(
   tool: ToolRegistration<P, D>,
   callId: string,
   args: Static<P>

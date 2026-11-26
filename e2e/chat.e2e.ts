@@ -534,7 +534,7 @@ test("one control picks the model and how hard it thinks, sends both with the qu
 
   // The stack's first model doesn't think: the control names it alone.
   await expect(control).toHaveAccessibleName(
-    "Model: mistral-large-latest. Change model"
+    "Model: mistral-large-2512. Change model"
   );
   await control.click();
   // The models by their makers; one that thinks offers its efforts
