@@ -353,7 +353,7 @@ describe("an organization's integrations, workflows and members", () => {
     }).toStrictEqual({
       anna: ["anna@acme.test", `Ready since ${joined}`, "Admin"],
       ben: true,
-      seats: ["2", "No contract known, so no seats to count against"],
+      seats: ["2", "No contract known yet"],
       writes: "mailto:anna@acme.test",
       toCome: false,
     });

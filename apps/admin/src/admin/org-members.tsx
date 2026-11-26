@@ -123,33 +123,29 @@ export const OrgMembers = () => {
       </Empty>
     );
   }
+  const ready = countOf(members, "ready");
   const removed = countOf(members, "removed");
+  const notIn = [
+    ready === 0 ? "" : `${ready} ready for when Grasp opens`,
+    removed === 0 ? "" : `${removed} with access taken away`,
+  ].filter((part) => part !== "");
   return (
     <div {...stylex.props(styles.parts)}>
-      <StatGroup aria-label="Its members" columns={3}>
+      <StatGroup aria-label="Its members" columns={2}>
         <Stat
           // A contract not known yet gives no number of seats either.
           change={
             view.unknown.contract
-              ? "No contract known, so no seats to count against"
+              ? "No contract known yet"
               : `of ${seats.of} on its contract`
           }
           label="Seats taken"
           value={String(seats.used)}
         />
         <Stat
-          change={`${countOf(members, "ready")} ready for when Grasp opens`}
+          change={notIn.length === 0 ? "Everyone" : notIn.join(", ")}
           label="In Grasp"
           value={String(countOf(members, "active"))}
-        />
-        <Stat
-          change={
-            removed === 0
-              ? "Nobody’s access taken away"
-              : `${removed} ${plural(removed, "member’s", "members’")} access taken away`
-          }
-          label="Members"
-          value={String(members.length)}
         />
       </StatGroup>
       <Part aria-labelledby="members">
