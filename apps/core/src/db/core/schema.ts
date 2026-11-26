@@ -7187,6 +7187,12 @@ export const chatTurns = sqliteTable(
     code: text(),
     /** Whether pi compacted the chat during the turn. */
     compacted: integer({ mode: "boolean" }).notNull(),
+    /**
+     * Questions the person sent while the turn ran, which it took in and
+     * answered after its own (chat-harness.ts `queueQuestion`): its times and use
+     * cover them too.
+     */
+    queued: integer().notNull().default(0),
     /** Whether a restart cut it short and the chat's object took it up again: its times are then unknown. */
     resumed: integer({ mode: "boolean" }).notNull(),
   },

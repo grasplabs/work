@@ -329,6 +329,52 @@ test("a person asks, and reads the agent's answer once its turn ends", async ({
   await expect(messages.getByRole("alert")).toHaveCount(0);
 });
 
+test("a person asks again while the answer is still being written, sees it queued, and both are answered in order", async ({
+  pageOf,
+}) => {
+  const { user } = peopleIn("chat");
+  const page = await pageOf(user);
+  const { opener } = modelScripts.answersWhileAsked;
+  const question = `${opener} (${crypto.randomUUID().slice(0, 8)})`;
+  const again = "And by when is the budget set?";
+  const firstAnswer =
+    "First the goals, then the budget and who owns each part.";
+  const secondAnswer = "The budget is set by the end of the month.";
+  await page.goto("/");
+
+  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  const messages = page.getByRole("log", { name: "Messages" });
+  // The answer's first words, the rest still on its way.
+  await expect(messages.getByText("First the goals")).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(messages.getByText(firstAnswer)).toHaveCount(0);
+
+  // The box still takes a question, and the thread shows it queued.
+  const box = page.getByRole("textbox", { name: "Ask Grasp" });
+  await box.fill(again);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(box).toHaveText("");
+  await expect(messages.getByText("Queued")).toBeVisible();
+
+  await expect(messages.getByText(secondAnswer)).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(messages.getByText("Queued")).toHaveCount(0);
+  // In order: the question, its answer, the question asked meanwhile, its answer.
+  const said = (await messages.textContent()) ?? "";
+  const at = [question, firstAnswer, again, secondAnswer].map((words) =>
+    said.indexOf(words)
+  );
+  expect(at.every((index) => index >= 0)).toBeTruthy();
+  expect(at).toStrictEqual(at.toSorted((one, other) => one - other));
+  await expect(
+    messages.getByRole("button", { name: "Ask again" })
+  ).toBeVisible();
+  await expect(messages.getByRole("alert")).toHaveCount(0);
+});
+
 test("a person reads an answer in blocks: a table, a formula, code and a diagram, each with its own tools", async ({
   pageOf,
 }) => {
