@@ -365,37 +365,25 @@ export const pageReadOptions: AdminReadOptions = {
 };
 
 /**
- * Which clients a read takes: one alone (`only`), or every one but some
- * (`except`), as a page that reads one of them on its own asks.
- */
-export interface ClientChoice {
-  only?: string;
-  except?: readonly string[];
-}
-
-/**
  * Every client the admin knows but those offboarded, each with its admin
  * snapshot as its core answers `staff` now, or as not reachable since it
  * last answered. Never throws for a client; every one is in the answer.
- * `which` narrows it to one client, or leaves some out.
+ * `only` narrows it to one client, as its own page reads it.
  */
 export const clientAdmins = async (
   env: Env,
   staff: Staff,
   options: AdminReadOptions = defaultAdminReadOptions,
-  which: ClientChoice = {}
+  only?: string
 ): Promise<ClientAdmin[]> => {
   if (staff.email === "") {
     throw new Error("Reading clients' admin snapshots takes a staff member");
   }
   const db = adminDatabase(env.DB);
   const grid = await clientGrid(env);
-  const except = new Set(which.except);
   const known = grid.filter(
     ({ id, status }) =>
-      status !== "offboarded" &&
-      !except.has(id) &&
-      (which.only === undefined || id === which.only)
+      status !== "offboarded" && (only === undefined || id === only)
   );
   const [lastAnswered, secrets, key, links, attio, companyLinks] =
     await Promise.all([

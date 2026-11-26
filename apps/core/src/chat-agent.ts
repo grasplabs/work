@@ -201,11 +201,15 @@ const startsTurn = (entry: EntryRecord): boolean => {
 };
 
 // A question carries what the recall before it found (`recallForTurn` in
-// turn-recall.ts) as a part of its own, headed by the recall's run: pi
-// takes nothing between an input and the run's first request, and the run
-// is what a revocation withholds it by, as a code step's result.
+// turn-recall.ts) as a part of its own, in a `<recall>` tag that names the
+// recall's run: pi takes nothing between an input and the run's first
+// request, and the run is what a revocation withholds it by, as a code
+// step's result. A tag, as Anthropic and OpenAI advise for context handed
+// to a model, so it reads as structure, never as a label to write into the
+// answer.
 
-const recallPattern = /^\[Recall (?<run>[^\]\s]+)\]\n/u;
+const recallPattern =
+  /^<recall run="(?<run>[^"\s]+)">\n(?<text>[\s\S]*)\n<\/recall>$/u;
 
 /** The run the recall in `part` was, if it is one. */
 const recallRunOf = (part: {
@@ -243,7 +247,7 @@ export const questionContent = (
     : [
         {
           type: "text" as const,
-          text: `[Recall ${recall.runId}]\n${recall.text}`,
+          text: `<recall run="${recall.runId}">\n${recall.text}\n</recall>`,
         },
       ]),
 ];
@@ -263,11 +267,12 @@ export const recallTextOf = (message: UserMessage): string | undefined => {
     return undefined;
   }
   for (const part of message.content) {
-    if (part.type === "text") {
-      const header = recallPattern.exec(part.text);
-      if (header !== null) {
-        return part.text.slice(header[0].length);
-      }
+    const text =
+      part.type === "text"
+        ? recallPattern.exec(part.text)?.groups?.text
+        : undefined;
+    if (text !== undefined) {
+      return text;
     }
   }
   return undefined;

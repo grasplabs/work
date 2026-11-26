@@ -30,10 +30,14 @@ const daysBetween = (from: string, to: string): number =>
     (Date.parse(`${to}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / dayMs
   );
 
-/** The onboarding as the admin shows it, from what core holds, at `now`. */
+/**
+ * The onboarding as the admin shows it, from what core holds, at `now`:
+ * from its view and gate, or from the admin snapshot, which carries both
+ * (admin-summary.ts).
+ */
 export const summaryOf = (
-  view: OnboardingView,
-  gate: GateView,
+  view: Pick<OnboardingView, "roster" | "plan" | "agreed" | "paused">,
+  gate: Pick<GateView, "open" | "ready" | "known">,
   now: string
 ): OnboardingSummary => {
   const today = dayOf(now);
