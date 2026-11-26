@@ -22,6 +22,8 @@ import {
 } from "./agent-builds-harness.ts";
 import type { FilesGate } from "./agent-builds-harness.ts";
 import {
+  buildingApisIn,
+  chatOf,
   codeResults,
   codeStep,
   says,
@@ -32,6 +34,7 @@ import {
 import { allEvents } from "./audit-events.ts";
 import { agentWriting } from "./draft-writers.ts";
 import { mockIdpWith } from "./idp.ts";
+import { signedInApi } from "./sign-in.ts";
 import { stoppingUltracite } from "./ultracite-stops.ts";
 
 // `env.build` in a chat's code: the chat's agent building Apps for its
@@ -468,17 +471,18 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   });
 
   it("refuses a file write for someone who doesn't build the App, as it refuses their code", async () => {
-    const { chat } = await setUp(
-      (app) => [
-        toolStep("writeFile", { app, files: { "a.md": "a" } }),
-        codeStep(
-          tryEach({
-            write: `await env.build.write(${JSON.stringify(app)}, { "a.md": "a" }, { revision: (await env.build.files(${JSON.stringify(app)})).revision })`,
-          })
-        ),
-        says("No."),
-      ],
-      "user"
+    // A builder, offered the file tools, with no role in the Ledger.
+    const { existing } = await setUp([]);
+    const stranger = await signedInApi(idp, "builder");
+    const chat = await chatOf(
+      stranger.userId,
+      toolStep("writeFile", { app: existing, files: { "a.md": "a" } }),
+      codeStep(
+        tryEach({
+          write: `await env.build.write(${JSON.stringify(existing)}, { "a.md": "a" }, { revision: (await env.build.files(${JSON.stringify(existing)})).revision })`,
+        })
+      ),
+      says("No.")
     );
 
     await chat.ask("Change the Ledger");
@@ -491,6 +495,41 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       tool: [true, true],
       code: { write: refused },
+    });
+  });
+
+  it("offers no building to someone who doesn't build, and refuses their write all the same", async () => {
+    const { chat, existing } = await setUp(
+      (app) => [
+        // A call of a tool the turn wasn't offered, as an old chat holds.
+        toolStep("writeFile", { app, files: { "a.md": "a" } }),
+        says("No."),
+      ],
+      "user"
+    );
+
+    await chat.ask("Change the Ledger");
+
+    const [tool] = await toolResults(chat.stub, chat.chat.id);
+    const { tools } = z
+      .object({ tools: z.array(z.object({ name: z.string() })) })
+      .parse(chat.provider.requests[0]?.body);
+    // `env.build` itself, as code a model wrote anyway would reach it.
+    const { build } = await buildingApisIn(chat);
+    let write: unknown = "written";
+    try {
+      await build.write(existing, { "a.md": "a" }, { revision: 0 });
+    } catch (error) {
+      write = error instanceof Error ? error.message : error;
+    }
+    expect({
+      offered: tools.some(({ name }) => name === "writeFile"),
+      tool: tool?.isError,
+      write,
+    }).toStrictEqual({
+      offered: false,
+      tool: true,
+      write: appErrors.create("app.not_found").message,
     });
   });
 

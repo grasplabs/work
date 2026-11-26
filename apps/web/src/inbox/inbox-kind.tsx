@@ -50,6 +50,10 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
     message: "Unconfirmed change",
     context: "inbox item kind",
   }),
+  everyonesOutcome: msg({
+    message: "Unconfirmed change",
+    context: "inbox item kind",
+  }),
   permissionRequest: msg({ message: "Permission", context: "inbox item kind" }),
   stoppedSchedule: msg({
     message: "Stopped schedule",
@@ -101,6 +105,7 @@ export const kindMark: Record<InboxKind, IconData> = {
   heldWrite: PencilIcon,
   heldStart: PlayIcon,
   unknownOutcome: CircleHelpIcon,
+  everyonesOutcome: CircleHelpIcon,
   permissionRequest: LockIcon,
   stoppedSchedule: CalendarIcon,
   workflowChanged: ArrowLeftRightIcon,

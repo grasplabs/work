@@ -164,6 +164,28 @@ export const linearAsked = "Grant it here, and I'll look.";
 /** What the agent says once it read the first issue through the connector (`readsLinear`). */
 export const linearAnswer = /^The first open one is ENG-\d+\.$/u;
 
+/** An answer with each kind of block Markdown draws beyond words (`answersInBlocks`). */
+const inBlocks = [
+  "Here is the quarter at a glance.",
+  "",
+  "| Region | Revenue |",
+  "| --- | --- |",
+  "| North | 120 |",
+  "| South | 95 |",
+  "",
+  "Growth is $$g = \\frac{r_2 - r_1}{r_1}$$, so the North grew by a quarter.",
+  "",
+  "```python",
+  "def growth(before, after):",
+  "    return (after - before) / before",
+  "```",
+  "",
+  "```mermaid",
+  "flowchart LR",
+  "  Lead --> Deal --> Invoice",
+  "```",
+].join("\n");
+
 export const modelScripts = {
   /** A chat turn, end to end: the person asks, the agent answers. */
   answers: {
@@ -193,6 +215,11 @@ export const modelScripts = {
   answersAtLength: {
     opener: "Walk me through the month-end close, step by step.",
     replies: [says(monthEndClose)],
+  },
+  /** An answer in blocks: a table, a formula, code and a diagram. */
+  answersInBlocks: {
+    opener: "Show me the quarter in a table, a formula, code and a diagram.",
+    replies: [says(inBlocks)],
   },
   /**
    * The agent asks for the person's connection to a connector made from a

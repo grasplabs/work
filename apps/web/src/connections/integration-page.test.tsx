@@ -484,6 +484,38 @@ describe("the Connectors pages, back from a sign-in", () => {
     });
   });
 
+  it("shows an admin what core named for support under a refusal, only in its fixed form, and nobody else", async () => {
+    const named =
+      "/connectors?connectionError=connection.provider_refused&connectionReason=server%3Ahttp_403&connectionRelease=26.11.900&connectionVersion=1a2b3c4d";
+    await shown(named, [stopped]);
+    const admin = document.querySelector(
+      '[role="alert"] [data-release]'
+    )?.textContent;
+    unmounted();
+    // Anyone can put anything in a link: what isn't in its form isn't shown.
+    await shown(
+      "/connectors?connectionError=connection.provider_refused&connectionReason=see%20evil.example&connectionRelease=call-support.evil.example&connectionVersion=not-hex",
+      [stopped]
+    );
+    const said = document.querySelector('[role="alert"]')?.textContent ?? "";
+    const crafted = {
+      dashes: said.includes("Details for support: – (release –, connect –)"),
+      echoed: ["evil", "call-support", "not-hex"].some((text) =>
+        said.includes(text)
+      ),
+    };
+    unmounted();
+    await shown(named, [stopped], person({ role: "user" }));
+    const user = document.body.textContent.includes("Details for support");
+
+    expect({ admin, crafted, user }).toStrictEqual({
+      admin:
+        "Details for support: server:http_403 (release 26.11.900, connect 1a2b3c4d)",
+      crafted: { dashes: true, echoed: false },
+      user: false,
+    });
+  });
+
   it("disconnects nothing from a crafted link naming a connection, with or without the old again", async () => {
     const named = await shown(
       "/connectors/composio:hubspot?connection=c-new&again=1",

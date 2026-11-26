@@ -42,9 +42,14 @@ export const Route = createFileRoute("/_shell/inbox")({
   validateSearch: (search: Record<string, unknown>): { item?: string } =>
     typeof search.item === "string" ? { item: search.item } : {},
   pendingComponent: InboxPending,
-  loader: async ({ context: { core, identity } }) => {
+  loader: async ({ abortController, context: { core, identity } }) => {
     const [waiting, read] = await Promise.all([
-      readWaiting(core, identity),
+      // Everyone's unknown outcomes too, for an admin to follow up: here
+      // alone, never in the sidebar's count.
+      readWaiting(core, identity, {
+        everyonesOutcomes: true,
+        left: abortController.signal,
+      }),
       // The programme with Grasp, for the weekly report; none without a plan.
       loadFromCore(
         core,

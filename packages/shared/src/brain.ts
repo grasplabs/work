@@ -112,8 +112,8 @@ export interface Team {
 }
 
 /**
- * One of the company's groups of teams, as Grasp arranged it or an admin
- * changed it: a region of the brain.
+ * One of the company's groups of teams, as Grasp arranged it: a region of
+ * the brain.
  */
 export interface TeamGroup {
   id: string;
@@ -124,33 +124,6 @@ export interface TeamGroup {
   /** Always true as core keeps it: every group counts, none waits to be confirmed. */
   confirmed: boolean;
 }
-
-/** Most groups of teams a company keeps. */
-export const teamGroupsMax = 50;
-
-/** A group of teams as an admin keeps it (`brain.saveTeamGroups`). */
-export const teamGroupInputSchema = z.strictObject({
-  id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u),
-  name: z.string().trim().min(1).max(80),
-  teamIds: z
-    .array(z.string().regex(/^[A-Za-z0-9_.-]{1,80}$/u))
-    .min(1)
-    .max(200),
-});
-export type TeamGroupInput = z.input<typeof teamGroupInputSchema>;
-
-/** The company's groups of teams, in its order: each id once, each team in one group at most. */
-export const teamGroupsInputSchema = z
-  .array(teamGroupInputSchema)
-  .max(teamGroupsMax)
-  .refine(
-    (groups) => new Set(groups.map(({ id }) => id)).size === groups.length,
-    "Each group once."
-  )
-  .refine((groups) => {
-    const teams = groups.flatMap(({ teamIds }) => teamIds);
-    return new Set(teams).size === teams.length;
-  }, "Each team in one group at most.");
 
 /**
  * How many interviews the brain learned from in a week, never who gave them
@@ -379,7 +352,7 @@ export interface Workspace {
   /**
    * The company's groups of teams, in its order: the brain's regions. A
    * team in none waits for Grasp to arrange it, after the staff list is
-   * saved, or for an admin to place it (`saveTeamGroups`).
+   * saved.
    */
   teamGroups: TeamGroup[];
   /** The interviews the brain learned from, week by week, oldest first. */
@@ -498,13 +471,6 @@ export interface BrainApi {
    * took.
    */
   forget: (target: BrainForgetTarget) => Promise<BrainForgetPreview>;
-  /**
-   * Keeps the company's groups of teams as given, in its order, all of
-   * them: what isn't given is no longer a group. Grasp never moves a team
-   * an admin placed. For the company's admins, audited. Returns them as
-   * kept.
-   */
-  saveTeamGroups: (groups: TeamGroupInput[]) => Promise<TeamGroup[]>;
   /** Closes an open gap without an answer: for the company's admins. */
   closeGap: (gapId: string) => Promise<Gap>;
   /**
@@ -529,7 +495,5 @@ export const brainErrors = defineErrorFamily({
   "brain.invalid": "That isn't a valid moment, page, page size or source.",
   "brain.forget_missing":
     "The brain holds no such source or statement to take out.",
-  "brain.team_groups_invalid":
-    "Those aren't groups of the brain's teams: each needs a name and teams the brain has, each team in one group at most.",
   "brain.work_not_found": "Grasp knows of no such piece of work.",
 });

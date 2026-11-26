@@ -609,6 +609,66 @@ describe("a chat's ChatSession", () => {
     });
   });
 
+  it("opens pi again each time its storage fails under a turn, also after an open that worked", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId);
+    const provider = await fakeProviderFor(
+      [model],
+      says("Never stored."),
+      says("Never stored either."),
+      says("Stored.")
+    );
+    const { session, request } = sessionOf(asking, userId);
+    await session().activeTurn();
+    await runInDurableObject(session(), (_instance, state) => {
+      state.storage.sql.exec(
+        `CREATE TRIGGER test_fault BEFORE INSERT ON pi_entries WHEN NEW.record LIKE '%Never stored%' AND NEW.record LIKE '%"stopReason":"stop"%' BEGIN SELECT RAISE(ABORT, 'Refused by the test'); END`
+      );
+    });
+    const end = await session().run(request("turn-a", "Stored?"));
+    expect({
+      answer: end.answer,
+      requests: provider.requests.length,
+    }).toStrictEqual({ answer: "Stored.", requests: 3 });
+  });
+
+  it("stops sending a turn's requests again once its storage keeps failing after opens that work, and ends the turn", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId);
+    const provider = await fakeProviderFor(
+      [model],
+      ...Array.from({ length: 10 }, () => says("Never stored."))
+    );
+    const { session, request } = sessionOf(asking, userId);
+    await session().activeTurn();
+    await runInDurableObject(session(), (_instance, state) => {
+      state.storage.sql.exec(
+        `CREATE TRIGGER test_fault BEFORE INSERT ON pi_entries WHEN NEW.record LIKE '%Never stored%' AND NEW.record LIKE '%"stopReason":"stop"%' BEGIN SELECT RAISE(ABORT, 'Refused by the test'); END`
+      );
+    });
+    const ended = await session()
+      .run(request("turn-a", "Stored?"))
+      .then(
+        (end) => end.stopped ?? end.outcome,
+        (error: unknown) =>
+          z.object({ message: z.string() }).parse(error).message
+      );
+    // Woken by its alarm meanwhile, as nothing else calls it.
+    await runDurableObjectAlarm(session());
+    const sent = provider.requests.length;
+    await runDurableObjectAlarm(session());
+    expect({
+      // Lost, or failed for restarts cutting it off: either way it ends.
+      ended: [
+        "lost",
+        "failed",
+        agentErrors.create("agent.turn_lost").message,
+      ].includes(ended),
+      bounded: sent <= 6,
+      noMore: provider.requests.length === sent,
+    }).toStrictEqual({ ended: true, bounded: true, noMore: true });
+  });
+
   it("opens pi again when its storage fails under a turn nothing waits on, and the turn answers", async () => {
     const { userId } = await signedInWithRole(idp, "user");
     const cut = pausedReply(says("Cut."), 1);
@@ -687,13 +747,14 @@ describe("a chat's ChatSession", () => {
     }
   });
 
-  it("tries a pi that fails to open again later and later, then stops, its chat no longer shown busy", async () => {
+  it("tries a pi that fails to open again later and later, then gives the turn up as failed, and takes the next question once storage recovers", async () => {
     const { userId } = await signedInWithRole(idp, "user");
     const never = Promise.withResolvers<boolean>();
     const stuck = { ...says("Never."), pause: { at: 0, until: never.promise } };
     const { id, stub, provider, newChat } = await personalChatsOf(
       userId,
-      stuck
+      stuck,
+      says("Answered now.")
     );
     const { chat, ask } = await newChat();
     const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
@@ -739,6 +800,17 @@ describe("a chat's ChatSession", () => {
       }
       const waits = after.filter((wait) => wait !== null);
       const { running } = await workspace(env, id).chatSummary(chat.id, userId);
+      // Storage recovers: the turn given up on stays given up, and the
+      // next question is taken, not refused as busy.
+      await runInDurableObject(session(), (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE pi_durable_schema SET version = version - 100"
+        );
+      });
+      const next = await workspace(env, id).ask(chat.id, {
+        text: "Again?",
+        model,
+      });
       expect({
         tried: waits.length,
         longerEachTime: waits.every(
@@ -746,18 +818,137 @@ describe("a chat's ChatSession", () => {
         ),
         thenNone: after.at(-1),
         running,
+        next: next.answer,
+        requests: provider.requests.length,
       }).toStrictEqual({
         tried: 5,
         longerEachTime: true,
         thenNone: null,
         running: false,
+        next: "Answered now.",
+        requests: 2,
       });
     } finally {
       never.resolve(true);
     }
   });
 
-  it("stops a turn that runs past its time, as overdue", async () => {
+  it("stops waking a chat whose opens reset the object as often as it gives up after, and settles its turn as lost once a call opens it", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const never = Promise.withResolvers<boolean>();
+    const stuck = { ...says("Never."), pause: { at: 0, until: never.promise } };
+    const { id, stub, provider, newChat } = await personalChatsOf(
+      userId,
+      stuck,
+      says("Answered after all.")
+    );
+    const { chat, ask } = await newChat();
+    const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
+    try {
+      void ask("Hello?").catch(() => "settled");
+      await vi.waitFor(
+        async () => {
+          expect(provider.requests).toHaveLength(1);
+          await expect(
+            stub.chatSummary(chat.id, userId)
+          ).resolves.toMatchObject({ running: true });
+        },
+        { timeout: 10_000 }
+      );
+      for (const stopped of [stub, session()]) {
+        // oxlint-disable-next-line no-await-in-loop -- one, then the other
+        await runInDurableObject(stopped, (_instance, state) => {
+          state.abort("Restarted by the test");
+        }).catch(() => {
+          // Aborting fails the call that aborted: that is the restart.
+        });
+      }
+      // What six opens a reset cut short leave: each counted before it
+      // was tried, none reaching its end.
+      await runInDurableObject(session(), (_instance, state) => {
+        state.storage.kv.put("failedOpens", 6);
+      });
+      await runDurableObjectAlarm(session());
+      const { running } = await workspace(env, id).chatSummary(chat.id, userId);
+      const afterAlarm = {
+        alarm: await runInDurableObject(
+          session(),
+          async (_instance, state) => await state.storage.getAlarm()
+        ),
+        requests: provider.requests.length,
+        running,
+      };
+      // A call still opens it: the turn given up on is settled, and the
+      // next question answered.
+      const active = await session().activeTurn();
+      const next = await workspace(env, id).ask(chat.id, {
+        text: "Again?",
+        model,
+      });
+      expect({ ...afterAlarm, active, next: next.answer }).toStrictEqual({
+        alarm: null,
+        requests: 1,
+        running: false,
+        active: undefined,
+        next: "Answered after all.",
+      });
+    } finally {
+      never.resolve(true);
+    }
+  });
+
+  it("never stops a turn that keeps going, however long it runs", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId);
+    const steps = [6, 12, 18].map(() => Promise.withResolvers<boolean>());
+    const provider = await fakeProviderFor([model], {
+      ...says("Slowly but surely, the answer."),
+      pause: steps.map(({ promise }, index) => ({
+        at: 6 * (index + 1),
+        until: promise,
+      })),
+    });
+    const { session, request } = sessionOf(asking, userId);
+    const restore = await setObjectEnv(session(), {
+      CHAT_TURN_IDLE_MS: "1500",
+    });
+    try {
+      const startedAt = Date.now();
+      const asked = session().run(request("turn-a", "Slowly?"));
+      await vi.waitFor(
+        () => {
+          expect(provider.requests).toHaveLength(1);
+        },
+        { timeout: 10_000 }
+      );
+      for (const step of steps) {
+        // oxlint-disable-next-line no-await-in-loop -- a word a second
+        await scheduler.wait(1000);
+        step.resolve(true);
+        // oxlint-disable-next-line no-await-in-loop -- the heartbeat checks
+        await scheduler.wait(200);
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await runDurableObjectAlarm(session());
+      }
+      const end = await asked;
+      expect({
+        outcome: end.outcome,
+        answer: end.answer,
+        pastTheLimit: Date.now() - startedAt > 1500,
+      }).toStrictEqual({
+        outcome: "answered",
+        answer: "Slowly but surely, the answer.",
+        pastTheLimit: true,
+      });
+    } finally {
+      for (const step of steps) {
+        step.resolve(true);
+      }
+      await restore();
+    }
+  });
+
+  it("stops a turn pi makes no progress in, as overdue", async () => {
     const { userId } = await signedInWithRole(idp, "user");
     const asking = await chatOf(userId);
     const never = Promise.withResolvers<boolean>();
@@ -766,7 +957,7 @@ describe("a chat's ChatSession", () => {
       pause: { at: 0, until: never.promise },
     });
     const { session, request } = sessionOf(asking, userId);
-    const restore = await setObjectEnv(session(), { CHAT_TURN_MOST_MS: "1" });
+    const restore = await setObjectEnv(session(), { CHAT_TURN_IDLE_MS: "1" });
     try {
       const asked = session().run(request("turn-a", "Forever?"));
       await vi.waitFor(
@@ -1176,6 +1367,40 @@ describe("a chat Pi 1.4 wrote", () => {
       answer: "Again, on this Pi.",
       read: [true, true, true],
     });
+  });
+
+  it("is left as Pi 1.4 wrote it by an open alone: only a turn writes this Pi's versions", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId, says("Again, on this Pi."));
+    await restoreFixture(settledOnPi14, asking);
+    const session = chatSession(
+      env,
+      asking.id,
+      chatIdSchema.parse(asking.chat.id)
+    );
+    /** The newest version each of pi's own documents is stored at. */
+    const versions = async () =>
+      await runInDurableObject(session, (_instance, state) =>
+        Object.fromEntries(
+          state.storage.sql
+            .exec<{ kind: string; version: number }>(
+              `SELECT d.kind AS kind, max(r.version) AS version FROM pi_documents d JOIN pi_document_revisions r ON r.document_id = d.id WHERE d.kind LIKE '"pi.%' GROUP BY d.kind`
+            )
+            .toArray()
+            .map(({ kind, version }) => [kind, version])
+        )
+      );
+    const before = await versions();
+    // As the Workspace asks before a question: opens pi on this version.
+    await session.activeTurn();
+    const opened = await versions();
+    await asking.ask("Still there?");
+    const answered = await versions();
+    expect({
+      opened: opened['"pi.live"'],
+      unchanged: opened,
+      answered: answered['"pi.live"'],
+    }).toStrictEqual({ opened: 1, unchanged: before, answered: 3 });
   });
 
   it("answers the turn whose request an eviction cut off on Pi 1.4", async () => {

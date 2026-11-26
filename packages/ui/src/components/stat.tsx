@@ -34,6 +34,7 @@ import {
   size,
   space,
 } from "../lib/tokens.stylex";
+import { listOf } from "../lib/utils";
 import type { LayoutStyle } from "../lib/utils";
 import { iconVars, skeletonVars } from "../lib/vars.stylex";
 import { Skeleton } from "./skeleton";
@@ -446,7 +447,8 @@ export const StatGroup = ({
   loading = false,
   style,
 }: StatGroupProps) => {
-  const stats = [children].flat().filter(isValidElement);
+  // Stats at any depth: a list made with map beside a Stat written out counts as much as the Stat.
+  const stats = listOf(children).filter(isValidElement);
   const figures = items ?? [];
   const total = figures.length + stats.length;
   const count = columns ?? columnsFor(total);

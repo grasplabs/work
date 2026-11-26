@@ -102,7 +102,8 @@ export interface TableProps {
   /**
    * Its rows arrive one at a time (an answer being written): the columns share the width evenly,
    * so no row that comes moves the ones above it. Keep it on once the table is whole and nothing
-   * moves then either.
+   * moves then either. Each column is at least the narrowest a column may be and its name wraps, so
+   * a table of many columns scrolls sideways rather than squeezing them.
    */
   streaming?: boolean;
   /** Something after the table, inside its box: a data table's mark for endless loading. */
@@ -202,6 +203,12 @@ export interface TableHeadProps {
   /** The name of a column whose head shows no words, such as a column of actions. */
   "aria-label"?: string;
   /**
+   * The direction of its words, when they may run right to left: `auto` takes it from the first
+   * letter that has one, so a name in Arabic or Hebrew stands at the cell's right and reads from
+   * there (an answer's table, whose cells come in any language).
+   */
+  dir?: "auto" | "ltr" | "rtl";
+  /**
    * How the column is sorted now. You own the sort: sort the rows yourself and pass it here, on
    * every sortable column (`none` on the others).
    */
@@ -222,6 +229,12 @@ export interface TableHeadProps {
   width?: number;
   /** The column's key in code, as `data-column`, for a script or a test that finds it. */
   column?: string;
+  /**
+   * Its name may wrap onto more lines, as TableCell's `wrap`: a column of sentences in a table that
+   * should fit a narrow box (an answer's table), so a long name does not set the column's width.
+   * @default false
+   */
+  wrap?: boolean;
   /** Controls at the head's end, after the name: a column's menu, a handle to resize it. */
   actions?: ReactNode;
   /** Dragging the head moves the column (a data table that reorders); the drop's own events. */
@@ -254,6 +267,12 @@ export interface TableCellProps {
    */
   align?: "start" | "center" | "end";
   /**
+   * The direction of its words, when they may run right to left: `auto` takes it from the first
+   * letter that has one, so a name in Arabic or Hebrew stands at the cell's right and reads from
+   * there (an answer's table, whose cells come in any language).
+   */
+  dir?: "auto" | "ltr" | "rtl";
+  /**
    * The cell that says what the row is, usually the first: in ink, and read as the row's name by a
    * screen reader.
    * @default false
@@ -275,9 +294,10 @@ export interface TableCellProps {
   /** The cell's whole text, shown on hover where `truncate` cuts it short. */
   title?: string;
   /**
-   * Its words may wrap onto more lines: a cell that holds a sentence. Only the row header wraps by
-   * itself; every other cell (a figure, a date, a name, a badge) stays on one line, and a table
-   * too narrow for its rows scrolls sideways inside its box.
+   * Its words may wrap onto more lines: a cell that holds a sentence. It keeps the narrowest a
+   * column may be, so a table too narrow for its columns scrolls rather than squeezing it. Only the row
+   * header wraps by itself; every other cell (a figure, a date, a name, a badge) stays on one line,
+   * and a table too narrow for its rows scrolls sideways inside its box.
    * @default false
    */
   wrap?: boolean;
@@ -304,6 +324,7 @@ export interface TableCellProps {
 const SectionContext = createContext<"head" | "body" | "foot">("body");
 const DensityContext = createContext<TableDensity>("default");
 const StickyHeadContext = createContext(false);
+const EvenContext = createContext(false);
 
 // Values only the moment knows: where a held column stands, how wide a sized one is, how tall the
 // box may grow. Given as StyleX values, never as an inline style.
@@ -583,6 +604,8 @@ const styles = stylex.create({
     fontWeight: font.weightMedium,
     color: colors.tableHeadForeground,
     whiteSpace: "nowrap",
+    // As a cell's: whole words, when it wraps.
+    overflowWrap: "break-word",
   },
   // A head with controls after its name (a column's menu, a resize handle): they sit at its end.
   headWithActions: {
@@ -590,6 +613,11 @@ const styles = stylex.create({
     paddingInlineEnd: space[1],
   },
   headCompact: { height: size.tableHeadHeightCompact },
+  headWrap: { whiteSpace: "normal" },
+  // A head in a table whose columns share the width (streaming): the column is at least the
+  // narrowest a column may be. A fixed table takes its columns' widths from its head, and grows past
+  // its box, which then scrolls, when they add up to more.
+  headEven: { width: size.tableColumnMin },
   // Where a dragged column will land: a pine line on that side of the head.
   dropBefore: {
     boxShadow: {
@@ -656,6 +684,9 @@ const styles = stylex.create({
   // Every cell but the row header (and one asked to wrap) on one line: on a phone the row header
   // gives way first, in whole words, and when the row still does not fit the box scrolls sideways.
   oneLine: { whiteSpace: "nowrap" },
+  // A head or a cell whose words wrap keeps the narrowest a column may be, so a table too narrow
+  // for its columns scrolls sideways rather than squeezing them to a letter a line.
+  fewWords: { boxSizing: "border-box", minWidth: size.tableColumnMin },
   // A column of figures stands at the end, so units line up.
   end: { textAlign: "end" },
   centre: { textAlign: "center" },
@@ -862,7 +893,9 @@ export const Table = ({
             )}
             <DensityContext value={density}>
               <StickyHeadContext value={height !== undefined}>
-                {children}
+                <EvenContext value={streaming === true && width === undefined}>
+                  {children}
+                </EvenContext>
               </StickyHeadContext>
             </DensityContext>
           </table>
@@ -1073,6 +1106,7 @@ export const TableHead = ({
   children,
   align = "start",
   "aria-label": label,
+  dir,
   sortDirection,
   onSort,
   sortIndex,
@@ -1081,11 +1115,14 @@ export const TableHead = ({
   actions,
   drag,
   column,
+  wrap = false,
   hideBelow,
   style,
 }: TableHeadProps) => {
   const density = use(DensityContext);
   const stickyHead = use(StickyHeadContext);
+  // In a table whose columns share the width, a head with no width of its own sets its column's.
+  const even = use(EvenContext) && width === undefined;
   const direction = sortDirection ?? "none";
   return (
     <th
@@ -1095,6 +1132,7 @@ export const TableHead = ({
       data-own-line={stickyHead || pin !== undefined ? "" : undefined}
       scope="col"
       aria-label={label}
+      dir={dir}
       aria-sort={
         onSort !== undefined && direction !== "none" ? direction : undefined
       }
@@ -1104,6 +1142,9 @@ export const TableHead = ({
         styles.head,
         actions !== undefined && styles.headWithActions,
         density === "compact" && styles.headCompact,
+        (wrap || even) && styles.headWrap,
+        wrap && styles.fewWords,
+        even && styles.headEven,
         alignOf(align),
         stickyHead && styles.stuck,
         heldHeadOf(pin, stickyHead),
@@ -1129,6 +1170,7 @@ export const TableHead = ({
 export const TableCell = ({
   children,
   align = "start",
+  dir,
   rowHeader = false,
   colSpan,
   pin,
@@ -1146,6 +1188,7 @@ export const TableCell = ({
     density === "comfortable" && styles.comfortable,
     rowHeader && styles.rowHeader,
     !rowHeader && !wrap && styles.oneLine,
+    !rowHeader && wrap && styles.fewWords,
     alignOf(align),
     truncate && styles.truncate,
     pinOf(pin),
@@ -1158,6 +1201,7 @@ export const TableCell = ({
   const shared = {
     "data-slot": "table-cell",
     colSpan,
+    dir,
     title: truncate ? title : undefined,
   };
   return rowHeader ? (

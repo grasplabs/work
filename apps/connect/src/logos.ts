@@ -207,7 +207,7 @@ const fetchLogo = async (source: URL): Promise<CatalogLogo | null> => {
     bytes = await readCappedBytes(response, maxLogoBytes);
   } catch (error) {
     // Too big, or no bytes: refused. The answer breaking off: it didn't come.
-    if (!(error instanceof ComposioError)) {
+    if (!(error instanceof ComposioError) || error.unanswered) {
       throw new LogoUnavailableError("Composio's logo broke off", error);
     }
     log.warn("catalog.logo_refused", errorFields(error));

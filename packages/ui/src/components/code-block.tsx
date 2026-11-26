@@ -1,14 +1,16 @@
 // CodeBlock: code in an answer or a page, in StyleX on our
-// CopyButton. Highlighted with Prism (each language loaded the first time it is shown,
-// code-block-prism.ts), its title and the language's name in a header over it, a copy button that
-// copies the code exactly, line numbers and wrapping as options, highlighted, added and removed
-// lines, and long code folded under Show more. While it is still being written, the header says
-// so, quietly, and the code grows in place, read again at most once a frame.
+// CopyButton. Highlighted by @pierre/highlights' lexers in WebAssembly, loaded when a block is
+// first drawn (code-block-highlight.ts), its title and the language's name in a header over it, a
+// copy button that copies the code exactly and a download button that saves it as a file, line
+// numbers and wrapping as options, highlighted, added and removed lines, and long code folded under
+// Show more. While it is still being written, the header says so, quietly, and the code grows in
+// place, drawn at most once a frame, each line coloured once a newline ends it.
 //
 //   <CodeBlock language="ts">
 //     <CodeBlockHeader>
 //       <CodeBlockTitle>src/report.ts</CodeBlockTitle>
 //       <CodeBlockActions>
+//         <CodeBlockDownloadButton value={source} />
 //         <CodeBlockCopyButton value={source} />
 //       </CodeBlockActions>
 //     </CodeBlockHeader>
@@ -18,7 +20,7 @@
 // CodeBlockContent highlights its code given as text, in the block's language. To mark lines, give
 // it CodeBlockLines instead: `useHighlightedCode` gives the highlighted lines to map over. The
 // block is a region named by its title, or by its language without one. The code is drawn as
-// text from Prism's tokens, never as HTML. Every value is a token. A caller sets layout only
+// text from the lexers' runs, never as HTML. Every value is a token. A caller sets layout only
 // (`style`).
 "use client";
 
@@ -36,6 +38,7 @@ import type { ReactNode } from "react";
 
 import { markScrollEdges, useScrollEdges } from "../hooks/use-scroll-edges";
 import { useI18n } from "../lib/i18n";
+import { DownloadIcon, Icon } from "../lib/icons";
 import {
   codeStyles,
   focusCarrier,
@@ -51,15 +54,28 @@ import {
   size,
   space,
 } from "../lib/tokens.stylex";
-import { listOf, nothing, ownValue } from "../lib/utils";
+import { listOf, nothing, ownValue, saveFile } from "../lib/utils";
 import type { LayoutStyle } from "../lib/utils";
 import { iconVars, ringInsetMarker } from "../lib/vars.stylex";
 import { Button } from "./button";
-import { grammarOrNull, languageNames, linesOf } from "./code-block-prism";
-import type { Highlight } from "./code-block-prism";
+import {
+  colouredRuns,
+  currentEngine,
+  doneLines,
+  languages,
+  MOST_RUNS,
+  newReading,
+  noEngine,
+  plainLines,
+  stopReading,
+  watchEngine,
+  writtenLines,
+} from "./code-block-highlight";
+import type { Line, Tone } from "./code-block-highlight";
 import { codeBlockVars } from "./code-block.stylex";
 import { CopyButton } from "./copy-button";
 import { Spinner } from "./spinner";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip";
 
 /** Every prop a CodeBlock takes. */
 export interface CodeBlockProps {
@@ -76,9 +92,10 @@ export interface CodeBlockProps {
    */
   size?: "default" | "sm";
   /**
-   * Its language, by Prism's name or the usual short one: `tsx`, `ts`, `js`, `json`, `bash`,
-   * `python`, `css`, `html`, `markdown`, `yaml`, `sql`, `diff`, `go`, `rust`. Another shows as
-   * plain text. It colours CodeBlockContent's code and is named in CodeBlockTitle.
+   * Its language, by its name or the usual short one: `tsx`, `ts`, `js`, `json`, `bash`,
+   * `python`, `css`, `html`, `markdown`, `yaml`, `sql`, `diff`, `go`, `rust`, or any other the
+   * lexers know. Another shows as plain text. It colours CodeBlockContent's code and is named in
+   * CodeBlockTitle.
    * @default "text"
    */
   language?: string;
@@ -86,7 +103,7 @@ export interface CodeBlockProps {
   languageName?: string;
   /**
    * It is still being written: the header says so in words, copying waits, nothing folds, and
-   * the code grows in place, read again at most once a frame.
+   * the code grows in place, drawn at most once a frame.
    * @default false
    */
   streaming?: boolean;
@@ -131,6 +148,22 @@ export interface CodeBlockActionsProps {
 export interface CodeBlockCopyButtonProps {
   /** The code it copies, exactly. */
   value: string;
+  /**
+   * Out of use. It is, too, while the block is `streaming`.
+   * @default false
+   */
+  disabled?: boolean;
+}
+
+/** Every prop a CodeBlockDownloadButton takes. */
+export interface CodeBlockDownloadButtonProps {
+  /** The code it saves, exactly. */
+  value: string;
+  /**
+   * The file's name.
+   * @default "file" and the language's extension (`file.ts`), `file.txt` for one it does not know
+   */
+  filename?: string;
   /**
    * Out of use. It is, too, while the block is `streaming`.
    * @default false
@@ -330,6 +363,9 @@ const styles = stylex.create({
     },
     maskImage: `linear-gradient(to right, transparent, black ${codeBlockVars.start}, black calc(100% - ${codeBlockVars.end}), transparent), linear-gradient(to bottom, black calc(100% - ${codeBlockVars.foot}), transparent)`,
     maskComposite: "intersect",
+    // A layer of its own: WebKit otherwise paints each run of coloured code through the box's
+    // rounded clip, and a screen of them takes a tenth of a second; on its layer, a few ms.
+    willChange: "transform",
   },
   // Cut at `maxLines`, with a fade, until Show more.
   folded: {
@@ -465,70 +501,76 @@ const dynamic = stylex.create({
   }),
 });
 
-/** Which colour a run of code takes, from Prism's names for it. */
-const tones: Record<string, stylex.StyleXStyles> = {
+/** Each of Damsko's syntax colours (code-block-highlight.ts names which a run takes). */
+const tones: Record<Tone, stylex.StyleXStyles> = {
   keyword: styles.keyword,
-  important: styles.keyword,
-  atrule: styles.keyword,
-  rule: styles.keyword,
-  builtin: styles.keyword,
   string: styles.string,
-  char: styles.string,
-  "template-string": styles.string,
-  regex: styles.string,
-  url: styles.string,
-  "attr-value": styles.string,
-  number: styles.constant,
-  boolean: styles.constant,
   constant: styles.constant,
-  symbol: styles.constant,
-  entity: styles.constant,
   comment: styles.comment,
-  prolog: styles.comment,
-  doctype: styles.comment,
-  cdata: styles.comment,
   function: styles.function,
-  "class-name": styles.function,
-  tag: styles.function,
-  selector: styles.function,
-  title: styles.function,
   punctuation: styles.punctuation,
-  operator: styles.punctuation,
-  "attr-name": styles.attribute,
-  property: styles.attribute,
-  key: styles.attribute,
-  parameter: styles.attribute,
+  attribute: styles.attribute,
   inserted: styles.inserted,
   deleted: styles.deleted,
 };
 
-/** The colour of a run: the innermost of Prism's names that has one. */
-const toneOf = (types: string[]) =>
-  types
-    .map((type) => ownValue(tones, type))
-    .findLast((found) => found !== undefined) ?? null;
+/**
+ * At most this many lines are drawn while the block is open (and before the page is live, or with
+ * no script): past them, a line says how many more there are. Copy still takes all of the code.
+ */
+const MOST_DRAWN = 2000;
 
-/** Prism and the language's grammar once they have loaded, in the browser; null until then. */
-const useHighlight = (language: string): Highlight | null => {
-  // The grammar is kept with its language, so code in a new language is never coloured as the old.
-  const [loaded, setLoaded] = useState<{
-    language: string;
-    found: Highlight | null;
-  } | null>(null);
-  useEffect(() => {
-    let live = true;
-    const load = async () => {
-      const found = await grammarOrNull(language);
-      if (live) {
-        setLoaded({ language, found });
-      }
-    };
-    void load();
-    return () => {
-      live = false;
-    };
-  }, [language]);
-  return loaded?.language === language ? loaded.found : null;
+/** Where the line after `count` lines of `code` starts. */
+const afterLines = (code: string, count: number) => {
+  let at = 0;
+  for (let line = 0; line < count && at !== -1; line += 1) {
+    at = code.indexOf("\n", at);
+    at = at === -1 ? code.length : at + 1;
+  }
+  return at;
+};
+
+/**
+ * `code`'s first `most` lines, coloured, the rest of them text: all of it text until the lexers
+ * have loaded, where they cannot, in a language they do not know, and when the lines are more than
+ * MOST_RUNS coloured runs (never the 18 lines a folded block shows: see MOST_LINE). While it is
+ * written, the lines a newline has ended are coloured, each once, as they come, and the last is
+ * text until its newline comes: never coloured in one frame and plain in the next.
+ */
+const useLinesOf = (
+  code: string,
+  language: string,
+  streaming: boolean,
+  most: number
+): (Line | string)[] => {
+  const engine = useSyncExternalStore(watchEngine, currentEngine, noEngine);
+  // oxlint-disable-next-line react/hook-use-state -- made once, never replaced
+  const [reading] = useState(newReading);
+  useEffect(
+    () => () => {
+      stopReading(reading);
+    },
+    [reading]
+  );
+  if (engine === null || code === "") {
+    return plainLines(code, most);
+  }
+  if (streaming) {
+    const lines = writtenLines(reading, engine, code, language, most);
+    return lines === null
+      ? plainLines(code, most)
+      : [
+          ...lines,
+          ...plainLines(
+            code.slice(afterLines(code, lines.length)),
+            most - lines.length
+          ),
+        ];
+  }
+  const lines = doneLines(reading, engine, code, language, most);
+  return lines === null || colouredRuns(lines) > MOST_RUNS
+    ? plainLines(code, most)
+    : lines;
 };
 
 /**
@@ -575,15 +617,15 @@ const useOncePerFrame = (code: string, streaming: boolean): string => {
  */
 const useOpen = (streaming: boolean) => {
   const [open, setOpen] = useState(false);
-  const streamed = useRef(streaming);
-  useEffect(() => {
-    if (streaming) {
-      streamed.current = true;
-    } else if (streamed.current) {
-      streamed.current = false;
+  // Opened in the render the writing ends in, never a frame later: no frame draws it folded, and
+  // its lines are read once, for the open block.
+  const [wasStreaming, setWasStreaming] = useState(streaming);
+  if (wasStreaming !== streaming) {
+    setWasStreaming(streaming);
+    if (wasStreaming) {
       setOpen(true);
     }
-  }, [streaming]);
+  }
   return [open, setOpen] as const;
 };
 
@@ -637,27 +679,51 @@ const useBlock = (part: string): Block => {
 };
 
 /**
+ * A line's runs, each in its colour. A component of its own, so the compiler keeps what it drew for
+ * as long as the line is the same object (code-block-highlight.ts keeps it one while the code is
+ * written and once it is done): a line already coloured is never drawn again while later lines
+ * are coloured or more code comes in.
+ */
+const LineRuns = ({ line }: { line: Line }) => (
+  <>
+    {line.map((run, at) =>
+      // A run with no colour is its text alone: a long file draws thousands fewer elements.
+      run.tone === null ? (
+        run.text
+      ) : (
+        // A run has no id; its place in the line is its key, and runs never reorder.
+        <span key={at} {...stylex.props(tones[run.tone])}>
+          {run.text}
+        </span>
+      )
+    )}
+  </>
+);
+
+/**
  * `code` highlighted in `language`, as lines of coloured runs to give CodeBlockLines: plain until
- * Prism and the language have loaded. While `streaming`, read again at most once a frame, however
- * fast the code comes.
+ * the lexers have loaded, and where they cannot; plain, all of it, past MOST_RUNS coloured runs.
+ * While `streaming`, the code shown is drawn at most once a frame, each line coloured once its
+ * newline comes.
  */
 export const useHighlightedCode = (
   code: string,
   language: string,
   streaming = false
-): ReactNode[] => {
-  const highlight = useHighlight(language);
-  const shown = useOncePerFrame(code, streaming);
-  // The compiler keeps the lines until the code or the grammar changes.
-  return linesOf(shown, highlight).map((line) =>
-    line.map((run, at) => (
-      // A run has no id; its place in the line is its key, and runs never reorder.
-      <span key={at} {...stylex.props(toneOf(run.types))}>
-        {run.text}
-      </span>
-    ))
+): ReactNode[] =>
+  useLinesOf(
+    useOncePerFrame(code, streaming),
+    language,
+    streaming,
+    Number.POSITIVE_INFINITY
+  ).map((line, index) =>
+    typeof line === "string" ? (
+      line
+    ) : (
+      // Lines have no id; a line's place is its key.
+      <LineRuns key={index} line={line} />
+    )
   );
-};
 
 /** Code, highlighted, with its title and language over it, a copy button, and Show more when it is long. */
 export const CodeBlock = ({
@@ -736,7 +802,7 @@ export const CodeBlockTitle = ({ children }: CodeBlockTitleProps) => {
   const key = language.toLowerCase();
   const name =
     languageName ??
-    (key === "text" ? words.plainText : ownValue(languageNames, key)) ??
+    (key === "text" ? words.plainText : ownValue(languages, key)?.name) ??
     language;
   return (
     <>
@@ -783,6 +849,36 @@ export const CodeBlockCopyButton = ({
 }: CodeBlockCopyButtonProps) => {
   const { streaming } = useBlock("CodeBlockCopyButton");
   return <CopyButton value={value} disabled={disabled || streaming} />;
+};
+
+/** Saves the code as a file, in the block's language. It waits while the code is written. */
+export const CodeBlockDownloadButton = ({
+  value,
+  filename,
+  disabled = false,
+}: CodeBlockDownloadButtonProps) => {
+  const words = useI18n().codeBlock;
+  const { language, streaming } = useBlock("CodeBlockDownloadButton");
+  const extension =
+    ownValue(languages, language.toLowerCase())?.extension ?? "txt";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={words.download}
+          disabled={disabled || streaming}
+          onClick={() => {
+            saveFile(value, filename ?? `file.${extension}`, "text/plain");
+          }}
+        >
+          <Icon icon={DownloadIcon} />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{words.download}</TooltipContent>
+    </Tooltip>
+  );
 };
 
 /** Whether a line has no code in it: nothing given, no text, or no runs. */
@@ -847,13 +943,6 @@ const ShowMore = ({
   );
 };
 
-/**
- * At most this many lines are drawn while a block that folds is open (and before the page is live,
- * or with no script): past them, a line says how many more there are. Copy still takes all of the
- * code. A block that never folds (`maxLines={false}`) draws every line.
- */
-const MOST_DRAWN = 2000;
-
 /** How many lines code has, as linesOf reads it: a last newline ends a line, not starts one. */
 const countLines = (code: string) => {
   let count = 1;
@@ -867,47 +956,42 @@ const countLines = (code: string) => {
   return count;
 };
 
-/** The first `most` lines of code. */
-const firstLines = (code: string, most: number) => {
-  let at = -1;
-  for (let line = 0; line < most; line += 1) {
-    at = code.indexOf("\n", at + 1);
-    if (at === -1) {
-      return code;
-    }
-  }
-  return code.slice(0, at);
-};
-
 const noWatch = () => nothing;
 const live = () => true;
 const notLive = () => false;
 
 /**
- * The content's lines: how many there are, and those drawn, at most `most`: its code highlighted, a
- * CodeBlockLine each; or the CodeBlockLines given. Only the lines drawn are highlighted and made.
+ * A line CodeBlockContent draws from its code: kept by the compiler while the line is the same, so
+ * it is not drawn again when the lines after it change.
+ */
+const HighlightedLine = ({ line }: { line: Line | string }) => (
+  <CodeBlockLine>
+    {typeof line === "string" ? line : <LineRuns line={line} />}
+  </CodeBlockLine>
+);
+
+/**
+ * The content's lines: how many there are, and those drawn, at most `drawn` of `fold`: its code
+ * highlighted, a CodeBlockLine each; or the CodeBlockLines given. Only the lines drawn are made.
  */
 const useLines = (
   children: ReactNode,
   language: string,
   streaming: boolean,
-  most: (count: number) => number
+  fold: (count: number) => { drawn: number }
 ) => {
   const given = typeof children === "string";
   const parts = given ? [] : listOf(children);
   const count = given ? countLines(children) : parts.length;
-  const drawn = most(count);
-  const highlighted = useHighlightedCode(
-    given ? firstLines(children, drawn) : "",
-    language,
-    streaming
-  );
+  const { drawn } = fold(count);
+  const shown = useOncePerFrame(given ? children : "", streaming);
+  const highlighted = useLinesOf(shown, language, streaming, drawn);
   return {
     count,
     lines: given
       ? highlighted.map((line, index) => (
           // Lines have no id; a line's place is its key.
-          <CodeBlockLine key={index}>{line}</CodeBlockLine>
+          <HighlightedLine key={index} line={line} />
         ))
       : parts.slice(0, drawn),
   };
@@ -956,12 +1040,7 @@ export const CodeBlockContent = ({
     useBlock("CodeBlockContent");
   const words = useI18n().codeBlock;
   const { open, setOpen, linesFor } = useFold(maxLines, streaming);
-  const { count, lines } = useLines(
-    children,
-    language,
-    streaming,
-    (all) => linesFor(all).drawn
-  );
+  const { count, lines } = useLines(children, language, streaming, linesFor);
   const { folds, foldAt, more } = linesFor(count);
   const { scroller, scrolls } = useScrolls();
   const contentId = useId();

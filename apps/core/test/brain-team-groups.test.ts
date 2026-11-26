@@ -12,19 +12,17 @@ import { aloneInTheStore, answering, holdAlarm } from "./interview-link.ts";
 import { teamsMade } from "./members-teams.ts";
 import { arrangementCalls, arrangementReplies } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
-import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
+import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
 
 // The company's own groups of teams, the brain's regions (core's
-// brain-team-groups.ts). What can go wrong, tried here: someone who isn't
-// an admin regrouping the company; a group naming a team the brain
-// doesn't have, or one team in two groups; a change kept without its
-// audit event, or an earlier set lost to it. And as Grasp arranges the
-// teams in no region by itself (GRA-1993): a team an admin placed moved;
-// more regions than the map's four lobes; the model given more than the
-// teams' names, or trusted when it invents a team; the staff list's save
-// held up or failed by the model, or a read asking it; a failure that
-// is never tried again, or tried forever.
+// brain-team-groups.ts), which Grasp arranges by itself (GRA-1993). What
+// can go wrong, tried here: a change kept without its audit event, or an
+// earlier set lost to it; a placed team moved; more regions than the
+// map's four lobes; the model given more than the teams' names, or
+// trusted when it invents a team; the staff list's save held up or
+// failed by the model, or a read asking it; a failure that is never tried
+// again, or tried forever.
 
 const idp = mockIdp();
 
@@ -138,171 +136,18 @@ const regionsRow = async () =>
     return row ?? null;
   });
 
+/** The ids of a set of groups as `brain_team_group_saves` keeps it. */
+const groupIds = (stored: string | undefined): string[] =>
+  z
+    .array(z.object({ id: z.string() }))
+    .parse(JSON.parse(stored ?? "[]"))
+    .map((group) => group.id);
+
 /** A staff-list team's id as the Brain named it before its bare id (GRA-2055). */
 const was = (id: string): string => `team-${id}`;
 
-/** How many times the groups were kept (`brain_team_group_saves`). */
-const keptSets = async (): Promise<number> => {
-  const row = await env.DB.prepare(
-    "SELECT count(*) AS saves FROM brain_team_group_saves"
-  ).first<{ saves: number }>();
-  return row?.saves ?? 0;
-};
-
 describe("the company's groups of teams", { timeout: 120_000 }, () => {
   beforeEach(aloneInTheStore);
-
-  it("are confirmed by an admin, read by every member and audited", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const member = await signedInApi(idp, "user");
-    const tag = unique();
-    await admin.api.onboarding.confirmRoster(await teamsMade(rosterOf(tag)));
-
-    let saved: unknown;
-    const events = await auditedDuring(async () => {
-      saved = await admin.api.brain.saveTeamGroups([
-        {
-          id: "front",
-          name: "Front office",
-          teamIds: [`sales-${tag}`, `support-${tag}`],
-        },
-        { id: "back", name: "Back office", teamIds: [`finance-${tag}`] },
-      ]);
-    });
-    const { teamGroups } = await admin.api.brain.read();
-    const forMember = await member.api.brain.read();
-
-    expect({
-      saved,
-      read: teamGroups,
-      events: events
-        .filter(({ action }) => action === "brain.team_groups.saved")
-        .map(({ actor, provenance, detail }) => ({
-          actor: actor.type,
-          provenance,
-          // The save that keeps the groups before and after, by its id.
-          detail: {
-            ...detail,
-            before: typeof detail?.before,
-            save: typeof detail?.save,
-          },
-        })),
-      // A member reads the groups as they read the teams: the confirmed
-      // roster's teams are every member's (GRA-1748), so its groups are too.
-      member: forMember.teamGroups,
-    }).toStrictEqual({
-      saved: [
-        {
-          id: "front",
-          name: "Front office",
-          teamIds: [`sales-${tag}`, `support-${tag}`],
-          confirmed: true,
-        },
-        {
-          id: "back",
-          name: "Back office",
-          teamIds: [`finance-${tag}`],
-          confirmed: true,
-        },
-      ],
-      read: saved,
-      events: [
-        {
-          actor: "person",
-          provenance: ["front", "back"],
-          detail: { groups: 2, before: "number", save: "string" },
-        },
-      ],
-      member: saved,
-    });
-  });
-
-  it("keep each confirmed set whole, before and after, so an earlier one can be put back", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const tag = unique();
-    await admin.api.onboarding.saveRoster(await teamsMade(rosterOf(tag)));
-    const finance = `finance-${tag}`;
-    const sales = `sales-${tag}`;
-    const support = `support-${tag}`;
-    const first = [
-      { id: "front", name: "Front office", teamIds: [sales, support] },
-      { id: "back", name: "Back office", teamIds: [finance] },
-    ];
-    await admin.api.brain.saveTeamGroups(first);
-    const events = await auditedDuring(async () => {
-      await admin.api.brain.saveTeamGroups([
-        { id: "all", name: "Everyone", teamIds: [finance, sales, support] },
-      ]);
-    });
-    const saved = events.find(
-      ({ action }) => action === "brain.team_groups.saved"
-    );
-    const kept = await env.DB.prepare(
-      "SELECT before, after FROM brain_team_group_saves WHERE id = ?"
-    )
-      .bind(saved?.detail?.save ?? "")
-      .first<{ before: string; after: string }>();
-
-    expect(kept).toStrictEqual({
-      before: JSON.stringify(
-        first.map((group) => ({ ...group, confirmed: true }))
-      ),
-      after: JSON.stringify([
-        {
-          id: "all",
-          name: "Everyone",
-          teamIds: [finance, sales, support],
-          confirmed: true,
-        },
-      ]),
-    });
-  });
-
-  it("are refused to anyone but an admin, and when they don't group the brain's teams", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const member = await signedInApi(idp, "user");
-    const tag = unique();
-    await admin.api.onboarding.saveRoster(await teamsMade(rosterOf(tag)));
-    const finance = `finance-${tag}`;
-    await admin.api.brain.saveTeamGroups([
-      { id: "kept", name: "Kept", teamIds: [finance] },
-    ]);
-
-    const outcomes = {
-      member: await outcome(
-        member.api.brain.saveTeamGroups([
-          { id: "mine", name: "Mine", teamIds: [finance] },
-        ])
-      ),
-      unknownTeam: await outcome(
-        admin.api.brain.saveTeamGroups([
-          { id: "ghost", name: "Ghosts", teamIds: [`ghost-${tag}`] },
-        ])
-      ),
-      twice: await outcome(
-        admin.api.brain.saveTeamGroups([
-          { id: "one", name: "One", teamIds: [finance] },
-          { id: "two", name: "Two", teamIds: [finance] },
-        ])
-      ),
-      empty: await outcome(
-        admin.api.brain.saveTeamGroups([
-          { id: "none", name: "None", teamIds: [] },
-        ])
-      ),
-    };
-    const { teamGroups } = await admin.api.brain.read();
-
-    expect({ outcomes, kept: teamGroups.map(({ id }) => id) }).toStrictEqual({
-      outcomes: {
-        member: "role.forbidden",
-        unknownTeam: "brain.team_groups_invalid",
-        twice: "brain.team_groups_invalid",
-        empty: "brain.team_groups_invalid",
-      },
-      kept: ["kept"],
-    });
-  });
 
   it("are arranged by Grasp, from the onboarding's alarm after the staff list is saved, into at most four regions that count at once, audited once without a name", async () => {
     const admin = await signedInApi(idp, "admin");
@@ -318,16 +163,22 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
       ],
     };
 
-    // Three regions of a staff list before, whose teams are all gone: they
-    // take none of the map's four lobes.
+    // Three regions Grasp made of a staff list before, whose teams are all
+    // gone: they take none of the map's four lobes.
     const old = unique();
-    await admin.api.onboarding.saveRoster(await teamsMade(rosterOf(old)));
-    const gone = ["finance", "sales", "support"].map((team, index) => ({
-      id: `gone-${index}-${tag}`,
-      name: `Gone ${index}`,
-      teamIds: [`${team}-${old}`],
-    }));
-    await admin.api.brain.saveTeamGroups(gone);
+    await alarmed(
+      [
+        arranging({
+          groups: ["finance", "sales", "support"].map((team, index) => ({
+            name: `Gone ${index} ${tag}`,
+            teamIds: [`${team}-${old}`],
+          })),
+        }),
+      ],
+      async () =>
+        await admin.api.onboarding.saveRoster(await teamsMade(rosterOf(old)))
+    );
+    const { teamGroups: gone } = await admin.api.brain.read();
     let ran = false;
     let requests: readonly unknown[] = [];
     const events = await auditedDuring(async () => {
@@ -342,6 +193,12 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     const arranged = events.filter(
       ({ action }) => action === "brain.team_groups.arranged"
     );
+    // The set kept whole, before and after, by the save the event names.
+    const kept = await env.DB.prepare(
+      "SELECT before, after FROM brain_team_group_saves WHERE id = ?"
+    )
+      .bind(arranged[0]?.detail?.save ?? "")
+      .first<{ before: string; after: string }>();
 
     expect({
       ran,
@@ -362,6 +219,7 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
       namesAudited: names.some((name) =>
         JSON.stringify(arranged).includes(name)
       ),
+      kept: { before: groupIds(kept?.before), after: groupIds(kept?.after) },
     }).toStrictEqual({
       ran: true,
       asked: 1,
@@ -380,21 +238,27 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
         },
       ],
       namesAudited: false,
+      kept: {
+        before: gone.map((group) => group.id),
+        after: [...gone, ...teamGroups].map((group) => group.id),
+      },
     });
   });
 
-  it("never move a team an admin placed, and join a region by its name", async () => {
+  it("never move a team once placed, and join a region by its name", async () => {
     const admin = await signedInApi(idp, "admin");
     const tag = unique();
-    await admin.api.onboarding.saveRoster(await teamsMade(rosterOf(tag)));
     const finance = `finance-${tag}`;
     const sales = `sales-${tag}`;
     const support = `support-${tag}`;
-    await admin.api.brain.saveTeamGroups([
-      { id: "money", name: "Money matters", teamIds: [finance] },
-    ]);
+    // Grasp places Finance alone first; Sales and Support wait.
+    await alarmed(
+      [arranging({ groups: [{ name: "Money matters", teamIds: [finance] }] })],
+      async () =>
+        await admin.api.onboarding.saveRoster(await teamsMade(rosterOf(tag)))
+    );
 
-    // The model would move Finance out, and puts Sales in the admin's region.
+    // The model would move Finance out, and puts Sales in Finance's region.
     const { requests } = await alarmed(
       [
         arranging({
@@ -419,51 +283,13 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       asked: 1,
       regions: [
-        { id: "money", name: "Money matters", teamIds: [finance, sales] },
+        {
+          id: "group-money-matters",
+          name: "Money matters",
+          teamIds: [finance, sales],
+        },
         { id: "group-customers", name: "Customers", teamIds: [support] },
       ],
-    });
-  });
-
-  it("keep a team an admin took out of every region out: the next staff list asks no model for it", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const tag = unique();
-    const finance = `finance-${tag}`;
-    const sales = `sales-${tag}`;
-    const support = `support-${tag}`;
-    await alarmed(
-      [
-        arranging({
-          groups: [{ name: "Everyone", teamIds: [finance, sales, support] }],
-        }),
-      ],
-      async () =>
-        await admin.api.onboarding.saveRoster(await teamsMade(rosterOf(tag)))
-    );
-    const arranged = await admin.api.brain.read();
-    const everyone = arranged.teamGroups.find(({ teamIds }) =>
-      teamIds.includes(finance)
-    );
-    // The admin sets Finance to "No group".
-    await admin.api.brain.saveTeamGroups([
-      { id: everyone?.id ?? "", name: "Everyone", teamIds: [sales, support] },
-    ]);
-
-    const { ran, requests } = await alarmed(
-      [arranging({ groups: [{ name: "Money", teamIds: [finance] }] })],
-      async () =>
-        await admin.api.onboarding.saveRoster(await teamsMade(rosterOf(tag)))
-    );
-    const { teamGroups } = await admin.api.brain.read();
-
-    expect({
-      ran,
-      asked: requests.length,
-      regions: teamGroups.map(({ name, teamIds }) => ({ name, teamIds })),
-    }).toStrictEqual({
-      ran: true,
-      asked: 0,
-      regions: [{ name: "Everyone", teamIds: [sales, support] }],
     });
   });
 
@@ -548,7 +374,7 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     });
   });
 
-  it("keep what an admin saves while the model answers, a team taken out included, and are owed again by a staff list saved meanwhile", async () => {
+  it("keep what the model answers while the staff list is saved again, and are owed again by that save", async () => {
     const admin = await signedInApi(idp, "admin");
     const tag = unique();
     const finance = `finance-${tag}`;
@@ -560,17 +386,12 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     const { requests } = await arrangingWith(
       [
         async () => {
-          // While the model answers: the admin places Sales and Finance,
-          // takes Finance out again, and saves the staff list again.
-          await admin.api.brain.saveTeamGroups([
-            { id: "front", name: "Front office", teamIds: [sales, finance] },
-          ]);
-          await admin.api.brain.saveTeamGroups([
-            { id: "front", name: "Front office", teamIds: [sales] },
-          ]);
+          // While the model answers, the admin saves the staff list again.
           await admin.api.onboarding.saveRoster(await teamsMade(rosterOf(tag)));
           return arranging({
-            groups: [{ name: "Everyone", teamIds: [finance, sales, support] }],
+            groups: [
+              { name: `Everyone ${tag}`, teamIds: [finance, sales, support] },
+            ],
           });
         },
       ],
@@ -586,98 +407,9 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       asked: 1,
       regions: [
-        { id: "front", teamIds: [sales] },
-        { id: "group-everyone", teamIds: [support] },
+        { id: `group-everyone-${tag}`, teamIds: [finance, sales, support] },
       ],
       owed: 0,
-    });
-  });
-
-  it("keep nothing of an arrangement when an admin saves between its last read and its write, and audit none", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const tag = unique();
-    const finance = `finance-${tag}`;
-    const sales = `sales-${tag}`;
-    const support = `support-${tag}`;
-    await admin.api.onboarding.saveRoster(await teamsMade(rosterOf(tag)));
-    // A fault at the database binding: once the arrangement prepares its
-    // write (the statement that keeps the set of groups, seen through
-    // D1's public `prepare`), an admin's save is made through the real
-    // RPC, and only then does the arrangement's batch run. The model
-    // gateway's own batches never prepare that statement.
-    const writesSaves = /insert into "?brain_team_group_saves"?/iu;
-    let writing = false;
-    let injected = 0;
-    const db = new Proxy(env.DB, {
-      get: (target, key) => {
-        if (key === "prepare") {
-          return (query: string) => {
-            writing ||= writesSaves.test(query);
-            return target.prepare(query);
-          };
-        }
-        if (key === "batch") {
-          return async (statements: D1PreparedStatement[]) => {
-            if (writing && injected === 0) {
-              injected += 1;
-              await admin.api.brain.saveTeamGroups([
-                { id: "front", name: "Front office", teamIds: [sales] },
-              ]);
-            }
-            return await target.batch(statements);
-          };
-        }
-        const value: unknown = Reflect.get(target, key, target);
-        if (typeof value !== "function") {
-          return value;
-        }
-        return (...args: unknown[]): unknown => {
-          const result: unknown = Reflect.apply(value, target, args);
-          return result;
-        };
-      },
-    });
-    const faulty: Env = { ...env, DB: db };
-    const savesBefore = await keptSets();
-
-    let refusal = "";
-    const events = await auditedDuring(async () => {
-      await arrangingWith(
-        [
-          arranging({
-            groups: [{ name: "Everyone", teamIds: [finance, sales, support] }],
-          }),
-        ],
-        async () => {
-          try {
-            await arrangeTeams(faulty, async () => await brainTeams(env));
-          } catch (error) {
-            refusal = error instanceof Error ? error.message : String(error);
-          }
-        }
-      );
-    });
-    const { teamGroups } = await admin.api.brain.read();
-    const savesAfter = await keptSets();
-
-    expect({
-      injected,
-      // Thrown, so the onboarding's alarm keeps it owed and tries again.
-      refusal,
-      regions: teamGroups.map(({ id, teamIds }) => ({ id, teamIds })),
-      saves: savesAfter - savesBefore,
-      arranged: events.filter(
-        ({ action }) => action === "brain.team_groups.arranged"
-      ).length,
-      saved: events.filter(({ action }) => action === "brain.team_groups.saved")
-        .length,
-    }).toStrictEqual({
-      injected: 1,
-      refusal: "The regions changed while Grasp arranged the teams.",
-      regions: [{ id: "front", teamIds: [sales] }],
-      saves: 1,
-      arranged: 0,
-      saved: 1,
     });
   });
 

@@ -14,11 +14,7 @@ export default defineConfig({
     {
       path: "<rootDir>/src/locales/{locale}/messages",
       include: ["<rootDir>/src"],
-      exclude: [
-        "**/*.test.ts",
-        "**/*.test.tsx",
-        "<rootDir>/src/routes/kit.tsx",
-      ],
+      exclude: ["**/*.test.ts", "**/*.test.tsx"],
     },
   ],
   format: formatter({ lineNumbers: false }),

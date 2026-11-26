@@ -32,7 +32,14 @@ export const useChange = ({
           const { pathname, searchStr } = router.state.location;
           const params = new URLSearchParams(searchStr);
           params.delete("connection");
-          params.delete("connectionError");
+          for (const name of [
+            "connectionError",
+            "connectionReason",
+            "connectionRelease",
+            "connectionVersion",
+          ]) {
+            params.delete(name);
+          }
           const left = params.toString();
           await router.navigate({
             href: leave

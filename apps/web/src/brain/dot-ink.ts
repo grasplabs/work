@@ -1,7 +1,7 @@
 /**
- * The ink the dot brain prints with, shared with the buddy on Home: how its dots look and move,
- * and every colour a dot can have, by warmth and ink, from the brain tokens in the kit's styles.css. Ported
- * from the prototype (grasplabs/prototype, packages/grasp: components/onboarding/dot-ink.ts).
+ * The ink the dot brain prints with: how its dots look and move, and every colour a dot can have,
+ * by warmth and ink, from the brain's heat and glow (styles.css). Ported from the prototype
+ * (grasplabs/prototype, packages/grasp: components/onboarding/dot-ink.ts).
  */
 
 /**
