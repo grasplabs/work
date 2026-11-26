@@ -301,6 +301,8 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   // The documents' Google client (connect's providers.ts).
   "GOOGLE_DOCUMENTS_CLIENT_ID",
   "GOOGLE_DOCUMENTS_CLIENT_SECRET",
+  // Which live voice holds an interview (core's src/onboarding/voice.ts).
+  "INTERVIEW_LIVE_VOICE",
   // A lower live-read budget, which tests set (core's src/app.ts).
   "LIVE_READ_LIMITS",
   "LOADER",
