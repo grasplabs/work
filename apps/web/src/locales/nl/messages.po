@@ -8556,7 +8556,7 @@ msgstr "Helsinki"
 
 #: src/onboarding/plan-story.tsx
 msgid "Here’s a quick look at the next two weeks."
-msgstr "Even kort wat er de komende twee weken gaat gebeuren."
+msgstr "Ik laat je even kort zien wat er de komende twee weken gaat gebeuren."
 
 #: src/onboarding/plan-story.tsx
 msgid "Here’s the plan"
