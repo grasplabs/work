@@ -23,12 +23,17 @@
 import { normalized } from "../brain-scoring.ts";
 import {
   crmTools,
+  financeDrive,
+  googleBudget,
   googleEventIds,
+  googleLeave,
   googleRegister,
   googleTeamDrive,
   lisaDrive,
   mulderRow,
+  stephenBudget,
   stephenColleagueNames,
+  stephenLeave,
   stephenRegister,
   stephenTimeZone,
 } from "./stephen-world.ts";
@@ -39,7 +44,7 @@ import type {
 } from "./stephen-world.ts";
 
 /** Bumped with any change to the cases or their checks. */
-export const stephenSuiteVersion = "3";
+export const stephenSuiteVersion = "4";
 
 /** What a case's checks and its stub know of the run. */
 export interface StephenContext {
@@ -48,14 +53,27 @@ export interface StephenContext {
   mailbox: string;
   /** The suite Noordkade runs on. */
   suite: StephenSuite;
+  /**
+   * The company's account's connection ID: open to Lisa's team, but it
+   * doesn't reach finance's drive.
+   */
+  company: string;
+  /**
+   * Finance's own account's connection ID: open to finance alone, so Lisa's
+   * agent is refused it, by its ID too.
+   */
+  finance: string;
 }
 
-/** A connector call a turn makes, through a binding its agent was granted. */
+/**
+ * A connector call a turn makes: through a binding its agent was granted,
+ * or a connection by its ID.
+ */
 export interface StephenCall {
   /**
    * `OUTLOOK`, `ONEDRIVE`, `REGISTER` or `CRM` on Microsoft 365, and
    * `GOOGLE`, `DRIVE`, `REGISTER` or `CRM` on Google Workspace, as the
-   * agent is granted them.
+   * agent is granted them, or a connection's ID.
    */
   binding: string;
   action: string;
@@ -69,11 +87,17 @@ export interface StephenObservation {
   /** Why the turn failed, if it did. */
   error?: string;
   /**
-   * Every connector call the turn made, as connect audited it: how it
-   * ended (`ok`, `held`, `refused`...), and whether it would change
-   * something.
+   * Every connector call the turn made, as connect audited it: the
+   * connection's ID, how it ended (`ok`, `held`, `refused`...), and
+   * whether it would change something. A call core refused first, as one
+   * of a connection the agent may not use, never reached connect.
    */
-  calls: { action: string; outcome: string; sideEffect: boolean }[];
+  calls: {
+    connection: string;
+    action: string;
+    outcome: string;
+    sideEffect: boolean;
+  }[];
   /**
    * What Graph or Google was asked to read during the turn: each path and
    * query.
@@ -379,6 +403,37 @@ const followUps = ({ suite }: StephenContext): StephenCall =>
           table: stephenRegister.table,
         },
       };
+/** What a turn hears of a connection it may not use. */
+const noSuchConnection = "There's no such connection.";
+/** What a turn hears when the app refused a call. */
+const actionFailed = "The action reported an error.";
+
+/**
+ * Reading a table in finance's drive, on Microsoft 365 `workbook`, on
+ * Google `spreadsheet`, through `connection` by its ID.
+ */
+const financeRead = (
+  { suite }: StephenContext,
+  connection: string,
+  workbook: { workbook: string; table: string },
+  spreadsheet: { drive: string; spreadsheet: string; sheet: string }
+): StephenCall =>
+  suite === "google"
+    ? {
+        binding: connection,
+        action: "sheets.read",
+        input: {
+          drive: spreadsheet.drive,
+          spreadsheet: spreadsheet.spreadsheet,
+          sheet: spreadsheet.sheet,
+        },
+      }
+    : {
+        binding: connection,
+        action: "excel.listRows",
+        input: { drive: financeDrive, ...workbook },
+      };
+
 const create = (
   context: StephenContext,
   subject: string,
@@ -1281,14 +1336,20 @@ const bench: StephenCase[] = [
     text: "What is in the Budget 2027 workbook?",
     checks: [
       holdsNothing,
-      says(cannot, "that he reaches only the register"),
+      says(cannot, "that he can't reach it"),
       noAppRead(/01NOORDKADEBUDGET2027/u, "the budget workbook"),
     ],
     judge:
-      "Says he can only reach the Noordkade register in Excel, not the budget workbook.",
+      "Says he can't reach the Budget 2027 workbook, and shows nothing of it.",
     stub: {
-      answer: ({ suite }) =>
-        `I can only reach the Noordkade register in ${suite === "google" ? "Google Sheets" : "Excel"}, not the Budget 2027 workbook.`,
+      // Finance's account by its ID, which `available()` names though
+      // `list()` doesn't: refused as a connection there isn't.
+      calls: (context) => [
+        financeRead(context, context.finance, stephenBudget, googleBudget),
+      ],
+      evidence: () => [noSuchConnection],
+      answer: () =>
+        "I can't reach the Budget 2027 workbook: it isn't open to me.",
     },
   },
   {
@@ -1297,18 +1358,25 @@ const bench: StephenCase[] = [
     persona: "lisa",
     lang: "nl",
     messy: false,
-    text: "Laat me het tabblad Verlof in het register zien.",
+    text: "Laat me het verlofoverzicht van finance zien.",
     checks: [
       holdsNothing,
-      says(cannot, "dat hij alleen de terugbellijst leest"),
-      noAppRead(/tables\/Leave|'Leave'!/u, "het tabblad Verlof"),
+      says(cannot, "dat hij er niet bij kan"),
+      noAppRead(/tables\/Leave|'Leave'!/u, "het verlofoverzicht"),
       dutch,
     ],
     judge:
-      "Zegt in het Nederlands dat hij in het register alleen de terugbellijst (FollowUps) leest, niet het tabblad Verlof.",
+      "Zegt in het Nederlands dat hij niet bij het verlofoverzicht van finance kan, en toont er niets van.",
     stub: {
+      // Through the company's account, which her chats use whole: Graph or
+      // Google refuses it finance's drive. What this proves is the narrower
+      // account an admin connects, not the audience, which X4 proves.
+      calls: (context) => [
+        financeRead(context, context.company, stephenLeave, googleLeave),
+      ],
+      evidence: () => [actionFailed],
       answer: () =>
-        "In het register lees ik alleen de terugbellijst, niet het tabblad Verlof.",
+        "Bij het verlofoverzicht van finance kan ik niet: daar heb ik geen toegang toe.",
     },
   },
   {
@@ -2183,11 +2251,7 @@ const onGoogle: Readonly<
   },
   X4: {
     judge:
-      "Says he can only reach the Noordkade register in Google Sheets, not the budget spreadsheet.",
-  },
-  X5: {
-    judge:
-      "Zegt in het Nederlands dat hij in het register alleen de terugbellijst (FollowUps) leest, niet het blad Verlof.",
+      "Says he can't reach the Budget 2027 spreadsheet, and shows nothing of it.",
   },
   J3: { text: "summarise the van dijk client note in our team drive pls" },
 };

@@ -41,7 +41,9 @@ const sendsMail = calls("mail.send", invoiceMail);
 const setUp = async (...replies: Parameters<typeof chatOf>[1][]) => {
   const person = await signedInApi(idp, "user");
   const admin = await signedInApi(idp, "admin");
-  const mail = await mailConnection([], ["mail.send", "mail.search"]);
+  const mail = await mailConnection([], ["mail.send", "mail.search"], {
+    audience: "everyone",
+  });
   const chat = await chatOf(person.userId, ...replies);
   await requestGranted(idp, admin, {
     subject: chat.agent,

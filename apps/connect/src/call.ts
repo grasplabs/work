@@ -438,7 +438,9 @@ const mustHold = (
 /**
  * The connection a call may use, as `usableConnection` says; for a held
  * action, only while it reaches the account it reached when the action was
- * held (CN15).
+ * held (CN15). A call no grant allows may change something only through a
+ * shared connection (core's ungranted-reads.ts): through a personal one,
+ * it may only read.
  */
 export const connectionFor = async (
   env: Env,
@@ -453,6 +455,13 @@ export const connectionFor = async (
   );
   if (held !== undefined && connection.accountId !== held.accountId) {
     throw connectErrors.create("connect.connection_changed");
+  }
+  if (
+    claims.origin.permissionId === null &&
+    !claims.readOnly &&
+    connection.ownerUserId !== null
+  ) {
+    throw connectErrors.create("connect.read_only");
   }
   return connection;
 };

@@ -1,4 +1,3 @@
-import { agentErrors } from "@grasp-os/shared/agent";
 import { actorOf, delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type { ChatConnectionRequest } from "@grasp-os/shared/chat";
@@ -52,14 +51,14 @@ import {
   tellChat,
   toPermission,
 } from "./permissions.ts";
-import { mustConfirmForOthers } from "./private-reads.ts";
 
 // Connections a chat's agent asks for, each granted in that chat alone.
 // The agent asks (`env.connections.request`); the chat's person grants or
 // denies a request for their own personal connection (a mailbox, a drive)
-// on a card in the chat, and nobody else sees it; a shared connection
-// still needs an admin (`grantPermission`), and the person may withdraw
-// it. The grant is an ordinary permission of the chat's agent that holds
+// on a card in the chat, and nobody else sees it. A shared connection is
+// never asked for: its one audience, which an admin chose, decides who
+// uses it in every chat, with no grant (ungranted-reads.ts, GRA-2322).
+// The grant is an ordinary permission of the chat's agent that holds
 // only in that chat and only for that person (`chat_id`, `requested_by`;
 // `holdsIn` in permissions.ts), so every call is checked, signed and
 // audited as any other, connect still refuses a personal connection to
@@ -70,10 +69,13 @@ import { mustConfirmForOthers } from "./private-reads.ts";
 //
 // - Someone grants another person's connection: only the chat's own
 //   person decides its requests (the row names them, the chat is theirs
-//   in their own Workspace object), and grants only a request for their
-//   own personal connection (`personal`, from connect as it was asked
-//   for). Connect refuses it to anyone else anyway. An admin never sees,
-//   grants or revokes a personal one.
+//   in their own Workspace object), and only a request for their own
+//   personal connection is ever stored or decided (`personal`, from
+//   connect as it was asked for). Connect refuses it to anyone else
+//   anyway. An admin never sees, grants or revokes a personal one.
+// - A grant that widens a shared connection's audience: none is asked
+//   for or stored here, and any grant on one holds only within its
+//   audience (ungranted-reads.ts `requireAudienceOfGrant`).
 // - The agent grants itself: its code reaches only its env's stubs; the
 //   decision is on `/rpc` alone, behind the person's session.
 // - A card replayed or forged: a decision names a request by ID only, and
@@ -120,7 +122,11 @@ export interface AskableConnection {
   scope: "personal" | "shared";
   /** The actions it has, which a request may name. */
   actions: string[];
-  /** Who grants it: the person in the chat, or an admin. */
+  /**
+   * Who grants it: the person in the chat grants their own personal one;
+   * an admin grants a shared one or an outside API to an App or a workflow
+   * that asks for it.
+   */
   decidedBy: "person" | "admin";
   /**
    * An outside API an admin approved (`provider: "http"`): only an App or
@@ -134,7 +140,6 @@ export interface AskedConnection {
   /** The request's ID. */
   id: string;
   binding: string;
-  decidedBy: "person" | "admin";
 }
 
 /** A decision on a request, and the audit action it is recorded as. */
@@ -257,19 +262,59 @@ const waitingChanged = async (env: Env, scope: AgentScope): Promise<void> => {
 };
 
 /**
- * Whether a connection asked for in this chat could be granted: a shared
- * one by an admin, anywhere; the person's own only by them, on a card in
- * the chat, and a chat app's conversation is no chat in Grasp (GRA-1919):
- * asked there, nobody could ever decide it.
+ * Whether the person's own connection asked for in this chat could be
+ * granted: only by them, on a card in the chat, and a chat app's
+ * conversation is no chat in Grasp (GRA-1919): asked there, nobody could
+ * ever decide it.
  */
-export const grantableIn = (
-  scope: Pick<AgentScope, "via">,
-  personal: boolean
-): boolean => !personal || scope.via === undefined || scope.via === "web";
+export const grantableIn = (scope: Pick<AgentScope, "via">): boolean =>
+  scope.via === undefined || scope.via === "web";
 
 /**
- * The connections the chat's agent may ask for: its person's own personal
- * ones and the shared ones, active and offered (`offeredConnections`).
+ * The connections a chat's `list()` may name, as connect lists them for
+ * its person, of entries an admin hasn't hidden (`offeredAmong`): those
+ * active and those that need someone to sign in again. Never an outside
+ * API.
+ */
+export const offeredToChat = async (
+  env: Env,
+  scope: Pick<AgentScope, "personId">
+): Promise<ConnectionSummary[]> => {
+  const listed = await env.CONNECT.listConnections(
+    await scopePerson(env, scope)
+  );
+  const [active, waiting] = await Promise.all([
+    offeredAmong(env, listed),
+    offeredAmong(env, listed, "needs_reauth"),
+  ]);
+  return [...active, ...waiting];
+};
+
+/**
+ * The connections the chat itself may call, as far as connect lists them
+ * for its person: their own personal ones and the shared ones, active and
+ * offered (`offeredConnections`), with every action each has. Which of
+ * them a turn uses is ungranted-reads.ts's and the grants' to say.
+ */
+export const callableConnections = async (
+  env: Env,
+  scope: Pick<AgentScope, "personId">
+): Promise<{ connectionId: string; actions: string[] }[]> => {
+  const offered = await offeredConnections(env, await scopePerson(env, scope));
+  const actions = await actionsOf(env, offered);
+  return offered.map(({ id }) => ({
+    connectionId: id,
+    actions: actions.get(id) ?? [],
+  }));
+};
+
+/**
+ * The connections the chat's agent may name, active and offered
+ * (`offeredConnections`): its person's own personal ones, which it may
+ * ask for; the shared ones, which an App or an agent it builds or sets up
+ * names, and an admin grants an App, but the chat never asks for, as their
+ * audience decides who uses them (`askInChat`); and the outside APIs only
+ * an App or a workflow uses.
  */
 export const askableConnections = async (
   env: Env,
@@ -376,8 +421,8 @@ const whyNotStored = async (
 };
 
 /**
- * Asks, for the chat's agent, to use a connection in this chat alone: one
- * of `askableConnections`, with actions it has, under a binding name no
+ * Asks, for the chat's agent, to use its person's own personal connection
+ * in this chat alone: one of `askableConnections`, with actions it has, under a binding name no
  * permission of the agent here has. It allows nothing until it is
  * granted. Stored in one conditional insert, only while fewer than
  * {@link maxWaitingRequests} wait in the chat, the same connection and
@@ -417,6 +462,13 @@ export const askInChat = async (
   }
   const offered = await offeredConnections(env, await scopePerson(env, scope));
   const connection = offered.find(({ id }) => id === object.connectionId);
+  if (connection?.ownerUserId === null) {
+    throw permissionErrors.create("permission.invalid", {
+      issues: [
+        "connectionId: A shared connection is never asked for: everyone its audience holds uses it in any chat with no request (env.connections.list()), and one not listed isn't for this chat.",
+      ],
+    });
+  }
   if (connection === undefined) {
     throw permissionErrors.create("permission.invalid", {
       issues: [
@@ -437,16 +489,8 @@ export const askInChat = async (
       issues: unknown.map((action) => `actions: It has no action ${action}.`),
     });
   }
-  const personal = connection.ownerUserId !== null;
-  if (!grantableIn(scope, personal)) {
+  if (!grantableIn(scope)) {
     throw permissionErrors.create("permission.own_in_chat_app");
-  }
-  // Admins read why a shared connection is asked for, and nothing holds a
-  // request for its person first: refused from a chat that used something
-  // only its person may read (private-reads.ts). Their own personal
-  // connection's request reaches them alone.
-  if (!personal && (await mustConfirmForOthers(env, scope))) {
-    throw agentErrors.create("agent.private_shared_request");
   }
   const row: typeof permissions.$inferSelect = {
     id: crypto.randomUUID(),
@@ -476,7 +520,7 @@ export const askInChat = async (
     },
     chatId: scope.chatId,
     reason,
-    personal,
+    personal: true,
   };
   const permission = toPermission(row);
   const db = drizzle(env.DB);
@@ -522,11 +566,7 @@ export const askInChat = async (
     });
   }
   await waitingChanged(env, scope);
-  return {
-    id: permission.id,
-    binding,
-    decidedBy: personal ? "person" : "admin",
-  };
+  return { id: permission.id, binding };
 };
 
 /**
@@ -567,7 +607,6 @@ export const chatRequests = async (
       binding: permission.binding,
       reason: row.reason,
       requestedAt: permission.requestedAt,
-      decidedBy: row.personal ? "you" : "admin",
     };
   });
 };
@@ -576,10 +615,10 @@ export const chatRequests = async (
  * Grants or denies request `id` of `by`'s own chat `chatId` (the caller has
  * checked the chat is theirs), as it was asked for: granting only a
  * request for their own personal connection, still connected and offered,
- * under a name nothing that holds everywhere has; denying any
- * (withdrawing it, for a shared one). Only from waiting, in one
+ * under a name nothing that holds everywhere has. Only from waiting, in one
  * conditional update with its audit event, while `by` is still a member:
- * a decided, forged or someone else's request is refused as if there
+ * a decided, forged or someone else's request, or one for a shared
+ * connection (which its audience alone decides), is refused as if there
  * were none.
  */
 const decide = async (
@@ -597,15 +636,13 @@ const decide = async (
   if (
     found === undefined ||
     found.chatId !== chatId ||
-    found.requestedBy !== by.userId
+    found.requestedBy !== by.userId ||
+    !found.personal
   ) {
     throw permissionErrors.create("permission.not_found");
   }
   const granting = decision === "granted";
   if (granting) {
-    if (!found.personal) {
-      throw permissionErrors.create("permission.admin_decides");
-    }
     await requireOfferedConnection(
       env,
       await personOf(env, by),

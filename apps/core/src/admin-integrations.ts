@@ -88,12 +88,15 @@ const personalOf = (
   return [...byApp.values()];
 };
 
-/** Requests chats' agents made for connections, still waiting on a decision. */
+/**
+ * Requests chats' agents made for their person's own connections, still
+ * waiting on a decision: a shared one is never asked for, as its audience
+ * decides (GRA-2322).
+ */
 const waitingRequests = async (env: Env) =>
   await drizzle(env.DB)
     .select({
       connectionId: permissions.objectId,
-      personal: permissions.personal,
       requestedAt: permissions.requestedAt,
     })
     .from(permissions)
@@ -105,7 +108,7 @@ const waitingRequests = async (env: Env) =>
       )
     );
 
-/** The requests, counted by app and by who decides them, the oldest's time with each. */
+/** The requests, counted by app, the oldest's time with each: each is its person's to decide. */
 const requestsOf = (
   waiting: Awaited<ReturnType<typeof waitingRequests>>,
   apps: ReadonlyMap<string, App>
@@ -116,13 +119,12 @@ const requestsOf = (
     if (app === undefined) {
       continue;
     }
-    const decidedBy = request.personal ? "person" : "admin";
-    const key = JSON.stringify([app.source, app.provider, decidedBy]);
+    const key = JSON.stringify([app.source, app.provider]);
     const since = request.requestedAt.toISOString();
     const counted = byApp.get(key);
     byApp.set(key, {
       ...app,
-      decidedBy,
+      decidedBy: "person",
       waiting: (counted?.waiting ?? 0) + 1,
       since:
         counted === undefined || since < counted.since ? since : counted.since,

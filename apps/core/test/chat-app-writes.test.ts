@@ -89,7 +89,8 @@ const setUp = async (via: "teams" | "web", ...replies: ProviderReply[]) => {
   const admin = await signedInApi(idp, "admin");
   const mail = await mailConnection(
     [],
-    ["MAIL_REPLY", { name: "MAIL_READ", read: true }]
+    ["MAIL_REPLY", { name: "MAIL_READ", read: true }],
+    { audience: "everyone" }
   );
   const providers = testBinding("CONNECT_PROVIDERS");
   if (!isFetcher(providers)) {

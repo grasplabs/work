@@ -223,7 +223,7 @@ const coreOf = (
             readOnly: true,
           },
         ]),
-      brainAudiences: async () => await Promise.resolve([]),
+      audiences: async () => await Promise.resolve([]),
       connectorTools: async (): Promise<ConnectorToolView[]> => {
         toolAsks.reads += 1;
         return await Promise.resolve(linearTools());

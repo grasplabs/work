@@ -474,7 +474,7 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     });
   });
 
-  it("keeps nothing from a shared connection with no Brain audience, counted as skipped, nor from a toolkit that forbids copies", async () => {
+  it("keeps nothing from a shared connection with no audience, which the chat's agent can't read even granted, nor from a toolkit that forbids copies", async () => {
     const person = await signedInApi(idp, "user");
     const [sharedMarker, privateMarker, witness] = [
       markerOf(),
@@ -483,6 +483,7 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     ];
     const shared = await mailConnection([], mailWithSearch, {
       provider: "mail_own",
+      audience: "nobody",
     });
     const forbidden = await mailConnection([], mailWithSearch, {
       provider: "mail_private",
@@ -523,14 +524,12 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     }
     // Each capture starts as its call answers, the others' at once: once
     // the last call's is in, the earlier ones have ended.
-    const [sharedEvents, witnessed] = await Promise.all([
-      captures(shared.id),
-      captures(own.id),
-    ]);
+    const witnessed = await captures(own.id);
     const quiet = await allEvents();
 
     expect({
-      shared: sharedEvents.map(shown),
+      // Refused before it reached the connection.
+      shared: await shared.searched(),
       recalled: await Promise.all(
         [sharedMarker, privateMarker].map(
           async (marker) => await recalled(person.userId, marker)
@@ -539,23 +538,11 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
       witnessed: witnessed.map(shown),
       quiet: quiet.filter(
         ({ action, target }) =>
-          action.startsWith("brain.capture.") && target?.id === forbidden.id
+          action.startsWith("brain.capture.") &&
+          (target?.id === forbidden.id || target?.id === shared.id)
       ),
     }).toStrictEqual({
-      shared: [
-        {
-          action: "brain.capture.skipped",
-          onBehalfOf: person.userId,
-          detail: {
-            // No Brain audience chosen for it (GRA-1831): kept for nobody.
-            reason: "no_audience",
-            items: 1,
-            kept: 0,
-            failed: 0,
-            skipped: 1,
-          },
-        },
-      ],
+      shared: [],
       recalled: [{ texts: [] }, { texts: [] }],
       witnessed: [
         {

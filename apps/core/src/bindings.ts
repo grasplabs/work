@@ -25,7 +25,10 @@ import { isRestricted } from "./restricted.ts";
 import type { WorkContext } from "./restricted.ts";
 import { mailboxesFor } from "./shared-mailboxes.ts";
 import { requireToolClassOn } from "./tool-classes.ts";
-import { ungrantedReadConnection } from "./ungranted-reads.ts";
+import {
+  requireAudienceOfGrant,
+  ungrantedConnection,
+} from "./ungranted-reads.ts";
 import { stampedMail } from "./workflows/mail-stamps.ts";
 import type { StampingRun } from "./workflows/mail-stamps.ts";
 
@@ -82,7 +85,7 @@ export interface CallGrant {
 
 /**
  * The capability for one call already allowed (`signedCall`, or with no
- * grant `signedUngrantedRead`): its context's restricted mode, its class on for
+ * grant `signedUngrantedCall`): its context's restricted mode, its class on for
  * the person, then signed.
  */
 const capabilityFor = async (
@@ -190,26 +193,37 @@ export const signedCall = async (
     permissionId,
     context
   );
+  // The chat's agent reaches a shared connection only within its audience,
+  // whatever it was granted (ungranted-reads.ts).
+  if (authority.subject.type === "agent") {
+    await requireAudienceOfGrant(
+      env,
+      authority,
+      connection.connectionId,
+      call.action
+    );
+  }
   return await capabilityFor(env, grant, call, decision);
 };
 
 /**
- * Signs the capability for a read that needs no grant (ungranted-reads.ts):
- * of a connection active and the chat's person's own, or shared with an
- * audience that holds them, and only a tool whose class reads, checked
- * here again whoever asks, and signed read-only, so connect refuses
- * anything but a read. The caller holds it to a turn whose answer reaches
- * its person alone. Such a read connect held for its person (a marked
- * chat's, GRA-1928) is confirmed (`decision`) and its answer read under
- * its `idempotencyKey`, each checked here again as the read would be now.
+ * Signs the capability for a call of the chat's agent that needs no grant
+ * (ungranted-reads.ts), checked here again whoever asks: of a connection
+ * active and the chat's person's own, only a tool whose class reads,
+ * signed read-only, so connect refuses anything but a read (the caller
+ * holds it to a turn whose answer reaches its person alone); or of a
+ * shared one whose audience holds the person, any tool,
+ * whose side effects connect holds for the person. A call connect held
+ * for its person is confirmed (`decision`) and its answer read under its
+ * `idempotencyKey`, each checked here again as the call would be now.
  */
-export const signedUngrantedRead = async (
+export const signedUngrantedCall = async (
   env: Env,
   grant: Omit<CallGrant, "permissionId" | "readOnly" | "binding" | "sensitive">,
   { action, idempotencyKey }: Pick<ConnectCall, "action" | "idempotencyKey">,
   decision?: CapabilityDecision
 ) => {
-  await ungrantedReadConnection(
+  const { readOnly } = await ungrantedConnection(
     env,
     grant.authority,
     grant.connection.connectionId,
@@ -217,7 +231,7 @@ export const signedUngrantedRead = async (
   );
   return await capabilityFor(
     env,
-    { ...grant, permissionId: null, readOnly: true },
+    { ...grant, permissionId: null, readOnly },
     { action, idempotencyKey },
     decision
   );
@@ -277,7 +291,7 @@ export interface ConnectionGrant {
 }
 
 /**
- * A read with no grant (ungranted-reads.ts): signed by `signedUngrantedRead`, never authorized
+ * A call with no grant (ungranted-reads.ts): signed by `signedUngrantedCall`, never authorized
  * by a permission.
  */
 export interface UngrantedRead {
@@ -380,7 +394,10 @@ const signedStub = async (
     };
     const { capability, scope } =
       permissionId === null
-        ? await signedUngrantedRead(env, allowed, { action })
+        ? await signedUngrantedCall(env, allowed, {
+            action,
+            idempotencyKey: options?.idempotencyKey,
+          })
         : await signedCall(
             env,
             {

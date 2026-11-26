@@ -695,11 +695,14 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
     });
   });
 
-  it("keeps nothing of a shared connection of the same toolkit beside the person's own, and takes nothing of it when their own is disconnected", async () => {
+  it("keeps a shared connection of the same toolkit beside the person's own for its audience, and takes nothing of it when their own is disconnected", async () => {
     const person = await signedInApi(idp, "user");
     const [mine, shared] = [markerOf(), markerOf()];
     const own = await ownToolkit(person, "mail");
-    const company = await mailConnection([], allowed, { provider: "mail" });
+    const company = await mailConnection([], allowed, {
+      provider: "mail",
+      audience: "everyone",
+    });
     await company.serves(listed);
     await own.answer("mail.search", structured({ messages: [`Mine ${mine}`] }));
     await company.answer(
@@ -737,28 +740,22 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
     await askAfresh(chat, "Read it again.");
     const sharedAfter = await captures(company.id, 2);
     const listedAfter = await person.api.connections.list();
+    const sharedKept = await recalled(person.userId, shared);
 
     expect({
       shared: sharedEvents.map(shown),
       kept,
       sharedAfter: sharedAfter.map(({ detail }) => detail.reason),
-      sharedRecalled: await recalled(person.userId, shared),
+      sharedRecalled: sharedKept.length > 0,
       sharedStatus: listedAfter.find(({ id }) => id === company.id)?.status,
       sharedKeepsReads: listedAfter.find(({ id }) => id === company.id)
         ?.keepsReads,
     }).toStrictEqual({
       shared: [
         {
-          action: "brain.capture.skipped",
+          action: "brain.capture.kept",
           onBehalfOf: person.userId,
-          detail: {
-            // No Brain audience chosen for it (GRA-1831): kept for nobody.
-            reason: "no_audience",
-            items: 1,
-            kept: 0,
-            failed: 0,
-            skipped: 1,
-          },
+          detail: { items: 1, kept: 1, failed: 0, skipped: 0 },
         },
       ],
       kept: [
@@ -766,8 +763,8 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
           query: mine,
         }),
       ],
-      sharedAfter: ["no_audience", "no_audience"],
-      sharedRecalled: [],
+      sharedAfter: [undefined, undefined],
+      sharedRecalled: true,
       sharedStatus: "active",
       sharedKeepsReads: undefined,
     });

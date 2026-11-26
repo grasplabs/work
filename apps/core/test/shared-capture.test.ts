@@ -274,15 +274,19 @@ describe("what agents read through a shared connection", setUpTime, () => {
     )
       .bind(Date.now())
       .run();
-    // Ann reads the deal and someone's mail; Bea reads the same deal;
-    // Carl, outside the audience, has his agent read it too. One chat at
-    // a time: the tests' model answers whichever asks.
+    // Ann reads the deal and, in another chat, someone's mail: a read
+    // through a connection not everyone may read marks its chat, and a
+    // marked chat's next toolkit read waits for her (private-reads.ts).
+    // Bea reads the same deal; Carl, outside the audience, is refused it,
+    // though his agent was granted it (GRA-2322). One chat at a time: the
+    // tests' model answers whichever asks.
     const search = calling("MAIL", "mail.search", { query: deal });
     for (const [person, code, actions] of [
+      [ann, step(search), ["mail.search"]],
       [
         ann,
-        step(search, calling("MAIL", "mail.others", { mailbox: others })),
-        ["mail.search", "mail.others"],
+        step(calling("MAIL", "mail.others", { mailbox: others })),
+        ["mail.others"],
       ],
       [bea, step(search), ["mail.search"]],
       [carl, step(search), ["mail.search"]],
@@ -294,7 +298,7 @@ describe("what agents read through a shared connection", setUpTime, () => {
       // oxlint-disable-next-line no-await-in-loop -- one chat at a time
       await chat.ask("Read it.");
     }
-    const events = await captures(company.id, 4);
+    const events = await captures(company.id, 3);
     const kept = `${await keyOf(company.id, deal)}@1`;
 
     expect({
@@ -303,7 +307,7 @@ describe("what agents read through a shared connection", setUpTime, () => {
       bea: await recalled(bea.userId, deal),
       // In the audience, though their agent never read it.
       dana: await recalled(dana.userId, deal),
-      // His agent read it: he reads it at the source, never from the Brain.
+      // Outside the audience: read neither at the source nor from the Brain.
       carl: await recalled(carl.userId, deal),
       othersByAnn: await finds(ann.userId, others),
       othersByDana: await finds(dana.userId, others),
@@ -316,7 +320,6 @@ describe("what agents read through a shared connection", setUpTime, () => {
           reason: "reach",
         },
         { action: "brain.capture.kept", onBehalfOf: bea.userId, reason: null },
-        { action: "brain.capture.kept", onBehalfOf: carl.userId, reason: null },
       ],
       // One record, its one version: the same answer read again adds only
       // its read time.
