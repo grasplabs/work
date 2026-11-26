@@ -102,15 +102,18 @@ const plannedStore = async (start: string) => {
 const sentTo = (mail: { sent: EmailMessageBuilder[] }) =>
   mail.sent.map(({ to, subject }) => ({ to, subject }));
 
-const linkSubject =
-  "acme.test x Grasp: Your personal link to talk with Stephen";
+// The company is named after its sign-in domain: acme.test gives Acme.
+const linkSubject = "Acme x Grasp: Your personal link to talk with Stephen";
 const reminderSubject =
-  "Reminder — acme.test x Grasp: Your personal link to talk with Stephen";
+  "Reminder — Acme x Grasp: Your personal link to talk with Stephen";
 
-/** Whom a mail went to, and whether it was a reminder or the link. */
+/**
+ * Whom a mail went to, and whether it was a reminder or the link: by its
+ * subject's opening, whatever an earlier test renamed the company to.
+ */
 const whichTo = ({ to, subject }: EmailMessageBuilder) => [
   to,
-  subject === reminderSubject ? "reminder" : "link",
+  subject.startsWith("Reminder — ") ? "reminder" : "link",
 ];
 
 describe("the interview link emails", () => {
