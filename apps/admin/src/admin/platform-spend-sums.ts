@@ -38,11 +38,18 @@ export interface OrganizationSpend {
   name: string;
   thisMonth: number;
   lastMonth: number;
+  /**
+   * Its own AI on Grasp's key this month (`spent`) against what it may
+   * use a month (`limit`), in micros; null while it runs its AI on its
+   * own key, or its release doesn't report it.
+   */
+  graspAi: { spent: number; limit: number } | null;
 }
 
-/** The platform's: every active organization's summed, and those that cost the most. */
+/** The platform's: every active organization's summed, and each one's. */
 export interface PlatformSpend extends SpendOverview {
-  top: OrganizationSpend[];
+  /** Each organization whose core reported it, the dearest this month first, then last. */
+  byOrganization: OrganizationSpend[];
   /** How many active organizations were read. */
   organizations: number;
   /** The active organizations whose core didn't answer: not in the sums. */

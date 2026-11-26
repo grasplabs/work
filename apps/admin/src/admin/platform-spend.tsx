@@ -26,7 +26,11 @@ import * as stylex from "@stylexjs/stylex";
 import { Await, Link as RouterLink } from "@tanstack/react-router";
 
 import { Panel, PanelNote } from "./panel.tsx";
-import { microsPerDollar, organizationSpendOf } from "./platform-spend-sums.ts";
+import {
+  microsPerDollar,
+  organizationSpendOf,
+  topOrganizationsMost,
+} from "./platform-spend-sums.ts";
 import type {
   OrganizationSpend,
   PlatformSpend,
@@ -295,11 +299,15 @@ export const PlatformSpendPanel = ({
         if (all === null) {
           return <PanelNote>The organizations couldn’t be read now.</PanelNote>;
         }
+        // Those that cost the most, this month then last: none that cost nothing.
+        const top = all.byOrganization
+          .filter(({ thisMonth, lastMonth }) => thisMonth + lastMonth > 0)
+          .slice(0, topOrganizationsMost);
         return (
           <>
             <SpendBody overview={all} />
-            {all.top.length === 0 ? null : (
-              <TopOrganizations overview={all} top={all.top} />
+            {top.length === 0 ? null : (
+              <TopOrganizations overview={all} top={top} />
             )}
             {all.unread.length === 0 ? null : (
               <PanelNote>{unreadLine(all)}</PanelNote>

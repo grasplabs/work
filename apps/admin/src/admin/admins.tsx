@@ -45,7 +45,7 @@ export const AdminsLoading = () => (
 );
 
 /** The organizations couldn't be read: said, with Try again. */
-const AdminsUnread = () => {
+export const AdminsUnread = () => {
   const router = useRouter();
   return (
     <Empty variant="destructive">
