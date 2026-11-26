@@ -113,6 +113,14 @@ const sectionLink = (
     );
   };
 
+/** How many apps a company asked Grasp for, as its summary or, from an older core, its snapshot says. */
+const askedOf = (entry: ClientSummary): number => {
+  if (entry.state === "answered") {
+    return entry.summary.asked ?? 0;
+  }
+  return entry.state === "older" ? entry.admin.snapshot.asked.length : 0;
+};
+
 /** How many things need Grasp, as a row's count; none at 0. */
 const needsCount = (needs: number): Partial<SidebarRow> =>
   needs > 0
@@ -168,10 +176,10 @@ const homeGroups = ({
 }): SidebarGroupEntry[] => {
   // Each company's apps asked for, added up: one asked for at two counts
   // twice. A company that doesn't share it (it ended Grasp's staff
-  // access) isn't counted.
+  // access) isn't counted; one on a core from before the summary is
+  // counted from its snapshot.
   const asked = [...(organizations?.values() ?? [])].reduce(
-    (sum, entry) =>
-      sum + (entry.state === "answered" ? (entry.summary.asked ?? 0) : 0),
+    (sum, entry) => sum + askedOf(entry),
     0
   );
   const live = clients.filter(({ status }) => status !== "offboarded");
