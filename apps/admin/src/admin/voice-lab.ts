@@ -75,14 +75,10 @@ const voice = "voice_485";
 const firstLines: Record<InterviewLocale, string> = {
   en: "First your work as a whole, then one part of it up close. What do you do here, in a sentence or two?",
   nl: "Eerst je werk als geheel, daarna één onderdeel ervan van dichtbij. Wat doe je hier, in een of twee zinnen?",
-  de: "Zuerst Ihre Arbeit als Ganzes, dann ein Teil davon aus der Nähe. Was machen Sie hier, in ein oder zwei Sätzen?",
+  de: "Zuerst deine Arbeit als Ganzes, dann ein Teil davon aus der Nähe. Was machst du hier, in ein oder zwei Sätzen?",
   fr: "D’abord votre travail dans son ensemble, puis une partie de plus près. Que faites-vous ici, en une ou deux phrases ?",
   es: "Primero tu trabajo en conjunto, luego una parte de cerca. ¿Qué haces aquí, en una o dos frases?",
 };
-
-/** How he asks for an example where nothing can be shared. */
-const EXAMPLE =
-  "Then ask whether there is one real example they could show someone later. Nothing can be shared in this conversation.";
 
 /** What he does in the last part, with no screen to read back from. */
 const READ_BACK =
@@ -105,12 +101,9 @@ This is a try-out: a colleague at Grasp plays an employee of a practice company,
 /** Everything the session's model is told, in the language of the conversation. */
 export const instructionsOf = (locale: InterviewLocale): string =>
   inLanguage(
-    [
-      WHO,
-      partsOf(EXAMPLE, READ_BACK),
-      LISTENING,
-      spokenOf(firstLines[locale]),
-    ].join("\n\n"),
+    [WHO, partsOf(READ_BACK), LISTENING, spokenOf(firstLines[locale])].join(
+      "\n\n"
+    ),
     locale
   );
 

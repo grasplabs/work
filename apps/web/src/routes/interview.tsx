@@ -210,7 +210,7 @@ const Loading = () => {
       <Calm>
         <output>
           <Heading level={1} size="lg">
-            {t`Opening your interview…`}
+            {t`Opening your conversation…`}
           </Heading>
         </output>
       </Calm>
@@ -276,7 +276,7 @@ const SignIn = ({
               {t`Your company’s sign-in records it, like every sign-in.`}
             </>
           }
-          title={t`Sign in to open your interview`}
+          title={t`Sign in to open your conversation`}
         />
         <Actions>
           <TopError>

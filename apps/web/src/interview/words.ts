@@ -1,4 +1,4 @@
-import type { FactTag, InterviewPhase } from "@grasp-os/shared/interview-turn";
+import type { FactTag } from "@grasp-os/shared/interview-turn";
 import { useLingui } from "@lingui/react/macro";
 
 import type { Locale } from "../i18n.ts";
@@ -22,6 +22,8 @@ export interface LoopWords {
   summary: string;
   summaryIntro: string;
   summaryAsk: string;
+  /** How he asks it once he told back only what was added. */
+  addedAsk: string;
   /** What heads and opens the read-back when he reads back only what was added. */
   added: string;
   /** His goodbye once they agreed to it, by their first name when there is one. */
@@ -60,13 +62,14 @@ export const useLoopWords = (locale: Locale): LoopWords => {
     question: t`Is that correct?`,
     yes: t`Yes, that’s correct.`,
     summary: t`Summary`,
-    summaryIntro: t`Based on our conversation, I’ve made a summary for you. This is how it looks.`,
-    summaryAsk: t`Does that sound like a good summary, or is there anything you’d like to add?`,
+    summaryIntro: t`Thanks—I’ve put together a quick summary of what we talked about. Take a look.`,
+    summaryAsk: t`Does that capture it well, or is there anything you’d like to change or add?`,
+    addedAsk: t`Does this new part look right?`,
     added: t`This is what is new.`,
     farewell: (name) =>
       name === ""
-        ? t`Well, thank you. It was great talking to you. You can always come back to this link if you want to change something. For now, I have enough. Have a great rest of your week.`
-        : t`Well, thank you, ${name}. It was great talking to you. You can always come back to this link if you want to change something. For now, I have enough. Have a great rest of your week.`,
+        ? t`Thanks so much—it was great talking with you. You can always come back to this link within 7 days if you want to adjust anything. Have a great rest of your week.`
+        : t`Thanks so much, ${name}—it was great talking with you. You can always come back to this link within 7 days if you want to adjust anything. Have a great rest of your week.`,
     agrees: agreesIn[locale],
     changed: (was, now) => t`Change “${was}” to “${now}”.`,
     offline: t`I lost the connection. Please check your internet. I have kept what you said, and I keep trying.`,
@@ -77,7 +80,6 @@ export const useLoopWords = (locale: Locale): LoopWords => {
   };
 };
 
-/** The parts of an interview, and what Stephen marks, in words. */
 /**
  * The promise about their words (GRA-1286, GRA-1987), as the first screen,
  * the read-back's last part and the thanks say it, and as Stephen says it
@@ -90,20 +92,9 @@ export const usePromise = (): string => {
   return t`How you do the work is shared in your company as how your team works, never as what you said. What you think of it is only counted anonymously: it shows once five or more people across the company say the same, never with your name or your team.`;
 };
 
+/** What Stephen marks in a line, in words: each mark's hover names its kind. */
 export const useInterviewWords = () => {
   const { t } = useLingui();
-  const phase: Record<InterviewPhase, string> = {
-    open: t`Hello`,
-    week: t`Your week`,
-    you: t`You and AI`,
-    anchor: t`One real case`,
-    story: t`Your story`,
-    steps: t`Step by step`,
-    exceptions: t`When it goes differently`,
-    numbers: t`The numbers`,
-    result: t`Done right`,
-    readback: t`Reading it back`,
-  };
   const tag: Record<FactTag, string> = {
     step: t`Step`,
     system: t`Where`,
@@ -125,5 +116,5 @@ export const useInterviewWords = () => {
     who: t`Who does it`,
     task: t`Recurring work`,
   };
-  return { phase, tag };
+  return { tag };
 };

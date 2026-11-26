@@ -86,7 +86,7 @@ test("someone has their interview by typing, carries on after stopping, and agre
   // it, and come back to their interview (GRA-1790).
   await page.goto(link);
   await expect(
-    page.getByRole("heading", { name: "Sign in to open your interview" })
+    page.getByRole("heading", { name: "Sign in to open your conversation" })
   ).toBeVisible();
   await expect(
     page.getByText(
@@ -309,7 +309,9 @@ test("someone removes a line of theirs and takes out what was written from it, a
   await page.getByRole("button", { name: "Transcript" }).click();
   const transcript = page.getByRole("complementary", { name: "Transcript" });
   await transcript
-    .getByRole("button", { name: `Remove your line: Only Ria knows ${run},` })
+    .getByRole("button", {
+      name: `Remove your message: Only Ria knows ${run},`,
+    })
     .click();
   await page
     .getByRole("alertdialog")

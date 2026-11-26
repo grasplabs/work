@@ -84,9 +84,9 @@ const RemoveLine = ({
     >
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{t`Remove this line?`}</AlertDialogTitle>
+          <AlertDialogTitle>{t`Remove this message?`}</AlertDialogTitle>
           <AlertDialogDescription>
-            {t`The line is deleted now, and so is what I marked in it. What I wrote down from it is in what I read back to you at the end: take it out there, and it is deleted for good when our conversation is finished. This can’t be undone.`}
+            {t`The message is deleted now, and so is what I marked in it. What I wrote down from it is in what I read back to you at the end: take it out there, and it is deleted for good when our conversation is finished. This can’t be undone.`}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

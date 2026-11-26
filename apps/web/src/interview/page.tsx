@@ -358,7 +358,7 @@ const BeforeTalk = ({
     case "start": {
       return (
         <Consent
-          closes={closes}
+          company={session.company}
           name={session.name}
           onAgree={() => {
             void agree();
@@ -405,12 +405,11 @@ const readBackNow = (): void => {
 };
 
 /** His thanks, once they agreed to the read-back. */
-const Thanks = ({ name, closes }: { name: string; closes: string }) => {
+const Thanks = ({ name }: { name: string }) => {
   const { rating, feedback } = useProgress();
   return (
     <Page>
       <Closed
-        closes={closes}
         feedback={feedback}
         name={name}
         onAdd={() => {
@@ -649,7 +648,7 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
       />
     );
   } else if (progress.person === "completed" && progress.told) {
-    stage = <Thanks closes={closes} name={session.name} />;
+    stage = <Thanks name={session.name} />;
   } else if (started && progress.told) {
     stage = (
       <Talking

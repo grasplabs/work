@@ -14,6 +14,7 @@ import type { NoCaller } from "./interview-caller.ts";
 import { eraseOwedOfPersonQuietly } from "./new-brain.ts";
 import { onboardingStore } from "./store.ts";
 import type { LinkActed, LinkAnswer, LinkRefusal } from "./store.ts";
+import { companyName } from "./team-map.ts";
 
 // Everyone's own interview link (`@grasp-os/shared/interview-links`): the
 // page's calls, `POST /api/interview`, with the link's secret in the body
@@ -38,7 +39,9 @@ import type { LinkActed, LinkAnswer, LinkRefusal } from "./store.ts";
 //   opens once it was sent (the store's alarm, by its day and its lead),
 //   while the interviews run and the agreements are in; after the plan's
 //   last day what was said can be read and deleted, and nothing more.
-//   Deleting works at any time for the account the link belongs to.
+//   Once they approved what was read back, adding and deleting work for
+//   7 days (DELETE_DAYS) for the account the link belongs to; after that
+//   it only reads.
 // - Someone taken off the list (L7): their link, and what they said, go
 //   with them, and their link answers as one that never was (L10).
 // - A lost device (L9): nothing to do; they sign in on another one. Staff
@@ -196,7 +199,10 @@ export const interviewResponse = async (
     case "session": {
       const result = await store.openLink(secretMark, caller);
       done(result);
-      return answer(result, requestId, (value) => json(value));
+      // The company's name, which the start screen names: only for the
+      // link's own account, as everything else the session holds.
+      const company = result.ok ? await companyName(env) : "";
+      return answer(result, requestId, (value) => json({ ...value, company }));
     }
     case "save": {
       const result = await store.saveInterview(

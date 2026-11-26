@@ -1,4 +1,7 @@
-import { STARTING_ORG_RULES } from "@grasp-os/shared/admin/onboarding-admin";
+import {
+  DELETE_DAYS,
+  STARTING_ORG_RULES,
+} from "@grasp-os/shared/admin/onboarding-admin";
 import type { OrgRules } from "@grasp-os/shared/admin/onboarding-admin";
 import {
   addDays,
@@ -10374,6 +10377,24 @@ export class Onboarding extends DurableObject<Env> {
     }
     if (use === "save" && dayOf(now) > closesOn(row.plan)) {
       return refused("interview.closed");
+    }
+    // Once they approved what was read back, the link keeps working for
+    // DELETE_DAYS days, as their mail, the page and the admin's count say:
+    // to add something, change it or delete it. After that it still opens
+    // to read, and nothing more is added or deleted through it.
+    if (use !== "open") {
+      const [state] = this.#db
+        .select({ completedAt: interviewStates.completedAt })
+        .from(interviewStates)
+        .where(eq(interviewStates.person, person.id))
+        .all();
+      if (
+        state?.completedAt !== null &&
+        state?.completedAt !== undefined &&
+        dayOf(now) > addDays(dayOf(state.completedAt), DELETE_DAYS)
+      ) {
+        return refused("interview.closed");
+      }
     }
     return answered({ person, link, roster, plan: row.plan });
   }

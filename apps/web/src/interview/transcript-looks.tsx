@@ -273,7 +273,7 @@ const Words = ({
   if (line.removed === true) {
     return (
       <p {...stylex.props(styles.line, styles.removed, extra)}>
-        {stephen ? t`A line of mine, removed.` : t`Removed.`}
+        {stephen ? t`A message of mine, removed.` : t`Removed.`}
       </p>
     );
   }
@@ -313,8 +313,8 @@ const BinFor = ({
     <Bin
       label={
         line.from === "stephen"
-          ? t`Remove ${who}’s line: ${words}`
-          : t`Remove your line: ${words}`
+          ? t`Remove ${who}’s message: ${words}`
+          : t`Remove your message: ${words}`
       }
       onRemove={onRemove}
     />
@@ -326,7 +326,7 @@ const Who = ({ stephen, who }: { stephen: boolean; who: string }) => {
   const { t } = useLingui();
   return (
     <span {...stylex.props(styles.who, !stephen && styles.whoThem)}>
-      {stephen ? who : t`You`}
+      {stephen ? who : t({ message: "You", context: "the person interviewed" })}
     </span>
   );
 };
@@ -380,7 +380,7 @@ const LineEditor = ({
     <div {...stylex.props(styles.editing)}>
       <div {...stylex.props(styles.bubble, styles.bubbleEditing)}>
         <textarea
-          aria-label={t`Your line`}
+          aria-label={t`Your message`}
           autoFocus
           onBlur={save}
           onChange={(event) => {
@@ -457,19 +457,22 @@ const TheirChatLine = ({
       <span {...stylex.props(styles.bin, styles.tools)}>
         {onEdit === undefined ? null : (
           <Button
-            aria-label={t`Change your line: ${words}`}
+            aria-label={t`Edit your message: ${words}`}
             onClick={() => {
               setEditing(true);
             }}
             size="icon-xs"
-            tooltip={t`Change`}
+            tooltip={t({
+              message: "Edit",
+              context: "a message of theirs in the transcript",
+            })}
             variant="ghost"
           >
             <Icon icon={PencilIcon} />
           </Button>
         )}
         <Button
-          aria-label={t`Remove your line: ${words}`}
+          aria-label={t`Remove your message: ${words}`}
           onClick={onRemove}
           size="icon-xs"
           tooltip={t`Remove`}
@@ -544,7 +547,9 @@ export const QaLegend = ({ who }: { who: string }) => {
       </span>
       <span {...stylex.props(styles.legendItem)}>
         <span {...stylex.props(styles.legendTheirs)} />
-        <span {...stylex.props(styles.who, styles.whoThem)}>{t`You`}</span>
+        <span {...stylex.props(styles.who, styles.whoThem)}>
+          {t({ message: "You", context: "the person interviewed" })}
+        </span>
       </span>
     </div>
   );
