@@ -19139,6 +19139,11 @@ msgctxt "a day line in a chat"
 msgid "Today"
 msgstr "Aujourd’hui"
 
+#: src/onboarding/send-plan-form.tsx
+msgctxt "a day tile"
+msgid "Today"
+msgstr "Aujourd’hui"
+
 #: src/chat/chat-window.tsx
 msgctxt "chats from today"
 msgid "Today"
