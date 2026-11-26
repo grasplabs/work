@@ -567,6 +567,17 @@ export interface I18nCatalog {
     external: string;
   };
   markdown: {
+    /**
+     * The titles of GitHub's five alerts in an answer (`> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`,
+     * `[!WARNING]`, `[!CAUTION]`), each over its words.
+     */
+    alerts: {
+      note: string;
+      tip: string;
+      important: string;
+      warning: string;
+      caution: string;
+    };
     /** The link from a footnote back to where it is used, from its number and which mark it is. */
     back: (number: number, mark: number) => string;
     /** The name of a table's copy button, whose menu holds the formats. */
@@ -1341,6 +1352,13 @@ const english: I18nCatalog = {
     external: "opens in a new tab",
   },
   markdown: {
+    alerts: {
+      note: "Note",
+      tip: "Tip",
+      important: "Important",
+      warning: "Warning",
+      caution: "Caution",
+    },
     back: (number: number, mark: number) =>
       mark > 1
         ? `Back to reference ${number}-${mark}`

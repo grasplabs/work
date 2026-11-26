@@ -51,10 +51,10 @@ catalog:
   # diagram fence; and remend, which makes the end of an answer still
   # being written whole, at the versions Damsko pins. KaTeX and Mermaid
   # load only with an answer that has a formula or a diagram.
-  katex: 0.16.47
+  katex: 0.18.10
   mdast-util-gfm: 3.1.0
   mdast-util-math: 3.0.0
-  mermaid: 11.17.2
+  mermaid: 12.2.0
   micromark-extension-gfm: 3.0.0
   micromark-extension-math: 3.1.0
   remend: 1.5.0
@@ -315,10 +315,9 @@ catalog:
   # An App's Code tab: its files and a draft's changes, virtualised and
   # highlighted by the library's own highlighter (Highlights).
   "@pierre/diffs": 1.6.2
-  # Damsko's code block (packages/ui): its highlighter, each language's
-  # grammar loaded when a block first shows it.
-  prismjs: 1.30.0
-  "@types/prismjs": 1.26.6
+  # Damsko's code block (packages/ui): its highlighter, on the page, each
+  # language's grammar loaded when a block first shows it.
+  "@pierre/highlights": 0.5.2
   remark-gfm: 4.0.1
   shadcn: 4.23.0
   tailwind-merge: 3.7.0

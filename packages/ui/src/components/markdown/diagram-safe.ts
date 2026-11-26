@@ -89,7 +89,7 @@ const TAGS = new Set([
   "use",
 ]);
 // A style's way to anywhere but the drawing itself, or a backslash that could write one.
-const ELSEWHERE = /url\(\s*['"]?(?!#)|image-set\(|\\|@import/iu;
+const ELSEWHERE = /url\(\s*(?!['"]?#)|image-set\(|\\|@import/iu;
 const SVG = "http://www.w3.org/2000/svg";
 
 /**

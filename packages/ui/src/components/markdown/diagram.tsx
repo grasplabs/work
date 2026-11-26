@@ -35,6 +35,8 @@ import {
   DropdownMenuTrigger,
 } from "../dropdown-menu";
 import { drawable, safeSvg } from "./diagram-safe";
+import { themeAt, watchScheme } from "./diagram-theme";
+import type { DiagramTheme } from "./diagram-theme";
 
 const styles = stylex.create({
   view: {
@@ -42,9 +44,7 @@ const styles = stylex.create({
     overflow: "hidden",
     minHeight: 160,
     padding: space["4"],
-    // Mermaid's default theme draws dark lines: the diagram stands on the light surface in either
-    // mode.
-    colorScheme: "light",
+    // The ground the diagram's theme is resolved on (diagram-theme.ts).
     backgroundColor: colors.background,
     borderRadius: radius.md,
     cornerShape: radius.shape,
@@ -83,6 +83,8 @@ const NUDGE = 40;
 const SECURE = [
   "secure",
   "securityLevel",
+  "theme",
+  "darkMode",
   "startOnLoad",
   "maxTextSize",
   "suppressErrorRendering",
@@ -139,7 +141,7 @@ let turn: Promise<unknown> = Promise.resolve();
 export const drawDiagram = async (
   code: string,
   id: string,
-  { check = true }: { check?: boolean } = {}
+  { check = true, theme }: { check?: boolean; theme?: DiagramTheme } = {}
 ) => {
   if (check && !drawable(code)) {
     return null;
@@ -172,7 +174,9 @@ export const drawDiagram = async (
       securityLevel: "sandbox",
       secure: SECURE,
       suppressErrorRendering: true,
-      theme: "default",
+      // The design system's look, from its tokens as they resolve where the diagram stands.
+      theme: "base",
+      themeVariables: theme?.variables ?? {},
       // Labels as SVG text, not HTML in the drawing.
       htmlLabels: false,
       // Mermaid's own bounds, under the fence's own (drawable).
@@ -196,13 +200,26 @@ export const drawDiagram = async (
   }
 };
 
+/** The numbers of the drawing's `viewBox`: where it starts, and its size. */
+const boxOf = (svg: string) =>
+  /viewBox="(?<box>[^"]*)"/u
+    .exec(svg)
+    ?.groups?.box?.split(/[\s,]+/u)
+    .map(Number) ?? [];
+
+/** The drawing on a ground of its own, as it is on the page: for a file, seen anywhere. */
+const onGround = (svg: string, ground: string) => {
+  const [x = 0, y = 0, width = 0, height = 0] = boxOf(svg);
+  return svg.replace(
+    /<svg\b[^>]*>/u,
+    (open) =>
+      `${open}<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="${ground}"/>`
+  );
+};
+
 /** The drawing as a PNG, at twice its size (less for a huge one): drawn onto a canvas. */
 const pngOf = async (svg: string) => {
-  const box =
-    /viewBox="(?<box>[^"]*)"/u
-      .exec(svg)
-      ?.groups?.box?.split(/[\s,]+/u)
-      .map(Number) ?? [];
+  const box = boxOf(svg);
   const width = box[2] ?? 0;
   const height = box[3] ?? 0;
   if (!(width > 0 && height > 0)) {
@@ -383,10 +400,25 @@ export const Diagram = ({
   // The last drawing, and the code it is of: its SVG, or null for code Mermaid could not draw.
   const [drawn, setDrawn] = useState<{
     code: string;
+    theme: string;
     svg: string | null;
     title: string;
   } | null>(null);
   const svg = drawn?.svg ?? null;
+  // The look it is drawn in, resolved where it stands; drawn again when the colour scheme changes.
+  const [theme, setTheme] = useState<DiagramTheme | null>(null);
+  useEffect(() => {
+    const at = frame.current;
+    if (!near || at === null) {
+      return nothing;
+    }
+    const resolve = () => {
+      const now = themeAt(at);
+      setTheme((was) => (was?.key === now.key ? was : now));
+    };
+    resolve();
+    return watchScheme(resolve);
+  }, [near]);
   // Drawn once it comes within 300px of the screen, as Streamdown draws one.
   useEffect(() => {
     const at = frame.current;
@@ -410,29 +442,30 @@ export const Diagram = ({
   }, []);
   useEffect(() => {
     let live = true;
-    const draw = async () => {
-      const made = await drawDiagram(code, id);
+    const draw = async (look: DiagramTheme) => {
+      const made = await drawDiagram(code, id, { theme: look });
       if (live) {
         setDrawn({
           code,
-          svg: made,
+          theme: look.key,
+          svg: made === null ? null : onGround(made, look.background),
           title: made === null ? "" : titleOf(made),
         });
       }
     };
-    if (near) {
-      void draw();
+    if (theme !== null) {
+      void draw(theme);
     }
     return () => {
       live = false;
     };
-  }, [code, id, near]);
+  }, [code, id, theme]);
   return (
     // Busy while Mermaid loads and draws it, once it is near the screen.
     <div
       ref={frame}
       data-slot="markdown-diagram"
-      aria-busy={near && drawn?.code !== code}
+      aria-busy={near && (drawn?.code !== code || drawn.theme !== theme?.key)}
     >
       <Code.CodeBlock language="mermaid">
         <Code.CodeBlockHeader>

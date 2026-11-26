@@ -1,7 +1,6 @@
-// Message scroller: the scrolling transcript of a chat,
-// in StyleX, built on UI SDK's createStickToBottom. With
-// `autoScroll` it stays at the end while an answer streams, unless the person scrolls up or presses
-// a key up; then it stays put, and "Jump to latest" appears under it. A newly sent turn
+// Message scroller: the scrolling transcript of a chat, in StyleX. With `autoScroll` it follows the
+// end while an answer streams, gliding as the words come (lib/stick-to-bottom.ts), until the person
+// scrolls up or presses a key up; then it stays put, and "Jump to latest" appears under it. A newly sent turn
 // (`scrollAnchor`) goes to the top with room kept under it for the answer. New rows fade in, once;
 // the ones there when it opened do not. No virtualiser: each row is skipped by the browser while it
 // is out of view (`content-visibility: auto`).
@@ -28,8 +27,6 @@
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
-import { createStickToBottom } from "@ui-sdk/core";
-import type { StickToBottom } from "@ui-sdk/core";
 import {
   createContext,
   isValidElement,
@@ -46,6 +43,8 @@ import type { ReactNode, RefObject } from "react";
 import { scrollEdgesOf, useScrollEdges } from "../hooks/use-scroll-edges";
 import { useI18n } from "../lib/i18n";
 import { ArrowDownIcon, Icon } from "../lib/icons";
+import { createStickToBottom } from "../lib/stick-to-bottom";
+import type { StickToBottom } from "../lib/stick-to-bottom";
 import { focusCarrier, scrollbarHidden } from "../lib/styles";
 import {
   colors,
@@ -509,9 +508,14 @@ const markEdges = ({
   const end = !following && found.end;
   const value = [start && "start", end && "end"].filter(Boolean).join(" ");
   const frame = element.parentElement;
+  // Written only when it changes: an attribute written, even to what it was, has the page work
+  // out its styles again, and this runs on every scroll.
   for (const each of frame?.dataset.slot === "message-scroller"
     ? [element, frame]
     : [element]) {
+    if ((each.dataset.scrollable ?? "") === value) {
+      continue;
+    }
     if (value === "") {
       delete each.dataset.scrollable;
     } else {
@@ -530,7 +534,10 @@ const iconOnly = (
 const rowsOf = (element: HTMLElement) =>
   element.querySelectorAll<HTMLElement>(":scope > * > [data-message-id]");
 
-/** Goes to the end: the follower, which follows again, or the scroll alone without `autoScroll`. */
+/**
+ * Goes to the end: the follower, which follows again (gliding there when smooth, at once with
+ * reduced motion), or the scroll alone without `autoScroll`.
+ */
 type Follow = Pick<ScrollerState, "viewport" | "stick" | "autoScroll">;
 
 const toEnd = (
@@ -538,7 +545,7 @@ const toEnd = (
   behavior: ScrollBehavior = "auto"
 ) => {
   if (autoScroll) {
-    stick.scrollToBottom({ behavior: motionOf(behavior) });
+    stick.scrollToBottom({ behavior });
   } else {
     viewport?.scrollTo({
       top: viewport.scrollHeight,
@@ -960,8 +967,8 @@ export const MessageScrollerContent = ({
     };
   }, [anchor, viewport]);
 
-  // When the person sends, the log goes to its end, which the kept room makes the place where that
-  // turn stands at the top. Once for each sent turn, so reading back is never undone.
+  // When the person sends, the log glides to its end, which the kept room makes the place where
+  // that turn stands at the top. Once for each sent turn, so reading back is never undone.
   const sentDone = useRef<string | null>(null);
   useEffect(() => {
     if (!mounted || anchor === undefined || sentDone.current === anchor) {
@@ -969,7 +976,7 @@ export const MessageScrollerContent = ({
     }
     sentDone.current = anchor;
     return nowAndNextFrame(() => {
-      toEnd({ viewport, stick, autoScroll });
+      toEnd({ viewport, stick, autoScroll }, autoScroll ? "smooth" : "auto");
     });
   }, [anchor, mounted, viewport, stick, autoScroll]);
 

@@ -28,6 +28,11 @@ const MARKS =
 // repeated: 3 s for 24 KB): a block with a word of more than 1,000 characters (its fenced code
 // aside) is read without bare addresses.
 const ADDRESSES = ["wwwAutolink", "protocolAutolink", "emailAutolink"];
+// HTML is never drawn: a tag (an open or closing tag, a comment) is read where it stands, inside a
+// line, and dropped (markdown.tsx), so a tag on a line of its own is not an HTML block that would
+// run on to the next blank line, and the lines after it are Markdown. An address in angle brackets
+// (`<https://…>`) is an autolink, not HTML: it stays a link.
+const HTML = ["htmlFlow"];
 const GFM = gfm({ singleTilde: false });
 const MATH = math({ singleDollarTextMath: false });
 const MATH_FROM = mathFromMarkdown();
@@ -157,7 +162,7 @@ const read = (
 ): MarkdownRoot => {
   const { text, many, long } = bounded(source);
   try {
-    const off = [...(many ? MARKS : []), ...(long ? ADDRESSES : [])];
+    const off = [...HTML, ...(many ? MARKS : []), ...(long ? ADDRESSES : [])];
     const extensions = [
       GFM,
       MATH,
@@ -179,16 +184,8 @@ const read = (
 export const parseMarkdown = (source: string) => read(source);
 
 // After a blank line, a line at the margin that no list item starts starts a block of its own; a
-// fence, HTML that may hold blank lines (CommonMark's kinds 1 to 5) and a section run on to their
-// end.
+// fence and a section run on to their end.
 const STARTS = /^(?![-*+](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$))\S/u;
-const HTML =
-  /^ {0,3}<(?<open>pre|script|style|textarea|!--|\?|!\[CDATA\[|![a-z])/iu;
-const ENDS: Record<string, string> = {
-  "!--": "-->",
-  "?": "?>",
-  "![cdata[": "]]>",
-};
 
 const OPENS = /^<details\b/iu;
 const CLOSES = /^<\/details>[ \t]*$/iu;
@@ -215,13 +212,7 @@ const endOf = (line: string): End | null => {
   if (fence !== undefined) {
     return until((next) => closes(next, fence));
   }
-  if (OPENS.test(line)) {
-    return sectionEnd(1, "");
-  }
-  const open = HTML.exec(line)?.groups?.open?.toLowerCase() ?? "";
-  const end = ENDS[open] ?? (/^[a-z]{2}/u.test(open) ? `</${open}>` : ">");
-  const ends = (next: string) => next.toLowerCase().includes(end);
-  return open === "" || ends(line.slice(open.length + 1)) ? null : until(ends);
+  return OPENS.test(line) ? sectionEnd(1, "") : null;
 };
 
 /** Where each top-level block starts, and where the scan may go on from: before a line still growing. */
@@ -431,14 +422,14 @@ const sectionOf = (
 
 const DASH_ROW = /^ {0,3}\|?[ \t]*:?-+:?[ \t]*(?:\||$)/u;
 // What ends a table's rows, as micromark reads them: a blank line, or a line that starts a heading,
-// a quote, a list item, a break, indented code, a fence or HTML that may hold blank lines.
+// a quote, a list item, a break, indented code, a fence, or a section.
 const ROWS_END =
   /^(?:[ \t]*$| {0,3}\t| {4}| {0,3}(?:#{1,6}(?:[ \t]|$)|>|(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)|(?<mark>[-*_])(?:[ \t]*\k<mark>){2,}[ \t]*$))/u;
 const endsRows = (line: string) => {
   // A backtick fence's info has no backtick: ``` `a` ``` is code in a row.
   const { fence = "", info = "" } = FENCE.exec(line)?.groups ?? {};
   const fenced = fence !== "" && !(fence.startsWith("`") && info.includes("`"));
-  return ROWS_END.test(line) || fenced || HTML.test(line) || OPENS.test(line);
+  return ROWS_END.test(line) || fenced || OPENS.test(line);
 };
 /**
  * A table from a model has no bound: past its first 1,000 rows, only how many more there are is
