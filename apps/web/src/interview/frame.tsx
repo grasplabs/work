@@ -40,7 +40,7 @@ const styles = stylex.create({
   frame: {
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr)",
-    gridTemplateRows: "auto 1fr",
+    gridTemplateRows: "auto auto 1fr",
     boxSizing: "border-box",
     height: "100svh",
     overflow: "hidden",
@@ -53,7 +53,7 @@ const styles = stylex.create({
     position: "relative",
     zIndex: 1,
     gridColumn: "1 / -1",
-    gridRow: "1",
+    gridRow: "2",
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
@@ -80,7 +80,7 @@ const styles = stylex.create({
   // The texture behind the header, across the window, at every width.
   strip: {
     gridColumn: "1 / -1",
-    gridRow: "1",
+    gridRow: "2",
     height: { default: "6rem", [media.sm]: "8rem" },
   },
   // Damsko's calm dither, as the page header's banner draws it: mint light from the top, seen
@@ -114,6 +114,13 @@ const styles = stylex.create({
     transitionTimingFunction: duration.ease,
   },
   calmGone: { opacity: 0 },
+  // The bar every error is said in, at the very top, above the header.
+  errors: {
+    gridColumn: "1 / -1",
+    gridRow: "1",
+    position: "relative",
+    zIndex: 2,
+  },
   // Over a surface rather than behind it: above its fill, never catching a press.
   over: { zIndex: 1 },
   main: {
@@ -121,7 +128,7 @@ const styles = stylex.create({
     display: "flex",
     flexDirection: "column",
     gridColumn: "1 / -1",
-    gridRow: "2",
+    gridRow: "3",
     minHeight: 0,
   },
 });
@@ -204,6 +211,9 @@ export const Frame = ({
   }
   const screen = (
     <>
+      <div {...stylex.props(styles.errors)}>
+        <TopErrorBar />
+      </div>
       <header {...stylex.props(styles.header)}>
         {/* Grasp's mark alone: "Grasp" is its name. */}
         <span {...stylex.props(styles.brand)}>
@@ -247,7 +257,6 @@ export const Frame = ({
   return (
     <div {...stylex.props(styles.frame)}>
       <StephenField pose={pose ?? aside}>{screen}</StephenField>
-      <TopErrorBar />
     </div>
   );
 };
