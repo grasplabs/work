@@ -12,7 +12,8 @@ import { ErrorText } from "../error-text.tsx";
 import { chooseLocale, isLocale } from "../i18n.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { speak } from "../voice/voice.ts";
-import { AiChoice } from "./ai-choice.tsx";
+import { AiChoice, firstWay, useChooseGrasp } from "./ai-choice.tsx";
+import type { AiWay } from "./ai-choice.tsx";
 import { CalmStep } from "./calm-frame.tsx";
 import { CompanyStep } from "./company-step.tsx";
 import { DocumentsStep } from "./documents-step.tsx";
@@ -90,13 +91,17 @@ const Welcome = ({ data, onward }: StepProps) => {
 };
 
 /**
- * Which AI Grasp thinks with, on the organization's own key or Grasp's
- * own where this deployment offers it. Until a model answers, the choice
- * itself is the way on; once one does, Continue.
+ * The AI Grasp runs on, said plainly: nothing works without one (Ruben:
+ * "which AI should we use" was too vague). Our own system is the first
+ * way and Continue takes it in one press; a key of their own is the
+ * other. Until a model answers on their own key, the key block's own
+ * button is the way on.
  */
 const Ai = ({ data, askedFor, path, go, onward }: StepProps) => {
   const { t } = useLingui();
   const { ai } = data;
+  const [way, setWay] = useState<AiWay>(() => firstWay(ai));
+  const grasp = useChooseGrasp();
   const ready = ai === null || ai.ready;
   const graspOffered = ai?.listing.grasp.available === true;
   // On to the step they asked for, for an admin the setup held here on the way; else the next.
@@ -108,38 +113,56 @@ const Ai = ({ data, askedFor, path, go, onward }: StepProps) => {
       go(next);
     }
   };
-  let body = t`Everything I read and say runs on it. Paste a key from your provider, and you pay them directly.`;
-  // What Stephen tells about it, as a tutor would: why it's asked, then where it stands.
-  const why = t`Good, that’s settled. Now, before I can do anything, I need something to think with. That’s the AI on this screen: everything I read and everything I say runs on it.`;
-  let spoken = `${why} ${t`If your company works with a provider of its own, paste its key here, and you pay them directly.`}`;
+  // Ours, once core has it chosen; their own key already in use goes straight on.
+  const onContinue = async () => {
+    const onOurs = ready && ai?.listing.source === "grasp";
+    if (way === "grasp" && !onOurs && !(await grasp.choose())) {
+      return;
+    }
+    onReady();
+  };
+  const why = t`Everything Grasp does runs on AI, from reading your documents to every interview.`;
+  let body = `${why} ${t`Paste a key from your provider to connect it. You pay them directly.`}`;
+  // What Stephen tells about it, as a tutor would: why it's asked, then what to do.
+  const because = t`Good, that’s settled. Before we really start, one thing: everything in Grasp runs on AI. Reading your documents, the interviews, the plan, all of it. So we need an AI attached to get it working.`;
+  let spoken = `${because} ${t`Paste a key from your company’s provider here. You pay them directly, and I’ll check that it works.`}`;
   if (ready && ai?.listing.source === "grasp") {
-    body = t`Everything I read and say runs on it. You use Grasp’s AI, and it’s ready.`;
-    spoken = `${why} ${t`You’re on Grasp’s own, and it’s ready, so we can carry on.`}`;
+    body = `${why} ${t`You’re on our own system, and it’s ready.`}`;
+    spoken = `${because} ${t`You’re already on our own system, and it works, so just press Continue.`}`;
   } else if (ready && ai !== null) {
-    body = t`Everything I read and say runs on it. Your own key works, and it’s ready.`;
-    spoken = `${why} ${t`Your own key works, so we can carry on.`}`;
+    body = `${why} ${t`Your own key works, and it’s ready.`}`;
+    spoken = `${because} ${t`Your own key works, so just press Continue.`}`;
   } else if (graspOffered) {
-    body = t`Everything I read and say runs on it. Grasp’s AI works right away, or you can use your own key.`;
-    spoken = `${why} ${t`The easiest is Grasp’s own, it works straight away. If your company would rather use its own provider, you can paste a key instead.`}`;
+    body = `${why} ${t`Use our own system and you’re set, or connect a provider of your own.`}`;
+    spoken = `${because} ${t`The simplest is our own system: leave it chosen and press Continue, and you’re ready. If your company already works with a provider like OpenAI or Mistral, choose your own key and paste it instead.`}`;
   } else if (ai === null) {
     // Core couldn't say: no providers are shown, so nothing is asked of them here.
-    body = t`Everything I read and say runs on it. You can set it up later in Settings.`;
-    spoken = `${why} ${t`Don’t let it hold you up, you can set it up later in Settings.`}`;
+    body = `${why} ${t`You can set it up later in Settings.`}`;
+    spoken = `${because} ${t`Don’t let it hold you up, you can set it up later in Settings.`}`;
   }
+  const canContinue = ready || (way === "grasp" && graspOffered);
   return (
     <CalmStep
       body={body}
       end={
-        ready ? (
-          <Button onClick={onReady} size="lg">
+        canContinue ? (
+          <Button
+            disabled={grasp.busy}
+            onClick={() => {
+              void onContinue();
+            }}
+            size="lg"
+            status={grasp.busy ? "loading" : "idle"}
+          >
             {t`Continue`}
           </Button>
         ) : null
       }
       spoken={spoken}
-      title={t`Which AI should I use?`}
+      title={t`Grasp needs an AI to work`}
     >
-      <AiChoice ai={ai} onReady={onReady} />
+      <AiChoice ai={ai} onReady={onReady} onWay={setWay} way={way} />
+      <ErrorText>{grasp.failure}</ErrorText>
     </CalmStep>
   );
 };
