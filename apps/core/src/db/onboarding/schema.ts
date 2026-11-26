@@ -75,8 +75,13 @@ export const teams = sqliteTable("teams", {
   id: text().primaryKey(),
   position: integer().notNull(),
   name: text().notNull(),
-  /** Its lead, by person. */
+  /** Its lead, by person: with several, the first, whom its map is drawn from. */
   lead: text(),
+  /** Who else leads it, by person, as JSON (`rosterTeamSchema.coLeads`). */
+  coLeads: text("co_leads", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default(sql`'[]'`),
   /**
    * What it does, as the admin described it on the roster they saved: only
    * ever the admin's own words, which every member reads once confirmed

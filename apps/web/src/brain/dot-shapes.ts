@@ -1524,53 +1524,6 @@ interface Hit {
   ink: number;
 }
 
-/** A dot of a figure printed coarsely: where it is, fitted into -1..1, how lit it is and how large it prints. */
-export interface CoarseDot {
-  x: number;
-  y: number;
-  z: number;
-  tone: number;
-  ink: number;
-}
-
-/**
- * A figure on far fewer rows than the brain prints with, for print as small as an icon: the same
- * surface, `columns` dots across its box, seen from the same side unless another `view` is asked
- * for. Only the dots that are printed, in scan order.
- */
-export const coarseScan = (
-  key: ShapeKey,
-  columns: number,
-  view?: { turn: number; tilt?: number }
-): CoarseDot[] => {
-  const p = view ? { ...plan(key), ...view } : plan(key);
-  const [x0, x1, y0, y1] = p.box;
-  const { field, local } = viewOf(p);
-  const scale = 2 / Math.max(x1 - x0, y1 - y0);
-  const cx = (x0 + x1) / 2;
-  const cy = (y0 + y1) / 2;
-  const hits = field
-    ? scan(field, p.box, columns, p.step)
-    : (p.hits?.(2 / columns) ?? []);
-  return hits.flatMap((hit) => {
-    const [lx, ly, lz] = local(hit.x, hit.y, hit.z);
-    const fade = p.fade?.(lx, ly, lz) ?? 1;
-    const print = p.print?.(lx, ly, lz) ?? 1;
-    if (print <= 0 || fade <= 0.02) {
-      return [];
-    }
-    return [
-      {
-        x: (hit.x - cx) * scale,
-        y: (hit.y - cy) * scale,
-        z: hit.z * scale,
-        tone: hit.tone * fade * print,
-        ink: Math.min(1, hit.ink * fade * print),
-      },
-    ];
-  });
-};
-
 // ---- The atlas brain -------------------------------------------------------------------------
 
 /** The atlas's regions, in the order of `REGIONS` in brain-atlas.ts: frontal, parietal, temporal, occipital, cerebellum, stem. */

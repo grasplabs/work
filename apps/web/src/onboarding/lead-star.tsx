@@ -153,8 +153,6 @@ const styles = stylex.create({
     display: "grid",
     width: "100%",
     height: "100%",
-    // A spark may stand over the sticky team row above.
-    zIndex: 2,
   },
   leaping: {
     animationName: { default: leap, [REDUCED]: "none" },
