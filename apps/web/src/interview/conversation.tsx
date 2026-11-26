@@ -11,6 +11,7 @@ import type { ReactNode } from "react";
 import { TopError } from "../frame/top-error.tsx";
 import { Composer, SaveTrouble } from "./composer.tsx";
 import { Countdown, budgetMinutes } from "./countdown.tsx";
+import { Guide } from "./guide.tsx";
 import { keepNow, update, useInterviewer, useProgress } from "./kept.ts";
 import { sendTyped, useLoop } from "./loop.ts";
 import { micProblem } from "./mic.ts";
@@ -229,9 +230,12 @@ const TurnTrouble = () => {
 /** The box at the bottom, with what they must know about saving over it. */
 const AnswerBox = ({
   reading,
+  guiding,
   onTalk,
 }: {
   reading: boolean;
+  /** Only shown, while the guide tells about it: as it will be, not yet to answer in. */
+  guiding: boolean;
   onTalk: () => void;
 }) => {
   const { t } = useLingui();
@@ -239,11 +243,12 @@ const AnswerBox = ({
   const words = useInterviewWords();
   const { mode } = useProgress();
   return (
-    <div {...stylex.props(styles.composer)}>
+    <div data-guide="answer" inert={guiding} {...stylex.props(styles.composer)}>
       <SaveTrouble />
       <Composer
         micTrouble={mode === "type" ? micProblem() : null}
-        doing={loop.doing}
+        // In the guide it is drawn as it will be while he talks: spoken, at rest.
+        doing={guiding ? "speaking" : loop.doing}
         line={loop.saying}
         names={words.tag}
         onSend={sendTyped}
@@ -311,11 +316,14 @@ const Room = ({
 /** The conversation, or its read-back: the stage, and the card at its foot. */
 export const Conversation = ({
   reading,
+  guiding = false,
   transcript,
   alone,
   onTalk,
 }: {
   reading: boolean;
+  /** The quick look round before the first question, in the questions' place (guide.tsx). */
+  guiding?: boolean;
   transcript: boolean;
   alone: boolean;
   onTalk: () => void;
@@ -337,12 +345,18 @@ export const Conversation = ({
           ) : (
             <>
               <div aria-hidden="true" {...stylex.props(styles.lead)} />
-              <Asking />
+              {guiding ? <Guide /> : <Asking />}
             </>
           )}
         </div>
         {footed ? null : (
-          <AnswerBox key={answer} onTalk={onTalk} reading={reading} />
+          <AnswerBox
+            guiding={guiding}
+            // Afresh once the guide is done, with the cursor in the box for whoever types.
+            key={guiding ? "guide" : answer}
+            onTalk={onTalk}
+            reading={reading}
+          />
         )}
       </Room>
       {/* The setup's own foot, across the window, as the admin's onboarding has it. */}
