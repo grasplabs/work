@@ -173,6 +173,17 @@ describe("adding a connector by URL", () => {
     ]);
   });
 
+  it("says a name holds a character that doesn't show, not that it is too long, sending nothing", async () => {
+    const sent = await opened();
+    await type(field("Name"), "Lin\u200Bear");
+    await type(field("Server URL"), "https://mcp.example.com/mcp");
+    await press(button("Add the connector"));
+    expect(sent).toStrictEqual([]);
+    expect(dialog()?.textContent).toContain(
+      "The name holds a character that doesn't show"
+    );
+  });
+
   it("refuses plain HTTP for a server on the public internet, sending nothing", async () => {
     const sent = await opened();
     await type(field("Name"), "Ledger");
