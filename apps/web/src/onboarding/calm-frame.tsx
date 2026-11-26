@@ -456,6 +456,8 @@ export const CalmFrame = ({
       <BackWay.Provider value={ways?.onBack}>
         <div {...stylex.props(styles.window)}>
           <StephenField pose={pose}>
+            {/* Every error is said here, at the very top, above the bar: it never covers the page. */}
+            <TopErrorBar />
             <header {...stylex.props(styles.bar)}>
               <span {...stylex.props(styles.mark)}>
                 <Icon icon={GraspLogo} label="Grasp" />
@@ -481,7 +483,6 @@ export const CalmFrame = ({
               />
             ) : null}
           </StephenField>
-          <TopErrorBar />
         </div>
       </BackWay.Provider>
     </EndPlace.Provider>

@@ -26,7 +26,6 @@ import { loadFromCore } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { CalmStep } from "./calm-frame.tsx";
-import { ConnectionProblem } from "./connection-problem.tsx";
 import { useConnectionReturn } from "./connection-return.ts";
 import { ConnectorSearch } from "./connector-search.tsx";
 import { sourcesFor } from "./setup.ts";
@@ -379,19 +378,20 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
         open={searching}
         placeholder={t`Search apps, for example Dropbox`}
       />
-      <ConnectionProblem
-        message={returnClosed ? null : returned}
-        onClose={() => {
-          setReturnClosed(true);
-        }}
-        retry={{
+      <TopError
+        action={{
           label: t`Choose an app again`,
           run: () => {
             setSearching(true);
           },
         }}
+        onClose={() => {
+          setReturnClosed(true);
+        }}
         title={t`The app didn't connect`}
-      />
+      >
+        {returnClosed ? null : returned}
+      </TopError>
       {connecting === null ? null : (
         <ConnectDialog
           identity={identity}

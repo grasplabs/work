@@ -97,7 +97,6 @@ const data: SetupData = {
   },
   review: { differences: [], mapped: 0 },
   directory: null,
-  hr: null,
   suites: [],
   places: null,
   choices: noChoices,
@@ -284,7 +283,9 @@ const send = async (): Promise<void> => {
 /** The text of the error the bar at the top says, if it says one: every error in the setup is said there. */
 const error = (): string | undefined =>
   document
-    .querySelector('[data-slot="alert"] [data-slot="alert-description"]')
+    .querySelector(
+      '[data-slot="top-error"]:not([inert]) [data-slot="alert-description"]'
+    )
     ?.textContent?.trim();
 
 // Browsers whose first language counts in another calendar. Safari writes
@@ -556,26 +557,22 @@ describe("the leads step's confirmation", () => {
       Promise.withResolvers<boolean>();
     const { confirmed } = await shown("en", ["en-GB"], {
       step: "leads",
-      // The HR platform was answered: the step shows the teams and their leads.
-      given: { ...data, choices: { ...noChoices, hr: { kind: "none" } } },
+      given: data,
       reread,
     });
-    await press("This is right");
+    await press("Continue");
     expect({
-      busy: button("This is right")?.getAttribute("aria-busy"),
+      busy: button("Continue")?.getAttribute("aria-busy"),
       confirmed: confirmed(),
     }).toStrictEqual({ busy: "true", confirmed: 1 });
-    await press("This is right");
+    await press("Continue");
     expect(confirmed()).toBe(1);
     await act(async () => {
       answered(true);
       await Promise.resolve();
     });
     await settled();
-    expect({
-      next: button("Continue") === undefined,
-      confirmed: confirmed(),
-    }).toStrictEqual({ next: false, confirmed: 1 });
+    expect(confirmed()).toBe(1);
   });
 });
 

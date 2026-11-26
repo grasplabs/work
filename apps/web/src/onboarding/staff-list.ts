@@ -586,3 +586,57 @@ export const exampleList = [
   "Daan Bakker,daan@example.com,Customer service,Team lead customer service,yes",
   "Lisa Jansen,lisa@example.com,Customer service,Customer service agent,",
 ].join("\n");
+
+/**
+ * A staff list added to the people there are, on the leads step: its
+ * teams under the ids the ones there have by name, and only the people
+ * not in yet, by id or address. Who is in keeps everything the admin set;
+ * a team keeps its lead, and one without takes the list's, when that one
+ * is new. Too many people or teams together is `large`.
+ */
+export const withListAdded = (
+  read: StaffList["roster"],
+  saved: Roster | null
+): StaffList["roster"] => {
+  if (saved === null) {
+    return read;
+  }
+  const roster = underSavedIds(read, saved);
+  const savedIds = new Set(saved.people.map(({ id }) => id));
+  const savedEmails = new Set(
+    saved.people.map(({ email }) => email.toLowerCase()).filter(Boolean)
+  );
+  const fresh = roster.people.filter(
+    (person) =>
+      !savedIds.has(person.id) &&
+      (person.email === "" || !savedEmails.has(person.email.toLowerCase()))
+  );
+  const freshIds = new Set(fresh.map(({ id }) => id));
+  const readTeams = new Map(roster.teams.map((team) => [team.id, team]));
+  const teams = [
+    ...saved.teams.map((team) => {
+      const lead = readTeams.get(team.id)?.lead ?? null;
+      return team.lead === null && lead !== null && freshIds.has(lead)
+        ? { ...team, lead }
+        : team;
+    }),
+    ...roster.teams.filter(
+      (team) =>
+        !saved.teams.some((each) => each.id === team.id) &&
+        fresh.some((person) => person.team === team.id)
+    ),
+  ].map((team) =>
+    team.lead !== null &&
+    !saved.people.some((person) => person.id === team.lead) &&
+    !freshIds.has(team.lead)
+      ? { ...team, lead: null }
+      : team
+  );
+  if (
+    saved.people.length + fresh.length > onboardingPeopleMax ||
+    teams.length > onboardingTeamsMax
+  ) {
+    throw new StaffListError("large");
+  }
+  return { teams, people: [...saved.people, ...fresh] };
+};

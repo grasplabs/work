@@ -1,5 +1,3 @@
-import type { HrPlatform } from "@grasp-os/shared/onboarding-choices";
-
 import type { DocumentSource } from "./setup.ts";
 
 // The logos of the places documents live, for the sources step: each
@@ -30,25 +28,6 @@ export const namedPlaces = [
   { name: "Dropbox", logo: "/logos/dropbox.svg" },
   { name: "Box", logo: "/logos/box.svg" },
 ] as const;
-
-/** The logo of each HR platform offered as a tile, whole, in its own colours. */
-export const hrLogos: Readonly<Record<HrPlatform, string>> = {
-  Personio: "/logos/personio.svg",
-  AFAS: "/logos/afas.svg",
-  HiBob: "/logos/hibob.svg",
-  Nmbrs: "/logos/nmbrs.svg",
-  Loket: "/logos/loket.svg",
-};
-
-/** Logos of HR platforms a kickoff may name beyond those offered, by product name. */
-const namedHrLogos: Readonly<Record<string, string>> = {
-  ...hrLogos,
-  Workday: "/logos/workday.svg",
-};
-
-/** The logo of an HR platform by its name, or none Grasp has. */
-export const hrLogoOf = (name: string): string | null =>
-  Object.hasOwn(namedHrLogos, name) ? (namedHrLogos[name] ?? null) : null;
 
 /** The logo a place carries, by its address; none for a place Grasp has no logo for. */
 export const sourceLogo = (source: DocumentSource): string | null =>
