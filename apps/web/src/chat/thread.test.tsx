@@ -737,6 +737,53 @@ describe(ChatThread, () => {
     ]);
   });
 
+  it("answers a question asked again in a row of its own while it is written, and draws the same words with a file of their own as a new question", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    const stopped: ChatMessage = {
+      id: 2,
+      role: "assistant",
+      text: "Let me",
+      code: [],
+      tools: [],
+      end: "failed",
+      at,
+    };
+    await thread(
+      [
+        asked,
+        stopped,
+        {
+          ...asked,
+          id: 3,
+          files: [
+            {
+              id: "f1",
+              name: "sums.csv",
+              type: "csv",
+              bytes: 3,
+              createdAt: at,
+            },
+          ],
+        },
+        { ...stopped, id: 4 },
+        { ...asked, id: 5 },
+      ],
+      { text: "Four", code: [], tools: [], reasoning: "" }
+    );
+
+    const rows = [...document.querySelectorAll("article")].map(
+      (row) => `${row.getAttribute("aria-label") ?? "You"}: ${row.textContent}`
+    );
+    expect(rows).toStrictEqual([
+      expect.stringMatching(/^You: What is 2 \+ 2\?/u),
+      expect.stringMatching(/^Grasp: Let me/u),
+      expect.stringMatching(/^You: sums\.csv.*What is 2 \+ 2\?/u),
+      expect.stringMatching(/^Grasp: Let me/u),
+      // The answer being written: a row of its own.
+      expect.stringMatching(/^Grasp/u),
+    ]);
+  });
+
   it("says what each call of Grasp's tools did in one line, and unfolds what it was given and what came of it", async () => {
     const at = "2026-10-27T09:00:05.000Z";
     await thread([

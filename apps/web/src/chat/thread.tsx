@@ -697,8 +697,9 @@ const sameAgent = (
 /**
  * Whether `message` asks again what was asked last, after it was stopped
  * or failed (Try again, Ask again, or the same words sent again): the
- * question it repeats is the last one, and nothing after it was answered
- * to the end.
+ * question it repeats is the last one, nothing after it was answered to
+ * the end, and it carries nothing of its own to show (files, a Build it).
+ * Until core marks a retry itself, the words say it.
  */
 const asksAgain = (rows: readonly Row[], message: Asked): boolean => {
   const at = rows.findLastIndex(({ kind }) => kind === "question");
@@ -706,6 +707,8 @@ const asksAgain = (rows: readonly Row[], message: Asked): boolean => {
   return (
     asked?.kind === "question" &&
     asked.message.text === message.text &&
+    (message.files ?? []).length === 0 &&
+    message.built === undefined &&
     rows
       .slice(at + 1)
       .every(
