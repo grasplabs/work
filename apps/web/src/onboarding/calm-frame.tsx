@@ -35,12 +35,19 @@ import {
 } from "../frame/theme.ts";
 import { TopErrorBar } from "../frame/top-error.tsx";
 import { useCore } from "../use-core.ts";
-import { allowSound, setVoiceOn, speak, useVoice } from "../voice/voice.ts";
+import {
+  allowSound,
+  prepare,
+  setVoiceOn,
+  speak,
+  useVoice,
+} from "../voice/voice.ts";
 import type { Pose } from "./field/engine.ts";
 import { fromTheTop } from "./field/poses.ts";
 import { StephenField } from "./field/stephen-field.tsx";
 import { LanguagePicker } from "./language-picker.tsx";
 import { StartOver } from "./start-over.tsx";
+import { useRememberLines } from "./step-voice.tsx";
 
 // The frame of the setup and of the page a member waits on: full screen,
 // outside the app. One quiet bar on top, Grasp's mark at its start, the
@@ -522,20 +529,30 @@ const spokenStep = (title: string, body: ReactNode): string => {
  */
 const saidOnArrival = new Set<string>();
 
-/** Stephen says `line` as its step arrives, after `delay` ms: once in a visit, not again on the way back. */
+/**
+ * Stephen says `line` as its step arrives, after `delay` ms: once in a visit, not again on the way
+ * back. It is fetched from the moment the step opens (if the step before hasn't already), so he
+ * starts on time, and remembered as what the step says, to be fetched ahead the next time through
+ * (step-voice.tsx).
+ */
 const useSayOnce = (line: string, delay: number, when: boolean): void => {
+  const remember = useRememberLines();
   useEffect(() => {
-    const id =
-      when && !saidOnArrival.has(line)
-        ? window.setTimeout(() => {
-            saidOnArrival.add(line);
-            speak(line);
-          }, delay)
-        : undefined;
+    const due = when && !saidOnArrival.has(line);
+    if (due) {
+      prepare(line);
+    }
+    const id = due
+      ? window.setTimeout(() => {
+          saidOnArrival.add(line);
+          speak(line);
+          remember?.([line]);
+        }, delay)
+      : undefined;
     return () => {
       window.clearTimeout(id);
     };
-  }, [line, delay, when]);
+  }, [line, delay, when, remember]);
 };
 
 /**
