@@ -27,12 +27,6 @@ import type {
   StoryLine,
   StorySentence,
 } from "@grasp-os/shared/interview-story";
-import { interviewTurnPath, turnEvents } from "@grasp-os/shared/interview-turn";
-import type {
-  InterviewTurnRequest,
-  StephenTurn,
-  TurnEvent,
-} from "@grasp-os/shared/interview-turn";
 import { interviewVoicePath } from "@grasp-os/shared/interview-voice";
 import type {
   InterviewVoiceRequest,
@@ -44,7 +38,7 @@ import { t } from "@lingui/core/macro";
 import { z } from "zod";
 
 // The interview's page talks to core over its link's endpoints only
-// (`/api/interview`, `/turn`, `/story`), with the link's secret in each
+// (`/api/interview`, `/voice`, `/story`), with the link's secret in each
 // body and the session of the company's sign-in in its cookie, which core
 // reads on these endpoints alone (GRA-1790): the interview opens only for
 // the account it belongs to. Nothing it is answered is taken on trust:
@@ -211,15 +205,14 @@ const inLanguage = (code: string | null, message: string): string => {
       "Stephen could not be reached. Try again.",
       t`Stephen could not be reached. Try again.`,
     ],
-    [
-      "Stephen could not answer that. Say it another way.",
-      t`Stephen could not answer that. Say it another way.`,
-    ],
   ]);
   return (
     (code === null ? undefined : said.get(code)) ?? said.get(message) ?? message
   );
 };
+
+/** Why a live conversation's request went wrong, as core says it without a code (core's onboarding/voice.ts). */
+const voiceFailureSchema = z.object({ error: z.string().min(1) });
 
 /** A refusal as core sent it, with its reference. */
 const refusalOf = async (response: Response): Promise<Refused> => {
@@ -230,14 +223,19 @@ const refusalOf = async (response: Response): Promise<Refused> => {
     // No body to read: the status says enough.
   }
   const parsed = errorPayloadSchema.safeParse(payload);
+  const voice = voiceFailureSchema.safeParse(payload);
+  let said = t`That didn't work. Try again in a moment.`;
+  if (parsed.success) {
+    said = inLanguage(parsed.data.code, parsed.data.message);
+  } else if (voice.success) {
+    said = inLanguage(null, voice.data.error);
+  }
   return {
     refused: true,
     status: response.status,
     code: parsed.success ? parsed.data.code : null,
     message: withReference(
-      parsed.success
-        ? inLanguage(parsed.data.code, parsed.data.message)
-        : t`That didn't work. Try again in a moment.`,
+      said,
       requestIdOf(payload) ?? response.headers.get(requestIdHeader) ?? undefined
     ),
   };
@@ -364,68 +362,6 @@ export const withdrawInterview = async (
     { action: "withdraw", secret } satisfies InterviewRequest,
     withdrawnSchema
   );
-
-/** A turn that could not be had: its status, 0 when nothing came back. */
-export interface TurnFailed {
-  failed: true;
-  status: number;
-}
-
-export const turnFailed = (value: unknown): value is TurnFailed =>
-  typeof value === "object" && value !== null && "failed" in value;
-
-/** What comes in of a turn before the whole of it: his line's start, his line, where the interview goes. */
-export type EarlyEvent = Exclude<
-  TurnEvent,
-  { turn: StephenTurn } | { error: string; status: number }
->;
-
-/**
- * One turn, as core answers it, a line of JSON at a time: `onEvent` gets
- * each event as it comes in, and `alive` is called whenever anything does.
- * What comes back is the whole turn, or that it failed.
- */
-export const askTurn = async (
-  request: InterviewTurnRequest,
-  signal: AbortSignal,
-  onEvent: (event: EarlyEvent) => void,
-  alive: () => void
-): Promise<StephenTurn | TurnFailed> => {
-  const response = await fetch(interviewTurnPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(request),
-    signal,
-  });
-  if (!response.ok || response.body === null) {
-    return { failed: true, status: response.status };
-  }
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let turn: StephenTurn | TurnFailed = { failed: true, status: 0 };
-  let arrived = "";
-  for (;;) {
-    // oxlint-disable-next-line no-await-in-loop -- a stream is read a piece at a time
-    const { done, value } = await reader.read();
-    alive();
-    // The last line counts too, whether or not it ends in a new line.
-    const text = `${arrived}${decoder.decode(value, { stream: !done })}${done ? "\n" : ""}`;
-    const { events, rest } = turnEvents(text);
-    arrived = rest;
-    for (const event of events) {
-      if ("turn" in event) {
-        ({ turn } = event);
-      } else if ("error" in event) {
-        turn = { failed: true, status: event.status };
-      } else {
-        onEvent(event);
-      }
-    }
-    if (done) {
-      return turn;
-    }
-  }
-};
 
 /** How long a story of a part is waited for at all. */
 const storyTimeoutMs = 8000;
@@ -600,7 +536,7 @@ export const openVoice = async (
 ): Promise<VoiceSessionJoin | Refused> =>
   await posted(interviewVoicePath, request, voiceJoinSchema);
 
-/** Has core write down what was said in the conversation since `noted` of their answers. */
+/** Has core write down what was said in the conversation since `noted` of their answers, or what they put right in the read-back. */
 export const answerVoice = async (
   request: Extract<InterviewVoiceRequest, { action: "answer" }>
 ): Promise<VoiceAnswered | Refused> =>

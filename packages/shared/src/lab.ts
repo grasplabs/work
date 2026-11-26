@@ -63,13 +63,18 @@ export const labRequestSchema = z.discriminatedUnion("action", [
   /** How the models are reached: the model of each role. */
   z.strictObject({ action: z.literal("via") }),
   /**
-   * One of Stephen's turns on fixed input, with who it is with given: the
-   * same turn a link gets, as the same events.
+   * One of Stephen's turns, turn by turn, as only the lab holds them: on
+   * fixed input, with who it is with given (`who`), or with someone on
+   * the roster (`person`), a practice person the lab plays, a lead too,
+   * known as the store knows them. The events core's lab-turn.ts answers.
    */
   z.strictObject({
     action: z.literal("turn"),
-    who: labWhoSchema,
-    turn: interviewTurnRequestSchema.omit({ secret: true, interviewer: true }),
+    who: z.union([
+      labWhoSchema,
+      z.strictObject({ person: z.string().min(1).max(nameMax) }),
+    ]),
+    turn: interviewTurnRequestSchema,
   }),
   /** Who someone on the roster is, as a turn of theirs would know it. */
   z.strictObject({

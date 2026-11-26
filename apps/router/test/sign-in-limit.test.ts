@@ -352,7 +352,7 @@ describe("interview link rate limit", () => {
     ).toHaveLength(6);
   });
 
-  it("limits an interview's turns from the same budget as its link's endpoint", async () => {
+  it("limits an interview's live conversation from the same budget as its link's endpoint", async () => {
     const limiter = limiterAllowing(1);
     const statuses = [
       await interviewFrom(
@@ -362,7 +362,7 @@ describe("interview link rate limit", () => {
       ),
       await interviewFrom(
         "192.0.2.24",
-        "https://acme.interview.test/api/interview/turn",
+        "https://acme.interview.test/api/interview/voice",
         limiter
       ),
     ].map(({ status }) => status);
@@ -374,7 +374,7 @@ describe("interview link rate limit", () => {
     const statuses = [
       await interviewFrom(
         "192.0.2.25",
-        "https://acme.interview.test/api/interview/turn",
+        "https://acme.interview.test/api/interview/voice",
         limiter
       ),
       await interviewFrom(

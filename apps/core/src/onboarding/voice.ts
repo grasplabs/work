@@ -6,6 +6,7 @@ import {
 } from "@grasp-os/shared/encoding";
 import { requestErrors } from "@grasp-os/shared/errors";
 import { checkedTurn } from "@grasp-os/shared/interview-turn";
+import type { SaidAnswer } from "@grasp-os/shared/interview-turn";
 import {
   interviewVoiceMaxBytes,
   interviewVoiceRequestSchema,
@@ -41,10 +42,11 @@ import { heardBudgets } from "./transcription.ts";
 // agent (`platformAi.agent`), as the page asks for it at
 // /api/interview/voice (@grasp-os/shared/interview-voice). ElevenLabs
 // listens, Stephen answers and speaks there, and the person can talk over
-// him; core opens the conversation and writes down what was said.
+// him, or types to him in a conversation without sound; core opens the
+// conversation and writes down what was said.
 //
-// - Open: who they are comes from the store, on their own link, as for a
-//   turn (`turnContext`). Core asks ElevenLabs for a conversation token
+// - Open: who they are comes from the store, on their own link
+//   (`turnContext`). Core asks ElevenLabs for a conversation token
 //   through the model gateway, with Grasp's key, which connect holds, and
 //   answers the page the token, who the agent talks with, which the page
 //   tells it as context, and a pass that ties the conversation to the link
@@ -54,9 +56,14 @@ import { heardBudgets } from "./transcription.ts";
 // - Answer: core doesn't read the conversation at ElevenLabs. Once one
 //   more answer of theirs is heard, the page sends the conversation as it
 //   heard it (`said`), and core has the notes' model write down what was
-//   said, as a turn does; every fact is checked against their last three
-//   answers in it (`checkedTurn`). A pass from another link or account
-//   writes nothing down.
+//   said; every fact is checked against their last three answers in it
+//   (`checkedTurn`), a typed one's words as they stand. A pass from
+//   another link or account writes nothing down.
+// - Answer, in the read-back (`reading`): what they put right after the
+//   conversation, typed, said, or changed on their screen (`edit`), is
+//   written down the same way, with the lines read back told to the notes'
+//   model. No conversation is open then, so it takes no pass: the link and
+//   its account are checked, as for every request here.
 // - Close: the page left the conversation, which it ends at ElevenLabs
 //   itself. Core has nothing open there to close.
 //
@@ -155,7 +162,11 @@ const holdsPass = async (
 /** The conversation as the page heard it (`said`), without its empty lines. */
 const heardOf = (said: readonly VoiceLine[]): VoiceLine[] =>
   said
-    .map(({ from, text }) => ({ from, text: text.trim() }))
+    .map(({ from, text, typed }) => ({
+      from,
+      text: text.trim(),
+      ...(typed === true ? { typed } : {}),
+    }))
     .filter(({ text }) => text !== "");
 
 /** What ElevenLabs answers for a conversation token. */
@@ -166,14 +177,18 @@ const agentTokenSchema = z.object({ token: z.string().min(1).max(8192) });
  * they said since the first `noted` answers as one answer, with the ones
  * just before it that nothing of Stephen's came between, so a quote
  * across a pause the agent split an answer at stands, also where part of it
- * was written down before. Quotes stand in it or in the two before.
+ * was written down before. Quotes stand in it or in the two before. An
+ * answer counts as typed, its words as they stand, only when every part
+ * of it was.
  */
 const joinedSince = (
   lines: readonly VoiceLine[],
   noted: number
-): { text: string }[] => {
+): SaidAnswer[] => {
   const theirs = lines.flatMap((line, at) =>
-    line.from === "person" ? [{ text: line.text, at }] : []
+    line.from === "person"
+      ? [{ text: line.text, typed: line.typed === true, at }]
+      : []
   );
   let start = Math.min(noted, theirs.length);
   while (
@@ -183,13 +198,12 @@ const joinedSince = (
   ) {
     start -= 1;
   }
+  const last = theirs.slice(start);
   return [
-    ...theirs.slice(0, start).map(({ text }) => ({ text })),
+    ...theirs.slice(0, start).map(({ text, typed }) => ({ text, typed })),
     {
-      text: theirs
-        .slice(start)
-        .map(({ text }) => text)
-        .join(" "),
+      text: last.map(({ text }) => text).join(" "),
+      typed: last.every(({ typed }) => typed),
     },
   ];
 };
@@ -362,13 +376,16 @@ const open = async (
   return Response.json(join, { headers: linkHeaders });
 };
 
-/** Writes down what was said since the answers already noted. */
+/**
+ * Writes down what was said since the answers already noted; in the
+ * read-back, what they put right in the lines read back.
+ */
 const answer = async (
   { env, context, requestId, ctx }: Asked,
   asked: Extract<InterviewVoiceRequest, { action: "answer" }>
 ): Promise<Response> => {
-  // Grasp's own notes' model, as an interview's turns write theirs
-  // (`platformAi.interview`), whatever models the organization set up.
+  // Grasp's own notes' model (`platformAi.interview`), whatever models
+  // the organization set up.
   const notesModel = platformAi.interview.notes;
   const lines = heardOf(asked.said);
   const answers = lines.filter(({ from }) => from === "person");
@@ -388,20 +405,22 @@ const answer = async (
     interviewerText(context.kind, asked.locale),
     companyOf(env),
   ]);
-  // Up to their last words, as a turn's brief ends: what Stephen said after
+  // Up to their last words, where the brief ends: what Stephen said after
   // them is his, not what was just said.
   const lastAnswer = lines.findLastIndex(({ from }) => from === "person");
   const turn: TurnAsked = {
     // An answer, also when they came back to add something: `adding` says
-    // that, and "add" is only the event that opens it.
-    event: "answer",
+    // that, and "add" is only the event that opens it. In the read-back,
+    // their answer to the lines read back.
+    event: asked.reading === undefined ? "answer" : "readback",
     locale: asked.locale,
-    // The whole conversation, as a turn's brief has it: before this
-    // conversation too, on a resume. Quotes are checked in this one's alone.
+    // The whole conversation: before this one too, on a resume and in the
+    // read-back. Quotes are checked in this one's alone.
     lines: [...asked.before, ...lines.slice(0, lastAnswer + 1)],
     facts: asked.facts,
     phase: asked.phase,
     minutes: asked.minutes,
+    ...(asked.reading === undefined ? {} : { reading: asked.reading }),
     adding: asked.adding,
   };
   const counting: Promise<void>[] = [];
@@ -449,6 +468,18 @@ const answer = async (
   );
   if (dropped.unknownTag + dropped.noText + dropped.notSaid > 0) {
     log.info("interview.notes_dropped", { requestId, ...dropped });
+  }
+  const { edit } = asked;
+  if (edit !== undefined) {
+    // They changed the line on their screen themselves: exactly that
+    // change, their words as they stand, whatever the notes' model made of
+    // it. Only the line for the record is the model's, in English.
+    const record = checked.changes.find(({ id }) => id === edit.id)?.record;
+    return answeredNow({
+      facts: [],
+      changes: [{ id: edit.id, text: edit.text, record: record ?? edit.text }],
+      phase: asked.phase,
+    });
   }
   return answeredNow({
     facts: checked.facts,
@@ -523,7 +554,20 @@ export const interviewVoiceResponse = async (
   if (asked.action === "open") {
     return await open(held, asked);
   }
-  if (!(await holdsPass(env, asked.pass, secretMark, caller.account))) {
+  const { edit, reading } = asked;
+  // A line changed on screen is one of the lines read back to them.
+  const editFits =
+    edit === undefined ||
+    (reading !== undefined && asked.facts.some(({ id }) => id === edit.id));
+  if (!editFits) {
+    return linkRefusal("interview.invalid", requestId);
+  }
+  // An answer of a conversation comes with the pass core opened it with.
+  if (
+    reading === undefined &&
+    (asked.pass === undefined ||
+      !(await holdsPass(env, asked.pass, secretMark, caller.account)))
+  ) {
     log.warn("interview.voice_pass_refused", { requestId });
     return linkRefusal("interview.invalid", requestId);
   }

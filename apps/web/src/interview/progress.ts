@@ -212,15 +212,15 @@ const withoutEmpty = (fact: InterviewFact): InterviewFact => {
 };
 
 /**
- * What a turn of Stephen's brought: what he marked in what was just said,
- * what he wrote down, what he put right, and where the interview is now.
+ * What the notes brought after an answer: what he marked in what was just
+ * said, what he wrote down, what he put right, and where the interview is now.
  * `answered` is the line his marks go on: the last thing the person said,
  * as it stands in the conversation. In the read-back, what is new is
  * pinned to the part on screen (`pin`).
  */
 export const afterTurn = (
   progress: InterviewProgress,
-  turn: StephenTurn,
+  turn: Pick<StephenTurn, "facts" | "changes" | "phase" | "wants">,
   {
     answered,
     pin,

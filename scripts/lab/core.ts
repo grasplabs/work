@@ -3,8 +3,11 @@
  * it: Grasp's staff member of the local stack, signed in through the fake
  * IdP as the seed signs people in (scripts/seed/local.ts); the lab's own
  * model calls, through core's model gateway (`/api/lab`, core's
- * onboarding/lab.ts); and someone's interview, on their own link, exactly
- * as the interview page talks to core. Every turn is a real turn of core.
+ * onboarding/lab.ts); and someone's interview, kept and approved on their
+ * own link as the interview page does it. Stephen's turns are the lab's
+ * own (core's onboarding/lab-turn.ts, through `/api/lab`): the interviews
+ * themselves are live conversations with Grasp's agent, which the lab
+ * does not hold.
  */
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -19,7 +22,7 @@ import type {
   ApprovedFact,
   InterviewProgress,
 } from "@grasp-os/shared/interview-links";
-import { interviewTurnPath, turnEvents } from "@grasp-os/shared/interview-turn";
+import { turnEvents } from "@grasp-os/shared/interview-turn";
 import type {
   EarlyLine,
   EarlyNext,
@@ -260,17 +263,15 @@ export interface Link {
   approve: (facts: readonly ApprovedFact[]) => Promise<void>;
   /** Keeps where the interview is; the version it was kept as. */
   save: (version: number, progress: InterviewProgress) => Promise<number>;
-  /** One turn of Stephen's. */
-  turn: (
-    request: Omit<InterviewTurnRequest, "secret" | "interviewer">
-  ) => Promise<StephenTurn>;
+  /** One turn of Stephen's, with them. */
+  turn: (request: InterviewTurnRequest) => Promise<StephenTurn>;
 }
 
 /**
- * A turn, as the page reads its stream: the whole turn, or why it failed.
+ * A turn, as its stream is read: the whole turn, or why it failed.
  * With `early`, as soon as his line and where the interview goes are in,
- * as a page does when someone talks on: what he would write down is then
- * never waited for, and the turn is given up, which is half of what a
+ * as when someone talks on: what he would write down is then never
+ * waited for, and the turn is given up, which is half of what a
  * turn takes. `early` is the part the interview was in.
  */
 const turnOf = async (
@@ -333,10 +334,14 @@ const turnOf = async (
 };
 
 /**
- * Someone's link on the local core, for the person at `email`, the address
+ * Someone's link on the local core, for `person` at `email`, the address
  * it was sent to: signed in as them through the stack's fake IdP.
  */
-export const linkOn = (link: string, email: string): Link => {
+export const linkOn = (
+  core: Core,
+  link: string,
+  { person, email }: { person: string; email: string }
+): Link => {
   const secret = secretOf(link);
   let signedIn: Promise<string> | undefined;
   const cookie = async (): Promise<string> => {
@@ -376,36 +381,31 @@ export const linkOn = (link: string, email: string): Link => {
       }
       return saved.version;
     },
-    turn: async (request) => {
-      const signedInAs = cookieHeader(await cookie());
-      return await whileBusy(
+    // No link reaches a turn: the lab asks for it as Grasp's staff, with
+    // them as the store knows them.
+    turn: async (request) =>
+      await whileBusy(
         async () =>
           await turnOf(
-            await fetch(new URL(interviewTurnPath, origin), {
-              method: "POST",
-              headers: {
-                origin,
-                "content-type": "application/json",
-                "sec-fetch-site": "same-origin",
-                cookie: signedInAs,
-              },
-              body: JSON.stringify({ ...request, secret }),
+            await labFetch(core.session, {
+              action: "turn",
+              who: { person },
+              turn: request,
             })
           )
-      );
-    },
+      ),
   };
 };
 
 /**
- * One of Stephen's turns on fixed input, with who it is with given: the
- * same turn a link gets (`/api/lab`, core's onboarding/lab.ts). With
+ * One of Stephen's turns on fixed input, with who it is with given
+ * (`/api/lab`, core's onboarding/lab.ts). With
  * `lineOnly`, only his line and where the interview goes are waited for.
  */
 export const turnOn = async (
   core: Core,
   who: LabWho,
-  turn: Omit<InterviewTurnRequest, "secret" | "interviewer">,
+  turn: InterviewTurnRequest,
   { lineOnly = false }: { lineOnly?: boolean } = {}
 ): Promise<StephenTurn> => {
   const taken = await whileBusy(

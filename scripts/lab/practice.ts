@@ -366,7 +366,10 @@ export const makePractice = async (
     throw new PracticeError("The lead has no link.");
   }
   await playInterview(
-    linkOn(leadLink, practiceEmail(leadId)),
+    linkOn(core, leadLink, {
+      person: leadId,
+      email: practiceEmail(leadId),
+    }),
     modelPlayer(askerOf(core), lead, leadSystem(key, lead, locale)),
     { locale }
   );

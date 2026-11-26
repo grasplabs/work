@@ -6,32 +6,39 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { models } from "../src/models.ts";
 import { platformSpeech } from "../src/speech.ts";
-import { speechBytesPerChar } from "./ai-providers-fake.ts";
+import {
+  secondsPerCharacter,
+  speechBytesPerChar,
+} from "./ai-providers-fake.ts";
 import { allEvents } from "./audit-events.ts";
-import { platformMistralKey } from "./connect-providers.ts";
+import { platformElevenLabsKey } from "./connect-providers.ts";
 import { fakeProviderFor } from "./model-provider.ts";
 import { spentMicros } from "./model-usage.ts";
 import { carrying, keyPlaces, plan } from "./platform-providers.ts";
 import { outcome, uniqueLetters } from "./sign-in.ts";
 
 // Speech through the model gateway: one of its speech models
-// (src/voice-models.ts), Mistral's Voxtral, says a line, judged by
+// (src/voice-models.ts), ElevenLabs's Eleven v4, says a line, judged by
 // the deployment's rules, charged per character to Grasp's own key (never
 // the organization's spend) and audited
 // like any model call, through connect with Grasp's own key.
-// Mistral is the outside system: a fake behind connect's fetch
+// ElevenLabs is the outside system: a fake behind connect's fetch
 // (test/ai-providers-fake.ts), which says each character in 30 ms.
 // Connect, the rules, the usage record and the audit log are real.
 
-const speechModel = "mistral/voxtral-mini-tts-3-0";
+const speechModel = "elevenlabs/eleven_v4";
 /** A text model, as an organization chooses one: no speech model. */
 const textModel = "mistral/mistral-large-latest";
 
-/** A voice of Voxtral's, by its Mistral ID. */
-const voice = "voice_485";
+/** A voice of Grasp's at ElevenLabs, by its ID there. */
+const voice = "cjVigY5qzO86Huf0OWal";
 
-/** What a line of `characters` costs at Voxtral's $13 a million: 13 micros each. */
-const lineMicrosOf = (characters: number): number => characters * 13;
+/** What a line of `characters` costs at Eleven v4's $0.08 a thousand: 80 micros each. */
+const lineMicrosOf = (characters: number): number => characters * 80;
+
+/** When the fake has said `characters` characters of a line, in whole ms. */
+const ms = (characters: number): number =>
+  Math.round(characters * secondsPerCharacter * 1000);
 
 /** A line no other test says, so what reached the provider with it is this test's. */
 const newLine = (): string => `Hello there, ${uniqueLetters()}.`;
@@ -78,8 +85,8 @@ const stephen = (
     work: { onboarding: true },
   });
   return {
-    speak: async (line, signal, onAudio) =>
-      await speech.speak({ model: speechModel, ...line }, signal, onAudio),
+    speak: async (line, signal) =>
+      await speech.speak({ model: speechModel, ...line }, signal),
   };
 };
 
@@ -133,7 +140,7 @@ const sentWith = async (line: string) => {
 
 // A test waits up to 10 seconds for a line's audit events (`auditedFor`).
 describe("speech through the model gateway", { timeout: 30_000 }, () => {
-  it("says a line as a WAV file, with its words timed in order over the audio's length", async () => {
+  it("says a line as audio, with its words timed as the provider aligned them, and names the line's language to it", async () => {
     const { rulesEnv } = withRules();
     const line = newLine();
 
@@ -144,34 +151,35 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     });
 
     expect({ bytes: speech.audio.byteLength, mime: speech.mime }).toStrictEqual(
-      { bytes: 44 + line.length * speechBytesPerChar, mime: "audio/wav" }
+      { bytes: line.length * speechBytesPerChar, mime: "audio/mpeg" }
     );
-    // Mistral tells no word's time: each is placed over the audio's
-    // length, which the fake makes 30 ms a character.
-    const lengthMs = line.length * 30;
-    const [hello, there, last] = speech.words;
-    expect({
-      texts: speech.words.map(({ text }) => text),
-      starts: hello?.startMs,
-      inOrder:
-        (hello?.endMs ?? 0) <= (there?.startMs ?? 0) &&
-        (there?.endMs ?? 0) <= (last?.startMs ?? 0),
-      ends: (last?.endMs ?? 0) > lengthMs / 2 && (last?.endMs ?? 0) <= lengthMs,
-    }).toStrictEqual({
-      texts: line.split(" "),
-      starts: 0,
-      inOrder: true,
-      ends: true,
-    });
+    // Each word from its first character to its last, as the fake says
+    // them: 30 ms a character, the spaces between them too.
+    const [hello = "", there = ""] = line.split(" ");
+    expect(speech.words).toStrictEqual([
+      { text: hello, startMs: 0, endMs: ms(hello.length) },
+      {
+        text: there,
+        startMs: ms(hello.length + 1),
+        endMs: ms(hello.length + 1 + there.length),
+      },
+      {
+        text: line.split(" ").at(-1),
+        startMs: ms(hello.length + there.length + 2),
+        endMs: ms(line.length),
+      },
+    ]);
     await expect(sentWith(line)).resolves.toStrictEqual([
       {
-        host: "api.mistral.ai",
-        path: "/v1/audio/speech",
+        host: "api.eu.residency.elevenlabs.io",
+        // Kept by neither side.
+        path: `/v1/text-to-speech/${voice}/with-timestamps?enable_logging=false&output_format=mp3_44100_128`,
         body: {
-          model: "voxtral-mini-tts-3-0",
-          input: line,
-          voice_id: voice,
-          response_format: "wav",
+          text: line,
+          model_id: "eleven_v4",
+          language_code: "en",
+          seed: 7,
+          voice_settings: { stability: 0.7, similarity_boost: 0.8 },
         },
       },
     ]);
@@ -186,7 +194,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
       outcome(
         stephen(rulesEnv, person).speak({
           text: line,
-          voice: "voice_0",
+          voice: "voice0000000000000000",
           language: "en",
         })
       )
@@ -194,7 +202,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     await graspSpent(month, 0);
   });
 
-  it("sends Grasp's key only from connect, once, to Mistral alone, and never logs or hands it back", async () => {
+  it("sends Grasp's key only from connect, once, to ElevenLabs alone, and never logs or hands it back", async () => {
     const lines: string[] = [];
     for (const level of ["info", "warn", "error"] as const) {
       vi.spyOn(console, level).mockImplementation((...args: unknown[]) => {
@@ -211,7 +219,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
       voice,
       language: "nl",
     });
-    await plan(platformMistralKey, [busy, busy]);
+    await plan(platformElevenLabsKey, [busy, busy]);
     const failed = await thrown(
       stephen(rulesEnv, person).speak({
         text: refused,
@@ -221,17 +229,19 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     );
 
     const events = await auditedFor(person.userId, 2);
-    await expect(keyPlaces(said, platformMistralKey)).resolves.toStrictEqual({
-      hosts: ["api.mistral.ai"],
-      headers: ["authorization"],
-      inBody: false,
-      placeholder: false,
-    });
+    await expect(keyPlaces(said, platformElevenLabsKey)).resolves.toStrictEqual(
+      {
+        hosts: ["api.eu.residency.elevenlabs.io"],
+        headers: ["xi-api-key"],
+        inBody: false,
+        placeholder: false,
+      }
+    );
     const seen = JSON.stringify([speech.words, failed, String(failed), events]);
     expect({
       logged: lines.some((logged) => logged.includes("model.failed")),
-      inLogs: lines.some((logged) => logged.includes(platformMistralKey)),
-      handedBack: seen.includes(platformMistralKey),
+      inLogs: lines.some((logged) => logged.includes(platformElevenLabsKey)),
+      handedBack: seen.includes(platformElevenLabsKey),
     }).toStrictEqual({ logged: true, inLogs: false, handedBack: false });
   });
 
@@ -255,7 +265,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     const [event] = await auditedFor(person.userId, 1);
     expect(event).toMatchObject({
       action: "model.call",
-      model: { provider: "mistral", model: "voxtral-mini-tts-3-0" },
+      model: { provider: "elevenlabs", model: "eleven_v4" },
       cost: { amount: lineMicros / 1_000_000, currency: "USD" },
       detail: {
         purpose: "onboarding.speech",
@@ -283,12 +293,19 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
         model,
       });
 
-    // One the gateway doesn't offer.
-    await expect(outcome(speak("mistral/voxtral-mini-tts-9"))).resolves.toBe(
-      "model.not_allowed"
-    );
-    // A text model can't say a line.
-    await expect(outcome(speak(textModel))).resolves.toBe("model.not_allowed");
+    // One the gateway doesn't offer, one of a provider that says no line
+    // for Grasp, and a text model, which can't say a line.
+    await expect(
+      Promise.all(
+        ["elevenlabs/eleven_v9", "mistral/voxtral-mini-tts-3-0", textModel].map(
+          async (model) => await outcome(speak(model))
+        )
+      )
+    ).resolves.toStrictEqual([
+      "model.not_allowed",
+      "model.not_allowed",
+      "model.not_allowed",
+    ]);
     // Nor can a speech model answer a text call.
     await expect(
       outcome(
@@ -309,7 +326,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     const { rulesEnv, month } = withRules();
     const person = newPerson();
     const line = newLine();
-    await plan(platformMistralKey, [
+    await plan(platformElevenLabsKey, [
       { status: 429, body: { error: { type: "too_many_requests" } } },
     ]);
 
@@ -329,7 +346,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
   it("gives up after asking once more, and says when to try again", async () => {
     const { rulesEnv } = withRules();
     const line = newLine();
-    await plan(platformMistralKey, [busy, busy]);
+    await plan(platformElevenLabsKey, [busy, busy]);
 
     await expect(
       stephen(rulesEnv, newPerson()).speak({

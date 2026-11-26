@@ -39,15 +39,17 @@ const agentVoices = {
 /**
  * Each feature's provider and model: OpenAI's GPT-4o Transcribe writes
  * down a recording, and Mistral's Voxtral realtime transcription speech as
- * it is said, live (`liveTranscription`: a dictation, an interview typed
- * turn by turn); ElevenLabs's Eleven v4 says an interview's lines
- * (`speech`) and the admin's onboarding (`onboardingSpeech`), each with
- * its own voices; and Mistral writes an interview's turns. Its `line`
- * model writes what the interviewer says while someone waits for it:
- * Mistral Small, for how soon its first words come. Its `notes` model
- * writes down what was said, which nobody waits for and the interview is
- * for: Mistral Medium. A live interview is a conversation with Grasp's
- * ElevenLabs agent (`agent`).
+ * it is said, live (`liveTranscription`: a dictation, the words over the
+ * box in an interview); ElevenLabs's Eleven v4 says an interview's lines
+ * outside its conversation (`speech`) and the admin's onboarding
+ * (`onboardingSpeech`), each with its own voices; and Mistral's models
+ * write for an interview (`interview`). Its `notes` model writes down
+ * what was said, which nobody waits for and the interview is for: Mistral
+ * Medium. Its `line` model is the quick one, Mistral Small: it tells the
+ * read-back as a story while someone waits for it (onboarding/story.ts),
+ * and writes Stephen's line in a turn of the Stephen Lab's
+ * (onboarding/lab-turn.ts). A live interview is a conversation with
+ * Grasp's ElevenLabs agent (`agent`).
  */
 export const platformAi = {
   transcription: { provider: "openai", model: "gpt-4o-transcribe" },

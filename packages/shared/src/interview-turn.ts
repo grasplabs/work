@@ -6,22 +6,21 @@ import {
   interviewLimits,
   interviewLineSchema,
   interviewPhases,
-  interviewSecretSchema,
   voiceTags,
 } from "./interview-links.ts";
-import { interviewerSchema, interviewLocaleSchema } from "./onboarding.ts";
+import { interviewLocaleSchema } from "./onboarding.ts";
 
-// One turn of an interview with Stephen (core's onboarding/interview.ts):
-// what the page sends, the events it gets back, and the checks both go
-// through. The models write Stephen's line, but they don't get the last
-// word: a line with two questions, praise or filler, or a tone he doesn't
-// have is put right here before anyone hears it, and a fact whose words
-// weren't said is left out, and counted (`checkedTurn`). Ported from the
-// prototype (grasplabs/prototype, packages/grasp:
-// src/lib/interview-turn.ts), which the Stephen Lab measures: change the
-// rules there and here together.
-
-export const interviewTurnPath = "/api/interview/turn";
+// What Stephen writes down in an interview, and the checks it goes through
+// (`checkedTurn`): a fact whose words weren't said is left out, and counted.
+// Core's notes step uses it after each answer of a live conversation
+// (core's onboarding/voice.ts).
+//
+// The rest is a turn of the Stephen Lab's (core's onboarding/lab-turn.ts,
+// scripts/lab/): the lab still measures his text turn by turn, his line
+// written by a model and put right here (`asStephenSays`). No interview
+// is held that way: every one is a live conversation with Grasp's agent,
+// and no link reaches a turn. Ported from the prototype
+// (grasplabs/prototype, packages/grasp: src/lib/interview-turn.ts).
 
 /**
  * What just happened: the interview starts; they answered; they came back
@@ -56,20 +55,14 @@ export const turnAnswerMax = 4000;
 export const sayMax = 560;
 /** The most words a question of his has. */
 export const questionWordsMax = 20;
-/** The most bytes one turn's request may carry. */
-export const interviewTurnMaxBytes = 768 * 1024;
-
 /**
- * What the page sends for one turn. Who they are, their team, their lead
- * and what Stephen knows come from the store, never from here: the page
- * sends only the conversation, which it holds, and what just happened.
+ * What the lab sends for one turn (`labRequestSchema`): the conversation
+ * and what just happened. Core's notes step fills the same shape from a
+ * live conversation, without the link it came on (core's `TurnAsked`).
  */
 export const interviewTurnRequestSchema = z.strictObject({
-  secret: interviewSecretSchema,
   event: z.enum(interviewEvents),
   locale: interviewLocaleSchema,
-  /** The one they chose on the way in; core holds the turn as Stephen whoever it names. */
-  interviewer: interviewerSchema.default("stephen"),
   /** The conversation so far, oldest first; the last line is what they just said. */
   lines: z
     .array(
@@ -124,13 +117,11 @@ export interface EarlyNext {
 }
 
 /**
- * A turn as it comes back, a line of JSON at a time: the first sentence of
- * his line while the rest is still being written (`earlyOpening`); his
- * line as soon as it is written; where the interview goes from there
- * (`earlyNext`); then the whole turn; or that it failed, and how.
+ * A turn as it comes back, a line of JSON at a time: his line as soon as
+ * it is written; where the interview goes from there (`earlyNext`); then
+ * the whole turn; or that it failed, and how.
  */
 export type TurnEvent =
-  | { opening: EarlyLine }
   | { line: EarlyLine }
   | { next: EarlyNext }
   | { turn: StephenTurn }
@@ -332,29 +323,6 @@ export const earlyPlainLine = (lines: string): EarlyLine | false | null => {
   }
   const say = asStephenSays(said);
   return say === "" ? false : { say, tone: isVoiceTag(tone) ? tone : null };
-};
-
-const firstSentence = /^(?<first>.*?[.!…])\s+\S/u;
-
-/**
- * The first sentence of his line while the rest of it is still to come,
- * so he can begin to say it: the model writes about forty words a second,
- * so a short first sentence ("Okay.") is there half a second before the
- * question after it. Only a sentence he may say as it is, and never a
- * question: his question is the last thing he says. `null` otherwise, also
- * once his line is whole (`earlyPlainLine`).
- */
-export const earlyOpening = (lines: string): EarlyLine | null => {
-  const tone = named(lines, plain.tone, true);
-  if (tone === null || named(lines, plain.say, true) !== null) {
-    return null;
-  }
-  const first = firstSentence.exec(named(lines, plain.say) ?? "")?.groups
-    ?.first;
-  if (first === undefined || asStephenSays(first) !== first) {
-    return null;
-  }
-  return { say: first, tone: isVoiceTag(tone) ? tone : null };
 };
 
 /**
@@ -646,9 +614,6 @@ export const fileCalled = (name: string): string => {
 };
 
 const turnEventSchema: z.ZodType<TurnEvent> = z.union([
-  z.object({
-    opening: z.object({ say: z.string(), tone: z.enum(voiceTags).nullable() }),
-  }),
   z.object({
     line: z.object({ say: z.string(), tone: z.enum(voiceTags).nullable() }),
   }),

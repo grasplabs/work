@@ -31,6 +31,7 @@ import { isHidden, repoRoot } from "./keys/index.ts";
  */
 const talkingCode = [
   "apps/core/src/onboarding/interview.ts",
+  "apps/core/src/onboarding/lab-turn.ts",
   "packages/shared/src/interview-turn.ts",
 ];
 /** The code that draws a piece of work from what its people agreed to. */

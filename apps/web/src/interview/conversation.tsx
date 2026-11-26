@@ -13,7 +13,7 @@ import { Composer, SaveTrouble } from "./composer.tsx";
 import { Countdown, budgetMinutes } from "./countdown.tsx";
 import { Guide } from "./guide.tsx";
 import { keepNow, update, useInterviewer, useProgress } from "./kept.ts";
-import { sendTyped, useLoop } from "./loop.ts";
+import { goOn, sendTyped, typingNow, useLoop } from "./loop.ts";
 import { micProblem } from "./mic.ts";
 import { StephenOrb } from "./orb.tsx";
 import { partAt, withLineText, withoutLine } from "./progress.ts";
@@ -235,10 +235,19 @@ const Asking = () => {
   );
 };
 
-/** A turn that could not be had: in the bar at the top, as every error here, never as his line. */
+/** The conversation can't go on: why, in the bar at the top, as every error here, never as his line, with a way to try again where that can help. */
 const TurnTrouble = () => {
-  const loop = useLoop();
-  return <TopError>{loop.trouble}</TopError>;
+  const { t } = useLingui();
+  const { trouble } = useLoop();
+  return (
+    <TopError
+      action={
+        trouble?.again === true ? { label: t`Try again`, run: goOn } : undefined
+      }
+    >
+      {trouble?.message}
+    </TopError>
+  );
 };
 
 /** The box at the bottom, with what they must know about saving over it. */
@@ -267,6 +276,7 @@ const AnswerBox = ({
         names={words.tag}
         onSend={sendTyped}
         onTalk={onTalk}
+        onTyping={typingNow}
         placeholder={
           reading ? t`Type what is missing, or yes` : t`Type your answer…`
         }
