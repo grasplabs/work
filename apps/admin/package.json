@@ -27,6 +27,7 @@
     "@stylexjs/stylex": "catalog:",
     "@tanstack/react-router": "catalog:",
     "@tanstack/react-start": "catalog:",
+    "@ui-sdk/react": "catalog:",
     "drizzle-orm": "catalog:",
     "fflate": "catalog:",
     "jose": "catalog:",

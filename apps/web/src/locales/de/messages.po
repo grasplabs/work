@@ -4125,10 +4125,6 @@ msgstr "Ein Modell aufgerufen"
 msgid "Called another App"
 msgstr "Eine andere App aufgerufen"
 
-#: src/routes/_shell.settings.outcomes.tsx
-msgid "Calls"
-msgstr "Aufrufe"
-
 #: src/activity/pending.tsx
 msgid "Calls {path} of {app}. Each run can read or change whatever that function reads or changes in the App, as the person it runs for"
 msgstr "Ruft {path} von {app} auf. Jeder Lauf kann lesen oder ändern, was diese Funktion in der App liest oder ändert, als die Person, für die er läuft"
@@ -4248,7 +4244,6 @@ msgstr "Fälle pro Woche: {cases}."
 #: src/apps/app-workflows.tsx
 #: src/drafts/share-with-team.tsx
 #: src/interview/transcript-looks.tsx
-#: src/routes/_shell.settings.outcomes.tsx
 #: src/settings/ai-providers.tsx
 msgid "Change"
 msgstr "Änderung"
@@ -4519,10 +4514,6 @@ msgstr "Ändert"
 msgctxt "a list of changes"
 msgid "Changes"
 msgstr "Änderungen"
-
-#: src/routes/_shell.settings.outcomes.tsx
-msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, in their inbox; follow up with them."
-msgstr "Änderungen, die Grasp für jemanden gesendet hat und deren Antwort verloren ging, sodass niemand sagen kann, ob sie wirksam wurden. Nur diese Person kann in ihrem Posteingang sagen, was geschehen ist; fragen Sie bei ihr nach."
 
 #: src/drafts/draft-history.tsx
 #: src/drafts/share-with-team.tsx
@@ -5239,8 +5230,8 @@ msgstr "Ihr Microsoft 365 wird verbunden"
 #: src/apps/resource-bindings.tsx
 #: src/chat/sources.tsx
 #: src/connections/app/words.ts
+#: src/inbox/item-detail.tsx
 #: src/inbox/items.ts
-#: src/routes/_shell.settings.outcomes.tsx
 #: src/settings/ai-providers.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Connection"
@@ -6675,10 +6666,6 @@ msgstr "Jede so, wie das Unternehmen sie hat, oder für weniger Personen. Nie f�
 #: src/routes/_shell.settings.billing.tsx
 msgid "Each invoice to your billing email"
 msgstr "Jede Rechnung an Ihre Rechnungs-E-Mail"
-
-#: src/routes/_shell.settings.outcomes.tsx
-msgid "Each one sent for someone shows here until they say what became of it."
-msgstr "Jeder Aufruf, der für jemanden gesendet wurde, steht hier, bis diese Person sagt, was daraus wurde."
 
 #: src/connections/http-connections.tsx
 msgid "Each path prefix starts with /, on its own line, with no query or dot segments."
@@ -9636,6 +9623,10 @@ msgstr "Der Zugang ist abgelaufen. Melde dich erneut an, damit es weiter funktio
 msgid "Its account is out of credit."
 msgstr "Das Guthaben des Kontos ist aufgebraucht."
 
+#: src/inbox/item-detail.tsx
+msgid "Its answer was lost: nobody can tell whether it took effect."
+msgstr "Die Antwort ging verloren: Niemand weiß, ob es gewirkt hat."
+
 #: src/answer-pause.tsx
 msgid "Its answers can be used in a moment, so a press meant for the one before doesn't answer it."
 msgstr "Seine Antworten sind gleich nutzbar, damit ein Klick, der für das vorige gedacht war, es nicht beantwortet."
@@ -11539,10 +11530,6 @@ msgstr "Noch keine Rechnungsdaten"
 msgid "No business process"
 msgstr "Kein Geschäftsprozess"
 
-#: src/routes/_shell.settings.outcomes.tsx
-msgid "No call of unknown outcome is open."
-msgstr "Kein Aufruf mit unbekanntem Ergebnis ist offen."
-
 #: src/apps/app-data.tsx
 msgid "No changes are kept for this record."
 msgstr "Für diesen Datensatz sind keine Änderungen gespeichert."
@@ -12906,6 +12893,10 @@ msgstr "Nur {accounts}"
 msgid "Only {owner} so far."
 msgstr "Bisher nur {owner}."
 
+#: src/inbox/item-detail.tsx
+msgid "Only {person} can say whether it happened."
+msgstr "Nur {person} kann sagen, ob es passiert ist."
+
 #: src/settings/use-team-change.ts
 msgid "Only admins can change teams."
 msgstr "Nur Admins können Teams ändern."
@@ -13789,7 +13780,6 @@ msgid "person"
 msgstr "Person"
 
 #: src/activity/audit-event.tsx
-#: src/routes/_shell.settings.outcomes.tsx
 msgid "Person"
 msgstr "Person"
 
@@ -14485,7 +14475,7 @@ msgstr "Nachdenken"
 msgid "Recalled from the Brain"
 msgstr "Aus dem Gehirn abgerufen"
 
-#: src/routes/_shell.settings.outcomes.tsx
+#: src/inbox/item-detail.tsx
 msgid "Receipt"
 msgstr "Beleg"
 
@@ -15998,9 +15988,9 @@ msgstr "Wird gesendet"
 msgid "Sensitive"
 msgstr "Sensibel"
 
+#: src/inbox/item-detail.tsx
 #: src/inbox/items.ts
 #: src/onboarding/campaign/campaign-asks.tsx
-#: src/routes/_shell.settings.outcomes.tsx
 msgid "Sent"
 msgstr "Gesendet"
 
@@ -19531,11 +19521,6 @@ msgstr "Unbekannt"
 #: src/routes/_shell.settings.security.tsx
 msgid "Unknown device"
 msgstr "Unbekanntes Gerät"
-
-#: src/routes/_shell.settings.outcomes.tsx
-#: src/settings/sections.ts
-msgid "Unknown outcomes"
-msgstr "Unbekannte Ergebnisse"
 
 #: src/brain/brain.ts
 #: src/chat/chat-markdown.ts
