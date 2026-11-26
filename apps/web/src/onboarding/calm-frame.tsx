@@ -96,7 +96,12 @@ const styles = stylex.create({
   column: { width: "100%", maxWidth: "40rem" },
   // How far the column stands down the room, so it sits in its middle (useMiddle).
   lowered: (top: number) => ({ marginBlockStart: `${top}px` }),
-  step: { display: "grid", gap: space[10] },
+  // One track as wide as the column: a part that stands out past it (the team step's, side by side) leaves the rest at its width.
+  step: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    gap: space[10],
+  },
   // A page with little on it: Stephen over the title, all of it on the column's middle.
   stepCentred: { justifyItems: "center", textAlign: "center", gap: space[8] },
   // A step's title and its line wrap into even lines (Ruben: "a linebreak with 2 words… should never be possible").

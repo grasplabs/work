@@ -697,6 +697,14 @@ msgstr "{goals, plural, one {# goal} other {# goals}}"
 msgid "{going, plural, one {The lead of # team gets their link {when}. Everyone else right after their lead has talked to me.} other {The leads of # teams get their link {when}. Everyone else right after their lead has talked to me.}}"
 msgstr "{going, plural, one {The lead of # team gets their link {when}. Everyone else right after their lead has talked to me.} other {The leads of # teams get their link {when}. Everyone else right after their lead has talked to me.}}"
 
+#: src/onboarding/team-step.tsx
+msgid "{heldCount, plural, one {{heldNames} gets no link yet.} other {{heldNames} get no link yet.}}"
+msgstr "{heldCount, plural, one {{heldNames} gets no link yet.} other {{heldNames} get no link yet.}}"
+
+#: src/onboarding/team-step.tsx
+msgid "{heldCount, plural, one {{heldNames} gets theirs {heldWhen}.} other {{heldNames} get theirs {heldWhen}.}}"
+msgstr "{heldCount, plural, one {{heldNames} gets theirs {heldWhen}.} other {{heldNames} get theirs {heldWhen}.}}"
+
 #: src/brain/brain-chips.tsx
 #: src/brain/brain-source-contents.tsx
 msgid "{hidden, plural, one {Show # more} other {Show # more}}"
@@ -3746,11 +3754,6 @@ msgstr "Asks you first, every time."
 msgctxt "who wrote a message"
 msgid "Assistant"
 msgstr "Assistant"
-
-#: src/onboarding/send-plan-form.tsx
-msgctxt "at an hour of the day: on Tuesday at 9:00"
-msgid "at"
-msgstr "at"
 
 #: src/agents/setup/schedule-step.tsx
 msgid "At"
@@ -12202,10 +12205,6 @@ msgstr "Not mine"
 msgid "Not offered"
 msgstr "Not offered"
 
-#: src/onboarding/send-plan-form.tsx
-msgid "Not planned yet"
-msgstr "Not planned yet"
-
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Not published yet."
 msgstr "Not published yet."
@@ -12767,10 +12766,6 @@ msgstr "On {type} events from a deleted webhook source"
 #: src/inbox/outcome-details.tsx
 msgid "On {where}"
 msgstr "On {where}"
-
-#: src/onboarding/send-plan-form.tsx
-msgid "On a later day"
-msgstr "On a later day"
 
 #: src/agents/setup/schedule-step.tsx
 msgid "On a schedule"
@@ -18119,10 +18114,6 @@ msgstr "The current version doesn't declare these, so they serve nothing until a
 msgid "The data isn't JSON."
 msgstr "The data isn't JSON."
 
-#: src/onboarding/send-plan-form.tsx
-msgid "The day the other teams get their links"
-msgstr "The day the other teams get their links"
-
 #: src/chat/composer.tsx
 msgid "The default"
 msgstr "The default"
@@ -18224,10 +18215,6 @@ msgstr "The header is a name of letters, digits and dashes, and not one Grasp se
 #: src/drafts/draft-history.tsx
 msgid "The history of your changes couldn't be read. Try again in a moment."
 msgstr "The history of your changes couldn't be read. Try again in a moment."
-
-#: src/onboarding/send-plan-form.tsx
-msgid "The hour the other teams get their links"
-msgstr "The hour the other teams get their links"
 
 #: src/inbox/inbox-page.tsx
 msgid "The inbox didn't load"
