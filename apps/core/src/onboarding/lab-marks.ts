@@ -49,3 +49,38 @@ export const stephenVersion = marksDigest;
 /** Every mark above, in the order they stand: what `marksDigest` is taken over. */
 export const everyLabMark = (): string[] =>
   Object.values(labMarks).flatMap((locales) => Object.values(locales));
+
+// The marks of the texts that hold an interview as one live voice session
+// (`voiceText` in interviewer-text.ts), kept as the turn texts' are, and
+// named by their own version: a voice interview is never set beside a turn
+// interview of the same name. The Stephen Lab has not measured these.
+export const voiceMarks: Record<
+  InterviewKind,
+  Record<InterviewLocale, string>
+> = {
+  own: {
+    en: "37c60b8eca0c8477c937715e9b1023a7143fb5568ea442d5985bda5a6b9b841c",
+    nl: "0a78ad8c94ad03ff6c25dd4d808ca72b6c9aa30ad5e0b204e610008cb11494c6",
+    de: "ebf4ec8c83725e82131e1fd2bd1cb552d318669ae4f6b254c8c13f6ea3eda6b4",
+    fr: "ab72adcd4708f69f066a2c86c85455031155ffa9d964c604dc83446aa2103d9c",
+    es: "2ba3014e143ef773754ee7b165cfe3421fbf6cc2f3f1de6b37d4bc187a87fdaf",
+  },
+  lead: {
+    en: "6292c7de4c7381c657ac4d3f00a35f719333e716cd0731c426535929da67ce82",
+    nl: "e3428fd05747999c9527dd1cf0490df5570553cd5a67df1d22b2bb5ce90143cf",
+    de: "233fafac2ba05ce93ee00a1b5a4de2914f3c13e6e7ddb825c45a11b47fa9ebc9",
+    fr: "d9a9e782c5176f0c6d58976d51b5d410955c3c46abc88a0909d58cc0a52fd58c",
+    es: "072e41e92ba2bd6d3e0cbf0e7090b9cb0dda6dcbf232507b28ef63a44dc29c0e",
+  },
+};
+
+/** Every voice mark above, in the order they stand: what `voiceMarksDigest` is taken over. */
+export const everyVoiceMark = (): string[] =>
+  Object.values(voiceMarks).flatMap((locales) => Object.values(locales));
+
+// The voice marks as one, as `marksDigest` is taken over the turn marks.
+export const voiceMarksDigest = "b34596b204bd";
+
+// Which Stephen holds a voice interview: its own name, so the admin's lab
+// sets voice interviews apart from turn interviews.
+export const voiceVersion = `voice-${voiceMarksDigest}`;

@@ -15,6 +15,8 @@ import { z } from "zod";
 
 import { appRecord } from "./bundled-connectors.ts";
 import type { AppRecord } from "./bundled-connectors.ts";
+import { publicOutbound } from "./company-network.ts";
+import type { Outbound } from "./company-network.ts";
 import { hibobAccount, hibobCredential } from "./hibob.ts";
 import { idTokenClaims, lookupAccount } from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
@@ -198,12 +200,23 @@ export interface ApiKeyProviderConfig {
   /** The key, as a call's requests carry it. */
   credential: (key: string) => Credential;
   /**
-   * The account the key is for, as the app says; `null` if it refused it.
+   * The account the key is for, as the app says, asked the connection's
+   * way out (`send`, company-network.ts); `null` if it refused it.
    * `owner` as for an OAuth provider's `account`.
    */
-  account: (key: string, owner: string) => Promise<ProviderAccount | null>;
+  account: (
+    key: string,
+    owner: string,
+    send: Outbound
+  ) => Promise<ProviderAccount | null>;
   /** Only shared connections, never a person's own (the HR platform's). */
   sharedOnly?: boolean;
+  /**
+   * For a connector whose server sits inside the company's own network,
+   * the one address it is reached at (company-network.ts): its
+   * connections are shared ones, through the company network, only.
+   */
+  companyNetwork?: string;
 }
 
 export type ProviderConfig = OAuthProviderConfig | ApiKeyProviderConfig;
@@ -692,11 +705,14 @@ const appClient = (
   return client.data;
 };
 
-/** The account an app's lookup names, with `credential`. */
+/** The account an app's lookup names, with `credential`, sent by `send`. */
 const lookedUp =
   (lookup: AccountLookup) =>
-  async (credential: Credential): Promise<ProviderAccount | null> =>
-    await lookupAccount(lookup, credential);
+  async (
+    credential: Credential,
+    send: Outbound
+  ): Promise<ProviderAccount | null> =>
+    await lookupAccount(lookup, credential, send);
 
 /** An app, as its record describes it. */
 const appProvider = ({
@@ -715,7 +731,7 @@ const appProvider = ({
       id: provider,
       server,
       credential,
-      account: async (key) => await lookup(credential(key)),
+      account: async (key, _owner, send) => await lookup(credential(key), send),
     };
   }
   return {
@@ -736,7 +752,8 @@ const appProvider = ({
     client: (env) => appClient(env, provider),
     // No ID token is trusted from an app: its lookup names the account,
     // and it has no subject apart from that.
-    account: async ({ accessToken }) => await lookup(bearer(accessToken)),
+    account: async ({ accessToken }) =>
+      await lookup(bearer(accessToken), publicOutbound),
   };
 };
 

@@ -2,6 +2,7 @@ import { agentErrors } from "@grasp-os/shared/agent";
 import { actorOf, delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type { ChatConnectionRequest } from "@grasp-os/shared/chat";
+import { connectionOwnersMax } from "@grasp-os/shared/connect";
 import type {
   ConnectionPerson,
   ConnectionSummary,
@@ -145,35 +146,12 @@ const decisionActions = {
 } as const;
 
 /**
- * The tools of the connection to a connector made from a URL
- * `connectionId` that Grasp runs, by the rules, from its server's list as
- * it is now (connect's `connectorToolClasses`): none while the list can't
- * be read for any reason connect names (its server or its sign-in down, its
- * access refused on refresh), so one connection failing leaves the others
- * askable. Asking for its actions says why (`requestConnection`).
- */
-const connectorActionsOf = async (
-  env: Env,
-  connectionId: string
-): Promise<string[]> => {
-  try {
-    return Object.keys(await env.CONNECT.connectorToolClasses(connectionId));
-  } catch (error) {
-    if (!isExpectedError(error)) {
-      throw error;
-    }
-    log.warn("chat.connector_tools_unreadable", {
-      connectionId,
-      ...errorFields(error),
-    });
-    return [];
-  }
-};
-
-/**
  * The actions of each connection in `offered`, by its ID: a native
- * provider's manifest's (one lookup per provider), a connector's tools
- * its server lists now, a toolkit's those the admin allowed as they
+ * provider's manifest's (one lookup per provider), a connector's those of
+ * its server's list as connect keeps it that the rules class, answered at
+ * once and read again for the next ask once stale
+ * (`offeredConnectorTools`), so a tool its server just added is offered
+ * from the ask after, and a toolkit's those the admin allowed as they
  * connected it.
  */
 const actionsOf = async (
@@ -198,23 +176,27 @@ const actionsOf = async (
       })
     )
   );
-  const connectors = new Map(
-    await Promise.all(
-      offered.flatMap(({ id, source }) =>
-        source === "connector"
-          ? [(async () => [id, await connectorActionsOf(env, id)] as const)()]
-          : []
-      )
-    )
+  const connectors = offered.flatMap(({ id, source }) =>
+    source === "connector" ? [id] : []
   );
+  const pages: string[][] = [];
+  for (let start = 0; start < connectors.length; start += connectionOwnersMax) {
+    pages.push(connectors.slice(start, start + connectionOwnersMax));
+  }
+  const offers = await Promise.all(
+    pages.map(async (page) => await env.CONNECT.offeredConnectorTools(page))
+  );
+  const listed = new Map(offers.flatMap((page) => Object.entries(page)));
   return new Map(
-    // A Composio connection's tools Grasp classed.
-    offered.map(({ id, source, provider, offeredTools }) => [
-      id,
-      source === "native"
-        ? (manifests.get(provider) ?? [])
-        : (connectors.get(id) ?? offeredTools ?? []),
-    ])
+    offered.map(({ id, source, provider, offeredTools }) => {
+      if (source === "native") {
+        return [id, manifests.get(provider) ?? []];
+      }
+      if (source === "connector") {
+        return [id, listed.get(id) ?? []];
+      }
+      return [id, offeredTools ?? []];
+    })
   );
 };
 
@@ -273,6 +255,17 @@ const waitingChanged = async (env: Env, scope: AgentScope): Promise<void> => {
     });
   }
 };
+
+/**
+ * Whether a connection asked for in this chat could be granted: a shared
+ * one by an admin, anywhere; the person's own only by them, on a card in
+ * the chat, and a chat app's conversation is no chat in Grasp (GRA-1919):
+ * asked there, nobody could ever decide it.
+ */
+export const grantableIn = (
+  scope: Pick<AgentScope, "via">,
+  personal: boolean
+): boolean => !personal || scope.via === undefined || scope.via === "web";
 
 /**
  * The connections the chat's agent may ask for: its person's own personal
@@ -445,10 +438,7 @@ export const askInChat = async (
     });
   }
   const personal = connection.ownerUserId !== null;
-  // Only its person grants their own connection, on a card in the chat, and
-  // a chat app's conversation is no chat in Grasp (GRA-1919): asked there,
-  // nobody could ever decide it. A shared one waits for an admin anywhere.
-  if (personal && scope.via !== undefined && scope.via !== "web") {
+  if (!grantableIn(scope, personal)) {
     throw permissionErrors.create("permission.own_in_chat_app");
   }
   // Admins read why a shared connection is asked for, and nothing holds a

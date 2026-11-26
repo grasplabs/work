@@ -211,13 +211,19 @@ const platformProvider = (
  * switch them off here, but they see where that data goes.
  */
 const platformUses = (env: Env): AiPlatformUse[] => {
-  const { transcription, speech } = platformAi;
+  const { transcription, speech, conversation } = platformAi;
   return [
     {
       feature: "transcription",
       provider: platformProvider(env, transcription.provider),
     },
     { feature: "speech", provider: platformProvider(env, speech.provider) },
+    // An interview's live voice session: its audio goes from the browser
+    // to the provider directly.
+    {
+      feature: "conversation",
+      provider: platformProvider(env, conversation.provider),
+    },
   ];
 };
 

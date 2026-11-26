@@ -628,7 +628,7 @@ export const recallForTurn = async (
   } finally {
     analysis.abort();
   }
-  const ended = await turn.runs.close(runId, status);
+  const { status: ended, readFrom } = await turn.runs.close(runId, status);
   // Recorded as done, then revoked before it was handed over: so the log
   // holds what happened, not only the `ok`.
   if (status === "completed" && ended === "revoked") {
@@ -639,18 +639,21 @@ export const recallForTurn = async (
       { outcome: "failed", reason: "agent.run_revoked" }
     );
   }
-  const text = describeRun({
-    status: ended,
-    logs: [],
-    ...(ended === "completed" && result !== undefined ? { result } : {}),
-    ...(ended === "completed"
-      ? {}
-      : {
-          error:
-            ended === "revoked"
-              ? agentErrors.create("agent.run_revoked").message
-              : failure,
-        }),
-  });
+  const text = describeRun(
+    {
+      status: ended,
+      logs: [],
+      ...(ended === "completed" && result !== undefined ? { result } : {}),
+      ...(ended === "completed"
+        ? {}
+        : {
+            error:
+              ended === "revoked"
+                ? agentErrors.create("agent.run_revoked").message
+                : failure,
+          }),
+    },
+    readFrom
+  );
   return { runId, callId, query, status: ended, text };
 };

@@ -564,6 +564,40 @@ describe("changing what Grasp may do in a connected app", () => {
     ]);
   });
 
+  it("says on an account's row where one reached through the company network goes", async () => {
+    const id = `mcp_${"0".repeat(32)}`;
+    await shown(
+      {
+        id: "connection-1",
+        source: "connector",
+        provider: id,
+        scope: "shared",
+        status: "active",
+        ownerUserId: null,
+        connectedBy: "u1",
+        connectedByName: "Ada",
+        accountName: null,
+        createdAt: "2026-10-01T00:00:00.000Z",
+        companyNetwork: "http://10.0.0.8:8080",
+      },
+      {
+        app: {
+          ...entry,
+          source: "connector",
+          id,
+          name: "Ledger",
+          auth: "key",
+          companyNetwork: "http://10.0.0.8:8080",
+        },
+      }
+    );
+    expect(
+      document.querySelector('[data-slot="app-account"]')?.textContent
+    ).toContain(
+      "Reached through your company network at http://10.0.0.8:8080."
+    );
+  });
+
   it("leaves signing in again and disconnecting to the account's row, not to the head's Manage menu", async () => {
     await shown(
       {
