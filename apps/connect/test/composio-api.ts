@@ -425,9 +425,10 @@ export const fakeComposioApi = (
     failing: string | undefined;
     /**
      * As `failing`, for its next `times` requests only, each counted down
-     * as it fails: a failure that passes.
+     * as it fails: a failure that passes. `broken` answers 200 instead,
+     * with a body that breaks off after its first bytes.
      */
-    failingFor: { prefix: string; times: number } | undefined;
+    failingFor: { prefix: string; times: number; broken?: boolean } | undefined;
     /** Where it says a new server is, instead of its own MCP host. */
     serverUrlBase: string;
     /**
@@ -747,6 +748,31 @@ export const fakeComposioApi = (
     return notFound();
   };
 
+  /** How `state.failingFor` fails the request `call` names, if it does. */
+  const failForNow = (call: string): Response | undefined => {
+    const { failingFor } = state;
+    if (
+      failingFor === undefined ||
+      failingFor.times <= 0 ||
+      !call.startsWith(failingFor.prefix)
+    ) {
+      return undefined;
+    }
+    failingFor.times -= 1;
+    if (failingFor.broken !== true) {
+      return new Response("Service Unavailable", { status: 503 });
+    }
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        start: (controller) => {
+          controller.enqueue(new TextEncoder().encode('{"id":'));
+          controller.error(new Error("The connection broke"));
+        },
+      }),
+      { headers: { "content-type": "application/json" } }
+    );
+  };
+
   const answer = async (request: Request): Promise<Response> => {
     const url = new URL(request.url);
     const route = url.pathname.slice(new URL(composioApiBase).pathname.length);
@@ -775,14 +801,9 @@ export const fakeComposioApi = (
     ) {
       return new Response("Service Unavailable", { status: 503 });
     }
-    const { failingFor } = state;
-    if (
-      failingFor !== undefined &&
-      failingFor.times > 0 &&
-      `${request.method} ${route}`.startsWith(failingFor.prefix)
-    ) {
-      failingFor.times -= 1;
-      return new Response("Service Unavailable", { status: 503 });
+    const failedFor = failForNow(`${request.method} ${route}`);
+    if (failedFor !== undefined) {
+      return failedFor;
     }
     const cursor = url.searchParams.get("cursor");
     if (request.method === "GET" && route === "/toolkits") {

@@ -360,40 +360,68 @@ describe("connecting a Composio toolkit", () => {
     });
   });
 
-  it("asks again when Composio fails to read the account for a moment, and connects", async () => {
+  it("asks again when Composio fails to read the account for a moment, or its answer breaks off, and connects", async () => {
     const admin = someone("admin");
-    const { callback } = composio.authorize(await start(admin));
-    composio.state.failingFor = {
-      prefix: "GET /connected_accounts/",
-      times: 2,
-    };
-    const finished = await asTimePasses(
-      async (connect) => await outcome(back(admin, callback, connect))
-    );
-    expect({ finished, ended: await connectsEnded() }).toStrictEqual({
-      finished: "ok",
-      ended: [["ok", null]],
+    const ends = [];
+    for (const broken of [false, true]) {
+      // oxlint-disable-next-line no-await-in-loop -- one flow at a time
+      const { callback } = composio.authorize(await start(admin));
+      composio.state.failingFor = {
+        prefix: "GET /connected_accounts/",
+        times: 2,
+        broken,
+      };
+      ends.push(
+        // oxlint-disable-next-line no-await-in-loop -- one flow at a time
+        await asTimePasses(
+          async (connect) => await outcome(back(admin, callback, connect))
+        )
+      );
+    }
+    expect({ ends, ended: await connectsEnded() }).toStrictEqual({
+      ends: ["ok", "ok"],
+      ended: [
+        ["ok", null],
+        ["ok", null],
+      ],
     });
   });
 
-  it("says the provider isn't answering when Composio never reads the account back, and keeps nothing", async () => {
+  it("says the provider isn't answering when Composio never reads the account back, or its answer always breaks off, and keeps nothing", async () => {
     const admin = someone("admin");
-    const { callback } = composio.authorize(await start(admin));
-    composio.state.failing = "GET /connected_accounts/";
-    const finished = await asTimePasses(
-      async (connect) => await outcome(back(admin, callback, connect))
-    );
-    composio.state.failing = undefined;
+    const ends = [];
+    for (const broken of [false, true]) {
+      // oxlint-disable-next-line no-await-in-loop -- one flow at a time
+      const { callback } = composio.authorize(await start(admin));
+      composio.state.failingFor = {
+        prefix: "GET /connected_accounts/",
+        times: Number.POSITIVE_INFINITY,
+        broken,
+      };
+      ends.push(
+        // oxlint-disable-next-line no-await-in-loop -- one flow at a time
+        await asTimePasses(
+          async (connect) => await outcome(back(admin, callback, connect))
+        )
+      );
+      composio.state.failingFor = undefined;
+    }
     expect({
-      finished,
+      ends,
       held: heldAtComposio(),
       cleanups: await cleanupsLeft(),
       ended: await connectsEnded(),
     }).toStrictEqual({
-      finished: "connection.provider_not_answering",
+      ends: [
+        "connection.provider_not_answering",
+        "connection.provider_not_answering",
+      ],
       held: nothingHeld,
       cleanups: 0,
-      ended: [["failed", "connection.provider_not_answering"]],
+      ended: [
+        ["failed", "connection.provider_not_answering"],
+        ["failed", "connection.provider_not_answering"],
+      ],
     });
   });
 

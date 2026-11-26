@@ -73,8 +73,9 @@ export const composioKey = (env: Env): string | undefined =>
 
 /**
  * The body's bytes, read up to `maxBytes` as they arrive: one byte more
- * is a {@link ComposioError}, whatever `content-length` said. The body is
- * cancelled once read, or once refused.
+ * is a {@link ComposioError}, whatever `content-length` said, and a body
+ * that breaks off or runs out of time is one that is `unanswered`. The
+ * body is cancelled once read, or once refused.
  */
 export const readCappedBytes = async (
   response: Response,
@@ -85,8 +86,21 @@ export const readCappedBytes = async (
   let bytes = 0;
   try {
     for (;;) {
-      // oxlint-disable-next-line no-await-in-loop -- a stream is read in order
-      const chunk = await reader?.read();
+      let chunk: ReadableStreamReadResult<Uint8Array> | undefined;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- a stream is read in order
+        chunk = await reader?.read();
+      } catch (error) {
+        // The answer broke off, or ran out of time, on the way: asking
+        // again may get all of it.
+        throw new ComposioError(
+          "Composio's answer broke off",
+          undefined,
+          error,
+          undefined,
+          true
+        );
+      }
       if (chunk === undefined || chunk.done) {
         break;
       }
