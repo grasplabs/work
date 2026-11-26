@@ -29,6 +29,7 @@ import { poses } from "./field/poses.ts";
 import { PlanPictures } from "./plan-pictures.tsx";
 import type { Scene } from "./plan-scenes.ts";
 import { dateOf, planStart } from "./plan.ts";
+import { useRememberLines } from "./step-voice.tsx";
 
 // "Here's the plan", told as a story (as the first onboarding told it,
 // `about-story.tsx` before a955fb8). Stephen tells the admin's own two
@@ -392,9 +393,10 @@ export const PlanStory = ({
     poseField(poses.about);
     setTold(true);
   };
-  const latest = useRef({ texts, finish, setAt, setBegan, setOver });
+  const remember = useRememberLines();
+  const latest = useRef({ texts, finish, remember, setAt, setBegan, setOver });
   useEffect(() => {
-    latest.current = { texts, finish, setAt, setBegan, setOver };
+    latest.current = { texts, finish, remember, setAt, setBegan, setOver };
   });
 
   // The story: a breath, then each part in turn, a short breath after each, and a longer one for
@@ -409,6 +411,10 @@ export const PlanStory = ({
           latest.current.finish();
         }
         return;
+      }
+      if (index === 0) {
+        // What the step says, to be fetched ahead the next time through (step-voice.tsx).
+        latest.current.remember?.(lines);
       }
       latest.current.setAt(index);
       latest.current.setOver(false);
