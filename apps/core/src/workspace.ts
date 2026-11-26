@@ -40,7 +40,9 @@ import type {
   ChatOutput,
   ChatPlan,
   ChatProvenance,
+  ChatQueued,
   ChatRating,
+  ChatStopped,
   ChatSearchHit,
   ChatSearchSnippet,
   ChatSummary,
@@ -138,6 +140,7 @@ import {
 } from "./chat-audiences.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
 import type {
+  QueuedQuestion,
   TurnCapture,
   TurnEnd,
   TurnMessage,
@@ -230,6 +233,8 @@ interface LiveTurn {
   id: string;
   /** The agent it runs as: the one its answers are kept under. */
   agentId: string;
+  /** Whether nobody asked for it there and then (`askUnattended`): it only reads. */
+  unattended: boolean;
   /**
    * Gives the chat back the agent it had before this turn: set while the
    * turn may still be refused before it starts, and run as it ends then.
@@ -251,6 +256,14 @@ interface LiveTurn {
   remembered?: ChatSavedMemory[];
   /** Tells a chat platform's asker the answer's text so far. */
   onText?: (text: string) => unknown;
+  /**
+   * Whether it got under way (`started`), told once: true as it goes to
+   * its ChatSession, false when it was refused before. What a question
+   * queued into it (`send`) waits for first.
+   */
+  underWay: PromiseWithResolvers<boolean>;
+  /** Settles once this object holds the turn no more (`#endLive`). */
+  ended: PromiseWithResolvers<void>;
 }
 
 /**
@@ -848,6 +861,17 @@ const builtSchema = z.array(z.string());
  * object does.
  */
 const runningKeyPrefix = "running:";
+
+/**
+ * The questions queued into a chat's turn that it hasn't taken yet, as
+ * `queued:<chat>`: a copy of what its `ChatSession` holds in pi
+ * (`turnQueued`), for its watchers, kept through a restart of this object.
+ */
+const queuedKeyPrefix = "queued:";
+
+const chatQueuedSchema = z.array(
+  z.object({ id: z.string(), text: z.string() })
+);
 
 /**
  * What of a chat's `ChatSession` its messages were kept of, as
@@ -2727,9 +2751,12 @@ export class Workspace extends DurableObject<Env> {
     const live: LiveTurn = {
       id: crypto.randomUUID(),
       agentId: chat.agentId,
+      unattended,
       reads: [],
       calls,
       remembered,
+      underWay: Promise.withResolvers(),
+      ended: Promise.withResolvers(),
     };
     this.#turns.set(chat.id, live);
     try {
@@ -2828,6 +2855,7 @@ export class Workspace extends DurableObject<Env> {
       this.#stopped.delete(chat.id);
       // Under way: the chat keeps the agent it answers as.
       delete live.unstarted;
+      live.underWay.resolve(true);
       started?.();
       this.#changed(chat.id);
       if (onText !== undefined) {
@@ -2878,6 +2906,8 @@ export class Workspace extends DurableObject<Env> {
   #endLive(chatId: ChatId, live: LiveTurn): void {
     // Refused before it started: the chat stays with the agent it had.
     live.unstarted?.();
+    live.underWay.resolve(false);
+    live.ended.resolve();
     this.#turns.delete(chatId);
     this.#partials.delete(chatId);
     this.#waits.delete(chatId);
@@ -2976,9 +3006,7 @@ export class Workspace extends DurableObject<Env> {
     if (key !== undefined) {
       this.#starting.set(key, { chatId: chat.id, started: started.promise });
     }
-    const ended = this.#sentTurns(chat, question, started);
-    this.#sent.add(ended);
-    void this.#forget(ended);
+    void this.#takeQuestion(chat, question, started);
     try {
       await started.promise;
       if (key !== undefined) {
@@ -3024,6 +3052,164 @@ export class Workspace extends DurableObject<Env> {
     }
     await starting.started;
     return true;
+  }
+
+  /**
+   * Takes the question `send` was asked, and tells `started` once it is
+   * taken, or why it wasn't: queued into the chat's turn while one runs
+   * here (`#queueInto`), or into the one this object's restart left
+   * running in its ChatSession (`#queueIntoLeft`), else asked in a turn of
+   * its own (`#sentTurns`),
+   * as it is once the turn it was meant for takes no more. Whether a turn
+   * runs is decided with nothing awaited before the new one claims the
+   * chat, so of two questions at once one starts it and the other queues.
+   */
+  async #takeQuestion(
+    chat: Chat,
+    question: Question,
+    started: PromiseWithResolvers<boolean>
+  ): Promise<void> {
+    // The question's own ID in its turn: the same however often it is sent there.
+    const id = crypto.randomUUID();
+    // Whether the chat's ChatSession was asked for a turn this object's
+    // restart left running there: once, and only when the chat shows one.
+    let askedLeft = false;
+    try {
+      for (;;) {
+        const live = this.#turns.get(chat.id);
+        if (live === undefined && !askedLeft && this.#isRunning(chat.id)) {
+          askedLeft = true;
+          // oxlint-disable-next-line no-await-in-loop -- once, see above
+          if (await this.#queueIntoLeft(chat, id, question)) {
+            started.resolve(true);
+            return;
+          }
+          // A turn may have started here meanwhile: looked for again.
+          continue;
+        }
+        if (live === undefined) {
+          const ended = this.#sentTurns(chat, question, started);
+          this.#sent.add(ended);
+          void this.#forget(ended);
+          return;
+        }
+        if (
+          // oxlint-disable-next-line no-await-in-loop -- once more only when that turn ended meanwhile
+          await this.#queueInto(
+            chat,
+            {
+              id: live.id,
+              agentId: live.agentId,
+              underWay: live.underWay.promise,
+            },
+            id,
+            question
+          )
+        ) {
+          started.resolve(true);
+          return;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await live.ended.promise;
+      }
+    } catch (error) {
+      started.reject(error);
+    }
+  }
+
+  /**
+   * Queues `question`, a person's question to their chat's agent sent
+   * while its turn `live` runs, into that turn (`ChatHarness.queueQuestion`), as
+   * Claude Code, Codex and T3 Code take a message sent while their agent
+   * works: shown queued (`turnQueued`) until the agent takes it as its
+   * current step ends, then answered in order, in the same turn, by the
+   * same model. Checked as a question of a turn of its own is, for what
+   * still holds of it (its person, the chat's room, its files). One that
+   * addresses another agent, which answers in a turn of its own, is
+   * refused as before (`agent.busy`), as the turn's ChatSession refuses
+   * one sent while a turn nobody asked for runs (a wake), which only
+   * reads, so never answers in the person's own scope. False when the
+   * turn takes no more.
+   */
+  async #queueInto(
+    chat: Chat,
+    live: Pick<LiveTurn, "id" | "agentId"> & { underWay: Promise<boolean> },
+    id: string,
+    question: Question
+  ): Promise<boolean> {
+    const parsed = questionSchema.safeParse(question);
+    if (!parsed.success) {
+      throw agentErrors.create("agent.invalid_question");
+    }
+    const {
+      text,
+      files = [],
+      subject,
+      mentions,
+      built,
+      followUp,
+    } = parsed.data;
+    if (
+      followUp === true ||
+      mentions?.some(({ kind }) => kind === "agent") === true
+    ) {
+      throw agentErrors.create("agent.busy");
+    }
+    if (!(await live.underWay)) {
+      return false;
+    }
+    if (this.#deleting.has(chat.id)) {
+      throw agentErrors.create("agent.chat_not_found");
+    }
+    // Its person still a member, the chat with room, and the turn's agent
+    // not paused or deleted since it started: checked as a turn's are.
+    await allInOrder([
+      this.#mayTakeTurn(chat.id, chat.personId),
+      turnAgent(this.env, live.agentId),
+    ]);
+    const carried = this.#unsentFiles(chat.id, files);
+    const queued: QueuedQuestion = {
+      id,
+      text,
+      files: carried.map(({ id: fileId, type }) => ({ id: fileId, type })),
+      ...(subject === undefined ? {} : { subject }),
+      ...(mentions === undefined ? {} : { mentions }),
+      ...(built === undefined ? {} : { built }),
+    };
+    return await this.#toSession(
+      chat.id,
+      async (session) => await session.queueQuestion(live.id, queued)
+    );
+  }
+
+  /**
+   * Queues `question` into the chat's turn that runs in its ChatSession
+   * though this object holds none (`#turns`): one this object's restart
+   * left there, which goes on answering. As `#queueInto` does, the turn
+   * under way and running as the chat's agent, which it became as the turn
+   * began. False when there is none, or it takes no more: the question is
+   * then asked in a turn of its own, refused while that one settles
+   * (`agent.busy`), as before.
+   */
+  async #queueIntoLeft(
+    chat: Chat,
+    id: string,
+    question: Question
+  ): Promise<boolean> {
+    const turnId = await this.#activeTurn(chat.id);
+    if (turnId === undefined || this.#turns.has(chat.id)) {
+      return false;
+    }
+    return await this.#queueInto(
+      chat,
+      {
+        id: turnId,
+        agentId: this.#chat(chat.id).agentId,
+        underWay: Promise.resolve(true),
+      },
+      id,
+      question
+    );
   }
 
   /**
@@ -3573,6 +3759,32 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * The chat's `ChatSession` says which questions queued into its turn it
+   * hasn't taken yet (chat-harness.ts `queueQuestion`): what the chat's watchers
+   * show, kept through a restart of this object.
+   */
+  turnQueued(chatId: ChatId, queued: readonly ChatQueued[]): void {
+    if (this.chatState(chatId) === undefined || this.#deleting.has(chatId)) {
+      return;
+    }
+    const key = `${queuedKeyPrefix}${chatId}`;
+    if (queued.length === 0) {
+      this.ctx.storage.kv.delete(key);
+    } else {
+      this.ctx.storage.kv.put(key, queued);
+    }
+    this.#changed(chatId);
+  }
+
+  /** The questions queued into the chat's turn, as its ChatSession last said. */
+  #queued(chatId: ChatId): ChatQueued[] {
+    const kept = chatQueuedSchema.safeParse(
+      this.ctx.storage.kv.get(`${queuedKeyPrefix}${chatId}`)
+    );
+    return kept.success ? kept.data : [];
+  }
+
+  /**
    * The chat's turn under way, as its ChatSession, which owns it, says:
    * what a stop ends.
    */
@@ -3995,11 +4207,17 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Stops `personId`'s own chat's running turn, if there is one: the model
-   * request or code run in flight ends, and the turn answers `cancelled`.
-   * Answered once its ChatSession has the stop, kept (`ChatSession.abort`):
+   * request or code run in flight ends, and the turn answers `cancelled`;
+   * the questions queued into it are dropped (pi withdraws them), as Codex
+   * hands queued messages back on an interrupt rather than send them. The
+   * page puts them back in its box. Answered once its ChatSession has the
+   * stop, kept (`ChatSession.abort`):
    * a stop that can't reach it fails, for its person to try again.
    */
-  async cancel(chatId: unknown, personId: string): Promise<boolean> {
+  async cancel(
+    chatId: unknown,
+    personId: string
+  ): Promise<ChatStopped | false> {
     const { id } = this.#graspChat(chatId, personId);
     // The ChatSession's turn; or the question this object is preparing,
     // whose stop is kept for it as it is claimed.
@@ -4007,10 +4225,27 @@ export class Workspace extends DurableObject<Env> {
     if (turnId === undefined) {
       return false;
     }
+    const dropped = await this.#toSession(
+      id,
+      async (session) => await session.abort(turnId)
+    );
+    return { dropped };
+  }
+
+  /**
+   * Has `personId`'s own chat's running turn take the questions queued
+   * into it now (`ChatSession.sendNow`), stopping the answer being
+   * written; nothing when no turn runs, or none is queued.
+   */
+  async sendNow(chatId: unknown, personId: string): Promise<void> {
+    const { id } = this.#graspChat(chatId, personId);
+    const turnId = await this.#activeTurn(id);
+    if (turnId === undefined) {
+      return;
+    }
     await this.#toSession(id, async (session) => {
-      await session.abort(turnId);
+      await session.sendNow(turnId);
     });
-    return true;
   }
 
   /**
@@ -5264,6 +5499,7 @@ export class Workspace extends DurableObject<Env> {
         this.ctx.storage.kv.delete(`${traceKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${builtKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${runningKeyPrefix}${id}`);
+        this.ctx.storage.kv.delete(`${queuedKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${copiedKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${draftMadeKeyPrefix}${id}`);
         if (audited) {
@@ -5647,6 +5883,7 @@ export class Workspace extends DurableObject<Env> {
             },
       output: outputOf(this.#outputs.get(chatId)),
       running: this.#isRunning(chatId),
+      queued: this.#queued(chatId),
       provenanceVersion: this.#provenanceVersions.get(chatId) ?? 0,
       stopped: stopped ?? null,
       held: this.#heldVersions.get(chatId) ?? 0,
