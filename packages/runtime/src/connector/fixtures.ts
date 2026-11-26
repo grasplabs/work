@@ -711,10 +711,11 @@ export const fixtureVendor = (exchanges: readonly Exchange[]) => {
         }
       })
       .join("/");
+  // Pairs, never joined: a decoded `=` would make two queries one.
   const queryOf = (url: URL): string =>
     canonical(
       [...url.searchParams]
-        .map(([name, value]) => `${name}=${value}`)
+        .map(([name, value]) => JSON.stringify([name, value]))
         .toSorted((a, b) => (a < b ? -1 : 1))
     );
   const sameBody = (exchange: Exchange, text: string): boolean => {

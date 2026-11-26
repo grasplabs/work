@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { recordedFixtures } from "../../src/connector/connector.ts";
+import {
+  fixtureVendor,
+  recordedFixtures,
+} from "../../src/connector/connector.ts";
 
 const credential = "test-key-0123456789";
 
@@ -52,5 +55,27 @@ describe("the outputs a recording run makes", () => {
     expect(() => {
       refuseKnownIn([{ token: btoa(credential) }]);
     }).toThrow("The recording still carries the credential");
+  });
+});
+
+describe("the vendor a recording makes", () => {
+  it("answers only a query whose every name and value is as recorded", async () => {
+    const vendor = fixtureVendor([
+      {
+        request: {
+          method: "GET",
+          url: "https://api.example.test/items?filter=status%3Dopen&limit=2",
+        },
+        answer: { status: 200, headers: {}, body: { items: [] } },
+      },
+    ]);
+    const answered = async (query: string): Promise<boolean> =>
+      (await vendor.answer(
+        new Request(`https://api.example.test/items?${query}`)
+      )) !== undefined;
+    expect({
+      reordered: await answered("limit=2&filter=status%3Dopen"),
+      moved: await answered("filter%3Dstatus=open&limit=2"),
+    }).toStrictEqual({ reordered: true, moved: false });
   });
 });

@@ -24,6 +24,9 @@ const connector = `import { auth, defineConnector, page, tool, v } from "@grasp-
 
 const Item = v.object({ id: v.string() });
 
+/** What tags.list reads once and keeps, for as long as its isolate lives. */
+let labels: unknown;
+
 export default defineConnector({
   name: "replayed",
   title: "Replayed",
@@ -58,6 +61,22 @@ export default defineConnector({
       returns: Item,
       handler: async ({ id }, api) =>
         await api.get("/items/{id}", { path: { id }, returns: Item }),
+    }),
+    "tags.list": tool({
+      description: "Lists the tags, reading the labels once",
+      readOnly: true,
+      reach: "company",
+      routes: ["GET /tags", "GET /labels"],
+      args: { cursor: v.string().optional() },
+      returns: page(Item),
+      handler: async ({ cursor }, api) => {
+        labels ??= await api.get("/labels");
+        const answer = await api.get("/tags", {
+          query: { cursor },
+          returns: v.object({ items: v.array(Item), next: v.string().nullable() }),
+        });
+        return { items: answer.items, next: answer.next };
+      },
     }),
     "checks.get": tool({
       description: "Gets a check twice, to be sure",
@@ -149,6 +168,40 @@ describe(
 
     it("builds a connector whose every case replays as recorded", async () => {
       await expect(buildWith(recorded())).resolves.toBeUndefined();
+    });
+
+    it("replays each call in an isolate of its own, as connect calls it", async () => {
+      const labelled = exchange("/labels", 200, { labels: [] });
+      await expect(
+        buildWith(
+          recorded([
+            {
+              tool: "tags.list",
+              args: {},
+              cursor: "cursor",
+              calls: [
+                {
+                  exchanges: [
+                    labelled,
+                    exchange("/tags", 200, { items: [{ id: "1" }], next: "2" }),
+                  ],
+                  output: { items: [{ id: "1" }], next: "2" },
+                },
+                {
+                  exchanges: [
+                    labelled,
+                    exchange("/tags?cursor=2", 200, {
+                      items: [{ id: "2" }],
+                      next: null,
+                    }),
+                  ],
+                  output: { items: [{ id: "2" }], next: null },
+                },
+              ],
+            },
+          ])
+        )
+      ).resolves.toBeUndefined();
     });
 
     it("replays what a recording keeps, its personal values replaced", async () => {

@@ -185,68 +185,67 @@ const checkFixturesOf = async (
 ): Promise<void> => {
   let vendor = fixtureVendor([]);
   let unrecorded: string[] = [];
-  const workerd = new Miniflare(
-    convertV4MiniflareOptions({
-      modules: [{ type: "ESModule", path: "connector.js", contents: code }],
-      ...isolateBase,
-      outboundService: async (sent) => {
-        const request = new Request(sent.url, {
-          method: sent.method,
-          headers: [...sent.headers],
-          body:
-            sent.method === "GET" || sent.method === "HEAD"
-              ? null
-              : await sent.arrayBuffer(),
-        });
-        const answer = await vendor.answer(request);
-        if (answer !== undefined) {
-          return answer;
-        }
-        unrecorded.push(`${request.method} ${request.url}`);
-        return new Response("Not recorded", { status: 501 });
-      },
-    })
-  );
-  try {
-    const problems = await checkFixtures(
-      fixtures,
-      async (tool, args, exchanges) => {
-        vendor = fixtureVendor(exchanges);
-        unrecorded = [];
-        let answer: unknown;
-        try {
-          // As long as connect waits for a connector's answer, so a
-          // connector that never answers fails the build, not hangs it.
-          const response = await workerd.dispatchFetch("https://connector/", {
-            signal: AbortSignal.timeout(callTimeoutMs),
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              jsonrpc: "2.0",
-              id: 1,
-              method: "tools/call",
-              params: { name: tool, arguments: args },
-            }),
-          });
-          answer = await response.json();
-        } catch (error) {
-          answer = { error: { message: `it didn't answer: ${String(error)}` } };
-        }
-        return {
-          answer,
-          unrecorded,
-          repeated: vendor.repeated,
-          unsent: vendor.unsent(),
-        };
+  const options = convertV4MiniflareOptions({
+    modules: [{ type: "ESModule", path: "connector.js", contents: code }],
+    ...isolateBase,
+    outboundService: async (sent) => {
+      const request = new Request(sent.url, {
+        method: sent.method,
+        headers: [...sent.headers],
+        body:
+          sent.method === "GET" || sent.method === "HEAD"
+            ? null
+            : await sent.arrayBuffer(),
+      });
+      const answer = await vendor.answer(request);
+      if (answer !== undefined) {
+        return answer;
       }
-    );
-    if (problems.length > 0) {
-      throw new Error(
-        `${name} doesn't replay its recorded vendor answers:\n${problems.join("\n")}`
-      );
+      unrecorded.push(`${request.method} ${request.url}`);
+      return new Response("Not recorded", { status: 501 });
+    },
+  });
+  const problems = await checkFixtures(
+    fixtures,
+    async (tool, args, exchanges) => {
+      vendor = fixtureVendor(exchanges);
+      unrecorded = [];
+      // A worker of its own for each call, as connect loads a fresh
+      // isolate for each, so nothing one call keeps reaches the next.
+      const workerd = new Miniflare(options);
+      let answer: unknown;
+      try {
+        // As long as connect waits for a connector's answer, so a
+        // connector that never answers fails the build, not hangs it.
+        const response = await workerd.dispatchFetch("https://connector/", {
+          signal: AbortSignal.timeout(callTimeoutMs),
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: { name: tool, arguments: args },
+          }),
+        });
+        answer = await response.json();
+      } catch (error) {
+        answer = { error: { message: `it didn't answer: ${String(error)}` } };
+      } finally {
+        await workerd.dispose();
+      }
+      return {
+        answer,
+        unrecorded,
+        repeated: vendor.repeated,
+        unsent: vendor.unsent(),
+      };
     }
-  } finally {
-    await workerd.dispose();
+  );
+  if (problems.length > 0) {
+    throw new Error(
+      `${name} doesn't replay its recorded vendor answers:\n${problems.join("\n")}`
+    );
   }
 };
 
