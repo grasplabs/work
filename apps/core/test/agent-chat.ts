@@ -1,4 +1,11 @@
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import type { JsonValue } from "@earendil-works/chord/json";
 import type { Message } from "@earendil-works/pi-ai";
+import type {
+  ToolExecutionApi,
+  ToolRegistration,
+} from "@earendil-works/pi-durable";
+import type { Schema, Static } from "@earendil-works/pi-schema";
 import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { ChatId } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
@@ -18,6 +25,25 @@ import type { Answer, FakeProvider, ProviderReply } from "./model-provider.ts";
 // (test/model-provider.ts).
 
 export const model = testModel;
+
+/**
+ * Calls one of the chat's tools as pi's tool task does, outside a turn:
+ * with the call's ID and a context, all of pi's API the chat's tools read.
+ */
+export const callTool = async <P extends Schema, D extends JsonValue>(
+  tool: ToolRegistration<P, D>,
+  callId: string,
+  args: Static<P>
+) => {
+  const api: Pick<ToolExecutionApi<D>, "callId"> = { callId };
+  return await tool.execute(
+    args,
+    // SAFETY: the chat's tools read only `callId` of pi's API (src/agent*.ts).
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    api as ToolExecutionApi<D>,
+    BACKGROUND_CONTEXT
+  );
+};
 
 /** The model calls `executeCode` with `code`, `times` times at once. */
 export const codeStep = (code: string, times = 1): Answer => ({

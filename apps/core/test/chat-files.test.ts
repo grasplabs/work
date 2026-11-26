@@ -866,7 +866,7 @@ describe("pictures attached to a question", slow, () => {
       bytes: realPng,
     });
     // Mistral NeMo takes text alone (pi's catalog).
-    const textOnly = "mistral/mistral-nemo";
+    const textOnly = "mistral/voxtral-small-latest";
     const provider = await fakeProviderFor([textOnly], says("No picture."));
     const followed = await follow(ann, chat.id);
     await ann.api.chats.send(chat.id, {
