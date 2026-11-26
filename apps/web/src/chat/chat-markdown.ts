@@ -120,7 +120,7 @@ export const chatMarkdown = ({
     return turn === undefined ? [] : [turn];
   });
   const sources = provenance.sources.map(
-    (id) => `- ${plainText(names.get(id)?.name ?? id)}`
+    (id) => `- ${plainText(names.get(id)?.name ?? i18n._(msg`Unknown source`))}`
   );
   // What the answers draw on: restricted data first, as the chat marks it.
   const footer = [

@@ -302,6 +302,13 @@
       "when": 1795633499048,
       "tag": "0042_chat_read_up_to",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1795678908600,
+      "tag": "0043_code_run_outside_text",
+      "breakpoints": true
     }
   ]
 }

@@ -475,8 +475,19 @@ describe("a connector made from a URL", slow, () => {
 
     const steps = await codeResults(chats.stub, chat.chat.id);
     const [offered, asked] = steps.map(({ text }) => text);
-    expect({ offered, asked }).toStrictEqual({
+    const marked = readOutside(offered);
+    expect({
+      offered: marked?.text,
+      // Its tools' names are its server's words: handed over as data.
+      markedAsItsTools: marked?.from
+        .split("; ")
+        .includes(
+          `connection ${connectionId} (its tools' names, descriptions and schemas)`
+        ),
+      asked,
+    }).toStrictEqual({
       offered: "Returned:\ntrue",
+      markedAsItsTools: true,
       asked:
         "Returned:\nThis connection isn't active: it needs to be connected again.",
     });
