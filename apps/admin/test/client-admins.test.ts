@@ -475,6 +475,27 @@ describe("every client's summary", () => {
     });
   });
 
+  it("keeps a client's summary a minute, so the frame's next loads don't ask its core again", async () => {
+    const release = await importedRelease("feat(core): a kept summary");
+    const acme = await liveClient(release);
+    acme.core.summary = emptyAdminSummary([{ kind: "lead", count: 1 }]);
+    const ask = async () => {
+      const read = await callServerFn(fetchClientSummaries, undefined, {
+        email: "ada@grasp.test",
+      });
+      return read.find(({ client }) => client.id === acme.clientId);
+    };
+
+    const first = await ask();
+    acme.core.summary = emptyAdminSummary([{ kind: "lead", count: 3 }]);
+    const second = await ask();
+
+    expect([first, second]).toMatchObject([
+      { summary: { needs: [{ kind: "lead", count: 1 }] } },
+      { summary: { needs: [{ kind: "lead", count: 1 }] } },
+    ]);
+  });
+
   it("refuses the read for anyone Access doesn't vouch for", async () => {
     await expect(
       callServerFn(fetchClientSummaries, undefined, { email: null })
