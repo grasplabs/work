@@ -4,7 +4,6 @@ import type {
   OnboardingDirectory,
 } from "@grasp-os/shared/directory";
 import type { OnboardingPlaces } from "@grasp-os/shared/document-places";
-import type { OnboardingHr } from "@grasp-os/shared/hr";
 import type {
   LinkToSend,
   OnboardingReview,
@@ -44,8 +43,6 @@ export interface SetupData {
   directory: OnboardingDirectory | null;
   /** The suites this deployment signs in with, whose directory and documents can be connected. */
   suites: DirectorySuite[];
-  /** The HR platform connected for the onboarding; null before one is. */
-  hr: OnboardingHr | null;
   /** Where the documents live, connected for the onboarding; null before it is. */
   places: OnboardingPlaces | null;
   /** Grasp's sending domain (core's `MAIL_FROM`), which the admin lets through their mail filter; null while unset. */

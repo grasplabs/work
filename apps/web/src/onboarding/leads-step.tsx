@@ -1,32 +1,34 @@
-import type { Roster } from "@grasp-os/shared/onboarding";
-import { hrPlatforms } from "@grasp-os/shared/onboarding-choices";
-import type {
-  HrPlatform,
-  SetupChoices,
-} from "@grasp-os/shared/onboarding-choices";
+import { noTeamId } from "@grasp-os/shared/onboarding";
+import type { RosterPerson, RosterTeam } from "@grasp-os/shared/onboarding";
+import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
 import { Button } from "@grasp-os/ui/components/button";
 import { Card } from "@grasp-os/ui/components/card";
-import { Combobox } from "@grasp-os/ui/components/combobox";
+import { Checkbox } from "@grasp-os/ui/components/checkbox";
+import type { CheckedState } from "@grasp-os/ui/components/checkbox";
 import {
-  Item,
-  ItemContent,
-  ItemDescription,
-  ItemGrid,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "@grasp-os/ui/components/item";
-import { Switch } from "@grasp-os/ui/components/switch";
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@grasp-os/ui/components/empty";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupClear,
+  InputGroupInput,
+} from "@grasp-os/ui/components/input-group";
 import { Text } from "@grasp-os/ui/components/text";
+import { Toggle } from "@grasp-os/ui/components/toggle";
 import {
-  ArrowRightIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
   Icon,
-  MicIcon,
-  PlusIcon,
-  SendIcon,
-  UsersIcon,
+  SearchIcon,
+  StarIcon,
+  UserPlusIcon,
 } from "@grasp-os/ui/lib/icons";
-import { colors, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { colors, media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -36,414 +38,580 @@ import { TopError } from "../frame/top-error.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { CalmStep } from "./calm-frame.tsx";
 import { WaitingNote } from "./company-step.tsx";
-import { ConnectorSearch } from "./connector-search.tsx";
 import { ForgetTeams } from "./forget-teams.tsx";
-import { HrLeads } from "./hr-leads.tsx";
-import { hrLogoOf } from "./source-logos.ts";
-import { Logo, useIntegrations, useSaveChoices } from "./sources-step.tsx";
-import { useRefresh } from "./step-parts.ts";
+import { PeopleAdd } from "./people-add.tsx";
+import { personRowMarker } from "./people-list.stylex.ts";
+import {
+  countsOf,
+  found,
+  leads,
+  noPicks,
+  takesPart,
+  teamRowsOf,
+  TooManyPeopleError,
+  withAdded,
+  withLead,
+  withTaking,
+} from "./people-picks.ts";
+import type { Picks } from "./people-picks.ts";
+import { suiteNames, useRefresh } from "./step-parts.ts";
 import type { StepProps } from "./step-parts.ts";
-import { SupportLink } from "./support-link.tsx";
 import { orgConfirmed, orgDraft } from "./visit.ts";
 
-// The leads: first which HR platform the company uses, a tile each with its
-// logo, as the documents step has them, pressed
-// to choose it, until the admin said; then, without a staff list, that
-// Grasp's staff set the teams up with them; else the organization as Stephen
-// will interview it, on one card: a row a team, who leads it, chosen from
-// the team's own people, and whether it takes part. What the staff list
-// guessed, the admin puts right here, or takes from the HR platform
-// (hr-leads.tsx) and checks.
+// Who Stephen talks to (Ruben: no HR platform; the people come from the
+// Microsoft or Google directory the company step connected). Everyone it
+// gave is on one list, by team: the admin unticks who doesn't take part,
+// a whole team at once if they like, and marks each team's lead, whom
+// Stephen talks to first. Someone missing, or no directory at all: they
+// add people by address or with a staff list. Nothing goes to core until
+// Continue, which confirms the organization as it stands (core checks it
+// is the admin, and every address).
 
-/** Where a team's row puts its name above its controls. */
-const PHONE = "@media (max-width: 40rem)";
+/** More people than this, and each team opens on its own press. */
+const openUpTo = 30;
+/** The most rows one team shows before a press shows the rest. */
+const rowsShown = 150;
 
 const styles = stylex.create({
   stack: { display: "grid", gap: space[4] },
-  rows: { margin: 0, padding: 0, listStyle: "none" },
-  // A team a row: its name, who leads it, and whether it takes part; on a phone the name above the two.
-  row: {
+  toolbar: {
     display: "grid",
-    gridTemplateColumns: {
-      default: "minmax(0, 1fr) minmax(0, 14rem) auto",
-      [PHONE]: "minmax(0, 1fr) auto",
-    },
-    alignItems: "center",
-    columnGap: space[4],
-    rowGap: space[2],
-    paddingBlock: space[3],
-    paddingInline: space[4],
-    borderBlockStartWidth: { default: size.hairline, ":first-child": 0 },
-    borderBlockStartStyle: "solid",
-    borderBlockStartColor: colors.border,
+    gap: space[3],
+    padding: space[3],
+    borderBlockEndWidth: size.hairline,
+    borderBlockEndStyle: "solid",
+    borderBlockEndColor: colors.border,
   },
-  name: { gridColumn: { default: "auto", [PHONE]: "1 / -1" } },
+  // Everyone at once, and how many take part.
+  all: {
+    display: "flex",
+    alignItems: "center",
+    gap: space[3],
+    paddingInline: space[1],
+  },
+  list: {
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+    maxHeight: "min(32rem, 60svh)",
+    overflowY: "auto",
+    scrollbarWidth: "thin",
+  },
+  team: {
+    position: "sticky",
+    insetBlockStart: 0,
+    zIndex: 1,
+    display: "flex",
+    alignItems: "center",
+    gap: space[3],
+    minHeight: "2.75rem",
+    paddingInline: space[4],
+    backgroundColor: colors.muted,
+    borderBlockEndWidth: size.hairline,
+    borderBlockEndStyle: "solid",
+    borderBlockEndColor: colors.border,
+  },
+  teamName: { flexGrow: 1, minWidth: 0 },
+  // A team's name is the press that opens it: no box drawn round it.
+  opener: {
+    display: "flex",
+    alignItems: "center",
+    gap: space[2],
+    flexGrow: 1,
+    minWidth: 0,
+    padding: 0,
+    border: "none",
+    background: "none",
+    color: "inherit",
+    font: "inherit",
+    textAlign: "start",
+    cursor: "pointer",
+    outline: { ":focus-visible": "none" },
+    textDecorationLine: { default: "none", ":focus-visible": "underline" },
+  },
+  person: {
+    display: "flex",
+    alignItems: "center",
+    gap: space[3],
+    minHeight: "3.25rem",
+    paddingInline: space[4],
+    borderBlockEndWidth: size.hairline,
+    borderBlockEndStyle: "solid",
+    borderBlockEndColor: colors.border,
+  },
+  // The whole row ticks the box: the name, the job, the space between.
+  pick: {
+    display: "flex",
+    alignItems: "center",
+    gap: space[3],
+    flexGrow: 1,
+    minWidth: 0,
+    cursor: "pointer",
+  },
+  words: { display: "grid", minWidth: 0 },
+  out: { opacity: 0.55 },
+  // A lead's mark always shows; anyone else's only while the row is pointed at or in focus, so
+  // the list stays calm. Without a pointer that hovers, it always shows.
+  lead: {
+    opacity: {
+      default: 1,
+      [media.hover]: {
+        default: 0,
+        [stylex.when.ancestor(":hover", personRowMarker)]: 1,
+        [stylex.when.ancestor(":focus-within", personRowMarker)]: 1,
+      },
+    },
+  },
+  leadOn: { opacity: 1 },
+  more: { display: "flex", justifyContent: "center", padding: space[3] },
 });
 
-/** The HR platform: one named, which Grasp sets up with them; another asked for by name; or none. */
-const HrPlatformChoice = ({
-  choices,
-  named,
-  onDone,
+/** One person: ticked to take part, and marked as their team's lead. */
+const PersonRow = ({
+  person,
+  taking,
+  lead,
+  teamName,
+  onTaking,
+  onLead,
 }: {
-  choices: SetupChoices;
-  /** The HR platform Grasp's kickoff call named, if any: offered first, marked as said there. */
-  named: string | null;
-  onDone: () => void;
+  person: RosterPerson;
+  taking: boolean;
+  lead: boolean;
+  /** Their team, while the list is searched and no longer by team. */
+  teamName: string | null;
+  onTaking: (on: boolean) => void;
+  onLead: (on: boolean) => void;
 }) => {
   const { t } = useLingui();
-  const { save, busy, failure } = useSaveChoices();
-  const integrations = useIntegrations();
-  const [searching, setSearching] = useState(false);
-  // A platform picked is said and done: the step goes straight on, no screen to confirm it (Ruben).
-  const choose = async (next: SetupChoices["hr"]) => {
-    if (!busy && (await save({ ...choices, hr: next }))) {
-      onDone();
-    }
-  };
-  // Six tiles with the + one: the platform the kickoff named first, then those offered, the last
-  // giving way when the one named is none of them.
-  const namedOffered = hrPlatforms.find((each) => each === named);
-  const tiles: { name: string; platform: HrPlatform | null }[] = [
-    ...(named === null
-      ? []
-      : [{ name: named, platform: namedOffered ?? null }]),
-    ...hrPlatforms
-      .filter((each) => each !== named)
-      .map((each) => ({ name: each, platform: each })),
-  ].slice(0, hrPlatforms.length);
+  const name = person.name === "" ? t`Erased` : person.name;
+  const about = [person.title || person.email, teamName]
+    .filter(Boolean)
+    .join(" · ");
   return (
-    <CalmStep
-      body={t`It knows who leads which team, so I can talk to the leads first. We connect it with you.`}
-      end={
-        <Button
-          onClick={() => {
-            void (async () => {
-              if (await save({ ...choices, hr: { kind: "none" } })) {
-                onDone();
-              }
-            })();
+    <li {...stylex.props(personRowMarker, styles.person)}>
+      <label {...stylex.props(styles.pick, !taking && styles.out)}>
+        <Checkbox
+          checked={taking}
+          onCheckedChange={(on) => {
+            onTaking(on === true);
           }}
-          size="lg"
+        />
+        <Avatar decorative name={name} size="sm">
+          <AvatarFallback />
+        </Avatar>
+        <span {...stylex.props(styles.words)}>
+          <Text as="span" color="default" truncate>
+            {name}
+          </Text>
+          {about === "" ? null : (
+            <Text as="span" color="muted" size="sm" truncate>
+              {about}
+            </Text>
+          )}
+        </span>
+      </label>
+      <span {...stylex.props(styles.lead, lead && styles.leadOn)}>
+        <Toggle
+          aria-label={t`${name} leads the team`}
+          onPressedChange={onLead}
+          pressed={lead}
+          size="xs"
           variant="outline"
         >
-          {t`We don’t use an HR platform`}
-        </Button>
-      }
-      also={
-        <SupportLink page="hr">{t`More about this connection`}</SupportLink>
-      }
-      spoken={t`Now, about the people I’ll be talking to. I like to start with the team leads, so they hear from me before their team does. Your HR platform knows who leads which team, so tell me which one you use, and we’ll connect it together.`}
-      title={t`Which HR platform do you use?`}
-    >
-      <div {...stylex.props(styles.stack)}>
-        <ItemGrid aria-label={t`HR platforms`} columns={3}>
-          {tiles.map(({ name, platform }) => {
-            const logo = hrLogoOf(name);
-            const said = name === named;
-            return (
-              <Item
-                done={said}
-                key={name}
-                onClick={() => {
-                  void choose(
-                    platform === null
-                      ? { kind: "asked", name }
-                      : { kind: "platform", name: platform }
-                  );
-                }}
-                variant="outline"
-              >
-                {logo === null ? (
-                  <ItemMedia variant="icon">
-                    <Icon icon={UsersIcon} />
-                  </ItemMedia>
-                ) : (
-                  <Logo src={logo} />
-                )}
-                <ItemContent>
-                  <ItemTitle>{name}</ItemTitle>
-                  {said ? (
-                    <ItemDescription>{t`From our call`}</ItemDescription>
-                  ) : null}
-                </ItemContent>
-              </Item>
-            );
-          })}
-          <Item
-            onClick={() => {
-              setSearching(true);
-            }}
-            variant="outline"
-          >
-            <ItemMedia variant="icon">
-              <Icon icon={PlusIcon} />
-            </ItemMedia>
-            <ItemContent>
-              <ItemTitle>{t`Another platform`}</ItemTitle>
-            </ItemContent>
-          </Item>
-        </ItemGrid>
-        <TopError>{failure}</TopError>
-      </div>
-      {/* The catalog's HR apps; one offered as a row is chosen as that platform, any other asked for. */}
-      <ConnectorSearch
-        integrations={integrations.filter(({ group }) => group === "HR")}
-        onAsk={async (name) => {
-          await choose({ kind: "asked", name });
-        }}
-        onOpenChange={setSearching}
-        onPick={async ({ name }) => {
-          const offered = hrPlatforms.find(
-            (each) => each.toLocaleLowerCase() === name.toLocaleLowerCase()
-          );
-          await choose(
-            offered === undefined
-              ? { kind: "asked", name }
-              : { kind: "platform", name: offered }
-          );
-        }}
-        open={searching}
-        placeholder={t`Search HR platforms, for example Workday`}
-      />
-    </CalmStep>
+          <Icon icon={StarIcon} />
+          {t`Lead`}
+        </Toggle>
+      </span>
+    </li>
   );
 };
 
-/**
- * The organization on one card: every team, who leads it, and whether it
- * takes part. A team that is off gets no links.
- */
-const ConfirmOrg = ({
-  data,
-  onward,
-  roster,
-}: StepProps & { roster: Roster }) => {
+/** A team's box: ticked when everyone in it takes part, a dash when some do. */
+const checkedOf = (taking: number, all: number): CheckedState => {
+  if (taking === 0) {
+    return false;
+  }
+  return taking === all ? true : "indeterminate";
+};
+
+/** One team: its box ticks everyone in it, its name opens it. */
+const TeamRow = ({
+  team,
+  people,
+  picks,
+  open,
+  searching,
+  onOpen,
+  onPicks,
+}: {
+  team: RosterTeam;
+  people: RosterPerson[];
+  picks: Picks;
+  open: boolean;
+  searching: boolean;
+  onOpen: (open: boolean) => void;
+  onPicks: (picks: Picks) => void;
+}) => {
+  const { t } = useLingui();
+  const [all, setAll] = useState(false);
+  const taking = people.filter((person) => takesPart(picks, person)).length;
+  const lead = people.find((person) => person.id === team.lead);
+  const counted = searching
+    ? plural(people.length, { one: "# found", other: "# found" })
+    : t`${taking} of ${people.length}`;
+  const shown = all ? people : people.slice(0, rowsShown);
+  return (
+    <>
+      <li {...stylex.props(styles.team)}>
+        <Checkbox
+          aria-label={t`Everyone in ${team.name}`}
+          checked={checkedOf(taking, people.length)}
+          onCheckedChange={(on) => {
+            onPicks(
+              withTaking(
+                picks,
+                new Set(people.map(({ id }) => id)),
+                on === true
+              )
+            );
+          }}
+        />
+        <button
+          aria-expanded={open}
+          onClick={() => {
+            onOpen(!open);
+          }}
+          type="button"
+          {...stylex.props(styles.opener)}
+        >
+          <span {...stylex.props(styles.teamName)}>
+            <Text as="span" color="default" truncate weight="medium">
+              {lead === undefined || open
+                ? team.name
+                : t`${team.name} · led by ${lead.name}`}
+            </Text>
+          </span>
+          <Text as="span" color="subtle" size="sm">
+            {counted}
+          </Text>
+          <Icon icon={open ? ChevronDownIcon : ChevronRightIcon} />
+        </button>
+      </li>
+      {open
+        ? shown.map((person) => (
+            <PersonRow
+              key={person.id}
+              lead={leads(picks, person)}
+              onLead={(on) => {
+                onPicks(withLead(picks, person.id, on));
+              }}
+              onTaking={(on) => {
+                onPicks(withTaking(picks, new Set([person.id]), on));
+              }}
+              person={person}
+              taking={takesPart(picks, person)}
+              teamName={null}
+            />
+          ))
+        : null}
+      {open && shown.length < people.length ? (
+        <li {...stylex.props(styles.more)}>
+          <Button
+            onClick={() => {
+              setAll(true);
+            }}
+            size="sm"
+            variant="ghost"
+          >
+            {t`Show all ${people.length}`}
+          </Button>
+        </li>
+      ) : null}
+    </>
+  );
+};
+
+/** The list: searched, everyone at once, and by team. */
+const PeopleList = ({
+  picks,
+  onPicks,
+  noTeam,
+}: {
+  picks: Picks;
+  onPicks: (picks: Picks) => void;
+  noTeam: string;
+}) => {
+  const { t } = useLingui();
+  const [query, setQuery] = useState("");
+  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
+  const [closed, setClosed] = useState<ReadonlySet<string>>(new Set());
+  const searching = query.trim() !== "";
+  const shown = found(picks, query);
+  const rows = teamRowsOf(picks, shown, noTeamId);
+  // A small company opens every team; a large one opens a team on its press. A search opens all it found.
+  const openFirst = picks.people.length <= openUpTo || rows.length === 1;
+  const isOpen = (id: string) =>
+    searching || opened.has(id) || (openFirst && !closed.has(id));
+  const taking = shown.filter((person) => takesPart(picks, person)).length;
+  const { taking: allTaking, leads: allLeads, all } = countsOf(picks);
+  const summary = searching
+    ? plural(shown.length, {
+        0: "Nobody found by that name",
+        one: "# person found",
+        other: "# people found",
+      })
+    : `${t`${allTaking} of ${all} take part`} · ${plural(allLeads, {
+        one: "# lead",
+        other: "# leads",
+      })}`;
+  return (
+    <Card padding="none">
+      <div {...stylex.props(styles.toolbar)}>
+        <InputGroup>
+          <InputGroupAddon>
+            <Icon icon={SearchIcon} />
+          </InputGroupAddon>
+          <InputGroupInput
+            aria-label={t`Search people`}
+            onValueChange={setQuery}
+            placeholder={t`Search by name, email or team`}
+            type="search"
+            value={query}
+          />
+          <InputGroupClear aria-label={t`Clear the search`} />
+        </InputGroup>
+        <div {...stylex.props(styles.all)}>
+          <Checkbox
+            aria-label={searching ? t`Everyone found` : t`Everyone`}
+            checked={checkedOf(taking, shown.length)}
+            disabled={shown.length === 0}
+            onCheckedChange={(on) => {
+              onPicks(
+                withTaking(
+                  picks,
+                  new Set(shown.map(({ id }) => id)),
+                  on === true
+                )
+              );
+            }}
+          />
+          <Text as="span" color="muted" size="sm">
+            {summary}
+          </Text>
+        </div>
+      </div>
+      <ul aria-label={t`People`} {...stylex.props(styles.list)}>
+        {rows.map(({ team, people }) => (
+          <TeamRow
+            key={team.id}
+            onOpen={(open) => {
+              const without = (set: ReadonlySet<string>) =>
+                new Set([...set].filter((id) => id !== team.id));
+              setOpened(open ? new Set([...opened, team.id]) : without(opened));
+              setClosed(open ? without(closed) : new Set([...closed, team.id]));
+            }}
+            onPicks={onPicks}
+            open={isOpen(team.id)}
+            people={people}
+            picks={picks}
+            searching={searching}
+            team={team.id === noTeamId ? { ...team, name: noTeam } : team}
+          />
+        ))}
+      </ul>
+    </Card>
+  );
+};
+
+/** Nobody yet: no directory, and no list. The ways to add them stand in the middle. */
+const NobodyYet = ({ onAdd }: { onAdd: () => void }) => {
+  const { t } = useLingui();
+  return (
+    <Card padding="lg">
+      <Empty>
+        <EmptyHeader>
+          <EmptyTitle>{t`Nobody on the list yet`}</EmptyTitle>
+          <EmptyDescription>
+            {t`Add people by email address, or share a staff list.`}
+          </EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <Button onClick={onAdd} variant="outline">
+            <Icon icon={UserPlusIcon} />
+            {t`Add people`}
+          </Button>
+        </EmptyContent>
+      </Empty>
+    </Card>
+  );
+};
+
+/** What the step says, and what Stephen says as it arrives, by where the people came from. */
+const useWords = (from: "directory" | "list" | "nobody", signIn: string) => {
+  const { t } = useLingui();
+  if (from === "nobody") {
+    return {
+      title: t`Who should I talk to?`,
+      body: t`Add the people I’ll talk to, by email or with a staff list. Then mark who leads each team: I talk to the leads first.`,
+      spoken: t`Now for the people I’ll be talking to. I don’t have anyone yet, so add them here by email, or drop in a staff list if you have one. Then mark who leads each team. I always start with the leads, so they hear about this before their team does.`,
+    };
+  }
+  return {
+    title: t`Who should I talk to?`,
+    body:
+      from === "directory"
+        ? t`Everyone from ${signIn} is here. Untick who isn’t taking part, and mark who leads each team: I talk to the leads first.`
+        : t`Everyone from your staff list is here. Untick who isn’t taking part, and mark who leads each team: I talk to the leads first.`,
+    spoken:
+      from === "directory"
+        ? t`Now for the people I’ll be talking to. Everyone from ${signIn} is already on this list, so there’s nothing to type. Untick anyone who shouldn’t take part, and mark who leads each team. I always start with the leads, so they hear about this before their team does. Someone missing? Add them by email.`
+        : t`Now for the people I’ll be talking to. Everyone from your staff list is already here. Untick anyone who shouldn’t take part, and mark who leads each team. I always start with the leads, so they hear about this before their team does. Someone missing? Add them by email.`,
+  };
+};
+
+export const LeadsStep = ({ data, onward }: StepProps) => {
   const { t } = useLingui();
   const { run, busy, failure } = useCoreAction();
   const refresh = useRefresh();
-  // Confirmed, it stays busy until every step reads what core now has, so it can't be pressed twice.
-  const [refreshing, setRefreshing] = useState(false);
+  const { roster, waiting } = data.view;
   const from = JSON.stringify(roster);
   // Changed and not confirmed yet, it is as they left it.
-  const [draft, setDraft] = useState<Roster>(() => orgDraft.of(from) ?? roster);
-  const redraft = (next: Roster) => {
-    orgDraft.keep(from, next);
-    setDraft(next);
-  };
-  // Confirmed as it stands: on this visit, or before on this page with nothing changed since.
-  const [saved, setSaved] = useState(
-    () => orgDraft.of(from) === undefined && orgConfirmed.of(from) === true
+  const [picks, setPicks] = useState<Picks>(
+    () => orgDraft.of(from) ?? roster ?? noPicks
   );
-  const [said, setSaid] = useState<string | null>(null);
-  const teams = draft.teams
-    .map((team) => ({
-      team,
-      people: draft.people.filter((person) => person.team === team.id),
-    }))
-    .toSorted((a, b) => b.people.length - a.people.length);
-  const leads = draft.teams.filter(
-    (team) => !team.off && team.lead !== null
-  ).length;
-  const missing = draft.teams.filter(
-    (team) => !team.off && team.lead === null
-  ).length;
-  const change = (id: string, next: Partial<Roster["teams"][number]>) => {
-    setSaved(false);
-    setSaid(null);
-    redraft({
-      ...draft,
-      teams: draft.teams.map((team) =>
-        team.id === id ? { ...team, ...next } : team
-      ),
-    });
+  const [adding, setAdding] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const noTeam = t({
+    message: "Other",
+    context: "the team for people a staff list gives no team",
+  });
+  const directory =
+    data.directory?.status === "active" ? data.directory.suite : null;
+  let source: "directory" | "list" | "nobody" = "directory";
+  if (roster === null) {
+    source = "nobody";
+  } else if (directory === null) {
+    source = "list";
+  }
+  // By what core has, not by what the admin changes here: Stephen says the step once, as it arrives.
+  const words = useWords(
+    source,
+    directory === null ? "" : suiteNames[directory]
+  );
+  const change = (next: Picks) => {
+    setProblem(null);
+    if (next.people.length > 0) {
+      orgDraft.keep(from, next);
+    }
+    setPicks(next);
   };
+  const { taking } = countsOf(picks);
   const confirm = async () => {
     if (busy || refreshing) {
       return;
     }
+    if (taking === 0) {
+      setProblem(
+        t`Tick at least one person to take part, or skip this for now.`
+      );
+      return;
+    }
+    // Confirmed as it stands before, on this page: nothing to send again.
+    if (JSON.stringify(picks) === from && orgConfirmed.of(from) === true) {
+      await onward();
+      return;
+    }
     const kept = await run(
-      async (session) => await session.onboarding.confirmRoster(draft)
+      async (session) => await session.onboarding.confirmRoster(picks)
     );
     if (kept !== undefined) {
-      // Coming back while it stands as confirmed, it still is.
       orgConfirmed.keep(JSON.stringify(kept.roster), true);
       setRefreshing(true);
       await refresh();
       setRefreshing(false);
-      setSaved(true);
-      setSaid(
-        plural(leads, {
-          one: "Thank you. I’ll start with this lead.",
-          other: "Thank you. I’ll start with these # leads.",
-        })
-      );
+      await onward();
     }
   };
+  const nobody = picks.people.length === 0;
   return (
     <CalmStep
       also={
         <ForgetTeams onErased={refresh} teamsInBrain={data.view.teamsInBrain} />
       }
-      body={t`I talk to each team lead first, so they hear about me before their team does. Check who leads which team, and which teams take part.`}
+      body={words.body}
       end={
-        saved ? (
+        nobody ? (
           <Button
             onClick={() => {
               void onward();
             }}
             size="lg"
+            variant="outline"
           >
-            {t`Continue`}
-            <Icon icon={ArrowRightIcon} />
+            {t`Skip for now`}
           </Button>
         ) : (
-          <Button
-            onClick={() => {
-              void confirm();
-            }}
-            size="lg"
-            status={busy || refreshing ? "loading" : "idle"}
-          >
-            {t`This is right`}
-          </Button>
-        )
-      }
-      spoken={t`This is how I understand your organization. I’ll talk to each team lead first, so nobody is caught off guard. Have a quick look whether the right people lead the right teams, and which teams should take part.`}
-      title={t`Is this your organization?`}
-    >
-      <div {...stylex.props(styles.stack)}>
-        <Card padding="none">
-          <ul aria-label={t`Your teams`} {...stylex.props(styles.rows)}>
-            {teams.map(({ team, people }) => {
-              const { name } = team;
-              const options = people.map((person) => ({
-                value: person.id,
-                // Someone erased stays in their team, without a name.
-                label: person.name === "" ? t`Erased` : person.name,
-              }));
-              return (
-                <li key={team.id} {...stylex.props(styles.row)}>
-                  <Text style={styles.name}>{name}</Text>
-                  <Combobox
-                    aria-label={t`Lead of ${name}`}
-                    disabled={team.off}
-                    items={options}
-                    onValueChange={(value) => {
-                      change(team.id, {
-                        lead: value === null || value === "" ? null : value,
-                      });
-                    }}
-                    placeholder={t`Who leads it?`}
-                    value={team.lead}
-                  />
-                  <Switch
-                    aria-label={t`${name} takes part`}
-                    checked={!team.off}
-                    onCheckedChange={(on: boolean) => {
-                      change(team.id, { off: !on });
-                    }}
-                  />
-                </li>
-              );
-            })}
-          </ul>
-        </Card>
-        {missing > 0 ? (
-          <Text>
-            {t`A team without a lead gets its links on the first day, and I ask each person what they do.`}
-          </Text>
-        ) : null}
-        {said === null ? null : (
-          <output aria-live="polite">
-            <Text as="span">{said}</Text>
-          </output>
-        )}
-        <WaitingNote waiting={data.view.waiting} />
-        <TopError>{failure}</TopError>
-        <HrLeads
-          hr={data.hr}
-          onRoster={(next) => {
-            setSaved(false);
-            redraft(next);
-          }}
-          onSaid={setSaid}
-          roster={draft}
-        />
-      </div>
-    </CalmStep>
-  );
-};
-
-export const LeadsStep = (props: StepProps) => {
-  const { t } = useLingui();
-  const { roster } = props.data.view;
-  // The HR platform comes first, until the admin said which; then, on this visit, the organization.
-  const [hrSaid, setHrSaid] = useState(props.data.choices.hr !== null);
-  if (!hrSaid) {
-    return (
-      <HrPlatformChoice
-        choices={props.data.choices}
-        named={props.data.view.context.hr}
-        onDone={() => {
-          setHrSaid(true);
-        }}
-      />
-    );
-  }
-  // No staff list: the company step was skipped, and Grasp's staff go through the teams with the
-  // admin in their conversations. Nothing to check here yet; a list shared after all brings the rows.
-  if (roster === null) {
-    return (
-      <CalmStep
-        body={t`Without a staff list I don’t know your teams yet. That’s fine, this is how it goes:`}
-        end={
           <>
             <Button
               onClick={() => {
-                void props.onward();
+                void confirm();
               }}
               size="lg"
+              status={busy || refreshing ? "loading" : "idle"}
             >
               {t`Continue`}
-              <Icon icon={ArrowRightIcon} />
             </Button>
             <Button
               onClick={() => {
-                props.go("company");
+                setAdding(true);
               }}
               size="lg"
               variant="outline"
             >
-              {t`Share a staff list`}
+              {t`Add people`}
             </Button>
           </>
-        }
-        spoken={t`Since I don’t have a staff list yet, I don’t know your teams. That’s perfectly fine. Here’s how we’ll do it instead.`}
-        title={t`We’ll set up your teams together`}
-      >
-        {/* What happens without a list, so the step isn't left empty under its line. */}
-        <ItemGroup aria-label={t`What happens next`}>
-          {[
-            {
-              icon: UsersIcon,
-              said: t`Grasp’s team goes through your teams with you`,
-            },
-            { icon: MicIcon, said: t`I talk to each team lead first` },
-            { icon: SendIcon, said: t`Then everyone gets their link` },
-          ].map(({ icon, said }) => (
-            <Item key={said} variant="outline">
-              <ItemMedia variant="icon">
-                <Icon icon={icon} />
-              </ItemMedia>
-              <ItemContent>
-                <ItemTitle>{said}</ItemTitle>
-              </ItemContent>
-            </Item>
-          ))}
-        </ItemGroup>
-      </CalmStep>
-    );
-  }
-  return <ConfirmOrg {...props} roster={roster} />;
+        )
+      }
+      spoken={words.spoken}
+      title={words.title}
+    >
+      <div {...stylex.props(styles.stack)}>
+        {nobody ? (
+          <NobodyYet
+            onAdd={() => {
+              setAdding(true);
+            }}
+          />
+        ) : (
+          <PeopleList noTeam={noTeam} onPicks={change} picks={picks} />
+        )}
+        <WaitingNote waiting={waiting} />
+      </div>
+      <PeopleAdd
+        noTeam={noTeam}
+        onAdd={(typed, to) => {
+          try {
+            change(withAdded(picks, typed, to).picks);
+            return true;
+          } catch (error) {
+            if (error instanceof TooManyPeopleError) {
+              setProblem(t`That’s more people than I can take: up to 2,000.`);
+              return false;
+            }
+            throw error;
+          }
+        }}
+        onList={(next) => {
+          change(next);
+        }}
+        onOpenChange={setAdding}
+        open={adding}
+        picks={picks}
+      />
+      <TopError>{problem ?? failure}</TopError>
+    </CalmStep>
+  );
 };
