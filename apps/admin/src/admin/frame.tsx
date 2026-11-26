@@ -27,7 +27,10 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarInset,
+  SidebarLevel,
+  SidebarLevels,
   SidebarMenu,
+  SidebarMenuAction,
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -37,6 +40,11 @@ import {
   useSidebar,
 } from "@grasp-os/ui/components/sidebar";
 import { Text } from "@grasp-os/ui/components/text";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@grasp-os/ui/components/tooltip";
 import {
   AudioWaveformIcon,
   BuildingIcon,
@@ -53,7 +61,13 @@ import type { IconData } from "@grasp-os/ui/lib/icons";
 import { visuallyHidden } from "@grasp-os/ui/lib/styles";
 import { colors, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
-import { Link, Outlet, useMatchRoute, useRouter } from "@tanstack/react-router";
+import {
+  Link,
+  Outlet,
+  useMatch,
+  useMatchRoute,
+  useRouter,
+} from "@tanstack/react-router";
 import { Suspense, useEffect } from "react";
 import type { ReactNode } from "react";
 
@@ -62,6 +76,7 @@ import type { GridRow } from "../clients/grid.ts";
 import { PageLoading } from "./failure.tsx";
 import { GraspMark } from "./grasp-mark.ts";
 import { askedApps } from "./integrations-asked.ts";
+import { OrganizationLevel } from "./organization.tsx";
 import type { PlatformCounts } from "./platform.ts";
 import { useSettled } from "./settled.tsx";
 import type { Deferred } from "./settled.tsx";
@@ -104,6 +119,15 @@ const styles = stylex.create({
     overflowY: "auto",
   },
 });
+
+/**
+ * Where the admin's sidebar keeps, in this browser, whether staff folded
+ * it to its icons. Not drawn before the page wakes: Damsko's
+ * `sidebarStateScript` is an inline script, and the admin runs none
+ * (public/theme.js is a file for that reason); the frame's first paint is
+ * its loading skeleton, which takes the kept fold as the page wakes.
+ */
+const sidebarKey = "grasp.admin.sidebar";
 
 /** One of the admin's own places, down the top of its sidebar. */
 interface Place {
@@ -268,7 +292,22 @@ const OrganizationItem = ({
         </Link>
       </SidebarMenuButton>
       {unread === null ? null : (
-        <RowBadge shown={<Icon icon={unread.mark} />} words={unread.words} />
+        // Why it isn't read, said by the mark's own tooltip whether the
+        // sidebar is open or folded; it leads to its Setup, which says more.
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <SidebarMenuAction asChild>
+              <Link
+                aria-label={`${name}: ${unread.words}. Open its Setup`}
+                params={{ clientId: id }}
+                to="/organizations/$clientId/setup"
+              >
+                <Icon icon={unread.mark} />
+              </Link>
+            </SidebarMenuAction>
+          </TooltipTrigger>
+          <TooltipContent side="right">{unread.words}</TooltipContent>
+        </Tooltip>
       )}
       {needs > 0 ? (
         <RowBadge
@@ -302,7 +341,7 @@ const SidebarLists = ({
   );
   const asked = askedApps(admins ?? []).length;
   return (
-    <>
+    <SidebarContent aria-label="Admin">
       <SidebarGroup>
         <SidebarGroupContent>
           <SidebarMenu>
@@ -316,23 +355,26 @@ const SidebarLists = ({
           </SidebarMenu>
         </SidebarGroupContent>
       </SidebarGroup>
-      <SidebarGroup>
-        <SidebarGroupLabel>Organizations</SidebarGroupLabel>
-        <SidebarGroupContent>
-          <SidebarMenu>
-            {clients
-              .filter(({ status }) => status !== "offboarded")
-              .map((client) => (
-                <OrganizationItem
-                  client={client}
-                  key={client.id}
-                  organization={organizations.get(client.id) ?? null}
-                />
-              ))}
-          </SidebarMenu>
-        </SidebarGroupContent>
-      </SidebarGroup>
-    </>
+      {/* A landmark of its own, so staff can jump to the organizations. */}
+      <nav aria-label="Organizations">
+        <SidebarGroup>
+          <SidebarGroupLabel>Organizations</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {clients
+                .filter(({ status }) => status !== "offboarded")
+                .map((client) => (
+                  <OrganizationItem
+                    client={client}
+                    key={client.id}
+                    organization={organizations.get(client.id) ?? null}
+                  />
+                ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </nav>
+    </SidebarContent>
   );
 };
 
@@ -345,6 +387,50 @@ const SettledLists = ({
   admins: Deferred<ClientAdmin[] | null>;
   platform: PlatformCounts;
 }) => <SidebarLists {...lists} admins={useSettled(admins)} />;
+
+/**
+ * The sidebar's levels: the admin's places and organizations, and while
+ * an organization's page is open, that organization's sections in their
+ * place, as the frontend's areas with a navigation of their own.
+ */
+const Levels = ({
+  clients,
+  admins,
+  platform,
+}: {
+  clients: readonly GridRow[];
+  admins: Deferred<ClientAdmin[] | null>;
+  platform: PlatformCounts;
+}) => {
+  // The open organization's page, as its route loaded it: the level shows
+  // what that page read of its core.
+  const open = useMatch({
+    from: "/organizations/$clientId",
+    shouldThrow: false,
+  })?.loaderData;
+  const shown = open?.state === "open" ? open : undefined;
+  return (
+    <SidebarLevels value={shown?.client.id ?? "main"}>
+      <SidebarLevel value="main">
+        {/* Every organization by name at once; what needs Grasp in each once its core answered. */}
+        <Suspense
+          fallback={
+            <SidebarLists admins={null} clients={clients} platform={platform} />
+          }
+        >
+          <SettledLists admins={admins} clients={clients} platform={platform} />
+        </Suspense>
+      </SidebarLevel>
+      {shown === undefined ? null : (
+        <OrganizationLevel
+          client={shown.client}
+          key={shown.client.id}
+          read={shown.read}
+        />
+      )}
+    </SidebarLevels>
+  );
+};
 
 /**
  * The sidebar's head: Grasp's mark, "Grasp" with "Admin" under it, and
@@ -376,11 +462,11 @@ const Brand = () => {
 
 /** The admin's sidebar, folded to its icons or open, around what it lists. */
 const AdminSidebarFrame = ({ children }: { children: ReactNode }) => (
-  <Sidebar aria-label="Admin" collapsible="icon" variant="inset">
+  <Sidebar collapsible="icon" variant="inset">
     <SidebarHeader>
       <Brand />
     </SidebarHeader>
-    <SidebarContent aria-label="Admin">{children}</SidebarContent>
+    {children}
   </Sidebar>
 );
 
@@ -406,14 +492,7 @@ const AdminSidebar = ({
   );
   return (
     <AdminSidebarFrame>
-      {/* Every organization by name at once; what needs Grasp in each once its core answered. */}
-      <Suspense
-        fallback={
-          <SidebarLists admins={null} clients={clients} platform={platform} />
-        }
-      >
-        <SettledLists admins={admins} clients={clients} platform={platform} />
-      </Suspense>
+      <Levels admins={admins} clients={clients} platform={platform} />
     </AdminSidebarFrame>
   );
 };
@@ -432,7 +511,7 @@ const Shell = ({
   children: ReactNode;
 }) => (
   <KitTooltipProvider>
-    <SidebarProvider>
+    <SidebarProvider storageKey={sidebarKey}>
       {sidebar}
       <SidebarInset>
         <div {...stylex.props(styles.card)}>
@@ -475,17 +554,19 @@ export const FrameLoading = () => (
   <Shell
     sidebar={
       <AdminSidebarFrame>
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu aria-busy>
-              {Array.from({ length: loadingEntries }, (_, entry) => (
-                <SidebarMenuItem key={entry}>
-                  <SidebarMenuSkeleton showIcon />
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        <SidebarContent aria-label="Admin">
+          <SidebarGroup>
+            <SidebarGroupContent>
+              <SidebarMenu aria-busy>
+                {Array.from({ length: loadingEntries }, (_, entry) => (
+                  <SidebarMenuItem key={entry}>
+                    <SidebarMenuSkeleton showIcon />
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        </SidebarContent>
       </AdminSidebarFrame>
     }
   >
