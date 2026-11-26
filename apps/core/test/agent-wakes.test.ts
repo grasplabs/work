@@ -6,7 +6,7 @@ import { startDueAgentWakes } from "../src/agent-wakes.ts";
 import { chatAgentId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { personalWorkspaceId } from "../src/personal-workspace.ts";
-import { codeResults, codeStep, says } from "./agent-chat.ts";
+import { codeResults, codeStep, says, returnedText } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
 import { answeringProvider, fakeProvider } from "./model-provider.ts";
 import {
@@ -374,7 +374,9 @@ describe("an agent's wake-ups", setUpTime, () => {
       chat?.id ?? ""
     );
     expect(results.map(({ text }) => text)).toStrictEqual([
-      "Returned:\nNobody asked for this just now, so the agent can only read. What it wants to change waits for its person.",
+      returnedText(
+        "Nobody asked for this just now, so the agent can only read. What it wants to change waits for its person."
+      ),
     ]);
   });
 

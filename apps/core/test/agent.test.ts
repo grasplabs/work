@@ -25,6 +25,7 @@ import {
   says,
   testRunOpening,
   transcript,
+  returnedText,
 } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
 import { chatsWith, runRecords } from "./agent-code-runs.ts";
@@ -128,7 +129,7 @@ describe("chat agent", () => {
     });
     // The code ran with the API core gave it, which knows whom it acts for.
     await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
-      { isError: false, text: `Returned:\n${personId}` },
+      { isError: false, text: returnedText(personId) },
     ]);
     // The model saw the API listed, read its declaration, then the step's
     // result.

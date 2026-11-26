@@ -172,6 +172,7 @@ const flagMessage = defineTool({
   // A flag is a state: set again, it leaves the same flag.
   repeatable: true,
   resource: "mailbox",
+  mail: true,
   routes: [meRoute, get("/messages/{message}"), patch("/messages/{message}")],
   describe: {
     title: "Flag an email",
@@ -260,6 +261,7 @@ const categoriseMessage = defineTool({
   // It sets the whole list: set again, it leaves the same categories.
   repeatable: true,
   resource: "mailbox",
+  mail: true,
   routes: [
     meRoute,
     get("/outlook/masterCategories"),

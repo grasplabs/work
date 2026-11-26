@@ -91,6 +91,51 @@ export const nativeItemReads: Readonly<
 };
 
 /**
+ * Each native tool that reads, changes or sends email (its manifest's
+ * `mail`), by its connector's provider, then its name: whether its
+ * resource is a mailbox, and the input properties holding the addresses
+ * it mails. Core holds them to the mail rules: the shared-mailbox
+ * pointer (tool-classes.ts), a card's word that the turn read mail
+ * (channels/held.ts) and a run's mail stamps (workflows/mail-stamps.ts).
+ */
+export const nativeMailTools: Readonly<
+  Record<
+    string,
+    Readonly<
+      Record<
+        string,
+        {
+          readonly mailbox: boolean;
+          readonly recipients: readonly string[];
+        }
+      >
+    >
+  >
+> = {
+  "google": {
+    "mail.createDraft": {"mailbox":true,"recipients":["to","cc","bcc"]},
+    "mail.get": {"mailbox":true,"recipients":[]},
+    "mail.label": {"mailbox":true,"recipients":[]},
+    "mail.labels": {"mailbox":true,"recipients":[]},
+    "mail.list": {"mailbox":true,"recipients":[]},
+    "mail.readAttachment": {"mailbox":true,"recipients":[]},
+    "mail.send": {"mailbox":true,"recipients":["to","cc","bcc"]},
+  },
+  "microsoft": {
+    "mail.categorise": {"mailbox":true,"recipients":[]},
+    "mail.createDraft": {"mailbox":true,"recipients":["to","cc","bcc"]},
+    "mail.createReplyDraft": {"mailbox":true,"recipients":[]},
+    "mail.flag": {"mailbox":true,"recipients":[]},
+    "mail.get": {"mailbox":true,"recipients":[]},
+    "mail.list": {"mailbox":true,"recipients":[]},
+    "mail.move": {"mailbox":true,"recipients":[]},
+    "mail.readAttachment": {"mailbox":true,"recipients":[]},
+    "mail.send": {"mailbox":true,"recipients":["to","cc","bcc"]},
+    "mail.thread": {"mailbox":true,"recipients":[]},
+  },
+};
+
+/**
  * Each native connector's syncs, by its provider: the feeds it can list
  * and follow the changes of. A connection of a provider in none can't
  * tell Grasp what changed in it (core's brain-rpc.ts shows it as a gap).

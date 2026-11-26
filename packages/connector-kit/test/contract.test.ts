@@ -149,6 +149,46 @@ describe("a tool", () => {
     );
   });
 
+  it("handles mail, mailing someone only as a write naming its own input properties, as the manifest then says", () => {
+    const mailTool = (
+      readOnly: boolean,
+      mail: true | { recipients: readonly ("mailbox" | "to")[] }
+    ) =>
+      defineTool({
+        name: "mail.send",
+        description: "Sends mail",
+        input: z.strictObject({ mailbox: z.string(), to: z.array(z.string()) }),
+        output: z.strictObject({}),
+        readOnly,
+        reach: readOnly ? "own" : "others",
+        resource: "mailbox",
+        mail,
+        routes: [readOnly ? route : { ...route, method: "POST" }],
+        run: async () => await Promise.resolve({ output: {} }),
+      });
+    const declared = (...args: Parameters<typeof mailTool>) => {
+      try {
+        return mailTool(...args).action.mail;
+      } catch {
+        return "refused";
+      }
+    };
+
+    expect({
+      read: declared(true, true),
+      change: declared(false, true),
+      send: declared(false, { recipients: ["to"] }),
+      readMailing: declared(true, { recipients: ["to"] }),
+      noRecipients: declared(false, { recipients: [] }),
+    }).toStrictEqual({
+      read: true,
+      change: true,
+      send: { recipients: ["to"] },
+      readMailing: "refused",
+      noRecipients: "refused",
+    });
+  });
+
   it("takes strict input with a string resource property", () => {
     expect(() =>
       toolWith(

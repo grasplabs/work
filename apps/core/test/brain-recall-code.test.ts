@@ -73,7 +73,13 @@ import {
   startCandidateRun,
 } from "../src/workflows/candidate-runs.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
-import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
+import {
+  chatOf,
+  codeResults,
+  codeStep,
+  says,
+  returnedOf,
+} from "./agent-chat.ts";
 import { testApp } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import { failingAuditLog } from "./failing-audit-log.ts";
@@ -586,10 +592,6 @@ const recallCode = (request: unknown) =>
   codeStep(
     `export default async (self, env) => { try { return await env.brain.recall(${JSON.stringify(request)}); } catch (error) { return { failed: error.code ?? "no code", message: String(error.message) }; } };`
   );
-
-/** What the chat's code returned, its last step's. */
-const returnedOf = (text: string | undefined): unknown =>
-  JSON.parse((text ?? "").replace(/^Returned:\n/u, ""));
 
 /** The `brain.recall` audit events of `onBehalfOf`, once `count` are kept. */
 const recallEvents = async (

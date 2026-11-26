@@ -44,7 +44,7 @@ import {
   signedUngrantedCall,
 } from "./bindings.ts";
 import type { ConnectionGrant, UngrantedRead } from "./bindings.ts";
-import { readsMail, textsOf } from "./channels/stephen-rules.ts";
+import { textsOf } from "./channels/stephen-rules.ts";
 import {
   askInChat,
   askableConnections,
@@ -218,7 +218,8 @@ const cutWords = (text: string): string => {
  * failed; the literal is one line, so where the words end is plain even
  * with the run's stack after them. The run read them from outside (`call`
  * records the error's output as read), so the model reads them as
- * outside data, between the run's own tags (code-mode.ts `describeRun`).
+ * outside data, a value in the run's result whose `readFrom` names the
+ * connection (code-mode.ts `describeRun`).
  * Words that are only blanks go nowhere. Any other error as it is.
  */
 const withServerWords = (error: unknown): unknown => {
@@ -766,7 +767,6 @@ const checkedForChatApp = async (
 const keptForChatApp = async (
   env: Env,
   scope: AgentScope,
-  action: string,
   shape: ActionShape,
   output: unknown
 ): Promise<void> => {
@@ -774,7 +774,7 @@ const keptForChatApp = async (
     scope.chatId,
     scope.runId,
     textsOf(output),
-    { read: readsMail(action) ? "mail" : "record", where: shape.provider }
+    { read: shape.mail === true ? "mail" : "record", where: shape.provider }
   );
   if (kept !== "open") {
     throw runRefusal(kept);
@@ -1282,7 +1282,7 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
     // unmarked: before it is kept or recorded, and before it is handed over.
     await markIfNotEveryones(this.env, scope, connectionId);
     if (shape !== undefined) {
-      await keptForChatApp(this.env, scope, request.action, shape, output);
+      await keptForChatApp(this.env, scope, shape, output);
     }
     await recordSources(this.env, scope, [connectionId], [read]);
     // Recorded with the chat first: a run that ended since keeps nothing.

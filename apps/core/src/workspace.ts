@@ -62,6 +62,7 @@ import {
 import type { ChatId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { modelEfforts, modelErrors } from "@grasp-os/shared/models";
+import type { ModelWait } from "@grasp-os/shared/models";
 import {
   bindingNameSchema,
   permissionActionSchema,
@@ -783,16 +784,14 @@ const namedPerson = async (
   return name === undefined ? {} : { person: { name } };
 };
 
-/** Whether a turn builds (`TurnContext.builds`): its person's own chat in Grasp's app, with a role that builds. */
+/** Whether a turn builds (`TurnContext.builds`): its person's own chat, with a role that builds. */
 const buildsIn = ({
   shared,
-  via,
   role,
 }: {
   shared: boolean;
-  via: ChatChannel;
   role: Role | undefined;
-}): boolean => !shared && via === "web" && role !== undefined && canBuild(role);
+}): boolean => !shared && role !== undefined && canBuild(role);
 
 /**
  * Which agents a turn may draft for its person (`TurnContext.drafts`):
@@ -1094,6 +1093,11 @@ export class Workspace extends DurableObject<Env> {
   readonly #stopped = new Map<ChatId, string>();
   /** The chats whose turn checks the drafts it wrote now (`turnChecking`). */
   readonly #checking = new Set<ChatId>();
+  /**
+   * What each chat's turn waits on now from its model, where it waits
+   * (`turnWaiting`). In memory only.
+   */
+  readonly #waits = new Map<ChatId, ModelWait>();
 
   /**
    * Turns `send` started, each settled once its turn ends: the alarm waits
@@ -2866,6 +2870,7 @@ export class Workspace extends DurableObject<Env> {
     }
     this.#turns.delete(chatId);
     this.#partials.delete(chatId);
+    this.#waits.delete(chatId);
     // A turn that stopped short of a step's result shows no output on.
     const output = this.#outputs.get(chatId);
     clearTimeout(output?.timer);
@@ -3244,12 +3249,12 @@ export class Workspace extends DurableObject<Env> {
     // A chat that came through a chat platform: how to answer there.
     const channel = via === "web" ? undefined : await channelText();
     // Only who builds is told how, reads Grasp's docs and gets the APIs
-    // and tools to build with, in their own chat in Grasp's app: thousands
-    // of tokens in every request, of no use to anyone else. Building, an
-    // App included, needs a role that builds (app-access.ts); a chat app
-    // has no plan card, App preview or workflow page to build with.
+    // and tools to build with, in their own chat, in Grasp's app or their
+    // direct message on a chat app: thousands of tokens in every request,
+    // of no use to anyone else. Building, an App included, needs a role
+    // that builds (app-access.ts).
     const role = await memberRole(this.env.DB, scope.personId);
-    const builds = buildsIn({ shared, via, role });
+    const builds = buildsIn({ shared, role });
     // Who drafts an agent for its person to make (`draftAgent`).
     const drafts = draftsOf({ shared, unattended, via, role });
     // The documents an admin gave the chat's agent, by name.
@@ -5566,6 +5571,22 @@ export class Workspace extends DurableObject<Env> {
     this.#changed(chat.data);
   }
 
+  /**
+   * Shows the chat's watchers what its turn's model request waits on (the
+   * model gateway's `ModelWait`), or that it no longer waits.
+   */
+  turnWaiting(chatId: ChatId, waiting: ModelWait | null): void {
+    if (this.chatState(chatId) === undefined || this.#deleting.has(chatId)) {
+      return;
+    }
+    if (waiting === null) {
+      this.#waits.delete(chatId);
+    } else {
+      this.#waits.set(chatId, waiting);
+    }
+    this.#changed(chatId);
+  }
+
   /** Tells the chat's watchers it changed, with the messages just stored. */
   #changed(chatId: ChatId, messages: readonly ChatMessage[] = []): void {
     for (const watch of this.#watchers.get(chatId)?.values() ?? []) {
@@ -5594,6 +5615,7 @@ export class Workspace extends DurableObject<Env> {
       held: this.#heldVersions.get(chatId) ?? 0,
       worked: this.#worked.get(chatId) ?? 0,
       checking: this.#checking.has(chatId),
+      waiting: this.#waits.get(chatId) ?? null,
     };
   }
 

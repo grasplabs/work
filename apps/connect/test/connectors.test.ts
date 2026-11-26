@@ -1,3 +1,4 @@
+import { v } from "@grasp-os/runtime/connector";
 import { signCapability } from "@grasp-os/shared/capability";
 import { companyToolClasses, toolClassOf } from "@grasp-os/shared/connect";
 import { env, exports } from "cloudflare:workers";
@@ -723,6 +724,49 @@ describe("a connector's code", { timeout: 60_000 }, () => {
     );
   });
 
+  it("sends in a path parameter exactly the values v.string().segment() takes", async () => {
+    const connection = await connectionTo("sample");
+    const values = [
+      "a1",
+      "AAMkAD=",
+      "O'Brien & Co",
+      "münchen",
+      "v1.0",
+      "$value",
+      "batches",
+      "",
+      ".",
+      "..",
+      "a1/..",
+      "a\\b",
+      "a?b",
+      "a#b",
+      "a%2Fb",
+      "a;b",
+      "19:chat",
+      "a\nb",
+      "batch",
+      "$Batch",
+    ];
+    const sentPaths = new Set<string>();
+    for (const value of values) {
+      const path = `/v1/probe/${encodeURIComponent(value)}`;
+      // oxlint-disable-next-line no-await-in-loop -- one at a time, to tell which went out
+      await probe(connection, { url: `https://${sampleHost}${path}` });
+      if (api.sent.some((request) => request.path === path)) {
+        sentPaths.add(path);
+      }
+    }
+    const segment = v.string().segment();
+    const taken = values.filter(
+      (value) => segment["~standard"].validate(value).issues === undefined
+    );
+    expect(taken).toHaveLength(7);
+    expect([...sentPaths]).toStrictEqual(
+      taken.map((value) => `/v1/probe/${encodeURIComponent(value)}`)
+    );
+  });
+
   it("reaches only the resource its capability names", async () => {
     const connection = await connectionTo("sample");
     const scoped = async (mailbox: string) =>
@@ -742,7 +786,7 @@ describe("a connector's code", { timeout: 60_000 }, () => {
     expect(api.sent).toHaveLength(1);
   });
 
-  it("can't override the method its action declares", async () => {
+  it("can't override the method or the path its action declares", async () => {
     const connection = await connectionTo("sample");
     await probe(connection, {
       url: `https://${sampleHost}/v1/probe/ok`,
@@ -751,6 +795,8 @@ describe("a connector's code", { timeout: 60_000 }, () => {
         ["x-http-method-override", "DELETE"],
         ["x-http-method", "DELETE"],
         ["x-method-override", "DELETE"],
+        ["x-original-url", "/v1/admin"],
+        ["x-rewrite-url", "/v1/admin"],
         ["te", "trailers"],
       ],
     });
@@ -759,6 +805,8 @@ describe("a connector's code", { timeout: 60_000 }, () => {
       "x-http-method-override",
       "x-http-method",
       "x-method-override",
+      "x-original-url",
+      "x-rewrite-url",
       "te",
     ]) {
       expect(api.sent[0]?.headers).not.toHaveProperty(name);

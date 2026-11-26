@@ -3,7 +3,6 @@ import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "@earendil-works/pi-ai";
 import type { Message, Static, TSchema } from "@earendil-works/pi-ai";
 import type { ToolRegistration } from "@earendil-works/pi-durable";
-import { agentErrors } from "@grasp-os/shared/agent";
 import { brainQuestionMaxLength } from "@grasp-os/shared/brain-sources";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { env, exports } from "cloudflare:workers";
@@ -14,7 +13,13 @@ import type { DedicatedToolName } from "./agent-messages.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import type { CodeRunEnd, CodeRuns, CodeStepDetails } from "./agent.ts";
 import { searchBrainFor } from "./brain-search.ts";
-import { codeLimits, describeRun, sourceHash, utf8Bytes } from "./code-mode.ts";
+import {
+  codeLimits,
+  describeRun,
+  describeText,
+  sourceHash,
+  utf8Bytes,
+} from "./code-mode.ts";
 import type { CodeRunStatus } from "./code-run-statuses.ts";
 
 // The chat's tools for what it does most (GRA-1470), besides `executeCode`:
@@ -61,8 +66,9 @@ export interface ToolDeps {
  * call's input as its source), its stub's calls answering only while it
  * is open, and closed however it ends. What it returned reaches the model
  * as a code run's result does (`describeRun`: redacted, within the same
- * budget); what it threw, as its error. A call a revocation closed hands
- * on nothing.
+ * budget), or, as text it read nothing from outside for, as that text
+ * (`describeText`); what it threw, as its error. A call a revocation
+ * closed hands on nothing.
  */
 const callAs = async (
   { scope, runs }: ToolDeps,
@@ -92,7 +98,7 @@ const callAs = async (
     }
   };
   let status: CodeRunStatus = "crashed";
-  let result: string | undefined;
+  let value: unknown;
   let failure: string | undefined;
   let end: CodeRunEnd;
   const files: Record<string, string> = {};
@@ -102,8 +108,7 @@ const callAs = async (
   };
   try {
     guard();
-    const value = await call({ ...scope, runId }, guard, know);
-    result = typeof value === "string" ? value : JSON.stringify(value ?? null);
+    value = await call({ ...scope, runId }, guard, know);
     status = "completed";
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);
@@ -116,19 +121,16 @@ const callAs = async (
     end = await (closing ?? runs.close(runId, status));
   }
   const { status: ended, readFrom } = end;
+  // Text it read nothing from outside for, a file's lines, as itself; the
+  // rest as one JSON object (code-mode.ts has the rule).
   const text =
-    ended === "revoked"
-      ? describeRun({
-          status: ended,
-          logs: [],
-          error: agentErrors.create("agent.run_revoked").message,
-        })
+    ended === "completed" && readFrom.length === 0 && typeof value === "string"
+      ? describeText(value)
       : describeRun(
           {
             status: ended,
-            logs: [],
-            ...(result === undefined ? {} : { result }),
-            ...(failure === undefined ? {} : { error: failure }),
+            result: JSON.stringify(value ?? null),
+            error: failure,
           },
           readFrom
         );

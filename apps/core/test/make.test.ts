@@ -17,6 +17,7 @@ import {
   personalChatsOf,
   says,
   toolStep,
+  returnedText,
 } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
 import { release } from "./apps.ts";
@@ -215,7 +216,7 @@ describe("Make something", { timeout: 120_000 }, () => {
       made: await madeBy(builder),
     }).toStrictEqual({
       requests: 2,
-      code: "Returned:\nnothing",
+      code: returnedText("nothing"),
       planned: { ...closePlan, callId: "string" },
       title: "Month-end close",
       made: before,

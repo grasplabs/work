@@ -94,6 +94,7 @@ const createReplyDraft = defineTool({
   reach: "company",
   destructive: false,
   resource: "mailbox",
+  mail: true,
   // One write, and no send: Graph's `send` routes are never declared, so
   // the egress lets no call of this tool send anything. `createReply` with
   // the recipients set serves reply-all too, as one tool has one write.

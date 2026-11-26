@@ -7,7 +7,7 @@ import { appKind } from "../src/apps.ts";
 import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
 import { keepMadeInChat } from "../src/drafts.ts";
 import { workspace } from "../src/durable-objects.ts";
-import { codeStep, model, says } from "./agent-chat.ts";
+import { codeStep, model, returnedText, says } from "./agent-chat.ts";
 import { botConnectorMembersUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { saveInstructions } from "./instruction-saves.ts";
@@ -72,6 +72,10 @@ const save = async (
   text: string
 ) => await saveInstructions(by.api, file, text);
 
+/** A result as a request carries it: JSON text in a JSON string. */
+const sent = (value: string): string =>
+  JSON.stringify(returnedText(value)).slice(1, -1);
+
 describe("in a group chat", setUpTime, () => {
   it("answers in a chat of its own for the group, read from its roster, which is nobody's private conversation", async () => {
     const ann = await member(idp, says("In private."), says("In the group."));
@@ -121,9 +125,9 @@ describe("in a group chat", setUpTime, () => {
       JSON.stringify(ann.provider.requests[index]?.body ?? null);
     // Neither has Knowledge, which no chat reads since the Brain replaced
     // it: in private the agent's APIs, the Brain's with no grant, but
-    // building's, which a chat app doesn't do; in the group none of them.
-    expect(told(1)).toContain('"Returned:\\nconnections,apps,workflows,brain"');
-    expect(told(3)).toContain('"Returned:\\n"');
+    // building's, as she doesn't build; in the group none of them.
+    expect(told(1)).toContain(sent("connections,apps,workflows,brain"));
+    expect(told(3)).toContain(sent(""));
     // Nor any of the tools that write, ask for a connection or read the
     // brain: each calls an API the group's chat doesn't have.
     expect([dedicated.test(told(0)), dedicated.test(told(2))]).toStrictEqual([

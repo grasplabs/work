@@ -6,9 +6,19 @@
 
 export { v } from "../common/values.ts";
 export type { Infer, InferInput } from "../common/value-types.ts";
-export { auth, defineConnector, event, page, sync, tool } from "./define.ts";
+export {
+  attachedFiles,
+  attachments,
+  auth,
+  defineConnector,
+  event,
+  page,
+  sync,
+  tool,
+} from "./define.ts";
 export type {
   AccountDeclaration,
+  AttachedFile,
   Checkpoint,
   ConnectorAuth,
   ConnectorDeclaration,
@@ -80,7 +90,6 @@ export {
   generatedContractMajor,
   generatedContracts,
   hostSchema,
-  maxProvenanceItems,
   mcpServerKey,
   provenanceSchema,
   readAsSchema,
@@ -116,9 +125,9 @@ export {
   egressKind,
   egressTooLargeMessage,
   findMetaKey,
-  forbiddenInValue,
   httpMethods,
   maxChangeBytes,
+  maxProvenanceItems,
   maxRetryAfterSeconds,
   mcpProtocolVersion,
   notPerformedMetaKey,
@@ -126,7 +135,6 @@ export {
   pathMatches,
   provenanceMetaKey,
   resourceMetaKey,
-  segmentValuePattern,
   stampHeader,
   stampMetaKey,
   stampPattern,
@@ -134,6 +142,10 @@ export {
   syncPlacesMethod,
 } from "./protocol.ts";
 export type { EgressKind } from "./protocol.ts";
+export {
+  forbiddenInValue,
+  segmentValuePattern,
+} from "../common/value-formats.ts";
 export {
   accountLookupSchema,
   endpointHost,
@@ -170,6 +182,7 @@ export {
   isJsonArray,
   isNeverPath,
   isNeverTool,
+  readsMailByRules,
   ruledDeclaration,
   topNames,
 } from "./tool-rules.ts";
