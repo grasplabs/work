@@ -8310,7 +8310,6 @@ msgid "Groups of teams"
 msgstr "Groepen van teams"
 
 #: src/drafts/sharing.tsx
-#: src/people/person-picker.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/erasures.tsx
 msgid "Guest"
@@ -11501,10 +11500,6 @@ msgstr "Nog niemand heeft een app met je gedeeld."
 msgid "No one yet: open it to add people"
 msgstr "Nog niemand: open het om mensen toe te voegen"
 
-#: src/people/person-picker.tsx
-msgid "No owner yet"
-msgstr "Nog geen eigenaar"
-
 #: src/apps/app-page.tsx
 msgid "No page yet"
 msgstr "Nog geen pagina"
@@ -11719,10 +11714,6 @@ msgstr "Niemand ziet de records in {table}, ook Sam niet."
 #: src/connections/connected-dialog.tsx
 msgid "Nobody uses it in chat until you choose who may, and Apps and workflows only through the permissions you grant."
 msgstr "Niemand gebruikt het in een chat tot je kiest wie het mag, en Apps en workflows alleen via de rechten die je geeft."
-
-#: src/people/person-picker.tsx
-msgid "Nobody with that name."
-msgstr "Niemand met die naam."
 
 #: src/agents/agent-facts.tsx
 #: src/agents/new-agent.tsx
@@ -13178,14 +13169,6 @@ msgctxt "who answers for an app"
 msgid "Owner"
 msgstr "Eigenaar"
 
-#: src/people/person-picker.tsx
-msgid "Owner: {owner}. Change owner"
-msgstr "Eigenaar: {owner}. Eigenaar wijzigen"
-
-#: src/people/person-picker.tsx
-msgid "Owner: nobody yet. Change owner"
-msgstr "Eigenaar: nog niemand. Eigenaar wijzigen"
-
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Owns"
@@ -14160,10 +14143,6 @@ msgstr "Het lezen bleef mislukken, dus je triggers daar starten voorlopig niets 
 msgid "Reading its instructions…"
 msgstr "Leest zijn instructies…"
 
-#: src/people/people-teams-picker.tsx
-msgid "Reading people and teams…"
-msgstr "Mensen en teams worden gelezen…"
-
 #: src/connections/sync-places.tsx
 msgid "Reading the places"
 msgstr "Plekken worden gelezen"
@@ -14183,10 +14162,6 @@ msgstr "Werkruimte wordt gelezen"
 #: src/activity/audit-words.ts
 msgid "Reading what changed at a connection failed"
 msgstr "Lezen wat er bij een verbinding veranderd is, is mislukt"
-
-#: src/people/person-picker.tsx
-msgid "Reading who can own it…"
-msgstr "Lezen wie eigenaar kan zijn…"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Reading your staff list"
@@ -15511,11 +15486,6 @@ msgstr "Leden zoeken"
 msgid "Search models"
 msgstr "Modellen zoeken"
 
-#: src/people/person-picker.tsx
-msgid "Search people"
-msgstr "Personen zoeken"
-
-#: src/people/people-teams-picker.tsx
 #: src/projects/project-people.tsx
 msgid "Search people and teams"
 msgstr "Mensen en teams zoeken"

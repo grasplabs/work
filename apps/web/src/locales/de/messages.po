@@ -8310,7 +8310,6 @@ msgid "Groups of teams"
 msgstr "Gruppen von Teams"
 
 #: src/drafts/sharing.tsx
-#: src/people/person-picker.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/erasures.tsx
 msgid "Guest"
@@ -11501,10 +11500,6 @@ msgstr "Noch hat niemand eine App mit Ihnen geteilt."
 msgid "No one yet: open it to add people"
 msgstr "Noch niemand: Öffnen Sie es, um Personen hinzuzufügen"
 
-#: src/people/person-picker.tsx
-msgid "No owner yet"
-msgstr "Noch niemand verantwortlich"
-
 #: src/apps/app-page.tsx
 msgid "No page yet"
 msgstr "Noch keine Seite"
@@ -11719,10 +11714,6 @@ msgstr "Niemand sieht die Datensätze in {table}, auch Sam nicht."
 #: src/connections/connected-dialog.tsx
 msgid "Nobody uses it in chat until you choose who may, and Apps and workflows only through the permissions you grant."
 msgstr "Niemand nutzt es im Chat, bis Sie wählen, wer es darf, und Apps und Workflows nur über die Berechtigungen, die Sie erteilen."
-
-#: src/people/person-picker.tsx
-msgid "Nobody with that name."
-msgstr "Niemand mit diesem Namen."
 
 #: src/agents/agent-facts.tsx
 #: src/agents/new-agent.tsx
@@ -13178,14 +13169,6 @@ msgctxt "who answers for an app"
 msgid "Owner"
 msgstr "Verantwortliche Person"
 
-#: src/people/person-picker.tsx
-msgid "Owner: {owner}. Change owner"
-msgstr "Verantwortlich: {owner}. Ändern"
-
-#: src/people/person-picker.tsx
-msgid "Owner: nobody yet. Change owner"
-msgstr "Verantwortlich: noch niemand. Ändern"
-
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Owns"
@@ -14160,10 +14143,6 @@ msgstr "Das Lesen ist wiederholt fehlgeschlagen, deshalb starten deine Auslöser
 msgid "Reading its instructions…"
 msgstr "Liest seine Anweisungen…"
 
-#: src/people/people-teams-picker.tsx
-msgid "Reading people and teams…"
-msgstr "Personen und Teams werden gelesen…"
-
 #: src/connections/sync-places.tsx
 msgid "Reading the places"
 msgstr "Orte werden gelesen"
@@ -14183,10 +14162,6 @@ msgstr "Workspace wird gelesen"
 #: src/activity/audit-words.ts
 msgid "Reading what changed at a connection failed"
 msgstr "Lesen, was sich bei einer Verbindung geändert hat, ist fehlgeschlagen"
-
-#: src/people/person-picker.tsx
-msgid "Reading who can own it…"
-msgstr "Liest, wer verantwortlich sein kann…"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Reading your staff list"
@@ -15511,11 +15486,6 @@ msgstr "Mitglieder suchen"
 msgid "Search models"
 msgstr "Modelle suchen"
 
-#: src/people/person-picker.tsx
-msgid "Search people"
-msgstr "Personen suchen"
-
-#: src/people/people-teams-picker.tsx
 #: src/projects/project-people.tsx
 msgid "Search people and teams"
 msgstr "Personen und Teams suchen"
