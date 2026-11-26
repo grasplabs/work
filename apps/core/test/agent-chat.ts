@@ -5,12 +5,13 @@ import type {
   ToolExecutionApi,
   ToolRegistration,
 } from "@earendil-works/pi-durable";
-import { workspaceIdSchema } from "@grasp-os/shared/ids";
+import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { ChatId } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
-import { env } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { z } from "zod";
 
+import type { AgentScope } from "../src/agent-scope.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { fakeProvider, testModel } from "./model-provider.ts";
@@ -394,3 +395,29 @@ export const openTestRun = async (
   chatId: ChatId,
   turnId: string = crypto.randomUUID()
 ): Promise<string> => await stub.openCodeRun(chatId, turnId, testRunOpening);
+
+/**
+ * The building APIs as the code of `chat`'s person reaches them, in a code
+ * run of the chat's own, whether or not the chat's turns offer them: the
+ * APIs themselves decide what their person may do, whatever the model was
+ * offered or calls.
+ */
+export const buildingApisIn = async (
+  chat: Pick<
+    Awaited<ReturnType<typeof chatOf>>,
+    "id" | "stub" | "chat" | "personId" | "agent"
+  >
+) => {
+  const chatId = chatIdSchema.parse(chat.chat.id);
+  const scope: AgentScope = {
+    workspaceId: chat.id,
+    agentId: chat.agent.agentId,
+    chatId,
+    personId: chat.personId,
+    runId: await openTestRun(chat.stub, chatId),
+  };
+  return {
+    build: exports.BuildApi({ props: scope }),
+    workflowBuild: exports.WorkflowBuildApi({ props: scope }),
+  };
+};

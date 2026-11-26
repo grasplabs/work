@@ -13,7 +13,6 @@ import { Route as ShellRouteImport } from './routes/_shell'
 import { Route as ChatLinkRouteImport } from './routes/chat-link'
 import { Route as GuestRouteImport } from './routes/guest'
 import { Route as InterviewRouteImport } from './routes/interview'
-import { Route as KitRouteImport } from './routes/kit'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as StaffRouteImport } from './routes/staff'
@@ -47,11 +46,9 @@ import { Route as ShellSettingsAiProvidersRouteImport } from './routes/_shell.se
 import { Route as ShellSettingsAppearanceRouteImport } from './routes/_shell.settings.appearance'
 import { Route as ShellSettingsAuditRouteImport } from './routes/_shell.settings.audit'
 import { Route as ShellSettingsBillingRouteImport } from './routes/_shell.settings.billing'
-import { Route as ShellSettingsBrainRouteImport } from './routes/_shell.settings.brain'
 import { Route as ShellSettingsInstructionsRouteImport } from './routes/_shell.settings.instructions'
 import { Route as ShellSettingsMembersRouteImport } from './routes/_shell.settings.members'
 import { Route as ShellSettingsOnboardingRouteImport } from './routes/_shell.settings.onboarding'
-import { Route as ShellSettingsOutcomesRouteImport } from './routes/_shell.settings.outcomes'
 import { Route as ShellSettingsProfileRouteImport } from './routes/_shell.settings.profile'
 import { Route as ShellSettingsSecurityRouteImport } from './routes/_shell.settings.security'
 import { Route as ShellSettingsTeamsRouteImport } from './routes/_shell.settings.teams'
@@ -62,8 +59,6 @@ import { Route as ShellWorkflowsWorkflowRouteImport } from './routes/_shell.work
 import { Route as ShellWorkflowsRunsRouteImport } from './routes/_shell.workflows.runs'
 import { Route as AppsAppDraftRouteImport } from './routes/apps.$app.draft'
 import { Route as AppsAppFullRouteImport } from './routes/apps.$app.full'
-import { Route as KitComponentsNameRouteImport } from './routes/kit_.components.$name'
-import { Route as KitExamplesNameRouteImport } from './routes/kit_.examples.$name'
 import { Route as ShellAppsAppSettingsRouteImport } from './routes/_shell.apps.$app_.settings'
 import { Route as ShellBrainSectionsSectionIdRouteImport } from './routes/_shell.brain.sections.$sectionId'
 import { Route as AppsAppDraftSplatRouteImport } from './routes/apps.$app.draft.$'
@@ -88,11 +83,6 @@ const GuestRoute = GuestRouteImport.update({
 const InterviewRoute = InterviewRouteImport.update({
   id: '/interview',
   path: '/interview',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const KitRoute = KitRouteImport.update({
-  id: '/kit',
-  path: '/kit',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SetupRoute = SetupRouteImport.update({
@@ -262,11 +252,6 @@ const ShellSettingsBillingRoute = ShellSettingsBillingRouteImport.update({
   path: '/billing',
   getParentRoute: () => ShellSettingsRoute,
 } as any)
-const ShellSettingsBrainRoute = ShellSettingsBrainRouteImport.update({
-  id: '/brain',
-  path: '/brain',
-  getParentRoute: () => ShellSettingsRoute,
-} as any)
 const ShellSettingsInstructionsRoute =
   ShellSettingsInstructionsRouteImport.update({
     id: '/instructions',
@@ -281,11 +266,6 @@ const ShellSettingsMembersRoute = ShellSettingsMembersRouteImport.update({
 const ShellSettingsOnboardingRoute = ShellSettingsOnboardingRouteImport.update({
   id: '/onboarding',
   path: '/onboarding',
-  getParentRoute: () => ShellSettingsRoute,
-} as any)
-const ShellSettingsOutcomesRoute = ShellSettingsOutcomesRouteImport.update({
-  id: '/outcomes',
-  path: '/outcomes',
   getParentRoute: () => ShellSettingsRoute,
 } as any)
 const ShellSettingsProfileRoute = ShellSettingsProfileRouteImport.update({
@@ -338,16 +318,6 @@ const AppsAppFullRoute = AppsAppFullRouteImport.update({
   path: '/apps/$app/full',
   getParentRoute: () => rootRouteImport,
 } as any)
-const KitComponentsNameRoute = KitComponentsNameRouteImport.update({
-  id: '/kit_/components/$name',
-  path: '/kit/components/$name',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const KitExamplesNameRoute = KitExamplesNameRouteImport.update({
-  id: '/kit_/examples/$name',
-  path: '/kit/examples/$name',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ShellAppsAppSettingsRoute = ShellAppsAppSettingsRouteImport.update({
   id: '/apps/$app_/settings',
   path: '/apps/$app/settings',
@@ -386,7 +356,6 @@ export interface FileRoutesByFullPath {
   '/chat-link': typeof ChatLinkRoute
   '/guest': typeof GuestRoute
   '/interview': typeof InterviewRoute
-  '/kit': typeof KitRoute
   '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
   '/staff': typeof StaffRoute
@@ -413,11 +382,9 @@ export interface FileRoutesByFullPath {
   '/settings/appearance': typeof ShellSettingsAppearanceRoute
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/billing': typeof ShellSettingsBillingRoute
-  '/settings/brain': typeof ShellSettingsBrainRoute
   '/settings/instructions': typeof ShellSettingsInstructionsRoute
   '/settings/members': typeof ShellSettingsMembersRoute
   '/settings/onboarding': typeof ShellSettingsOnboardingRoute
-  '/settings/outcomes': typeof ShellSettingsOutcomesRoute
   '/settings/profile': typeof ShellSettingsProfileRoute
   '/settings/security': typeof ShellSettingsSecurityRoute
   '/settings/teams': typeof ShellSettingsTeamsRoute
@@ -427,8 +394,6 @@ export interface FileRoutesByFullPath {
   '/workflows/runs': typeof ShellWorkflowsRunsRoute
   '/apps/$app/draft': typeof AppsAppDraftRouteWithChildren
   '/apps/$app/full': typeof AppsAppFullRouteWithChildren
-  '/kit/components/$name': typeof KitComponentsNameRoute
-  '/kit/examples/$name': typeof KitExamplesNameRoute
   '/agents/': typeof ShellAgentsIndexRoute
   '/apps/': typeof ShellAppsIndexRoute
   '/brain/': typeof ShellBrainIndexRoute
@@ -447,7 +412,6 @@ export interface FileRoutesByTo {
   '/chat-link': typeof ChatLinkRoute
   '/guest': typeof GuestRoute
   '/interview': typeof InterviewRoute
-  '/kit': typeof KitRoute
   '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
   '/staff': typeof StaffRoute
@@ -473,11 +437,9 @@ export interface FileRoutesByTo {
   '/settings/appearance': typeof ShellSettingsAppearanceRoute
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/billing': typeof ShellSettingsBillingRoute
-  '/settings/brain': typeof ShellSettingsBrainRoute
   '/settings/instructions': typeof ShellSettingsInstructionsRoute
   '/settings/members': typeof ShellSettingsMembersRoute
   '/settings/onboarding': typeof ShellSettingsOnboardingRoute
-  '/settings/outcomes': typeof ShellSettingsOutcomesRoute
   '/settings/profile': typeof ShellSettingsProfileRoute
   '/settings/security': typeof ShellSettingsSecurityRoute
   '/settings/teams': typeof ShellSettingsTeamsRoute
@@ -487,8 +449,6 @@ export interface FileRoutesByTo {
   '/workflows/runs': typeof ShellWorkflowsRunsRoute
   '/apps/$app/draft': typeof AppsAppDraftRouteWithChildren
   '/apps/$app/full': typeof AppsAppFullRouteWithChildren
-  '/kit/components/$name': typeof KitComponentsNameRoute
-  '/kit/examples/$name': typeof KitExamplesNameRoute
   '/agents': typeof ShellAgentsIndexRoute
   '/apps': typeof ShellAppsIndexRoute
   '/brain': typeof ShellBrainIndexRoute
@@ -509,7 +469,6 @@ export interface FileRoutesById {
   '/chat-link': typeof ChatLinkRoute
   '/guest': typeof GuestRoute
   '/interview': typeof InterviewRoute
-  '/kit': typeof KitRoute
   '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
   '/staff': typeof StaffRoute
@@ -537,11 +496,9 @@ export interface FileRoutesById {
   '/_shell/settings/appearance': typeof ShellSettingsAppearanceRoute
   '/_shell/settings/audit': typeof ShellSettingsAuditRoute
   '/_shell/settings/billing': typeof ShellSettingsBillingRoute
-  '/_shell/settings/brain': typeof ShellSettingsBrainRoute
   '/_shell/settings/instructions': typeof ShellSettingsInstructionsRoute
   '/_shell/settings/members': typeof ShellSettingsMembersRoute
   '/_shell/settings/onboarding': typeof ShellSettingsOnboardingRoute
-  '/_shell/settings/outcomes': typeof ShellSettingsOutcomesRoute
   '/_shell/settings/profile': typeof ShellSettingsProfileRoute
   '/_shell/settings/security': typeof ShellSettingsSecurityRoute
   '/_shell/settings/teams': typeof ShellSettingsTeamsRoute
@@ -551,8 +508,6 @@ export interface FileRoutesById {
   '/_shell/workflows/runs': typeof ShellWorkflowsRunsRoute
   '/apps/$app/draft': typeof AppsAppDraftRouteWithChildren
   '/apps/$app/full': typeof AppsAppFullRouteWithChildren
-  '/kit_/components/$name': typeof KitComponentsNameRoute
-  '/kit_/examples/$name': typeof KitExamplesNameRoute
   '/_shell/agents/': typeof ShellAgentsIndexRoute
   '/_shell/apps/': typeof ShellAppsIndexRoute
   '/_shell/brain/': typeof ShellBrainIndexRoute
@@ -574,7 +529,6 @@ export interface FileRouteTypes {
     | '/chat-link'
     | '/guest'
     | '/interview'
-    | '/kit'
     | '/setup'
     | '/sign-in'
     | '/staff'
@@ -601,11 +555,9 @@ export interface FileRouteTypes {
     | '/settings/appearance'
     | '/settings/audit'
     | '/settings/billing'
-    | '/settings/brain'
     | '/settings/instructions'
     | '/settings/members'
     | '/settings/onboarding'
-    | '/settings/outcomes'
     | '/settings/profile'
     | '/settings/security'
     | '/settings/teams'
@@ -615,8 +567,6 @@ export interface FileRouteTypes {
     | '/workflows/runs'
     | '/apps/$app/draft'
     | '/apps/$app/full'
-    | '/kit/components/$name'
-    | '/kit/examples/$name'
     | '/agents/'
     | '/apps/'
     | '/brain/'
@@ -635,7 +585,6 @@ export interface FileRouteTypes {
     | '/chat-link'
     | '/guest'
     | '/interview'
-    | '/kit'
     | '/setup'
     | '/sign-in'
     | '/staff'
@@ -661,11 +610,9 @@ export interface FileRouteTypes {
     | '/settings/appearance'
     | '/settings/audit'
     | '/settings/billing'
-    | '/settings/brain'
     | '/settings/instructions'
     | '/settings/members'
     | '/settings/onboarding'
-    | '/settings/outcomes'
     | '/settings/profile'
     | '/settings/security'
     | '/settings/teams'
@@ -675,8 +622,6 @@ export interface FileRouteTypes {
     | '/workflows/runs'
     | '/apps/$app/draft'
     | '/apps/$app/full'
-    | '/kit/components/$name'
-    | '/kit/examples/$name'
     | '/agents'
     | '/apps'
     | '/brain'
@@ -696,7 +641,6 @@ export interface FileRouteTypes {
     | '/chat-link'
     | '/guest'
     | '/interview'
-    | '/kit'
     | '/setup'
     | '/sign-in'
     | '/staff'
@@ -724,11 +668,9 @@ export interface FileRouteTypes {
     | '/_shell/settings/appearance'
     | '/_shell/settings/audit'
     | '/_shell/settings/billing'
-    | '/_shell/settings/brain'
     | '/_shell/settings/instructions'
     | '/_shell/settings/members'
     | '/_shell/settings/onboarding'
-    | '/_shell/settings/outcomes'
     | '/_shell/settings/profile'
     | '/_shell/settings/security'
     | '/_shell/settings/teams'
@@ -738,8 +680,6 @@ export interface FileRouteTypes {
     | '/_shell/workflows/runs'
     | '/apps/$app/draft'
     | '/apps/$app/full'
-    | '/kit_/components/$name'
-    | '/kit_/examples/$name'
     | '/_shell/agents/'
     | '/_shell/apps/'
     | '/_shell/brain/'
@@ -760,7 +700,6 @@ export interface RootRouteChildren {
   ChatLinkRoute: typeof ChatLinkRoute
   GuestRoute: typeof GuestRoute
   InterviewRoute: typeof InterviewRoute
-  KitRoute: typeof KitRoute
   SetupRoute: typeof SetupRoute
   SignInRoute: typeof SignInRoute
   StaffRoute: typeof StaffRoute
@@ -768,8 +707,6 @@ export interface RootRouteChildren {
   DecisionsDecisionRoute: typeof DecisionsDecisionRoute
   AppsAppDraftRoute: typeof AppsAppDraftRouteWithChildren
   AppsAppFullRoute: typeof AppsAppFullRouteWithChildren
-  KitComponentsNameRoute: typeof KitComponentsNameRoute
-  KitExamplesNameRoute: typeof KitExamplesNameRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -800,13 +737,6 @@ declare module '@tanstack/react-router' {
       path: '/interview'
       fullPath: '/interview'
       preLoaderRoute: typeof InterviewRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/kit': {
-      id: '/kit'
-      path: '/kit'
-      fullPath: '/kit'
-      preLoaderRoute: typeof KitRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/setup': {
@@ -1040,13 +970,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellSettingsBillingRouteImport
       parentRoute: typeof ShellSettingsRoute
     }
-    '/_shell/settings/brain': {
-      id: '/_shell/settings/brain'
-      path: '/brain'
-      fullPath: '/settings/brain'
-      preLoaderRoute: typeof ShellSettingsBrainRouteImport
-      parentRoute: typeof ShellSettingsRoute
-    }
     '/_shell/settings/instructions': {
       id: '/_shell/settings/instructions'
       path: '/instructions'
@@ -1066,13 +989,6 @@ declare module '@tanstack/react-router' {
       path: '/onboarding'
       fullPath: '/settings/onboarding'
       preLoaderRoute: typeof ShellSettingsOnboardingRouteImport
-      parentRoute: typeof ShellSettingsRoute
-    }
-    '/_shell/settings/outcomes': {
-      id: '/_shell/settings/outcomes'
-      path: '/outcomes'
-      fullPath: '/settings/outcomes'
-      preLoaderRoute: typeof ShellSettingsOutcomesRouteImport
       parentRoute: typeof ShellSettingsRoute
     }
     '/_shell/settings/profile': {
@@ -1143,20 +1059,6 @@ declare module '@tanstack/react-router' {
       path: '/apps/$app/full'
       fullPath: '/apps/$app/full'
       preLoaderRoute: typeof AppsAppFullRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/kit_/components/$name': {
-      id: '/kit_/components/$name'
-      path: '/kit/components/$name'
-      fullPath: '/kit/components/$name'
-      preLoaderRoute: typeof KitComponentsNameRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/kit_/examples/$name': {
-      id: '/kit_/examples/$name'
-      path: '/kit/examples/$name'
-      fullPath: '/kit/examples/$name'
-      preLoaderRoute: typeof KitExamplesNameRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_shell/apps/$app_/settings': {
@@ -1235,11 +1137,9 @@ interface ShellSettingsRouteChildren {
   ShellSettingsAppearanceRoute: typeof ShellSettingsAppearanceRoute
   ShellSettingsAuditRoute: typeof ShellSettingsAuditRoute
   ShellSettingsBillingRoute: typeof ShellSettingsBillingRoute
-  ShellSettingsBrainRoute: typeof ShellSettingsBrainRoute
   ShellSettingsInstructionsRoute: typeof ShellSettingsInstructionsRoute
   ShellSettingsMembersRoute: typeof ShellSettingsMembersRoute
   ShellSettingsOnboardingRoute: typeof ShellSettingsOnboardingRoute
-  ShellSettingsOutcomesRoute: typeof ShellSettingsOutcomesRoute
   ShellSettingsProfileRoute: typeof ShellSettingsProfileRoute
   ShellSettingsSecurityRoute: typeof ShellSettingsSecurityRoute
   ShellSettingsTeamsRoute: typeof ShellSettingsTeamsRoute
@@ -1253,11 +1153,9 @@ const ShellSettingsRouteChildren: ShellSettingsRouteChildren = {
   ShellSettingsAppearanceRoute: ShellSettingsAppearanceRoute,
   ShellSettingsAuditRoute: ShellSettingsAuditRoute,
   ShellSettingsBillingRoute: ShellSettingsBillingRoute,
-  ShellSettingsBrainRoute: ShellSettingsBrainRoute,
   ShellSettingsInstructionsRoute: ShellSettingsInstructionsRoute,
   ShellSettingsMembersRoute: ShellSettingsMembersRoute,
   ShellSettingsOnboardingRoute: ShellSettingsOnboardingRoute,
-  ShellSettingsOutcomesRoute: ShellSettingsOutcomesRoute,
   ShellSettingsProfileRoute: ShellSettingsProfileRoute,
   ShellSettingsSecurityRoute: ShellSettingsSecurityRoute,
   ShellSettingsTeamsRoute: ShellSettingsTeamsRoute,
@@ -1361,7 +1259,6 @@ const rootRouteChildren: RootRouteChildren = {
   ChatLinkRoute: ChatLinkRoute,
   GuestRoute: GuestRoute,
   InterviewRoute: InterviewRoute,
-  KitRoute: KitRoute,
   SetupRoute: SetupRoute,
   SignInRoute: SignInRoute,
   StaffRoute: StaffRoute,
@@ -1369,8 +1266,6 @@ const rootRouteChildren: RootRouteChildren = {
   DecisionsDecisionRoute: DecisionsDecisionRoute,
   AppsAppDraftRoute: AppsAppDraftRouteWithChildren,
   AppsAppFullRoute: AppsAppFullRouteWithChildren,
-  KitComponentsNameRoute: KitComponentsNameRoute,
-  KitExamplesNameRoute: KitExamplesNameRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -2332,10 +2332,6 @@ msgstr "Ausweichmodell hinzufügen"
 msgid "Add a goal"
 msgstr "Ziel hinzufügen"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Add a group"
-msgstr "Gruppe hinzufügen"
-
 #: src/settings/workspace-name.tsx
 msgid "Add a logo"
 msgstr "Logo hinzufügen"
@@ -3922,7 +3918,6 @@ msgstr "Gebunden an"
 #: src/brain/brain-section.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.brain.tsx
-#: src/settings/sections.ts
 msgid "Brain"
 msgstr "Gehirn"
 
@@ -4067,10 +4062,6 @@ msgstr "Ein Modell aufgerufen"
 msgid "Called another App"
 msgstr "Eine andere App aufgerufen"
 
-#: src/routes/_shell.settings.outcomes.tsx
-msgid "Calls"
-msgstr "Aufrufe"
-
 #: src/activity/pending.tsx
 msgid "Calls {path} of {app}. Each run can read or change whatever that function reads or changes in the App, as the person it runs for"
 msgstr "Ruft {path} von {app} auf. Jeder Lauf kann lesen oder ändern, was diese Funktion in der App liest oder ändert, als die Person, für die er läuft"
@@ -4123,7 +4114,6 @@ msgstr "Ausführen nicht möglich: {unread}"
 #: src/chat/brain-questions.tsx
 #: src/chat/chat-window.tsx
 #: src/chat/delete-chat-dialog.tsx
-#: src/confirmed.tsx
 #: src/connections/add-connector.tsx
 #: src/connections/app/words.ts
 #: src/connections/connect-dialog.tsx
@@ -4194,7 +4184,6 @@ msgstr "Fälle pro Woche: {cases}."
 #: src/agents/new-agent.tsx
 #: src/apps/app-workflows.tsx
 #: src/drafts/share-with-team.tsx
-#: src/routes/_shell.settings.outcomes.tsx
 #: src/settings/ai-providers.tsx
 msgid "Change"
 msgstr "Änderung"
@@ -4451,10 +4440,6 @@ msgstr "Ändert"
 msgctxt "a list of changes"
 msgid "Changes"
 msgstr "Änderungen"
-
-#: src/routes/_shell.settings.outcomes.tsx
-msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, in their inbox; follow up with them."
-msgstr "Änderungen, die Grasp für jemanden gesendet hat und deren Antwort verloren ging, sodass niemand sagen kann, ob sie wirksam wurden. Nur diese Person kann in ihrem Posteingang sagen, was geschehen ist; fragen Sie bei ihr nach."
 
 #: src/drafts/draft-history.tsx
 #: src/drafts/share-with-team.tsx
@@ -4782,7 +4767,6 @@ msgstr "Klippen"
 #: src/interview/destination.tsx
 #: src/projects/project-chats.tsx
 #: src/settings/erasures.tsx
-#: src/shown-once.tsx
 #: src/workflows/start-run.tsx
 msgid "Close"
 msgstr "Schließen"
@@ -5142,8 +5126,8 @@ msgstr "Ihr Microsoft 365 wird verbunden"
 #: src/apps/resource-bindings.tsx
 #: src/chat/sources.tsx
 #: src/connections/app/words.ts
+#: src/inbox/item-detail.tsx
 #: src/inbox/items.ts
-#: src/routes/_shell.settings.outcomes.tsx
 #: src/settings/ai-providers.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Connection"
@@ -5307,7 +5291,6 @@ msgstr "Kopenhagen"
 #: src/settings/event-sources.tsx
 #: src/settings/guests.tsx
 #: src/settings/invitations.tsx
-#: src/shown-once.tsx
 msgid "Copied"
 msgstr "Kopiert"
 
@@ -5331,7 +5314,6 @@ msgstr "Kopien"
 #: src/frame/ui-words.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
-#: src/shown-once.tsx
 msgid "Copy"
 msgstr "Kopieren"
 
@@ -5353,7 +5335,6 @@ msgstr "E-Mail kopieren"
 msgid "Copy into the Brain from {label}"
 msgstr "Aus {label} ins Brain kopieren"
 
-#: src/settings/event-sources.tsx
 #: src/shown-once.tsx
 msgid "Copy it now: you won't see it again. Lost, it can only be replaced."
 msgstr "Kopieren Sie es jetzt: Sie sehen es nicht noch einmal. Geht es verloren, kann es nur ersetzt werden."
@@ -5374,7 +5355,6 @@ msgstr "Link für {name} kopieren"
 msgid "Copy the output"
 msgstr "Ausgabe kopieren"
 
-#: src/settings/event-sources.tsx
 #: src/shown-once.tsx
 msgid "Copy the secret"
 msgstr "Geheimnis kopieren"
@@ -6546,10 +6526,6 @@ msgstr "Jede so, wie das Unternehmen sie hat, oder für weniger Personen. Nie f�
 #: src/routes/_shell.settings.billing.tsx
 msgid "Each invoice to your billing email"
 msgstr "Jede Rechnung an Ihre Rechnungs-E-Mail"
-
-#: src/routes/_shell.settings.outcomes.tsx
-msgid "Each one sent for someone shows here until they say what became of it."
-msgstr "Jeder Aufruf, der für jemanden gesendet wurde, steht hier, bis diese Person sagt, was daraus wurde."
 
 #: src/connections/http-connections.tsx
 msgid "Each path prefix starts with /, on its own line, with no query or dot segments."
@@ -8314,16 +8290,7 @@ msgstr "Bis dahin kann das Grasp-Team hier helfen"
 msgid "Grid"
 msgstr "Punktraster"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Group {number}"
-msgstr "Gruppe {number}"
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "Groups of teams"
-msgstr "Gruppen von Teams"
-
 #: src/drafts/sharing.tsx
-#: src/people/person-picker.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/erasures.tsx
 msgid "Guest"
@@ -9433,6 +9400,10 @@ msgstr "Ihr Zugriff ist abgelaufen. Das Grasp-Team kann sie nicht neu verbinden:
 msgid "Its account is out of credit."
 msgstr "Das Guthaben des Kontos ist aufgebraucht."
 
+#: src/inbox/item-detail.tsx
+msgid "Its answer was lost: nobody can tell whether it took effect."
+msgstr "Die Antwort ging verloren: Niemand weiß, ob es gewirkt hat."
+
 #: src/answer-pause.tsx
 msgid "Its answers can be used in a moment, so a press meant for the one before doesn't answer it."
 msgstr "Seine Antworten sind gleich nutzbar, damit ein Klick, der für das vorige gedacht war, es nicht beantwortet."
@@ -9789,7 +9760,6 @@ msgid "Language"
 msgstr "Sprache"
 
 #: src/frame/language-button.tsx
-#: src/language-picker.tsx
 msgid "Language: {name}"
 msgstr "Sprache: {name}"
 
@@ -11148,10 +11118,6 @@ msgstr "Neuer Chat"
 msgid "New field"
 msgstr "Neues Feld"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "New group"
-msgstr "Neue Gruppe"
-
 #: src/settings/ai-providers.tsx
 msgid "New key"
 msgstr "Neuer Schlüssel"
@@ -11352,10 +11318,6 @@ msgstr "Noch keine Rechnungsdaten"
 msgid "No business process"
 msgstr "Kein Geschäftsprozess"
 
-#: src/routes/_shell.settings.outcomes.tsx
-msgid "No call of unknown outcome is open."
-msgstr "Kein Aufruf mit unbekanntem Ergebnis ist offen."
-
 #: src/apps/app-data.tsx
 msgid "No changes are kept for this record."
 msgstr "Für diesen Datensatz sind keine Änderungen gespeichert."
@@ -11436,10 +11398,6 @@ msgstr "Keine erste Zeile"
 msgid "No goals yet."
 msgstr "Noch keine Ziele."
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "No group"
-msgstr "Keine Gruppe"
-
 #: src/agents/agents-overview.tsx
 msgid "No job written yet"
 msgstr "Noch keine Aufgabe beschrieben"
@@ -11513,10 +11471,6 @@ msgstr "Noch hat niemand eine App mit Ihnen geteilt."
 #: src/settings/teams.tsx
 msgid "No one yet: open it to add people"
 msgstr "Noch niemand: Öffnen Sie es, um Personen hinzuzufügen"
-
-#: src/people/person-picker.tsx
-msgid "No owner yet"
-msgstr "Noch niemand verantwortlich"
 
 #: src/apps/app-page.tsx
 msgid "No page yet"
@@ -11732,10 +11686,6 @@ msgstr "Niemand sieht die Datensätze in {table}, auch Sam nicht."
 #: src/connections/connected-dialog.tsx
 msgid "Nobody uses it in chat until you choose who may, and Apps and workflows only through the permissions you grant."
 msgstr "Niemand nutzt es im Chat, bis Sie wählen, wer es darf, und Apps und Workflows nur über die Berechtigungen, die Sie erteilen."
-
-#: src/people/person-picker.tsx
-msgid "Nobody with that name."
-msgstr "Niemand mit diesem Namen."
 
 #: src/agents/agent-facts.tsx
 #: src/agents/new-agent.tsx
@@ -12641,6 +12591,10 @@ msgstr "Nur {accounts}"
 msgid "Only {owner} so far."
 msgstr "Bisher nur {owner}."
 
+#: src/inbox/item-detail.tsx
+msgid "Only {person} can say whether it happened."
+msgstr "Nur {person} kann sagen, ob es passiert ist."
+
 #: src/settings/use-team-change.ts
 msgid "Only admins can change teams."
 msgstr "Nur Admins können Teams ändern."
@@ -13187,14 +13141,6 @@ msgctxt "who answers for an app"
 msgid "Owner"
 msgstr "Verantwortliche Person"
 
-#: src/people/person-picker.tsx
-msgid "Owner: {owner}. Change owner"
-msgstr "Verantwortlich: {owner}. Ändern"
-
-#: src/people/person-picker.tsx
-msgid "Owner: nobody yet. Change owner"
-msgstr "Verantwortlich: noch niemand. Ändern"
-
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Owns"
@@ -13519,7 +13465,6 @@ msgid "person"
 msgstr "Person"
 
 #: src/activity/audit-event.tsx
-#: src/routes/_shell.settings.outcomes.tsx
 msgid "Person"
 msgstr "Person"
 
@@ -14170,10 +14115,6 @@ msgstr "Das Lesen ist wiederholt fehlgeschlagen, deshalb starten deine Auslöser
 msgid "Reading its instructions…"
 msgstr "Liest seine Anweisungen…"
 
-#: src/people/people-teams-picker.tsx
-msgid "Reading people and teams…"
-msgstr "Personen und Teams werden gelesen…"
-
 #: src/connections/sync-places.tsx
 msgid "Reading the places"
 msgstr "Orte werden gelesen"
@@ -14193,10 +14134,6 @@ msgstr "Workspace wird gelesen"
 #: src/activity/audit-words.ts
 msgid "Reading what changed at a connection failed"
 msgstr "Lesen, was sich bei einer Verbindung geändert hat, ist fehlgeschlagen"
-
-#: src/people/person-picker.tsx
-msgid "Reading who can own it…"
-msgstr "Liest, wer verantwortlich sein kann…"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Reading your staff list"
@@ -14240,7 +14177,7 @@ msgstr "Nachdenken"
 msgid "Recalled from the Brain"
 msgstr "Aus dem Gehirn abgerufen"
 
-#: src/routes/_shell.settings.outcomes.tsx
+#: src/inbox/item-detail.tsx
 msgid "Receipt"
 msgstr "Beleg"
 
@@ -15327,10 +15264,6 @@ msgstr "Änderungen speichern"
 msgid "Save first"
 msgstr "Zuerst speichern"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Save groups"
-msgstr "Gruppen speichern"
-
 #: src/apps/app-own-link.tsx
 msgid "Save link"
 msgstr "Link speichern"
@@ -15521,11 +15454,6 @@ msgstr "Mitglieder suchen"
 msgid "Search models"
 msgstr "Modelle suchen"
 
-#: src/people/person-picker.tsx
-msgid "Search people"
-msgstr "Personen suchen"
-
-#: src/people/people-teams-picker.tsx
 #: src/projects/project-people.tsx
 msgid "Search people and teams"
 msgstr "Personen und Teams suchen"
@@ -15613,7 +15541,6 @@ msgid "Searching the docs for {query}"
 msgstr "Suche nach {query} in der Doku"
 
 #: src/connections/http-connections.tsx
-#: src/shown-once.tsx
 msgid "Secret"
 msgstr "Geheimnis"
 
@@ -15726,8 +15653,8 @@ msgstr "Wird gesendet"
 msgid "Sensitive"
 msgstr "Sensibel"
 
+#: src/inbox/item-detail.tsx
 #: src/inbox/items.ts
-#: src/routes/_shell.settings.outcomes.tsx
 msgid "Sent"
 msgstr "Gesendet"
 
@@ -17231,7 +17158,6 @@ msgstr "Teamgröße unbekannt."
 #: src/agents/setup/audience-step.tsx
 #: src/brain/brain.ts
 #: src/people/people-teams-picker.tsx
-#: src/routes/_shell.settings.brain.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/sections.ts
 #: src/settings/teams.tsx
@@ -17623,10 +17549,6 @@ msgstr "Der beste Teil seines Abschnitts"
 msgid "The board"
 msgstr "Die Geschäftsleitung"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "The brain has no teams to group yet."
-msgstr "Das Brain hat noch keine Teams zum Gruppieren."
-
 #: src/brain/learned-section.tsx
 msgid "The Brain hasn't learned anything from this version."
 msgstr "Das Brain hat aus dieser Version noch nichts gelernt."
@@ -17650,10 +17572,6 @@ msgstr "Das Gehirn, so wie die Person jedes Laufs es lesen darf"
 #: src/brain/brain-section.tsx
 msgid "The Brain's pages"
 msgstr "Die Seiten des Gehirns"
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "The brain's regions: your teams, grouped the way your company is. Grasp groups new teams by itself; rename a group or move a team here."
-msgstr "Die Bereiche des Brains: Ihre Teams, so gruppiert wie Ihr Unternehmen. Grasp gruppiert neue Teams selbst; hier benennen Sie eine Gruppe um oder verschieben ein Team."
 
 #: src/brain/atlas-overlays.tsx
 msgid "The brain's view"
@@ -19174,11 +19092,6 @@ msgstr "Unbekannt"
 msgid "Unknown device"
 msgstr "Unbekanntes Gerät"
 
-#: src/routes/_shell.settings.outcomes.tsx
-#: src/settings/sections.ts
-msgid "Unknown outcomes"
-msgstr "Unbekannte Ergebnisse"
-
 #: src/brain/brain.ts
 #: src/chat/chat-markdown.ts
 #: src/chat/sources.tsx
@@ -19573,6 +19486,10 @@ msgstr "Sprachgespräch"
 #: src/voice/sound-controls.tsx
 msgid "Volume"
 msgstr "Lautstärke"
+
+#: src/voice/sound-controls.tsx
+msgid "Volume (sound off)"
+msgstr "Lautstärke (Ton aus)"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"

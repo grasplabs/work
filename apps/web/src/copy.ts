@@ -1,4 +1,4 @@
-import { toast } from "@grasp-os/app-kit/components/toast";
+import { toast } from "@grasp-os/ui/components/toast";
 import { useLingui } from "@lingui/react/macro";
 import { useEffect, useState } from "react";
 
@@ -39,7 +39,7 @@ export const useCopy = () => {
     if (await copyText(text)) {
       setCopied(true);
     } else {
-      toast.add({ type: "error", title: t`Copying didn't work` });
+      toast.error(t`Copying didn't work`);
     }
   };
   return { copied, copy };
