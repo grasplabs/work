@@ -698,6 +698,15 @@ describe(
         { title: "Hiring", category: null },
         { title: "Launch" },
       ]);
+      const toUnion = await nullable.applySchema(
+        change(
+          notesText({
+            title,
+            category: v.union(v.string(), v.json()).optional(),
+          }),
+          v1Ids
+        )
+      );
       await nullable.applySchema(
         change(
           notesText({ title, category: v.json().default("general") }),
@@ -707,9 +716,11 @@ describe(
 
       expect({
         widened: widened.changes.widenedFields,
+        toUnion: toUnion.changes.widenedFields,
         notes: await fieldsOf(nullable),
       }).toStrictEqual({
         widened: [{ table: "notes", field: "category" }],
+        toUnion: [{ table: "notes", field: "category" }],
         notes: [
           { title: "Hiring", category: null },
           { title: "Launch", category: "general" },
