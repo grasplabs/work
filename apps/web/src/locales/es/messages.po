@@ -19518,6 +19518,10 @@ msgstr "Conversación por voz"
 msgid "Volume"
 msgstr "Volumen"
 
+#: src/voice/sound-controls.tsx
+msgid "Volume (sound off)"
+msgstr "Volumen (sonido desactivado)"
+
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Wait"
