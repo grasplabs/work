@@ -23,9 +23,10 @@ import { Fragment } from "react";
 
 import { isRefused, participate } from "./api.ts";
 import { tool } from "./frame.tsx";
+import { forgetGuided } from "./guide.tsx";
 import { keepNow, linkNow, progressNow, update } from "./kept.ts";
 import { startLoop, stopLoop } from "./loop.ts";
-import { freshProgress } from "./progress.ts";
+import { begun, freshProgress } from "./progress.ts";
 
 // On a local stack only (`vp run dev`): a way through the interview for
 // whoever works on it, so every part can be seen without talking through
@@ -38,9 +39,10 @@ import { freshProgress } from "./progress.ts";
 // menu and everything here out. Its words are a developer's, in English,
 // and not in the catalogs.
 
-/** Where the menu jumps: the start, a phase, the read-back, or done. */
+/** Where the menu jumps: the start, the guide, a phase, the read-back, or done. */
 export const jumps = [
   "start",
+  "guide",
   "you",
   "anchor",
   "story",
@@ -55,6 +57,7 @@ type Jump = (typeof jumps)[number];
 
 const jumpNames: Record<Jump, string> = {
   start: "Start over (the consent screen)",
+  guide: "The quick guide (after the yes)",
   you: "You: their role",
   anchor: "Anchor: one piece of work",
   story: "Story: the last time",
@@ -251,7 +254,7 @@ const wantsAt: Partial<Record<Jump, InterviewWants>> = {
 
 /** The interview as it stands at `jump`: what was said before it, and where it is. */
 const progressAt = (
-  jump: Exclude<Jump, "start">,
+  jump: Exclude<Jump, "start" | "guide">,
   was: InterviewProgress
 ): InterviewProgress => {
   const ended = jump === "readback" || jump === "done";
@@ -308,6 +311,18 @@ const progressAt = (
   };
 };
 
+/** The interview as it stands after jumping to `jump` from `was`. */
+const jumpedTo = (jump: Jump, was: InterviewProgress): InterviewProgress => {
+  const fresh = { ...freshProgress, interviewer: was.interviewer };
+  if (jump === "start") {
+    return fresh;
+  }
+  // Just agreed, nothing said yet: the guide comes first.
+  return jump === "guide"
+    ? begun(fresh, Date.now(), "talk")
+    : progressAt(jump, was);
+};
+
 /**
  * Jumps the interview on this link to `jump`, kept in core as any change
  * is; core is told they take part first, so what it keeps isn't refused.
@@ -326,14 +341,13 @@ const jumpTo = async (jump: Jump, onJumped?: () => void): Promise<void> => {
   // The conversation goes on from where it jumped, not from where it was.
   stopLoop({ keep: false });
   const was = progressNow();
-  update(() =>
-    jump === "start"
-      ? { ...freshProgress, interviewer: was.interviewer }
-      : progressAt(jump, was)
-  );
+  if (jump === "start" || jump === "guide") {
+    forgetGuided();
+  }
+  update(() => jumpedTo(jump, was));
   keepNow();
   onJumped?.();
-  if (jump !== "start" && jump !== "done") {
+  if (jump !== "start" && jump !== "guide" && jump !== "done") {
     // Started again where it now stands; the page starts it too when it
     // wasn't on screen, and the second start does nothing.
     window.setTimeout(startLoop, 120);
@@ -367,11 +381,10 @@ export const jumpOnOpen = async (secret: string): Promise<void> => {
     }
   }
   const was = progressNow();
-  update(() =>
-    asked === "start"
-      ? { ...freshProgress, interviewer: was.interviewer }
-      : progressAt(asked, was)
-  );
+  if (asked === "start" || asked === "guide") {
+    forgetGuided(secret);
+  }
+  update(() => jumpedTo(asked, was));
   keepNow();
 };
 

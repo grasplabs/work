@@ -3017,6 +3017,10 @@ msgstr "Ein Upload ins Brain ist fehlgeschlagen"
 msgid "and {more} more"
 msgstr "und {more} weitere"
 
+#: src/interview/guide.tsx
+msgid "And here you’ll find everything we say, written out. You can read it back, fix a word, or take something out."
+msgstr "Und hier findest du alles, was wir sagen, ausgeschrieben. Du kannst es nachlesen, ein Wort korrigieren oder etwas herausnehmen."
+
 #: src/apps/app-data.tsx
 msgid "And more."
 msgstr "Und weitere."
@@ -3886,6 +3890,10 @@ msgstr "Bevor ich mich melde, sagen Sie es Ihrem Team"
 #: src/agents/agent-templates.ts
 msgid "Before meetings"
 msgstr "Vor Besprechungen"
+
+#: src/interview/guide.tsx
+msgid "Before we start, a quick look around. You can simply talk to me, the way you would to a colleague. Rather type? That works just as well."
+msgstr "Bevor wir anfangen, ein kurzer Rundgang. Du kannst einfach mit mir sprechen, so wie mit einer Kollegin oder einem Kollegen. Schreibst du lieber? Das geht genauso gut."
 
 #: src/apps/data-model-changes.tsx
 msgid "Before you make this change"
@@ -5345,6 +5353,7 @@ msgstr "Kontext"
 msgid "Context used"
 msgstr "Genutzter Kontext"
 
+#: src/interview/guide.tsx
 #: src/interview/rating.tsx
 #: src/interview/start.tsx
 #: src/onboarding/company-step.tsx
@@ -7365,6 +7374,10 @@ msgstr "Alles, was das Brain daraus gespeichert hat, wird endgültig gelöscht, 
 #: src/connections/connection-list.tsx
 msgid "Everything the Brain kept from it is erased for good."
 msgstr "Alles, was das Brain daraus gespeichert hat, wird endgültig gelöscht."
+
+#: src/interview/guide.tsx
+msgid "Everything we say, written down."
+msgstr "Alles, was wir sagen, aufgeschrieben."
 
 #: src/interview/closed.tsx
 msgid "Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead."
@@ -11211,6 +11224,14 @@ msgstr "Genannt, nicht verknüpft"
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Names {title} under {under}"
 msgstr "Nennt {title} unter {under}"
+
+#: src/interview/guide.tsx
+msgid "Need a moment? Pause."
+msgstr "Brauchst du einen Moment? Pause."
+
+#: src/interview/guide.tsx
+msgid "Need a moment? Press pause, and we’ll carry on right where we left off."
+msgstr "Brauchst du einen Moment? Drück auf Pause, dann machen wir genau da weiter, wo wir aufgehört haben."
 
 #: src/chat/plan-card.tsx
 msgid "Needs {name} connected"
@@ -16631,6 +16652,7 @@ msgctxt "the Brain's skills page"
 msgid "Skills"
 msgstr "Skills"
 
+#: src/interview/guide.tsx
 #: src/onboarding/plan-story.tsx
 msgid "Skip"
 msgstr "Überspringen"
@@ -17054,6 +17076,7 @@ msgid "Step"
 msgstr "Schritt"
 
 #: src/frame/ui-words.tsx
+#: src/interview/guide.tsx
 #: src/onboarding/calm-frame.tsx
 msgid "Step {step} of {total}"
 msgstr "Schritt {step} von {total}"
@@ -17422,6 +17445,10 @@ msgstr "Sie werden zur Anmeldung bei Microsoft weitergeleitet…"
 msgid "Talk"
 msgstr "Sprechen"
 
+#: src/interview/guide.tsx
+msgid "Talk to me, or type. Whichever feels easiest."
+msgstr "Sprich mit mir oder schreib. Wie es dir am leichtesten fällt."
+
 #: src/onboarding/campaign/concepts/mosaic.tsx
 msgid "Talked"
 msgstr "Gesprochen"
@@ -17742,6 +17769,14 @@ msgstr "Die Schulungsfolien helfen auch"
 #: src/sign-in-errors.ts
 msgid "That way of signing in isn't set up here."
 msgstr "Diese Anmeldemethode ist hier nicht eingerichtet."
+
+#: src/interview/guide.tsx
+msgid "That’s all there is to it. There are no wrong answers here; I just want to hear how your work really goes. Ready when you are."
+msgstr "Mehr ist es nicht. Es gibt hier keine falschen Antworten; ich möchte einfach hören, wie deine Arbeit wirklich läuft. Sag Bescheid, wenn du so weit bist."
+
+#: src/interview/guide.tsx
+msgid "That’s all. There are no wrong answers."
+msgstr "Das war’s. Es gibt keine falschen Antworten."
 
 #: src/onboarding/plan-story.tsx
 msgid "That’s everything. Here’s a quick look at what happens next."
@@ -19563,6 +19598,10 @@ msgstr "Bis ein Abgleich gelingt, kommt über das Verzeichnis niemand hinzu, wec
 #: src/onboarding/review-parts.tsx
 msgid "Until Grasp support sets one, interview links can’t go out by email. Send each one their link by hand from Interviews."
 msgstr "Bis der Grasp-Support einen einrichtet, können Interview-Links nicht per E-Mail rausgehen. Senden Sie jedem seinen Link selbst, über Interviews."
+
+#: src/interview/guide.tsx
+msgid "Up here you can change the language, even halfway through. I’ll switch right along with you."
+msgstr "Hier oben kannst du die Sprache wechseln, auch mittendrin. Ich wechsle einfach mit."
 
 #: src/frame/ui-words.tsx
 msgid "Up to {maxSize}"
@@ -21787,6 +21826,10 @@ msgstr "Ihre Einladungen haben alle {invited} Personen erreicht. {talked, plural
 #: src/onboarding/language-cards.tsx
 msgid "Your language"
 msgstr "Deine Sprache"
+
+#: src/interview/guide.tsx
+msgid "Your language, whenever you like."
+msgstr "Deine Sprache, wann immer du willst."
 
 #: src/interview/transcript-looks.tsx
 msgid "Your line"

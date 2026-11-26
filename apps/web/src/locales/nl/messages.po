@@ -3017,6 +3017,10 @@ msgstr "Een upload naar het Brain is mislukt"
 msgid "and {more} more"
 msgstr "en nog {more}"
 
+#: src/interview/guide.tsx
+msgid "And here you’ll find everything we say, written out. You can read it back, fix a word, or take something out."
+msgstr "En hier vind je alles wat we zeggen, uitgeschreven. Je kunt het teruglezen, een woord verbeteren of iets weghalen."
+
 #: src/apps/app-data.tsx
 msgid "And more."
 msgstr "En meer."
@@ -3886,6 +3890,10 @@ msgstr "Laat je team het weten voordat ik contact opneem"
 #: src/agents/agent-templates.ts
 msgid "Before meetings"
 msgstr "Voor vergaderingen"
+
+#: src/interview/guide.tsx
+msgid "Before we start, a quick look around. You can simply talk to me, the way you would to a colleague. Rather type? That works just as well."
+msgstr "Voordat we beginnen, even een korte rondleiding. Je kunt gewoon tegen me praten, zoals je dat met een collega zou doen. Typ je liever? Dat kan net zo goed."
 
 #: src/apps/data-model-changes.tsx
 msgid "Before you make this change"
@@ -5345,6 +5353,7 @@ msgstr "Context"
 msgid "Context used"
 msgstr "Gebruikte context"
 
+#: src/interview/guide.tsx
 #: src/interview/rating.tsx
 #: src/interview/start.tsx
 #: src/onboarding/company-step.tsx
@@ -7365,6 +7374,10 @@ msgstr "Alles wat het Brain ervan heeft bewaard, wordt voorgoed gewist, en vanaf
 #: src/connections/connection-list.tsx
 msgid "Everything the Brain kept from it is erased for good."
 msgstr "Alles wat het Brain ervan heeft bewaard, wordt voorgoed gewist."
+
+#: src/interview/guide.tsx
+msgid "Everything we say, written down."
+msgstr "Alles wat we zeggen, uitgeschreven."
 
 #: src/interview/closed.tsx
 msgid "Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead."
@@ -11211,6 +11224,14 @@ msgstr "Genoemd, niet gelinkt"
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Names {title} under {under}"
 msgstr "Noemt {title} onder {under}"
+
+#: src/interview/guide.tsx
+msgid "Need a moment? Pause."
+msgstr "Even een moment nodig? Pauzeer."
+
+#: src/interview/guide.tsx
+msgid "Need a moment? Press pause, and we’ll carry on right where we left off."
+msgstr "Even een moment nodig? Druk op pauze, dan gaan we verder waar we gebleven waren."
 
 #: src/chat/plan-card.tsx
 msgid "Needs {name} connected"
@@ -16631,6 +16652,7 @@ msgctxt "the Brain's skills page"
 msgid "Skills"
 msgstr "Skills"
 
+#: src/interview/guide.tsx
 #: src/onboarding/plan-story.tsx
 msgid "Skip"
 msgstr "Overslaan"
@@ -17054,6 +17076,7 @@ msgid "Step"
 msgstr "Stap"
 
 #: src/frame/ui-words.tsx
+#: src/interview/guide.tsx
 #: src/onboarding/calm-frame.tsx
 msgid "Step {step} of {total}"
 msgstr "Stap {step} van {total}"
@@ -17422,6 +17445,10 @@ msgstr "Je gaat naar de aanmelding van Microsoft…"
 msgid "Talk"
 msgstr "Praten"
 
+#: src/interview/guide.tsx
+msgid "Talk to me, or type. Whichever feels easiest."
+msgstr "Praat met me, of typ. Wat voor jou het makkelijkst is."
+
 #: src/onboarding/campaign/concepts/mosaic.tsx
 msgid "Talked"
 msgstr "Gepraat"
@@ -17742,6 +17769,14 @@ msgstr "Die trainingsslides helpen ook"
 #: src/sign-in-errors.ts
 msgid "That way of signing in isn't set up here."
 msgstr "Die manier van inloggen is hier niet ingesteld."
+
+#: src/interview/guide.tsx
+msgid "That’s all there is to it. There are no wrong answers here; I just want to hear how your work really goes. Ready when you are."
+msgstr "Meer is het niet. Er bestaan hier geen foute antwoorden; ik wil gewoon horen hoe je werk echt gaat. Zeg het maar als je klaar bent."
+
+#: src/interview/guide.tsx
+msgid "That’s all. There are no wrong answers."
+msgstr "Dat was het. Er bestaan geen foute antwoorden."
 
 #: src/onboarding/plan-story.tsx
 msgid "That’s everything. Here’s a quick look at what happens next."
@@ -19563,6 +19598,10 @@ msgstr "Tot een uitlezing lukt, komt er via de directory niemand bij, verhuist n
 #: src/onboarding/review-parts.tsx
 msgid "Until Grasp support sets one, interview links can’t go out by email. Send each one their link by hand from Interviews."
 msgstr "Tot Grasp-support er een instelt, kunnen interviewlinks niet per mail weg. Stuur iedereen zelf zijn link, vanuit Interviews."
+
+#: src/interview/guide.tsx
+msgid "Up here you can change the language, even halfway through. I’ll switch right along with you."
+msgstr "Hierboven kun je de taal wisselen, ook halverwege. Ik schakel gewoon met je mee."
 
 #: src/frame/ui-words.tsx
 msgid "Up to {maxSize}"
@@ -21787,6 +21826,10 @@ msgstr "Je uitnodigingen bereikten alle {invited} mensen. {talked, plural, one {
 #: src/onboarding/language-cards.tsx
 msgid "Your language"
 msgstr "Je taal"
+
+#: src/interview/guide.tsx
+msgid "Your language, whenever you like."
+msgstr "Jouw taal, wanneer je maar wilt."
 
 #: src/interview/transcript-looks.tsx
 msgid "Your line"

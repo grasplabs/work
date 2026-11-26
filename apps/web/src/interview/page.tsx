@@ -34,6 +34,7 @@ import {
 } from "./countdown.tsx";
 import { DevJump } from "./dev-jump.tsx";
 import { Frame, tool } from "./frame.tsx";
+import { useGuided } from "./guide.tsx";
 import {
   forgetInterview,
   keepNow,
@@ -244,6 +245,7 @@ const TalkActions = ({
       </Button>
       <Button
         aria-label={t`Pause`}
+        data-guide="pause"
         onClick={onPause}
         size={tool.button}
         tooltip={t`Pause`}
@@ -488,12 +490,15 @@ const useTranscript = (running: boolean) => {
 const Talking = ({
   name,
   reading,
+  guiding,
   timeUp,
   transcript,
   alone,
 }: {
   name: string;
   reading: boolean;
+  /** The quick look round before the first question (guide.tsx). */
+  guiding: boolean;
   timeUp: boolean;
   transcript: boolean;
   alone: boolean;
@@ -503,6 +508,7 @@ const Talking = ({
   ) : (
     <Conversation
       alone={alone}
+      guiding={guiding}
       onTalk={() => {
         void talkAgain();
       }}
@@ -552,6 +558,18 @@ const HeaderEnd = ({
   </>
 );
 
+/**
+ * Where the conversation stands: read back, or, once, before anything is
+ * said, the quick look round first (guide.tsx), which the minutes and the
+ * conversation wait for.
+ */
+const useTalkingAt = (progress: InterviewProgress, talking: boolean) => {
+  const guided = useGuided();
+  const reading = talking && isReading(progress);
+  const guiding = talking && !reading && !guided && progress.lines.length === 0;
+  return { reading, guiding, asking: talking && !reading && !guiding };
+};
+
 /** The interview on the link, held on this device. */
 export const InterviewPage = ({ session }: { session: OpenSession }) => {
   const progress = useProgress();
@@ -564,8 +582,8 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
     inConversation(progress) &&
     !(stopped || withdrawn || session.closed) &&
     deleted === "no";
-  const reading = talking && isReading(progress);
-  const { left, timeUp } = useClock(progress, talking && !reading);
+  const { reading, guiding, asking } = useTalkingAt(progress, talking);
+  const { left, timeUp } = useClock(progress, asking);
 
   useWordsOnScreen();
   // He says goodbye by the name they are greeted by.
@@ -573,14 +591,17 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
     setLoopName(session.name);
   }, [session.name]);
   // The conversation runs while it is on screen; a moment after, so a screen that only flashes by asks nothing.
-  const running = talking && !timeUp;
+  const running = talking && !timeUp && !guiding;
   useEffect(() => (running ? runLoop() : undefined), [running]);
-  const { transcript, setTranscript, floating, alone } = useTranscript(running);
+  // The header's tools for talking are there from the guide on, which tells about them.
+  const talkTools = running || guiding;
+  const { transcript, setTranscript, floating, alone } =
+    useTranscript(talkTools);
   const canDelete =
     deleted !== "yes" && deletable(progress, session.closed || withdrawn);
 
   let actions: ReactNode = null;
-  if (running) {
+  if (talkTools) {
     actions = (
       <TalkActions
         onPause={() => {
@@ -633,6 +654,7 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
     stage = (
       <Talking
         alone={alone}
+        guiding={guiding}
         name={session.name}
         reading={reading}
         timeUp={timeUp}

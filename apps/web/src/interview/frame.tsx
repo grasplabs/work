@@ -63,6 +63,7 @@ const styles = stylex.create({
   },
   // The header's controls: one quiet family, one gap.
   end: { display: "flex", alignItems: "center", gap: space["1"] },
+  tool: { display: "inline-flex" },
   // The website's mark, as the sign-in page has it.
   brand: {
     display: "inline-flex",
@@ -220,7 +221,10 @@ export const Frame = ({
           <Icon icon={GraspLogo} label="Grasp" />
         </span>
         <div {...stylex.props(styles.end)}>
-          <LanguagePicker />
+          {/* Its own box, so the guide's light can find it (guide.tsx). */}
+          <span data-guide="language" {...stylex.props(styles.tool)}>
+            <LanguagePicker />
+          </span>
           <Appearance />
           <StartOver size="icon-sm" />
           {actions}
