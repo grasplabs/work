@@ -5110,6 +5110,14 @@ msgstr "Conectada, a través de Composio"
 msgid "Connected: {names}"
 msgstr "Conectado: {names}"
 
+#: src/connections/app-of.tsx
+msgid "Connected: Grasp hasn't reviewed its tools yet"
+msgstr "Conectada: Grasp aún no ha revisado sus herramientas"
+
+#: src/connections/app-of.tsx
+msgid "Connected: none of its allowed tools is reviewed"
+msgstr "Conectada: ninguna de sus herramientas permitidas está revisada"
+
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
 msgid "Connecting"
@@ -8128,6 +8136,10 @@ msgstr "Grasp no las usa"
 #: src/onboarding/no-sender.tsx
 msgid "Grasp has no sender for its mail yet"
 msgstr "Grasp aún no tiene remitente para su correo"
+
+#: src/connections/app-actions.tsx
+msgid "Grasp hasn't reviewed {appName}'s tools yet, so a chat couldn't use any of them. It can be connected once a release of Grasp has reviewed them."
+msgstr "Grasp aún no ha revisado las herramientas de {appName}, así que un chat no podría usar ninguna. Se podrá conectar cuando una versión de Grasp las haya revisado."
 
 #: src/routes/waiting.tsx
 msgid "Grasp is almost ready for you"

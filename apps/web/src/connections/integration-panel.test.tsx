@@ -289,6 +289,51 @@ describe("an app's panel", () => {
     });
   });
 
+  it("offers an admin only the tools of a toolkit Grasp reviewed", async () => {
+    const mixed: CatalogTool[] = tools.map((tool) => ({
+      ...tool,
+      reviewed: tool.name === "HUBSPOT_LIST_CONTACTS",
+    }));
+    const sent = await opened("hubspot", [], person(), {
+      catalogTools: async () => await Promise.resolve(mixed),
+    });
+    await press(buttons("Connect")[0]);
+    // Every tool on offer, changes included: the unreviewed one isn't.
+    await press(
+      document.querySelector('[aria-label="What Grasp may do: All tools"]')
+    );
+    await press(
+      [...document.querySelectorAll('[role="option"]')].find((each) =>
+        each.textContent.startsWith("Write")
+      )
+    );
+    await press(dialogAction("Connect"));
+
+    expect(sent).toMatchObject([
+      { toolkit: "hubspot", tools: ["HUBSPOT_LIST_CONTACTS"] },
+    ]);
+  });
+
+  it("says why a toolkit none of whose tools Grasp reviewed can't be connected yet", async () => {
+    const unreviewed: CatalogTool[] = tools.map((tool) => ({
+      ...tool,
+      reviewed: false,
+    }));
+    await opened("hubspot", [], person(), {
+      catalogTools: async () => await Promise.resolve(unreviewed),
+    });
+    await press(buttons("Connect")[0]);
+    const dialog = dialogOf("Connect HubSpot");
+
+    expect({
+      says: dialog?.querySelector('[role="note"]')?.textContent,
+      connectable: dialogAction("Connect")?.hasAttribute("disabled") === false,
+    }).toStrictEqual({
+      says: "Grasp hasn't reviewed HubSpot's tools yet, so a chat couldn't use any of them. It can be connected once a release of Grasp has reviewed them.",
+      connectable: false,
+    });
+  });
+
   it("has an admin connect a stopped toolkit again from what it allowed, disconnecting nothing", async () => {
     const stopped: ListedConnection = {
       id: "c-hubspot",

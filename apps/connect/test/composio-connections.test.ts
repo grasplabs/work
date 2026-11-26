@@ -892,6 +892,64 @@ describe("connecting a Composio toolkit", () => {
   });
 });
 
+/** Each tool of Composio toolkit `id` in the catalog, and whether reviewed. */
+const catalogued = async (id: string) => {
+  const tools = await exports.default.catalogTools({ source: "composio", id });
+  return Object.fromEntries(
+    tools.map(({ name, reviewed }) => [name, reviewed])
+  );
+};
+
+describe("a Composio toolkit's tools Grasp hasn't reviewed", () => {
+  it("are marked so in the catalog, offered by no connection, and the connection says why", async () => {
+    const admin = someone("admin");
+    const folkdesk = await catalogued("folkdesk");
+    const hubspot = await catalogued("hubspot");
+    // Connected all the same, as an admin can, and offering nothing.
+    const { callback } = composio.authorize(
+      await start(admin, {
+        toolkit: "folkdesk",
+        tools: [{ name: "FOLKDESK_SEARCH_RECORDS", read: true }],
+      })
+    );
+    const { connectionId: unreviewed } = await back(admin, callback);
+    // A reviewed toolkit, allowing only a tool its review left out.
+    const narrowed = await connectHubSpot(admin);
+    await env.DB.prepare("UPDATE connections SET tools = ? WHERE id = ?")
+      .bind(JSON.stringify(["HUBSPOT_NOT_REVIEWED"]), narrowed)
+      .run();
+    const listed = await exports.default.listConnections(admin);
+    const owners = await exports.default.connectionOwners([
+      unreviewed,
+      narrowed,
+    ]);
+    const of = (id: string) => listed.find((each) => each.id === id);
+
+    expect({
+      folkdesk,
+      hubspot,
+      unreviewed: [of(unreviewed)?.offeredTools, of(unreviewed)?.toolsWhy],
+      narrowed: [of(narrowed)?.offeredTools, of(narrowed)?.toolsWhy],
+      owners: owners
+        .map(({ toolsWhy }) => toolsWhy ?? "")
+        .toSorted((first, second) => first.localeCompare(second)),
+    }).toStrictEqual({
+      folkdesk: {
+        FOLKDESK_SEARCH_RECORDS: false,
+        FOLKDESK_UPDATE_RECORD: false,
+      },
+      hubspot: {
+        HUBSPOT_LIST_CONTACTS: true,
+        HUBSPOT_CREATE_CONTACT: true,
+        HUBSPOT_UPDATE_CONTACT: true,
+      },
+      unreviewed: [[], "toolkit_unreviewed"],
+      narrowed: [[], "tools_unreviewed"],
+      owners: ["toolkit_unreviewed", "tools_unreviewed"],
+    });
+  });
+});
+
 describe("a Composio connection", () => {
   const workflow = agentFor("user-anna");
 

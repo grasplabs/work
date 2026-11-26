@@ -155,7 +155,11 @@ export const appToolsOf = (
   };
   const savedRead = (name: string): boolean =>
     allowed?.some((rule) => rule.name === name && rule.read) ?? false;
-  const listed = tools.map((tool): AppTool => ({
+  // Only the tools a connection can offer: a Composio tool Grasp hasn't
+  // reviewed is never offered or run (connect's composio-classes.ts),
+  // whatever is chosen, so it isn't offered to choose.
+  const usable = tools.filter((tool) => tool.reviewed !== false);
+  const listed = usable.map((tool): AppTool => ({
     id: tool.name,
     name: toolWords(tool.name, integration.id),
     ...(tool.description === null ? {} : { description: tool.description }),

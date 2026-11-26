@@ -98,6 +98,11 @@ export interface ConnectAppConsentProps extends Omit<
    * tool starts at its default (reads on, changes off).
    */
   initialTools?: readonly { id: string; choice: AppToolChoice }[];
+  /**
+   * What the dialog says in place of the tools when the app has none to
+   * choose, and so can't be connected: why, as the host knows it.
+   */
+  noTools?: string;
 }
 
 const styles = stylex.create({
@@ -327,6 +332,14 @@ const defaultsOf = (
   });
 };
 
+/** Why there are no tools to choose, when the host says. */
+const NoTools = ({ words }: { words: string | undefined }) =>
+  words === undefined ? null : (
+    <p role="note" {...stylex.props(styles.where)}>
+      {words}
+    </p>
+  );
+
 /** What Grasp may do with the tools: every tool at once, then each group, opening to its tools. */
 const ToolPicker = ({
   tools,
@@ -394,6 +407,7 @@ export const ConnectAppConsent = ({
   again = false,
   forWhom: fixed,
   initialTools,
+  noTools,
 }: ConnectAppConsentProps) => {
   const words = useConnectAppWords();
   const shared = useAppIntegrationWords();
@@ -471,7 +485,9 @@ export const ConnectAppConsent = ({
                   );
                 }}
               />
-            ) : null}
+            ) : (
+              <NoTools words={noTools} />
+            )}
             {signInAt === undefined ? null : (
               <p {...stylex.props(styles.where)}>{words.signInAt(signInAt)}</p>
             )}

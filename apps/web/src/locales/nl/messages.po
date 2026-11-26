@@ -5110,6 +5110,14 @@ msgstr "Gekoppeld, via Composio"
 msgid "Connected: {names}"
 msgstr "Gekoppeld: {names}"
 
+#: src/connections/app-of.tsx
+msgid "Connected: Grasp hasn't reviewed its tools yet"
+msgstr "Verbonden: Grasp heeft de tools nog niet beoordeeld"
+
+#: src/connections/app-of.tsx
+msgid "Connected: none of its allowed tools is reviewed"
+msgstr "Verbonden: geen van de toegestane tools is beoordeeld"
+
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
 msgid "Connecting"
@@ -8128,6 +8136,10 @@ msgstr "Grasp gebruikt deze niet"
 #: src/onboarding/no-sender.tsx
 msgid "Grasp has no sender for its mail yet"
 msgstr "Grasp heeft nog geen afzender voor zijn mail"
+
+#: src/connections/app-actions.tsx
+msgid "Grasp hasn't reviewed {appName}'s tools yet, so a chat couldn't use any of them. It can be connected once a release of Grasp has reviewed them."
+msgstr "Grasp heeft de tools van {appName} nog niet beoordeeld, dus een chat kan er geen gebruiken. Verbinden kan zodra een versie van Grasp ze heeft beoordeeld."
 
 #: src/routes/waiting.tsx
 msgid "Grasp is almost ready for you"

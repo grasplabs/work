@@ -24,6 +24,7 @@ import { z } from "zod";
 
 import { nativeConnector } from "./bundled-connectors.ts";
 import { ComposioError, composioKey, composioRequest } from "./composio.ts";
+import { isReviewedTool } from "./connections.ts";
 import { builtIn, builtIns, connectorRow } from "./connector-providers.ts";
 import { connectors } from "./db/schema.ts";
 import { providers } from "./providers.ts";
@@ -667,7 +668,12 @@ export const catalogTools = async (
   if (key === undefined || !toolkit.success) {
     throw connectErrors.create("connect.catalog_entry_not_found");
   }
-  return await composioTools(key, toolkit.data);
+  // Each marked as Grasp reviewed it: only those a connection offers.
+  const tools = await composioTools(key, toolkit.data);
+  return tools.map((tool) => ({
+    ...tool,
+    reviewed: isReviewedTool(toolkit.data, tool.name),
+  }));
 };
 
 /**

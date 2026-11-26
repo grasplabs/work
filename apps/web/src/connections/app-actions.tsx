@@ -82,6 +82,8 @@ const ConnectToolkit = ({
 }) => {
   const core = useCore();
   const supportLine = useSupportLine();
+  const { t } = useLingui();
+  const appName = integration.name;
   const [old] = stopped;
   // What the old connection allowed of what the catalog still lists: where
   // connecting again starts, each tool keeping the resource it was held to.
@@ -145,6 +147,11 @@ const ConnectToolkit = ({
       app={shown}
       consent={composioConsentText}
       forWhom="everyone"
+      {...((shown.tools ?? []).length === 0
+        ? {
+            noTools: t`Grasp hasn't reviewed ${appName}'s tools yet, so a chat couldn't use any of them. It can be connected once a release of Grasp has reviewed them.`,
+          }
+        : {})}
       onConnect={connect}
       size={size}
     />

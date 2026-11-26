@@ -123,6 +123,12 @@ export interface AskableConnection {
   /** The actions it has, which a request may name. */
   actions: string[];
   /**
+   * Why it has none, when `actions` is empty, in words for the person:
+   * so the chat says what stands in the way and who can change it, never
+   * that an admin should "enable access" when none can.
+   */
+  noActions?: string;
+  /**
    * Who grants it: the person in the chat grants their own personal one;
    * an admin grants a shared one or an outside API to an App or a workflow
    * that asks for it.
@@ -291,6 +297,30 @@ export const offeredToChat = async (
 };
 
 /**
+ * Why a connection has no tool the chat may call or name, in words the
+ * chat can pass on (`AskableConnection.noActions`, `list`'s `noTools`):
+ * for a Composio toolkit, connect's own reason (`toolsWhy`) with its code;
+ * otherwise its provider listing none Grasp offers.
+ */
+export const noActionsOf = ({
+  source,
+  name,
+  toolsWhy,
+}: {
+  source: ConnectionSummary["source"];
+  name: string;
+  toolsWhy?: ConnectionSummary["toolsWhy"];
+}): string => {
+  if (source === "composio" && toolsWhy === "toolkit_unreviewed") {
+    return `Grasp hasn't reviewed ${name}'s tools yet, so this connection offers none (toolkit_unreviewed). No setting in Grasp changes that: a release of Grasp has to review them first.`;
+  }
+  if (source === "composio" && toolsWhy === "tools_unreviewed") {
+    return `None of the tools an admin allowed on this ${name} connection is one Grasp reviewed (tools_unreviewed). An admin can allow reviewed tools on its page in Connectors.`;
+  }
+  return `${name} lists no tool Grasp offers right now (no_tools_listed).`;
+};
+
+/**
  * The connections the chat itself may call, as far as connect lists them
  * for its person: their own personal ones and the shared ones, active and
  * offered (`offeredConnections`), with every action each has. Which of
@@ -347,16 +377,19 @@ export const askableConnections = async (
       : []
   );
   return [
-    ...offered.map(
-      ({ id, provider, accountName, ownerUserId }): AskableConnection => ({
+    ...offered.map((connection): AskableConnection => {
+      const { id, provider, accountName, ownerUserId } = connection;
+      const its = actions.get(id) ?? [];
+      return {
         connectionId: id,
         provider,
         account: accountName,
         scope: ownerUserId === null ? "shared" : "personal",
-        actions: actions.get(id) ?? [],
+        actions: its,
+        ...(its.length === 0 ? { noActions: noActionsOf(connection) } : {}),
         decidedBy: ownerUserId === null ? "admin" : "person",
-      })
-    ),
+      };
+    }),
     ...apis,
   ];
 };

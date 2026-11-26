@@ -50,6 +50,7 @@ import {
   askableConnections,
   callableConnections,
   grantableIn,
+  noActionsOf,
   waitingConnections,
 } from "./chat-connections.ts";
 import type { AskableConnection, AskedConnection } from "./chat-connections.ts";
@@ -108,6 +109,8 @@ export interface AgentListedConnection {
   /** The one resource it covers, such as a mailbox; `null` for all. */
   resource: string | null;
   tools: Partial<Record<ToolClass, number>>;
+  /** Why it has no tool the agent may call, when it has none. */
+  noTools?: string;
 }
 
 /** What a call answered. */
@@ -941,11 +944,23 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
                 counts[tool.toolClass] = (counts[tool.toolClass] ?? 0) + 1;
               }
             }
+            const owner = owners.get(connection.connectionId);
             return {
               name: connection.name,
-              account: owners.get(connection.connectionId)?.accountName ?? null,
+              account: owner?.accountName ?? null,
               resource: connection.resource,
               tools: counts,
+              // An active one alone: one waiting to be connected again
+              // says so on its own (`connect.connection_inactive`).
+              ...(Object.keys(counts).length === 0 && owner?.status === "active"
+                ? {
+                    noTools: noActionsOf({
+                      source: owner.source,
+                      name: owner.provider,
+                      toolsWhy: owner.toolsWhy,
+                    }),
+                  }
+                : {}),
             };
           });
         }
@@ -1456,6 +1471,8 @@ connections: {
     account: string | null;
     resource: string | null;
     tools: Partial<Record<${toolClassType}, number>>;
+    /** Why it has no tool you may call, when it has none: pass it on as it says. */
+    noTools?: string;
   }[]>;
   /**
    * Finds tools for each of \`queries\` (a few words each, such as \`"send
@@ -1506,6 +1523,8 @@ connections: {
     account: string | null;
     scope: "personal" | "shared";
     actions: string[];
+    /** Why it has no action, when it has none: pass it on as it says. */
+    noActions?: string;
     decidedBy: "person" | "admin";
     forAppsOnly?: true;
   }[]>;

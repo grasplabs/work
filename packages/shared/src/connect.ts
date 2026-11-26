@@ -712,6 +712,14 @@ export interface ConnectionSummary {
    */
   offeredTools?: string[];
   /**
+   * Why a Composio connection offers no tool, when it offers none
+   * (`offeredTools` empty): Grasp hasn't reviewed any tool of its toolkit
+   * yet (`toolkit_unreviewed`), so a release has to class them before a
+   * chat can use one; or it reviewed some, but none of those the admin
+   * allowed (`tools_unreviewed`), so an admin can allow reviewed ones.
+   */
+  toolsWhy?: ToolsWhy;
+  /**
    * Those of `tools` the admin marked as only reading, which run without
    * asking. Absent for a native connection.
    */
@@ -881,6 +889,8 @@ export interface ConnectionOwner {
    * connection, whose classes core reads from the release.
    */
   toolClasses?: Record<string, Exclude<ToolClass, "never">>;
+  /** For a Composio connection that offers no tool: why (`ToolsWhy`). */
+  toolsWhy?: ToolsWhy;
 }
 
 /**
@@ -1467,9 +1477,22 @@ export interface OfferedCatalog extends Catalog {
 }
 
 /** One tool of a catalog entry. */
+/** Why a Composio connection offers no tool (`ListedConnection.toolsWhy`). */
+export const toolsWhyValues = [
+  "toolkit_unreviewed",
+  "tools_unreviewed",
+] as const;
+export type ToolsWhy = (typeof toolsWhyValues)[number];
+
 export interface CatalogTool {
   /** The action a call names, exactly. */
   name: string;
+  /**
+   * For a Composio toolkit's tool: whether Grasp reviewed and classed it
+   * (connect's composio-classes.ts), the only tools a connection offers
+   * and runs. Absent for the tools of other sources, which are all used.
+   */
+  reviewed?: boolean;
   description: string | null;
   /**
    * The properties its input takes, as its provider declares them: the

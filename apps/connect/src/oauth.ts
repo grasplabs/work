@@ -61,6 +61,7 @@ import {
 import {
   allowedToolNames,
   offeredToolNames,
+  toolsWhyOf,
   pastAddressesAfter,
   readToolNames,
   toolResourcesOf,
@@ -1710,6 +1711,7 @@ export const listConnections = async (
       ...(row.composioAuth !== null && { composioAuth: row.composioAuth }),
       tools: allowedToolNames(row),
       offeredTools: offeredToolNames(row),
+      ...(toolsWhyOf(row) === undefined ? {} : { toolsWhy: toolsWhyOf(row) }),
       readTools: readToolNames(row),
       toolResources: toolResourcesOf(row),
     }),

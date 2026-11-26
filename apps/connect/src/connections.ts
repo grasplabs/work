@@ -11,6 +11,7 @@ import type {
   PersonalAccount,
   ToolClass,
   ToolReach,
+  ToolsWhy,
 } from "@grasp-os/shared/connect";
 import { sourceReaderProviders } from "@grasp-os/shared/source-readers";
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
@@ -204,6 +205,21 @@ const reviewedClass = (
   return toolClass === "never" ? undefined : toolClass;
 };
 
+/**
+ * Whether Grasp reviewed `tool` of `toolkit` and classed it as one it
+ * runs: the only Composio tools a connection offers, whatever an admin
+ * allowed (`allowedTool`).
+ */
+export const isReviewedTool = (toolkit: string, tool: string): boolean =>
+  !isNeverTool(tool) && reviewedClass(toolkit, tool) !== undefined;
+
+/** Whether Grasp reviewed any tool of `toolkit` as one it runs. */
+const hasReviewedTools = (toolkit: string): boolean =>
+  Object.hasOwn(composioClasses, toolkit) &&
+  Object.keys(composioClasses[toolkit] ?? {}).some((tool) =>
+    isReviewedTool(toolkit, tool)
+  );
+
 /** Whether Grasp's review says `tool` of `toolkit` reads or changes mail. */
 export const reviewedMail = (toolkit: string, tool: string): boolean => {
   const reviewed = reviewOf(toolkit, tool);
@@ -267,6 +283,21 @@ export const offeredToolNames = (
   allowedToolNames(connection).filter(
     (name) => allowedTool(connection, name) !== undefined
   );
+
+/**
+ * Why a Composio connection offers no tool (`ToolsWhy`), when it offers
+ * none: nothing of its toolkit reviewed, or nothing reviewed allowed.
+ */
+export const toolsWhyOf = (
+  connection: Pick<Connection, "provider" | "tools">
+): ToolsWhy | undefined => {
+  if (offeredToolNames(connection).length > 0) {
+    return undefined;
+  }
+  return hasReviewedTools(connection.provider)
+    ? "tools_unreviewed"
+    : "toolkit_unreviewed";
+};
 
 /**
  * The Composio MCP server behind the connection, if its URL is one, with
@@ -350,6 +381,9 @@ export const connectionOwners = async (
       accountSenders: accountSenders ?? [],
       ...(row.source === "composio" && {
         toolClasses: offeredToolClasses({ provider: row.provider, tools }),
+        ...(toolsWhyOf({ provider: row.provider, tools }) === undefined
+          ? {}
+          : { toolsWhy: toolsWhyOf({ provider: row.provider, tools }) }),
       }),
       ...(row.source === "connector" && {
         toolClasses: connectorClasses.get(row.id) ?? {},

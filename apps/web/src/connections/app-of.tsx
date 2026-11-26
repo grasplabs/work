@@ -223,6 +223,13 @@ export const useTileWords = (identity: Pick<Identity, "role" | "staff">) => {
     ) {
       return { needsConnect: t`Waiting for an admin` };
     }
+    // Why a Composio connection offers a chat no tool, as connect says.
+    if (primary.toolsWhy === "toolkit_unreviewed") {
+      return { works: t`Connected: Grasp hasn't reviewed its tools yet` };
+    }
+    if (primary.toolsWhy === "tools_unreviewed") {
+      return { works: t`Connected: none of its allowed tools is reviewed` };
+    }
     const allowed = primary.offeredTools ?? primary.tools;
     return integration.source === "composio" &&
       allowed !== undefined &&

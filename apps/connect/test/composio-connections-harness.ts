@@ -100,6 +100,16 @@ export const composio = fakeComposioApi(
       managed: false,
       tools: [{ slug: "ACME_ERP_LIST_ORDERS" }],
     },
+    // A CRM Composio holds an app for, whose tools Grasp hasn't reviewed
+    // (test/fixtures/composio-classes.ts has none of them), as Attio's.
+    {
+      slug: "folkdesk",
+      name: "Folkdesk",
+      tools: [
+        { slug: "FOLKDESK_SEARCH_RECORDS", tags: ["readOnlyHint"] },
+        { slug: "FOLKDESK_UPDATE_RECORD" },
+      ],
+    },
   ],
   {
     mcpTools: [

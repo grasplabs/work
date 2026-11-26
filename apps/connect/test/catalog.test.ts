@@ -338,18 +338,21 @@ describe("a catalog entry's tools", () => {
         description: "List contacts",
         inputs: ["limit", "after"],
         readOnly: true,
+        reviewed: true,
       },
       {
         name: "HUBSPOT_CREATE_CONTACT",
         description: "Create a contact",
         inputs: [],
         readOnly: false,
+        reviewed: true,
       },
       {
         name: "HUBSPOT_UPDATE_CONTACT",
         description: null,
         inputs: [],
         readOnly: false,
+        reviewed: true,
       },
     ]);
     expect(toolRequests()).toStrictEqual([

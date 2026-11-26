@@ -266,6 +266,33 @@ describe("the Connectors overview", () => {
     );
   });
 
+  it("says on a connected toolkit's tile why it offers a chat no tool, as connect says", async () => {
+    const { host } = await opened([
+      connection("acme-crm", {
+        source: "composio",
+        tools: ["ACME_CRM_SEARCH"],
+        offeredTools: [],
+        toolsWhy: "toolkit_unreviewed",
+      }),
+      connection("ledger", {
+        source: "composio",
+        tools: ["LEDGER_EXPORT"],
+        offeredTools: [],
+        toolsWhy: "tools_unreviewed",
+      }),
+    ]);
+    const tileOf = (name: string) => {
+      const tile = [
+        ...host.querySelectorAll<HTMLElement>('ul[aria-label="Apps"] li'),
+      ].find((each) => heard(each).startsWith(name));
+      return tile === undefined ? "" : heard(tile);
+    };
+    expect([tileOf("Acme CRM"), tileOf("Ledger")]).toStrictEqual([
+      "Acme CRMConnected: Grasp hasn't reviewed its tools yet",
+      "LedgerConnected: none of its allowed tools is reviewed",
+    ]);
+  });
+
   it("opens an app over the page from its tile, saying where a connected one stands", async () => {
     const { host, router } = await opened([
       connection("google", { status: "needs_reauth" }),

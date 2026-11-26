@@ -1046,6 +1046,40 @@ describe("a person's own connections in their own chat", setUpTime, () => {
     });
   });
 
+  it("say why one offers no tool when Grasp hasn't reviewed its toolkit's, never that an admin can enable it", async () => {
+    const person = await signedInApi(idp, "user");
+    // A toolkit connect's review has no class for (its fixtures).
+    const unreviewed = await mailConnection([], mailWithSearch, {
+      owner: person.userId,
+      provider: "unreviewed_crm",
+    });
+    const chat = await chatOf(
+      person.userId,
+      codeStep(
+        "export default async (self, env) => await env.connections.available();"
+      ),
+      says("Nothing to read there.")
+    );
+    await chat.ask("Look in the CRM.");
+
+    const [available] = await codeResults(chat.stub, chat.chat.id);
+    const why =
+      "Grasp hasn't reviewed unreviewed_crm's tools yet, so this connection offers none (toolkit_unreviewed). No setting in Grasp changes that: a release of Grasp has to review them first.";
+    expect({
+      listed: available?.text.includes(
+        JSON.stringify({
+          connectionId: unreviewed.id,
+          provider: "unreviewed_crm",
+          account: null,
+          scope: "personal",
+          actions: [],
+          noActions: why,
+          decidedBy: "person",
+        })
+      ),
+    }).toStrictEqual({ listed: true });
+  });
+
   it("are listed and named for reading beside a grant for a write alone, which still holds the write", async () => {
     const [person, admin] = await Promise.all([
       signedInApi(idp, "user"),
