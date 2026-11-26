@@ -9,6 +9,7 @@ import type {
   ChatOutput,
   ChatPartial,
   ChatProvenance,
+  ChatQueued,
   ChatToolEvent,
   ChatUpdate,
 } from "@grasp-os/shared/chat";
@@ -34,6 +35,8 @@ export interface ChatView {
   /** The calls the chat's code made, oldest first: the latest core keeps. */
   tools: ChatToolEvent[];
   running: boolean;
+  /** The questions sent while it runs that its agent hasn't taken yet, oldest first. */
+  queued: ChatQueued[];
   provenance: ChatProvenance;
   /** Why the last question stopped short; `null` once another starts. */
   stopped: string | null;
@@ -55,6 +58,7 @@ export const emptyView: ChatView = {
   output: null,
   tools: [],
   running: false,
+  queued: [],
   provenance: { sources: [], restricted: false },
   stopped: null,
   held: 0,
@@ -93,6 +97,7 @@ export const applyUpdate = (view: ChatView, update: ChatUpdate): ChatView => {
     output: applyOutput(view.output, update.output),
     tools: mergedTools(view.tools, update.tools),
     running: update.running,
+    queued: update.queued ?? [],
     // Sent first, then only when it changes.
     provenance: update.provenance ?? view.provenance,
     stopped: update.stopped,
