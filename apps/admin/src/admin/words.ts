@@ -416,6 +416,36 @@ export const needLine = (need: Need, view: OrgView): string => {
   }
 };
 
+/** What a company whose Grasp is from before the summary needs: an update, to see its counts. */
+export const olderLine = "Update to see its counts";
+
+/**
+ * Each kind of need as a label that names nothing (no team, lead, piece of
+ * work or app) and reads right beside how many there are of it, as the
+ * sidebar's Inbox lists them from the summaries. `needLine` says one in
+ * full.
+ */
+export const needKindLines: Record<Need["kind"], string> = {
+  paused: "Interviews paused",
+  transcript: "First conversation waiting on Grasp",
+  ask: "First conversation left things to ask the sponsor",
+  conflict: "Sources that disagree about the company",
+  agreement: "Agreements not in yet",
+  lead: "Team leads who haven’t talked yet",
+  quiet: "Quiet teams whose link closes soon",
+  blocked: "Work people describe in two ways",
+  split: "Work that is probably two workflows",
+  few: "Work heard from too few people",
+  read: "Interviews waiting to be read at Grasp",
+  go: "Ready for Grasp’s go",
+  short: "Interviews over, below what it opens at",
+  contract: "Contract not signed yet",
+  ending: "Contract ending with nothing agreed for after",
+  signin: "Connections waiting for someone to sign in again",
+  budget: "AI use over what the contract covers",
+  overdue: "Overdue invoices",
+};
+
 /** Where someone stands with their link (the prototype's `link` words). */
 export const linkWords: Record<LinkState, string> = {
   waiting: "No link yet",

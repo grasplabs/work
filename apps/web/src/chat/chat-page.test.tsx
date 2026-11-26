@@ -137,6 +137,14 @@ const opened = async (
       await Promise.resolve();
     },
     heldCalls: async () => await Promise.resolve([]),
+    cancel: async (chatId: string) => {
+      asked.push(`cancel ${chatId}`);
+      return await Promise.resolve({ dropped: ["Germany?"] });
+    },
+    sendNow: async (chatId: string) => {
+      asked.push(`sendNow ${chatId}`);
+      await Promise.resolve();
+    },
     watch,
     summary,
   };
@@ -247,6 +255,48 @@ const restricted =
     });
     return await Promise.withResolvers<never>().promise;
   };
+
+/**
+ * A watch that sends the chat as an answer is written, a question queued
+ * behind it, then holds.
+ */
+const answeringWithQueued = async (
+  _chatId: string,
+  _after: number | null,
+  onUpdate: (update: ChatUpdate) => void
+): Promise<never> => {
+  await Promise.resolve();
+  onUpdate({
+    messages: [
+      {
+        id: 1,
+        role: "user",
+        text: "France?",
+        at: "2026-11-01T08:00:00.000Z",
+      },
+    ],
+    partial: {
+      from: 0,
+      text: "Paris",
+      code: [],
+      tools: [],
+      reasoning: { from: 0, text: "" },
+    },
+    running: true,
+    queued: [{ id: "7", text: "Germany?" }],
+    stopped: null,
+    held: 0,
+    worked: 0,
+    provenance: { sources: [], restricted: false },
+  });
+  return await Promise.withResolvers<never>().promise;
+};
+
+/** A button by its accessible name, its words or its label. */
+const buttonLabelled = (name: string): HTMLButtonElement | undefined =>
+  [...document.querySelectorAll("button")].find(
+    (each) => each.getAttribute("aria-label") === name || wordsOf(each) === name
+  );
 
 /** Whether the page says the chat is restricted. */
 const saysRestricted = () =>
@@ -486,6 +536,35 @@ describe("a chat's own page", () => {
     expect({ writing, held: saysRestricted() }).toStrictEqual({
       writing: true,
       held: true,
+    });
+  });
+
+  it("takes a question while the answer is written, Stop standing beside Send", async () => {
+    const { asked } = await opened("chat-a", undefined, answeringWithQueued);
+    await settled();
+    const stopAtRest = buttonLabelled("Stop") !== undefined;
+    await typed("Spain?");
+    const stopBeside = buttonLabelled("Stop") !== undefined;
+    await sent();
+
+    expect({ stopAtRest, stopBeside, asked }).toStrictEqual({
+      stopAtRest: true,
+      stopBeside: true,
+      asked: ["send chat-a Spain?"],
+    });
+  });
+
+  it("puts the questions Stop dropped back in an empty box", async () => {
+    const { asked } = await opened("chat-a", undefined, answeringWithQueued);
+    await settled();
+    act(() => {
+      buttonLabelled("Stop")?.click();
+    });
+    await settled();
+
+    expect({ asked, box: box()?.textContent }).toStrictEqual({
+      asked: ["cancel chat-a"],
+      box: "Germany?",
     });
   });
 

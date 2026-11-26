@@ -136,6 +136,7 @@ export const ChatConversation = ({
     failure,
     empty,
     ask,
+    sendNow,
     composer,
     offered,
     sourceNames,
@@ -189,6 +190,10 @@ export const ChatConversation = ({
         }}
         output={view.output}
         partial={view.partial}
+        queued={view.queued}
+        onSendNow={() => {
+          void sendNow(chatId);
+        }}
         checking={view.checking}
         modelWait={view.waiting}
         running={view.running}

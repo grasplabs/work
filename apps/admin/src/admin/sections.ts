@@ -174,14 +174,15 @@ const needSections: Record<Need["kind"], OrgSection> = {
   read: "interviews",
 };
 
-export const needSection = (need: Need): OrgSection => needSections[need.kind];
+export const needSection = (need: Pick<Need, "kind">): OrgSection =>
+  needSections[need.kind];
 
 /**
  * Where a need is settled: its section, and the tab of it where that isn't
  * the section's first. The contract's are on Details' Contract.
  */
 export const needWhere = (
-  need: Need
+  need: Pick<Need, "kind">
 ): { section: OrgSection; search: { tab: "contract" } | undefined } => ({
   section: needSection(need),
   search:

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   act,
   answeredAdmin,
+  answeredSummary,
   gridRow,
   lineOf,
   openAdmin,
@@ -159,6 +160,12 @@ describe("an organization's billing, as Stripe's answer reads", () => {
           billing: { state: "read", customerId, account: late },
         }),
       ],
+      fetchClientSummaries: [
+        answeredSummary({
+          client: acme,
+          billing: { state: "read", customerId, account: late },
+        }),
+      ],
     });
     const inbox = [
       ...container.querySelectorAll<HTMLElement>('[role="tab"]'),
@@ -169,7 +176,7 @@ describe("an organization's billing, as Stripe's answer reads", () => {
     await settle();
     const overdue = [
       ...container.querySelectorAll('[data-slot="sidebar"] a'),
-    ].find((link) => link.textContent?.includes("is overdue"));
+    ].find((link) => link.textContent?.includes("Overdue invoices"));
 
     expect(overdue?.getAttribute("href")).toBe(
       `/organizations/${acme.id}/details?tab=contract`

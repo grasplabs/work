@@ -28,6 +28,7 @@
     "@tanstack/react-table": "catalog:",
     "@ui-sdk/core": "catalog:",
     "@ui-sdk/react": "catalog:",
+    "diff": "catalog:",
     "katex": "catalog:",
     "mdast-util-from-markdown": "catalog:",
     "mdast-util-gfm": "catalog:",

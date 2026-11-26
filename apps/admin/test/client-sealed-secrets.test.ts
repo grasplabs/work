@@ -16,6 +16,7 @@ import { fetchOrganizationTrail } from "../src/admin/trail.ts";
 import {
   fetchClientAdmin,
   fetchClientAdmins,
+  fetchClientSummaries,
   fetchClientAiStatus,
   fetchClientGrid,
   fetchClientSetup,
@@ -185,7 +186,8 @@ const sentToBrowser = async (clientId: string): Promise<string> => {
   );
   const answers = [
     await callServerFn(fetchClientGrid, undefined, caller),
-    await callServerFn(fetchClientAdmins, { except: [clientId] }, caller),
+    await callServerFn(fetchClientAdmins, undefined, caller),
+    await callServerFn(fetchClientSummaries, undefined, caller),
     await callServerFn(fetchClientAdmin, client, caller),
     await callServerFn(fetchClientSetup, client, caller),
     await callServerFn(fetchPinChoices, undefined, caller),

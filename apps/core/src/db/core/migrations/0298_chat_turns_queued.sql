@@ -1,0 +1,1 @@
+ALTER TABLE `chat_turns` ADD `queued` integer DEFAULT 0 NOT NULL;

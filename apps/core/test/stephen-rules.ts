@@ -65,9 +65,9 @@ const doneAlready =
 /**
  * What only the harness writes to the model, never words for the person:
  * a result's field names (code-mode.ts `describeRun`) and the recall's
- * heading (chat-agent.ts `questionContent`).
+ * tag (chat-agent.ts `questionContent`).
  */
-const internalFraming = /readFrom|"(?:returned|logs|cut)"\s*:|\[Recall /u;
+const internalFraming = /readFrom|"(?:returned|logs|cut)"\s*:|<\/?recall\b/u;
 
 /** The hard rules, by name. */
 export const stephenRules = {
