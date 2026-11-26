@@ -186,7 +186,8 @@ export type TurnStop =
   | "history_revoked"
   | "person_inactive"
   | "unreadable"
-  | "overdue";
+  | "overdue"
+  | "lost";
 
 /** How a turn ended, as its Workspace reads it. */
 export interface TurnEnd {
@@ -250,10 +251,13 @@ interface Asked {
  * what may have been billed) and says why a request failed in the end: pi
  * retrying that too would multiply the attempts and send again what may
  * have been billed. pi reads one policy for both, so it is on only until
- * the Harness first asks the model: a restart opens a new Harness, whose
- * first act for a request a restart cut off is to count it (pi's
- * `interrupted`), before it sends anything; once it sends, what the
- * gateway answers is final, a summary's too.
+ * the Harness starts a turn's request (the chat agent's `beforeRequest`),
+ * or any answer, a summary's too, comes back failed: a restart opens a new
+ * Harness, whose first act for a request a restart cut off is to count it
+ * (pi's `interrupted`), before that request is sent again; and a summary
+ * that answers meanwhile changes nothing. Once off, what the gateway
+ * answers is final. Only a summary failing in that window, as a request
+ * is cut off, makes the request end at its first cut.
  */
 const retryPolicy = (asked: boolean): Partial<ConversationRetryPolicy> =>
   asked ? { enabled: false } : { enabled: true, maxRetries: 4, baseDelayMs: 0 };
@@ -265,20 +269,23 @@ const retryPolicy = (asked: boolean): Partial<ConversationRetryPolicy> =>
 const syncRetryMs = 15_000;
 
 /**
- * Most a turn may run before it is stopped as overdue (`#watchdog`): far
- * past any turn that ends, as each request has its deadline (models.ts)
- * and each code run its own (`codeTimeoutMs`), so only a turn that would
- * never end, such as one calling tools without end, meets it.
+ * Most a turn pi runs may go without pi committing anything (a word, a
+ * step, a result) before it is stopped as overdue (`#watchdog`): past the
+ * gateway's 15 minutes for one request, which streams as it goes, and any
+ * code run's limit. A turn that keeps going is never stopped for it.
  */
-const turnMostMs = 30 * 60_000;
+const turnIdleMs = 20 * 60_000;
+
+/** Most a turn may run however it goes: a turn calling tools without end. */
+const turnMostMs = 4 * 60 * 60_000;
 
 /**
- * `turnMostMs`, or less where tests set `CHAT_TURN_MOST_MS`; never set in
+ * `turnIdleMs`, or less where tests set `CHAT_TURN_IDLE_MS`; never set in
  * wrangler.jsonc.
  */
-const turnMostOf = (env: Pick<Env, "CHAT_TURN_MOST_MS">): number => {
-  const set = Number(env.CHAT_TURN_MOST_MS);
-  return Number.isInteger(set) && set > 0 ? set : turnMostMs;
+const turnIdleOf = (env: Pick<Env, "CHAT_TURN_IDLE_MS">): number => {
+  const set = Number(env.CHAT_TURN_IDLE_MS);
+  return Number.isInteger(set) && set > 0 ? set : turnIdleMs;
 };
 
 /**
@@ -715,6 +722,8 @@ export class ChatHarness {
   #answering: string | undefined;
   /** Whether pi runs the agent now (`pi.live.run`). */
   #running = false;
+  /** When pi last committed anything: what `#watchdog` measures from. */
+  #progressAt = Date.now();
   /** The answer streaming in, as `pi.live` has it now. */
   #partial: AssistantMessage | null = null;
   /** What the turn's model request waits on now, as the gateway says. */
@@ -866,6 +875,7 @@ export class ChatHarness {
    * date with it, in order.
    */
   #see(value: ConversationView): void {
+    this.#progressAt = Date.now();
     const live = liveSchema.safeParse(value.docs["pi.live"] ?? {});
     const partial = live.success
       ? (live.data.generation?.message ?? null)
@@ -1323,10 +1333,26 @@ export class ChatHarness {
    * question rebases (`#submit`), the guard holding every request
    * meanwhile. A rebase can take longer than an object may block. A turn
    * restarts cut off too often pi ends itself (`#endOf`).
+   * With `lost`, the host gave the turn up while pi couldn't open, and its
+   * Workspace showed it failed: it is stopped and settled here, so the
+   * next question is taken.
    */
-  async setUpStored(): Promise<void> {
+  async setUpStored(lost = false): Promise<void> {
     const turn = await this.#harness.snapshot(TurnDoc, context);
     const request = turn === undefined ? undefined : requestOf(turn);
+    if (lost && turn?.ended === false && request !== undefined) {
+      this.#stopped = "lost";
+      if (this.#running) {
+        await this.#conversation.abort(context);
+      }
+      this.#active = request.turnId;
+      await this.#settle(request.turnId, {
+        outcome: "failed",
+        answer: "",
+        stopped: "lost",
+      });
+      return;
+    }
     // The turn its record holds unsettled: the chat takes no other first.
     if (turn?.ended === false) {
       this.#active = request?.turnId;
@@ -1370,9 +1396,10 @@ export class ChatHarness {
   }
 
   /**
-   * Stops the turn under way once it has run past `turnMostMs`: it ends
-   * as overdue, as a turn its guard stopped ends, rather than keeping its
-   * chat busy without end.
+   * Stops the turn under way once pi has committed nothing for
+   * `turnIdleMs`, or it has run `turnMostMs`: it ends as overdue, as a
+   * turn its guard stopped ends, rather than keeping its chat busy without
+   * end. A turn waiting on a person isn't running: its holds end the turn.
    */
   async #watchdog(): Promise<void> {
     try {
@@ -1385,7 +1412,8 @@ export class ChatHarness {
         !this.#running ||
         requestOf(turn)?.turnId !== this.#active ||
         typeof turn.startedAt !== "number" ||
-        Date.now() - turn.startedAt < turnMostOf(this.#env)
+        (Date.now() - this.#progressAt < turnIdleOf(this.#env) &&
+          Date.now() - turn.startedAt < turnMostMs)
       ) {
         return;
       }
@@ -1393,6 +1421,7 @@ export class ChatHarness {
         chatSession: this.#name,
         turnId: requestOf(turn)?.turnId,
         ms: Date.now() - turn.startedAt,
+        idleMs: Date.now() - this.#progressAt,
       });
       this.#stop("overdue");
     } catch {
@@ -1541,11 +1570,18 @@ export class ChatHarness {
         }
       }
     );
-    // Each request, a summary's too: from the first, pi retries nothing
-    // (`retryPolicy`).
+    // An answer that failed, a summary's too: from then on, pi retries
+    // nothing (`retryPolicy`). Seen before pi classifies it, as the
+    // first to wait on its result.
     const asking: AgentModel["stream"] = (model, sent, options) => {
-      this.#asked.since = true;
-      return admitted.stream(model, sent, options);
+      const events = admitted.stream(model, sent, options);
+      void (async () => {
+        const answer = await events.result();
+        if (answer.stopReason === "error") {
+          this.#asked.since = true;
+        }
+      })();
+      return events;
     };
     this.#models.setProvider(
       createProvider({
@@ -1597,6 +1633,10 @@ export class ChatHarness {
     };
     const transcript = await this.#conversation.context(context);
     const extension = chatAgent({
+      // A turn's request starts: from now, pi retries nothing (`retryPolicy`).
+      asking: () => {
+        this.#asked.since = true;
+      },
       ...turn,
       context:
         request.question.make === undefined

@@ -728,6 +728,9 @@ const turnStopError = (stop: TurnStop): Error => {
     case "overdue": {
       return agentErrors.create("agent.turn_overdue");
     }
+    case "lost": {
+      return agentErrors.create("agent.turn_lost");
+    }
     case "person_inactive": {
       return permissionErrors.create("permission.person_inactive");
     }
@@ -3510,6 +3513,19 @@ export class Workspace extends DurableObject<Env> {
       this.#turns.has(chatId) ||
       this.ctx.storage.kv.get(`${runningKeyPrefix}${chatId}`) !== undefined
     );
+  }
+
+  /**
+   * The chat's `ChatSession` gave its turn up, as it couldn't open the
+   * chat for a while (chat-session.ts): no longer running, and stopped
+   * with why, which the chat shows with a Try again.
+   */
+  turnLost(chatId: ChatId): void {
+    if (this.chatState(chatId) === undefined || this.#deleting.has(chatId)) {
+      return;
+    }
+    this.#stopped.set(chatId, agentErrors.create("agent.turn_lost").message);
+    this.turnRunning(chatId, false);
   }
 
   /**
