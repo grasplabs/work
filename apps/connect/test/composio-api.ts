@@ -425,10 +425,19 @@ export const fakeComposioApi = (
     failing: string | undefined;
     /**
      * As `failing`, for its next `times` requests only, each counted down
-     * as it fails: a failure that passes. `broken` answers 200 instead,
-     * with a body that breaks off after its first bytes.
+     * as it fails: a failure that passes. It answers `status` (503 by
+     * default), or, `broken`, 200 with a body that breaks off after its
+     * first bytes.
      */
-    failingFor: { prefix: string; times: number; broken?: boolean } | undefined;
+    failingFor:
+      | { prefix: string; times: number; broken?: boolean; status?: number }
+      | undefined;
+    /**
+     * How its answers about an account write the toolkit's slug: as it is,
+     * in capitals, or with each `k` the Kelvin sign (U+212A), which
+     * Unicode lowers to `k`.
+     */
+    slugCase: "lower" | "upper" | "kelvin";
     /** Where it says a new server is, instead of its own MCP host. */
     serverUrlBase: string;
     /**
@@ -471,6 +480,7 @@ export const fakeComposioApi = (
     toolsStatus: undefined,
     failing: undefined,
     failingFor: undefined,
+    slugCase: "lower",
     serverUrlBase: mcpBase,
     accountInUrl: "own",
     holds: { authConfigs: new Map(), accounts: new Map(), servers: new Map() },
@@ -676,7 +686,13 @@ export const fakeComposioApi = (
     return Response.json({
       id,
       status: completing ? "INITIATED" : account.status,
-      toolkit: { slug: account.toolkit },
+      toolkit: {
+        slug: {
+          lower: account.toolkit,
+          upper: account.toolkit.toUpperCase(),
+          kelvin: account.toolkit.replaceAll("k", "\u212A"),
+        }[state.slugCase],
+      },
       auth_config: { id: account.authConfigId },
     });
   };
@@ -760,7 +776,10 @@ export const fakeComposioApi = (
     }
     failingFor.times -= 1;
     if (failingFor.broken !== true) {
-      return new Response("Service Unavailable", { status: 503 });
+      return Response.json(
+        { error: { message: "Refused", slug: "Refused" } },
+        { status: failingFor.status ?? 503 }
+      );
     }
     return new Response(
       new ReadableStream<Uint8Array>({
@@ -867,6 +886,7 @@ export const fakeComposioApi = (
     state.toolsStatus = undefined;
     state.failing = undefined;
     state.failingFor = undefined;
+    state.slugCase = "lower";
     state.beforeUpdate = undefined;
     state.updateGate = undefined;
     state.serverGate = undefined;
