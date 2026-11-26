@@ -291,11 +291,29 @@ const sharedApis = [
   sharedSkillsApi,
 ];
 
+/** The APIs only a turn that builds gets (`TurnContext.builds`). */
+const buildingApiNames: ReadonlySet<string> = new Set([
+  "build",
+  "workflowBuild",
+]);
+const nonBuildingApis = agentApis.filter(
+  ({ name }) => !buildingApiNames.has(name)
+);
+
 /**
- * The APIs a chat's turn gets: a shared chat's (`sharedApis`), or all of
- * the agent's, `env.brain` (and its `searchBrain` tool, agent-tools.ts)
+ * The APIs a chat's turn gets: a shared chat's (`sharedApis`), or the
+ * agent's, `env.brain` (and its `searchBrain` tool, agent-tools.ts)
  * included: every agent reads the Brain, as far as where the turn reads
- * as lets it (brain-recall.ts).
+ * as lets it (brain-recall.ts). Building's only where the turn builds:
+ * anyone else's builds are refused, so the APIs, and the tools they
+ * bring, would only cost every request.
  */
-export const apisFor = (shared: boolean): readonly AgentApi[] =>
-  shared ? sharedApis : agentApis;
+export const apisFor = (
+  shared: boolean,
+  builds: boolean
+): readonly AgentApi[] => {
+  if (shared) {
+    return sharedApis;
+  }
+  return builds ? agentApis : nonBuildingApis;
+};

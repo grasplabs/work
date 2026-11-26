@@ -11,7 +11,7 @@ import type {
   TurnEnd,
   TurnRequest,
 } from "./chat-harness.ts";
-import { callObject, workspace } from "./durable-objects.ts";
+import { workspace } from "./durable-objects.ts";
 
 // One chat's agent: the object that runs its turns on pi-durable
 // (chat-harness.ts), named by its Workspace and chat (`chatSession` in
@@ -49,6 +49,10 @@ const heartbeatMs = 60_000;
 
 /** How soon the alarm first tries an open that failed again, doubling after. */
 const reopenMs = 30_000;
+
+/** When the alarm tries again after `failed` opens failed in a row. */
+const backoffMs = (failed: number): number =>
+  failed === 0 ? heartbeatMs : reopenMs * 2 ** (failed - 1);
 
 /** Opens that fail in a row before the object stops waking itself. */
 const opensMost = 6;
@@ -147,15 +151,16 @@ export class ChatSession extends DurableObject<Env> {
     }
     const opened = await this.ctx.blockConcurrencyWhile(
       async (): Promise<{ harness: ChatHarness } | { error: unknown }> => {
-        // A fallback before anything can fail: an object whose open or
-        // recovery fails is woken again.
-        const fallback = Date.now() + heartbeatMs;
+        // Counted before it can fail, by a throw or by a reset; and a
+        // fallback set first, at the backoff should this open fail too: an
+        // object whose open resets it is woken again, later each time.
+        const failed = this.#failedOpens() + 1;
+        const fallback = Date.now() + backoffMs(failed);
         const current = await this.ctx.storage.getAlarm();
         if (current === null || current > fallback) {
           await this.ctx.storage.setAlarm(fallback);
         }
-        // Counted before it can fail, by a throw or by a reset.
-        this.ctx.storage.kv.put(failedOpensKey, this.#failedOpens() + 1);
+        this.ctx.storage.kv.put(failedOpensKey, failed);
         let harness: ChatHarness | undefined;
         try {
           const { ChatHarness: Opening } = await import("./chat-harness.ts");
@@ -355,8 +360,9 @@ export class ChatSession extends DurableObject<Env> {
         // One that failed to open, or to stop, goes with the storage below.
       }
     }
-    // Nothing of a pi that failed writes after the storage is gone.
-    await this.#lastClosed;
+    // Nothing of a pi that failed writes after the storage is gone; one
+    // that never closes resets the object, and the erase is asked again.
+    await this.#closedOrReset();
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     this.ctx.storage.kv.put(erasedKey, true);
@@ -369,6 +375,12 @@ export class ChatSession extends DurableObject<Env> {
    */
   override async alarm(): Promise<void> {
     if (this.#erased()) {
+      return;
+    }
+    // Opens that keep failing, by a throw or by a reset, stop here: only a
+    // call opens pi again.
+    if (this.#current === undefined && this.#failedOpens() >= opensMost) {
+      await this.#giveUp();
       return;
     }
     try {
@@ -389,26 +401,47 @@ export class ChatSession extends DurableObject<Env> {
   async #retry(): Promise<void> {
     const failed = this.#failedOpens();
     if (failed < opensMost) {
-      const backoff = failed === 0 ? heartbeatMs : reopenMs * 2 ** (failed - 1);
-      await this.ctx.storage.setAlarm(Date.now() + backoff);
+      await this.ctx.storage.setAlarm(Date.now() + backoffMs(failed));
       return;
     }
-    await this.ctx.storage.deleteAlarm();
-    const name = this.ctx.id.name ?? "";
-    log.error("chat.gave_up", { chatSession: name, failedOpens: failed });
-    const [workspaceId, chatId] = name.split("/");
-    try {
-      await callObject(async () => {
+    await this.#giveUp();
+  }
+
+  /**
+   * Stops waking the object for opens that keep failing, once its
+   * Workspace is told the chat's turn no longer runs: until it is, the
+   * alarm tells it again later, never opening pi meanwhile.
+   */
+  async #giveUp(): Promise<void> {
+    // Inside the block, so no call opens pi meanwhile: one that comes waits,
+    // and opens it after; one that came first keeps it, and its wake.
+    await this.ctx.blockConcurrencyWhile(async () => {
+      if (this.#current !== undefined || this.#opened !== undefined) {
+        return;
+      }
+      const name = this.ctx.id.name ?? "";
+      log.error("chat.gave_up", {
+        chatSession: name,
+        failedOpens: this.#failedOpens(),
+      });
+      // A fallback first: a notice that fails, or resets the object, leaves
+      // an alarm that tells it again. One attempt, inside the block, with
+      // no retry that could land after a later open said the turn runs.
+      await this.ctx.storage.setAlarm(Date.now() + backoffMs(opensMost));
+      const [workspaceId, chatId] = name.split("/");
+      try {
         await workspace(
           this.env,
           workspaceIdSchema.parse(workspaceId)
         ).turnRunning(chatIdSchema.parse(chatId), false);
-      });
-    } catch (error) {
-      log.error("chat.gave_up_untold", {
-        chatSession: name,
-        ...errorFields(error),
-      });
-    }
+      } catch (error) {
+        log.error("chat.gave_up_untold", {
+          chatSession: name,
+          ...errorFields(error),
+        });
+        return;
+      }
+      await this.ctx.storage.deleteAlarm();
+    });
   }
 }

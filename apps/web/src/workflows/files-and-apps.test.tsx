@@ -327,6 +327,31 @@ const listed = (alias: string): string[] | undefined => {
 const saidNow = (): string[] =>
   [...document.querySelectorAll("output")].map((each) => each.textContent);
 
+/** The open list's search field. */
+const searchField = (): HTMLInputElement => {
+  const field = document.querySelector(
+    'input[aria-label="Search people, teams and roles"]'
+  );
+  if (!(field instanceof HTMLInputElement)) {
+    throw new TypeError("No search field");
+  }
+  return field;
+};
+
+/** Types `words` into `field`, in place of what it held, as a person does. */
+const typeInto = async (field: HTMLInputElement, words: string) => {
+  await act(async () => {
+    field.focus();
+    Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value"
+    )?.set?.call(field, words);
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    await Promise.resolve();
+  });
+  await settled();
+};
+
 /** Opens the list of who answers and picks `name` from it. */
 const pick = async (name: string) => {
   await press(button("Add who answers"));
@@ -444,6 +469,61 @@ describe("a workflow's Files and apps tab", () => {
           deciders: ["person:user-222222", "person:user-111111"],
         },
       ],
+    });
+  });
+
+  it("finds whom to add by what was typed, as typed, in a name, an email or what tells a namesake apart, and adds the row Enter is on", async () => {
+    const { session, approved, answerFirstCatalog } = fakeCore(
+      [],
+      [
+        { userId: "user-111111", name: "Ada Lovelace", email: "ada@acme.test" },
+        {
+          userId: "user-222222",
+          name: "Ada Lovelace",
+          email: "a.lovelace@acme.test",
+        },
+        { userId: "user-eva", name: "Eva Bakker", email: "eva@acme.test" },
+        {
+          userId: "user-wouter",
+          name: "Wouter van den Berg",
+          email: "w.berg@acme.test",
+        },
+      ]
+    );
+    answerFirstCatalog();
+    await shown(session, true);
+    await press(button("Add who answers"));
+    const found = async (words: string): Promise<string[]> => {
+      await typeInto(searchField(), words);
+      return [...document.querySelectorAll('[role="option"]')].map((each) =>
+        wordsOf(each)
+      );
+    };
+
+    const byName = await found("Eva");
+    const byEmail = await found("w.berg");
+    const byHint = await found("222222");
+    await act(async () => {
+      searchField().dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true })
+      );
+      await Promise.resolve();
+    });
+    await settled();
+    await press(button("Approve approval"));
+
+    expect({
+      byName,
+      byEmail,
+      byHint,
+      deciders: approved.map(({ input }) =>
+        "target" in input ? input.target : undefined
+      ),
+    }).toStrictEqual({
+      byName: ["Eva Bakker"],
+      byEmail: ["Wouter van den Berg"],
+      byHint: ["Ada LovelaceID …222222"],
+      deciders: [{ kind: "decision", deciders: ["person:user-222222"] }],
     });
   });
 

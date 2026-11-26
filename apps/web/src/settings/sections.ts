@@ -1,14 +1,12 @@
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
 import {
-  BrainIcon,
   BuildingIcon,
   CableIcon,
   CircleUserIcon,
   ClockIcon,
   ContrastIcon,
   FileInvoiceIcon,
-  InfoIcon,
   LinkIcon,
   LockIcon,
   StickyNoteIcon,
@@ -35,8 +33,6 @@ type SettingsHref =
   | "/settings/audit"
   | "/settings/webhooks"
   | "/settings/billing"
-  | "/settings/brain"
-  | "/settings/outcomes"
   | "/settings/profile"
   | "/settings/appearance"
   | "/settings/instructions"
@@ -177,28 +173,6 @@ const settingsSections: readonly SettingsSection[] = [
     group: "workspace",
     icon: FileInvoiceIcon,
     audience: "admins",
-  },
-  // Not in the reference, which dropped both: no other page lets an admin
-  // rename the brain's groups of teams or move a team between them, or see
-  // everyone's calls of unknown outcome (the reference shows those in an
-  // admin's inbox, which on `main` shows only the person's own). Last, so
-  // the reference's sections keep their places.
-  {
-    // Its groups of teams, the brain's regions.
-    id: "brain",
-    label: msg`Brain`,
-    href: "/settings/brain",
-    group: "workspace",
-    icon: BrainIcon,
-    audience: "admins",
-  },
-  {
-    id: "outcomes",
-    label: msg`Unknown outcomes`,
-    href: "/settings/outcomes",
-    group: "workspace",
-    icon: InfoIcon,
-    audience: "own-admins",
   },
 ];
 

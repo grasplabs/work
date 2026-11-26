@@ -75,8 +75,6 @@
 @import "./icon-moves.css";
 
 @source "../";
-/* The kit's demos and examples, shown on the local kit pages (routes/kit_.*). */
-@source "../../../packages/app-kit/catalog";
 
 /*
  * No scrollbars anywhere in the product. Every area still scrolls with the
@@ -111,21 +109,6 @@
 @page export {
   size: A4;
   margin: 16mm 16mm 18mm;
-}
-
-/*
- * In every Markdown export, its first two levels of heading are in
- * Newsreader, as the prototype's (packages/grasp/src/lib/export-file.ts),
- * so a printed page reads as Grasp's. A Markdown h1 is in the serif
- * already (markdown.tsx); on paper its h2 is too.
- */
-@utility page-export {
-  page: export;
-  print-color-adjust: exact;
-
-  & h2 {
-    @apply font-serif font-normal tracking-tight;
-  }
 }
 
 /*
@@ -296,12 +279,6 @@
     transform: scale(1.3);
     opacity: 1;
   }
-}
-
-/* Room at the foot of whatever scrolls up and down into the bottom right corner, where the chat
-   box floats over the page: what is last on a page can then always be moved clear of it. */
-@utility pb-chat {
-  padding-bottom: calc(var(--spacing) * 24);
 }
 
 /* The lines of the experiment's chain. A drawing says how its lines are printed (`data-lines`)

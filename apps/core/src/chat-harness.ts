@@ -1834,7 +1834,7 @@ export class ChatHarness {
     /** The lines the turn's runs sent the Workspace, one after another. */
     let logged: Promise<void> = Promise.resolve();
     return {
-      apis: apisFor(request.shared),
+      apis: apisFor(request.shared, request.context.builds === true),
       scope,
       runs: {
         open: async (opening) =>

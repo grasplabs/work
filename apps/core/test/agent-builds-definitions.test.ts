@@ -17,7 +17,7 @@ import {
   tryEach,
   findApp,
 } from "./agent-builds-harness.ts";
-import { codeResults, codeStep, says } from "./agent-chat.ts";
+import { buildingApisIn, codeResults, codeStep, says } from "./agent-chat.ts";
 import { definedWith, redefined } from "./app-definitions.ts";
 import { commitApp, published, release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -72,6 +72,15 @@ const writeAndCall = (app: string): string =>
     write: `(await env.build.write(${JSON.stringify(app)}, { "notes.md": "new" }, { revision: (await env.build.files(${JSON.stringify(app)})).revision })).changed`,
     call: `await env.build.call("app_refused", "count")`,
   });
+
+/** What `call` returns, or the message of what it throws. */
+const settled = async (call: () => Promise<unknown>): Promise<unknown> => {
+  try {
+    return await call();
+  } catch (error) {
+    return error instanceof Error ? error.message : error;
+  }
+};
 
 describe("building Apps from a chat", { timeout: 120_000 }, () => {
   it("changes a definition whose table holds records, says what each change does to them, and records each change", async () => {
@@ -429,37 +438,47 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   });
 
   it("builds for whoever builds, as them, with no permission of its own, and never past what they may do", async () => {
-    const resultOf = async (role: "admin" | "user", granted: boolean) => {
-      const { admin, chat, existing } = await setUp(
-        (app) => [codeStep(writeAndCall(app)), says("Done.")],
-        role
-      );
-      if (granted) {
-        // The most an agent could hold on the App: reading and writing it.
-        await requestGranted(idp, admin, {
-          subject: chat.agent,
-          object: { type: "app", appId: existing },
-          actions: ["read", "write"],
-          binding: "LEDGER",
-        });
-      }
-      await chat.ask("Build something");
-      const [result] = await codeResults(chat.stub, chat.chat.id);
-      return returned(result?.text);
-    };
     const notFound = appErrors.create("app.not_found").message;
-
     // An admin in a new deployment, whose agent was granted nothing: they
     // build every App, so the agent writes it, as them.
-    await expect(resultOf("admin", false)).resolves.toStrictEqual({
-      write: ["notes.md"],
-      call: notFound,
-    });
+    const asAdmin = await setUp(
+      (app) => [codeStep(writeAndCall(app)), says("Done.")],
+      "admin"
+    );
+    await asAdmin.chat.ask("Build something");
+    const [result] = await codeResults(asAdmin.chat.stub, asAdmin.chat.chat.id);
     // Every permission the agent could hold reaches no further than its
-    // person: a member who doesn't build it writes nothing of it.
-    await expect(resultOf("user", true)).resolves.toStrictEqual({
-      write: notFound,
-      call: notFound,
+    // person: a member who doesn't build it writes nothing of it, through
+    // `env.build` itself, which their turns aren't offered.
+    const asUser = await setUp([], "user");
+    // The most an agent could hold on the App: reading and writing it.
+    await requestGranted(idp, asUser.admin, {
+      subject: asUser.chat.agent,
+      object: { type: "app", appId: asUser.existing },
+      actions: ["read", "write"],
+      binding: "LEDGER",
+    });
+    const { build } = await buildingApisIn(asUser.chat);
+
+    expect({
+      admin: returned(result?.text),
+      user: {
+        write: await settled(async () => {
+          const { revision } = await build.files(asUser.existing);
+          const { changed } = await build.write(
+            asUser.existing,
+            { "notes.md": "new" },
+            { revision }
+          );
+          return changed;
+        }),
+        call: await settled(
+          async () => await build.call("app_refused", "count")
+        ),
+      },
+    }).toStrictEqual({
+      admin: { write: ["notes.md"], call: notFound },
+      user: { write: notFound, call: notFound },
     });
   });
 

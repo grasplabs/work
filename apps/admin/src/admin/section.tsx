@@ -1,9 +1,8 @@
 /**
  * A titled part of an admin page on a card of its own: the kit's panel
- * card, as the workspace's settings draw theirs (apps/web/src/settings/
- * settings-parts.tsx, `SettingsSection`). Its title, a line on what it
- * holds, and beside them what can be done there (`action`); under them
- * its rows or body. Named by its title, so it is a region of the page.
+ * card. Its title, a line on what it holds, and beside them what can be
+ * done there (`action`); under them its rows or body. Named by its title,
+ * so it is a region of the page.
  */
 import {
   Card,

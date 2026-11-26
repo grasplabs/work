@@ -1,14 +1,16 @@
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@grasp-os/app-kit/components/alert-dialog";
+} from "@grasp-os/ui/components/alert-dialog";
+import { Button } from "@grasp-os/ui/components/button";
+import { colors, font, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
 
 import { confirmGate } from "./confirm-gate.ts";
@@ -24,6 +26,30 @@ import { linkAddress } from "./link-address.ts";
 // core wants it confirmed, the whole URL too, as core parsed it, so the
 // person sees what it would carry out. Open counts only as the
 // gate says (confirm-gate.ts): never for a click or key on its way.
+
+// The origin and the address in the mono face, each on a line of its own,
+// broken at any letter: mono tells rn from m, l from I and 1, 0 from O,
+// where the person checks the host. Damsko's Text has no mono face.
+const styles = stylex.create({
+  origin: {
+    display: "block",
+    marginBlockStart: space["2"],
+    fontFamily: font.mono,
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+    color: colors.foreground,
+    wordBreak: "break-all",
+  },
+  address: {
+    display: "block",
+    marginBlockStart: space["2"],
+    fontFamily: font.mono,
+    fontSize: font.textXs,
+    lineHeight: font.textXsLine,
+    color: colors.mutedForeground,
+    wordBreak: "break-all",
+  },
+});
 
 /** A link waiting for the person: the ASCII origin it opens. */
 export interface PendingLink {
@@ -114,24 +140,26 @@ export const LinkConfirmDialog = ({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{t`Open a link outside Grasp?`}</AlertDialogTitle>
+          {/* The address on lines of its own in the description, the one
+              part of an alert dialog that holds more than its title. */}
           <AlertDialogDescription>
             <Trans>
               This page wants to open another site in a new tab. Open it only if
               you expected to go there.
             </Trans>
+            <span {...stylex.props(styles.origin)}>{address?.origin}</span>
+            {pending?.url === undefined ? null : (
+              <span {...stylex.props(styles.address)}>{address?.href}</span>
+            )}
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <p className="font-mono text-sm break-all">{address?.origin}</p>
-        {pending?.url === undefined ? null : (
-          <p className="text-muted-foreground font-mono text-xs break-all">
-            {address?.href}
-          </p>
-        )}
         <AlertDialogFooter>
           <AlertDialogCancel>
             <Trans>Cancel</Trans>
           </AlertDialogCancel>
-          <AlertDialogAction
+          {/* A Button, not the closing action: a click the gate doesn't
+              count leaves the dialog open, as it found it. */}
+          <Button
             disabled={ready !== pending}
             onClick={(event) => {
               const opened = gate.current;
@@ -152,7 +180,7 @@ export const LinkConfirmDialog = ({
             onPointerDown={press}
           >
             <Trans context="open a link to another site">Open</Trans>
-          </AlertDialogAction>
+          </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
