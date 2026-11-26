@@ -38,6 +38,12 @@ const addWorkingDays = (day: string, count: number): string => {
 export const workingDaysAfter = (day: string, count: number): string[] =>
   Array.from({ length: count }, (_, index) => addWorkingDays(day, index + 1));
 
+/** The days the day's tiles offer: today, as a plan can start today, then the next four working days. */
+export const dayTiles = (today: string): string[] => [
+  today,
+  ...workingDaysAfter(today, 4),
+];
+
 export interface SendChoice {
   /** The day the first links go out, as an ISO day, and the hour on the sender's own clock, as HH:MM. */
   day: string;

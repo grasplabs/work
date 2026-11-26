@@ -499,7 +499,9 @@ test("the company's admin goes through their onboarding: the staff list, the org
     .nth(1)
     .click();
   await page.getByRole("button", { name: "Other day" }).click();
-  const start = isoOf(await page.getByLabel("Another day").inputValue());
+  const start = isoOf(
+    await page.locator('input[aria-label="Other day"]').inputValue()
+  );
   // Only the teams that take part are there to hold back.
   await expect(page.getByRole("button", { name: /^Legal/u })).toHaveCount(0);
   await page.getByRole("button", { name: /^Ops/u }).click();
