@@ -13,7 +13,6 @@ import { TopError } from "../frame/top-error.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { CalmStep } from "./calm-frame.tsx";
 import { MessageCompose } from "./message-compose.tsx";
-import { Postmark } from "./postmark.tsx";
 import { SendPlanForm, useSendWords } from "./send-plan-form.tsx";
 import { choiceHolds, choiceShown, replanOf } from "./send-plan.ts";
 import type { SendChoice } from "./send-plan.ts";
@@ -23,8 +22,7 @@ import { planDraft } from "./visit.ts";
 
 // Tell the team, and plan the interviews: the message the admin sends
 // themselves, as a new email Stephen writes for them the first time
-// (message-compose.tsx), theirs to change and copy, postmarked
-// with the day the interviews start (postmark.tsx); then that day, and
+// (message-compose.tsx), theirs to change and copy; then the day, and
 // which teams, on one card of its own. The leads get their link that
 // morning; everyone else once their lead talked. Not ready yet, the admin
 // can do it later: the setup ends here for now, and Settings, Onboarding
@@ -34,14 +32,8 @@ import { planDraft } from "./visit.ts";
 
 const styles = stylex.create({
   stack: { display: "grid", gap: space[4] },
-  // Copy on the end edge, where the hand goes on (Ruben), the postmark before it; alone, copy is still on the end.
-  foot: {
-    display: "flex",
-    flexDirection: "row-reverse",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: space[3],
-  },
+  // Copy on the end edge of the message's foot, where the hand goes on.
+  foot: { display: "flex", justifyContent: "flex-end" },
 });
 
 export const TeamStep = ({
@@ -179,7 +171,6 @@ export const TeamStep = ({
               <CopyButton size="lg" value={message} variant="outline">
                 {t`Copy the message`}
               </CopyButton>
-              {planned ? <Postmark day={choice.day} /> : null}
             </div>
           }
           onValueChange={onMessage}
