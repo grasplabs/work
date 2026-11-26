@@ -66,9 +66,6 @@ const settledMs = 300;
 /** A stretch is settled at the latest this long after its commit. */
 const settleMostMs = 1500;
 
-/** The most words to listen out for that the session is given. */
-const mostTerms = 100;
-
 /** What the session sends, as far as the relay reads it: the first that fits. */
 const serverEventSchema = z.union([
   z.object({ type: z.literal("session.created") }),
@@ -192,19 +189,19 @@ const settlingOf = (events: EventQueue): Settling => {
 };
 
 /**
- * The session's settings: PCM at 16 kHz, the language, the words to
- * listen out for, and a short delay, for words as they are said.
+ * The session's settings: PCM at 16 kHz, the language, and a short delay,
+ * for words as they are said. No words to listen out for: Voxtral's
+ * realtime model refuses `context_bias` ("does not support context
+ * biasing", its error 3051), so the keyterms the page's store names go
+ * unused here.
  */
-const sessionUpdate = ({ language, keyterms }: TranscriptionOptions): string =>
+const sessionUpdate = ({ language }: TranscriptionOptions): string =>
   JSON.stringify({
     type: "session.update",
     session: {
       audio_format: { encoding: "pcm_s16le", sample_rate: sessionSampleRate },
       language,
       target_streaming_delay_ms: streamingDelayMs,
-      ...(keyterms.length === 0
-        ? {}
-        : { context_bias: keyterms.slice(0, mostTerms) }),
     },
   });
 
