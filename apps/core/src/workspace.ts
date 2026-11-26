@@ -42,6 +42,7 @@ import type {
   ChatProvenance,
   ChatQueued,
   ChatRating,
+  ChatStopped,
   ChatSearchHit,
   ChatSearchSnippet,
   ChatSummary,
@@ -4157,7 +4158,10 @@ export class Workspace extends DurableObject<Env> {
    * stop, kept (`ChatSession.abort`):
    * a stop that can't reach it fails, for its person to try again.
    */
-  async cancel(chatId: unknown, personId: string): Promise<boolean> {
+  async cancel(
+    chatId: unknown,
+    personId: string
+  ): Promise<ChatStopped | false> {
     const { id } = this.#graspChat(chatId, personId);
     // The ChatSession's turn; or the question this object is preparing,
     // whose stop is kept for it as it is claimed.
@@ -4165,10 +4169,11 @@ export class Workspace extends DurableObject<Env> {
     if (turnId === undefined) {
       return false;
     }
-    await this.#toSession(id, async (session) => {
-      await session.abort(turnId);
-    });
-    return true;
+    const dropped = await this.#toSession(
+      id,
+      async (session) => await session.abort(turnId)
+    );
+    return { dropped };
   }
 
   /**

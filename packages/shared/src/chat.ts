@@ -1158,6 +1158,12 @@ export interface ChatToolEvent {
 /** Most calls a chat keeps the events of: its latest. */
 export const chatToolEventsKept = 200;
 
+/** A stop of the agent's work (`ChatsApi.cancel`). */
+export interface ChatStopped {
+  /** The words of the questions queued meanwhile that it dropped, oldest first. */
+  dropped: string[];
+}
+
 /**
  * A question the person sent while the agent worked, waiting for it: the
  * agent takes it once its current step ends, in the order sent, and it is
@@ -1529,9 +1535,11 @@ export interface ChatsApi {
   worked: (chatId: string) => Promise<ChatWork[]>;
   /**
    * Stops the agent's work on the chat; `false` when there was none. The
-   * questions queued meanwhile (`ChatUpdate.queued`) are dropped, unanswered.
+   * questions queued meanwhile (`ChatUpdate.queued`) are dropped,
+   * unanswered: their words, oldest first, in `dropped`, for the page to
+   * hand back. Not one the agent took just before the stop.
    */
-  cancel: (chatId: string) => Promise<boolean>;
+  cancel: (chatId: string) => Promise<ChatStopped | false>;
   /** The npm packages the chat's agent asked for that wait, oldest first. */
   packageRequests: (chatId: string) => Promise<DependencyRequest[]>;
   /** The connections the chat's agent asked for that wait, oldest first. */
