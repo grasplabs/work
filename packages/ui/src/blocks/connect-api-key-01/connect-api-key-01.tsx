@@ -399,12 +399,11 @@ const ConnectForm = ({
                 setRefused(null);
               }}
             />
+            {/* InputGroup's own button, as Damsko sets one in a field (ghost, its size and inset): only
+                its working state, no success or error words, whose widest would set its width. */}
             <InputGroupButton
               type="submit"
-              variant="secondary"
-              status={connect.status}
-              successText={words.connected}
-              errorText={words.notConnected}
+              status={connect.status === "loading" ? "loading" : "idle"}
             >
               {words.connect}
             </InputGroupButton>
