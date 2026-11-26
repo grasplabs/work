@@ -135,6 +135,13 @@ const styles = stylex.create({
   said: { opacity: 1, filter: "blur(0)", transform: "none" },
   fresh: { color: colors.brandLime },
   quiet: { opacity: 0.7 },
+  // Going into the platform: the story's words and ways make room for what was set up.
+  leaving: {
+    opacity: 0,
+    transitionProperty: "opacity",
+    transitionDuration: "420ms",
+    pointerEvents: "none",
+  },
   // Continue arriving once the story is told: slower than a step's, it is the story's last beat.
   arriving: { animationDuration: "900ms" },
 });
@@ -531,11 +538,11 @@ export const PlanStory = ({
   return createPortal(
     <section data-mode="dark" {...stylex.props(styles.stage, fadeIn)}>
       <PlanPictures scene={scene} still={reduce} />
-      <div {...stylex.props(styles.bar)}>
+      <div {...stylex.props(styles.bar, entering && styles.leaving)}>
         <Sound />
       </div>
       <span />
-      <div {...stylex.props(styles.words)}>
+      <div {...stylex.props(styles.words, entering && styles.leaving)}>
         <h1 {...stylex.props(visuallyHidden)}>{t`What happens next`}</h1>
         <Told
           began={began}
@@ -548,7 +555,7 @@ export const PlanStory = ({
           {began === null && !shown ? "" : part?.text}
         </span>
       </div>
-      <footer {...stylex.props(styles.foot)}>
+      <footer {...stylex.props(styles.foot, entering && styles.leaving)}>
         <Back />
         <Ways
           again={() => {
