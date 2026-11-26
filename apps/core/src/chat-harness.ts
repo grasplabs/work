@@ -1071,8 +1071,9 @@ export class ChatHarness {
         // Read at each use: tests lower the restart limit as they go, and
         // pi's retry is on only until this Harness asks the model anything.
         settings: () => ({
-          // One code run at a time, as each is an isolate of its own.
-          toolExecution: "sequential",
+          // A round of reads alone runs them together; any other call
+          // makes its round one call at a time (chat-agent.ts `roundTools`).
+          toolExecution: "parallel",
           // A question queued into a turn (`queueQuestion`) is answered after a
           // run that failed before it, as after one that answered: the
           // turn waits for it either way, and it is never left queued

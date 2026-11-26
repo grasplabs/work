@@ -200,7 +200,6 @@ export const askQuestions = (most: number = chatAskLimits.questions) =>
       }
       return ask.data;
     },
-    executionMode: "sequential",
     execute: async () =>
       await Promise.resolve({
         output: [
@@ -282,7 +281,6 @@ export const proposePlan = () =>
       }
       return plan.data;
     },
-    executionMode: "sequential",
     execute: async () =>
       await Promise.resolve({
         output: [
@@ -349,7 +347,6 @@ export const draftAgent = (
       }
       return draft.data;
     },
-    executionMode: "sequential",
     execute: async () =>
       await Promise.resolve({
         output: [
@@ -399,7 +396,6 @@ export const draftAgentChange = (drafts: "company" | "own") =>
       }
       return change.data;
     },
-    executionMode: "sequential",
     execute: async () =>
       await Promise.resolve({
         output: [
@@ -998,7 +994,6 @@ export const executeCode = ({
       "Runs a JavaScript module in a sandbox with the chat's APIs as `env`, and returns what its default export returns, what it logs, or what it throws.",
     parameters: codeParameters,
     prepareArguments: codeInput,
-    executionMode: "sequential",
     execute: async ({ code }, { callId }, { abortSignal }) => {
       const { runId, run, readFrom } = await runOpen(
         { apis, scope, runs, loader, sandbox, codeTimeoutMs },
