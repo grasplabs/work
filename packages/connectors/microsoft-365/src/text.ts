@@ -45,11 +45,10 @@ type ParentNode = DefaultTreeAdapterTypes.ParentNode;
 
 /**
  * Elements whose content a browser never shows, by their namespace: what
- * a page, a drawing or a formula runs or is styled with, a page's head and
- * title, what stands in for scripts, frames, objects, media and widgets,
- * a list of suggestions; a drawing's own description and what it only
- * refers to; a formula's annotations and phantoms. A template's content is
- * outside the tree already.
+ * a page or a formula runs or is styled with, a page's head and title,
+ * what stands in for scripts, frames, objects, media and widgets, a list
+ * of suggestions; a formula's annotations and phantoms. A template's
+ * content is outside the tree already.
  */
 const unread: Readonly<Record<string, ReadonlySet<string>>> = {
   [htmlSpec.NS.HTML]: new Set([
@@ -70,22 +69,6 @@ const unread: Readonly<Record<string, ReadonlySet<string>>> = {
     "progress",
     "rp",
   ]),
-  [htmlSpec.NS.SVG]: new Set([
-    "script",
-    "style",
-    "title",
-    "desc",
-    "metadata",
-    "defs",
-    "symbol",
-    "clipPath",
-    "mask",
-    "pattern",
-    "marker",
-    "filter",
-    "linearGradient",
-    "radialGradient",
-  ]),
   [htmlSpec.NS.MATHML]: new Set([
     "script",
     "style",
@@ -98,56 +81,38 @@ const unread: Readonly<Record<string, ReadonlySet<string>>> = {
 const hasAttribute = ({ attrs }: Element, attribute: string): boolean =>
   attrs.some(({ name }) => name === attribute);
 
-const attributeOf = (
-  { attrs }: Element,
-  attribute: string
-): string | undefined => attrs.find(({ name }) => name === attribute)?.value;
-
 const isHtml = ({ namespaceURI }: Element): boolean =>
   namespaceURI === htmlSpec.NS.HTML;
 
 /**
- * Whether a drawing's own attributes keep it from being drawn: `display`
- * or `visibility` set so, or a condition (`requiredExtensions`,
- * `systemLanguage`) a page's drawings rarely set and the reader can't
- * judge, so takes as unmet.
+ * Whether a browser hides `element` and all it holds. A drawing (SVG) is
+ * read as an image is, for none of its text: which of its characters a
+ * browser draws turns on its structure, conditions and styles, more than
+ * a reader can follow without passing hidden text for shown.
  */
-const isUndrawn = (element: Element): boolean =>
-  attributeOf(element, "display") === "none" ||
-  ["hidden", "collapse"].includes(attributeOf(element, "visibility") ?? "") ||
-  hasAttribute(element, "requiredExtensions") ||
-  hasAttribute(element, "systemLanguage");
-
-/** Whether a browser hides `element` and all it holds. */
 const isUnread = (element: Element): boolean =>
+  element.namespaceURI === htmlSpec.NS.SVG ||
   unread[element.namespaceURI]?.has(element.tagName) === true ||
-  (element.namespaceURI === htmlSpec.NS.SVG && isUndrawn(element)) ||
   (isHtml(element) &&
     (hasAttribute(element, "hidden") ||
       hasAttribute(element, "popover") ||
       (element.tagName === "dialog" && !hasAttribute(element, "open"))));
 
-/**
- * Elements that show their first element alone, by their namespace: a
- * formula's `semantics` and `maction` (MathML Core), and a drawing's
- * `switch`, which draws its first child that is drawn at all.
- */
-const firstShown: Readonly<Record<string, ReadonlySet<string>>> = {
-  [htmlSpec.NS.MATHML]: new Set(["semantics", "maction"]),
-  [htmlSpec.NS.SVG]: new Set(["switch"]),
-};
+/** Formula elements that show their first element alone (MathML Core). */
+const firstShown: ReadonlySet<string> = new Set(["semantics", "maction"]);
 
 /**
  * What a browser shows of what `element` holds: of a closed `details`,
- * only its first `summary`; of a {@link firstShown} element, only its
- * first element.
+ * only its first `summary`; of a formula's `semantics` or `maction`,
+ * only its first element, whatever it is.
  */
 const shownChildren = (element: Element): readonly Node[] => {
   let shown: Node | undefined;
-  if (firstShown[element.namespaceURI]?.has(element.tagName) === true) {
-    shown = element.childNodes.find(
-      (node) => "tagName" in node && !isUnread(node)
-    );
+  if (
+    element.namespaceURI === htmlSpec.NS.MATHML &&
+    firstShown.has(element.tagName)
+  ) {
+    shown = element.childNodes.find((node) => "tagName" in node);
   } else if (
     element.tagName === "details" &&
     isHtml(element) &&
@@ -161,17 +126,6 @@ const shownChildren = (element: Element): readonly Node[] => {
   }
   return shown === undefined ? [] : [shown];
 };
-
-/**
- * Drawing elements whose characters a browser draws, wherever they are:
- * a drawing's text, and a `foreignObject`, which lays out what it holds
- * as a page's. A drawing's characters elsewhere are never shown (SVG 2,
- * 11.1), but in {@link drawnWithin}.
- */
-const drawnText: ReadonlySet<string> = new Set(["text", "foreignObject"]);
-
-/** Drawing elements whose characters a browser draws inside drawn text. */
-const drawnWithin: ReadonlySet<string> = new Set(["tspan", "textPath", "a"]);
 
 /** Elements on lines of their own: paragraphs, headings, list items, table rows, sections. */
 const lineEnds: ReadonlySet<string> = new Set([
@@ -330,7 +284,7 @@ interface Leaving {
  * a line per paragraph, heading, list item and table row, cells apart by
  * a tab, whitespace as a browser shows it (a no-break space as a space),
  * and no blank lines. What a browser never shows is no text of it, nor
- * are images, ink and attachments. Read in a loop, not by recursion, so
+ * are images, drawings, ink and attachments. Read in a loop, not by recursion, so
  * markup however deep or wide can't exhaust the stack; markup that would
  * build more than its length is refused (`boundedTree`).
  */
@@ -387,25 +341,8 @@ export const htmlText = (html: string): string => {
       .replaceAll(whitespace, " ");
     push(atBreak || spaced ? collapsed.trimStart() : collapsed);
   };
-  /** The drawing's elements entered whose characters it draws. */
-  const drawn = new Set<object>();
-  /** Whether a browser shows `text`'s characters, by what holds them. */
-  const isShownText = ({
-    parentNode,
-  }: DefaultTreeAdapterTypes.TextNode): boolean =>
-    parentNode === null ||
-    !("namespaceURI" in parentNode) ||
-    parentNode.namespaceURI !== htmlSpec.NS.SVG ||
-    drawn.has(parentNode);
   const enter = (element: Element): void => {
     const { tagName } = element;
-    if (
-      element.namespaceURI === htmlSpec.NS.SVG &&
-      (drawnText.has(tagName) ||
-        (drawnWithin.has(tagName) && drawn.has(element.parentNode ?? {})))
-    ) {
-      drawn.add(element);
-    }
     if (tagName === "br" && cells > 0) {
       space();
     } else if (tagName === "br") {
@@ -442,9 +379,7 @@ export const htmlText = (html: string): string => {
     if ("leave" in step) {
       leave(step);
     } else if (step.nodeName === "#text" && "value" in step) {
-      if (isShownText(step)) {
-        read(step.value);
-      }
+      read(step.value);
     } else if ("tagName" in step && !isUnread(step)) {
       enter(step);
     }

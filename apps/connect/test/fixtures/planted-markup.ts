@@ -60,11 +60,11 @@ export const plantedHtml: Readonly<
     html: `<p>${shownText}<title>${plantedInstruction}</title></p><dialog>${plantedInstruction}</dialog><video>${plantedInstruction}</video><canvas>${plantedInstruction}</canvas><svg><desc>${plantedInstruction}</desc><title>${plantedInstruction}</title><defs><text>${plantedInstruction}</text></defs><symbol><text>${plantedInstruction}</text></symbol><script>${plantedInstruction}</script><style>${plantedInstruction}</style></svg><math><semantics><mi>x</mi><annotation>${plantedInstruction}</annotation></semantics><script>${plantedInstruction}</script><style>${plantedInstruction}</style></math>`,
     shown: `${shownText}\nx`,
   },
-  // A drawing draws only its text elements' characters, and a formula
-  // its shown parts.
+  // A drawing is read as an image is, for none of its text, however it
+  // would draw it; a formula for its shown parts alone.
   drawnAlone: {
-    html: `<p>${shownText}</p><svg><g>${plantedInstruction}</g>${plantedInstruction}<foo>${plantedInstruction}</foo><text hidden>Due <a>by</a> <tspan>Friday<a>!</a></tspan><rect>${plantedInstruction}</rect></text><switch><text systemLanguage="zz">${plantedInstruction}</text><g/><text>${plantedInstruction}</text></switch><filter><text>${plantedInstruction}</text></filter><linearGradient><text>${plantedInstruction}</text></linearGradient><radialGradient><text>${plantedInstruction}</text></radialGradient><g><tspan>${plantedInstruction}</tspan><a>${plantedInstruction}</a></g><text display="none">${plantedInstruction}</text><text visibility="hidden">${plantedInstruction}</text><text requiredExtensions="urn:x">${plantedInstruction}</text><foreignObject> at noon<p>soon</p><svg>${plantedInstruction}</svg></foreignObject></svg><p><math><mphantom><mi>${plantedInstruction}</mi></mphantom><semantics><mi>y</mi><mtext>${plantedInstruction}</mtext></semantics><maction><mi>z</mi><mtext>${plantedInstruction}</mtext></maction></math></p>`,
-    shown: `${shownText}\nDue by Friday! at noon\nsoon\nyz`,
+    html: `<p>${shownText}</p><svg><text>${plantedInstruction}</text><switch><g display="none"/><text>${plantedInstruction}</text></switch><foreignObject><p>${plantedInstruction}</p></foreignObject></svg><p><math><mphantom><mi>${plantedInstruction}</mi></mphantom><semantics><mi>y</mi><mtext>${plantedInstruction}</mtext></semantics><maction><mi>z</mi><mtext>${plantedInstruction}</mtext></maction><semantics><mphantom><mi>a</mi></mphantom><mtext>${plantedInstruction}</mtext></semantics><semantics><annotation>a</annotation><mtext>${plantedInstruction}</mtext></semantics></math></p>`,
+    shown: `${shownText}\nyz`,
   },
   // What only an SVG drawing hides, a page shows.
   drawingNamesElsewhere: {
