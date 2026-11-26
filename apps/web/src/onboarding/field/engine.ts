@@ -44,6 +44,7 @@ const UNIFORMS = [
   "u_trail[0]",
   "u_ripples[0]",
   "u_accent",
+  "u_motion",
 ] as const;
 type Uniform = (typeof UNIFORMS)[number];
 
@@ -280,6 +281,8 @@ interface Him {
   trail: { x: number; y: number; on: number }[];
   /** The rings presses sent out: where, and when (his clock). */
   ripples: { x: number; y: number; at: number }[];
+  /** How the pointer is moving, in CSS pixels a second, eased. */
+  motion: { x: number; y: number };
 }
 
 const him: Him = {
@@ -292,6 +295,7 @@ const him: Him = {
   alarmed: false,
   trail: [],
   ripples: [],
+  motion: { x: 0, y: 0 },
 };
 
 /** How many points of the pointer's trail and how many rings the shader takes. */
@@ -299,7 +303,19 @@ const TRAIL = 8;
 const RIPPLES = 3;
 
 /** Which dither he is drawn in, as the shader numbers them. */
-const variantNumber = { current: 0, a: 1, b: 2, c: 3 } as const;
+const variantNumber = {
+  current: 0,
+  a: 1,
+  b: 2,
+  c: 3,
+  a1: 4,
+  a2: 5,
+  a3: 6,
+} as const;
+
+/** A3's soft wake lingers longer behind the pointer than the others' trails. */
+const trailHalfLife = (variant: string): number =>
+  variant === "a3" ? 420 : 160;
 
 /** What stops the drawing on the canvas he is drawn on now; none between two screens. */
 let stopDrawing: (() => void) | null = null;
@@ -365,6 +381,7 @@ const draw = (layer: Layer, colours: Colours) => {
         : [ripple.x, ripple.y, him.clock - ripple.at];
     }).flat()
   );
+  gl.uniform2f(u("u_motion"), fx ? him.motion.x : 0, fx ? him.motion.y : 0);
   gl.uniform3fv(
     u("u_accent"),
     mix(colours.accent, colours.alarmed.accent, him.alarm)
@@ -396,8 +413,25 @@ const settle = (elapsed: number) => {
     rest.strength = toward(rest.strength, pose.strength, elapsed, 320);
   }
   him.alarm = toward(him.alarm, him.alarmed ? 1 : 0, elapsed, 180);
+  const wasX = pointer.x;
+  const wasY = pointer.y;
   pointer.x = toward(pointer.x, pointer.tx, elapsed, 110);
   pointer.y = toward(pointer.y, pointer.ty, elapsed, 110);
+  if (elapsed > 0) {
+    const moved = pointer.there ? 1000 / elapsed : 0;
+    him.motion.x = toward(
+      him.motion.x,
+      (pointer.x - wasX) * moved,
+      elapsed,
+      90
+    );
+    him.motion.y = toward(
+      him.motion.y,
+      (pointer.y - wasY) * moved,
+      elapsed,
+      90
+    );
+  }
   pointer.on = toward(pointer.on, pointer.there ? 1 : 0, elapsed, 180);
   // The trail: a new point each time the pointer has gone a little way, each fading behind it.
   const [head] = him.trail;
@@ -409,7 +443,12 @@ const settle = (elapsed: number) => {
     him.trail.unshift({ x: pointer.x, y: pointer.y, on: 1 });
   }
   for (const point of him.trail) {
-    point.on = toward(point.on, 0, elapsed, 160);
+    point.on = toward(
+      point.on,
+      0,
+      elapsed,
+      trailHalfLife(ditherLookNow().variant)
+    );
   }
   him.trail = him.trail.filter((point) => point.on > 0.01).slice(0, TRAIL);
   him.ripples = him.ripples.filter((ripple) => him.clock - ripple.at < 2.4);
