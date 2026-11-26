@@ -252,8 +252,21 @@ const targetOf = (
     : pick(parts.question, 0, 1);
 };
 
-/** Changes the page under the night; failing that, whatever page is there is shown. */
-const goQuietly = async (entry: Entry): Promise<void> => {
+/** Readies the platform's page; failing that, `go` fetches what it needs itself. */
+const readyQuietly = async (entry: Entry): Promise<void> => {
+  try {
+    await entry.ready?.();
+  } catch {
+    // Fetched again as the page opens.
+  }
+};
+
+/** Changes the page under the night, once it is ready; failing that, whatever page is there is shown. */
+const goQuietly = async (
+  entry: Entry,
+  readying: Promise<void>
+): Promise<void> => {
+  await readying;
   try {
     await entry.go();
   } catch {
@@ -272,6 +285,8 @@ const play = async (
   const places = placesOf(entry.facts);
   const width = window.innerWidth;
   const height = window.innerHeight;
+  // While the night falls and the chips gather, the page's data and code are fetched.
+  const readying = readyQuietly(entry);
   // The night falls over the story first: no cut.
   night?.animate([{ opacity: 0 }, { opacity: 1 }], {
     duration: FALL_MS,
@@ -310,7 +325,7 @@ const play = async (
   // Only once every chip stands does the page change under the night: building it is the
   // heaviest moment, and nothing moves while it happens.
   const since = performance.now();
-  await Promise.all([goQuietly(entry), wait(HOLD_MS)]);
+  await Promise.all([goQuietly(entry, readying), wait(HOLD_MS)]);
   await settled(since);
 
   const parts = partsOf();

@@ -443,6 +443,7 @@ export const CalmFrame = ({
   language = true,
   pose = fromTheTop,
   centred = false,
+  covered = false,
   children,
 }: {
   /** Whose light or dark the bar's icon keeps. */
@@ -455,6 +456,12 @@ export const CalmFrame = ({
   centred?: boolean;
   /** The language in the bar: not on the step that asks for it. */
   language?: boolean;
+  /**
+   * Under a screen of a step's own over the whole window (the story at the
+   * end), whose bar has the tools: this bar can't be reached then, so it
+   * isn't offered at all.
+   */
+  covered?: boolean;
   /** Where Stephen's light rests on this screen and how it moves there. */
   pose?: Pose;
   children: ReactNode;
@@ -469,7 +476,7 @@ export const CalmFrame = ({
           <StephenField pose={pose}>
             {/* Every error is said here, at the very top, above the bar: it never covers the page. */}
             <TopErrorBar />
-            <header {...stylex.props(styles.bar)}>
+            <header inert={covered} {...stylex.props(styles.bar)}>
               <span {...stylex.props(styles.mark)}>
                 <Icon icon={GraspLogo} label="Grasp" />
               </span>

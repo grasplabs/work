@@ -281,6 +281,8 @@ const Setup = () => {
       ways={waysOf(index, furthest, path, go)}
       progress={progressOf(partOf(step, path), partNames)}
       centred={step === "company"}
+      // The story covers the frame and has its own bar.
+      covered={step === "about"}
       language={step !== "welcome"}
       pose={poses[step]}
     >
