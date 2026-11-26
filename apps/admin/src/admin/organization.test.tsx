@@ -170,8 +170,79 @@ describe("an organization's page", () => {
     );
 
     expect(statusOf(container)).toMatch(
-      /At risk.*The interviews closed \d+ days ago/u
+      /At risk.*The interviews closed 5 days ago/u
     );
+  });
+
+  it("counts the interviews' day and the risk as core does, so the page and Home agree", async () => {
+    // Told ten days ago: core's day 11 of 14, three quarters gone with
+    // less known than an even pace towards 80% (63%) gives.
+    const told = toldSnapshot("Behind", {
+      days: 14,
+      daysIn: 10,
+      leadTalked: true,
+    });
+    const { container } = await openAcme("", {
+      ...told,
+      gate: { ...told.gate, known: 40 },
+    });
+
+    expect(statusOf(container)).toMatch(/At risk.*Day 11 of 14/u);
+  });
+
+  it("calls an organization live while its gate is open, though Grasp never gave a go", async () => {
+    const ready = readySnapshot("Acme");
+    const { container } = await openAcme("", {
+      ...ready,
+      // A deployment that started open: no go recorded, no first
+      // conversation brought in.
+      gate: { ...ready.gate, open: true, openedAt: null },
+      kickoff: null,
+    });
+    const next =
+      container.querySelector('section[aria-labelledby="next"]')?.textContent ??
+      "";
+
+    expect({
+      live: statusOf(container).includes("LiveOpen, without interviews"),
+      onboarding: ["Give the go", "Bring in the conversation"].some((words) =>
+        next.includes(words)
+      ),
+    }).toStrictEqual({ live: true, onboarding: false });
+  });
+
+  it("leads with what its own platform needs, settled on its Setup, before anything its core says", async () => {
+    const failing = gridRow({
+      id: "acme",
+      name: "Acme",
+      rollout: {
+        failed: { releaseId: "2026.11.20-1", error: null },
+        behind: 0,
+        channelStopped: null,
+      },
+    });
+    const { container } = await openAdmin("/organizations/acme", {
+      fetchClientGrid: [failing],
+      fetchClientAdmin: answeredAdmin({
+        client: failing,
+        snapshot: readySnapshot("Acme"),
+      }),
+      ...setupAnswers,
+    });
+    const next = container.querySelector('section[aria-labelledby="next"]');
+
+    expect({
+      deploy: next?.textContent?.includes("Its deploy of 2026.11.20-1 failed"),
+      action: next?.querySelector('a[href="/organizations/acme/setup"]')
+        ?.textContent,
+      goAfter: (
+        partOf(container, "What else needs Grasp")?.textContent ?? ""
+      ).includes("The company comes in once Grasp gives its go."),
+    }).toStrictEqual({
+      deploy: true,
+      action: "Open its Setup",
+      goAfter: true,
+    });
   });
 
   it("leads a paused organization's overview with resuming its interviews, on its steps", async () => {
@@ -423,7 +494,7 @@ describe("an organization's overview", () => {
         "People active last week1–4of 0 members"
       ),
       // The chart says a week of a few as such.
-      chart: few.main().includes("in 1 week, 1 to 4"),
+      chart: few.main().includes("In 1 week, 1 to 4."),
     }).toStrictEqual({ many: [true, true, true], few: true, chart: true });
   });
 

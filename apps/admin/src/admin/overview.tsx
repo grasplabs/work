@@ -66,14 +66,21 @@ import { LoadingLines } from "../frame/page.tsx";
 import { LoadingFigure, MissingFigure } from "./figures.tsx";
 import { NextRow, WaitsOn } from "./next-row.tsx";
 import { needAction, needSince, partyOf, partyWords } from "./org-status.ts";
+import type { Party } from "./org-status.ts";
 import type { AnsweredOrganization } from "./organization.tsx";
 import { useOrganization } from "./organization.tsx";
 import { needWhere, sectionTo, sectionWords } from "./sections.ts";
 import type { OrgSection } from "./sections.ts";
 import { Ago, useSettled } from "./settled.tsx";
 import { actorWords, entryWords, shownEntries } from "./setup-history.ts";
-import { dayCount, daysBetween, standingOfView } from "./standing.ts";
+import {
+  dayCount,
+  daysBetween,
+  interviewDay,
+  standingOfView,
+} from "./standing.ts";
 import type { Standing } from "./standing.ts";
+import { rolloutNeedLine, rolloutNeeds } from "./views.ts";
 import {
   contractWords,
   dollars,
@@ -162,16 +169,88 @@ const sum = (values: readonly number[]): number =>
 
 // ---- Next ---------------------------------------------------------------
 
+const capitalized = (words: string): string =>
+  `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+
+/** The needs that only stand while an organization isn't open yet. */
+const beforeOpening: ReadonlySet<Need["kind"]> = new Set([
+  "go",
+  "short",
+  "transcript",
+  "ask",
+  "conflict",
+  "paused",
+  "lead",
+  "quiet",
+  "few",
+]);
+
+/** Something that waits, as the overview lists it: what, on whom, where it is settled, and since when. */
+interface Waiting {
+  key: string;
+  title: string;
+  party: Party;
+  section: OrgSection;
+  search: { tab: "contract" } | undefined;
+  /** The page's action for it, as its button says it. */
+  action: string;
+  since: string | null;
+}
+
 /**
- * What comes next: the most pressing need, who it waits on and for how
- * long, and the page's one primary action, to the section it is settled
- * in. With nothing waiting, a live company's own Grasp is the way on.
+ * Everything that waits, the most pressing first: what its own platform
+ * needs (settled on its Setup, by Grasp), then what its core's view says.
  */
-const NextStep = ({ standing }: { standing: Standing }) => {
-  const { admin, view } = useOrganization();
-  const [need] = view.needs;
+const waitingOf = (
+  { admin, view }: AnsweredOrganization,
+  standing: Standing
+): Waiting[] => [
+  ...rolloutNeeds(admin.client).map((need, at) => ({
+    key: `rollout-${String(at)}`,
+    title: rolloutNeedLine(need),
+    party: "grasp" as const,
+    section: "setup" as const,
+    search: undefined,
+    action: "Open its Setup",
+    since: null,
+  })),
+  ...view.needs
+    // Open already, though no go is recorded (a deployment that started
+    // open): what only stands before opening doesn't wait on anyone.
+    .filter((need) => standing !== "live" || !beforeOpening.has(need.kind))
+    .map((need, at) => ({
+      // The same need can stand twice, for two teams.
+      key: `${need.kind}-${String(at)}`,
+      title: needLine(need, view),
+      party: partyOf(need),
+      ...needWhere(need),
+      action: needAction(need),
+      since: needSince(need, standing, admin.snapshot),
+    })),
+];
+
+/** How long something has waited, in a few words: "for 3 days", "since today". */
+const waitedWords = (since: string, now: string): string => {
+  const days = daysBetween(since, now);
+  return days === 0 ? "since today" : `for ${dayCount(days)}`;
+};
+
+/**
+ * What comes next: the most pressing of what waits, who it waits on and
+ * for how long, and the page's one primary action, to the section it is
+ * settled in. With nothing waiting, a live company's own Grasp is the way
+ * on.
+ */
+const NextStep = ({
+  standing,
+  next,
+}: {
+  standing: Standing;
+  next: Waiting | undefined;
+}) => {
+  const { admin } = useOrganization();
   const clientId = admin.client.id;
-  if (need === undefined) {
+  if (next === undefined) {
     const { hostname } = admin.client;
     return (
       <NextRow
@@ -199,29 +278,30 @@ const NextStep = ({ standing }: { standing: Standing }) => {
       />
     );
   }
-  const party = partyOf(need);
-  const since = needSince(need, standing, admin.snapshot);
-  const { section, search } = needWhere(need);
-  const where = `settled in ${sectionWords[section].title}`;
+  const where = `Settled in ${sectionWords[next.section].title}`;
   return (
     <NextRow
       action={
         <Button asChild>
-          <Link params={{ clientId }} search={search} to={sectionTo[section]}>
-            {needAction(need)}
+          <Link
+            params={{ clientId }}
+            search={next.search}
+            to={sectionTo[next.section]}
+          >
+            {next.action}
             <Icon icon={ArrowRightIcon} />
           </Link>
         </Button>
       }
       description={
-        <WaitsOn grasp={party === "grasp"} words={partyWords[party]}>
-          {since === null
-            ? `${where.charAt(0).toUpperCase()}${where.slice(1)}`
-            : `For ${dayCount(daysBetween(since, admin.snapshot.now))} · ${where}`}
+        <WaitsOn grasp={next.party === "grasp"} words={partyWords[next.party]}>
+          {next.since === null
+            ? where
+            : `${capitalized(waitedWords(next.since, admin.snapshot.now))} · ${where.toLowerCase()}`}
         </WaitsOn>
       }
-      icon={party === "grasp" ? ClockIcon : UsersIcon}
-      title={needLine(need, view)}
+      icon={next.party === "grasp" ? ClockIcon : UsersIcon}
+      title={next.title}
     />
   );
 };
@@ -315,20 +395,38 @@ const peopleStat = (
   };
 };
 
-/** Its company connections that work, of all of them, and how many stopped. */
+/** What troubles its connections, in a few words: stopped, and waiting for a sign-in. */
+const connectorTrouble = ({
+  stopped,
+  again,
+}: {
+  stopped: number;
+  again: number;
+}): string => {
+  const parts = [
+    stopped > 0 ? `${stopped} stopped` : null,
+    again > 0 ? `${again} to sign in again` : null,
+  ].filter((part) => part !== null);
+  return parts.length === 0 ? "All working" : capitalized(parts.join(", "));
+};
+
+/** Its company connections that work, of all of them, how many stopped, and how many wait for a sign-in. */
 const connectorCounts = (
   organization: AnsweredOrganization
-): { works: number; all: number; stopped: number } | null => {
+): { works: number; all: number; stopped: number; again: number } | null => {
   const { integrations } = organization.admin.snapshot;
   if (integrations === null) {
     return null;
   }
   const { connected } = integrations;
-  const works = connected.filter(({ state }) => state === "works").length;
-  const stopped = connected.filter(
-    ({ state }) => state === "stopped" || state === "again"
-  ).length;
-  return { works, all: connected.length, stopped };
+  const count = (state: "works" | "again" | "stopped") =>
+    connected.filter((each) => each.state === state).length;
+  return {
+    works: count("works"),
+    all: connected.length,
+    stopped: count("stopped"),
+    again: count("again"),
+  };
 };
 
 /** A live company's figures: people, runs, its AI, what is live and its connectors. */
@@ -340,11 +438,8 @@ const LiveFigures = ({
   const organization = useOrganization();
   const used = useUse(organization.admin.client.id);
   const connectors = connectorCounts(organization);
-  let connectorsChange = "Not reported";
-  if (connectors !== null) {
-    connectorsChange =
-      connectors.stopped > 0 ? `${connectors.stopped} stopped` : "All working";
-  }
+  const connectorsChange =
+    connectors === null ? "Not reported" : connectorTrouble(connectors);
   const connectorsStat = (
     <Stat
       change={connectorsChange}
@@ -355,7 +450,9 @@ const LiveFigures = ({
           : `${connectors.works} of ${connectors.all}`
       }
       variant={
-        connectors !== null && connectors.stopped > 0 ? "warning" : "default"
+        connectors !== null && connectors.stopped + connectors.again > 0
+          ? "warning"
+          : "default"
       }
     />
   );
@@ -428,13 +525,14 @@ const OnboardingFigures = ({
   const { view } = useOrganization();
   const { percent, threshold, ready } = view.knowledge;
   const days = listenDays(view.org);
-  const left = Math.max(0, days - view.day);
+  const day = interviewDay(view) ?? days;
+  const left = Math.max(0, days - day);
   let interviews = { value: "Not started", change: "The team isn’t told yet" };
   if (view.told) {
     interviews = view.closed
       ? { value: `${days} of ${days}`, change: "Closed" }
       : {
-          value: `Day ${view.day} of ${days}`,
+          value: `Day ${day} of ${days}`,
           change: `${dayCount(left)} left`,
         };
   }
@@ -484,7 +582,9 @@ const Charts = ({ activity }: { activity: Activity }) => {
   const failed = sum(activity.runs.map((day) => day.failed));
   const weeks = activity.activePeople.map(({ week: monday, people }) => ({
     week: formatDay(monday),
-    people: people === fewPeople ? 0 : people,
+    // A week of a few: its people said as core sends them, "1–4", in the
+    // chart's table and tooltip; its bar is the few series', drawn to 4.
+    people,
     few: people === fewPeople ? 4 : 0,
   }));
   const counted = activity.activePeople.map(({ people }) =>
@@ -539,14 +639,19 @@ const Charts = ({ activity }: { activity: Activity }) => {
             aria-label="People active each week, the last 8"
             config={{
               people: { label: "People" },
-              few: { label: "1 to 4 people" },
+              few: { label: "1 to 4 people, drawn to 4" },
             }}
             data={weeks}
-            summary={
+            summary={[
+              most === 0
+                ? null
+                : `At most ${most} people were active in a week.`,
               fewWeeks === 0
-                ? `At most ${most} people were active in a week.`
-                : `At most ${most} people were active in a week; in ${fewWeeks} ${plural(fewWeeks, "week", "weeks")}, 1 to 4.`
-            }
+                ? null
+                : `In ${fewWeeks} ${plural(fewWeeks, "week", "weeks")}, 1 to 4.`,
+            ]
+              .filter((part) => part !== null)
+              .join(" ")}
             xKey="week"
           >
             <ChartGrid />
@@ -583,9 +688,9 @@ const UseCharts = () => {
 // ---- What needs Grasp ---------------------------------------------------
 
 /** Everything else that waits, past the one in Next, each a row to the section it is settled in. */
-const MoreNeeds = ({ needs }: { needs: readonly Need[] }) => {
-  const { admin, view } = useOrganization();
-  if (needs.length === 0) {
+const MoreNeeds = ({ waiting }: { waiting: readonly Waiting[] }) => {
+  const { admin } = useOrganization();
+  if (waiting.length === 0) {
     return null;
   }
   return (
@@ -597,26 +702,22 @@ const MoreNeeds = ({ needs }: { needs: readonly Need[] }) => {
         variant="group"
       />
       <ItemGroup aria-labelledby="needs" separated>
-        {needs.map((need, index) => {
-          const { section, search } = needWhere(need);
-          return (
-            // The same need can stand twice, for two teams.
-            <Item asChild key={`${need.kind}-${index}`}>
-              <Link
-                params={{ clientId: admin.client.id }}
-                search={search}
-                to={sectionTo[section]}
-              >
-                <ItemContent>
-                  <ItemTitle>{needLine(need, view)}</ItemTitle>
-                  <ItemDescription>
-                    {`${partyWords[partyOf(need)]} · ${sectionWords[section].title}`}
-                  </ItemDescription>
-                </ItemContent>
-              </Link>
-            </Item>
-          );
-        })}
+        {waiting.map((each) => (
+          <Item asChild key={each.key}>
+            <Link
+              params={{ clientId: admin.client.id }}
+              search={each.search}
+              to={sectionTo[each.section]}
+            >
+              <ItemContent>
+                <ItemTitle>{each.title}</ItemTitle>
+                <ItemDescription>
+                  {`${partyWords[each.party]} · ${sectionWords[each.section].title}`}
+                </ItemDescription>
+              </ItemContent>
+            </Link>
+          </Item>
+        ))}
       </ItemGroup>
     </Part>
   );
@@ -731,9 +832,14 @@ const ways: readonly Exclude<OrgSection, "overview">[] = [
 /** How the Setup stands, from what the admin recorded: its standing and the release it runs. */
 const setupLine = (organization: AnsweredOrganization): string => {
   const { client } = organization.admin;
+  const [need] = rolloutNeeds(client);
   let standing = "Healthy";
-  if (client.rollout.failed !== null) {
+  if (need?.kind === "channel_stopped") {
+    standing = "Nothing deploys on its channel";
+  } else if (need?.kind === "deploy_failed") {
     standing = "Its deploy failed";
+  } else if (need?.kind === "behind") {
+    standing = `${need.releases} releases behind`;
   } else if (client.setup !== null) {
     standing = "Being set up";
   }
@@ -749,15 +855,16 @@ const connectorsLine = (organization: AnsweredOrganization): string => {
   if (counts.all === 0) {
     return "Nothing connected yet";
   }
-  return counts.stopped === 0
+  const trouble = connectorTrouble(counts);
+  return trouble === "All working"
     ? `${counts.works} working`
-    : `${counts.works} working, ${counts.stopped} stopped`;
+    : `${counts.works} working, ${trouble.toLowerCase()}`;
 };
 
 /** How the work is known, or how much runs once it is live. */
-const WorkflowsLine = ({ view }: { view: AdminView }) => {
+const WorkflowsLine = ({ view, live }: { view: AdminView; live: boolean }) => {
   const used = useUse(view.org.id);
-  if (view.open && "activity" in used) {
+  if (live && "activity" in used) {
     return `${used.activity.workflowsLive} live`;
   }
   const signal = healthOf(view).find(({ area }) => area === "workflows");
@@ -779,8 +886,15 @@ const hoursLine = (view: AdminView): string => {
 };
 
 /** Where the steps stand: open since its go, or the step it is at. */
-const stepsLine = (view: AdminView): string =>
-  view.open ? stageLines(view).open : stageWords[view.stage];
+const stepsLine = (view: AdminView, live: boolean): string => {
+  if (!live) {
+    return stageWords[view.stage];
+  }
+  // Open from the start: no go was ever given.
+  return view.knowledge.opened === null
+    ? "Open, without Grasp’s go"
+    : stageLines(view).open;
+};
 
 /** The contract and its members, in a line. */
 const detailsLine = (view: AdminView, members: number): string => {
@@ -809,12 +923,13 @@ const SectionLine = ({
 }) => {
   const organization = useOrganization();
   const { view, admin } = organization;
+  const live = standingOfView(view, admin.snapshot.gate.open) === "live";
   switch (section) {
     case "details": {
       return detailsLine(view, admin.snapshot.members.length);
     }
     case "steps": {
-      return stepsLine(view);
+      return stepsLine(view, live);
     }
     case "interviews": {
       return view.told
@@ -824,7 +939,7 @@ const SectionLine = ({
     case "workflows": {
       return (
         <Suspense fallback="Reading…">
-          <WorkflowsLine view={view} />
+          <WorkflowsLine live={live} view={view} />
         </Suspense>
       );
     }
@@ -909,11 +1024,13 @@ export const Overview = ({
   setup: Promise<ClientSetup | null>;
   aiStatus: Promise<AiStatusReport | null>;
 }) => {
-  const { view } = useOrganization();
-  const standing = standingOfView(view);
+  const organization = useOrganization();
+  const { admin, view } = organization;
+  const standing = standingOfView(view, admin.snapshot.gate.open);
+  const [next, ...more] = waitingOf(organization, standing);
   return (
     <div {...stylex.props(styles.parts)}>
-      <NextStep standing={standing} />
+      <NextStep next={next} standing={standing} />
       {standing === "live" ? (
         <Suspense fallback={<LoadingLines lines={4} />}>
           <LiveFigures aiStatus={aiStatus} />
@@ -922,7 +1039,7 @@ export const Overview = ({
       ) : (
         <OnboardingFigures aiStatus={aiStatus} />
       )}
-      <MoreNeeds needs={view.needs.slice(1)} />
+      <MoreNeeds waiting={more} />
       <Recent setup={setup} />
       <Sections aiStatus={aiStatus} />
     </div>

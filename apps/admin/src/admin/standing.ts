@@ -125,14 +125,25 @@ export const standingOf = (entry: ClientSummary): Standing => {
 };
 
 /**
- * How an organization whose core answered stands, from the admin's view
- * of its snapshot, by the same rule as its summary's (`behind`): its own
- * page reads the snapshot, which says more than the summary. Enough known
- * is waiting for the go; the team told, the interviews, at risk while
- * they are behind.
+ * The day of its interviews as core counts it, from 1 on the day they
+ * start (the summary's `day`); the admin's view counts from 0. Null once
+ * they are over.
  */
-export const standingOfView = (view: AdminView): Standing => {
-  if (view.open) {
+export const interviewDay = (view: AdminView): number | null =>
+  view.closed ? null : view.day + 1;
+
+/**
+ * How an organization whose core answered stands, from the admin's view
+ * of its snapshot, by the same rules as its summary's: live while its gate
+ * is open (`gateOpen`, as core's stage says it, whether or not Grasp gave
+ * a go: a deployment can start open), enough known is waiting for the go,
+ * the team told is the interviews, at risk while they are behind.
+ */
+export const standingOfView = (
+  view: AdminView,
+  gateOpen: boolean
+): Standing => {
+  if (view.open || gateOpen) {
     return "live";
   }
   if (view.knowledge.ready) {
@@ -143,7 +154,7 @@ export const standingOfView = (view: AdminView): Standing => {
   }
   return behind({
     closed: view.closed,
-    day: view.day,
+    day: interviewDay(view),
     days: listenDays(view.org),
     known: view.knowledge.percent,
     threshold: view.knowledge.threshold,
