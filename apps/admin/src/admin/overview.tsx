@@ -15,6 +15,7 @@ import { brainOf, healthOf } from "@grasp-os/shared/admin/admin-health";
 import { historyOf } from "@grasp-os/shared/admin/admin-view";
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import { listenDays } from "@grasp-os/shared/admin/onboarding-admin";
+import type { Need } from "@grasp-os/shared/admin/onboarding-admin";
 import type { AiStatusReport } from "@grasp-os/shared/ai-status-report";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -171,6 +172,19 @@ const sum = (values: readonly number[]): number =>
 const capitalized = (words: string): string =>
   `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
 
+/** The needs that only stand while an organization isn't open yet. */
+const beforeOpening: ReadonlySet<Need["kind"]> = new Set([
+  "go",
+  "short",
+  "transcript",
+  "ask",
+  "conflict",
+  "paused",
+  "lead",
+  "quiet",
+  "few",
+]);
+
 /** Something that waits, as the overview lists it: what, on whom, where it is settled, and since when. */
 interface Waiting {
   key: string;
@@ -202,11 +216,8 @@ const waitingOf = (
   })),
   ...view.needs
     // Open already, though no go is recorded (a deployment that started
-    // open): there is no go to give, nor opening to decide on.
-    .filter(
-      (need) =>
-        standing !== "live" || (need.kind !== "go" && need.kind !== "short")
-    )
+    // open): what only stands before opening doesn't wait on anyone.
+    .filter((need) => standing !== "live" || !beforeOpening.has(need.kind))
     .map((need, at) => ({
       // The same need can stand twice, for two teams.
       key: `${need.kind}-${String(at)}`,
@@ -875,8 +886,15 @@ const hoursLine = (view: AdminView): string => {
 };
 
 /** Where the steps stand: open since its go, or the step it is at. */
-const stepsLine = (view: AdminView, live: boolean): string =>
-  live ? stageLines(view).open : stageWords[view.stage];
+const stepsLine = (view: AdminView, live: boolean): string => {
+  if (!live) {
+    return stageWords[view.stage];
+  }
+  // Open from the start: no go was ever given.
+  return view.knowledge.opened === null
+    ? "Open, without Grasp’s go"
+    : stageLines(view).open;
+};
 
 /** The contract and its members, in a line. */
 const detailsLine = (view: AdminView, members: number): string => {

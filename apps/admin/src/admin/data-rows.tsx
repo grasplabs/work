@@ -69,7 +69,7 @@ export interface DataColumn<Row> {
    * The fact on a card, after its quiet label (`head`); null leaves it
    * off the card. The cell itself where not given.
    */
-  fact?: (row: Row) => ReactNode | null;
+  fact?: (row: Row) => ReactNode;
 }
 
 export interface DataRowsProps<Row> {
