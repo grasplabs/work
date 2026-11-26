@@ -16,7 +16,7 @@ import {
   call,
   confirmAll,
   failure,
-  heldSend,
+  heldDraft,
   idp,
   mailerApp,
   outcomeOf,
@@ -68,11 +68,11 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     // the same Graph fake meanwhile.
     const subject = `Launch ${crypto.randomUUID()}`;
     const input = { to: "ada@acme.test", subject };
-    const held = await call(mailer, "mail.send", input, "launch-1");
+    const held = await call(mailer, "mail.draft", input, "launch-1");
     const whileHeld = await sentCount(subject);
     await confirmAll(mailer);
-    const answered = await call(mailer, "mail.send", input, "launch-1");
-    const again = await call(mailer, "mail.send", input, "launch-1");
+    const answered = await call(mailer, "mail.draft", input, "launch-1");
+    const again = await call(mailer, "mail.draft", input, "launch-1");
     expect({
       held: outcomeOf(held),
       sentWhileHeld: whileHeld,
@@ -81,10 +81,10 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       held: { failed: "permission.awaiting_confirmation" },
       sentWhileHeld: 0,
-      answered: { mailbox: "team@acme.test", sent: true },
-      again: { mailbox: "team@acme.test", sent: true },
+      answered: { drafted: true },
+      again: { drafted: true },
     });
-    // Sent once, as the person confirmed it: the repeats replayed it.
+    // Drafted once, as the person confirmed it: the repeats replayed it.
     await expect(sentCount(subject)).resolves.toBe(1);
   });
 
@@ -174,7 +174,7 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     };
     const input = { to: "ada@acme.test", subject: "Next" };
     // The grant and the binding carry over: no admin is asked again.
-    const held = await call(next, "mail.send", input, "next-1");
+    const held = await call(next, "mail.draft", input, "next-1");
     expect({
       held: outcomeOf(held),
       sent: await sentCount("Next"),
@@ -186,8 +186,8 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
 
   it("refuse a call key replayed with another payload", async () => {
     const mailer = await mailerApp();
-    await call(mailer, "mail.sendFresh", {}, "fresh-1");
-    const replayed = await call(mailer, "mail.sendFresh", {}, "fresh-1");
+    await call(mailer, "mail.draftFresh", {}, "fresh-1");
+    const replayed = await call(mailer, "mail.draftFresh", {}, "fresh-1");
     expect(outcomeOf(replayed)).toStrictEqual({
       failed: "permission.idempotency_conflict",
     });
@@ -196,10 +196,10 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
   it("answer a declined side effect as declined, under its call's key, never sent", async () => {
     const mailer = await mailerApp();
     const input = { to: "ada@acme.test", subject: "Declined" };
-    await call(mailer, "mail.send", input, "declined-1");
-    const waiting = await heldSend(mailer);
+    await call(mailer, "mail.draft", input, "declined-1");
+    const waiting = await heldDraft(mailer);
     await mailer.builder.api.pendingActions.decline(waiting.id);
-    const again = await call(mailer, "mail.send", input, "declined-1");
+    const again = await call(mailer, "mail.draft", input, "declined-1");
     expect({
       again: outcomeOf(again),
       sent: await sentCount("Declined"),
@@ -213,7 +213,7 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     const mailer = await mailerApp();
     await call(
       mailer,
-      "mail.send",
+      "mail.draft",
       { to: "ada@acme.test", subject: "Late" },
       "late-1"
     );
@@ -232,11 +232,11 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     const mailer = await mailerApp();
     await call(
       mailer,
-      "mail.send",
+      "mail.draft",
       { to: "ada@acme.test", subject: "Stale" },
       "stale-1"
     );
-    const held = await heldSend(mailer);
+    const held = await heldDraft(mailer);
     // Revoked behind the API's back, so nothing dropped the held action:
     // only the check on confirming stands between it and Graph.
     await drizzle(env.DB)
@@ -265,16 +265,16 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     const mailer = await mailerApp();
     await call(
       mailer,
-      "mail.send",
+      "mail.draft",
       { to: "ada@acme.test", subject: "Drift" },
       "drift-1"
     );
-    const held = await heldSend(mailer);
+    const held = await heldDraft(mailer);
     const changed = servingEnv(
-      withOutput("send", {
+      withOutput("create", {
         type: "object",
-        properties: { mailbox: { type: "string" } },
-        required: ["mailbox"],
+        properties: { id: { type: "string" } },
+        required: ["id"],
         additionalProperties: false,
       })
     );

@@ -74,16 +74,16 @@ const schema = defineSchema({
 });
 
 const mail = permission.connection("mail", {
-  contract: "microsoft-365.mail@1",
-  actions: ["send"],
+  contract: "microsoft-365.users.sendMail@1",
+  actions: ["create"],
 });
 
-/** A mail to `to`, as the contract's `send` takes it. */
+/** A mail to `to`, as the contract's `create` takes it. */
 const mailTo = (to: string) => ({
   mailbox: "team@acme.test",
   subject: "Hello",
-  body: "Hi.",
-  to: [to],
+  body: { content: "Hi." },
+  toRecipients: [{ emailAddress: { address: to } }],
 });
 const ai = permission.ai({ maxOutputTokens: 200 });
 const brain = permission.brain({ operations: ["recall"] });
@@ -222,11 +222,9 @@ const level0 = action({
 
 const sendMail = action({
   args: { to: v.string().email() },
-  returns: v.object({ mailbox: v.string() }),
-  handler: async (ctx, args) => {
-    const sent = await ctx.connections.mail.send(mailTo(args.to));
-    return { mailbox: sent.mailbox };
-  },
+  returns: v.object({}),
+  handler: async (ctx, args) =>
+    await ctx.connections.mail.create(mailTo(args.to)),
 });
 
 const summarize = action({
@@ -296,7 +294,7 @@ const sendMany = action({
   handler: async (ctx, args) => {
     for (let index = 0; index < args.count; index += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one request after the other
-      await ctx.connections.mail.send(mailTo("ada@acme.test"));
+      await ctx.connections.mail.create(mailTo("ada@acme.test"));
     }
     return args.count;
   },
@@ -307,7 +305,7 @@ const sendMailToo = action({
   args: { to: v.string().email() },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.connections.mail.send(mailTo(args.to));
+    await ctx.connections.mail.create(mailTo(args.to));
     return null;
   },
 });
@@ -478,7 +476,7 @@ const sendsWhileStreaming = action({
   stream: v.object({ done: v.number() }),
   handler: async (ctx, args) => {
     await ctx.emit({ done: 0 });
-    await ctx.connections.mail.send(mailTo(args.to));
+    await ctx.connections.mail.create(mailTo(args.to));
     return null;
   },
 });
@@ -490,7 +488,7 @@ const sendsAndLeaves = action({
   stream: v.object({ done: v.number() }),
   handler: async (ctx, args) => {
     await ctx.emit({ done: 0 });
-    void ctx.connections.mail.send(mailTo(args.to));
+    void ctx.connections.mail.create(mailTo(args.to));
     return null;
   },
 });
@@ -527,7 +525,7 @@ const savesThenSends = action({
   returns: v.null(),
   handler: async (ctx, args) => {
     await ctx.runMutation(create, { title: args.title });
-    await ctx.connections.mail.send(mailTo(args.to));
+    await ctx.connections.mail.create(mailTo(args.to));
     return null;
   },
 });
@@ -726,8 +724,7 @@ const misusing = (
 };
 
 /** A provider that answers every request as one mail sent. */
-const messageSent = async () =>
-  await Promise.resolve({ mailbox: "m", sent: true });
+const messageSent = async () => await Promise.resolve({});
 
 /** A binding of `kind` serving `contract`, answering with `answer`. */
 const bound = (
@@ -1058,7 +1055,7 @@ describe("an action's channel", () => {
       unbound: await attempt(
         async (channel) =>
           await channel.permission("mail", "call", [
-            "send",
+            "create",
             mailTo("a@acme.test"),
           ])
       ),
@@ -1083,20 +1080,17 @@ describe("resources", () => {
     bindingsOf({
       mail: bound(
         "connections",
-        "microsoft-365.mail@1",
+        "microsoft-365.users.sendMail@1",
         async (_method, args, context) => await answer(args, context)
       ),
     });
 
   it("reach the provider through the binding, with a key derived from the action's own", async () => {
     const fixture = await notes();
-    const seen: ResourceContext[] = [];
+    const seen: { args: readonly Json[]; context: ResourceContext }[] = [];
     const resources = mailBinding(async (args, context) => {
-      seen.push(context);
-      return await Promise.resolve({
-        mailbox: `m-${JSON.stringify(args)}`,
-        sent: true,
-      });
+      seen.push({ args, context });
+      return await Promise.resolve({});
     });
     const send = async (key: string) =>
       await call(
@@ -1112,12 +1106,17 @@ describe("resources", () => {
     const results = [await send("k1"), await send("k1"), await send("k2")];
     expect({
       results: results.map(valueOf),
-      sameKey: seen[0]?.idempotencyKey === seen[1]?.idempotencyKey,
-      otherKey: seen[0]?.idempotencyKey === seen[2]?.idempotencyKey,
+      requests: seen.map(({ args }) => args),
+      sameKey:
+        seen[0]?.context.idempotencyKey === seen[1]?.context.idempotencyKey,
+      otherKey:
+        seen[0]?.context.idempotencyKey === seen[2]?.context.idempotencyKey,
     }).toStrictEqual({
-      results: Array.from({ length: 3 }, () => ({
-        mailbox: `m-${JSON.stringify(["send", mailTo("ada@acme.test")])}`,
-      })),
+      results: Array.from({ length: 3 }, () => ({})),
+      requests: Array.from({ length: 3 }, () => [
+        "create",
+        mailTo("ada@acme.test"),
+      ]),
       sameKey: true,
       otherKey: false,
     });
@@ -1130,7 +1129,7 @@ describe("resources", () => {
     const left: number[] = [];
     const resources = mailBinding(async (_args, context) => {
       left.push(context.deadline - Date.now());
-      return await Promise.resolve({ mailbox: "m", sent: true });
+      return await Promise.resolve({});
     });
     const send = async (within: number) =>
       valueOf(
@@ -1188,7 +1187,11 @@ describe("resources", () => {
       none: await send(),
       otherContract: await send(
         bindingsOf({
-          mail: bound("connections", "microsoft-365.mail@2", messageSent),
+          mail: bound(
+            "connections",
+            "microsoft-365.users.sendMail@2",
+            messageSent
+          ),
         })
       ),
       otherKind: await send(
@@ -1206,7 +1209,7 @@ describe("resources", () => {
     let reached = false;
     const resources = mailBinding(async () => {
       reached = true;
-      return await Promise.resolve({ mailbox: "m", sent: true });
+      return await Promise.resolve({});
     });
     const attempt = async (
       misuse: (channel: FunctionChannel) => Promise<unknown>
@@ -1411,7 +1414,7 @@ const cancellable = () => {
 describe("what an action's invocation keeps", () => {
   /** Mail refused for a busy model budget, before anything was sent. */
   const busy = bindingsOf({
-    mail: bound("connections", "microsoft-365.mail@1", async () => {
+    mail: bound("connections", "microsoft-365.users.sendMail@1", async () => {
       await Promise.resolve();
       throw functionErrors.create("permission.budget_busy");
     }),
@@ -1566,10 +1569,14 @@ describe("cancelling a streaming action", () => {
     const fixture = await notes();
     const { sink, signal, cancel } = cancellable();
     let sent = 0;
-    const mailBound = bound("connections", "microsoft-365.mail@1", async () => {
-      sent += 1;
-      return await Promise.resolve({ mailbox: "m-1", sent: true });
-    });
+    const mailBound = bound(
+      "connections",
+      "microsoft-365.users.sendMail@1",
+      async () => {
+        sent += 1;
+        return await Promise.resolve({});
+      }
+    );
     // Resolving the binding is the last step before the request is sent.
     const resources: ResourceBindings = async (declaration, byDefault) => {
       cancel();
@@ -1593,11 +1600,11 @@ describe("cancelling a streaming action", () => {
     const { sink, signal, cancel } = cancellable();
     let sent = 0;
     const resources = bindingsOf({
-      mail: bound("connections", "microsoft-365.mail@1", async () => {
+      mail: bound("connections", "microsoft-365.users.sendMail@1", async () => {
         sent += 1;
         cancel();
         await scheduler.wait(50);
-        return { mailbox: "m-1", sent: true };
+        return {};
       }),
     });
     const result = await call(
@@ -1618,11 +1625,11 @@ describe("cancelling a streaming action", () => {
     const { sink, signal, cancel } = cancellable();
     let sent = 0;
     const resources = bindingsOf({
-      mail: bound("connections", "microsoft-365.mail@1", async () => {
+      mail: bound("connections", "microsoft-365.users.sendMail@1", async () => {
         sent += 1;
         cancel();
         await scheduler.wait(100);
-        return { mailbox: "m-1", sent: true };
+        return {};
       }),
     });
     // Its handler has returned; the run waits for the request it left.
@@ -1644,11 +1651,11 @@ describe("cancelling a streaming action", () => {
     const { sink, signal, cancel } = cancellable();
     let settled = false;
     const resources = bindingsOf({
-      mail: bound("connections", "microsoft-365.mail@1", async () => {
+      mail: bound("connections", "microsoft-365.users.sendMail@1", async () => {
         cancel();
         await scheduler.wait(300);
         settled = true;
-        return { mailbox: "m-1", sent: true };
+        return {};
       }),
     });
     const result = await call(
@@ -1699,10 +1706,10 @@ describe("cancelling a streaming action", () => {
     const fixture = await notes();
     let settled = false;
     const resources = bindingsOf({
-      mail: bound("connections", "microsoft-365.mail@1", async () => {
+      mail: bound("connections", "microsoft-365.users.sendMail@1", async () => {
         await scheduler.wait(800);
         settled = true;
-        return { mailbox: "m-1", sent: true };
+        return {};
       }),
     });
     const result = await call(
@@ -1724,11 +1731,11 @@ describe("cancelling a streaming action", () => {
     const { sink, signal, cancel } = cancellable();
     let settled = false;
     const resources = bindingsOf({
-      mail: bound("connections", "microsoft-365.mail@1", async () => {
+      mail: bound("connections", "microsoft-365.users.sendMail@1", async () => {
         cancel();
         await scheduler.wait(5000);
         settled = true;
-        return { mailbox: "m-1", sent: true };
+        return {};
       }),
     });
     const started = Date.now();
@@ -1794,7 +1801,7 @@ describe("one call's budget", () => {
   it("bounds the resource requests one call makes", async () => {
     const fixture = await notes();
     const resources = bindingsOf({
-      mail: bound("connections", "microsoft-365.mail@1", messageSent),
+      mail: bound("connections", "microsoft-365.users.sendMail@1", messageSent),
     });
     const send = async (requests: number) =>
       codeOf(
@@ -1827,10 +1834,10 @@ describe("derived keys", () => {
         resources: bindingsOf({
           mail: bound(
             "connections",
-            "microsoft-365.mail@1",
+            "microsoft-365.users.sendMail@1",
             async (_method, _args, context) => {
               seen.push(context.idempotencyKey);
-              return await Promise.resolve({ mailbox: "m", sent: true });
+              return await Promise.resolve({});
             }
           ),
         }),
@@ -2009,7 +2016,7 @@ describe("failures across the host's boundary", () => {
             resources: bindingsOf({
               mail: bound(
                 "connections",
-                "microsoft-365.mail@1",
+                "microsoft-365.users.sendMail@1",
                 async () => await Promise.reject(failure)
               ),
             }),
@@ -2214,7 +2221,7 @@ describe("evidence of a refused use", () => {
   it("is kept once per call, for the first use refused, before App code hears of it, naming only what the manifest has", async () => {
     const fixture = await notes();
     const resources = bindingsOf({
-      mail: bound("connections", "microsoft-365.mail@1", messageSent),
+      mail: bound("connections", "microsoft-365.users.sendMail@1", messageSent),
     });
     /** What a call of sendMail kept, its code asking `asks` and swallowing each refusal. */
     const kept = async (
@@ -2245,7 +2252,7 @@ describe("evidence of a refused use", () => {
                 order.push("refused");
               }
             }
-            return { mailbox: "m" };
+            return {};
           }),
         }
       );
@@ -2348,7 +2355,7 @@ describe("evidence of a refused use", () => {
         run: misusing(
           "notes.create",
           async (channel) =>
-            await channel.permission("mail", "call", ["send", {}])
+            await channel.permission("mail", "call", ["create", {}])
         ),
       }
     );
@@ -2382,7 +2389,11 @@ describe("evidence of a refused use", () => {
       {
         within: 20_000,
         resources: bindingsOf({
-          mail: bound("connections", "microsoft-365.mail@1", messageSent),
+          mail: bound(
+            "connections",
+            "microsoft-365.users.sendMail@1",
+            messageSent
+          ),
         }),
         refusedUse: async () => {
           await Promise.withResolvers<null>().promise;
@@ -2393,7 +2404,7 @@ describe("evidence of a refused use", () => {
           } catch {
             // Swallowed.
           }
-          return { mailbox: "m" };
+          return {};
         }),
       }
     );
@@ -2412,7 +2423,7 @@ describe("evidence of a refused use", () => {
         run: misusing(
           "notes.create",
           async (channel) =>
-            await channel.permission("mail", "call", ["send", {}])
+            await channel.permission("mail", "call", ["create", {}])
         ),
       }
     );

@@ -1088,7 +1088,7 @@ export const carryOut = async (
   progress.sideEffect = sideEffect;
   requireAllowedEffect(claims, tool, sideEffect);
   checkResourceScope(resource, tool, input);
-  requirePointedMailbox(claims, connection, call.action, tool, input);
+  requirePointedMailbox(claims, connection, tool, input);
   requirePointedResource(claims, connection, call.action, input);
   // Before it is held or its key claimed: an HTTP request the connection
   // doesn't allow is refused unsent.

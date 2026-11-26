@@ -624,7 +624,7 @@ describe("a guest shared an App", { timeout: 120_000 }, () => {
         await storedGrant(
           { type: "app", id: app },
           { type: "connection", id },
-          ["mail.list"],
+          ["users.messages.list"],
           `MAIL_${unique().replaceAll("-", "_").toUpperCase()}`
         );
       },

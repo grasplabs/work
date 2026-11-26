@@ -23,7 +23,10 @@ export const stephenGraphFake = () => {
   interface World {
     events: Record<string, unknown>[];
     messages: Record<string, unknown>[];
-    /** Its To Do lists, as Graph answers them (`todo/lists`). */
+    /**
+     * Its To Do lists, as Graph answers them (`/me/todo/lists`): a world
+     * set under an account's subject answers its token's `/me`.
+     */
     todoLists: Record<string, unknown>[];
   }
   /** A named table: its header row, and its body as Graph answers ranges. */
@@ -179,6 +182,27 @@ export const stephenGraphFake = () => {
       : Response.json(itemOf(file));
   };
 
+  /**
+   * The world a path's mailbox names (`/users/{mailbox}`), or for
+   * `/me/todo/lists` the token's own: its token is `access.<subject>...`.
+   */
+  const worldOf = (
+    request: Request,
+    kind: string,
+    parts: string[]
+  ): World | undefined => {
+    if (kind === "users") {
+      return worlds.get((parts[3] ?? "").toLowerCase());
+    }
+    if (parts[3] !== "todo" || parts[4] !== "lists") {
+      return undefined;
+    }
+    const [, subject = ""] = (request.headers.get("authorization") ?? "").split(
+      "."
+    );
+    return worlds.get(subject.toLowerCase());
+  };
+
   const tableAnswer = (table: Table, range: string | undefined): Response => {
     if (range === "headerRowRange") {
       return Response.json({ values: [table.columns] });
@@ -248,14 +272,14 @@ export const stephenGraphFake = () => {
         return undefined;
       }
       let answer: () => Response;
-      if (kind === "users") {
-        const world = worlds.get((parts[3] ?? "").toLowerCase());
+      if (kind === "users" || kind === "me") {
+        const world = worldOf(request, kind, parts);
         if (world === undefined) {
           return undefined;
         }
         // Its To Do lists, or its calendar and mail.
         answer = () =>
-          parts[4] === "todo" && parts[5] === "lists"
+          kind === "me"
             ? Response.json({ value: world.todoLists })
             : mailboxAnswer(world, request.method, parts.slice(4), url);
       } else if (kind === "drives" && drives.has(parts[3] ?? "")) {

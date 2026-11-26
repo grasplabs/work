@@ -30,8 +30,8 @@ export const idp = createIdp();
 /** A permission to call `actions` of `contract` through a connection, as `alias`. */
 export const connectionTo = (
   alias: string,
-  contract = "microsoft-365.mail@1",
-  actions = `["send", "list"]`
+  contract = "microsoft-365.users.messages@1",
+  actions = `["create", "list"]`
 ): string =>
   `permission.connection("${alias}", { contract: "${contract}", actions: ${actions} })`;
 
@@ -48,10 +48,10 @@ export const mailerDefinition = (permissions: readonly string[]): TestApp =>
     permissions,
   });
 
-/** An App whose actions send and list mail through Microsoft 365. */
+/** An App whose actions draft and list mail through Microsoft 365. */
 export const mailFiles = (
-  contract = "microsoft-365.mail@1",
-  actions = `["send", "list"]`
+  contract = "microsoft-365.users.messages@1",
+  actions = `["create", "list"]`
 ): TestApp =>
   withFiles(mailerDefinition([connectionTo("mail", contract, actions)]), {
     "server/mail.ts": `import { v } from "@grasp-os/sdk";
@@ -60,20 +60,20 @@ import { permissions } from "../grasp.config.ts";
 
 export const mail = permissions.mail;
 
-export const send = action({
+export const draft = action({
   args: { to: v.string().email(), subject: v.string().min(1) },
-  returns: v.object({ mailbox: v.string(), sent: v.boolean() }),
+  returns: v.object({ drafted: v.boolean() }),
   handler: async (ctx, args) => {
-    const sent = await ctx.connections.mail.send({
+    const created = await ctx.connections.mail.create({
       mailbox: "team@acme.test",
       subject: args.subject,
-      body: "Hello.",
-      to: [args.to],
+      body: { content: "Hello." },
+      toRecipients: [{ emailAddress: { address: args.to } }],
     });
-    if (typeof sent !== "object" || sent === null || Array.isArray(sent)) {
-      return { mailbox: "", sent: false };
+    if (typeof created !== "object" || created === null || Array.isArray(created)) {
+      return { drafted: false };
     }
-    return { mailbox: String(sent.mailbox), sent: sent.sent === true };
+    return { drafted: typeof created.id === "string" };
   },
 });
 
@@ -82,22 +82,22 @@ export const inbox = action({
   returns: v.number(),
   handler: async (ctx) => {
     const listed = await ctx.connections.mail.list({ mailbox: "team@acme.test" });
-    return typeof listed === "object" && listed !== null && !Array.isArray(listed) && Array.isArray(listed.messages)
-      ? listed.messages.length
+    return typeof listed === "object" && listed !== null && !Array.isArray(listed) && Array.isArray(listed.items)
+      ? listed.items.length
       : -1;
   },
 });
 
-/** Sends a subject of its own each time: one call key, another payload. */
-export const sendFresh = action({
+/** Drafts a subject of its own each time: one call key, another payload. */
+export const draftFresh = action({
   args: {},
   returns: v.boolean(),
   handler: async (ctx) => {
-    await ctx.connections.mail.send({
+    await ctx.connections.mail.create({
       mailbox: "team@acme.test",
       subject: crypto.randomUUID(),
-      body: "Hello.",
-      to: ["ada@acme.test"],
+      body: { content: "Hello." },
+      toRecipients: [{ emailAddress: { address: "ada@acme.test" } }],
     });
     return true;
   },
@@ -122,14 +122,14 @@ export const probe = action({
   },
 });
 
-/** Sends without what the contract requires. */
+/** Drafts without what the contract requires. */
 export const careless = action({
   args: {},
   returns: v.string(),
   handler: async (ctx) => {
     // What its contract requires left out, past the types on purpose.
-    await ctx.connections.mail.send({ mailbox: "team@acme.test" } as never);
-    return "sent";
+    await ctx.connections.mail.create({ mailbox: "team@acme.test" } as never);
+    return "drafted";
   },
 });
 `,
@@ -227,7 +227,7 @@ export const graphSent = async (): Promise<unknown[]> => {
   return z.array(z.unknown()).parse(await response.json());
 };
 
-/** How many messages Graph sent with `subject` (each test's own). */
+/** How many messages Graph sent or drafted with `subject` (each test's own). */
 export const sentCount = async (subject: string): Promise<number> => {
   const sent = await graphSent();
   return sent.filter(
@@ -246,7 +246,6 @@ export const sentCount = async (subject: string): Promise<number> => {
 export const mailerApp = async (
   options: {
     tools?: string[];
-    contract?: string;
     bind?: boolean;
     files?: TestSource;
   } = {}
@@ -254,17 +253,13 @@ export const mailerApp = async (
   const admin = await signedInApi(idp, "admin");
   const builder = await signedInApi(idp, "builder");
   const created = await builder.api.apps.create({ name: "Mailer" });
-  await commitApp(
-    builder.api,
-    created.id,
-    options.files ?? mailFiles(options.contract)
-  );
+  await commitApp(builder.api, created.id, options.files ?? mailFiles());
   await builder.api.versions.rollback({ kind: "app", id: created.id }, 1);
   const connectionId = await connectShared(admin);
   const requested = await builder.api.permissions.request({
     subject: { type: "app", appId: created.id },
     object: { type: "connection", connectionId },
-    actions: options.tools ?? ["mail.send", "mail.list"],
+    actions: options.tools ?? ["users.messages.create", "users.messages.list"],
     binding: "MAIL",
   });
   // Granting it approves the version the admin reviewed.
@@ -409,20 +404,19 @@ export const withOutput =
 export const someMessages = {
   type: "object",
   properties: {
-    mailbox: { type: "string" },
-    messages: {
+    items: {
       type: "array",
       items: { type: "object", properties: {}, additionalProperties: false },
       minItems: 1,
     },
-    nextPage: { type: ["string", "null"] },
+    next: { type: ["string", "null"] },
   },
-  required: ["mailbox", "messages", "nextPage"],
+  required: ["items", "next"],
   additionalProperties: false,
 };
 
-/** The send held for the Mailer's builder, as their list shows it. */
-export const heldSend = async ({ builder }: Mailer) => {
+/** The draft held for the Mailer's builder, as their list shows it. */
+export const heldDraft = async ({ builder }: Mailer) => {
   const [held] = await builder.api.pendingActions.list();
   if (held === undefined) {
     throw new Error("Expected a held action");

@@ -13,11 +13,13 @@ import {
   askCountingEnv,
   call,
   choicesOf,
+  connectionTo,
   failure,
-  heldSend,
+  heldDraft,
   idp,
   mailFiles,
   mailerApp,
+  mailerDefinition,
   outcomeOf,
   sentCount,
   servingEnv,
@@ -45,16 +47,16 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     const mailer = await mailerApp();
     await call(
       mailer,
-      "mail.send",
+      "mail.draft",
       { to: "ada@acme.test", subject: "Wider" },
       "wider-1"
     );
-    const held = await heldSend(mailer);
+    const held = await heldDraft(mailer);
     const app = mailer.release.manifest.resourceId;
     await commitApp(
       mailer.builder.api,
       app,
-      mailFiles("microsoft-365.mail@1", `["send", "list", "createDraft"]`)
+      mailFiles("microsoft-365.users.messages@1", `["create", "list", "get"]`)
     );
     // The connection stays granted: only the binding, approved for the
     // narrower declaration, is stale.
@@ -78,17 +80,17 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
   it("leave a dropped held call's key free: the same call is asked again, never answered as declined", async () => {
     const mailer = await mailerApp();
     const input = { to: "ada@acme.test", subject: "Again" };
-    await call(mailer, "mail.send", input, "again-1");
+    await call(mailer, "mail.draft", input, "again-1");
     // Approved again: the binding is replaced, its held call dropped.
     await mailer.admin.api.resourceBindings.approve(mailer.approval);
-    const afterReplace = await call(mailer, "mail.send", input, "again-1");
+    const afterReplace = await call(mailer, "mail.draft", input, "again-1");
     // Revoked, then approved anew: dropped again.
     const [current] = await mailer.admin.api.resourceBindings.list(
       mailer.release.manifest.resourceId
     );
     await mailer.admin.api.resourceBindings.revoke(current?.id ?? "");
     await mailer.admin.api.resourceBindings.approve(mailer.approval);
-    const afterRevoke = await call(mailer, "mail.send", input, "again-1");
+    const afterRevoke = await call(mailer, "mail.draft", input, "again-1");
     expect({
       afterReplace: outcomeOf(afterReplace),
       afterRevoke: outcomeOf(afterRevoke),
@@ -104,11 +106,11 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     const mailer = await mailerApp();
     await call(
       mailer,
-      "mail.send",
+      "mail.draft",
       { to: "ada@acme.test", subject: "Garbled" },
       "garbled-1"
     );
-    const held = await heldSend(mailer);
+    const held = await heldDraft(mailer);
     await connectDb()
       .prepare("UPDATE pending_actions SET binding = ? WHERE id = ?")
       .bind("not a binding", held.id)
@@ -127,11 +129,11 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     const mailer = await mailerApp();
     await call(
       mailer,
-      "mail.send",
+      "mail.draft",
       { to: "ada@acme.test", subject: "Unused" },
       "unused-1"
     );
-    const held = await heldSend(mailer);
+    const held = await heldDraft(mailer);
     const app = mailer.release.manifest.resourceId;
     await commitApp(mailer.builder.api, app, undeclaredMailFiles());
     await mailer.builder.api.versions.rollback({ kind: "app", id: app }, 2);
@@ -188,13 +190,18 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
   });
 
   it("bind only a contract the connection serves, for tools it allows", async () => {
-    const narrow = await mailerApp({ tools: ["mail.list"], bind: false });
+    const narrow = await mailerApp({
+      tools: ["users.messages.list"],
+      bind: false,
+    });
     const google = await mailerApp({
-      contract: "google-workspace.mail@1",
+      files: mailerDefinition([
+        connectionTo("mail", "google-workspace.mail@1", `["send", "list"]`),
+      ]),
       bind: false,
     });
     expect({
-      // The permission doesn't allow `mail.send`.
+      // The permission doesn't allow `users.messages.create`.
       narrow: await refusal(narrow),
       // A Microsoft connection serves no Google contract.
       google: await refusal(google),
@@ -211,7 +218,10 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
   });
 
   it("offer an admin only the connection permissions that serve the declared actions", async () => {
-    const narrow = await mailerApp({ tools: ["mail.list"], bind: false });
+    const narrow = await mailerApp({
+      tools: ["users.messages.list"],
+      bind: false,
+    });
     const full = await mailerApp({ bind: false });
     const db = drizzle(env.DB);
     const granted = await db
@@ -221,12 +231,12 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       .get();
     const connectionId = granted?.objectId ?? "";
     // On the same connection, the Mailer also holds a permission that
-    // doesn't allow `mail.send`, and a copy of its full one that holds in
+    // doesn't allow `users.messages.create`, and a copy of its full one that holds in
     // one chat only: neither is offered, nor is the other App's.
     const listOnly = await full.builder.api.permissions.request({
       subject: { type: "app", appId: full.release.manifest.resourceId },
       object: { type: "connection", connectionId },
-      actions: ["mail.list"],
+      actions: ["users.messages.list"],
       binding: "MAIL_LIST",
     });
     await full.admin.api.permissions.grant(listOnly.id, { version: 1 });
@@ -241,12 +251,12 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       narrow: await choicesOf(narrow),
       full: await choicesOf(full),
     }).toStrictEqual({
-      // The permission doesn't allow `mail.send`, which the App declares.
+      // The permission doesn't allow `users.messages.create`, which the App declares.
       narrow: [
         {
           alias: "mail",
           state: "unbound",
-          actions: ["send", "list"],
+          actions: ["create", "list"],
           choices: { kind: "connector", permissions: [], truncated: false },
         },
       ],
@@ -254,7 +264,7 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
         {
           alias: "mail",
           state: "unbound",
-          actions: ["send", "list"],
+          actions: ["create", "list"],
           choices: {
             kind: "connector",
             permissions: [

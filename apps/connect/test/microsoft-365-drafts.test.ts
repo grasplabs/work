@@ -15,7 +15,7 @@ import {
 } from "./tool-calls.ts";
 import type { Connection, Input } from "./tool-calls.ts";
 
-// files.createDraft against the fake Graph, through connect's real call
+// me.drive.root.content.upload against the fake Graph, through connect's real call
 // path: a draft lands only in the "Drafts from Stephen" folder of the
 // person's own OneDrive. What can go wrong, first: a call pointed at a
 // SharePoint site, a colleague's drive or a path of its own, a name
@@ -50,7 +50,10 @@ const draft = async (
   connection: Connection,
   input: Input,
   idempotencyKey = crypto.randomUUID()
-) => await call(connection, "files.createDraft", input, { idempotencyKey });
+) =>
+  await call(connection, "me.drive.root.content.upload", input, {
+    idempotencyKey,
+  });
 
 /** The requests that reached Graph, parsed. */
 const requests = () =>
@@ -71,7 +74,7 @@ const partsOf = (bytes: Uint8Array | undefined): Record<string, string> =>
 
 const keyIn = /<vt:lpwstr>(?<key>[^<]*)<\/vt:lpwstr>/u;
 
-describe("files.createDraft", () => {
+describe("me.drive.root.content.upload", () => {
   it("never writes to a SharePoint site, a colleague's drive or a path of its own", async () => {
     const connection = await connected();
     const refused = await Promise.all(
@@ -88,11 +91,20 @@ describe("files.createDraft", () => {
         { ...letter, format: "html" },
       ].map(async (input) => await toolError(draft(connection, input)))
     );
-    // Each refused by its input's schema, before anything went out.
+    // Each refused as invalid input, before anything went out.
     expect(
       refused.filter(
         (error) =>
-          !(typeof error === "string" && error.startsWith("Invalid input"))
+          !(typeof error === "string" && error.startsWith("Invalid input")) &&
+          !(
+            typeof error === "object" &&
+            error !== null &&
+            "error" in error &&
+            typeof error.error === "object" &&
+            error.error !== null &&
+            "code" in error.error &&
+            error.error.code === "invalid"
+          )
       )
     ).toStrictEqual([]);
     expect(graph.sent).toStrictEqual([]);
@@ -102,10 +114,7 @@ describe("files.createDraft", () => {
     const connection = await connected();
     const made = await outputOf(draft(connection, letter, "run-1:letter"));
     const parts = partsOf(graph.ownFile(`${folder}/${letter.name}.docx`));
-    expect(made).toMatchObject({
-      folder,
-      name: `${letter.name}.docx`,
-    });
+    expect(made).toMatchObject({ name: `${letter.name}.docx` });
     expect(writes()).toMatchObject([
       {
         method: "PUT",
@@ -131,7 +140,7 @@ describe("files.createDraft", () => {
     const made = await outputOf(
       draft(connection, { ...note, text: "Grüße, Jürgen" })
     );
-    expect(made).toMatchObject({ folder, name: `${note.name}.txt` });
+    expect(made).toMatchObject({ name: `${note.name}.txt` });
     expect(graph.ownFile(`${folder}/${note.name}.txt`)).toStrictEqual(
       new TextEncoder().encode("Grüße, Jürgen")
     );

@@ -29,8 +29,8 @@ import type { JsonValue } from "../src/common/value-descriptor.ts";
 import { v } from "../src/common/values.ts";
 
 const mail = permission.connection("mail", {
-  contract: "microsoft-365.mail@1",
-  actions: ["send", "list"],
+  contract: "microsoft-365.users.messages@1",
+  actions: ["create", "list"],
 });
 
 const { action } = serverModule(
@@ -43,40 +43,34 @@ const gmail = permission.connection("gmail", {
 });
 
 // The catalog names the release's contracts and their actions.
-expectTypeOf<"microsoft-365.mail@1">().toExtend<ConnectorContract>();
+expectTypeOf<"microsoft-365.users.messages@1">().toExtend<ConnectorContract>();
 expectTypeOf<"google-workspace.files@1">().toExtend<ConnectorContract>();
 expectTypeOf<"grasp.mail@1">().not.toExtend<ConnectorContract>();
-expectTypeOf<ConnectorAction<"microsoft-365.mail@1">>().toEqualTypeOf<
-  | "categorise"
-  | "createDraft"
-  | "createReplyDraft"
-  | "flag"
-  | "get"
-  | "list"
-  | "move"
-  | "readAttachment"
-  | "send"
-  | "thread"
+expectTypeOf<ConnectorAction<"microsoft-365.users.messages@1">>().toEqualTypeOf<
+  "create" | "get" | "list"
 >();
 
 declare const ctx: ActionCtx<typeof mail | typeof gmail>;
 
 // Arguments as the contract takes them: optional fields may be left out.
-const sent = await ctx.connections.mail.send({
+const sent = await ctx.connections.mail.create({
   mailbox: "team@acme.test",
   subject: "Hello",
-  body: "Hi.",
-  to: ["ada@acme.test"],
+  body: { content: "Hi." },
+  toRecipients: [{ emailAddress: { address: "ada@acme.test" } }],
 });
 // The answer as the contract gives it, with no narrowing first.
-expectTypeOf(sent).toEqualTypeOf<{ mailbox: string; sent: true }>();
-await ctx.connections.mail.send({
+expectTypeOf(sent).toEqualTypeOf<{
+  conversationId?: string | null;
+  id: string;
+  webLink?: string | null;
+}>();
+await ctx.connections.mail.create({
   mailbox: "team@acme.test",
   subject: "Hello",
-  body: "<p>Hi.</p>",
-  bodyType: "html",
-  to: ["ada@acme.test"],
-  cc: ["grace@acme.test"],
+  body: { content: "<p>Hi.</p>", contentType: "html" },
+  toRecipients: [{ emailAddress: { address: "ada@acme.test" } }],
+  ccRecipients: [{ emailAddress: { address: "grace@acme.test" } }],
 });
 
 // Each action has its own types, and so does each contract.
@@ -84,8 +78,8 @@ const listed = await ctx.connections.mail.list({
   mailbox: "team@acme.test",
   top: 10,
 });
-expectTypeOf(listed.nextPage).toEqualTypeOf<string | null>();
-expectTypeOf(listed.messages[0]?.subject).toEqualTypeOf<
+expectTypeOf(listed.next).toEqualTypeOf<string | null>();
+expectTypeOf(listed.items[0]?.subject).toEqualTypeOf<
   string | null | undefined
 >();
 const gmailSent = await ctx.connections.gmail.send({
@@ -108,13 +102,13 @@ action({
   args: { to: v.string().email() },
   returns: v.string(),
   handler: async (context, args) => {
-    const answer = await context.connections.mail.send({
+    const answer = await context.connections.mail.create({
       mailbox: "team@acme.test",
       subject: "Hello",
-      body: "Hi.",
-      to: [args.to],
+      body: { content: "Hi." },
+      toRecipients: [{ emailAddress: { address: args.to } }],
     });
-    return answer.mailbox;
+    return answer.id;
   },
 });
 
@@ -123,56 +117,55 @@ action({
 permission.connection("x", { contract: "grasp.mail@1", actions: ["send"] });
 // Refused: an action its contract doesn't have, though another one does.
 permission.connection("other", {
-  contract: "microsoft-365.mail@1",
+  contract: "microsoft-365.users.messages@1",
   // @ts-expect-error -- Google's mail has labels; Microsoft's hasn't
   actions: ["labels"],
 });
 permission.connection("other", {
-  contract: "microsoft-365.calendar@1",
-  // @ts-expect-error -- `send` is mail's, not the calendar's
-  actions: ["send"],
+  contract: "microsoft-365.users.events@1",
+  // @ts-expect-error -- `list` is the messages', not the events'
+  actions: ["list"],
 });
 
 // Refused: an action the declaration doesn't list, though its contract has
 // it, isn't a member.
-expectTypeOf(ctx.connections.mail).not.toHaveProperty("move");
+expectTypeOf(ctx.connections.mail).not.toHaveProperty("get");
 // There's no `call`: each action is its own member.
 expectTypeOf(ctx.connections.mail).not.toHaveProperty("call");
 
-await ctx.connections.mail.send({
+await ctx.connections.mail.create({
   mailbox: "team@acme.test",
   subject: "Hello",
-  body: "Hi.",
+  body: { content: "Hi." },
   // @ts-expect-error -- recipients are a list
-  to: "ada@acme.test",
+  toRecipients: { emailAddress: { address: "ada@acme.test" } },
 });
-// @ts-expect-error -- `to` is required
-await ctx.connections.mail.send({
+// @ts-expect-error -- `toRecipients` is required
+await ctx.connections.mail.create({
   mailbox: "team@acme.test",
   subject: "Hello",
-  body: "Hi.",
+  body: { content: "Hi." },
 });
-await ctx.connections.mail.send({
+await ctx.connections.mail.create({
   mailbox: "team@acme.test",
   subject: "Hello",
-  body: "Hi.",
-  to: ["ada@acme.test"],
   // @ts-expect-error -- not a body type the contract has
-  bodyType: "markdown",
+  body: { content: "Hi.", contentType: "markdown" },
+  toRecipients: [{ emailAddress: { address: "ada@acme.test" } }],
 });
-await ctx.connections.mail.send({
+await ctx.connections.mail.create({
   mailbox: "team@acme.test",
   subject: "Hello",
-  body: "Hi.",
-  to: ["ada@acme.test"],
+  body: { content: "Hi." },
+  toRecipients: [{ emailAddress: { address: "ada@acme.test" } }],
   // @ts-expect-error -- the contract has no such argument
   priority: "high",
 });
-// @ts-expect-error -- Microsoft's send answers no thread
+// @ts-expect-error -- Microsoft's draft answers no thread
 expectTypeOf(sent.threadId).toBeString();
 // The answer isn't any value: it can't be used as one it isn't.
-// @ts-expect-error -- `sent` is `true`, not a string
-expectTypeOf(sent.sent).toBeString();
+// @ts-expect-error -- `id` is a string, not a number
+expectTypeOf(sent.id).toBeNumber();
 
 // A Composio toolkit's contract (`composio.<toolkit>@1`): its tools change
 // without a release, so it isn't in the catalog and its calls are untyped

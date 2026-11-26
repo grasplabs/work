@@ -60,37 +60,49 @@ describe.runIf(smoke.success)("Microsoft 365, live", () => {
     const id = await connection();
     const mailbox = config?.M365_SMOKE_MAILBOX ?? "";
     const drive = config?.M365_SMOKE_DRIVE ?? "";
-    const mail = await run(id, "mail.list", { mailbox, top: 2 }, mailbox);
-    expect(mail.mailbox).toBe(mailbox);
-    if (typeof mail.nextPage === "string") {
+    const mail = await run(
+      id,
+      "users.messages.list",
+      { mailbox, top: 2 },
+      mailbox
+    );
+    expect(mail).toHaveProperty("items");
+    if (typeof mail.next === "string") {
       await run(
         id,
-        "mail.list",
-        { mailbox, top: 2, page: mail.nextPage },
+        "users.messages.list",
+        { mailbox, top: 2, next: mail.next },
         mailbox
       );
     }
     const now = Date.now();
     await run(
       id,
-      "calendar.list",
+      "users.calendarView.list",
       {
         mailbox,
-        start: new Date(now).toISOString(),
-        end: new Date(now + 7 * 24 * 3600 * 1000).toISOString(),
+        startDateTime: new Date(now).toISOString(),
+        endDateTime: new Date(now + 7 * 24 * 3600 * 1000).toISOString(),
       },
       mailbox
     );
     const files = z
       .object({
-        items: z.array(z.object({ id: z.string(), kind: z.string() })),
+        items: z.array(
+          z.object({ id: z.string(), file: z.object({}).nullish() })
+        ),
       })
-      .parse(await run(id, "files.list", { drive }, drive));
+      .parse(await run(id, "drives.root.children.list", { drive }, drive));
     // The drive's top folder must hold a file: it is read through Graph's
     // redirect to SharePoint.
-    const item = files.items.find(({ kind }) => kind === "file")?.id ?? "";
+    const item = files.items.find(({ file }) => file)?.id ?? "";
     await expect(
-      run(id, "files.read", { drive, item, as: "base64" }, drive)
+      run(
+        id,
+        "drives.items.content.download",
+        { drive, item, as: "base64" },
+        drive
+      )
     ).resolves.toMatchObject({ id: item, encoding: "base64" });
   });
 
@@ -102,12 +114,14 @@ describe.runIf(smoke.success)("Microsoft 365, live", () => {
       const key = crypto.randomUUID();
       const draft = await run(
         id,
-        "mail.createDraft",
+        "users.messages.create",
         {
           mailbox,
           subject: "Grasp OS smoke test",
-          body: "Created and removed by the connector's smoke test.",
-          to: [mailbox],
+          body: {
+            content: "Created and removed by the connector's smoke test.",
+          },
+          toRecipients: [{ emailAddress: { address: mailbox } }],
         },
         mailbox,
         `${key}:draft`
@@ -118,9 +132,9 @@ describe.runIf(smoke.success)("Microsoft 365, live", () => {
         outcome(
           run(
             id,
-            "mail.move",
-            { mailbox, message: String(draft.id), destination: foreign },
-            mailbox,
+            "me.messages.move.create",
+            { message: String(draft.id), destinationId: foreign },
+            undefined,
             `${key}:move-away`
           )
         )
@@ -129,12 +143,12 @@ describe.runIf(smoke.success)("Microsoft 365, live", () => {
       await expect(
         run(
           id,
-          "mail.move",
-          { mailbox, message: String(draft.id), destination: "deleteditems" },
-          mailbox,
+          "me.messages.move.create",
+          { message: String(draft.id), destinationId: "deleteditems" },
+          undefined,
           `${key}:move`
         )
-      ).resolves.toMatchObject({ mailbox, previousId: draft.id });
+      ).resolves.toHaveProperty("id");
     }
   );
 
@@ -148,61 +162,56 @@ describe.runIf(smoke.success)("Microsoft 365, live", () => {
         .toISOString()
         .slice(0, "2026-10-26".length);
       const timeZone = "Europe/Amsterdam";
-      const made = z.object({ event: z.object({ id: z.string() }) }).parse(
+      const made = z.object({ id: z.string() }).parse(
         await run(
           id,
-          "calendar.create",
+          "users.events.create",
           {
             mailbox,
             subject: "Grasp OS smoke test",
-            start: `${day}T14:00`,
-            end: `${day}T15:00`,
-            timeZone,
+            start: { dateTime: `${day}T14:00`, timeZone },
+            end: { dateTime: `${day}T15:00`, timeZone },
           },
           mailbox,
           `${key}:create`
         )
       );
       await expect(
-        run(id, "calendar.get", { mailbox, event: made.event.id }, mailbox)
-      ).resolves.toMatchObject({ event: { attendees: [] } });
+        run(id, "users.events.get", { mailbox, event: made.id }, mailbox)
+      ).resolves.toMatchObject({ attendees: [] });
       await expect(
         run(
           id,
-          "calendar.update",
+          "users.events.update",
           {
             mailbox,
-            event: made.event.id,
-            timeZone,
-            start: `${day}T15:00`,
-            end: `${day}T16:00`,
+            event: made.id,
+            start: { dateTime: `${day}T15:00`, timeZone },
+            end: { dateTime: `${day}T16:00`, timeZone },
           },
           mailbox,
           `${key}:update`
         )
       ).resolves.toMatchObject({
-        event: { start: { dateTime: `${day}T15:00:00.0000000`, timeZone } },
+        start: { dateTime: `${day}T15:00:00.0000000`, timeZone },
       });
     }
   );
 
   it.runIf(config?.M365_SMOKE_OWN_MAILBOX !== undefined)(
-    "finds free time in the user's own calendar",
+    "reads the user's own calendar view",
     async () => {
       const id = await connection();
-      const own = config?.M365_SMOKE_OWN_MAILBOX ?? "";
       const day = new Date(Date.now() + 7 * 24 * 3600 * 1000)
         .toISOString()
         .slice(0, "2026-10-26".length);
       const range = {
-        start: `${day}T00:00`,
-        end: `${day}T23:59`,
-        timeZone: "Europe/Amsterdam",
-        minutes: 15,
+        startDateTime: `${day}T00:00:00Z`,
+        endDateTime: `${day}T23:59:00Z`,
       };
       await expect(
-        run(id, "calendar.freeTime", { ...range, mailbox: own }, own)
-      ).resolves.toMatchObject({ mailbox: own });
+        run(id, "me.calendarView.list", range)
+      ).resolves.toHaveProperty("items");
     }
   );
 });

@@ -170,7 +170,7 @@ export const registerRows = (clock: StephenClock): RegisterRow[] => [
   ],
 ];
 
-/** The row of the register Mr Mulder is on, as excel.listRows numbers it. */
+/** The row of the register Mr Mulder is on, as its table's rows number it. */
 export const mulderRow = 2;
 
 /** A day as Excel keeps it: days since 30 December 1899. */

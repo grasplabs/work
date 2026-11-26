@@ -149,10 +149,14 @@ const jsonOf = (text: string): unknown => {
   return value;
 };
 
-/** `microsoft-365.mail@1`'s action `tool`, as connect serves it to `connectionId`. */
-const servedAction = async (connectionId: string, tool: string) => {
+/** `contract`'s action `tool`, as connect serves it to `connectionId`. */
+const servedAction = async (
+  connectionId: string,
+  contract: string,
+  tool: string
+) => {
   const served = await env.CONNECT.connectorContract({
-    contract: "microsoft-365.mail@1",
+    contract,
     connectionId,
   });
   const action = Object.values(served.actions).find(
@@ -199,7 +203,7 @@ const definitionOf = (mail: string): string =>
         id: "read",
         type: "call",
         connection: "mail",
-        action: "mail.readAttachment",
+        action: "users.messages.attachments.get",
         args: {
           mailbox: { $expr: "args.mailbox" },
           message: { $expr: "args.message" },
@@ -212,7 +216,8 @@ const definitionOf = (mail: string): string =>
 
 /**
  * An admin, a builder, a shared Microsoft 365 mailbox, and a catalog
- * contract of exactly `mail.readAttachment`'s schemas, as connect makes them.
+ * contract of exactly `users.messages.attachments.get`'s schemas, as
+ * connect makes them.
  */
 const nativeContract = async () => {
   const adminPerson = await signedInApi(idp, "admin");
@@ -223,13 +228,17 @@ const nativeContract = async () => {
     adminPerson,
     `native-${unique()}`
   );
-  const read = await servedAction(connectionId, "mail.readAttachment");
+  const read = await servedAction(
+    connectionId,
+    "microsoft-365.users.messages.attachments@1",
+    "users.messages.attachments.get"
+  );
   const key = `mail-${unique()}`;
   await publishCatalogContract(env, admin, {
     key,
     kind: "connector",
     operations: {
-      "mail.readAttachment": {
+      "users.messages.attachments.get": {
         input: enveloped(read.input),
         output: enveloped(read.output),
         readOnly: true,
@@ -252,7 +261,7 @@ const readingWorkflow = async () => {
   const permissionId = await granted(builder, admin, {
     subject: { type: "workflow", workflowId: workflow.id },
     object: { type: "connection", connectionId },
-    actions: ["mail.readAttachment"],
+    actions: ["users.messages.attachments.get"],
     binding: `MAIL_${unique().toUpperCase().replaceAll("-", "_")}`,
   });
   await approveWorkflowBinding(env, admin, workflow.id, {
@@ -260,7 +269,7 @@ const readingWorkflow = async () => {
     target: {
       kind: "connector",
       permissionId,
-      contract: "microsoft-365.mail@1",
+      contract: "microsoft-365.users.messages.attachments@1",
     },
     reviewed: { version: 1 },
   });
@@ -298,7 +307,11 @@ const ran = async (
 describe("a workflow binding a native connector's operation", () => {
   it("publishes a connector's own JSON Schemas only when connect confirms they're exactly a native action's", async () => {
     const { admin, read, connectionId } = await nativeContract();
-    const send = await servedAction(connectionId, "mail.send");
+    const send = await servedAction(
+      connectionId,
+      "microsoft-365.users.sendMail@1",
+      "users.sendMail.create"
+    );
     const publish = async (
       operations: Record<
         string,
@@ -337,14 +350,14 @@ describe("a workflow binding a native connector's operation", () => {
     expect({
       // Like the connector's, its pattern a catastrophic one.
       backtracking: await publish({
-        "mail.readAttachment": {
+        "users.messages.attachments.get": {
           ...exact,
           input: enveloped(withPattern(read.input, "^(a+)+$")),
         },
       }),
       // A keyword the check doesn't enforce.
       unenforced: await publish({
-        "mail.readAttachment": {
+        "users.messages.attachments.get": {
           ...exact,
           input: enveloped({
             ...z.record(z.string(), z.unknown()).parse(read.input),
@@ -353,21 +366,24 @@ describe("a workflow binding a native connector's operation", () => {
         },
       }),
       // A native action's schemas under another operation's name.
-      otherName: await publish({ "mail.send": exact }),
+      otherName: await publish({ "users.sendMail.create": exact }),
       // Half of an operation: its output a descriptor.
       half: await publish({
-        "mail.readAttachment": { input: exact.input, output: descriptor },
+        "users.messages.attachments.get": {
+          input: exact.input,
+          output: descriptor,
+        },
       }),
       // On a contract that isn't a connector's.
       notConnector: await publish({ op: exact }, "operation"),
       // A read published as a write: readOnly is the connector's to say.
       notReadOnly: await publish({
-        "mail.readAttachment": { ...exact, readOnly: false },
+        "users.messages.attachments.get": { ...exact, readOnly: false },
       }),
       // A write published as a read, which would leave it out of the
       // writes a version's review says a model may steer.
       writeAsRead: await publish({
-        "mail.send": {
+        "users.sendMail.create": {
           input: enveloped(send.input),
           output: enveloped(send.output),
           readOnly: true,
@@ -377,23 +393,23 @@ describe("a workflow binding a native connector's operation", () => {
       // A write that attaches files says so, as its connector declares it
       // (GRA-887), and no other does.
       write: await publish({
-        "mail.send": {
+        "users.sendMail.create": {
           input: enveloped(send.input),
           output: enveloped(send.output),
           takesFiles: true,
         },
       }),
       writeFilesUndeclared: await publish({
-        "mail.send": {
+        "users.sendMail.create": {
           input: enveloped(send.input),
           output: enveloped(send.output),
         },
       }),
       readTakesFiles: await publish({
-        "mail.readAttachment": { ...exact, takesFiles: true },
+        "users.messages.attachments.get": { ...exact, takesFiles: true },
       }),
       descriptorTakesFiles: await publish({
-        "mail.send": {
+        "users.sendMail.create": {
           input: descriptor,
           output: descriptor,
           takesFiles: true,
@@ -401,10 +417,10 @@ describe("a workflow binding a native connector's operation", () => {
       }),
       // A file answer is the connector's to declare, both ways (GRA-886).
       fileUndeclared: await publish({
-        "mail.readAttachment": { ...exact, answersFile: undefined },
+        "users.messages.attachments.get": { ...exact, answersFile: undefined },
       }),
       writeAnswersFile: await publish({
-        "mail.send": {
+        "users.sendMail.create": {
           input: enveloped(send.input),
           output: enveloped(send.output),
           answersFile: true,
@@ -412,13 +428,13 @@ describe("a workflow binding a native connector's operation", () => {
         },
       }),
       descriptorAnswersFile: await publish({
-        "mail.readAttachment": {
+        "users.messages.attachments.get": {
           input: descriptor,
           output: descriptor,
           answersFile: true,
         },
       }),
-      exact: await publish({ "mail.readAttachment": exact }),
+      exact: await publish({ "users.messages.attachments.get": exact }),
     }).toStrictEqual({
       backtracking: "workflow.contract_invalid",
       unenforced: "workflow.contract_invalid",
@@ -476,8 +492,6 @@ describe("a workflow binding a native connector's operation", () => {
     });
     expect(saved.problems).toStrictEqual([]);
     const answer = {
-      mailbox,
-      messageId: "m1",
       id: "a1",
       name: "notes.txt",
       contentType: "text/plain",

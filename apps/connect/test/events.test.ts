@@ -278,7 +278,7 @@ describe("connector events", () => {
         id: mail.id,
         connection: outlook.id,
         owner: outlook.person.userId,
-        action: "mail.list",
+        action: "users.messages.list",
         type: "m365.mail.received",
         payload: {
           mailbox: outlook.oid,
@@ -491,7 +491,7 @@ describe("connector events", () => {
         connection: outlook.id,
         owner: outlook.person.userId,
         resource: financeDrive,
-        action: "files.list",
+        action: "drives.items.children.list",
         type: "m365.file.created",
         payload: {
           drive: financeDrive,

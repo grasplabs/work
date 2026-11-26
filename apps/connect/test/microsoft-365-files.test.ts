@@ -27,7 +27,6 @@ import {
   pdfBase64,
   procedureTexts,
   reportText,
-  supplierColumns,
   supplierTable,
   totalsRange,
   workbookIds,
@@ -70,28 +69,22 @@ describe("the Microsoft 365 connector's file tools", () => {
   it("list a drive's top folder or a folder in it, page by page", async () => {
     const connection = await connected();
     const first = await resultOf(
-      call(connection, "files.list", { drive: financeDrive })
+      call(connection, "drives.root.children.list", { drive: financeDrive })
     );
     expect(first).toMatchObject({
       output: {
-        drive: financeDrive,
         items: [
-          { drive: financeDrive, id: itemIds.folder, kind: "folder" },
-          {
-            drive: financeDrive,
-            id: itemIds.report,
-            kind: "file",
-            mimeType: "text/plain",
-          },
+          { id: itemIds.folder, folder: { childCount: 42 } },
+          { id: itemIds.report, file: { mimeType: "text/plain" } },
         ],
-        nextPage: `%24skiptoken=${childrenSkipToken}`,
+        next: `%24skiptoken=${childrenSkipToken}`,
       },
       provenance: [itemIds.folder, itemIds.report],
     });
-    await call(connection, "files.list", {
+    await call(connection, "drives.items.children.list", {
       drive: financeDrive,
       folder: itemIds.folder,
-      page: `%24skiptoken=${childrenSkipToken}`,
+      next: `%24skiptoken=${childrenSkipToken}`,
     });
     expect(requests()).toMatchObject([
       { path: `${drivePath}/root/children` },
@@ -107,16 +100,15 @@ describe("the Microsoft 365 connector's file tools", () => {
     // Graph finds an item shared from another drive too: it's left out.
     await expect(
       resultOf(
-        call(connection, "files.search", {
+        call(connection, "drives.root.search", {
           drive: financeDrive,
-          query: "Northwind's invoice",
+          q: "Northwind's invoice",
         })
       )
     ).resolves.toStrictEqual({
       output: {
-        drive: financeDrive,
         items: [expect.objectContaining({ id: itemIds.pdf })],
-        nextPage: null,
+        next: null,
       },
       provenance: [itemIds.pdf],
     });
@@ -129,12 +121,12 @@ describe("the Microsoft 365 connector's file tools", () => {
     // A query the egress would refuse in a path is refused before it.
     await expect(
       toolError(
-        call(connection, "files.search", {
+        call(connection, "drives.root.search", {
           drive: financeDrive,
-          query: "../../me",
+          q: "../../me",
         })
       )
-    ).resolves.toBe("Invalid input: invalid_format at query");
+    ).resolves.toMatchObject({ error: { code: "invalid" } });
     expect(graph.sent).toHaveLength(1);
   });
 
@@ -142,18 +134,16 @@ describe("the Microsoft 365 connector's file tools", () => {
     const connection = await connected();
     await expect(
       resultOf(
-        call(connection, "files.read", {
+        call(connection, "drives.items.content.download", {
           drive: financeDrive,
           item: itemIds.report,
         })
       )
     ).resolves.toStrictEqual({
       output: {
-        drive: financeDrive,
         id: itemIds.report,
         name: "Month-end report.txt",
-        version: null,
-        mimeType: "text/plain",
+        contentType: "text/plain",
         size: new TextEncoder().encode(reportText).byteLength,
         encoding: "text",
         content: reportText,
@@ -178,10 +168,20 @@ describe("the Microsoft 365 connector's file tools", () => {
     expect(graph.sent[2]?.headers).not.toHaveProperty("authorization");
     const pdf = { drive: financeDrive, item: itemIds.pdf };
     await expect(
-      outputOf(call(connection, "files.read", { ...pdf, as: "base64" }))
+      outputOf(
+        call(connection, "drives.items.content.download", {
+          ...pdf,
+          as: "base64",
+        })
+      )
     ).resolves.toMatchObject({ encoding: "base64", content: pdfBase64 });
     await expect(
-      toolError(call(connection, "files.read", { ...pdf, as: "text" }))
+      toolError(
+        call(connection, "drives.items.content.download", {
+          ...pdf,
+          as: "text",
+        })
+      )
     ).resolves.toMatchObject({ error: { code: "not_text" } });
   });
 
@@ -191,7 +191,10 @@ describe("the Microsoft 365 connector's file tools", () => {
       [itemIds.folder, itemIds.foreign, itemIds.big, itemIds.controls].map(
         async (item) =>
           await toolError(
-            call(connection, "files.read", { drive: financeDrive, item })
+            call(connection, "drives.items.content.download", {
+              drive: financeDrive,
+              item,
+            })
           )
       )
     );
@@ -210,49 +213,48 @@ describe("the Microsoft 365 connector's file tools", () => {
 
   it("list a file's versions newest first, each with when and by whom it was saved", async () => {
     const connection = await connected();
-    const sanne = { name: "Sanne Visser", email: "sanne.visser@example.com" };
+    const sanne = {
+      displayName: "Sanne Visser",
+      email: "sanne.visser@example.com",
+    };
     // Graph's pre-authenticated download link of each isn't passed on.
     await expect(
       resultOf(
-        call(connection, "files.versions", {
+        call(connection, "drives.items.versions.list", {
           drive: financeDrive,
           item: itemIds.procedure,
         })
       )
     ).resolves.toStrictEqual({
       output: {
-        drive: financeDrive,
-        id: itemIds.procedure,
-        name: "Advice procedure.txt",
-        versions: [
+        items: [
           {
             id: "3.0",
-            current: true,
-            savedAt: "2026-10-12T09:41:07Z",
-            savedBy: sanne,
+            lastModifiedDateTime: "2026-10-12T09:41:07Z",
+            lastModifiedBy: { user: sanne },
             size: versionSize("3.0"),
           },
           {
             id: "2.0",
-            current: false,
-            savedAt: "2026-06-03T14:20:55Z",
-            savedBy: {
-              name: "Daan Bakker",
-              email: "daan.bakker@example.com",
+            lastModifiedDateTime: "2026-06-03T14:20:55Z",
+            lastModifiedBy: {
+              user: {
+                displayName: "Daan Bakker",
+                email: "daan.bakker@example.com",
+              },
             },
             size: versionSize("2.0"),
           },
           {
             id: "1.0",
-            current: false,
-            savedAt: "2025-11-18T08:05:30Z",
-            savedBy: sanne,
+            lastModifiedDateTime: "2025-11-18T08:05:30Z",
+            lastModifiedBy: { user: sanne },
             size: versionSize("1.0"),
           },
         ],
-        nextPage: null,
+        next: null,
       },
-      provenance: [itemIds.procedure],
+      provenance: ["3.0", "2.0", "1.0"],
     });
     expect(graphPaths()).toStrictEqual([
       `${drivePath}/items/${itemIds.procedure}`,
@@ -260,34 +262,30 @@ describe("the Microsoft 365 connector's file tools", () => {
     ]);
   });
 
-  it("page through a file's versions, the newest alone current", async () => {
+  it("page through a file's versions, newest first", async () => {
     const connection = await connected();
     const pageSchema = z.object({
-      versions: z.array(z.object({ id: z.string(), current: z.boolean() })),
-      nextPage: z.string().nullable(),
+      items: z.array(z.object({ id: z.string() })),
+      next: z.string().nullable(),
     });
-    const seen: { id: string; current: boolean }[] = [];
-    let page: string | undefined;
+    const seen: string[] = [];
+    let next: string | undefined;
     do {
       const read = pageSchema.parse(
         // oxlint-disable-next-line no-await-in-loop -- each page follows the last
         await outputOf(
-          call(connection, "files.versions", {
+          call(connection, "drives.items.versions.list", {
             drive: financeDrive,
             item: itemIds.procedure,
             top: 1,
-            ...(page === undefined ? {} : { page }),
+            ...(next === undefined ? {} : { next }),
           })
         )
       );
-      seen.push(...read.versions);
-      page = read.nextPage ?? undefined;
-    } while (page !== undefined);
-    expect(seen).toStrictEqual([
-      { id: "3.0", current: true },
-      { id: "2.0", current: false },
-      { id: "1.0", current: false },
-    ]);
+      seen.push(...read.items.map(({ id }) => id));
+      next = read.next ?? undefined;
+    } while (next !== undefined);
+    expect(seen).toStrictEqual(["3.0", "2.0", "1.0"]);
   });
 
   it("refuse an older version too big to read before asking for its content", async () => {
@@ -295,7 +293,7 @@ describe("the Microsoft 365 connector's file tools", () => {
     graph.oversizeVersion("1.0");
     await expect(
       toolError(
-        call(connection, "files.read", {
+        call(connection, "drives.items.versions.content.download", {
           drive: financeDrive,
           item: itemIds.procedure,
           version: "1.0",
@@ -311,17 +309,19 @@ describe("the Microsoft 365 connector's file tools", () => {
     const connection = await connected();
     const procedure = { drive: financeDrive, item: itemIds.procedure };
     const [current, older] = await Promise.all([
-      outputOf(call(connection, "files.read", procedure)),
+      outputOf(call(connection, "drives.items.content.download", procedure)),
       outputOf(
-        call(connection, "files.read", { ...procedure, version: "1.0" })
+        call(connection, "drives.items.versions.content.download", {
+          ...procedure,
+          version: "1.0",
+        })
       ),
     ]);
     expect([current, older]).toMatchObject([
-      { version: null, content: procedureTexts["3.0"] },
+      { id: itemIds.procedure, content: procedureTexts["3.0"] },
       {
         id: itemIds.procedure,
         name: "Advice procedure.txt",
-        version: "1.0",
         size: versionSize("1.0"),
         content: procedureTexts["1.0"],
       },
@@ -336,7 +336,10 @@ describe("the Microsoft 365 connector's file tools", () => {
     // A version the file doesn't have is Graph's to refuse.
     await expect(
       toolError(
-        call(connection, "files.read", { ...procedure, version: "9.0" })
+        call(connection, "drives.items.versions.content.download", {
+          ...procedure,
+          version: "9.0",
+        })
       )
     ).resolves.toMatchObject({ error: { code: "not_found" } });
   });
@@ -346,10 +349,13 @@ describe("the Microsoft 365 connector's file tools", () => {
     const refusals = await Promise.all(
       (
         [
-          ["files.versions", { item: itemIds.locked }],
-          ["files.read", { item: itemIds.locked, version: "1.0" }],
-          ["files.versions", { item: itemIds.folder }],
-          ["files.versions", { item: itemIds.foreign }],
+          ["drives.items.versions.list", { item: itemIds.locked }],
+          [
+            "drives.items.versions.content.download",
+            { item: itemIds.locked, version: "1.0" },
+          ],
+          ["drives.items.versions.list", { item: itemIds.folder }],
+          ["drives.items.versions.list", { item: itemIds.foreign }],
         ] satisfies [string, Input][]
       ).map(
         async ([tool, input]) =>
@@ -376,7 +382,10 @@ describe("the Microsoft 365 connector's file tools", () => {
       [itemIds.elsewhere, itemIds.plain, itemIds.nested, itemIds.twice].map(
         async (item) =>
           await toolError(
-            call(connection, "files.read", { drive: financeDrive, item })
+            call(connection, "drives.items.content.download", {
+              drive: financeDrive,
+              item,
+            })
           )
       )
     );
@@ -400,9 +409,9 @@ describe("the Microsoft 365 connector's list tools", () => {
   it("read the items of a list that meet every condition, with only their own columns", async () => {
     const connection = await connected();
     const result = await resultOf(
-      call(connection, "lists.items", {
+      call(connection, "sites.lists.items.list", {
         ...contracts,
-        where: [
+        filter: [
           { column: "Supplier", is: "eq", value: "O'Brien & Sons" },
           { column: "Amount", is: "ge", value: 5000 },
         ],
@@ -413,11 +422,7 @@ describe("the Microsoft 365 connector's list tools", () => {
       .filter((n) => n % 4 === 3 && n >= 20)
       .map(String);
     expect(result.provenance).toStrictEqual(ids);
-    expect(result.output).toMatchObject({
-      site: financeSite,
-      list: contractsList,
-      nextPage: null,
-    });
+    expect(result.output).toMatchObject({ next: null });
     expect(
       z
         .object({ items: z.array(z.unknown()) })
@@ -434,18 +439,18 @@ describe("the Microsoft 365 connector's list tools", () => {
         Renewal_x0020_date: "2027-06-01T00:00:00Z",
         _x0032_nd_x0020_signatory: "Legal",
         Regions: ["EU", "UK"],
-        Website: JSON.stringify({
+        Website: {
           Description: "Supplier portal",
           Url: "https://suppliers.example.com/23",
-        }),
+        },
         Modified: "2026-06-13T09:30:00Z",
         Created: "2026-01-05T08:00:00Z",
         AuthorLookupId: "11",
         EditorLookupId: "11",
         Attachments: false,
       },
-      createdAt: "2026-01-05T08:00:00Z",
-      lastModifiedAt: "2026-06-13T09:30:00Z",
+      createdDateTime: "2026-01-05T08:00:00Z",
+      lastModifiedDateTime: "2026-06-13T09:30:00Z",
       webUrl: `https://${graph.sharePointHost}/sites/Finance/Lists/Contracts/23_.000`,
     });
     // The filter is built from the conditions, its quote doubled as OData
@@ -466,9 +471,9 @@ describe("the Microsoft 365 connector's list tools", () => {
   it("read only the columns asked for, one of SharePoint's own too", async () => {
     const connection = await connected();
     const output = await outputOf(
-      call(connection, "lists.items", {
+      call(connection, "sites.lists.items.list", {
         ...contracts,
-        columns: ["Title", "Status", "ContentType"],
+        select: ["Title", "Status", "ContentType"],
         top: 1,
       })
     );
@@ -499,16 +504,16 @@ describe("the Microsoft 365 connector's list tools", () => {
       ].map(
         async (condition) =>
           await toolError(
-            call(connection, "lists.items", {
+            call(connection, "sites.lists.items.list", {
               ...contracts,
-              where: [condition],
+              filter: [condition],
             })
           )
       )
     );
-    expect(refusals).toStrictEqual([
-      "Invalid input: invalid_format at where.0.column",
-      "Invalid input: invalid_value at where.0.is",
+    expect(refusals).toMatchObject([
+      { error: { code: "invalid" } },
+      "Invalid input: value.invalid_enum at filter.0.is",
     ]);
     expect(graph.sent).toStrictEqual([]);
   });
@@ -519,7 +524,7 @@ describe("the Microsoft 365 connector's list tools", () => {
       toolError(
         call(
           connection,
-          "lists.items",
+          "sites.lists.items.list",
           { site: hrSite, list: contractsList },
           { resource: hrSite }
         )
@@ -531,41 +536,43 @@ describe("the Microsoft 365 connector's list tools", () => {
     const connection = await connected();
     const pageSchema = z.object({
       items: z.array(z.object({ id: z.string() })),
-      nextPage: z.string().nullable(),
+      next: z.string().nullable(),
     });
     const first = pageSchema.parse(
-      await outputOf(call(connection, "lists.items", contracts))
+      await outputOf(call(connection, "sites.lists.items.list", contracts))
     );
     expect({
       read: first.items.length,
-      nextPage: first.nextPage,
+      next: first.next,
     }).toStrictEqual({
       read: 50,
-      nextPage: `%24skiptoken=${encodeURIComponent("Paged=TRUE&p_ID=50")}`,
+      next: `%24skiptoken=${encodeURIComponent("Paged=TRUE&p_ID=50")}`,
     });
     const second = pageSchema.parse(
       await outputOf(
-        call(connection, "lists.items", {
+        call(connection, "sites.lists.items.list", {
           ...contracts,
-          page: first.nextPage ?? "",
+          next: first.next ?? "",
         })
       )
     );
     // The rest, from where the first page ended.
     expect({
       read: second.items.map(({ id }) => Number(id)),
-      nextPage: second.nextPage,
+      next: second.next,
     }).toStrictEqual({
       read: Array.from(
         { length: contractCount - 50 },
         (_, index) => index + 51
       ),
-      nextPage: null,
+      next: null,
     });
     // Never more than a page's bound, whatever is asked.
     await expect(
-      toolError(call(connection, "lists.items", { ...contracts, top: 500 }))
-    ).resolves.toBe("Invalid input: too_big at top");
+      toolError(
+        call(connection, "sites.lists.items.list", { ...contracts, top: 500 })
+      )
+    ).resolves.toBe("Invalid input: value.too_large at top");
     expect(requests().map(({ query }) => query.$top)).toStrictEqual([
       "50",
       "50",
@@ -580,24 +587,24 @@ describe("the Microsoft 365 connector's list pages", () => {
     const connection = await connected();
     const asked = {
       ...contracts,
-      where: [{ column: "Status", is: "eq", value: "Open" }],
-      columns: ["Title", "Status"],
+      filter: [{ column: "Status", is: "eq", value: "Open" }],
+      select: ["Title", "Status"],
       top: 10,
     };
     const pageSchema = z.object({
       items: z.array(
         z.object({ id: z.string(), fields: z.record(z.string(), z.unknown()) })
       ),
-      nextPage: z.string().nullable(),
+      next: z.string().nullable(),
     });
     const first = pageSchema.parse(
-      await outputOf(call(connection, "lists.items", asked))
+      await outputOf(call(connection, "sites.lists.items.list", asked))
     );
     const second = pageSchema.parse(
       await outputOf(
-        call(connection, "lists.items", {
+        call(connection, "sites.lists.items.list", {
           ...asked,
-          page: first.nextPage ?? "",
+          next: first.next ?? "",
         })
       )
     );
@@ -670,23 +677,24 @@ describe("the Microsoft 365 connector's Excel tools", () => {
   it("list a named table's rows under its columns, a day as its date, page by page", async () => {
     const connection = await connected();
     await expect(
-      resultOf(onRegister(connection, "excel.listRows", { top: 1 }))
+      resultOf(
+        onRegister(connection, "drives.items.workbook.tables.dataBodyRange", {
+          top: 1,
+        })
+      )
     ).resolves.toStrictEqual({
-      output: {
-        drive: financeDrive,
-        workbook: register,
-        table: supplierTable,
-        columns: supplierColumns,
-        rows: [{ row: 0, values: northwind }],
-        nextStart: 1,
-      },
-      provenance: [register],
+      output: { items: [{ index: 0, values: northwind }], next: "1" },
+      provenance: [],
     });
     await expect(
-      outputOf(onRegister(connection, "excel.listRows", { start: 1 }))
+      outputOf(
+        onRegister(connection, "drives.items.workbook.tables.dataBodyRange", {
+          next: "1",
+        })
+      )
     ).resolves.toMatchObject({
-      rows: [{ row: 1, values: contoso }],
-      nextStart: null,
+      items: [{ index: 1, values: contoso }],
+      next: null,
     });
     // Only the named table, never a sheet or a range of one.
     expect(new Set(graphPaths())).toStrictEqual(
@@ -699,7 +707,7 @@ describe("the Microsoft 365 connector's Excel tools", () => {
     const list = async (table: string) =>
       await call(
         connection,
-        "excel.listRows",
+        "drives.items.workbook.tables.dataBodyRange",
         { drive: financeDrive, workbook: register, table },
         { resource: register }
       );
@@ -734,19 +742,13 @@ describe("the Microsoft 365 connector's Excel tools", () => {
       await outputOf(
         onRegister(
           connection,
-          "excel.addRow",
+          "drives.items.workbook.tables.rows.create",
           { values: fabrikam },
           "run-3:add"
         )
       );
     const added = await add();
-    expect(added).toStrictEqual({
-      drive: financeDrive,
-      workbook: register,
-      table: supplierTable,
-      row: 2,
-      values: fabrikam,
-    });
+    expect(added).toStrictEqual({ index: 2, values: fabrikam });
     // Excel holds the day as a date: its serial number, shown as a date.
     expect(valuesHeld()[2]).toStrictEqual([
       { value: "Fabrikam Metals", format: "General" },
@@ -755,8 +757,12 @@ describe("the Microsoft 365 connector's Excel tools", () => {
       { value: "", format: "General" },
     ]);
     await expect(
-      outputOf(onRegister(connection, "excel.listRows", { start: 2 }))
-    ).resolves.toMatchObject({ rows: [{ row: 2, values: fabrikam }] });
+      outputOf(
+        onRegister(connection, "drives.items.workbook.tables.dataBodyRange", {
+          next: "2",
+        })
+      )
+    ).resolves.toMatchObject({ items: [{ index: 2, values: fabrikam }] });
     // The same call again, under its key, adds nothing.
     await expect(add()).resolves.toStrictEqual(added);
     expect({ rows: valuesHeld().length, posts: sentAs("POST") }).toStrictEqual({
@@ -777,7 +783,7 @@ describe("the Microsoft 365 connector's Excel tools", () => {
           await toolError(
             onRegister(
               connection,
-              "excel.addRow",
+              "drives.items.workbook.tables.rows.create",
               { values },
               crypto.randomUUID()
             )
@@ -806,7 +812,7 @@ describe("the Microsoft 365 connector's Excel tools", () => {
           await toolError(
             onRegister(
               connection,
-              "excel.addRow",
+              "drives.items.workbook.tables.rows.create",
               { values: supplierNamed(value) },
               crypto.randomUUID()
             )
@@ -822,7 +828,7 @@ describe("the Microsoft 365 connector's Excel tools", () => {
       outputOf(
         onRegister(
           connection,
-          "excel.addRow",
+          "drives.items.workbook.tables.rows.create",
           { values: withAmount(fabrikam, "-12.5") },
           "run-3:credit"
         )
@@ -835,19 +841,15 @@ describe("the Microsoft 365 connector's Excel tools", () => {
     const update = async (before: SupplierRow, amount: number, key: string) =>
       await onRegister(
         connection,
-        "excel.updateRow",
-        { row: 0, before, after: withAmount(northwind, amount) },
+        "drives.items.workbook.tables.rows.itemAt.range.update",
+        { index: 0, before, values: withAmount(northwind, amount) },
         key
       );
     await expect(
       outputOf(update(northwind, 1350, "run-4:raise"))
     ).resolves.toStrictEqual({
-      drive: financeDrive,
-      workbook: register,
-      table: supplierTable,
-      row: 0,
-      before: northwind,
-      after: withAmount(northwind, 1350),
+      index: 0,
+      values: withAmount(northwind, 1350),
     });
     // The old and new values are kept, and the call's audit event vouches
     // for them by their hash.
@@ -872,7 +874,10 @@ describe("the Microsoft 365 connector's Excel tools", () => {
       events.find(({ action }) => action === "connection.call")
     ).toMatchObject({
       requestId: change?.requestId,
-      detail: { action: "excel.updateRow", changeHash: change?.hash },
+      detail: {
+        action: "drives.items.workbook.tables.rows.itemAt.range.update",
+        changeHash: change?.hash,
+      },
     });
     // A change made from what the row held before is refused, unwritten.
     await expect(
@@ -894,14 +899,7 @@ describe("the Microsoft 365 connector's Excel tools", () => {
       patches: sentAs("PATCH"),
     }).toStrictEqual({
       amount: 1350,
-      again: {
-        drive: financeDrive,
-        workbook: register,
-        table: supplierTable,
-        row: 0,
-        before: withAmount(northwind, 5),
-        after: withAmount(northwind, 1350),
-      },
+      again: { index: 0, values: withAmount(northwind, 1350) },
       kept: 1,
       patches: 1,
     });
@@ -914,11 +912,11 @@ describe("the Microsoft 365 connector's Excel tools", () => {
       toolError(
         onRegister(
           connection,
-          "excel.updateRow",
+          "drives.items.workbook.tables.rows.itemAt.range.update",
           {
-            row: 0,
+            index: 0,
             before: withAmount(northwind, "1200"),
-            after: withAmount(northwind, 1350),
+            values: withAmount(northwind, 1350),
           },
           "run-7:typed"
         )
@@ -933,11 +931,11 @@ describe("the Microsoft 365 connector's Excel tools", () => {
     const update = async () =>
       await onRegister(
         connection,
-        "excel.updateRow",
+        "drives.items.workbook.tables.rows.itemAt.range.update",
         {
-          row: 0,
+          index: 0,
           before: northwind,
-          after: withIban(withAmount(northwind, ""), iban),
+          values: withIban(withAmount(northwind, ""), iban),
         },
         "run-7:clear"
       );
@@ -945,7 +943,7 @@ describe("the Microsoft 365 connector's Excel tools", () => {
     await expect(outcome(update())).resolves.toBe("connect.outcome_unknown");
     await claimedAgo(connection);
     await expect(outputOf(update())).resolves.toMatchObject({
-      after: withIban(withAmount(northwind, null), iban),
+      values: withIban(withAmount(northwind, null), iban),
     });
     expect(sentAs("PATCH")).toBe(1);
   });
@@ -961,13 +959,17 @@ describe("the Microsoft 365 connector's Excel tools", () => {
     // The row reads the formula's cell as its value.
     const read = withAmount(northwind, 1320);
     await expect(
-      outputOf(onRegister(connection, "excel.listRows", { top: 1 }))
-    ).resolves.toMatchObject({ rows: [{ row: 0, values: read }] });
+      outputOf(
+        onRegister(connection, "drives.items.workbook.tables.dataBodyRange", {
+          top: 1,
+        })
+      )
+    ).resolves.toMatchObject({ items: [{ index: 0, values: read }] });
     const change = async (after: SupplierRow, key: string) =>
       await onRegister(
         connection,
-        "excel.updateRow",
-        { row: 0, before: read, after },
+        "drives.items.workbook.tables.rows.itemAt.range.update",
+        { index: 0, before: read, values: after },
         key
       );
     const iban = "NL20INGB0001234567";
@@ -983,7 +985,7 @@ describe("the Microsoft 365 connector's Excel tools", () => {
     );
     await expect(
       outputOf(change(kept, "run-6:iban-kept"))
-    ).resolves.toMatchObject({ after: kept });
+    ).resolves.toMatchObject({ values: kept });
     const [first] = graph.supplierRowsOf(register);
     expect({
       iban: first?.[1]?.value,
@@ -997,8 +999,8 @@ describe("the Microsoft 365 connector's Excel tools", () => {
     const update = async () =>
       await onRegister(
         connection,
-        "excel.updateRow",
-        { row: 0, before: northwind, after: withAmount(northwind, 1350) },
+        "drives.items.workbook.tables.rows.itemAt.range.update",
+        { index: 0, before: northwind, values: withAmount(northwind, 1350) },
         "run-5:raise"
       );
     graph.loseWriteAnswer();
@@ -1007,14 +1009,14 @@ describe("the Microsoft 365 connector's Excel tools", () => {
     // already stands as asked, and nothing is written again.
     await claimedAgo(connection);
     await expect(outputOf(update())).resolves.toMatchObject({
-      after: withAmount(northwind, 1350),
+      values: withAmount(northwind, 1350),
     });
     // An added row carries nothing to find it by: it stays unknown.
     const add = async () =>
       await outcome(
         onRegister(
           connection,
-          "excel.addRow",
+          "drives.items.workbook.tables.rows.create",
           { values: fabrikam },
           "run-5:add"
         )
@@ -1044,13 +1046,13 @@ describe("the Microsoft 365 connector's Excel tools", () => {
       {
         connectionId: connection.id,
         resource: register,
-        action: "excel.updateRow",
+        action: "drives.items.workbook.tables.rows.itemAt.range.update",
         input: {
           ...supplierTableOf,
           workbook: register,
-          row: 0,
+          index: 0,
           before: northwind,
-          after,
+          values: after,
         },
         idempotencyKey: `chat-1:${crypto.randomUUID()}`,
       },
@@ -1076,14 +1078,14 @@ describe("the Microsoft 365 connector's Excel tools", () => {
               { input: "drive", label: "Drive", value: financeDrive },
               { input: "workbook", label: "Workbook", value: register },
               { input: "table", label: "Table", value: supplierTable },
-              { input: "row", label: "Row", value: "0" },
+              { input: "index", label: "Row", value: "0" },
               {
                 input: "before",
                 label: "Now",
                 value: JSON.stringify(northwind, null, 2),
               },
               {
-                input: "after",
+                input: "values",
                 label: "Will be",
                 value: JSON.stringify(after, null, 2),
               },
@@ -1112,8 +1114,8 @@ describe("the Microsoft 365 connector's Excel tools", () => {
         }),
       });
     await expect(outputOf(confirm())).resolves.toMatchObject({
-      before: northwind,
-      after,
+      index: 0,
+      values: after,
     });
     await expect(outcome(confirm())).resolves.not.toBe("ok");
     // The formula its person confirmed is the cell's, written once.
@@ -1127,7 +1129,7 @@ describe("the Microsoft 365 connector's Excel tools", () => {
 const list = async (connection: Connection) =>
   await call(
     connection,
-    "excel.listRows",
+    "drives.items.workbook.tables.dataBodyRange",
     { ...supplierTableOf, workbook: workbookIds.register },
     { resource: workbookIds.register }
   );

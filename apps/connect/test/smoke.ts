@@ -61,8 +61,8 @@ export const smokeConnection = async (
 export const smokeRun = async (
   connectionId: string,
   action: string,
-  input: Record<string, string | number | string[]>,
-  resource: string,
+  input: Parameters<typeof callAs>[1]["input"],
+  resource?: string,
   idempotencyKey?: string
 ): Promise<Record<string, unknown>> => {
   const { output } = await callAs(agentFor(person), {

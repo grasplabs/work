@@ -179,7 +179,7 @@ describe("sharing an App", () => {
       await storedGrant(
         { type: "app", id: app },
         { type: "connection", id: connectionId },
-        ["mail.list"],
+        ["users.messages.list"],
         `MAIL_${index}`
       );
     }
@@ -291,7 +291,7 @@ describe("sharing an App", () => {
         await storedGrant(
           { type: "app", id: app },
           { type: "connection", id: mailbox },
-          ["mail.list"],
+          ["users.messages.list"],
           "MAILBOX"
         );
       }

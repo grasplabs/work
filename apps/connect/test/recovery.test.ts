@@ -13,7 +13,7 @@ import {
   ownAccount,
   someone,
 } from "./connect.ts";
-import { invoices } from "./fixtures/graph.ts";
+import { invoices, messageId } from "./fixtures/graph.ts";
 import { fakeGraph } from "./graph-api.ts";
 import { fakeProviders } from "./oauth-provider.ts";
 import {
@@ -51,8 +51,10 @@ const connected = async (): Promise<Connection> => {
 const email = {
   mailbox: invoices,
   subject: "Payment of invoice 2026-0041",
-  body: "Paid today.",
-  to: ["billing@northwind.example.org"],
+  body: { content: "Paid today." },
+  toRecipients: [
+    { emailAddress: { address: "billing@northwind.example.org" } },
+  ],
 };
 
 /** The requests that reached Graph, parsed. */
@@ -82,13 +84,13 @@ const tagOf = (body: unknown): string | undefined => {
 };
 
 const send = async (connection: Connection, key: string) =>
-  await call(connection, "mail.send", email, {
+  await call(connection, "users.sendMail.create", email, {
     resource: invoices,
     idempotencyKey: key,
   });
 
 const draft = async (connection: Connection, key: string) =>
-  await call(connection, "mail.createDraft", email, {
+  await call(connection, "users.messages.create", email, {
     resource: invoices,
     idempotencyKey: key,
   });
@@ -220,7 +222,7 @@ describe("a Microsoft 365 write of unknown outcome", () => {
       })),
       audited: details.slice(-2),
     }).toMatchObject({
-      found: { mailbox: invoices },
+      found: { id: messageId(invoices, 9) },
       repeat: found,
       keyed: true,
       writesDone: 1,
@@ -257,7 +259,7 @@ describe("a Microsoft 365 write of unknown outcome", () => {
       sameKey: second === first,
     }).toMatchObject({
       lost: "connect.outcome_unknown",
-      made: { mailbox: invoices },
+      made: { id: messageId(invoices, 9) },
       writes: 2,
       lookups: 1,
       keyed: true,
@@ -352,8 +354,11 @@ describe("a Microsoft 365 write of unknown outcome", () => {
       outcome(
         call(
           connection,
-          "mail.createDraft",
-          { ...email, to: ["ceo@example.com"] },
+          "users.messages.create",
+          {
+            ...email,
+            toRecipients: [{ emailAddress: { address: "ceo@example.com" } }],
+          },
           { resource: invoices, idempotencyKey: "run-6:draft" }
         )
       )
@@ -391,7 +396,7 @@ describe("a Microsoft 365 write of unknown outcome", () => {
         agentFor(connection.person.userId),
         {
           connectionId: connection.id,
-          action: "mail.createDraft",
+          action: "users.messages.create",
           input: email,
           resource: invoices,
           idempotencyKey: "run-8:draft",
@@ -536,7 +541,6 @@ describe("a Microsoft 365 write of unknown outcome", () => {
     await outcome(draft(connection, "run-18:draft"));
     await claimedAgo(connection);
     const stored = {
-      mailbox: invoices,
       id: "draft-recovered",
       conversationId: null,
       webLink: null,

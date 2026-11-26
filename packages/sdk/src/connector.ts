@@ -3,18 +3,24 @@
 // import this and nothing else.
 
 export {
+  attachedFiles,
+  attachments,
   auth,
+  contentAs,
   defineConnector,
   event,
   page,
+  stampHeader,
   sync,
   tool,
+  ToolError,
   v,
 } from "@grasp-os/runtime/connector";
 export type {
   AccountDeclaration,
   Api,
   ApiRequest,
+  AttachedFile,
   Checkpoint,
   ConnectorAuth,
   ConnectorDeclaration,

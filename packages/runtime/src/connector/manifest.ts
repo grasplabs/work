@@ -391,6 +391,25 @@ const actionManifestSchema = z.strictObject({
    */
   takesFiles: z.literal(true).optional(),
   /**
+   * It reads or changes email (`true`), or mails someone: a write whose
+   * `recipients` input properties hold the addresses it mails. Mail tools
+   * are held by the platform's mail rules: a chat's agent reaches only its
+   * person's own mailbox or one pointed at for them (with resource
+   * `mailbox`), a card says the turn read mail, and a run's mail is
+   * stamped with its recipients (core's workflows/mail-stamps.ts).
+   */
+  mail: z
+    .union([
+      z.literal(true),
+      z.strictObject({
+        recipients: z
+          .array(z.string().regex(/^[A-Za-z_]\w*$/u))
+          .min(1)
+          .max(16),
+      }),
+    ])
+    .optional(),
+  /**
    * Its input and its output, as the JSON Schemas the connector's own
    * schemas make: the generated contract an App's resource binding is
    * checked against (spec 12), in both directions. Data only: connect
@@ -573,6 +592,16 @@ export const connectorManifestSchema = z
   .refine(
     ({ actions }) =>
       Object.values(actions).every(
+        ({ mail, readOnly, input }) =>
+          typeof mail !== "object" ||
+          (!readOnly &&
+            mail.recipients.every((recipient) => input.includes(recipient)))
+      ),
+    "Only a write mails someone, at its own input properties"
+  )
+  .refine(
+    ({ actions }) =>
+      Object.values(actions).every(
         ({ readOnly, recovery, routes }) =>
           (!readOnly || recovery === "none") &&
           (recovery !== "find" || routes.some(({ method }) => method === "GET"))
@@ -615,8 +644,8 @@ const contractActionPattern = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/u;
 /**
  * The contracts `manifest` generates (spec 12): one per family of its
  * tools, `<connector>.<family>@1`, holding each tool of the family under
- * its name after the family (`mail.send` is `send` of
- * `microsoft-365.mail@1`). The family is all of the name but its last
+ * its name after the family (`users.messages.list` is `list` of
+ * `microsoft-365.users.messages@1`). The family is all of the name but its last
  * part, as the mirror rule names a tool (`deals.followers.list` is `list`
  * of `crm.deals.followers@1`). Connect serves contracts from this, and the
  * SDK's connector catalog is typed from it, so both name the same

@@ -128,8 +128,8 @@ const chatCalling = async (
       `export default async (self, env) => {
         const tried = async (action, input) => { try { const { pending } = await env.connections.call("MAIL", action, input); return pending === null ? "done" : "held"; } catch (error) { return error.message; } };
         return {
-          list: await tried("mail.list", { mailbox: ${JSON.stringify(mailbox)} }),
-          send: await tried("mail.send", { mailbox: ${JSON.stringify(mailbox)}, to: ["ben@acme.test"], subject: ${JSON.stringify(subject)}, body: "Attached." }),
+          list: await tried("users.messages.list", { mailbox: ${JSON.stringify(mailbox)} }),
+          send: await tried("users.sendMail.create", { mailbox: ${JSON.stringify(mailbox)}, toRecipients: [{ emailAddress: { address: "ben@acme.test" } }], subject: ${JSON.stringify(subject)}, body: { content: "Attached." } }),
         };
       };`
     ),
@@ -138,7 +138,7 @@ const chatCalling = async (
   await requestGranted(idp, admin, {
     subject: chat.agent,
     object: { type: "connection", connectionId },
-    actions: ["mail.list", "mail.send"],
+    actions: ["users.messages.list", "users.sendMail.create"],
     binding: "MAIL",
   });
   return {
@@ -297,27 +297,25 @@ describe("the native tools on by default", () => {
         "google mail.labels",
         "google mail.list",
         "google mail.readAttachment",
-        "microsoft calendar.create",
-        "microsoft calendar.freeTime",
-        "microsoft calendar.update",
-        "microsoft files.createDraft",
-        "microsoft mail.categorise",
-        "microsoft mail.createDraft",
-        "microsoft mail.createReplyDraft",
-        "microsoft mail.flag",
-        "microsoft mail.get",
-        "microsoft mail.list",
-        "microsoft mail.move",
-        "microsoft mail.readAttachment",
-        "microsoft mail.thread",
-        "microsoft onenote.create",
-        "microsoft onenote.pages",
-        "microsoft onenote.read",
-        "microsoft onenote.sections",
-        "microsoft todo.complete",
-        "microsoft todo.create",
-        "microsoft todo.lists",
-        "microsoft todo.tasks",
+        "microsoft me.drive.root.content.upload",
+        "microsoft me.messages.move.create",
+        "microsoft me.messages.update",
+        "microsoft me.onenote.pages.get",
+        "microsoft me.onenote.sections.list",
+        "microsoft me.onenote.sections.pages.create",
+        "microsoft me.onenote.sections.pages.list",
+        "microsoft me.todo.lists.list",
+        "microsoft me.todo.lists.tasks.create",
+        "microsoft me.todo.lists.tasks.list",
+        "microsoft me.todo.lists.tasks.update",
+        "microsoft users.events.create",
+        "microsoft users.events.update",
+        "microsoft users.mailFolders.messages.list",
+        "microsoft users.messages.attachments.get",
+        "microsoft users.messages.create",
+        "microsoft users.messages.createReply.create",
+        "microsoft users.messages.get",
+        "microsoft users.messages.list",
       ],
     });
   });
@@ -348,7 +346,9 @@ describe("the classes a company turned on", setUpTime, () => {
     );
     const calls = await connectCalls(id);
     expect({
-      sends: calls.filter(({ detail }) => detail.action === "mail.send"),
+      sends: calls.filter(
+        ({ detail }) => detail.action === "users.sendMail.create"
+      ),
       sent: await sentWith(chat.subject),
     }).toStrictEqual({ sends: [], sent: [] });
   });
@@ -388,12 +388,12 @@ describe("the classes a company turned on", setUpTime, () => {
   it("keep Read others' words off by default, refusing the agent's read of Teams chats in core until an admin turns it on", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "user");
-    const { id, mailbox } = await connectShared(admin, everyRightGrant);
+    const { id } = await connectShared(admin, everyRightGrant);
     const chat = await chatOf(
       person.userId,
       codeStep(
         `export default async (self, env) => {
-          try { await env.connections.call("TEAMS", "chats.list", { mailbox: ${JSON.stringify(mailbox)} }); return "read"; } catch (error) { return error.message; }
+          try { await env.connections.call("TEAMS", "me.chats.list", {}); return "read"; } catch (error) { return error.message; }
         };`
       ),
       says("Done.")
@@ -401,7 +401,7 @@ describe("the classes a company turned on", setUpTime, () => {
     await requestGranted(idp, admin, {
       subject: chat.agent,
       object: { type: "connection", connectionId: id },
-      actions: ["chats.list"],
+      actions: ["me.chats.list"],
       binding: "TEAMS",
     });
 
@@ -413,7 +413,7 @@ describe("the classes a company turned on", setUpTime, () => {
     expect(result?.text).toBe(`Returned:\n${off}`);
     const calls = await connectCalls(id);
     expect(
-      calls.filter(({ detail }) => detail.action === "chats.list")
+      calls.filter(({ detail }) => detail.action === "me.chats.list")
     ).toStrictEqual([]);
   });
 

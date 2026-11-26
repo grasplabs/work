@@ -52,7 +52,7 @@ const held = (changes: Partial<PendingAction> = {}): PendingAction => ({
   connectionId: "connection-1",
   connectionName: "Microsoft 365 (anna@acme.test)",
   resource: null,
-  action: "calendar.create",
+  action: "users.events.create",
   idempotencyKey: "c:1",
   input: JSON.stringify({ subject: "Focus", attendees: ["ben@acme.test"] }),
   inputHash: "a".repeat(64),
@@ -117,8 +117,10 @@ describe("a held write on the card", () => {
 describe("the card's check line", () => {
   it("warns only when the turn read mail", () => {
     expect([
-      checkOf([connectionRead("connection-1", "mail.search", null)]),
-      checkOf([connectionRead("connection-1", "calendar.list", null)]),
+      checkOf([connectionRead("connection-1", "users.messages.list", null)]),
+      checkOf([
+        connectionRead("connection-1", "users.calendarView.list", null),
+      ]),
       checkOf(["note:doc-1"]),
       checkOf([]),
     ]).toStrictEqual([{ read: "mail" }, undefined, undefined, undefined]);

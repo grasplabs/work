@@ -111,7 +111,7 @@ const listening = async () => {
   await requestGranted(idp, builder, {
     subject,
     object: { type: "connection", connectionId: connection },
-    actions: ["mail.list"],
+    actions: ["users.messages.list"],
     binding: `HEAR_${unique().toUpperCase()}`,
   });
   return {

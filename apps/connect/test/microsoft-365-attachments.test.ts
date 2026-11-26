@@ -56,8 +56,10 @@ const mailboxPath = `/v1.0/users/${encodeURIComponent(invoices)}`;
 const mail = (files: readonly Attached[]) => ({
   mailbox: invoices,
   subject: "Invoice 2026-0041",
-  body: "Attached.",
-  to: ["billing@northwind.example.org"],
+  body: { content: "Attached." },
+  toRecipients: [
+    { emailAddress: { address: "billing@northwind.example.org" } },
+  ],
   attachments: files.map(({ entry }) => entry),
 });
 
@@ -66,7 +68,7 @@ const send = async (
   connection: Connection,
   files: readonly Attached[],
   key: string,
-  action = "mail.send"
+  action = "users.sendMail.create"
 ) =>
   await call(connection, action, mail(files), {
     resource: invoices,
@@ -80,7 +82,7 @@ describe("a Microsoft 365 write that attaches files", () => {
     const notes = await attach("notes.txt", "text/plain", "Paid in full.");
     const report = await attach("report.json", "application/json", '{"a":1}');
     await send(connection, [notes, report], "run-1:send");
-    await send(connection, [report], "run-1:draft", "mail.createDraft");
+    await send(connection, [report], "run-1:draft", "users.messages.create");
     const [sent, drafted] = writes();
     expect(sent).toMatchObject({
       method: "POST",
@@ -155,31 +157,41 @@ describe("a Microsoft 365 write that attaches files", () => {
       Call["input"],
       AttachmentBytes | undefined,
     ][] = [
-      ["mail.send", "no bytes", mail([file]), undefined],
-      ["mail.send", "empty bytes", mail([file]), {}],
-      ["mail.send", "an extra part", mail([file]), bytesOf([file, other])],
-      ["mail.send", "another content", mail([file]), wrongContent],
+      ["users.sendMail.create", "no bytes", mail([file]), undefined],
+      ["users.sendMail.create", "empty bytes", mail([file]), {}],
       [
-        "mail.send",
+        "users.sendMail.create",
+        "an extra part",
+        mail([file]),
+        bytesOf([file, other]),
+      ],
+      ["users.sendMail.create", "another content", mail([file]), wrongContent],
+      [
+        "users.sendMail.create",
         "another length",
         { ...mail([file]), attachments: [{ ...file.entry, size: 4 }] },
         bytesOf([file]),
       ],
       [
-        "mail.send",
+        "users.sendMail.create",
         "a path in a name",
         { ...mail([file]), attachments: [{ ...file.entry, name: "../a.txt" }] },
         bytesOf([file]),
       ],
       [
-        "mail.send",
+        "users.sendMail.create",
         "a run file's reference where its digest goes",
         { ...mail([]), attachments: [{ file: crypto.randomUUID() }] },
         bytesOf([file]),
       ],
-      ["mail.send", "too many files", mail(tooMany), bytesOf(tooMany)],
       [
-        "mail.send",
+        "users.sendMail.create",
+        "too many files",
+        mail(tooMany),
+        bytesOf(tooMany),
+      ],
+      [
+        "users.sendMail.create",
         "a file past the largest",
         {
           ...mail([file]),
@@ -189,12 +201,25 @@ describe("a Microsoft 365 write that attaches files", () => {
         },
         bytesOf([file]),
       ],
-      ["mail.send", "bytes with no files named", mail([]), bytesOf([file])],
+      [
+        "users.sendMail.create",
+        "bytes with no files named",
+        mail([]),
+        bytesOf([file]),
+      ],
       // Files for an action that takes none.
       [
-        "mail.move",
+        "users.messages.createReply.create",
         "files for a tool that takes none",
-        { mailbox: invoices, message: "m1", destination: "archive" },
+        {
+          mailbox: invoices,
+          message: "m1",
+          subject: "RE: Invoice 2026-0041",
+          comment: "Attached.",
+          toRecipients: [
+            { emailAddress: { address: "billing@northwind.example.org" } },
+          ],
+        },
         bytesOf([file]),
       ],
     ];
@@ -277,7 +302,7 @@ const hold = async (
       agentFor(connection.person.userId),
       {
         connectionId: connection.id,
-        action: "mail.send",
+        action: "users.sendMail.create",
         input: mail(files),
         resource: invoices,
         idempotencyKey: key,

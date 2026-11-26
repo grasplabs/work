@@ -6,6 +6,8 @@ import {
 } from "@grasp-os/runtime/connector";
 import { z } from "zod";
 
+import { graphHost } from "./graph-sdk.ts";
+
 // Microsoft Graph, as this connector's tools reach it: plain `fetch` to
 // graph.microsoft.com, through connect's egress, which adds the token and
 // lets through only the called tool's routes (threat model R9, Q11).
@@ -25,17 +27,7 @@ import { z } from "zod";
 // token would reach this code if one did): Graph's answers carry its own
 // `request-id` and `client-request-id`, which this code doesn't send.
 
-export const graphHost = "graph.microsoft.com";
-
-/**
- * The extended property a message this connector makes carries its call's
- * effect key in (`effectKeyMetaKey`), so a call of unknown outcome can find
- * it again (`findByEffect`): a named MAPI string property in a property set
- * of our own. Graph keeps it on the message, and on the Sent Items copy of
- * one it sent, and filters on it.
- */
-export const effectPropertyId =
-  "String {c30928d5-7050-44f2-99d3-ce09d5cd6e60} Name GraspEffect";
+export { effectPropertyId, graphHost } from "./graph-sdk.ts";
 
 /**
  * Where a download may be redirected to: Graph answers a file's `/content`

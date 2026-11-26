@@ -51,8 +51,10 @@ const connected = async (): Promise<Connection> => {
 const email = {
   mailbox: invoices,
   subject: "Payment of invoice 2026-0041",
-  body: "Paid today.",
-  to: ["billing@northwind.example.org"],
+  body: { content: "Paid today." },
+  toRecipients: [
+    { emailAddress: { address: "billing@northwind.example.org" } },
+  ],
 };
 
 /** The writes that reached Graph. */
@@ -62,13 +64,13 @@ const writes = () =>
   );
 
 const send = async (connection: Connection, key: string, input = email) =>
-  await call(connection, "mail.send", input, {
+  await call(connection, "users.sendMail.create", input, {
     resource: invoices,
     idempotencyKey: key,
   });
 
 const draft = async (connection: Connection, key: string) =>
-  await call(connection, "mail.createDraft", email, {
+  await call(connection, "users.messages.create", email, {
     resource: invoices,
     idempotencyKey: key,
   });
@@ -183,7 +185,7 @@ describe("a call of unknown outcome", () => {
     const listed = await exports.default.listUnknownOutcomes(connection.person);
     const one = await exports.default.unknownOutcome({
       person: connection.person,
-      key: keyOf(connection, "mail.send", "run-1:send"),
+      key: keyOf(connection, "users.sendMail.create", "run-1:send"),
     });
     expect({
       lost,
@@ -198,7 +200,7 @@ describe("a call of unknown outcome", () => {
       lost: "connect.outcome_unknown",
       listed: [
         {
-          key: keyOf(connection, "mail.send", "run-1:send"),
+          key: keyOf(connection, "users.sendMail.create", "run-1:send"),
           resource: invoices,
           description: { title: "Send an email" },
           input: JSON.stringify(email),
@@ -253,7 +255,7 @@ describe("a call of unknown outcome", () => {
         {
           onBehalfOf: connection.person.userId,
           connectionId: connection.id,
-          action: "mail.send",
+          action: "users.sendMail.create",
           title: "Send an email",
           resource: invoices,
         },
@@ -293,7 +295,7 @@ describe("a call of unknown outcome", () => {
     const connection = await connected();
     graph.loseWriteAnswer();
     await outcome(send(connection, "run-2:send"));
-    const key = keyOf(connection, "mail.send", "run-2:send");
+    const key = keyOf(connection, "users.sendMail.create", "run-2:send");
     await resolve(connection.person, key, "happened");
     expect({
       repeats: [
@@ -335,7 +337,7 @@ describe("a call of unknown outcome", () => {
     await outcome(send(connection, "run-3:send"));
     await resolve(
       connection.person,
-      keyOf(connection, "mail.send", "run-3:send"),
+      keyOf(connection, "users.sendMail.create", "run-3:send"),
       "not_happened"
     );
     const other = await outcome(
@@ -374,7 +376,7 @@ describe("a call of unknown outcome", () => {
     const connection = await connected();
     graph.loseWriteAnswer();
     await outcome(send(connection, "run-4:send"));
-    const key = keyOf(connection, "mail.send", "run-4:send");
+    const key = keyOf(connection, "users.sendMail.create", "run-4:send");
     const owner = agentFor(connection.person.userId);
     const stranger = someone();
     const refused = {
@@ -422,7 +424,7 @@ describe("a call of unknown outcome", () => {
           {
             connectionId: connection.id,
             resource: invoices,
-            action: "mail.send",
+            action: "users.sendMail.create",
             input: email,
             idempotencyKey: "run-4:send",
           },
@@ -439,7 +441,7 @@ describe("a call of unknown outcome", () => {
         exports.default.heldOutcome({
           connectionId: connection.id,
           resource: invoices,
-          action: "mail.send",
+          action: "users.sendMail.create",
           idempotencyKey: "run-4:send",
           capability: await resolutionCapability(key, "not_happened", owner),
         })
@@ -490,7 +492,7 @@ describe("a call of unknown outcome", () => {
     const lateResolution = await outcome(
       resolve(
         connection.person,
-        keyOf(connection, "mail.createDraft", "run-5:draft"),
+        keyOf(connection, "users.messages.create", "run-5:draft"),
         "happened"
       )
     );
@@ -522,7 +524,7 @@ describe("a call of unknown outcome", () => {
               resolved = await outcome(
                 resolve(
                   connection.person,
-                  keyOf(connection, "mail.createDraft", "run-5:other"),
+                  keyOf(connection, "users.messages.create", "run-5:other"),
                   "happened"
                 )
               );
@@ -584,7 +586,7 @@ describe("a call of unknown outcome", () => {
     const recoverable = await pending("run-6:draft");
     await resolve(
       connection.person,
-      keyOf(connection, "mail.send", "run-6:send"),
+      keyOf(connection, "users.sendMail.create", "run-6:send"),
       "happened"
     );
     expect({
@@ -653,7 +655,7 @@ describe("a native connector's call of unknown outcome", () => {
         {
           connectionId: connection.id,
           resource: invoices,
-          action: "mail.createDraft",
+          action: "users.messages.create",
           input: email,
           idempotencyKey: "run-9:draft",
         },
@@ -686,7 +688,7 @@ describe("a native connector's call of unknown outcome", () => {
     // Any later claim sweeps it, as it sweeps expired answers.
     await outcome(send(connection, "chat-2:send"));
     const after = await exports.default.listUnknownOutcomes(connection.person);
-    const key = keyOf(connection, "mail.send", "chat-1:send");
+    const key = keyOf(connection, "users.sendMail.create", "chat-1:send");
     expect({
       before: before.map(({ input }) => input),
       after: after.map(({ input }) => input),
@@ -716,7 +718,7 @@ describe("a native connector's call of unknown outcome", () => {
         {
           connectionId: connection.id,
           resource: invoices,
-          action: "mail.send",
+          action: "users.sendMail.create",
           input: email,
           idempotencyKey: "run-10:send",
         },
@@ -726,7 +728,7 @@ describe("a native connector's call of unknown outcome", () => {
     const [listed] = await exports.default.listUnknownOutcomes(
       connection.person
     );
-    const key = keyOf(connection, "mail.send", "run-10:send");
+    const key = keyOf(connection, "users.sendMail.create", "run-10:send");
     const appKey = { ...key, subject: app.subject };
     const resolveAs = async (authority: Authority, signed: Signed) =>
       await outcome(
@@ -763,12 +765,12 @@ describe("a native connector's call of unknown outcome", () => {
     const connection = await connected();
     graph.loseWriteAnswer();
     await outcome(send(connection, "run-11:send"));
-    const key = keyOf(connection, "mail.send", "run-11:send");
+    const key = keyOf(connection, "users.sendMail.create", "run-11:send");
     const owner = agentFor(connection.person.userId);
     const never = await outcome(
       resolve(
         connection.person,
-        keyOf(connection, "mail.send", "run-11:never"),
+        keyOf(connection, "users.sendMail.create", "run-11:never"),
         "happened"
       )
     );
@@ -838,7 +840,7 @@ describe("two resolutions that it didn't happen, at once", () => {
     const connection = await connected();
     graph.loseWriteAnswer();
     await outcome(send(connection, "run-12:send"));
-    const key = keyOf(connection, "mail.send", "run-12:send");
+    const key = keyOf(connection, "users.sendMail.create", "run-12:send");
     // Both read, and signed for, the claim the person was shown.
     const shown = await claimOf(key);
     const capabilities = await Promise.all([
@@ -933,7 +935,9 @@ describe("a run's step key with many calls of unknown outcome", () => {
     // recovers, all under it.
     for (const [index, copy] of copies.entries()) {
       const action =
-        index === copies.length - 1 ? "mail.send" : "mail.createDraft";
+        index === copies.length - 1
+          ? "users.sendMail.create"
+          : "users.messages.create";
       // oxlint-disable-next-line no-await-in-loop -- in order: the email last
       await env.DB.batch([
         env.DB.prepare(

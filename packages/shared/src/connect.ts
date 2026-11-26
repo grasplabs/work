@@ -2052,8 +2052,8 @@ export interface UnknownOutcomesApi {
  * workflows/connector-events.ts). Connect reads them (its events.ts).
  */
 export const connectorEventActions = {
-  "m365.mail.received": "mail.list",
-  "m365.file.created": "files.list",
+  "m365.mail.received": "users.messages.list",
+  "m365.file.created": "drives.items.children.list",
   "google.mail.received": "mail.list",
   "google.file.created": "files.list",
 } as const satisfies Record<string, string>;
@@ -2741,7 +2741,7 @@ export type NativeOperationRequest = z.input<
 
 /** A native connector's action an operation's schemas are exactly. */
 export interface NativeOperation {
-  /** The generated contract that serves it, e.g. `microsoft-365.mail@1`. */
+  /** The generated contract that serves it, e.g. `microsoft-365.users.messages@1`. */
   contract: string;
   /** Whether it only reads, as the connector declares. */
   readOnly: boolean;

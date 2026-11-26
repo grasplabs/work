@@ -147,8 +147,8 @@ const eventOf = <Workflow extends string>(
 describe("what a function may use", () => {
   test("is the App's: the manifest lists its permissions once, by alias, and no function narrows them", () => {
     const mail = permission.connection("mail", {
-      contract: "microsoft-365.mail@1",
-      actions: ["send"],
+      contract: "microsoft-365.users.sendMail@1",
+      actions: ["create"],
     });
     const files = permission.files({ operations: ["upload"] });
     const followUp = permission.workflow("followUp", {
@@ -246,8 +246,8 @@ describe("permissions", () => {
   test("are frozen all the way down, so nothing checked can change before registration", () => {
     const brain = permission.brain({ operations: ["recall"] });
     const connection = permission.connection("mail", {
-      contract: "microsoft-365.mail@1",
-      actions: ["send"],
+      contract: "microsoft-365.users.sendMail@1",
+      actions: ["create"],
     });
     const ai = permission.ai({ maxOutputTokens: 100 });
     expect({
@@ -263,7 +263,7 @@ describe("permissions", () => {
     });
     expect([brain.operations, connection.actions, ai.alias]).toStrictEqual([
       ["recall"],
-      ["send"],
+      ["create"],
       "ai",
     ]);
   });
@@ -301,8 +301,8 @@ describe("permissions", () => {
 
   test("each kind sits under its own key, each alias once", () => {
     const mail = permission.connection("mail", {
-      contract: "microsoft-365.mail@1",
-      actions: ["send"],
+      contract: "microsoft-365.users.sendMail@1",
+      actions: ["create"],
     });
     const ai = permission.ai({ maxOutputTokens: 100 });
     const followUp = permission.workflow("mail", {
@@ -350,8 +350,8 @@ describe("permissions", () => {
 
   test("the fixed aliases are each one kind's", () => {
     const connection = permission.connection("ai", {
-      contract: "microsoft-365.mail@1",
-      actions: ["send"],
+      contract: "microsoft-365.users.sendMail@1",
+      actions: ["create"],
     });
     expect(
       refusal(() => notes({ permissions: { connections: [connection] } }))
@@ -579,8 +579,8 @@ const shapeOf = (client: object) => ({
 
 describe("the App's permissions in a function's context", () => {
   const mail = permission.connection("mail", {
-    contract: "microsoft-365.mail@1",
-    actions: ["send"],
+    contract: "microsoft-365.users.sendMail@1",
+    actions: ["create"],
   });
   const followUp = permission.workflow("followUp", {
     args: v.object({ title: v.string().trim() }),
@@ -979,8 +979,8 @@ describe("the App's permissions in a function's context", () => {
             workflows: [followUp],
             connections: [
               permission.connection("followUp", {
-                contract: "microsoft-365.mail@1",
-                actions: ["send"],
+                contract: "microsoft-365.users.sendMail@1",
+                actions: ["create"],
               }),
             ],
           },

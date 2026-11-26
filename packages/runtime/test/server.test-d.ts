@@ -52,8 +52,8 @@ const { query, mutation, action, internalQuery, doc } = serverModule(schema);
 
 // An App's permissions: every function may use them, as its kind allows.
 const mail = permission.connection("mail", {
-  contract: "microsoft-365.mail@1",
-  actions: ["send"],
+  contract: "microsoft-365.users.sendMail@1",
+  actions: ["create"],
 });
 const brain = permission.brain({ operations: ["recall"] });
 const ai = permission.ai({ maxOutputTokens: 500 });
@@ -332,11 +332,11 @@ granted.action({
     ).resolves.toEqualTypeOf<Id<"notes">>();
     // Internal functions of the App are its own server code's to call.
     expectTypeOf(ctx.runQuery(secret, {})).resolves.toEqualTypeOf<string>();
-    await ctx.connections.mail.send({
+    await ctx.connections.mail.create({
       mailbox: "team@acme.test",
       subject: "Hello",
-      body: "Hi.",
-      to: [args.to],
+      body: { content: "Hi." },
+      toRecipients: [{ emailAddress: { address: args.to } }],
     });
     // An action the declaration doesn't list isn't a member.
     expectTypeOf(ctx.connections.mail).not.toHaveProperty("delete");

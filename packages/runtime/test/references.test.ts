@@ -1405,8 +1405,8 @@ describe("browser permissions", () => {
   test("share one namespace of aliases with the actions' permissions", () => {
     const files = permission.files({ operations: ["read"] });
     const connection = permission.connection("files", {
-      contract: "microsoft-365.mail@1",
-      actions: ["send"],
+      contract: "microsoft-365.users.sendMail@1",
+      actions: ["create"],
     });
     expect(
       refusal(() =>
@@ -1495,8 +1495,8 @@ describe("reading a manifest back", () => {
         setAt(data, ["permissions", "links"], {
           "~permission": "connections",
           alias: "links",
-          contract: "microsoft-365.mail@1",
-          actions: ["send"],
+          contract: "microsoft-365.users.sendMail@1",
+          actions: ["create"],
         });
       },
       "is the alias of the App's `links` permission",

@@ -298,13 +298,16 @@ describe("a side effect from chat", () => {
     });
     const input = {
       mailbox: "anna@acme.test",
-      to: ["ben@acme.test", "cleo@acme.test"],
+      toRecipients: [
+        { emailAddress: { address: "ben@acme.test" } },
+        { emailAddress: { address: "cleo@acme.test" } },
+      ],
       subject: "Invoice INV-7",
-      body: "Hi Ben,\n\nThe invoice is attached.",
+      body: { content: "Hi Ben,\n\nThe invoice is attached." },
     };
     await hold(inChat(anna), {
       connectionId,
-      action: "mail.send",
+      action: "users.sendMail.create",
       input,
       idempotencyKey: crypto.randomUUID(),
     });
@@ -319,9 +322,17 @@ describe("a side effect from chat", () => {
         title: "Send an email",
         fields: [
           { input: "mailbox", label: "From", value: input.mailbox },
-          { input: "to", label: "To", value: input.to },
+          {
+            input: "toRecipients",
+            label: "To",
+            value: JSON.stringify(input.toRecipients, null, 2),
+          },
           { input: "subject", label: "Subject", value: input.subject },
-          { input: "body", label: "Body", value: input.body },
+          {
+            input: "body",
+            label: "Body",
+            value: JSON.stringify(input.body, null, 2),
+          },
         ],
         complete: true,
       },
@@ -344,13 +355,13 @@ describe("a side effect from chat", () => {
     // the tool doesn't take, a value of another type.
     const input = {
       mailbox: "anna@acme.test",
-      to: ["ben@acme.test", 7],
+      toRecipients: ["ben@acme.test", 7],
       subject: "Invoice",
       forwardTo: "eve@evil.test",
     };
     await hold(inChat(anna), {
       connectionId,
-      action: "mail.send",
+      action: "users.sendMail.create",
       input,
       idempotencyKey: crypto.randomUUID(),
     });
@@ -366,9 +377,9 @@ describe("a side effect from chat", () => {
         fields: [
           { input: "mailbox", label: "From", value: "anna@acme.test" },
           {
-            input: "to",
+            input: "toRecipients",
             label: "To",
-            value: JSON.stringify(input.to, null, 2),
+            value: JSON.stringify(input.toRecipients, null, 2),
           },
           { input: "subject", label: "Subject", value: "Invoice" },
         ],

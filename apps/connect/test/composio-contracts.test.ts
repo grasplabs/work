@@ -457,7 +457,7 @@ describe("a Composio connection's generated contract", () => {
         contractOf(connectionId, "composio.hubspot@2")
       ),
       nativeContract: await outcome(
-        contractOf(connectionId, "microsoft-365.mail@1")
+        contractOf(connectionId, "microsoft-365.users.messages@1")
       ),
       nativeAsComposio: await outcome(
         contractOf(native, "composio.microsoft@1")
@@ -466,9 +466,11 @@ describe("a Composio connection's generated contract", () => {
         contractOf(composioNamed, "composio.items@1")
       ),
       toolkitAsNative: await outcome(
-        contractOf(lookalike, "microsoft-365.mail@1")
+        contractOf(lookalike, "microsoft-365.users.messages@1")
       ),
-      nativeStill: await outcome(contractOf(native, "microsoft-365.mail@1")),
+      nativeStill: await outcome(
+        contractOf(native, "microsoft-365.users.messages@1")
+      ),
     }).toStrictEqual({
       otherToolkit: "connect.contract_not_found",
       otherVersion: "connect.contract_not_found",
@@ -505,7 +507,7 @@ describe("a Composio connection's generated contract", () => {
       lookalike: await listed(lookalike),
       composioNamed: await listed(composioNamed),
       gone: await listed(crypto.randomUUID()),
-      nativeMail: nativeListed.includes("microsoft-365.mail@1"),
+      nativeMail: nativeListed.includes("microsoft-365.users.messages@1"),
       nativeServed: served.every((each) => each === "ok"),
     }).toStrictEqual({
       toolkit: ["composio.hubspot@1"],
@@ -577,8 +579,8 @@ describe("an action's shape, as core checks a chat app's write against it", () =
       server: "microsoft-365",
     });
     const gone = await hubspot(rules, { status: "disconnected" });
-    const send = await shapeOf(native, "mail.send");
-    const list = await shapeOf(native, "mail.list");
+    const send = await shapeOf(native, "users.sendMail.create");
+    const list = await shapeOf(native, "users.messages.list");
     expect({
       send: { readOnly: send.readOnly, provider: send.provider },
       takesFields: (send.inputs ?? []).length > 0,

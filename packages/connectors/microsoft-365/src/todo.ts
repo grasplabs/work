@@ -1,230 +1,108 @@
-import { defineTool } from "@grasp-os/connector-kit/connector";
-import { jsonBody, segment, ToolError } from "@grasp-os/runtime/connector";
-import { z } from "zod";
+import { page, tool, ToolError, v } from "@grasp-os/sdk/connector";
+import type { Api } from "@grasp-os/sdk/connector";
 
 import {
-  atPage,
+  checkIds,
   effectPropertyId,
-  graphHost,
-  graphJson,
-  graphUrl,
-  idSchema,
-  mailboxSchema,
-  nextPageOf,
-  pageOf,
-  pageSchema,
-  topSchema,
-  v1,
-} from "./graph.ts";
+  effectTag,
+  graphId,
+  graphPage,
+  next,
+  nextOf,
+  positionOf,
+  top,
+} from "./graph-sdk.ts";
 
-// Microsoft To Do, of one person per call, as `/users/{mailbox}` like mail
-// and calendars, so a call's capability binds every request to them. These
-// tools reach only the person's own: Graph lets a delegated token
-// (`Tasks.ReadWrite`) into the signed-in user's To Do and no one else's,
-// and a list someone shared with them, or they shared with others, is
-// refused here, so a task is never read, made or completed where another
-// person sees it.
+// Microsoft To Do, the signed-in person's own: every route is under `/me`,
+// so a call reaches no one else's To Do. A list someone shared with them,
+// or they shared with others, is refused here, so a task is never read,
+// made or changed where another person sees it.
 
-const users = `${v1}/users/{mailbox}`;
+const listsRoute = "/me/todo/lists";
+const listRoute = "/me/todo/lists/{list}";
+const tasksRoute = "/me/todo/lists/{list}/tasks";
+const taskRoute = "/me/todo/lists/{list}/tasks/{task}";
 
-const get = (path: string) =>
-  ({ method: "GET", host: graphHost, path: `${users}${path}` }) as const;
-
-const graphList = z.object({
-  id: z.string(),
-  displayName: z.string().nullish(),
-  isOwner: z.boolean().nullish(),
-  isShared: z.boolean().nullish(),
-  wellknownListName: z.string().nullish(),
+/** A To Do list (Graph's todoTaskList), with whose it is. */
+const TodoList = v.object({
+  id: v.string(),
+  displayName: v.string(),
+  isOwner: v.boolean().optional(),
+  isShared: v.boolean().optional(),
+  wellknownListName: v.string().nullable().optional(),
 });
-type GraphList = z.infer<typeof graphList>;
-
-const graphTime = z.object({ dateTime: z.string(), timeZone: z.string() });
-
-const graphTask = z.object({
-  id: z.string(),
-  title: z.string().nullish(),
-  status: z.string().nullish(),
-  importance: z.string().nullish(),
-  dueDateTime: graphTime.nullish(),
-  completedDateTime: graphTime.nullish(),
-  createdDateTime: z.string().nullish(),
-  lastModifiedDateTime: z.string().nullish(),
-});
-type GraphTask = z.infer<typeof graphTask>;
-
-const taskFields = [
-  "id",
-  "title",
-  "status",
-  "importance",
-  "dueDateTime",
-  "completedDateTime",
-  "createdDateTime",
-  "lastModifiedDateTime",
-].join(",");
 
 /** Whether a list is the person's alone: theirs, and shared with no one. */
-const isOwn = (list: GraphList): boolean =>
-  list.isOwner === true && list.isShared !== true;
+const isOwn = (list: {
+  isOwner?: boolean | undefined;
+  isShared?: boolean | undefined;
+}): boolean => list.isOwner === true && list.isShared !== true;
 
-const listSchema = z.strictObject({
-  id: z.string(),
-  name: z.string().nullable(),
-  wellknownName: z.string().nullable(),
+/** Graph's dateTimeTimeZone. */
+const DateTimeTimeZone = v.object({
+  dateTime: v.string(),
+  timeZone: v.string(),
 });
 
-const timeSchema = z.strictObject({
-  dateTime: z.string(),
-  timeZone: z.string(),
-});
+const taskFields = {
+  id: v.string(),
+  title: v.string(),
+  status: v.string(),
+  importance: v.string(),
+  dueDateTime: DateTimeTimeZone.nullable().optional(),
+  completedDateTime: DateTimeTimeZone.nullable().optional(),
+  createdDateTime: v.string(),
+  lastModifiedDateTime: v.string(),
+};
 
-const taskSchema = z.strictObject({
-  id: z.string(),
-  title: z.string().nullable(),
-  status: z.string().nullable(),
-  importance: z.string().nullable(),
-  due: timeSchema.nullable(),
-  completedAt: timeSchema.nullable(),
-  createdAt: z.string().nullable(),
-  lastModifiedAt: z.string().nullable(),
-});
+/** A To Do task (Graph's todoTask), narrowed to these fields. */
+const Task = v.object(taskFields);
 
-const taskOf = (task: GraphTask): z.infer<typeof taskSchema> => ({
-  id: task.id,
-  title: task.title ?? null,
-  status: task.status ?? null,
-  importance: task.importance ?? null,
-  due: task.dueDateTime ?? null,
-  completedAt: task.completedDateTime ?? null,
-  createdAt: task.createdDateTime ?? null,
-  lastModifiedAt: task.lastModifiedDateTime ?? null,
-});
+const select = Object.keys(taskFields).join(",");
+
+/** Graph's taskStatus. */
+const taskStatus = v.enum([
+  "notStarted",
+  "inProgress",
+  "completed",
+  "waitingOnOthers",
+  "deferred",
+]);
 
 /**
- * The person's list `list`, once Graph says it is theirs alone; a
- * ToolError otherwise. Every tool on a list asks this first, a read
- * before its one write.
+ * Refuses the list unless Graph says it is the person's alone. Every tool
+ * on a list asks this first, a read before its one write.
  */
-const ownList = async (mailbox: string, list: string): Promise<GraphList> => {
-  const found = await graphJson(
-    graphUrl(`/users/${segment(mailbox)}/todo/lists/${segment(list)}`),
-    graphList
-  );
+const ownList = async (api: Api, list: string): Promise<void> => {
+  const found = await api.get(listRoute, {
+    path: { list },
+    returns: TodoList,
+  });
   if (!isOwn(found)) {
     throw new ToolError(
       "This To Do list is shared, so it isn't only the person's own",
       { code: "access_denied" }
     );
   }
-  return found;
 };
 
-const tasksPath = (mailbox: string, list: string): string =>
-  `/users/${segment(mailbox)}/todo/lists/${segment(list)}/tasks`;
-
-const listLists = defineTool({
-  name: "todo.lists",
-  description:
-    "Lists a person's own Microsoft To Do lists, the ones shared with no one; lists shared with or by them are left out.",
-  input: z.strictObject({
-    mailbox: mailboxSchema,
-    top: topSchema,
-    page: pageSchema,
-  }),
-  output: z.strictObject({
-    mailbox: z.string(),
-    lists: z.array(listSchema),
-    nextPage: z.string().nullable(),
-  }),
-  readOnly: true,
-  reach: "own",
-  resource: "mailbox",
-  routes: [get("/todo/lists")],
-  run: async ({ mailbox, top, page }) => {
-    const { value, "@odata.nextLink": nextLink } = await graphJson(
-      atPage(
-        graphUrl(`/users/${segment(mailbox)}/todo/lists`, {
-          $top: String(top ?? 25),
-        }),
-        page
-      ),
-      pageOf(graphList)
-    );
-    const own = value.filter(isOwn);
-    return {
-      output: {
-        mailbox,
-        lists: own.map((list) => ({
-          id: list.id,
-          name: list.displayName ?? null,
-          wellknownName: list.wellknownListName ?? null,
-        })),
-        nextPage: nextPageOf(nextLink),
-      },
-      provenance: own.map(({ id }) => id),
-    };
-  },
-});
-
-const listTasks = defineTool({
-  name: "todo.tasks",
-  description:
-    "Lists the tasks of one of a person's own Microsoft To Do lists, optionally only those not completed yet.",
-  input: z.strictObject({
-    mailbox: mailboxSchema,
-    list: idSchema,
-    openOnly: z.boolean().optional(),
-    top: topSchema,
-    page: pageSchema,
-  }),
-  output: z.strictObject({
-    mailbox: z.string(),
-    listId: z.string(),
-    tasks: z.array(taskSchema),
-    nextPage: z.string().nullable(),
-  }),
-  readOnly: true,
-  reach: "own",
-  resource: "mailbox",
-  routes: [get("/todo/lists/{list}"), get("/todo/lists/{list}/tasks")],
-  run: async ({ mailbox, list, openOnly, top, page }) => {
-    await ownList(mailbox, list);
-    const { value, "@odata.nextLink": nextLink } = await graphJson(
-      atPage(
-        graphUrl(tasksPath(mailbox, list), {
-          $select: taskFields,
-          $top: String(top ?? 25),
-          $filter: openOnly === true ? "status ne 'completed'" : undefined,
-        }),
-        page
-      ),
-      pageOf(graphTask)
-    );
-    return {
-      output: {
-        mailbox,
-        listId: list,
-        tasks: value.map(taskOf),
-        nextPage: nextPageOf(nextLink),
-      },
-      provenance: value.map(({ id }) => id),
-    };
-  },
-});
-
-const createOutput = z.strictObject({
-  mailbox: z.string(),
-  listId: z.string(),
-  task: taskSchema,
-});
-
 /** A task with the effect tag it carries, if Graph expanded it. */
-const graphTaggedTask = graphTask.extend({
-  singleValueExtendedProperties: z
-    .array(z.object({ id: z.string(), value: z.string().nullish() }))
-    .nullish(),
+const TaggedTask = v.object({
+  ...taskFields,
+  singleValueExtendedProperties: v
+    .array(
+      v.object({ id: v.string(), value: v.string().nullable().optional() })
+    )
+    .nullable()
+    .optional(),
 });
+
+/**
+ * Graph reads a To Do task's extended property only by expanding it (the
+ * `singleValueExtendedProperties/Any(...)` filter mail and events take is
+ * an unsupported query on To Do).
+ */
+const tagExpansion = `singleValueExtendedProperties($filter=id eq '${effectPropertyId}')`;
 
 /** Tasks Graph is asked for per page while a lost task is looked for. */
 const effectPageSize = 50;
@@ -237,44 +115,39 @@ const effectPageSize = 50;
 const effectPages = 40;
 
 /**
- * The task in the person's list that a call with effect key `key` made, if
- * there is one. Graph reads a To Do task's extended property only by
- * expanding it (the `singleValueExtendedProperties/Any(...)` filter that
- * mail and events take is reported as an unsupported query on To Do), so
- * the list is read a page at a time with the tag expanded, and matched
- * here.
+ * The task in the list that a call with effect key `key` made, if there
+ * is one: the list is read a page at a time with the tag expanded, and
+ * matched here.
  */
-const findByEffect = async (
-  mailbox: string,
-  list: string,
-  key: string
-): Promise<GraphTask | undefined> => {
-  let page: string | undefined;
+const findByEffect = async (api: Api, list: string, key: string) => {
+  let at: string | undefined;
   for (let pages = 0; pages < effectPages; pages += 1) {
     // One page after another: each names the next.
     // oxlint-disable-next-line no-await-in-loop -- sequential pages
-    const { value, "@odata.nextLink": nextLink } = await graphJson(
-      atPage(
-        graphUrl(tasksPath(mailbox, list), {
-          $select: taskFields,
-          $top: String(effectPageSize),
-          $expand: `singleValueExtendedProperties($filter=id eq '${effectPropertyId}')`,
-        }),
-        page
-      ),
-      pageOf(graphTaggedTask)
+    const answer = await api.get(tasksRoute, {
+      path: { list },
+      query: {
+        $select: select,
+        $top: effectPageSize,
+        $expand: tagExpansion,
+        ...positionOf(at),
+      },
+      returns: graphPage(TaggedTask),
+    });
+    const found = answer.value.find(
+      ({ singleValueExtendedProperties }) =>
+        singleValueExtendedProperties?.some(({ value }) => value === key) ===
+        true
     );
-    const found = value.find(
-      (task) =>
-        task.singleValueExtendedProperties?.some(
-          (property) => property.value === key
-        ) === true
-    );
-    const next = nextPageOf(nextLink);
-    if (found !== undefined || next === null) {
-      return found;
+    if (found !== undefined) {
+      const { singleValueExtendedProperties: _tag, ...task } = found;
+      return task;
     }
-    page = next;
+    const following = nextOf(answer["@odata.nextLink"]);
+    if (following === null) {
+      return null;
+    }
+    at = following;
   }
   throw new ToolError(
     "This To Do list is too long to look through for the task",
@@ -282,142 +155,144 @@ const findByEffect = async (
   );
 };
 
-/** A day's form, `2026-10-30`. */
-const dayPattern = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/u;
+/** Graph's dateTime: a day and a time, without an offset. */
+const dateTimePattern =
+  /^(?<day>\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01]))T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,7})?$/u;
 
 /**
- * A day of the calendar, as `2026-10-30`. Its JSON Schema is a pattern,
- * not `format: date`, which core can't check, so the tool stays bindable;
- * that the day exists (no 30 February) is checked here.
+ * Refuses, before anything is sent, a due time that isn't a day and a
+ * time of Graph's form, or whose day doesn't exist (30 February).
  */
-const daySchema = z
-  .string()
-  .regex(dayPattern)
-  .refine(
-    (day) => new Date(`${day}T00:00:00Z`).toISOString().startsWith(day),
-    "No such day"
-  );
-
-const createTask = defineTool({
-  name: "todo.create",
-  description:
-    "Adds a task, such as a follow-up someone promised, to one of a person's own Microsoft To Do lists, with a note and a due day if given.",
-  input: z.strictObject({
-    mailbox: mailboxSchema,
-    list: idSchema,
-    title: z.string().min(1).max(255),
-    note: z
-      .string()
-      .max(32 * 1024)
-      .optional(),
-    due: daySchema.optional(),
-  }),
-  output: createOutput,
-  readOnly: false,
-  reach: "own",
-  destructive: false,
-  resource: "mailbox",
-  routes: [
-    get("/todo/lists/{list}"),
-    get("/todo/lists/{list}/tasks"),
-    {
-      method: "POST",
-      host: graphHost,
-      path: `${users}/todo/lists/{list}/tasks`,
-    },
-  ],
-  describe: {
-    title: "Add a task to Microsoft To Do",
-    fields: [
-      { label: "For", input: "mailbox" },
-      { label: "List", input: "list" },
-      { label: "Title", input: "title" },
-      { label: "Due", input: "due" },
-      { label: "Note", input: "note" },
-    ],
-  },
-  run: async ({ mailbox, list, title, note, due }, { key: effectKey }) => {
-    await ownList(mailbox, list);
-    const task = await graphJson(
-      graphUrl(tasksPath(mailbox, list)),
-      graphTask,
-      jsonBody({
-        title,
-        ...(note === undefined
-          ? {}
-          : { body: { contentType: "text", content: note } }),
-        // To Do keeps a due day as a time: noon UTC falls on that day in
-        // every time zone from UTC-12 to UTC+11, wherever the person is.
-        ...(due === undefined
-          ? {}
-          : { dueDateTime: { dateTime: `${due}T12:00:00`, timeZone: "UTC" } }),
-        ...(effectKey === null
-          ? {}
-          : {
-              singleValueExtendedProperties: [
-                { id: effectPropertyId, value: effectKey },
-              ],
-            }),
-      })
+const checkDue = (due: { dateTime: string } | undefined): void => {
+  if (due === undefined) {
+    return;
+  }
+  const day = dateTimePattern.exec(due.dateTime)?.groups?.day;
+  if (
+    day === undefined ||
+    !new Date(`${day}T00:00:00Z`).toISOString().startsWith(day)
+  ) {
+    throw new ToolError(
+      "Invalid input: dueDateTime.dateTime isn't a day and a time, such as 2026-10-30T12:00:00",
+      { code: "invalid" }
     );
-    return { output: { mailbox, listId: list, task: taskOf(task) } };
-  },
-  // Made, if a task with its key is in the list. The list may have been
-  // shared since the task was made: then it is read no more than run would.
-  find: async ({ mailbox, list }, effect) => {
-    await ownList(mailbox, list);
-    const task = await findByEffect(mailbox, list, effect.key);
-    return task === undefined
-      ? null
-      : { output: { mailbox, listId: list, task: taskOf(task) } };
-  },
-});
+  }
+};
 
-const completeTask = defineTool({
-  name: "todo.complete",
-  description:
-    "Marks a task in one of a person's own Microsoft To Do lists as completed.",
-  input: z.strictObject({
-    mailbox: mailboxSchema,
-    list: idSchema,
-    task: idSchema,
-  }),
-  output: z.strictObject({
-    mailbox: z.string(),
-    listId: z.string(),
-    task: taskSchema,
-  }),
-  readOnly: false,
-  reach: "own",
-  destructive: false,
-  resource: "mailbox",
-  routes: [
-    get("/todo/lists/{list}"),
-    {
-      method: "PATCH",
-      host: graphHost,
-      path: `${users}/todo/lists/{list}/tasks/{task}`,
+/**
+ * The person's own To Do tools, by name: each named from its route
+ * (`POST /me/todo/lists/{list}/tasks` is `me.todo.lists.tasks.create`).
+ */
+export const todoTools = {
+  "me.todo.lists.list": tool({
+    description:
+      "Lists the person's own Microsoft To Do lists, a page at a time. Lists shared with them or by them are left out.",
+    readOnly: true,
+    reach: "own",
+    scopes: ["Tasks.Read"],
+    routes: [`GET ${listsRoute}`],
+    args: { top, next },
+    returns: page(TodoList),
+    handler: async (args, api) => {
+      const answer = await api.get(listsRoute, {
+        query: { $top: args.top ?? 25, ...positionOf(args.next) },
+        returns: graphPage(TodoList),
+      });
+      return {
+        items: answer.value.filter(isOwn),
+        next: nextOf(answer["@odata.nextLink"]),
+      };
     },
-  ],
-  describe: {
-    title: "Complete a task in Microsoft To Do",
-    fields: [
-      { label: "For", input: "mailbox" },
-      { label: "List", input: "list" },
-      { label: "Task", input: "task" },
-    ],
-  },
-  // Completing sets a state, so a call of unknown outcome is sent again.
-  repeatable: true,
-  run: async ({ mailbox, list, task: id }) => {
-    await ownList(mailbox, list);
-    const task = await graphJson(
-      graphUrl(`${tasksPath(mailbox, list)}/${segment(id)}`),
-      graphTask,
-      { ...jsonBody({ status: "completed" }), method: "PATCH" }
-    );
-    return { output: { mailbox, listId: list, task: taskOf(task) } };
-  },
-});
-
-export const todoTools = [listLists, listTasks, createTask, completeTask];
+  }),
+  "me.todo.lists.tasks.list": tool({
+    description:
+      "Lists the tasks in one of the person's own Microsoft To Do lists, a page at a time, optionally only those with one status. A list shared with them or by them is refused.",
+    readOnly: true,
+    reach: "own",
+    scopes: ["Tasks.Read"],
+    routes: [`GET ${tasksRoute}`, `GET ${listRoute}`],
+    args: { list: graphId, status: taskStatus.optional(), top, next },
+    returns: page(Task),
+    handler: async ({ list, status, ...args }, api) => {
+      checkIds({ list });
+      await ownList(api, list);
+      const answer = await api.get(tasksRoute, {
+        path: { list },
+        query: {
+          $select: select,
+          $top: args.top ?? 25,
+          $filter: status === undefined ? undefined : `status eq '${status}'`,
+          ...positionOf(args.next),
+        },
+        returns: graphPage(Task),
+      });
+      return { items: answer.value, next: nextOf(answer["@odata.nextLink"]) };
+    },
+  }),
+  "me.todo.lists.tasks.create": tool({
+    description:
+      "Adds a task to one of the person's own Microsoft To Do lists, such as a follow-up someone promised, with a text body and a due date if given. To Do keeps only the due date: noon UTC (2026-10-30T12:00:00 in UTC) falls on that day in every time zone. A list shared with them or by them is refused.",
+    readOnly: false,
+    reach: "own",
+    scopes: ["Tasks.ReadWrite"],
+    routes: [`POST ${tasksRoute}`, `GET ${listRoute}`, `GET ${tasksRoute}`],
+    args: {
+      list: graphId,
+      title: v.string().min(1).max(255),
+      body: v.object({ content: v.string().max(32 * 1024) }).optional(),
+      dueDateTime: v
+        .object({
+          dateTime: v.string().max(32),
+          timeZone: v.string().min(1).max(64),
+        })
+        .optional(),
+    },
+    returns: Task,
+    handler: async ({ list, title, body, dueDateTime }, api, call) => {
+      checkIds({ list });
+      checkDue(dueDateTime);
+      await ownList(api, list);
+      return await api.post(tasksRoute, {
+        path: { list },
+        body: {
+          title,
+          ...(body === undefined
+            ? {}
+            : { body: { contentType: "text", content: body.content } }),
+          ...(dueDateTime === undefined ? {} : { dueDateTime }),
+          ...effectTag(call.key),
+        },
+        returns: Task,
+      });
+    },
+    // Made, if a task with its key is in the list. The list may have been
+    // shared since the task was made: then it is read no more than the
+    // handler would.
+    find: async ({ list }, api, call) => {
+      checkIds({ list });
+      await ownList(api, list);
+      return await findByEffect(api, list, call.key);
+    },
+  }),
+  "me.todo.lists.tasks.update": tool({
+    description:
+      "Marks a task in one of the person's own Microsoft To Do lists as completed: the only status it sets. A list shared with them or by them is refused.",
+    readOnly: false,
+    reach: "own",
+    scopes: ["Tasks.ReadWrite"],
+    routes: [`PATCH ${taskRoute}`, `GET ${listRoute}`],
+    args: { list: graphId, task: graphId, status: v.literal("completed") },
+    returns: Task,
+    // Completing sets a state, so a call of unknown outcome is sent again.
+    repeatable: true,
+    handler: async ({ list, task, status }, api) => {
+      checkIds({ list, task });
+      await ownList(api, list);
+      return await api.patch(taskRoute, {
+        path: { list, task },
+        body: { status },
+        returns: Task,
+      });
+    },
+  }),
+};

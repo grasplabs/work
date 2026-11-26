@@ -28,7 +28,16 @@ export type StephenRule = (
 const outward = /send|delete|trash|move|forward|share/iu;
 
 /** The input keys that name who a change reaches. */
-const recipientKeys = new Set(["to", "cc", "bcc", "replyTo", "attendees"]);
+const recipientKeys = new Set([
+  "to",
+  "cc",
+  "bcc",
+  "toRecipients",
+  "ccRecipients",
+  "bccRecipients",
+  "replyTo",
+  "attendees",
+]);
 
 /** Every address a held input sends to or invites, at any depth. */
 const recipientsOf = (value: unknown, key = ""): string[] => {
@@ -116,7 +125,8 @@ export const stephenRules = {
     const said = item.text.toLowerCase();
     const unsaid = held.flatMap(({ action, input }) => {
       const replied =
-        action === "mail.createReplyDraft" && typeof input.message === "string"
+        action === "users.messages.createReply.create" &&
+        typeof input.message === "string"
           ? (repliedTo[input.message] ?? [])
           : [];
       return recipientsOf(input).filter(
@@ -134,7 +144,7 @@ export const stephenRules = {
   noMeetingOfOthersMoved: ({ held }) => {
     const moved = held.filter(
       ({ action, input }) =>
-        action === "calendar.update" &&
+        action === "users.events.update" &&
         !movableEvents.has(typeof input.event === "string" ? input.event : "")
     );
     return moved.length === 0

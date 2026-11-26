@@ -62,7 +62,7 @@ export interface HttpRequestInit<Method extends HttpMethod = HttpMethod> {
 
 /**
  * A generated connector contract: a native connector's tools of
- * one family, such as `microsoft-365.mail@1`, from this release's catalog;
+ * one family, such as `microsoft-365.users.messages@1`, from this release's catalog;
  * a Composio toolkit's (`ComposioContract`); or an HTTP connection's
  * (`HttpContract`).
  */

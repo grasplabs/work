@@ -15,17 +15,11 @@ import {
   ownAccount,
   someone,
 } from "./connect.ts";
-import {
-  meetingPage,
-  sectionIds,
-  suppliersList,
-} from "./fixtures/graph-apps.ts";
-import { chatIds, eventIds } from "./fixtures/graph-teams.ts";
+import { suppliersList } from "./fixtures/graph-apps.ts";
 import {
   ceo,
   contractsList,
   financeDrive,
-  threadConversationId,
   invoices,
   itemIds,
   messageId,
@@ -33,7 +27,6 @@ import {
   pdfAttachmentId,
   procedureTexts,
   supplierTable,
-  todoListIds,
 } from "./fixtures/graph.ts";
 import { fakeGraph } from "./graph-api.ts";
 import { fakeProviders } from "./oauth-provider.ts";
@@ -76,7 +69,6 @@ export const invoiceSubject = "Invoice 2026-0041 from Northwind Supplies";
 
 /** An email in `mailbox`, as a card shows it: as Graph has it. */
 export const shownEmail = (mailbox: string) => ({
-  mailbox,
   message: messageId(mailbox, 1),
   from: "billing@northwind.example.org",
   subject: invoiceSubject,
@@ -102,89 +94,59 @@ export const manifest = connectorManifestSchema.parse(
   nativeConnector("microsoft-365")?.manifest
 );
 
+/** Addresses as Graph takes a message's recipients. */
+export const recipientsOf = (...addresses: string[]) =>
+  addresses.map((address) => ({ emailAddress: { address } }));
+
 /** Input for each mail and calendar tool, but its mailbox. */
 export const mailboxInputs: Record<string, Input> = {
-  "mail.list": {},
-  "mail.thread": { conversation: threadConversationId },
-  "mail.get": { message: messageId(ceo, 1) },
-  "mail.readAttachment": {
+  "users.messages.list": {},
+  "users.mailFolders.messages.list": { folder: "inbox" },
+  "users.messages.get": { message: messageId(ceo, 1) },
+  "users.messages.attachments.get": {
     message: messageId(ceo, 1),
     attachment: pdfAttachmentId,
   },
-  "mail.move": { message: messageId(ceo, 1), destination: "archive" },
-  "mail.flag": {
-    message: messageId(ceo, 1),
-    from: "billing@northwind.example.org",
-    subject: invoiceSubject,
-    flag: "flagged",
+  "users.sendMail.create": {
+    subject: "Hi",
+    body: { content: "Hi" },
+    toRecipients: recipientsOf("a@example.com"),
   },
-  "mail.categorise": {
-    message: messageId(ceo, 1),
-    from: "billing@northwind.example.org",
-    subject: invoiceSubject,
-    categories: ["Finance"],
+  "users.messages.create": {
+    subject: "Hi",
+    body: { content: "Hi" },
+    toRecipients: recipientsOf("a@example.com"),
   },
-  "mail.send": { subject: "Hi", body: "Hi", to: ["a@example.com"] },
-  "mail.createDraft": { subject: "Hi", body: "Hi", to: ["a@example.com"] },
-  "mail.createReplyDraft": {
+  "users.messages.createReply.create": {
     message: messageId(ceo, 1),
     subject: "RE: Hi",
-    body: "Hi",
-    to: ["billing@northwind.example.org"],
+    comment: "Hi",
+    toRecipients: recipientsOf("billing@northwind.example.org"),
   },
-  "calendar.list": {
-    start: "2026-09-28T00:00:00Z",
-    end: "2026-10-05T00:00:00Z",
+  "users.calendarView.list": {
+    startDateTime: "2026-09-28T00:00:00Z",
+    endDateTime: "2026-10-05T00:00:00Z",
   },
-  "calendar.get": { event: eventId(ceo, 1) },
-  "todo.lists": {},
-  "todo.tasks": { list: todoListIds.tasks },
-  "todo.create": { list: todoListIds.tasks, title: "Send the signed contract" },
-  "todo.complete": {
-    list: todoListIds.tasks,
-    task: "AAkALgAAAAAAHYQDEapmEc2b=",
-  },
-  "calendar.freeTime": {
-    start: "2026-10-26T00:00",
-    end: "2026-10-27T00:00",
-    timeZone: "Europe/Amsterdam",
-    minutes: 30,
-  },
-  "calendar.create": {
+  "users.events.get": { event: eventId(ceo, 1) },
+  "users.events.create": {
     subject: "Focus time",
-    start: "2026-10-26T14:00",
-    end: "2026-10-26T15:00",
-    timeZone: "Europe/Amsterdam",
+    start: { dateTime: "2026-10-26T14:00", timeZone: "Europe/Amsterdam" },
+    end: { dateTime: "2026-10-26T15:00", timeZone: "Europe/Amsterdam" },
   },
-  "calendar.update": {
-    event: eventId(ceo, 1),
-    timeZone: "Europe/Amsterdam",
-    subject: "Focus time",
-  },
-  "onenote.sections": {},
-  "onenote.pages": { section: sectionIds.own },
-  "onenote.read": { page: meetingPage.id },
-  "onenote.create": {
-    section: sectionIds.own,
-    title: "Notes",
-    text: "Call Northwind back",
-  },
-  "chats.list": {},
-  "chats.messages": { chat: chatIds.own },
-  "meetings.list": {
-    from: "2026-10-19T00:00:00Z",
-    to: "2026-10-26T00:00:00Z",
-  },
-  "meetings.transcript": { event: eventIds.review },
+  "users.events.update": { event: eventId(ceo, 1), subject: "Focus time" },
 };
 
 /** Input for each file tool, but its drive. */
 export const driveInputs: Record<string, Input> = {
-  "files.list": {},
-  "files.search": { query: "invoice" },
-  "files.versions": { item: itemIds.procedure },
-  "files.read": { item: itemIds.report },
-  "word.read": { item: itemIds.contract },
+  "drives.root.children.list": {},
+  "drives.items.children.list": { folder: itemIds.folder },
+  "drives.root.search": { q: "invoice" },
+  "drives.items.versions.list": { item: itemIds.procedure },
+  "drives.items.content.download": { item: itemIds.report },
+  "drives.items.versions.content.download": {
+    item: itemIds.procedure,
+    version: "1.0",
+  },
 };
 
 /** A row of the supplier table, as its cells are read and written. */
@@ -232,35 +194,38 @@ export const supplierTableOf = { drive: financeDrive, table: supplierTable };
 
 /** Input for each Excel tool, but its workbook. */
 export const workbookInputs: Record<string, Input> = {
-  "excel.listRows": supplierTableOf,
-  "excel.addRow": { ...supplierTableOf, values: fabrikam },
-  "excel.updateRow": {
+  "drives.items.workbook.tables.dataBodyRange": supplierTableOf,
+  "drives.items.workbook.tables.rows.create": {
     ...supplierTableOf,
-    row: 0,
+    values: fabrikam,
+  },
+  "drives.items.workbook.tables.rows.itemAt.range.update": {
+    ...supplierTableOf,
+    index: 0,
     before: northwind,
-    after: withAmount(northwind, 1350),
+    values: withAmount(northwind, 1350),
   },
 };
 
 /** Input for each list tool, but its site. */
 export const siteInputs: Record<string, Input> = {
-  "lists.items": { list: contractsList },
-  "lists.addItem": {
+  "sites.lists.items.list": { list: contractsList },
+  "sites.lists.items.create": {
     list: suppliersList,
-    values: [{ column: "Title", value: "Fabrikam Metals" }],
+    fields: [{ column: "Title", value: "Fabrikam Metals" }],
   },
-  "lists.updateItem": {
+  "sites.lists.items.fields.update": {
     list: suppliersList,
     item: "1",
     before: [{ column: "CreditLimit", value: 5000 }],
-    after: [{ column: "CreditLimit", value: 7500 }],
+    fields: [{ column: "CreditLimit", value: 7500 }],
   },
 };
 
 /** Input for each Planner tool, but its plan. */
 export const planInputs: Record<string, Input> = {
-  "planner.tasks": {},
-  "planner.create": { title: "Reconcile Fabrikam's statement" },
+  "planner.plans.tasks.list": {},
+  "planner.tasks.create": { title: "Reconcile Fabrikam's statement" },
 };
 
 /** The `internetMessageHeaders` a sent mail or draft carried, or null. */
@@ -281,7 +246,7 @@ export const draftReply = async (
   input: Input,
   idempotencyKey: string
 ) =>
-  await call(connection, "mail.createReplyDraft", input, {
+  await call(connection, "users.messages.createReply.create", input, {
     resource: invoices,
     idempotencyKey,
   });
@@ -289,17 +254,12 @@ export const draftReply = async (
 /** The organization's time zone, in the calendar tools below. */
 export const amsterdam = "Europe/Amsterdam";
 
-/** Looks for free time in a calendar. */
-export const freeTime = async (connection: Connection, input: Input) =>
-  await call(connection, "calendar.freeTime", input);
-
 /** An hour of focus time in `mailbox`'s calendar, in Amsterdam time. */
 export const focusTime = (mailbox: string) => ({
   mailbox,
   subject: "Focus time: Q4 forecast",
-  start: "2026-10-26T14:00",
-  end: "2026-10-26T15:00",
-  timeZone: amsterdam,
+  start: { dateTime: "2026-10-26T14:00", timeZone: amsterdam },
+  end: { dateTime: "2026-10-26T15:00", timeZone: amsterdam },
 });
 
 /** Puts an event in the person's own calendar, under `key`. */
@@ -308,31 +268,29 @@ export const createEvent = async (
   input: Input,
   key: string = crypto.randomUUID()
 ) =>
-  await call(connection, "calendar.create", input, {
+  await call(connection, "users.events.create", input, {
     resource: connection.person.email,
     idempotencyKey: key,
   });
 
 /** Changes an event in the person's own calendar. */
 export const updateEvent = async (connection: Connection, input: Input) =>
-  await call(connection, "calendar.update", input, {
+  await call(connection, "users.events.update", input, {
     resource: connection.person.email,
     idempotencyKey: crypto.randomUUID(),
   });
 
-/** The event, as calendar.get reads it from the person's own calendar. */
+/** The event, as users.events.get reads it from the person's own calendar. */
 export const readEvent = async (connection: Connection, event: string) =>
   await outputOf(
-    call(connection, "calendar.get", {
+    call(connection, "users.events.get", {
       mailbox: connection.person.email,
       event,
     })
   );
 
 /** The ID of the event a calendar write answered with. */
-export const madeId = z
-  .object({ event: z.object({ id: z.string() }) })
-  .transform(({ event }) => event.id);
+export const madeId = z.object({ id: z.string() }).transform(({ id }) => id);
 
 /** The size of the procedure's text at `version`, in bytes. */
 export const versionSize = (version: string): number =>
@@ -356,12 +314,9 @@ export const statusOf = async (connection: Connection) => {
   return row?.status;
 };
 
-/** The person's own mailbox, as their To Do is named. */
-export const ownMailbox = ({ person }: Connection): string => person.email;
-
 /** The id of the task a To Do tool answered with. */
 export const taskIdOf = (created: unknown): string =>
-  z.object({ task: z.object({ id: z.string() }) }).parse(created).task.id;
+  z.object({ id: z.string() }).parse(created).id;
 
 /** An hour of focus time in the person's own calendar, under `key`. */
 export const createFocusTime = async (connection: Connection, key: string) =>
@@ -425,7 +380,7 @@ export const listAs = async (
       agentFor(connection.person.userId),
       {
         connectionId: connection.id,
-        action: "mail.list",
+        action: "users.messages.list",
         input: { mailbox },
       },
       { mailboxes }

@@ -1,277 +1,132 @@
 import {
   attachedFiles,
-  attachmentsInput,
-  defineTool,
-} from "@grasp-os/connector-kit/connector";
-import type { Effect } from "@grasp-os/connector-kit/connector";
-import {
-  checkReadable,
+  attachments,
   contentAs,
-  fromBase64,
-  invalidCode,
-  jsonBody,
-  readAsSchema,
-  segment,
+  page,
   stampHeader,
-  toBase64,
+  tool,
   ToolError,
-} from "@grasp-os/runtime/connector";
-import { z } from "zod";
+  v,
+} from "@grasp-os/sdk/connector";
+import type { Api, ToolCall } from "@grasp-os/sdk/connector";
 
 import {
-  atPage,
-  effectPropertyId,
-  graphFetch,
-  graphHost,
-  graphJson,
-  graphUrl,
-  idSchema,
-  mailboxSchema,
-  nextPageOf,
-  pageOf,
-  pageSchema,
-  topSchema,
-  v1,
-} from "./graph.ts";
-import {
-  fromSchema,
-  meRoute,
-  requireOwnMailbox,
-  requireShown,
-  subjectSchema,
-} from "./mail-sorting.ts";
+  checkIds,
+  effectFilter,
+  effectTag,
+  graphId,
+  graphPage,
+  mailbox,
+  next,
+  nextOf,
+  positionOf,
+  top,
+} from "./graph-sdk.ts";
 
 // Mail, in one mailbox per call: a person's own or a shared one (such as
-// invoices@), always as `/users/{mailbox}`, so a call's capability binds
-// every request to its mailbox. Each result names its mailbox and the IDs
-// of the messages it came from. Reading, filing and drafting stay in the
-// mailbox, but the mailbox may be a shared one or a colleague's the
-// connection may open (`Mail.ReadWrite.Shared`), so they reach `company`;
-// sending reaches whoever the message goes to (`others`). Moving, flagging
-// and categorising work only in the person's own mailbox (`own`,
-// mail-sorting.ts).
+// invoices@), always as `/users/{mailbox}`, so a call's permission binds
+// every request to its mailbox. Reading and drafting stay in the mailbox,
+// but the mailbox may be a shared one or a colleague's the connection may
+// open (`Mail.ReadWrite.Shared`), so they reach `company`; sending reaches
+// whoever the message goes to (`others`). Moving, flagging and
+// categorising work only in the person's own mailbox, under `/me`
+// (mail-sorting.ts).
 
-const users = `${v1}/users/{mailbox}`;
+export const messagesRoute = "/users/{mailbox}/messages";
+const folderMessagesRoute = "/users/{mailbox}/mailFolders/{folder}/messages";
+export const messageRoute = "/users/{mailbox}/messages/{message}";
+const attachmentRoute =
+  "/users/{mailbox}/messages/{message}/attachments/{attachment}";
+const sendRoute = "/users/{mailbox}/sendMail";
 
-const get = (path: string) =>
-  ({ method: "GET", host: graphHost, path: `${users}${path}` }) as const;
-const post = (path: string) =>
-  ({ method: "POST", host: graphHost, path: `${users}${path}` }) as const;
-
-const graphAddress = z.object({
-  emailAddress: z
+/** Graph's recipient: an emailAddress. */
+const Recipient = v.object({
+  emailAddress: v
     .object({
-      name: z.string().nullish(),
-      address: z.string().nullish(),
+      name: v.string().nullable().optional(),
+      address: v.string().nullable().optional(),
     })
-    .nullish(),
+    .nullable()
+    .optional(),
 });
 
-const graphMessage = z.object({
-  id: z.string(),
-  subject: z.string().nullish(),
-  bodyPreview: z.string().nullish(),
-  body: z.object({ contentType: z.string(), content: z.string() }).nullish(),
-  uniqueBody: z
-    .object({ contentType: z.string(), content: z.string() })
-    .nullish(),
-  from: graphAddress.nullish(),
-  toRecipients: z.array(graphAddress).nullish(),
-  ccRecipients: z.array(graphAddress).nullish(),
-  bccRecipients: z.array(graphAddress).nullish(),
-  replyTo: z.array(graphAddress).nullish(),
-  receivedDateTime: z.string().nullish(),
-  sentDateTime: z.string().nullish(),
-  isRead: z.boolean().nullish(),
-  isDraft: z.boolean().nullish(),
-  hasAttachments: z.boolean().nullish(),
-  importance: z.string().nullish(),
-  flag: z.object({ flagStatus: z.string().nullish() }).nullish(),
-  parentFolderId: z.string().nullish(),
-  conversationId: z.string().nullish(),
-  internetMessageId: z.string().nullish(),
-  webLink: z.string().nullish(),
-});
-type GraphMessage = z.infer<typeof graphMessage>;
+/** Graph's itemBody. */
+const ItemBody = v.object({ contentType: v.string(), content: v.string() });
 
-/** The message fields a summary asks Graph for. */
-const summaryFields = [
-  "id",
-  "subject",
-  "bodyPreview",
-  "from",
-  "toRecipients",
-  "ccRecipients",
-  "receivedDateTime",
-  "sentDateTime",
-  "isRead",
-  "isDraft",
-  "hasAttachments",
-  "importance",
-  "flag",
-  "parentFolderId",
-  "conversationId",
-  "internetMessageId",
-  "webLink",
-].join(",");
+const messageFields = {
+  id: v.string(),
+  subject: v.string().nullable().optional(),
+  bodyPreview: v.string().nullable().optional(),
+  from: Recipient.nullable().optional(),
+  toRecipients: v.array(Recipient).nullable().optional(),
+  ccRecipients: v.array(Recipient).nullable().optional(),
+  receivedDateTime: v.string().nullable().optional(),
+  sentDateTime: v.string().nullable().optional(),
+  isRead: v.boolean().nullable().optional(),
+  isDraft: v.boolean().nullable().optional(),
+  hasAttachments: v.boolean().nullable().optional(),
+  importance: v.string().nullable().optional(),
+  flag: v
+    .object({ flagStatus: v.string().nullable().optional() })
+    .nullable()
+    .optional(),
+  parentFolderId: v.string().nullable().optional(),
+  conversationId: v.string().nullable().optional(),
+  internetMessageId: v.string().nullable().optional(),
+  webLink: v.string().nullable().optional(),
+};
 
-const addressSchema = z.strictObject({
-  name: z.string().nullable(),
-  address: z.string().nullable(),
+/** A message (Graph's message), narrowed to these fields. */
+const Message = v.object(messageFields);
+
+/** A message of a conversation, with its own text (Graph's uniqueBody). */
+const ConversationMessage = v.object({
+  ...messageFields,
+  uniqueBody: ItemBody.nullable().optional(),
 });
 
-const summarySchema = z.strictObject({
-  mailbox: z.string(),
-  id: z.string(),
-  folderId: z.string().nullable(),
-  conversationId: z.string().nullable(),
-  internetMessageId: z.string().nullable(),
-  subject: z.string().nullable(),
-  bodyPreview: z.string().nullable(),
-  from: addressSchema.nullable(),
-  to: z.array(addressSchema),
-  cc: z.array(addressSchema),
-  receivedAt: z.string().nullable(),
-  sentAt: z.string().nullable(),
-  isRead: z.boolean(),
-  isDraft: z.boolean(),
-  hasAttachments: z.boolean(),
-  importance: z.string().nullable(),
-  /** Graph's follow-up flag: `notFlagged`, `flagged` or `complete`. */
-  flagStatus: z.string().nullable(),
-  webLink: z.string().nullable(),
+const select = Object.keys(messageFields).join(",");
+
+const attachmentShape = {
+  "@odata.type": v.string(),
+  id: v.string(),
+  name: v.string().nullable().optional(),
+  contentType: v.string().nullable().optional(),
+  size: v.number().integer().min(0),
+  isInline: v.boolean().nullable().optional(),
+};
+
+/** Graph's attachment, without its content. */
+const Attachment = v.object(attachmentShape);
+
+/** Graph's attachment, with its content if it is a file. */
+const AttachmentContent = v.object({
+  ...attachmentShape,
+  contentBytes: v.string().nullable().optional(),
 });
 
-const addressOf = (
-  value: z.infer<typeof graphAddress>
-): z.infer<typeof addressSchema> => ({
-  name: value.emailAddress?.name ?? null,
-  address: value.emailAddress?.address ?? null,
-});
+/** Attachment fields without their content. */
+const attachmentFields = "id,name,contentType,size,isInline";
 
-const addressesOf = (
-  values: z.infer<typeof graphAddress>[] | null | undefined
-): z.infer<typeof addressSchema>[] => (values ?? []).map(addressOf);
-
-const summaryOf = (
-  mailbox: string,
-  message: GraphMessage
-): z.infer<typeof summarySchema> => ({
-  mailbox,
-  id: message.id,
-  folderId: message.parentFolderId ?? null,
-  conversationId: message.conversationId ?? null,
-  internetMessageId: message.internetMessageId ?? null,
-  subject: message.subject ?? null,
-  bodyPreview: message.bodyPreview ?? null,
-  from: message.from ? addressOf(message.from) : null,
-  to: addressesOf(message.toRecipients),
-  cc: addressesOf(message.ccRecipients),
-  receivedAt: message.receivedDateTime ?? null,
-  sentAt: message.sentDateTime ?? null,
-  isRead: message.isRead ?? false,
-  isDraft: message.isDraft ?? false,
-  hasAttachments: message.hasAttachments ?? false,
-  importance: message.importance ?? null,
-  flagStatus: message.flag?.flagStatus ?? null,
-  webLink: message.webLink ?? null,
+/** A message with its body, and its attachments without their content. */
+const FullMessage = v.object({
+  ...messageFields,
+  body: ItemBody.nullable().optional(),
+  bccRecipients: v.array(Recipient).nullable().optional(),
+  replyTo: v.array(Recipient).nullable().optional(),
+  attachments: v.array(Attachment).nullable().optional(),
 });
 
 /** How a message's body comes back: as text, or as Graph has it (HTML). */
-const bodyTypeSchema = z.enum(["text", "html"]);
+const bodyType = v.enum(["text", "html"]);
 
 /** Asks Graph for bodies of one type. */
-const preferBody = (type: z.infer<typeof bodyTypeSchema>): HeadersInit => ({
+const preferBody = (type: "text" | "html") => ({
   prefer: `outlook.body-content-type="${type}"`,
 });
 
 /** A search term for Graph's `$search`: no quote to end it early. */
-const searchSchema = z
-  .string()
-  .min(1)
-  .max(256)
-  .regex(/^[^"\\]*$/u);
-
-const listMessages = defineTool({
-  name: "mail.list",
-  description:
-    "Lists messages in a mailbox, newest first, or in one of its folders (a folder ID, or a well-known name such as inbox or archive), optionally filtered (unread, flagged, received after) or searched. Each names its conversationId: read the whole conversation with mail.thread.",
-  input: z.strictObject({
-    mailbox: mailboxSchema,
-    folder: idSchema.optional(),
-    search: searchSchema.optional(),
-    unreadOnly: z.boolean().optional(),
-    flaggedOnly: z.boolean().optional(),
-    receivedAfter: z.iso.datetime({ offset: true }).optional(),
-    top: topSchema,
-    page: pageSchema,
-  }),
-  output: z.strictObject({
-    mailbox: z.string(),
-    messages: z.array(summarySchema),
-    nextPage: z.string().nullable(),
-  }),
-  readOnly: true,
-  reach: "company",
-  resource: "mailbox",
-  routes: [get("/messages"), get("/mailFolders/{folder}/messages")],
-  run: async ({
-    mailbox,
-    folder,
-    search,
-    unreadOnly,
-    flaggedOnly,
-    receivedAfter,
-    top,
-    page,
-  }) => {
-    const filtered =
-      unreadOnly === true ||
-      flaggedOnly === true ||
-      receivedAfter !== undefined;
-    if (search !== undefined && filtered) {
-      throw new ToolError(
-        "Microsoft 365 can't search and filter at once: search, or filter",
-        { code: invalidCode }
-      );
-    }
-    // Graph sorts by a filtered property only once it leads the filter.
-    const filter = filtered
-      ? [
-          `receivedDateTime ge ${receivedAfter ?? "1900-01-01T00:00:00Z"}`,
-          ...(unreadOnly === true ? ["isRead eq false"] : []),
-          ...(flaggedOnly === true ? ["flag/flagStatus eq 'flagged'"] : []),
-        ].join(" and ")
-      : undefined;
-    const path =
-      folder === undefined
-        ? `/users/${segment(mailbox)}/messages`
-        : `/users/${segment(mailbox)}/mailFolders/${segment(folder)}/messages`;
-    const url = atPage(
-      graphUrl(path, {
-        $select: summaryFields,
-        $top: String(top ?? 25),
-        // Search results come by relevance, and can't be sorted.
-        $orderby: search === undefined ? "receivedDateTime desc" : undefined,
-        $filter: filter,
-        $search: search === undefined ? undefined : `"${search}"`,
-      }),
-      page
-    );
-    const { value, "@odata.nextLink": nextLink } = await graphJson(
-      url,
-      pageOf(graphMessage)
-    );
-    return {
-      output: {
-        mailbox,
-        messages: value.map((message) => summaryOf(mailbox, message)),
-        nextPage: nextPageOf(nextLink),
-      },
-      provenance: value.map(({ id }) => id),
-    };
-  },
-});
+const searchPattern = /^[^"\\]*$/u;
 
 /**
  * A conversation's ID, as Graph gives it in a message's `conversationId`:
@@ -279,20 +134,27 @@ const listMessages = defineTool({
  * string literal, never a path, and can't hold the quote that would end
  * the literal.
  */
-const conversationSchema = z
-  .string()
-  .min(1)
-  .max(512)
-  .regex(/^[\w=+/!.-]+$/u);
+const conversationPattern = /^[\w=+/!.-]+$/u;
 
-/** How many messages of a conversation mail.thread returns at most. */
-const threadMessageLimit = 25;
+/** Graph's followupFlagStatus. */
+export const flagStatus = v.enum(["notFlagged", "flagged", "complete"]);
+
+/** The filters both message lists take, in Graph's field names. */
+const listArgs = {
+  mailbox,
+  search: v.string().min(1).max(256).optional(),
+  isRead: v.boolean().optional(),
+  flag: v.object({ flagStatus }).optional(),
+  receivedDateTime: v.string().datetime().optional(),
+  top,
+  next,
+};
 
 /**
- * How many characters of each message's own text mail.thread returns at
- * most, so a whole thread stays a size a model reads in one go.
+ * How many characters of a conversation message's own text a list returns
+ * at most, so a whole conversation stays a size a model reads in one go.
  */
-const threadBodyLimit = 8000;
+const uniqueBodyLimit = 8000;
 
 /** `text` cut to `limit` characters, never inside a surrogate pair. */
 const cutText = (text: string, limit: number): string => {
@@ -303,536 +165,442 @@ const cutText = (text: string, limit: number): string => {
   return text.slice(0, astral ? limit - 1 : limit);
 };
 
-const threadMessages = defineTool({
-  name: "mail.thread",
-  description:
-    "Gets the messages of one conversation (a conversationId from mail.list or mail.get) in every folder of a mailbox, Sent Items included, oldest first, each with its own text without the earlier messages quoted below it. The last 25 at most: earlierMessages is true when the conversation has older ones. A body over 8,000 characters is cut, and bodyCut says so. A thread whose last message, leaving out drafts (isDraft), is someone else's waits on the mailbox's owner.",
-  input: z.strictObject({
-    mailbox: mailboxSchema,
-    conversation: conversationSchema,
-  }),
-  output: z.strictObject({
-    mailbox: z.string(),
-    conversationId: z.string(),
-    messages: z.array(
-      summarySchema.extend({
-        body: z.string().nullable(),
-        bodyCut: z.boolean(),
-      })
-    ),
-    earlierMessages: z.boolean(),
-  }),
-  readOnly: true,
-  reach: "company",
-  resource: "mailbox",
-  routes: [get("/messages")],
-  run: async ({ mailbox, conversation }) => {
-    // The newest messages first, so a long conversation keeps its last
-    // word, the one triage reads; then turned oldest first. Graph sorts by
-    // a filtered property only once it leads the filter. A message's
-    // `uniqueBody` is its own text without the earlier ones quoted below
-    // it, so a thread read whole doesn't repeat itself.
-    const { value, "@odata.nextLink": nextLink } = await graphJson(
-      graphUrl(`/users/${segment(mailbox)}/messages`, {
-        $select: `${summaryFields},uniqueBody`,
-        $top: String(threadMessageLimit),
-        $orderby: "receivedDateTime desc",
-        $filter: `receivedDateTime ge 1900-01-01T00:00:00Z and conversationId eq '${conversation}'`,
-      }),
-      pageOf(graphMessage),
-      { headers: preferBody("text") }
+interface ListFilters {
+  search?: string | undefined;
+  isRead?: boolean | undefined;
+  flag?: { flagStatus: string } | undefined;
+  receivedDateTime?: string | undefined;
+  conversationId?: string | undefined;
+  top?: number | undefined;
+  next?: string | undefined;
+}
+
+/** Refuses, before anything is sent, a search or a conversation ID that would end its literal. */
+const checkFilters = ({ search, conversationId }: ListFilters): void => {
+  if (search !== undefined && !searchPattern.test(search)) {
+    throw new ToolError("Invalid input: search can't hold a quote", {
+      code: "invalid",
+    });
+  }
+  if (
+    conversationId !== undefined &&
+    !conversationPattern.test(conversationId)
+  ) {
+    throw new ToolError(
+      "Invalid input: conversationId isn't a Microsoft 365 conversation ID",
+      { code: "invalid" }
     );
-    const messages = value.toReversed();
-    return {
-      output: {
-        mailbox,
-        conversationId: conversation,
-        messages: messages.map((message) => {
-          const body = message.uniqueBody?.content ?? null;
-          return {
-            ...summaryOf(mailbox, message),
-            body: body === null ? null : cutText(body, threadBodyLimit),
-            bodyCut: body !== null && body.length > threadBodyLimit,
-          };
-        }),
-        earlierMessages: nextLink !== undefined,
-      },
-      provenance: messages.map(({ id }) => id),
-    };
-  },
-});
-
-const graphAttachment = z.object({
-  "@odata.type": z.string(),
-  id: z.string(),
-  name: z.string().nullish(),
-  contentType: z.string().nullish(),
-  size: z.number().int().nonnegative(),
-  isInline: z.boolean().nullish(),
-  contentBytes: z.string().nullish(),
-});
-
-/** What kind of attachment Graph says it is: a file, an item or a link. */
-const kindOf = (odataType: string): "file" | "item" | "reference" | "other" => {
-  switch (odataType) {
-    case "#microsoft.graph.fileAttachment": {
-      return "file";
-    }
-    case "#microsoft.graph.itemAttachment": {
-      return "item";
-    }
-    case "#microsoft.graph.referenceAttachment": {
-      return "reference";
-    }
-    default: {
-      return "other";
-    }
   }
 };
-
-const attachmentSchema = z.strictObject({
-  id: z.string(),
-  name: z.string().nullable(),
-  contentType: z.string().nullable(),
-  size: z.number(),
-  isInline: z.boolean(),
-  kind: z.enum(["file", "item", "reference", "other"]),
-});
-
-/** Attachment fields without their content. */
-const attachmentFields = "id,name,contentType,size,isInline";
-
-/** How many pages of a message's attachments mail.get reads at most. */
-const attachmentPageLimit = 10;
 
 /**
- * The attachments of the message at `path`, without their content, page
- * by page up to `attachmentPageLimit`, and whether Graph has more past
- * that. Each next page is asked for on the tool's own route with only
- * its position taken from Graph's `@odata.nextLink`, as mail.list does:
- * the link is never followed as a URL.
+ * Graph's `$filter` for the filters given, or undefined for none. Graph
+ * sorts by a filtered property only once it leads the filter.
  */
-const attachmentsOf = async (path: string) => {
-  const attachments: z.infer<typeof graphAttachment>[] = [];
-  let page: string | null | undefined;
-  for (let read = 0; read < attachmentPageLimit && page !== null; read += 1) {
-    // oxlint-disable-next-line no-await-in-loop -- each page's position is in the one before
-    const { value, "@odata.nextLink": nextLink } = await graphJson(
-      atPage(
-        graphUrl(`${path}/attachments`, { $select: attachmentFields }),
-        page
-      ),
-      pageOf(graphAttachment)
-    );
-    attachments.push(...value);
-    page = nextPageOf(nextLink);
+const filterOf = ({
+  isRead,
+  flag,
+  receivedDateTime,
+  conversationId,
+}: ListFilters): string | undefined => {
+  if (
+    isRead === undefined &&
+    flag === undefined &&
+    receivedDateTime === undefined &&
+    conversationId === undefined
+  ) {
+    return undefined;
   }
-  return { attachments, moreAttachments: page !== null };
+  return [
+    `receivedDateTime ge ${receivedDateTime ?? "1900-01-01T00:00:00Z"}`,
+    ...(isRead === undefined ? [] : [`isRead eq ${String(isRead)}`]),
+    ...(flag === undefined ? [] : [`flag/flagStatus eq '${flag.flagStatus}'`]),
+    ...(conversationId === undefined
+      ? []
+      : [`conversationId eq '${conversationId}'`]),
+  ].join(" and ");
 };
 
-const getMessage = defineTool({
-  name: "mail.get",
-  description:
-    "Gets one message of a mailbox with its body, and its attachments' names, types and sizes (read one with mail.readAttachment). moreAttachments is true when the message has more attachments than are listed.",
-  input: z.strictObject({
-    mailbox: mailboxSchema,
-    message: idSchema,
-    bodyType: bodyTypeSchema.optional(),
-  }),
-  output: z.strictObject({
-    message: summarySchema.extend({
-      body: z
-        .strictObject({ contentType: z.string(), content: z.string() })
-        .nullable(),
-      bcc: z.array(addressSchema),
-      replyTo: z.array(addressSchema),
-      attachments: z.array(attachmentSchema),
-      moreAttachments: z.boolean(),
-    }),
-  }),
-  readOnly: true,
-  reach: "company",
-  resource: "mailbox",
-  routes: [get("/messages/{message}"), get("/messages/{message}/attachments")],
-  run: async ({ mailbox, message: id, bodyType }) => {
-    const path = `/users/${segment(mailbox)}/messages/${segment(id)}`;
-    const message = await graphJson(
-      graphUrl(path, {
-        $select: `${summaryFields},body,bccRecipients,replyTo`,
-      }),
-      graphMessage,
-      { headers: preferBody(bodyType ?? "text") }
+/**
+ * A page of messages at `route`: newest first, filtered or searched (not
+ * both, which Graph refuses), and with each message's own text when they
+ * are one conversation's.
+ */
+const listMessages = async (
+  api: Api,
+  route: string,
+  path: Readonly<Record<string, string>>,
+  filters: ListFilters
+) => {
+  checkFilters(filters);
+  const { search, conversationId } = filters;
+  const filter = filterOf(filters);
+  if (search !== undefined && filter !== undefined) {
+    throw new ToolError(
+      "Microsoft 365 can't search and filter at once: search, or filter",
+      { code: "invalid" }
     );
-    const { attachments, moreAttachments } = await attachmentsOf(path);
-    return {
-      output: {
-        message: {
-          ...summaryOf(mailbox, message),
-          body: message.body ?? { contentType: "text", content: "" },
-          bcc: addressesOf(message.bccRecipients),
-          replyTo: addressesOf(message.replyTo),
-          attachments: attachments.map((attachment) => ({
-            id: attachment.id,
-            name: attachment.name ?? null,
-            contentType: attachment.contentType ?? null,
-            size: attachment.size,
-            isInline: attachment.isInline ?? false,
-            kind: kindOf(attachment["@odata.type"]),
-          })),
-          moreAttachments,
-        },
-      },
-      provenance: [message.id],
-    };
+  }
+  const conversation = conversationId !== undefined;
+  const answer = await api.get(route, {
+    path,
+    query: {
+      // A message's `uniqueBody` is its own text without the earlier ones
+      // quoted below it, so a conversation read whole doesn't repeat itself.
+      $select: conversation ? `${select},uniqueBody` : select,
+      $top: filters.top ?? 25,
+      // Search results come by relevance, and can't be sorted.
+      $orderby: search === undefined ? "receivedDateTime desc" : undefined,
+      $filter: filter,
+      $search: search === undefined ? undefined : `"${search}"`,
+      ...positionOf(filters.next),
+    },
+    ...(conversation ? { headers: preferBody("text") } : {}),
+    returns: graphPage(ConversationMessage),
+  });
+  return {
+    items: answer.value.map((message) =>
+      message.uniqueBody === undefined || message.uniqueBody === null
+        ? message
+        : {
+            ...message,
+            uniqueBody: {
+              ...message.uniqueBody,
+              content: cutText(message.uniqueBody.content, uniqueBodyLimit),
+            },
+          }
+    ),
+    next: nextOf(answer["@odata.nextLink"]),
+  };
+};
+
+const fileAttachment = "#microsoft.graph.fileAttachment";
+
+/** Largest attachment a read returns, in bytes. */
+const maxAttachmentBytes = 4 * 1024 * 1024;
+
+/** Bytes from base64. */
+const fromBase64 = (base64: string): Uint8Array =>
+  Uint8Array.from(atob(base64), (character) => character.codePointAt(0) ?? 0);
+
+/** Base64 of `bytes`, a chunk at a time to spare the call stack. */
+const toBase64 = (bytes: Uint8Array): string => {
+  const chunk = 0x80_00;
+  const parts: string[] = [];
+  for (let start = 0; start < bytes.length; start += chunk) {
+    parts.push(String.fromCodePoint(...bytes.subarray(start, start + chunk)));
+  }
+  return btoa(parts.join(""));
+};
+
+/** Recipients as Graph takes them, narrowed to an address each. */
+export const recipients = v
+  .array(
+    v.object({
+      emailAddress: v.object({ address: v.string().email().max(256) }),
+    })
+  )
+  .max(100);
+
+/** A message to send or keep as a draft, in Graph's message's terms. */
+const draftArgs = {
+  mailbox,
+  subject: v.string().max(1024),
+  body: v.object({
+    contentType: bodyType.optional(),
+    content: v.string().max(1024 * 1024),
+  }),
+  toRecipients: recipients.min(1),
+  ccRecipients: recipients.optional(),
+  bccRecipients: recipients.optional(),
+  replyTo: recipients.optional(),
+  // Run files a workflow attaches (GRA-887), each by digest; their bytes
+  // come beside the args, checked before the handler runs.
+  attachments,
+};
+
+/**
+ * A message as the person asked to confirm it reads it: every arg of
+ * {@link draftArgs}, so nothing it sends goes unshown.
+ */
+const draftFields = [
+  { label: "From", arg: "mailbox" },
+  { label: "To", arg: "toRecipients" },
+  { label: "Cc", arg: "ccRecipients" },
+  { label: "Bcc", arg: "bccRecipients" },
+  { label: "Reply to", arg: "replyTo" },
+  { label: "Subject", arg: "subject" },
+  { label: "Body", arg: "body" },
+  { label: "Attachments", arg: "attachments" },
+] as const;
+
+/**
+ * The run's stamp as a header, if it has one: Graph keeps the header on
+ * every copy it delivers, so the copy a watched mailbox receives names the
+ * run that sent it (core's workflows/mail-stamps.ts), whatever new ID it
+ * gets there.
+ */
+export const stampOf = (stamp: string | null) =>
+  stamp === null
+    ? {}
+    : { internetMessageHeaders: [{ name: stampHeader, value: stamp }] };
+
+type Recipients = { emailAddress: { address: string } }[];
+
+/**
+ * A message as Graph takes it, with the run's files inline, tagged with
+ * the call's effect key if any and carrying its stamp if any.
+ */
+const graphDraft = (
+  args: {
+    subject: string;
+    body: { contentType?: "text" | "html" | undefined; content: string };
+    toRecipients: Recipients;
+    ccRecipients?: Recipients | undefined;
+    bccRecipients?: Recipients | undefined;
+    replyTo?: Recipients | undefined;
+    attachments?: Parameters<typeof attachedFiles>[0];
   },
+  call: ToolCall
+) => {
+  const files = attachedFiles(args.attachments, call);
+  return {
+    subject: args.subject,
+    body: {
+      contentType: args.body.contentType ?? "text",
+      content: args.body.content,
+    },
+    toRecipients: args.toRecipients,
+    ccRecipients: args.ccRecipients ?? [],
+    bccRecipients: args.bccRecipients ?? [],
+    replyTo: args.replyTo ?? [],
+    // Inline file attachments, as Graph's JSON takes them: the name and
+    // type are the run file's own (a name no folder or control character
+    // is in, a type from a closed list) in JSON strings, the content base64.
+    ...(files.length === 0
+      ? {}
+      : {
+          attachments: files.map(({ name, type, bytes }) => ({
+            "@odata.type": fileAttachment,
+            name,
+            contentType: type,
+            contentBytes: toBase64(bytes),
+          })),
+        }),
+    ...stampOf(call.stamp),
+    ...effectTag(call.key),
+  };
+};
+
+/** What a draft Graph made tells of it. */
+export const Draft = v.object({
+  id: v.string(),
+  conversationId: v.string().nullable().optional(),
+  webLink: v.string().nullable().optional(),
 });
 
-const readAttachment = defineTool({
-  name: "mail.readAttachment",
-  description:
-    "Reads a file attachment of a message: as text, or as base64 to extract its content (a PDF, say). Up to 4 MiB.",
-  input: z.strictObject({
-    mailbox: mailboxSchema,
-    message: idSchema,
-    attachment: idSchema,
-    as: readAsSchema.optional(),
+/**
+ * The message in `mailbox`, in any folder, that a call with effect key
+ * `key` made, if there is one: the draft, or the message it became once a
+ * person sent it. The key is 64 hex characters (connect derives it), so it
+ * can't break out of the filter's string literal.
+ */
+export const findByEffect = async (
+  api: Api,
+  mailboxId: string,
+  key: string
+) => {
+  const { value } = await api.get(messagesRoute, {
+    path: { mailbox: mailboxId },
+    query: {
+      $filter: effectFilter(key),
+      $select: "id,conversationId,webLink",
+      $top: 1,
+    },
+    returns: graphPage(Draft),
+  });
+  return value[0] ?? null;
+};
+
+/**
+ * Mail in one mailbox, by name: each named from its route
+ * (`GET /users/{mailbox}/messages` is `users.messages.list`).
+ */
+export const mailTools = {
+  "users.messages.list": tool({
+    description:
+      "Lists the messages of a mailbox in every folder, Sent Items included, newest first, a page at a time: filtered by isRead, flag, receivedDateTime (received at or after) or conversationId, or searched, but not both. With conversationId it reads one conversation, each message with its own text (uniqueBody, as text without the earlier messages quoted below it, cut at 8,000 characters).",
+    readOnly: true,
+    reach: "company",
+    scopes: ["Mail.Read", "Mail.ReadWrite.Shared"],
+    resource: "mailbox",
+    mail: true,
+    routes: [`GET ${messagesRoute}`],
+    args: {
+      ...listArgs,
+      conversationId: v.string().min(1).max(512).optional(),
+    },
+    returns: page(ConversationMessage),
+    handler: async ({ mailbox: mailboxId, ...filters }, api) =>
+      await listMessages(api, messagesRoute, { mailbox: mailboxId }, filters),
   }),
-  output: z.strictObject({
-    mailbox: z.string(),
-    messageId: z.string(),
-    id: z.string(),
-    name: z.string().nullable(),
-    contentType: z.string().nullable(),
-    size: z.number(),
-    encoding: readAsSchema,
-    content: z.string().nullable(),
+  "users.mailFolders.messages.list": tool({
+    description:
+      "Lists the messages in one folder of a mailbox (a folder ID, or a well-known name such as inbox or archive), newest first, a page at a time: filtered by isRead, flag or receivedDateTime (received at or after), or searched, but not both.",
+    readOnly: true,
+    reach: "company",
+    scopes: ["Mail.Read", "Mail.ReadWrite.Shared"],
+    resource: "mailbox",
+    mail: true,
+    routes: [`GET ${folderMessagesRoute}`],
+    args: { ...listArgs, folder: graphId },
+    returns: page(Message),
+    handler: async ({ mailbox: mailboxId, folder, ...filters }, api) => {
+      checkIds({ folder });
+      return await listMessages(
+        api,
+        folderMessagesRoute,
+        { mailbox: mailboxId, folder },
+        filters
+      );
+    },
   }),
-  readOnly: true,
-  reach: "company",
-  // A workflow action may keep it as a file of its run (GRA-886).
-  answersFile: true,
-  resource: "mailbox",
-  routes: [get("/messages/{message}/attachments/{attachment}")],
-  run: async ({ mailbox, message, attachment, as }) => {
-    const path = `/users/${segment(mailbox)}/messages/${segment(message)}/attachments/${segment(attachment)}`;
-    // Its size first: Graph sends the content inline, however large.
-    const found = await graphJson(
-      graphUrl(path, { $select: attachmentFields }),
-      graphAttachment
-    );
-    checkReadable(found.size);
-    const full = await graphJson(graphUrl(path), graphAttachment);
-    const content = full.contentBytes ?? "";
-    if (kindOf(full["@odata.type"]) !== "file" || content === "") {
-      throw new ToolError("This attachment isn't a file", {
-        code: "not_a_file",
+  "users.messages.get": tool({
+    description:
+      "Gets one message of a mailbox with its body, as text unless bodyType is html, and its attachments' names, types and sizes without their content (read one with users.messages.attachments.get).",
+    readOnly: true,
+    reach: "company",
+    scopes: ["Mail.Read", "Mail.ReadWrite.Shared"],
+    resource: "mailbox",
+    mail: true,
+    routes: [`GET ${messageRoute}`],
+    args: { mailbox, message: graphId, bodyType: bodyType.optional() },
+    returns: FullMessage,
+    handler: async ({ mailbox: mailboxId, message, ...args }, api) => {
+      checkIds({ message });
+      return await api.get(messageRoute, {
+        path: { mailbox: mailboxId, message },
+        query: {
+          $select: `${select},body,bccRecipients,replyTo`,
+          $expand: `attachments($select=${attachmentFields})`,
+        },
+        headers: preferBody(args.bodyType ?? "text"),
+        returns: FullMessage,
       });
-    }
-    return {
-      output: {
-        mailbox,
-        messageId: message,
+    },
+  }),
+  "users.messages.attachments.get": tool({
+    description:
+      "Reads a file attachment of a message: as text, or as base64 to extract its content (a PDF, say). Up to 4 MiB; an attached item or link is refused.",
+    readOnly: true,
+    reach: "company",
+    scopes: ["Mail.Read", "Mail.ReadWrite.Shared"],
+    resource: "mailbox",
+    mail: true,
+    // A workflow action may keep it as a file of its run (GRA-886).
+    answersFile: true,
+    routes: [`GET ${attachmentRoute}`],
+    args: {
+      mailbox,
+      message: graphId,
+      attachment: graphId,
+      as: v.enum(["text", "base64"]).optional(),
+    },
+    returns: v.object({
+      id: v.string(),
+      name: v.string().nullable(),
+      contentType: v.string().nullable(),
+      size: v.number(),
+      encoding: v.enum(["text", "base64"]),
+      content: v.string(),
+    }),
+    handler: async ({ mailbox: mailboxId, message, attachment, as }, api) => {
+      checkIds({ message, attachment });
+      const path = { mailbox: mailboxId, message, attachment };
+      // Its size first: Graph sends the content inline, however large.
+      const found = await api.get(attachmentRoute, {
+        path,
+        query: { $select: attachmentFields },
+        returns: Attachment,
+      });
+      if (found.size > maxAttachmentBytes) {
+        throw new ToolError(
+          `This is over ${maxAttachmentBytes / 1024 / 1024} MiB, more than a tool reads`,
+          { code: "too_large" }
+        );
+      }
+      const full = await api.get(attachmentRoute, {
+        path,
+        returns: AttachmentContent,
+      });
+      const content = full.contentBytes ?? "";
+      if (full["@odata.type"] !== fileAttachment || content === "") {
+        throw new ToolError("This attachment isn't a file", {
+          code: "not_a_file",
+        });
+      }
+      return {
         id: full.id,
         name: full.name ?? null,
         contentType: full.contentType ?? null,
         size: full.size,
         ...contentAs(fromBase64(content), as ?? "base64"),
-      },
-      provenance: [message],
-    };
-  },
-});
-
-const graphFolder = z.object({
-  id: z.string(),
-  displayName: z.string().nullish(),
-});
-
-const moveMessage = defineTool({
-  name: "mail.move",
-  description:
-    "Moves an email in the person's own mailbox to another of its folders (a folder ID, or a well-known name such as archive). The moved email has a new ID. Give the email's sender and subject, and the folder's name, as the person sees them: they must match.",
-  input: z.strictObject({
-    mailbox: mailboxSchema,
-    message: idSchema,
-    destination: idSchema,
-    from: fromSchema.optional(),
-    subject: subjectSchema.optional(),
-    folderName: z.string().min(1).max(256).optional(),
+      };
+    },
   }),
-  output: z.strictObject({
-    mailbox: z.string(),
-    previousId: z.string(),
-    id: z.string(),
-    folderId: z.string().nullable(),
-  }),
-  readOnly: false,
-  reach: "own",
-  destructive: true,
-  resource: "mailbox",
-  routes: [
-    meRoute,
-    get("/messages/{message}"),
-    get("/mailFolders/{destination}"),
-    post("/messages/{message}/move"),
-  ],
-  describe: {
-    title: "Move an email to another folder",
-    fields: [
-      { label: "Mailbox", input: "mailbox" },
-      { label: "From", input: "from" },
-      { label: "Subject", input: "subject" },
-      { label: "To folder", input: "folderName" },
-      { label: "Folder", input: "destination" },
-      { label: "Message", input: "message" },
-    ],
-  },
-  run: async ({ mailbox, message, destination, from, subject, folderName }) => {
-    await requireOwnMailbox(mailbox);
-    const path = `/users/${segment(mailbox)}/messages/${segment(message)}`;
-    await requireShown(path, { from, subject });
-    // The destination is looked up in this mailbox first, on a route the
-    // egress binds to it, and the message moved to the folder that names:
-    // a folder of another mailbox is never a destination.
-    const folder = await graphJson(
-      graphUrl(
-        `/users/${segment(mailbox)}/mailFolders/${segment(destination)}`,
-        { $select: "id,displayName" }
-      ),
-      graphFolder
-    );
-    if (folderName !== undefined && folder.displayName !== folderName) {
-      throw new ToolError("That folder isn't the one the card names", {
-        code: invalidCode,
+  "users.sendMail.create": tool({
+    description:
+      "Sends a message from a mailbox (the person's own, or a shared one they may send as), keeping a copy in its Sent Items. The body is text unless its contentType is html.",
+    readOnly: false,
+    reach: "others",
+    scopes: ["Mail.Send", "Mail.Send.Shared"],
+    resource: "mailbox",
+    mail: { recipients: ["toRecipients", "ccRecipients", "bccRecipients"] },
+    takesFiles: true,
+    // No recovery: a sent email of unknown outcome stays unknown. Not
+    // finding its Sent Items copy doesn't prove it wasn't sent: a shared
+    // mailbox's copy can land in the delegate's own mailbox, a copy can be
+    // hard-deleted, Graph may not keep the tag on the copy, and `sendMail`
+    // answers 202 before the copy is saved. Before this tool gets a `find`,
+    // a live check (M365_SMOKE_WRITES) must show, for a person's own and a
+    // shared mailbox: the copy carries the tag, it is found by it once the
+    // claim timeout has passed, and where a delegate's copy lands. The tag
+    // is kept on every send, so such a lookup can find it then.
+    routes: [`POST ${sendRoute}`],
+    describe: { title: "Send an email", fields: draftFields },
+    args: draftArgs,
+    // Graph answers 202, with nothing.
+    returns: v.object({}),
+    handler: async ({ mailbox: mailboxId, ...args }, api, call) => {
+      await api.post(sendRoute, {
+        path: { mailbox: mailboxId },
+        body: { message: graphDraft(args, call), saveToSentItems: true },
       });
-    }
-    const moved = await graphJson(
-      graphUrl(`${path}/move`),
-      graphMessage,
-      jsonBody({ destinationId: folder.id })
-    );
-    return {
-      output: {
-        mailbox,
-        previousId: message,
-        id: moved.id,
-        folderId: moved.parentFolderId ?? null,
-      },
-    };
-  },
-});
-
-export const recipientsSchema = z.array(z.email().max(256)).max(100);
-
-/** A message to send or keep as a draft. */
-const draftInput = z.strictObject({
-  mailbox: mailboxSchema,
-  subject: z.string().max(1024),
-  body: z.string().max(1024 * 1024),
-  bodyType: bodyTypeSchema.optional(),
-  to: recipientsSchema.min(1),
-  cc: recipientsSchema.optional(),
-  bcc: recipientsSchema.optional(),
-  replyTo: recipientsSchema.optional(),
-  // Run files a workflow attaches (GRA-887), each by digest; their bytes
-  // come beside the input, checked by the kit before the tool runs.
-  attachments: attachmentsInput,
-});
-
-/**
- * A message as the person asked to confirm it reads it: every property of
- * {@link draftInput}, so nothing it sends goes unshown.
- */
-const draftFields = [
-  { label: "From", input: "mailbox" },
-  { label: "To", input: "to" },
-  { label: "Cc", input: "cc" },
-  { label: "Bcc", input: "bcc" },
-  { label: "Reply to", input: "replyTo" },
-  { label: "Subject", input: "subject" },
-  { label: "Body", input: "body" },
-  { label: "Body format", input: "bodyType" },
-  { label: "Attachments", input: "attachments" },
-] as const;
-
-/** Addresses as Graph takes them. */
-const recipients = (addresses: string[] | undefined) =>
-  (addresses ?? []).map((address) => ({ emailAddress: { address } }));
-
-/**
- * A message as Graph takes it, tagged with the call's effect key if any,
- * and carrying its stamp as a header if any: Graph keeps the header on
- * every copy it delivers, so the copy a watched mailbox receives names the
- * run that sent it (core's workflows/mail-stamps.ts), whatever new ID it
- * gets there.
- */
-const graphDraft = (
-  {
-    subject,
-    body,
-    bodyType,
-    to,
-    cc,
-    bcc,
-    replyTo,
-    attachments,
-  }: z.output<typeof draftInput>,
-  effect: Effect
-) => ({
-  subject,
-  body: { contentType: bodyType ?? "text", content: body },
-  toRecipients: recipients(to),
-  ccRecipients: recipients(cc),
-  bccRecipients: recipients(bcc),
-  replyTo: recipients(replyTo),
-  // Inline file attachments, as Graph's JSON takes them: the name and type
-  // are the run file's own (a name no folder or control character is in,
-  // a type from a closed list) in JSON strings, the content base64.
-  ...(attachments === undefined || attachments.length === 0
-    ? {}
-    : {
-        attachments: attachedFiles(attachments, effect).map(
-          ({ name, type, bytes }) => ({
-            "@odata.type": "#microsoft.graph.fileAttachment",
-            name,
-            contentType: type,
-            contentBytes: toBase64(bytes),
-          })
-        ),
-      }),
-  ...(effect.stamp === null
-    ? {}
-    : {
-        internetMessageHeaders: [{ name: stampHeader, value: effect.stamp }],
-      }),
-  ...(effect.key === null
-    ? {}
-    : {
-        singleValueExtendedProperties: [
-          { id: effectPropertyId, value: effect.key },
-        ],
-      }),
-});
-
-/** What a message found by its effect key tells of it. */
-const foundMessage = z.object({
-  id: z.string(),
-  conversationId: z.string().nullish(),
-  webLink: z.string().nullish(),
-});
-
-/**
- * The message in `mailbox`, in any folder, that a call with effect key
- * `key` made, if there is one. The key is 64 hex characters (connect
- * derives it, the kit checks it), so it can't break out of the filter's
- * string literal.
- */
-export const findByEffect = async (
-  mailbox: string,
-  key: string
-): Promise<z.infer<typeof foundMessage> | undefined> => {
-  const { value } = await graphJson(
-    graphUrl(`/users/${segment(mailbox)}/messages`, {
-      $filter: `singleValueExtendedProperties/Any(ep: ep/id eq '${effectPropertyId}' and ep/value eq '${key}')`,
-      $select: "id,conversationId,webLink",
-      $top: "1",
-    }),
-    pageOf(foundMessage)
-  );
-  return value[0];
-};
-
-const sendMail = defineTool({
-  name: "mail.send",
-  description:
-    "Sends a message from a mailbox (the person's own, or a shared one they may send as), keeping a copy in its Sent Items.",
-  input: draftInput,
-  output: z.strictObject({ mailbox: z.string(), sent: z.literal(true) }),
-  readOnly: false,
-  reach: "others",
-  destructive: false,
-  takesFiles: true,
-  resource: "mailbox",
-  // Recovery `none`: a sent email of unknown outcome stays unknown. Not
-  // finding its Sent Items copy doesn't prove it wasn't sent: a shared
-  // mailbox's copy can land in the delegate's own mailbox, a copy can be
-  // hard-deleted, Graph may not keep the tag on the copy, and `sendMail`
-  // answers 202 before the copy is saved. Before this tool gets a `find`,
-  // a live check (M365_SMOKE_WRITES) must show, for a person's own and a
-  // shared mailbox: the copy carries the tag, it is found by it once the
-  // claim timeout has passed, and where a delegate's copy lands. The tag
-  // is kept on every send, so such a lookup can find it then.
-  routes: [post("/sendMail")],
-  describe: { title: "Send an email", fields: draftFields },
-  run: async (input, effect) => {
-    const response = await graphFetch(
-      graphUrl(`/users/${segment(input.mailbox)}/sendMail`),
-      jsonBody({
-        message: graphDraft(input, effect),
-        saveToSentItems: true,
-      })
-    );
-    await response.body?.cancel();
-    return { output: { mailbox: input.mailbox, sent: true as const } };
-  },
-});
-
-const createDraft = defineTool({
-  name: "mail.createDraft",
-  description:
-    "Creates a draft in a mailbox's Drafts folder, for a person to review and send.",
-  input: draftInput,
-  output: z.strictObject({
-    mailbox: z.string(),
-    id: z.string(),
-    conversationId: z.string().nullable(),
-    webLink: z.string().nullable(),
+      return {};
+    },
   }),
-  readOnly: false,
-  reach: "company",
-  destructive: false,
-  takesFiles: true,
-  resource: "mailbox",
-  routes: [get("/messages"), post("/messages")],
-  describe: { title: "Create a draft email", fields: draftFields },
-  run: async (input, effect) => {
-    const draft = await graphJson(
-      graphUrl(`/users/${segment(input.mailbox)}/messages`),
-      graphMessage,
-      jsonBody(graphDraft(input, effect))
-    );
-    return {
-      output: {
-        mailbox: input.mailbox,
-        id: draft.id,
-        conversationId: draft.conversationId ?? null,
-        webLink: draft.webLink ?? null,
-      },
-    };
-  },
-  // Made, if a message with its key is in the mailbox: the draft, or the
-  // message it became once a person sent it.
-  find: async (input, effect) => {
-    const draft = await findByEffect(input.mailbox, effect.key);
-    return draft === undefined
-      ? null
-      : {
-          output: {
-            mailbox: input.mailbox,
-            id: draft.id,
-            conversationId: draft.conversationId ?? null,
-            webLink: draft.webLink ?? null,
-          },
-        };
-  },
-});
-
-export const mailTools = [
-  listMessages,
-  threadMessages,
-  getMessage,
-  readAttachment,
-  moveMessage,
-  sendMail,
-  createDraft,
-];
+  "users.messages.create": tool({
+    description:
+      "Creates a draft in a mailbox's Drafts folder, for a person to review and send. The body is text unless its contentType is html.",
+    readOnly: false,
+    reach: "company",
+    scopes: ["Mail.ReadWrite", "Mail.ReadWrite.Shared"],
+    resource: "mailbox",
+    mail: { recipients: ["toRecipients", "ccRecipients", "bccRecipients"] },
+    takesFiles: true,
+    routes: [`POST ${messagesRoute}`, `GET ${messagesRoute}`],
+    describe: { title: "Create a draft email", fields: draftFields },
+    args: draftArgs,
+    returns: Draft,
+    handler: async ({ mailbox: mailboxId, ...args }, api, call) =>
+      await api.post(messagesRoute, {
+        path: { mailbox: mailboxId },
+        body: graphDraft(args, call),
+        returns: Draft,
+      }),
+    // Made, if a message with its key is in the mailbox: the draft, or the
+    // message it became once a person sent it.
+    find: async ({ mailbox: mailboxId }, api, call) =>
+      await findByEffect(api, mailboxId, call.key),
+  }),
+};

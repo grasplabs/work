@@ -624,8 +624,7 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     const person = await signedInApi(idp, "user");
     const marker = markerOf();
     const { connectionId: gmail, mailbox } = await ownGmail(person);
-    const { connectionId: outlook, mailbox: outlookBox } =
-      await ownMicrosoft(person);
+    const { connectionId: outlook } = await ownMicrosoft(person);
     const large = `large-${marker}`;
     const erased = `erased-${marker}`;
     const withFile = `file-${marker}`;
@@ -642,9 +641,10 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
         }),
       ],
     });
-    // One To Do list: a list still, never kept.
+    // One To Do list: a list still, never kept. Graph's `/me` is the
+    // account the token is for, by its subject.
     await worldHolds(stephenGraphUrl, {
-      mailbox: outlookBox,
+      mailbox: String(person.person.oid),
       events: [],
       messages: [],
       todoLists: [
@@ -667,14 +667,14 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
       // As base64, the default: a file's bytes.
       calling("MAIL", "mail.readAttachment", attachment),
       calling("MAIL", "mail.readAttachment", { ...attachment, as: "text" }),
-      calling("OUTLOOK", "todo.lists", { mailbox: outlookBox }),
+      calling("OUTLOOK", "me.todo.lists.list", {}),
     ];
     const chat = await chatOf(
       person.userId,
       ...calls.flatMap((call) => [step(call), says("Done.")])
     );
     await grant(chat, gmail, "MAIL", ["mail.get", "mail.readAttachment"]);
-    await grant(chat, outlook, "OUTLOOK", ["todo.lists"]);
+    await grant(chat, outlook, "OUTLOOK", ["me.todo.lists.list"]);
 
     for (const [index] of calls.entries()) {
       // oxlint-disable-next-line no-await-in-loop -- one turn at a time

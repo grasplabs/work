@@ -27,47 +27,46 @@ export const nativeToolClasses: Readonly<
     "sheets.read": "read-company",
   },
   "microsoft": {
-    "calendar.create": "change-own",
-    "calendar.freeTime": "read-own",
-    "calendar.get": "read-company",
-    "calendar.list": "read-company",
-    "calendar.update": "change-own",
-    "chats.list": "read-others",
-    "chats.messages": "read-others",
-    "excel.addRow": "change-company",
-    "excel.listRows": "read-company",
-    "excel.updateRow": "change-company",
-    "files.createDraft": "change-own",
-    "files.list": "read-company",
-    "files.read": "read-company",
-    "files.search": "read-company",
-    "files.versions": "read-company",
-    "lists.addItem": "change-company",
-    "lists.items": "read-company",
-    "lists.updateItem": "change-company",
-    "mail.categorise": "change-own",
-    "mail.createDraft": "change-company",
-    "mail.createReplyDraft": "change-company",
-    "mail.flag": "change-own",
-    "mail.get": "read-company",
-    "mail.list": "read-company",
-    "mail.move": "change-own",
-    "mail.readAttachment": "read-company",
-    "mail.send": "reach-others",
-    "mail.thread": "read-company",
-    "meetings.list": "read-others",
-    "meetings.transcript": "read-others",
-    "onenote.create": "change-own",
-    "onenote.pages": "read-own",
-    "onenote.read": "read-own",
-    "onenote.sections": "read-own",
-    "planner.create": "change-company",
-    "planner.tasks": "read-company",
-    "todo.complete": "change-own",
-    "todo.create": "change-own",
-    "todo.lists": "read-own",
-    "todo.tasks": "read-own",
-    "word.read": "read-company",
+    "drives.items.children.list": "read-company",
+    "drives.items.content.download": "read-company",
+    "drives.items.versions.content.download": "read-company",
+    "drives.items.versions.list": "read-company",
+    "drives.items.workbook.tables.dataBodyRange": "read-company",
+    "drives.items.workbook.tables.rows.create": "change-company",
+    "drives.items.workbook.tables.rows.itemAt.range.update": "change-company",
+    "drives.root.children.list": "read-company",
+    "drives.root.search": "read-company",
+    "me.calendarView.list": "read-others",
+    "me.chats.list": "read-others",
+    "me.chats.messages.list": "read-others",
+    "me.drive.root.content.upload": "change-own",
+    "me.messages.move.create": "change-own",
+    "me.messages.update": "change-own",
+    "me.onenote.pages.get": "read-own",
+    "me.onenote.sections.list": "read-own",
+    "me.onenote.sections.pages.create": "change-own",
+    "me.onenote.sections.pages.list": "read-own",
+    "me.onlineMeetings.transcripts.content.getContent": "read-others",
+    "me.todo.lists.list": "read-own",
+    "me.todo.lists.tasks.create": "change-own",
+    "me.todo.lists.tasks.list": "read-own",
+    "me.todo.lists.tasks.update": "change-own",
+    "planner.plans.tasks.list": "read-company",
+    "planner.tasks.create": "change-company",
+    "sites.lists.items.create": "change-company",
+    "sites.lists.items.fields.update": "change-company",
+    "sites.lists.items.list": "read-company",
+    "users.calendarView.list": "read-company",
+    "users.events.create": "change-own",
+    "users.events.get": "read-company",
+    "users.events.update": "change-own",
+    "users.mailFolders.messages.list": "read-company",
+    "users.messages.attachments.get": "read-company",
+    "users.messages.create": "change-company",
+    "users.messages.createReply.create": "change-company",
+    "users.messages.get": "read-company",
+    "users.messages.list": "read-company",
+    "users.sendMail.create": "reach-others",
   },
 };
 
@@ -86,7 +85,53 @@ export const nativeItemReads: Readonly<
     "mail.readAttachment": "file",
   },
   "microsoft": {
-    "onenote.read": "item",
+    "me.onenote.pages.get": "item",
+  },
+};
+
+/**
+ * Each native tool that reads, changes or sends email (its manifest's
+ * `mail`), by its connector's provider, then its name: whether it only
+ * reads, whether its resource is a mailbox, and the input properties
+ * holding the addresses it mails. Core holds them to the mail rules: the
+ * shared-mailbox pointer (tool-classes.ts), a card's word that the turn
+ * read mail (channels/held.ts) and a run's mail stamps
+ * (workflows/mail-stamps.ts).
+ */
+export const nativeMailTools: Readonly<
+  Record<
+    string,
+    Readonly<
+      Record<
+        string,
+        {
+          readonly reads: boolean;
+          readonly mailbox: boolean;
+          readonly recipients: readonly string[];
+        }
+      >
+    >
+  >
+> = {
+  "google": {
+    "mail.createDraft": {"reads":false,"mailbox":true,"recipients":["to","cc","bcc"]},
+    "mail.get": {"reads":true,"mailbox":true,"recipients":[]},
+    "mail.label": {"reads":false,"mailbox":true,"recipients":[]},
+    "mail.labels": {"reads":true,"mailbox":true,"recipients":[]},
+    "mail.list": {"reads":true,"mailbox":true,"recipients":[]},
+    "mail.readAttachment": {"reads":true,"mailbox":true,"recipients":[]},
+    "mail.send": {"reads":false,"mailbox":true,"recipients":["to","cc","bcc"]},
+  },
+  "microsoft": {
+    "me.messages.move.create": {"reads":false,"mailbox":false,"recipients":[]},
+    "me.messages.update": {"reads":false,"mailbox":false,"recipients":[]},
+    "users.mailFolders.messages.list": {"reads":true,"mailbox":true,"recipients":[]},
+    "users.messages.attachments.get": {"reads":true,"mailbox":true,"recipients":[]},
+    "users.messages.create": {"reads":false,"mailbox":true,"recipients":["toRecipients","ccRecipients","bccRecipients"]},
+    "users.messages.createReply.create": {"reads":false,"mailbox":true,"recipients":["toRecipients","ccRecipients"]},
+    "users.messages.get": {"reads":true,"mailbox":true,"recipients":[]},
+    "users.messages.list": {"reads":true,"mailbox":true,"recipients":[]},
+    "users.sendMail.create": {"reads":false,"mailbox":true,"recipients":["toRecipients","ccRecipients","bccRecipients"]},
   },
 };
 

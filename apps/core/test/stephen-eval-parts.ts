@@ -110,10 +110,10 @@ export const stephenEvalRun = (
  */
 const plantedReads: Record<StephenSuite, Readonly<Record<string, string>>> = {
   microsoft: {
-    J1: "mail.list",
-    J2: "excel.listRows",
-    J3: "files.read",
-    J4: "calendar.get",
+    J1: "users.messages.list",
+    J2: "drives.items.workbook.tables.dataBodyRange",
+    J3: "drives.items.content.download",
+    J4: "users.events.get",
     J5: crmTools.read,
   },
   google: {

@@ -51,19 +51,22 @@ describe("generated connector contracts", () => {
 
   it("check what the connector's input schema checks", () => {
     const send = read(
-      microsoft365.manifest.actions["mail.send"]?.contract.input
+      microsoft365.manifest.actions["users.sendMail.create"]?.contract.input
     );
     const valid = {
       mailbox: "team@acme.test",
       subject: "Launch",
-      body: "Hello.",
-      to: ["ada@acme.test"],
+      body: { content: "Hello." },
+      toRecipients: [{ emailAddress: { address: "ada@acme.test" } }],
     };
     expect({
       valid: passes(send, valid),
       unknownKey: passes(send, { ...valid, priority: "high" }),
       missing: passes(send, { mailbox: "team@acme.test" }),
-      notEmail: passes(send, { ...valid, to: ["ada"] }),
+      notEmail: passes(send, {
+        ...valid,
+        toRecipients: [{ emailAddress: { address: "ada" } }],
+      }),
       tooLong: passes(send, { ...valid, subject: "x".repeat(1025) }),
     }).toStrictEqual({
       valid: true,
@@ -94,15 +97,23 @@ describe("generated connector contracts", () => {
 
   it("enforce the patterns and formats a descriptor can't say", () => {
     const list = read(
-      microsoft365.manifest.actions["mail.list"]?.contract.input
+      microsoft365.manifest.actions["users.messages.list"]?.contract.input
     );
-    const at = (receivedAfter: string) =>
-      passes(list, { mailbox: "team@acme.test", receivedAfter });
+    // Microsoft 365's `v` arguments carry no pattern (graph-sdk.ts checks
+    // IDs in the handler), so the pattern is Google Workspace's.
+    const labelled = read(
+      googleWorkspace.manifest.actions["mail.list"]?.contract.input
+    );
+    const at = (receivedDateTime: string) =>
+      passes(list, { mailbox: "team@acme.test", receivedDateTime });
     expect({
       valid: at("2026-10-12T09:00:00Z"),
       leapDay: at("2028-02-29T09:00:00+01:00"),
-      // A mailbox with a path in it, which the connector's pattern refuses.
-      badPattern: passes(list, { mailbox: "team/../other" }),
+      // A label with a path in it, which the connector's pattern refuses.
+      badPattern: passes(labelled, {
+        mailbox: "team@acme.test",
+        label: "inbox/../sent",
+      }),
       notADate: at("yesterday"),
       noSuchDay: at("2026-02-31T09:00:00Z"),
       notALeapYear: at("2027-02-29T09:00:00Z"),

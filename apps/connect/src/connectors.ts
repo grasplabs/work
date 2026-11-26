@@ -107,6 +107,7 @@ export const nativeAction = (
       readOnly: declared.readOnly,
       resourceField: declared.resource ?? undefined,
       inputProperties: declared.input,
+      ...(declared.mail === undefined ? {} : { mail: true as const }),
     },
   };
 };

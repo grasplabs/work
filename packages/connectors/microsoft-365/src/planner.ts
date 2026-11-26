@@ -1,18 +1,13 @@
-import { defineTool } from "@grasp-os/connector-kit/connector";
-import { jsonBody, segment } from "@grasp-os/runtime/connector";
-import { z } from "zod";
+import { page, tool, ToolError, v } from "@grasp-os/sdk/connector";
 
 import {
-  atPage,
-  graphHost,
-  graphJson,
-  graphUrl,
-  idSchema,
-  nextPageOf,
-  pageOf,
-  pageSchema,
-  v1,
-} from "./graph.ts";
+  checkIds,
+  graphId,
+  graphPage,
+  next,
+  nextOf,
+  positionOf,
+} from "./graph-sdk.ts";
 
 // Planner, one plan per call, as `/planner/plans/{plan}`, so a call's
 // capability binds its reads to the plan. A plan belongs to a Microsoft 365
@@ -24,157 +19,132 @@ import {
 // assigned to, which would reach others: that is left out, so making a
 // task stays Change company.
 
-const plans = `${v1}/planner/plans/{plan}`;
+const planRoute = "/planner/plans/{plan}";
+const planTasksRoute = "/planner/plans/{plan}/tasks";
+const tasksRoute = "/planner/tasks";
 
-const graphPlan = z.object({ id: z.string(), title: z.string().nullish() });
+const taskFields = {
+  id: v.string(),
+  planId: v.string().nullable().optional(),
+  bucketId: v.string().nullable().optional(),
+  title: v.string().nullable().optional(),
+  percentComplete: v.number().nullable().optional(),
+  priority: v.number().nullable().optional(),
+  dueDateTime: v.string().nullable().optional(),
+  createdDateTime: v.string().nullable().optional(),
+  completedDateTime: v.string().nullable().optional(),
+  // Each assignee's user ID, with how they were assigned.
+  assignments: v.record(v.json()).nullable().optional(),
+};
 
-const graphTask = z.object({
-  id: z.string(),
-  planId: z.string().nullish(),
-  bucketId: z.string().nullish(),
-  title: z.string().nullish(),
-  percentComplete: z.number().nullish(),
-  priority: z.number().nullish(),
-  dueDateTime: z.string().nullish(),
-  createdDateTime: z.string().nullish(),
-  completedDateTime: z.string().nullish(),
-  assignments: z.record(z.string(), z.unknown()).nullish(),
-});
-type GraphTask = z.infer<typeof graphTask>;
+/** A Planner task (Graph's plannerTask), narrowed to these fields. */
+const Task = v.object(taskFields);
 
-const taskSchema = z.strictObject({
-  id: z.string(),
-  title: z.string().nullable(),
-  bucketId: z.string().nullable(),
-  percentComplete: z.number().nullable(),
-  priority: z.number().nullable(),
-  due: z.string().nullable(),
-  createdAt: z.string().nullable(),
-  completedAt: z.string().nullable(),
-  /** The user IDs of those it is assigned to. */
-  assignedTo: z.array(z.string()),
-});
+/** A due time as Planner keeps a day: noon UTC on it. */
+const duePattern =
+  /^(?<day>\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01]))T12:00:00Z$/u;
 
-const taskOf = (task: GraphTask): z.infer<typeof taskSchema> => ({
-  id: task.id,
-  title: task.title ?? null,
-  bucketId: task.bucketId ?? null,
-  percentComplete: task.percentComplete ?? null,
-  priority: task.priority ?? null,
-  due: task.dueDateTime ?? null,
-  createdAt: task.createdDateTime ?? null,
-  completedAt: task.completedDateTime ?? null,
-  assignedTo: Object.keys(task.assignments ?? {}),
-});
-
-/** Planner's done: a task at 100 percent. */
-const isDone = (task: GraphTask): boolean => (task.percentComplete ?? 0) >= 100;
-
-/** The plan, as Graph lets the person open it; a ToolError otherwise. */
-const planOf = async (plan: string) =>
-  await graphJson(graphUrl(`/planner/plans/${segment(plan)}`), graphPlan);
-
-const listTasks = defineTool({
-  name: "planner.tasks",
-  description:
-    "Lists the tasks of a Planner plan, a page at a time: each task's title, bucket, progress, due time and the user IDs it is assigned to. Optionally only those not done yet.",
-  input: z.strictObject({
-    plan: idSchema,
-    openOnly: z.boolean().optional(),
-    page: pageSchema,
-  }),
-  output: z.strictObject({
-    plan: z.string(),
-    tasks: z.array(taskSchema),
-    nextPage: z.string().nullable(),
-  }),
-  readOnly: true,
-  reach: "company",
-  resource: "plan",
-  routes: [{ method: "GET", host: graphHost, path: `${plans}/tasks` }],
-  run: async ({ plan, openOnly, page }) => {
-    // Planner takes neither `$filter` nor `$top` on a plan's tasks: it
-    // pages as it likes, and open tasks are kept here.
-    const { value, "@odata.nextLink": nextLink } = await graphJson(
-      atPage(graphUrl(`/planner/plans/${segment(plan)}/tasks`), page),
-      pageOf(graphTask)
+/**
+ * Refuses, before anything is sent, a due time that isn't noon UTC on a
+ * day of the calendar (no 30 February).
+ */
+const checkDue = (due: string | undefined): void => {
+  if (due === undefined) {
+    return;
+  }
+  const day = duePattern.exec(due)?.groups?.day;
+  if (
+    day === undefined ||
+    !new Date(`${day}T00:00:00Z`).toISOString().startsWith(day)
+  ) {
+    throw new ToolError(
+      "Invalid input: dueDateTime isn't noon UTC on a day, such as 2026-10-30T12:00:00Z",
+      { code: "invalid" }
     );
-    const tasks = value.filter((task) => openOnly !== true || !isDone(task));
-    return {
-      output: {
-        plan,
-        tasks: tasks.map(taskOf),
-        nextPage: nextPageOf(nextLink),
-      },
-      provenance: tasks.map(({ id }) => id),
-    };
-  },
-});
+  }
+};
 
-/** A day's form, `2026-10-30`. */
-const dayPattern = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/u;
-
-/** A day of the calendar; that it exists (no 30 February) is checked too. */
-const daySchema = z
-  .string()
-  .regex(dayPattern)
-  .refine(
-    (day) => new Date(`${day}T00:00:00Z`).toISOString().startsWith(day),
-    "No such day"
-  );
-
-const createTask = defineTool({
-  name: "planner.create",
-  description:
-    "Adds an unassigned task to a Planner plan, with a due day if given.",
-  input: z.strictObject({
-    plan: idSchema,
-    title: z.string().min(1).max(255),
-    due: daySchema.optional(),
+/**
+ * Planner tools, by name: each named from its route
+ * (`POST /planner/tasks` is `planner.tasks.create`).
+ */
+export const plannerTools = {
+  "planner.plans.tasks.list": tool({
+    description:
+      "Lists the tasks of a Planner plan, a page at a time: each task's title, bucket, progress, priority, due time and assignments. With completedDateTime null, only the tasks not completed yet.",
+    readOnly: true,
+    reach: "company",
+    scopes: ["Tasks.Read"],
+    resource: "plan",
+    routes: [`GET ${planTasksRoute}`],
+    args: { plan: graphId, completedDateTime: v.null().optional(), next },
+    returns: page(Task),
+    handler: async ({ plan, completedDateTime, ...args }, api) => {
+      checkIds({ plan });
+      // Planner takes neither `$filter` nor `$top` on a plan's tasks: it
+      // pages as it likes, and open tasks are kept here.
+      const answer = await api.get(planTasksRoute, {
+        path: { plan },
+        query: positionOf(args.next),
+        returns: graphPage(Task),
+      });
+      return {
+        items: answer.value.filter(
+          (task) =>
+            completedDateTime === undefined ||
+            (task.completedDateTime ?? null) === null
+        ),
+        next: nextOf(answer["@odata.nextLink"]),
+      };
+    },
   }),
-  output: z.strictObject({ plan: z.string(), task: taskSchema }),
-  readOnly: false,
-  reach: "company",
-  destructive: false,
-  resource: "plan",
-  // Recovery `none`: a Planner task carries no property of ours to find it
-  // by, and the same task may rightly be added twice, so one of unknown
-  // outcome stays unknown, for its person to say what became of it.
-  routes: [
-    { method: "GET", host: graphHost, path: plans },
-    // Planner names a new task's plan in its body, not its path: `run`
-    // puts the call's own plan there, the one its capability bound when
-    // it read the plan just before.
-    { method: "POST", host: graphHost, path: `${v1}/planner/tasks` },
-  ],
-  describe: {
-    title: "Add a task to Planner",
-    fields: [
-      { label: "Plan", input: "plan" },
-      { label: "Title", input: "title" },
-      { label: "Due", input: "due" },
-    ],
-  },
-  run: async ({ plan, title, due }) => {
-    // Graph refuses a plan the person can't open before anything is made.
-    await planOf(plan);
-    const task = await graphJson(
-      graphUrl("/planner/tasks"),
-      graphTask,
-      jsonBody({
-        planId: plan,
-        title,
-        // Planner keeps a due day as a time: noon UTC falls on that day in
-        // every time zone from UTC-12 to UTC+11.
-        ...(due === undefined ? {} : { dueDateTime: `${due}T12:00:00Z` }),
-      })
-    );
-    const after = taskOf(task);
-    return {
-      output: { plan, task: after },
-      change: { before: null, after },
-    };
-  },
-});
-
-export const plannerTools = [listTasks, createTask];
+  "planner.tasks.create": tool({
+    description:
+      "Adds an unassigned task to a Planner plan, with a due time if given: Planner keeps a due day, so it is noon UTC on that day (2026-10-30T12:00:00Z), which falls on it in every time zone from UTC-12 to UTC+11.",
+    readOnly: false,
+    reach: "company",
+    scopes: ["Tasks.ReadWrite"],
+    resource: "plan",
+    // No recovery: a Planner task carries no property of ours to find it
+    // by, and the same task may rightly be added twice, so one of unknown
+    // outcome stays unknown, for its person to say what became of it.
+    //
+    // Planner names a new task's plan in its body, not its path: the
+    // handler puts the call's own plan there, the one its capability bound
+    // when it read the plan just before.
+    routes: [`POST ${tasksRoute}`, `GET ${planRoute}`],
+    args: {
+      plan: graphId,
+      title: v.string().min(1).max(255),
+      dueDateTime: v.string().min(1).max(32).optional(),
+    },
+    returns: Task,
+    describe: {
+      title: "Add a task to Planner",
+      fields: [
+        { label: "Plan", arg: "plan" },
+        { label: "Title", arg: "title" },
+        { label: "Due", arg: "dueDateTime" },
+      ],
+    },
+    handler: async ({ plan, title, dueDateTime }, api, call) => {
+      checkIds({ plan });
+      checkDue(dueDateTime);
+      // Graph refuses a plan the person can't open before anything is made.
+      await api.get(planRoute, {
+        path: { plan },
+        returns: v.object({ id: v.string() }),
+      });
+      const task = await api.post(tasksRoute, {
+        body: {
+          planId: plan,
+          title,
+          ...(dueDateTime === undefined ? {} : { dueDateTime }),
+        },
+        returns: Task,
+      });
+      call.changed({ before: null, after: task });
+      return task;
+    },
+  }),
+};

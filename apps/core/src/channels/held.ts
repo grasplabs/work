@@ -12,6 +12,7 @@ import { activeMember, organizationId } from "../auth/auth.ts";
 import { personOf } from "../connections.ts";
 import { members, users } from "../db/core/schema.ts";
 import { heldAppCallsOf } from "../held-app-calls.ts";
+import { nativeMailTools } from "../native-tool-classes.gen.ts";
 import type { HeldWriteView, ReadCheck } from "./cards.tsx";
 import { inertOn } from "./inert.ts";
 import { say } from "./words.ts";
@@ -224,16 +225,25 @@ export const turnHeldWrites = async (
     .map(({ view }) => view);
 };
 
+/** The native tools that read mail (`nativeMailTools`), of any provider. */
+const mailReads: ReadonlySet<string> = new Set(
+  Object.values(nativeMailTools).flatMap((tools) =>
+    Object.entries(tools).flatMap(([tool, { reads }]) => (reads ? [tool] : []))
+  )
+);
+
 /**
  * What the card warns of, from what the chat's code read (the turn's
- * provenance, `connectionRead` sources): mail, which other people wrote.
- * Company records' line (`record`) comes with the rules that know which
- * reads are of a company record (GRA-719).
+ * provenance, `connectionRead` sources): mail, which other people wrote,
+ * read by a native tool that reads mail. Company records' line (`record`)
+ * comes with the rules that know which reads are of a company record
+ * (GRA-719).
  */
 export const checkOf = (sources: readonly string[]): ReadCheck | undefined =>
-  sources.some(
-    (source) => connectionReadOf(source)?.action.startsWith("mail.") === true
-  )
+  sources.some((source) => {
+    const read = connectionReadOf(source);
+    return read !== undefined && mailReads.has(read.action);
+  })
     ? { read: "mail" }
     : undefined;
 

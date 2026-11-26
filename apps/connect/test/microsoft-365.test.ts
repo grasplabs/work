@@ -7,7 +7,6 @@ import { outcome } from "./connect.ts";
 import { planIds } from "./fixtures/graph-apps.ts";
 import {
   archiveFolderId,
-  attachmentsSkipToken,
   categoriesSkipToken,
   endlessAttachments,
   foreignFolderId,
@@ -45,6 +44,7 @@ import {
   mailboxPath,
   manifest,
   planInputs,
+  recipientsOf,
   requests,
   shownEmail,
   siteInputs,
@@ -68,8 +68,24 @@ import type { Input } from "./tool-calls.ts";
 // back. Scoping comes first: a call for one mailbox or drive reaches only
 // that one, by construction.
 
+/**
+ * Where the tools that name no resource reach under /me: me.drive.root.content.upload
+ * the person's own OneDrive, and the To Do and OneNote tools their own To
+ * Do and notebooks.
+ */
+const underMe = [
+  ["me.drive.root.content.upload", "/v1.0/me/drive/root:/{folder}/{name}"],
+  ["me.todo.", "/v1.0/me/todo/lists"],
+  ["me.onenote.", "/v1.0/me/onenote/"],
+  ["me.messages.", "/v1.0/me/"],
+  ["me.calendarView.", "/v1.0/me/calendarView"],
+  ["me.chats.", "/v1.0/me/chats"],
+  ["me.onlineMeetings.", "/v1.0/me/onlineMeetings"],
+  ["me.onlineMeetings.", "/v1.0/me/events/"],
+] as const;
+
 describe("the Microsoft 365 connector's scoping", () => {
-  it("binds every route of every tool to its mailbox, drive, site, plan or workbook's named table, reads /me only to know whose a mailbox is, and writes under /me only for drafts in the person's own OneDrive", () => {
+  it("binds every route of every tool to its mailbox, drive, site, plan or workbook's named table, reads /me only to know whose a mailbox is, and reaches under /me only for drafts in the person's own OneDrive and their own To Do", () => {
     const unbound = Object.entries(manifest.actions).flatMap(
       ([name, { resource, routes }]) =>
         routes
@@ -87,7 +103,7 @@ describe("the Microsoft 365 connector's scoping", () => {
                     path.startsWith("/v1.0/planner/plans/{plan}/"))) ||
                 // Planner names a new task's plan in its body: the tool puts
                 // its bound plan there, after reading that plan.
-                (name === "planner.create" &&
+                (name === "planner.tasks.create" &&
                   method === "POST" &&
                   path === "/v1.0/planner/tasks") ||
                 (resource === "workbook" &&
@@ -95,32 +111,42 @@ describe("the Microsoft 365 connector's scoping", () => {
                     "/v1.0/drives/{drive}/items/{workbook}/workbook/tables/{table}/"
                   )) ||
                 (method === "GET" && path === "/v1.0/me") ||
-                (name === "files.createDraft" &&
-                  resource === null &&
-                  path.startsWith("/v1.0/me/drive/root:/{folder}/{name}"))
+                (resource === null &&
+                  underMe.some(
+                    ([tool, under]) =>
+                      name.startsWith(tool) && path.startsWith(under)
+                  ))
               )
           )
           .map(({ path }) => `${name} ${path}`)
     );
     expect(unbound).toStrictEqual([]);
-    // Only the tools that work in the person's own mailbox or OneDrive go
-    // to /me: the mail tools, calendar.freeTime and the chat and meeting
-    // tools to ask whose the token is, files.createDraft to write its draft.
+    // Only the tools that work in the person's own mailbox, OneDrive or To
+    // Do go to /me: the mail tools that sort their own inbox, and the
+    // person's own calendar view, chats (whose messages also ask whose the
+    // token is) and meetings, me.drive.root.content.upload to write
+    // its draft, and the To Do tools for the person's own lists.
     const askWho = Object.entries(manifest.actions)
       .filter(([, { routes }]) =>
         routes.some(({ path }) => path.startsWith("/v1.0/me"))
       )
       .map(([name, { reach }]) => `${name} ${reach}`);
     expect(askWho.toSorted()).toStrictEqual([
-      "calendar.freeTime own",
-      "chats.list conversations",
-      "chats.messages conversations",
-      "files.createDraft own",
-      "mail.categorise own",
-      "mail.flag own",
-      "mail.move own",
-      "meetings.list conversations",
-      "meetings.transcript conversations",
+      "me.calendarView.list conversations",
+      "me.chats.list conversations",
+      "me.chats.messages.list conversations",
+      "me.drive.root.content.upload own",
+      "me.messages.move.create own",
+      "me.messages.update own",
+      "me.onenote.pages.get own",
+      "me.onenote.sections.list own",
+      "me.onenote.sections.pages.create own",
+      "me.onenote.sections.pages.list own",
+      "me.onlineMeetings.transcripts.content.getContent conversations",
+      "me.todo.lists.list own",
+      "me.todo.lists.tasks.create own",
+      "me.todo.lists.tasks.list own",
+      "me.todo.lists.tasks.update own",
     ]);
     expect(
       Object.keys(manifest.actions).toSorted(),
@@ -132,7 +158,21 @@ describe("the Microsoft 365 connector's scoping", () => {
         ...Object.keys(siteInputs),
         ...Object.keys(planInputs),
         ...Object.keys(workbookInputs),
-        "files.createDraft",
+        "me.calendarView.list",
+        "me.chats.list",
+        "me.chats.messages.list",
+        "me.drive.root.content.upload",
+        "me.messages.move.create",
+        "me.messages.update",
+        "me.onenote.pages.get",
+        "me.onenote.sections.list",
+        "me.onenote.sections.pages.create",
+        "me.onenote.sections.pages.list",
+        "me.todo.lists.list",
+        "me.todo.lists.tasks.create",
+        "me.todo.lists.tasks.list",
+        "me.onlineMeetings.transcripts.content.getContent",
+        "me.todo.lists.tasks.update",
       ].toSorted()
     );
     expect(manifest.hosts).toStrictEqual(["graph.microsoft.com"]);
@@ -153,7 +193,7 @@ describe("the Microsoft 365 connector's scoping", () => {
     // The same capability reads its own mailbox, and only its paths.
     await call(
       connection,
-      "mail.list",
+      "users.messages.list",
       { mailbox: invoices },
       { resource: invoices }
     );
@@ -209,25 +249,27 @@ describe("the Microsoft 365 connector's mail tools", () => {
     const connection = await connected();
     const token = await accessTokenFor(env, connection.id);
     const result = await resultOf(
-      call(connection, "mail.list", { mailbox: invoices })
+      call(connection, "users.messages.list", { mailbox: invoices })
     );
     expect(result).toMatchObject({
       output: {
-        mailbox: invoices,
-        messages: [
+        items: [
           {
-            mailbox: invoices,
             id: messageId(invoices, 1),
             subject: "Invoice 2026-0041 from Northwind Supplies",
             from: {
-              name: "Northwind Billing",
-              address: "billing@northwind.example.org",
+              emailAddress: {
+                name: "Northwind Billing",
+                address: "billing@northwind.example.org",
+              },
             },
-            to: [{ name: "Invoices", address: invoices }],
+            toRecipients: [
+              { emailAddress: { name: "Invoices", address: invoices } },
+            ],
             isRead: false,
             hasAttachments: true,
           },
-          { mailbox: invoices, id: messageId(invoices, 2) },
+          { id: messageId(invoices, 2) },
         ],
       },
       provenance: [messageId(invoices, 1), messageId(invoices, 2)],
@@ -245,17 +287,21 @@ describe("the Microsoft 365 connector's mail tools", () => {
   it("page through Graph's next link on their own route, never following it", async () => {
     const connection = await connected();
     const first = await outputOf(
-      call(connection, "mail.list", { mailbox: invoices, top: 2 })
+      call(connection, "users.messages.list", { mailbox: invoices, top: 2 })
     );
-    expect(first).toMatchObject({ nextPage: "%24skip=2" });
-    const page = z.object({ nextPage: z.string() }).parse(first).nextPage;
+    expect(first).toMatchObject({ next: "%24skip=2" });
+    const { next } = z.object({ next: z.string() }).parse(first);
     await expect(
       outputOf(
-        call(connection, "mail.list", { mailbox: invoices, top: 2, page })
+        call(connection, "users.messages.list", {
+          mailbox: invoices,
+          top: 2,
+          next,
+        })
       )
     ).resolves.toMatchObject({
-      messages: [{ id: messageId(invoices, 3) }],
-      nextPage: null,
+      items: [{ id: messageId(invoices, 3) }],
+      next: null,
     });
     // Graph's link names `users('invoices%40example.com')`: not followed.
     expect(requests()[1]).toMatchObject({
@@ -264,16 +310,16 @@ describe("the Microsoft 365 connector's mail tools", () => {
     });
     // A page is only a position: anything else in one is ignored, and one
     // without a position is refused.
-    await call(connection, "mail.list", {
+    await call(connection, "users.messages.list", {
       mailbox: invoices,
-      page: "%24skip=2&%24select=body",
+      next: "%24skip=2&%24select=body",
     });
     expect(requests()[2]?.query.$select).not.toBe("body");
     await expect(
       toolError(
-        call(connection, "mail.list", {
+        call(connection, "users.messages.list", {
           mailbox: invoices,
-          page: "$select=body",
+          next: "$select=body",
         })
       )
     ).resolves.toMatchObject({ error: { code: "invalid" } });
@@ -281,14 +327,14 @@ describe("the Microsoft 365 connector's mail tools", () => {
 
   it("search a folder, filter, but not both at once", async () => {
     const connection = await connected();
-    await call(connection, "mail.list", {
+    await call(connection, "users.mailFolders.messages.list", {
       mailbox: invoices,
       folder: "inbox",
       search: "invoice 2026",
     });
-    await call(connection, "mail.list", {
+    await call(connection, "users.messages.list", {
       mailbox: invoices,
-      unreadOnly: true,
+      isRead: false,
     });
     const [searched, filtered] = requests();
     expect({ searched, filtered }).toMatchObject({
@@ -308,10 +354,10 @@ describe("the Microsoft 365 connector's mail tools", () => {
     expect(searched?.query).not.toHaveProperty("$orderby");
     await expect(
       toolError(
-        call(connection, "mail.list", {
+        call(connection, "users.messages.list", {
           mailbox: invoices,
           search: "invoice",
-          unreadOnly: true,
+          isRead: false,
         })
       )
     ).resolves.toMatchObject({ error: { code: "invalid" } });
@@ -322,18 +368,21 @@ describe("the Microsoft 365 connector's mail tools", () => {
     const connection = await connected();
     await expect(
       outputOf(
-        call(connection, "mail.list", { mailbox: invoices, flaggedOnly: true })
+        call(connection, "users.messages.list", {
+          mailbox: invoices,
+          flag: { flagStatus: "flagged" },
+        })
       )
     ).resolves.toMatchObject({
-      messages: [
+      items: [
         {
           id: messageId(invoices, flaggedMessage),
-          flagStatus: "flagged",
+          flag: { flagStatus: "flagged" },
           conversationId:
             "AAQkAGE1M2IyNGNmLTI5MTktNDUyZi1iOTVjLTc2ZjI5ZmNmZmQ2MwAQAC3Ym9A=",
         },
       ],
-      nextPage: null,
+      next: null,
     });
     expect(requests()).toMatchObject([
       {
@@ -347,52 +396,53 @@ describe("the Microsoft 365 connector's mail tools", () => {
     ]);
     await expect(
       toolError(
-        call(connection, "mail.list", {
+        call(connection, "users.messages.list", {
           mailbox: invoices,
           search: "invoice",
-          flaggedOnly: true,
+          flag: { flagStatus: "flagged" },
         })
       )
     ).resolves.toMatchObject({ error: { code: "invalid" } });
     expect(graph.sent).toHaveLength(1);
   });
 
-  it("read a conversation oldest first, Sent Items included, so the last word shows who waits", async () => {
+  it("read a conversation newest first, Sent Items included, so the last word shows who waits", async () => {
     const connection = await connected();
     const result = await resultOf(
-      call(connection, "mail.thread", {
+      call(connection, "users.messages.list", {
         mailbox: invoices,
-        conversation: threadConversationId,
+        conversationId: threadConversationId,
       })
     );
     const billing = {
-      name: "Northwind Billing",
-      address: "billing@northwind.example.org",
+      emailAddress: {
+        name: "Northwind Billing",
+        address: "billing@northwind.example.org",
+      },
     };
     expect(result).toMatchObject({
       output: {
-        mailbox: invoices,
-        conversationId: threadConversationId,
-        messages: [
-          { id: messageId(invoices, 101), from: billing },
+        items: [
           {
-            id: messageId(invoices, 102),
-            from: { address: invoices },
-            to: [billing],
-          },
-          {
-            mailbox: invoices,
             id: messageId(invoices, 103),
             conversationId: threadConversationId,
             from: billing,
             isRead: false,
-            body: "Message 3 of the conversation about invoice 2026-0041.",
-            bodyCut: false,
+            uniqueBody: {
+              contentType: "text",
+              content: "Message 3 of the conversation about invoice 2026-0041.",
+            },
           },
+          {
+            id: messageId(invoices, 102),
+            from: { emailAddress: { address: invoices } },
+            toRecipients: [billing],
+          },
+          { id: messageId(invoices, 101), from: billing },
         ],
-        earlierMessages: false,
+        next: null,
       },
-      provenance: [101, 102, 103].map((n) => messageId(invoices, n)),
+      provenance: [103, 102, 101].map((n) => messageId(invoices, n)),
     });
     // The whole mailbox, not a folder, so the person's own replies count;
     // each message's own text only, as text.
@@ -407,113 +457,104 @@ describe("the Microsoft 365 connector's mail tools", () => {
       },
     ]);
     expect(requests()[0]?.query.$select?.split(",")).toContain("uniqueBody");
-    // A conversation ID can't end the filter's string literal: refused as
-    // input, before anything goes out.
+    // A conversation ID can't end the filter's string literal: refused
+    // before anything goes out.
     await expect(
       toolError(
-        call(connection, "mail.thread", {
+        call(connection, "users.messages.list", {
           mailbox: invoices,
-          conversation: "x' or isRead eq false or id eq 'y",
+          conversationId: "x' or isRead eq false or id eq 'y",
         })
       )
-    ).resolves.toBe("Invalid input: invalid_format at conversation");
+    ).resolves.toMatchObject({ error: { code: "invalid" } });
     expect(graph.sent).toHaveLength(1);
   });
 
-  it("cut a long conversation to its newest messages, and a long body to its bound", async () => {
+  it("cut a long conversation to a page of its newest messages, and a long body to its bound", async () => {
     const connection = await connected();
     const output = z
       .object({
-        messages: z.array(
+        items: z.array(
           z.object({
             id: z.string(),
-            body: z.string().nullable(),
-            bodyCut: z.boolean(),
+            uniqueBody: z.object({ content: z.string() }),
           })
         ),
-        earlierMessages: z.boolean(),
+        next: z.string().nullable(),
       })
       .parse(
         await outputOf(
-          call(connection, "mail.thread", {
+          call(connection, "users.messages.list", {
             mailbox: invoices,
-            conversation: longConversationId,
+            conversationId: longConversationId,
           })
         )
       );
     const bound = 25;
-    expect(output.earlierMessages).toBeTruthy();
-    expect(output.messages.map(({ id }) => id)).toStrictEqual(
+    expect(output.next).not.toBeNull();
+    expect(output.items.map(({ id }) => id)).toStrictEqual(
       Array.from({ length: bound }, (_, at) =>
-        messageId(invoices, 100 + longThreadLength - bound + 1 + at)
+        messageId(invoices, 100 + longThreadLength - at)
       )
     );
-    const last = output.messages.at(-1);
-    expect(last).toMatchObject({ bodyCut: true });
+    const [newest, ...rest] = output.items;
     // Cut before the emoji whose halves straddle the bound, never between them.
     expect({
       straddling: String.fromCodePoint(longBody.codePointAt(7999) ?? 0),
-      body: last?.body,
+      body: newest?.uniqueBody.content,
     }).toStrictEqual({ straddling: "🧾", body: longBody.slice(0, 7999) });
     expect(
-      output.messages.slice(0, -1).filter(({ bodyCut }) => bodyCut)
+      rest.filter(({ uniqueBody }) => uniqueBody.content.length >= 7999)
     ).toStrictEqual([]);
   });
 
   it("get a message with its body as text, and its attachments' metadata", async () => {
     const connection = await connected();
     const result = await resultOf(
-      call(connection, "mail.get", {
+      call(connection, "users.messages.get", {
         mailbox: invoices,
         message: messageId(invoices, 1),
       })
     );
     expect(result).toMatchObject({
       output: {
-        message: {
-          mailbox: invoices,
-          id: messageId(invoices, 1),
-          body: {
-            contentType: "text",
-            content:
-              "Dear customer,\r\n\r\nPlease find attached invoice 2026-0041 for EUR 1,250.00.\r\n",
-          },
-          attachments: [
-            {
-              id: pdfAttachmentId,
-              name: "Invoice-2026-0041.pdf",
-              contentType: "application/pdf",
-              size: invoicePdf.byteLength,
-              kind: "file",
-            },
-            { id: itemAttachmentId, kind: "item" },
-          ],
-          moreAttachments: false,
+        id: messageId(invoices, 1),
+        body: {
+          contentType: "text",
+          content:
+            "Dear customer,\r\n\r\nPlease find attached invoice 2026-0041 for EUR 1,250.00.\r\n",
         },
+        attachments: [
+          {
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            id: pdfAttachmentId,
+            name: "Invoice-2026-0041.pdf",
+            contentType: "application/pdf",
+            size: invoicePdf.byteLength,
+          },
+          {
+            "@odata.type": "#microsoft.graph.itemAttachment",
+            id: itemAttachmentId,
+          },
+        ],
       },
       provenance: [messageId(invoices, 1)],
     });
-    // Attachments are listed without their content, every page on the
-    // tool's own route: Graph's next link, naming the user and message its
-    // own way, is never followed.
-    const attachmentsPath = `${mailboxPath}/messages/${encodeURIComponent(messageId(invoices, 1))}/attachments`;
-    const [got, first, second, ...rest] = requests();
-    expect({ got, first, second, rest }).toMatchObject({
-      got: { headers: { prefer: 'outlook.body-content-type="text"' } },
-      first: { path: attachmentsPath },
-      second: { path: attachmentsPath },
-      rest: [],
-    });
-    expect([first?.query, second?.query]).toStrictEqual([
-      { $select: "id,name,contentType,size,isInline" },
+    // Its attachments come with it, without their content, in the one
+    // request: no page of them is followed.
+    expect(requests()).toMatchObject([
       {
-        $select: "id,name,contentType,size,isInline",
-        $skiptoken: attachmentsSkipToken,
+        path: `${mailboxPath}/messages/${encodeURIComponent(messageId(invoices, 1))}`,
+        query: {
+          $expand: "attachments($select=id,name,contentType,size,isInline)",
+        },
+        headers: { prefer: 'outlook.body-content-type="text"' },
       },
     ]);
+    expect(graph.sent).toHaveLength(1);
     await expect(
       toolError(
-        call(connection, "mail.get", {
+        call(connection, "users.messages.get", {
           mailbox: invoices,
           message: "AAMkUnknown=",
         })
@@ -526,19 +567,17 @@ describe("the Microsoft 365 connector's mail tools", () => {
     });
   });
 
-  it("list a message's attachments up to a bound, and say there are more", async () => {
+  it("read a message's attachments with it, never paging through them", async () => {
     const connection = await connected();
-    await expect(
-      outputOf(
-        call(connection, "mail.get", {
-          mailbox: invoices,
-          message: messageId(invoices, endlessAttachments),
-        })
-      )
-    ).resolves.toMatchObject({ message: { moreAttachments: true } });
-    expect(
-      graphPaths().filter((path) => path.endsWith("/attachments"))
-    ).toHaveLength(10);
+    await outputOf(
+      call(connection, "users.messages.get", {
+        mailbox: invoices,
+        message: messageId(invoices, endlessAttachments),
+      })
+    );
+    expect(graphPaths()).toStrictEqual([
+      `${mailboxPath}/messages/${encodeURIComponent(messageId(invoices, endlessAttachments))}`,
+    ]);
   });
 
   it("read a file attachment as base64, and only a file", async () => {
@@ -549,11 +588,9 @@ describe("the Microsoft 365 connector's mail tools", () => {
       attachment: pdfAttachmentId,
     };
     await expect(
-      resultOf(call(connection, "mail.readAttachment", input))
+      resultOf(call(connection, "users.messages.attachments.get", input))
     ).resolves.toStrictEqual({
       output: {
-        mailbox: invoices,
-        messageId: messageId(invoices, 1),
         id: pdfAttachmentId,
         name: "Invoice-2026-0041.pdf",
         contentType: "application/pdf",
@@ -561,7 +598,7 @@ describe("the Microsoft 365 connector's mail tools", () => {
         encoding: "base64",
         content: pdfBase64,
       },
-      provenance: [messageId(invoices, 1)],
+      provenance: [pdfAttachmentId],
     });
     const refusals = await Promise.all(
       [
@@ -570,7 +607,9 @@ describe("the Microsoft 365 connector's mail tools", () => {
         { ...input, attachment: bigAttachmentId },
       ].map(
         async (each) =>
-          await toolError(call(connection, "mail.readAttachment", each))
+          await toolError(
+            call(connection, "users.messages.attachments.get", each)
+          )
       )
     );
     expect(refusals).toMatchObject([
@@ -588,34 +627,31 @@ describe("the Microsoft 365 connector's mail tools", () => {
   });
 
   it("move an email once for its idempotency key, to a folder of the person's own mailbox", async () => {
-    const { connection, own, ownPath } = await connectedOwn();
-    const move = async (destination: string, idempotencyKey: string) =>
+    const { connection, own } = await connectedOwn();
+    const move = async (destinationId: string, idempotencyKey: string) =>
       await outputOf(
         call(
           connection,
-          "mail.move",
-          { mailbox: own, message: messageId(own, 1), destination },
-          { resource: own, idempotencyKey }
+          "me.messages.move.create",
+          { message: messageId(own, 1), destinationId },
+          { idempotencyKey }
         )
       );
     const first = await move("archive", "run-7:move-invoice");
     expect(first).toStrictEqual({
-      mailbox: own,
-      previousId: messageId(own, 1),
       id: movedId(own, 1),
-      folderId: archiveFolderId,
+      parentFolderId: archiveFolderId,
     });
     await expect(move("archive", "run-7:move-invoice")).resolves.toStrictEqual(
       first
     );
-    // The destination is looked up in the bound mailbox (once Graph's
-    // `/me` said it is the person's own), and the message moved to the
-    // folder it names there.
+    // The destination is looked up in the person's own mailbox, and the
+    // message moved to the folder it names there.
     expect(requests()).toMatchObject([
-      { method: "GET", path: `${ownPath}/mailFolders/archive` },
+      { method: "GET", path: "/v1.0/me/mailFolders/archive" },
       {
         method: "POST",
-        path: `${ownPath}/messages/${encodeURIComponent(messageId(own, 1))}/move`,
+        path: `/v1.0/me/messages/${encodeURIComponent(messageId(own, 1))}/move`,
         body: { destinationId: archiveFolderId },
       },
     ]);
@@ -632,14 +668,9 @@ describe("the Microsoft 365 connector's mail tools", () => {
       await outcome(
         call(
           connection,
-          "mail.move",
-          {
-            mailbox: own,
-            message: messageId(own, 1),
-            destination: "archive",
-            ...shown,
-          },
-          { resource: own, idempotencyKey }
+          "me.messages.move.create",
+          { message: messageId(own, 1), destinationId: "archive", ...shown },
+          { idempotencyKey }
         )
       );
     const outcomes = [
@@ -666,22 +697,22 @@ describe("the Microsoft 365 connector's mail tools", () => {
   });
 
   it("flag an email in the person's own mailbox, checked against the card first", async () => {
-    const { connection, own, ownPath } = await connectedOwn();
+    const { connection, own } = await connectedOwn();
     await expect(
       outputOf(
         call(
           connection,
-          "mail.flag",
-          { ...shownEmail(own), flag: "flagged" },
-          { resource: own, idempotencyKey: "run-3:flag" }
+          "me.messages.update",
+          { ...shownEmail(own), flag: { flagStatus: "flagged" } },
+          { idempotencyKey: "run-3:flag" }
         )
       )
     ).resolves.toStrictEqual({
-      mailbox: own,
       id: messageId(own, 1),
-      flag: "flagged",
+      flag: { flagStatus: "flagged" },
+      categories: [],
     });
-    const path = `${ownPath}/messages/${encodeURIComponent(messageId(own, 1))}`;
+    const path = `/v1.0/me/messages/${encodeURIComponent(messageId(own, 1))}`;
     expect(requests()).toMatchObject([
       { method: "GET", path, query: { $select: "id,from,subject" } },
       {
@@ -698,9 +729,9 @@ describe("the Microsoft 365 connector's mail tools", () => {
       await outcome(
         call(
           connection,
-          "mail.flag",
-          { ...shownEmail(own), flag: "complete" },
-          { resource: own, idempotencyKey: "run-3:complete" }
+          "me.messages.update",
+          { ...shownEmail(own), flag: { flagStatus: "complete" } },
+          { idempotencyKey: "run-3:complete" }
         )
       );
     graph.loseWriteAnswer();
@@ -726,12 +757,12 @@ describe("the Microsoft 365 connector's mail tools", () => {
       await outcome(
         call(
           connection,
-          "mail.categorise",
+          "me.messages.update",
           {
             ...shownEmail(own),
             categories: ["Finance", "Waiting on others", "Finance"],
           },
-          { resource: own, idempotencyKey }
+          { idempotencyKey }
         )
       );
     await expect(categorise("run-3:categorise")).resolves.toBe("ok");
@@ -750,20 +781,20 @@ describe("the Microsoft 365 connector's mail tools", () => {
   });
 
   it("refuse a category the person doesn't have, before anything changes", async () => {
-    const { connection, own, ownPath } = await connectedOwn();
+    const { connection, own } = await connectedOwn();
     await expect(
       toolError(
         call(
           connection,
-          "mail.categorise",
+          "me.messages.update",
           { ...shownEmail(own), categories: ["Finance", "Board only"] },
-          { resource: own, idempotencyKey: "run-3:new-category" }
+          { idempotencyKey: "run-3:new-category" }
         )
       )
     ).resolves.toMatchObject({ error: { code: "invalid" } });
     // Every page of their categories was read, the next on the tool's own
     // route, before it was refused.
-    const categories = `${ownPath}/outlook/masterCategories`;
+    const categories = "/v1.0/me/outlook/masterCategories";
     expect(requests()).toMatchObject([
       { method: "GET", path: categories },
       {
@@ -787,17 +818,21 @@ describe("the Microsoft 365 connector's mail tools", () => {
         outcome(
           call(
             connection,
-            "mail.flag",
-            { ...shownEmail(own), ...differs, flag: "flagged" },
-            { resource: own, idempotencyKey: crypto.randomUUID() }
+            "me.messages.update",
+            {
+              ...shownEmail(own),
+              ...differs,
+              flag: { flagStatus: "flagged" },
+            },
+            { idempotencyKey: crypto.randomUUID() }
           )
         ),
         outcome(
           call(
             connection,
-            "mail.categorise",
+            "me.messages.update",
             { ...shownEmail(own), ...differs, categories: ["Finance"] },
-            { resource: own, idempotencyKey: crypto.randomUUID() }
+            { idempotencyKey: crypto.randomUUID() }
           )
         ),
       ])
@@ -806,14 +841,18 @@ describe("the Microsoft 365 connector's mail tools", () => {
     expect(graph.writesDone()).toBe(0);
   });
 
-  it("work only in the person's own mailbox, by any of their addresses, asking only whose the token is", async () => {
-    const alias = "the.person@acme.test";
-    const { connection } = await connectedOwn([alias]);
+  it("work only in the person's own mailbox, under /me: a call can't name another", async () => {
+    const { connection } = await connectedOwn();
     // invoices@ is a mailbox the token opens, but not the person's own.
     const inputs: Record<string, Input> = {
-      "mail.flag": { flag: "flagged" },
-      "mail.categorise": { categories: ["Finance"] },
-      "mail.move": { destination: "archive" },
+      "me.messages.update": {
+        ...shownEmail(invoices),
+        flag: { flagStatus: "flagged" },
+      },
+      "me.messages.move.create": {
+        message: messageId(invoices, 1),
+        destinationId: "archive",
+      },
     };
     const elsewhere = await Promise.all(
       Object.entries(inputs).map(
@@ -822,29 +861,17 @@ describe("the Microsoft 365 connector's mail tools", () => {
             call(
               connection,
               action,
-              { ...shownEmail(invoices), ...input },
-              { resource: invoices, idempotencyKey: crypto.randomUUID() }
+              { mailbox: invoices, ...input },
+              { idempotencyKey: crypto.randomUUID() }
             )
           )
       )
     );
-    expect(elsewhere).toMatchObject(
-      Array.from({ length: 3 }, () => ({ error: { code: "invalid" } }))
-    );
-    // Only `/me` was asked: nothing reached the mailbox.
+    expect(elsewhere).toStrictEqual([
+      expect.stringMatching(/^Invalid input/u),
+      expect.stringMatching(/^Invalid input/u),
+    ]);
     expect(graph.sent).toStrictEqual([]);
-    // An alias of theirs, in another case, is their own mailbox.
-    const shouted = alias.toUpperCase();
-    await expect(
-      outcome(
-        call(
-          connection,
-          "mail.flag",
-          { ...shownEmail(shouted), flag: "flagged" },
-          { resource: shouted, idempotencyKey: "run-3:alias" }
-        )
-      )
-    ).resolves.toBe("ok");
   });
 
   it("send mail from a shared mailbox", async () => {
@@ -854,18 +881,18 @@ describe("the Microsoft 365 connector's mail tools", () => {
       outputOf(
         call(
           connection,
-          "mail.send",
+          "users.sendMail.create",
           {
             mailbox: invoices,
             subject: "Payment of invoice 2026-0041",
-            body: "Paid today.",
-            to: ["billing@northwind.example.org"],
-            cc: ["controller@example.com"],
+            body: { content: "Paid today." },
+            toRecipients: recipientsOf("billing@northwind.example.org"),
+            ccRecipients: recipientsOf("controller@example.com"),
           },
           { resource: invoices, idempotencyKey: "run-7:send-receipt" }
         )
       )
-    ).resolves.toStrictEqual({ mailbox: invoices, sent: true });
+    ).resolves.toStrictEqual({});
     expect(requests()).toMatchObject([
       {
         method: "POST",
@@ -899,20 +926,20 @@ describe("the Microsoft 365 connector's mail tools", () => {
     const mail = {
       mailbox: invoices,
       subject: "Payment of invoice 2026-0041",
-      body: "Paid today.",
-      to: ["billing@northwind.example.org"],
+      body: { content: "Paid today." },
+      toRecipients: recipientsOf("billing@northwind.example.org"),
     };
-    await call(connection, "mail.send", mail, {
+    await call(connection, "users.sendMail.create", mail, {
       resource: invoices,
       idempotencyKey: "run-7:send-stamped",
       stamp,
     });
-    await call(connection, "mail.createDraft", mail, {
+    await call(connection, "users.messages.create", mail, {
       resource: invoices,
       idempotencyKey: "run-7:draft-stamped",
       stamp,
     });
-    await call(connection, "mail.send", mail, {
+    await call(connection, "users.sendMail.create", mail, {
       resource: invoices,
       idempotencyKey: "run-7:send-plain",
     });
@@ -934,18 +961,20 @@ describe("the Microsoft 365 connector's mail tools", () => {
       outputOf(
         call(
           connection,
-          "mail.createDraft",
+          "users.messages.create",
           {
             mailbox: invoices,
             subject: "Question about invoice 2026-0041",
-            body: "<p>Could you send the order number?</p>",
-            bodyType: "html",
-            to: ["billing@northwind.example.org"],
+            body: {
+              contentType: "html",
+              content: "<p>Could you send the order number?</p>",
+            },
+            toRecipients: recipientsOf("billing@northwind.example.org"),
           },
           { idempotencyKey: "run-7:draft" }
         )
       )
-    ).resolves.toMatchObject({ mailbox: invoices, id: messageId(invoices, 9) });
+    ).resolves.toMatchObject({ id: messageId(invoices, 9) });
     expect(requests()).toMatchObject([
       {
         method: "POST",
@@ -965,14 +994,12 @@ describe("the Microsoft 365 connector's reply drafts", () => {
     mailbox: invoices,
     message: messageId(invoices, 1),
     subject: "RE: Invoice 2026-0041 from Northwind Supplies",
-    body: "Thanks, we'll pay it this week.",
-    to: [sender],
+    comment: "Thanks, we'll pay it this week.",
+    toRecipients: recipientsOf(sender),
   };
   const replyPath = `${mailboxPath}/messages/${encodeURIComponent(messageId(invoices, 1))}`;
   const made = replyDraft(invoices, 1, reply.subject);
   const drafted = {
-    mailbox: invoices,
-    inReplyTo: messageId(invoices, 1),
     id: made.id,
     conversationId: made.conversationId,
     webLink: made.webLink,
@@ -992,7 +1019,7 @@ describe("the Microsoft 365 connector's reply drafts", () => {
         method: "POST",
         path: `${replyPath}/createReply`,
         body: {
-          comment: reply.body,
+          comment: reply.comment,
           message: {
             subject: reply.subject,
             toRecipients: [{ emailAddress: { address: sender } }],
@@ -1003,7 +1030,7 @@ describe("the Microsoft 365 connector's reply drafts", () => {
     ]);
     // Its only write makes a draft: no call of it can send.
     expect(
-      manifest.actions["mail.createReplyDraft"]?.routes
+      manifest.actions["users.messages.createReply.create"]?.routes
         .filter(({ method }) => method !== "GET")
         .map(({ path }) => path)
     ).toStrictEqual(["/v1.0/users/{mailbox}/messages/{message}/createReply"]);
@@ -1013,10 +1040,17 @@ describe("the Microsoft 365 connector's reply drafts", () => {
     const connection = await connected();
     const refusals = await Promise.all(
       [
-        { ...reply, to: ["someone@elsewhere.example.com"] },
-        { ...reply, to: [sender, invoices] },
-        { ...reply, cc: [invoices] },
-        { ...reply, replyAll: true, cc: ["someone@elsewhere.example.com"] },
+        {
+          ...reply,
+          toRecipients: recipientsOf("someone@elsewhere.example.com"),
+        },
+        { ...reply, toRecipients: recipientsOf(sender, invoices) },
+        { ...reply, ccRecipients: recipientsOf(invoices) },
+        {
+          ...reply,
+          replyAll: true,
+          ccRecipients: recipientsOf("someone@elsewhere.example.com"),
+        },
       ].map(
         async (input, index) =>
           await toolError(
@@ -1035,8 +1069,8 @@ describe("the Microsoft 365 connector's reply drafts", () => {
         {
           ...reply,
           replyAll: true,
-          to: ["Billing@Northwind.example.org"],
-          cc: [invoices],
+          toRecipients: recipientsOf("Billing@Northwind.example.org"),
+          ccRecipients: recipientsOf(invoices),
         },
         "run-8:reply-all"
       )
@@ -1061,14 +1095,14 @@ describe("the Microsoft 365 connector's reply drafts", () => {
     const second = {
       ...reply,
       message: messageId(invoices, 2),
-      to: ["accounts@northwind.example.org"],
+      toRecipients: recipientsOf("accounts@northwind.example.org"),
     };
     // Its Cc is someone the message was only copied to: not a reply's.
     await expect(
       toolError(
         draftReply(
           connection,
-          { ...second, to: ["controller@example.com"] },
+          { ...second, toRecipients: recipientsOf("controller@example.com") },
           "run-8:cc-only"
         )
       )
@@ -1077,7 +1111,11 @@ describe("the Microsoft 365 connector's reply drafts", () => {
     await outputOf(
       draftReply(
         connection,
-        { ...second, replyAll: true, cc: ["controller@example.com"] },
+        {
+          ...second,
+          replyAll: true,
+          ccRecipients: recipientsOf("controller@example.com"),
+        },
         "run-8:reply-all-cc"
       )
     );
@@ -1124,11 +1162,7 @@ describe("the Microsoft 365 connector's reply drafts", () => {
       draftReply(connection, reply, "run-8:reply-lost")
     );
     // The draft found by its key is the one the lost answer made.
-    expect(found).toMatchObject({
-      mailbox: invoices,
-      inReplyTo: messageId(invoices, 1),
-      id: drafted.id,
-    });
+    expect(found).toMatchObject({ id: drafted.id });
     expect({
       repeat,
       writesDone: graph.writesDone(),

@@ -410,8 +410,8 @@ describe("a catalog entry's tools", () => {
       tools.map(({ name, readOnly }) => [name, readOnly])
     );
     expect(readOnlyOf).toMatchObject({
-      "mail.list": true,
-      "mail.send": false,
+      "users.messages.list": true,
+      "users.sendMail.create": false,
     });
     expect(composio.requests).toStrictEqual([]);
   });

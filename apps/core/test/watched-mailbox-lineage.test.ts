@@ -139,29 +139,30 @@ const enveloped = (text: string): string => {
 };
 
 /**
- * A catalog contract of `admin`'s of exactly `mail.send`, as connect
- * serves it to `connectionId` (`microsoft-365.mail@1`): its key.
+ * A catalog contract of `admin`'s of exactly `users.sendMail.create`, as
+ * connect serves it to `connectionId` (`microsoft-365.users.sendMail@1`):
+ * its key.
  */
 const sendContract = async (
   admin: Person,
   connectionId: string
 ): Promise<string> => {
   const served = await env.CONNECT.connectorContract({
-    contract: "microsoft-365.mail@1",
+    contract: "microsoft-365.users.sendMail@1",
     connectionId,
   });
   const send = Object.values(served.actions).find(
-    ({ tool }) => tool === "mail.send"
+    ({ tool }) => tool === "users.sendMail.create"
   );
   if (send === undefined) {
-    throw new Error("Expected mail.send in the contract");
+    throw new Error("Expected users.sendMail.create in the contract");
   }
   const key = `mail-${unique()}`;
   await admin.api.workflowResources.publishContract({
     key,
     kind: "connector",
     operations: {
-      "mail.send": {
+      "users.sendMail.create": {
         input: enveloped(send.input),
         output: enveloped(send.output),
         // As its connector declares it: a send may attach run files.
@@ -202,12 +203,12 @@ const echoOf = (key: string, from: string, to: string) => (): string =>
         id: "send",
         type: "call",
         connection: "mail",
-        action: "mail.send",
+        action: "users.sendMail.create",
         args: {
           mailbox: from,
-          to: [to],
+          toRecipients: [{ emailAddress: { address: to } }],
           subject: { $expr: "args.subject" },
-          body: "Again.",
+          body: { content: "Again." },
         },
       },
     ],
@@ -251,7 +252,7 @@ const triggerOn = async (
   await requestGranted(idp, admin, {
     subject,
     object: { type: "connection", ...connection },
-    actions: ["mail.list"],
+    actions: ["users.messages.list"],
     binding: `HEAR_${unique().toUpperCase()}`,
   });
   return id;
@@ -319,7 +320,7 @@ const watchingWorkflow = async (
       connectionId: watched.id,
       ...(named === undefined ? {} : { resource: named }),
     },
-    actions: ["mail.send"],
+    actions: ["users.sendMail.create"],
     binding: `MAIL_${unique().toUpperCase()}`,
   });
   await admin.api.workflowResources.approveBinding(workflow, {
@@ -327,7 +328,7 @@ const watchingWorkflow = async (
     target: {
       kind: "connector",
       permissionId,
-      contract: "microsoft-365.mail@1",
+      contract: "microsoft-365.users.sendMail@1",
     },
     reviewed: { version: 1 },
   });

@@ -158,8 +158,8 @@ const steps = [
   {
     id: "kept",
     type: "call",
-    connection: "mail",
-    action: "mail.readAttachment",
+    connection: "attachments",
+    action: "users.messages.attachments.get",
     args: {
       mailbox: { $expr: "args.mailbox" },
       message: { $expr: "args.message" },
@@ -189,12 +189,14 @@ const steps = [
     id: "sent",
     type: "call",
     connection: "mail",
-    action: "mail.send",
+    action: "users.sendMail.create",
     args: {
       mailbox: { $expr: "args.mailbox" },
       subject: "Invoice",
-      body: "Attached.",
-      to: ["billing@northwind.example.org"],
+      body: { content: "Attached." },
+      toRecipients: [
+        { emailAddress: { address: "billing@northwind.example.org" } },
+      ],
       attachments: [
         { file: { $expr: 'args.attach === "" ? note.file : args.attach' } },
       ],
@@ -203,9 +205,12 @@ const steps = [
   },
 ];
 
-/** A definition of `steps`, its mail contract `mail` and files `files`. */
+/**
+ * A definition of `steps`, its attachments and mail contracts `mail` and
+ * files `files`.
+ */
 const definitionOf = (
-  mail: string,
+  mail: MailContracts,
   files: string,
   of: readonly unknown[] = steps
 ): string =>
@@ -236,55 +241,88 @@ const definitionOf = (
       text: { $expr: "text.text" },
     },
     permissions: {
-      connections: { mail: { contract: mail } },
+      connections: {
+        attachments: { contract: mail.attachments },
+        mail: { contract: mail.mail },
+      },
       files: { runFiles: { contract: files } },
     },
     steps: of,
   });
 
+/** The keys of a workflow's catalog contracts for attachments and sends. */
+interface MailContracts {
+  attachments: string;
+  mail: string;
+}
+
 /**
  * The catalog contract of exactly the shapes the native connector makes
- * for its reads of attachments and its sends, answering and taking files
- * as it does: its key.
+ * for `tool` of `contract`, answering or taking files as it does
+ * (`declared`): its key.
  */
-const mailContract = async (
+const nativeContract = async (
   admin: Identity,
-  connectionId: string
+  connectionId: string,
+  contract: string,
+  tool: string,
+  declared: { readOnly: true; answersFile: true } | { takesFiles: true }
 ): Promise<string> => {
   const served = await env.CONNECT.connectorContract({
-    contract: "microsoft-365.mail@1",
+    contract,
     connectionId,
   });
-  const shapeOf = (tool: string) => {
-    const action = Object.values(served.actions).find(
-      (each) => each.tool === tool
-    );
-    if (action === undefined) {
-      throw new Error(`Expected ${tool} in the contract`);
-    }
-    return {
-      input: JSON.stringify({ format: "json", document: jsonOf(action.input) }),
-      output: JSON.stringify({
-        format: "json",
-        document: jsonOf(action.output),
-      }),
-    };
-  };
+  const action = Object.values(served.actions).find(
+    (each) => each.tool === tool
+  );
+  if (action === undefined) {
+    throw new Error(`Expected ${tool} in the contract`);
+  }
   const key = `mail-${unique()}`;
   await publishCatalogContract(env, admin, {
     key,
     kind: "connector",
     operations: {
-      "mail.readAttachment": {
-        ...shapeOf("mail.readAttachment"),
-        readOnly: true,
-        answersFile: true,
+      [tool]: {
+        input: JSON.stringify({
+          format: "json",
+          document: jsonOf(action.input),
+        }),
+        output: JSON.stringify({
+          format: "json",
+          document: jsonOf(action.output),
+        }),
+        ...declared,
       },
-      "mail.send": { ...shapeOf("mail.send"), takesFiles: true },
     },
   });
   return key;
 };
+
+/**
+ * The catalog contracts of exactly the shapes the native connector makes
+ * for its reads of attachments and its sends, answering and taking files
+ * as it does: their keys.
+ */
+const mailContracts = async (
+  admin: Identity,
+  connectionId: string
+): Promise<MailContracts> => ({
+  attachments: await nativeContract(
+    admin,
+    connectionId,
+    "microsoft-365.users.messages.attachments@1",
+    "users.messages.attachments.get",
+    { readOnly: true, answersFile: true }
+  ),
+  mail: await nativeContract(
+    admin,
+    connectionId,
+    "microsoft-365.users.sendMail@1",
+    "users.sendMail.create",
+    { takesFiles: true }
+  ),
+});
 
 /**
  * `key`'s contract as one published before contracts recorded files:
@@ -328,8 +366,9 @@ const withoutFiles = async (key: string): Promise<string> => {
 
 /**
  * A workflow of a builder's that keeps a shared Microsoft 365 account's
- * attachments and mails the run's files, its mail and files permissions
- * approved by an admin: the builder, the workflow and the mailbox.
+ * attachments and mails the run's files, its attachments, mail and files
+ * permissions approved by an admin: the builder, the workflow and the
+ * mailbox.
  */
 const filingWorkflow = async () => {
   const adminPerson = await signedInApi(idp, "admin");
@@ -340,7 +379,7 @@ const filingWorkflow = async () => {
     adminPerson,
     `files-${unique()}`
   );
-  const mailKey = await mailContract(admin, connectionId);
+  const mail = await mailContracts(admin, connectionId);
   const filesKey = `files-${unique()}`;
   await publishCatalogContract(env, admin, { key: filesKey, kind: "files" });
   const workflow = await createWorkflowResource(
@@ -352,23 +391,27 @@ const filingWorkflow = async () => {
     env,
     builder,
     workflow.id,
-    definitionOf(mailKey, filesKey)
+    definitionOf(mail, filesKey)
   );
-  const permissionId = await granted(builder, admin, {
-    subject: { type: "workflow", workflowId: workflow.id },
-    object: { type: "connection", connectionId },
-    actions: ["mail.readAttachment", "mail.send"],
-    binding: `MAIL_${unique().toUpperCase().replaceAll("-", "_")}`,
-  });
-  await approveWorkflowBinding(env, admin, workflow.id, {
-    alias: "mail",
-    target: {
-      kind: "connector",
-      permissionId,
-      contract: "microsoft-365.mail@1",
-    },
-    reviewed: { version: 1 },
-  });
+  const bind = async (alias: string, action: string, contract: string) => {
+    const permissionId = await granted(builder, admin, {
+      subject: { type: "workflow", workflowId: workflow.id },
+      object: { type: "connection", connectionId },
+      actions: [action],
+      binding: `MAIL_${unique().toUpperCase().replaceAll("-", "_")}`,
+    });
+    await approveWorkflowBinding(env, admin, workflow.id, {
+      alias,
+      target: { kind: "connector", permissionId, contract },
+      reviewed: { version: 1 },
+    });
+  };
+  await bind(
+    "attachments",
+    "users.messages.attachments.get",
+    "microsoft-365.users.messages.attachments@1"
+  );
+  await bind("mail", "users.sendMail.create", "microsoft-365.users.sendMail@1");
   await approveWorkflowBinding(env, admin, workflow.id, {
     alias: "runFiles",
     target: { kind: "files" },
@@ -551,7 +594,11 @@ describe("a workflow's connection calls keeping and attaching run files", () => 
       adminPerson,
       `plain-${unique()}`
     );
-    const plain = await withoutFiles(await mailContract(admin, connectionId));
+    const mail = await mailContracts(admin, connectionId);
+    const plain = {
+      attachments: await withoutFiles(mail.attachments),
+      mail: await withoutFiles(mail.mail),
+    };
     const filesKey = `files-${unique()}`;
     await publishCatalogContract(env, admin, { key: filesKey, kind: "files" });
     const workflow = await createWorkflowResource(

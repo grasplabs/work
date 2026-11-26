@@ -57,7 +57,7 @@ export const verdictLine =
 
 /** Reads only, retried once: what a careful turn does when a read fails. */
 const isRead = (action: string) =>
-  /\.(?:list|get|listRows|thread)$/u.test(action);
+  /\.(?:list|get|dataBodyRange|thread)$/u.test(action);
 
 /** The tokens a recall of the Brain hands over at most. */
 const recallTokens = 4000;

@@ -12,7 +12,7 @@ import { z } from "zod";
 //
 //   requires:
 //     connections: [microsoft]   # a native provider, or a toolkit's slug
-//     tools: [mail.send]         # a connection's action: its tool's name
+//     tools: [users.sendMail.create] # a connection's action: its tool's name
 //
 // A skill whose needs the caller lacks is never listed, selected or read
 // for them (brain-skills.ts): it is as if it weren't there. A need is

@@ -3,10 +3,9 @@ import { defineConnector } from "@grasp-os/connector-kit/connector";
 import { calendarSync } from "./calendar-sync.ts";
 import { calendarTools } from "./calendar.ts";
 import { chatTools } from "./chats.ts";
-import { documentTools } from "./documents.ts";
 import { draftTools } from "./drafts.ts";
 import { fileTools } from "./files.ts";
-import { graphHost } from "./graph.ts";
+import { graphBase, graphHost } from "./graph-sdk.ts";
 import { librarySync } from "./library-sync.ts";
 import { listTools } from "./lists.ts";
 import { mailReplyTools } from "./mail-replies.ts";
@@ -51,13 +50,13 @@ export default defineConnector({
     "Mail.ReadWrite.Shared",
     "Mail.Send",
     "Mail.Send.Shared",
-    // The categories a person has, so mail.categorise sets only those.
+    // The categories a person has, so me.messages.update sets only those.
     "MailboxSettings.Read",
     "Calendars.ReadWrite",
     "Calendars.Read.Shared",
     // Changing a workbook's rows: in the person's own files, and in those
     // SharePoint lets them change; and drafts in the person's own OneDrive
-    // (files.createDraft, under /me/drive).
+    // (me.drive.root.content.upload, under /me/drive).
     "Files.ReadWrite.All",
     "Sites.ReadWrite.All",
     // A person's own To Do, and the Planner plans of their groups.
@@ -71,20 +70,65 @@ export default defineConnector({
   ],
   hosts: [graphHost],
   tools: [
-    ...mailTools,
-    ...mailReplyTools,
-    ...mailSortingTools,
-    ...calendarTools,
-    ...fileTools,
-    ...documentTools,
-    ...draftTools,
-    ...listTools,
-    ...workbookTools,
-    ...todoTools,
-    ...plannerTools,
-    ...onenoteTools,
-    ...chatTools,
-    ...meetingTools,
+    // The mail tools, written on @grasp-os/sdk/connector.
+    ...Object.entries({
+      ...mailTools,
+      ...mailReplyTools,
+      ...mailSortingTools,
+    }).map(([name, each]) =>
+      each.serve(name, {
+        title: "Microsoft 365",
+        hosts: [graphHost],
+        base: graphBase,
+      })
+    ),
+    // The calendar, meeting and chat tools, written on
+    // @grasp-os/sdk/connector.
+    ...Object.entries({
+      ...calendarTools,
+      ...meetingTools,
+      ...chatTools,
+    }).map(([name, each]) =>
+      each.serve(name, {
+        title: "Microsoft 365",
+        hosts: [graphHost],
+        base: graphBase,
+      })
+    ),
+    // The file tools, written on @grasp-os/sdk/connector.
+    ...Object.entries({ ...fileTools, ...draftTools }).map(([name, each]) =>
+      each.serve(name, {
+        title: "Microsoft 365",
+        hosts: [graphHost],
+        base: graphBase,
+      })
+    ),
+    // SharePoint lists and Excel tables, written on @grasp-os/sdk/connector.
+    ...Object.entries({ ...listTools, ...workbookTools }).map(([name, each]) =>
+      each.serve(name, {
+        title: "Microsoft 365",
+        hosts: [graphHost],
+        base: graphBase,
+      })
+    ),
+    // Written on @grasp-os/sdk/connector, served beside the kit's tools
+    // until every family is.
+    ...Object.entries(todoTools).map(([name, each]) =>
+      each.serve(name, {
+        title: "Microsoft 365",
+        hosts: [graphHost],
+        base: graphBase,
+      })
+    ),
+    // Planner and OneNote, written on @grasp-os/sdk/connector.
+    ...Object.entries({ ...plannerTools, ...onenoteTools }).map(
+      ([name, each]) =>
+        each.serve(name, {
+          title: "Microsoft 365",
+          hosts: [graphHost],
+          base: graphBase,
+        })
+    ),
   ],
   syncs: [onedriveSync, mailSync, calendarSync, librarySync],
 });

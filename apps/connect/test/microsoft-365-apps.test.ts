@@ -17,6 +17,7 @@ import {
   financeSite,
   hrSite,
   itemIds,
+  reportText,
 } from "./fixtures/graph.ts";
 import { fakeGraph } from "./graph-api.ts";
 import { fakeProviders } from "./oauth-provider.ts";
@@ -25,6 +26,7 @@ import {
   claimedAgo,
   outputOf,
   parsedRequests,
+  resultOf,
   toolError,
 } from "./tool-calls.ts";
 import type { Connection, Input } from "./tool-calls.ts";
@@ -49,52 +51,59 @@ const connected = async (): Promise<Connection> => {
   return { id, person };
 };
 
-const ownMailbox = ({ person }: Connection): string => person.email;
-
 /** What left connect, each request with its query and JSON body parsed. */
 const requests = () => parsedRequests(graph.sent);
 
-describe("the Microsoft 365 connector's Word tool", () => {
+/** A read of a file of the finance drive, as `as` asks for it. */
+const download = async (
+  connection: Connection,
+  item: string,
+  as?: "text" | "base64"
+) =>
+  await call(
+    connection,
+    "drives.items.content.download",
+    { drive: financeDrive, item, ...(as === undefined ? {} : { as }) },
+    { resource: financeDrive }
+  );
+
+describe("the Microsoft 365 connector's Word documents", () => {
   it("reads a Word document's words: a line per paragraph, its tabs and line breaks kept", async () => {
     const connection = await connected();
     await expect(
-      outputOf(
-        call(
-          connection,
-          "word.read",
-          { drive: financeDrive, item: itemIds.contract },
-          { resource: financeDrive }
-        )
-      )
+      outputOf(download(connection, itemIds.contract))
     ).resolves.toMatchObject({
-      drive: financeDrive,
       id: itemIds.contract,
       name: "Supply agreement Northwind.docx",
-      text: contractText,
+      contentType: "text/plain",
+      encoding: "text",
+      content: contractText,
+    });
+    // As base64, it is the document's own bytes.
+    await expect(
+      outputOf(download(connection, itemIds.contract, "base64"))
+    ).resolves.toMatchObject({
+      contentType:
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      encoding: "base64",
     });
   });
 
-  it("refuses a file that isn't a Word document, and one the person may not open", async () => {
+  it("reads a file that isn't a Word document as its own text, and refuses one the person may not open", async () => {
     const connection = await connected();
-    const read = async (item: string) =>
-      await toolError(
-        call(
-          connection,
-          "word.read",
-          { drive: financeDrive, item },
-          { resource: financeDrive }
-        )
-      );
-    await expect(read(itemIds.report)).resolves.toMatchObject({
-      error: { code: "not_text" },
+    await expect(
+      outputOf(download(connection, itemIds.report))
+    ).resolves.toMatchObject({
+      contentType: "text/plain",
+      content: reportText,
     });
-    await expect(read(itemIds.locked)).resolves.toMatchObject({
-      error: { code: "access_denied" },
-    });
+    await expect(
+      toolError(download(connection, itemIds.locked))
+    ).resolves.toMatchObject({ error: { code: "access_denied" } });
     // A file too big to read is refused before its content is asked for.
-    await expect(read(itemIds.big)).resolves.toMatchObject({
-      error: { code: "too_large" },
-    });
+    await expect(
+      toolError(download(connection, itemIds.big))
+    ).resolves.toMatchObject({ error: { code: "too_large" } });
     expect(
       requests().filter(({ path }) => path.endsWith("/content"))
     ).toHaveLength(1);
@@ -122,29 +131,30 @@ const plannerCall = async (
 describe("the Microsoft 365 connector's Planner tools", () => {
   it("read a plan's tasks a page at a time, and only the open ones when asked", async () => {
     const connection = await connected();
-    const first = await plannerCall(connection, "planner.tasks", {});
+    const first = await plannerCall(connection, "planner.plans.tasks.list", {});
     expect(first).toMatchObject({
-      plan: planIds.finance,
-      tasks: [
+      items: [
         {
           title: "Reconcile supplier statement 1",
-          assignedTo: ["fbab97d0-4932-4511-b675-204639209557"],
+          assignments: { "fbab97d0-4932-4511-b675-204639209557": {} },
         },
         { title: "Reconcile supplier statement 2", percentComplete: 100 },
       ],
-      nextPage: "%24skiptoken=2",
+      next: "%24skiptoken=2",
     });
-    const { nextPage } = z.object({ nextPage: z.string() }).parse(first);
+    const { next } = z.object({ next: z.string() }).parse(first);
     await expect(
-      plannerCall(connection, "planner.tasks", { page: nextPage })
+      plannerCall(connection, "planner.plans.tasks.list", { next })
     ).resolves.toMatchObject({
-      tasks: [{ title: "Reconcile supplier statement 3" }],
-      nextPage: null,
+      items: [{ title: "Reconcile supplier statement 3" }],
+      next: null,
     });
     await expect(
-      plannerCall(connection, "planner.tasks", { openOnly: true })
+      plannerCall(connection, "planner.plans.tasks.list", {
+        completedDateTime: null,
+      })
     ).resolves.toMatchObject({
-      tasks: [{ title: "Reconcile supplier statement 1" }],
+      items: [{ title: "Reconcile supplier statement 1" }],
     });
   });
 
@@ -152,18 +162,21 @@ describe("the Microsoft 365 connector's Planner tools", () => {
     const connection = await connected();
     const made = await plannerCall(
       connection,
-      "planner.create",
-      { title: "Reconcile Fabrikam's statement", due: "2026-10-30" },
+      "planner.tasks.create",
+      {
+        title: "Reconcile Fabrikam's statement",
+        dueDateTime: "2026-10-30T12:00:00Z",
+      },
       "run-1:planner"
     );
     expect(made).toMatchObject({
-      plan: planIds.finance,
-      task: {
-        title: "Reconcile Fabrikam's statement",
-        due: "2026-10-30T12:00:00Z",
-        assignedTo: [],
-      },
+      planId: planIds.finance,
+      title: "Reconcile Fabrikam's statement",
+      dueDateTime: "2026-10-30T12:00:00Z",
     });
+    expect(
+      z.object({ assignments: z.record(z.string(), z.unknown()) }).parse(made)
+    ).toStrictEqual({ assignments: {} });
     const sent = requests().find(({ method }) => method === "POST");
     expect(sent).toMatchObject({
       path: "/v1.0/planner/tasks",
@@ -183,7 +196,7 @@ describe("the Microsoft 365 connector's Planner tools", () => {
       toolError(
         call(
           connection,
-          "planner.create",
+          "planner.tasks.create",
           { plan: planIds.hr, title: "Anything" },
           { resource: planIds.hr, idempotencyKey: "run-2:planner" }
         )
@@ -204,11 +217,11 @@ describe("the Microsoft 365 connector's Planner tools", () => {
     };
     graph.loseWriteAnswer();
     await expect(
-      outcome(call(connection, "planner.create", task, options))
+      outcome(call(connection, "planner.tasks.create", task, options))
     ).resolves.toBe("connect.outcome_unknown");
     await claimedAgo(connection);
     await expect(
-      outcome(call(connection, "planner.create", task, options))
+      outcome(call(connection, "planner.tasks.create", task, options))
     ).resolves.toBe("connect.outcome_unknown");
     expect(graph.writesDone()).toBe(1);
   });
@@ -224,11 +237,8 @@ const onenote = async (
     call(
       connection,
       action,
-      { mailbox: ownMailbox(connection), ...input },
-      {
-        resource: ownMailbox(connection),
-        ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
-      }
+      input,
+      idempotencyKey === undefined ? {} : { idempotencyKey }
     )
   );
 
@@ -236,40 +246,46 @@ describe("the Microsoft 365 connector's OneNote tools", () => {
   const notes = {
     section: sectionIds.own,
     title: "Fabrikam call",
-    text: "Agreed: <b>net 30</b> & a 2% discount\n\nCall back Monday",
+    content: "Agreed: <b>net 30</b> & a 2% discount\n\nCall back Monday",
   };
 
   it("list only the sections of the person's own notebooks", async () => {
     const connection = await connected();
     await expect(
-      onenote(connection, "onenote.sections", {})
+      onenote(connection, "me.onenote.sections.list", {})
     ).resolves.toStrictEqual({
-      mailbox: ownMailbox(connection),
-      sections: [
+      items: [
         {
           id: sectionIds.own,
-          name: "Meetings",
-          notebookId: notebooks.own.id,
-          notebook: "Work notes",
+          displayName: "Meetings",
+          parentNotebook: { id: notebooks.own.id, displayName: "Work notes" },
         },
       ],
-      nextPage: null,
+      next: null,
     });
   });
 
   it("read a page's words, not its markup", async () => {
     const connection = await connected();
     await expect(
-      onenote(connection, "onenote.pages", { section: sectionIds.own })
+      onenote(connection, "me.onenote.sections.pages.list", {
+        section: sectionIds.own,
+      })
     ).resolves.toMatchObject({
-      pages: [{ id: meetingPage.id, title: "Northwind call" }],
+      items: [{ id: meetingPage.id, title: "Northwind call" }],
     });
     await expect(
-      onenote(connection, "onenote.read", { page: meetingPage.id })
+      resultOf(
+        call(connection, "me.onenote.pages.get", { page: meetingPage.id })
+      )
     ).resolves.toMatchObject({
-      page: { id: meetingPage.id, title: "Northwind call" },
-      sectionId: sectionIds.own,
-      text: meetingText,
+      output: {
+        id: meetingPage.id,
+        title: "Northwind call",
+        parentSection: { id: sectionIds.own },
+        content: meetingText,
+      },
+      provenance: [meetingPage.id],
     });
   });
 
@@ -277,58 +293,51 @@ describe("the Microsoft 365 connector's OneNote tools", () => {
     const connection = await connected();
     const made = await onenote(
       connection,
-      "onenote.create",
+      "me.onenote.sections.pages.create",
       notes,
       "run-1:notes"
     );
-    expect(made).toMatchObject({
-      sectionId: sectionIds.own,
-      page: { title: "Fabrikam call" },
-    });
-    const { page } = z
-      .object({ page: z.object({ id: z.string() }) })
-      .parse(made);
+    expect(made).toMatchObject({ title: "Fabrikam call" });
+    const { id } = z.object({ id: z.string() }).parse(made);
     // What the person typed reads back as they typed it: none of it became
     // markup on the page.
     await expect(
-      onenote(connection, "onenote.read", { page: page.id })
+      onenote(connection, "me.onenote.pages.get", { page: id })
     ).resolves.toMatchObject({
-      text: "Agreed: <b>net 30</b> & a 2% discount\nCall back Monday",
+      parentSection: { id: sectionIds.own },
+      content: "Agreed: <b>net 30</b> & a 2% discount\nCall back Monday",
     });
   });
 
-  it("refuse another person's OneNote, and notebooks shared with or by the person", async () => {
+  it("reach no one else's OneNote, and refuse notebooks shared with or by the person", async () => {
     const connection = await connected();
+    // Every route is the person's own, under /me: a call naming someone
+    // else is refused before anything goes out.
     await expect(
-      toolError(
+      outcome(
         call(
           connection,
-          "onenote.create",
+          "me.onenote.sections.pages.create",
           { ...notes, mailbox: ceo },
-          { resource: ceo, idempotencyKey: "run-2:theirs" }
+          { idempotencyKey: "run-2:theirs" }
         )
       )
-    ).resolves.toMatchObject({ error: { code: "access_denied" } });
+    ).resolves.toBe("connect.action_failed");
+    expect(graph.sent).toStrictEqual([]);
     const calls: [string, Input][] = [
       sectionIds.sharedByThem,
       sectionIds.sharedWithThem,
     ].flatMap((section): [string, Input][] => [
-      ["onenote.pages", { section }],
-      ["onenote.create", { ...notes, section }],
+      ["me.onenote.sections.pages.list", { section }],
+      ["me.onenote.sections.pages.create", { ...notes, section }],
     ]);
     const refusals = await Promise.all(
       calls.map(
         async ([action, input]) =>
           await toolError(
-            call(
-              connection,
-              action,
-              { mailbox: ownMailbox(connection), ...input },
-              {
-                resource: ownMailbox(connection),
-                idempotencyKey: crypto.randomUUID(),
-              }
-            )
+            call(connection, action, input, {
+              idempotencyKey: crypto.randomUUID(),
+            })
           )
       )
     );
@@ -343,20 +352,15 @@ describe("the Microsoft 365 connector's OneNote tools", () => {
     graph.shareNotebook(notebooks.own.id);
     await expect(
       toolError(
-        call(
-          connection,
-          "onenote.read",
-          { mailbox: ownMailbox(connection), page: meetingPage.id },
-          { resource: ownMailbox(connection) }
-        )
+        call(connection, "me.onenote.pages.get", { page: meetingPage.id })
       )
     ).resolves.toMatchObject({ error: { code: "access_denied" } });
     expect(
       requests().filter(({ path }) => path.endsWith("/content"))
     ).toStrictEqual([]);
     await expect(
-      onenote(connection, "onenote.sections", {})
-    ).resolves.toMatchObject({ sections: [] });
+      onenote(connection, "me.onenote.sections.list", {})
+    ).resolves.toMatchObject({ items: [] });
   });
 });
 
@@ -379,7 +383,7 @@ describe("the Microsoft 365 connector's list writes", () => {
   const raise = {
     item: "1",
     before: [{ column: "CreditLimit", value: 5000 }],
-    after: [
+    fields: [
       { column: "CreditLimit", value: 7500 },
       { column: "Notes", value: "Raised after the Q3 review" },
     ],
@@ -390,9 +394,9 @@ describe("the Microsoft 365 connector's list writes", () => {
     await expect(
       listCall(
         connection,
-        "lists.addItem",
+        "sites.lists.items.create",
         {
-          values: [
+          fields: [
             { column: "Title", value: "Fabrikam Metals" },
             { column: "Approved", value: false },
             { column: "CreditLimit", value: 2500 },
@@ -401,15 +405,11 @@ describe("the Microsoft 365 connector's list writes", () => {
         "run-1:supplier"
       )
     ).resolves.toMatchObject({
-      site: financeSite,
-      list: suppliersList,
-      item: {
-        id: "2",
-        fields: {
-          Title: "Fabrikam Metals",
-          Approved: false,
-          CreditLimit: 2500,
-        },
+      id: "2",
+      fields: {
+        Title: "Fabrikam Metals",
+        Approved: false,
+        CreditLimit: 2500,
       },
     });
     expect(graph.supplierOf("2")).toStrictEqual({
@@ -423,25 +423,28 @@ describe("the Microsoft 365 connector's list writes", () => {
     const connection = await connected();
     const changed = await listCall(
       connection,
-      "lists.updateItem",
+      "sites.lists.items.fields.update",
       raise,
       "run-2:raise"
     );
     expect(changed).toMatchObject({
-      item: {
-        id: "1",
-        fields: {
-          Title: "Northwind Supplies",
-          CreditLimit: 7500,
-          Notes: "Raised after the Q3 review",
-        },
+      id: "1",
+      fields: {
+        Title: "Northwind Supplies",
+        CreditLimit: 7500,
+        Notes: "Raised after the Q3 review",
       },
     });
     // SharePoint's own columns stay out of what the tool hands back.
-    expect(changed).not.toHaveProperty("item.fields.ContentType");
+    expect(changed).not.toHaveProperty("fields.ContentType");
     // The same change again finds the item standing as asked, and writes
     // nothing.
-    await listCall(connection, "lists.updateItem", raise, "run-3:raise");
+    await listCall(
+      connection,
+      "sites.lists.items.fields.update",
+      raise,
+      "run-3:raise"
+    );
     expect(graph.writesDone()).toBe(1);
     const patch = requests().find(({ method }) => method === "PATCH");
     expect(patch).toMatchObject({
@@ -457,7 +460,7 @@ describe("the Microsoft 365 connector's list writes", () => {
       toolError(
         call(
           connection,
-          "lists.updateItem",
+          "sites.lists.items.fields.update",
           { site: financeSite, list: suppliersList, ...raise },
           { resource: financeSite, idempotencyKey: "run-4:raise" }
         )
@@ -474,11 +477,11 @@ describe("the Microsoft 365 connector's list writes", () => {
       toolError(
         call(
           connection,
-          "lists.addItem",
+          "sites.lists.items.create",
           {
             site: financeSite,
             list: suppliersList,
-            values: [
+            fields: [
               { column: "Title", value: "Fabrikam Metals" },
               { column: "ContentType", value: "Document" },
             ],
@@ -491,11 +494,11 @@ describe("the Microsoft 365 connector's list writes", () => {
       toolError(
         call(
           connection,
-          "lists.addItem",
+          "sites.lists.items.create",
           {
             site: financeSite,
             list: suppliersList,
-            values: [
+            fields: [
               { column: "Title", value: "Fabrikam Metals" },
               { column: "Title", value: "Contoso Paper" },
             ],
@@ -503,7 +506,7 @@ describe("the Microsoft 365 connector's list writes", () => {
           { resource: financeSite, idempotencyKey: "run-6:supplier" }
         )
       )
-    ).resolves.toBe("Invalid input: custom at values");
+    ).resolves.toMatchObject({ error: { code: "invalid" } });
     expect(graph.sent).toHaveLength(sent);
   });
 
@@ -513,11 +516,11 @@ describe("the Microsoft 365 connector's list writes", () => {
       toolError(
         call(
           connection,
-          "lists.addItem",
+          "sites.lists.items.create",
           {
             site: hrSite,
             list: suppliersList,
-            values: [{ column: "Title", value: "Fabrikam Metals" }],
+            fields: [{ column: "Title", value: "Fabrikam Metals" }],
           },
           { resource: hrSite, idempotencyKey: "run-7:supplier" }
         )

@@ -81,11 +81,15 @@ const ownOutlook = async (person: Person, binding: string) => {
   await requestGranted(idp, admin, {
     subject: { type: "agent", agentId: chatAgentId },
     object: { type: "connection", connectionId: connection.id },
-    actions: ["mail.send"],
+    actions: ["users.sendMail.create"],
     binding,
   });
   return { id: connection.id, mailbox: connection.accountName };
 };
+
+/** `addresses` as Graph's recipients. */
+const recipients = (addresses: string[]) =>
+  addresses.map((address) => ({ emailAddress: { address } }));
 
 /**
  * A member whose Teams turn sends one mail from their own Outlook, as the
@@ -106,10 +110,16 @@ const sendingTurn = async (
   const body = "Hi Ben, the invoice is attached. Kind regards, Anna";
   const person = await signedInApi(idp, "user");
   const outlook = await ownOutlook(person, binding);
-  const mail = { mailbox: outlook.mailbox, to, cc, subject, body };
+  const mail = {
+    mailbox: outlook.mailbox,
+    subject,
+    body: { content: body },
+    toRecipients: recipients(to),
+    ccRecipients: recipients(cc),
+  };
   await fakeProvider(
     codeStep(
-      `export default async (self, env) => { try { const { pending } = await env.connections.call(${JSON.stringify(binding)}, "mail.send", ${JSON.stringify(mail)}); return pending === null ? "sent" : "held"; } catch (error) { return error.message; } };`
+      `export default async (self, env) => { try { const { pending } = await env.connections.call(${JSON.stringify(binding)}, "users.sendMail.create", ${JSON.stringify(mail)}); return pending === null ? "sent" : "held"; } catch (error) { return error.message; } };`
     ),
     says("Done.")
   );

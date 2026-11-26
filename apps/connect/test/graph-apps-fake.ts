@@ -2,9 +2,9 @@
  * Graph's Planner, OneNote and a SharePoint list that is written to, as the
  * Microsoft 365 connector reaches them, beside the rest of the fake Graph
  * (graph-api.ts). Planner opens Finance's plan, not HR's, as it answers for
- * a member of Finance's group. Each person's OneNote is theirs alone:
- * Graph answers a token for its own user's notebooks only, as it answers a
- * delegated `Notes.ReadWrite` token. The suppliers list holds its items in
+ * a member of Finance's group. Each person's OneNote is theirs alone, under
+ * `/me`: Graph answers a token for its own user's notebooks only, as it
+ * answers a delegated `Notes.ReadWrite` token. The suppliers list holds its items in
  * memory and refuses a change sent with an old `If-Match` etag. All of it
  * starts afresh for each test (`resetApps`).
  */
@@ -37,7 +37,6 @@ type Route = (
 ) => ProviderRoute<Part>;
 
 const planner = String.raw`^/v1\.0/planner`;
-const users = String.raw`^/v1\.0/users/(?<mailbox>[^/]+)`;
 const sites = String.raw`^/v1\.0/sites/(?<site>[^/]+)`;
 
 /** Planner pages a plan's tasks by two, as Graph may: a reader follows the next page. */
@@ -195,13 +194,14 @@ export const resetApps = (): void => {
 
 /**
  * The routes, given how graph-api.ts makes one and whose a request's
- * token is (`ownerOf`: the subject, if the mailbox it names is that user).
+ * token is (`ownerOf`: the subject of its account, if any). OneNote is
+ * the signed-in user's own, under `/me`.
  */
 export const appRoutes = (
   route: Route,
-  ownerOf: (mailbox: string, request: Request) => string | undefined
+  ownerOf: (request: Request) => string | undefined
 ): ProviderRoute<Part>[] => {
-  const onenote = `${users}/onenote`;
+  const onenote = String.raw`^/v1\.0/me/onenote`;
   return [
     // Planner.
     route("GET", `${planner}/plans/(?<plan>[^/]+)`, (asked) => {
@@ -261,7 +261,7 @@ export const appRoutes = (
     }),
     // OneNote.
     route("GET", `${onenote}/sections`, (asked) => {
-      if (ownerOf(asked.mailbox, asked.request) === undefined) {
+      if (ownerOf(asked.request) === undefined) {
         return json(graphAccessDenied, 403);
       }
       return json({
@@ -269,7 +269,7 @@ export const appRoutes = (
       });
     }),
     route("GET", `${onenote}/sections/(?<section>[^/]+)`, (asked) => {
-      if (ownerOf(asked.mailbox, asked.request) === undefined) {
+      if (ownerOf(asked.request) === undefined) {
         return json(graphAccessDenied, 403);
       }
       const section = sections.find(({ id }) => id === asked.section);
@@ -278,7 +278,7 @@ export const appRoutes = (
         : json(sectionAnswer(section, asked.query));
     }),
     route("GET", `${onenote}/sections/(?<section>[^/]+)/pages`, (asked) => {
-      const owner = ownerOf(asked.mailbox, asked.request);
+      const owner = ownerOf(asked.request);
       if (owner === undefined) {
         return json(graphAccessDenied, 403);
       }
@@ -294,7 +294,7 @@ export const appRoutes = (
       "POST",
       `${onenote}/sections/(?<section>[^/]+)/pages`,
       async (asked) => {
-        const owner = ownerOf(asked.mailbox, asked.request);
+        const owner = ownerOf(asked.request);
         if (owner === undefined) {
           return json(graphAccessDenied, 403);
         }
@@ -318,7 +318,7 @@ export const appRoutes = (
       }
     ),
     route("GET", `${onenote}/pages/(?<page>[^/]+)`, (asked) => {
-      const owner = ownerOf(asked.mailbox, asked.request);
+      const owner = ownerOf(asked.request);
       if (owner === undefined) {
         return json(graphAccessDenied, 403);
       }
@@ -328,7 +328,7 @@ export const appRoutes = (
         : json(pageAnswer(page, asked.query));
     }),
     route("GET", `${onenote}/pages/(?<page>[^/]+)/content`, (asked) => {
-      const owner = ownerOf(asked.mailbox, asked.request);
+      const owner = ownerOf(asked.request);
       if (owner === undefined) {
         return json(graphAccessDenied, 403);
       }

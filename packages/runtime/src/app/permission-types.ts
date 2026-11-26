@@ -42,7 +42,7 @@ export interface ConnectionConfig<
 > {
   /**
    * The generated contract and its major version: one the release's
-   * connectors serve, e.g. `microsoft-365.mail@1`, or a Composio toolkit's,
+   * connectors serve, e.g. `microsoft-365.users.messages@1`, or a Composio toolkit's,
    * e.g. `composio.hubspot@1`.
    */
   readonly contract: Contract;

@@ -1,21 +1,7 @@
-import { defineTool } from "@grasp-os/connector-kit/connector";
-import type { Effect } from "@grasp-os/connector-kit/connector";
-import {
-  invalidCode,
-  jsonBody,
-  segment,
-  ToolError,
-} from "@grasp-os/runtime/connector";
-import { z } from "zod";
+import { page, tool, ToolError, v } from "@grasp-os/sdk/connector";
+import type { Api, Infer, ToolCall } from "@grasp-os/sdk/connector";
 
-import {
-  driveSchema,
-  graphHost,
-  graphJson,
-  graphUrl,
-  idSchema,
-  v1,
-} from "./graph.ts";
+import { checkDrive, checkIds, drive, graphId, next } from "./graph-sdk.ts";
 
 // Rows of a named table in an Excel workbook: a register a company keeps
 // in SharePoint or OneDrive, read and changed through the person's own
@@ -45,25 +31,20 @@ import {
 // formula is changed only as `{ formula }`, and keeping the one it holds
 // needs no confirming again.
 
-const table = `${v1}/drives/{drive}/items/{workbook}/workbook/tables/{table}`;
-
-const get = (path: string) =>
-  ({ method: "GET", host: graphHost, path: `${table}${path}` }) as const;
-
-const headerRoute = get("/headerRowRange");
-const bodyRoute = get("/dataBodyRange");
-const rowRoute = "/rows/itemAt(index={row})/range";
+const tableRoute = "/drives/{drive}/items/{workbook}/workbook/tables/{table}";
+const headerRoute = `${tableRoute}/headerRowRange`;
+const bodyRoute = `${tableRoute}/dataBodyRange`;
+const rowsRoute = `${tableRoute}/rows`;
+const rowRoute = `${tableRoute}/rows/itemAt(index={index})/range`;
 
 /**
  * A table's name, as Excel allows it: a letter or underscore, then
  * letters, digits, underscores and periods. Never a table's `{...}` ID or
- * anything else Graph would take in its place.
+ * anything else Graph would take in its place. `checkTable` holds it to that.
  */
-const tableSchema = z
-  .string()
-  .min(1)
-  .max(255)
-  .regex(/^[\p{L}_][\p{L}\p{N}_.]*$/u);
+const table = v.string().min(1).max(255);
+
+const tablePattern = /^[\p{L}_][\p{L}\p{N}_.]*$/u;
 
 /** Most characters a cell holds, as Excel allows. */
 const maxCellChars = 32_767;
@@ -71,73 +52,108 @@ const maxCellChars = 32_767;
 /** Most columns a row of a register may have here. */
 const maxColumns = 200;
 
-/**
- * A day, as a cell holds it: `{ date: "2026-10-21" }`. By a pattern, not
- * zod's `iso.date()`: a generated contract checks patterns, and a `date`
- * format it doesn't know would leave the action out of App bindings.
- */
-const daySchema = z.strictObject({
-  date: z
-    .string()
-    .regex(/^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/u)
-    .refine(
-      (date) => new Date(`${date}T00:00:00Z`).toISOString().startsWith(date),
-      "Not a day"
-    ),
-});
+/** A day, as a cell holds it: `{ date: "2026-10-21" }`. `checkCells` holds it to a day. */
+const Day = v.object({ date: v.string().min(10).max(10) });
 
-/** The cells a row is read as: text, a number, true or false, a day, or empty. */
-const readCells = [
-  z.string().max(maxCellChars),
-  z.number(),
-  z.boolean(),
-  z.null(),
-  daySchema,
-] as const;
+const dayPattern = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/u;
 
-/** A cell as it is read. */
-const readCellSchema = z.union(readCells);
-type ReadCell = z.infer<typeof readCellSchema>;
+/** A formula, as a cell is written: `{ formula: "=SUM(A1:A9)" }`. */
+const Formula = v.object({ formula: v.string().min(2).max(8192) });
+
+/** A cell as it is read: text, a number, true or false, a day, or empty. */
+const ReadCell = v.union(
+  v.string().max(maxCellChars),
+  v.number(),
+  v.boolean(),
+  v.null(),
+  Day
+);
+type ReadCellValue = Infer<typeof ReadCell>;
 
 /** A cell as it is written: as it is read, or a formula. */
-const cellSchema = z.union([
-  ...readCells,
-  z.strictObject({
-    formula: z.string().min(2).max(8192).regex(/^=/u),
-  }),
-]);
-type Cell = z.infer<typeof cellSchema>;
+const Cell = v.union(
+  v.string().max(maxCellChars),
+  v.number(),
+  v.boolean(),
+  v.null(),
+  Day,
+  Formula
+);
+type CellValue = Infer<typeof Cell>;
 
-const columnSchema = z.string().min(1).max(255);
+const column = v.string().min(1).max(255);
 
 /** A row as read: each of the table's columns, with its cell. */
-const readRowSchema = z
-  .array(z.strictObject({ column: columnSchema, value: readCellSchema }))
+const ReadRow = v
+  .array(v.object({ column, value: ReadCell }))
   .min(1)
   .max(maxColumns);
-type ReadRow = z.infer<typeof readRowSchema>;
+type ReadRowValue = Infer<typeof ReadRow>;
 
 /** A row as it will stand: each of the table's columns, with its cell. */
-const rowSchema = z
-  .array(z.strictObject({ column: columnSchema, value: cellSchema }))
+const Row = v
+  .array(v.object({ column, value: Cell }))
   .min(1)
   .max(maxColumns);
-type Row = z.infer<typeof rowSchema>;
+type RowValue = Infer<typeof Row>;
 
-const graphValue = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+/** A table's row (Graph's workbookTableRow): its index, and its cells by column. */
+const TableRow = v.object({
+  index: v.number().integer(),
+  values: Row,
+});
+
+const graphValue = v.union(v.string(), v.number(), v.boolean(), v.null());
+type GraphValue = Infer<typeof graphValue>;
 
 /** A range as Graph answers it: its values, and how each is shown. */
-const graphRange = z.object({
-  values: z.array(z.array(graphValue)),
-  numberFormat: z.array(z.array(z.string().nullable())).nullish(),
-  formulas: z.array(z.array(graphValue)).nullish(),
+const graphRange = v.object({
+  values: v.array(v.array(graphValue)),
+  numberFormat: v.array(v.array(v.string().nullable())).nullable().optional(),
+  formulas: v.array(v.array(graphValue)).nullable().optional(),
 });
-type GraphRange = z.infer<typeof graphRange>;
+type GraphRange = Infer<typeof graphRange>;
 
-const graphTableRow = z.object({
-  index: z.number().int().nonnegative(),
-  values: z.array(z.array(graphValue)),
+const graphTableRow = v.object({
+  index: v.number().integer().min(0),
+  values: v.array(v.array(graphValue)),
 });
+
+/** Refuses, before anything is sent, a name that isn't a table's. */
+const checkTable = (name: string): void => {
+  if (!tablePattern.test(name)) {
+    throw new ToolError("Invalid input: table isn't an Excel table's name", {
+      code: "invalid",
+    });
+  }
+};
+
+/** Whether `date` is a day of the calendar (no 30 February). */
+const isDay = (date: string): boolean =>
+  dayPattern.test(date) &&
+  new Date(`${date}T00:00:00Z`).toISOString().startsWith(date);
+
+/**
+ * Refuses, before anything is sent, a day that isn't one and a formula
+ * that doesn't start with `=`.
+ */
+const checkCells = (
+  name: string,
+  row: readonly { value: CellValue }[]
+): void => {
+  for (const { value } of row) {
+    if (
+      value !== null &&
+      typeof value === "object" &&
+      ("date" in value ? !isDay(value.date) : !value.formula.startsWith("="))
+    ) {
+      throw new ToolError(
+        `Invalid input: ${name} holds ${JSON.stringify(value)}, which isn't a day or a formula`,
+        { code: "invalid" }
+      );
+    }
+  }
+};
 
 /** What a number format shows besides its codes: quoted text, `[...]`, `\x`. */
 const formatLiterals = /"[^"]*"|\[[^\]]*\]|\\./gu;
@@ -175,10 +191,7 @@ const dayOf = (serial: number): string | undefined =>
  * One cell of a range as read: a date-formatted day as `{ date }`, empty
  * as null. Without its format (as Graph answers an added row), a number.
  */
-const cellOf = (
-  value: z.infer<typeof graphValue>,
-  format?: string | null
-): ReadCell => {
+const cellOf = (value: GraphValue, format?: string | null): ReadCellValue => {
   if (value === "" || value === null) {
     return null;
   }
@@ -190,20 +203,20 @@ const cellOf = (
 };
 
 /** The cells of row `index` of a range, as read. */
-const cellsOf = (range: GraphRange, index: number): ReadCell[] =>
-  (range.values[index] ?? []).map((value, column) =>
-    cellOf(value, range.numberFormat?.[index]?.[column])
+const cellsOf = (range: GraphRange, index: number): ReadCellValue[] =>
+  (range.values[index] ?? []).map((value, at) =>
+    cellOf(value, range.numberFormat?.[index]?.[at])
   );
 
 /** A row's cells under the table's columns. */
 const rowOf = (
   columns: readonly string[],
-  cells: readonly ReadCell[]
-): ReadRow =>
-  columns.map((column, index) => ({ column, value: cells[index] ?? null }));
+  cells: readonly ReadCellValue[]
+): ReadRowValue =>
+  columns.map((name, index) => ({ column: name, value: cells[index] ?? null }));
 
 /** Two cells as the same value, a day's as its date. */
-const sameCell = (a: Cell, b: Cell): boolean =>
+const sameCell = (a: CellValue, b: CellValue): boolean =>
   JSON.stringify(a) === JSON.stringify(b);
 
 /**
@@ -213,9 +226,9 @@ const sameCell = (a: Cell, b: Cell): boolean =>
  * formula, the formula Excel holds there.
  */
 const stands = (
-  now: ReadCell,
-  formula: z.infer<typeof graphValue> | undefined,
-  wanted: Cell
+  now: ReadCellValue,
+  formula: GraphValue | undefined,
+  wanted: CellValue
 ): boolean => {
   if (wanted !== null && typeof wanted === "object" && "formula" in wanted) {
     return formula === wanted.formula;
@@ -240,24 +253,23 @@ const inColumnOrder = <Value>(
   columns: readonly string[],
   row: readonly { column: string; value: Value }[]
 ): (Value | null)[] => {
-  const byColumn = new Map(row.map(({ column, value }) => [column, value]));
+  const byColumn = new Map(row.map(({ column: name, value }) => [name, value]));
   if (
     byColumn.size !== row.length ||
     row.length !== columns.length ||
-    !columns.every((column) => byColumn.has(column))
+    !columns.every((name) => byColumn.has(name))
   ) {
     throw new ToolError(
       `A row gives each of the table's columns once: ${columns.join(", ")}`,
-      { code: invalidCode }
+      { code: "invalid" }
     );
   }
-  return columns.map((column) => byColumn.get(column) ?? null);
+  return columns.map((name) => byColumn.get(name) ?? null);
 };
 
 /** Whether a cell's formula, as Graph answers it, is one, not a constant. */
-const isFormula = (
-  formula: z.infer<typeof graphValue> | undefined
-): formula is string => typeof formula === "string" && formula.startsWith("=");
+const isFormula = (formula: GraphValue | undefined): formula is string =>
+  typeof formula === "string" && formula.startsWith("=");
 
 /**
  * Cells as Graph takes them, typed as a person would type them: a day as
@@ -266,9 +278,9 @@ const isFormula = (
  * person confirmed it, or as the cell already holds it (`held`).
  */
 const valuesOf = (
-  cells: readonly Cell[],
-  { confirmed }: Effect,
-  held: readonly z.infer<typeof graphValue>[] = []
+  cells: readonly CellValue[],
+  { confirmed }: Pick<ToolCall, "confirmed">,
+  held: readonly GraphValue[] = []
 ): (string | number | boolean)[] =>
   cells.map((cell, index) => {
     if (cell === null) {
@@ -281,7 +293,7 @@ const valuesOf = (
       if (!confirmed && cell.formula !== held[index]) {
         throw new ToolError(
           "A formula is written only once its person confirmed it",
-          { code: invalidCode }
+          { code: "invalid" }
         );
       }
       return cell.formula;
@@ -289,7 +301,7 @@ const valuesOf = (
     if (typeof cell === "string" && runsAsFormula.test(cell)) {
       throw new ToolError(
         "This text would run as a formula: write a formula as { formula }, for its person to confirm",
-        { code: invalidCode }
+        { code: "invalid" }
       );
     }
     return cell;
@@ -302,252 +314,230 @@ const valuesOf = (
  */
 const writtenRow = (
   columns: readonly string[],
-  written: readonly Cell[],
-  answered: readonly ReadCell[]
-): Row =>
-  columns.map((column, index) => {
+  written: readonly CellValue[],
+  answered: readonly ReadCellValue[]
+): RowValue =>
+  columns.map((name, index) => {
     const cell = written[index] ?? null;
     const value =
       cell !== null && typeof cell === "object"
         ? cell
         : (answered[index] ?? null);
-    return { column, value };
+    return { column: name, value };
   });
 
-const tablePath = (drive: string, workbook: string, name: string): string =>
-  `/drives/${segment(drive)}/items/${segment(workbook)}/workbook/tables/${segment(name)}`;
+interface TablePath {
+  drive: string;
+  workbook: string;
+  table: string;
+}
+
+/** Refuses, before anything is sent, a table that isn't one by ID and name. */
+const checkTablePath = ({
+  drive: driveId,
+  workbook,
+  table: name,
+}: TablePath): void => {
+  checkDrive(driveId);
+  checkIds({ workbook });
+  checkTable(name);
+};
 
 /** The table's columns, by its header row. */
-const columnsOf = async (path: string): Promise<string[]> => {
-  const header = await graphJson(
-    graphUrl(`${path}/headerRowRange`, { $select: "values" }),
-    graphRange
-  );
+const columnsOf = async (api: Api, path: TablePath): Promise<string[]> => {
+  const header = await api.get(headerRoute, {
+    path: { ...path },
+    query: { $select: "values" },
+    returns: graphRange,
+  });
   return (header.values[0] ?? []).map(String);
 };
 
-const tableInput = {
-  drive: driveSchema,
-  workbook: idSchema,
-  table: tableSchema,
-};
-
-const tableOutput = {
-  drive: z.string(),
-  workbook: z.string(),
-  table: z.string(),
-};
+const tableArgs = { drive, workbook: graphId, table };
 
 /** Most rows one page holds. */
 const maxPageRows = 200;
 
-const listRows = defineTool({
-  name: "excel.listRows",
-  description:
-    "Lists the rows of a named table in an Excel workbook (a drive item), each cell under its column: a day as { date }. Rows are numbered from 0, as excel.updateRow names them; start where a page's nextStart says.",
-  input: z.strictObject({
-    ...tableInput,
-    start: z.number().int().nonnegative().optional(),
-    top: z.number().int().min(1).max(maxPageRows).optional(),
+/** The row a page starts at: a `next` this tool handed out, else 0. */
+const startOf = (at: string | undefined): number => {
+  if (at === undefined) {
+    return 0;
+  }
+  if (!/^\d{1,7}$/u.test(at)) {
+    throw new ToolError("That isn't a page this tool handed out", {
+      code: "invalid",
+    });
+  }
+  return Number(at);
+};
+
+/**
+ * Excel table tools, by name: each named from its route
+ * (`POST /drives/{drive}/items/{workbook}/workbook/tables/{table}/rows` is
+ * `drives.items.workbook.tables.rows.create`).
+ */
+export const workbookTools = {
+  "drives.items.workbook.tables.dataBodyRange": tool({
+    description:
+      "Reads the rows of a named table in an Excel workbook (a drive item), a page at a time: each row's index in the table's body, from 0, and its cells under the header row's columns, a day as { date }.",
+    readOnly: true,
+    reach: "company",
+    scopes: ["Files.Read.All"],
+    resource: "workbook",
+    routes: [`GET ${bodyRoute}`, `GET ${headerRoute}`],
+    args: {
+      ...tableArgs,
+      top: v.number().integer().min(1).max(maxPageRows).optional(),
+      next,
+    },
+    returns: page(TableRow),
+    handler: async ({ top, next: at, ...path }, api) => {
+      checkTablePath(path);
+      const start = startOf(at);
+      const columns = await columnsOf(api, path);
+      // A register is read whole and paged here: Graph can't page a range.
+      const range = await api.get(bodyRoute, {
+        path: { ...path },
+        query: { $select: "values,numberFormat" },
+        returns: graphRange,
+      });
+      const end = Math.min(start + (top ?? 100), range.values.length);
+      const items: Infer<typeof TableRow>[] = [];
+      for (let index = start; index < end; index += 1) {
+        items.push({ index, values: rowOf(columns, cellsOf(range, index)) });
+      }
+      return {
+        items,
+        next: end < range.values.length ? String(end) : null,
+      };
+    },
   }),
-  output: z.strictObject({
-    ...tableOutput,
-    columns: z.array(z.string()),
-    rows: z.array(z.strictObject({ row: z.number(), values: readRowSchema })),
-    nextStart: z.number().nullable(),
-  }),
-  readOnly: true,
-  reach: "company",
-  resource: "workbook",
-  routes: [headerRoute, bodyRoute],
-  run: async ({ drive, workbook, table: name, start = 0, top = 100 }) => {
-    const path = tablePath(drive, workbook, name);
-    const columns = await columnsOf(path);
-    // A register is read whole and paged here: Graph can't page a range.
-    const body = await graphJson(
-      graphUrl(`${path}/dataBodyRange`, { $select: "values,numberFormat" }),
-      graphRange
-    );
-    const end = Math.min(start + top, body.values.length);
-    const rows: { row: number; values: ReadRow }[] = [];
-    for (let index = start; index < end; index += 1) {
-      rows.push({ row: index, values: rowOf(columns, cellsOf(body, index)) });
-    }
-    return {
-      output: {
-        drive,
-        workbook,
-        table: name,
+  "drives.items.workbook.tables.rows.create": tool({
+    description:
+      "Adds a row at the end of a named table in an Excel workbook: a cell for each of its columns, a day as { date }, empty as null. Text that would run as a formula is refused, and a formula ({ formula }) is written only once its person confirmed it.",
+    readOnly: false,
+    reach: "company",
+    scopes: ["Files.ReadWrite.All"],
+    resource: "workbook",
+    // No recovery: a row carries no tag to find it by, and the same values
+    // may rightly be added twice, so an added row of unknown outcome stays
+    // unknown, for its person to say what became of it.
+    routes: [`POST ${rowsRoute}`, `GET ${headerRoute}`],
+    args: { ...tableArgs, values: Row },
+    returns: TableRow,
+    describe: {
+      title: "Add a row to an Excel table",
+      fields: [
+        { label: "Drive", arg: "drive" },
+        { label: "Workbook", arg: "workbook" },
+        { label: "Table", arg: "table" },
+        { label: "Row", arg: "values" },
+      ],
+    },
+    handler: async ({ values, ...path }, api, call) => {
+      checkTablePath(path);
+      checkCells("values", values);
+      const columns = await columnsOf(api, path);
+      const cells = inColumnOrder(columns, values);
+      const added = await api.post(rowsRoute, {
+        path: { ...path },
+        body: { values: [valuesOf(cells, call)] },
+        returns: graphTableRow,
+      });
+      const after = writtenRow(
         columns,
-        rows,
-        nextStart: end < body.values.length ? end : null,
-      },
-      provenance: [workbook],
-    };
-  },
-});
-
-const addRow = defineTool({
-  name: "excel.addRow",
-  description:
-    "Adds a row at the end of a named table in an Excel workbook: a cell for each of its columns, a day as { date }, empty as null.",
-  input: z.strictObject({ ...tableInput, values: rowSchema }),
-  output: z.strictObject({
-    ...tableOutput,
-    row: z.number(),
-    values: rowSchema,
-  }),
-  readOnly: false,
-  reach: "company",
-  destructive: false,
-  resource: "workbook",
-  // Recovery `none`: a row carries no tag to find it by, and the same
-  // values may rightly be added twice, so an added row of unknown outcome
-  // stays unknown, for its person to say what became of it.
-  routes: [
-    headerRoute,
-    { method: "POST", host: graphHost, path: `${table}/rows` },
-  ],
-  describe: {
-    title: "Add a row to an Excel table",
-    fields: [
-      { label: "Drive", input: "drive" },
-      { label: "Workbook", input: "workbook" },
-      { label: "Table", input: "table" },
-      { label: "Row", input: "values" },
-    ],
-  },
-  run: async ({ drive, workbook, table: name, values }, effect) => {
-    const path = tablePath(drive, workbook, name);
-    const columns = await columnsOf(path);
-    const cells = inColumnOrder(columns, values);
-    const added = await graphJson(
-      graphUrl(`${path}/rows`),
-      graphTableRow,
-      jsonBody({ values: [valuesOf(cells, effect)] })
-    );
-    const after = writtenRow(
-      columns,
-      cells,
-      (added.values[0] ?? []).map((value) => cellOf(value))
-    );
-    return {
-      output: {
-        drive,
-        workbook,
-        table: name,
-        row: added.index,
-        values: after,
-      },
-      change: { before: null, after },
-    };
-  },
-});
-
-const updateRow = defineTool({
-  name: "excel.updateRow",
-  description:
-    "Changes a row of a named table in an Excel workbook: the row (numbered from 0, as excel.listRows reads it), its cells as read (before), and every cell as it will stand (after). Refused when the row no longer holds what was read.",
-  input: z.strictObject({
-    ...tableInput,
-    row: z.number().int().nonnegative().max(1_048_575),
-    before: readRowSchema,
-    after: rowSchema,
-  }),
-  output: z.strictObject({
-    ...tableOutput,
-    row: z.number(),
-    before: readRowSchema,
-    after: rowSchema,
-  }),
-  readOnly: false,
-  reach: "company",
-  destructive: true,
-  resource: "workbook",
-  // Recovery `repeat`: the write sets the row's cells, and a repeat finds
-  // the row already standing as asked and writes nothing. One whose row
-  // someone changed meanwhile is refused as any changed row is.
-  repeatable: true,
-  routes: [
-    headerRoute,
-    get(rowRoute),
-    { method: "PATCH", host: graphHost, path: `${table}${rowRoute}` },
-  ],
-  describe: {
-    title: "Change a row of an Excel table",
-    fields: [
-      { label: "Drive", input: "drive" },
-      { label: "Workbook", input: "workbook" },
-      { label: "Table", input: "table" },
-      { label: "Row", input: "row" },
-      { label: "Now", input: "before" },
-      { label: "Will be", input: "after" },
-    ],
-  },
-  run: async ({ drive, workbook, table: name, row, before, after }, effect) => {
-    const path = tablePath(drive, workbook, name);
-    const columns = await columnsOf(path);
-    const was = inColumnOrder(columns, before);
-    const wanted = inColumnOrder(columns, after);
-    const rowPath = `${path}/rows/itemAt(index=${row})/range`;
-    const now = await graphJson(
-      graphUrl(rowPath, { $select: "values,numberFormat,formulas" }),
-      graphRange
-    );
-    const cells = cellsOf(now, 0);
-    const formulas = now.formulas?.[0] ?? [];
-    const output = {
-      drive,
-      workbook,
-      table: name,
-      row,
-      before: rowOf(columns, was),
-    };
-    if (
-      wanted.every((cell, index) =>
-        stands(cells[index] ?? null, formulas[index], cell)
-      )
-    ) {
-      // Already as asked: a repeat of this call, or a change to what is.
-      // Nothing is written, and what the row held before isn't seen, so
-      // no change is said: the caller's `before` is only what they read.
-      const stood = writtenRow(columns, wanted, cells);
-      return { output: { ...output, after: stood } };
-    }
-    // What was read is checked as it was read, its type too: text that
-    // has since become a number is a change, the old value kept with it.
-    if (!was.every((cell, index) => sameCell(cells[index] ?? null, cell))) {
-      throw new ToolError(
-        "The row no longer holds what was read: read it again",
-        { code: "conflict" }
+        cells,
+        (added.values[0] ?? []).map((value) => cellOf(value))
       );
-    }
-    // A formula's cell reads as its value: written back as that value, it
-    // would lose its formula.
-    const overwritten = columns.flatMap((column, index) => {
-      const cell = wanted[index] ?? null;
-      const held = formulas[index];
-      const asFormula =
-        cell !== null && typeof cell === "object" && "formula" in cell;
-      return isFormula(held) && !asFormula ? [`${column} holds ${held}`] : [];
-    });
-    if (overwritten.length > 0) {
-      throw new ToolError(
-        `A cell holding a formula is changed only as { formula }: ${overwritten.join(", ")}`,
-        { code: invalidCode }
-      );
-    }
-    const values = valuesOf(wanted, effect, formulas);
-    const written = await graphJson(graphUrl(rowPath), graphRange, {
-      ...jsonBody({ values: [values] }),
-      method: "PATCH",
-    });
-    const stood = writtenRow(columns, wanted, cellsOf(written, 0));
-    return {
-      output: { ...output, after: stood },
-      change: { before: output.before, after: stood },
-    };
-  },
-});
-
-export const workbookTools = [listRows, addRow, updateRow];
+      call.changed({ before: null, after });
+      return { index: added.index, values: after };
+    },
+  }),
+  "drives.items.workbook.tables.rows.itemAt.range.update": tool({
+    description:
+      "Changes a row of a named table in an Excel workbook: the row's index (from 0, as the table's rows are read), its cells as read (before), and every cell as it will stand (values). Refused when the row no longer holds what was read. A cell holding a formula is changed only as { formula }, and a new formula is written only once its person confirmed it.",
+    readOnly: false,
+    reach: "company",
+    scopes: ["Files.ReadWrite.All"],
+    resource: "workbook",
+    routes: [`PATCH ${rowRoute}`, `GET ${headerRoute}`, `GET ${rowRoute}`],
+    args: {
+      ...tableArgs,
+      index: v.number().integer().min(0).max(1_048_575),
+      before: ReadRow,
+      values: Row,
+    },
+    returns: TableRow,
+    // The write sets the row's cells, and a repeat finds the row already
+    // standing as asked and writes nothing. One whose row someone changed
+    // meanwhile is refused as any changed row is.
+    repeatable: true,
+    describe: {
+      title: "Change a row of an Excel table",
+      fields: [
+        { label: "Drive", arg: "drive" },
+        { label: "Workbook", arg: "workbook" },
+        { label: "Table", arg: "table" },
+        { label: "Row", arg: "index" },
+        { label: "Now", arg: "before" },
+        { label: "Will be", arg: "values" },
+      ],
+    },
+    handler: async ({ index, before, values, ...path }, api, call) => {
+      checkTablePath(path);
+      checkCells("before", before);
+      checkCells("values", values);
+      const columns = await columnsOf(api, path);
+      const was = inColumnOrder(columns, before);
+      const wanted = inColumnOrder(columns, values);
+      const now = await api.get(rowRoute, {
+        path: { ...path, index },
+        query: { $select: "values,numberFormat,formulas" },
+        returns: graphRange,
+      });
+      const cells = cellsOf(now, 0);
+      const formulas = now.formulas?.[0] ?? [];
+      if (
+        wanted.every((cell, at) =>
+          stands(cells[at] ?? null, formulas[at], cell)
+        )
+      ) {
+        // Already as asked: a repeat of this call, or a change to what is.
+        // Nothing is written, and what the row held before isn't seen, so
+        // no change is said: the caller's `before` is only what they read.
+        return { index, values: writtenRow(columns, wanted, cells) };
+      }
+      // What was read is checked as it was read, its type too: text that
+      // has since become a number is a change, the old value kept with it.
+      if (!was.every((cell, at) => sameCell(cells[at] ?? null, cell))) {
+        throw new ToolError(
+          "The row no longer holds what was read: read it again",
+          { code: "conflict" }
+        );
+      }
+      // A formula's cell reads as its value: written back as that value, it
+      // would lose its formula.
+      const overwritten = columns.flatMap((name, at) => {
+        const cell = wanted[at] ?? null;
+        const held = formulas[at];
+        const asFormula =
+          cell !== null && typeof cell === "object" && "formula" in cell;
+        return isFormula(held) && !asFormula ? [`${name} holds ${held}`] : [];
+      });
+      if (overwritten.length > 0) {
+        throw new ToolError(
+          `A cell holding a formula is changed only as { formula }: ${overwritten.join(", ")}`,
+          { code: "invalid" }
+        );
+      }
+      const written = await api.patch(rowRoute, {
+        path: { ...path, index },
+        body: { values: [valuesOf(wanted, call, formulas)] },
+        returns: graphRange,
+      });
+      const after = writtenRow(columns, wanted, cellsOf(written, 0));
+      call.changed({ before: rowOf(columns, was), after });
+      return { index, values: after };
+    },
+  }),
+};

@@ -1,307 +1,245 @@
-import { defineTool } from "@grasp-os/connector-kit/connector";
-import {
-  invalidCode,
-  jsonBody,
-  segment,
-  ToolError,
-} from "@grasp-os/runtime/connector";
-import { z } from "zod";
+import { tool, ToolError, v } from "@grasp-os/sdk/connector";
+import type { Api } from "@grasp-os/sdk/connector";
 
 import {
-  atPage,
-  graphHost,
-  graphJson,
-  graphUrl,
-  idSchema,
-  mailboxSchema,
-  nextPageOf,
-  pageOf,
-  v1,
-} from "./graph.ts";
+  checkIds,
+  graphId,
+  graphPage,
+  nextOf,
+  positionOf,
+} from "./graph-sdk.ts";
+import { flagStatus } from "./mail.ts";
 
-// Sorting a person's own inbox: flags and categories, on a card they
-// press. These reach `own`, so each call first asks Graph whose token it
-// holds (`GET /me`, the one route that isn't bound to a mailbox, and only
-// a read of who that is) and refuses any mailbox but that person's: a
+// Sorting the person's own inbox: moving, flags and categories, on a card
+// they press. These reach `own`, so every route is under `/me`: a call
+// reaches only the mailbox of the person whose token it holds, never a
 // shared or a colleague's mailbox the token may also open
-// (`Mail.ReadWrite.Shared`) is never one of these tools' (GRA-724 is the
-// shared mailbox's own issue). Requests still go to `/users/{mailbox}`,
-// so the egress binds them to the call's mailbox as it binds every mail
-// tool's.
+// (`Mail.ReadWrite.Shared`; GRA-724 is the shared mailbox's own issue).
 //
-// A card shows a call's input, not the email it acts on, so these tools
-// take the email's sender and subject as input and check them against the
-// email before they change it: what the person confirmed is what changes.
+// A card shows a call's args, not the email it acts on, so these tools
+// take the email's sender and subject and check them against the email
+// before they change it: what the person confirmed is what changes.
 
-const users = `${v1}/users/{mailbox}`;
-
-const get = (path: string) =>
-  ({ method: "GET", host: graphHost, path: `${users}${path}` }) as const;
-const patch = (path: string) =>
-  ({ method: "PATCH", host: graphHost, path: `${users}${path}` }) as const;
-
-/** Who the connection's token is for: read before any own-mailbox write. */
-export const meRoute = {
-  method: "GET",
-  host: graphHost,
-  path: `${v1}/me`,
-} as const;
-
-const graphMe = z.object({
-  id: z.string().nullish(),
-  mail: z.string().nullish(),
-  userPrincipalName: z.string().nullish(),
-  proxyAddresses: z.array(z.string()).nullish(),
-});
-
-/** An Exchange proxy address that is an email address: `SMTP:` or `smtp:`. */
-const smtpPrefix = /^smtp:/iu;
-
-/**
- * Refuses `mailbox` unless it names the person the token is for: their
- * user ID, address, sign-in name or one of their email aliases, in any
- * case. The refusal is `invalid`, not `access_denied`: Graph didn't deny
- * anything, the call named someone else's mailbox. Gives back every name
- * the person goes by, in lower case.
- */
-export const requireOwnMailbox = async (
-  mailbox: string
-): Promise<ReadonlySet<string>> => {
-  const me = await graphJson(
-    graphUrl("/me", { $select: "id,mail,userPrincipalName,proxyAddresses" }),
-    graphMe
-  );
-  const own = new Set(
-    [
-      me.id,
-      me.mail,
-      me.userPrincipalName,
-      ...(me.proxyAddresses ?? [])
-        .filter((address) => smtpPrefix.test(address))
-        .map((address) => address.replace(smtpPrefix, "")),
-    ]
-      .filter((name): name is string => typeof name === "string")
-      .map((name) => name.toLowerCase())
-  );
-  if (!own.has(mailbox.toLowerCase())) {
-    throw new ToolError("This works only in the person's own mailbox", {
-      code: invalidCode,
-    });
-  }
-  return own;
-};
-
-const graphShown = z.object({
-  id: z.string(),
-  subject: z.string().nullish(),
-  from: z
-    .object({
-      emailAddress: z.object({ address: z.string().nullish() }).nullish(),
-    })
-    .nullish(),
-});
-
-/** The email a card shows: who it is from and its subject. */
-export interface Shown {
-  from?: string | undefined;
-  subject?: string | undefined;
-}
-
-/**
- * Refuses the call unless the email at `path` is from `from` (in any
- * case) and has exactly `subject`, each when given.
- */
-export const requireShown = async (
-  path: string,
-  { from, subject }: Shown
-): Promise<void> => {
-  if (from === undefined && subject === undefined) {
-    return;
-  }
-  const message = await graphJson(
-    graphUrl(path, { $select: "id,from,subject" }),
-    graphShown
-  );
-  const sender = message.from?.emailAddress?.address ?? "";
-  if (from !== undefined && sender.toLowerCase() !== from.toLowerCase()) {
-    throw new ToolError("That email isn't from the sender the card shows", {
-      code: invalidCode,
-    });
-  }
-  if (subject !== undefined && (message.subject ?? "") !== subject) {
-    throw new ToolError("That email's subject isn't the one the card shows", {
-      code: invalidCode,
-    });
-  }
-};
+const messageRoute = "/me/messages/{message}";
+const moveRoute = "/me/messages/{message}/move";
+const folderRoute = "/me/mailFolders/{folder}";
+const categoriesRoute = "/me/outlook/masterCategories";
 
 /** The sender an email is from, as a card shows it. */
-export const fromSchema = z.email().max(256);
+const from = v.string().email().max(256);
 
 /** An email's subject, as a card shows it. */
-export const subjectSchema = z.string().max(1024);
+const subject = v.string().max(1024);
 
-/** How an email is flagged, in Graph's words. */
-const flagSchema = z.enum(["flagged", "complete", "notFlagged"]);
-
-const graphFlagged = z.object({
-  id: z.string(),
-  flag: z.object({ flagStatus: z.string() }).nullish(),
-  categories: z.array(z.string()).nullish(),
+const Shown = v.object({
+  id: v.string(),
+  subject: v.string().nullable().optional(),
+  from: v
+    .object({
+      emailAddress: v
+        .object({ address: v.string().nullable().optional() })
+        .nullable()
+        .optional(),
+    })
+    .nullable()
+    .optional(),
 });
 
-const flagMessage = defineTool({
-  name: "mail.flag",
-  description:
-    "Flags an email in the person's own mailbox for follow-up, marks its flag complete, or clears it. Give the email's sender and subject as the person sees them: the email must match them.",
-  input: z.strictObject({
-    mailbox: mailboxSchema,
-    message: idSchema,
-    from: fromSchema,
-    subject: subjectSchema,
-    flag: flagSchema,
-  }),
-  output: z.strictObject({
-    mailbox: z.string(),
-    id: z.string(),
-    flag: z.string(),
-  }),
-  readOnly: false,
-  reach: "own",
-  destructive: false,
-  // A flag is a state: set again, it leaves the same flag.
-  repeatable: true,
-  resource: "mailbox",
-  routes: [meRoute, get("/messages/{message}"), patch("/messages/{message}")],
-  describe: {
-    title: "Flag an email",
-    fields: [
-      { label: "Mailbox", input: "mailbox" },
-      { label: "From", input: "from" },
-      { label: "Subject", input: "subject" },
-      { label: "Flag", input: "flag" },
-      { label: "Message", input: "message" },
-    ],
-  },
-  run: async ({ mailbox, message, from, subject, flag }) => {
-    await requireOwnMailbox(mailbox);
-    const path = `/users/${segment(mailbox)}/messages/${segment(message)}`;
-    await requireShown(path, { from, subject });
-    const flagged = await graphJson(graphUrl(path), graphFlagged, {
-      ...jsonBody({ flag: { flagStatus: flag } }),
-      method: "PATCH",
+/**
+ * Refuses the call unless the person's email `message` is from `from`
+ * (in any case) and has exactly `subject`, each when given.
+ */
+const requireShown = async (
+  api: Api,
+  message: string,
+  shown: { from?: string | undefined; subject?: string | undefined }
+): Promise<void> => {
+  if (shown.from === undefined && shown.subject === undefined) {
+    return;
+  }
+  const found = await api.get(messageRoute, {
+    path: { message },
+    query: { $select: "id,from,subject" },
+    returns: Shown,
+  });
+  const sender = found.from?.emailAddress?.address ?? "";
+  if (
+    shown.from !== undefined &&
+    sender.toLowerCase() !== shown.from.toLowerCase()
+  ) {
+    throw new ToolError("That email isn't from the sender the card shows", {
+      code: "invalid",
     });
-    return {
-      output: {
-        mailbox,
-        id: flagged.id,
-        flag: flagged.flag?.flagStatus ?? flag,
-      },
-    };
-  },
+  }
+  if (shown.subject !== undefined && (found.subject ?? "") !== shown.subject) {
+    throw new ToolError("That email's subject isn't the one the card shows", {
+      code: "invalid",
+    });
+  }
+};
+
+/** A moved message: its new ID, and the folder it is in now. */
+const Moved = v.object({
+  id: v.string(),
+  parentFolderId: v.string().nullable().optional(),
 });
 
-/** A category's name, as Outlook keeps it. */
-const categorySchema = z.string().min(1).max(255);
+/** A message's flag and categories, as Graph has them. */
+const Updated = v.object({
+  id: v.string(),
+  flag: v
+    .object({ flagStatus: v.string().nullable().optional() })
+    .nullable()
+    .optional(),
+  categories: v.array(v.string()).nullable().optional(),
+});
 
-const graphCategory = z.object({ displayName: z.string() });
-
-/** How many pages of a person's categories mail.categorise reads at most. */
+/** How many pages of the person's categories are read at most. */
 const categoryPageLimit = 10;
 
 /**
- * The names of the categories the person has in `mailbox`, page by page
- * up to `categoryPageLimit`, each next page asked for on the tool's own
- * route with only its position taken from Graph's `@odata.nextLink`. A
- * category past the last page read counts as one they don't have, so it
- * is refused, never made.
+ * Refuses any of `categories` the person doesn't have in Outlook: a new
+ * one would show up there as a category nobody made. Their categories are
+ * read page by page up to `categoryPageLimit`; one past the last page
+ * read counts as one they don't have, so it is refused, never made.
  */
-const categoriesOf = async (mailbox: string): Promise<Set<string>> => {
-  const names = new Set<string>();
-  let page: string | null | undefined;
-  for (let read = 0; read < categoryPageLimit && page !== null; read += 1) {
+const requireKnownCategories = async (
+  api: Api,
+  categories: readonly string[]
+): Promise<void> => {
+  const known = new Set<string>();
+  let at: string | undefined;
+  for (let read = 0; read < categoryPageLimit; read += 1) {
     // oxlint-disable-next-line no-await-in-loop -- each page's position is in the one before
-    const { value, "@odata.nextLink": nextLink } = await graphJson(
-      atPage(
-        graphUrl(`/users/${segment(mailbox)}/outlook/masterCategories`, {
-          $select: "displayName",
-        }),
-        page
-      ),
-      pageOf(graphCategory)
-    );
-    for (const { displayName } of value) {
-      names.add(displayName);
+    const answer = await api.get(categoriesRoute, {
+      query: { $select: "displayName", ...positionOf(at) },
+      returns: graphPage(v.object({ displayName: v.string() })),
+    });
+    for (const { displayName } of answer.value) {
+      known.add(displayName);
     }
-    page = nextPageOf(nextLink);
+    const following = nextOf(answer["@odata.nextLink"]);
+    if (following === null) {
+      break;
+    }
+    at = following;
   }
-  return names;
+  if (categories.some((category) => !known.has(category))) {
+    throw new ToolError(
+      "The person doesn't have that category in Outlook: use one they have",
+      { code: "invalid" }
+    );
+  }
 };
 
-const categoriseMessage = defineTool({
-  name: "mail.categorise",
-  description:
-    "Sets an email's categories in the person's own mailbox to exactly these, from the categories they already use (an empty list clears them). Give the email's sender and subject as the person sees them: the email must match them.",
-  input: z.strictObject({
-    mailbox: mailboxSchema,
-    message: idSchema,
-    from: fromSchema,
-    subject: subjectSchema,
-    categories: z.array(categorySchema).max(25),
+/** The person's own inbox, sorted, by name, named from their routes. */
+export const mailSortingTools = {
+  "me.messages.move.create": tool({
+    description:
+      "Moves an email in the person's own mailbox to another of its folders (destinationId: a folder ID, or a well-known name such as archive). The moved email has a new ID. Give the email's sender and subject, and the folder's name, as the person sees them: they must match.",
+    readOnly: false,
+    reach: "own",
+    mail: true,
+    scopes: ["Mail.ReadWrite"],
+    routes: [`POST ${moveRoute}`, `GET ${messageRoute}`, `GET ${folderRoute}`],
+    describe: {
+      title: "Move an email to another folder",
+      fields: [
+        { label: "From", arg: "from" },
+        { label: "Subject", arg: "subject" },
+        { label: "To folder", arg: "folderName" },
+        { label: "Folder", arg: "destinationId" },
+        { label: "Message", arg: "message" },
+      ],
+    },
+    args: {
+      message: graphId,
+      destinationId: graphId,
+      from: from.optional(),
+      subject: subject.optional(),
+      folderName: v.string().min(1).max(256).optional(),
+    },
+    returns: Moved,
+    handler: async ({ message, destinationId, folderName, ...shown }, api) => {
+      checkIds({ message, destinationId });
+      await requireShown(api, message, shown);
+      // The destination is looked up in the person's mailbox first, and the
+      // message moved to the folder that names: a folder of another
+      // mailbox is never a destination.
+      const folder = await api.get(folderRoute, {
+        path: { folder: destinationId },
+        query: { $select: "id,displayName" },
+        returns: v.object({
+          id: v.string(),
+          displayName: v.string().nullable().optional(),
+        }),
+      });
+      if (folderName !== undefined && folder.displayName !== folderName) {
+        throw new ToolError("That folder isn't the one the card names", {
+          code: "invalid",
+        });
+      }
+      return await api.post(moveRoute, {
+        path: { message },
+        body: { destinationId: folder.id },
+        returns: Moved,
+      });
+    },
   }),
-  output: z.strictObject({
-    mailbox: z.string(),
-    id: z.string(),
-    categories: z.array(z.string()),
-  }),
-  readOnly: false,
-  reach: "own",
-  destructive: false,
-  // It sets the whole list: set again, it leaves the same categories.
-  repeatable: true,
-  resource: "mailbox",
-  routes: [
-    meRoute,
-    get("/outlook/masterCategories"),
-    get("/messages/{message}"),
-    patch("/messages/{message}"),
-  ],
-  describe: {
-    title: "Categorise an email",
-    fields: [
-      { label: "Mailbox", input: "mailbox" },
-      { label: "From", input: "from" },
-      { label: "Subject", input: "subject" },
-      { label: "Categories", input: "categories" },
-      { label: "Message", input: "message" },
+  "me.messages.update": tool({
+    description:
+      "Flags an email in the person's own mailbox for follow-up, marks its flag complete or clears it (flag), and sets its categories to exactly these, from the categories they already use (an empty list clears them). Give the email's sender and subject as the person sees them: the email must match them.",
+    readOnly: false,
+    reach: "own",
+    mail: true,
+    scopes: ["Mail.ReadWrite", "MailboxSettings.Read"],
+    routes: [
+      `PATCH ${messageRoute}`,
+      `GET ${messageRoute}`,
+      `GET ${categoriesRoute}`,
     ],
-  },
-  run: async ({ mailbox, message, from, subject, categories }) => {
-    await requireOwnMailbox(mailbox);
-    // Only the categories the person already has: a new one would show
-    // up in their Outlook as a category nobody made.
-    const known = await categoriesOf(mailbox);
-    const unknown = categories.filter((category) => !known.has(category));
-    if (unknown.length > 0) {
-      throw new ToolError(
-        "The person doesn't have that category in Outlook: use one they have",
-        { code: invalidCode }
-      );
-    }
-    const path = `/users/${segment(mailbox)}/messages/${segment(message)}`;
-    await requireShown(path, { from, subject });
-    const categorised = await graphJson(graphUrl(path), graphFlagged, {
-      ...jsonBody({ categories: [...new Set(categories)] }),
-      method: "PATCH",
-    });
-    return {
-      output: {
-        mailbox,
-        id: categorised.id,
-        categories: categorised.categories ?? [],
-      },
-    };
-  },
-});
-
-export const mailSortingTools = [flagMessage, categoriseMessage];
+    describe: {
+      title: "Flag or categorise an email",
+      fields: [
+        { label: "From", arg: "from" },
+        { label: "Subject", arg: "subject" },
+        { label: "Flag", arg: "flag" },
+        { label: "Categories", arg: "categories" },
+        { label: "Message", arg: "message" },
+      ],
+    },
+    args: {
+      message: graphId,
+      from,
+      subject,
+      flag: v.object({ flagStatus }).optional(),
+      categories: v.array(v.string().min(1).max(255)).max(25).optional(),
+    },
+    returns: Updated,
+    // It sets a flag and the whole list of categories: set again, it
+    // leaves the same.
+    repeatable: true,
+    handler: async ({ message, flag, categories, ...shown }, api) => {
+      checkIds({ message });
+      if (flag === undefined && categories === undefined) {
+        throw new ToolError("Invalid input: give a flag, categories or both", {
+          code: "invalid",
+        });
+      }
+      if (categories !== undefined) {
+        await requireKnownCategories(api, categories);
+      }
+      await requireShown(api, message, shown);
+      return await api.patch(messageRoute, {
+        path: { message },
+        body: {
+          ...(flag === undefined ? {} : { flag }),
+          ...(categories === undefined
+            ? {}
+            : { categories: [...new Set(categories)] }),
+        },
+        returns: Updated,
+      });
+    },
+  }),
+};

@@ -21,7 +21,6 @@ import {
   createEvent,
   createFocusTime,
   focusTime,
-  freeTime,
   grantOf,
   graph,
   graphPaths,
@@ -49,55 +48,73 @@ import type { Input } from "./tool-calls.ts";
 // back. Scoping comes first: a call for one mailbox or drive reaches only
 // that one, by construction.
 
+/** A write's start or end: a wall-clock time, in Amsterdam unless given. */
+const at = (dateTime: string, timeZone = amsterdam) => ({ dateTime, timeZone });
+
+/** An arg as a card shows it: an object as its JSON. */
+const shown = (value: object): string => JSON.stringify(value, null, 2);
+
+/** An hour's start and end in `timeZone`. */
+const inZone = (timeZone: string) => ({
+  start: at("2026-10-26T14:00", timeZone),
+  end: at("2026-10-26T15:00", timeZone),
+});
+
 describe("the Microsoft 365 connector's calendar tools", () => {
   it("list a range of events in UTC, page by page", async () => {
     const connection = await connected();
     const range = {
       mailbox: invoices,
-      start: "2026-09-28T00:00:00Z",
-      end: "2026-10-05T00:00:00Z",
+      startDateTime: "2026-09-28T00:00:00Z",
+      endDateTime: "2026-10-05T00:00:00Z",
       top: 1,
     };
     const skipToken = "d2c7f1a0-5b9e-4d1c-8e6a-3f2b7c9d0e1f";
-    const first = await resultOf(call(connection, "calendar.list", range));
+    const first = await resultOf(
+      call(connection, "users.calendarView.list", range)
+    );
     expect(first).toMatchObject({
       output: {
-        mailbox: invoices,
-        events: [
+        items: [
           {
-            mailbox: invoices,
             id: eventId(invoices, 1),
             subject: "Month-end close",
             start: { dateTime: "2026-09-29T09:00:00.0000000", timeZone: "UTC" },
-            location: "Room 4.12",
+            location: { displayName: "Room 4.12" },
           },
         ],
-        nextPage: `%24skiptoken=${skipToken}`,
+        next: `%24skiptoken=${skipToken}`,
       },
       provenance: [eventId(invoices, 1)],
     });
     await expect(
       outputOf(
-        call(connection, "calendar.list", {
+        call(connection, "users.calendarView.list", {
           ...range,
-          page: `%24skiptoken=${skipToken}`,
+          next: `%24skiptoken=${skipToken}`,
         })
       )
     ).resolves.toMatchObject({
-      events: [{ id: eventId(invoices, 2) }],
-      nextPage: null,
+      items: [{ id: eventId(invoices, 2) }],
+      next: null,
     });
     expect(requests()).toMatchObject([
       {
         path: `${mailboxPath}/calendarView`,
-        query: { startDateTime: range.start, endDateTime: range.end },
+        query: {
+          startDateTime: range.startDateTime,
+          endDateTime: range.endDateTime,
+        },
         headers: { prefer: 'outlook.timezone="UTC"' },
       },
       { path: `${mailboxPath}/calendarView`, query: { $skiptoken: skipToken } },
     ]);
     await expect(
       toolError(
-        call(connection, "calendar.list", { ...range, end: range.start })
+        call(connection, "users.calendarView.list", {
+          ...range,
+          endDateTime: range.startDateTime,
+        })
       )
     ).resolves.toMatchObject({ error: { code: "invalid" } });
   });
@@ -106,26 +123,25 @@ describe("the Microsoft 365 connector's calendar tools", () => {
     const connection = await connected();
     await expect(
       resultOf(
-        call(connection, "calendar.get", {
+        call(connection, "users.events.get", {
           mailbox: invoices,
           event: eventId(invoices, 1),
         })
       )
     ).resolves.toMatchObject({
       output: {
-        event: {
-          mailbox: invoices,
-          id: eventId(invoices, 1),
-          body: { contentType: "text" },
-          attendees: [
-            {
+        id: eventId(invoices, 1),
+        body: { contentType: "text" },
+        attendees: [
+          {
+            type: "required",
+            status: { response: "accepted" },
+            emailAddress: {
               name: "Controller",
               address: "controller@example.com",
-              type: "required",
-              response: "accepted",
             },
-          ],
-        },
+          },
+        ],
       },
       provenance: [eventId(invoices, 1)],
     });
@@ -135,130 +151,94 @@ describe("the Microsoft 365 connector's calendar tools", () => {
   });
 });
 
-describe("the Microsoft 365 connector's free time", () => {
-  it("finds free stretches around a person's events in working hours, in the organization's time zone", async () => {
+describe("the Microsoft 365 connector's view of the person's own calendar", () => {
+  it("lists their own events in UTC under /me, page by page, to find their free time in", async () => {
     const connection = await connected();
     const own = connection.person.email;
-    // Monday 26 October in Amsterdam, a day after the clocks went back:
-    // UTC+1, so 09:00 there is 08:00 UTC.
     graph.holdEvents(own, [
       { start: "2026-10-26T08:00:00", end: "2026-10-26T09:00:00" },
       { start: "2026-10-26T11:00:00", end: "2026-10-26T12:00:00" },
-      { start: "2026-10-26T12:20:00", end: "2026-10-26T14:00:00" },
       {
         start: "2026-10-26T14:00:00",
         end: "2026-10-26T15:00:00",
         showAs: "free",
       },
-      {
-        start: "2026-10-26T15:00:00",
-        end: "2026-10-26T15:30:00",
-        isCancelled: true,
-      },
     ]);
-    // From Saturday, over the weekend and the change of clocks.
-    await expect(
-      outputOf(
-        freeTime(connection, {
-          mailbox: own,
-          start: "2026-10-24T00:00",
-          end: "2026-10-27T00:00",
-          timeZone: amsterdam,
-          minutes: 30,
-        })
-      )
-    ).resolves.toStrictEqual({
-      mailbox: own,
-      timeZone: amsterdam,
-      // 13:00 to 13:20 is too short; the free and the cancelled events
-      // leave their time free.
-      free: [
-        { start: "2026-10-26T10:00", end: "2026-10-26T12:00", minutes: 120 },
-        { start: "2026-10-26T15:00", end: "2026-10-26T17:00", minutes: 120 },
-      ],
-    });
-    const ownPath = `/v1.0/users/${encodeURIComponent(own)}`;
-    expect(requests()).toMatchObject([
-      {
-        path: `${ownPath}/calendarView`,
-        query: {
-          startDateTime: "2026-10-23T22:00:00.000Z",
-          endDateTime: "2026-10-26T23:00:00.000Z",
+    const range = {
+      startDateTime: "2026-10-23T22:00:00.000Z",
+      endDateTime: "2026-10-26T23:00:00.000Z",
+    };
+    const first = await outputOf(
+      call(connection, "me.calendarView.list", range)
+    );
+    expect(first).toStrictEqual({
+      items: [
+        {
+          id: "held-0",
+          start: { dateTime: "2026-10-26T08:00:00.0000000", timeZone: "UTC" },
+          end: { dateTime: "2026-10-26T09:00:00.0000000", timeZone: "UTC" },
+          isAllDay: false,
+          isCancelled: false,
+          showAs: "busy",
         },
-        headers: { prefer: 'outlook.timezone="UTC"' },
-      },
-      { path: `${ownPath}/calendarView`, query: { $skiptoken: "2" } },
-      { path: `${ownPath}/calendarView`, query: { $skiptoken: "4" } },
-    ]);
-  });
-
-  it("puts each event on the organization's day, not UTC's, and takes working hours as given", async () => {
-    const connection = await connected();
-    const own = connection.person.email;
-    const auckland = "Pacific/Auckland";
-    // Auckland is UTC+13 in October: its Tuesday morning is Monday evening
-    // in UTC, and its Wednesday morning Tuesday evening.
-    graph.holdEvents(own, [
-      { start: "2026-10-26T20:00:00", end: "2026-10-26T22:30:00" },
-      { start: "2026-10-27T19:00:00", end: "2026-10-27T21:00:00" },
-      // All of Thursday, as the person sees it.
-      {
-        start: "2026-10-29T00:00:00",
-        end: "2026-10-30T00:00:00",
-        isAllDay: true,
-      },
-    ]);
+        {
+          id: "held-1",
+          start: { dateTime: "2026-10-26T11:00:00.0000000", timeZone: "UTC" },
+          end: { dateTime: "2026-10-26T12:00:00.0000000", timeZone: "UTC" },
+          isAllDay: false,
+          isCancelled: false,
+          showAs: "busy",
+        },
+      ],
+      next: "%24skiptoken=2",
+    });
     await expect(
       outputOf(
-        freeTime(connection, {
-          mailbox: own,
-          start: "2026-10-27T00:00",
-          end: "2026-10-30T00:00",
-          timeZone: auckland,
-          minutes: 60,
-          workingHours: {
-            from: "08:00",
-            to: "12:00",
-            days: ["tuesday", "wednesday", "thursday"],
-          },
+        call(connection, "me.calendarView.list", {
+          ...range,
+          next: z.object({ next: z.string() }).parse(first).next,
         })
       )
     ).resolves.toMatchObject({
-      free: [
-        { start: "2026-10-27T08:00", end: "2026-10-27T09:00", minutes: 60 },
-        { start: "2026-10-28T10:00", end: "2026-10-28T12:00", minutes: 120 },
-      ],
+      items: [{ id: "held-2", showAs: "free" }],
+      next: null,
     });
+    expect(requests()).toMatchObject([
+      {
+        path: "/v1.0/me/calendarView",
+        query: range,
+        headers: { prefer: 'outlook.timezone="UTC"' },
+      },
+      { path: "/v1.0/me/calendarView", query: { $skiptoken: "2" } },
+    ]);
   });
 
-  it("refuses another person's calendar, a shared one, and a range it can't read", async () => {
+  it("names no mailbox, and refuses a range that doesn't end after it starts or spans more than a month, before anything goes out", async () => {
     const connection = await connected();
     const range = {
-      start: "2026-10-26T00:00",
-      end: "2026-10-27T00:00",
-      timeZone: amsterdam,
-      minutes: 30,
+      startDateTime: "2026-10-26T00:00:00Z",
+      endDateTime: "2026-10-27T00:00:00Z",
     };
+    // Another person's calendar, or a shared one, can't be named at all.
     for (const mailbox of [ceo, invoices]) {
       // oxlint-disable-next-line no-await-in-loop -- one calendar at a time
       await expect(
-        toolError(freeTime(connection, { ...range, mailbox }))
-      ).resolves.toMatchObject({ error: { code: "invalid" } });
+        outcome(call(connection, "me.calendarView.list", { ...range, mailbox }))
+      ).resolves.toBe("connect.action_failed");
     }
-    // Neither calendar's events were read: only whose the token is.
-    expect(graphPaths()).toStrictEqual([]);
-    const own = connection.person.email;
     const wrongs: Input[] = [
-      { end: range.start },
-      { end: "2026-12-01T00:00" },
-      { workingHours: { from: "17:00", to: "09:00", days: ["monday"] } },
+      { endDateTime: range.startDateTime },
+      { endDateTime: "2026-12-01T00:00:00Z" },
     ];
     for (const wrong of wrongs) {
       // oxlint-disable-next-line no-await-in-loop -- one input at a time
       await expect(
-        toolError(freeTime(connection, { ...range, mailbox: own, ...wrong }))
+        toolError(
+          call(connection, "me.calendarView.list", { ...range, ...wrong })
+        )
       ).resolves.toMatchObject({ error: { code: "invalid" } });
     }
+    expect(graphPaths()).toStrictEqual([]);
   });
 });
 
@@ -268,13 +248,10 @@ describe("the Microsoft 365 connector's calendar writes", () => {
     const own = connection.person.email;
     const made = await outputOf(createEvent(connection, focusTime(own)));
     expect(made).toMatchObject({
-      event: {
-        mailbox: own,
-        subject: "Focus time: Q4 forecast",
-        start: { dateTime: "2026-10-26T14:00:00.0000000", timeZone: amsterdam },
-        end: { dateTime: "2026-10-26T15:00:00.0000000", timeZone: amsterdam },
-        showAs: "busy",
-      },
+      subject: "Focus time: Q4 forecast",
+      start: { dateTime: "2026-10-26T14:00:00.0000000", timeZone: amsterdam },
+      end: { dateTime: "2026-10-26T15:00:00.0000000", timeZone: amsterdam },
+      showAs: "busy",
     });
     // What Graph was asked to make: these fields, nobody invited, and the
     // call's tag; nothing else.
@@ -305,7 +282,8 @@ describe("the Microsoft 365 connector's calendar writes", () => {
     await expect(
       readEvent(connection, madeId.parse(made))
     ).resolves.toMatchObject({
-      event: { subject: "Focus time: Q4 forecast", attendees: [] },
+      subject: "Focus time: Q4 forecast",
+      attendees: [],
     });
   });
 
@@ -315,13 +293,14 @@ describe("the Microsoft 365 connector's calendar writes", () => {
     const changes: Input[] = [
       { attendees: [{ emailAddress: { address: "guest@example.org" } }] },
       { requiredAttendees: ["guest@example.org"] },
-      { start: "2026-10-26T14:00:00Z" },
-      { start: "2026-10-26T14:00+01:00" },
+      { start: at("2026-10-26T14:00:00Z") },
+      { start: at("2026-10-26T14:00+01:00") },
       // A day that doesn't exist, which Date.parse would move on.
-      { start: "2026-02-30T10:00" },
-      { timeZone: "Mars/Olympus_Mons" },
-      { timeZone: 'UTC", outlook.body-content-type="html' },
-      { end: "2026-10-26T13:00" },
+      { start: at("2026-02-30T10:00") },
+      inZone("Mars/Olympus_Mons"),
+      inZone('UTC", outlook.body-content-type="html'),
+      { end: at("2026-10-26T13:00") },
+      { end: at("2026-10-26T15:00", "Europe/London") },
     ];
     const refusals = await Promise.all(
       changes.map(
@@ -336,7 +315,7 @@ describe("the Microsoft 365 connector's calendar writes", () => {
     expect(refusals).toStrictEqual([
       "connect.resource_out_of_scope",
       "connect.resource_out_of_scope",
-      ...Array.from({ length: 6 }, () => "connect.action_failed"),
+      ...Array.from({ length: 7 }, () => "connect.action_failed"),
     ]);
     expect(graph.sent).toStrictEqual([]);
   });
@@ -344,11 +323,14 @@ describe("the Microsoft 365 connector's calendar writes", () => {
   it("are shown for the person to confirm as the card will show them, and made once confirmed", async () => {
     const connection = await connected();
     const { person } = connection;
-    const input = { ...focusTime(person.email), location: "Desk 3" };
+    const input = {
+      ...focusTime(person.email),
+      location: { displayName: "Desk 3" },
+    };
     const inChat = agentFor(person.userId, "agent-chat", "interactive");
     const asked = {
       connectionId: connection.id,
-      action: "calendar.create",
+      action: "users.events.create",
       input,
       resource: person.email,
       idempotencyKey: `chat-1:${crypto.randomUUID()}`,
@@ -361,10 +343,10 @@ describe("the Microsoft 365 connector's calendar writes", () => {
         fields: [
           { input: "mailbox", label: "Calendar", value: person.email },
           { input: "subject", label: "Title", value: input.subject },
-          { input: "start", label: "Starts", value: "2026-10-26T14:00" },
-          { input: "end", label: "Ends", value: "2026-10-26T15:00" },
-          { input: "timeZone", label: "Time zone", value: amsterdam },
-          { input: "location", label: "Where", value: "Desk 3" },
+          // An object arg shows as its JSON.
+          { input: "start", label: "Starts", value: shown(input.start) },
+          { input: "end", label: "Ends", value: shown(input.end) },
+          { input: "location", label: "Where", value: shown(input.location) },
         ],
         complete: true,
       },
@@ -382,7 +364,8 @@ describe("the Microsoft 365 connector's calendar writes", () => {
     });
     const made = madeId.parse(JSON.parse(confirmed.output));
     await expect(readEvent(connection, made)).resolves.toMatchObject({
-      event: { location: "Desk 3", attendees: [] },
+      location: { displayName: "Desk 3" },
+      attendees: [],
     });
   });
 
@@ -396,17 +379,14 @@ describe("the Microsoft 365 connector's calendar writes", () => {
       updateEvent(connection, {
         mailbox: own,
         event: made,
-        timeZone: amsterdam,
-        start: "2026-10-27T09:30",
-        end: "2026-10-27T10:30",
+        start: { dateTime: "2026-10-27T09:30", timeZone: amsterdam },
+        end: { dateTime: "2026-10-27T10:30", timeZone: amsterdam },
       })
     );
     expect(moved).toMatchObject({
-      event: {
-        id: made,
-        start: { dateTime: "2026-10-27T09:30:00.0000000", timeZone: amsterdam },
-        subject: "Focus time: Q4 forecast",
-      },
+      id: made,
+      start: { dateTime: "2026-10-27T09:30:00.0000000", timeZone: amsterdam },
+      subject: "Focus time: Q4 forecast",
     });
     const patch = requests().find(({ method }) => method === "PATCH");
     expect(patch?.body).toStrictEqual({
@@ -427,7 +407,6 @@ describe("the Microsoft 365 connector's calendar writes", () => {
             updateEvent(connection, {
               mailbox: own,
               event,
-              timeZone: amsterdam,
               subject: "Moved",
             })
           )
@@ -455,7 +434,6 @@ describe("the Microsoft 365 connector's calendar writes", () => {
           updateEvent(connection, {
             mailbox: own,
             event: made,
-            timeZone: amsterdam,
             subject: "Moved",
           })
         )
@@ -480,16 +458,13 @@ describe("the Microsoft 365 connector's calendar writes", () => {
         updateEvent(connection, {
           mailbox: own,
           event: made,
-          timeZone: amsterdam,
           subject: "Moved",
         })
       )
     ).resolves.toBe("connect.action_failed");
     await expect(readEvent(connection, made)).resolves.toMatchObject({
-      event: {
-        subject: "Focus time: Q4 forecast",
-        attendees: [{ address: "guest@example.org" }],
-      },
+      subject: "Focus time: Q4 forecast",
+      attendees: [{ emailAddress: { address: "guest@example.org" } }],
     });
   });
 });
@@ -511,12 +486,10 @@ describe("the Microsoft 365 connector's calendar writes, when something goes wro
         .map(({ path, headers }) => ({ path, prefer: headers.prefer })),
     }).toMatchObject({
       found: {
-        event: {
-          subject: "Focus time: Q4 forecast",
-          start: {
-            dateTime: "2026-10-26T14:00:00.0000000",
-            timeZone: amsterdam,
-          },
+        subject: "Focus time: Q4 forecast",
+        start: {
+          dateTime: "2026-10-26T14:00:00.0000000",
+          timeZone: amsterdam,
         },
       },
       writesDone: 1,

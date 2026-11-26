@@ -167,8 +167,13 @@ const mailFrom = async (
     { run, stepKey: `step-${unique()}` },
     {
       connectionId,
-      action: "mail.send",
-      input: { mailbox, to: [mailbox], subject: "Again", body: "Again." },
+      action: "users.sendMail.create",
+      input: {
+        mailbox,
+        toRecipients: [{ emailAddress: { address: mailbox } }],
+        subject: "Again",
+        body: { content: "Again." },
+      },
     }
   );
   if (stamp === undefined) {
@@ -254,7 +259,7 @@ const connectorTrigger = async (
           connectionId: connectionIdSchema.parse(connectionId),
           ...(resource === undefined ? {} : { resource }),
         },
-        actions: ["mail.list"],
+        actions: ["users.messages.list"],
       })
     : undefined;
   return { ...trigger, start, hear };
@@ -277,7 +282,7 @@ const mailEvent = (
   owner: changes.owner ?? null,
   ...(changes.resource === undefined ? {} : { resource: changes.resource }),
   ...(changes.stamp === undefined ? {} : { stamp: changes.stamp }),
-  action: "mail.list",
+  action: "users.messages.list",
   type: changes.type ?? "m365.mail.received",
   payload: changes.payload ?? { subject: "Invoice INV-7", folder: "archive" },
 });
@@ -900,16 +905,16 @@ describe("connector triggers", { timeout: 120_000 }, () => {
       );
     const before = await listenersOf(env);
     const refused = {
-      otherConnection: await ask(other, ["mail.list"]),
-      otherAction: await ask(shared, ["mail.send"]),
-      more: await ask(shared, ["mail.list", "mail.send"]),
+      otherConnection: await ask(other, ["users.messages.list"]),
+      otherAction: await ask(shared, ["users.sendMail.create"]),
+      more: await ask(shared, ["users.messages.list", "users.sendMail.create"]),
     };
-    const own = await ask(shared, ["mail.list"]);
+    const own = await ask(shared, ["users.messages.list"]);
     const after = await listenersOf(env);
     // A grant it can no longer use (another action than its event reads):
     // connect listens there no more.
     await env.DB.prepare(
-      "UPDATE permissions SET actions = '[\"mail.send\"]' WHERE subject_type = 'trigger' AND subject_id = ?"
+      "UPDATE permissions SET actions = '[\"users.sendMail.create\"]' WHERE subject_type = 'trigger' AND subject_id = ?"
     )
       .bind(trigger.id)
       .run();
@@ -958,7 +963,7 @@ describe("connector triggers", { timeout: 120_000 }, () => {
         type: "connection",
         connectionId: connectionIdSchema.parse(shared),
       },
-      actions: ["mail.list"],
+      actions: ["users.messages.list"],
     });
     const listening = async () => {
       const listeners = await listenersOf(env);

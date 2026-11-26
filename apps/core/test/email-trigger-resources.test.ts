@@ -231,8 +231,13 @@ const stampOf = async (
     { run, stepKey: `step-${unique()}` },
     {
       connectionId,
-      action: "mail.send",
-      input: { mailbox, to: [to], subject: "Again", body: "Again." },
+      action: "users.sendMail.create",
+      input: {
+        mailbox,
+        toRecipients: [{ emailAddress: { address: to } }],
+        subject: "Again",
+        body: { content: "Again." },
+      },
     }
   );
   if (stamp === undefined) {

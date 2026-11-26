@@ -4,9 +4,9 @@
  * 365 connector reaches them, beside the rest of the fake Graph
  * (graph-api.ts). A calendar holds the meetings once `holdMeetings` puts
  * them there; graph-api.ts's calendar routes ask `meetingsAnswer` first.
- * Graph answers a token for its own user only, as it
- * answers a delegated `Chat.Read` or `OnlineMeetings.Read` token: anyone
- * else's chats, calendar and meetings are refused. One chat, of two
+ * Every route is the signed-in user's own, under `/me`, as Graph answers
+ * a delegated `Chat.Read` or `OnlineMeetings.Read` token: a token of no
+ * one is refused. One chat, of two
  * colleagues, answers without the person among its members, as a chat
  * whose ID was read somewhere would if Graph let it through.
  */
@@ -36,8 +36,6 @@ type Route = (
   path: string,
   answer: ProviderRoute<Part>["answer"]
 ) => ProviderRoute<Part>;
-
-const users = String.raw`^/v1\.0/users/(?<mailbox>[^/]+)`;
 
 /** The mailboxes whose calendar holds the meetings. Cleared before each test. */
 const meetingCalendars = new Set<string>();
@@ -80,59 +78,60 @@ export const meetingsAnswer = (
 const joinUrlFilter = /^JoinWebUrl eq '(?<url>(?:[^']|'')*)'$/u;
 
 /** The person's own chat, they and the finance lead its members. */
-const ownChat = (mailbox: string) =>
-  chat(chatIds.own, [member("You", mailbox.toLowerCase()), financeLead]);
+const ownChat = (email: string) =>
+  chat(chatIds.own, [member("You", email.toLowerCase()), financeLead]);
+
+const me = String.raw`^/v1\.0/me`;
 
 /**
- * The routes, given how graph-api.ts makes one and whose a request's
- * token is (`ownerOf`: the subject, if the mailbox it names is that user).
+ * The routes, under `/me`, given how graph-api.ts makes one and whose a
+ * request's token is (`holderOf`: the address of its account, if any).
  */
 export const teamsRoutes = (
   route: Route,
-  ownerOf: (mailbox: string, request: Request) => string | undefined
+  holderOf: (request: Request) => string | undefined
 ): ProviderRoute<Part>[] => {
   const theirChat = chat(chatIds.theirs, [
     financeLead,
     member("Tom de Vries", "tom.devries@acme.test"),
   ]);
-  const chatOf = (mailbox: string, id: string) => {
+  const chatOf = (email: string, id: string) => {
     if (id === chatIds.own) {
-      return ownChat(mailbox);
+      return ownChat(email);
     }
     return id === chatIds.theirs ? theirChat : undefined;
   };
-  const meeting = `${users}/onlineMeetings/(?<meeting>[^/]+)`;
+  const meeting = `${me}/onlineMeetings/(?<meeting>[^/]+)`;
   return [
-    route("GET", `${users}/chats`, ({ mailbox, request }) =>
-      ownerOf(mailbox, request) === undefined
+    route("GET", `${me}/chats`, ({ request }) => {
+      const email = holderOf(request);
+      return email === undefined
         ? json(graphAccessDenied, 403)
-        : json({ value: [ownChat(mailbox)] })
-    ),
-    route(
-      "GET",
-      `${users}/chats/(?<chat>[^/]+)`,
-      ({ mailbox, chat: id, request }) => {
-        if (ownerOf(mailbox, request) === undefined) {
-          return json(graphAccessDenied, 403);
-        }
-        const found = chatOf(mailbox, decodeURIComponent(id));
-        return found === undefined ? json(notFound, 404) : json(found);
+        : json({ value: [ownChat(email)] });
+    }),
+    route("GET", `${me}/chats/(?<chat>[^/]+)`, ({ chat: id, request }) => {
+      const email = holderOf(request);
+      if (email === undefined) {
+        return json(graphAccessDenied, 403);
       }
-    ),
+      const found = chatOf(email, decodeURIComponent(id));
+      return found === undefined ? json(notFound, 404) : json(found);
+    }),
     route(
       "GET",
-      `${users}/chats/(?<chat>[^/]+)/messages`,
-      ({ mailbox, chat: id, request }) => {
-        if (ownerOf(mailbox, request) === undefined) {
+      `${me}/chats/(?<chat>[^/]+)/messages`,
+      ({ chat: id, request }) => {
+        const email = holderOf(request);
+        if (email === undefined) {
           return json(graphAccessDenied, 403);
         }
-        return chatOf(mailbox, decodeURIComponent(id)) === undefined
+        return chatOf(email, decodeURIComponent(id)) === undefined
           ? json(notFound, 404)
           : json({ value: chatMessages });
       }
     ),
-    route("GET", `${users}/onlineMeetings`, ({ mailbox, query, request }) => {
-      if (ownerOf(mailbox, request) === undefined) {
+    route("GET", `${me}/onlineMeetings`, ({ query, request }) => {
+      if (holderOf(request) === undefined) {
         return json(graphAccessDenied, 403);
       }
       const url = joinUrlFilter
@@ -145,23 +144,19 @@ export const teamsRoutes = (
       const found = onlineMeetings.get(url);
       return json({ value: found === undefined ? [] : [found] });
     }),
-    route(
-      "GET",
-      `${meeting}/transcripts`,
-      ({ mailbox, meeting: id, request }) => {
-        if (ownerOf(mailbox, request) === undefined) {
-          return json(graphAccessDenied, 403);
-        }
-        return json({
-          value: id === meetingIds.review ? reviewTranscripts : [],
-        });
+    route("GET", `${meeting}/transcripts`, ({ meeting: id, request }) => {
+      if (holderOf(request) === undefined) {
+        return json(graphAccessDenied, 403);
       }
-    ),
+      return json({
+        value: id === meetingIds.review ? reviewTranscripts : [],
+      });
+    }),
     route(
       "GET",
       `${meeting}/transcripts/(?<transcript>[^/]+)/content`,
-      ({ mailbox, meeting: id, transcript, query, request }) => {
-        if (ownerOf(mailbox, request) === undefined) {
+      ({ meeting: id, transcript, query, request }) => {
+        if (holderOf(request) === undefined) {
           return json(graphAccessDenied, 403);
         }
         const vtt = {

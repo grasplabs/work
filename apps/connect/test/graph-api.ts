@@ -27,6 +27,7 @@ import {
   graphAccessDenied,
   attachment,
   attachmentPage,
+  attachments,
   childrenPage,
   contract,
   contractCount,
@@ -323,6 +324,49 @@ let attendeesLeftOut: "missing" | "null" | undefined;
 
 const newEtag = (): string => `W/"${crypto.randomUUID()}"`;
 
+/** Graph's calendar view of `mailbox`. */
+const calendarViewAnswer = (mailbox: string, query: URLSearchParams) => {
+  const meetings = meetingsAnswer(mailbox, query);
+  if (meetings !== undefined) {
+    return meetings;
+  }
+  const held = heldEvents.get(mailbox);
+  return held === undefined
+    ? json(eventPage(mailbox, query.get("$skiptoken")))
+    : json(viewOf(mailbox, held, query));
+};
+
+/** Graph's read of `mailbox`'s event `id`. */
+const eventAnswer = (mailbox: string, id: string, query: URLSearchParams) => {
+  const meeting = meetingsAnswer(mailbox, query, id);
+  if (meeting !== undefined) {
+    return meeting;
+  }
+  const event = eventOf(mailbox, id);
+  if (inviteDuringRead) {
+    // Someone invites a guest right after this read.
+    inviteDuringRead = false;
+    events.set(eventKey(mailbox, id), {
+      ...event,
+      attendees: [
+        {
+          type: "required",
+          status: { response: "none" },
+          emailAddress: { name: "Guest", address: "guest@example.org" },
+        },
+      ],
+      "@odata.etag": newEtag(),
+    });
+  }
+  if (attendeesLeftOut !== undefined) {
+    const { attendees: _attendees, ...rest } = event;
+    const leftOut = attendeesLeftOut;
+    attendeesLeftOut = undefined;
+    return json(leftOut === "null" ? { ...rest, attendees: null } : rest);
+  }
+  return json(event);
+};
+
 /** The time zone a request's `Prefer` header asks for, UTC if none. */
 const zoneOf = (request: Request): string =>
   /outlook\.timezone="(?<zone>[^"]+)"/u.exec(
@@ -403,6 +447,30 @@ const route = (
   path: string,
   answer: ProviderRoute<Part>["answer"]
 ): ProviderRoute<Part> => routeOn(graphHost, method, path, answer);
+
+/**
+ * The signed-in user's own calendar under `/me`: what its
+ * `/users/{mailbox}` routes answer for the token's own mailbox.
+ */
+const meCalendarRoutes = (
+  mailboxOf: (request: Request) => string | undefined
+): ProviderRoute<Part>[] => {
+  const me = String.raw`^/v1\.0/me`;
+  return [
+    route("GET", `${me}/calendarView`, ({ query, request }) => {
+      const mailbox = mailboxOf(request);
+      return mailbox === undefined
+        ? json(graphAccessDenied, 403)
+        : calendarViewAnswer(mailbox, query);
+    }),
+    route("GET", `${me}/events/(?<id>[^/]+)`, ({ id, query, request }) => {
+      const mailbox = mailboxOf(request);
+      return mailbox === undefined
+        ? json(graphAccessDenied, 403)
+        : eventAnswer(mailbox, id, query);
+    }),
+  ];
+};
 
 /** A named table, as the fake Excel holds it. */
 interface SheetTable {
@@ -540,8 +608,9 @@ const workbookRoutes: ProviderRoute<Part>[] = [
 
 /**
  * The files in the person's own OneDrive, by their decoded path from the
- * drive's root (`Drafts from Stephen/Letter.docx`), as files.createDraft
- * writes and finds them. Cleared before each test.
+ * drive's root (`Drafts from Stephen/Letter.docx`), as
+ * me.drive.root.content.upload writes and finds them. Cleared before each
+ * test.
  */
 const ownFiles = new Map<string, { id: string; bytes: Uint8Array }>();
 
@@ -607,21 +676,83 @@ const patchSchema = z.object({
   categories: z.unknown().optional(),
 });
 
+/**
+ * Graph's routes to the signed-in user's own mailbox, under `/me`.
+ * `mailboxOf` says whose a request's token is: a token of no one is
+ * refused.
+ */
+const ownMailRoutes = (
+  mailboxOf: (request: Request) => string | undefined
+): ProviderRoute<Part>[] => {
+  const me = String.raw`^/v1\.0/me`;
+  /** The answer `answer` gives for the token's own mailbox, or Graph's refusal. */
+  const own =
+    (
+      answer: (
+        mailbox: string,
+        part: Parameters<ProviderRoute<Part>["answer"]>[0]
+      ) => Response | Promise<Response>
+    ): ProviderRoute<Part>["answer"] =>
+    async (part) => {
+      const mailbox = mailboxOf(part.request);
+      return mailbox === undefined
+        ? json(graphAccessDenied, 403)
+        : await answer(mailbox, part);
+    };
+  return [
+    route(
+      "GET",
+      `${me}/outlook/masterCategories`,
+      own((_mailbox, { query }) =>
+        json(masterCategories(query.get("$skiptoken")))
+      )
+    ),
+    route(
+      "GET",
+      `${me}/messages/(?<id>[^/]+)`,
+      own((mailbox, { id }) =>
+        id.includes("Unknown")
+          ? json(notFound, 404)
+          : json(message(mailbox, numberOf(id), "text"))
+      )
+    ),
+    route(
+      "PATCH",
+      `${me}/messages/(?<id>[^/]+)`,
+      own(async (mailbox, { id, request }) =>
+        json(
+          patched(
+            mailbox,
+            numberOf(id),
+            patchSchema.parse(await request.json())
+          )
+        )
+      )
+    ),
+    route(
+      "GET",
+      `${me}/mailFolders/(?<id>[^/]+)`,
+      own((_mailbox, { id }) => {
+        const folder = mailFolder(id);
+        return folder === undefined ? json(notFound, 404) : json(folder);
+      })
+    ),
+    route(
+      "POST",
+      `${me}/messages/(?<id>[^/]+)/move`,
+      own((mailbox, { id }) => json(moved(mailbox, numberOf(id)), 201))
+    ),
+  ];
+};
+
+/** The `$expand` that reads a message's attachments without their content. */
+const attachmentsExpansion =
+  "attachments($select=id,name,contentType,size,isInline)";
+
 // `GET /me` is the OAuth fake's (oauth-provider.ts `profileOf`): it
 // answers for the account the bearer token was issued to.
 const graphRoutes: ProviderRoute<Part>[] = [
   ...ownFileRoutes,
-  route("GET", `${users}/outlook/masterCategories`, ({ query }) =>
-    json(masterCategories(query.get("$skiptoken")))
-  ),
-  route(
-    "PATCH",
-    `${users}/messages/(?<id>[^/]+)`,
-    async ({ mailbox, id, request }) =>
-      json(
-        patched(mailbox, numberOf(id), patchSchema.parse(await request.json()))
-      )
-  ),
   ...workbookRoutes,
   route(
     "GET",
@@ -676,43 +807,45 @@ const graphRoutes: ProviderRoute<Part>[] = [
       return foundByKey(mailbox, filter);
     }
   ),
-  route("GET", `${users}/messages/(?<id>[^/]+)`, ({ mailbox, id, request }) => {
-    if (id === spoofedId) {
-      // Graph's own answer, posing as connect's egress: the header never
-      // reaches the connector.
-      return Response.json(notFound, {
-        status: 404,
-        headers: { [egressHeader]: "refused" },
-      });
+  route(
+    "GET",
+    `${users}/messages/(?<id>[^/]+)`,
+    ({ mailbox, id, query, request }) => {
+      if (id === spoofedId) {
+        // Graph's own answer, posing as connect's egress: the header never
+        // reaches the connector.
+        return Response.json(notFound, {
+          status: 404,
+          headers: { [egressHeader]: "refused" },
+        });
+      }
+      const prefer = request.headers.get("prefer") ?? "";
+      const expand = query.get("$expand");
+      if (expand !== null && expand !== attachmentsExpansion) {
+        return json({ error: { code: "BadRequest" } }, 400);
+      }
+      return id.includes("Unknown")
+        ? json(notFound, 404)
+        : json({
+            ...message(
+              mailbox,
+              numberOf(id),
+              prefer.includes('"html"') ? "html" : "text"
+            ),
+            ...(expand === null ? {} : { attachments: attachments.value }),
+          });
     }
-    const prefer = request.headers.get("prefer") ?? "";
-    return id.includes("Unknown")
-      ? json(notFound, 404)
-      : json(
-          message(
-            mailbox,
-            numberOf(id),
-            prefer.includes('"html"') ? "html" : "text"
-          )
-        );
-  }),
+  ),
   route(
     "GET",
     `${users}/messages/(?<id>[^/]+)/attachments`,
     ({ mailbox, id, query }) =>
       json(attachmentPage(mailbox, numberOf(id), query.get("$skiptoken")))
   ),
-  route("GET", `${users}/mailFolders/(?<id>[^/]+)`, ({ id }) => {
-    const folder = mailFolder(id);
-    return folder === undefined ? json(notFound, 404) : json(folder);
-  }),
   route(
     "GET",
     `${users}/messages/[^/]+/attachments/(?<id>[^/]+)`,
     ({ id, query }) => json(attachment(id, query.has("$select")))
-  ),
-  route("POST", `${users}/messages/(?<id>[^/]+)/move`, ({ mailbox, id }) =>
-    json(moved(mailbox, numberOf(id)), 201)
   ),
   route(
     "POST",
@@ -738,45 +871,12 @@ const graphRoutes: ProviderRoute<Part>[] = [
     keepTag(mailbox, made.id, body);
     return json(made, 201);
   }),
-  route("GET", `${users}/calendarView`, ({ mailbox, query }) => {
-    const meetings = meetingsAnswer(mailbox, query);
-    if (meetings !== undefined) {
-      return meetings;
-    }
-    const held = heldEvents.get(mailbox);
-    return held === undefined
-      ? json(eventPage(mailbox, query.get("$skiptoken")))
-      : json(viewOf(mailbox, held, query));
-  }),
-  route("GET", `${users}/events/(?<id>[^/]+)`, ({ mailbox, id, query }) => {
-    const meeting = meetingsAnswer(mailbox, query, id);
-    if (meeting !== undefined) {
-      return meeting;
-    }
-    const event = eventOf(mailbox, id);
-    if (inviteDuringRead) {
-      // Someone invites a guest right after this read.
-      inviteDuringRead = false;
-      events.set(eventKey(mailbox, id), {
-        ...event,
-        attendees: [
-          {
-            type: "required",
-            status: { response: "none" },
-            emailAddress: { name: "Guest", address: "guest@example.org" },
-          },
-        ],
-        "@odata.etag": newEtag(),
-      });
-    }
-    if (attendeesLeftOut !== undefined) {
-      const { attendees: _attendees, ...rest } = event;
-      const leftOut = attendeesLeftOut;
-      attendeesLeftOut = undefined;
-      return json(leftOut === "null" ? { ...rest, attendees: null } : rest);
-    }
-    return json(event);
-  }),
+  route("GET", `${users}/calendarView`, ({ mailbox, query }) =>
+    calendarViewAnswer(mailbox, query)
+  ),
+  route("GET", `${users}/events/(?<id>[^/]+)`, ({ mailbox, id, query }) =>
+    eventAnswer(mailbox, id, query)
+  ),
   route("PATCH", `${users}/events/(?<id>[^/]+)`, async (part) => {
     const { mailbox, id, request } = part;
     const event = eventOf(mailbox, id);
@@ -995,40 +1095,36 @@ const listOf = (id: string) => {
 };
 
 /**
- * Graph's To Do routes. `ownerOf` says whose a request's token is, if the
- * mailbox it names is that user: anyone else's To Do is refused.
+ * Graph's To Do routes, the signed-in user's own under `/me`. `ownerOf`
+ * says whose a request's token is: a token of no one is refused.
  */
 const todoRoutes = (
-  ownerOf: (mailbox: string, request: Request) => string | undefined
+  ownerOf: (request: Request) => string | undefined
 ): ProviderRoute<Part>[] => {
-  const lists = `${users}/todo/lists`;
+  const lists = String.raw`^/v1\.0/me/todo/lists`;
   /** The list's owner, or Graph's refusal. */
-  const opened = (
-    mailbox: string,
-    list: string,
-    request: Request
-  ): string | Response => {
-    const owner = ownerOf(mailbox, request);
+  const opened = (list: string, request: Request): string | Response => {
+    const owner = ownerOf(request);
     if (owner === undefined) {
       return json(graphAccessDenied, 403);
     }
     return listOf(list) === undefined ? json(notFound, 404) : owner;
   };
   return [
-    route("GET", lists, ({ mailbox, request }) =>
-      ownerOf(mailbox, request) === undefined
+    route("GET", lists, ({ request }) =>
+      ownerOf(request) === undefined
         ? json(graphAccessDenied, 403)
         : json({ value: todoLists.map(({ id }) => listOf(id)) })
     ),
-    route("GET", `${lists}/(?<list>[^/]+)`, ({ mailbox, list, request }) => {
-      const owner = opened(mailbox, list, request);
+    route("GET", `${lists}/(?<list>[^/]+)`, ({ list, request }) => {
+      const owner = opened(list, request);
       return owner instanceof Response ? owner : json(listOf(list));
     }),
     route(
       "GET",
       `${lists}/(?<list>[^/]+)/tasks`,
-      ({ mailbox, list, query, request }) => {
-        const owner = opened(mailbox, list, request);
+      ({ list, query, request }) => {
+        const owner = opened(list, request);
         if (owner instanceof Response) {
           return owner;
         }
@@ -1045,10 +1141,14 @@ const todoRoutes = (
           }
           return json(taggedTaskPage(tasks, query.get("$skip")));
         }
-        const openOnly = filter === "status ne 'completed'";
+        const status = /^status eq '(?<status>\w+)'$/u.exec(filter)?.groups
+          ?.status;
+        if (filter !== "" && status === undefined) {
+          return json({ error: { code: "BadRequest" } }, 400);
+        }
         return json({
           value: tasks
-            .filter(({ status }) => !openOnly || status !== "completed")
+            .filter((task) => status === undefined || task.status === status)
             .map(taskAnswer),
         });
       }
@@ -1056,8 +1156,8 @@ const todoRoutes = (
     route(
       "POST",
       `${lists}/(?<list>[^/]+)/tasks`,
-      async ({ mailbox, list, request }) => {
-        const owner = opened(mailbox, list, request);
+      async ({ list, request }) => {
+        const owner = opened(list, request);
         if (owner instanceof Response) {
           return owner;
         }
@@ -1084,8 +1184,8 @@ const todoRoutes = (
     route(
       "PATCH",
       `${lists}/(?<list>[^/]+)/tasks/(?<task>[^/]+)`,
-      async ({ mailbox, list, task: id, request }) => {
-        const owner = opened(mailbox, list, request);
+      async ({ list, task: id, request }) => {
+        const owner = opened(list, request);
         if (owner instanceof Response) {
           return owner;
         }
@@ -1159,31 +1259,23 @@ export const fakeGraph = (providers?: ReturnType<typeof fakeProviders>) => {
     resetApps();
     resetTeams();
   });
-  /** The subject of the token's account, if `mailbox` is that account. */
-  const ownerOf = (mailbox: string, request: Request): string | undefined => {
-    const token = (request.headers.get("authorization") ?? "").replace(
-      "Bearer ",
-      ""
+  /** The account the request's token was issued to, if any. */
+  const holderOf = (request: Request) =>
+    providers?.state.holders.get(
+      (request.headers.get("authorization") ?? "").replace("Bearer ", "")
     );
-    const account = providers?.state.holders.get(token);
-    if (account === undefined) {
-      return undefined;
-    }
-    const isThem =
-      mailbox.toLowerCase() === account.email.toLowerCase() ||
-      mailbox === account.subject;
-    return isThem ? account.subject : undefined;
-  };
   const { sent, writesDone, fail } = fakeProvider({
     hosts: [graphHost],
     parts,
     // Planner, OneNote and the suppliers list come first: the suppliers
     // list's routes are more particular than the other lists'.
     routes: [
-      ...appRoutes(route, ownerOf),
-      ...teamsRoutes(route, ownerOf),
+      ...appRoutes(route, (request) => holderOf(request)?.subject),
+      ...teamsRoutes(route, (request) => holderOf(request)?.email),
+      ...meCalendarRoutes((request) => holderOf(request)?.email),
       ...graphRoutes,
-      ...todoRoutes(ownerOf),
+      ...todoRoutes((request) => holderOf(request)?.subject),
+      ...ownMailRoutes((request) => holderOf(request)?.email),
     ],
     unmatched: () =>
       json(

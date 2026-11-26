@@ -1,5 +1,15 @@
 import type { ToolReach } from "@grasp-os/shared/connect";
+import {
+  attachmentLimits,
+  attachmentRefsSchema,
+  attachmentsMatch,
+  attachmentsProperty,
+  attachmentsSchema,
+  sha256Pattern,
+} from "@grasp-os/shared/connector-attachments";
 import { isRecord } from "@grasp-os/shared/json";
+import { runFileLimits, runFileTypes } from "@grasp-os/shared/run-files";
+import { z } from "zod";
 
 import { jsonSchemaOf } from "../common/json-schema.ts";
 import type { JsonValue, ValueDescriptor } from "../common/value-descriptor.ts";
@@ -13,7 +23,15 @@ import type {
 import { v } from "../common/values.ts";
 import { apiFor, routeOf } from "./api.ts";
 import type { Api, RouteText } from "./api.ts";
-import { provenanceMetaKey, resourceMetaKey } from "./manifest.ts";
+import { fromBase64 } from "./content.ts";
+import {
+  changeMetaKey,
+  maxChangeBytes,
+  provenanceMetaKey,
+  provenanceSchema,
+  readAsSchema,
+  resourceMetaKey,
+} from "./manifest.ts";
 import type { ActionManifest, Route } from "./manifest.ts";
 import {
   callMetaOf,
@@ -28,7 +46,13 @@ import {
   serveConnector,
   ToolError,
 } from "./server.ts";
-import type { CallResult, Connector, JsonObject, Tool } from "./server.ts";
+import type {
+  CallMeta,
+  CallResult,
+  Connector,
+  JsonObject,
+  Tool,
+} from "./server.ts";
 import type {
   AccountLookup,
   DeclaredRights,
@@ -36,6 +60,7 @@ import type {
   SignInInput,
   TenantKind,
 } from "./sign-in.ts";
+import type { Sync } from "./sync.ts";
 
 // How a connector is written (@grasp-os/sdk/connector): its tools, each one
 // route of the vendor's API with `v` for its arguments and what it
@@ -52,12 +77,79 @@ export interface ToolCall {
    * Null for a read.
    */
   key: string | null;
+  /**
+   * The stamp core recorded for a workflow run's mail, which a mail tool
+   * puts on what it sends or drafts as the `stampHeader` header; null
+   * otherwise.
+   */
+  stamp: string | null;
+  /**
+   * Whether the call is a held write its person confirmed, on a card that
+   * showed its exact args.
+   */
+  confirmed: boolean;
+  /**
+   * The bytes of the files a write that takes files attaches, by SHA-256:
+   * exactly those its `attachments` name, checked before the handler runs
+   * (`attachedFiles`). Empty for any other call.
+   */
+  files: ReadonlyMap<string, Uint8Array>;
+  /**
+   * Says what a write changed, once, for the audit's before and after: at
+   * most `maxChangeBytes` of JSON. A change past that, or a second one,
+   * fails the call.
+   */
+  changed: (change: { before: JsonValue; after: JsonValue }) => void;
 }
+
+/**
+ * The `attachments` argument of a write that takes files (`takesFiles`),
+ * exactly: each file by name, type, size and SHA-256, never its bytes,
+ * within the platform's limits (the kit's `attachmentsSchema`, which
+ * checks each call's again before its handler runs).
+ */
+export const attachments = v
+  .array(
+    v.object({
+      name: v.string().min(1).max(runFileLimits.nameLength),
+      type: v.enum(runFileTypes),
+      size: v.number().integer().min(0).max(attachmentLimits.fileBytes),
+      sha256: v.string().min(64).max(64),
+    })
+  )
+  .max(attachmentLimits.files)
+  .optional();
+
+/** A file a write attaches: its entry, and the bytes checked against it. */
+export type AttachedFile = NonNullable<Infer<typeof attachments>>[number] & {
+  bytes: Uint8Array;
+};
+
+/**
+ * The files a write's `attachments` argument names, each with its bytes
+ * from `call.files`, which were checked against the argument before the
+ * handler ran: one that is missing can only be a bug.
+ */
+export const attachedFiles = (
+  named: Infer<typeof attachments>,
+  call: Pick<ToolCall, "files">
+): AttachedFile[] =>
+  (named ?? []).map((entry) => {
+    const bytes = call.files.get(entry.sha256);
+    if (bytes === undefined) {
+      throw new Error("An attached file's bytes are missing");
+    }
+    return { ...entry, bytes };
+  });
 
 /** A tool's arguments, as its handler gets them. */
 export type ToolArgs<Args extends ValueShape> = ObjectOutput<Args>;
 
-interface ToolBase<Args extends ValueShape, Returns extends AnySchema> {
+interface ToolBase<
+  Args extends ValueShape,
+  Returns extends AnySchema,
+  Routes extends readonly RouteText[],
+> {
   description: string;
   /**
    * Whom it reaches: `own`, only the person it acts for; `company`, what
@@ -72,7 +164,15 @@ interface ToolBase<Args extends ValueShape, Returns extends AnySchema> {
    * The only requests it may send, as `"METHOD /path"` with `{name}` for a
    * path parameter. At most one is a write (not GET or HEAD).
    */
-  routes: readonly RouteText[];
+  routes: Routes;
+  /**
+   * For a GET route of its own, the hosts its answer may redirect to
+   * (`*.<host>`), which connect's egress follows once, without the token:
+   * a download whose vendor answers with a link to its storage.
+   */
+  redirects?: Readonly<
+    Partial<Record<Extract<Routes[number], `GET ${string}`>, readonly string[]>>
+  >;
   /** Strict: a call with any other argument is refused. */
   args: Args;
   /** An object; the answer is checked against it before anyone sees it. */
@@ -94,10 +194,34 @@ interface ToolBase<Args extends ValueShape, Returns extends AnySchema> {
 interface ReadTool<
   Args extends ValueShape,
   Returns extends AnySchema,
-> extends ToolBase<Args, Returns> {
+  Routes extends readonly RouteText[],
+> extends ToolBase<Args, Returns, Routes> {
   readOnly: true;
   repeatable?: never;
   find?: never;
+  describe?: never;
+  takesFiles?: never;
+  /**
+   * It reads one item and answers it, not a list: a message, a page. The
+   * answer's own `id` is its provenance, exactly one item, which core may
+   * keep of the person's own things as a source in the Brain.
+   */
+  answersItem?: true;
+  /**
+   * It reads a file and answers it as `contentAs` makes it: an `as` arg
+   * that takes `text` and `base64`, and an answer with `name`,
+   * `contentType`, `encoding` and `content`. A workflow may keep the
+   * answer as a file of its run.
+   */
+  answersFile?: true;
+  /**
+   * It reads email, which the platform's mail rules hold: through a mail
+   * tool whose resource is `mailbox`, a chat's agent reaches only its
+   * person's own mailbox or one pointed at for them; and what a read of
+   * mail answers was written by others, which a card confirming a write
+   * after it says.
+   */
+  mail?: true;
 }
 
 /**
@@ -107,8 +231,34 @@ interface ReadTool<
 interface WriteTool<
   Args extends ValueShape,
   Returns extends AnySchema,
-> extends ToolBase<Args, Returns> {
+  Routes extends readonly RouteText[],
+> extends ToolBase<Args, Returns, Routes> {
   readOnly: false;
+  answersItem?: never;
+  answersFile?: never;
+  /**
+   * How a call reads to the person asked to confirm it: a title ("Send an
+   * email") and the args that matter, each under a label, shown exactly as
+   * the call holds them. They are told when a call holds more than these
+   * show, so list every arg that changes what it does.
+   */
+  describe?: {
+    title: string;
+    fields: readonly { label: string; arg: Extract<keyof Args, string> }[];
+  };
+  /**
+   * It attaches files: its `attachments` arg is exactly `attachments`,
+   * and `call.files` holds their bytes (`attachedFiles`).
+   */
+  takesFiles?: true;
+  /**
+   * It changes email (`true`), held by the same rules as a read of it; or
+   * it mails someone, sending or drafting, and `recipients` are the args
+   * holding the addresses it mails, as address strings or within objects.
+   * Core records them with the stamp a workflow run's mail carries
+   * (`ToolCall.stamp`), so the mail that comes back is known as the run's.
+   */
+  mail?: true | { recipients: readonly Extract<keyof Args, string>[] };
   /**
    * Sending it twice changes nothing (it sets a state, or the vendor keeps
    * the call's key), so connect may send a call of unknown outcome again.
@@ -122,14 +272,15 @@ interface WriteTool<
   find?: (
     args: ToolArgs<Args>,
     api: Api,
-    call: { key: string }
+    call: Pick<ToolCall, "stamp" | "changed"> & { key: string }
   ) => Promise<InferInput<Returns> | null>;
 }
 
 export type ToolDeclaration<
   Args extends ValueShape,
   Returns extends AnySchema,
-> = ReadTool<Args, Returns> | WriteTool<Args, Returns>;
+  Routes extends readonly RouteText[] = readonly RouteText[],
+> = ReadTool<Args, Returns, Routes> | WriteTool<Args, Returns, Routes>;
 
 /** A tool, as `tool` declares it and `defineConnector` takes it. */
 export interface ConnectorTool {
@@ -367,16 +518,238 @@ const issuesText = (
 
 const asJsonObject = (schema: Record<string, JsonValue>): JsonObject => schema;
 
+/** The properties a tool that answers a file answers it with (`contentAs`). */
+const fileAnswerFields = ["name", "contentType", "encoding", "content"];
+
+/**
+ * Whether a tool that answers a file has its shape: an `as` arg that
+ * takes each of `readAsSchema`'s (core keeps a file read as text, a run's
+ * files one read as base64), and the file answer's fields among its
+ * answer's.
+ */
+const answersFileShape = ({
+  args,
+  returns: { descriptor },
+}: {
+  args: ValueShape;
+  returns: AnySchema;
+}): boolean => {
+  const as = Object.hasOwn(args, "as") ? args.as : undefined;
+  return (
+    as !== undefined &&
+    readAsSchema.options.every(
+      (each) => as["~standard"].validate(each).issues === undefined
+    ) &&
+    descriptor.kind === "object" &&
+    fileAnswerFields.every((field) => Object.hasOwn(descriptor.fields, field))
+  );
+};
+
+/**
+ * Throws if what a tool declares of files doesn't fit it: one that takes
+ * files has exactly `attachments` as its `attachments` arg; one that
+ * answers a file has the shape `contentAs` makes.
+ */
+const checkFiles = (
+  name: string,
+  declaration: {
+    args: ValueShape;
+    returns: AnySchema;
+    takesFiles?: true;
+    answersFile?: true;
+  }
+): void => {
+  if (
+    declaration.takesFiles === true &&
+    declaration.args[attachmentsProperty] !== attachments
+  ) {
+    throw new Error(
+      `${name}: a tool that takes files has the SDK's \`attachments\` as its \`attachments\` argument`
+    );
+  }
+  if (declaration.answersFile === true && !answersFileShape(declaration)) {
+    throw new Error(
+      `${name}: a tool that answers a file takes \`as\` as text or base64, and answers \`name\`, \`contentType\`, \`encoding\` and \`content\``
+    );
+  }
+};
+
+/**
+ * A tool's `mail`, as its manifest holds it, if it declares one. Throws
+ * for recipients that aren't among its args.
+ */
+const mailOf = (
+  name: string,
+  mail: true | { recipients: readonly string[] } | undefined,
+  properties: Readonly<Record<string, unknown>>
+): Pick<ActionManifest, "mail"> => {
+  if (mail === undefined) {
+    return {};
+  }
+  if (mail === true) {
+    return { mail };
+  }
+  if (
+    mail.recipients.length === 0 ||
+    !mail.recipients.every((arg) => Object.hasOwn(properties, arg))
+  ) {
+    throw new Error(`${name}: its mail's recipients are some of its args`);
+  }
+  return { mail: { recipients: [...mail.recipients] } };
+};
+
+/** The files a call was sent, base64 by SHA-256, as bytes. */
+const sentFilesSchema = z.record(z.string().regex(sha256Pattern), z.string());
+
+/**
+ * The files of a call of a write that takes files, checked against the
+ * digests its `attachments` name: every part and no other, of the length
+ * and the SHA-256 its entry says. Undefined when they aren't.
+ */
+const checkedFilesOf = async (
+  named: unknown,
+  sent: unknown
+): Promise<Map<string, Uint8Array> | undefined> => {
+  const entries = attachmentsSchema.safeParse(named ?? []);
+  const encoded = sentFilesSchema.safeParse(sent ?? {});
+  if (!entries.success || !encoded.success) {
+    return undefined;
+  }
+  let files: Map<string, Uint8Array>;
+  try {
+    files = new Map(
+      Object.entries(encoded.data).map(([sha256, base64]) => [
+        sha256,
+        fromBase64(base64),
+      ])
+    );
+  } catch {
+    return undefined;
+  }
+  return (await attachmentsMatch(entries.data, Object.fromEntries(files)))
+    ? files
+    : undefined;
+};
+
+/**
+ * What an answer says it read: the string `id` of each of its `items`,
+ * or else its own `id`, or nothing; only its own `id` for a tool that
+ * answers an item.
+ */
+const provenanceOf = (answer: JsonObject, item: boolean): string[] => {
+  if (!item && Array.isArray(answer.items)) {
+    return answer.items.flatMap((each: unknown) =>
+      isRecord(each) && typeof each.id === "string" ? [each.id] : []
+    );
+  }
+  return typeof answer.id === "string" ? [answer.id] : [];
+};
+
+/**
+ * The files a call may use: those of a write that takes files, checked
+ * against its args' digests before anything uses them (a part missing,
+ * extra, of another length or hashing to another digest fails the call).
+ * A tool that takes none is sent none, and neither is a lookup.
+ */
+const callFilesOf = async (
+  takesFiles: boolean,
+  meta: CallMeta,
+  value: object
+): Promise<Map<string, Uint8Array> | CallResult> => {
+  if (meta.find) {
+    return new Map();
+  }
+  if (!takesFiles) {
+    return meta.attachments === undefined
+      ? new Map()
+      : failure("Invalid input: this tool takes no files");
+  }
+  return (
+    (await checkedFilesOf(
+      Reflect.get(value, attachmentsProperty),
+      meta.attachments
+    )) ?? failure("Invalid input: the attached files don't match")
+  );
+};
+
+type Change = Parameters<ToolCall["changed"]>[0];
+
+/** Whether a change fits what connect keeps (`maxChangeBytes`). */
+const changeFits = (change: Change): boolean =>
+  new TextEncoder().encode(JSON.stringify(change)).byteLength <= maxChangeBytes;
+
+/**
+ * The result of a call that answered `output` and reported `changes`:
+ * the answer, checked against `returns`, with its provenance and its
+ * change. One that isn't what the tool declares fails, and a write that
+ * got this far sent its write: it went through, but what it made can't be
+ * told.
+ */
+const resultOf = (
+  output: unknown,
+  changes: readonly Change[],
+  {
+    returns,
+    readOnly,
+    answersItem,
+  }: { returns: AnySchema; readOnly: boolean; answersItem: boolean }
+): CallResult => {
+  const checked = returns["~standard"].validate(output);
+  const answer =
+    checked.issues === undefined && isRecord(checked.value)
+      ? checked.value
+      : undefined;
+  const provenance = provenanceSchema.safeParse(
+    answer === undefined ? [] : provenanceOf(answer, answersItem)
+  );
+  const [change, ...more] = changes;
+  if (
+    answer === undefined ||
+    !provenance.success ||
+    (answersItem && provenance.data.length !== 1) ||
+    more.length > 0 ||
+    (change !== undefined && !changeFits(change))
+  ) {
+    return failure(
+      "The connector's result isn't what it declares",
+      undefined,
+      readOnly ? "failed" : "outcomeUnknown"
+    );
+  }
+  // Connect reads structured content only, so the output isn't sent a
+  // second time as text.
+  return {
+    content: [],
+    structuredContent: answer,
+    _meta: {
+      [provenanceMetaKey]: provenance.data,
+      ...(change === undefined ? {} : { [changeMetaKey]: change }),
+    },
+  };
+};
+
 /** A declared tool as the runtime's server serves it. */
-const toolOf = <Args extends ValueShape, Returns extends AnySchema>(
+const toolOf = <
+  Args extends ValueShape,
+  Returns extends AnySchema,
+  Routes extends readonly RouteText[],
+>(
   connector: Pick<ConnectorDeclaration, "title" | "hosts" | "base">,
   name: string,
-  declaration: ToolDeclaration<Args, Returns>
+  declaration: ToolDeclaration<Args, Returns, Routes>
 ): Tool => {
   const { readOnly, reach, resource, handler } = declaration;
-  const routes: Route[] = declaration.routes.map((route) =>
-    routeOf(route, connector.hosts, connector.base)
-  );
+  const redirects: Readonly<Record<string, readonly string[] | undefined>> =
+    declaration.redirects ?? {};
+  const routes: Route[] = declaration.routes.map((route) => {
+    const hosts = Object.hasOwn(redirects, route)
+      ? redirects[route]
+      : undefined;
+    return {
+      ...routeOf(route, connector.hosts, connector.base),
+      ...(hosts === undefined ? {} : { redirects: [...hosts] }),
+    };
+  });
   const args = v.object(declaration.args);
   const { returns } = declaration;
   if (returns.descriptor.kind !== "object" || returns.descriptor.nullable) {
@@ -402,6 +775,11 @@ const toolOf = <Args extends ValueShape, Returns extends AnySchema>(
   ) {
     throw new Error(`${name}: its resource must be a string argument`);
   }
+  checkFiles(name, declaration);
+  const mail = mailOf(name, declaration.mail, properties);
+  const takesFiles = declaration.takesFiles === true;
+  const answersItem = declaration.answersItem === true;
+  const { describe } = declaration;
   const action: ActionManifest = {
     routes,
     readOnly,
@@ -409,8 +787,37 @@ const toolOf = <Args extends ValueShape, Returns extends AnySchema>(
     recovery: recoveryOf(name, declaration),
     resource: resource ?? null,
     input: Object.keys(properties),
+    ...(declaration.answersFile === true ? { answersFile: true as const } : {}),
+    ...(answersItem ? { answersItem: true as const } : {}),
+    ...(takesFiles ? { takesFiles: true as const } : {}),
+    ...mail,
+    ...(describe === undefined
+      ? {}
+      : {
+          describe: {
+            title: describe.title,
+            fields: describe.fields.map(({ label, arg }) => ({
+              label,
+              input: arg,
+            })),
+          },
+        }),
     contract: {
-      input: contractSchemaOf(inputSchema),
+      // A workflow's action names the files by run file ID, which core
+      // turns into the digests and bytes the tool itself takes.
+      input: contractSchemaOf(
+        takesFiles
+          ? {
+              ...inputSchema,
+              properties: {
+                ...properties,
+                [attachmentsProperty]: contractSchemaOf(
+                  z.toJSONSchema(attachmentRefsSchema, { io: "input" })
+                ),
+              },
+            }
+          : inputSchema
+      ),
       output: contractSchemaOf(outputSchema),
     },
   };
@@ -425,9 +832,14 @@ const toolOf = <Args extends ValueShape, Returns extends AnySchema>(
       return failure(`Invalid input: ${issuesText(parsed.issues)}`);
     }
     const meta = callMetaOf(sent);
-    if (meta.attachments !== undefined && !meta.find) {
-      return failure("Invalid input: this tool takes no files");
+    const files = await callFilesOf(takesFiles, meta, parsed.value);
+    if (!(files instanceof Map)) {
+      return files;
     }
+    const changes: Change[] = [];
+    const changed = (change: Change): void => {
+      changes.push(change);
+    };
     let output: unknown;
     if (meta.find) {
       const looked = await lookUp(
@@ -438,7 +850,7 @@ const toolOf = <Args extends ValueShape, Returns extends AnySchema>(
                 data,
                 apiFor(connector.title, connector.hosts, reads, connector.base)
                   .api,
-                effect
+                { key: effect.key, stamp: meta.stamp, changed }
               );
               return found === null ? null : { output: found };
             },
@@ -457,7 +869,13 @@ const toolOf = <Args extends ValueShape, Returns extends AnySchema>(
         connector.base
       );
       try {
-        output = await handler(parsed.value, api, { key: meta.key });
+        output = await handler(parsed.value, api, {
+          key: meta.key,
+          stamp: meta.stamp,
+          confirmed: meta.confirmed,
+          files,
+          changed,
+        });
       } catch (error) {
         // Once its write may have done something, whatever the handler
         // throws leaves the outcome unknown: a read's refusal rethrown
@@ -472,29 +890,7 @@ const toolOf = <Args extends ValueShape, Returns extends AnySchema>(
         );
       }
     }
-    const checked = returns["~standard"].validate(output);
-    if (
-      checked.issues !== undefined ||
-      typeof checked.value !== "object" ||
-      checked.value === null
-    ) {
-      // A write that got this far sent its write: it went through, but
-      // what it made can't be told.
-      return failure(
-        "The connector's result isn't what it declares",
-        undefined,
-        readOnly ? "failed" : "outcomeUnknown"
-      );
-    }
-    // Connect reads structured content only, so the output isn't sent a
-    // second time as text.
-    return {
-      content: [],
-      // SAFETY: an object, checked just above against an object schema.
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-      structuredContent: checked.value as JsonObject,
-      _meta: { [provenanceMetaKey]: [] },
-    };
+    return resultOf(output, changes, { returns, readOnly, answersItem });
   };
   return {
     name,
@@ -517,19 +913,29 @@ const toolOf = <Args extends ValueShape, Returns extends AnySchema>(
 
 /**
  * A tool: one route of the vendor's API. Throws if it declares more than
- * one write, or both `repeatable` and `find`.
+ * one write, both `repeatable` and `find`, or redirects for anything but
+ * a GET route of its own.
  */
 export const tool = <
   const Args extends ValueShape,
   const Returns extends AnySchema,
+  const Routes extends readonly RouteText[],
 >(
-  declaration: ToolDeclaration<Args, Returns>
+  declaration: ToolDeclaration<Args, Returns, Routes>
 ): ConnectorTool => {
   checkOneWrite(
     "A tool",
     declaration.routes.map((route) => ({ method: methodOf(route) }))
   );
   recoveryOf("A tool", declaration);
+  const routes: readonly string[] = declaration.routes;
+  for (const route of Object.keys(declaration.redirects ?? {})) {
+    if (!routes.includes(route) || methodOf(route) !== "GET") {
+      throw new Error(
+        `"${route}": a tool's redirects are for its own GET routes`
+      );
+    }
+  }
   return {
     scopes: declaration.scopes ?? [],
     routes: declaration.routes,
@@ -550,14 +956,10 @@ export interface DefinedConnector extends Connector {
   readonly declaration: ConnectorDeclaration;
 }
 
-/**
- * A connector: its manifest, and the MCP server connect runs it as. Throws
- * if a tool breaks the connector contract (a route to a host it doesn't
- * list, args that aren't strict, a scope its sign-in doesn't ask for), or
- * an event or a sync reads a route off its hosts.
- */
-export const defineConnector = (
-  declaration: ConnectorDeclaration
+/** A declared connector served with `syncs` (`defineConnector`). */
+const serveDeclared = (
+  declaration: ConnectorDeclaration,
+  nativeSyncs: readonly Sync[]
 ): DefinedConnector => {
   const {
     name,
@@ -590,8 +992,32 @@ export const defineConnector = (
       },
       Object.entries(tools).map(([toolName, each]) =>
         each.serve(toolName, declaration)
-      )
+      ),
+      nativeSyncs
     ),
     declaration,
   };
 };
+
+/**
+ * A connector: its manifest, and the MCP server connect runs it as. Throws
+ * if a tool breaks the connector contract (a route to a host it doesn't
+ * list, args that aren't strict, a scope its sign-in doesn't ask for), or
+ * an event or a sync reads a route off its hosts.
+ */
+export const defineConnector = (
+  declaration: ConnectorDeclaration
+): DefinedConnector => serveDeclared(declaration, []);
+
+/**
+ * `connector` serving the runtime's own native syncs besides (sync.ts),
+ * as connect's Brain sync reads them today. Only the suites' syncs, kept on
+ * `defineSync` until Phase 4 of the connector layer rewrites them as
+ * declared syncs (GRA-2311), which deletes this: it isn't part of
+ * `@grasp-os/sdk/connector`, and only the connector files the import
+ * checks list (connect's build.ts, vite.config.ts) may reach it.
+ */
+export const withNativeSyncs = (
+  connector: DefinedConnector,
+  syncs: readonly Sync[]
+): DefinedConnector => serveDeclared(connector.declaration, syncs);

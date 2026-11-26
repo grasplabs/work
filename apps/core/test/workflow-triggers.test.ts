@@ -554,7 +554,7 @@ describe("an independent workflow's triggers over /rpc", () => {
       connection: connectionId,
       owner: owner.userId,
       resource: mailbox,
-      action: "mail.list",
+      action: "users.messages.list",
       type: "m365.mail.received",
       payload: { subject: "Weekly" },
     });
@@ -624,7 +624,7 @@ describe("an independent workflow's triggers over /rpc", () => {
           {
             subject,
             object: { type: "connection", connectionId, resource: mailbox },
-            actions: ["mail.list"],
+            actions: ["users.messages.list"],
             binding: "EVENTS",
             trigger: summary,
           },

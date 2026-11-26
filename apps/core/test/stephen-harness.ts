@@ -111,25 +111,29 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
 
 /** What Lisa's agent may do in her own Outlook: no send, no delete. */
 export const outlookActions = [
-  "calendar.list",
-  "calendar.get",
-  "calendar.create",
-  "calendar.update",
-  "mail.list",
-  "mail.get",
-  "mail.thread",
-  "mail.createDraft",
-  "mail.createReplyDraft",
+  "users.calendarView.list",
+  "users.events.get",
+  "users.events.create",
+  "users.events.update",
+  "users.messages.list",
+  "users.messages.get",
+  "users.messages.create",
+  "users.messages.createReply.create",
 ];
 
 /** What her agent may do in her own OneDrive: read it. */
-export const oneDriveActions = ["files.list", "files.search", "files.read"];
+export const oneDriveActions = [
+  "drives.root.children.list",
+  "drives.items.children.list",
+  "drives.root.search",
+  "drives.items.content.download",
+];
 
 /** What her agent may do in the register, through the company's account. */
 export const registerActions = [
-  "excel.listRows",
-  "excel.addRow",
-  "excel.updateRow",
+  "drives.items.workbook.tables.dataBodyRange",
+  "drives.items.workbook.tables.rows.create",
+  "drives.items.workbook.tables.rows.itemAt.range.update",
 ];
 
 /**

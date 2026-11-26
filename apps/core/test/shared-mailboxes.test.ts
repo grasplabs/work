@@ -75,8 +75,8 @@ const teamOf = async (...userIds: string[]): Promise<string> => {
 };
 
 /**
- * A chat of `personId`'s whose code lists the shared mailbox and moves a
- * message in it to the archive, through `MAIL`, which the admin granted
+ * A chat of `personId`'s whose code lists the shared mailbox and drafts a
+ * reply in it, through `MAIL`, which the admin granted
  * its agent both for, then says what each call answered, or why it was
  * refused.
  */
@@ -92,8 +92,8 @@ const chatSorting = async (
       `export default async (self, env) => {
         const tried = async (action, input) => { try { const { pending } = await env.connections.call("MAIL", action, input); return pending === null ? "done" : "held"; } catch (error) { return error.message; } };
         return {
-          list: await tried("mail.list", { mailbox: ${JSON.stringify(mailbox.toUpperCase())} }),
-          move: await tried("mail.move", { mailbox: ${JSON.stringify(mailbox)}, message: "m-1", destination: "archive" }),
+          list: await tried("users.messages.list", { mailbox: ${JSON.stringify(mailbox.toUpperCase())} }),
+          draft: await tried("users.messages.create", { mailbox: ${JSON.stringify(mailbox)}, subject: "Invoice INV-7", body: { content: "Paid today." }, toRecipients: [{ emailAddress: { address: "billing@northwind.example.org" } }] }),
         };
       };`
     ),
@@ -102,7 +102,7 @@ const chatSorting = async (
   await requestGranted(idp, admin, {
     subject: chat.agent,
     object: { type: "connection", connectionId },
-    actions: ["mail.list", "mail.move"],
+    actions: ["users.messages.list", "users.messages.create"],
     binding: "MAIL",
   });
   return async () => {
@@ -112,7 +112,7 @@ const chatSorting = async (
   };
 };
 
-const answer = (answers: { list: string; move: string }) =>
+const answer = (answers: { list: string; draft: string }) =>
   `Returned:\n${JSON.stringify(answers)}`;
 
 /** The rights a person's own consent asks Microsoft for. */
@@ -129,7 +129,7 @@ describe("a shared mailbox", setUpTime, () => {
     await env.DB.prepare("DELETE FROM shared_mailbox_pointers").run();
   });
 
-  it("is refused to the chat's agent until an admin points it there, and only for the people named, who sort it from a press", async () => {
+  it("is refused to the chat's agent until an admin points it there, and only for the people named, who work in it from a press", async () => {
     const admin = await signedInApi(idp, "admin");
     const named = await signedInApi(idp, "user");
     const outside = await signedInApi(idp, "user");
@@ -137,7 +137,7 @@ describe("a shared mailbox", setUpTime, () => {
 
     const before = await chatSorting(admin, named.userId, mailbox, id);
     await expect(before()).resolves.toBe(
-      answer({ list: notPointed, move: notPointed })
+      answer({ list: notPointed, draft: notPointed })
     );
 
     // Named in another case: the same mailbox.
@@ -146,20 +146,20 @@ describe("a shared mailbox", setUpTime, () => {
       teams: [await teamOf(named.userId)],
     });
     const theirs = await chatSorting(admin, named.userId, mailbox, id);
-    // The sort waits for its person's press: nothing moved yet.
+    // The draft waits for its person's press: nothing made yet.
     await expect(theirs()).resolves.toBe(
-      answer({ list: "done", move: "held" })
+      answer({ list: "done", draft: "held" })
     );
     const others = await chatSorting(admin, outside.userId, mailbox, id);
     await expect(others()).resolves.toBe(
-      answer({ list: notPointed, move: notPointed })
+      answer({ list: notPointed, draft: notPointed })
     );
 
     // Pointed at for nobody again: refused again.
     await admin.api.connections.pointSharedMailbox(mailbox, { who: "nobody" });
     const after = await chatSorting(admin, named.userId, mailbox, id);
     await expect(after()).resolves.toBe(
-      answer({ list: notPointed, move: notPointed })
+      answer({ list: notPointed, draft: notPointed })
     );
   });
 

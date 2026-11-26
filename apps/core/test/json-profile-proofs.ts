@@ -494,21 +494,23 @@ export const callProofs = (where: string): void => {
         );
         // The operation's schemas, exactly as connect serves them.
         const served = await env.CONNECT.connectorContract({
-          contract: "microsoft-365.mail@1",
+          contract: "microsoft-365.users.messages.attachments@1",
           connectionId,
         });
         const operation = Object.values(served.actions).find(
-          (each) => each.tool === "mail.readAttachment"
+          (each) => each.tool === "users.messages.attachments.get"
         );
         if (operation === undefined) {
-          throw new Error("Expected mail.readAttachment in the contract");
+          throw new Error(
+            "Expected users.messages.attachments.get in the contract"
+          );
         }
         const key = `mail-${unique()}`;
         await publishCatalogContract(env, admin.identity, {
           key,
           kind: "connector",
           operations: {
-            "mail.readAttachment": {
+            "users.messages.attachments.get": {
               input: enveloped(operation.input),
               output: enveloped(operation.output),
               readOnly: true,
@@ -530,7 +532,7 @@ export const callProofs = (where: string): void => {
               id: "read",
               type: "call",
               connection: "mail",
-              action: "mail.readAttachment",
+              action: "users.messages.attachments.get",
               args: {
                 mailbox: { $expr: "args.mailbox" },
                 message: { $expr: "args.message" },
@@ -548,7 +550,7 @@ export const callProofs = (where: string): void => {
           {
             subject: { type: "workflow", workflowId: workflow.id },
             object: { type: "connection", connectionId },
-            actions: ["mail.readAttachment"],
+            actions: ["users.messages.attachments.get"],
             binding: `MAIL_${unique().toUpperCase().replaceAll("-", "_")}`,
           },
           rolesOf(builder.identity)
@@ -561,7 +563,7 @@ export const callProofs = (where: string): void => {
           target: {
             kind: "connector",
             permissionId: asked.id,
-            contract: "microsoft-365.mail@1",
+            contract: "microsoft-365.users.messages.attachments@1",
           },
           reviewed: { version: 1 },
         });

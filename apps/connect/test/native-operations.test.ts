@@ -44,86 +44,91 @@ const reordered = (value: unknown): unknown => {
   );
 };
 
-/** `schema` with every `pattern` in it replaced by `pattern`. */
+/** `schema` with every string in it held to `pattern`. */
 const withPattern = (schema: unknown, pattern: string): unknown =>
   JSON.parse(
-    JSON.stringify(schema, (key, value: unknown) =>
-      key === "pattern" ? pattern : value
+    JSON.stringify(schema, (_key, value: unknown) =>
+      typeof value === "object" &&
+      value !== null &&
+      Reflect.get(value, "type") === "string"
+        ? { ...value, pattern }
+        : value
     )
   );
 
 describe("a native operation's schemas", () => {
   it("are confirmed only when exactly a native action's, under its own tool", async () => {
-    const { contract } = declaredOf("mail.readAttachment");
-    const send = declaredOf("mail.send");
-    expect(JSON.stringify(contract.input)).toContain('"pattern"');
+    const { contract } = declaredOf("users.messages.attachments.get");
+    const send = declaredOf("users.sendMail.create");
     expect({
       exact: await confirm(
-        "mail.readAttachment",
+        "users.messages.attachments.get",
         contract.input,
         contract.output
       ),
       reordered: await confirm(
-        "mail.readAttachment",
+        "users.messages.attachments.get",
         reordered(contract.input),
         reordered(contract.output)
       ),
       write: await confirm(
-        "mail.send",
+        "users.sendMail.create",
         send.contract.input,
         send.contract.output
       ),
       backtracking: await outcome(
         confirm(
-          "mail.readAttachment",
+          "users.messages.attachments.get",
           withPattern(contract.input, "^(a+)+$"),
           contract.output
         )
       ),
       loosened: await outcome(
         confirm(
-          "mail.readAttachment",
+          "users.messages.attachments.get",
           withPattern(contract.input, ".*"),
           contract.output
         )
       ),
       keywordAdded: await outcome(
         confirm(
-          "mail.readAttachment",
+          "users.messages.attachments.get",
           { ...contract.input, multipleOf: 2 },
           contract.output
         )
       ),
       otherTool: await outcome(
-        confirm("mail.send", contract.input, contract.output)
+        confirm("users.sendMail.create", contract.input, contract.output)
       ),
       composio: await outcome(
         confirm("HUBSPOT_LIST_CONTACTS", { type: "object" }, { type: "object" })
       ),
       notJson: await outcome(
         exports.default.nativeOperation({
-          tool: "mail.readAttachment",
+          tool: "users.messages.attachments.get",
           input: "{",
           output: "{}",
         })
       ),
       invalid: await outcome(
-        exports.default.nativeOperation({ tool: "mail.readAttachment" })
+        exports.default.nativeOperation({
+          tool: "users.messages.attachments.get",
+        })
       ),
     }).toStrictEqual({
       exact: {
-        contract: "microsoft-365.mail@1",
+        contract: "microsoft-365.users.messages.attachments@1",
         readOnly: true,
         answersFile: true,
       },
       reordered: {
-        contract: "microsoft-365.mail@1",
+        contract: "microsoft-365.users.messages.attachments@1",
         readOnly: true,
         answersFile: true,
       },
       // A write that attaches files says so (GRA-887).
       write: {
-        contract: "microsoft-365.mail@1",
+        contract: "microsoft-365.users.sendMail@1",
         readOnly: false,
         takesFiles: true,
       },

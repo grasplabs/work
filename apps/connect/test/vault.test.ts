@@ -392,7 +392,7 @@ describe("refreshing", () => {
       outcome(
         callAs(agentFor(person.userId), {
           connectionId,
-          action: "mail.list",
+          action: "users.messages.list",
           input: {},
         })
       )
@@ -451,7 +451,7 @@ describe("disconnecting", () => {
       outcome(
         callAs(agentFor(person.userId), {
           connectionId,
-          action: "mail.list",
+          action: "users.messages.list",
           input: {},
         })
       )
