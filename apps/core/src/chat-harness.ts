@@ -17,6 +17,7 @@ import {
   defineDoc,
   defineDocFamily,
   Harness,
+  ResetEntry,
   ToolResultEntry,
 } from "@earendil-works/pi-durable";
 import type {
@@ -1303,6 +1304,21 @@ export class ChatHarness {
    * question isn't in the transcript.
    */
   async #factsOf(turnId: string): Promise<TurnFacts | undefined> {
+    try {
+      return await this.#factsRead(turnId);
+    } catch (error) {
+      // A record may go without them; the turn still settles.
+      log.warn("chat.turn_facts_unread", {
+        chatSession: this.#name,
+        turnId,
+        ...errorFields(error),
+      });
+      return undefined;
+    }
+  }
+
+  /** `#factsOf`, read: throws as pi's reads do. */
+  async #factsRead(turnId: string): Promise<TurnFacts | undefined> {
     const placed = await this.#conversation.commit(
       async (tx) => await tx.submissionByRequest(this.#conversation.id, turnId),
       context
@@ -1332,6 +1348,11 @@ export class ChatHarness {
       compacted: false,
     };
     for (const [index, entry] of entries.entries()) {
+      // A rebase after the turn (`history_revoked`) starts a context of
+      // its own: nothing from it on is the turn's.
+      if (ResetEntry.is(entry)) {
+        break;
+      }
       const [message] = entry.model ?? [];
       if (ToolResultEntry.is(entry) && message?.role === "toolResult") {
         const tool = tools.get(message.toolName) ?? { calls: 0, ms: 0 };
@@ -1450,10 +1471,12 @@ export class ChatHarness {
 
   /**
    * Submits `request`'s question, refused while pi runs: the turn kept
-   * (`TurnDoc`), its guard asked once, the context rebased if it must be,
-   * then its model admitted and the brain recalled at once, as neither
-   * reads the other: the recall is most of what the first request waits
-   * for, and it waits no longer for the admission.
+   * (`TurnDoc`), its guard asked once, then its model admitted and the
+   * brain recalled at once, as neither reads the other: the recall is most
+   * of what the first request waits for, and it waits no longer for the
+   * admission. The Workspace admitted the same model by the same rules
+   * just before (workspace.ts `#turn`). A context that must be rebased is,
+   * once the model is admitted (its room) and before the recall reads it.
    */
   async #submit(request: TurnRequest): Promise<Submission> {
     if (this.#running) {

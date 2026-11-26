@@ -22,8 +22,8 @@ import { retriedBatch } from "./db/d1.ts";
 export type ChatTurn = typeof chatTurns.$inferInsert;
 
 /**
- * Writes `record` once, by its turn's ID: a write tried again, or a turn
- * settled again after a restart, keeps the first. Never throws.
+ * Writes `record` once, by its turn's ID: a write tried again keeps the
+ * first. Never throws.
  */
 export const recordTurn = async (
   env: Pick<Env, "DB">,

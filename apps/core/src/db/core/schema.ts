@@ -7147,16 +7147,21 @@ export const chatTurns = sqliteTable(
     /** When the question reached the chat's Workspace. */
     sentAt: timestamp("sent_at").notNull(),
     /**
-     * Milliseconds from `sent_at` to the turn's first model request, its
-     * first token (any delta: text, thinking or a tool call), its first
-     * text the chat's watchers could be shown, and its end. Null where it
-     * never came, or for a turn a restart cut short (`resumed`).
+     * Milliseconds from `sent_at` to the turn's first model request (a
+     * summary's, should pi compact first), its first token (any delta:
+     * text, thinking or a tool call), its first text the chat's watchers
+     * could be shown, and its end. Null where it never came, or for a turn
+     * a restart cut short (`resumed`).
      */
     firstRequestMs: integer("first_request_ms"),
     firstTokenMs: integer("first_token_ms"),
     firstTextMs: integer("first_text_ms"),
     doneMs: integer("done_ms").notNull(),
-    /** What its model requests used and cost, summaries included: prompt tokens with the cache's. */
+    /**
+     * What the chat's model requests in the turn used and cost, summaries
+     * and cancelled ones included: prompt tokens with the cache's. Not the
+     * recall's analysis, which is the Brain's (`brain.recall_analysis`).
+     */
     inputTokens: integer("input_tokens").notNull(),
     outputTokens: integer("output_tokens").notNull(),
     cacheReadTokens: integer("cache_read_tokens").notNull(),

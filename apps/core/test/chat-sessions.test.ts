@@ -28,6 +28,7 @@ import midRequestOnPi14 from "./fixtures/pi-1.4/mid-request.json" with { type: "
 import settledOnPi14 from "./fixtures/pi-1.4/settled.json" with { type: "json" };
 import { mockIdp } from "./idp.ts";
 import { fakeProvider, fakeProviderFor } from "./model-provider.ts";
+import { turnRecordsOf } from "./model-usage.ts";
 import { signedInApi, signedInWithRole } from "./sign-in.ts";
 
 // A chat's own object (chat-session.ts), through its Workspace: pi-durable
@@ -663,6 +664,24 @@ describe("a chat's ChatSession", () => {
       );
       const kept = await keptOf(woken, chat.id);
       expect(kept.at(-1)).toBe("assistant:stop");
+      // Its record, once, as the object that took it up saw it: answered,
+      // its times unknown, what came after the restart counted.
+      const turns = await turnRecordsOf(chat.id, 1);
+      expect(
+        turns.map((turn) => ({
+          outcome: turn.outcome,
+          resumed: turn.resumed,
+          times: [turn.firstRequestMs, turn.firstTokenMs, turn.firstTextMs],
+          answered: turn.outputTokens > 0,
+        }))
+      ).toStrictEqual([
+        {
+          outcome: "answered",
+          resumed: true,
+          times: [null, null, null],
+          answered: true,
+        },
+      ]);
     } finally {
       cut.release();
     }
