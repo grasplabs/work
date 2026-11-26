@@ -132,6 +132,16 @@ export type ToolDeclaration<
   Returns extends AnySchema,
 > = ReadTool<Args, Returns> | WriteTool<Args, Returns>;
 
+/**
+ * What a tool knows of its connector: its name, the hosts it may reach,
+ * and the path its routes are under.
+ */
+interface ToolConnector {
+  title: string;
+  hosts: readonly string[];
+  base?: string;
+}
+
 /** A tool, as `tool` declares it and `defineConnector` takes it. */
 export interface ConnectorTool {
   readonly scopes: readonly string[];
@@ -141,10 +151,7 @@ export interface ConnectorTool {
   readonly args: Readonly<Record<string, ValueDescriptor>>;
   readonly returns: ValueDescriptor;
   /** The tool as the runtime's server serves it, named `name` on `connector`. */
-  readonly serve: (
-    name: string,
-    connector: Pick<ConnectorDeclaration, "title" | "hosts" | "base">
-  ) => Tool;
+  readonly serve: (name: string, connector: ToolConnector) => Tool;
 }
 
 const methodOf = (route: string): string => route.split(" ", 1)[0] ?? "";
@@ -322,16 +329,35 @@ export const auth = Object.freeze({
   }),
 });
 
-export interface ConnectorDeclaration {
+/**
+ * The vendor's own MCP server, which a connector serves: every tool its
+ * `tools/list` names, classed by the rules. `registration` says how
+ * Grasp gets a client there: `"dcr"`, the server registers it;
+ * `{ header }`, each person types a key that goes in that header.
+ */
+export interface McpDeclaration {
+  /** The server's URL: https, without credentials, query or fragment. */
+  url: string;
+  registration: "dcr" | { header: string };
+}
+
+interface DeclarationBase {
   /** Its name: lowercase, as permissions and the catalogue name it. */
   name: string;
+  /** Its vendor's name, as people read it: `Pipedrive`. */
+  title: string;
+  events?: Readonly<Record<string, ConnectorReader>>;
+  syncs?: Readonly<Record<string, ConnectorReader>>;
+}
+
+/** A connector of its own tools, each a route of the vendor's API. */
+interface ApiConnectorDeclaration extends DeclarationBase {
+  mcp?: never;
   /**
    * Whose connections its calls get, and whose sign-in its `auth` is:
    * its `name` unless it says otherwise.
    */
   provider?: string;
-  /** Its vendor's name, as people read it: `Pipedrive`. */
-  title: string;
   /** Every host it may reach, exactly. */
   hosts: readonly string[];
   /**
@@ -352,9 +378,29 @@ export interface ConnectorDeclaration {
   };
   auth: ConnectorAuth;
   tools: Readonly<Record<string, ConnectorTool>>;
-  events?: Readonly<Record<string, ConnectorReader>>;
-  syncs?: Readonly<Record<string, ConnectorReader>>;
 }
+
+/**
+ * A connector that serves its vendor's MCP server: its tools are the
+ * server's, and signing in is the server's, learned from it (RFC 9728 and
+ * 8414) or a person's key. It has no hosts, `auth`, tools, events or
+ * syncs of its own.
+ */
+interface McpConnectorDeclaration extends DeclarationBase {
+  mcp: McpDeclaration;
+  provider?: never;
+  hosts?: never;
+  base?: never;
+  openapi?: never;
+  auth?: never;
+  tools?: never;
+  events?: never;
+  syncs?: never;
+}
+
+export type ConnectorDeclaration =
+  | ApiConnectorDeclaration
+  | McpConnectorDeclaration;
 
 /** Where a value didn't fit, without the value. */
 const issuesText = (
@@ -370,7 +416,7 @@ const asJsonObject = (schema: Record<string, JsonValue>): JsonObject => schema;
 
 /** A declared tool as the runtime's server serves it. */
 const toolOf = <Args extends ValueShape, Returns extends AnySchema>(
-  connector: Pick<ConnectorDeclaration, "title" | "hosts" | "base">,
+  connector: ToolConnector,
   name: string,
   declaration: ToolDeclaration<Args, Returns>
 ): Tool => {
@@ -565,9 +611,9 @@ export const defineConnector = (
   const {
     name,
     title,
-    hosts,
+    hosts = [],
     base,
-    tools,
+    tools = {},
     events = {},
     syncs = {},
   } = declaration;
@@ -594,13 +640,16 @@ export const defineConnector = (
     ...serveConnector(
       {
         name,
+        title,
         provider: declaration.provider ?? name,
-        signIn: { ...declaration.auth.signIn, name: title },
+        ...(declaration.mcp === undefined
+          ? { signIn: { ...declaration.auth.signIn, name: title } }
+          : { mcp: declaration.mcp }),
         scopes: [...scopes],
         hosts,
       },
       Object.entries(tools).map(([toolName, each]) =>
-        each.serve(toolName, declaration)
+        each.serve(toolName, { title, hosts, base })
       )
     ),
     declaration,

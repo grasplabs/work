@@ -8,10 +8,11 @@ import type { FakeToolkit } from "./composio-api.ts";
 import { outcome } from "./connect.ts";
 import { testComposioKey } from "./provider-config.ts";
 
-// The catalog: the native providers of this release, then Composio's
-// toolkits, each marked with who carries out its actions. Composio's are
-// listed only while connect has its key, and Composio failing leaves the
-// native ones listed.
+// The catalog: the native providers of this release and its connectors
+// that serve their vendors' MCP servers, then Composio's toolkits, each
+// marked with who carries out its actions. Composio's are listed only
+// while connect has its key, and Composio failing leaves the release's
+// own listed.
 
 const toolkits: FakeToolkit[] = [
   {
@@ -124,6 +125,9 @@ describe("the catalog", () => {
     ).toStrictEqual([
       ["native", "microsoft", "Microsoft 365"],
       ["native", "google", "Google Workspace"],
+      ["connector", "linear", "Linear"],
+      ["connector", "notion", "Notion"],
+      ["connector", "sample-tracker", "Sample tracker"],
       ["composio", "hubspot", "HubSpot"],
       ["composio", "linear", "Linear"],
       ["composio", "acme_erp", "Acme ERP"],
@@ -168,6 +172,9 @@ describe("the catalog", () => {
         ["Gmail", "Google Calendar", "Google Drive"],
         "Email and calendar",
       ],
+      ["linear", null, undefined, "Other"],
+      ["notion", null, undefined, "Other"],
+      ["sample-tracker", null, undefined, "Other"],
       [
         "hubspot",
         "HubSpot is a CRM platform for marketing, sales and service.",
@@ -197,6 +204,9 @@ describe("the catalog", () => {
     expect(entries.map(({ id, auth }) => [id, auth])).toStrictEqual([
       ["microsoft", "managed"],
       ["google", "managed"],
+      ["linear", "managed"],
+      ["notion", "managed"],
+      ["sample-tracker", "key"],
       ["hubspot", "managed"],
       ["linear", "key"],
       ["acme_erp", "own"],
@@ -264,7 +274,7 @@ describe("the catalog", () => {
     expect(composio.requests).toStrictEqual([]);
   });
 
-  it("still lists the native providers when Composio fails", async () => {
+  it("still lists the release's own entries when Composio fails", async () => {
     // `stuck`: even a body that fails to cancel ends as unavailable.
     const failures = ["down", "redirect", "garbled", "stuck"] as const;
     const results = [];
@@ -275,7 +285,7 @@ describe("the catalog", () => {
     }
     expect(
       results.map(({ composio: state, entries }) => [state, entries.length])
-    ).toStrictEqual(failures.map(() => ["unavailable", 2]));
+    ).toStrictEqual(failures.map(() => ["unavailable", 5]));
   });
 
   it("reads no more of an answer than its size cap, however valid it is", async () => {
@@ -288,7 +298,7 @@ describe("the catalog", () => {
       readAll: composio.hugeSent.bytes >= hugeAnswerBytes,
     }).toStrictEqual({
       state: "unavailable",
-      entries: 2,
+      entries: 5,
       readPastCap: false,
       readAll: false,
     });

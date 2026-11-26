@@ -9,7 +9,11 @@ import { z } from "zod";
 
 import { recordEventIf } from "./audit.ts";
 import { pastAddressesAfter } from "./connections.ts";
-import { providerConfigFor } from "./connector-providers.ts";
+import {
+  providerConfigFor,
+  serverStands,
+  stillServes,
+} from "./connector-providers.ts";
 import {
   connections,
   connectionTokens,
@@ -27,6 +31,7 @@ import {
   renewedAsGranted,
 } from "./providers.ts";
 import type {
+  ConnectorServer,
   Credential,
   OAuthClientCredentials,
   OAuthProviderConfig,
@@ -224,10 +229,15 @@ const disconnected = async (
 const notDisconnected = (row: TokenRow): SQL =>
   sql`EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${row.connectionId} AND ${connections.status} <> 'disconnected')`;
 
-/** Takes the refresh lease on `row`, unless someone holds it. */
+/**
+ * Takes the refresh lease on `row`, unless someone holds it, and only
+ * while a connector's row still holds `server`: a move deletes `row`
+ * with it, so a row leased is the server's that issued it.
+ */
 const takeLease = async (
   db: D1Database,
   row: TokenRow,
+  server: ConnectorServer | undefined,
   now: number
 ): Promise<boolean> => {
   const taken = await drizzle(db)
@@ -236,6 +246,7 @@ const takeLease = async (
     .where(
       and(
         unchanged(row),
+        server === undefined ? undefined : serverStands(server),
         or(
           isNull(connectionTokens.refreshUntil),
           lte(connectionTokens.refreshUntil, new Date(now))
@@ -607,8 +618,10 @@ const refreshed = async (
       // oxlint-disable-next-line no-await-in-loop -- one of the loop's exits
       return await accessTokenOf(context.vault, row);
     }
-    // oxlint-disable-next-line no-await-in-loop -- one of the loop's exits
-    if (await takeLease(context.env.DB, row, now)) {
+    if (
+      // oxlint-disable-next-line no-await-in-loop -- one of the loop's exits
+      await takeLease(context.env.DB, row, context.provider.connector, now)
+    ) {
       // oxlint-disable-next-line no-await-in-loop -- one of the loop's exits
       const token = await refreshUnderLease(context, row);
       if (token !== undefined) {
@@ -616,6 +629,12 @@ const refreshed = async (
       }
       // Lost to a change: what is stored now decides.
       continue;
+    }
+    // Its connector moved since its provider was read: no lease is ever
+    // taken for it.
+    // oxlint-disable-next-line no-await-in-loop -- one of the loop's exits
+    if (!(await stillServes(context.env.DB, context.provider.connector))) {
+      throw connectErrors.create("connect.server_unavailable");
     }
     // oxlint-disable-next-line no-await-in-loop -- waits for the lease holder
     await scheduler.wait(refreshPollMs);
@@ -722,6 +741,11 @@ const activeConnection = async (env: Env, connectionId: string) => {
       ? undefined
       : await providerConfigFor(env, connection.provider);
   const row = await readRow(env.DB, connectionId);
+  // A release may move a connector's server as its credential is read:
+  // its provider and its tokens are of one server, or neither is used.
+  if (!(await stillServes(env.DB, provider?.connector))) {
+    throw connectErrors.create("connect.server_unavailable");
+  }
   if (
     connection?.status !== "active" ||
     provider === undefined ||

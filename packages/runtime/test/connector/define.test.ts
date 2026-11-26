@@ -10,7 +10,11 @@ import {
   tool,
   v,
 } from "../../src/connector/connector.ts";
-import { connectorManifestSchema } from "../../src/connector/manifest.ts";
+import {
+  connectorManifestSchema,
+  shadowingConnectors,
+  sharedMcpServers,
+} from "../../src/connector/manifest.ts";
 import {
   effectKeyMetaKey,
   findMetaKey,
@@ -297,6 +301,14 @@ describe("a tool's definition", () => {
     ).toThrow("either repeats or finds");
   });
 });
+
+/** A connector serving a tracker's MCP server, which takes a key. */
+const tracker = (name: string, url = "https://mcp.tracker.test/mcp") =>
+  defineConnector({
+    name,
+    title: "Tracker",
+    mcp: { url, registration: { header: "X-Api-Key" } },
+  });
 
 describe("a connector's definition", () => {
   const withTool =
@@ -915,6 +927,82 @@ describe("a connector's definition", () => {
         tools: { "stock.get": getStock },
       })
     ).toThrow("among its scopes");
+  });
+
+  it("serves its vendor's MCP server from its URL alone, with no hosts, sign-in or tools of its own", () => {
+    const { manifest } = defineConnector({
+      name: "tracker",
+      title: "Tracker",
+      mcp: { url: "https://mcp.tracker.test/mcp", registration: "dcr" },
+    });
+    expect(manifest).toStrictEqual({
+      name: "tracker",
+      title: "Tracker",
+      provider: "tracker",
+      mcp: { url: "https://mcp.tracker.test/mcp", registration: "dcr" },
+      scopes: [],
+      hosts: [],
+      actions: {},
+    });
+  });
+
+  it("refuses, beside its vendor's MCP server, a name that isn't an app's, tools, hosts, scopes or syncs of its own, and a URL that isn't a server's", () => {
+    const { manifest } = tracker("tracker");
+    const withOwn = (own: Partial<typeof manifest>) =>
+      connectorManifestSchema
+        .safeParse({ ...manifest, ...own })
+        .error?.issues.some(
+          ({ message }) =>
+            message ===
+            "A connector serving an MCP server has no hosts, scopes, actions or syncs of its own"
+        ) === true;
+    expect(manifest.mcp?.registration).toStrictEqual({ header: "x-api-key" });
+    expect(() => tracker("google")).toThrow("by an app's name");
+    expect(() => tracker("tracker", "http://mcp.tracker.test/mcp")).toThrow(
+      "Invalid URL"
+    );
+    expect(() =>
+      tracker("tracker", "https://mcp.tracker.test/mcp?key=1")
+    ).toThrow("Not a server URL");
+    expect({
+      tools: withOwn({ actions: stock.manifest.actions }),
+      hosts: withOwn({ hosts: [host] }),
+      scopes: withOwn({ scopes: ["read"] }),
+      syncs: withOwn({
+        syncs: {
+          stock: {
+            kind: "file",
+            places: "own",
+            routes: [{ method: "GET", host, path: "/v1/stock" }],
+          },
+        },
+      }),
+    }).toStrictEqual({ tools: true, hosts: true, scopes: true, syncs: true });
+  });
+
+  it("finds a connector serving an MCP server under another connector's provider", () => {
+    const { manifest } = tracker("tracker");
+    const suite = { ...stock.manifest, name: "tracker-suite" };
+    expect({
+      apart: shadowingConnectors([manifest, stock.manifest]),
+      shadowing: shadowingConnectors([
+        manifest,
+        { ...suite, provider: "tracker" },
+      ]),
+    }).toStrictEqual({ apart: [], shadowing: ["tracker"] });
+  });
+
+  it("finds connectors serving one MCP server, its path with a trailing slash or not", () => {
+    const { manifest } = tracker("tracker");
+    const again = tracker("tracker-again", "https://mcp.tracker.test/mcp/");
+    const elsewhere = tracker(
+      "tracker-elsewhere",
+      "https://mcp.tracker.test/v2"
+    );
+    expect({
+      apart: sharedMcpServers([manifest, elsewhere.manifest, stock.manifest]),
+      shared: sharedMcpServers([manifest, elsewhere.manifest, again.manifest]),
+    }).toStrictEqual({ apart: [], shared: [["tracker", "tracker-again"]] });
   });
 });
 

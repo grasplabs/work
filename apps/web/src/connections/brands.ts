@@ -46,3 +46,6 @@ export const aiProviderLogos: Partial<
   mistral: MistralLogo,
   openrouter: OpenRouterLogo,
 };
+
+/** Whether the product has its own mark for the connector `id`, by that id exactly. */
+export const isBrand = (id: string): id is Brand => Object.hasOwn(brands, id);

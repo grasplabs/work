@@ -7,6 +7,7 @@ import { checkedManifest } from "#connector-manifest";
 import type {
   ActionManifest,
   ConnectorManifest,
+  McpManifestInput,
   RecoveryMode,
 } from "./manifest.ts";
 import {
@@ -430,9 +431,13 @@ export interface Connector {
 /** What a connector is, besides its tools and syncs. */
 export interface ConnectorBase {
   name: string;
+  /** Its vendor's name, as people read it. */
+  title?: string;
   provider: ConnectorProvider;
   /** An app's provider record (sign-in.ts); never a suite's. */
   signIn?: SignInInput;
+  /** The vendor's MCP server it serves (manifest.ts `mcpManifestSchema`). */
+  mcp?: McpManifestInput;
   scopes: readonly string[];
   hosts: readonly string[];
 }

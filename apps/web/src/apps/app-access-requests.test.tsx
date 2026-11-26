@@ -47,6 +47,8 @@ const hubspot = {
   id: "connection-1",
   source: "composio",
   provider: "hubspot",
+  // Connect's name for it, which the page shows where the catalog has none.
+  name: "HubSpot",
   scope: "shared",
   status: "active",
   ownerUserId: null,
@@ -247,7 +249,7 @@ describe("Asking for access for an App, for its builders", () => {
     const before = listed();
 
     await press(button("Ask for access"));
-    await choose("Connection", "hubspot · sales@acme.test");
+    await choose("Connection", "HubSpot · sales@acme.test");
     const tools = offered();
     const suggested = bindingOf();
     await tick("HUBSPOT_LIST_DEALS");
@@ -268,7 +270,7 @@ describe("Asking for access for an App, for its builders", () => {
         ],
         listed: [
           [
-            "hubspot · sales@acme.test",
+            "HubSpot · sales@acme.test",
             "HUBSPOT_LIST_DEALS",
             "HUBSPOT_SALES_ACME_TEST",
           ],
@@ -284,7 +286,7 @@ describe("Asking for access for an App, for its builders", () => {
     await shown(session);
 
     await press(button("Ask for access"));
-    await choose("Connection", "hubspot · sales@acme.test");
+    await choose("Connection", "HubSpot · sales@acme.test");
     await tick("HUBSPOT_LIST_DEALS");
     await press(button("Ask an admin"));
 

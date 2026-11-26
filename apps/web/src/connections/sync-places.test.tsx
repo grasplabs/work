@@ -35,6 +35,7 @@ const microsoft: CatalogConnection = {
   id: "c1",
   source: "native",
   provider: "microsoft",
+  name: "Microsoft 365",
   scope: "shared",
   status: "active",
   ownerUserId: null,

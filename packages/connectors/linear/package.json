@@ -1,0 +1,16 @@
+{
+  "name": "@grasp-os/connector-linear",
+  "private": true,
+  "description": "Linear, through Linear's own MCP server, loaded by connect into its own isolate",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@grasp-os/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:"
+  }
+}

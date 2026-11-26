@@ -203,8 +203,10 @@ export interface ProjectShareCandidates {
  */
 export interface ProjectConnection {
   id: string;
-  /** A native provider (`microsoft`), or a Composio toolkit's slug. */
+  /** A native provider (`microsoft`), a Composio toolkit's slug, or a connector's ID. */
   provider: string;
+  /** What it reaches, as people know it (`ConnectionSummary.name`). */
+  name: string;
   /** The account at the provider, such as its email address. */
   accountName: string | null;
   status: "active" | "needs_reauth" | "disconnected";
@@ -212,7 +214,7 @@ export interface ProjectConnection {
 
 /** The connections a project's items use (`ProjectsApi.connections`). */
 export interface ProjectConnections {
-  /** Those among the connections the person may see, by provider. */
+  /** Those among the connections the person may see, by name. */
   connections: ProjectConnection[];
   /** How many more its items use that the person may not see. */
   unseen: number;
