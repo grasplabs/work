@@ -108,6 +108,12 @@ const styles = stylex.create({
     left: `${String(x)}%`,
     top: `${String(y)}%`,
   }),
+  // The dots in the brand's own greens: the page's ink at rest, sea as they fly, mint at their brightest.
+  ink: {
+    display: "contents",
+    "--brain-heat": "var(--damsko-brand-sea)",
+    "--brain-glow": "var(--damsko-brand-mint)",
+  },
   // The build, over the facts: in the platform's own mode and ground, so outside the night's.
   build: {
     position: "fixed",
@@ -116,6 +122,7 @@ const styles = stylex.create({
     width: "100vw",
     height: "100vh",
     pointerEvents: "auto",
+    color: colors.foreground,
     animationName: lift,
     animationDuration: `${String(LIFT_MS)}ms`,
     animationTimingFunction: "ease-out",
@@ -155,12 +162,12 @@ const dotsOf = (field: HTMLElement): BrainDots => {
     height,
     skip: document.createElement("i"),
     ground: lightness(rgb(token(field, "--damsko-brand-night"))),
-    budget: 2600,
+    budget: 3200,
   });
   // The night itself: a soft field of dots, densest in the middle, on a grid, as the dither is.
   const random = seeded(41);
   const sky: [number, number][] = [];
-  const step = 11;
+  const step = 8;
   const middleX = width / 2;
   const middleY = height * 0.47;
   const reach = Math.max(width, height) * 0.42;
@@ -172,7 +179,7 @@ const dotsOf = (field: HTMLElement): BrainDots => {
       }
     }
   }
-  const kept = sky.slice(0, 2200);
+  const kept = sky.slice(0, 4200);
   const count = words.count + kept.length;
   const dots: BrainDots = {
     count,
@@ -186,17 +193,17 @@ const dotsOf = (field: HTMLElement): BrainDots => {
   for (let index = 0; index < words.count; index += 1) {
     dots.x[index] = words.x[index] ?? 0;
     dots.y[index] = words.y[index] ?? 0;
-    dots.r[index] = Math.max(words.r[index] ?? 1, 1);
-    dots.alpha[index] = 0.6 + 0.4 * (words.tone[index] ?? 0);
-    dots.heat[index] = 0.9;
+    dots.r[index] = Math.max((words.r[index] ?? 1) * 1.4, 1.2);
+    dots.alpha[index] = 0.7 + 0.3 * (words.tone[index] ?? 0);
+    dots.heat[index] = 0.75;
   }
   for (const [offset, [x, y]] of kept.entries()) {
     const index = words.count + offset;
     dots.x[index] = x;
     dots.y[index] = y;
-    dots.r[index] = 0.9;
-    dots.alpha[index] = 0.35;
-    dots.heat[index] = 0.55;
+    dots.r[index] = 1;
+    dots.alpha[index] = 0.45;
+    dots.heat[index] = 0.5;
   }
   return dots;
 };
@@ -306,26 +313,30 @@ const Playing = ({ entry }: { entry: Entry }) => {
           entry={entry}
           onBuild={(built) => {
             setDots(built);
-            // The page changes under the dots: they hold until it is there.
-            void goQuietly(entry);
+            // Once the dots hold the whole window, the page changes under them; they hold until it is there.
+            window.setTimeout(() => {
+              void goQuietly(entry);
+            }, LIFT_MS);
           }}
         />
       )}
       {dots === null ? null : (
-        <DotsBuild
-          from={dots}
-          label={t`Opening Grasp`}
-          layer={styles.build}
-          onArrive={() => {
-            setGone(true);
-          }}
-          onEnd={entryOver}
-          pace={PACE}
-          ready={landed}
-          root={pageOf}
-          sketch
-          way="burst"
-        />
+        <div {...stylex.props(styles.ink)}>
+          <DotsBuild
+            from={dots}
+            label={t`Opening Grasp`}
+            layer={styles.build}
+            onArrive={() => {
+              setGone(true);
+            }}
+            onEnd={entryOver}
+            pace={PACE}
+            ready={landed}
+            root={pageOf}
+            sketch
+            way="burst"
+          />
+        </div>
       )}
     </>,
     document.body
