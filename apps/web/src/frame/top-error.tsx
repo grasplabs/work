@@ -7,7 +7,7 @@ import {
 import { alertVars } from "@grasp-os/ui/components/alert.stylex";
 import { Button } from "@grasp-os/ui/components/button";
 import { Icon, XIcon } from "@grasp-os/ui/lib/icons";
-import { duration, media } from "@grasp-os/ui/lib/tokens.stylex";
+import { duration, media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import {
@@ -159,6 +159,14 @@ const styles = stylex.create({
   open: { gridTemplateRows: "1fr" },
   inner: { minHeight: 0, overflow: "hidden" },
   alert: { width: "100%" },
+  // Its close beside the words at their top end at every width, as an alert's own close stands:
+  // never dropped under them on a phone, where Damsko puts an action that has no room.
+  beside: {
+    gridColumn: "2",
+    gridRow: "1 / span 2",
+    alignSelf: "start",
+    marginBlockStart: `calc(-1 * ${space["1"]})`,
+  },
 });
 
 /** The bar every error of the onboarding and the interview is said in: one per frame, at its top. */
@@ -203,7 +211,7 @@ export const TopErrorBar = () => {
               <AlertTitle>{said.title}</AlertTitle>
             )}
             <AlertDescription>{said.message}</AlertDescription>
-            <AlertAction>
+            <AlertAction style={styles.beside}>
               {said.action === undefined ? null : (
                 <Button
                   onClick={async () => {

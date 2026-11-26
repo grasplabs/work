@@ -61,13 +61,13 @@ export const voicePassSchema = z.string().min(1).max(1024);
 export const interviewVoiceRequestSchema = z.discriminatedUnion("action", [
   /**
    * Open a session: at the start, or again when they come back to an
-   * interview they left (`resume`) or to add something after agreeing to
-   * it (`add`), with the conversation so far, which a new session doesn't
-   * know.
+   * interview they left (`resume`), to add something after agreeing to
+   * it (`add`), or when they switch the language on screen (`language`),
+   * with the conversation so far, which a new session doesn't know.
    */
   z.strictObject({
     action: z.literal("open"),
-    event: z.enum(["start", "resume", "add"]),
+    event: z.enum(["start", "resume", "add", "language"]),
     ...standing,
     /** The pass of the session they left, if the page still holds it: that one is closed. */
     previous: voicePassSchema.optional(),

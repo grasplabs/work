@@ -21,6 +21,7 @@ import type {
   VoiceLine,
   VoiceSessionJoin,
 } from "@grasp-os/shared/interview-voice";
+import { NAMED } from "@grasp-os/shared/interviewers/stephen";
 import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import type {
@@ -148,22 +149,83 @@ const welcome: Record<
   },
 };
 
+/** What he says as they switch the language on screen, before his last line again in it. */
+const switched: Record<InterviewLocale, string> = {
+  en: "Sure, let's go on in English.",
+  nl: "Prima, we gaan verder in het Nederlands.",
+  de: "Gern, machen wir auf Deutsch weiter.",
+  fr: "Très bien, continuons en français.",
+  es: "Claro, sigamos en español.",
+};
+
 /**
  * What he says first: the first question, said after a quick hello; or,
  * back where they left off, his last line again whole, as they may not
- * have heard all of it when they paused or talked over it.
+ * have heard all of it when they paused or talked over it; or, in the
+ * language they just switched to, that line again in it (`restated`),
+ * never the old language's words in the new one's voice.
  */
 const welcomeOf = (
   locale: InterviewLocale,
-  said: "own" | "lead" | "resume" | "add",
-  before: readonly VoiceLine[]
+  said: "own" | "lead" | "resume" | "add" | "language",
+  before: readonly VoiceLine[],
+  restated: string | null
 ): string => {
   const lines = welcome[locale];
+  if (said === "language") {
+    return restated === null
+      ? switched[locale]
+      : `${switched[locale]} ${restated}`;
+  }
   const last = before.at(-1);
   if (said === "resume" && last?.from === "stephen" && last.text !== "") {
     return `${lines.back} ${last.text}`;
   }
   return lines[said];
+};
+
+const restatedSchema = z.strictObject({ line: z.string().min(1).max(1200) });
+
+/**
+ * His last line in the language they switched to, by the model that
+ * writes his lines; null when there is none, or it couldn't be had, and
+ * he only says that he goes on in it.
+ */
+const restatedIn = async (
+  env: Env,
+  locale: InterviewLocale,
+  before: readonly VoiceLine[],
+  signal: AbortSignal
+): Promise<string | null> => {
+  const last = before.at(-1);
+  if (last?.from !== "stephen" || last.text.trim() === "") {
+    return null;
+  }
+  const model = platformAi.interview.line;
+  try {
+    const { output, usage } = await models(env).interview.call({
+      model,
+      purpose,
+      trigger: { type: "system" },
+      work: { onboarding: true },
+      effort: "low",
+      system: `You translate what an interviewer just said into ${NAMED[locale]}. It may be cut off mid-sentence: then say the whole thought as he meant it. Keep his meaning, his tone and any names as they are. Answer with the line only.`,
+      input: last.text,
+      schema: restatedSchema,
+      maxTokens: 400,
+      signal,
+    });
+    await onboardingStore(env).meter({
+      purpose: "interviews",
+      model,
+      tokensIn: usage.inputTokens,
+      tokensCached: usage.cacheRead,
+      tokensOut: usage.outputTokens,
+    });
+    return output.line.trim();
+  } catch {
+    return null;
+  }
 };
 
 /** What he asks after a minute of silence. */
@@ -571,6 +633,10 @@ const open = async (
   }
   const before = asked.event === "start" ? [] : asked.before;
   const said = asked.event === "start" ? context.kind : asked.event;
+  const restated =
+    said === "language"
+      ? await restatedIn(env, asked.locale, before, AbortSignal.timeout(8000))
+      : null;
   const { conversation } = platformAi;
   let answered: Response;
   try {
@@ -600,7 +666,7 @@ const open = async (
           turn_detection: turnDetection,
         },
         tts: { model: conversation.speaking, voice_id: conversation.voice },
-        welcome_message: welcomeOf(asked.locale, said, before),
+        welcome_message: welcomeOf(asked.locale, said, before, restated),
         turn: {
           allow_interruptions: true,
           inactivity: inactivityOf(asked.locale),
