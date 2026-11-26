@@ -442,6 +442,57 @@ describe(inboxItems, () => {
     expect(kinds).not.toContain("bindingApproval");
   });
 
+  it("lists everyone's open changes of unknown outcome for the organization's own admin to follow up, by whose they are, but not their own twice", () => {
+    const listing = (id: string, cursor: string, onBehalfOf: string) => ({
+      effectKeyHash: `hash-${id}`,
+      id,
+      onBehalfOf,
+      subject: { type: "app" as const, appId: app },
+      connectionId: connectionIdSchema.parse("connection-1"),
+      connectionName: "Slack (ops)",
+      action: "post_message",
+      title: "Post a message",
+      resource: null,
+      sentAt: "2026-10-13T08:00:00.000Z",
+      cursor,
+    });
+    const read = {
+      ...waiting(),
+      everyonesOutcomes: {
+        state: "ready",
+        data: {
+          listed: [
+            listing("theirs", "2.def", "user-bo"),
+            // The admin's own, which the inbox lists for them to answer already.
+            listing("own", "1.abc", "user-ada"),
+          ],
+          people: new Map([["user-bo", "Bo Berg"]]),
+        },
+      },
+    } satisfies Waiting;
+    const followed = (viewer: typeof admin | typeof member) =>
+      inboxItems(read, viewer, readAt)
+        .filter(({ kind }) => kind === "everyonesOutcome")
+        .map(({ id, face, summary, urgent }) => ({
+          id,
+          face,
+          summary,
+          urgent,
+        }));
+
+    expect({ admin: followed(admin), member: followed(member) }).toStrictEqual({
+      admin: [
+        {
+          id: "everyonesOutcome:theirs",
+          face: "Bo Berg",
+          summary: "Bo Berg · Slack (ops)",
+          urgent: false,
+        },
+      ],
+      member: [],
+    });
+  });
+
   it("lets go of an item once what it is about is settled", () => {
     const settled = {
       ...waiting(false),

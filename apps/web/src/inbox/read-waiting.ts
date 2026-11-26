@@ -13,6 +13,7 @@ import type { CoreConnection } from "../core-connection.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { readWorkflowTitles, titledDecision } from "../workflows/reads.ts";
+import { readOutcomes } from "./everyones-outcomes.ts";
 import { markShownRead } from "./notifications-page.ts";
 import { decidesRequests } from "./waiting.ts";
 import type { Waiting } from "./waiting.ts";
@@ -54,12 +55,18 @@ const partOf = <T>(
  * permission requests are shown with. Reading it marks the
  * notifications it lists as read, as the inbox, which shows them, does;
  * the sidebar's Inbox view, which only says what waits, reads them with
- * `markShownRead: false`.
+ * `markShownRead: false`. Everyone's unknown outcomes are listed only
+ * with `everyonesOutcomes` (the inbox's page, which shows them): core
+ * records each such read in the audit trail, so the sidebar's read, every
+ * few minutes, would fill it.
  */
 export const readWaiting = async (
   core: CoreConnection,
   identity: Identity,
-  { markShownRead: marking = true }: { markShownRead?: boolean } = {}
+  {
+    markShownRead: marking = true,
+    everyonesOutcomes: listOutcomes = false,
+  }: { markShownRead?: boolean; everyonesOutcomes?: boolean } = {}
 ): Promise<Waiting> => {
   const feed = await loadFromCore(
     core,
@@ -111,6 +118,10 @@ export const readWaiting = async (
           )
         : asked;
   }
+  const everyonesOutcomes =
+    listOutcomes && decidesRequests(identity)
+      ? await readOutcomes(core)
+      : undefined;
   // Workflows by the titles the reader may read, where any item names one.
   const naming =
     feed.state === "ready" &&
@@ -179,5 +190,6 @@ export const readWaiting = async (
           ),
         }
       : {}),
+    ...(everyonesOutcomes === undefined ? {} : { everyonesOutcomes }),
   };
 };

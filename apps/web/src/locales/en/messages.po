@@ -1273,6 +1273,10 @@ msgstr "{percent} context"
 msgid "{percent}% known now"
 msgstr "{percent}% known now"
 
+#: src/inbox/items.ts
+msgid "{person} · {connection}"
+msgstr "{person} · {connection}"
+
 #: src/workflows/activity-words.ts
 msgid "{person} approved {alias} for version {version}"
 msgstr "{person} approved {alias} for version {version}"
@@ -4057,10 +4061,6 @@ msgstr "Called a model"
 msgid "Called another App"
 msgstr "Called another App"
 
-#: src/routes/_shell.settings.outcomes.tsx
-msgid "Calls"
-msgstr "Calls"
-
 #: src/activity/pending.tsx
 msgid "Calls {path} of {app}. Each run can read or change whatever that function reads or changes in the App, as the person it runs for"
 msgstr "Calls {path} of {app}. Each run can read or change whatever that function reads or changes in the App, as the person it runs for"
@@ -4184,7 +4184,6 @@ msgstr "Cases a week: {cases}."
 #: src/agents/new-agent.tsx
 #: src/apps/app-workflows.tsx
 #: src/drafts/share-with-team.tsx
-#: src/routes/_shell.settings.outcomes.tsx
 #: src/settings/ai-providers.tsx
 msgid "Change"
 msgstr "Change"
@@ -4441,10 +4440,6 @@ msgstr "Changes"
 msgctxt "a list of changes"
 msgid "Changes"
 msgstr "Changes"
-
-#: src/routes/_shell.settings.outcomes.tsx
-msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, in their inbox; follow up with them."
-msgstr "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, in their inbox; follow up with them."
 
 #: src/drafts/draft-history.tsx
 #: src/drafts/share-with-team.tsx
@@ -5132,8 +5127,8 @@ msgstr "Connecting your Microsoft 365"
 #: src/apps/resource-bindings.tsx
 #: src/chat/sources.tsx
 #: src/connections/app/words.ts
+#: src/inbox/item-detail.tsx
 #: src/inbox/items.ts
-#: src/routes/_shell.settings.outcomes.tsx
 #: src/settings/ai-providers.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Connection"
@@ -6536,10 +6531,6 @@ msgstr "Each as the company has it, or for fewer people. Never more."
 #: src/routes/_shell.settings.billing.tsx
 msgid "Each invoice to your billing email"
 msgstr "Each invoice to your billing email"
-
-#: src/routes/_shell.settings.outcomes.tsx
-msgid "Each one sent for someone shows here until they say what became of it."
-msgstr "Each one sent for someone shows here until they say what became of it."
 
 #: src/connections/http-connections.tsx
 msgid "Each path prefix starts with /, on its own line, with no query or dot segments."
@@ -9423,6 +9414,10 @@ msgstr "Its access ran out. Grasp staff can't reconnect it: an admin of the orga
 msgid "Its account is out of credit."
 msgstr "Its account is out of credit."
 
+#: src/inbox/item-detail.tsx
+msgid "Its answer was lost: nobody can tell whether it took effect."
+msgstr "Its answer was lost: nobody can tell whether it took effect."
+
 #: src/answer-pause.tsx
 msgid "Its answers can be used in a moment, so a press meant for the one before doesn't answer it."
 msgstr "Its answers can be used in a moment, so a press meant for the one before doesn't answer it."
@@ -11342,10 +11337,6 @@ msgstr "No billing details yet"
 msgid "No business process"
 msgstr "No business process"
 
-#: src/routes/_shell.settings.outcomes.tsx
-msgid "No call of unknown outcome is open."
-msgstr "No call of unknown outcome is open."
-
 #: src/apps/app-data.tsx
 msgid "No changes are kept for this record."
 msgstr "No changes are kept for this record."
@@ -12631,6 +12622,10 @@ msgstr "Only {accounts}"
 msgid "Only {owner} so far."
 msgstr "Only {owner} so far."
 
+#: src/inbox/item-detail.tsx
+msgid "Only {person} can say whether it happened."
+msgstr "Only {person} can say whether it happened."
+
 #: src/settings/use-team-change.ts
 msgid "Only admins can change teams."
 msgstr "Only admins can change teams."
@@ -13509,7 +13504,6 @@ msgid "person"
 msgstr "person"
 
 #: src/activity/audit-event.tsx
-#: src/routes/_shell.settings.outcomes.tsx
 msgid "Person"
 msgstr "Person"
 
@@ -14230,7 +14224,7 @@ msgstr "Reasoning"
 msgid "Recalled from the Brain"
 msgstr "Recalled from the Brain"
 
-#: src/routes/_shell.settings.outcomes.tsx
+#: src/inbox/item-detail.tsx
 msgid "Receipt"
 msgstr "Receipt"
 
@@ -15716,8 +15710,8 @@ msgstr "Sending"
 msgid "Sensitive"
 msgstr "Sensitive"
 
+#: src/inbox/item-detail.tsx
 #: src/inbox/items.ts
-#: src/routes/_shell.settings.outcomes.tsx
 msgid "Sent"
 msgstr "Sent"
 
@@ -19155,11 +19149,6 @@ msgstr "Unknown"
 #: src/routes/_shell.settings.security.tsx
 msgid "Unknown device"
 msgstr "Unknown device"
-
-#: src/routes/_shell.settings.outcomes.tsx
-#: src/settings/sections.ts
-msgid "Unknown outcomes"
-msgstr "Unknown outcomes"
 
 #: src/brain/brain.ts
 #: src/chat/chat-markdown.ts

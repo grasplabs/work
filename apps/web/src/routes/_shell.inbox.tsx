@@ -44,7 +44,9 @@ export const Route = createFileRoute("/_shell/inbox")({
   pendingComponent: InboxPending,
   loader: async ({ context: { core, identity } }) => {
     const [waiting, read] = await Promise.all([
-      readWaiting(core, identity),
+      // Everyone's unknown outcomes too, for an admin to follow up: here
+      // alone, never in the sidebar's count.
+      readWaiting(core, identity, { everyonesOutcomes: true }),
       // The programme with Grasp, for the weekly report; none without a plan.
       loadFromCore(
         core,
