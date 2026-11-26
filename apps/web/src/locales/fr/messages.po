@@ -3014,10 +3014,6 @@ msgstr "Un import dans le Brain a échoué"
 msgid "and {more} more"
 msgstr "et {more} de plus"
 
-#: src/onboarding/documents-step.tsx
-msgid "And if you have files lying around that explain how you work, you can drop them in here. Rough drafts are just as welcome. One thing though: leave out anything about a single person, that’s not what I’m here for."
-msgstr "Et si vous avez des fichiers qui expliquent votre façon de travailler, vous pouvez les déposer ici. Les brouillons sont tout aussi bienvenus. Une seule chose : laissez de côté tout ce qui concerne une seule personne, ce n’est pas pour ça que je suis là."
-
 #: src/apps/app-data.tsx
 msgid "And more."
 msgstr "Et d'autres."
@@ -11428,8 +11424,8 @@ msgid "Next week"
 msgstr "La semaine prochaine"
 
 #: src/onboarding/sources-step.tsx
-msgid "Next, I’d like to understand how the work actually gets done. Most of that is written down somewhere, in handbooks, procedures or how-tos. Show me where those live, and I’ll only read what you choose to share with me."
-msgstr "Ensuite, j’aimerais comprendre comment le travail se fait vraiment. L’essentiel est écrit quelque part, dans des manuels, des procédures ou des modes opératoires. Montrez-moi où ils se trouvent, et je ne lirai que ce que vous choisissez de partager avec moi."
+msgid "Next, I’d like to understand how the work actually gets done. Most of it lives in the tools your team already uses: shared drives, Teams channels and wikis, full of the files and pages people work from every day. Point me to the ones you use, and I’ll only read what you choose to share with me."
+msgstr "Ensuite, j’aimerais comprendre comment le travail se fait vraiment. L’essentiel se trouve dans les outils que votre équipe utilise déjà : disques partagés, canaux Teams et wikis, remplis des fichiers et des pages avec lesquels chacun travaille au quotidien. Montrez-moi lesquels vous utilisez, et je ne lirai que ce que vous choisissez de partager avec moi."
 
 #: src/apps/field-editor.tsx
 #: src/inbox/json-fields.tsx
@@ -13968,10 +13964,6 @@ msgstr "Prix"
 #: src/drafts/share-with-team.tsx
 msgid "Problems"
 msgstr "Problèmes"
-
-#: src/onboarding/sources-step.tsx
-msgid "Procedures, handbooks, how-tos. Connect where they live, and I’ll only read what you share with me."
-msgstr "Procédures, manuels, modes d’emploi. Connectez les endroits où ils se trouvent, et je ne lirai que ce que vous partagez avec moi."
 
 #: src/brain/memories-page.tsx
 msgctxt "a kind of thing the Brain remembers"
@@ -18102,6 +18094,10 @@ msgstr "Les données d’exemple ne correspondent pas à la modification"
 msgid "The export didn't work. Try again."
 msgstr "L’export n’a pas fonctionné. Réessayez."
 
+#: src/onboarding/sources-step.tsx
+msgid "The files, pages and folders your team works from. Connect the tools they’re in, and I’ll only read what you share with me."
+msgstr "Les fichiers, pages et dossiers avec lesquels votre équipe travaille. Connectez les outils où ils se trouvent, et je ne lirai que ce que vous partagez avec moi."
+
 #: src/onboarding/review-parts.tsx
 msgid "The first way: {way}"
 msgstr "La première façon : {way}"
@@ -18737,6 +18733,10 @@ msgstr "Cet entretien ne peut pas être ouvert"
 #: src/interview/composer.tsx
 msgid "This interview went on in another window. You now see that one."
 msgstr "Cet entretien a continué dans une autre fenêtre. Vous voyez maintenant celui-là."
+
+#: src/onboarding/documents-step.tsx
+msgid "This is a good moment to give me some context. A process description, an onboarding guide, a price list or even a rough draft helps me understand what you’re dealing with every day. The more I know, the better my questions to your team, and the more useful everything I give back. Just leave out anything about a single person."
+msgstr "C’est le bon moment pour me donner un peu de contexte. Une description de processus, un guide d’accueil, une grille tarifaire ou même un brouillon m’aide à comprendre ce que vous gérez au quotidien. Plus j’en sais, meilleures sont mes questions à votre équipe, et plus tout ce que je vous rends est utile. Laissez simplement de côté tout ce qui concerne une seule personne."
 
 #: src/onboarding/leads-step.tsx
 msgid "This is how I understand your organization. I’ll talk to each team lead first, so nobody is caught off guard. Have a quick look whether the right people lead the right teams, and which teams should take part."

@@ -236,7 +236,7 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
     <CalmStep
       body={
         kinds === null
-          ? t`Procedures, handbooks, how-tos. Connect where they live, and I’ll only read what you share with me.`
+          ? t`The files, pages and folders your team works from. Connect the tools they’re in, and I’ll only read what you share with me.`
           : t`${kinds}. Connect where they live, and I’ll only read what you share with me.`
       }
       also={
@@ -252,7 +252,7 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
           {t`Continue`}
         </Button>
       }
-      spoken={t`Next, I’d like to understand how the work actually gets done. Most of that is written down somewhere, in handbooks, procedures or how-tos. Show me where those live, and I’ll only read what you choose to share with me.`}
+      spoken={t`Next, I’d like to understand how the work actually gets done. Most of it lives in the tools your team already uses: shared drives, Teams channels and wikis, full of the files and pages people work from every day. Point me to the ones you use, and I’ll only read what you choose to share with me.`}
       title={t`Where does the work get written down?`}
     >
       <div {...stylex.props(styles.stack)}>
