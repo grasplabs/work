@@ -1,21 +1,32 @@
-// The plan's days (plan-story.tsx), counted from today: core plans no campaign yet.
+import type { Roster } from "@grasp-os/shared/onboarding";
 
-/** The moments of the campaign, by how many days after today: until core plans one. */
-export const after = { first: 2, everyone: 6, close: 9, findings: 13 } as const;
+// The story's days and people (plan-story.tsx), read from what the admin
+// just chose: the plan's days and the teams' leads. Pure.
 
-export type Moment = keyof typeof after;
+/** An ISO day as a date, at noon, so no time zone moves it. */
+export const dayAt = (day: string): Date =>
+  new Date(`${day.slice(0, 10)}T12:00:00Z`);
 
-/** Today, as the day the plan counts from: at noon, so no time zone moves it. */
-export const planStart = (today: string): Date =>
-  new Date(`${today}T12:00:00Z`);
-
-/** The day of a moment of the plan: a weekday, so one that falls on a weekend moves to the Monday after. */
-export const dateOf = (start: Date, moment: Moment): Date => {
-  const date = new Date(start);
-  date.setUTCDate(start.getUTCDate() + after[moment]);
+/** A day that falls on a weekend, moved to the Monday after; a weekday as it is. As an ISO day. */
+export const weekdayOf = (day: string): string => {
+  const date = dayAt(day);
   const weekday = date.getUTCDay();
   if (weekday === 6 || weekday === 0) {
     date.setUTCDate(date.getUTCDate() + (weekday === 6 ? 2 : 1));
   }
-  return date;
+  return date.toISOString().slice(0, 10);
 };
+
+/** The teams that take part, and their leads by name: those who go first. */
+export const leadsOf = (
+  roster: Roster | null
+): { team: string; lead: string | null }[] =>
+  (roster?.teams ?? [])
+    .filter((team) => !team.off)
+    .map((team) => {
+      const lead = roster?.people.find(
+        (person) => person.id === team.lead && !person.away
+      );
+      const name = lead?.name.trim() ?? "";
+      return { team: team.name, lead: name === "" ? null : name };
+    });

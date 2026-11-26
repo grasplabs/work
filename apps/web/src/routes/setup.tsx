@@ -32,13 +32,11 @@ import { PageError } from "../frame/page-states.tsx";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import { CalmFrame } from "../onboarding/calm-frame.tsx";
 import type { Ways } from "../onboarding/calm-frame.tsx";
-import { CampaignFrame } from "../onboarding/campaign/campaign-page.tsx";
-import { isCampaignState } from "../onboarding/campaign/fixtures.ts";
-import type { CampaignState } from "../onboarding/campaign/fixtures.ts";
 import { poses } from "../onboarding/field/poses.ts";
 import { keptKey } from "../onboarding/kept.ts";
 import { todayInUtc } from "../onboarding/send-plan.ts";
 import { SetupStepBody } from "../onboarding/setup-steps.tsx";
+import type { ShownStep } from "../onboarding/setup-steps.tsx";
 import {
   finishedAt,
   waysFrom,
@@ -74,6 +72,15 @@ const directorySuites = directorySuiteSchema.options;
  * Pulse, on the work laptops, is set up with the company outside it.
  */
 const dropped: ReadonlySet<SetupStep> = new Set(["pulse"]);
+
+/** Screens no flow has any more, kept by name only so places kept with them still read. */
+const gone: ReadonlySet<SetupStep> = new Set([
+  "pulse",
+  "listening",
+  "review",
+  "open",
+]);
+const framed = (step: SetupStep): step is ShownStep => !gone.has(step);
 
 /** Which list of steps a kept place counts in: core keeps the place by the screens' names, this browser only the message and what was settled. */
 const keptSteps = 3;
@@ -159,17 +166,15 @@ const useKept = (userId: string, index: number, path: SetupPath) => {
   };
 };
 
-/** The frame's arrows on a step: back a step, and on as far as they went; none on the campaign page or the end. */
+/** The frame's arrows on a step: back a step, and on as far as they went. */
 const waysOf = (
   index: number,
   reached: number,
   path: SetupPath,
   go: (step: SetupStep) => void
-): Ways | undefined => {
+): Ways => {
   const { back, on } = waysFrom(index, reached, path);
-  const step = path[index];
-  const ends = step === "listening" || step === "open";
-  const ways: Ways = {
+  return {
     onBack:
       back === undefined
         ? undefined
@@ -177,13 +182,12 @@ const waysOf = (
             go(back);
           },
     onNext:
-      on === undefined || on === "listening" || on === "open"
+      on === undefined
         ? undefined
         : () => {
             go(on);
           },
   };
-  return ends ? undefined : ways;
 };
 
 /** The track's progress on a screen: its part, named; none on a screen in no part. */
@@ -207,7 +211,7 @@ const Setup = () => {
   const navigate = useNavigate();
   const { identity, signIn, suites } = Route.useRouteContext();
   const loaded = Route.useLoaderData();
-  const { step: asked, state: campaignState } = Route.useSearch();
+  const { step: asked } = Route.useSearch();
   const data = loaded.state === "ready" ? loaded.data : null;
   // The screens this company's flow has, in its order; all of them where core can't say.
   // The same list while the flow is the same, so what goes by it runs once per change.
@@ -267,17 +271,16 @@ const Setup = () => {
   if (path.length === 0) {
     return <Navigate replace to="/" />;
   }
-  // While the interviews run: the campaign page, from fixtures until core plans a campaign.
-  // (Pulse is never on the path; named here so the steps below know they are the setup's.)
-  if (step === "listening" || step === "pulse") {
-    return <CampaignFrame state={campaignState ?? "day3"} />;
+  // Never on the path; named here so the steps below know they are the setup's.
+  if (!framed(step)) {
+    return <Navigate replace to="/" />;
   }
   return (
     <CalmFrame
       userId={identity.userId}
       ways={waysOf(index, furthest, path, go)}
       progress={progressOf(partOf(step, path), partNames)}
-      centred={step === "open" || step === "company"}
+      centred={step === "company"}
       language={step !== "welcome"}
       pose={poses[step]}
     >
@@ -382,10 +385,8 @@ export const Route = createFileRoute("/setup")({
     step?: SetupStep;
     connection?: string;
     connectionError?: string;
-    state?: CampaignState;
   } => ({
     ...(isStep(search.step) && { step: search.step }),
-    ...(isCampaignState(search.state) && { state: search.state }),
     ...(typeof search.connection === "string" && {
       connection: search.connection,
     }),

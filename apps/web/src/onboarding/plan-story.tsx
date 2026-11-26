@@ -8,6 +8,7 @@ import {
   media,
   space,
 } from "@grasp-os/ui/lib/tokens.stylex";
+import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
@@ -24,11 +25,15 @@ import {
   voiceClock,
 } from "../voice/voice.ts";
 import { Sound, useBackWay, useEnterGoesOn } from "./calm-frame.tsx";
+import { enterPlatform } from "./entry-store.ts";
+import type { EntryFact } from "./entry-store.ts";
 import { poseField } from "./field/engine.ts";
 import { poses } from "./field/poses.ts";
 import { PlanPictures } from "./plan-pictures.tsx";
 import type { Scene } from "./plan-scenes.ts";
-import { dateOf, planStart } from "./plan.ts";
+import { dayAt, leadsOf, weekdayOf } from "./plan.ts";
+import { closesOn } from "./setup.ts";
+import type { SetupData } from "./step-parts.ts";
 import { useRememberLines } from "./step-voice.tsx";
 
 // "Here's the plan", told as a story (as the first onboarding told it,
@@ -130,9 +135,21 @@ const styles = stylex.create({
   said: { opacity: 1, filter: "blur(0)", transform: "none" },
   fresh: { color: colors.brandLime },
   quiet: { opacity: 0.7 },
+  // Going into the platform: the story's words and ways make room for what was set up.
+  leaving: {
+    opacity: 0,
+    transitionProperty: "opacity",
+    transitionDuration: "420ms",
+    pointerEvents: "none",
+  },
   // Continue arriving once the story is told: slower than a step's, it is the story's last beat.
   arriving: { animationDuration: "900ms" },
 });
+
+/** Fetches the way into the platform ahead (platform-entry.tsx), which the root plays. */
+const fetchEntry = (): void => {
+  void import("./platform-entry.tsx");
+};
 
 /** Told once in this visit: coming back to the step, the story's last picture stands at once. */
 let toldBefore = false;
@@ -160,43 +177,102 @@ interface Part {
   text: string;
 }
 
-/** The narration, in the language the page is in, with the plan's own days. */
-const useParts = (today: string): Part[] => {
+/** The narration, in the language the page is in: what the admin chose, told back as what happens next. */
+const useParts = (data: SetupData): Part[] => {
   const { t, i18n } = useLingui();
-  const start = planStart(today);
-  const format = new Intl.DateTimeFormat(i18n.locale, {
+  const day = new Intl.DateTimeFormat(i18n.locale, {
     weekday: "long",
     day: "numeric",
     month: "long",
     timeZone: "UTC",
   });
-  const first = format.format(dateOf(start, "first"));
-  const everyone = format.format(dateOf(start, "everyone"));
-  const close = format.format(dateOf(start, "close"));
-  const findings = format.format(dateOf(start, "findings"));
+  const clock = new Intl.DateTimeFormat(i18n.locale, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const { plan } = data.view;
+  const leads = leadsOf(data.view.roster).filter(
+    ({ lead }) => lead !== null
+  ).length;
+  const start = plan === null ? null : day.format(dayAt(plan.start));
+  const at = plan?.at === undefined ? null : clock.format(new Date(plan.at));
+  const close =
+    plan === null ? null : day.format(dayAt(weekdayOf(closesOn(plan))));
+  let first = t`Once Grasp’s team has planned the day with you, the team leads go first. They get a link for a short chat with me about their day, the tools they use, and where their time goes.`;
+  if (start !== null) {
+    first =
+      at === null
+        ? t`On ${start}, the team leads go first. They get a link for a short chat with me about their day, the tools they use, and where their time goes.`
+        : t`On ${start} at ${at}, the team leads go first. They get a link for a short chat with me about their day, the tools they use, and where their time goes.`;
+  }
+  const everyone =
+    leads > 0
+      ? t`Everyone else gets their own link as soon as their lead has talked with me, and can do the chat whenever it suits them.`
+      : t`Then everyone else gets their own link, and can do the chat whenever it suits them.`;
   return [
-    { scene: "you", text: t`Here’s a quick look at the next two weeks.` },
     {
-      scene: "first",
-      text: t`We kick off on ${first} with a small first group. They’ll get a link for a quick chat about what their day-to-day looks like, which tools they use, and where their time goes.`,
+      scene: "you",
+      text: t`That’s everything. Here’s a quick look at what happens next.`,
     },
-    {
-      scene: "everyone",
-      text: t`Starting ${everyone}, the rest of the team follows. Everyone gets their own link and can do the chat whenever it suits them.`,
-    },
+    { scene: "first", text: first },
+    { scene: "everyone", text: everyone },
     {
       scene: "close",
-      text: t`We wrap up on ${close}, once we’ve heard from almost everyone.`,
+      text:
+        close === null
+          ? t`About two weeks later we wrap up, once I’ve heard from almost everyone.`
+          : t`We wrap up on ${close}, once I’ve heard from almost everyone.`,
     },
     {
       scene: "learned",
-      text: t`I’ll pull everything together, and on ${findings} we’ll walk through the report: where work gets stuck and which processes make the most sense to tackle first.`,
+      text: t`Then I pull it all together, and we walk through the report: where work gets stuck, and what makes the most sense to tackle first.`,
     },
     {
       scene: "rest",
-      text: t`Most of the time, it’s the small things that pile up—and end up making the biggest difference.`,
+      text: t`Most of the time, it’s the small things that pile up and end up making the biggest difference. Until then, Grasp is all yours.`,
     },
   ];
+};
+
+/** How many of each shown at most, so the way in stays a glance, never a list. */
+const most = { teams: 5, leads: 4, documents: 3 };
+
+/** What the admin set up, as the way into the platform gathers it: the company, its teams and leads, its people, its documents, the day. */
+const useEntryFacts = (data: SetupData): EntryFact[] => {
+  const { t, i18n } = useLingui();
+  const { roster, plan } = data.view;
+  const teams = leadsOf(roster);
+  const people = roster?.people.filter((person) => !person.away).length ?? 0;
+  const facts: EntryFact[] = [];
+  const company = data.company?.trim() ?? "";
+  facts.push({ kind: "company", text: company === "" ? "Grasp" : company });
+  for (const { team } of teams.slice(0, most.teams)) {
+    facts.push({ kind: "team", text: team });
+  }
+  for (const { lead } of teams.slice(0, most.leads)) {
+    if (lead !== null) {
+      facts.push({ kind: "lead", text: lead.split(/\s+/u)[0] ?? lead });
+    }
+  }
+  if (people > 0) {
+    facts.push({
+      kind: "people",
+      text: plural(people, { one: "# person", other: "# people" }),
+    });
+  }
+  for (const document of data.documents.slice(0, most.documents)) {
+    facts.push({ kind: "document", text: document.name });
+  }
+  if (plan !== null) {
+    const day = new Intl.DateTimeFormat(i18n.locale, {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      timeZone: "UTC",
+    }).format(dayAt(plan.start));
+    facts.push({ kind: "start", text: t`Starts ${day}` });
+  }
+  return facts;
 };
 
 /** How many characters of a part are said by now: by his voice, or by the pace of speech when it is off. */
@@ -342,8 +418,8 @@ const Back = () => {
 };
 
 /** The story as it is told: the part being told, and how much of it is said. */
-const useTelling = (today: string, shown: boolean) => {
-  const parts = useParts(today);
+const useTelling = (data: SetupData, shown: boolean) => {
+  const parts = useParts(data);
   const texts = parts.map((part) => part.text);
   const [at, setAt] = useState(0);
   const [began, setBegan] = useState<number | null>(null);
@@ -371,21 +447,34 @@ const useTelling = (today: string, shown: boolean) => {
 };
 
 export const PlanStory = ({
-  today,
+  data,
   onward,
 }: {
-  /** The day the plan counts from, as YYYY-MM-DD. */
-  today: string;
+  data: SetupData;
+  /** Past the setup's last screen: into the platform. Over once it is there. */
   onward: () => Promise<void>;
 }) => {
   const { t } = useLingui();
+  const facts = useEntryFacts(data);
   const reduce = useLessMotion();
   const [told, setTold] = useState(toldBefore);
   const shown = told || reduce;
   const { texts, part, at, over, began, setAt, setBegan, setOver } = useTelling(
-    today,
+    data,
     shown
   );
+  // The way in, fetched while the story is told, so it starts at once.
+  useEffect(fetchEntry, []);
+  // Continue: what they set up gathers on the screen and builds the platform's first page.
+  const [entering, setEntering] = useState(false);
+  const enter = async (): Promise<void> => {
+    if (entering) {
+      return;
+    }
+    setEntering(true);
+    stopSpeaking();
+    await enterPlatform({ facts, go: onward });
+  };
 
   const finish = () => {
     toldBefore = true;
@@ -449,12 +538,12 @@ export const PlanStory = ({
   return createPortal(
     <section data-mode="dark" {...stylex.props(styles.stage, fadeIn)}>
       <PlanPictures scene={scene} still={reduce} />
-      <div {...stylex.props(styles.bar)}>
+      <div {...stylex.props(styles.bar, entering && styles.leaving)}>
         <Sound />
       </div>
       <span />
-      <div {...stylex.props(styles.words)}>
-        <h1 {...stylex.props(visuallyHidden)}>{t`Here’s the plan`}</h1>
+      <div {...stylex.props(styles.words, entering && styles.leaving)}>
+        <h1 {...stylex.props(visuallyHidden)}>{t`What happens next`}</h1>
         <Told
           began={began}
           key={`part-${String(at)}`}
@@ -466,7 +555,7 @@ export const PlanStory = ({
           {began === null && !shown ? "" : part?.text}
         </span>
       </div>
-      <footer {...stylex.props(styles.foot)}>
+      <footer {...stylex.props(styles.foot, entering && styles.leaving)}>
         <Back />
         <Ways
           again={() => {
@@ -476,7 +565,7 @@ export const PlanStory = ({
             setOver(false);
             setTold(false);
           }}
-          onward={onward}
+          onward={enter}
           reduce={reduce}
           shown={shown}
           skip={finish}
