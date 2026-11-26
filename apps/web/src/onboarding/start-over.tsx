@@ -2,6 +2,7 @@ import { devResetPath } from "@grasp-os/shared/dev-reset";
 import { Button } from "@grasp-os/ui/components/button";
 import { Icon, RefreshCwIcon } from "@grasp-os/ui/lib/icons";
 
+import { DitherPicker } from "./field/dither-picker.tsx";
 import { forgetKeptSetups } from "./kept.ts";
 
 // On a local stack only (`vp run dev`): the onboarding started over, so
@@ -25,18 +26,21 @@ const startOver = async (): Promise<void> => {
 
 const label = "Start the onboarding over (local only)";
 
-/** A small button in the bar that starts the onboarding over: on a local stack only. */
+/** A small button in the bar that starts the onboarding over, and the dither menu: on a local stack only. */
 export const StartOver = ({ size }: { size: "icon-sm" | "icon" }) =>
   import.meta.env.DEV ? (
-    <Button
-      aria-label={label}
-      onClick={() => {
-        void startOver();
-      }}
-      size={size}
-      tooltip={label}
-      variant="ghost"
-    >
-      <Icon icon={RefreshCwIcon} />
-    </Button>
+    <>
+      <DitherPicker size={size} />
+      <Button
+        aria-label={label}
+        onClick={() => {
+          void startOver();
+        }}
+        size={size}
+        tooltip={label}
+        variant="ghost"
+      >
+        <Icon icon={RefreshCwIcon} />
+      </Button>
+    </>
   ) : null;
