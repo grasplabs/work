@@ -79,8 +79,34 @@ tester.run("grasp/no-unexplained-json", rule, {
       `${imports}const Deal = v.object({\n  // oxlint-disable-next-line no-console\n  fields: v.json(),\n});`
     ),
     free(
-      "a comment after it",
-      `${imports}const Deal = v.object({\n  fields: v.json(), // custom fields\n});`
+      "a comment for TypeScript",
+      `${imports}const Deal = v.object({\n  // @ts-expect-error -- not a shape\n  fields: v.json(),\n});`
+    ),
+    free(
+      "a comment for the formatter",
+      `${imports}const Deal = v.object({\n  // prettier-ignore\n  fields: v.json(),\n});`
+    ),
+    free(
+      "a comment with no words",
+      `${imports}const Deal = v.object({\n  /** */\n  fields: v.json(),\n});`
+    ),
+    free(
+      "the next property after a comment that ends a line",
+      `${imports}const Deal = v.object({\n  fields: v.json(), // Each company names its own.\n  owner: v.json(),\n});`,
+      2
+    ),
+    free(
+      "the next statement after a comment that ends a line",
+      `${imports}const Fields = v.json(); // Each company names its own.\nconst Owner = v.json();`,
+      2
+    ),
+    free(
+      "a comment ending its property's line",
+      `${imports}const Deal = v.object({\n  fields: v.json(), // Each company names its own.\n});`
+    ),
+    free(
+      "a comment before it on its line",
+      `${imports}const Value = v.union(v.string(), /* The vendor's own. */ v.json());`
     ),
     free(
       "the properties after an explained one",
@@ -92,6 +118,10 @@ tester.run("grasp/no-unexplained-json", rule, {
     typed(
       "a comment before its property",
       `${imports}tool({\n  args: {},\n  returns: v.object({\n    // Each company names its own custom fields.\n    custom_fields: v.record(v.json()).optional(),\n  }),\n});`
+    ),
+    typed(
+      "a comment on the line before it among arguments",
+      `${imports}const Value = v.union(\n  v.string(),\n  // Any of the vendor's own.\n  v.json()\n);`
     ),
     typed(
       "a comment before its declaration",
@@ -112,6 +142,10 @@ tester.run("grasp/no-unexplained-json", rule, {
     typed(
       "json() on a v the SDK didn't give",
       "const v = { json: () => ({}) };\nconst Any = v.json();"
+    ),
+    typed(
+      "json() on a parameter that hides the imported v",
+      `${imports}const read = (v) => v.json();`
     ),
   ],
 });

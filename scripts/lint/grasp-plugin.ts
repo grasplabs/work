@@ -35,11 +35,15 @@
  *
  * no-unexplained-json: in a connector, `v.json()` lets any JSON value
  * through, so the agent and Apps learn nothing of its shape (GRA-2330).
- * It refuses a call of `json` on the SDK's `v` (imported under any name,
- * or read off a namespace import) unless a comment stands right before
- * the property that holds it, or, outside an object, the statement: the
- * comment says why the shape is free-form (a vendor's custom fields). A
- * lint directive is no such comment. What the OpenAPI generator writes
+ * It refuses a call of `json` on a `v` imported under any name, or read
+ * off a namespace import, unless a comment beside it says why the shape
+ * is free-form (a vendor's custom fields): on a line of its own, right
+ * before the call or the property that holds it (outside an object, its
+ * statement). A comment after code on its line explains nothing: it would
+ * stand before whatever comes next, and no-inline-comments refuses it
+ * anyway. A comment with no words, or a tool's directive
+ * (`eslint`, `oxlint`, `@ts-`, `oxfmt-ignore`, `prettier-ignore`), is no
+ * such comment. What the OpenAPI generator writes
  * (`tools.gen.ts`) is never linted: it writes `v.json()` only where the
  * spec gives the value no shape `v` can hold.
  *
@@ -119,8 +123,10 @@ interface Node {
   exportKind?: string;
 }
 
-interface JsonContext extends Context {
-  sourceCode: { getCommentsBefore: (node: Node) => { value: string }[] };
+/** The lines a node, token or comment starts and ends on. */
+interface Lines {
+  start: { line: number };
+  end: { line: number };
 }
 
 interface Context {
@@ -547,17 +553,43 @@ const noUnboundedRpcTarget = {
   },
 };
 
-/** A comment that only steers the linter, which says nothing of a shape. */
-const lintDirective = /^\s*(?:eslint|oxlint)-(?:disable|enable)/u;
+/** A token or a comment, as the source code gives it. */
+interface Token {
+  value: string;
+  loc: Lines;
+}
+
+interface Scope {
+  set: Map<string, { defs: { type: string; node: Node }[] }>;
+  upper: Scope | null;
+}
+
+interface JsonContext extends Context {
+  sourceCode: {
+    getScope: (node: Node) => Scope;
+    getCommentsBefore: (of: Node) => Token[];
+    getTokenBefore: (
+      of: Token,
+      options: { includeComments: true }
+    ) => Token | null;
+  };
+}
+
+/** A comment for a tool, which says nothing of a shape. */
+const toolDirective =
+  /^[\s*]*(?:(?:eslint|oxlint)\b|@ts-|oxfmt-ignore|prettier-ignore)/u;
+
+/** A comment with words in it: not only spaces and a doc comment's stars. */
+const hasWords = /[^\s*]/u;
 
 /** The statement lists, whose members are the statements a comment stands before. */
 const statementLists = new Set(["Program", "BlockStatement", "StaticBlock"]);
 
 /**
- * What a comment explaining `call` stands before: the nearest property
- * that holds it, or else its statement, with the export that wraps it.
+ * The nearest property that holds `call`, or else its statement, with the
+ * export that wraps it.
  */
-const explainedAt = (call: Node): Node => {
+const holderOf = (call: Node): Node => {
   let node = call;
   while (
     node.type !== "Property" &&
@@ -569,6 +601,42 @@ const explainedAt = (call: Node): Node => {
   return node;
 };
 
+/** The import specifier that binds `node`, an identifier, where one does. */
+const importOf = (
+  context: JsonContext,
+  node: Node | undefined
+): Node | undefined => {
+  if (node?.type !== "Identifier" || typeof node.name !== "string") {
+    return undefined;
+  }
+  for (
+    let scope: Scope | null = context.sourceCode.getScope(node);
+    scope !== null;
+    scope = scope.upper
+  ) {
+    const variable = scope.set.get(node.name);
+    if (variable !== undefined) {
+      const [definition] = variable.defs;
+      return definition?.type === "ImportBinding" ? definition.node : undefined;
+    }
+  }
+  return undefined;
+};
+
+/** Whether `node` is an imported `v`, by any name, or a namespace's `v`. */
+const isV = (context: JsonContext, node: Node | undefined): boolean => {
+  if (node?.type === "MemberExpression") {
+    return (
+      nameOf(node.property) === "v" &&
+      importOf(context, node.object)?.type === "ImportNamespaceSpecifier"
+    );
+  }
+  const specifier = importOf(context, node);
+  return (
+    specifier?.type === "ImportSpecifier" && nameOf(specifier.imported) === "v"
+  );
+};
+
 const noUnexplainedJson = {
   meta: {
     type: "problem",
@@ -577,47 +645,36 @@ const noUnexplainedJson = {
         "Type a connector's values with v, or say why one is free-form.",
     },
     messages: {
-      free: "v.json() takes any JSON value, so the agent and Apps learn nothing of its shape. Type it with v, or, where the vendor gives it no fixed shape (custom fields), say why in a comment right before its property.",
+      free: "v.json() takes any JSON value, so the agent and Apps learn nothing of its shape. Type it with v, or, where the vendor gives it no fixed shape (custom fields), say why in a comment on the line before its property.",
     },
     schema: [],
   },
   create: (context: JsonContext) => {
-    // What this file calls the SDK's `v`, and its namespace imports.
-    const names = new Set<unknown>();
-    const namespaces = new Set<unknown>();
-    const isV = (node: Node | undefined): boolean =>
-      node?.type === "MemberExpression"
-        ? namespaces.has(nameOf(node.object)) && nameOf(node.property) === "v"
-        : node?.type === "Identifier" && names.has(node.name);
+    const { sourceCode } = context;
+    const explains = ({ value }: Token): boolean =>
+      hasWords.test(value) && !toolDirective.test(value);
+    // A comment right before `node`, on a line of its own.
+    const leads = (node: Node): boolean =>
+      sourceCode.getCommentsBefore(node).some((comment) => {
+        const before = sourceCode.getTokenBefore(comment, {
+          includeComments: true,
+        });
+        return (
+          explains(comment) &&
+          (before === null || before.loc.end.line < comment.loc.start.line)
+        );
+      });
     return {
-      ImportDeclaration: (node: Node): void => {
-        if (node.importKind === "type") {
-          return;
-        }
-        for (const specifier of node.specifiers ?? []) {
-          if (specifier.type === "ImportNamespaceSpecifier") {
-            namespaces.add(nameOf(specifier.local));
-          } else if (
-            specifier.importKind !== "type" &&
-            nameOf(specifier.imported) === "v"
-          ) {
-            names.add(nameOf(specifier.local));
-          }
-        }
-      },
       CallExpression: (node: Node): void => {
         const { callee } = node;
         if (
           callee?.type !== "MemberExpression" ||
           nameOf(callee.property) !== "json" ||
-          !isV(callee.object)
+          !isV(context, callee.object)
         ) {
           return;
         }
-        const explained = context.sourceCode
-          .getCommentsBefore(explainedAt(node))
-          .some(({ value }) => !lintDirective.test(value));
-        if (!explained) {
+        if (!leads(node) && !leads(holderOf(node))) {
           context.report({ node, messageId: "free" });
         }
       },
