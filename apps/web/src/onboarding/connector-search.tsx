@@ -20,6 +20,22 @@ import type { Integration } from "../connections/integrations.ts";
 // open a search modal from all our composio connectors"). A name the
 // catalog doesn't hold is still asked for, as the last row, as typed.
 
+/**
+ * One row an app: the catalog can hold one twice (Grasp's own and Composio's Linear), and the
+ * search shows it once, as the one with a logo where only one has, in the first one's place.
+ */
+const oncePerName = (all: readonly Integration[]): Integration[] => {
+  const kept = new Map<string, Integration>();
+  for (const each of all) {
+    const name = each.name.toLocaleLowerCase();
+    const first = kept.get(name);
+    if (first === undefined || (first.logo === null && each.logo !== null)) {
+      kept.set(name, each);
+    }
+  }
+  return [...kept.values()];
+};
+
 /** The value of the row that asks for what was typed. */
 const askValue = "ask";
 
@@ -43,7 +59,9 @@ export const ConnectorSearch = ({
 }) => {
   const { t } = useLingui();
   const [typed, setTyped] = useState("");
-  const offered = find(integrations.filter((each) => each.offered));
+  const offered = oncePerName(
+    find(integrations.filter((each) => each.offered))
+  );
   const byKey = new Map(offered.map((each) => [each.key, each]));
   const name = typed.trim();
   const held = offered.some(
@@ -91,6 +109,7 @@ export const ConnectorSearch = ({
       }}
       open={open}
       shortcut={null}
+      size="large"
       trigger={null}
     >
       <CommandInput aria-label={t`Search apps`} placeholder={placeholder} />

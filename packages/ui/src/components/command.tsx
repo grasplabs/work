@@ -371,7 +371,9 @@ const styles = stylex.create({
     // its full touch target across.
     "--tap-room-inline": size.tapTarget,
     boxSizing: "border-box",
-    maxHeight: size.popupHeight,
+    // A large palette sets both (see paletteLarge): a list of one height, so the panel holds still as results change.
+    height: "var(--command-list-height, auto)",
+    maxHeight: `var(--command-list-max-height, ${size.popupHeight})`,
     overflowY: "auto",
     overscrollBehavior: "auto",
     padding: space.popupPadding,
@@ -513,6 +515,23 @@ const styles = stylex.create({
     maxHeight: {
       default: `calc(var(--visual-viewport-height, 100dvh) - 4 * ${size.dialogGutter})`,
       [PHONE]: `calc(var(--visual-viewport-height, 100dvh) - ${size.dialogGutter})`,
+    },
+  },
+  // A large palette: wider, on the window's middle, its list one height whatever it shows, so
+  // nothing moves while someone types. A sheet on a phone, as any palette.
+  paletteLarge: {
+    marginBlockStart: { default: "auto", [PHONE]: 0 },
+    width: {
+      default: `min(40rem, 100% - 2 * ${size.dialogGutter})`,
+      [PHONE]: "100%",
+    },
+    "--command-list-height": {
+      default: "min(28rem, var(--visual-viewport-height, 100dvh) - 12rem)",
+      [PHONE]: "auto",
+    },
+    "--command-list-max-height": {
+      default: "none",
+      [PHONE]: size.popupHeight,
     },
   },
 });
@@ -1379,6 +1398,12 @@ export interface CommandDialogProps extends Omit<CommandProps, "style"> {
    * @default "mod+k"
    */
   shortcut?: string | null;
+  /**
+   * `large`: wider, on the window's middle, its list one height as results change. For a palette
+   * that is the step's one question (the onboarding's app search), not a quick jump.
+   * @default "default"
+   */
+  size?: "default" | "large";
 }
 
 /** A command palette over the page: its trigger, and the Command in a dialog's panel. */
@@ -1390,6 +1415,7 @@ export const CommandDialog = ({
   shortcut = "mod+k",
   open: openGiven,
   onOpenChange,
+  size: paletteSize = "default",
   ...passed
 }: CommandDialogProps) => {
   const words = useI18n().command;
@@ -1461,7 +1487,8 @@ export const CommandDialog = ({
           dialogStyles.panel,
           dialogStyles.placed,
           styles.fade,
-          styles.palette
+          styles.palette,
+          paletteSize === "large" && styles.paletteLarge
         )}
       >
         <DialogTitle {...stylex.props(visuallyHidden)}>{ariaLabel}</DialogTitle>

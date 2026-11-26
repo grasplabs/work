@@ -11,6 +11,11 @@
     "pullRequest": "https://github.com/grasplabs/damsko/pull/66"
   },
   {
+    "path": "src/components/command.tsx",
+    "reason": "CommandDialog takes size=\"large\": wider, on the window's middle, its list one height whatever it shows, so the panel holds still while someone types. The onboarding's app search is the step's one question, not a quick jump.",
+    "since": "2026-11-26"
+  },
+  {
     "path": "src/components/file-upload.tsx",
     "reason": "In the dropzone, Choose files is underlined words in its line, as a link in a sentence, not an outline button: the dropzone is already the place to act. Made taller by a minHeight on the upload, its icon and line stay together in its middle.",
     "since": "2026-11-25"
