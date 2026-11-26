@@ -23,10 +23,18 @@ import {
   candidateRunFor,
   startCandidateRun,
 } from "../src/workflows/candidate-runs.ts";
+import { waitStepPrefix } from "../src/workflows/host.ts";
+import { resourceRunTrace } from "../src/workflows/resource-run-trace.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
-import { consentCode, graphAttachmentUrl } from "./connect-providers.ts";
+import {
+  consentCode,
+  graphAttachmentUrl,
+  graphThrottleUrl,
+} from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
+import { configuredLimits, withQuotas } from "./quota-limits.ts";
+import { resumed, sleeping, stopped } from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi, unique } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
@@ -139,6 +147,21 @@ const attach = async (
   });
 };
 
+/**
+ * Has Graph answer `mailbox`'s next `requests` requests 429, asking to
+ * wait `retryAfter` seconds: connect pauses the connection that long.
+ */
+const throttle = async (
+  mailbox: string,
+  retryAfter: number,
+  requests = 1
+): Promise<void> => {
+  await providers().fetch(graphThrottleUrl, {
+    method: "POST",
+    body: JSON.stringify({ mailbox, requests, retryAfter }),
+  });
+};
+
 /** A JSON Schema, as the catalog's envelope text for it. */
 const enveloped = (document: unknown): string =>
   JSON.stringify({ format: "json", document });
@@ -182,8 +205,26 @@ const refusal = async (promise: Promise<unknown>) => {
   }
 };
 
-/** A definition reading an attachment through binding `mail`. */
-const definitionOf = (mail: string): string =>
+/** The step reading an attachment through binding `mail`. */
+const readStep = {
+  id: "read",
+  type: "call",
+  connection: "mail",
+  action: "mail.readAttachment",
+  args: {
+    mailbox: { $expr: "args.mailbox" },
+    message: { $expr: "args.message" },
+    attachment: { $expr: "args.attachment" },
+    as: "text",
+  },
+};
+
+/**
+ * A definition reading an attachment through binding `mail`; `guarded`,
+ * in a try whose catch retries the read once, a second on, and then takes
+ * its failure.
+ */
+const definitionOf = (mail: string, guarded = false): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
     args: objectSchema({
@@ -192,22 +233,21 @@ const definitionOf = (mail: string): string =>
       attachment: { kind: "string" },
     }),
     returns: objectSchema({ status: { kind: "string" } }),
-    result: { status: { $expr: "read.content" } },
+    result: { status: guarded ? "caught" : { $expr: "read.content" } },
     permissions: { connections: { mail: { contract: mail } } },
-    steps: [
-      {
-        id: "read",
-        type: "call",
-        connection: "mail",
-        action: "mail.readAttachment",
-        args: {
-          mailbox: { $expr: "args.mailbox" },
-          message: { $expr: "args.message" },
-          attachment: { $expr: "args.attachment" },
-          as: "text",
-        },
-      },
-    ],
+    steps: guarded
+      ? [
+          {
+            id: "guarded",
+            type: "try",
+            try: [readStep],
+            catch: {
+              retry: { attempts: 2, delay: "1 second", backoff: "constant" },
+              do: [{ id: "tell", type: "wait", until: { $expr: "0" } }],
+            },
+          },
+        ]
+      : [readStep],
   });
 
 /**
@@ -240,15 +280,23 @@ const nativeContract = async () => {
   return { admin, builder, connectionId, mailbox, key, read };
 };
 
-/** A published workflow reading attachments through `key`, its binding approved. */
-const readingWorkflow = async () => {
+/**
+ * A published workflow reading attachments through `key`, its binding
+ * approved; `guarded` as `definitionOf` says.
+ */
+const readingWorkflow = async (guarded = false) => {
   const { admin, builder, connectionId, mailbox, key } = await nativeContract();
   const workflow = await createWorkflowResource(
     env,
     builder,
     `native-${unique()}`
   );
-  await publishDefinition(env, builder, workflow.id, definitionOf(key));
+  await publishDefinition(
+    env,
+    builder,
+    workflow.id,
+    definitionOf(key, guarded)
+  );
   const permissionId = await granted(builder, admin, {
     subject: { type: "workflow", workflowId: workflow.id },
     object: { type: "connection", connectionId },
@@ -267,11 +315,15 @@ const readingWorkflow = async () => {
   return { builder, workflow, mailbox };
 };
 
-/** Runs version 1 of workflow `id` for `by` on `input`: how it ended. */
+/**
+ * Runs version 1 of workflow `id` for `by` on `input`, doing
+ * `meanwhile` to the run as it goes: how it ended.
+ */
 const ran = async (
   by: Identity,
   id: string,
-  input: { mailbox: string; message: string; attachment: string }
+  input: { mailbox: string; message: string; attachment: string },
+  meanwhile?: (runId: string) => Promise<void> | void
 ) => {
   const { runId } = await startWorkflow(
     env,
@@ -282,6 +334,7 @@ const ran = async (
   if (runId === null) {
     throw new Error("The start admitted no run");
   }
+  await meanwhile?.(runId);
   const run: WorkflowResourceRun = await vi.waitFor(
     async () => {
       const read = await resourceRunFor(env, by, id, runId);
@@ -459,6 +512,101 @@ describe("a workflow binding a native connector's operation", () => {
     expect({ read, unpatterned }).toStrictEqual({
       read: { status: "completed", output: { status: "due 2026-11-01" } },
       unpatterned: { status: "failed", code: "workflow.call_invalid" },
+    });
+  });
+
+  it("waits out the pause its connection's vendor asked for, past its step's retries, then calls", async () => {
+    const { builder, workflow, mailbox } = await readingWorkflow();
+    await attach(mailbox, "m1", {
+      id: "a1",
+      name: "notes.txt",
+      text: "due 2026-11-01",
+    });
+    const input = { mailbox, message: "m1", attachment: "a1" };
+    // A run before it gets Graph's 429, which pauses the connection longer
+    // than a sealed step's retries take in all (a second, then two).
+    await throttle(mailbox, 6);
+    const paused = Promise.withResolvers<null>();
+    const tripping = ran(builder, workflow.id, input, async (runId) => {
+      await sleeping(runId, waitStepPrefix);
+      paused.resolve(null);
+    });
+    await paused.promise;
+    // So connect refuses this run's first attempt itself, the connection
+    // paused (`connect.rate_limited`): Graph has no 429 left to give.
+    let run = "";
+    const read = await ran(builder, workflow.id, input, async (runId) => {
+      run = runId;
+      // Stopped and resumed as it waits: a new activation replays the
+      // wait, and waits on.
+      await sleeping(runId, waitStepPrefix);
+      await stopped(runId);
+      await resumed(runId);
+    });
+    const { tasks } = await resourceRunTrace(env, builder, workflow.id, run);
+    const done = {
+      status: "completed",
+      output: { status: "due 2026-11-01" },
+    };
+    expect({ tripping: await tripping, read, tasks }).toStrictEqual({
+      tripping: done,
+      read: done,
+      // The attempt connect refused, then the one after the wait.
+      tasks: [{ task: "read", state: "reached", attempts: 2 }],
+    });
+  });
+
+  it("retries a pause longer than a step may wait as any failure, and fails with it", async () => {
+    const { builder, workflow, mailbox } = await readingWorkflow();
+    await throttle(mailbox, 6);
+    let run = "";
+    const read = await withQuotas(
+      { ...configuredLimits, workflowQueuedStepMs: 1000 },
+      async () =>
+        await ran(
+          builder,
+          workflow.id,
+          { mailbox, message: "m1", attachment: "a1" },
+          (runId) => {
+            run = runId;
+          }
+        )
+    );
+    const { tasks } = await resourceRunTrace(env, builder, workflow.id, run);
+    expect({ read, tasks }).toStrictEqual({
+      read: { status: "failed", code: "connect.rate_limited" },
+      // Its first attempt and the engine's two retries, none waiting.
+      tasks: [{ task: "read", state: "failed", attempts: 3 }],
+    });
+  });
+
+  it("gives a catch's retry of a step no more time to wait out pauses than the step had left", async () => {
+    const { builder, workflow, mailbox } = await readingWorkflow(true);
+    // Every request Graph gets is turned away, a pause of 3 seconds each.
+    await throttle(mailbox, 3, 1000);
+    let run = "";
+    const read = await withQuotas(
+      { ...configuredLimits, workflowQueuedStepMs: 5000 },
+      async () =>
+        await ran(
+          builder,
+          workflow.id,
+          { mailbox, message: "m1", attachment: "a1" },
+          (runId) => {
+            run = runId;
+          }
+        )
+    );
+    const { tasks } = await resourceRunTrace(env, builder, workflow.id, run);
+    expect({
+      read,
+      attempts: tasks.find(({ task }) => task === "read")?.attempts,
+    }).toStrictEqual({
+      read: { status: "completed", output: { status: "caught" } },
+      // Its first round: the attempt turned away, a sleep of the 5 seconds
+      // a step may wait, then the engine's three tries. Its retry: three
+      // tries more, none sleeping, as the step has no time left to wait.
+      attempts: 7,
     });
   });
 
