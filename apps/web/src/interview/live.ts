@@ -60,6 +60,8 @@ export interface LiveHandlers {
   part: (part: InterviewPhase) => void;
   /** It ended without the page closing it: dropped, or it broke off. */
   ended: () => void;
+  /** Stephen ended it himself after his goodbye: the read-back follows. */
+  finished: () => void;
   /**
    * It began, but Stephen never said his first line: the provider refused
    * part of it, or said nothing in time. The session is closed already.
@@ -291,13 +293,8 @@ const joinAgent = async (
     const conversation = await Conversation.startSession({
       conversationToken: join.conversationToken,
       connectionType: "webrtc",
-      overrides: {
-        agent: {
-          prompt: { prompt: join.prompt },
-          firstMessage: join.firstMessage,
-          language: join.language,
-        },
-      },
+      // The agent takes no overrides: its own prompt and first line stand; who they are comes as context.
+      stripAudioTags: true,
       workletPaths: {
         rawAudioProcessor: raw.default,
         audioConcatProcessor: concat.default,
@@ -405,10 +402,15 @@ const joinAgent = async (
           fail?.(message);
         }
       },
-      onDisconnect: () => {
+      onDisconnect: (details) => {
         if (!closed) {
-          // Dropped from the other side, or he ended it.
           closed = true;
+          if (begun && details.reason === "agent") {
+            // He said goodbye and ended it: the interview is through.
+            on.finished();
+            return;
+          }
+          // Dropped from the other side.
           on.ended();
         }
       },
@@ -424,6 +426,10 @@ const joinAgent = async (
         // Nothing more to let go of: the agent ends it by itself.
       }
     };
+    // Who they are, and where they left off: the agent's own prompt does the rest.
+    if (join.context !== "") {
+      conversation.sendContextualUpdate(join.context);
+    }
     // Begun, but without his first line, it is no conversation: closed, and the page goes on without it.
     fail = (why) => {
       if (closed || begun) {
@@ -438,12 +444,8 @@ const joinAgent = async (
     }, firstLineMs);
     return {
       pass: join.pass,
-      instruct: async ({ situation }) => {
-        if (!closed) {
-          conversation.sendContextualUpdate(
-            `Where the interview stands now (it replaces what you were told of it before):\n${situation}`
-          );
-        }
+      // The agent runs the interview by its own prompt: core's notes don't steer it.
+      instruct: async () => {
         await Promise.resolve();
       },
       said: () => [...said],

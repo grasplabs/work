@@ -39,10 +39,7 @@ import type {
   VoiceAnswered,
   VoiceSessionJoin,
 } from "@grasp-os/shared/interview-voice";
-import {
-  interviewKindSchema,
-  interviewLocaleSchema,
-} from "@grasp-os/shared/onboarding";
+import { interviewKindSchema } from "@grasp-os/shared/onboarding";
 import { t } from "@lingui/core/macro";
 import { z } from "zod";
 
@@ -552,9 +549,7 @@ const voiceJoinSchema = z.discriminatedUnion("via", [
   z.object({
     via: z.literal("elevenlabs"),
     conversationToken: z.string().min(1),
-    prompt: z.string().min(1),
-    firstMessage: z.string(),
-    language: interviewLocaleSchema,
+    context: z.string(),
     pass: z.string().min(1),
   }),
 ]) satisfies z.ZodType<VoiceSessionJoin>;

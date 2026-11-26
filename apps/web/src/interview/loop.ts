@@ -2090,6 +2090,12 @@ const goLive = async (): Promise<boolean> => {
           listen();
         }
       },
+      finished: () => {
+        if (liveCount === count && on) {
+          // He said goodbye and hung up: what was said is written down, and the read-back is here.
+          void toReadBack();
+        }
+      },
       failed: () => {
         if (liveCount === count && on) {
           // It never began: that stands in the bar at the top, and he begins turn by turn.
