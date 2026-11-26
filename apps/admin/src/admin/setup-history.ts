@@ -97,7 +97,7 @@ const provisionStepOf =
   /^provision\.(?<step>validated|resources|migrations|connect|core|probe|route)$/u;
 
 /** What the admin did by itself, in a sentence; null for an action it has no words for. */
-export const systemEventWords = ({
+const systemEventWords = ({
   action,
   target,
 }: Pick<HistoryEntry, "action" | "target">): string | null => {
