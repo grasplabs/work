@@ -2456,8 +2456,8 @@ msgid "Add another"
 msgstr "En ajouter une autre"
 
 #: src/onboarding/company-step.tsx
-msgid "Add another account"
-msgstr "Ajouter un autre compte"
+msgid "Add another Microsoft or Google account"
+msgstr "Ajouter un autre compte Microsoft ou Google"
 
 #: src/agents/setup/apps-step.tsx
 #: src/connections/add-connector.tsx

@@ -35,12 +35,7 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from "@grasp-os/ui/components/toggle-group";
-import {
-  CircleCheckIcon,
-  FileIcon,
-  Icon,
-  PlusIcon,
-} from "@grasp-os/ui/lib/icons";
+import { CircleCheckIcon, FileIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { msg, plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -393,24 +388,27 @@ const AddAccount = ({
 }) => {
   const { t } = useLingui();
   const [open, setOpen] = useState(false);
-  const [first = "microsoft"] = suites;
+  // Any kind of account, whichever the company signs in with: the one it does first.
+  const kinds = [
+    ...suites,
+    ...directorySuiteSchema.options.filter((each) => !suites.includes(each)),
+  ];
+  const [first = "microsoft"] = kinds;
   const [suite, setSuite] = useState<DirectorySuite>(first);
   const [domain, setDomain] = useState("");
   if (!open) {
     return (
-      <Item
+      <Button
         onClick={() => {
           setOpen(true);
         }}
-        variant="outline"
+        size="sm"
+        style={styles.example}
+        type="button"
+        variant="link"
       >
-        <ItemMedia>
-          <Icon icon={PlusIcon} />
-        </ItemMedia>
-        <ItemContent>
-          <ItemTitle>{t`Add another account`}</ItemTitle>
-        </ItemContent>
-      </Item>
+        {t`Add another Microsoft or Google account`}
+      </Button>
     );
   }
   return (
@@ -421,7 +419,7 @@ const AddAccount = ({
       }}
       {...stylex.props(styles.add)}
     >
-      {suites.length > 1 ? (
+      {kinds.length > 1 ? (
         <ToggleGroup
           aria-label={t`Which kind of account`}
           onValueChange={(value) => {
@@ -432,7 +430,7 @@ const AddAccount = ({
           }}
           value={[suite]}
         >
-          {suites.map((each) => (
+          {kinds.map((each) => (
             <ToggleGroupItem key={each} value={each}>
               {suiteNames[each]}
             </ToggleGroupItem>
@@ -466,8 +464,7 @@ const AddAccount = ({
 /**
  * The ways in by sign-in: before any, the company's own account at each
  * suite; once there is a roster, every account connected (its own and its
- * others), the own account of a suite not yet connected, and a way to add
- * another account.
+ * others) and the own account of a suite not yet connected.
  */
 const SignIns = ({
   suites,
@@ -475,7 +472,6 @@ const SignIns = ({
   known,
   reading,
   onConnect,
-  onAdd,
 }: {
   suites: DirectorySuite[];
   accounts: OnboardingDirectoryAccount[];
@@ -485,7 +481,6 @@ const SignIns = ({
     suite: DirectorySuite,
     account?: OnboardingDirectoryAccount
   ) => void;
-  onAdd: (suite: DirectorySuite, domain: string) => void;
 }) => {
   const { t } = useLingui();
   const labelOf = useAccountLabel();
@@ -523,9 +518,6 @@ const SignIns = ({
             suite={suite}
           />
         ))}
-      {shown.length > 0 ? (
-        <AddAccount busy={reading !== null} onAdd={onAdd} suites={suites} />
-      ) : null}
     </ItemGroup>
   );
 };
@@ -799,37 +791,40 @@ export const CompanyStep = (props: StepProps) => {
     >
       {kept === null ? null : <ReadRow kept={kept} />}
       <div {...stylex.props(kept === null ? styles.stack : styles.gone)}>
-        {suites.length > 0 ? (
-          <>
-            <SignIns
-              accounts={accounts}
-              known={roster !== null}
-              onAdd={(suite, domain) => {
-                void connect(suite, domain);
-              }}
-              onConnect={(suite, account) => {
-                if (reading === null) {
-                  // Another account connects again by its own tenant; the company's own as ever.
-                  void connect(
-                    suite,
-                    account === undefined || account.own
-                      ? undefined
-                      : account.tenant
-                  );
-                }
-              }}
-              reading={reading}
-              suites={suites}
-            />
-            <div {...stylex.props(styles.or)}>
-              <Separator decorative style={styles.orLine} />
-              <Text color="muted" size="sm">
-                {t`Or use a staff list`}
-              </Text>
-              <Separator decorative style={styles.orLine} />
-            </div>
-          </>
+        {suites.length > 0 || (roster !== null && accounts.length > 0) ? (
+          <SignIns
+            accounts={accounts}
+            known={roster !== null}
+            onConnect={(suite, account) => {
+              if (reading === null) {
+                // Another account connects again by its own tenant; the company's own as ever.
+                void connect(
+                  suite,
+                  account === undefined || account.own
+                    ? undefined
+                    : account.tenant
+                );
+              }
+            }}
+            reading={reading}
+            suites={suites}
+          />
         ) : null}
+        {/* Another account, of either kind, quietly under the company's own: there from the start. */}
+        <AddAccount
+          busy={reading !== null}
+          onAdd={(suite, domain) => {
+            void connect(suite, domain);
+          }}
+          suites={suites}
+        />
+        <div {...stylex.props(styles.or)}>
+          <Separator decorative style={styles.orLine} />
+          <Text color="muted" size="sm">
+            {t`Or use a staff list`}
+          </Text>
+          <Separator decorative style={styles.orLine} />
+        </div>
         <StaffListDrop
           disabled={reading !== null && reading !== "list"}
           known={roster !== null}
