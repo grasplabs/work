@@ -23,9 +23,9 @@ describe("someone signed in while the company onboards", () => {
       to: "/setup",
     },
     {
-      who: "an admin on the onboarding's own settings",
+      who: "an admin on the interviews' own settings",
       identity: admin,
-      path: "/settings/onboarding",
+      path: "/settings/interviews",
       to: null,
     },
     { who: "a member", identity: member, path: "/", to: "/waiting" },

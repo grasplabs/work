@@ -9,6 +9,7 @@ import {
   FileInvoiceIcon,
   LinkIcon,
   LockIcon,
+  MessageCircleIcon,
   StickyNoteIcon,
   UsersIcon,
   WorkflowIcon,
@@ -29,6 +30,7 @@ type SettingsHref =
   | "/settings/workspace"
   | "/settings/members"
   | "/settings/teams"
+  | "/settings/interviews"
   | "/settings/ai-providers"
   | "/settings/audit"
   | "/settings/webhooks"
@@ -137,6 +139,16 @@ const settingsSections: readonly SettingsSection[] = [
     href: "/settings/teams",
     group: "workspace",
     icon: WorkflowIcon,
+    audience: "own-admins",
+  },
+  {
+    // The onboarding's interviews, as core tells them to the company's own
+    // admins (settings/interviews.tsx): Grasp's staff watch them from the admin.
+    id: "interviews",
+    label: msg`Interviews`,
+    href: "/settings/interviews",
+    group: "workspace",
+    icon: MessageCircleIcon,
     audience: "own-admins",
   },
   {
