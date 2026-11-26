@@ -5343,6 +5343,10 @@ msgstr "Kopieer het nu: je ziet het niet nog eens. Kwijt, dan kan het alleen wor
 msgid "Copy link"
 msgstr "Link kopiëren"
 
+#: src/frame/ui-words.tsx
+msgid "Copy table"
+msgstr "Tabel kopiëren"
+
 #: src/chat/thread.tsx
 msgid "Copy the answer"
 msgstr "Antwoord kopiëren"
@@ -6366,6 +6370,7 @@ msgstr "Stippen"
 msgid "Double-click or press F2 to rename"
 msgstr "Dubbelklik of druk op F2 om de naam te wijzigen"
 
+#: src/frame/ui-words.tsx
 #: src/workflows/run-files.tsx
 #: src/workflows/version-source.tsx
 msgctxt "download a file"
@@ -6390,6 +6395,10 @@ msgstr "Downloaden als Markdown"
 #: src/chat/chat-more.tsx
 msgid "Download as PDF"
 msgstr "Downloaden als pdf"
+
+#: src/frame/ui-words.tsx
+msgid "Download table"
+msgstr "Tabel downloaden"
 
 #: src/apps/app-code.tsx
 msgid "Download the file"
