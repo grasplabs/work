@@ -33,6 +33,16 @@
  * or seen once is turned off for its files in vite.config.ts, each with
  * its reason; a stylesheet's own animations are for review.
  *
+ * no-unexplained-json: in a connector, `v.json()` lets any JSON value
+ * through, so the agent and Apps learn nothing of its shape (GRA-2330).
+ * It refuses a call of `json` on the SDK's `v` (imported under any name,
+ * or read off a namespace import) unless a comment stands right before
+ * the property that holds it, or, outside an object, the statement: the
+ * comment says why the shape is free-form (a vendor's custom fields). A
+ * lint directive is no such comment. What the OpenAPI generator writes
+ * (`tools.gen.ts`) is never linted: it writes `v.json()` only where the
+ * spec gives the value no shape `v` can hold.
+ *
  * icon-has-move: every Lucide icon the app imports moves in its own parts
  * when its control is pointed at (apps/web/src/icon-moves.css, the
  * `table` option, from the repository's root). It refuses an import of an
@@ -107,6 +117,10 @@ interface Node {
   accessibility?: string;
   importKind?: string;
   exportKind?: string;
+}
+
+interface JsonContext extends Context {
+  sourceCode: { getCommentsBefore: (node: Node) => { value: string }[] };
 }
 
 interface Context {
@@ -533,6 +547,84 @@ const noUnboundedRpcTarget = {
   },
 };
 
+/** A comment that only steers the linter, which says nothing of a shape. */
+const lintDirective = /^\s*(?:eslint|oxlint)-(?:disable|enable)/u;
+
+/** The statement lists, whose members are the statements a comment stands before. */
+const statementLists = new Set(["Program", "BlockStatement", "StaticBlock"]);
+
+/**
+ * What a comment explaining `call` stands before: the nearest property
+ * that holds it, or else its statement, with the export that wraps it.
+ */
+const explainedAt = (call: Node): Node => {
+  let node = call;
+  while (
+    node.type !== "Property" &&
+    node.parent !== undefined &&
+    !statementLists.has(node.parent.type)
+  ) {
+    node = node.parent;
+  }
+  return node;
+};
+
+const noUnexplainedJson = {
+  meta: {
+    type: "problem",
+    docs: {
+      description:
+        "Type a connector's values with v, or say why one is free-form.",
+    },
+    messages: {
+      free: "v.json() takes any JSON value, so the agent and Apps learn nothing of its shape. Type it with v, or, where the vendor gives it no fixed shape (custom fields), say why in a comment right before its property.",
+    },
+    schema: [],
+  },
+  create: (context: JsonContext) => {
+    // What this file calls the SDK's `v`, and its namespace imports.
+    const names = new Set<unknown>();
+    const namespaces = new Set<unknown>();
+    const isV = (node: Node | undefined): boolean =>
+      node?.type === "MemberExpression"
+        ? namespaces.has(nameOf(node.object)) && nameOf(node.property) === "v"
+        : node?.type === "Identifier" && names.has(node.name);
+    return {
+      ImportDeclaration: (node: Node): void => {
+        if (node.importKind === "type") {
+          return;
+        }
+        for (const specifier of node.specifiers ?? []) {
+          if (specifier.type === "ImportNamespaceSpecifier") {
+            namespaces.add(nameOf(specifier.local));
+          } else if (
+            specifier.importKind !== "type" &&
+            nameOf(specifier.imported) === "v"
+          ) {
+            names.add(nameOf(specifier.local));
+          }
+        }
+      },
+      CallExpression: (node: Node): void => {
+        const { callee } = node;
+        if (
+          callee?.type !== "MemberExpression" ||
+          nameOf(callee.property) !== "json" ||
+          !isV(callee.object)
+        ) {
+          return;
+        }
+        const explained = context.sourceCode
+          .getCommentsBefore(explainedAt(node))
+          .some(({ value }) => !lintDirective.test(value));
+        if (!explained) {
+          context.report({ node, messageId: "free" });
+        }
+      },
+    };
+  },
+};
+
 /** Whether `node` is infinity: `Infinity`, or `Number.POSITIVE_INFINITY`. */
 const isInfinity = (node: Node): boolean =>
   node.type === "MemberExpression"
@@ -855,5 +947,6 @@ export default {
     "no-old-product-name": noOldProductName,
     "no-slow-motion": noSlowMotion,
     "icon-has-move": iconHasMove,
+    "no-unexplained-json": noUnexplainedJson,
   },
 };
