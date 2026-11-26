@@ -3,7 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { filePart } from "../../../scripts/test-file-parts.ts";
 import { nativeConnector } from "../src/bundled-connectors.ts";
 import { outcome } from "./connect.ts";
-import { api, connectionOf, tools } from "./connectors-harness.ts";
+import { api, connectionOf, tenantApp, tools } from "./connectors-harness.ts";
 import { callTool as call, toolError } from "./tool-calls.ts";
 
 // The check of every native tool's input, which
@@ -112,7 +112,10 @@ export const everyNativeTool = (file: string): void => {
         expect(refusedByConnect).toBe(
           filesField === undefined ? undefined : "connect.invalid"
         );
-        expect(api.sent).toStrictEqual([]);
+        expect({ sample: api.sent, tenant: tenantApp.calls }).toStrictEqual({
+          sample: [],
+          tenant: [],
+        });
       }
     );
   });

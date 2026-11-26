@@ -40,6 +40,13 @@ type Admin = Awaited<ReturnType<typeof signedInApi>>;
 
 const notPointed = connectErrors.create("connect.mailbox_not_pointed").message;
 
+/**
+ * A grant that holds the classes on by default, and a shared mailbox's
+ * rights to read it, as an admin's consent once one is pointed at gives.
+ */
+const sharedGrant =
+  "openid profile email offline_access User.Read MailboxSettings.Read Mail.ReadWrite Mail.ReadWrite.Shared Calendars.ReadWrite Calendars.Read.Shared Files.ReadWrite.All Files.Read.All Sites.Read.All Tasks.ReadWrite Tasks.Read Notes.ReadWrite";
+
 /** A shared Microsoft 365 mailbox, as an admin connects it. */
 const connectShared = async (admin: Admin) => {
   const subject = `team-${crypto.randomUUID()}`;
@@ -49,7 +56,7 @@ const connectShared = async (admin: Admin) => {
   });
   const authorization = new URL(url);
   const query = new URLSearchParams({
-    code: consentCode(authorization, acmeTenant, subject),
+    code: consentCode(authorization, acmeTenant, subject, sharedGrant),
     state: authorization.searchParams.get("state") ?? "",
   });
   await routed(`/api/connections/callback?${query.toString()}`, {
