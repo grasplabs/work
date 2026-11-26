@@ -1,18 +1,23 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type {
   AssistantMessage,
+  AssistantMessageEventStream,
   Message,
   ToolResultMessage,
 } from "@earendil-works/pi-ai";
 import { createModels, createProvider } from "@earendil-works/pi-ai/models";
 import type { MutableModels } from "@earendil-works/pi-ai/models";
+import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import {
+  AssistantEntry,
+  CompactionEntry,
   ConversationBusy,
   createRegistry,
   DEFAULT_COMPACTION_POLICY,
   defineDoc,
   defineDocFamily,
   Harness,
+  ToolResultEntry,
 } from "@earendil-works/pi-durable";
 import type {
   Conversation,
@@ -74,11 +79,14 @@ import { coreMessageProvider, shownBuiltSchema } from "./chat-messages.ts";
 import type { ShownBuilt } from "./chat-messages.ts";
 import { codeTimeoutMs } from "./code-mode.ts";
 import { callObject, workspace } from "./durable-objects.ts";
+import { allInOrder } from "./in-order.ts";
 import { chatTurnPurpose } from "./model-spend.ts";
-import { models } from "./models.ts";
+import { inputTokens, modelFailureOf, models } from "./models.ts";
 import type { AgentModel } from "./models.ts";
 import { sessionHost } from "./sandboxed.ts";
 import { recallForTurn, turnRecallTool } from "./turn-recall.ts";
+import { recordTurn } from "./turn-records.ts";
+import type { ChatTurn } from "./turn-records.ts";
 
 // A chat's turns on pi-durable (GRA-1529), in the chat's own object
 // (chat-session.ts): one Harness on the object's SQLite, its root
@@ -121,6 +129,11 @@ export interface ChatHost {
 export interface TurnRequest {
   /** The turn's ID: the request ID of its input, so a retry finds it. */
   turnId: string;
+  /**
+   * When its question reached the chat's Workspace, in ms since the epoch:
+   * what the turn's record times from (`#recordOf`).
+   */
+  sentAt: number;
   scope: Omit<AgentScope, "runId">;
   question: {
     text: string;
@@ -298,6 +311,123 @@ interface TurnRecord extends JsonObject {
   captureOwed: boolean;
   /** When the turn was claimed: none in a record an earlier release wrote. */
   startedAt: number | null;
+}
+
+/**
+ * What the chat's object saw of its turn under way as it went, for the
+ * turn's record (`#recordOf`): when its first model request went out,
+ * its first token came, and its first text reached the chat's
+ * Workspace; what each request used as the gateway charged it, its
+ * summaries' too, cancelled ones included (models.ts `chargedAnswer`);
+ * and what the gateway told it of fallbacks and rate limits
+ * (`ModelWait`). Only in memory: after a restart, only what came since.
+ */
+interface Pace {
+  turnId: string;
+  /** Whether a restart cut the turn short, so its times are unknown. */
+  resumed: boolean;
+  firstRequestAt?: number;
+  firstTokenAt?: number;
+  firstTextAt?: number;
+  /** Prompt tokens with the cache's, as the gateway counts them. */
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  /** US dollars at list prices. */
+  cost: number;
+  fallbacks: number;
+  rateLimitWaits: number;
+  rateLimitWaitMs: number;
+  /** When the rate limit waited out now began. */
+  waitingSince?: number;
+}
+
+const paceOf = (turnId: string, resumed: boolean): Pace => ({
+  turnId,
+  resumed,
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  cost: 0,
+  fallbacks: 0,
+  rateLimitWaits: 0,
+  rateLimitWaitMs: 0,
+});
+
+/**
+ * `events`, one request's, passed on as they come: `first` told as the
+ * first token comes (the first delta of text, thinking or a tool call),
+ * and `last` given the response it ended with, answered or failed.
+ */
+const tapped = (
+  events: AssistantMessageEventStream,
+  first: () => void,
+  last: (response: AssistantMessage) => void
+): AssistantMessageEventStream => {
+  const out = createAssistantMessageEventStream();
+  void (async () => {
+    let seen = false;
+    try {
+      for await (const event of events) {
+        if (!seen && event.type.endsWith("_delta")) {
+          seen = true;
+          first();
+        }
+        if (event.type === "done") {
+          last(event.message);
+        } else if (event.type === "error") {
+          last(event.error);
+        }
+        out.push(event);
+      }
+    } finally {
+      // A stream that ended without its last event ends here too.
+      out.end();
+    }
+  })();
+  return out;
+};
+
+/**
+ * The end of the turn that settles as failed because restarts cut it off
+ * too often (`#endOf`), told apart in its record.
+ */
+const cutOffTooOften = "Restarts cut the turn off too often for it to go on.";
+
+/**
+ * Why a turn that ended as `end` failed, for its record: what stopped it
+ * (`TurnStop`), restarts, or the gateway's code for its failure (models.ts
+ * `modelFailureOf`). None for a turn that answered or was cancelled.
+ */
+const failureCodeOf = (end: TurnEnd): string | null => {
+  if (end.stopped !== undefined) {
+    return end.stopped;
+  }
+  if (end.outcome !== "failed") {
+    return null;
+  }
+  return end.error === cutOffTooOften
+    ? "chat.cut_off"
+    : modelFailureOf(end.error);
+};
+
+/** A turn just settled with its end, what its record holds (`#record`). */
+interface SettledTurn {
+  request: TurnRequest;
+  end: TurnEnd;
+  facts: TurnFacts | undefined;
+  /** What this object saw of it, if it is the turn it saw. */
+  pace: Pace | undefined;
+}
+
+/** What the turn's committed entries say of it, for its record. */
+interface TurnFacts {
+  tools: Record<string, { calls: number; ms: number }>;
+  retries: number;
+  stopReason: string | null;
+  compacted: boolean;
 }
 
 const TurnDoc = defineDoc<TurnRecord>({
@@ -715,6 +845,8 @@ export class ChatHarness {
   #answering: string | undefined;
   /** Whether pi runs the agent now (`pi.live.run`). */
   #running = false;
+  /** What this object saw of the turn under way, for its record. */
+  #pace: Pace | undefined;
   /** The answer streaming in, as `pi.live` has it now. */
   #partial: AssistantMessage | null = null;
   /** What the turn's model request waits on now, as the gateway says. */
@@ -1039,7 +1171,7 @@ export class ChatHarness {
       );
       await written.wait(context);
     }
-    await this.#settle(request.turnId, end);
+    const done = await this.#settle(request.turnId, end);
     // Everything copied, and told it ended, before the turn returns. Its
     // answer stands should that fail: the alarm the failed sync arms makes
     // it good.
@@ -1047,6 +1179,10 @@ export class ChatHarness {
       await this.#synced();
     } catch {
       // Logged, and tried again, by the sync itself (`#syncSoon`).
+    }
+    // Done once its Workspace has its end, as its person sees it.
+    if (done !== undefined) {
+      this.#record(done);
     }
     return end;
   }
@@ -1058,43 +1194,164 @@ export class ChatHarness {
    * settled with an outcome its guard didn't stop. Settled by the sync as
    * one nothing waits on (`unwaited`) only while no `run` takes it. The
    * chat then takes its next turn; the sync this asks for tells the
-   * Workspace and delivers the capture.
+   * Workspace and delivers the capture. A turn that ran and settled here
+   * with its end is recorded (`#record`): at once when nothing waits on it,
+   * else by its `run` once it returns, with what that needs.
    */
   async #settle(
     turnId: string,
     end?: TurnEnd,
     unwaited = false
-  ): Promise<void> {
-    const settled = await this.#conversation.commit(async (tx) => {
+  ): Promise<SettledTurn | undefined> {
+    // Read before the commit, while every entry is the turn's.
+    const facts = end === undefined ? undefined : await this.#factsOf(turnId);
+    const request = await this.#conversation.commit(async (tx) => {
       const turn = await tx.doc(TurnDoc);
-      const request = requestOf(turn);
+      const settling = requestOf(turn);
       if (
         turn.ended ||
-        request?.turnId !== turnId ||
+        settling?.turnId !== turnId ||
         (unwaited && this.#taking?.turnId === turnId)
       ) {
-        return false;
+        return null;
       }
       turn.ended = true;
-      turn.request = JSON.stringify({ ...request, context: { skills: [] } });
+      turn.request = JSON.stringify({ ...settling, context: { skills: [] } });
       if (end !== undefined && end.stopped === undefined) {
         const owed: TurnCapture = {
           outcome: end.outcome,
           answerId: turn.answerId,
           // A request kept before it said is no one's there and then.
-          attended: request.capture.attended,
+          attended: settling.capture.attended,
         };
         await tx.doc(CaptureDoc, turnId, owed);
         turn.captureOwed = true;
       }
-      return true;
+      return settling;
     }, context);
     // A `run` frees its claim however its record stood; the sync only the
     // turn it settled.
-    if (this.#active === turnId && (settled || !unwaited)) {
+    if (this.#active === turnId && (request !== null || !unwaited)) {
       this.#active = undefined;
     }
     this.#syncSoon();
+    if (request === null || end === undefined) {
+      return undefined;
+    }
+    const done = { request, end, facts, pace: this.#paceOf(turnId) };
+    // Nothing waits on a turn the sync settles: done now.
+    if (unwaited) {
+      this.#record(done);
+      return undefined;
+    }
+    return done;
+  }
+
+  /**
+   * Writes the record of turn `settled`, done now, once, in the background
+   * (turn-records.ts): its times from when its question reached the
+   * Workspace (`sentAt`), as this object saw them (`Pace`), none for one a
+   * restart cut short; what its requests used, as the gateway charged
+   * them; and what its entries say (`#factsOf`). A turn an earlier release
+   * claimed, which says nothing of when it was sent, keeps none.
+   */
+  #record({ request, end, facts, pace: seen }: SettledTurn): void {
+    const { turnId, sentAt, scope, question } = request;
+    if (typeof sentAt !== "number") {
+      return;
+    }
+    const pace = seen ?? paceOf(turnId, true);
+    // The Workspace's clock and this object's: Cloudflare's, kept in step
+    // to well under the times measured, never below none.
+    const since = (at: number | undefined): number | null =>
+      pace.resumed || at === undefined ? null : Math.max(0, at - sentAt);
+    const record: ChatTurn = {
+      id: turnId,
+      chatId: scope.chatId,
+      surface: scope.unattended === true ? "wake" : (scope.via ?? "web"),
+      model: question.model,
+      effort: question.effort ?? null,
+      sentAt: new Date(sentAt),
+      firstRequestMs: since(pace.firstRequestAt),
+      firstTokenMs: since(pace.firstTokenAt),
+      firstTextMs: since(pace.firstTextAt),
+      doneMs: Math.max(0, Date.now() - sentAt),
+      inputTokens: pace.inputTokens,
+      outputTokens: pace.outputTokens,
+      cacheReadTokens: pace.cacheReadTokens,
+      cacheWriteTokens: pace.cacheWriteTokens,
+      cost: pace.cost,
+      tools: facts?.tools ?? {},
+      retries: facts?.retries ?? 0,
+      fallbacks: pace.fallbacks,
+      rateLimitWaits: pace.rateLimitWaits,
+      rateLimitWaitMs: pace.rateLimitWaitMs,
+      stopReason: facts?.stopReason ?? null,
+      outcome: end.outcome,
+      code: failureCodeOf(end),
+      compacted: facts?.compacted ?? false,
+      resumed: pace.resumed,
+    };
+    this.#host.waitUntil(recordTurn(this.#env, record));
+  }
+
+  /**
+   * What turn `turnId`'s entries, from its question on, say of it: each
+   * tool's calls and their time, the requests pi sent again after a
+   * restart cut them off (`cutAttempt`), the last response's stop reason,
+   * and whether pi compacted the chat meanwhile. None for a turn whose
+   * question isn't in the transcript.
+   */
+  async #factsOf(turnId: string): Promise<TurnFacts | undefined> {
+    const placed = await this.#conversation.commit(
+      async (tx) => await tx.submissionByRequest(this.#conversation.id, turnId),
+      context
+    );
+    const question = placed?.type === "input" ? placed.entry : undefined;
+    if (question === undefined) {
+      return undefined;
+    }
+    const entries: EntryRecord[] = [];
+    let cursor: Cursor | undefined;
+    do {
+      // oxlint-disable-next-line no-await-in-loop -- page after page
+      const page = await this.#conversation.entries(
+        { order: "ascending", minEntryId: question },
+        100,
+        cursor,
+        context
+      );
+      entries.push(...page.items);
+      cursor = page.next;
+    } while (cursor !== undefined);
+    const tools = new Map<string, { calls: number; ms: number }>();
+    const facts: TurnFacts = {
+      tools: {},
+      retries: 0,
+      stopReason: null,
+      compacted: false,
+    };
+    for (const [index, entry] of entries.entries()) {
+      const [message] = entry.model ?? [];
+      if (ToolResultEntry.is(entry) && message?.role === "toolResult") {
+        const tool = tools.get(message.toolName) ?? { calls: 0, ms: 0 };
+        tool.calls += 1;
+        tool.ms += message.durationMs ?? 0;
+        tools.set(message.toolName, tool);
+      } else if (CompactionEntry.is(entry)) {
+        facts.compacted = true;
+      } else if (entry.kind === stoppedKind) {
+        // Stopped before the model said anything: the chat shows it as a
+        // response stopped (`cancelledMessage`).
+        facts.stopReason = "aborted";
+      } else if (AssistantEntry.is(entry) && message?.role === "assistant") {
+        if (cutAttempt(entry, entries.slice(index + 1), false) === true) {
+          facts.retries += 1;
+        }
+        facts.stopReason = message.stopReason;
+      }
+    }
+    return { ...facts, tools: Object.fromEntries(tools) };
   }
 
   /**
@@ -1193,8 +1450,10 @@ export class ChatHarness {
 
   /**
    * Submits `request`'s question, refused while pi runs: the turn kept
-   * (`TurnDoc`), its model admitted, the context rebased if it must be,
-   * and the brain recalled, in that order.
+   * (`TurnDoc`), its guard asked once, the context rebased if it must be,
+   * then its model admitted and the brain recalled at once, as neither
+   * reads the other: the recall is most of what the first request waits
+   * for, and it waits no longer for the admission.
    */
   async #submit(request: TurnRequest): Promise<Submission> {
     if (this.#running) {
@@ -1210,17 +1469,32 @@ export class ChatHarness {
       turn.captureOwed = false;
       turn.startedAt = Date.now();
     }, context);
+    this.#pace = paceOf(request.turnId, false);
     this.#answering = undefined;
-    const turn = await this.#setUp(request);
-    await this.#rebaseIfNeeded(request);
-    // Read from the context as rebased, as the turn's model is given it.
-    const { messages } = await this.#conversation.context(context);
+    // One guard for the turn's setup and its rebase: every request asks
+    // it again (`withheld`).
+    const { withheld } = await this.#setUpGuard(request.scope);
+    const runs = new Set(withheld);
+    const rebasing = await needsRebase(this.#conversation, runs, context);
+    const turn = this.#codeTurn(request);
+    let { messages } = await this.#conversation.context(context);
+    const settingUp = this.#setUp(request, turn, messages);
+    if (rebasing) {
+      // Into the room of the turn's model, as it is admitted.
+      await settingUp;
+      await this.#rebase(runs);
+      // The context as rebased, as the turn's model is given it.
+      ({ messages } = await this.#conversation.context(context));
+    }
     this.#answering = lastWordsOf(messages);
     // At least once: should the object reset before the submit below, the
     // turn asked again sets up and recalls again, a second recall run
     // audited as the first was. Who reads the answer decides what it may
-    // hand over (turn-recall.ts).
-    const recall = await this.#recall(turn, request);
+    // hand over (turn-recall.ts). A refusal of the setup's is said first.
+    const [, recall] = await allInOrder([
+      settingUp,
+      this.#recall(turn, request, messages),
+    ]);
     try {
       return await this.#conversation.submit(
         {
@@ -1272,13 +1546,14 @@ export class ChatHarness {
 
   /**
    * The recall before `question` (turn-recall.ts), its analysis reading
-   * the context as the model would, once rebased: nothing withheld.
+   * `history`, the context as the model reads it, once rebased: nothing
+   * withheld.
    */
   async #recall(
     turn: CodeTurn,
-    { question: { text }, shared, audience, personal }: TurnRequest
+    { question: { text }, shared, audience, personal }: TurnRequest,
+    history: readonly Message[]
   ) {
-    const { messages } = await this.#conversation.context(context);
     return await recallForTurn(
       {
         env: this.#env,
@@ -1287,7 +1562,7 @@ export class ChatHarness {
           ? { outsiders: audience?.outsiders ?? null }
           : "own",
         personal,
-        history: messages,
+        history,
         provenance: this.#sources,
       },
       text
@@ -1296,15 +1571,21 @@ export class ChatHarness {
 
   /**
    * Rebases the chat's context (`rebase`) when it holds a result the chat
-   * may no longer read, or a rebase was cut short: only while idle. A note
-   * that comes meanwhile waits for it (`note`).
+   * may no longer read, or a rebase was cut short: only while idle.
    */
   async #rebaseIfNeeded(request: TurnRequest): Promise<void> {
     const { withheld } = await this.#guard(request.scope);
     const runs = new Set(withheld);
-    if (!(await needsRebase(this.#conversation, runs, context))) {
-      return;
+    if (await needsRebase(this.#conversation, runs, context)) {
+      await this.#rebase(runs);
     }
+  }
+
+  /**
+   * Rebases the chat's context without `runs`' results: a note that comes
+   * meanwhile waits for it (`note`).
+   */
+  async #rebase(runs: ReadonlySet<string>): Promise<void> {
     this.#rebasing = rebase(this.#conversation, runs, this.#room, context);
     try {
       await this.#rebasing;
@@ -1334,9 +1615,11 @@ export class ChatHarness {
     if (!this.#running || request === undefined) {
       return;
     }
+    this.#pace = paceOf(request.turnId, true);
     try {
-      await this.#setUp(request);
-      const { withheld } = await this.#guard(request.scope);
+      const { withheld } = await this.#setUpGuard(request.scope);
+      const { messages } = await this.#conversation.context(context);
+      await this.#setUp(request, this.#codeTurn(request), messages);
       if (await needsRebase(this.#conversation, new Set(withheld), context)) {
         this.#stopped = "history_revoked";
         await this.#conversation.abort(context);
@@ -1504,65 +1787,30 @@ export class ChatHarness {
   }
 
   /**
-   * Admits the turn's model through the gateway, refused before anything
-   * runs, and installs the chat's extension with what the turn runs with.
+   * The turn guard as a turn is set up: refused once its person is no
+   * longer a member; what the chat has read from kept, which every
+   * request carries, as of it.
    */
-  async #setUp(request: TurnRequest): Promise<CodeTurn> {
+  async #setUpGuard(scope: TurnRequest["scope"]) {
+    const guard = await this.#guard(scope);
+    if (guard.stop !== undefined) {
+      throw permissionErrors.create("permission.person_inactive");
+    }
+    this.#sources = guard.sources;
+    return guard;
+  }
+
+  /** What the turn's code runs and dedicated tools run with. */
+  #codeTurn(request: TurnRequest): CodeTurn {
     const env = this.#env;
     const { scope } = request;
     // A stub a call, never one kept for the turn: a stub to a Workspace
     // that restarted mid-turn stays broken, its calls failing or never
     // answering, where a new one reaches the Workspace as it is now.
     const host = () => this.#workspace(scope);
-    const authority = chatAuthority(scope);
-    const guard = await this.#guard(scope);
-    if (guard.stop !== undefined) {
-      throw permissionErrors.create("permission.person_inactive");
-    }
-    this.#sources = guard.sources;
-    // Every request carries everything the chat has read from, as of its
-    // guard: the rules judge it by all of it.
-    const admitted = await models(env).agent(
-      {
-        model: request.question.model,
-        effort: request.question.effort,
-        purpose: chatTurnPurpose,
-        trigger: delegateActorOf(authority, scope.via),
-        provenance: this.#sources,
-        work: { authority, context: chatContext(scope) },
-      },
-      () => this.#sources,
-      // Shown in the chat as it goes (`#sync`): a rate limit waited out,
-      // another model answering instead.
-      (waiting) => {
-        if (waiting !== this.#waiting) {
-          this.#waiting = waiting;
-          this.#syncSoon();
-        }
-      }
-    );
-    // Each request, a summary's too: from the first, pi retries nothing
-    // (`retryPolicy`).
-    const asking: AgentModel["stream"] = (model, sent, options) => {
-      this.#asked.since = true;
-      return admitted.stream(model, sent, options);
-    };
-    this.#models.setProvider(
-      createProvider({
-        id: gateway,
-        auth: {
-          apiKey: {
-            name: "Grasp's model gateway",
-            resolve: async () => await Promise.resolve({ auth: {} }),
-          },
-        },
-        models: [{ ...admitted.model, provider: gateway }],
-        api: { stream: asking, streamSimple: asking },
-      })
-    );
     /** The lines the turn's runs sent the Workspace, one after another. */
     let logged: Promise<void> = Promise.resolve();
-    const turn: CodeTurn = {
+    return {
       apis: apisFor(request.shared),
       scope,
       runs: {
@@ -1595,7 +1843,83 @@ export class ChatHarness {
       sandbox: () => sessionHost(env),
       codeTimeoutMs: codeTimeoutMs(env),
     };
-    const transcript = await this.#conversation.context(context);
+  }
+
+  /**
+   * Admits the turn's model through the gateway, refused before anything
+   * runs, and installs the chat's extension with what the turn runs with:
+   * `turn`, and `history`, the transcript as the turn starts. After the
+   * turn's guard (`#setUpGuard`).
+   */
+  async #setUp(
+    request: TurnRequest,
+    turn: CodeTurn,
+    history: readonly Message[]
+  ): Promise<void> {
+    const env = this.#env;
+    const { scope } = request;
+    const host = () => this.#workspace(scope);
+    const authority = chatAuthority(scope);
+    // Every request carries everything the chat has read from, as of its
+    // guard: the rules judge it by all of it.
+    const admitted = await models(env).agent(
+      {
+        model: request.question.model,
+        effort: request.question.effort,
+        purpose: chatTurnPurpose,
+        trigger: delegateActorOf(authority, scope.via),
+        provenance: this.#sources,
+        work: { authority, context: chatContext(scope) },
+      },
+      () => this.#sources,
+      // Shown in the chat as it goes (`#sync`): a rate limit waited out,
+      // another model answering instead. Counted in the turn's record.
+      (waiting) => {
+        this.#paceWait(request.turnId, waiting);
+        if (waiting !== this.#waiting) {
+          this.#waiting = waiting;
+          this.#syncSoon();
+        }
+      }
+    );
+    // Each request, a summary's too: from the first, pi retries nothing
+    // (`retryPolicy`). Each counted in the turn's record: the first's time
+    // and its first token's, and what each used as the gateway charged it.
+    const asking: AgentModel["stream"] = (model, sent, options) => {
+      this.#asked.since = true;
+      const pace = this.#paceOf(request.turnId);
+      const events = admitted.stream(model, sent, options);
+      if (pace === undefined) {
+        return events;
+      }
+      pace.firstRequestAt ??= Date.now();
+      return tapped(
+        events,
+        () => {
+          pace.firstTokenAt ??= Date.now();
+        },
+        ({ usage }) => {
+          pace.inputTokens += inputTokens(usage);
+          pace.outputTokens += usage.output;
+          pace.cacheReadTokens += usage.cacheRead;
+          pace.cacheWriteTokens += usage.cacheWrite;
+          pace.cost += usage.cost.total;
+        }
+      );
+    };
+    this.#models.setProvider(
+      createProvider({
+        id: gateway,
+        auth: {
+          apiKey: {
+            name: "Grasp's model gateway",
+            resolve: async () => await Promise.resolve({ auth: {} }),
+          },
+        },
+        models: [{ ...admitted.model, provider: gateway }],
+        api: { stream: asking, streamSimple: asking },
+      })
+    );
     const extension = chatAgent({
       ...turn,
       context:
@@ -1603,7 +1927,7 @@ export class ChatHarness {
           ? request.context
           : { ...request.context, make: request.question.make },
       assets: env.ASSETS,
-      history: transcript.messages,
+      history,
       // Only where the answer reaches the person alone, in a turn they
       // started (`personal`, workspace.ts `answersAlone`): their own chat
       // in Grasp's app, or their direct message on a chat app (GRA-1920),
@@ -1668,7 +1992,30 @@ export class ChatHarness {
       admitted.model.contextWindow - DEFAULT_COMPACTION_POLICY.reserveTokens,
       DEFAULT_COMPACTION_POLICY.keepRecentTokens
     );
-    return turn;
+  }
+
+  /** What this object saw of turn `turnId`, if it is the one under way. */
+  #paceOf(turnId: string): Pace | undefined {
+    return this.#pace?.turnId === turnId ? this.#pace : undefined;
+  }
+
+  /** Counts what the gateway said turn `turnId`'s request waits on now. */
+  #paceWait(turnId: string, waiting: ModelWait | null): void {
+    const pace = this.#paceOf(turnId);
+    if (pace === undefined) {
+      return;
+    }
+    const now = Date.now();
+    if (pace.waitingSince !== undefined) {
+      pace.rateLimitWaitMs += now - pace.waitingSince;
+      pace.waitingSince = undefined;
+    }
+    if (waiting?.kind === "rate_limited") {
+      pace.rateLimitWaits += 1;
+      pace.waitingSince = now;
+    } else if (waiting?.kind === "fallback") {
+      pace.fallbacks += 1;
+    }
   }
 
   /** How the turn whose input settled as `settled` ended. */
@@ -1702,11 +2049,7 @@ export class ChatHarness {
       settled.reason === "interrupted" ||
       settled.reason === "restart_limit"
     ) {
-      return {
-        outcome: "failed",
-        answer: "",
-        error: "Restarts cut the turn off too often for it to go on.",
-      };
+      return { outcome: "failed", answer: "", error: cutOffTooOften };
     }
     return {
       outcome: "failed",
@@ -1791,14 +2134,10 @@ export class ChatHarness {
     const left =
       !before.ended && !this.#running && this.#taking?.turnId !== turnId;
     const owed = await this.#owed();
-    await this.#copy(scope);
-    const partial = this.#partial;
-    if (partial !== this.#told.partial) {
-      await callObject(async () => {
-        await this.#workspace(scope).showPartial(scope.chatId, partial);
-      });
-      this.#told.partial = partial;
+    if (await this.#copy(scope)) {
+      this.#sawText(turnId);
     }
+    await this.#showPartial(scope, turnId);
     const waiting = this.#waiting;
     if (waiting !== this.#told.waiting) {
       await callObject(async () => {
@@ -1828,6 +2167,38 @@ export class ChatHarness {
     for (const key of owed) {
       // oxlint-disable-next-line no-await-in-loop -- one after another
       await this.#deliver(scope, key);
+    }
+  }
+
+  /**
+   * Shows the chat's Workspace the answer streaming in now, if it changed
+   * since it was told: turn `turnId`'s.
+   */
+  async #showPartial(
+    scope: TurnRequest["scope"],
+    turnId: string
+  ): Promise<void> {
+    const partial = this.#partial;
+    if (partial === this.#told.partial) {
+      return;
+    }
+    await callObject(async () => {
+      await this.#workspace(scope).showPartial(scope.chatId, partial);
+    });
+    this.#told.partial = partial;
+    if (partial !== null && textOf(partial) !== "") {
+      this.#sawText(turnId);
+    }
+  }
+
+  /**
+   * Notes that turn `turnId`'s first text reached its Workspace, which
+   * shows it to the chat's watchers: the first the person could read.
+   */
+  #sawText(turnId: string): void {
+    const pace = this.#paceOf(turnId);
+    if (pace !== undefined) {
+      pace.firstTextAt ??= Date.now();
     }
   }
 
@@ -1901,9 +2272,10 @@ export class ChatHarness {
    * Copies the entries committed since the last copy that show the person
    * something to the chat's Workspace, then marks them copied. A copy sent
    * again, as a restart between the two sends it, is kept once: the
-   * Workspace knows each by its entry.
+   * Workspace knows each by its entry. Whether it copied a response with
+   * words.
    */
-  async #copy(scope: TurnRequest["scope"]): Promise<void> {
+  async #copy(scope: TurnRequest["scope"]): Promise<boolean> {
     // Before the entries are read: pi may end its run meanwhile, and an
     // entry read before then is judged as of then.
     const running = this.#running;
@@ -1946,7 +2318,7 @@ export class ChatHarness {
       }
     }
     if (last === undefined) {
-      return;
+      return false;
     }
     const answerId =
       shown.length === 0
@@ -1982,5 +2354,8 @@ export class ChatHarness {
     for (const id of seen) {
       this.#thought.delete(id);
     }
+    return shown.some(
+      ({ message }) => message.role === "assistant" && textOf(message) !== ""
+    );
   }
 }

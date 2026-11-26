@@ -105,6 +105,7 @@ const sessionOf = (
   session: () => chatSession(env, id, chatIdSchema.parse(chat.id)),
   request: (turnId: string, text: string, asked = model) => ({
     turnId,
+    sentAt: Date.now(),
     scope: {
       workspaceId: id,
       agentId: chat.agentId,

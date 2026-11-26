@@ -7125,6 +7125,73 @@ export const modelUsage = sqliteTable(
 );
 
 /**
+ * One row per chat turn that ran (src/turn-records.ts): how long the
+ * person waited for its first model request, first token, first text and
+ * its end, what its model requests used and cost, its tools, retries,
+ * fallbacks and rate-limit waits, and how it ended. Beside `model_usage`,
+ * whose rows are per response: a turn's spend is summed there, never
+ * counted twice. Identifiers, counts and times only, never what was said.
+ */
+export const chatTurns = sqliteTable(
+  "chat_turns",
+  {
+    /** The turn's ID: its question's request ID, so a record written again is kept once. */
+    id: text().primaryKey(),
+    chatId: text("chat_id").notNull(),
+    /** Where it was asked: `web`, a chat platform (`slack`, `teams`), or `wake` for a turn nobody asked for there and then. */
+    surface: text().notNull(),
+    /** `<provider>/<model>`, as the turn asked for it. */
+    model: text().notNull(),
+    /** How hard it asked the model to think; null for the model's default. */
+    effort: text(),
+    /** When the question reached the chat's Workspace. */
+    sentAt: timestamp("sent_at").notNull(),
+    /**
+     * Milliseconds from `sent_at` to the turn's first model request, its
+     * first token (any delta: text, thinking or a tool call), its first
+     * text the chat's watchers could be shown, and its end. Null where it
+     * never came, or for a turn a restart cut short (`resumed`).
+     */
+    firstRequestMs: integer("first_request_ms"),
+    firstTokenMs: integer("first_token_ms"),
+    firstTextMs: integer("first_text_ms"),
+    doneMs: integer("done_ms").notNull(),
+    /** What its model requests used and cost, summaries included: prompt tokens with the cache's. */
+    inputTokens: integer("input_tokens").notNull(),
+    outputTokens: integer("output_tokens").notNull(),
+    cacheReadTokens: integer("cache_read_tokens").notNull(),
+    cacheWriteTokens: integer("cache_write_tokens").notNull(),
+    /** US dollars at list prices, as the gateway charged each response. */
+    cost: real().notNull(),
+    /** Each tool it called, by name: `{ "<tool>": { "calls": n, "ms": t } }`. */
+    tools: text({ mode: "json" })
+      .$type<Record<string, { calls: number; ms: number }>>()
+      .notNull(),
+    /** Requests pi sent again after a restart cut them off. */
+    retries: integer().notNull(),
+    /** Models the gateway fell back to after a provider refused one. */
+    fallbacks: integer().notNull(),
+    /** Rate limits the gateway waited out, and how long in all. */
+    rateLimitWaits: integer("rate_limit_waits").notNull(),
+    rateLimitWaitMs: integer("rate_limit_wait_ms").notNull(),
+    /** The last response's stop reason (`stop`, `length`, `toolUse`, `error`, `aborted`); null for none. */
+    stopReason: text("stop_reason"),
+    /** `answered`, `failed` or `cancelled`. */
+    outcome: text().notNull(),
+    /** Why it failed: the gateway's code (`model.timeout`), or what stopped it (`history_revoked`). */
+    code: text(),
+    /** Whether pi compacted the chat during the turn. */
+    compacted: integer({ mode: "boolean" }).notNull(),
+    /** Whether a restart cut it short and the chat's object took it up again: its times are then unknown. */
+    resumed: integer({ mode: "boolean" }).notNull(),
+  },
+  (table) => [
+    // The rows past their retention (`sweepModelUsage`).
+    index("chat_turns_sent_idx").on(table.sentAt),
+  ]
+);
+
+/**
  * How each provider's requests fared last, by whose key, noted after each
  * response in the batch that records it (src/model-usage.ts): when one
  * last worked, and when one last failed and how, never what it carried.

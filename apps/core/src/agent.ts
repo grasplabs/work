@@ -740,11 +740,6 @@ export interface TurnContext {
     documents?: readonly { id: string; name: string; type: string }[];
   };
   /**
-   * The model an admin gave the chat's agent for its turns; none for an
-   * agent that answers with the model its asker picked.
-   */
-  agentModel?: string;
-  /**
    * The name of the person the agent talks with, as their account holds
    * it: only where the answer reaches them alone (GRA-2174).
    */
