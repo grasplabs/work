@@ -433,7 +433,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       page.socket.send(tenthOfASecond());
       const partial = await page.next();
       page.socket.send(JSON.stringify({ type: "commit" }));
-      // The rest of the stretch, written down once asked to flush.
+      // The rest of the stretch, written down once silence followed it.
       const flushed = await page.next();
       const final = await page.next();
       page.socket.close(1000, "Done");
@@ -475,8 +475,9 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       format: { encoding: "pcm_s16le", sample_rate: 16_000 },
       language: "nl",
       keyterms: true,
-      events: ["session.update", "input_audio.append", "input_audio.flush"],
-      audio: 3198,
+      events: ["session.update", "input_audio.append", "input_audio.append"],
+      // A tenth of a second, then the silence after the stretch.
+      audio: 3198 + 15_360,
       samples: Array.from({ length: 8 }, () => 0x07_07),
     });
     // A tenth of a second heard, counted once the socket closed.
@@ -512,8 +513,9 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
 
     expect({
       ...result,
-      commits: upstream.opened[0]?.events.filter(
-        (type) => type === "input_audio.flush"
+      // The audio, then each commit's silence.
+      appended: upstream.opened[0]?.events.filter(
+        (type) => type === "input_audio.append"
       ).length,
     }).toStrictEqual({
       flushed: { type: "partial", text: "Hello there" },
@@ -521,7 +523,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
         { type: "final", text: "Hello there", words: [] },
         { type: "final", text: "", words: [] },
       ],
-      commits: 2,
+      appended: 3,
     });
   });
 

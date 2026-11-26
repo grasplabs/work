@@ -37,10 +37,16 @@ import { Resampler } from "./resampler.ts";
 // Ordering: the page counts on exactly one `final` for each of its
 // commits, in order, holding the whole stretch it closed. Voxtral has no
 // stretches of its own: it streams text, behind the audio by its delay.
-// A commit asks it to write down what it still holds
-// (`input_audio.flush`), and the stretch's final goes out once its words
-// stop coming (`settledMs` without one), or at the latest `settleMostMs`
-// after the commit: every word since the stretch before (`settlingOf`).
+// A commit sends a moment of silence after the stretch (`tailMs`), so the
+// session writes down its last words, which it holds back by its delay,
+// and the stretch's final goes out once its words stop coming
+// (`settledMs` without one), or at the latest `settleMostMs` after the
+// commit: every word since the stretch before (`settlingOf`).
+//
+// Its settings are fixed from the first audio on: changed after it, the
+// session answers with its error 3051 and ends. So they go in one
+// `session.update`, and no audio goes before the session confirmed them
+// (`session.updated`).
 
 /** The session's own path at the provider, which connect allows with its model. */
 const realtimePath = "/v1/audio/transcriptions/realtime";
@@ -51,11 +57,14 @@ export const sessionSampleRate = 16_000;
 /** How far behind the audio Voxtral may write, for words as they are said. */
 const streamingDelayMs = 240;
 
+/** The silence sent after a stretch: past the delay, so its last words come. */
+const tailMs = streamingDelayMs + 240;
+
 /** A stretch is settled once no word came for this long after its commit. */
 const settledMs = 300;
 
 /** A stretch is settled at the latest this long after its commit. */
-const settleMostMs = 1200;
+const settleMostMs = 1500;
 
 /** The most words to listen out for that the session is given. */
 const mostTerms = 100;
@@ -199,22 +208,36 @@ const sessionUpdate = ({ language, keyterms }: TranscriptionOptions): string =>
     },
   });
 
-/** The longest the session may take to say it was created. */
-const createdWithinMs = 10_000;
+/** An error's message about the session's settings, cut short; none other. */
+const settingsMessageOf = (message: unknown): string | undefined =>
+  typeof message === "string" ? message.slice(0, 200) : undefined;
 
-/** Waits for the session to say it was created; throws when it won't. */
-const created = async (socket: WebSocket): Promise<void> => {
+/** The longest the session may take to answer as it opens. */
+const answerWithinMs = 10_000;
+
+/**
+ * Waits for the session to send `type` (`session.created`, then
+ * `session.updated`); throws when it errs, closes or doesn't in time. Its
+ * error here is about its settings, never what was said: its message is
+ * logged with its code.
+ */
+const answered = async (
+  socket: WebSocket,
+  type: "session.created" | "session.updated"
+): Promise<void> => {
   const { promise, resolve, reject } = Promise.withResolvers<null>();
   const timer = setTimeout(() => {
-    reject(new Error("The session wasn't created in time"));
-  }, createdWithinMs);
+    reject(new Error(`No ${type} in time`));
+  }, answerWithinMs);
   const heard = (event: MessageEvent): void => {
     const read = serverEventOf(event.data);
-    if (read?.type === "session.created") {
+    if (read?.type === type) {
       resolve(null);
     } else if (read !== undefined && "error" in read) {
-      log.warn("transcription.upstream_error", {
+      log.warn("transcription.upstream_refused", {
+        waiting: type,
         code: read.error.code ?? undefined,
+        message: settingsMessageOf(read.error.message),
       });
       reject(new Error("The session was refused"));
     }
@@ -250,7 +273,9 @@ export const platformTranscription = (
       throw transcriptionErrors.create("transcription.failed");
     }
     try {
-      await created(socket);
+      await answered(socket, "session.created");
+      socket.send(sessionUpdate(options));
+      await answered(socket, "session.updated");
     } catch {
       try {
         socket.close(1000, "Done");
@@ -259,10 +284,13 @@ export const platformTranscription = (
       }
       throw transcriptionErrors.create("transcription.failed");
     }
-    socket.send(sessionUpdate(options));
     const events = new EventQueue();
     const settling = settlingOf(events);
     const resampler = new Resampler(options.sampleRate, sessionSampleRate);
+    // 16-bit samples of silence, at the session's rate.
+    const tail = toBase64(
+      new Uint8Array(((sessionSampleRate * tailMs) / 1000) * 2)
+    );
     let closed = false;
     const ended = (failed: string | undefined): void => {
       if (!closed && failed !== undefined) {
@@ -280,9 +308,11 @@ export const platformTranscription = (
       if ("text" in heard) {
         settling.delta(heard.text);
       } else if ("error" in heard) {
-        // Only its code, which names no content.
+        // Its code, and its message cut short: about the session, never
+        // what was said.
         log.warn("transcription.upstream_error", {
           code: heard.error.code ?? undefined,
+          message: settingsMessageOf(heard.error.message),
         });
         ended("upstream_error");
         try {
@@ -314,7 +344,7 @@ export const platformTranscription = (
         if (!closed) {
           settling.pageCommitted();
         }
-        send({ type: "input_audio.flush" });
+        send({ type: "input_audio.append", audio: tail });
       },
       close: () => {
         if (!closed) {
