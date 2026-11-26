@@ -18286,6 +18286,7 @@ msgstr "Le logo n’a pas pu être supprimé"
 msgid "The message"
 msgstr "Le message"
 
+#: src/interview/composer.tsx
 #: src/interview/words.ts
 msgid "The microphone is not available here. Type your answer."
 msgstr "Le micro n’est pas disponible ici. Écrivez votre réponse."

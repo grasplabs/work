@@ -288,7 +288,7 @@ const AnswerBox = ({
     <div {...stylex.props(styles.composer)}>
       <SaveTrouble />
       <Composer
-        blocked={mode === "type" && micProblem() === "blocked"}
+        micTrouble={mode === "type" ? micProblem() : null}
         doing={loop.doing}
         line={loop.saying}
         names={words.tag}
