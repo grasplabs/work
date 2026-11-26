@@ -239,7 +239,7 @@ describe("a shared connection reached through the company network", () => {
     const { port } = new URL(address);
     const probe = async (url: string) =>
       probeSchema.parse(
-        outputOf(await callErp(connectionId, person, "probe.send", { url }))
+        outputOf(await callErp(connectionId, person, "probe.fetch", { url }))
       );
     const moved = await outcome(callErp(connectionId, person, "moved.list"));
     const attempts = {

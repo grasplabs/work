@@ -3,7 +3,7 @@
  * address, as connect's tests load its connector: written on
  * `@grasp-os/sdk/connector` like any other, with one host and a key, and
  * nothing that knows it is reached through the company network
- * (test/company-network-fake.ts answers it there). `probe.send` plays
+ * (test/company-network-fake.ts answers it there). `probe.fetch` plays
  * connector code gone wrong: it sends whatever request it is given.
  */
 import { auth, defineConnector, page, tool, v } from "@grasp-os/sdk/connector";
@@ -52,7 +52,7 @@ export default defineConnector({
         return { items: answer.items, next: null };
       },
     }),
-    "probe.send": tool({
+    "probe.fetch": tool({
       description: "Sends any request it is given",
       readOnly: true,
       reach: "own",
