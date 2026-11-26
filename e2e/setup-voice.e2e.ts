@@ -16,8 +16,8 @@ test.use({
   launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
 });
 
-const sourcesHeading = "Where does the work get written down?";
-const documentsHeading = "Do you have anything that explains how you work?";
+const sourcesHeading = "Where does your team store its work?";
+const documentsHeading = "Share documents that explain how you work";
 
 test("the admin goes through steps and back, with his voice on and off", async ({
   pageOf,

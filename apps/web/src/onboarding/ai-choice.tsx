@@ -277,10 +277,10 @@ export const AiChoice = ({
         formId={aiKeyForm}
         labels={{
           change: t({ context: "button", message: "Change" }),
-          connect: t`Connect`,
+          connect: t({ context: "setup", message: "Connect" }),
           connectName: (name) => t`Connect ${name}`,
-          connected: t`Connected`,
-          connecting: t`Connecting`,
+          connected: t({ context: "setup", message: "Connected" }),
+          connecting: t({ context: "setup", message: "Connecting…" }),
           disconnect: t`Disconnect`,
           disconnectTitle: (name) => t`Disconnect ${name}?`,
           disconnecting: t`Disconnecting`,
@@ -291,8 +291,8 @@ export const AiChoice = ({
               ? t`Key …${last}`
               : t`Key …${last} · ${region}`,
           keyMissing: t`Paste the key.`,
-          keyNote: t`We store it sealed. You’ll only see its last four characters again.`,
-          notConnected: t`Not connected`,
+          keyNote: t`Stored encrypted. Only the last four characters remain visible.`,
+          notConnected: t({ context: "setup", message: "Not connected" }),
           notDisconnected: t`Couldn’t disconnect`,
           replaceKey: t`Replace key`,
         }}
@@ -347,14 +347,14 @@ export const AiChoice = ({
   }[] = [
     {
       value: "grasp",
-      label: t`Use our own system`,
-      description: t`Ready right away, nothing to set up.`,
+      label: t`Use our built-in system`,
+      description: t`Ready right away, nothing to configure.`,
       recommended: true,
     },
     {
       value: "own",
       label: t`Use your own API key`,
-      description: t`For a provider your company already works with. You pay them directly.`,
+      description: t`Connect a provider your company already uses. You pay them directly.`,
     },
   ];
   return (
@@ -382,7 +382,7 @@ export const AiChoice = ({
                       {label}
                       {recommended === true ? (
                         <Badge size="sm" variant="success">
-                          {t`Recommended`}
+                          {t({ context: "setup", message: "Recommended" })}
                         </Badge>
                       ) : null}
                     </span>

@@ -74,9 +74,9 @@ const useProblemOf = (): ((error: unknown) => string) => {
 
 /** What Stephen says of the documents shared, as the next step arrives. */
 const documentsLeft = {
-  none: msg`No documents for now, that’s fine. You can add them later too.`,
-  one: msg`Thanks for the document. I’ll read it before I talk to anyone.`,
-  some: msg`Thanks for the documents. I’ll read them before I talk to anyone.`,
+  none: msg`No documents for now, that’s fine. You can always upload them later.`,
+  one: msg`Thanks for the document. I’ll review it before talking to anyone.`,
+  some: msg`Thanks for the documents. I’ll review them before talking to anyone.`,
 };
 
 /**
@@ -84,7 +84,7 @@ const documentsLeft = {
  * and he answers that as he does every error (step-voice.tsx).
  */
 const documentAnswers = {
-  one: msg`Got it, I’ll read that one.`,
+  one: msg`Got it, I’ll read through that.`,
   some: msg`Got them, I’ll read through those.`,
 };
 
@@ -166,7 +166,7 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
     <CalmStep
       body={
         kinds === null
-          ? t`Policies, procedures, work instructions. Anything that explains how you work helps.`
+          ? t`Policies, procedures, work instructions—anything that gives context helps.`
           : t`${kinds}, and whatever explains how you work.`
       }
       end={
@@ -180,8 +180,8 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
           <Icon icon={ArrowRightIcon} />
         </Button>
       }
-      spoken={t`This is a good moment to give me some context. A process description, an onboarding guide or a price list helps me understand what you’re dealing with every day. The more I know, the better my questions to your team, and the more useful everything I give back.`}
-      title={t`Do you have anything that explains how you work?`}
+      spoken={t`This is a great moment to give me some context. A process doc, onboarding guide, or price list helps me understand your day-to-day. The more context I have upfront, the sharper my questions to your team will be.`}
+      title={t`Share documents that explain how you work`}
     >
       <div {...stylex.props(styles.stack)}>
         <TopError>{removeProblem}</TopError>

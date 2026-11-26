@@ -329,12 +329,15 @@ describe("the AI step", () => {
     const unknown = said("ai", { ai: null });
     expect({
       // Asked for a key: the step says so (the providers stand on the page, with no card titled for it).
-      asked: [asked.includes("Paste a key"), asked.includes("Continue")],
+      asked: [asked.includes("Paste an API key"), asked.includes("Continue")],
       ready: [
-        ready.includes("Your own key is connected"),
+        ready.includes("Your API key is connected"),
         ready.includes("Continue"),
       ],
-      unknown: [unknown.includes("Paste a key"), unknown.includes("Continue")],
+      unknown: [
+        unknown.includes("Paste an API key"),
+        unknown.includes("Continue"),
+      ],
     }).toStrictEqual({
       asked: [true, true],
       ready: [true, true],
@@ -355,11 +358,11 @@ describe("the AI step", () => {
     const notOffered = said("ai", { ai: own });
     expect({
       offered: [
-        shown.includes("Use our own system"),
+        shown.includes("Use our built-in system"),
         shown.includes("Use your own API key"),
         shown.includes("Continue"),
       ],
-      notOffered: notOffered.includes("Use our own system"),
+      notOffered: notOffered.includes("Use our built-in system"),
     }).toStrictEqual({
       offered: [true, true, true],
       notOffered: false,
@@ -370,7 +373,7 @@ describe("the AI step", () => {
 describe("the welcome", () => {
   it("offers to forget the kickoff while it is in, and says when its erasure finishes by itself", () => {
     const offer = "Forget our first conversation";
-    const erasing = "I’m still erasing what I took from it";
+    const erasing = "I’m still clearing what I learned from it";
     const shown = (kickoff: OnboardingView["kickoff"]) => {
       const markup = drawn("welcome", { kickoff });
       return {
