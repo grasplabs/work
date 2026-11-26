@@ -698,7 +698,9 @@ describe("chats", () => {
     const ann = await person();
     const ben = await person();
     const admin = await signedInApi(idp, "admin");
-    const mail = await mailConnection();
+    const mail = await mailConnection([], ["mail.send"], {
+      audience: "everyone",
+    });
     // The workspace's agent may send mail, held for its person each time:
     // one grant, for everyone's chats, each in its person's own object.
     const agent = { type: "agent" as const, agentId: chatAgentId };
@@ -884,7 +886,9 @@ describe("chats", () => {
   it("tell a follower the moment its agent has a write held, mid-turn", async () => {
     const ann = await person();
     const admin = await signedInApi(idp, "admin");
-    const mail = await mailConnection();
+    const mail = await mailConnection([], ["mail.send"], {
+      audience: "everyone",
+    });
     await requestGranted(idp, admin, {
       subject: { type: "agent", agentId: chatAgentId },
       object: { type: "connection", connectionId: mail.id },
@@ -924,11 +928,21 @@ describe("chats", () => {
     // connect fails unexpectedly on the fourth once it took it, and the
     // fifth's server sends the mail and loses its answer.
     const mails = {
-      OUTCOME_SENT: await mailConnection(),
-      OUTCOME_DECLINED: await mailConnection(),
-      OUTCOME_FAILED: await mailConnection(["invalid"]),
-      OUTCOME_BROKEN: await mailConnection(),
-      OUTCOME_UNKNOWN: await mailConnection(["lost"]),
+      OUTCOME_SENT: await mailConnection([], ["mail.send"], {
+        audience: "everyone",
+      }),
+      OUTCOME_DECLINED: await mailConnection([], ["mail.send"], {
+        audience: "everyone",
+      }),
+      OUTCOME_FAILED: await mailConnection(["invalid"], ["mail.send"], {
+        audience: "everyone",
+      }),
+      OUTCOME_BROKEN: await mailConnection([], ["mail.send"], {
+        audience: "everyone",
+      }),
+      OUTCOME_UNKNOWN: await mailConnection(["lost"], ["mail.send"], {
+        audience: "everyone",
+      }),
     };
     for (const [binding, { id }] of Object.entries(mails)) {
       // oxlint-disable-next-line no-await-in-loop -- one grant after the other
@@ -1059,7 +1073,9 @@ describe("chats", () => {
   it("tell their agent one outcome of a write when a refused confirmation races the one that runs it", async () => {
     const ann = await person();
     const admin = await signedInApi(idp, "admin");
-    const mail = await mailConnection();
+    const mail = await mailConnection([], ["mail.send"], {
+      audience: "everyone",
+    });
     await requestGranted(idp, admin, {
       subject: { type: "agent", agentId: chatAgentId },
       object: { type: "connection", connectionId: mail.id },

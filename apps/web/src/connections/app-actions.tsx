@@ -21,15 +21,16 @@ import { reliedOnLapsed } from "./integrations.ts";
 // one; this offers only what the person's role can do.
 //
 // Every app connects in the one connect dialog (connect-dialog.tsx), as
-// onboarding does: a native connector (Microsoft, Google) asks an admin who
-// uses it, then signs in; a Composio toolkit asks what Grasp may do, with
-// the consent word for word. One that stopped working is connected again
-// the same way: a new connection beside the stopped one, starting from what
-// the stopped one allowed and nothing more, which stays until someone
-// disconnects it (its row on the app's page says it can go once one of the
-// same account works, connection-list.tsx). Only a toolkit that takes a key
-// replaces its stopped key as the new one is added: connect keeps one key
-// connection of a toolkit.
+// onboarding does: a native connector (Microsoft, Google), or a connector
+// made from a URL whose server signs in, asks an admin who uses it, then
+// signs in; one made from a URL that takes a key asks for it; a Composio
+// toolkit asks what Grasp may do, with the consent word for word. One that
+// stopped working is connected again the same way: a new connection beside
+// the stopped one, starting from what the stopped one allowed and nothing
+// more, which stays until someone disconnects it (its row on the app's page
+// says it can go once one of the same account works, connection-list.tsx).
+// Only a toolkit that takes a key replaces its stopped key as the new one
+// is added: connect keeps one key connection of a toolkit.
 
 /**
  * The connection this person may disconnect from the app panel's Manage

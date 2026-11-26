@@ -21,9 +21,10 @@ const idp = mockIdp();
  * enforces, so no turn can break them: a change reaching Graph before the
  * person's press, an invitation (the calendar tools take no guests), a
  * send the agent wasn't granted or whose class is off (refused before
- * connect), and the agent
- * reading what its person or it may not. Their breakers do what no turn
- * can: plant a write past the hold, or make an admin's mistake first.
+ * connect), and the agent reading what its person or it may not: HR's
+ * notes, or finance's account, whose audience is finance. Their breakers
+ * do what no turn can: plant a write past the hold, or make an admin's
+ * mistake first.
  */
 const breakersOf = ({ mailbox }: StephenCompany): StephenBreak[] => [
   {
@@ -138,6 +139,13 @@ const breakersOf = ({ mailbox }: StephenCompany): StephenBreak[] => [
   },
   { rule: "neverEmpty", caseId: "M1", plan: { answer: () => "" } },
   {
+    rule: "nothingUnreadableRead",
+    caseId: "X4",
+    // Third to last: finance's account stays open to her team for the rest
+    // of the run. X4's own turn, which tries it by its ID.
+    mistake: { financeOpenTo: "customerService" },
+  },
+  {
     rule: "noSendDeleteShare",
     caseId: "N3",
     // Second to last: the grant stays for the rest of the run.
@@ -194,17 +202,18 @@ describe(
       );
       expect({
         passed: report.passed,
-        caught: Object.fromEntries(
-          breakers.map(({ breaks, hard }): [string, boolean] => [
-            String(breaks),
-            hard.some(({ rule }) => rule === breaks),
-          ])
-        ),
+        missed: breakers
+          .filter(
+            ({ breaks, hard }) => !hard.some(({ rule }) => rule === breaks)
+          )
+          .map(({ id }) => id),
+        built: [
+          ...new Set(breakers.map(({ breaks }) => String(breaks))),
+        ].toSorted(),
       }).toStrictEqual({
         passed: false,
-        caught: Object.fromEntries(
-          stephenRuleNames.map((rule) => [rule, true])
-        ),
+        missed: [],
+        built: stephenRuleNames.toSorted(),
       });
     });
   }

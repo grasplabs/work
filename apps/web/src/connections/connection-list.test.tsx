@@ -255,7 +255,7 @@ const asAdmin = async (
   const session = {
     connections: {
       // As core lists them: one with an audience or being erased.
-      brainAudiences: async () => {
+      audiences: async () => {
         reads.audiences += 1;
         if (held.refusingReads === true) {
           await Promise.resolve();
@@ -278,8 +278,8 @@ const asAdmin = async (
               ]
         );
       },
-      setBrainAudience: async (...given: unknown[]) => {
-        asked.push(["setBrainAudience", ...given]);
+      setAudience: async (...given: unknown[]) => {
+        asked.push(["setAudience", ...given]);
         if (refusing === "change") {
           await Promise.resolve();
           throw new Error(refusal);
@@ -288,7 +288,7 @@ const asAdmin = async (
         // As core: only from the audience held now.
         if (JSON.stringify(from) !== JSON.stringify(held.audience)) {
           await Promise.resolve();
-          throw connectionErrors.create("connection.brain_audience_changed");
+          throw connectionErrors.create("connection.audience_changed");
         }
         // As core: opening it to anyone new only once confirmed.
         const opens =
@@ -368,7 +368,7 @@ const asAdmin = async (
 };
 
 /**
- * The card's choice of Brain audience, a library Select: the value it
+ * The card's choice of audience, a library Select: the value it
  * shows as chosen, and whether it may be changed; null when there is none.
  */
 const audienceSelect = (): {
@@ -388,7 +388,7 @@ const audienceSelect = (): {
   };
 };
 
-/** Chooses the option named `name` in the card's Brain audience: opens it and picks it. */
+/** Chooses the option named `name` in the card's audience: opens it and picks it. */
 const choose = async (name: string): Promise<void> => {
   const trigger = document.querySelector<HTMLElement>('[role="combobox"]');
   await act(async () => {
@@ -437,7 +437,7 @@ const returnToWindow = async (): Promise<void> => {
 const dialogText = (): string =>
   document.querySelector('[role="alertdialog"]')?.textContent ?? "";
 
-describe("a shared connection's Brain audience, for an admin", () => {
+describe("a shared connection's audience, for an admin", () => {
   afterEach(() => {
     act(() => {
       root?.unmount();
@@ -453,11 +453,11 @@ describe("a shared connection's Brain audience, for an admin", () => {
     await press("Cancel");
     const afterCancel = [...asked];
     await choose("Everyone in the company");
-    await press("Keep it for them");
+    await press("Open it to them");
 
     expect({
       asking: asking.includes(
-        "Everyone in the company will be able to find what agents read through Notes and what is copied from it, including what was kept before, whatever their permissions in Notes. Their assistants will also read Notes directly, in their own chats. Choose a team if not everyone should have this."
+        "Everyone in the company will be able to use Notes in their own chats, with everything it reaches, whatever their own permissions there, change things through it once they confirm each change, be given Apps that use it, and find in the Brain what came from it, including what was kept before. To open only part of it, connect an account that reaches only that part, or have each person connect their own. Choose a team if not everyone should have this."
       ),
       afterCancel,
       asked,
@@ -466,7 +466,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
       afterCancel: [],
       asked: [
         [
-          "setBrainAudience",
+          "setAudience",
           "c1",
           { kind: "everyone" },
           { kind: "nobody" },
@@ -501,19 +501,19 @@ describe("a shared connection's Brain audience, for an admin", () => {
       asked,
       erasing: erasing.includes("This can't be undone."),
       toTeam: toTeam.includes(
-        "Everyone in Sales will be able to find what agents read through Notes and what is copied from it, including what was kept before, whatever their permissions in Notes. Their assistants will also read Notes directly, in their own chats."
+        "Everyone in Sales will be able to use Notes in their own chats, with everything it reaches, whatever their own permissions there, change things through it once they confirm each change, be given Apps that use it, and find in the Brain what came from it, including what was kept before. To open only part of it, connect an account that reaches only that part, or have each person connect their own."
       ),
       fromNobody,
     }).toStrictEqual({
       asked: [
         [
-          "setBrainAudience",
+          "setAudience",
           "c1",
           { kind: "team", teamId: "t1" },
           { kind: "everyone" },
         ],
         [
-          "setBrainAudience",
+          "setAudience",
           "c1",
           { kind: "nobody" },
           { kind: "team", teamId: "t1" },
@@ -545,7 +545,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
       shown: select?.value,
       disabled: select?.disabled,
       says: document.body.textContent.includes(
-        "What the Brain kept from Notes is being erased. You can choose who may read it again once that is done."
+        "What the Brain kept from Notes is being erased. You can choose who may use it again once that is done."
       ),
     };
     // The clock ends the erasure; the admin comes back to the card.
@@ -560,7 +560,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
     expect({
       whileErasing,
       asking: dialogText().includes(
-        "Everyone in Sales will be able to find what agents read through Notes and what is copied from it, including what was kept before, whatever their permissions in Notes. Their assistants will also read Notes directly, in their own chats."
+        "Everyone in Sales will be able to use Notes in their own chats, with everything it reaches, whatever their own permissions there, change things through it once they confirm each change, be given Apps that use it, and find in the Brain what came from it, including what was kept before. To open only part of it, connect an account that reaches only that part, or have each person connect their own."
       ),
       asked,
     }).toStrictEqual({
@@ -638,7 +638,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
     });
     const after = {
       says: document.body.textContent.includes(
-        "Who may read what agents read through Notes was changed in the meantime. This is who may read it now: choose again if you still want to change it."
+        "Who may use Notes was changed in the meantime. This is who may use it now: choose again if you still want to change it."
       ),
       shown: audienceSelect()?.value,
       held: held.audience,
@@ -648,7 +648,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
     expect({
       after,
       asking: dialogText().includes(
-        "Everyone in Sales will be able to find what agents read through Notes and what is copied from it, including what was kept before, whatever their permissions in Notes. Their assistants will also read Notes directly, in their own chats."
+        "Everyone in Sales will be able to use Notes in their own chats, with everything it reaches, whatever their own permissions there, change things through it once they confirm each change, be given Apps that use it, and find in the Brain what came from it, including what was kept before. To open only part of it, connect an account that reaches only that part, or have each person connect their own."
       ),
     }).toStrictEqual({
       after: { says: true, shown: "nobody", held: { kind: "nobody" } },
@@ -681,7 +681,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
     // card reads it again behind the question.
     held.audience = { kind: "team", teamId: "t1" };
     await returnToWindow();
-    await press("Keep it for them");
+    await press("Open it to them");
     await act(async () => {
       await Promise.resolve();
     });
@@ -691,13 +691,13 @@ describe("a shared connection's Brain audience, for an admin", () => {
       asked,
       held: held.audience,
       says: document.body.textContent.includes(
-        "Who may read what agents read through Notes was changed in the meantime."
+        "Who may use Notes was changed in the meantime."
       ),
     }).toStrictEqual({
       asking: true,
       asked: [
         [
-          "setBrainAudience",
+          "setAudience",
           "c1",
           { kind: "everyone" },
           { kind: "nobody" },

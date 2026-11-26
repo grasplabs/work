@@ -282,7 +282,7 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
   await page.goto(`/apps/${appId}/settings?section=connections`);
   const inUse = page.getByRole("region", { name: "Connected accounts in use" });
   const used = inUse.getByRole("listitem").filter({ hasText: "Microsoft 365" });
-  await expect(used).toContainText("Connected for everyone");
+  await expect(used).toContainText("Connected for the company");
   await expect(
     used.getByRole("link", { name: "Manage Microsoft 365" })
   ).toBeVisible();

@@ -311,7 +311,7 @@ describe("an app's panel", () => {
     await press(dialogAction("Allow and sign in"));
 
     // Only the connect: the stopped connection stays, with its consent, its
-    // Brain audience and its permissions, until someone disconnects it.
+    // audience and its permissions, until someone disconnects it.
     expect(
       sent.map((each) => ("toolkit" in each ? each.tools : each))
     ).toStrictEqual([
@@ -454,7 +454,7 @@ describe("an app's panel", () => {
     // for everyone this time.
     await press(buttons("Close").at(-1));
     await press(buttons("Connect")[0]);
-    await press(buttons("For everyone")[0]);
+    await press(buttons("For the company")[0]);
     await press(dialogAction("Sign in to Microsoft 365"));
     // The first, just for the admin, answers last: it sends the browser nowhere.
     await act(async () => {
@@ -481,13 +481,13 @@ describe("an app's panel", () => {
     });
   });
 
-  it("has an admin connect Microsoft 365 for everyone, saying where they'll sign in", async () => {
+  it("has an admin connect Microsoft 365 for the company, saying where they'll sign in", async () => {
     const sent = await opened("microsoft", []);
     await press(buttons("Connect")[0]);
     const where = dialogOf("Connect Microsoft 365")?.textContent.includes(
       "login.microsoftonline.com"
     );
-    await press(buttons("For everyone")[0]);
+    await press(buttons("For the company")[0]);
     await press(dialogAction("Sign in to Microsoft 365"));
 
     expect({ where, sent }).toStrictEqual({
@@ -505,7 +505,7 @@ describe("an app's panel", () => {
   it("has a member connect Microsoft 365 for themselves alone, with no choice", async () => {
     const sent = await opened("microsoft", [], person({ role: "user" }));
     await press(buttons("Connect")[0]);
-    const choice = buttons("For everyone").length;
+    const choice = buttons("For the company").length;
     await press(dialogAction("Sign in to Microsoft 365"));
 
     expect({ choice, sent }).toStrictEqual({

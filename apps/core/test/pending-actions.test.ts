@@ -45,7 +45,9 @@ const invoiceMail = { to: "ben@acme.test", subject: "Invoice INV-7" };
 const setUp = async () => {
   const owner = await person();
   const admin = await person("admin");
-  const mail = await mailConnection();
+  const mail = await mailConnection([], ["mail.send"], {
+    audience: "everyone",
+  });
   const agent = { type: "agent" as const, agentId: `agent-${unique()}` };
   const permissionId = await requestGranted(idp, admin, {
     subject: agent,

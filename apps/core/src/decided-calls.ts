@@ -10,7 +10,7 @@ import {
 import type { CodeSubject, WorkContext } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 
-import { signedCall, signedUngrantedRead } from "./bindings.ts";
+import { signedCall, signedUngrantedCall } from "./bindings.ts";
 import { requireHeldBinding } from "./resource-bindings.ts";
 
 // A person deciding a call that waits for them, from their own session:
@@ -29,7 +29,7 @@ export interface DecidedCall {
   /** The App version whose code made it; null for an agent's. */
   appVersion: number | null;
   context: WorkContext;
-  /** Null for a read that needs no grant (ungranted-reads.ts). */
+  /** Null for a call that needs no grant (ungranted-reads.ts). */
   permissionId: string | null;
   /** The App's approved resource binding it came through, if any. */
   binding?: HeldBinding | undefined;
@@ -98,12 +98,13 @@ export const reauthorizedCapability = async (
     },
   };
   const scope = { action: call.action, idempotencyKey: call.idempotencyKey };
-  // A read with no grant, held in a chat that read something only its
-  // person may read (GRA-1928): decided only while the person still
-  // reads that connection so, by the same rule as the read itself.
+  // A call with no grant (ungranted-reads.ts): a write through a shared
+  // connection, or a read held in a chat that read something only its
+  // person may read (GRA-1928), decided only while the person still uses
+  // that connection so, by the same rule as the call itself.
   const { capability } =
     call.permissionId === null
-      ? await signedUngrantedRead(env, allowed, scope, decision)
+      ? await signedUngrantedCall(env, allowed, scope, decision)
       : await signedCall(
           env,
           {
