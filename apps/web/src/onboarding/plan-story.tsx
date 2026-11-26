@@ -11,9 +11,11 @@ import {
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
+import { useRouter } from "@tanstack/react-router";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 
+import { useCore } from "../use-core.ts";
 import { readingTiming, saidBy, wordsOf } from "../voice/timing.ts";
 import {
   hold,
@@ -154,8 +156,36 @@ const styles = stylex.create({
 });
 
 /** Fetches the way into the platform ahead (platform-entry.tsx), which the root plays. */
-const fetchEntry = (): void => {
+type Router = ReturnType<typeof useRouter>;
+
+/**
+ * While the story is told, the way in and the platform's first page are
+ * loaded: their code fetched and parsed, the fonts ready, so nothing is
+ * loaded for the first time while it moves.
+ */
+const fetchEntry = (router: Router): void => {
   void import("./platform-entry.tsx");
+  // The generated route tree types these; the linter's type check doesn't follow it there.
+  // oxlint-disable-next-line typescript/no-unsafe-argument -- see above
+  void router.loadRouteChunk(router.routesById["/_shell"]);
+  // oxlint-disable-next-line typescript/no-unsafe-argument -- see above
+  void router.loadRouteChunk(router.routesById["/_shell/"]);
+  void document.fonts.ready;
+};
+
+/**
+ * The platform's first page ready to open, as the chips gather: the
+ * recap counted as seen, so the admin is through, and the page's data
+ * fetched as it opens.
+ */
+const readyPlatform = async (
+  core: ReturnType<typeof useCore>,
+  router: Router
+): Promise<void> => {
+  await core.withSession(
+    async (session) => await session.onboarding.finishSteps(["about"])
+  );
+  await router.preloadRoute({ to: "/" });
 };
 
 /** Told once in this visit: coming back to the step, the story's last picture stands at once. */
@@ -471,7 +501,11 @@ export const PlanStory = ({
     shown
   );
   // The way in, fetched while the story is told, so it starts at once.
-  useEffect(fetchEntry, []);
+  const router = useRouter();
+  const core = useCore();
+  useEffect(() => {
+    fetchEntry(router);
+  }, [router]);
   // Continue: what they set up gathers on the screen and builds the platform's first page.
   const [entering, setEntering] = useState(false);
   const enter = async (): Promise<void> => {
@@ -480,7 +514,13 @@ export const PlanStory = ({
     }
     setEntering(true);
     stopSpeaking();
-    await enterPlatform({ facts, go: onward });
+    await enterPlatform({
+      facts,
+      ready: async () => {
+        await readyPlatform(core, router);
+      },
+      go: onward,
+    });
   };
 
   const finish = () => {
