@@ -79,7 +79,7 @@ describe("an organization's AI use and hours", () => {
     expect({
       // What core counted isn't said to be worked out.
       workedOut: has("Worked out from what happened"),
-      month: has(`${monthName(snapshot.now)}</span>`),
+      month: has(`>${monthName(snapshot.now)}</p>`),
       inAll: has("In all, so far"),
       spend: html.split(">€21<").length - 1,
       // Core doesn't send the contract yet: unknown, not unsigned.
@@ -130,7 +130,7 @@ describe("an organization's AI use and hours", () => {
     const { html } = await page(`${base}/ai-use`);
 
     expect({
-      thisMonth: html.includes(`>${monthName(snapshot.now)}</span>`),
+      thisMonth: html.includes(`>${monthName(snapshot.now)}</p>`),
       // This month took nothing; everything so far is the earlier month's.
       nothingYet: html.includes(">€0.00<"),
       inAll: html.includes(">€21<"),
