@@ -250,12 +250,13 @@ test("the admin signs in, gives the staff list, confirms and plans, and the link
   ).toBeVisible();
   // Typed, the day counts once it is committed (Enter), as a person does:
   // day first, as the field shows.
+  await page.getByRole("button", { name: "Other day" }).click();
   const day = page.getByLabel("Another day");
   const today = await pageToday(page);
   await day.fill(typed(today));
   await day.press("Enter");
   await expect(day).toHaveValue(typed(today));
-  await page.getByLabel("at", { exact: true }).fill("00:00");
+  await page.getByLabel("Time", { exact: true }).fill("00:00");
   // What it says is the day it saves: the links due today go out below.
   await expect(
     page

@@ -697,10 +697,6 @@ msgstr "{goals, plural, one {# goal} other {# goals}}"
 msgid "{going, plural, one {The lead of # team gets their link {when}. Everyone else right after their lead has talked to me.} other {The leads of # teams get their link {when}. Everyone else right after their lead has talked to me.}}"
 msgstr "{going, plural, one {The lead of # team gets their link {when}. Everyone else right after their lead has talked to me.} other {The leads of # teams get their link {when}. Everyone else right after their lead has talked to me.}}"
 
-#: src/onboarding/send-plan-form.tsx
-msgid "{heldCount, plural, one {When {leftOut} gets links} other {When {leftOut} get links}}"
-msgstr "{heldCount, plural, one {When {leftOut} gets links} other {When {leftOut} get links}}"
-
 #: src/brain/brain-chips.tsx
 #: src/brain/brain-source-contents.tsx
 msgid "{hidden, plural, one {Show # more} other {Show # more}}"
@@ -5801,6 +5797,11 @@ msgid "Date"
 msgstr "Date"
 
 #: src/settings/ai-spend.tsx
+msgid "Day"
+msgstr "Day"
+
+#: src/onboarding/send-plan-form.tsx
+msgctxt "the day the links go out"
 msgid "Day"
 msgstr "Day"
 
@@ -11435,10 +11436,6 @@ msgstr "Next step"
 msgid "Next times"
 msgstr "Next times"
 
-#: src/onboarding/send-plan-form.tsx
-msgid "Next week"
-msgstr "Next week"
-
 #: src/onboarding/team-step.tsx
 msgid "Next week, then."
 msgstr "Next week, then."
@@ -13339,6 +13336,10 @@ msgstr "Other"
 msgctxt "the team for people a staff list gives no team"
 msgid "Other"
 msgstr "Other"
+
+#: src/onboarding/send-plan-form.tsx
+msgid "Other day"
+msgstr "Other day"
 
 #: src/apps/draft-changes.tsx
 msgctxt "files of an App"
@@ -17547,6 +17548,11 @@ msgctxt "a kind of thing the Brain remembers"
 msgid "Teams"
 msgstr "Teams"
 
+#: src/onboarding/send-plan-form.tsx
+msgctxt "the teams that get links"
+msgid "Teams"
+msgstr "Teams"
+
 #: src/brain/brain-source-contents.tsx
 msgid "Teams and roles"
 msgstr "Teams and roles"
@@ -17558,10 +17564,6 @@ msgstr "Teams chats and meetings they were in: what others wrote and said there,
 #: src/settings/stephen-audience.tsx
 msgid "Teams for {label}"
 msgstr "Teams for {label}"
-
-#: src/onboarding/send-plan-form.tsx
-msgid "Teams that get links"
-msgstr "Teams that get links"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Teams under five people show only whether their lead talked, so nobody can be singled out."
@@ -18109,17 +18111,9 @@ msgstr "The current version doesn't declare these, so they serve nothing until a
 msgid "The data isn't JSON."
 msgstr "The data isn't JSON."
 
-#: src/onboarding/send-plan-form.tsx
-msgid "The day after"
-msgstr "The day after"
-
 #: src/onboarding/team-step.tsx
 msgid "The day after, then."
 msgstr "The day after, then."
-
-#: src/onboarding/send-plan-form.tsx
-msgid "The day I start"
-msgstr "The day I start"
 
 #: src/onboarding/send-plan-form.tsx
 msgid "The day the other teams get their links"
@@ -19078,6 +19072,11 @@ msgstr "Ticked"
 msgid "Time"
 msgstr "Time"
 
+#: src/onboarding/send-plan-form.tsx
+msgctxt "the hour the links go out"
+msgid "Time"
+msgstr "Time"
+
 #: src/brain/forget.tsx
 msgid "Time left to undo"
 msgstr "Time left to undo"
@@ -19169,10 +19168,6 @@ msgstr "Token"
 #: src/brain/work-knowledge.tsx
 msgid "Told by the team that does it"
 msgstr "Told by the team that does it"
-
-#: src/onboarding/send-plan-form.tsx
-msgid "Tomorrow"
-msgstr "Tomorrow"
 
 #: src/workflows/workflow-rows.tsx
 msgid "Tomorrow {time}"
