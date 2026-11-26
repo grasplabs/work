@@ -4,6 +4,7 @@ import type {
   DirectoryPeople,
   DirectorySuite,
   OnboardingDirectory,
+  OnboardingDirectoryAccount,
 } from "@grasp-os/shared/directory";
 import type {
   DocumentPlace,
@@ -78,6 +79,9 @@ import {
 } from "./cadence.ts";
 import {
   connectDirectory,
+  connectOtherDirectory,
+  onboardingDirectoryAccounts,
+  readDirectoryAccount,
   onboardingDirectory,
   readOnboardingDirectory,
 } from "./directory.ts";
@@ -232,6 +236,37 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
     return await withPerson(
       this.#check,
       async (person) => await onboardingDirectory(this.#env, person)
+    );
+  }
+
+  async directoryAccounts(): Promise<OnboardingDirectoryAccount[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await onboardingDirectoryAccounts(this.#env, person)
+    );
+  }
+
+  async connectOtherDirectory(
+    suite: DirectorySuite,
+    domain: string,
+    returnTo: string
+  ): Promise<{ url: string }> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await connectOtherDirectory(this.#env, person, {
+          suite,
+          domain,
+          returnTo,
+        })
+    );
+  }
+
+  async readDirectoryAccount(connectionId: unknown): Promise<DirectoryPeople> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await readDirectoryAccount(this.#env, person, connectionId)
     );
   }
 

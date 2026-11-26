@@ -62,6 +62,7 @@ msgstr "{0} actions"
 msgid "{0} didn't connect"
 msgstr "{0} didn't connect"
 
+#. placeholder {0}: account.tenant
 #. placeholder {0}: suiteNames[from]
 #: src/onboarding/company-step.tsx
 msgid "{0} is connected"
@@ -2454,6 +2455,10 @@ msgstr "Add an index"
 msgid "Add another"
 msgstr "Add another"
 
+#: src/onboarding/company-step.tsx
+msgid "Add another account"
+msgstr "Add another account"
+
 #: src/agents/setup/apps-step.tsx
 #: src/connections/add-connector.tsx
 msgid "Add connector"
@@ -3061,6 +3066,10 @@ msgstr "anna@company.com, tom@company.com"
 msgid "Anonymous"
 msgstr "Anonymous"
 
+#: src/onboarding/company-step.tsx
+msgid "Another {signIn} account is connected"
+msgstr "Another {signIn} account is connected"
+
 #: src/agents/new-agent.tsx
 msgid "Another agent has this name"
 msgstr "Another agent has this name"
@@ -3076,6 +3085,10 @@ msgstr "Another App"
 #: src/pages/page-frame.tsx
 msgid "Another link is waiting for an answer, or one was just turned down. Try again in a moment."
 msgstr "Another link is waiting for an answer, or one was just turned down. Try again in a moment."
+
+#: src/onboarding/company-step.tsx
+msgid "Another list adds its people to the ones I have."
+msgstr "Another list adds its people to the ones I have."
 
 #: src/agents/new-agent.tsx
 msgid "Another name"
@@ -5089,6 +5102,7 @@ msgstr "Confirmed. Carry on."
 #: src/connections/app/words.ts
 #: src/connections/integration-item.tsx
 #: src/connections/request-app-dialog.tsx
+#: src/onboarding/company-step.tsx
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
 msgid "Connect"
@@ -5121,6 +5135,10 @@ msgstr "Connect {name}"
 #: src/settings/directory-reconnect.tsx
 msgid "Connect {name} again"
 msgstr "Connect {name} again"
+
+#: src/onboarding/company-step.tsx
+msgid "Connect {signIn} again"
+msgstr "Connect {signIn} again"
 
 #: src/agents/agent-overview.tsx
 msgid "Connect a provider"
@@ -5372,13 +5390,14 @@ msgstr "Context used"
 msgid "Continue"
 msgstr "Continue"
 
+#. placeholder {0}: suiteNames[suite]
+#: src/onboarding/company-step.tsx
+msgid "Continue with {0}"
+msgstr "Continue with {0}"
+
 #: src/frame/sign-in/sign-in.tsx
 msgid "Continue with {provider}"
 msgstr "Continue with {provider}"
-
-#: src/onboarding/company-step.tsx
-msgid "Continue with {signIn}"
-msgstr "Continue with {signIn}"
 
 #: src/frame/sign-in/sign-in.tsx
 msgid "Continue with Grasp staff"
@@ -8928,6 +8947,11 @@ msgstr "I agree, let’s start"
 #: src/onboarding/send-plan-form.tsx
 msgid "I can’t plan that day. Type one like {example}, from {earliest} to {latest}."
 msgstr "I can’t plan that day. Type one like {example}, from {earliest} to {latest}."
+
+#. placeholder {0}: domain ?? ""
+#: src/onboarding/company-step.tsx
+msgid "I could not find a {signIn} account for {0}. Check how it is spelled."
+msgstr "I could not find a {signIn} account for {0}. Check how it is spelled."
 
 #: src/onboarding/company-step.tsx
 #: src/onboarding/people-add.tsx
@@ -13349,6 +13373,10 @@ msgstr "Other files"
 #: src/brain/brain-atlas.ts
 msgid "Other teams"
 msgstr "Other teams"
+
+#: src/onboarding/company-step.tsx
+msgid "other-company.com"
+msgstr "other-company.com"
 
 #: src/projects/project-people-names.ts
 msgctxt "the rest of a list of people"
@@ -17827,6 +17855,10 @@ msgstr "The account connected as {label} can't open any SharePoint document libr
 msgid "The account is no longer listed in the directory. If it was deleted and can still be restored there, restoring it lets Grasp lift the suspension at its next daily read. Otherwise, to end their access for good, remove them."
 msgstr "The account is no longer listed in the directory. If it was deleted and can still be restored there, restoring it lets Grasp lift the suspension at its next daily read. Otherwise, to end their access for good, remove them."
 
+#: src/onboarding/company-step.tsx
+msgid "The account’s domain"
+msgstr "The account’s domain"
+
 #: src/settings/erasures.tsx
 msgid "The address"
 msgstr "The address"
@@ -19991,6 +20023,11 @@ msgctxt "status of a workflow run"
 msgid "Waiting"
 msgstr "Waiting"
 
+#. placeholder {0}: suiteNames[suite]
+#: src/onboarding/company-step.tsx
+msgid "Waiting for {0}"
+msgstr "Waiting for {0}"
+
 #: src/connections/connect-dialog.tsx
 msgid "Waiting for {app}"
 msgstr "Waiting for {app}"
@@ -20010,10 +20047,6 @@ msgstr "Waiting for {label}, which is refusing the key, since {since}. It goes o
 #: src/workflows/runs.tsx
 msgid "Waiting for {label}, which isn't answering, since {since}. It goes on by itself once calls work."
 msgstr "Waiting for {label}, which isn't answering, since {since}. It goes on by itself once calls work."
-
-#: src/onboarding/company-step.tsx
-msgid "Waiting for {signIn}"
-msgstr "Waiting for {signIn}"
 
 #: src/routes/_shell.workflows.runs.tsx
 msgid "Waiting for a decision"
@@ -20992,6 +21025,10 @@ msgstr "Which apps can {name} use?"
 msgid "Which colours should it have?"
 msgstr "Which colours should it have?"
 
+#: src/onboarding/company-step.tsx
+msgid "Which kind of account"
+msgstr "Which kind of account"
+
 #: src/interview/read-back-story.tsx
 msgid "Which line do you want to change?"
 msgstr "Which line do you want to change?"
@@ -21941,10 +21978,6 @@ msgstr "Your skills"
 #: src/onboarding/company-step.tsx
 msgid "Your staff list is in"
 msgstr "Your staff list is in"
-
-#: src/onboarding/company-step.tsx
-msgid "Your staff list is in. A new one replaces it."
-msgstr "Your staff list is in. A new one replaces it."
 
 #: src/routes/setup.tsx
 msgid "Your team"

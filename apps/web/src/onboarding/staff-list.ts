@@ -1,5 +1,6 @@
 import type { DirectoryPerson } from "@grasp-os/shared/directory";
 import {
+  leadsOfTeam,
   noTeamId,
   onboardingPeopleMax,
   onboardingTeamsMax,
@@ -568,6 +569,54 @@ export const withSaved = (
       return before === undefined ? person : { ...person, away: before.away };
     }),
   };
+};
+
+/**
+ * A list or directory read now, added to the roster saved before rather
+ * than put in its place: a company with Microsoft and Google both, or a
+ * staff list on top of a sign-in, ends up as one roster. Someone in both
+ * is one person (their id comes from their email), as the read has them;
+ * whoever only the saved roster has stays, in their team. Too many in
+ * all is too large, as one list would be.
+ */
+export const addedTo = (
+  read: StaffList["roster"],
+  saved: Roster | null
+): StaffList["roster"] => {
+  const kept = withSaved(read, saved);
+  if (saved === null) {
+    return kept;
+  }
+  const inRead = new Set(kept.people.map((person) => person.id));
+  const stay = saved.people.filter((person) => !inRead.has(person.id));
+  const people = [...kept.people, ...stay];
+  const teamOf = new Map(people.map((person) => [person.id, person.team]));
+  const keptTeams = new Set(kept.teams.map((team) => team.id));
+  const teams = [
+    ...kept.teams,
+    ...saved.teams
+      .filter(
+        (team) =>
+          !keptTeams.has(team.id) &&
+          stay.some((person) => person.team === team.id)
+      )
+      .map((team) => {
+        // A lead the read moved to another team leads this one no more.
+        const leads = leadsOfTeam(team).filter(
+          (id) => teamOf.get(id) === team.id
+        );
+        const [lead = null, ...coLeads] = leads;
+        const { coLeads: _before, ...rest } = team;
+        return { ...rest, lead, ...(coLeads.length > 0 ? { coLeads } : {}) };
+      }),
+  ];
+  if (
+    people.length > onboardingPeopleMax ||
+    teams.length > onboardingTeamsMax
+  ) {
+    throw new StaffListError("large");
+  }
+  return { teams, people };
 };
 
 /**

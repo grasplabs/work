@@ -62,6 +62,7 @@ msgstr "{0} acties"
 msgid "{0} didn't connect"
 msgstr "{0} is niet gekoppeld"
 
+#. placeholder {0}: account.tenant
 #. placeholder {0}: suiteNames[from]
 #: src/onboarding/company-step.tsx
 msgid "{0} is connected"
@@ -2454,6 +2455,10 @@ msgstr "Index toevoegen"
 msgid "Add another"
 msgstr "Nog een toevoegen"
 
+#: src/onboarding/company-step.tsx
+msgid "Add another account"
+msgstr "Nog een account toevoegen"
+
 #: src/agents/setup/apps-step.tsx
 #: src/connections/add-connector.tsx
 msgid "Add connector"
@@ -3061,6 +3066,10 @@ msgstr "anna@bedrijf.nl, tom@bedrijf.nl"
 msgid "Anonymous"
 msgstr "Anoniem"
 
+#: src/onboarding/company-step.tsx
+msgid "Another {signIn} account is connected"
+msgstr "Nog een {signIn}-account is gekoppeld"
+
 #: src/agents/new-agent.tsx
 msgid "Another agent has this name"
 msgstr "Een andere agent heeft deze naam"
@@ -3076,6 +3085,10 @@ msgstr "Een andere App"
 #: src/pages/page-frame.tsx
 msgid "Another link is waiting for an answer, or one was just turned down. Try again in a moment."
 msgstr "Er wacht al een link op antwoord, of er is er net een geweigerd. Probeer het zo opnieuw."
+
+#: src/onboarding/company-step.tsx
+msgid "Another list adds its people to the ones I have."
+msgstr "Een nieuwe lijst voegt de mensen toe aan wie ik al heb."
 
 #: src/agents/new-agent.tsx
 msgid "Another name"
@@ -5089,6 +5102,7 @@ msgstr "Bevestigd. Ga verder."
 #: src/connections/app/words.ts
 #: src/connections/integration-item.tsx
 #: src/connections/request-app-dialog.tsx
+#: src/onboarding/company-step.tsx
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
 msgid "Connect"
@@ -5121,6 +5135,10 @@ msgstr "{name} koppelen"
 #: src/settings/directory-reconnect.tsx
 msgid "Connect {name} again"
 msgstr "{name} opnieuw koppelen"
+
+#: src/onboarding/company-step.tsx
+msgid "Connect {signIn} again"
+msgstr "{signIn} opnieuw koppelen"
 
 #: src/agents/agent-overview.tsx
 msgid "Connect a provider"
@@ -5372,13 +5390,14 @@ msgstr "Gebruikte context"
 msgid "Continue"
 msgstr "Doorgaan"
 
+#. placeholder {0}: suiteNames[suite]
+#: src/onboarding/company-step.tsx
+msgid "Continue with {0}"
+msgstr "Doorgaan met {0}"
+
 #: src/frame/sign-in/sign-in.tsx
 msgid "Continue with {provider}"
 msgstr "Doorgaan met {provider}"
-
-#: src/onboarding/company-step.tsx
-msgid "Continue with {signIn}"
-msgstr "Doorgaan met {signIn}"
 
 #: src/frame/sign-in/sign-in.tsx
 msgid "Continue with Grasp staff"
@@ -8928,6 +8947,11 @@ msgstr "Akkoord, laten we beginnen"
 #: src/onboarding/send-plan-form.tsx
 msgid "I can’t plan that day. Type one like {example}, from {earliest} to {latest}."
 msgstr "Die dag kan ik niet plannen. Typ er een zoals {example}, van {earliest} tot en met {latest}."
+
+#. placeholder {0}: domain ?? ""
+#: src/onboarding/company-step.tsx
+msgid "I could not find a {signIn} account for {0}. Check how it is spelled."
+msgstr "Ik kon geen {signIn}-account vinden voor {0}. Controleer hoe het gespeld is."
 
 #: src/onboarding/company-step.tsx
 #: src/onboarding/people-add.tsx
@@ -13349,6 +13373,10 @@ msgstr "Overige bestanden"
 #: src/brain/brain-atlas.ts
 msgid "Other teams"
 msgstr "Andere teams"
+
+#: src/onboarding/company-step.tsx
+msgid "other-company.com"
+msgstr "ander-bedrijf.nl"
 
 #: src/projects/project-people-names.ts
 msgctxt "the rest of a list of people"
@@ -17827,6 +17855,10 @@ msgstr "Het account dat als {label} is verbonden, kan geen SharePoint-documentbi
 msgid "The account is no longer listed in the directory. If it was deleted and can still be restored there, restoring it lets Grasp lift the suspension at its next daily read. Otherwise, to end their access for good, remove them."
 msgstr "Het account staat niet meer in de directory. Is het verwijderd en kan het daar nog worden teruggezet, dan heft Grasp de schorsing na het terugzetten op bij de volgende dagelijkse uitlezing. Wil je anders hun toegang voorgoed beëindigen, verwijder hen dan."
 
+#: src/onboarding/company-step.tsx
+msgid "The account’s domain"
+msgstr "Het domein van het account"
+
 #: src/settings/erasures.tsx
 msgid "The address"
 msgstr "Het adres"
@@ -19991,6 +20023,11 @@ msgctxt "status of a workflow run"
 msgid "Waiting"
 msgstr "Wacht"
 
+#. placeholder {0}: suiteNames[suite]
+#: src/onboarding/company-step.tsx
+msgid "Waiting for {0}"
+msgstr "Wachten op {0}"
+
 #: src/connections/connect-dialog.tsx
 msgid "Waiting for {app}"
 msgstr "Wachten op {app}"
@@ -20010,10 +20047,6 @@ msgstr "Wacht sinds {since} op {label}, dat de sleutel weigert. Gaat vanzelf ver
 #: src/workflows/runs.tsx
 msgid "Waiting for {label}, which isn't answering, since {since}. It goes on by itself once calls work."
 msgstr "Wacht sinds {since} op {label}, dat niet antwoordt. Gaat vanzelf verder zodra aanroepen werken."
-
-#: src/onboarding/company-step.tsx
-msgid "Waiting for {signIn}"
-msgstr "Wachten op {signIn}"
 
 #: src/routes/_shell.workflows.runs.tsx
 msgid "Waiting for a decision"
@@ -20992,6 +21025,10 @@ msgstr "Welke apps kan {name} gebruiken?"
 msgid "Which colours should it have?"
 msgstr "Welke kleuren moet hij hebben?"
 
+#: src/onboarding/company-step.tsx
+msgid "Which kind of account"
+msgstr "Welk soort account"
+
 #: src/interview/read-back-story.tsx
 msgid "Which line do you want to change?"
 msgstr "Welke regel wil je aanpassen?"
@@ -21941,10 +21978,6 @@ msgstr "Je skills"
 #: src/onboarding/company-step.tsx
 msgid "Your staff list is in"
 msgstr "Je personeelslijst staat erin"
-
-#: src/onboarding/company-step.tsx
-msgid "Your staff list is in. A new one replaces it."
-msgstr "Je personeelslijst staat erin. Een nieuwe vervangt hem."
 
 #: src/routes/setup.tsx
 msgid "Your team"

@@ -9,6 +9,7 @@ import type { Roster } from "@grasp-os/shared/onboarding";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  addedTo,
   csvRows,
   directoryListOf,
   exampleList,
@@ -669,5 +670,70 @@ describe("the leads from the HR platform", () => {
       away: ["Lisa Jansen"],
       taken: true,
     });
+  });
+});
+
+/** `count` people of Sales, numbered from `from`, as CSV rows. */
+const many = (from: number, count: number): string =>
+  Array.from(
+    { length: count },
+    (_, index) =>
+      `Person ${String(from + index)},p${String(from + index)}@acme.test,Sales`
+  ).join("\n");
+
+describe("a list added to the roster", () => {
+  it("joins the one before instead of replacing it: someone in both once, as the new list has them, and whoever only the roster had kept in their team", () => {
+    const saved = rosterSchema.parse(
+      staffListOf(
+        csvRows(
+          "name,email,team\nDaan Bakker,daan@acme.test,Sales\nLisa Jansen,lisa@acme.test,Support"
+        ),
+        "Other"
+      ).roster
+    );
+    const added = addedTo(
+      staffListOf(
+        csvRows(
+          "name,email,team,title\nDaan Bakker,DAAN@acme.test,Sales,Team lead\nNoor de Vries,noor@acme.de,Finance,"
+        ),
+        "Other"
+      ).roster,
+      saved
+    );
+    expect({
+      core: rosterSchema.safeParse(added).success,
+      people: added.people
+        .map(({ name, email, title }) => `${name} <${email}> ${title}`)
+        .toSorted(),
+      teams: added.teams.map(({ name }) => name).toSorted(),
+      first: addedTo(saved, null),
+    }).toStrictEqual({
+      core: true,
+      people: [
+        "Daan Bakker <daan@acme.test> Team lead",
+        "Lisa Jansen <lisa@acme.test> ",
+        "Noor de Vries <noor@acme.de> ",
+      ],
+      teams: ["Finance", "Sales", "Support"],
+      first: saved,
+    });
+  });
+
+  it("is refused when the two together hold more people than an onboarding takes", () => {
+    const saved = rosterSchema.parse(
+      staffListOf(
+        csvRows(`name,email,team\n${many(0, onboardingPeopleMax)}`),
+        "Other"
+      ).roster
+    );
+    expect(() =>
+      addedTo(
+        staffListOf(
+          csvRows(`name,email,team\n${many(onboardingPeopleMax, 1)}`),
+          "Other"
+        ).roster,
+        saved
+      )
+    ).toThrow(StaffListError);
   });
 });

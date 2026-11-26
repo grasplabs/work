@@ -1,7 +1,10 @@
-import { directoryErrors } from "@grasp-os/shared/directory";
+import {
+  directoryErrors,
+  directorySuiteSchema,
+} from "@grasp-os/shared/directory";
 import type {
   DirectorySuite,
-  OnboardingDirectory,
+  OnboardingDirectoryAccount,
 } from "@grasp-os/shared/directory";
 import {
   onboardingPeopleMax,
@@ -11,6 +14,12 @@ import type { Roster, RosterInput } from "@grasp-os/shared/onboarding";
 import { BrandIcon } from "@grasp-os/ui/components/brand-icon";
 import { Button } from "@grasp-os/ui/components/button";
 import { FileUpload } from "@grasp-os/ui/components/file-upload";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@grasp-os/ui/components/input-group";
 import {
   Item,
   ItemActions,
@@ -22,7 +31,16 @@ import {
 } from "@grasp-os/ui/components/item";
 import { Separator } from "@grasp-os/ui/components/separator";
 import { Text } from "@grasp-os/ui/components/text";
-import { CircleCheckIcon, FileIcon, Icon } from "@grasp-os/ui/lib/icons";
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@grasp-os/ui/components/toggle-group";
+import {
+  CircleCheckIcon,
+  FileIcon,
+  Icon,
+  PlusIcon,
+} from "@grasp-os/ui/lib/icons";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { msg, plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -42,7 +60,7 @@ import {
   exampleList,
   StaffListError,
   staffListOf,
-  withSaved,
+  addedTo,
 } from "./staff-list.ts";
 import {
   returnedSchema,
@@ -71,6 +89,8 @@ const styles = stylex.create({
   stack: { display: "grid", gap: space[4] },
   // The ways in, kept mounted (the upload is still settling) but out of sight while the list comes in.
   gone: { display: "none" },
+  // Another account: which kind, then its domain and Connect, in one column.
+  add: { display: "grid", gap: space[2] },
   drop: { display: "grid", gap: space[2] },
   example: { justifySelf: "center" },
   // "Or use a staff list", through the middle of a line either side.
@@ -98,7 +118,7 @@ const readStaffList = async (
     const rows = xlsxName.test(file.name)
       ? await xlsxRows(await file.arrayBuffer())
       : csvRows(await file.text());
-    return withSaved(staffListOf(rows, noTeam).roster, saved);
+    return addedTo(staffListOf(rows, noTeam).roster, saved);
   } catch (error) {
     if (error instanceof StaffListError || error instanceof XlsxError) {
       return error.reason;
@@ -140,16 +160,19 @@ export const directoryProblemOf = (
 const readDirectoryRoster = async (
   core: ReturnType<typeof useCore>,
   noTeam: string,
-  saved: Roster | null
+  saved: Roster | null,
+  connectionId: string | null
 ): Promise<
   { roster: RosterInput; suite: DirectorySuite } | DirectoryProblem
 > => {
   try {
-    const { people, suite } = await core.withSession(
-      async (session) => await session.onboarding.readDirectory()
+    const { people, suite } = await core.withSession(async (session) =>
+      connectionId === null
+        ? await session.onboarding.readDirectory()
+        : await session.onboarding.readDirectoryAccount(connectionId)
     );
     return {
-      roster: withSaved(directoryListOf(people, noTeam).roster, saved),
+      roster: addedTo(directoryListOf(people, noTeam).roster, saved),
       suite,
     };
   } catch (error) {
@@ -160,35 +183,35 @@ const readDirectoryRoster = async (
   }
 };
 
-/** Starts connecting the directory of `suite`: the browser goes to its sign-in, and comes back here. False if it could not start. */
+/**
+ * Starts connecting the directory of `suite`, the company's own or, named
+ * by its `domain`, another of its accounts: the browser goes to its
+ * sign-in and comes back here. Why it could not start, if it couldn't:
+ * a domain no account answers for, or a failure of the moment.
+ */
 const startDirectory = async (
   core: ReturnType<typeof useCore>,
-  suite: DirectorySuite
-): Promise<boolean> => {
+  suite: DirectorySuite,
+  domain?: string
+): Promise<"unknown" | "failed" | null> => {
   try {
-    const { url } = await core.withSession(
-      async (session) =>
-        await session.onboarding.connectDirectory(suite, companyStep)
+    const { url } = await core.withSession(async (session) =>
+      domain === undefined
+        ? await session.onboarding.connectDirectory(suite, companyStep)
+        : await session.onboarding.connectOtherDirectory(
+            suite,
+            domain,
+            companyStep
+          )
     );
     window.location.assign(url);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-/** Which directory the roster came from: the one read on this visit, or, arriving, the one connected; none for a staff list. */
-const directoryShown = (
-  fresh: DirectorySuite | "list" | null,
-  directory: OnboardingDirectory | null
-): DirectorySuite | null => {
-  if (fresh === "list") {
     return null;
+  } catch (error) {
+    const code = directoryErrors.codeOf(error);
+    return code === "directory.unknown_domain" || code === "directory.invalid"
+      ? "unknown"
+      : "failed";
   }
-  if (fresh !== null) {
-    return fresh;
-  }
-  return directory?.status === "active" ? directory.suite : null;
 };
 
 /** Whoever is new on a list saved while the plan runs gets no link until the admin has chosen again who takes part (the leads step). */
@@ -266,12 +289,12 @@ const CompanyWay = ({
 const StaffListDrop = ({
   onUpload,
   disabled,
-  inUse,
+  known,
 }: {
   onUpload: (file: File) => Promise<void>;
   disabled: boolean;
-  /** Coming back with a staff list kept: a new one replaces it. */
-  inUse: boolean;
+  /** Coming back with a roster: another list adds to it. */
+  known: boolean;
 }) => {
   const { t } = useLingui();
   return (
@@ -279,8 +302,8 @@ const StaffListDrop = ({
       <FileUpload
         accept={[".csv", ".tsv", ".txt", ".xlsx"]}
         description={
-          inUse
-            ? t`Your staff list is in. A new one replaces it.`
+          known
+            ? t`Another list adds its people to the ones I have.`
             : t`A CSV or Excel file, one row per person`
         }
         disabled={disabled}
@@ -299,47 +322,211 @@ const StaffListDrop = ({
 };
 
 /**
- * A sign-in, as a row pressed to connect it. The one in use is marked
- * done; pressed again, it connects anew and replaces the list kept.
+ * A sign-in, as a row pressed to connect it: the company's own account
+ * at a suite, or, once connected, any of its accounts, marked done, and
+ * pressed again to connect it anew.
  */
 const SignInRow = ({
   suite,
+  label,
   done,
-  waiting,
   onConnect,
 }: {
   suite: DirectorySuite;
+  label: string;
   done: boolean;
-  waiting: boolean;
   onConnect: () => void;
+}) => (
+  <Item onClick={onConnect} variant="outline">
+    <ItemMedia>
+      <BrandIcon
+        decorative
+        logo={suiteLogos[suite]}
+        name={suiteNames[suite]}
+        size="sm"
+      />
+    </ItemMedia>
+    <ItemContent>
+      <ItemTitle>{label}</ItemTitle>
+    </ItemContent>
+    {done ? (
+      <ItemActions>
+        <Icon icon={CircleCheckIcon} />
+      </ItemActions>
+    ) : null}
+  </Item>
+);
+
+/** An account connected, as its row names it: the company's own by its suite, another by its domain where Google says it. */
+const useAccountLabel = (): ((
+  account: OnboardingDirectoryAccount
+) => string) => {
+  const { t } = useLingui();
+  return (account) => {
+    const signIn = suiteNames[account.suite];
+    if (account.status !== "active") {
+      return t`Connect ${signIn} again`;
+    }
+    if (account.own) {
+      return t`${signIn} is connected`;
+    }
+    return account.suite === "google"
+      ? t`${account.tenant} is connected`
+      : t`Another ${signIn} account is connected`;
+  };
+};
+
+/**
+ * Another of the company's accounts, by its domain: a second Microsoft
+ * tenant, a Google domain of a daughter company. Pressed open, it asks
+ * which kind and the domain, and connects it; everyone in it joins the
+ * roster, each email once.
+ */
+const AddAccount = ({
+  suites,
+  busy,
+  onAdd,
+}: {
+  suites: DirectorySuite[];
+  busy: boolean;
+  onAdd: (suite: DirectorySuite, domain: string) => void;
 }) => {
   const { t } = useLingui();
-  const signIn = suiteNames[suite];
-  let label = t`Continue with ${signIn}`;
-  if (waiting) {
-    label = t`Waiting for ${signIn}`;
-  } else if (done) {
-    label = t`${signIn} is connected`;
+  const [open, setOpen] = useState(false);
+  const [first = "microsoft"] = suites;
+  const [suite, setSuite] = useState<DirectorySuite>(first);
+  const [domain, setDomain] = useState("");
+  if (!open) {
+    return (
+      <Item
+        onClick={() => {
+          setOpen(true);
+        }}
+        variant="outline"
+      >
+        <ItemMedia>
+          <Icon icon={PlusIcon} />
+        </ItemMedia>
+        <ItemContent>
+          <ItemTitle>{t`Add another account`}</ItemTitle>
+        </ItemContent>
+      </Item>
+    );
   }
   return (
-    <Item onClick={onConnect} variant="outline">
-      <ItemMedia>
-        <BrandIcon
-          decorative
-          logo={suiteLogos[suite]}
-          name={signIn}
-          size="sm"
-        />
-      </ItemMedia>
-      <ItemContent>
-        <ItemTitle>{label}</ItemTitle>
-      </ItemContent>
-      {done ? (
-        <ItemActions>
-          <Icon icon={CircleCheckIcon} />
-        </ItemActions>
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        onAdd(suite, domain.trim());
+      }}
+      {...stylex.props(styles.add)}
+    >
+      {suites.length > 1 ? (
+        <ToggleGroup
+          aria-label={t`Which kind of account`}
+          onValueChange={(value) => {
+            const picked = directorySuiteSchema.safeParse(value[0]);
+            if (picked.success) {
+              setSuite(picked.data);
+            }
+          }}
+          value={[suite]}
+        >
+          {suites.map((each) => (
+            <ToggleGroupItem key={each} value={each}>
+              {suiteNames[each]}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
       ) : null}
-    </Item>
+      <InputGroup>
+        <InputGroupInput
+          aria-label={t`The account’s domain`}
+          autoFocus
+          onChange={(event) => {
+            setDomain(event.target.value);
+          }}
+          placeholder={t`other-company.com`}
+          value={domain}
+        />
+        <InputGroupAddon align="inline-end">
+          <InputGroupButton
+            disabled={busy || domain.trim() === ""}
+            type="submit"
+            variant="default"
+          >
+            {t`Connect`}
+          </InputGroupButton>
+        </InputGroupAddon>
+      </InputGroup>
+    </form>
+  );
+};
+
+/**
+ * The ways in by sign-in: before any, the company's own account at each
+ * suite; once there is a roster, every account connected (its own and its
+ * others), the own account of a suite not yet connected, and a way to add
+ * another account.
+ */
+const SignIns = ({
+  suites,
+  accounts,
+  known,
+  reading,
+  onConnect,
+  onAdd,
+}: {
+  suites: DirectorySuite[];
+  accounts: OnboardingDirectoryAccount[];
+  known: boolean;
+  reading: DirectorySuite | "list" | null;
+  onConnect: (
+    suite: DirectorySuite,
+    account?: OnboardingDirectoryAccount
+  ) => void;
+  onAdd: (suite: DirectorySuite, domain: string) => void;
+}) => {
+  const { t } = useLingui();
+  const labelOf = useAccountLabel();
+  const shown = known ? accounts : [];
+  const ownShown = new Set(
+    shown.filter(({ own }) => own).map(({ suite }) => suite)
+  );
+  return (
+    <ItemGroup aria-label={t`Your sign-in`}>
+      {shown.map((account) => (
+        <SignInRow
+          done={account.status === "active"}
+          key={account.id}
+          label={labelOf(account)}
+          onConnect={() => {
+            onConnect(account.suite, account);
+          }}
+          suite={account.suite}
+        />
+      ))}
+      {suites
+        .filter((suite) => !ownShown.has(suite))
+        .map((suite) => (
+          <SignInRow
+            done={false}
+            key={suite}
+            label={
+              reading === suite
+                ? t`Waiting for ${suiteNames[suite]}`
+                : t`Continue with ${suiteNames[suite]}`
+            }
+            onConnect={() => {
+              onConnect(suite);
+            }}
+            suite={suite}
+          />
+        ))}
+      {shown.length > 0 ? (
+        <AddAccount busy={reading !== null} onAdd={onAdd} suites={suites} />
+      ) : null}
+    </ItemGroup>
   );
 };
 
@@ -476,6 +663,7 @@ export const CompanyStep = (props: StepProps) => {
   const [kept, setKept] = useState<Kept | null>(null);
   const { roster } = props.data.view;
   const { directory, suites } = props.data;
+  const accounts = props.data.directoryAccounts ?? [];
   // A sign-in that didn't connect, back refused or not started: said over the step, with the way on.
   const [notConnected, setNotConnected] = useNotConnected(suites);
   // He says it's in right here, as it comes in; the next step only says it can wait, when skipped.
@@ -532,25 +720,41 @@ export const CompanyStep = (props: StepProps) => {
     setProblem(why);
     throw new Error(why);
   };
-  const connect = async (suite: DirectorySuite) => {
+  const connect = async (suite: DirectorySuite, domain?: string) => {
     setReading(suite);
     setProblem(null);
     const signIn = suiteNames[suite];
-    if (!(await startDirectory(core, suite))) {
+    const failed = await startDirectory(core, suite, domain);
+    if (failed === "unknown") {
+      setProblem(
+        t`I could not find a ${signIn} account for ${domain ?? ""}. Check how it is spelled.`
+      );
+    } else if (failed === "failed") {
       setNotConnected({
         suite,
         why: t`I could not reach ${signIn} just now. Try again in a moment, or use a staff list.`,
       });
+    }
+    if (failed !== null) {
       setReading(null);
     }
   };
   // Back from the sign-in: the directory is read once, made a roster and kept, and the step moves on;
   // when it can't be, the step stays, says why, and the address forgets the connection.
   const readOnReturn = async () => {
-    const suite = directory?.suite ?? null;
+    // The account whose sign-in came back: the connection in the address, one of several.
+    const connectionId =
+      returnedSchema.safeParse(search).data?.connection ?? null;
+    const account = accounts.find(({ id }) => id === connectionId);
+    const suite = account?.suite ?? directory?.suite ?? null;
     setReading(suite ?? "list");
     setProblem(null);
-    const found = await readDirectoryRoster(core, noTeam, roster);
+    const found = await readDirectoryRoster(
+      core,
+      noTeam,
+      roster,
+      account === undefined ? null : account.id
+    );
     const signIn = suite === null ? "" : suiteNames[suite];
     if (typeof found !== "string" && (await keep(found.roster, found.suite))) {
       return;
@@ -580,12 +784,6 @@ export const CompanyStep = (props: StepProps) => {
       void readOnReturn();
     }
   });
-  // The sign-in in use: kept on this visit, or, coming back, the one connected; none for a staff list.
-  const inUse = directoryShown(
-    kept?.from ?? null,
-    roster === null ? null : directory
-  );
-  const listInUse = roster !== null && inUse === null;
   const { title, body, spoken } = useWords(suites);
   return (
     <CalmStep
@@ -603,21 +801,26 @@ export const CompanyStep = (props: StepProps) => {
       <div {...stylex.props(kept === null ? styles.stack : styles.gone)}>
         {suites.length > 0 ? (
           <>
-            <ItemGroup aria-label={t`Your sign-in`}>
-              {suites.map((suite) => (
-                <SignInRow
-                  done={inUse === suite}
-                  key={suite}
-                  onConnect={() => {
-                    if (reading === null) {
-                      void connect(suite);
-                    }
-                  }}
-                  suite={suite}
-                  waiting={reading === suite}
-                />
-              ))}
-            </ItemGroup>
+            <SignIns
+              accounts={accounts}
+              known={roster !== null}
+              onAdd={(suite, domain) => {
+                void connect(suite, domain);
+              }}
+              onConnect={(suite, account) => {
+                if (reading === null) {
+                  // Another account connects again by its own tenant; the company's own as ever.
+                  void connect(
+                    suite,
+                    account === undefined || account.own
+                      ? undefined
+                      : account.tenant
+                  );
+                }
+              }}
+              reading={reading}
+              suites={suites}
+            />
             <div {...stylex.props(styles.or)}>
               <Separator decorative style={styles.orLine} />
               <Text color="muted" size="sm">
@@ -629,7 +832,7 @@ export const CompanyStep = (props: StepProps) => {
         ) : null}
         <StaffListDrop
           disabled={reading !== null && reading !== "list"}
-          inUse={listInUse}
+          known={roster !== null}
           onUpload={upload}
         />
       </div>

@@ -43,10 +43,13 @@ export const startOnboardingConnection = async (
     provider,
     suite,
     returnTo,
+    otherTenant,
   }: {
     provider: StartConnection["provider"];
     suite: OAuthProvider | null;
     returnTo: unknown;
+    /** Another of the company's tenants at `suite`, for its directory only: pinned to it instead. */
+    otherTenant?: string;
   }
 ): Promise<{ url: string }> => {
   requireClientAdmin(identity);
@@ -54,7 +57,7 @@ export const startOnboardingConnection = async (
   const tenant =
     config === undefined || suite === null
       ? undefined
-      : tenantOf(config, suite);
+      : (otherTenant ?? tenantOf(config, suite));
   if (config === undefined || (suite !== null && tenant === undefined)) {
     throw connectionErrors.create("connection.provider_unavailable");
   }

@@ -2,6 +2,7 @@ import type { OAuthProvider } from "@grasp-os/shared/connect";
 import type {
   DirectorySuite,
   OnboardingDirectory,
+  OnboardingDirectoryAccount,
 } from "@grasp-os/shared/directory";
 import type { OnboardingPlaces } from "@grasp-os/shared/document-places";
 import type {
@@ -41,6 +42,8 @@ export interface SetupData {
   gate: GateView;
   /** The directory connected for the onboarding; null before one is. */
   directory: OnboardingDirectory | null;
+  /** Every account's directory connected for the roster, the company's own first; none before one is. */
+  directoryAccounts?: OnboardingDirectoryAccount[];
   /** The suites this deployment signs in with, whose directory and documents can be connected. */
   suites: DirectorySuite[];
   /** Where the documents live, connected for the onboarding; null before it is. */
