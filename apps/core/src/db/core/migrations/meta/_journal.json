@@ -2080,6 +2080,13 @@
       "when": 1795536358209,
       "tag": "0296_app_version_pictures",
       "breakpoints": true
+    },
+    {
+      "idx": 297,
+      "version": "6",
+      "when": 1795708352921,
+      "tag": "0297_chat_turns",
+      "breakpoints": true
     }
   ]
 }

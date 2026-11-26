@@ -8,7 +8,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { auditedBatch, keepEvent, outboxedEvent } from "./audit-outbox.ts";
-import { modelUsage, providerHealth } from "./db/core/schema.ts";
+import { chatTurns, modelUsage, providerHealth } from "./db/core/schema.ts";
 import { retriedBatch } from "./db/d1.ts";
 import { spendKeysOf, spendMonth } from "./model-spend.ts";
 import type { SpendInput } from "./model-spend.ts";
@@ -266,9 +266,10 @@ export const usageKeptDays = 400;
 const usageSweptAtMost = 1000;
 
 /**
- * Deletes usage rows older than {@link usageKeptDays}, at most
- * {@link usageSweptAtMost} a run, oldest first, from the clock: the spend
- * overview reads months, never older than a year back.
+ * Deletes usage rows, and chat turns' records (turn-records.ts), older
+ * than {@link usageKeptDays}, at most {@link usageSweptAtMost} of each a
+ * run, oldest first, from the clock: the spend overview reads months,
+ * never older than a year back.
  */
 export const sweepModelUsage = async (
   env: Pick<Env, "DB">,
@@ -276,17 +277,32 @@ export const sweepModelUsage = async (
 ): Promise<void> => {
   const before = new Date(now.getTime() - usageKeptDays * 24 * 60 * 60 * 1000);
   const db = drizzle(env.DB);
-  await db
-    .delete(modelUsage)
-    .where(
-      inArray(
-        modelUsage.id,
-        db
-          .select({ id: modelUsage.id })
-          .from(modelUsage)
-          .where(lt(modelUsage.createdAt, before))
-          .orderBy(asc(modelUsage.createdAt))
-          .limit(usageSweptAtMost)
-      )
-    );
+  await db.batch([
+    db
+      .delete(modelUsage)
+      .where(
+        inArray(
+          modelUsage.id,
+          db
+            .select({ id: modelUsage.id })
+            .from(modelUsage)
+            .where(lt(modelUsage.createdAt, before))
+            .orderBy(asc(modelUsage.createdAt))
+            .limit(usageSweptAtMost)
+        )
+      ),
+    db
+      .delete(chatTurns)
+      .where(
+        inArray(
+          chatTurns.id,
+          db
+            .select({ id: chatTurns.id })
+            .from(chatTurns)
+            .where(lt(chatTurns.sentAt, before))
+            .orderBy(asc(chatTurns.sentAt))
+            .limit(usageSweptAtMost)
+        )
+      ),
+  ]);
 };
