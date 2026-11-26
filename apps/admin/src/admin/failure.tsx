@@ -24,6 +24,7 @@ import * as stylex from "@stylexjs/stylex";
 import { Link, useMatch, useRouter } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 
+import { LoadingLines } from "../frame/page.tsx";
 import { AdminHeader } from "./page.tsx";
 import type { Crumb } from "./page.tsx";
 
@@ -52,9 +53,8 @@ const styles = stylex.create({
     padding: space["6"],
   },
   lines: { display: "flex", flexDirection: "column", gap: space["2"] },
-  title: { width: "12rem", height: space["8"] },
+  title: { width: "12rem", maxWidth: "100%" },
   lead: { width: "18rem", maxWidth: "100%" },
-  short: { width: "66%" },
 });
 
 /**
@@ -212,21 +212,12 @@ export const NotFound = () => (
 export const PageLoading = () => (
   <>
     <AdminHeader page={undefined} />
-    <output
-      aria-busy="true"
-      aria-label="Loading…"
-      {...stylex.props(styles.loading)}
-    >
+    <div {...stylex.props(styles.loading)}>
       <div {...stylex.props(styles.lines)}>
-        <Skeleton style={styles.title} variant="rectangular" />
-        <Skeleton style={styles.lead} />
+        <Skeleton size="lg" style={styles.title} />
+        <Skeleton size="default" style={styles.lead} />
       </div>
-      <div {...stylex.props(styles.lines)}>
-        <Skeleton />
-        <Skeleton />
-        <Skeleton />
-        <Skeleton style={styles.short} />
-      </div>
-    </output>
+      <LoadingLines lines={4} />
+    </div>
   </>
 );

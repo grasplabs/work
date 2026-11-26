@@ -20,9 +20,22 @@ const failureWords: Readonly<Record<ModelErrorCode, MessageDescriptor>> = {
   "model.failed": msg`The model couldn't answer. Try again.`,
   "model.request_refused": msg`The model couldn't answer. Try again.`,
   "model.invalid_output": msg`The model's answer came back in the wrong shape. Try again.`,
+  "model.timeout": msg`Your AI provider sent nothing for too long, so Grasp gave up on this answer. Try again.`,
+  "model.declined": msg`The model declined to answer this.`,
+  "model.context_too_long": msg`This chat is too long for the model. Start a new chat to go on.`,
 };
 
 const unreachable = msg`Grasp could not be reached. Try again.`;
+
+/**
+ * The failures asking the same again can't mend: the model declined, or
+ * the chat is past its window. Their answers offer no Try
+ * again, and their words say what helps instead.
+ */
+const unmendable: ReadonlySet<unknown> = new Set<ModelErrorCode>([
+  "model.declined",
+  "model.context_too_long",
+]);
 
 /** Whether `failure` is a code this page has words for. */
 const isKnown = (failure: unknown): failure is ModelErrorCode =>
@@ -31,3 +44,7 @@ const isKnown = (failure: unknown): failure is ModelErrorCode =>
 /** Why an answer failed, in people's words, from core's code for it. */
 export const failureMessage = (failure: unknown, i18n: I18n): string =>
   i18n._(isKnown(failure) ? failureWords[failure] : unreachable);
+
+/** Whether asking the same again may mend an answer that failed with `failure`. */
+export const retryMends = (failure: unknown): boolean =>
+  !unmendable.has(failure);

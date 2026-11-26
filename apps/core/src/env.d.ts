@@ -54,6 +54,12 @@ interface __BaseEnv_Env {
   /** Who core's mail is from (src/mail.ts): JSON, `{name, address}`. */
   MAIL_FROM?: unknown;
   /**
+   * For tests only: how long a streamed model request may go without a
+   * byte from its provider, in milliseconds, where that is less than the
+   * gateway's own (src/models.ts, `streamIdleMs`).
+   */
+  MODEL_STREAM_IDLE_MS?: string;
+  /**
    * `cloudflare` where core runs on Cloudflare's runtime, which enforces
    * Code Mode's CPU limit; anything else, unset included, is taken as a
    * runtime that doesn't (src/code-mode.ts). Tests, local development and
