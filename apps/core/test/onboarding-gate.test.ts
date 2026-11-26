@@ -8,12 +8,14 @@ import {
   setupSteps,
 } from "@grasp-os/shared/onboarding-flow";
 import type { GateThreshold } from "@grasp-os/shared/onboarding-gate";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { signInConfig } from "../src/auth/config.ts";
 import { memberFromDirectory } from "../src/auth/directory-members.ts";
 import { gateView, mayComeIn, memberMayBeIn } from "../src/onboarding/gate.ts";
+import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminCommands, adminSnapshot } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
 import { acmeTenant } from "./sign-in-config.ts";
@@ -185,10 +187,15 @@ describe("while the company is onboarding", () => {
     await adminCommands().close();
     const halfWay = await admin.api.onboarding.behind();
     await admin.api.onboarding.finishSteps([...setupSteps]);
-    expect({
-      halfWay,
-      finished: await admin.api.onboarding.behind(),
-    }).toStrictEqual({ halfWay: false, finished: true });
+    const finished = await admin.api.onboarding.behind();
+    // Every screen unfinished again: a later flow's screens start undone.
+    await runInDurableObject(onboardingStore(env), (_instance, state) => {
+      state.storage.sql.exec("UPDATE onboarding SET place = NULL");
+    });
+    expect({ halfWay, finished }).toStrictEqual({
+      halfWay: false,
+      finished: true,
+    });
   });
 
   it("lets in an admin the directory made a member before they ever signed in, by their object id, and no other member it made", async () => {

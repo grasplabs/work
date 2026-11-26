@@ -204,7 +204,13 @@ describe("Grasp staff's views, audited", () => {
         async () =>
           await routed(speechPath, {
             method: "POST",
-            headers: { "content-type": "application/json", cookie: session },
+            // From the deployment's own page: a request that names no
+            // origin is refused before anything is read.
+            headers: {
+              "content-type": "application/json",
+              cookie: session,
+              origin: clientOrigin,
+            },
             body: JSON.stringify({ text: "Hello.", language: "en" }),
           }),
       ],

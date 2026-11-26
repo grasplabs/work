@@ -15,11 +15,11 @@ import {
   answering,
   approveAgreed,
   aloneInTheStore,
+  interviewModels,
   modelOf,
   onLink,
   openLinkAs,
   participate,
-  quick,
   signedInAs,
 } from "./interview-link.ts";
 import type { Device } from "./interview-link.ts";
@@ -220,7 +220,9 @@ describe("a team's map", { timeout: 60_000 }, () => {
       work: context.ok ? context.value.work : null,
       due: due.includes(ids.lea),
       drawing: usage.some(
-        ({ purpose, model }) => purpose === "drawing" && model === quick
+        ({ purpose, model }) =>
+          // Drawn by the organization's model, never the interview's.
+          purpose === "drawing" && model === interviewModels[0]
       ),
     }).toStrictEqual({
       first: [ids.lea],
