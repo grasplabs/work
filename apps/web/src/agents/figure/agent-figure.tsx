@@ -23,8 +23,15 @@ import type { AgentFigureLook } from "./look.ts";
 // from the old library, a product part of the agents (it draws Grasp's own
 // figures, which no other product has).
 
-/** icon 16 in a row's icon box, xs 24 and sm 48 for a list, md 72, lg 128, xl 200 pixels. */
-export type AgentFigureSize = "icon" | "xs" | "sm" | "md" | "lg" | "xl";
+/** icon 16 in a row's icon box, xs 24 and sm 48 for a list, md 72, lg 128, xl 200, hero 360 pixels. */
+export type AgentFigureSize =
+  | "icon"
+  | "xs"
+  | "sm"
+  | "md"
+  | "lg"
+  | "xl"
+  | "hero";
 
 const pixels: Record<AgentFigureSize, number> = {
   icon: 16,
@@ -33,6 +40,7 @@ const pixels: Record<AgentFigureSize, number> = {
   md: 72,
   lg: 128,
   xl: 200,
+  hero: 360,
 };
 
 const styles = stylex.create({
@@ -59,6 +67,11 @@ const styles = stylex.create({
   md: { width: "72px", height: "72px" },
   lg: { width: "128px", height: "128px" },
   xl: { width: "200px", height: "200px" },
+  // The one figure a whole screen is about, such as Stephen while he interviews.
+  hero: {
+    width: "min(360px, 62vw, 42vh)",
+    height: "min(360px, 62vw, 42vh)",
+  },
   // The aura fills the positioned box it stands in.
   aura: {
     position: "absolute",

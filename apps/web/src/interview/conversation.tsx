@@ -133,6 +133,8 @@ const styles = stylex.create({
     paddingBlockStart: space["4"],
   },
   composer: { flexShrink: 0, paddingBlockStart: space["2"] },
+  // Paused, the box's place: as wide as the box, quiet.
+  resume: { width: "100%" },
 });
 
 /**
@@ -380,6 +382,36 @@ export const Conversation = ({
         />
       ) : null}
     </>
+  );
+};
+
+/**
+ * Paused, in place (the owner's ask, 2026-11-26): his orb sleeps where it
+ * stood, one word under it says so, and the box at the foot is a quiet
+ * button to go on. Nothing else: what was said is kept, and the clock waits.
+ */
+export const PausedConversation = ({ onResume }: { onResume: () => void }) => {
+  const { t } = useLingui();
+  return (
+    <Room alone={false} transcript={false}>
+      <div {...stylex.props(styles.stage)}>
+        <div aria-hidden="true" {...stylex.props(styles.lead)} />
+        <div aria-live="polite" {...stylex.props(styles.question)}>
+          <StephenOrb asleep />
+          <Text color="muted" size="sm">{t`Paused`}</Text>
+        </div>
+      </div>
+      <div {...stylex.props(styles.composer)}>
+        <Button
+          onClick={onResume}
+          size="lg"
+          style={styles.resume}
+          variant="secondary"
+        >
+          {t`Resume`}
+        </Button>
+      </div>
+    </Room>
   );
 };
 
