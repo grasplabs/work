@@ -601,6 +601,29 @@ describe("a chat's ChatSession", () => {
     });
   });
 
+  it("opens pi again each time its storage fails under a turn, also after an open that worked", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId);
+    const provider = await fakeProviderFor(
+      [model],
+      says("Never stored."),
+      says("Never stored either."),
+      says("Stored.")
+    );
+    const { session, request } = sessionOf(asking, userId);
+    await session().activeTurn();
+    await runInDurableObject(session(), (_instance, state) => {
+      state.storage.sql.exec(
+        `CREATE TRIGGER test_fault BEFORE INSERT ON pi_entries WHEN NEW.record LIKE '%Never stored%' AND NEW.record LIKE '%"stopReason":"stop"%' BEGIN SELECT RAISE(ABORT, 'Refused by the test'); END`
+      );
+    });
+    const end = await session().run(request("turn-a", "Stored?"));
+    expect({
+      answer: end.answer,
+      requests: provider.requests.length,
+    }).toStrictEqual({ answer: "Stored.", requests: 3 });
+  });
+
   it("opens pi again when its storage fails under a turn nothing waits on, and the turn answers", async () => {
     const { userId } = await signedInWithRole(idp, "user");
     const cut = pausedReply(says("Cut."), 1);
@@ -661,13 +684,14 @@ describe("a chat's ChatSession", () => {
     }
   });
 
-  it("tries a pi that fails to open again later and later, then stops, its chat no longer shown busy", async () => {
+  it("tries a pi that fails to open again later and later, then gives the turn up as failed, and takes the next question once storage recovers", async () => {
     const { userId } = await signedInWithRole(idp, "user");
     const never = Promise.withResolvers<boolean>();
     const stuck = { ...says("Never."), pause: { at: 0, until: never.promise } };
     const { id, stub, provider, newChat } = await personalChatsOf(
       userId,
-      stuck
+      stuck,
+      says("Answered now.")
     );
     const { chat, ask } = await newChat();
     const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
@@ -713,6 +737,17 @@ describe("a chat's ChatSession", () => {
       }
       const waits = after.filter((wait) => wait !== null);
       const { running } = await workspace(env, id).chatSummary(chat.id, userId);
+      // Storage recovers: the turn given up on stays given up, and the
+      // next question is taken, not refused as busy.
+      await runInDurableObject(session(), (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE pi_durable_schema SET version = version - 100"
+        );
+      });
+      const next = await workspace(env, id).ask(chat.id, {
+        text: "Again?",
+        model,
+      });
       expect({
         tried: waits.length,
         longerEachTime: waits.every(
@@ -720,18 +755,22 @@ describe("a chat's ChatSession", () => {
         ),
         thenNone: after.at(-1),
         running,
+        next: next.answer,
+        requests: provider.requests.length,
       }).toStrictEqual({
         tried: 5,
         longerEachTime: true,
         thenNone: null,
         running: false,
+        next: "Answered now.",
+        requests: 2,
       });
     } finally {
       never.resolve(true);
     }
   });
 
-  it("stops waking a chat whose opens reset the object as often as it gives up after, telling its Workspace, and opens it again for a call", async () => {
+  it("stops waking a chat whose opens reset the object as often as it gives up after, and settles its turn as lost once a call opens it", async () => {
     const { userId } = await signedInWithRole(idp, "user");
     const never = Promise.withResolvers<boolean>();
     const stuck = { ...says("Never."), pause: { at: 0, until: never.promise } };
@@ -776,25 +815,77 @@ describe("a chat's ChatSession", () => {
         requests: provider.requests.length,
         running,
       };
-      // A call still opens it, and the turn goes on.
-      await session().activeTurn();
-      await vi.waitFor(
-        () => {
-          expect(provider.requests).toHaveLength(2);
-        },
-        { timeout: 15_000 }
-      );
-      expect(afterAlarm).toStrictEqual({
+      // A call still opens it: the turn given up on is settled, and the
+      // next question answered.
+      const active = await session().activeTurn();
+      const next = await workspace(env, id).ask(chat.id, {
+        text: "Again?",
+        model,
+      });
+      expect({ ...afterAlarm, active, next: next.answer }).toStrictEqual({
         alarm: null,
         requests: 1,
         running: false,
+        active: undefined,
+        next: "Answered after all.",
       });
     } finally {
       never.resolve(true);
     }
   });
 
-  it("stops a turn that runs past its time, as overdue", async () => {
+  it("never stops a turn that keeps going, however long it runs", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId);
+    const steps = [6, 12, 18].map(() => Promise.withResolvers<boolean>());
+    const provider = await fakeProviderFor([model], {
+      ...says("Slowly but surely, the answer."),
+      pause: steps.map(({ promise }, index) => ({
+        at: 6 * (index + 1),
+        until: promise,
+      })),
+    });
+    const { session, request } = sessionOf(asking, userId);
+    const restore = await setObjectEnv(session(), {
+      CHAT_TURN_IDLE_MS: "1500",
+    });
+    try {
+      const startedAt = Date.now();
+      const asked = session().run(request("turn-a", "Slowly?"));
+      await vi.waitFor(
+        () => {
+          expect(provider.requests).toHaveLength(1);
+        },
+        { timeout: 10_000 }
+      );
+      for (const step of steps) {
+        // oxlint-disable-next-line no-await-in-loop -- a word a second
+        await scheduler.wait(1000);
+        step.resolve(true);
+        // oxlint-disable-next-line no-await-in-loop -- the heartbeat checks
+        await scheduler.wait(200);
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await runDurableObjectAlarm(session());
+      }
+      const end = await asked;
+      expect({
+        outcome: end.outcome,
+        answer: end.answer,
+        pastTheLimit: Date.now() - startedAt > 1500,
+      }).toStrictEqual({
+        outcome: "answered",
+        answer: "Slowly but surely, the answer.",
+        pastTheLimit: true,
+      });
+    } finally {
+      for (const step of steps) {
+        step.resolve(true);
+      }
+      await restore();
+    }
+  });
+
+  it("stops a turn pi makes no progress in, as overdue", async () => {
     const { userId } = await signedInWithRole(idp, "user");
     const asking = await chatOf(userId);
     const never = Promise.withResolvers<boolean>();
@@ -803,7 +894,7 @@ describe("a chat's ChatSession", () => {
       pause: { at: 0, until: never.promise },
     });
     const { session, request } = sessionOf(asking, userId);
-    const restore = await setObjectEnv(session(), { CHAT_TURN_MOST_MS: "1" });
+    const restore = await setObjectEnv(session(), { CHAT_TURN_IDLE_MS: "1" });
     try {
       const asked = session().run(request("turn-a", "Forever?"));
       await vi.waitFor(
