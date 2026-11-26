@@ -518,7 +518,10 @@ test("a person switches between two chats and asks in each: every question shows
     asked.push(question);
     // oxlint-disable-next-line no-await-in-loop -- one chat after the other
     await sidebar.getByRole("link", { name: title, exact: true }).click();
-    const box = page.getByRole("textbox", { name: "Ask Grasp" });
+    // Its page, not the one before it, whose box stands until it goes.
+    const box = page
+      .getByRole("region", { name: title })
+      .getByRole("textbox", { name: "Ask Grasp" });
     // oxlint-disable-next-line no-await-in-loop -- one chat after the other
     await box.fill(question);
     // oxlint-disable-next-line no-await-in-loop -- one chat after the other
