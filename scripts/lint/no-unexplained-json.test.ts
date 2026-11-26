@@ -101,6 +101,14 @@ tester.run("grasp/no-unexplained-json", rule, {
       2
     ),
     free(
+      "a comment before it on its statement's line",
+      `${imports}/* Each company names its own custom fields. */ const Fields = v.json();`
+    ),
+    free(
+      "a comment a blank line away",
+      `${imports}const Deal = v.object({\n  // Each company names its own custom fields.\n\n  fields: v.json(),\n});`
+    ),
+    free(
       "a comment ending its property's line",
       `${imports}const Deal = v.object({\n  fields: v.json(), // Each company names its own.\n});`
     ),

@@ -37,9 +37,9 @@
  * through, so the agent and Apps learn nothing of its shape (GRA-2330).
  * It refuses a call of `json` on a `v` imported under any name, or read
  * off a namespace import, unless a comment beside it says why the shape
- * is free-form (a vendor's custom fields): on a line of its own, right
- * before the call or the property that holds it (outside an object, its
- * statement). A comment after code on its line explains nothing: it would
+ * is free-form (a vendor's custom fields): on lines of its own, ending
+ * on the line right before the call or the property that holds it
+ * (outside an object, its statement). A comment after code on its line explains nothing: it would
  * stand before whatever comes next, and no-inline-comments refuses it
  * anyway. A comment with no words, or a tool's directive
  * (`eslint`, `oxlint`, `@ts-`, `oxfmt-ignore`, `prettier-ignore`), is no
@@ -121,6 +121,7 @@ interface Node {
   accessibility?: string;
   importKind?: string;
   exportKind?: string;
+  loc?: Lines;
 }
 
 /** The lines a node, token or comment starts and ends on. */
@@ -653,7 +654,7 @@ const noUnexplainedJson = {
     const { sourceCode } = context;
     const explains = ({ value }: Token): boolean =>
       hasWords.test(value) && !toolDirective.test(value);
-    // A comment right before `node`, on a line of its own.
+    // A comment on the lines right before `node`, with nothing else on them.
     const leads = (node: Node): boolean =>
       sourceCode.getCommentsBefore(node).some((comment) => {
         const before = sourceCode.getTokenBefore(comment, {
@@ -661,7 +662,8 @@ const noUnexplainedJson = {
         });
         return (
           explains(comment) &&
-          (before === null || before.loc.end.line < comment.loc.start.line)
+          (before === null || before.loc.end.line < comment.loc.start.line) &&
+          comment.loc.end.line + 1 === node.loc?.start.line
         );
       });
     return {
