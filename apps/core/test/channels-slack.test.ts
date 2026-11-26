@@ -37,6 +37,7 @@ import { codeStep, keptAnswersOf, says, toolStep } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { chatIdsOf } from "./code-step-trace.ts";
 import { slackApp, slackPostedUrl } from "./connect-providers.ts";
+import { pause } from "./connection-pause.ts";
 import { mockIdp } from "./idp.ts";
 import { attacks, ordinary } from "./inert-answers.ts";
 import { saveInstructions } from "./instruction-saves.ts";
@@ -60,7 +61,7 @@ import {
   reached,
   watched,
 } from "./teams-door.ts";
-import { connectDb, testBinding } from "./test-env.ts";
+import { testBinding } from "./test-env.ts";
 import { publishDefinition } from "./workflow-publishing.ts";
 
 // Slack as a door into core (src/channels/slack.ts, src/channels/door.ts),
@@ -477,6 +478,14 @@ describe("a press on a card in Slack", () => {
       }),
     });
     const confirmed = await post(confirm, { form: true });
+    // A card of an older release, whose press listed its writes alone:
+    // refused the same way.
+    const older = pressFrom(slackUser, {
+      value: JSON.stringify([
+        { id: crypto.randomUUID(), inputHash: "0".repeat(64) },
+      ]),
+    });
+    const olderPressed = await post(older, { form: true });
     // An offer that isn't there: Start's handler says it is gone.
     const start = pressFrom(slackUser, {
       actionId: startAction,
@@ -491,11 +500,15 @@ describe("a press on a card in Slack", () => {
     expect({
       confirmed: confirmed.status,
       confirmSaid: await said(confirm.channel.id),
+      older: olderPressed.status,
+      olderSaid: await said(older.channel.id),
       started: started.status,
       startSaid: await said(start.channel.id),
     }).toStrictEqual({
       confirmed: 200,
       confirmSaid: [["chat.postMessage", say("changedSince", "en")]],
+      older: 200,
+      olderSaid: [["chat.postMessage", say("changedSince", "en")]],
       started: 200,
       startSaid: [["chat.postMessage", say("startGone", "en")]],
     });
@@ -1425,14 +1438,7 @@ describe("a linked person's held write in Slack, on a paused connection", () => 
         .map(({ fields }) => slackCardOf(fields));
     };
     const [first] = await cards();
-    // Paused, as connect keeps a pause its vendor asked for.
-    const until = Date.now() + 30_000;
-    await connectDb()
-      .prepare(
-        "INSERT INTO connection_tokens (connection_id, sealed, access_expires_at, generation, updated_at, paused_until) VALUES (?, '', ?, 0, ?, ?)"
-      )
-      .bind(mail.id, until, Date.now(), until)
-      .run();
+    await pause(mail.id, Date.now() + 30_000);
     await post(pressFrom(slackUser, { channel, value: first?.confirm ?? "" }), {
       form: true,
     });

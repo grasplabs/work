@@ -12,6 +12,7 @@ import { chatAgentId } from "../src/chats-rpc.ts";
 import { codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { pause } from "./connection-pause.ts";
 import { heldFor } from "./held-in-connect.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
@@ -33,7 +34,6 @@ import {
   waitingOf,
 } from "./teams-press.ts";
 import type { Turn } from "./teams-press.ts";
-import { connectDb } from "./test-env.ts";
 
 // A press on a Teams card of held writes (src/channels/press.ts), D2: "a
 // verified Teams press confirms exactly the held writes on its card,
@@ -50,21 +50,6 @@ const idp = mockIdp();
 watched();
 
 const setUpTime = { timeout: 90_000 };
-
-/**
- * Pauses mail connection `connectionId` until `until` (ms), as connect
- * keeps a pause its vendor asked for (tokens.ts `pauseFor`). Written
- * directly: the mail fake is a Composio toolkit's, which connect never
- * pauses itself (only a native connector's throttled answer does).
- */
-const pause = async (connectionId: string, until: number): Promise<void> => {
-  await connectDb()
-    .prepare(
-      "INSERT INTO connection_tokens (connection_id, sealed, access_expires_at, generation, updated_at, paused_until) VALUES (?, '', ?, 0, ?, ?) ON CONFLICT (connection_id) DO UPDATE SET paused_until = excluded.paused_until"
-    )
-    .bind(connectionId, until, Date.now(), until)
-    .run();
-};
 
 /**
  * A member whose Teams turn read their mail, or, given `reads`, only with
@@ -486,7 +471,7 @@ describe("the person's own press", setUpTime, () => {
     });
   });
 
-  it("says to ask again when a paused connection's writes can't get a new card, and leaves them waiting", async () => {
+  it("declines a paused connection's writes that can't get a new card, and says to ask again", async () => {
     const turn = await heldMails(1);
     await pause(turn.mail.id, Date.now() + 90_000);
     await failsOnce(turn.person.teams.conversation, confirmAction);
@@ -496,12 +481,13 @@ describe("the person's own press", setUpTime, () => {
       said: edits.at(-1)?.includes(inJson(say("pausedManyAskAgain", "en"))),
       cards: await cardsAfter(turn),
       mail: await mailOf(turn.mail),
-      waiting: new Set(await waitingOf(turn.person)),
+      // No card can confirm them: asked again, they are held once.
+      waiting: await waitingOf(turn.person),
     }).toStrictEqual({
       said: true,
       cards: [],
       mail: { calls: 0, to: [] },
-      waiting: new Set(turn.press.map(({ id }) => id)),
+      waiting: [],
     });
   });
 

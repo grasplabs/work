@@ -329,6 +329,54 @@ const decide = async (
 };
 
 /**
+ * Offers `waiting`, the writes a connection's pause left waiting on a
+ * pressed card, on a new card with a press of its own, warning of what the
+ * pressed one did (`check`, which its press carries): whether it could be
+ * posted. Where it couldn't, no card can confirm them, so they are
+ * declined: asking again holds them once, never twice.
+ */
+const offerAgain = async (
+  env: Env,
+  {
+    identity,
+    platform,
+    locale,
+    event,
+  }: {
+    identity: Identity;
+    platform: string;
+    locale: ChannelLocale;
+    event: ActionEvent;
+  },
+  waiting: readonly StillHeld[],
+  check: Press["check"]
+): Promise<boolean> => {
+  try {
+    await event.adapter.postMessage(
+      event.threadId,
+      heldWritesCard({
+        locale,
+        platform,
+        writes: waiting.map(({ view }) => view),
+        ...(check === undefined ? {} : { check }),
+      })
+    );
+    return true;
+  } catch (error) {
+    log.warn("channel.card_post_failed", errorFields(error));
+  }
+  for (const write of waiting) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time, each recorded
+      await decide(env, identity, platform, write, false);
+    } catch (error) {
+      log.warn("channel.decline_failed", errorFields(error));
+    }
+  }
+  return false;
+};
+
+/**
  * Runs a press on a card of held writes: Confirm runs exactly the card's
  * writes, in order, once, stopping at the first that fails; Cancel
  * declines them. Anything else, or a card pressed before, runs nothing.
@@ -337,12 +385,19 @@ export const pressCard = async (
   env: Env,
   { platform, userId, event, state }: CardPress
 ): Promise<void> => {
-  const press = pressOf(event.value);
   const confirming = event.actionId === confirmAction;
-  if (press === null || (!confirming && event.actionId !== cancelAction)) {
+  if (!confirming && event.actionId !== cancelAction) {
     return;
   }
   const locale = appLocale(event.raw);
+  // Not what this release's cards carry (`pressOf`): a card of an older
+  // release, or none of ours. Nothing runs, and the person asks again.
+  const press = pressOf(event.value);
+  if (press === null) {
+    log.info("channel.press_refused", { platform, reason: "unreadable" });
+    await sayThere(event, "changedSince", locale);
+    return;
+  }
   const first = await state.setIfNotExists(
     pressedKey(platform, event),
     true,
@@ -417,32 +472,21 @@ export const pressCard = async (
       const ended = failedAs(error, still);
       write.state = ended.state;
       if (ended.state === "held") {
-        // Nothing of it was taken: it and the rest still wait. A new card,
-        // with a press of its own, offers them, warning of what this one
-        // did (the press carries it); then this one says so, or, without
-        // it, to ask again.
-        const waiting = writes.slice(index);
+        // Nothing of it was taken: it and the rest still wait, offered
+        // again (`offerAgain`), as this card then says.
+        const waiting = held.slice(index);
         log.info("channel.press_paused", {
           platform,
           waiting: waiting.length,
           ...errorFields(error),
         });
-        let newCard = false;
-        try {
-          // oxlint-disable-next-line no-await-in-loop -- once, then out
-          await event.adapter.postMessage(
-            event.threadId,
-            heldWritesCard({
-              locale,
-              platform,
-              writes: waiting,
-              ...(press.check === undefined ? {} : { check: press.check }),
-            })
-          );
-          newCard = true;
-        } catch (postError) {
-          log.warn("channel.card_post_failed", errorFields(postError));
-        }
+        // oxlint-disable-next-line no-await-in-loop -- once, then out
+        const newCard = await offerAgain(
+          env,
+          { identity, platform, locale, event },
+          waiting,
+          press.check
+        );
         // oxlint-disable-next-line no-await-in-loop -- once, then out
         await editCard(
           event,

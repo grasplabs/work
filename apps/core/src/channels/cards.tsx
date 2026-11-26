@@ -545,7 +545,8 @@ export const cancelAction = "held-writes.cancel";
 /**
  * What a press on the card's buttons carries: exactly the writes it
  * showed, a write to an App with the chat it is held in, and what it warned
- * of (`check`), for a card posted again for some of them (press.ts). It
+ * of (`check`: mail, the only warning a read gives until GRA-719), for a
+ * card posted again for some of them (press.ts). It
  * comes from the card itself, and runs only the presser's own writes, so a
  * press that drops it drops only their own warning.
  */
@@ -560,12 +561,7 @@ const pressSchema = z.strictObject({
     )
     .min(1)
     .max(maxWritesOnCard),
-  check: z
-    .discriminatedUnion("read", [
-      z.strictObject({ read: z.literal("mail") }),
-      z.strictObject({ read: z.literal("record"), where: z.string().min(1) }),
-    ])
-    .optional(),
+  check: z.strictObject({ read: z.literal("mail") }).optional(),
 });
 export type Press = z.infer<typeof pressSchema>;
 
@@ -620,7 +616,7 @@ const checkLine = (check: ReadCheck, locale: ChannelLocale, room: Room) =>
  */
 const pressOfWrites = (
   writes: readonly HeldWriteView[],
-  check?: ReadCheck
+  check?: Press["check"]
 ): string =>
   JSON.stringify({
     writes: writes.map(({ id, inputHash, chatId }) =>
@@ -664,7 +660,10 @@ const laidOut = ({
 }: Pick<HeldWritesCard, "locale" | "platform" | "writes" | "check">) => {
   const room: Room = { left: outsideBytes };
   const shown = writes.slice(0, maxWritesOnCard);
-  const press = pressOfWrites(shown, check);
+  const press = pressOfWrites(
+    shown,
+    check?.read === "mail" ? check : undefined
+  );
   // A press that names more than a button carries can't be on the card.
   const pressFits = press.length <= buttonValueChars;
   room.left -= sizeOf(press);
