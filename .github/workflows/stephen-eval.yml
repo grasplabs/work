@@ -29,7 +29,7 @@ on:
         required: false
         default: ""
       budget_usd:
-        description: "Most the run may spend, in US dollars, at most 10; empty for the Environment's"
+        description: "Most the run may spend, in US dollars, up to a ceiling; empty for the Environment's"
         required: false
         default: ""
 
@@ -83,8 +83,15 @@ jobs:
             echo "STEPHEN_EVAL_MODEL=$MODEL" >> "$GITHUB_ENV"
           fi
           if [ -n "$BUDGET_USD" ]; then
-            if [[ ! "$BUDGET_USD" =~ ^[0-9]+(\.[0-9]{1,2})?$ ]] ||
-              ! awk -v b="$BUDGET_USD" -v m="$maxBudgetUsd" 'BEGIN { exit !(b > 0 && b <= m) }'; then
+            # Compared in cents, as whole numbers in bash: base 10, so a
+            # leading zero isn't octal.
+            if [[ ! "$BUDGET_USD" =~ ^([0-9]{1,4})(\.([0-9]{1,2}))?$ ]]; then
+              cents=0
+            else
+              fraction="${BASH_REMATCH[3]}00"
+              cents=$((10#${BASH_REMATCH[1]} * 100 + 10#${fraction:0:2}))
+            fi
+            if [ "$cents" -le 0 ] || [ "$cents" -gt $((maxBudgetUsd * 100)) ]; then
               echo "::error::budget_usd must be a number of US dollars above 0 and at most $maxBudgetUsd."
               exit 1
             fi
