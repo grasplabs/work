@@ -15,6 +15,7 @@ import { z } from "zod";
 
 import { chatWork } from "../src/drafts.ts";
 import {
+  buildingApisIn,
   chatOf,
   codeResults,
   codeStep,
@@ -364,18 +365,23 @@ describe("the agent building an independent workflow", () => {
     const theirs = await ungranted.builder.api.workflowResources.create(
       `theirs-${unique()}`
     );
+    // Someone who doesn't build: their turns aren't offered
+    // `env.workflowBuild`, and the API itself refuses them all the same,
+    // as code a model wrote anyway would reach it.
     const asUser = await setUp([], "user");
-    await fakeProvider(codeStep(calls(theirs.id)), says("No."));
-    await asUser.chat.ask("Work on that workflow");
+    const { workflowBuild } = await buildingApisIn(asUser.chat);
+    const forUser = await workflowBuild.draft(theirs.id).then(
+      ({ revision }) => typeof revision,
+      (error: unknown) => (error instanceof Error ? error.message : error)
+    );
 
     const [read] = await codeResults(
       ungranted.chat.stub,
       ungranted.chat.chat.id
     );
-    const [forUser] = await codeResults(asUser.chat.stub, asUser.chat.chat.id);
     expect({
       ungranted: returned(read?.text),
-      user: returned(forUser?.text),
+      user: { draft: forUser },
     }).toStrictEqual({
       ungranted: { draft: "number" },
       user: { draft: unavailable },
