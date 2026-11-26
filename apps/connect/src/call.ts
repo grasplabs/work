@@ -1210,7 +1210,8 @@ export const carryOut = async (
     return { ...earlier, sideEffect, replayed: true };
   }
   // Claimed: the call may go out now, so whatever fails from here on
-  // (spending or freeing the key included) leaves its outcome unknown.
+  // (spending or freeing the key included) leaves its outcome unknown,
+  // but for connect's own refusal before sending (`sendClaimed`).
   progress.claimed = true;
   return { ...(await sendClaimed(sent, server)), sideEffect };
 };

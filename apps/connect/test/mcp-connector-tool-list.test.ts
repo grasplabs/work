@@ -271,7 +271,7 @@ describe("a connector's tool list", () => {
     });
   });
 
-  it("refuses a write blocked while it was made ready, sends it nothing, and frees its key", async () => {
+  it("refuses a write blocked while its list was read, sends it nothing, and leaves its key free", async () => {
     const { anna, connector, connectionId } = await connected();
     const app = appFor(anna.userId);
     const save = {
@@ -293,8 +293,8 @@ describe("a connector's tool list", () => {
         origin === linearOrigin && request.method === "POST"
           ? await rpcOf(request)
           : undefined;
-      // The admin blocks it after connect checked it first, while the
-      // call is made ready.
+      // The admin blocks it after connect checked it first, while its
+      // list is read.
       if (blocking && rpc?.method === "tools/list") {
         blocking = false;
         await exports.default.blockConnectorTool({
