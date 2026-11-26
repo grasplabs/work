@@ -504,6 +504,22 @@ describe("the tab's one connection to core", () => {
     });
   });
 
+  it("lets no ping that waits behind a large message let a working connection go", async () => {
+    const { core, opened } = tab([one, one]);
+    await core.session();
+    const letGo = core.keepAlive();
+    await vi.advanceTimersByTimeAsync(0);
+    // A file goes out: the socket answers nothing until it has.
+    const uploading = core.holdHeartbeat();
+    opened[0]?.silence();
+    await vi.advanceTimersByTimeAsync(heartbeatMs * 4 + 5000);
+    const during = { opened: opened.length, disposed: opened[0]?.disposed };
+    uploading();
+    letGo();
+
+    expect(during).toStrictEqual({ opened: 1, disposed: false });
+  });
+
   it("lets go of the connection at once when the browser goes offline, and connects again as it comes back online", async () => {
     const { core, opened, goOffline, comeBack } = tab([one, "down", one]);
     await core.session();

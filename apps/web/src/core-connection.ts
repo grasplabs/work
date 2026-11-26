@@ -194,6 +194,10 @@ export class CoreConnection {
   readonly #answered = new Set<() => void>();
   /** How many depend on hearing from core now (`keepAlive`). */
   #keptAlive = 0;
+  /** How many large messages go out now (`holdHeartbeat`). */
+  #held = 0;
+  /** How many have gone out since the page opened, held or let go of. */
+  #holds = 0;
   #heartbeat: ReturnType<typeof setInterval> | undefined;
 
   constructor({
@@ -324,6 +328,24 @@ export class CoreConnection {
       if (this.#keptAlive === 0) {
         clearInterval(this.#heartbeat);
         this.#heartbeat = undefined;
+      }
+    };
+  }
+
+  /**
+   * Holds off the heartbeat while a large message goes out, such as a
+   * file: a ping waits behind it on the socket, and a slow upload would
+   * read as a dead connection. No ping is sent, and none that fails lets
+   * the connection go, until every hold is let go of. Returns what lets go.
+   */
+  holdHeartbeat(): () => void {
+    this.#held += 1;
+    this.#holds += 1;
+    let held = true;
+    return () => {
+      if (held) {
+        held = false;
+        this.#held -= 1;
       }
     };
   }
@@ -566,13 +588,18 @@ export class CoreConnection {
 
   async #probe(): Promise<void> {
     const api = this.#live;
-    if (api === undefined) {
+    if (api === undefined || this.#held > 0) {
       return;
     }
+    const holds = this.#holds;
     try {
       await withTimeout(api.ping());
     } catch {
-      this.#drop(api);
+      // Behind a large message that went out meanwhile, a ping is late,
+      // not lost.
+      if (this.#holds === holds) {
+        this.#drop(api);
+      }
     }
   }
 

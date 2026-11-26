@@ -14,6 +14,7 @@ import { useRef, useState } from "react";
 import { CoreTimeoutError, isConnectionFailure, timeoutMs } from "../core.ts";
 import type { Session } from "../core.ts";
 import { useCoreAction } from "../use-core-action.ts";
+import { useHoldHeartbeat } from "../use-core-reach.ts";
 import { activeChat, setActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
 import type { Problem, StopNote } from "./dictation.ts";
@@ -78,6 +79,49 @@ const reaching =
     }
   };
 
+/** Where each of the box's files went, by its ID in the box. */
+type Attached = Map<string, { chatId: string; fileId: string }>;
+
+/**
+ * Attaches the box's files `carried` to `chatId`, one at a time in the
+ * order they were added, and answers their IDs there; one core took for
+ * that chat already (a send that failed after it) is named again, not
+ * sent twice. Each file is one large message, which a ping waits behind:
+ * the heartbeat holds off while they go (`hold`), or a slow upload would
+ * read as a dead connection.
+ */
+const attachAll = async (
+  session: Session,
+  chatId: string,
+  carried: readonly BoxFile[],
+  attached: Attached,
+  hold: () => () => void
+): Promise<string[]> => {
+  const fileIds: string[] = [];
+  const letGo = carried.length > 0 ? hold() : undefined;
+  try {
+    for (const { id: boxId, file } of carried) {
+      const known = attached.get(boxId);
+      if (known?.chatId === chatId) {
+        fileIds.push(known.fileId);
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one at a time, in the order they were added
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      // oxlint-disable-next-line no-await-in-loop -- one at a time, in the order they were added
+      const { id: fileId } = await session.chats.attachFile(chatId, {
+        name: file.name,
+        bytes,
+      });
+      attached.set(boxId, { chatId, fileId });
+      fileIds.push(fileId);
+    }
+  } finally {
+    letGo?.();
+  }
+  return fileIds;
+};
+
 /** No model takes an effort, as before core says which do. */
 const noModelEfforts: Readonly<Record<string, ModelEfforts>> = {};
 
@@ -108,32 +152,39 @@ const noOptions: AskOptions = {};
 /** A question that failed to send, and the key it went with. */
 export interface Unsent {
   key: string;
+  /** Its words. */
   question: string;
-  /** The chat it was asked in; none: a new one. */
-  chatId: string | undefined;
-  /** The agent a new chat for it was made with; none named: the company's first. */
-  agentId: string | undefined;
+  /** All it was asked with ({@link askedWith}). */
+  asked: string;
 }
 
 /**
- * The key asking `question` goes with (`ChatQuestion.key`): the one it
- * failed to send with, asked again in the same chat (or a new one, while
- * the same agent is picked), so core takes it once however often it is
- * asked again, and answers the chat a first try made, which may have
- * reached core with only its answer lost on the way; else a new one, and a
- * new chat with the agent picked now.
+ * All a question is asked with, as one text: its words, the chat (or the
+ * agent a new one is made with), the model and effort, its files, what it
+ * mentions, and what it is about. Two asks with the same are the same
+ * question.
  */
-export const questionKeyFor = (
-  unsent: Unsent | null,
-  question: string,
-  chatId?: string,
-  agentId?: string
-): string =>
-  unsent?.question === question &&
-  unsent.chatId === chatId &&
-  unsent.agentId === agentId
-    ? unsent.key
-    : crypto.randomUUID();
+export const askedWith = (asked: {
+  question: string;
+  chatId: string | undefined;
+  agentId: string | undefined;
+  model: string | undefined;
+  effort: string | undefined;
+  files: readonly string[];
+  mentions: readonly unknown[];
+  subject: unknown;
+}): string => JSON.stringify(asked);
+
+/**
+ * The key a question goes with (`ChatQuestion.key`): the one it failed to
+ * send with when it is asked again with all the same (`asked`), so core
+ * takes it once however often it is asked again, and answers the chat a
+ * first try made, which may have reached core with only its answer lost on
+ * the way; else a new one. Anything changed (another file, model, agent,
+ * chat) makes it a new question, which core takes as one.
+ */
+export const questionKeyFor = (unsent: Unsent | null, asked: string): string =>
+  unsent?.asked === asked ? unsent.key : crypto.randomUUID();
 
 /**
  * What the box to ask in needs: the text, model and effort, and asking in
@@ -151,11 +202,8 @@ export const useAsk = (
 ) => {
   const { identity } = useRouteContext({ from: "/_shell" });
   const { busy, failure, run } = useCoreAction();
-  // A question with files on its way is one large message, which a ping
-  // waits behind: it isn't checked meanwhile, or a slow upload would read
-  // as a dead connection.
-  const [uploading, setUploading] = useState(false);
-  const reconnecting = useReconnecting(running || (busy && !uploading));
+  const reconnecting = useReconnecting(busy || running);
+  const holdHeartbeat = useHoldHeartbeat();
   const [text, setText] = useState("");
   // Why dictating into the text stopped on its own, kept with it: the box
   // it stopped in may have gone (dictation.ts).
@@ -183,9 +231,7 @@ export const useAsk = (
   }
   // The box's files core already took, by chat: asking again in the same
   // chat names them rather than attaching them twice.
-  const attached = useRef(
-    new Map<string, { chatId: string; fileId: string }>()
-  );
+  const attached = useRef<Attached>(new Map());
   // The person's last choice in this browser, against what core offers
   // now: until they make one, the default model at its default effort.
   const [choice, setChoice] = useState<ModelChoice>(() =>
@@ -246,12 +292,21 @@ export const useAsk = (
       return false;
     }
     sending.current = true;
-    setUploading(carried.length > 0);
     const named = chatMentionsOf(mentioned);
     // A new chat starts with the agent picked, else the first one the
     // question mentions: the first agent, paused, never stops it.
     const startWith = agentId ?? named.find(({ kind }) => kind === "agent")?.id;
-    const key = questionKeyFor(unsent.current, question, chatId, startWith);
+    const asked = askedWith({
+      question,
+      chatId,
+      agentId: startWith,
+      model,
+      effort,
+      files: carried.map(({ id }) => id),
+      mentions: named,
+      subject,
+    });
+    const key = questionKeyFor(unsent.current, asked);
     const asking = async (session: Session): Promise<string> => {
       let id = chatId;
       if (id === undefined) {
@@ -263,23 +318,13 @@ export const useAsk = (
         ));
       }
       const askedIn = id;
-      const fileIds: string[] = [];
-      for (const { id: boxId, file } of carried) {
-        const known = attached.current.get(boxId);
-        if (known?.chatId === askedIn) {
-          fileIds.push(known.fileId);
-          continue;
-        }
-        // oxlint-disable-next-line no-await-in-loop -- one at a time, in the order they were added
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        // oxlint-disable-next-line no-await-in-loop -- one at a time, in the order they were added
-        const { id: fileId } = await session.chats.attachFile(askedIn, {
-          name: file.name,
-          bytes,
-        });
-        attached.current.set(boxId, { chatId: askedIn, fileId });
-        fileIds.push(fileId);
-      }
+      const fileIds = await attachAll(
+        session,
+        askedIn,
+        carried,
+        attached.current,
+        holdHeartbeat
+      );
       await session.chats.send(askedIn, {
         text: question,
         model,
@@ -295,7 +340,7 @@ export const useAsk = (
     sending.current = false;
     if (sent === undefined) {
       // The box keeps the question and says why it wasn't sent.
-      unsent.current = { key, question, chatId, agentId: startWith };
+      unsent.current = { key, question, asked };
       return false;
     }
     unsent.current = null;
