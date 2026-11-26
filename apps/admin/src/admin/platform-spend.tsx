@@ -244,13 +244,20 @@ const SplitBars = ({
   const thisMonth = formatMonth(overview.thisMonth.period);
   return (
     <Part aria-labelledby={id}>
-      <SectionHeader id={id} size="sm" title={label} variant="group" />
+      <SectionHeader
+        headingLevel={3}
+        id={id}
+        size="sm"
+        title={label}
+        variant="group"
+      />
       <ChartBarList
         aria-label={`${label}, ${thisMonth} and ${formatMonth(overview.lastMonth.period)}`}
         config={{
           thisMonth: { label: thisMonth },
           lastMonth: { label: formatMonth(overview.lastMonth.period) },
         }}
+        // A copy of each row: the chart takes plain records.
         data={rows.map((row) => ({ ...row }))}
         nameKey="label"
         sortOrder="none"

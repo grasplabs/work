@@ -71,7 +71,13 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from "@grasp-os/ui/components/toggle-group";
-import { colors, font, radius, space } from "@grasp-os/ui/lib/tokens.stylex";
+import {
+  colors,
+  font,
+  media,
+  radius,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
@@ -98,13 +104,31 @@ const allMonths = "all";
  */
 const mostParts = 5;
 
+// Under forced colours, every part in the text colour, as the chart draws its own.
+const FORCED = media.forcedColors;
+
 /** The chart's tones in its order, so a model's swatch is its colour in the bars. */
 const tones = stylex.create({
-  0: { fill: colors.chartPlain, backgroundColor: colors.chartPlain },
-  1: { fill: colors.chart2, backgroundColor: colors.chart2 },
-  2: { fill: colors.chart3, backgroundColor: colors.chart3 },
-  3: { fill: colors.chart4, backgroundColor: colors.chart4 },
-  4: { fill: colors.chart5, backgroundColor: colors.chart5 },
+  0: {
+    fill: { default: colors.chartPlain, [FORCED]: "CanvasText" },
+    backgroundColor: { default: colors.chartPlain, [FORCED]: "CanvasText" },
+  },
+  1: {
+    fill: { default: colors.chart2, [FORCED]: "CanvasText" },
+    backgroundColor: { default: colors.chart2, [FORCED]: "CanvasText" },
+  },
+  2: {
+    fill: { default: colors.chart3, [FORCED]: "CanvasText" },
+    backgroundColor: { default: colors.chart3, [FORCED]: "CanvasText" },
+  },
+  3: {
+    fill: { default: colors.chart4, [FORCED]: "CanvasText" },
+    backgroundColor: { default: colors.chart4, [FORCED]: "CanvasText" },
+  },
+  4: {
+    fill: { default: colors.chart5, [FORCED]: "CanvasText" },
+    backgroundColor: { default: colors.chart5, [FORCED]: "CanvasText" },
+  },
 });
 
 /** A tone by its place among the parts: past the fifth, the fifth's. */
@@ -338,18 +362,20 @@ const seriesOf = (split: Split, period: UsePeriod): Series[] =>
  */
 const OverTime = ({
   month,
+  monthly,
   split,
   covered,
   period,
 }: {
   month: string | null;
+  /** Month by month: every month together, while there is more than one. */
+  monthly: boolean;
   split: Split;
   covered: number | null;
   period: UsePeriod;
 }) => {
   const { view } = useOrganization();
   const { usage } = view;
-  const monthly = month === null && usage.months.length > 1;
   const series = seriesOf(split, period);
   // One row a bar: when it is, and what each part cost then.
   const data: Record<string, string | number>[] = monthly
@@ -575,6 +601,7 @@ const Used = () => {
   const [split, setSplit] = useState<Split>("model");
 
   const month = period === allMonths ? null : period;
+  const monthly = month === null && usage.months.length > 1;
   const now = usageIn(usage, month);
   const covered =
     contract.status === "signed" && contract.aiIncluded > 0
@@ -633,7 +660,7 @@ const Used = () => {
         <SectionHeader
           actions={<SplitToggle onChange={setSplit} value={split} />}
           description={
-            covered !== null && month === null
+            covered !== null && monthly
               ? `Against the ${euros(covered)} of AI use a month the contract covers`
               : undefined
           }
@@ -642,7 +669,13 @@ const Used = () => {
           title="What it cost, over time"
           variant="group"
         />
-        <OverTime covered={covered} month={month} period={now} split={split} />
+        <OverTime
+          covered={covered}
+          month={month}
+          monthly={monthly}
+          period={now}
+          split={split}
+        />
       </Part>
 
       {taken(now.total) ? (

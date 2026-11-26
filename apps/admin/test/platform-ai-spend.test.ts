@@ -173,6 +173,15 @@ describe("what Grasp's own AI features cost", () => {
     ];
 
     expect({
+      // This month's and last month's in all, as figures.
+      inAll: words(
+        html.slice(
+          html.indexOf('aria-label="Grasp’s own AI features in short"'),
+          html.indexOf("</ul>", html.indexOf("own AI features in short"))
+        )
+      )
+        .replace(/^[^>]*>/u, "")
+        .trim(),
       byFeature: barsText(html, "By feature"),
       byModel: barsText(html, "By model"),
       dollars: html.includes("US dollars at list prices"),
@@ -181,6 +190,7 @@ describe("what Grasp's own AI features cost", () => {
         html.slice(html.indexOf("Grasp’s own AI features")).includes(tag)
       ),
     }).toStrictEqual({
+      inAll: `${thisMonth} $3.55 ${lastMonth} $0.50`,
       byFeature: [
         `By feature, ${thisMonth} and ${lastMonth}`,
         "Transcription $2.00 $0.00",
