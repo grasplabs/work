@@ -63,7 +63,12 @@ export type ProviderReply =
       noUsage?: boolean;
       /** Prompt tokens written to a one-hour cache (Anthropic). */
       cacheWrite1h?: number;
-      /** The model declined to answer (Anthropic's `refusal` stop). */
+      /**
+       * The model declined to answer, as each API ends such an answer:
+       * Anthropic's `refusal` stop, chat completions' `content_filter`
+       * finish (OpenAI, OpenRouter, Mistral), and OpenAI's responses
+       * incomplete for its content filter.
+       */
       refused?: true;
       /**
        * Prompt tokens read from and written to the cache (Anthropic),
@@ -401,15 +406,21 @@ const chatCompletionEvents = (
   ];
 };
 
-const responsesEvents = ({
-  text,
-  toolCalls,
-  inputTokens,
-  outputTokens,
-  thinking,
+/** Why a response stopped short, as OpenAI's responses say it; none for one that completed. */
+const incompleteOf = ({
+  refused,
   truncated,
-  pause,
-}: Answer) => {
+}: Answer): "content_filter" | "max_output_tokens" | undefined => {
+  if (refused === true) {
+    return "content_filter";
+  }
+  return truncated === true ? "max_output_tokens" : undefined;
+};
+
+const responsesEvents = (answer: Answer) => {
+  const { text, toolCalls, inputTokens, outputTokens, thinking, pause } =
+    answer;
+  const incomplete = incompleteOf(answer);
   const message = { type: "message", id: "msg_1", role: "assistant" };
   const reasoning = { type: "reasoning", id: "rs_1" };
   const items = [
@@ -501,15 +512,19 @@ const responsesEvents = ({
       },
     ]),
     {
-      // Cut off at the output cap, as OpenAI ends such a response.
+      // Cut off at the output cap, or by the content filter, as OpenAI
+      // ends such a response.
       data: {
-        type: truncated === true ? "response.incomplete" : "response.completed",
+        type:
+          incomplete === undefined
+            ? "response.completed"
+            : "response.incomplete",
         response: {
           id: "resp_1",
-          status: truncated === true ? "incomplete" : "completed",
-          ...(truncated === true
-            ? { incomplete_details: { reason: "max_output_tokens" } }
-            : {}),
+          status: incomplete === undefined ? "completed" : "incomplete",
+          ...(incomplete === undefined
+            ? {}
+            : { incomplete_details: { reason: incomplete } }),
           usage: {
             input_tokens: inputTokens,
             output_tokens: outputTokens,

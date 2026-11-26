@@ -1,13 +1,16 @@
 import { Type } from "@earendil-works/pi-ai";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
+import { isContextOverflow } from "@earendil-works/pi-ai/utils/overflow";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { appIdSchema } from "@grasp-os/shared/ids";
+import type { ModelWait } from "@grasp-os/shared/models";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { aiModelsKind } from "../src/ai-model-choice.ts";
-import { models } from "../src/models.ts";
+import { modelFailureOf, models } from "../src/models.ts";
 import type { ModelCall } from "../src/models.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -624,6 +627,65 @@ describe("model gateway", { timeout: 30_000 }, () => {
     });
   });
 
+  it("fails as rate-limited, with the wait asked for, once waiting it out would take longer than a call waits on rate limits in all", async () => {
+    const { provider, providerEnv } = await withProvider(
+      [
+        {
+          status: 429,
+          errorType: "rate_limit_error",
+          headers: { "retry-after": "1" },
+        },
+        // A second wait past the minute a call waits in all.
+        {
+          status: 429,
+          errorType: "rate_limit_error",
+          headers: { "retry-after": "60" },
+        },
+      ],
+      { models: [mistral] }
+    );
+
+    const told = await models(providerEnv)
+      .call({
+        model: mistral,
+        input: "Hello.",
+        purpose: "chat.turn",
+        trigger: newPerson(),
+        work: work(),
+      })
+      .then(
+        () => "answered",
+        (error: unknown) => error
+      );
+
+    expect({ told, requests: provider.requests.length }).toMatchObject({
+      told: { code: "model.rate_limited", details: { retryAfterSeconds: 60 } },
+      requests: 2,
+    });
+  });
+
+  it.each([anthropic, mistral, openai])(
+    "fails a call %s's model declines as a refused request, never as an outage",
+    async (model) => {
+      const { providerEnv } = await withProvider(
+        [{ ...answer("I can't help with that."), refused: true }],
+        { models: [model] }
+      );
+
+      await expect(
+        outcome(
+          models(providerEnv).call({
+            model,
+            input: "Hello.",
+            purpose: "chat.turn",
+            trigger: newPerson(),
+            work: work(),
+          })
+        )
+      ).resolves.toBe("model.request_refused");
+    }
+  );
+
   it("tells a call whose last request was lost that its provider isn't answering, not that it was rate-limited before", async () => {
     const { providerEnv } = await withProvider(
       [
@@ -877,6 +939,12 @@ const firstWordsMs = async (
   await stream.result();
   return firstMs;
 };
+
+/** The text of what came of a streamed answer. */
+const textOf = ({ content }: AssistantMessage): string =>
+  content
+    .flatMap((block) => (block.type === "text" ? [block.text] : []))
+    .join("");
 
 describe("model gateway for agents", () => {
   beforeEach(makeWork);
@@ -1140,6 +1208,346 @@ describe("model gateway for agents", () => {
       outcome: "failed",
       status: 401,
       errorType: "authentication_error",
+    });
+  });
+
+  /** A stream's idle time, lowered from minutes for the tests. */
+  const idleMs = 400;
+
+  it.each([
+    ["sends nothing at all", { hang: true } as const, ""],
+    [
+      "goes silent after its first words",
+      {
+        ...answer("The first words, then nothing."),
+        // Never released: the provider says nothing more.
+        pause: { at: 9, until: Promise.withResolvers<boolean>().promise },
+      },
+      "The first",
+    ],
+  ])(
+    "fails a stream whose provider %s for too long as a failure of its own, never as a stop, and keeps what came",
+    async (_case, reply, kept) => {
+      const trigger = newPerson();
+      const { providerEnv } = await withProvider([reply], {
+        models: [anthropic],
+      });
+      const agent = await models({
+        ...providerEnv,
+        MODEL_STREAM_IDLE_MS: String(idleMs),
+      }).agent({
+        model: anthropic,
+        purpose: "chat.turn",
+        trigger,
+        work: work(),
+      });
+
+      const final = await agent
+        .stream(agent.model, withTool("Hello."))
+        .result();
+
+      expect({
+        stopReason: final.stopReason,
+        failure: modelFailureOf(final.errorMessage),
+        kept: textOf(final),
+      }).toStrictEqual({ stopReason: "error", failure: "model.timeout", kept });
+      const [event] = await auditedFor(trigger.userId, 1);
+      expect(event?.detail).toMatchObject({
+        outcome: "failed",
+        errorType: "timeout",
+      });
+    }
+  );
+
+  it("streams on for longer than its idle time in all, while the provider keeps sending", async () => {
+    const text = "One, two, three, four, five, six.";
+    // Each stop of the stream shorter than the idle time, all of them longer.
+    const gapMs = idleMs / 4;
+    const pause = [5, 10, 16, 22, 28, 33].map((at) => {
+      const gone = Promise.withResolvers<boolean>();
+      return {
+        at,
+        until: gone.promise,
+        reached: () => {
+          setTimeout(() => {
+            gone.resolve(true);
+          }, gapMs);
+        },
+      };
+    });
+    const { providerEnv } = await withProvider([{ ...answer(text), pause }], {
+      models: [anthropic],
+    });
+    const agent = await models({
+      ...providerEnv,
+      MODEL_STREAM_IDLE_MS: String(idleMs),
+    }).agent({
+      model: anthropic,
+      purpose: "chat.turn",
+      trigger: newPerson(),
+      work: work(),
+    });
+    const started = performance.now();
+
+    const final = await agent.stream(agent.model, withTool("Count.")).result();
+
+    expect({
+      stopReason: final.stopReason,
+      text: textOf(final),
+      longer: performance.now() - started > idleMs,
+    }).toStrictEqual({ stopReason: "stop", text, longer: true });
+  });
+
+  it.each([anthropic, mistral, openai])(
+    "ends a stream %s's model declines with the decline's code, never an outage, and keeps its words",
+    async (model) => {
+      const { providerEnv } = await withProvider(
+        [{ ...answer("I can't help with that part."), refused: true }],
+        { models: [model] }
+      );
+      const agent = await models(providerEnv).agent({
+        model,
+        purpose: "chat.turn",
+        trigger: newPerson(),
+        work: work(),
+      });
+
+      const final = await agent.stream(agent.model, withTool("Hm?")).result();
+
+      expect({
+        stopReason: final.stopReason,
+        failure: modelFailureOf(final.errorMessage),
+        kept: textOf(final),
+      }).toStrictEqual({
+        stopReason: "error",
+        failure: "model.declined",
+        kept: "I can't help with that part.",
+      });
+    }
+  );
+
+  it.each([
+    [
+      "OpenAI's flagged prompt",
+      openai,
+      400,
+      {
+        error: {
+          type: "invalid_request_error",
+          code: "invalid_prompt",
+          message: "Invalid prompt: your prompt was flagged.",
+        },
+      },
+    ],
+    [
+      "OpenRouter's moderation",
+      "openrouter/openai/gpt-5.4",
+      403,
+      {
+        error: {
+          code: 403,
+          message: "Your input was flagged.",
+          metadata: {
+            reasons: ["harassment"],
+            flagged_input: "…",
+            provider_name: "OpenAI",
+            model_slug: "openai/gpt-5.4",
+          },
+        },
+      },
+    ],
+  ])(
+    "ends a stream refused by %s as declined, never as a key refused",
+    async (_case, model, status, body) => {
+      const { providerEnv } = await withProvider([{ status, body }], {
+        models: [model],
+      });
+      const agent = await models(providerEnv).agent({
+        model,
+        purpose: "chat.turn",
+        trigger: newPerson(),
+        work: work(),
+      });
+
+      const final = await agent.stream(agent.model, withTool("Hm?")).result();
+
+      expect(modelFailureOf(final.errorMessage)).toBe("model.declined");
+    }
+  );
+
+  it.each([
+    [
+      anthropic,
+      {
+        type: "error",
+        error: {
+          type: "invalid_request_error",
+          message: "prompt is too long: 213462 tokens > 200000 maximum",
+        },
+      },
+    ],
+    [
+      openai,
+      {
+        error: {
+          type: "invalid_request_error",
+          code: "context_length_exceeded",
+          message: "Your input exceeds the context window of this model.",
+        },
+      },
+    ],
+    [
+      mistral,
+      {
+        object: "error",
+        type: "invalid_request_message_error",
+        message:
+          "Prompt contains 140000 tokens and 0 draft tokens, too large for model with 131072 maximum context length",
+      },
+    ],
+  ])(
+    "ends a stream %s refuses as past its window as too long, in words pi's compaction knows",
+    async (model, body) => {
+      const { providerEnv } = await withProvider([{ status: 400, body }], {
+        models: [model],
+      });
+      const agent = await models(providerEnv).agent({
+        model,
+        purpose: "chat.turn",
+        trigger: newPerson(),
+        work: work(),
+      });
+
+      const final = await agent.stream(agent.model, withTool("Hm?")).result();
+
+      expect({
+        failure: modelFailureOf(final.errorMessage),
+        // pi compacts the conversation and asks once more on this alone.
+        compacts: isContextOverflow(final),
+      }).toStrictEqual({ failure: "model.context_too_long", compacts: true });
+    }
+  );
+
+  it.each([
+    ["fails", { status: 503, errorType: "overloaded_error" }],
+    ["breaks off its answer", { ...answer("Half an answer"), cut: 4 }],
+  ])(
+    "ends a stream whose provider %s as its provider not answering",
+    async (_case, reply) => {
+      const { providerEnv } = await withProvider([reply], {
+        models: [anthropic],
+      });
+      const agent = await models(providerEnv).agent({
+        model: anthropic,
+        purpose: "chat.turn",
+        trigger: newPerson(),
+        work: work(),
+      });
+
+      const final = await agent.stream(agent.model, withTool("Hm?")).result();
+
+      expect(modelFailureOf(final.errorMessage)).toBe(
+        "model.provider_unavailable"
+      );
+    }
+  );
+
+  it("says while it waits on its provider's rate limit, and no longer once it got through", async () => {
+    const { providerEnv } = await withProvider(
+      [
+        {
+          status: 429,
+          errorType: "rate_limit_error",
+          headers: { "retry-after": "1" },
+        },
+        answer("Through."),
+      ],
+      { models: [mistral] }
+    );
+    const waits: (ModelWait | null)[] = [];
+    const agent = await models(providerEnv).agent(
+      {
+        model: mistral,
+        purpose: "chat.turn",
+        trigger: newPerson(),
+        work: work(),
+      },
+      () => [],
+      (wait) => {
+        waits.push(wait);
+      }
+    );
+
+    const final = await agent.stream(agent.model, withTool("Hi.")).result();
+
+    expect(textOf(final)).toBe("Through.");
+    expect(waits.at(0)).toStrictEqual({ kind: "rate_limited", seconds: 1 });
+    await vi.waitFor(() => {
+      expect(waits.at(-1)).toBeNull();
+    });
+  });
+
+  it("fails a stream as rate-limited, with the wait asked for, once waiting it out would take longer than a call waits in all", async () => {
+    const { provider, providerEnv } = await withProvider(
+      [
+        {
+          status: 429,
+          errorType: "rate_limit_error",
+          headers: { "retry-after": "1" },
+        },
+        {
+          status: 429,
+          errorType: "rate_limit_error",
+          headers: { "retry-after": "60" },
+        },
+      ],
+      { models: [mistral] }
+    );
+    const agent = await models(providerEnv).agent({
+      model: mistral,
+      purpose: "chat.turn",
+      trigger: newPerson(),
+      work: work(),
+    });
+
+    const final = await agent.stream(agent.model, withTool("Hi.")).result();
+
+    expect({
+      failure: modelFailureOf(final.errorMessage),
+      wait: final.errorMessage?.includes("Try again in 60 seconds"),
+      requests: provider.requests.length,
+    }).toStrictEqual({
+      failure: "model.rate_limited",
+      wait: true,
+      requests: 2,
+    });
+  });
+
+  it("says which of the organization's models answers instead, when its first refuses before anything streams", async () => {
+    const { providerEnv } = await withProvider(
+      [{ status: 401, errorType: "authentication_error" }, answer("Mistral.")],
+      { models: [anthropic, mistral] }
+    );
+    const waits: (ModelWait | null)[] = [];
+    const agent = await models(providerEnv).agent(
+      {
+        model: anthropic,
+        purpose: "chat.turn",
+        trigger: newPerson(),
+        work: work(),
+      },
+      () => [],
+      (wait) => {
+        waits.push(wait);
+      }
+    );
+
+    const final = await agent.stream(agent.model, withTool("Hi.")).result();
+
+    expect(textOf(final)).toBe("Mistral.");
+    // Over once the request is: told just after its last event.
+    await vi.waitFor(() => {
+      expect(waits).toStrictEqual([{ kind: "fallback", model: mistral }, null]);
     });
   });
 

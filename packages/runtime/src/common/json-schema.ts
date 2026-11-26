@@ -74,6 +74,9 @@ const scalarSchema = (descriptor: ValueDescriptor): JsonSchema | undefined => {
       // and `z` or a leap second (Zod does). Both are rare in what a model
       // writes, and `format` is an annotation most readers don't enforce.
       ...(descriptor.url === true ? { format: "iri" } : {}),
+      // Grasp's own name, which readers that don't know it pass over, and
+      // core checks by the same rule as `v` (`isPathSegment`).
+      ...(descriptor.segment === true ? { format: "segment" } : {}),
     };
   }
   if (descriptor.kind === "number") {

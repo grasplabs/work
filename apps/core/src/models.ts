@@ -17,6 +17,7 @@ import {
   getSupportedThinkingLevels,
 } from "@earendil-works/pi-ai/models";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
+import { isContextOverflow } from "@earendil-works/pi-ai/utils/overflow";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import {
   aiProviderIdSchema,
@@ -37,7 +38,7 @@ import {
   createAuditEvent,
 } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
-import { deadline } from "@grasp-os/shared/deadline";
+import { deadline, idleDeadline } from "@grasp-os/shared/deadline";
 import type { Deadline, Stopped } from "@grasp-os/shared/deadline";
 import type { ModelRole } from "@grasp-os/shared/deployment-config";
 import { appIdSchema, identifierSchema } from "@grasp-os/shared/ids";
@@ -53,6 +54,7 @@ import type {
   ModelEffort,
   ModelEfforts,
   ModelErrorCode,
+  ModelWait,
 } from "@grasp-os/shared/models";
 import {
   authoritySchema,
@@ -177,17 +179,46 @@ const answerTokens = (
 ): number => Math.min(call.maxTokens ?? defaultMaxTokens, usableAnswer(model));
 
 /**
- * How long a call may take, retries included, when it doesn't say; and the
- * most it may ask for.
+ * How long a call read whole (`call`) may take, retries included, when it
+ * doesn't say; and the most it may ask for, which is also the longest a
+ * streamed request (`agent`) may take in all: its grant to connect ends
+ * then (`streamCeilingMs`).
  */
 const defaultTimeoutMs = 3 * 60_000;
 const maxTimeoutMs = 15 * 60_000;
+
+/**
+ * How long a streamed request may go without a byte from its provider
+ * before it fails (`model.timeout`), from when it is sent: a healthy
+ * stream is never cut for how long it takes, only for going silent. Five
+ * minutes, as Codex waits on a stream (`stream_idle_timeout_ms`) and
+ * Node's fetch on a body (undici's `bodyTimeout`), which pi leaves a
+ * stream's stalls to: a model that thinks before it writes, such as
+ * OpenAI's at a high effort, may send nothing for minutes.
+ */
+const streamIdleMs = 5 * 60_000;
+
+/**
+ * The longest a streamed request may take in all, however much it sends:
+ * its grant to connect ends then (`notAfter`), well past any answer a
+ * request's token limit allows.
+ */
+const streamCeilingMs = maxTimeoutMs;
 
 /**
  * Retries for a request the provider refused for its rate (429), after
  * the wait it asked for.
  */
 const maxRetries = 2;
+
+/**
+ * The most a call waits on its providers' rate limits in all, from when it
+ * starts, its fallback models' included: a wait that would end later
+ * isn't waited, and the call fails as rate-limited with the wait the
+ * provider asked for. A wait the provider asks for past it is past what
+ * the SDKs honour too (OpenAI's and the AI SDK's 60 seconds).
+ */
+const rateLimitWaitMs = 60_000;
 
 /** The models the organization's calls may use now. */
 export interface ModelsNow {
@@ -284,8 +315,6 @@ const sessionShape = {
    * usefully give (`usableAnswer`), or refused for a call through a binding.
    */
   maxTokens: z.int().positive().optional(),
-  /** How long a request may take, in milliseconds, retries included. */
-  timeoutMs: z.int().positive().max(maxTimeoutMs).optional(),
   /**
    * How hard a model that thinks does so before it answers
    * ({@link thinkingOf}); {@link defaultModelEffort} without one.
@@ -389,9 +418,17 @@ const sessionShape = {
 const sessionSchema = z.strictObject(sessionShape);
 type Session = z.output<typeof sessionSchema>;
 
+/**
+ * How long a call read whole may take, in milliseconds, retries included.
+ * A streamed request (`agent`) takes none: it fails only once its
+ * provider goes silent (`streamIdleMs`).
+ */
+const timeoutMsSchema = z.int().positive().max(maxTimeoutMs).optional();
+
 const callSchema = z
   .strictObject({
     ...sessionShape,
+    timeoutMs: timeoutMsSchema,
     /** Instructions: the system prompt. */
     system: z.string().optional(),
     /** One message to answer: text, or JSON sent as its text. */
@@ -646,6 +683,11 @@ interface Route extends Admitted {
   reauthorize?: () => Promise<void>;
   /** Whether a refused request is sent again (`ModelCall.providerRetries`). */
   providerRetries?: boolean;
+  /**
+   * Told what the call waits on as it starts to (`ModelWait`), and `null`
+   * once it no longer does: a streamed request's person sees it.
+   */
+  onWait?: (wait: ModelWait | null) => void;
 }
 
 interface Request extends Route {
@@ -653,6 +695,8 @@ interface Request extends Route {
   signal: AbortSignal;
   /** When `signal` cuts the call off at the latest, in ms since the epoch. */
   endsAt: number;
+  /** The latest a wait on a rate limit may end (`waitsUntilOf`). */
+  waitsUntil: number;
   system: string | undefined;
   messages: Message[];
 }
@@ -708,6 +752,11 @@ interface ProviderRefusal {
    * kept as this flag alone, never the message.
    */
   outOfCredit: boolean;
+  /**
+   * Whether it says the provider's content policy turned the prompt away
+   * (`declinedOf`): kept as this flag alone, never what it quotes.
+   */
+  declined: boolean;
 }
 
 /**
@@ -742,6 +791,28 @@ const outOfCreditOf = (names: readonly unknown[], message: unknown): boolean =>
     (name) => typeof name === "string" && outOfCreditCodes.has(name)
   ) ||
   (typeof message === "string" && outOfCreditMessage.test(message));
+
+/**
+ * The codes providers refuse a prompt their content policy turns away by,
+ * before answering: OpenAI's `invalid_prompt` and the `content_filter` of
+ * Azure's and OpenAI-compatible endpoints.
+ */
+const declinedCodes: ReadonlySet<string> = new Set([
+  "invalid_prompt",
+  "content_filter",
+]);
+
+/**
+ * Whether a refusal's body says the content policy turned the prompt
+ * away: by one of its codes (`declinedCodes`), or as OpenRouter says its
+ * moderation flagged the input (a 403 whose `error.metadata` names the
+ * flagged input), which would otherwise read as a key refused.
+ */
+const declinedOf = (names: readonly unknown[], error: unknown): boolean =>
+  names.some((name) => typeof name === "string" && declinedCodes.has(name)) ||
+  (isRecord(error) &&
+    isRecord(error.metadata) &&
+    "flagged_input" in error.metadata);
 
 /** An identifier or a number, as a provider names its errors. */
 const errorCodeSchema = z.union([
@@ -780,15 +851,17 @@ const refusalOf = (text: string): ProviderRefusal => {
     identifierOf(parsed?.type) ?? identifierOf(nestedOf(parsed?.error, "type"));
   const code = codeOf(parsed?.code) ?? codeOf(nestedOf(parsed?.error, "code"));
   const { error } = parsed ?? {};
+  // Anthropic nests its own type under a top-level `error` type.
+  const names = [type, code, nestedOf(error, "type"), nestedOf(error, "code")];
   return {
     name: identifierOf(parsed?.name),
     type,
     code,
-    // Anthropic nests its own type under a top-level `error` type.
     outOfCredit: outOfCreditOf(
-      [type, code, nestedOf(error, "type"), nestedOf(error, "code")],
+      names,
       isRecord(error) ? error.message : parsed?.message
     ),
+    declined: declinedOf(names, error),
   };
 };
 
@@ -834,6 +907,13 @@ const rateLimitedSeconds = (headers: Headers, now = Date.now()): number => {
   return Math.min(mostSeconds, Math.max(leastSeconds, Math.ceil(seconds)));
 };
 
+/**
+ * The latest a call's waits on rate limits may end, as it starts: within
+ * its deadline (`endsAt`), and {@link rateLimitWaitMs} from now.
+ */
+const waitsUntilOf = (endsAt: number): number =>
+  Math.min(endsAt, Date.now() + rateLimitWaitMs);
+
 /** Waits `ms`, or until `signal` aborts, whichever comes first. */
 const pause = async (ms: number, signal: AbortSignal): Promise<void> => {
   if (signal.aborted) {
@@ -854,10 +934,28 @@ const hostOf = (input: Parameters<FetchFunction>[0]): string | undefined => {
   return URL.parse(href)?.hostname.toLowerCase();
 };
 
+/** `answered` as it is, but `onBytes` told of each part of its body as it comes. */
+const watchedBody = (answered: Response, onBytes: () => void): Response => {
+  if (answered.body === null) {
+    return answered;
+  }
+  const body = answered.body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform: (part, controller) => {
+        onBytes();
+        controller.enqueue(part);
+      },
+    })
+  );
+  return new Response(body, answered);
+};
+
 /**
  * Opens one request through the gateway: the model's answer as it streams
  * in, and the gateway's response once it came. pi reports a failed request
- * as a final error event instead of throwing.
+ * as a final error event instead of throwing. `onBytes` is told as each
+ * provider request is sent and as each part of its answer comes, for a
+ * deadline that waits for silence (`streamIdleMs`).
  */
 const open = async (
   route: Route,
@@ -865,8 +963,16 @@ const open = async (
   {
     signal,
     endsAt,
+    waitsUntil,
+    onBytes,
     cache,
-  }: { signal: AbortSignal; endsAt: number; cache?: RequestCache }
+  }: {
+    signal: AbortSignal;
+    endsAt: number;
+    waitsUntil: number;
+    onBytes?: () => void;
+    cache?: RequestCache;
+  }
 ) => {
   const { endpoint, call } = route;
   const response: GatewayResponse = {
@@ -907,6 +1013,7 @@ const open = async (
     try {
       // Only this request's own answer says whether it was rate-limited.
       response.rateLimited = undefined;
+      onBytes?.();
       answered = await endpoint.fetch(input, endpoint.tagged(init, id, endsAt));
     } catch (error) {
       // Not answered at all: down, unless its caller cut it off. It may
@@ -920,11 +1027,15 @@ const open = async (
     response.refusal = undefined;
     if (!answered.ok) {
       const refusal = refusalOf(await answered.clone().text());
-      const failure = failureOfResponse(
-        answered.status,
-        answered.status === 429 ? rateLimitedSeconds(answered.headers) : 0,
-        refusal.outOfCredit
-      );
+      // A prompt the content policy turned away is refused as itself,
+      // whatever its status: never a key refused, nor a rate limit.
+      const failure: TransportFailure = refusal.declined
+        ? { kind: "refused", status: answered.status }
+        : failureOfResponse(
+            answered.status,
+            answered.status === 429 ? rateLimitedSeconds(answered.headers) : 0,
+            refusal.outOfCredit
+          );
       response.failure = failure;
       // Only a rate limit is waited out: an account out of credit (a 429
       // too, at OpenAI) fails the same way however long it waits.
@@ -941,12 +1052,15 @@ const open = async (
     response.failure = undefined;
     response.requests.push("maybe_billed");
     response.answering = id;
-    return answered;
+    return onBytes === undefined ? answered : watchedBody(answered, onBytes);
   };
   // The gateway retries only a rate limit's refusal, which the provider made before
   // taking anything on, after the wait it asked for, and only while that
-  // wait ends before the call's deadline. Never a server error or a
-  // request that got no answer: those may have been taken on, and billed.
+  // wait ends before the call's deadline and within the most it waits on
+  // rate limits (`waitsUntil`): the SDKs' rule of a few retries that
+  // honour `retry-after`, held to a total, as OpenAI's guide asks. Never a
+  // server error or a request that got no answer: those may have been
+  // taken on, and billed. Whoever watches is told of each wait.
   const measured: FetchFunction = async (input, init) => {
     let answered = await sendOnce(input, init);
     for (
@@ -955,13 +1069,15 @@ const open = async (
       route.providerRetries !== false &&
       answered.status === 429 &&
       response.rateLimited !== undefined &&
-      Date.now() + response.rateLimited * 1000 < endsAt;
+      Date.now() + response.rateLimited * 1000 < waitsUntil;
       retry += 1
     ) {
       // oxlint-disable-next-line no-await-in-loop -- one after another, as asked
       await answered.body?.cancel();
+      route.onWait?.({ kind: "rate_limited", seconds: response.rateLimited });
       // oxlint-disable-next-line no-await-in-loop -- the wait the provider asked for
       await pause(response.rateLimited * 1000, signal);
+      route.onWait?.(null);
       // oxlint-disable-next-line no-await-in-loop -- one after another
       answered = await sendOnce(input, init);
     }
@@ -990,11 +1106,11 @@ const open = async (
 
 /** Sends one request through the gateway and waits for the whole answer. */
 const send = async (request: Request): Promise<Sent> => {
-  const { system, messages, signal, endsAt } = request;
+  const { system, messages, signal, endsAt, waitsUntil } = request;
   const { events, response } = await open(
     request,
     normalizeContext({ systemPrompt: system, messages }),
-    { signal, endsAt }
+    { signal, endsAt, waitsUntil }
   );
   const answer = await events.result();
   return { answer, ...response };
@@ -1116,6 +1232,48 @@ export const modelFailureOf = (
   modelErrors.codeOf({
     code: namedFailure.exec(errorMessage ?? "")?.groups?.code,
   }) ?? "model.failed";
+
+/**
+ * The provider's own stop reasons (pi's `rawStopReason`) that say the
+ * model declined to answer: Anthropic's `refusal` and its safety filter's
+ * `sensitive`, and the content filter of chat completions (OpenAI,
+ * OpenRouter, Mistral) and of OpenAI's responses. pi ends each as an
+ * error, its message free text.
+ */
+const declinedStops: ReadonlySet<string> = new Set([
+  "refusal",
+  "sensitive",
+  "content_filter",
+  "incomplete.content_filter",
+]);
+
+/**
+ * Why a failed request failed of itself, as opposed to its provider
+ * failing: the model declined to answer (`declinedStops`, or a refusal
+ * its content policy made before answering), or the conversation is past
+ * the model's context window (pi's `isContextOverflow`, which reads each
+ * provider's words for it, and which pi's compaction goes by too). Asking
+ * the same again gets the same. None for anything else.
+ */
+const answerFaultOf = ({
+  answer,
+  refusal,
+}: Pick<Sent, "answer" | "refusal">):
+  | "model.declined"
+  | "model.context_too_long"
+  | undefined => {
+  if (answer.stopReason !== "error") {
+    return undefined;
+  }
+  if (
+    refusal?.declined === true ||
+    (answer.rawStopReason !== undefined &&
+      declinedStops.has(answer.rawStopReason))
+  ) {
+    return "model.declined";
+  }
+  return isContextOverflow(answer) ? "model.context_too_long" : undefined;
+};
 
 /** How one request ended, as the audit log records it. */
 type Outcome =
@@ -1361,14 +1519,21 @@ const failureTroubles: Readonly<
  * (5xx, no answer, an answer that broke off, or the call's deadline
  * passed with a request out).
  * None for a call its caller cancelled, a refusal of the request itself,
- * or one on Grasp's key, whose features say so in their own words.
+ * an answer that failed of itself (`answerFaultOf`: a provider that
+ * answered with a refusal answered), or one on Grasp's key, whose
+ * features say so in their own words.
  */
 const troubleOf = (
   route: Route,
-  { failure, requests, answering }: GatewayResponse,
-  stopped: Stopped | undefined
+  sent: Sent,
+  stopped?: Stopped
 ): ProviderTrouble | undefined => {
-  if (route.way.credential !== "organization" || stopped === "cancelled") {
+  const { failure, requests, answering } = sent;
+  if (
+    route.way.credential !== "organization" ||
+    stopped === "cancelled" ||
+    (stopped === undefined && answerFaultOf(sent) !== undefined)
+  ) {
     return undefined;
   }
   if (stopped === "timeout") {
@@ -2122,19 +2287,26 @@ const answerCall = async <Output>(
       }
       // The provider refused the request itself (a 4xx other than its
       // key, credit or rate: a bad request, a prompt too long for the
-      // model, its content policy), on any key, and nothing cut it off:
-      // asking the same again gets the same. Worded and retried as a
-      // failed call wherever it reaches people (`model.failed`).
+      // model, its content policy), on any key, or answered with a
+      // refusal of its own (`answerFaultOf`: the model declined, or the
+      // prompt is past its window), and nothing cut it off: asking the
+      // same again gets the same. Worded and retried as a failed call
+      // wherever it reaches people (`model.failed`).
       //
       // Only here, a call that ends with an error: the streamed answers
-      // (`agent`) end with a message instead, whose missing code their
-      // readers take for exactly this (the interview words it "say it
-      // another way"; a chat, a failed answer), so naming a code there
-      // would change what people are told. Speech (`speak`) is Grasp's own
-      // voice on its own key, read by its own words. Neither is used by
-      // the Brain's work queue, which needs this code to tell an item's
-      // refused request from an outage.
-      if (sent.failure?.kind === "refused" && stopped === undefined) {
+      // (`agent`) end with a message instead, which names its own code
+      // for a decline or a window too small (`model.declined`,
+      // `model.context_too_long`) and none for any other refusal, whose
+      // readers take a missing code for exactly this (the interview words
+      // it "say it another way"; a chat, a failed answer). Speech
+      // (`speak`) is Grasp's own voice on its own key, read by its own
+      // words. Neither is used by the Brain's work queue, which needs
+      // this code to tell an item's refused request from an outage.
+      if (
+        (sent.failure?.kind === "refused" ||
+          answerFaultOf(sent) !== undefined) &&
+        stopped === undefined
+      ) {
         throw modelErrors.create("model.request_refused");
       }
       throw modelErrors.create("model.failed");
@@ -2222,6 +2394,7 @@ const callModel = async <Output>(
         ...route,
         signal: limit.signal,
         endsAt: limit.endsAt,
+        waitsUntil: waitsUntilOf(limit.endsAt),
         system:
           schema === undefined
             ? call.system
@@ -2293,6 +2466,50 @@ export const contextWindowOf = (model: string): number | undefined =>
   catalogWindowOf(model);
 
 /**
+ * What a stream ends with once its provider went silent for too long, or
+ * it ran past the longest a stream may take (`streamIdleMs`,
+ * `streamCeilingMs`).
+ */
+const streamTimeoutMessage =
+  "Your AI provider sent nothing for too long (model.timeout).";
+
+/**
+ * What a failed stream its deadline didn't end ends with: cancelled, as
+ * its caller cancelled it; else the code of what it failed of where it is
+ * known (`modelFailureOf` reads it back): a decline or a window too small
+ * (`answerFaultOf`), its provider's rate limit with the wait it asked
+ * for, or the provider's trouble; else the status and error type, which
+ * name no code (`model.failed`). A window too small is said in words pi's
+ * `isContextOverflow` knows, so pi compacts the conversation, where it
+ * has something to summarize, and asks once more before the turn fails
+ * of it: the provider's own words, which the gateway put in their place
+ * before, never let it.
+ */
+const streamFailureMessage = (
+  route: Route,
+  sent: Sent,
+  failure: Failure
+): string => {
+  if (failure.stopped !== undefined) {
+    return failureMessage(failure);
+  }
+  const fault = answerFaultOf(sent);
+  if (fault === "model.declined") {
+    return "The model declined to answer (model.declined).";
+  }
+  if (fault === "model.context_too_long") {
+    return "The prompt is too long for the model's context window (model.context_too_long).";
+  }
+  if (sent.rateLimited !== undefined) {
+    return `The model's provider is limiting requests for now (model.rate_limited). Try again in ${sent.rateLimited} seconds.`;
+  }
+  const trouble = troubleOf(route, sent);
+  return trouble === undefined
+    ? failureMessage(failure)
+    : troubleMessages[trouble];
+};
+
+/**
  * Streams one admitted request to `out`, event by event, and records it
  * before its last event: the loop sees an answer only once its audit event
  * is stored (`record`; its usage follows in the background). A failure
@@ -2329,19 +2546,30 @@ const relayEvents = async (
           : undefined;
       if (next !== undefined) {
         await auditFallback(env, route, next, response.failure);
+        route.onWait?.({ kind: "fallback", model: next.call.model });
         return next;
       }
-      const trouble = troubleOf(route, response, stopped);
-      let errorMessage =
-        trouble === undefined
-          ? failureMessage(failure)
-          : troubleMessages[trouble];
-      if (response.rateLimited !== undefined && stopped === undefined) {
-        errorMessage = `The model's provider is limiting requests for now (model.rate_limited). Try again in ${response.rateLimited} seconds.`;
+      const charged = chargedAnswer(route, sent);
+      if (stopped === "timeout") {
+        // A failure, never a stop someone asked for: pi ended it as
+        // aborted, as its signal was.
+        out.push({
+          type: "error",
+          reason: "error",
+          error: {
+            ...charged,
+            stopReason: "error",
+            errorMessage: streamTimeoutMessage,
+          },
+        });
+        return undefined;
       }
       out.push({
         ...event,
-        error: { ...chargedAnswer(route, sent), errorMessage },
+        error: {
+          ...charged,
+          errorMessage: streamFailureMessage(route, sent, failure),
+        },
       });
       return undefined;
     }
@@ -2378,10 +2606,20 @@ const relayEvents = async (
   return undefined;
 };
 
+/** {@link streamIdleMs}, or less where the env says (tests). */
+const streamIdleMsOf = (env: Pick<Env, "MODEL_STREAM_IDLE_MS">): number => {
+  const set = Number(env.MODEL_STREAM_IDLE_MS);
+  return Number.isInteger(set) && set > 0 && set < streamIdleMs
+    ? set
+    : streamIdleMs;
+};
+
 /**
  * One request of an agent loop: admitted by the deployment's rules as they
  * stand now (a refusal is audited, and reaches the loop in our words),
- * then sent and streamed to `out`.
+ * then sent and streamed to `out`, until its provider goes silent for too
+ * long (`streamIdleMs`), never for how long it streams, up to
+ * `streamCeilingMs`. `onWait` is told what it waits on meanwhile.
  */
 const relay = async (
   env: Env,
@@ -2391,7 +2629,8 @@ const relay = async (
   out: AssistantMessageEventStream,
   caller: AbortSignal | undefined,
   cache: RequestCache,
-  via: Via
+  via: Via,
+  onWait: Route["onWait"]
 ): Promise<void> => {
   if (caller?.aborted === true) {
     // Cancelled before it was sent: nothing to record.
@@ -2404,7 +2643,10 @@ const relay = async (
   }
   let route: Route | undefined = undefined;
   try {
-    route = await admit(env, session, via);
+    route = {
+      ...(await admit(env, session, via)),
+      ...(onWait === undefined ? {} : { onWait }),
+    };
   } catch (error) {
     const code = modelErrors.codeOf(error) ?? permissionErrors.codeOf(error);
     if (code === undefined) {
@@ -2417,7 +2659,8 @@ const relay = async (
     });
     return;
   }
-  const limit = deadline(session.timeoutMs ?? defaultTimeoutMs, caller);
+  const limit = idleDeadline(streamIdleMsOf(env), streamCeilingMs, caller);
+  const waitsUntil = waitsUntilOf(limit.endsAt);
   try {
     let current: Route | undefined = route;
     while (current !== undefined) {
@@ -2430,6 +2673,8 @@ const relay = async (
         await open(current, context, {
           signal: limit.signal,
           endsAt: limit.endsAt,
+          waitsUntil,
+          onBytes: limit.touch,
           cache,
         }),
         out,
@@ -2438,6 +2683,8 @@ const relay = async (
     }
   } finally {
     limit.clear();
+    // Whatever it waited on is over with the request.
+    onWait?.(null);
   }
 };
 
@@ -2453,10 +2700,11 @@ const relayOrFail = async (
   out: AssistantMessageEventStream,
   caller: AbortSignal | undefined,
   cache: RequestCache,
-  via: Via
+  via: Via,
+  onWait: Route["onWait"]
 ): Promise<void> => {
   try {
-    await relay(env, session, model, context, out, caller, cache, via);
+    await relay(env, session, model, context, out, caller, cache, via, onWait);
   } catch (error) {
     log.error("model.stream_failed", errorFields(error));
     // Ignored if the loop already has the request's last event.
@@ -2489,7 +2737,7 @@ const languagePattern = /^[a-z]{2}$/u;
 
 const speechSchema = z.strictObject({
   model: sessionShape.model,
-  timeoutMs: sessionShape.timeoutMs,
+  timeoutMs: timeoutMsSchema,
   purpose: sessionShape.purpose,
   trigger: sessionShape.trigger,
   provenance: sessionShape.provenance,
@@ -3636,6 +3884,7 @@ const agentModel = async (
   env: Env,
   fields: AgentSession,
   provenance: () => readonly string[],
+  onWait: Route["onWait"],
   via: Via = chosenVia
 ): Promise<AgentModel> => {
   const session = parseCall(sessionSchema, fields);
@@ -3668,7 +3917,8 @@ const agentModel = async (
           sessionId: options?.sessionId,
           retention: options?.cacheRetention,
         },
-        via
+        via,
+        onWait
       );
       return out;
     },
@@ -3683,12 +3933,15 @@ const agentModel = async (
  * when the provider refuses it before anything could be billed, and
  * records every request it makes, and every refusal, in the audit log. With a `schema`, the answer is JSON that matches it.
  *
- * `await models(env).agent({ model, purpose, trigger, work }, provenance)`
- * is the same for an agent loop: a model that streams and calls tools.
- * The session is refused up front, before the loop keeps or sends
+ * `await models(env).agent({ model, purpose, trigger, work }, provenance,
+ * onWait)` is the same for an agent loop: a model that streams and calls
+ * tools. The session is refused up front, before the loop keeps or sends
  * anything, and each request is admitted again by the rules as they stand
  * then (the context's restricted mode, what `provenance` says it has read
- * by then), sent and audited like a call's.
+ * by then), sent and audited like a call's. A request fails once its
+ * provider goes silent for too long, never for how long it streams, and
+ * `onWait` is told while one waits on a rate limit or another model
+ * answers instead (`ModelWait`).
  *
  * `await models(env).speak({ model, text, voice, language, purpose,
  * trigger, work }, signal)` has a speech model say a line, with Grasp's
@@ -3719,8 +3972,9 @@ export const models = (env: Env) => ({
     await callModel(env, call, { kind: "test", provider }),
   agent: async (
     session: AgentSession,
-    provenance: () => readonly string[] = () => []
-  ): Promise<AgentModel> => await agentModel(env, session, provenance),
+    provenance: () => readonly string[] = () => [],
+    onWait?: (wait: ModelWait | null) => void
+  ): Promise<AgentModel> => await agentModel(env, session, provenance, onWait),
   /**
    * The onboarding interview's own calls (onboarding/interview.ts,
    * story.ts): to the models fixed for it (src/platform-ai.ts), on
@@ -3732,7 +3986,7 @@ export const models = (env: Env) => ({
       call: ModelCall<Output>
     ): Promise<ModelAnswer<Output>> => await callModel(env, call, interviewVia),
     agent: async (session: AgentSession): Promise<AgentModel> =>
-      await agentModel(env, session, () => [], interviewVia),
+      await agentModel(env, session, () => [], undefined, interviewVia),
   },
   /**
    * Says a line. With `onAudio`, the line is asked for streamed: each

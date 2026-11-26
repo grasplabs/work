@@ -1,3 +1,4 @@
+import type { ConnectionOwner } from "@grasp-os/shared/connect";
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
@@ -8,6 +9,7 @@ import { z } from "zod";
 
 import { connectionOwnersOf } from "../connections.ts";
 import { resourceRunMailCalls, runMailStampClaims } from "../db/core/schema.ts";
+import { nativeMailTools } from "../native-tool-classes.gen.ts";
 
 // The runs a run's own mail starts, as its descendants. A run that mails
 // an address an email trigger receives (inbound-email.ts), or a mailbox a
@@ -110,14 +112,50 @@ export interface StampedCall {
   input: Json;
 }
 
-/** The native mail connectors' actions that send mail, or draft it to send. */
-const mailActions = new Set(["mail.send", "mail.createDraft"]);
+/**
+ * The input properties holding the addresses a native tool that mails
+ * someone mails, by its provider, then its name (its manifest's `mail`
+ * `recipients`, `nativeMailTools`): the sends and drafts core stamps.
+ */
+const mailSends: ReadonlyMap<
+  string,
+  ReadonlyMap<string, readonly string[]>
+> = new Map(
+  Object.entries(nativeMailTools).map(([provider, tools]) => [
+    provider,
+    new Map(
+      Object.entries(tools).flatMap(([tool, { recipients }]) =>
+        recipients.length > 0 ? [[tool, recipients] as const] : []
+      )
+    ),
+  ])
+);
 
-/** The native connectors whose mail actions core stamps. */
-const mailProviders = new Set(["microsoft", "google"]);
-
-/** The recipient fields of those actions' input, each a list of addresses. */
-const recipientFields = ["to", "cc", "bcc"] as const;
+/**
+ * The call's connection's owner and the recipient properties of `action`
+ * as its own provider declares them, if that provider is a native one
+ * that mails by it; none otherwise. A name no provider mails by is
+ * answered without asking connect whose the connection is.
+ */
+const mailingOf = async (
+  env: Env,
+  connectionId: string,
+  action: string
+): Promise<
+  { owner: ConnectionOwner; recipients: readonly string[] } | undefined
+> => {
+  if (![...mailSends.values()].some((tools) => tools.has(action))) {
+    return undefined;
+  }
+  const [owner] = await connectionOwnersOf(env, [connectionId]);
+  const recipients =
+    owner?.source === "native"
+      ? mailSends.get(owner.provider)?.get(action)
+      : undefined;
+  return owner === undefined || recipients === undefined
+    ? undefined
+    : { owner, recipients };
+};
 
 /** An address, alone. */
 const addressText =
@@ -126,6 +164,20 @@ const addressText =
 // `Array.isArray` doesn't narrow a readonly array type.
 const isJsonArray = (value: Json | undefined): value is readonly Json[] =>
   Array.isArray(value);
+
+/**
+ * The strings `value` holds, at any depth: a recipient property's
+ * addresses, whether a list of them or of objects that hold them.
+ */
+const stringsOf = (value: Json | undefined): string[] => {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (isJsonArray(value)) {
+    return value.flatMap(stringsOf);
+  }
+  return isRecord(value) ? Object.values(value).flatMap(stringsOf) : [];
+};
 
 /** `text` as an address, lower case; none if it isn't one. */
 const addressOf = (text: string) => {
@@ -145,8 +197,7 @@ const addressOf = (text: string) => {
  * the primary address it sends from, which may differ from its sign-in
  * name: M-new-2), the other addresses it receives mail at (its SMTP
  * aliases) and those it may send as (Google's verified send-as
- * addresses), as its provider said when it was connected (GRA-654); none
- * for a connection that isn't a native mail connector's.
+ * addresses), as its provider said when it was connected (GRA-654).
  *
  * Known gap: Microsoft 365 also takes another user's ID or UPN as the
  * mailbox (a shared mailbox named so), and sends from that mailbox's
@@ -155,19 +206,10 @@ const addressOf = (text: string) => {
  * hourly limit only: knowing another mailbox's addresses needs directory
  * access the connector doesn't ask for.
  */
-const sendersOf = async (
-  env: Env,
-  connectionId: string,
+const sendersOf = (
+  owner: ConnectionOwner,
   mailbox: Json | undefined
-): Promise<string[] | undefined> => {
-  const [owner] = await connectionOwnersOf(env, [connectionId]);
-  if (
-    owner === undefined ||
-    owner.source !== "native" ||
-    !mailProviders.has(owner.provider)
-  ) {
-    return undefined;
-  }
+): string[] => {
   const senders = [
     typeof mailbox === "string" ? mailbox : null,
     owner.accountName,
@@ -192,8 +234,8 @@ export interface StampedMail {
 const stampBytes = 16;
 
 /**
- * `call` as `run` sends it. For a native mail connector's send or draft
- * naming any address in its `to`, `cc` or `bcc`: a stamp recorded with
+ * `call` as `run` sends it. For a native tool's send or draft (its
+ * manifest's `mail` `recipients`) naming any address in those: a stamp recorded with
  * those recipients and its senders before the call leaves, the same one
  * each time its step calls again, which its message carries as a header
  * (`ConnectCall`'s `stamp`). Its input unchanged, always.
@@ -204,21 +246,22 @@ export const stampedMail = async (
   call: StampedCall
 ): Promise<StampedMail> => {
   const { input } = call;
-  if (!mailActions.has(call.action) || !isRecord(input)) {
+  if (!isRecord(input)) {
     return { input };
   }
-  const addresses = recipientFields.flatMap((field) => {
-    const value = input[field];
-    return isJsonArray(value)
-      ? value.flatMap((item) => {
-          const address =
-            typeof item === "string" ? addressOf(item) : undefined;
-          return address === undefined
-            ? []
-            : [`${address.local}@${address.domain}`];
-        })
-      : [];
-  });
+  const mailing = await mailingOf(env, call.connectionId, call.action);
+  if (mailing === undefined) {
+    // Not a native tool that mails someone: it puts no stamp on mail.
+    return { input };
+  }
+  const addresses = mailing.recipients.flatMap((field) =>
+    stringsOf(input[field]).flatMap((text) => {
+      const address = addressOf(text);
+      return address === undefined
+        ? []
+        : [`${address.local}@${address.domain}`];
+    })
+  );
   if (addresses.length === 0) {
     return { input };
   }
@@ -239,11 +282,7 @@ export const stampedMail = async (
       .get();
   let decided = await decidedOf();
   if (decided === undefined) {
-    const senders = await sendersOf(env, call.connectionId, input.mailbox);
-    if (senders === undefined) {
-      // Not a native mail connector's: its tool puts no stamp on mail.
-      return { input };
-    }
+    const senders = sendersOf(mailing.owner, input.mailbox);
     await db
       .insert(resourceRunMailCalls)
       .values({

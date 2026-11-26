@@ -12,6 +12,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { appFor } from "../src/apps.ts";
+import { personOf } from "../src/connections.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
@@ -33,6 +34,7 @@ import {
 } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
+import { mailConnection } from "./mail-connection.ts";
 import { configuredLimits, withQuotas } from "./quota-limits.ts";
 import { resumed, sleeping, stopped } from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
@@ -42,16 +44,19 @@ import { publishDefinition } from "./workflow-publishing.ts";
 
 // A workflow binding a native connector's operation (GRA-982): a host
 // catalog contract describes it by the connector's own JSON Schemas, which
-// use patterns no SDK descriptor holds. From the threat note on GRA-982,
-// the ways it can go wrong first:
-// - a schema no native connector makes, its pattern a backtracking one,
-//   run by core on a test run's fixture before any approval;
+// may use patterns and formats no SDK descriptor holds. From the threat
+// note on GRA-982, the ways it can go wrong first:
+// - a schema no native connector makes (a vendor's MCP server's), its
+//   pattern a backtracking one, run by core on a test run's fixture before
+//   any approval;
 // - a keyword core reads but doesn't enforce;
 // - JSON Schemas on a contract that isn't a connector's, or half of one;
 // - a native action's schemas under another operation's name.
 // Then that a native operation is published, approved, called through the
-// real connect against Microsoft Graph, its patterns enforced on what is
-// sent, and checked the same way in a test run.
+// real connect against Microsoft Graph, a path argument that isn't one
+// segment refused before it is sent, and checked the same way in a test
+// run, for a connector written with `v` too (a path argument held to
+// `v.string().segment()`, served as `format: "segment"`).
 
 const idp = mockIdp();
 
@@ -172,10 +177,14 @@ const jsonOf = (text: string): unknown => {
   return value;
 };
 
-/** `microsoft-365.mail@1`'s action `tool`, as connect serves it to `connectionId`. */
-const servedAction = async (connectionId: string, tool: string) => {
+/** `contract`'s action `tool`, as connect serves it to `connectionId`. */
+const servedAction = async (
+  connectionId: string,
+  tool: string,
+  contract = "microsoft-365.mail@1"
+) => {
   const served = await env.CONNECT.connectorContract({
-    contract: "microsoft-365.mail@1",
+    contract,
     connectionId,
   });
   const action = Object.values(served.actions).find(
@@ -186,14 +195,6 @@ const servedAction = async (connectionId: string, tool: string) => {
   }
   return { input: jsonOf(action.input), output: jsonOf(action.output) };
 };
-
-/** `schema` with every `pattern` in it replaced by `pattern`. */
-const withPattern = (schema: unknown, pattern: string): unknown =>
-  JSON.parse(
-    JSON.stringify(schema, (key, value: unknown) =>
-      key === "pattern" ? pattern : value
-    )
-  );
 
 /** The code a publish was refused with, and its issues. */
 const refusal = async (promise: Promise<unknown>) => {
@@ -348,10 +349,82 @@ const ran = async (
     : { status: run.status, code: run.error?.code };
 };
 
+/**
+ * A test run of workflow `id`'s draft `source`, by `by`, on `args` with
+ * its `fixtures`: how it ended.
+ */
+const testRunOf = async (by: Identity, id: string, source: string) => {
+  const { revision: base } = await workflowDraft(env, by, id);
+  const saved = await editWorkflowDraft(env, by, id, {
+    revision: base,
+    source,
+  });
+  expect(saved.problems).toStrictEqual([]);
+  return async (
+    args: Record<string, string>,
+    fixtures: Record<string, { result: unknown }>
+  ) => {
+    const { runId } = await startCandidateRun(env, by, id, {
+      revision: saved.revision,
+      args,
+      fixtures,
+    });
+    const run: WorkflowCandidateRun = await vi.waitFor(
+      async () => {
+        const found = await candidateRunFor(env, by, id, runId);
+        if (found.status === "starting" || found.status === "running") {
+          throw new Error(`Test run ${runId} is ${found.status}`);
+        }
+        return found;
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    return run.status === "completed"
+      ? { status: run.status, output: run.result }
+      : { status: run.status, code: run.error?.code };
+  };
+};
+
+/** A definition listing a board's items through binding `boards`. */
+const boardsDefinitionOf = (boards: string): string =>
+  JSON.stringify({
+    $schema: workflowSchemaUrl,
+    args: objectSchema({ board: { kind: "string" } }),
+    returns: objectSchema({ next: { kind: "string" } }),
+    result: { next: { $expr: "list.next" } },
+    permissions: { connections: { boards: { contract: boards } } },
+    steps: [
+      {
+        id: "list",
+        type: "call",
+        connection: "boards",
+        action: "boards.items.list",
+        args: { board: { $expr: "args.board" } },
+      },
+    ],
+  });
+
 describe("a workflow binding a native connector's operation", () => {
   it("publishes a connector's own JSON Schemas only when connect confirms they're exactly a native action's", async () => {
     const { admin, read, connectionId } = await nativeContract();
     const send = await servedAction(connectionId, "mail.send");
+    // A vendor's MCP server lists a reviewed read whose schema carries a
+    // catastrophic pattern. Connect serves no vendor schema with a pattern,
+    // so the read isn't served; the schema can only reach core published
+    // as it was listed.
+    const listed = {
+      type: "object",
+      properties: { attachment: { type: "string", pattern: "^(a+)+$" } },
+      required: ["attachment"],
+    };
+    const vendor = await mailConnection(
+      [],
+      [{ name: "mail.read", read: true }]
+    );
+    await vendor.serves([{ name: "mail.read", inputSchema: listed }]);
+    await expect(
+      servedAction(vendor.id, "mail.read", "composio.mail@1")
+    ).rejects.toThrow("doesn't serve that contract");
     const publish = async (
       operations: Record<
         string,
@@ -388,11 +461,12 @@ describe("a workflow binding a native connector's operation", () => {
       fields: {},
     });
     expect({
-      // Like the connector's, its pattern a catastrophic one.
+      // The vendor's schema as it listed it, its pattern a catastrophic one.
       backtracking: await publish({
-        "mail.readAttachment": {
-          ...exact,
-          input: enveloped(withPattern(read.input, "^(a+)+$")),
+        "mail.read": {
+          input: enveloped(listed),
+          output: enveloped({ type: "string" }),
+          readOnly: true,
         },
       }),
       // A keyword the check doesn't enforce.
@@ -491,7 +565,7 @@ describe("a workflow binding a native connector's operation", () => {
     });
   });
 
-  it("binds and calls it through connect, its patterns enforced on what is sent", async () => {
+  it("binds and calls it through connect, refusing a path argument that isn't one segment before it is sent", async () => {
     const { builder, workflow, mailbox } = await readingWorkflow();
     await attach(mailbox, "m1", {
       id: "a1",
@@ -503,15 +577,16 @@ describe("a workflow binding a native connector's operation", () => {
       message: "m1",
       attachment: "a1",
     });
-    // An attachment ID its pattern refuses: refused before it is sent.
-    const unpatterned = await ran(builder, workflow.id, {
+    // An attachment ID that climbs out of its segment: core's check of
+    // the call against the served schema refuses it before it is sent.
+    const traversing = await ran(builder, workflow.id, {
       mailbox,
       message: "m1",
       attachment: "a1/../../m2",
     });
-    expect({ read, unpatterned }).toStrictEqual({
+    expect({ read, traversing }).toStrictEqual({
       read: { status: "completed", output: { status: "due 2026-11-01" } },
-      unpatterned: { status: "failed", code: "workflow.call_invalid" },
+      traversing: { status: "failed", code: "workflow.call_invalid" },
     });
   });
 
@@ -617,12 +692,7 @@ describe("a workflow binding a native connector's operation", () => {
       builder,
       `native-${unique()}`
     );
-    const { revision: base } = await workflowDraft(env, builder, workflow.id);
-    const saved = await editWorkflowDraft(env, builder, workflow.id, {
-      revision: base,
-      source: definitionOf(key),
-    });
-    expect(saved.problems).toStrictEqual([]);
+    const testRun = await testRunOf(builder, workflow.id, definitionOf(key));
     const answer = {
       mailbox,
       messageId: "m1",
@@ -633,26 +703,11 @@ describe("a workflow binding a native connector's operation", () => {
       encoding: "text",
       content: "note",
     };
-    const tested = async (attachment: string, output: unknown) => {
-      const { runId } = await startCandidateRun(env, builder, workflow.id, {
-        revision: saved.revision,
-        args: { mailbox, message: "m1", attachment },
-        fixtures: { mail: { result: output } },
-      });
-      const run: WorkflowCandidateRun = await vi.waitFor(
-        async () => {
-          const found = await candidateRunFor(env, builder, workflow.id, runId);
-          if (found.status === "starting" || found.status === "running") {
-            throw new Error(`Test run ${runId} is ${found.status}`);
-          }
-          return found;
-        },
-        { timeout: 20_000, interval: 100 }
+    const tested = async (attachment: string, output: unknown) =>
+      await testRun(
+        { mailbox, message: "m1", attachment },
+        { mail: { result: output } }
       );
-      return run.status === "completed"
-        ? { status: run.status, output: run.result }
-        : { status: run.status, code: run.error?.code };
-    };
     expect(JSON.stringify(read.input)).toContain('"pattern"');
     expect({
       answered: await tested("a1", answer),
@@ -662,6 +717,59 @@ describe("a workflow binding a native connector's operation", () => {
       answered: { status: "completed", output: { status: "note" } },
       unpatterned: { status: "failed", code: "workflow.call_invalid" },
       misshapen: { status: "failed", code: "workflow.call_invalid" },
+    });
+  });
+
+  it("checks a test run's path argument as one segment, for a connector written with v", async () => {
+    const adminPerson = await signedInApi(idp, "admin");
+    const builderPerson = await signedInApi(idp, "builder");
+    const admin = identityOf(adminPerson.userId, "admin");
+    const builder = identityOf(builderPerson.userId, "builder");
+    const apiKey = `key-${unique()}`;
+    const { connectionId } = await env.CONNECT.connectWithKey({
+      person: await personOf(env, await adminPerson.api.whoami()),
+      provider: "sample-key",
+      scope: "shared",
+      key: apiKey,
+    });
+    const list = await servedAction(
+      connectionId,
+      "boards.items.list",
+      "sample-key.boards.items@1"
+    );
+    expect(JSON.stringify(list.input)).toContain('"format":"segment"');
+    expect(JSON.stringify(list.input)).not.toContain('"pattern"');
+    const key = `boards-${unique()}`;
+    await publishCatalogContract(env, admin, {
+      key,
+      kind: "connector",
+      operations: {
+        "boards.items.list": {
+          input: enveloped(list.input),
+          output: enveloped(list.output),
+          readOnly: true,
+        },
+      },
+    });
+    const workflow = await createWorkflowResource(
+      env,
+      builder,
+      `native-${unique()}`
+    );
+    const testRun = await testRunOf(
+      builder,
+      workflow.id,
+      boardsDefinitionOf(key)
+    );
+    const page = { boards: { result: { items: [], next: "c2" } } };
+    expect({
+      listed: await testRun({ board: "b1" }, page),
+      traversing: await testRun({ board: "b1/.." }, page),
+      batch: await testRun({ board: "$batch" }, page),
+    }).toStrictEqual({
+      listed: { status: "completed", output: { next: "c2" } },
+      traversing: { status: "failed", code: "workflow.call_invalid" },
+      batch: { status: "failed", code: "workflow.call_invalid" },
     });
   });
 });

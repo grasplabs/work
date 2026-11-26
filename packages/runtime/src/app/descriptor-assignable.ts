@@ -86,6 +86,9 @@ const enumAssignable = (
     ? values.every((value) => to.values.includes(value))
     : to.kind === "string" && values.every((value) => accepts(to, value));
 
+/** The formats a string holds only when set: one held to it keeps it. */
+const setFormats = ["datetime", "date", "url", "segment"] as const;
+
 /** The scalars with constraints to compare; undefined for others. */
 const scalarAssignable = (
   from: ValueDescriptor,
@@ -99,9 +102,9 @@ const scalarAssignable = (
       to.kind === "string" &&
       within(from, to) &&
       (from.email || !to.email) &&
-      (from.datetime === true || to.datetime !== true) &&
-      (from.date === true || to.date !== true) &&
-      (from.url === true || to.url !== true) &&
+      setFormats.every(
+        (format) => from[format] === true || to[format] !== true
+      ) &&
       (from.trim || !to.trim)
     );
   }

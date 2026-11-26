@@ -49,6 +49,11 @@ const promote = async (
   const panel = channel(page, name);
   await panel.getByLabel(`Release for ${name}`).selectOption(releaseId);
   await panel.getByRole("button", { name: "Promote" }).click();
+  // Every company on the channel moves: it asks first, naming the move.
+  const asked = page.getByRole("alertdialog", {
+    name: `Promote ${releaseId} to ${name}?`,
+  });
+  await asked.getByRole("button", { name: "Promote" }).click();
   await expect(panel.getByRole("link", { name: releaseId })).toBeVisible();
 };
 

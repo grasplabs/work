@@ -29,7 +29,7 @@ import {
   composioContract,
   composioContractPrefix,
 } from "./composio-contracts.ts";
-import { allowedTool } from "./connections.ts";
+import { allowedTool, reviewedMail } from "./connections.ts";
 import type { Connection } from "./connections.ts";
 import { connections } from "./db/schema.ts";
 import {
@@ -359,6 +359,47 @@ const propertiesOf = (schema: string | undefined): string[] | null => {
 };
 
 /**
+ * What core needs of a Composio connection's `action`: a read only as its
+ * admin allowed it, with the input its server lists now, and mail as
+ * Grasp's review says.
+ */
+const composioActionShape = async (
+  env: Env,
+  connection: Connection,
+  action: string
+): Promise<ActionShape> => {
+  const { provider } = connection;
+  const rule = allowedTool(connection, action);
+  if (rule === undefined) {
+    throw connectErrors.create("connect.action_not_found");
+  }
+  let inputs: string[] | null = null;
+  try {
+    const served = await composioContract(
+      env,
+      connection,
+      `${composioContractPrefix}.${provider}@1`
+    );
+    inputs = propertiesOf(
+      Object.hasOwn(served.actions, action)
+        ? served.actions[action]?.input
+        : undefined
+    );
+  } catch (error) {
+    // No tool of it can be served as a contract: its input is unknown.
+    if (connectErrors.codeOf(error) !== "connect.contract_not_found") {
+      throw error;
+    }
+  }
+  return {
+    readOnly: rule.read,
+    inputs,
+    provider,
+    ...(reviewedMail(provider, action) ? { mail: true as const } : {}),
+  };
+};
+
+/**
  * What core needs of `request`'s action before a chat's agent calls it
  * (`ActionShape`), by the same rules a call goes by: a Composio tool is a
  * read only as its admin allowed it, with the input its server lists now;
@@ -385,29 +426,7 @@ export const actionShape = async (
   }
   const { provider } = connection;
   if (connection.serverKind === "composio") {
-    const rule = allowedTool(connection, action);
-    if (rule === undefined) {
-      throw connectErrors.create("connect.action_not_found");
-    }
-    let inputs: string[] | null = null;
-    try {
-      const served = await composioContract(
-        env,
-        connection,
-        `${composioContractPrefix}.${provider}@1`
-      );
-      inputs = propertiesOf(
-        Object.hasOwn(served.actions, action)
-          ? served.actions[action]?.input
-          : undefined
-      );
-    } catch (error) {
-      // No tool of it can be served as a contract: its input is unknown.
-      if (connectErrors.codeOf(error) !== "connect.contract_not_found") {
-        throw error;
-      }
-    }
-    return { readOnly: rule.read, inputs, provider };
+    return await composioActionShape(env, connection, action);
   }
   if (connection.serverKind === "connector") {
     return await connectorActionShape(env, connection, action);
@@ -434,7 +453,12 @@ export const actionShape = async (
   if (declared === undefined) {
     throw connectErrors.create("connect.action_not_found");
   }
-  return { readOnly: declared.readOnly, inputs: [...declared.input], provider };
+  return {
+    readOnly: declared.readOnly,
+    inputs: [...declared.input],
+    provider,
+    ...(declared.mail === undefined ? {} : { mail: true as const }),
+  };
 };
 
 /** `text` (JSON) canonically, or undefined if it isn't JSON. */

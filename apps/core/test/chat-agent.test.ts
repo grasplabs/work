@@ -33,6 +33,7 @@ import {
   tooLargeResult,
 } from "../src/chat-agent.ts";
 import type { ChatAgent } from "../src/chat-agent.ts";
+import { returnedText } from "./agent-chat.ts";
 
 // The chat agent as a pi-durable extension, on a Harness of its own with a
 // fake provider and no Workspace: what the model is told and offered, the
@@ -471,8 +472,7 @@ describe("the chat agent's tools", () => {
     expect(chat.runs.opened).toStrictEqual(["run-1"]);
     expect(chat.runs.lines).toStrictEqual(["adding"]);
     const [result] = resultsIn(chat.requests[1] ?? []);
-    expect(result).toContain("adding");
-    expect(result).toContain("Returned:\n2");
+    expect(result).toBe(JSON.stringify({ logs: ["adding"], returned: 2 }));
   });
 
   it("hands on nothing of a run a revocation closed", async () => {
@@ -701,7 +701,7 @@ describe("what a chat can no longer read", () => {
     await chat.ask(
       questionContent("Find it", [], {
         runId: "recall-1",
-        text: "Returned:\nthe secret plan",
+        text: returnedText("the secret plan"),
       }),
       [chat.reply(says("It says secret"))]
     );
@@ -718,7 +718,7 @@ describe("what a chat can no longer read", () => {
     await chat.ask(
       questionContent("Find it", [], {
         runId: "recall-1",
-        text: "Returned:\nthe secret plan",
+        text: returnedText("the secret plan"),
       }),
       [
         chat.reply(call("executeCode", { code: returnsTwo })),

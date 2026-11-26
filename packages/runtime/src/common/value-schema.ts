@@ -151,6 +151,7 @@ const kindMethods = (descriptor: ValueDescriptor): object => {
       date: () => changed(descriptor, { date: true }),
       datetime: () => changed(descriptor, { datetime: true }),
       email: () => changed(descriptor, { email: true }),
+      segment: () => changed(descriptor, { segment: true }),
       trim: () => changed(descriptor, { trim: true }),
       url: () => changed(descriptor, { url: true }),
     };

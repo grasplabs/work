@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import type { ApiRequest } from "../../src/connector/api.ts";
 import {
+  attachedFiles,
+  attachments,
   auth,
+  contentAs,
   defineConnector,
   event,
   page,
@@ -16,10 +20,16 @@ import {
   sharedMcpServers,
 } from "../../src/connector/manifest.ts";
 import {
+  attachmentsMetaKey,
+  changeMetaKey,
+  confirmedMetaKey,
   effectKeyMetaKey,
   findMetaKey,
+  maxChangeBytes,
   notPerformedMetaKey,
   outcomeUnknownMetaKey,
+  provenanceMetaKey,
+  stampMetaKey,
 } from "../../src/connector/protocol.ts";
 import type { Connector } from "../../src/connector/server.ts";
 
@@ -36,6 +46,37 @@ const keyAuth = auth.apiKey({
   header: "x-api-key",
   account: { url: `https://${host}/v1/account`, id: "/id" },
 });
+
+/** A host template filled per connection, under the vendor's name. */
+const companyHost = "{company}.stock.test";
+
+/**
+ * A connector on `hosts` that signs in with OAuth 2.0, its account read by
+ * a lookup at the first, or from an ID token.
+ */
+const companySignIn =
+  (
+    hosts: string[],
+    hostsFrom?: Record<string, string>,
+    reads: "lookup" | "idToken" = "lookup"
+  ) =>
+  () =>
+    defineConnector({
+      name: "stock",
+      title: "Stock",
+      hosts,
+      auth: auth.oauth2({
+        hosts,
+        authorizeUrl: "https://auth.stock.test/authorize",
+        tokenUrl: "https://auth.stock.test/token",
+        scopes: { "stock:read": "Read stock" },
+        ...(hostsFrom === undefined ? {} : { hostsFrom }),
+        ...(reads === "lookup"
+          ? { account: { url: `https://${hosts[0]}/v1/account`, id: "/id" } }
+          : { idToken: { issuer: "https://auth.stock.test", subject: "sub" } }),
+      }),
+      tools: {},
+    });
 
 const Stock = v.object({ sku: v.string(), onHand: v.number().integer() });
 
@@ -685,6 +726,110 @@ describe("a connector's definition", () => {
     );
   });
 
+  it("sends its credential to its one host, and with several, only to those its sign-in names", () => {
+    const files = "files.stock.test";
+    expect(stock.manifest.credentialHosts).toStrictEqual([host]);
+    const several = (hosts?: string[]) => () =>
+      defineConnector({
+        name: "stock",
+        title: "Stock",
+        hosts: [host, files],
+        auth: auth.apiKey({
+          ...(hosts === undefined ? {} : { hosts }),
+          header: "x-api-key",
+          account: { url: `https://${host}/v1/account`, id: "/id" },
+        }),
+        tools: {},
+      });
+    expect(several()).toThrow("names those its credential goes to");
+    expect(several([host])().manifest.credentialHosts).toStrictEqual([host]);
+    expect(several(["evil.test"])).toThrow("only to hosts of the connector's");
+    // The account lookup carries the key: only where the key goes.
+    expect(several([files])).toThrow("one of the hosts the credential goes to");
+  });
+
+  it("takes a host set per connection as a template, and refuses one that isn't", () => {
+    const at = (template: string) => () =>
+      defineConnector({
+        name: "stock",
+        title: "Stock",
+        hosts: [host, template],
+        auth: auth.apiKey({
+          hosts: [host, template],
+          header: "x-api-key",
+          account: { url: `https://${template}/v1/account`, id: "/id" },
+        }),
+        tools: {},
+      });
+    expect(at("{host}")().manifest.credentialHosts).toStrictEqual([
+      host,
+      "{host}",
+    ]);
+    expect(at("{company}.stock.test")().manifest.hosts).toStrictEqual([
+      host,
+      "{company}.stock.test",
+    ]);
+    for (const template of [
+      "{company}.test",
+      "{company}.{region}.stock.test",
+      "{Company}.stock.test",
+      "{company}stock.test",
+      "x.{company}.stock.test",
+      // A template's stand-in, named as a fixed host.
+      "company.stock.test.invalid",
+      "{}",
+    ]) {
+      expect(at(template)).toThrow("Not a host, or a host template");
+    }
+    const twice = ["{company}.stock.test", "{company}.other.test"];
+    expect(() =>
+      defineConnector({
+        name: "stock",
+        title: "Stock",
+        hosts: twice,
+        auth: auth.apiKey({
+          hosts: twice,
+          header: "x-api-key",
+          account: {
+            url: "https://{company}.stock.test/v1/account",
+            id: "/id",
+          },
+        }),
+        tools: {},
+      })
+    ).toThrow("Each host template has a name of its own");
+  });
+
+  it("fills an OAuth sign-in's template under a fixed name from the token response with a lookup there, and refuses any other hostsFrom", () => {
+    expect(
+      companySignIn([companyHost], { [companyHost]: "/api_domain" })
+    ).not.toThrow();
+    const unfilled = "A host template is filled by an API key's sign-in";
+    const notOurs = "hostsFrom names only the connector's host templates";
+    const refused: [string[], Record<string, string> | undefined, string][] = [
+      [[companyHost], undefined, unfilled],
+      // A whole host is only an admin's to give, never a token response's.
+      [["{host}"], { "{host}": "/api_domain" }, unfilled],
+      [
+        [companyHost],
+        { [companyHost]: "/api_domain", "{region}.stock.test": "/region" },
+        notOurs,
+      ],
+      [
+        [companyHost, host],
+        { [companyHost]: "/api_domain", [host]: "/api_host" },
+        notOurs,
+      ],
+    ];
+    for (const [hosts, hostsFrom, refusal] of refused) {
+      expect(companySignIn(hosts, hostsFrom)).toThrow(refusal);
+    }
+    // An ID token's subject is the vendor's, whatever host the response names.
+    expect(
+      companySignIn([companyHost], { [companyHost]: "/api_domain" }, "idToken")
+    ).toThrow("A sign-in with hostsFrom reads its account with a lookup");
+  });
+
   it("refuses args that let any key through", () => {
     const open = tool({
       description: "Open",
@@ -942,6 +1087,7 @@ describe("a connector's definition", () => {
       mcp: { url: "https://mcp.tracker.test/mcp", registration: "dcr" },
       scopes: [],
       hosts: [],
+      credentialHosts: [],
       actions: {},
     });
   });
@@ -1023,9 +1169,20 @@ describe("a call of a tool", () => {
     });
   });
 
-  it("refuses a path parameter that would be no segment of its own, sending nothing", async () => {
+  it("refuses a path parameter that would be no segment of its own as the egress does, sending nothing", async () => {
     vendorAnswers(Response.json({ sku: "a", onHand: 1 }));
-    const values = ["..", ".", "", "urn:li:1", "50%", "a;b"];
+    const values = [
+      "..",
+      ".",
+      "",
+      "a1/..",
+      "urn:li:1",
+      "50%",
+      "a;b",
+      "$batch",
+      "Batch",
+      "a\uD800",
+    ];
     const results = await Promise.all(
       values.map(
         async (sku) =>
@@ -1037,10 +1194,18 @@ describe("a call of a tool", () => {
       )
     );
     expect({
-      refusals: results.map(({ isError, _meta }) => [isError, _meta]),
+      refusals: results.map(({ isError, structuredContent, _meta }) => ({
+        isError,
+        structuredContent,
+        _meta,
+      })),
       asked,
-    }).toStrictEqual({
-      refusals: values.map(() => [true, { [notPerformedMetaKey]: true }]),
+    }).toMatchObject({
+      refusals: values.map(() => ({
+        isError: true,
+        structuredContent: { error: { code: "egress_refused" } },
+        _meta: undefined,
+      })),
       asked: [],
     });
   });
@@ -1349,5 +1514,754 @@ describe("its MCP server", () => {
         error: { code: -32_602, message: "No such tool" },
       }))
     );
+  });
+});
+
+// Notes: tools that answer items and files, take files, and report what
+// they changed, as the old connector kit's tools could.
+
+const Note = v.object({ id: v.string(), text: v.string() });
+
+const FileAnswer = v.object({
+  name: v.string(),
+  contentType: v.string(),
+  encoding: v.enum(["text", "base64"]),
+  content: v.string(),
+});
+
+const notesTools = {
+  "notes.list": tool({
+    description: "Lists notes",
+    readOnly: true,
+    reach: "own",
+    routes: ["GET /v1/notes"],
+    args: {},
+    returns: page(Note),
+    handler: async (_args, api) =>
+      await api.get("/v1/notes", { returns: page(Note) }),
+  }),
+  "notes.get": tool({
+    description: "Gets one note",
+    readOnly: true,
+    reach: "own",
+    answersItem: true,
+    routes: ["GET /v1/notes/{id}"],
+    args: { id: v.string() },
+    returns: v.object({ id: v.string().optional(), text: v.string() }),
+    handler: async ({ id }, api) =>
+      await api.get("/v1/notes/{id}", {
+        path: { id },
+        returns: v.object({ id: v.string().optional(), text: v.string() }),
+      }),
+  }),
+  "notes.read": tool({
+    description: "Reads a note's file",
+    readOnly: true,
+    reach: "own",
+    answersFile: true,
+    routes: ["GET /v1/notes/{id}/file"],
+    redirects: { "GET /v1/notes/{id}/file": ["*.files.notes.test"] },
+    args: { id: v.string(), as: v.enum(["text", "base64"]) },
+    returns: FileAnswer,
+    handler: async ({ id, as }, api) => ({
+      name: "note.bin",
+      contentType: "application/octet-stream",
+      ...contentAs(
+        await api.get("/v1/notes/{id}/file", { path: { id }, as: "bytes" }),
+        as
+      ),
+    }),
+  }),
+  "notes.send": tool({
+    description: "Sends a note with files",
+    readOnly: false,
+    reach: "others",
+    takesFiles: true,
+    describe: {
+      title: "Send a note",
+      fields: [
+        { label: "Text", arg: "text" },
+        { label: "Files", arg: "attachments" },
+      ],
+    },
+    routes: ["POST /v1/notes"],
+    args: { text: v.string(), attachments },
+    returns: v.object({
+      id: v.string(),
+      files: v.array(v.object({ name: v.string(), bytes: v.number() })),
+      stamp: v.string().nullable(),
+      confirmed: v.boolean(),
+    }),
+    handler: async ({ text, attachments: named }, api, toolCall) => {
+      const files = attachedFiles(named, toolCall);
+      const { id } = await api.post("/v1/notes", {
+        body: { text, files: files.map(({ name }) => name) },
+        returns: v.object({ id: v.string() }),
+      });
+      return {
+        id,
+        files: files.map(({ name, bytes }) => ({
+          name,
+          bytes: bytes.byteLength,
+        })),
+        stamp: toolCall.stamp,
+        confirmed: toolCall.confirmed,
+      };
+    },
+  }),
+  "notes.edit": tool({
+    description: "Changes a note's text, reporting the change some times",
+    readOnly: false,
+    reach: "own",
+    routes: ["PUT /v1/notes/{id}"],
+    args: {
+      id: v.string(),
+      text: v.string(),
+      times: v.number().integer(),
+    },
+    returns: Note,
+    handler: async ({ id, text, times }, api, toolCall) => {
+      const note = await api.put("/v1/notes/{id}", {
+        path: { id },
+        body: { text },
+        returns: Note,
+      });
+      for (let time = 0; time < times; time += 1) {
+        toolCall.changed({ before: { text: "old" }, after: { text } });
+      }
+      return note;
+    },
+  }),
+};
+
+const notes = defineConnector({
+  name: "notes",
+  title: "Notes",
+  hosts: [host],
+  auth: keyAuth,
+  tools: notesTools,
+});
+
+const callNotes = async (
+  name: string,
+  args: Record<string, unknown>,
+  meta: Record<string, unknown> = {}
+) => await rpc(notes, "tools/call", { name, arguments: args, _meta: meta });
+
+/** The requests the vendor saw, answering each with `answer`'s next. */
+const vendorSees = (answer: () => Response): Request[] => {
+  const seen: Request[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    seen.push(new Request(input, init));
+    return await Promise.resolve(answer());
+  });
+  return seen;
+};
+
+const hexOf = async (bytes: Uint8Array): Promise<string> =>
+  [
+    ...new Uint8Array(
+      await crypto.subtle.digest("SHA-256", new Uint8Array(bytes))
+    ),
+  ]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+
+const base64Of = (bytes: Uint8Array): string =>
+  btoa(String.fromCodePoint(...bytes));
+
+/** A declaration as plain JavaScript could make it, past its types. */
+const pastTypes = (
+  base: Parameters<typeof tool>[0],
+  extra: Record<string, unknown>
+): ReturnType<typeof tool> => {
+  const declaration = { ...base };
+  for (const [name, value] of Object.entries(extra)) {
+    Reflect.set(declaration, name, value);
+  }
+  return tool(declaration);
+};
+
+describe("what a tool declares of items, files and confirmation", () => {
+  const withNotes = (each: ReturnType<typeof tool>) => () =>
+    defineConnector({
+      name: "notes",
+      title: "Notes",
+      hosts: [host],
+      auth: keyAuth,
+      tools: { "notes.one": each },
+    });
+
+  const aRead = {
+    description: "Reads",
+    readOnly: true,
+    reach: "own",
+    routes: ["GET /v1/notes/{id}"],
+    args: { id: v.string(), as: v.enum(["text", "base64"]), attachments },
+    returns: v.object({ id: v.string() }).extend(FileAnswer.shape),
+    handler: async () =>
+      await Promise.resolve({
+        id: "n1",
+        name: "a",
+        contentType: "text/plain",
+        encoding: "text" as const,
+        content: "",
+      }),
+  } as const;
+
+  const aWrite = {
+    ...aRead,
+    readOnly: false,
+    routes: ["GET /v1/notes/{id}", "PUT /v1/notes/{id}"],
+  } as const;
+
+  it("makes the manifest's card, items, files and redirects", () => {
+    const { actions } = notes.manifest;
+    expect({
+      send: actions["notes.send"],
+      get: actions["notes.get"]?.answersItem,
+      read: [actions["notes.read"]?.answersFile, actions["notes.read"]?.routes],
+    }).toMatchObject({
+      send: {
+        takesFiles: true,
+        describe: {
+          title: "Send a note",
+          fields: [
+            { label: "Text", input: "text" },
+            { label: "Files", input: "attachments" },
+          ],
+        },
+        contract: {
+          input: {
+            properties: {
+              attachments: {
+                type: "array",
+                items: { properties: { file: { type: "string" } } },
+              },
+            },
+          },
+        },
+      },
+      get: true,
+      read: [
+        true,
+        [
+          {
+            method: "GET",
+            host,
+            path: "/v1/notes/{id}/file",
+            redirects: ["*.files.notes.test"],
+          },
+        ],
+      ],
+    });
+  });
+
+  it("refuses a card that names an arg it doesn't have, or one twice", () => {
+    const naming = (fields: readonly { label: string; arg: string }[]) =>
+      withNotes(pastTypes(aWrite, { describe: { title: "Change", fields } }));
+    expect(naming([{ label: "Note", arg: "id" }])).not.toThrow();
+    expect(naming([{ label: "Who", arg: "owner" }])).toThrow(
+      "describes only its own input properties"
+    );
+    expect(
+      naming([
+        { label: "Note", arg: "id" },
+        { label: "Again", arg: "id" },
+      ])
+    ).toThrow("describes only its own input properties");
+  });
+
+  it("lets only a read answer an item or a file, and only a write take files", () => {
+    expect(withNotes(pastTypes(aWrite, { answersItem: true }))).toThrow(
+      "Only a read-only action answers an item"
+    );
+    expect(withNotes(pastTypes(aWrite, { answersFile: true }))).toThrow(
+      "Only a read-only action answers a file"
+    );
+    expect(withNotes(pastTypes(aRead, { takesFiles: true }))).toThrow(
+      "Only a write takes files"
+    );
+    expect(withNotes(pastTypes(aWrite, { takesFiles: true }))).not.toThrow();
+  });
+
+  it("refuses a write that takes files without exactly the SDK's attachments", () => {
+    const own = {
+      ...aWrite,
+      args: { id: v.string(), attachments: v.array(Note).optional() },
+    };
+    const none = { ...aWrite, args: { id: v.string() } };
+    expect(withNotes(pastTypes(own, { takesFiles: true }))).toThrow(
+      "takes files has the SDK's `attachments`"
+    );
+    expect(withNotes(pastTypes(none, { takesFiles: true }))).toThrow(
+      "takes files has the SDK's `attachments`"
+    );
+  });
+
+  it("refuses a read that answers a file without the shape contentAs makes", () => {
+    const textOnly = {
+      ...aRead,
+      args: { id: v.string(), as: v.enum(["text"]) },
+    };
+    const noContent = { ...aRead, returns: v.object({ id: v.string() }) };
+    expect(withNotes(pastTypes(aRead, { answersFile: true }))).not.toThrow();
+    expect(withNotes(pastTypes(textOnly, { answersFile: true }))).toThrow(
+      "answers a file takes `as`"
+    );
+    expect(withNotes(pastTypes(noContent, { answersFile: true }))).toThrow(
+      "answers a file takes `as`"
+    );
+  });
+
+  it("follows redirects only from its own GET routes, to redirect hosts", () => {
+    expect(() =>
+      pastTypes(aWrite, {
+        redirects: { "GET /v1/elsewhere": ["*.files.notes.test"] },
+      })
+    ).toThrow("redirects are for its own GET routes");
+    expect(() =>
+      pastTypes(aWrite, {
+        redirects: { "PUT /v1/notes/{id}": ["*.files.notes.test"] },
+      })
+    ).toThrow("redirects are for its own GET routes");
+    expect(
+      withNotes(
+        pastTypes(aWrite, {
+          redirects: { "GET /v1/notes/{id}": ["files.notes.test"] },
+        })
+      )
+    ).toThrow("Not a redirect host");
+  });
+});
+
+describe("a call of a tool that answers items and files", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("names what it read: each item's id, else the answer's own, else none", async () => {
+    const answers = [
+      {
+        items: [
+          { id: "n1", text: "a" },
+          { id: "n2", text: "b" },
+        ],
+        next: null,
+      },
+      { id: "n3", text: "c" },
+      { sku: "a", onHand: 1 },
+    ];
+    vendorSees(() => Response.json(answers.shift()));
+    const list = await callNotes("notes.list", {});
+    const item = await callNotes("notes.get", { id: "n3" });
+    const stockRead = await call("stock.get", { sku: "a" });
+    expect([list._meta, item._meta, stockRead._meta]).toStrictEqual([
+      { [provenanceMetaKey]: ["n1", "n2"] },
+      { [provenanceMetaKey]: ["n3"] },
+      { [provenanceMetaKey]: [] },
+    ]);
+  });
+
+  it("names a numeric id by its text, and nothing that isn't a finite number or a string", async () => {
+    const Deal = v.object({ id: v.number(), title: v.string() });
+    const deals = defineConnector({
+      name: "deals",
+      title: "Deals",
+      hosts: [host],
+      auth: keyAuth,
+      tools: {
+        "deals.list": tool({
+          description: "Lists deals",
+          readOnly: true,
+          reach: "company",
+          routes: ["GET /v1/deals"],
+          args: {},
+          returns: page(Deal),
+          handler: async (_args, api) =>
+            await api.get("/v1/deals", { returns: page(Deal) }),
+        }),
+        "deals.get": tool({
+          description: "Gets one deal",
+          readOnly: true,
+          reach: "company",
+          answersItem: true,
+          routes: ["GET /v1/deals/{id}"],
+          args: { id: v.string() },
+          returns: Deal,
+          handler: async ({ id }, api) =>
+            await api.get("/v1/deals/{id}", { path: { id }, returns: Deal }),
+        }),
+        "deals.find": tool({
+          description: "Finds a deal by its title",
+          readOnly: true,
+          reach: "company",
+          routes: ["GET /v1/deals/find"],
+          args: {},
+          returns: v.object({ id: v.boolean(), title: v.string() }),
+          handler: async (_args, api) =>
+            await api.get("/v1/deals/find", {
+              returns: v.object({ id: v.boolean(), title: v.string() }),
+            }),
+        }),
+      },
+    });
+    const callDeals = async (name: string, args: Record<string, unknown>) =>
+      await rpc(deals, "tools/call", { name, arguments: args, _meta: {} });
+    const answers = [
+      {
+        items: [
+          { id: 7, title: "a" },
+          { id: 1.5, title: "b" },
+        ],
+        next: null,
+      },
+      { id: 42, title: "c" },
+      { id: true, title: "d" },
+    ];
+    vendorSees(() => Response.json(answers.shift()));
+    const list = await callDeals("deals.list", {});
+    const item = await callDeals("deals.get", { id: "42" });
+    const found = await callDeals("deals.find", {});
+    expect([list._meta, item._meta, found._meta]).toStrictEqual([
+      { [provenanceMetaKey]: ["7", "1.5"] },
+      { [provenanceMetaKey]: ["42"] },
+      { [provenanceMetaKey]: [] },
+    ]);
+  });
+
+  it("fails a read that answers an item without naming exactly one", async () => {
+    vendorSees(() => Response.json({ text: "no id" }));
+    const unnamed = await callNotes("notes.get", { id: "n1" });
+    vi.restoreAllMocks();
+    vendorSees(() => Response.json({ id: "", text: "empty id" }));
+    const empty = await callNotes("notes.get", { id: "n1" });
+    expect([
+      [unnamed.isError, unnamed._meta],
+      [empty.isError, empty._meta],
+    ]).toStrictEqual([
+      [true, undefined],
+      [true, undefined],
+    ]);
+  });
+
+  it("answers a file's exact bytes as base64 or text, from a bytes answer", async () => {
+    const bytes = new Uint8Array([0, 255, 128, 10]);
+    vendorSees(() => new Response(bytes));
+    const base64 = await callNotes("notes.read", { id: "n1", as: "base64" });
+    const text = await callNotes("notes.read", { id: "n1", as: "text" });
+    expect([base64.structuredContent, text.structuredContent]).toStrictEqual([
+      {
+        name: "note.bin",
+        contentType: "application/octet-stream",
+        encoding: "base64",
+        content: base64Of(bytes),
+      },
+      {
+        error: {
+          code: "not_text",
+          message: "This isn't text: read it as base64",
+        },
+      },
+    ]);
+  });
+});
+
+describe("a call of a write that takes files", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const one = new TextEncoder().encode("one");
+  const two = new TextEncoder().encode("two!");
+
+  const entryOf = async (name: string, bytes: Uint8Array) => ({
+    name,
+    type: "text/plain",
+    size: bytes.byteLength,
+    sha256: await hexOf(bytes),
+  });
+
+  const send = async (
+    named: unknown[],
+    sent?: Record<string, string>,
+    meta: Record<string, unknown> = {}
+  ) =>
+    await callNotes(
+      "notes.send",
+      { text: "hi", attachments: named },
+      {
+        [effectKeyMetaKey]: key,
+        ...(sent === undefined ? {} : { [attachmentsMetaKey]: sent }),
+        ...meta,
+      }
+    );
+
+  it("gives the handler each file with its checked bytes, the stamp, and whether its person confirmed it", async () => {
+    const seen = vendorSees(() => Response.json({ id: "n1" }));
+    const stamp = "b".repeat(32);
+    const result = await send(
+      [await entryOf("one.txt", one), await entryOf("two.txt", two)],
+      {
+        [await hexOf(one)]: base64Of(one),
+        [await hexOf(two)]: base64Of(two),
+      },
+      { [stampMetaKey]: stamp, [confirmedMetaKey]: true }
+    );
+    expect({
+      body: await seen[0]?.text(),
+      result: result.structuredContent,
+      provenance: result._meta,
+    }).toStrictEqual({
+      body: JSON.stringify({ text: "hi", files: ["one.txt", "two.txt"] }),
+      result: {
+        id: "n1",
+        files: [
+          { name: "one.txt", bytes: 3 },
+          { name: "two.txt", bytes: 4 },
+        ],
+        stamp,
+        confirmed: true,
+      },
+      provenance: { [provenanceMetaKey]: [] },
+    });
+  });
+
+  it("refuses files that aren't exactly those its digests name, sending nothing", async () => {
+    const seen = vendorSees(() => Response.json({ id: "n1" }));
+    const entry = await entryOf("one.txt", one);
+    const results = await Promise.all([
+      send([entry], {}),
+      send([entry]),
+      send([entry], {
+        [entry.sha256]: base64Of(one),
+        [await hexOf(two)]: base64Of(two),
+      }),
+      send([entry], { [entry.sha256]: base64Of(two) }),
+      send([{ ...entry, size: 4 }], { [entry.sha256]: base64Of(one) }),
+      send([], { [entry.sha256]: base64Of(one) }),
+    ]);
+    expect({
+      results: results.map(({ isError, content }) => [isError, content]),
+      seen: seen.length,
+    }).toStrictEqual({
+      results: results.map(() => [
+        true,
+        [
+          {
+            type: "text",
+            text: "Invalid input: the attached files don't match",
+          },
+        ],
+      ]),
+      seen: 0,
+    });
+  });
+
+  it("refuses files sent to a tool that takes none", async () => {
+    const seen = vendorSees(() => Response.json({ id: "n1", text: "x" }));
+    const result = await callNotes(
+      "notes.edit",
+      { id: "n1", text: "x", times: 0 },
+      { [effectKeyMetaKey]: key, [attachmentsMetaKey]: {} }
+    );
+    expect([result.isError, result.content, seen.length]).toStrictEqual([
+      true,
+      [{ type: "text", text: "Invalid input: this tool takes no files" }],
+      0,
+    ]);
+  });
+});
+
+describe("a call of a write that reports its change", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const edit = async (text: string, times: number) =>
+    await callNotes(
+      "notes.edit",
+      { id: "n1", text, times },
+      { [effectKeyMetaKey]: key }
+    );
+
+  it("passes the change it reports on, for the audit", async () => {
+    vendorSees(() => Response.json({ id: "n1", text: "new" }));
+    const result = await edit("new", 1);
+    expect(result._meta).toStrictEqual({
+      [provenanceMetaKey]: [],
+      [changeMetaKey]: { before: { text: "old" }, after: { text: "new" } },
+    });
+  });
+
+  it("leaves the outcome unknown for a change reported twice or past the limit, once its write went out", async () => {
+    const seen = vendorSees(() => Response.json({ id: "n1", text: "x" }));
+    const twice = await edit("x", 2);
+    const large = await edit("x".repeat(maxChangeBytes), 1);
+    expect({
+      results: [
+        [twice.isError, twice._meta],
+        [large.isError, large._meta],
+      ],
+      sent: seen.map(({ method }) => method),
+    }).toStrictEqual({
+      results: [
+        [true, { [outcomeUnknownMetaKey]: true }],
+        [true, { [outcomeUnknownMetaKey]: true }],
+      ],
+      sent: ["PUT", "PUT"],
+    });
+  });
+});
+
+describe("what a request sends", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** A write whose one request is `request`, and what the vendor saw. */
+  const sending = async (
+    request: ApiRequest<undefined> & { as?: undefined }
+  ) => {
+    const seen = vendorSees(() => Response.json({}));
+    const connector = defineConnector({
+      name: "files",
+      title: "Files",
+      hosts: [host],
+      auth: keyAuth,
+      tools: {
+        "files.put": tool({
+          description: "Puts a file",
+          readOnly: false,
+          reach: "own",
+          routes: ["PUT /v1/files/{id}"],
+          args: {},
+          returns: v.object({}),
+          handler: async (_args, api) => {
+            await api.put("/v1/files/{id}", { ...request, path: { id: "f1" } });
+            return {};
+          },
+        }),
+      },
+    });
+    const result = await rpc(connector, "tools/call", {
+      name: "files.put",
+      arguments: {},
+      _meta: { [effectKeyMetaKey]: key },
+    });
+    return { result, seen };
+  };
+
+  const refusedBeforeSending = async (
+    request: ApiRequest<undefined> & { as?: undefined }
+  ) => {
+    const { result, seen } = await sending(request);
+    return [result.isError, result._meta, seen.length];
+  };
+  const refusal = [true, { [notPerformedMetaKey]: true }, 0];
+
+  it("adds its headers", async () => {
+    const { seen } = await sending({
+      headers: { "if-match": 'W/"etag 1"', prefer: "return=minimal" },
+      body: { a: 1 },
+    });
+    const [request] = seen;
+    expect([
+      request?.headers.get("if-match"),
+      request?.headers.get("prefer"),
+      request?.headers.get("content-type"),
+    ]).toStrictEqual(['W/"etag 1"', "return=minimal", "application/json"]);
+  });
+
+  it("refuses a header the egress or the body sets, or one that isn't a lowercase token with a visible value", async () => {
+    const names = [
+      "authorization",
+      "proxy-authorization",
+      "cookie",
+      "host",
+      "connection",
+      "content-length",
+      "content-type",
+      "transfer-encoding",
+      "te",
+      "upgrade",
+      "forwarded",
+      "x-forwarded-for",
+      "x-forwarded-host",
+      "x-http-method-override",
+      "x-original-url",
+      "x-rewrite-url",
+      "grasp-egress",
+      "If-Match",
+      "if match",
+      "",
+    ];
+    const values = ["a\r\nx-evil: 1", "a\nb", "tab\there", "é"];
+    const refusals = await Promise.all([
+      ...names.map(
+        async (name) => await refusedBeforeSending({ headers: { [name]: "1" } })
+      ),
+      ...values.map(
+        async (value) =>
+          await refusedBeforeSending({ headers: { "if-match": value } })
+      ),
+    ]);
+    expect(refusals).toStrictEqual([...names, ...values].map(() => refusal));
+  });
+
+  it("sends a string or bytes body as it is, under its media type", async () => {
+    const bytes = new Uint8Array([0, 255, 1]);
+    const html = await sending({
+      body: "<p>hi</p>",
+      contentType: 'text/html; charset="utf-8"',
+    });
+    const binary = await sending({
+      body: bytes,
+      contentType: "application/octet-stream",
+    });
+    const json = await sending({ body: "plain" });
+    expect([
+      html.seen[0]?.headers.get("content-type"),
+      await html.seen[0]?.text(),
+      binary.seen[0]?.headers.get("content-type"),
+      new Uint8Array((await binary.seen[0]?.arrayBuffer()) ?? []),
+      await json.seen[0]?.text(),
+    ]).toStrictEqual([
+      'text/html; charset="utf-8"',
+      "<p>hi</p>",
+      "application/octet-stream",
+      bytes,
+      '"plain"',
+    ]);
+  });
+
+  it("refuses bytes without a media type, a media type without a string or bytes body, and one that isn't a media type", async () => {
+    const malformed = [
+      "text",
+      "text/",
+      "/html",
+      "text/html; charset",
+      'text/html; charset="utf-8',
+      "text /html",
+      "text/html\r\nx-evil: 1",
+      "text/html; charset=a b",
+    ];
+    const refusals = await Promise.all([
+      refusedBeforeSending({ body: new Uint8Array([1]) }),
+      refusedBeforeSending({ contentType: "text/plain" }),
+      refusedBeforeSending({ body: { a: 1 }, contentType: "text/plain" }),
+      ...malformed.map(
+        async (contentType) =>
+          await refusedBeforeSending({ body: "x", contentType })
+      ),
+    ]);
+    expect(refusals).toStrictEqual([1, 2, 3, ...malformed].map(() => refusal));
+  });
+
+  it("refuses an answer read as bytes that also names returns", async () => {
+    const request = {};
+    Reflect.set(request, "as", "bytes");
+    Reflect.set(request, "returns", v.object({}));
+    await expect(refusedBeforeSending(request)).resolves.toStrictEqual(refusal);
   });
 });

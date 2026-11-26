@@ -275,6 +275,7 @@ describe("a shared connection reached through the company network", () => {
     const download = egressProps({
       connector: "sample-erp",
       hosts: [sampleErpHost],
+      credentialHosts: [sampleErpHost],
       routes: [
         {
           method: "GET",
@@ -283,7 +284,11 @@ describe("a shared connection reached through the company network", () => {
           redirects: ["*.storage.test"],
         },
       ],
-      credential: { header: "x-api-key", value: companyNetworkKey },
+      credential: {
+        header: "x-api-key",
+        value: companyNetworkKey,
+        secret: companyNetworkKey,
+      },
       companyNetwork: address,
     });
     const downloaded = await exports
