@@ -19,7 +19,6 @@ import {
   openLinkAs,
   participate,
   postedOnLink,
-  quick,
   signedInAs,
 } from "./interview-link.ts";
 import type { Device } from "./interview-link.ts";
@@ -143,11 +142,15 @@ const sayOf = async (response: Response): Promise<string | undefined> =>
     .events.flatMap((event) => ("turn" in event ? [event.turn.say] : []))
     .at(0);
 
-/** Calls the onboarding counted for `purpose` on `model`. */
-const callsFor = async (purpose: string, model: string): Promise<number> => {
+/**
+ * Calls the onboarding counted for `purpose`, on whichever model: an
+ * interview's lines and its notes run on two of Grasp's own
+ * (src/platform-ai.ts), a team's map on the organization's.
+ */
+const callsFor = async (purpose: string): Promise<number> => {
   const rows = await onboardingStore(env).usage();
   return rows
-    .filter((row) => row.purpose === purpose && row.model === model)
+    .filter((row) => row.purpose === purpose)
     .reduce((sum, { calls }) => sum + calls, 0);
 };
 
@@ -164,7 +167,7 @@ describe("the onboarding after a restart", { timeout: 60_000 }, () => {
       typed: true,
     };
     const before = await save(link, 0, progressOf([asked, answer]));
-    const counted = await callsFor("interviews", quick);
+    const counted = await callsFor("interviews");
 
     // The turn is under way, his line half written, when the object restarts.
     const reached = Promise.withResolvers<null>();
@@ -218,9 +221,8 @@ describe("the onboarding after a restart", { timeout: 60_000 }, () => {
       lines: kept?.progress?.lines.map(({ text }) => text),
       // The turn cut off is counted for what it took (his line, and the
       // line asked once more, which the cut stopped before it was sent),
-      // and the one asked again (his line and his notes): one model, the
-      // organization's, for both.
-      calls: (await callsFor("interviews", quick)) - counted,
+      // and the one asked again (his line and his notes).
+      calls: (await callsFor("interviews")) - counted,
     }).toStrictEqual({
       again: next,
       saved: [true, true, false],
@@ -317,7 +319,7 @@ describe("the onboarding after a restart", { timeout: 60_000 }, () => {
       inputTokens: 2000,
       outputTokens: 300,
     };
-    const counted = await callsFor("drawing", quick);
+    const counted = await callsFor("drawing");
 
     // The map is half written when the object restarts.
     // Noted as a flag, not a promise: what the object resolves goes on in
@@ -372,7 +374,7 @@ describe("the onboarding after a restart", { timeout: 60_000 }, () => {
       works: works.map(({ name }) => name),
       opened,
       openedAgain,
-      calls: (await callsFor("drawing", quick)) - counted,
+      calls: (await callsFor("drawing")) - counted,
     }).toStrictEqual({
       first: [ids.lea],
       dueAfterRestart: true,

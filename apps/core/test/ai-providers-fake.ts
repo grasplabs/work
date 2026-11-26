@@ -435,7 +435,8 @@ export const aiProvidersFake = () => {
     // The fake's lines are plain text, one code point to a character.
     // oxlint-disable-next-line typescript/no-misused-spread -- see above
     const characters = [...text];
-    const seconds = secondsPerCharacter;
+    // `secondsPerCharacter`, written out: the fake closes over nothing.
+    const seconds = 0.03;
     return Response.json(
       {
         audio_base64: btoa("\0".repeat(characters.length * 400)),
