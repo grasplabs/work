@@ -82,9 +82,10 @@ import { heardBudgets } from "./transcription.ts";
 //
 // Held with Grasp's ElevenLabs agent instead (`platformAi.liveInterview`),
 // open asks ElevenLabs for a conversation token with Grasp's key, through
-// connect, and answers the page the token with what Stephen is told and
-// says first, which the page sends as the agent's overrides; the page
-// starts the conversation with ElevenLabs's own SDK. Core doesn't read
+// connect, and answers the page the token and who the agent talks with,
+// which the page tells it as context; the page starts the conversation
+// with ElevenLabs's own SDK. The agent's prompt, first line, voice and
+// flow are its own, as its dashboard sets them: it takes no overrides. Core doesn't read
 // that conversation's transcript: on each answer the page sends the
 // conversation as it heard it (`said`), and every fact is checked against
 // their answers in it, as against Mistral's. Close has nothing to close
@@ -636,19 +637,53 @@ interface AgentOpening {
   asked: Extract<InterviewVoiceRequest, { action: "open" }>;
   seconds: number;
   voiceMark: string;
-  instructions: string;
-  firstMessage: string;
+  /** What the agent is told as the conversation begins (`agentContextOf`). */
+  context: string;
 }
 
 /**
+ * What Grasp's ElevenLabs agent is told as a conversation begins, as a
+ * contextual update: who it talks with, the language they chose and, on
+ * a resume, what was said before. Its prompt, its first line and its flow
+ * are the agent's own, as its dashboard sets them, which takes no
+ * overrides: this is context, never an instruction to it.
+ */
+const agentContextOf = (
+  context: TurnContext,
+  company: string,
+  asked: Extract<InterviewVoiceRequest, { action: "open" }>,
+  before: readonly VoiceLine[]
+): string =>
+  [
+    context.kind === "lead"
+      ? `You are talking with ${context.name}, who leads ${context.team === "" ? "a team" : context.team}${company === "" ? "" : ` at ${company}`}.`
+      : `You are talking with ${context.name}${context.team === "" ? "" : `, from ${context.team}`}${company === "" ? "" : ` at ${company}`}.`,
+    `They chose to talk in ${NAMED[asked.locale]}.`,
+    ...(before.length === 0
+      ? []
+      : [
+          asked.event === "add"
+            ? "They agreed to the summary before and came back to add or correct something."
+            : "They are back to an interview they left. Go on where it stood; don't start over.",
+          "The conversation before:",
+          ...before
+            .slice(-40)
+            .map(
+              (line) =>
+                `${line.from === "stephen" ? "You" : context.name}: ${line.text}`
+            ),
+        ]),
+  ].join("\n");
+
+/**
  * Opens a conversation with Grasp's ElevenLabs agent: a token for it,
- * asked with Grasp's key through connect, and what Stephen is told and
- * says first, which the page sends as the agent's overrides. The
- * listening held for it is given back when none could be had.
+ * asked with Grasp's key through connect, and what the agent is told as
+ * it begins (`agentContextOf`). The listening held for it is given back
+ * when none could be had.
  */
 const openAgent = async (
   { env, secretMark, account, requestId }: Omit<Asked, "ctx">,
-  { asked, seconds, voiceMark, instructions, firstMessage }: AgentOpening,
+  { asked, seconds, voiceMark, context }: AgentOpening,
   release: () => Promise<void>
 ): Promise<Response> => {
   const { agent } = platformAi;
@@ -706,9 +741,7 @@ const openAgent = async (
   const join: AgentJoin = {
     via: "elevenlabs",
     conversationToken: token.data.token,
-    prompt: instructions,
-    firstMessage,
-    language: asked.locale,
+    context,
     pass,
   };
   return Response.json(join, { headers: linkHeaders });
@@ -762,6 +795,21 @@ const open = async (
     await closeQuietly(env, earlier.session, requestId);
   }
   const before = asked.event === "start" ? [] : asked.before;
+  const release = async (): Promise<void> => {
+    await onboardingStore(env).releaseListening(who, seconds, heldOn);
+  };
+  if (liveInterviewOf(env) === "elevenlabs") {
+    return await openAgent(
+      { env, context, secretMark, account, requestId },
+      {
+        asked,
+        seconds,
+        voiceMark: voice.mark,
+        context: agentContextOf(context, company, asked, before),
+      },
+      release
+    );
+  }
   const said = asked.event === "start" ? context.kind : asked.event;
   const restated =
     said === "language"
@@ -776,16 +824,6 @@ const open = async (
     asked.locale
   );
   const firstMessage = welcomeOf(asked.locale, said, before, restated);
-  const release = async (): Promise<void> => {
-    await onboardingStore(env).releaseListening(who, seconds, heldOn);
-  };
-  if (liveInterviewOf(env) === "elevenlabs") {
-    return await openAgent(
-      { env, context, secretMark, account, requestId },
-      { asked, seconds, voiceMark: voice.mark, instructions, firstMessage },
-      release
-    );
-  }
   const { conversation } = platformAi;
   let answered: Response;
   try {

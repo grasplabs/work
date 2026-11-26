@@ -9,7 +9,6 @@ import {
 } from "./interview-links.ts";
 import type { StephenTurn } from "./interview-turn.ts";
 import { interviewLocaleSchema } from "./onboarding.ts";
-import type { InterviewLocale } from "./onboarding.ts";
 
 // An interview held as one live voice session (core's onboarding/voice.ts):
 // a conversation with Grasp's ElevenLabs agent, or a session at Mistral.
@@ -132,19 +131,18 @@ export interface MistralJoin {
 /**
  * A conversation with Grasp's ElevenLabs agent as the page starts it,
  * through ElevenLabs's own client SDK: a token core asked for with
- * Grasp's key, never the key, and what Stephen is told for this
- * conversation, which the page sends as the agent's overrides.
+ * Grasp's key, never the key, and who it talks with.
  */
 export interface AgentJoin {
   via: "elevenlabs";
   /** What the page starts the conversation with: it holds a few minutes. */
   conversationToken: string;
-  /** Who Stephen is, how the interview goes and where it stands: the agent's prompt for this conversation. */
-  prompt: string;
-  /** What he says first. */
-  firstMessage: string;
-  /** The language they talk in. */
-  language: InterviewLocale;
+  /**
+   * Who the agent talks with, the language they chose and, on a resume,
+   * what was said before: told to it as context as the conversation
+   * begins. Its prompt and first line are its own.
+   */
+  context: string;
   /** What the page sends back with each answer and the close. */
   pass: string;
 }
