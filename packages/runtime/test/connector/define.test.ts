@@ -10,7 +10,6 @@ import {
   tool,
   v,
 } from "../../src/connector/connector.ts";
-import { connectorManifestSchema } from "../../src/connector/manifest.ts";
 import {
   connectorManifestSchema,
   shadowingConnectors,
