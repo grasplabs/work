@@ -447,22 +447,31 @@ const runsByDay = (rows: readonly Row[]) => {
     .map((each) => ({ ...each, day: formatDay(each.day) }));
 };
 
+/** What the runs chart says over it: how many, or why there are none to draw. */
+const runsLine = (sharing: number, done: number, failed: number): string => {
+  if (sharing === 0) {
+    return "No organization’s runs are counted: none shares them now.";
+  }
+  const at = `at the ${sharing} ${plural(sharing, "organization", "organizations")} that share their runs`;
+  if (done + failed === 0) {
+    return `No workflow ran in the last 30 days, ${at}.`;
+  }
+  const share = Math.round((failed / (done + failed)) * 1000) / 10;
+  return `${done} done and ${failed} failed (${share}%) in the last 30 days, ${at}.`;
+};
+
 const Runs = ({ rows }: { rows: Row[] }) => {
   const data = runsByDay(rows);
+  const sharing = rows.filter(
+    ({ summary }) =>
+      summary?.activity !== null && summary?.activity !== undefined
+  ).length;
   const done = data.reduce((sum, day) => sum + day.done, 0);
   const failed = data.reduce((sum, day) => sum + day.failed, 0);
-  const share =
-    done + failed === 0
-      ? 0
-      : Math.round((failed / (done + failed)) * 1000) / 10;
   return (
     <section {...stylex.props(styles.part)}>
       <SectionHeader
-        description={
-          done + failed === 0
-            ? "No workflow ran at any organization in the last 30 days."
-            : `${done} done and ${failed} failed (${share}%) in the last 30 days, at every organization that shares its runs.`
-        }
+        description={runsLine(sharing, done, failed)}
         headingLevel={2}
         size="sm"
         title="Workflow runs"
@@ -550,6 +559,34 @@ const Progressed = ({ row }: { row: Row }) => {
       </span>
     </span>
   );
+};
+
+/** How far it has come, in words, for a card (`Progressed`). */
+const progressWords = (row: Row): string => {
+  const { summary } = row;
+  if (summary === null) {
+    return missingWords(row);
+  }
+  const { known, threshold } = summary.onboarding;
+  if (phaseOf(summary.onboarding) !== "live") {
+    return `${known}% of ${threshold}% known`;
+  }
+  const { activity } = summary;
+  if (activity === null) {
+    return missingWords(row);
+  }
+  const { workflowsLive, appsLive, agentsOn } = activity;
+  return `${workflowsLive} ${plural(workflowsLive, "workflow", "workflows")} live, ${appsLive} ${plural(appsLive, "App", "Apps")}, ${agentsOn} ${plural(agentsOn, "agent", "agents")} on`;
+};
+
+/** What it waits on first, and how many more, in words, for a card (`Next`). */
+const nextWords = (row: Row): string => {
+  const [first] = row.needs;
+  if (first === undefined) {
+    return "Nothing waits on Grasp";
+  }
+  const more = needCount(row.needs) - first.count;
+  return more > 0 ? `${needText(first)}, and ${more} more` : needText(first);
 };
 
 /** Why its AI spend isn't there: not set up, its release doesn't report it, or not read. */
@@ -754,7 +791,7 @@ const organizationColumns = (spend: SpendRead): DataColumn<Row>[] => [
     id: "progress",
     head: "Progress",
     cell: (row) => <Progressed row={row} />,
-    fact: () => null,
+    fact: progressWords,
   },
   {
     id: "use",
@@ -787,10 +824,7 @@ const organizationColumns = (spend: SpendRead): DataColumn<Row>[] => [
     head: "Next",
     cell: (row) => <Next row={row} />,
     wrap: true,
-    fact: (row) =>
-      row.needs[0] === undefined
-        ? "Nothing waits on Grasp"
-        : needText(row.needs[0]),
+    fact: nextWords,
   },
 ];
 
