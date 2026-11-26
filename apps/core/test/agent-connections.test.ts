@@ -1,4 +1,6 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import { applyPartial } from "@grasp-os/shared/chat";
+import type { ChatPartial, ChatUpdate } from "@grasp-os/shared/chat";
 import { connectErrors } from "@grasp-os/shared/connect";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { env } from "cloudflare:workers";
@@ -16,6 +18,7 @@ import {
   model,
   readOutside,
   says,
+  transcript,
 } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -23,7 +26,7 @@ import { chooseAudience } from "./brain-audiences.ts";
 import { heldFor } from "./held-in-connect.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection, mailWithSearch } from "./mail-connection.ts";
-import { fakeProvider } from "./model-provider.ts";
+import { answeringProvider, fakeProvider } from "./model-provider.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
 
@@ -208,6 +211,73 @@ describe("a chat's connections", setUpTime, () => {
     expect(first).toMatch(/<untrusted-[\w-]{22}>/u);
     expect(readAgain).toStrictEqual(read);
     expect(second).not.toBe(first);
+  });
+
+  it("show the person the model's answer without the marking's tags it copied, as it streams and once kept", async () => {
+    const { person, mail, chat, grant } = await setUp();
+    await grant(mail.id, "MAIL");
+    const search = codeStep(
+      'export default async (self, env) => (await env.connections.call("MAIL", "mail.search", { query: "invoice" })).output;'
+    );
+    // The answer copies the run's tags, and stops halfway into the first.
+    const paused = Promise.withResolvers<boolean>();
+    const reached = Promise.withResolvers<boolean>();
+    await answeringProvider((requests) => {
+      if (requests.length === 1) {
+        return search;
+      }
+      const tag = /<(?<tag>untrusted-[\w-]{22})>/u.exec(
+        JSON.stringify(requests.at(-1)?.body)
+      )?.groups?.tag;
+      const text = `Found it:\n<${tag}>\n- INV-7\n</${tag}>`;
+      return {
+        ...says(text),
+        pause: {
+          at: "Found it:\n<untr".length,
+          until: paused.promise,
+          reached: () => {
+            reached.resolve(true);
+          },
+        },
+      };
+    });
+    // Each text the chat showed of the answer streaming in.
+    const shown: string[] = [];
+    let partial: ChatPartial | null = null;
+    await chat.stub.watch(
+      chat.chat.id,
+      person.userId,
+      null,
+      async (update: ChatUpdate) => {
+        partial = applyPartial(partial, update.partial);
+        if (partial !== null && partial.text !== "") {
+          shown.push(partial.text);
+        }
+        await Promise.resolve();
+      }
+    );
+
+    const answered = chat.ask("Find the mail about the invoice.");
+    await reached.promise;
+    // Streamed up to the tag, and the tag's beginning held back.
+    await vi.waitFor(
+      () => {
+        expect(shown.at(-1)).toBe("Found it:\n");
+      },
+      { timeout: 10_000, interval: 50 }
+    );
+    paused.resolve(true);
+    await answered;
+
+    const kept = await transcript(chat.stub, chat.chat.id);
+    const answer = kept.findLast((message) => message.role === "assistant");
+    expect({
+      kept: answer?.content,
+      shown: shown.filter((text) => text.includes("<")),
+    }).toStrictEqual({
+      kept: [{ type: "text", text: "Found it:\n\n- INV-7\n" }],
+      shown: [],
+    });
   });
 
   it("hand the model what a failing tool said as that connection's data, and keep the marking whole when the run's output is cut", async () => {
