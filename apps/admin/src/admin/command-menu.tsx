@@ -5,6 +5,7 @@
  * (commands.tsx), asking first when it can't be undone.
  */
 
+import type { AdminCommand } from "@grasp-os/shared/admin-command";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -14,21 +15,31 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@grasp-os/app-kit/components/alert-dialog";
-import { Button } from "@grasp-os/app-kit/components/button";
+} from "@grasp-os/ui/components/alert-dialog";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@grasp-os/app-kit/components/dropdown-menu";
-import type { AdminCommand } from "@grasp-os/shared/admin-command";
-import { MoreHorizontalIcon } from "lucide-react";
+} from "@grasp-os/ui/components/dropdown-menu";
+import { EllipsisIcon, Icon } from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
 import { CommandFailure, useCommand } from "./commands.tsx";
 import type { Confirm } from "./commands.tsx";
+
+const styles = stylex.create({
+  // The button at the row's end, why a command didn't apply under it.
+  menu: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: space["1"],
+  },
+});
 
 /** One command in a row's menu. */
 export interface CommandMenuItem {
@@ -58,38 +69,34 @@ export const CommandMenu = ({
     return null;
   }
   return (
-    <span className="flex flex-col items-end gap-1">
+    <span {...stylex.props(styles.menu)}>
       <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <Button
-              aria-label={label}
-              disabled={busy}
-              size="icon-sm"
-              variant="ghost"
-            />
-          }
-        >
-          <MoreHorizontalIcon />
+        <DropdownMenuTrigger asChild>
+          <Button
+            aria-label={label}
+            disabled={busy}
+            size="icon-sm"
+            variant="ghost"
+          >
+            <Icon icon={EllipsisIcon} />
+          </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56">
-          <DropdownMenuGroup>
-            {items.map((item) => (
-              <DropdownMenuItem
-                key={item.words}
-                onClick={() => {
-                  if (item.confirm === undefined) {
-                    void give(item.command);
-                  } else {
-                    setAsking(item);
-                  }
-                }}
-                variant={item.confirm === undefined ? "default" : "destructive"}
-              >
-                {item.words}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuGroup>
+        <DropdownMenuContent align="end">
+          {items.map((item) => (
+            <DropdownMenuItem
+              key={item.words}
+              onSelect={() => {
+                if (item.confirm === undefined) {
+                  void give(item.command);
+                } else {
+                  setAsking(item);
+                }
+              }}
+              variant={item.confirm === undefined ? "default" : "destructive"}
+            >
+              {item.words}
+            </DropdownMenuItem>
+          ))}
         </DropdownMenuContent>
       </DropdownMenu>
       <AlertDialog
