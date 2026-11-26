@@ -46,7 +46,8 @@ type ParentNode = DefaultTreeAdapterTypes.ParentNode;
 /**
  * Elements whose content a browser never shows: what a page runs or is
  * styled with, its head and title, what stands in for scripts, frames,
- * objects, media and widgets, a list of suggestions. A template's content
+ * objects, media and widgets, a list of suggestions, a list to pick from
+ * (which shows one option of all it holds, as a widget). A template's content
  * is outside the tree already.
  */
 const unread: ReadonlySet<string> = new Set([
@@ -63,6 +64,7 @@ const unread: ReadonlySet<string> = new Set([
   "canvas",
   "object",
   "datalist",
+  "select",
   "meter",
   "progress",
   "rp",

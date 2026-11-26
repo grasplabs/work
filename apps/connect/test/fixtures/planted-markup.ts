@@ -72,7 +72,7 @@ export const plantedHtml: Readonly<
     shown: "Due Friday noon\nOwner\nSam",
   },
   neverShown: {
-    html: `<noscript>${plantedInstruction}</noscript><template><p>${plantedInstruction}</p></template><iframe>${plantedInstruction}</iframe><datalist><option>${plantedInstruction}</option></datalist><div popover>${plantedInstruction}</div><object>${plantedInstruction}</object><progress>${plantedInstruction}</progress><meter>${plantedInstruction}</meter><p>${shownText}</p>`,
+    html: `<noscript>${plantedInstruction}</noscript><template><p>${plantedInstruction}</p></template><iframe>${plantedInstruction}</iframe><datalist><option>${plantedInstruction}</option></datalist><div popover>${plantedInstruction}</div><select><option>Yes</option><option>${plantedInstruction}</option></select><object>${plantedInstruction}</object><progress>${plantedInstruction}</progress><meter>${plantedInstruction}</meter><p>${shownText}</p>`,
     shown: shownText,
   },
   // A closed `details` shows its summary alone.
