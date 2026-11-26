@@ -3014,10 +3014,6 @@ msgstr "Ein Upload ins Brain ist fehlgeschlagen"
 msgid "and {more} more"
 msgstr "und {more} weitere"
 
-#: src/onboarding/documents-step.tsx
-msgid "And if you have files lying around that explain how you work, you can drop them in here. Rough drafts are just as welcome. One thing though: leave out anything about a single person, that’s not what I’m here for."
-msgstr "Und wenn du Dateien hast, die erklären, wie ihr arbeitet, kannst du sie hier ablegen. Grobe Entwürfe sind genauso willkommen. Nur eins: Lass alles weg, was nur eine einzelne Person betrifft, dafür bin ich nicht da."
-
 #: src/apps/app-data.tsx
 msgid "And more."
 msgstr "Und weitere."
@@ -11428,8 +11424,8 @@ msgid "Next week"
 msgstr "Nächste Woche"
 
 #: src/onboarding/sources-step.tsx
-msgid "Next, I’d like to understand how the work actually gets done. Most of that is written down somewhere, in handbooks, procedures or how-tos. Show me where those live, and I’ll only read what you choose to share with me."
-msgstr "Als Nächstes möchte ich verstehen, wie die Arbeit wirklich gemacht wird. Das meiste davon steht irgendwo geschrieben, in Handbüchern, Abläufen oder Anleitungen. Zeig mir, wo die liegen, und ich lese nur, was du mit mir teilst."
+msgid "Next, I’d like to understand how the work actually gets done. Most of it lives in the tools your team already uses: shared drives, Teams channels and wikis, full of the files and pages people work from every day. Point me to the ones you use, and I’ll only read what you choose to share with me."
+msgstr "Als Nächstes möchte ich verstehen, wie die Arbeit wirklich gemacht wird. Das meiste davon steckt in den Tools, die dein Team schon nutzt: geteilte Laufwerke, Teams-Kanäle und Wikis, voller Dateien und Seiten, mit denen alle jeden Tag arbeiten. Zeig mir, welche ihr nutzt, und ich lese nur, was du mit mir teilst."
 
 #: src/apps/field-editor.tsx
 #: src/inbox/json-fields.tsx
@@ -13968,10 +13964,6 @@ msgstr "Preis"
 #: src/drafts/share-with-team.tsx
 msgid "Problems"
 msgstr "Probleme"
-
-#: src/onboarding/sources-step.tsx
-msgid "Procedures, handbooks, how-tos. Connect where they live, and I’ll only read what you share with me."
-msgstr "Abläufe, Handbücher, Anleitungen. Verbinden Sie die Orte, an denen sie liegen, und ich lese nur, was Sie mit mir teilen."
 
 #: src/brain/memories-page.tsx
 msgctxt "a kind of thing the Brain remembers"
@@ -18102,6 +18094,10 @@ msgstr "Die Beispieldaten passen nicht zur Änderung"
 msgid "The export didn't work. Try again."
 msgstr "Der Export hat nicht funktioniert. Versuchen Sie es erneut."
 
+#: src/onboarding/sources-step.tsx
+msgid "The files, pages and folders your team works from. Connect the tools they’re in, and I’ll only read what you share with me."
+msgstr "Die Dateien, Seiten und Ordner, mit denen Ihr Team arbeitet. Verbinden Sie die Tools, in denen sie liegen, und ich lese nur, was Sie mit mir teilen."
+
 #: src/onboarding/review-parts.tsx
 msgid "The first way: {way}"
 msgstr "Die erste Art: {way}"
@@ -18737,6 +18733,10 @@ msgstr "Dieses Gespräch lässt sich nicht öffnen"
 #: src/interview/composer.tsx
 msgid "This interview went on in another window. You now see that one."
 msgstr "Dieses Gespräch ging in einem anderen Fenster weiter. Sie sehen jetzt dieses."
+
+#: src/onboarding/documents-step.tsx
+msgid "This is a good moment to give me some context. A process description, an onboarding guide, a price list or even a rough draft helps me understand what you’re dealing with every day. The more I know, the better my questions to your team, and the more useful everything I give back. Just leave out anything about a single person."
+msgstr "Das ist ein guter Moment, mir etwas Kontext zu geben. Eine Prozessbeschreibung, eine Einarbeitungsmappe, eine Preisliste oder auch ein grober Entwurf hilft mir zu verstehen, womit ihr jeden Tag zu tun habt. Je mehr ich weiß, desto besser meine Fragen an dein Team, und desto nützlicher alles, was ich zurückgebe. Lass nur alles weg, was um eine einzelne Person geht."
 
 #: src/onboarding/leads-step.tsx
 msgid "This is how I understand your organization. I’ll talk to each team lead first, so nobody is caught off guard. Have a quick look whether the right people lead the right teams, and which teams should take part."
