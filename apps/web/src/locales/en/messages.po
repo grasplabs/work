@@ -41,6 +41,11 @@ msgstr "{0, plural, one {# found} other {# found}}"
 msgid "{0, plural, one {# thing that was said in it goes with it.} other {# things that were said in it go with it.}}"
 msgstr "{0, plural, one {# thing that was said in it goes with it.} other {# things that were said in it go with it.}}"
 
+#. placeholder {0}: missing.length
+#: src/onboarding/leads-step.tsx
+msgid "{0, plural, one {Not on the list yet} other {# addresses not on the list yet}}"
+msgstr "{0, plural, one {Not on the list yet} other {# addresses not on the list yet}}"
+
 #. placeholder {0}: team.name
 #. placeholder {1}: formatList(ledBy)
 #: src/onboarding/leads-step.tsx
@@ -56,6 +61,11 @@ msgstr "{0} actions"
 #: src/onboarding/company-step.tsx
 msgid "{0} didn't connect"
 msgstr "{0} didn't connect"
+
+#. placeholder {0}: suiteNames[from]
+#: src/onboarding/company-step.tsx
+msgid "{0} is connected"
+msgstr "{0} is connected"
 
 #. placeholder {0}: countOn(allowed, ofThis)
 #. placeholder {1}: ofThis.length
@@ -400,6 +410,7 @@ msgstr "{count, plural, one {# part that works behind the pages} other {# parts 
 msgid "{count, plural, one {# person in the team} other {# people in the team}}"
 msgstr "{count, plural, one {# person in the team} other {# people in the team}}"
 
+#: src/onboarding/company-step.tsx
 #: src/settings/teams.tsx
 msgid "{count, plural, one {# person} other {# people}}"
 msgstr "{count, plural, one {# person} other {# people}}"
@@ -423,6 +434,10 @@ msgstr "{count, plural, one {# run} other {# runs}}"
 #: src/brain/brain.ts
 msgid "{count, plural, one {# team, with its roles} other {# teams, with their roles}}"
 msgstr "{count, plural, one {# team, with its roles} other {# teams, with their roles}}"
+
+#: src/onboarding/company-step.tsx
+msgid "{count, plural, one {# team} other {# teams}}"
+msgstr "{count, plural, one {# team} other {# teams}}"
 
 #: src/drafts/share-with-team.tsx
 msgid "{count, plural, one {# test} other {# tests}}"
@@ -1278,6 +1293,10 @@ msgstr "{people, plural, one {Also give the # person in {projectName} access?} o
 #: src/connections/recommended-apps.tsx
 msgid "{people, plural, one {Asked for by # person} other {Asked for by # people}}"
 msgstr "{people, plural, one {Asked for by # person} other {Asked for by # people}}"
+
+#: src/onboarding/company-step.tsx
+msgid "{people} in {teams}"
+msgstr "{people} in {teams}"
 
 #: src/frame/ui-words.tsx
 msgid "{percent} context"
@@ -2314,6 +2333,7 @@ msgstr "Actually, let’s start now"
 #: src/connections/http-connections.tsx
 #: src/drafts/share-access.tsx
 #: src/drafts/share-with-team.tsx
+#: src/onboarding/leads-step.tsx
 #: src/onboarding/people-add.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/directory-placement.tsx
@@ -20310,6 +20330,10 @@ msgstr "What agents read through shared connections"
 msgid "What AI costs this month"
 msgstr "What AI costs this month"
 
+#: src/onboarding/company-step.tsx
+msgid "What came in"
+msgstr "What came in"
+
 #: src/brain/brain-atlas.ts
 msgctxt "the brainstem: every conversation, document and connection"
 msgid "What came in"
@@ -21913,6 +21937,10 @@ msgstr "Your sign-in, which your admin changes"
 #: src/brain/skills-page.tsx
 msgid "Your skills"
 msgstr "Your skills"
+
+#: src/onboarding/company-step.tsx
+msgid "Your staff list is in"
+msgstr "Your staff list is in"
 
 #: src/onboarding/company-step.tsx
 msgid "Your staff list is in. A new one replaces it."
