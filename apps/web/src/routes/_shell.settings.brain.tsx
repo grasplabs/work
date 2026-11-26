@@ -1,4 +1,5 @@
 import type { Team, TeamGroup } from "@grasp-os/shared/brain";
+import { isAdmin } from "@grasp-os/shared/roles";
 import { Button } from "@grasp-os/ui/components/button";
 import { FieldGroup } from "@grasp-os/ui/components/field";
 import { Input } from "@grasp-os/ui/components/input";
@@ -13,7 +14,7 @@ import { Text } from "@grasp-os/ui/components/text";
 import { Icon, PlusIcon } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
@@ -32,7 +33,8 @@ import { useCoreAction } from "../use-core-action.ts";
 // one is in its settings' language: a card of the groups, each named in a
 // field, then a card of every team beside the group it is in. Grasp arranges new teams into groups by itself; here an
 // admin renames a group or moves a team, and core keeps the set whole,
-// with the set before it. For admins; core refuses anyone else.
+// with the set before it. For admins: anyone else is sent to Profile, and
+// core refuses them.
 
 /** A group as the admin is shaping it. */
 type Draft = Omit<TeamGroup, "confirmed">;
@@ -253,6 +255,15 @@ const BrainSettings = () => {
 const BrainPending = () => <PageSkeletonSettings sections={[2, 3]} />;
 
 export const Route = createFileRoute("/_shell/settings/brain")({
+  // Only admins shape the groups: anyone else who follows a link here goes
+  // to their own settings, as Teams and Incoming events send them. Core
+  // refuses them all the same; this only spares them a page they can't use.
+  beforeLoad: ({ context: { identity } }) => {
+    if (!isAdmin(identity.role)) {
+      // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
+      throw redirect({ to: "/settings/profile", replace: true });
+    }
+  },
   pendingComponent: BrainPending,
   errorComponent: SettingsError,
   component: BrainSettings,
