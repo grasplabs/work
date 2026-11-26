@@ -59,6 +59,7 @@ type ConnectorInput = Omit<AddConnectorRequest, "person" | "origin">;
 /** The field a refusal names, in words people read. */
 const problemTexts = {
   name: msg`Give it a name of at most 80 characters.`,
+  unseen: msg`The name holds a character that doesn't show, such as a zero-width space or a direction mark. Type it again rather than pasting it.`,
   url: msg`The address is the server's own https:// URL, such as https://mcp.example.com/mcp, with no query, fragment or user name in it.`,
   companyUrl: msg`The address is the server's own http:// or https:// URL inside your network, such as http://10.0.0.8:8080/mcp, with no query, fragment or user name in it.`,
   header: msg`The header is a name of letters, digits and dashes, and not one Grasp sets itself.`,
@@ -67,14 +68,18 @@ const problemTexts = {
 
 /** Why the form isn't a connector core takes, by the first field wrong. */
 const problemOf = (
-  [field, part]: readonly PropertyKey[],
+  issue: { path: readonly PropertyKey[]; code: string } | undefined,
   companyNetwork: boolean
 ): string => {
+  const [field, part] = issue?.path ?? [];
   if (field === "url") {
     return i18n._(companyNetwork ? problemTexts.companyUrl : problemTexts.url);
   }
   if (field === "name") {
-    return i18n._(problemTexts.name);
+    // Only the characters it may hold are a pattern: a length is its own.
+    return i18n._(
+      issue?.code === "invalid_format" ? problemTexts.unseen : problemTexts.name
+    );
   }
   return i18n._(part === "client" ? problemTexts.client : problemTexts.header);
 };
@@ -177,7 +182,7 @@ const AddConnectorForm = ({
       )
       .safeParse(input);
     if (!parsed.success) {
-      setProblem(problemOf(parsed.error.issues[0]?.path ?? [], companyNetwork));
+      setProblem(problemOf(parsed.error.issues[0], companyNetwork));
       return;
     }
     void action.run(async (session) => {
