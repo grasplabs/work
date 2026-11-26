@@ -70,6 +70,8 @@ const devPolicy = (origin: string): string => {
     ...production,
     "script-src": `${production["script-src"]} ${scripts} 'sha256-${preamble}'`,
     "style-src": `${production["style-src"]} ${origin}/virtual:stylex.css`,
+    // The code block's worker, served from the package's source here.
+    "worker-src": `${production["worker-src"]} ${scripts}`,
   });
 };
 
