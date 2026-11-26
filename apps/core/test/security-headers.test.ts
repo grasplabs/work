@@ -72,13 +72,10 @@ describe("security headers on the frontend", () => {
     }
   });
 
-  it("starts workers and loads stylesheets only from the frontend's own files, besides inline styles", async () => {
+  it("starts no worker and loads only the frontend's own stylesheets, besides inline styles", async () => {
     for (const response of await eachPage()) {
       const policy = policyOf(response);
-      // Damsko's code block colours code in a worker of the build's own.
-      expect(policy.get("worker-src")).toStrictEqual([
-        `${clientOrigin}/assets/`,
-      ]);
+      expect(policy.get("worker-src")).toStrictEqual(["'none'"]);
       // Inline styles for the Code view's renderer (@pierre/diffs).
       expect(policy.get("style-src")).toStrictEqual([
         `${clientOrigin}/assets/`,
