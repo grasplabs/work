@@ -7,6 +7,7 @@ import {
   check,
   index,
   integer,
+  primaryKey,
   sqliteTable,
   text,
 } from "drizzle-orm/sqlite-core";
@@ -68,3 +69,23 @@ export const archives = sqliteTable("archives", {
    */
   deletedAt: text("deleted_at"),
 });
+
+/**
+ * Who did something themselves in which week, for the admin's summary
+ * (core's admin-summary.ts): one row for each person in each week in which
+ * the log appended an event whose actor is them (`actor.type` `person`),
+ * written with that event, in its transaction (`AuditLog.#append`). The
+ * week is the Monday, in UTC, of the event's own `at`. Kept as long as the
+ * events are (retention removes older weeks). It fills from the release
+ * that added it on: weeks before hold no rows, with nothing filled in
+ * after the fact, as nothing is before the first release.
+ */
+export const activeWeeks = sqliteTable(
+  "active_weeks",
+  {
+    /** The week's Monday, `YYYY-MM-DD`, in UTC. */
+    week: text().notNull(),
+    userId: text("user_id").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.week, table.userId] })]
+);

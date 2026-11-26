@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { clientAdmins, defaultAdminReadOptions } from "../src/clients/admin.ts";
 import type { ClientAdmin } from "../src/clients/admin.ts";
+import { commandFn } from "../src/clients/command-functions.ts";
 import {
   fetchClientAdmin,
   fetchClientAdmins,
@@ -493,6 +494,38 @@ describe("every client's summary", () => {
     expect([first, second]).toMatchObject([
       { summary: { needs: [{ kind: "lead", count: 1 }] } },
       { summary: { needs: [{ kind: "lead", count: 1 }] } },
+    ]);
+  });
+
+  it("asks a client's core again after staff gave it a command, though its summary was kept", async () => {
+    const release = await importedRelease("feat(core): a command counted");
+    const acme = await liveClient(release);
+    acme.core.admin = emptyAdminSnapshot("Acme");
+    acme.core.summary = emptyAdminSummary([{ kind: "paused", count: 1 }]);
+    const ask = async () => {
+      const read = await callServerFn(fetchClientSummaries, undefined, {
+        email: "ada@grasp.test",
+      });
+      return read.find(({ client }) => client.id === acme.clientId);
+    };
+
+    const before = await ask();
+    // Staff resume the interviews: the company's core counts nothing paused now.
+    acme.core.summary = emptyAdminSummary();
+    await callServerFn(
+      commandFn,
+      {
+        clientId: acme.clientId,
+        id: crypto.randomUUID(),
+        command: { type: "onboarding.resume", payload: {} },
+      },
+      { email: "ada@grasp.test" }
+    );
+    const after = await ask();
+
+    expect([before, after]).toMatchObject([
+      { summary: { needs: [{ kind: "paused", count: 1 }] } },
+      { summary: { needs: [] } },
     ]);
   });
 

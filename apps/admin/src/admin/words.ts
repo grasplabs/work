@@ -417,29 +417,30 @@ export const needLine = (need: Need, view: OrgView): string => {
 };
 
 /**
- * Each kind of need in a sentence that names nothing (no team, lead, piece
- * of work or app), as the sidebar's Inbox lists them from the summaries,
- * each beside how many there are of it. `needLine` says one in full.
+ * Each kind of need as a label that names nothing (no team, lead, piece of
+ * work or app) and reads right beside how many there are of it, as the
+ * sidebar's Inbox lists them from the summaries. `needLine` says one in
+ * full.
  */
 export const needKindLines: Record<Need["kind"], string> = {
-  paused: "The interviews are paused.",
-  transcript: "The first conversation with the sponsor waits on Grasp.",
-  ask: "The first conversation left things open to ask the sponsor.",
-  conflict: "Two sources disagree about the company.",
-  agreement: "An agreement isn’t in yet.",
-  lead: "A team’s lead hasn’t talked yet.",
-  quiet: "A team is quiet, and its link closes soon.",
-  blocked: "People describe a step of their work in two ways.",
-  split: "A piece of work is probably two workflows.",
-  few: "Work was heard from too few people before the link closed.",
-  read: "Interviews wait to be read by a person at Grasp.",
-  go: "Enough is known to open: the company waits for Grasp’s go.",
-  short: "The interviews are over, below what it opens at.",
-  contract: "The contract isn’t signed yet.",
-  ending: "The contract ends soon, with nothing agreed for after.",
-  signin: "A connection stopped until someone signs in again.",
-  budget: "AI use went over what the contract covers.",
-  overdue: "An invoice is overdue.",
+  paused: "Interviews paused",
+  transcript: "First conversation waiting on Grasp",
+  ask: "First conversation left things to ask the sponsor",
+  conflict: "Sources that disagree about the company",
+  agreement: "Agreements not in yet",
+  lead: "Team leads who haven’t talked yet",
+  quiet: "Quiet teams whose link closes soon",
+  blocked: "Work people describe in two ways",
+  split: "Work that is probably two workflows",
+  few: "Work heard from too few people",
+  read: "Interviews waiting to be read at Grasp",
+  go: "Ready for Grasp’s go",
+  short: "Interviews over, below what it opens at",
+  contract: "Contract not signed yet",
+  ending: "Contract ending with nothing agreed for after",
+  signin: "Connections waiting for someone to sign in again",
+  budget: "AI use over what the contract covers",
+  overdue: "Overdue invoices",
 };
 
 /** Where someone stands with their link (the prototype's `link` words). */

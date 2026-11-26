@@ -166,6 +166,11 @@ describe("the admin's frame", () => {
       ...container.querySelectorAll<HTMLElement>('[role="tab"]'),
     ].find((tab) => tab.textContent?.includes("Inbox"));
     const tab = inbox?.textContent;
+    // Its row on Home, before the Inbox is open.
+    const count =
+      sidebarEntry(container, acme.name)?.textContent?.includes(
+        "3 things need Grasp"
+      ) ?? false;
     await act(() => {
       inbox?.click();
     });
@@ -178,10 +183,7 @@ describe("the admin's frame", () => {
     ].map((link) => [link.textContent?.trim(), link.getAttribute("href")]);
 
     expect({
-      count:
-        sidebarEntry(container, acme.name)?.textContent?.includes(
-          "3 things need Grasp"
-        ) ?? false,
+      count,
       tab: tab?.includes("3") ?? false,
       rows,
       snapshots: calls.filter(({ fn }) => fn.startsWith("fetchClientAdmin"))
@@ -191,13 +193,11 @@ describe("the admin's frame", () => {
       tab: true,
       rows: [
         [
-          expect.stringContaining("A team’s lead hasn’t talked yet."),
+          expect.stringContaining("Team leads who haven’t talked yet"),
           "/organizations/acme/steps",
         ],
         [
-          expect.stringContaining(
-            "Interviews wait to be read by a person at Grasp."
-          ),
+          expect.stringContaining("Interviews waiting to be read at Grasp"),
           "/organizations/acme/interviews",
         ],
       ],

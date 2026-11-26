@@ -21,9 +21,11 @@ import { describe, expect, it } from "vite-plus/test";
 import { auditLog } from "../src/audit-log.ts";
 import worker from "../src/index.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { published } from "./apps.ts";
 import { logHead } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { coreOrigin, signedInWithRole } from "./sign-in.ts";
+import { seedResourceRun } from "./runs.ts";
+import { coreOrigin, signedInApi, signedInWithRole } from "./sign-in.ts";
 
 // Grasp's admin's summary of a client (src/admin-summary.ts): only the
 // admin reads it, and what it reads is counts and dates. The ways it can
@@ -296,5 +298,142 @@ describe("weekly active people", () => {
     expect(summary.activity.activePeople[4]?.week).toBe(
       weeksBack(3, 0).toISOString().slice(0, 10)
     );
+  });
+});
+
+/** The start of the UTC day `ago` days before today, in milliseconds. */
+const dayStart = (ago: number): number =>
+  (Math.floor(Date.now() / dayMs) - ago) * dayMs;
+
+/** An agent of the company's, `state` as given. */
+const seedAgent = async (state: "on" | "paused" | "deleted"): Promise<void> => {
+  const id = `agent-${crypto.randomUUID()}`;
+  await env.DB.prepare(
+    "INSERT INTO agents (id, name, name_key, face, job, state, made_by, made_at, changed_by, changed_at) VALUES (?, ?, ?, 'f', 'j', ?, 'user-ada', ?, 'user-ada', ?)"
+  )
+    .bind(id, id, id, state, Date.now(), Date.now())
+    .run();
+};
+
+describe("what runs in the company", () => {
+  it("counts every person's workflow runs by the day they started, and only what is live: workflows published and not paused, Apps live, agents on", async () => {
+    const [ada, ben] = await Promise.all([
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "builder"),
+    ]);
+    // Apps: one live, one never published, one archived, one removed.
+    const app = async (name: string) => {
+      const { id } = await ada.api.apps.create({ name });
+      return id;
+    };
+    const [live, archived, removed] = [
+      await app("Live"),
+      await app("Archived"),
+      await app("Removed"),
+    ];
+    await app("Draft");
+    await published(live);
+    await published(archived);
+    await published(removed);
+    await ada.api.apps.archive(archived);
+    await ada.api.apps.archive(removed);
+    await ada.api.apps.remove(removed);
+    // Each person's own workflow: neither sees the other's runs, the summary counts both.
+    // One more of Ada's never published: it has no current version.
+    const [adas, bens, paused, deleted] = await Promise.all([
+      ada.api.workflowResources.create(`intake-${crypto.randomUUID()}`),
+      ben.api.workflowResources.create(`billing-${crypto.randomUUID()}`),
+      ada.api.workflowResources.create(`paused-${crypto.randomUUID()}`),
+      ada.api.workflowResources.create(`gone-${crypto.randomUUID()}`),
+      ada.api.workflowResources.create(`draft-${crypto.randomUUID()}`),
+    ]);
+    // Published: Ada's and Ben's; the paused one, paused; the deleted one, deleted.
+    await env.DB.batch([
+      env.DB.prepare(
+        `UPDATE workflow_resources SET current_version = 1 WHERE id IN (?, ?, ?, ?)`
+      ).bind(adas.id, bens.id, paused.id, deleted.id),
+      env.DB.prepare(
+        "UPDATE workflow_resources SET deleted_at = ? WHERE id = ?"
+      ).bind(Date.now(), deleted.id),
+      env.DB.prepare(
+        "INSERT INTO workflow_resource_lifecycles (workflow_resource_id, revision, paused_by, paused_at, updated_at) VALUES (?, 1, ?, ?, ?)"
+      ).bind(paused.id, ada.userId, Date.now(), Date.now()),
+    ]);
+    await Promise.all([
+      // Today: Ada's done twice, Ben's failed once, and one of Ada's still running.
+      seedResourceRun({
+        workflow: adas.id,
+        principal: ada.userId,
+        status: "completed",
+        createdAt: dayStart(0),
+      }),
+      seedResourceRun({
+        workflow: adas.id,
+        principal: ada.userId,
+        status: "completed",
+        createdAt: dayStart(0),
+      }),
+      seedResourceRun({
+        workflow: bens.id,
+        principal: ben.userId,
+        status: "failed",
+        createdAt: dayStart(0),
+      }),
+      seedResourceRun({
+        workflow: adas.id,
+        principal: ada.userId,
+        status: "running",
+        createdAt: dayStart(0),
+      }),
+      // Three days ago: Ben's done once, Ada's failed once.
+      seedResourceRun({
+        workflow: bens.id,
+        principal: ben.userId,
+        status: "completed",
+        createdAt: dayStart(3),
+      }),
+      seedResourceRun({
+        workflow: paused.id,
+        principal: ada.userId,
+        status: "failed",
+        createdAt: dayStart(3),
+      }),
+      // Before the 30 days.
+      seedResourceRun({
+        workflow: bens.id,
+        principal: ben.userId,
+        status: "completed",
+        createdAt: dayStart(30),
+      }),
+      seedAgent("on"),
+      seedAgent("paused"),
+      seedAgent("deleted"),
+    ]);
+
+    const response = await askAsAdmin();
+    const { activity } = adminSummarySchema.parse(await response.json());
+    const ran = activity.runs.filter(({ done, failed }) => done + failed > 0);
+
+    expect({
+      days: activity.runs.length,
+      ran,
+      live: [activity.workflowsLive, activity.appsLive, activity.agentsOn],
+    }).toStrictEqual({
+      days: 30,
+      ran: [
+        {
+          day: new Date(dayStart(3)).toISOString().slice(0, 10),
+          done: 1,
+          failed: 1,
+        },
+        {
+          day: new Date(dayStart(0)).toISOString().slice(0, 10),
+          done: 2,
+          failed: 1,
+        },
+      ],
+      // Ada's and Ben's workflows; one App; one agent.
+      live: [2, 1, 1],
+    });
   });
 });

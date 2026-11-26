@@ -166,14 +166,16 @@ const runningOf = async (
 /**
  * Weekly active people: for each of the last weeks up to `at`, Monday to
  * Sunday in UTC, how many distinct people did something themselves in
- * it, as the audit log holds it (`AuditLog.activePeople`): a person
- * counts once in a week in which at least one event of the `events`
- * table has them as its `actor` (`actor.type` `person`, counted by
- * `actor.userId`), dated by the event's `at`. That is anything a signed-in
- * member did that core audits: a chat turn's model calls, a change, an
- * audited read, a press on a card in a chat app. Staff (`staff`), agents
- * working on their own (`agent`), Apps, workflow runs and the platform
- * (`system`) count as nobody. A week without anyone is 0.
+ * it, counted from the audit log's `active_weeks` table (week, user_id),
+ * one row per person per week, which the log writes in the transaction
+ * that appends an event whose `actor.type` is `person` (by
+ * `actor.userId`), the week being the Monday of the event's own `at`
+ * (`AuditLog.activePeople`). That is anything a signed-in member did that
+ * core audits: a chat turn's model calls, a change, an audited read, a
+ * press on a card in a chat app. Staff (`staff`), agents working on their
+ * own (`agent`), Apps, workflow runs and the platform (`system`) count as
+ * nobody. A week without anyone is 0. The table fills from the release
+ * that added it on: earlier weeks read 0.
  */
 const activePeopleOf = async (
   env: Env,

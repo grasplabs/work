@@ -80,6 +80,24 @@ const cached = async (clientId: string): Promise<AdminSummary | null> => {
   }
 };
 
+/**
+ * Forgets client `clientId`'s kept summary, so the next read asks its
+ * core: after staff changed something its summary counts (a command, the
+ * kickoff), as the frame reads again then. A cache that fails to forget it
+ * is logged: the summary is then at most a minute old, as any kept one.
+ */
+export const forgetSummary = async (clientId: string): Promise<void> => {
+  try {
+    const cache = await caches.open(cacheName);
+    await cache.delete(cacheKey(clientId));
+  } catch (error) {
+    log.warn("admin.summary_cache_unforgotten", {
+      clientId,
+      error: errorCode(error),
+    });
+  }
+};
+
 /** Keeps client `clientId`'s summary for a minute; a cache that fails to keep it is logged. */
 const keep = async (clientId: string, summary: AdminSummary): Promise<void> => {
   try {

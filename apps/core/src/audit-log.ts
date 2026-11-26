@@ -21,9 +21,11 @@ import {
   and,
   asc,
   between,
+  count,
   desc,
   eq,
   gt,
+  gte,
   inArray,
   isNotNull,
   isNull,
@@ -45,7 +47,7 @@ import type {
   StretchVerification,
 } from "./audit-chain.ts";
 import migrations from "./db/audit-log/migrations/migrations.js";
-import { archives, events } from "./db/audit-log/schema.ts";
+import { activeWeeks, archives, events } from "./db/audit-log/schema.ts";
 import { migrateOnWake } from "./db/migrate.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 
@@ -108,6 +110,13 @@ export const archiveRetentionDays = 7 * 365;
 // nothing). Daily, not at each event's exact deadline: that would archive
 // a stretch per event, and each `audit.archived` event would bring an
 // alarm of its own. An event is archived at most a day past retention.
+
+/** The Monday, `YYYY-MM-DD` in UTC, of the week `at` falls in. */
+const mondayOf = (at: string | Date): string => {
+  const day = Math.floor(new Date(at).getTime() / dayMs);
+  // 1 January 1970 was a Thursday, three days after a Monday.
+  return new Date((day - ((day + 3) % 7)) * dayMs).toISOString().slice(0, 10);
+};
 
 /** Most stretches one retention pass archives, and purges. */
 const stretchesPerPass = 10;
@@ -237,6 +246,8 @@ export interface SearchQuery {
 interface Incoming {
   id: string;
   event: string;
+  /** Who did it, in its week, when its actor is a person (`activeWeeks`). */
+  person: { userId: string; week: string } | null;
 }
 
 /**
@@ -260,7 +271,15 @@ const prepare = (input: AuditEvent): Incoming => {
       `Audit event ${parsed.id} is over ${auditEventMaxBytes} bytes`
     );
   }
-  return { id: parsed.id, event };
+  const { actor, at } = parsed;
+  return {
+    id: parsed.id,
+    event,
+    person:
+      actor.type === "person"
+        ? { userId: actor.userId, week: mondayOf(at) }
+        : null,
+  };
 };
 
 /**
@@ -445,6 +464,16 @@ export class AuditLog extends DurableObject<Env> {
     let moved = false;
     try {
       moved = await retainAuditLog(this);
+      // Who was active when, kept no longer than the events it was read from.
+      this.#db
+        .delete(activeWeeks)
+        .where(
+          lt(
+            activeWeeks.week,
+            mondayOf(new Date(Date.now() - auditRetentionDays * dayMs))
+          )
+        )
+        .run();
     } catch (error) {
       log.error("audit.retention_failed", errorFields(error));
     }
@@ -485,27 +514,18 @@ export class AuditLog extends DurableObject<Env> {
   /**
    * How many people did something themselves in each week from `since`
    * (a Monday, `YYYY-MM-DD`) on, by the Monday each week starts on (UTC),
-   * for the admin's summary (admin-summary.ts): a person counts once in a
-   * week in which the log holds at least one event whose `actor` is them
-   * (`actor.type` `person`, by `actor.userId`), dated by the event's own
-   * `at`. Weeks without anyone are left out. Only the counts leave the
-   * log. The events are found by the index on receipt time, as one is
-   * never received before it happened.
+   * for the admin's summary (admin-summary.ts): the rows of `active_weeks`
+   * counted by week, each a person in a week in which the log appended an
+   * event whose actor is them. Weeks without anyone are left out. Only the
+   * counts leave the log.
    */
   activePeople(since: string): { week: string; people: number }[] {
-    return this.ctx.storage.sql
-      .exec<{ week: string; people: number }>(
-        `SELECT date(json_extract(event, '$.at'), '-6 days', 'weekday 1') AS week,
-           COUNT(DISTINCT json_extract(event, '$.actor.userId')) AS people
-         FROM events
-         WHERE received_at >= ?
-           AND json_extract(event, '$.at') >= ?
-           AND json_extract(event, '$.actor.type') = 'person'
-         GROUP BY week`,
-        since,
-        since
-      )
-      .toArray();
+    return this.#db
+      .select({ week: activeWeeks.week, people: count() })
+      .from(activeWeeks)
+      .where(gte(activeWeeks.week, since))
+      .groupBy(activeWeeks.week)
+      .all();
   }
 
   /**
@@ -1026,9 +1046,15 @@ export class AuditLog extends DurableObject<Env> {
     // reading the head and writing after it, and fork the chain.
     return await this.ctx.blockConcurrencyWhile(async () => {
       const { entries, conflicts, conflictIds } = await this.#link(incoming);
+      const people = new Map(incoming.map(({ id, person }) => [id, person]));
       this.#db.transaction((tx) => {
         for (const entry of entries) {
           tx.insert(events).values(entry).run();
+          // Who did it, in its week: once each (`activePeople`).
+          const person = people.get(entry.id);
+          if (person !== undefined && person !== null) {
+            tx.insert(activeWeeks).values(person).onConflictDoNothing().run();
+          }
         }
       });
       return {

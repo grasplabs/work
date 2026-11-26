@@ -176,7 +176,7 @@ describe("an organization's billing, as Stripe's answer reads", () => {
     await settle();
     const overdue = [
       ...container.querySelectorAll('[data-slot="sidebar"] a'),
-    ].find((link) => link.textContent?.includes("is overdue"));
+    ].find((link) => link.textContent?.includes("Overdue invoices"));
 
     expect(overdue?.getAttribute("href")).toBe(
       `/organizations/${acme.id}/details?tab=contract`
