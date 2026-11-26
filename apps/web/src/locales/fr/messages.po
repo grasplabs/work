@@ -4269,6 +4269,11 @@ msgstr "Cas par semaine"
 msgid "Cases a week: {cases}."
 msgstr "Cas par semaine : {cases}."
 
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Caution"
+msgstr "Attention"
+
 #: src/agents/new-agent.tsx
 #: src/apps/app-workflows.tsx
 #: src/drafts/share-with-team.tsx
@@ -5489,6 +5494,10 @@ msgstr "Copiez-le maintenant : vous ne le reverrez pas. Perdu, il ne peut qu'êt
 msgid "Copy link"
 msgstr "Copier le lien"
 
+#: src/frame/ui-words.tsx
+msgid "Copy table"
+msgstr "Copier le tableau"
+
 #: src/chat/thread.tsx
 msgid "Copy the answer"
 msgstr "Copier la réponse"
@@ -6559,6 +6568,7 @@ msgstr "Points"
 msgid "Double-click or press F2 to rename"
 msgstr "Double-cliquez ou appuyez sur F2 pour renommer"
 
+#: src/frame/ui-words.tsx
 #: src/workflows/run-files.tsx
 #: src/workflows/version-source.tsx
 msgctxt "download a file"
@@ -6583,6 +6593,14 @@ msgstr "Télécharger en Markdown"
 #: src/chat/chat-more.tsx
 msgid "Download as PDF"
 msgstr "Télécharger en PDF"
+
+#: src/frame/ui-words.tsx
+msgid "Download diagram"
+msgstr "Télécharger le diagramme"
+
+#: src/frame/ui-words.tsx
+msgid "Download table"
+msgstr "Télécharger le tableau"
 
 #: src/apps/app-code.tsx
 msgid "Download the file"
@@ -9108,6 +9126,11 @@ msgstr "Importer dans {name}"
 msgid "Import or export"
 msgstr "Importer ou exporter"
 
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Important"
+msgstr "Important"
+
 #: src/settings/directory-placement.tsx
 msgid "In {team} from the directory."
 msgstr "Dans {team} par l’annuaire."
@@ -10875,6 +10898,10 @@ msgid "Mentioned"
 msgstr "Cités"
 
 #: src/frame/ui-words.tsx
+msgid "Mermaid diagram"
+msgstr "Diagramme Mermaid"
+
+#: src/frame/ui-words.tsx
 msgid "Message actions"
 msgstr "Actions du message"
 
@@ -12341,6 +12368,11 @@ msgstr "Ne fonctionne pas"
 
 #: src/frame/ui-words.tsx
 msgctxt "a badge's dot"
+msgid "Note"
+msgstr "Remarque"
+
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
 msgid "Note"
 msgstr "Remarque"
 
@@ -14953,6 +14985,10 @@ msgstr "Réinitialiser ce qu'il conserve"
 #: src/workflows/kept-state.tsx
 msgid "Reset what it keeps?"
 msgstr "Réinitialiser ce qu'il conserve ?"
+
+#: src/frame/ui-words.tsx
+msgid "Reset zoom"
+msgstr "Réinitialiser le zoom"
 
 #: src/apps/app-reset.tsx
 #: src/apps/reset-test-data.tsx
@@ -19120,6 +19156,11 @@ msgstr "Le temps est écoulé"
 msgid "Timeline"
 msgstr "Chronologie"
 
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Tip"
+msgstr "Conseil"
+
 #: src/apps/app-access-requests.tsx
 msgid "To"
 msgstr "Au"
@@ -19910,6 +19951,10 @@ msgstr "Consulter et modifier"
 msgid "View changes"
 msgstr "Voir les modifications"
 
+#: src/frame/ui-words.tsx
+msgid "View full screen"
+msgstr "Afficher en plein écran"
+
 #: src/brain/note-actions.tsx
 msgid "View in map"
 msgstr "Voir sur la carte"
@@ -20118,6 +20163,11 @@ msgstr "Voyageur"
 
 #: src/frame/ui-words.tsx
 msgctxt "a badge's dot"
+msgid "Warning"
+msgstr "Avertissement"
+
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
 msgid "Warning"
 msgstr "Avertissement"
 
@@ -22004,12 +22054,14 @@ msgid "Zoom"
 msgstr "Zoom"
 
 #: src/brain/atlas-overlays.tsx
+#: src/frame/ui-words.tsx
 #: src/inbox/report-viewer.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Zoom in"
 msgstr "Zoom avant"
 
 #: src/brain/atlas-overlays.tsx
+#: src/frame/ui-words.tsx
 #: src/inbox/report-viewer.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Zoom out"

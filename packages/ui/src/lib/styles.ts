@@ -1050,9 +1050,13 @@ const HOLDS = `:is(${CONTROL}, :has(${CONTROL}))`;
 // control before it, or after it. Written for the control itself; a target inside it adds ` > *`.
 const BETWEEN =
   ':is([role=separator], [data-slot$="separator"], hr, [role=tooltip], [data-slot$="-content"], [data-slot$="-positioner"], [hidden], [aria-hidden=true])';
-const PRECEDED = `:is(${HOLDS} + *, ${HOLDS} + ${BETWEEN} + *)`;
+// A part's header is a line above what follows it, never beside it: it is not a neighbour in a row,
+// nor the box round one (a code block's header and the drawing under it).
+const HEADER = '[data-slot$="-header"]';
+const BESIDE = `:is(${HOLDS}):not(${HEADER})`;
+const PRECEDED = `:is(${BESIDE} + *, ${BESIDE} + ${BETWEEN} + *):not(${HEADER})`;
 // (`:has()` cannot hold another, so "holds a control" is written as a control inside it.)
-const FOLLOWED = `:has(+ ${CONTROL}, + * ${CONTROL}, + ${BETWEEN} + ${CONTROL}, + ${BETWEEN} + * ${CONTROL})`;
+const FOLLOWED = `:not(${HEADER}):has(+ ${CONTROL}, + :not(${HEADER}) ${CONTROL}, + ${BETWEEN} + ${CONTROL}, + ${BETWEEN} + :not(${HEADER}) ${CONTROL})`;
 const BEFORE = [
   PRECEDED,
   `${PRECEDED} > :first-child`,
