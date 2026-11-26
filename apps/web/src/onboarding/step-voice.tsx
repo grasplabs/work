@@ -20,7 +20,7 @@ import { keptKey } from "./kept.ts";
 // i clicked previously so it feels continuously smooth and interactive").
 //
 // As a step arrives he first answers how the step before was left, the
-// choice made there ("Our own system it is."), then says the step. While
+// choice made there ("Great, we’re using our built-in system."), then says the step. While
 // on a step he answers what just happened on it: files dropped in, someone
 // marked as a lead, the message copied, something that went wrong. Each of
 // those is one of a few fixed lines, never words of the admin's own, so
@@ -154,8 +154,8 @@ export const answeredLately = (step: string): boolean =>
 
 /** What Stephen says when the bar at the top tells of something gone wrong: in turn, so twice isn't word for word. */
 const wentWrong = [
-  msg`Hmm, that didn’t work. What happened is at the top.`,
-  msg`Something went wrong there. The bar at the top says what to do.`,
+  msg`That didn’t work. You can see what happened at the top.`,
+  msg`Something went wrong. The bar at the top explains how to fix it.`,
 ];
 let wrongTurn = 0;
 /** The newest error he answered, so a step drawn again doesn't answer it twice. */
