@@ -8,7 +8,7 @@
  * column and the admin's sidebar, which keep working; only a frame that
  * can't be read at all shows `FrameFailure` in its place.
  */
-import { Button, buttonVariants } from "@grasp-os/app-kit/components/button";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   Empty,
   EmptyContent,
@@ -16,14 +16,46 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@grasp-os/app-kit/components/empty";
-import { Skeleton } from "@grasp-os/app-kit/components/skeleton";
+} from "@grasp-os/ui/components/empty";
+import { Skeleton } from "@grasp-os/ui/components/skeleton";
+import { Icon, RefreshCwIcon } from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import { Link, useMatch, useRouter } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
-import { RotateCcwIcon, SearchXIcon, TriangleAlertIcon } from "lucide-react";
 
 import { AdminHeader } from "./page.tsx";
 import type { Crumb } from "./page.tsx";
+
+const styles = stylex.create({
+  // The frame couldn't be read: the window, with the page's room round it.
+  frameless: {
+    display: "flex",
+    boxSizing: "border-box",
+    minHeight: "100svh",
+    padding: space["6"],
+  },
+  // A state that is the whole page fills it, its words in the middle.
+  whole: { flexGrow: 1 },
+  buttons: {
+    display: "flex",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: space["2"],
+  },
+  // The pages' usual layout while they load: a heading and its line, then
+  // a few lines of content.
+  loading: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["6"],
+    padding: space["6"],
+  },
+  lines: { display: "flex", flexDirection: "column", gap: space["2"] },
+  title: { width: "12rem", height: space["8"] },
+  lead: { width: "18rem", maxWidth: "100%" },
+  short: { width: "66%" },
+});
 
 /**
  * Reads the page again and shows it anew: its loaders run again, and
@@ -38,7 +70,7 @@ const TryAgain = ({ reset }: { reset: () => void }) => {
         void router.invalidate();
       }}
     >
-      <RotateCcwIcon data-icon="inline-start" />
+      <Icon icon={RefreshCwIcon} />
       Try again
     </Button>
   );
@@ -49,37 +81,38 @@ const TryAgain = ({ reset }: { reset: () => void }) => {
  * looks like a button, announced as the link it is.
  */
 const Back = ({ label, to }: { label: string; to: BackTo }) => (
-  <Link className={buttonVariants({ variant: "outline" })} to={to}>
-    {label}
-  </Link>
+  <Button asChild variant="outline">
+    <Link to={to}>{label}</Link>
+  </Button>
 );
 
 /** Where a page that isn't there leads back to. */
 type BackTo = "/";
 
 /**
- * The level of a failure's title, as the workspace's `ErrorState` has it:
- * `h1` where it stands for the whole page, `h2` under a section's own
- * heading (an organization's, whose page keeps its title and column).
+ * The heading level of a failure's title, as the workspace's `ErrorState`
+ * has it: 1 where it stands for the whole page (and fills it), 2 under a
+ * section's own heading (an organization's, whose page keeps its title
+ * and column).
  */
-type FailureHeading = "h1" | "h2";
+type FailureHeading = 1 | 2;
 
 /** What failed, said plainly, with a way to try again. */
 export const FailureState = ({
   reset,
-  heading: Heading = "h2",
+  heading = 2,
 }: {
   reset: () => void;
   heading?: FailureHeading;
 }) => (
-  <Empty role="alert">
+  <Empty
+    size={heading === 1 ? "lg" : "default"}
+    style={heading === 1 ? styles.whole : undefined}
+    variant="destructive"
+  >
     <EmptyHeader>
-      <EmptyMedia variant="icon">
-        <TriangleAlertIcon />
-      </EmptyMedia>
-      <EmptyTitle>
-        <Heading>This couldn’t be shown</Heading>
-      </EmptyTitle>
+      <EmptyMedia variant="icon" />
+      <EmptyTitle level={heading}>This couldn’t be shown</EmptyTitle>
       <EmptyDescription>
         Reading it failed just now. The rest of the admin still works.
       </EmptyDescription>
@@ -106,28 +139,24 @@ export const RouteFailure = ({ reset }: ErrorComponentProps) => {
   return (
     <>
       <AdminHeader page="This page didn’t load" />
-      <FailureState heading="h1" reset={reset} />
+      <FailureState heading={1} reset={reset} />
     </>
   );
 };
 
 /** The admin's frame itself couldn't be read: said plainly, with a way back. */
 export const FrameFailure = ({ reset }: ErrorComponentProps) => (
-  <main className="flex min-h-svh p-6">
-    <Empty role="alert">
+  <main {...stylex.props(styles.frameless)}>
+    <Empty size="lg" style={styles.whole} variant="destructive">
       <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <TriangleAlertIcon />
-        </EmptyMedia>
-        <EmptyTitle>
-          <h1>The admin couldn’t be read</h1>
-        </EmptyTitle>
+        <EmptyMedia variant="icon" />
+        <EmptyTitle level={1}>The admin couldn’t be read</EmptyTitle>
         <EmptyDescription>
           Reading it failed just now. Try again in a moment.
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
-        <div className="flex flex-wrap justify-center gap-2">
+        <div {...stylex.props(styles.buttons)}>
           <TryAgain reset={reset} />
           <Back label="Back to the admin" to="/" />
         </div>
@@ -153,14 +182,10 @@ export const NotFoundPage = ({
 }) => (
   <>
     <AdminHeader page="Not found" parents={parents} />
-    <Empty>
+    <Empty size="lg" style={styles.whole}>
       <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <SearchXIcon />
-        </EmptyMedia>
-        <EmptyTitle>
-          <h1>{title}</h1>
-        </EmptyTitle>
+        <EmptyMedia illustration="lost" />
+        <EmptyTitle level={1}>{title}</EmptyTitle>
         <EmptyDescription>{description}</EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
@@ -190,17 +215,17 @@ export const PageLoading = () => (
     <output
       aria-busy="true"
       aria-label="Loading…"
-      className="flex flex-col gap-6 p-6"
+      {...stylex.props(styles.loading)}
     >
-      <div className="flex flex-col gap-2">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-4 w-72 max-w-full" />
+      <div {...stylex.props(styles.lines)}>
+        <Skeleton style={styles.title} variant="rectangular" />
+        <Skeleton style={styles.lead} />
       </div>
-      <div className="flex w-full flex-col gap-2">
-        <Skeleton className="h-4 w-full" />
-        <Skeleton className="h-4 w-full" />
-        <Skeleton className="h-4 w-full" />
-        <Skeleton className="h-4 w-2/3" />
+      <div {...stylex.props(styles.lines)}>
+        <Skeleton />
+        <Skeleton />
+        <Skeleton />
+        <Skeleton style={styles.short} />
       </div>
     </output>
   </>
