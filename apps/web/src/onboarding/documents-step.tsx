@@ -151,7 +151,7 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
           <Icon icon={ArrowRightIcon} />
         </Button>
       }
-      spoken={t`And if you have files lying around that explain how you work, you can drop them in here. Rough drafts are just as welcome. One thing though: leave out anything about a single person, that’s not what I’m here for.`}
+      spoken={t`This is a good moment to give me some context. A process description, an onboarding guide, a price list or even a rough draft helps me understand what you’re dealing with every day. The more I know, the better my questions to your team, and the more useful everything I give back. Just leave out anything about a single person.`}
       title={t`Do you have anything that explains how you work?`}
     >
       <div {...stylex.props(styles.stack)}>
