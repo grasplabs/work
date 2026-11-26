@@ -21,9 +21,8 @@ import { TopErrorBar } from "../frame/top-error.tsx";
 import { dateLocale } from "./date-locale.ts";
 import { firstChoice, todayInUtc } from "./send-plan.ts";
 import { SetupStepBody } from "./setup-steps.tsx";
-import type { SetupData } from "./setup-steps.tsx";
+import type { SetupData, ShownStep } from "./setup-steps.tsx";
 import { steps } from "./setup.ts";
-import type { SetupStep } from "./setup.ts";
 import { planDraft } from "./visit.ts";
 
 // The team step's plan, as a person in a region of their own types its
@@ -149,7 +148,7 @@ const shown = async (
     reread,
     on = today,
   }: {
-    step?: Exclude<SetupStep, "pulse" | "listening">;
+    step?: ShownStep;
     given?: SetupData;
     reread?: Promise<unknown>;
     on?: string;

@@ -19,9 +19,9 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { InterviewsProgress } from "./interviews-progress.tsx";
 import { SetupStepBody, directoryProblemOf } from "./setup-steps.tsx";
-import type { SetupData } from "./setup-steps.tsx";
+import type { SetupData, ShownStep } from "./setup-steps.tsx";
 import { steps } from "./setup.ts";
-import type { AiReadiness, SetupStep } from "./setup.ts";
+import type { AiReadiness } from "./setup.ts";
 
 // What the setup's steps tell the company's admin, and where the
 // interviews stand, from what they render.
@@ -137,7 +137,7 @@ const aiOf = ({ ready }: { ready: boolean }): AiReadiness => {
 
 /** A step as it is drawn as it arrives, its markup and all. */
 const drawn = (
-  step: Exclude<SetupStep, "pulse" | "listening">,
+  step: ShownStep,
   {
     paused = false,
     settled = [],
@@ -204,10 +204,7 @@ const drawn = (
 };
 
 /** What a step says, as text without its markup. */
-const said = (
-  step: Exclude<SetupStep, "pulse" | "listening">,
-  shown: Shown
-): string =>
+const said = (step: ShownStep, shown: Shown): string =>
   drawn(step, shown)
     .replaceAll(/<[^>]+>/gu, " ")
     .replaceAll(/\s+/gu, " ");
@@ -322,63 +319,6 @@ describe("a setup without a staff list", () => {
       day: team.includes("Tomorrow"),
       sent: team.includes("Continue"),
     }).toStrictEqual({ plans: true, day: false, sent: true });
-  });
-});
-
-describe("what needs the admin", () => {
-  it("counts letting Grasp's mail through, and lets them go on once it's done", () => {
-    const open = said("review", {});
-    const done = said("review", { settled: ["mail"] });
-    expect({
-      open: [
-        open.includes("Just one thing for you"),
-        open.includes("Continue"),
-      ],
-      done: [
-        done.includes("Nothing needs you"),
-        done.includes("Settled: It’s done"),
-        done.includes("Continue"),
-      ],
-    }).toStrictEqual({ open: [true, false], done: [true, true, true] });
-  });
-
-  it("asks for no AI provider among what needs them: it was asked for before anything needed it", () => {
-    const review = said("review", {
-      settled: ["mail"],
-      ai: aiOf({ ready: false }),
-    });
-    expect({
-      asked: review.includes("AI provider"),
-      onward: review.includes("Continue"),
-    }).toStrictEqual({ asked: false, onward: true });
-  });
-
-  it("names no domain where core has no sender for Grasp's mail, says so, and leaves nothing to settle for it", () => {
-    const review = said("review", { mailDomain: null });
-    expect({
-      told: review.includes("Grasp has no sender for its mail yet"),
-      asked: review.includes("Let Grasp’s mail through"),
-      nothingOpen: review.includes("Nothing needs you"),
-    }).toStrictEqual({ told: true, asked: false, nothingOpen: true });
-  });
-
-  it("says mail isn't available where Grasp sends none, and leaves nothing to settle for it", () => {
-    const review = said("review", { mailSends: false });
-    expect({
-      told: review.includes("Mail isn’t available on this hosting yet"),
-      byHand: review.includes(
-        "Send each one their link by hand from Interviews."
-      ),
-      asked: review.includes("Let Grasp’s mail through"),
-      nothingOpen: review.includes("Nothing needs you"),
-      onward: review.includes("Continue"),
-    }).toStrictEqual({
-      told: true,
-      byHand: true,
-      asked: false,
-      nothingOpen: true,
-      onward: true,
-    });
   });
 });
 

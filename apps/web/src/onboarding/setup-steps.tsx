@@ -1,33 +1,26 @@
-import type { Difference, SettleChoice } from "@grasp-os/shared/onboarding";
 import { Button } from "@grasp-os/ui/components/button";
-import { ArrowRightIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
-import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { ComponentType } from "react";
 
 import { TopError } from "../frame/top-error.tsx";
 import { chooseLocale, isLocale } from "../i18n.ts";
-import { useCoreAction } from "../use-core-action.ts";
-import { speak } from "../voice/voice.ts";
 import { AiChoice, aiKeyForm, firstWay, useChooseGrasp } from "./ai-choice.tsx";
 import type { AiWay } from "./ai-choice.tsx";
 import { CalmStep } from "./calm-frame.tsx";
 import { CompanyStep } from "./company-step.tsx";
 import { DocumentsStep } from "./documents-step.tsx";
 import { ForgetKickoff } from "./forget-kickoff.tsx";
-import { handOver } from "./hand-over.ts";
 import { LanguageCards } from "./language-cards.tsx";
 import { LeadsStep } from "./leads-step.tsx";
 import { PlanStory } from "./plan-story.tsx";
-import { DifferenceItem, MailToLetThrough } from "./review-parts.tsx";
-import { afterAi, openItems } from "./setup.ts";
+import { afterAi } from "./setup.ts";
 import type { SetupStep } from "./setup.ts";
 import { smoothly } from "./smoothly.ts";
 import { SourcesStep } from "./sources-step.tsx";
-import { mailToLetThrough, useRefresh } from "./step-parts.ts";
+import { useRefresh } from "./step-parts.ts";
 import type { StepProps } from "./step-parts.ts";
 import { TeamStep } from "./team-step.tsx";
 
@@ -184,198 +177,23 @@ const Ai = ({ data, askedFor, path, go, onward }: StepProps) => {
   );
 };
 
-/** The plan: told as a small story, then their campaign as plain rows (plan-story.tsx). */
-const About = ({ onward, today }: StepProps) => (
-  <PlanStory onward={onward} today={today} />
+/**
+ * The setup's last screen: what happens next, told as a small story with
+ * what the admin just chose in it, and from there into the platform
+ * (plan-story.tsx).
+ */
+const About = ({ data, onward }: StepProps) => (
+  <PlanStory data={data} onward={onward} />
 );
 
-/** The steps people told two ways and nobody could explain, each settled in core. `changing` are the settled ones decided again. */
-const Differences = ({
-  differences,
-  changing,
-  onChanging,
-}: {
-  differences: Difference[];
-  changing: string[];
-  onChanging: (changing: string[]) => void;
-}) => {
-  const { run, busy, failure } = useCoreAction();
-  const refresh = useRefresh();
-  const settle = async (work: string, holds: SettleChoice) => {
-    if (busy) {
-      return;
-    }
-    const settled = await run(async (session) => {
-      await session.onboarding.settle(work, holds);
-      await refresh();
-      return true;
-    });
-    if (settled === true) {
-      onChanging(changing.filter((each) => each !== work));
-    }
-  };
-  return (
-    <>
-      <TopError>{failure}</TopError>
-      {differences.map((difference) => (
-        <DifferenceItem
-          difference={difference}
-          key={difference.work}
-          onReopen={() => {
-            onChanging([...changing, difference.work]);
-          }}
-          onSettle={(holds) => {
-            void settle(difference.work, holds);
-          }}
-          open={changing.includes(difference.work)}
-        />
-      ))}
-    </>
-  );
-};
+/** The screens a flow can show: Pulse, Stephen listening, the review and the way in are no longer among them. */
+export type ShownStep = Exclude<
+  SetupStep,
+  "pulse" | "listening" | "review" | "open"
+>;
 
-/**
- * What only the admin can settle, each with a way to settle it. Nothing
- * moves on by itself: they read what they settled, and go on once nothing
- * is open.
- */
-const Review = (props: StepProps) => {
-  const { t } = useLingui();
-  const [changing, setChanging] = useState<string[]>([]);
-  const { differences } = props.data.review;
-  const mail = openItems(props.settled, mailToLetThrough(props.data)).length;
-  const open =
-    mail +
-    differences.filter(
-      ({ work, holds }) => holds === null || changing.includes(work)
-    ).length;
-  return (
-    <CalmStep
-      body={t`I’ve handled everything else.`}
-      end={
-        open === 0 ? (
-          <Button
-            onClick={() => {
-              void props.onward();
-            }}
-            size="lg"
-          >
-            {t`Continue`}
-            <Icon icon={ArrowRightIcon} />
-          </Button>
-        ) : null
-      }
-      spoken={plural(open, {
-        0: "I’ve been through all the conversations now, and I’ve handled everything I could. Nothing needs you here.",
-        1: "I’ve been through all the conversations now, and I’ve handled almost everything myself. There’s just one thing I’d like you to decide.",
-        other:
-          "I’ve been through all the conversations now, and I’ve handled most of it myself. There are # things I’d like you to decide.",
-      })}
-      title={plural(open, {
-        0: "Nothing needs you",
-        1: "Just one thing for you",
-        other: "# things for you",
-      })}
-    >
-      <section aria-label={t`What needs you`} {...stylex.props(styles.stack)}>
-        {differences.length === 0 ? null : (
-          <Differences
-            changing={changing}
-            differences={differences}
-            onChanging={setChanging}
-          />
-        )}
-        <MailToLetThrough
-          data={props.data}
-          onSettle={props.onSettle}
-          settled={props.settled}
-        />
-      </section>
-    </CalmStep>
-  );
-};
-
-/** How often the last step asks core again whether Grasp gave its go. */
-const goCheckMs = 15_000;
-
-/**
- * The end of the setup: who Stephen talked with and how much of the work
- * is mapped. Until Grasp gives its go, that it opens once it has checked
- * everything with the admin, asking core again now and then; after, the
- * way in.
- */
-const Open = ({ data, onward }: StepProps) => {
-  const { t } = useLingui();
-  const refresh = useRefresh();
-  const { open } = data.gate;
-  const { progress } = data.view;
-  const talked = (progress?.talked ?? 0) + (progress?.leadsTalked ?? 0);
-  const { mapped } = data.review;
-  const { admin } = data;
-  useEffect(() => {
-    if (open) {
-      return () => {
-        // Nothing to ask.
-      };
-    }
-    const id = window.setInterval(() => {
-      void refresh();
-    }, goCheckMs);
-    return () => {
-      window.clearInterval(id);
-    };
-  }, [open, refresh]);
-  const said = plural(talked, {
-    one: "I talked with # person.",
-    other: "I talked with # people.",
-  });
-  const ready =
-    mapped === 0
-      ? ""
-      : plural(mapped, {
-          one: "One piece of work is mapped and ready for you.",
-          other: "# pieces of work are mapped and ready for you.",
-        });
-  const opens = open
-    ? ""
-    : t`We open your platform once we’ve checked everything with you. You’ll hear from us.`;
-  return (
-    <CalmStep
-      body={[said, ready, opens].filter((each) => each !== "").join(" ")}
-      end={
-        open ? (
-          <Button
-            onClick={(event) => {
-              // He says it as he does it, then hands them over to the platform.
-              speak(t`Here’s your Grasp.`);
-              void handOver(event.currentTarget, onward);
-            }}
-            size="lg"
-          >
-            {t`Open Grasp`}
-          </Button>
-        ) : null
-      }
-      spoken={[
-        t`That’s it from me. Thank you, ${admin}.`,
-        said,
-        ready,
-        open
-          ? t`Your Grasp is ready whenever you are.`
-          : t`Before we open it, we check everything with you once more. You’ll hear from us.`,
-      ]
-        .filter((each) => each !== "")
-        .join(" ")}
-      title={t`Thank you, ${admin}`}
-    />
-  );
-};
-
-/** One screen per step. The campaign page stands in for `listening` (routes/setup.tsx). */
-const bodies: Record<
-  Exclude<SetupStep, "pulse" | "listening">,
-  ComponentType<StepProps>
-> = {
+/** One screen per step. */
+const bodies: Record<ShownStep, ComponentType<StepProps>> = {
   welcome: Welcome,
   ai: Ai,
   about: About,
@@ -384,14 +202,12 @@ const bodies: Record<
   documents: DocumentsStep,
   leads: LeadsStep,
   team: TeamStep,
-  review: Review,
-  open: Open,
 };
 
 export const SetupStepBody = ({
   step,
   ...props
-}: StepProps & { step: Exclude<SetupStep, "pulse" | "listening"> }) => {
+}: StepProps & { step: ShownStep }) => {
   const Body = bodies[step];
   return <Body {...props} />;
 };

@@ -322,10 +322,12 @@ export const sampleTargets = (
     if (edged && !everything) {
       dots.outline(box, radius, 5, 0.8, darkness(style.borderTopColor, 0.2));
     }
+    // A picture is filled with dots; one behind the whole page is its ground, and says nothing.
     if (
-      element instanceof HTMLImageElement ||
-      element instanceof HTMLCanvasElement ||
-      element instanceof HTMLVideoElement
+      !everything &&
+      (element instanceof HTMLImageElement ||
+        element instanceof HTMLCanvasElement ||
+        element instanceof HTMLVideoElement)
     ) {
       dots.fill(box, radius, 6, 1, 0.45);
     }

@@ -190,22 +190,15 @@ describe("an onboarding flow", () => {
         flowOpening(flow),
       ])
     ).toStrictEqual([
-      ["full", true, [...setupSteps], "go"],
       [
-        "short",
+        "full",
         true,
-        [
-          "welcome",
-          "ai",
-          "company",
-          "leads",
-          "team",
-          "listening",
-          "review",
-          "open",
-        ],
+        setupSteps.filter(
+          (step) => !["listening", "review", "open"].includes(step)
+        ),
         "go",
       ],
+      ["short", true, ["welcome", "ai", "company", "leads", "team"], "go"],
       [
         "setup",
         true,
@@ -237,14 +230,18 @@ describe("an onboarding flow", () => {
     });
   });
 
-  it("puts the interviews' screens last, wherever the flow has the step", () => {
-    const early = withStepMoved(defaultFlow, "interviews", 4);
+  it("puts the interviews' screens last, and the story of what comes next after them, wherever the flow has the steps", () => {
+    const early = withStepMoved(
+      withStepMoved(defaultFlow, "about", 0),
+      "interviews",
+      4
+    );
     expect({
       step: order(early)[4],
-      screens: flowScreens(early).slice(-5),
+      screens: flowScreens(early).slice(-3),
     }).toStrictEqual({
       step: "interviews",
-      screens: ["leads", "team", "listening", "review", "open"],
+      screens: ["leads", "team", "about"],
     });
   });
 

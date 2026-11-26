@@ -843,10 +843,6 @@ msgstr "{line}; {failed}"
 msgid "{lines, plural, one {# line, read only} other {# lines, read only}}"
 msgstr "{lines, plural, one {# línea, solo lectura} other {# líneas, solo lectura}}"
 
-#: src/onboarding/setup-steps.tsx
-msgid "{mapped, plural, one {One piece of work is mapped and ready for you.} other {# pieces of work are mapped and ready for you.}}"
-msgstr "{mapped, plural, one {Un trabajo está mapeado y listo para ti.} other {# trabajos están mapeados y listos para ti.}}"
-
 #: src/frame/ui-words.tsx
 msgid "{max, plural, one {Close to the limit of # character} other {Close to the limit of # characters}}"
 msgstr "{max, plural, one {Cerca del límite de # carácter} other {Cerca del límite de # caracteres}}"
@@ -1236,14 +1232,6 @@ msgstr "{only} eliminado"
 msgid "{only} uses it"
 msgstr "{only} lo usa"
 
-#: src/onboarding/setup-steps.tsx
-msgid "{open, plural, =0 {I’ve been through all the conversations now, and I’ve handled everything I could. Nothing needs you here.} =1 {I’ve been through all the conversations now, and I’ve handled almost everything myself. There’s just one thing I’d like you to decide.} other {I’ve been through all the conversations now, and I’ve handled most of it myself. There are # things I’d like you to decide.}}"
-msgstr "{open, plural, =0 {Ya he repasado todas las conversaciones y me he encargado de todo lo que podía. Aquí no tienes que hacer nada.} =1 {Ya he repasado todas las conversaciones y me he encargado de casi todo yo mismo. Solo hay una cosa que me gustaría que decidieras tú.} other {Ya he repasado todas las conversaciones y me he encargado de casi todo yo mismo. Hay # cosas que me gustaría que decidieras tú.}}"
-
-#: src/onboarding/setup-steps.tsx
-msgid "{open, plural, =0 {Nothing needs you} =1 {Just one thing for you} other {# things for you}}"
-msgstr "{open, plural, =0 {Nada te necesita} =1 {Solo una cosa para ti} other {# cosas para ti}}"
-
 #: src/brain/region-marks.tsx
 msgid "{open, plural, one {# open question} other {# open questions}}"
 msgstr "{open, plural, one {# pregunta abierta} other {# preguntas abiertas}}"
@@ -1281,6 +1269,7 @@ msgid "{people, plural, one {{team}: # person} other {{team}: # people}}"
 msgstr "{people, plural, one {{team}: # persona} other {{team}: # personas}}"
 
 #: src/brain/brain.ts
+#: src/onboarding/plan-story.tsx
 msgid "{people, plural, one {# person} other {# people}}"
 msgstr "{people, plural, one {# persona} other {# personas}}"
 
@@ -1568,10 +1557,6 @@ msgstr "{taken, plural, one {Volver a poner la línea quitada} other {Volver a p
 #: src/onboarding/leads-step.tsx
 msgid "{taking} of {0}"
 msgstr "{taking} de {0}"
-
-#: src/onboarding/setup-steps.tsx
-msgid "{talked, plural, one {I talked with # person.} other {I talked with # people.}}"
-msgstr "{talked, plural, one {Hablé con # persona.} other {Hablé con # personas.}}"
 
 #: src/onboarding/campaign/concepts/road.tsx
 msgid "{talked} of {invited} have talked; {enough} are enough to understand every team."
@@ -2200,6 +2185,10 @@ msgstr "Sobre los equipos"
 #: src/brain/brain.ts
 msgid "About tools"
 msgstr "Sobre herramientas"
+
+#: src/onboarding/plan-story.tsx
+msgid "About two weeks later we wrap up, once I’ve heard from almost everyone."
+msgstr "Unas dos semanas después cerramos, cuando haya hablado con casi todos."
 
 #: src/activity/audit-log.tsx
 msgid "About, by ID"
@@ -3913,10 +3902,6 @@ msgstr "Antes de que me ponga en contacto, avisa a tu equipo"
 #: src/agents/agent-templates.ts
 msgid "Before meetings"
 msgstr "Antes de las reuniones"
-
-#: src/onboarding/setup-steps.tsx
-msgid "Before we open it, we check everything with you once more. You’ll hear from us."
-msgstr "Antes de abrirlo, lo revisamos todo contigo una vez más. Te avisaremos."
 
 #: src/apps/data-model-changes.tsx
 msgid "Before you make this change"
@@ -7233,6 +7218,10 @@ msgstr "Todo el equipo de {company}"
 msgid "Everyone can read this upload."
 msgstr "Todo el mundo puede leer este archivo subido."
 
+#: src/onboarding/plan-story.tsx
+msgid "Everyone else gets their own link as soon as their lead has talked with me, and can do the chat whenever it suits them."
+msgstr "Los demás reciben su propio enlace en cuanto su responsable haya hablado conmigo, y hacen la conversación cuando les venga bien."
+
 #: src/onboarding/leads-step.tsx
 msgid "Everyone found"
 msgstr "Todas las personas encontradas"
@@ -8602,14 +8591,6 @@ msgstr "Mesa de ayuda"
 msgid "Helsinki"
 msgstr "Helsinki"
 
-#: src/onboarding/plan-story.tsx
-msgid "Here’s a quick look at the next two weeks."
-msgstr "Un vistazo rápido a las próximas dos semanas."
-
-#: src/onboarding/plan-story.tsx
-msgid "Here’s the plan"
-msgstr "Este es el plan"
-
 #: src/chat/plan-card.tsx
 msgid "Here's what Grasp will make"
 msgstr "Esto es lo que hará Grasp"
@@ -8618,7 +8599,7 @@ msgstr "Esto es lo que hará Grasp"
 msgid "Here’s your company"
 msgstr "Esta es tu empresa"
 
-#: src/onboarding/setup-steps.tsx
+#: src/onboarding/platform-entry.tsx
 msgid "Here’s your Grasp."
 msgstr "Aquí tienes tu Grasp."
 
@@ -8961,10 +8942,6 @@ msgstr "Prefiero saltarme esto"
 msgid "I’d rather skip this"
 msgstr "Prefiero saltármelo"
 
-#: src/onboarding/plan-story.tsx
-msgid "I’ll pull everything together, and on {findings} we’ll walk through the report: where work gets stuck and which processes make the most sense to tackle first."
-msgstr "Lo reúno todo y el {findings} repasamos juntos el informe: dónde se atasca el trabajo y qué procesos conviene abordar primero."
-
 #: src/onboarding/setup-steps.tsx
 msgid "I’ll set up Grasp with you, one step at a time. Which language would you like?"
 msgstr "Configuro Grasp contigo, paso a paso. ¿Qué idioma prefieres?"
@@ -8976,10 +8953,6 @@ msgstr "Ya casi estoy listo para ti"
 #: src/onboarding/forget-teams.tsx
 msgid "I’m erasing your teams from your Brain. It isn’t finished yet, and I finish it by myself."
 msgstr "Estoy borrando tus equipos de tu Brain. Aún no ha terminado, y lo termino yo solo."
-
-#: src/onboarding/setup-steps.tsx
-msgid "I’ve handled everything else."
-msgstr "Del resto me he encargado yo."
 
 #: src/projects/project-dialog.tsx
 msgid "Icon"
@@ -11109,8 +11082,8 @@ msgid "Most characters"
 msgstr "Máximo de caracteres"
 
 #: src/onboarding/plan-story.tsx
-msgid "Most of the time, it’s the small things that pile up—and end up making the biggest difference."
-msgstr "La mayoría de las veces son las pequeñas cosas las que se acumulan, y las que acaban marcando la mayor diferencia."
+msgid "Most of the time, it’s the small things that pile up and end up making the biggest difference. Until then, Grasp is all yours."
+msgstr "Casi siempre son las cosas pequeñas las que se acumulan y acaban marcando la mayor diferencia. Mientras tanto, Grasp es todo tuyo."
 
 #: src/onboarding/campaign/concepts/concept-words.ts
 msgid "Most people talk in the first three days, so the next two count most."
@@ -12728,6 +12701,14 @@ msgstr "Activado · para todos con Grasp"
 msgid "on {date} at {hour}"
 msgstr "el {date} a las {hour}"
 
+#: src/onboarding/plan-story.tsx
+msgid "On {start} at {at}, the team leads go first. They get a link for a short chat with me about their day, the tools they use, and where their time goes."
+msgstr "El {start} a las {at} empiezan los responsables de equipo. Reciben un enlace para una charla corta conmigo sobre su día, las herramientas que usan y en qué se les va el tiempo."
+
+#: src/onboarding/plan-story.tsx
+msgid "On {start}, the team leads go first. They get a link for a short chat with me about their day, the tools they use, and where their time goes."
+msgstr "El {start} empiezan los responsables de equipo. Reciben un enlace para una charla corta conmigo sobre su día, las herramientas que usan y en qué se les va el tiempo."
+
 #: src/settings/audit-chain.tsx
 msgid "On {time}, the chain broke at entry {entry}: nothing from there on is verified. {reason}"
 msgstr "El {time}, la cadena se rompió en la entrada {entry}: nada desde ahí está verificado. {reason}"
@@ -12828,6 +12809,10 @@ msgstr "Entrevista de incorporación"
 #: src/settings/staff-access.tsx
 msgid "Onboarding only"
 msgstr "Solo onboarding"
+
+#: src/onboarding/plan-story.tsx
+msgid "Once Grasp’s team has planned the day with you, the team leads go first. They get a link for a short chat with me about their day, the tools they use, and where their time goes."
+msgstr "En cuanto el equipo de Grasp haya planificado el día contigo, empiezan los responsables de equipo. Reciben un enlace para una charla corta conmigo sobre su día, las herramientas que usan y en qué se les va el tiempo."
 
 #: src/apps/app-settings.tsx
 msgid "Once it has a version, it can be copied."
@@ -13116,10 +13101,6 @@ msgstr "Abrir Archivos y apps"
 msgid "Open full page"
 msgstr "Abrir a página completa"
 
-#: src/onboarding/setup-steps.tsx
-msgid "Open Grasp"
-msgstr "Abrir Grasp"
-
 #: src/apps/preview-controls.tsx
 msgid "Open in a new tab"
 msgstr "Abrir en una pestaña nueva"
@@ -13209,6 +13190,10 @@ msgstr "Abrió Grasp a toda la empresa"
 #: src/frame/sign-in/sign-in.tsx
 msgid "Opening {provider}"
 msgstr "Abriendo {provider}"
+
+#: src/onboarding/platform-entry.tsx
+msgid "Opening Grasp"
+msgstr "Abriendo Grasp"
 
 #: src/brain/note-reveal.tsx
 msgid "Opening the note"
@@ -16995,10 +16980,6 @@ msgctxt "status of a workflow run"
 msgid "Starting"
 msgstr "Iniciándose"
 
-#: src/onboarding/plan-story.tsx
-msgid "Starting {everyone}, the rest of the team follows. Everyone gets their own link and can do the chat whenever it suits them."
-msgstr "A partir del {everyone}, le sigue el resto del equipo. Cada persona recibe su propio enlace y puede tener la conversación cuando mejor le venga."
-
 #: src/agents/setup/job-step.tsx
 msgid "Starting points"
 msgstr "Puntos de partida"
@@ -17012,6 +16993,10 @@ msgstr "Iniciando…"
 msgctxt "where a workflow starts"
 msgid "Starts"
 msgstr "Empieza"
+
+#: src/onboarding/plan-story.tsx
+msgid "Starts {day}"
+msgstr "Empieza {day}"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Starts {starts}"
@@ -17626,10 +17611,6 @@ msgstr "Gracias por decírmelo."
 msgid "Thank you for your time."
 msgstr "Gracias por tu tiempo."
 
-#: src/onboarding/setup-steps.tsx
-msgid "Thank you, {admin}"
-msgstr "Gracias, {admin}"
-
 #: src/interview/closed.tsx
 msgid "Thank you, {name}."
 msgstr "Gracias, {name}."
@@ -17730,9 +17711,9 @@ msgstr "Esa forma de iniciar sesión no está configurada aquí."
 msgid "That’s completely fine. Your company will see that you opted out, but never why. Nothing was recorded."
 msgstr "No pasa nada. Tu empresa verá que no participas, pero nunca por qué. No se ha grabado nada."
 
-#: src/onboarding/setup-steps.tsx
-msgid "That’s it from me. Thank you, {admin}."
-msgstr "Eso es todo por mi parte. Gracias, {admin}."
+#: src/onboarding/plan-story.tsx
+msgid "That’s everything. Here’s a quick look at what happens next."
+msgstr "Eso es todo. Te cuento rápido lo que pasa ahora."
 
 #: src/onboarding/people-add.tsx
 msgid "That’s more people than I can take: up to 2,000 in up to 120 teams."
@@ -18565,6 +18546,14 @@ msgstr "Luego"
 #: src/workflows/workflow-diagram.tsx
 msgid "Then {task}"
 msgstr "Después {task}"
+
+#: src/onboarding/plan-story.tsx
+msgid "Then everyone else gets their own link, and can do the chat whenever it suits them."
+msgstr "Después, los demás reciben su propio enlace y hacen la conversación cuando les venga bien."
+
+#: src/onboarding/plan-story.tsx
+msgid "Then I pull it all together, and we walk through the report: where work gets stuck, and what makes the most sense to tackle first."
+msgstr "Luego lo junto todo y repasamos el informe: dónde se atasca el trabajo y qué tiene más sentido abordar primero."
 
 #: src/interview/words.ts
 msgid "Then, the numbers and the result."
@@ -20143,14 +20132,6 @@ msgstr "Hemos escuchado lo suficiente."
 msgid "We have what we need."
 msgstr "Tenemos lo que necesitamos."
 
-#: src/onboarding/plan-story.tsx
-msgid "We kick off on {first} with a small first group. They’ll get a link for a quick chat about what their day-to-day looks like, which tools they use, and where their time goes."
-msgstr "Empezamos el {first} con un pequeño primer grupo. Recibirán un enlace para una breve conversación sobre cómo es su día a día, qué herramientas usan y en qué se les va el tiempo."
-
-#: src/onboarding/setup-steps.tsx
-msgid "We open your platform once we’ve checked everything with you. You’ll hear from us."
-msgstr "Abrimos tu plataforma en cuanto lo hayamos revisado todo contigo. Tendrás noticias nuestras."
-
 #: src/agents/setup/apps-step.tsx
 msgid "We picked the apps that fit. Add any other."
 msgstr "Hemos elegido las aplicaciones adecuadas. Añade las que quieras."
@@ -20168,8 +20149,8 @@ msgid "We want to spend less time on repetitive work, so there’s more time for
 msgstr "Queremos dedicar menos tiempo al trabajo repetitivo, para tener más tiempo para nuestros clientes. Se trata de cómo fluye el trabajo, no de puestos."
 
 #: src/onboarding/plan-story.tsx
-msgid "We wrap up on {close}, once we’ve heard from almost everyone."
-msgstr "Cerramos las conversaciones el {close}, cuando ya hayamos hablado con casi todos."
+msgid "We wrap up on {close}, once I’ve heard from almost everyone."
+msgstr "El {close} cerramos, cuando haya hablado con casi todos."
 
 #: src/onboarding/campaign/concepts/concept-words.ts
 msgid "We write down how each team works"
@@ -20353,6 +20334,7 @@ msgid "What happened to this run"
 msgstr "Qué pasó con esta ejecución"
 
 #: src/onboarding/campaign/concepts/letter.tsx
+#: src/onboarding/plan-story.tsx
 msgid "What happens next"
 msgstr "Qué viene ahora"
 
@@ -20482,10 +20464,6 @@ msgstr "Lo que sus pasos guardan para ejecuciones posteriores, que cada ejecuci�
 #: src/apps/field-editor.tsx
 msgid "What kind of field?"
 msgstr "¿Qué tipo de campo?"
-
-#: src/onboarding/setup-steps.tsx
-msgid "What needs you"
-msgstr "Lo que te espera"
 
 #: src/brain/brain.ts
 msgid "What people across the company say"
@@ -21765,10 +21743,6 @@ msgstr "Tu exportación está lista. Descarga cada uno de sus archivos:"
 #: src/brain/own-export.tsx
 msgid "Your export's files"
 msgstr "Los archivos de tu exportación"
-
-#: src/onboarding/setup-steps.tsx
-msgid "Your Grasp is ready whenever you are."
-msgstr "Tu Grasp está listo cuando tú lo estés."
 
 #: src/routes/_shell.settings.instructions.tsx
 msgid "Your instructions"
