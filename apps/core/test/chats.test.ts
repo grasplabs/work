@@ -1557,11 +1557,16 @@ describe("chats", () => {
       ...question,
       mentions: [{ kind: "agent", id: crypto.randomUUID() }],
     });
+    // The question comes back with its key: the page knows it by it.
     expect(
-      follower.messages().map(({ role, text }) => ({ role, text }))
+      follower.messages().map((message) => ({
+        role: message.role,
+        text: message.text,
+        key: message.role === "user" ? message.key : undefined,
+      }))
     ).toStrictEqual([
-      { role: "user", text: "Any news?" },
-      { role: "assistant", text: "Noted." },
+      { role: "user", text: "Any news?", key },
+      { role: "assistant", text: "Noted.", key: undefined },
     ]);
 
     await ann.chats.send(chat.id, { ...question, key: refusedKey });

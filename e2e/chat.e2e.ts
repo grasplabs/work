@@ -484,6 +484,69 @@ test("a person's list follows what happens elsewhere: a chat answered in the bac
   ).toContainText(newer);
 });
 
+test("a person switches between two chats and asks in each: every question shows as it is sent, its answer under it, and stays so on coming back", async ({
+  pageOf,
+}) => {
+  const { user } = peopleIn("chat");
+  const page = await pageOf(user);
+  const { opener, replies } = modelScripts.answers;
+  const [answer] = replies;
+  const tag = crypto.randomUUID().slice(0, 8);
+  const titles = [`Budget ${tag}`, `Hiring ${tag}`];
+  const { core, api } = apiOf(user);
+  try {
+    for (const title of titles) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other, the second newest
+      await api.chats.create(title);
+    }
+  } finally {
+    core[Symbol.dispose]();
+  }
+  await page.goto("/");
+  const sidebar = page.getByRole("navigation", { name: "Main" });
+  const messages = page.getByRole("log", { name: "Messages" });
+  /** The thread's questions and answers, in order, by who said them. */
+  const order = async () =>
+    await messages
+      .getByRole("article")
+      .evaluateAll((articles) =>
+        articles.map((each) => each.getAttribute("aria-label"))
+      );
+  const asked: string[] = [];
+  for (const title of titles) {
+    const question = `${opener} (${title})`;
+    asked.push(question);
+    // oxlint-disable-next-line no-await-in-loop -- one chat after the other
+    await sidebar.getByRole("link", { name: title, exact: true }).click();
+    const box = page.getByRole("textbox", { name: "Ask Grasp" });
+    // oxlint-disable-next-line no-await-in-loop -- one chat after the other
+    await box.fill(question);
+    // oxlint-disable-next-line no-await-in-loop -- one chat after the other
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    // At once, before anything of its answer.
+    // oxlint-disable-next-line no-await-in-loop -- one chat after the other
+    await expect(
+      messages
+        .getByRole("article", { name: "You" })
+        .filter({ hasText: question })
+    ).toBeVisible({ timeout: 1000 });
+    // oxlint-disable-next-line no-await-in-loop -- one chat after the other
+    await expect(
+      messages.getByRole("button", { name: "Ask again" })
+    ).toBeVisible({ timeout: 30_000 });
+    // oxlint-disable-next-line no-await-in-loop -- one chat after the other
+    await expect(messages.getByText(answer.text).last()).toBeVisible();
+    // oxlint-disable-next-line no-await-in-loop -- one chat after the other
+    expect(await order()).toStrictEqual(["You", "Grasp"]);
+  }
+  // Back on the first: as it was left, question then answer.
+  await sidebar.getByRole("link", { name: titles[0], exact: true }).click();
+  await expect(messages.getByRole("article", { name: "You" })).toContainText(
+    asked[0] ?? ""
+  );
+  expect(await order()).toStrictEqual(["You", "Grasp"]);
+});
+
 test("a person answers the agent's questions in the box's place, and sends the answers", async ({
   pageOf,
 }) => {

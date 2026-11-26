@@ -24,6 +24,7 @@ import {
   writeChoice,
 } from "./model-choice.ts";
 import type { ModelChoice } from "./model-choice.ts";
+import { questionRefused, questionSent } from "./sent-questions.ts";
 
 // Asking in a chat, from the chat page or the chat dock on any other page:
 // the box's text, model, effort and files, and asking in the open chat, or
@@ -119,6 +120,8 @@ export const useAsk = (
 ) => {
   const { identity } = useRouteContext({ from: "/_shell" });
   const { busy, failure, run } = useCoreAction();
+  // Why a new chat's question went nowhere: no chat was made to say it in.
+  const [refused, setRefused] = useState<string>();
   const [text, setText] = useState("");
   // Why dictating into the text stopped on its own, kept with it: the box
   // it stopped in may have gone (dictation.ts).
@@ -200,11 +203,17 @@ export const useAsk = (
       });
     }
   };
-  /** Asks `question`: true once core took it, false when it was not sent. */
+  /**
+   * Asks `question`: true once core took it, false when it was not sent.
+   * It shows in its chat at once (sent-questions.ts), under the key it goes
+   * with (`again`, a question not sent, asked again under its own), and
+   * leaves the box: in a new chat, once the chat is made, which then opens.
+   */
   const ask = async (
     question: string,
     carried: readonly BoxFile[] = [],
-    mentioned: readonly BoxMention[] = []
+    mentioned: readonly BoxMention[] = [],
+    again?: string
   ): Promise<boolean> => {
     if (sending.current) {
       return false;
@@ -214,58 +223,88 @@ export const useAsk = (
     // A new chat starts with the agent picked, else the first one the
     // question mentions: the first agent, paused, never stops it.
     const startWith = agentId ?? named.find(({ kind }) => kind === "agent")?.id;
+    const key = again ?? crypto.randomUUID();
     let created: string | undefined;
-    const sent = await run(async (session) => {
-      let id = chatId ?? unsentChatFor(unsent.current, question, startWith);
-      if (id === undefined) {
-        ({ id } = await session.chats.create(
-          titleOf(question),
-          startWith,
-          make
-        ));
-        created = id;
-      }
-      const askedIn = id;
-      const fileIds: string[] = [];
-      for (const { id: boxId, file } of carried) {
-        const known = attached.current.get(boxId);
-        if (known?.chatId === askedIn) {
-          fileIds.push(known.fileId);
-          continue;
+    // The chat it shows in, once there is one: why core refused it is said
+    // there, under the question; before, in the box's place.
+    let shownIn: string | undefined;
+    const show = (id: string): void => {
+      shownIn = id;
+      questionSent(id, { key, text: question, at: new Date().toISOString() });
+      setText((now) => (now === question ? "" : now));
+    };
+    if (chatId !== undefined) {
+      show(chatId);
+    }
+    setRefused(undefined);
+    const sent = await run(
+      async (session) => {
+        let id = chatId ?? unsentChatFor(unsent.current, question, startWith);
+        if (id === undefined) {
+          ({ id } = await session.chats.create(
+            titleOf(question),
+            startWith,
+            make
+          ));
+          created = id;
         }
-        // oxlint-disable-next-line no-await-in-loop -- one at a time, in the order they were added
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        // oxlint-disable-next-line no-await-in-loop -- one at a time, in the order they were added
-        const { id: fileId } = await session.chats.attachFile(askedIn, {
-          name: file.name,
-          bytes,
+        if (chatId === undefined) {
+          // The chat it made opens now, the question in it, as it goes.
+          setMade(id);
+          show(id);
+          if (activeChat(slot) === undefined) {
+            setActiveChat(id, slot);
+          }
+          onAsked?.(id);
+        }
+        const askedIn = id;
+        const fileIds: string[] = [];
+        for (const { id: boxId, file } of carried) {
+          const known = attached.current.get(boxId);
+          if (known?.chatId === askedIn) {
+            fileIds.push(known.fileId);
+            continue;
+          }
+          // oxlint-disable-next-line no-await-in-loop -- one at a time, in the order they were added
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          // oxlint-disable-next-line no-await-in-loop -- one at a time, in the order they were added
+          const { id: fileId } = await session.chats.attachFile(askedIn, {
+            name: file.name,
+            bytes,
+          });
+          attached.current.set(boxId, { chatId: askedIn, fileId });
+          fileIds.push(fileId);
+        }
+        await session.chats.send(askedIn, {
+          key,
+          text: question,
+          model,
+          ...(effort === undefined ? {} : { effort }),
+          ...(fileIds.length === 0 ? {} : { files: fileIds }),
+          ...(subject === undefined ? {} : { subject }),
+          ...(named.length === 0 ? {} : { mentions: named }),
         });
-        attached.current.set(boxId, { chatId: askedIn, fileId });
-        fileIds.push(fileId);
+        return askedIn;
+      },
+      (reason) => {
+        if (shownIn === undefined) {
+          setRefused(reason);
+        } else {
+          questionRefused(shownIn, key, reason);
+        }
       }
-      await session.chats.send(askedIn, {
-        text: question,
-        model,
-        ...(effort === undefined ? {} : { effort }),
-        ...(fileIds.length === 0 ? {} : { files: fileIds }),
-        ...(subject === undefined ? {} : { subject }),
-        ...(named.length === 0 ? {} : { mentions: named }),
-      });
-      return askedIn;
-    });
+    );
     sending.current = false;
     if (sent === undefined) {
-      // The box keeps the question and says why it wasn't sent; a new chat
-      // made for it waits to be asked in again.
+      // Not sent: it stays in its chat, said not sent, to send again (or,
+      // where no chat was made for it, in the box, which says why); a new
+      // chat made for it waits to be asked in again.
       if (created !== undefined) {
         unsent.current = { id: created, question, agentId: startWith };
       }
       return false;
     }
     unsent.current = null;
-    // Clears the box only of what was sent from it: asking again sends an
-    // earlier question, and a draft the person started stays.
-    setText((now) => (now === question ? "" : now));
     if (mentioned.length > 0) {
       setMentions([]);
     }
@@ -273,13 +312,10 @@ export const useAsk = (
     for (const { id } of carried) {
       attached.current.delete(id);
     }
-    setMade(sent);
-    // The chat it made is the open one, unless another was opened while it
-    // was on its way: an answer that late selects nothing.
-    if (chatId === undefined && activeChat(slot) === undefined) {
-      setActiveChat(sent, slot);
+    // A new chat opened as it was made, above.
+    if (chatId !== undefined) {
+      onAsked?.(sent);
     }
-    onAsked?.(sent);
     return true;
   };
   const stop = async (id: string): Promise<void> => {
@@ -303,7 +339,7 @@ export const useAsk = (
         choose({ model, effort: chosen });
       },
       busy,
-      failure: fileProblem ?? failure,
+      failure: fileProblem ?? refused ?? failure,
       files: files.map(({ id, file }) => ({
         id,
         name: file.name,

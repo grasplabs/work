@@ -25,6 +25,7 @@ import {
   ModelsUnavailableNotice,
   unavailableText,
 } from "./models-unavailable.tsx";
+import { useSentQuestions } from "./sent-questions.ts";
 import { ChatSources } from "./sources.tsx";
 import { useSubjectBar } from "./subject-bar.tsx";
 import type { ChatThread as ChatThreadType } from "./thread.tsx";
@@ -142,6 +143,8 @@ export const ChatConversation = ({
   } = chat;
   // Read as it opens here; the New line over what the person hadn't seen.
   const newLine = useNewLine(chatId, view, seen);
+  // What the person sent from here that core hasn't shown back yet.
+  const sent = useSentQuestions(chatId, view.messages);
   // A subject's chat, while core finds it, or why it gave none.
   if (finding.searching || finding.failure !== undefined) {
     return finding.failure === undefined ? (
@@ -162,7 +165,7 @@ export const ChatConversation = ({
       </div>
     );
   }
-  if (chatId === undefined || empty) {
+  if (chatId === undefined || (empty && sent.length === 0)) {
     // Before anything is asked the chat is empty: the box at its foot is enough.
     return <div {...stylex.props(styles.grow)} />;
   }
@@ -176,7 +179,12 @@ export const ChatConversation = ({
         // As soon as the chat's view is there: kept from before, its line
         // comes as core says where they read to; else the watch's first
         // update says it at once (unread.ts).
-        loaded={newLine.decided || view.loaded || failure !== undefined}
+        loaded={
+          newLine.decided ||
+          view.loaded ||
+          failure !== undefined ||
+          sent.length > 0
+        }
         messages={view.messages}
         newLineBefore={newLine.before}
         // Ask again goes as its answer is drawn anew: the person is taken
@@ -196,6 +204,11 @@ export const ChatConversation = ({
           <ChatSources names={sourceNames} sources={view.provenance.sources} />
         }
         tools={view.tools}
+        sent={sent}
+        onAgain={(question) => {
+          focusBox();
+          void ask(question.text, [], [], question.key);
+        }}
         build={{
           model: composer.model,
           effort: composer.effort,

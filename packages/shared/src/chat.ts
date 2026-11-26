@@ -928,6 +928,11 @@ export type ChatMessage =
        * built from here on.
        */
       built?: ChatBuilt & { plan: string };
+      /**
+       * The key the page sent it with (`ChatQuestion.key`): the page drew
+       * it under that key the moment it was sent, and knows it by it.
+       */
+      key?: string;
       at: string;
     }
   | {

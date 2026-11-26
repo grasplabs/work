@@ -81,10 +81,12 @@ import { FileCards } from "./chat-files.tsx";
 import { answerStatusOf, stepFinished, stepStatusOf } from "./chat-states.ts";
 import { modelName } from "./composer.tsx";
 import { ConnectAiProvider } from "./connect-ai-provider.tsx";
+import { FailureLine } from "./failure-line.tsx";
 import { failureMessage, retryMends } from "./failure.ts";
 import { pendingCard } from "./make-card.tsx";
 import { recoveredSteps } from "./recovered.ts";
 import { SavedMemoryLine } from "./saved-memory.tsx";
+import type { SentQuestion } from "./sent-questions.ts";
 import { readingFileOf, signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
 import { shortTime, turnsOf, workedFor } from "./turns.ts";
@@ -150,6 +152,8 @@ const styles = stylex.create({
     gap: space["1"],
   },
   flat: { margin: 0 },
+  // Under a question core refused, at its side: why, and Try again.
+  notSent: { display: "grid", gap: space["2"], justifyItems: "end" },
   // A day line, as #2503's thread draws it: the day between two hairlines.
   dayLine: { display: "flex", alignItems: "center", gap: space["3"] },
   dayRule: { flexGrow: 1, flexBasis: 0, alignSelf: "center" },
@@ -565,6 +569,8 @@ type Row =
       at: string;
       message: Asked;
       asked: Answer["asked"];
+      /** Sent from this tab, not shown back by core yet (sent-questions.ts). */
+      sent?: SentQuestion;
     }
   | AnswerTurn
   | { kind: "after"; id: string; at?: undefined; children: ReactNode }
@@ -694,39 +700,77 @@ const sameAgent = (
   return before === undefined || agentId === undefined || before === agentId;
 };
 
-/** The thread's rows: each question, then its replies as one answer per agent, the reply being written joined to it. */
+/**
+ * A question's row ID: the key the page sent it with, where it has one, so
+ * the question drawn as it was sent and core's copy are the same row.
+ */
+const questionRowId = (message: Asked): string =>
+  message.key === undefined ? `q${message.id}` : `q:${message.key}`;
+
+/**
+ * The thread's rows: each question, then its replies as one answer per
+ * agent, the reply being written joined to it; then the questions sent
+ * from this tab that core hasn't shown back yet (`sent`), the answer being
+ * written after them. An answer's row is named after the question it
+ * answers (and how many answers came before it there), never after its
+ * first reply: the row that says Grasp works on a question stays the
+ * same row once its first reply is kept.
+ */
 const rowsOf = (
   messages: readonly ChatMessage[],
   partial: ChatPartial | null,
-  live: boolean
+  live: boolean,
+  sent: readonly SentQuestion[] = []
 ): Row[] => {
   const rows: Row[] = [];
+  // The question the answers being drawn follow, and how many answer
+  // rows it has.
+  let question = "";
+  let answers = 0;
+  const answerRow = (at: string | undefined): AnswerTurn => {
+    answers += 1;
+    return {
+      kind: "answer",
+      id: `${question}a${answers}`,
+      at,
+      replies: [],
+      partial: null,
+      live: false,
+    };
+  };
+  const ask = (message: Asked, from?: SentQuestion): void => {
+    const before = rows.at(-1);
+    question = questionRowId(message);
+    answers = 0;
+    rows.push({
+      kind: "question",
+      id: question,
+      at: message.at,
+      message,
+      asked:
+        before?.kind === "answer" ? before.replies.at(-1)?.asked : undefined,
+      ...(from === undefined ? {} : { sent: from }),
+    });
+  };
   for (const message of messages) {
     if (message.role === "user") {
-      const before = rows.at(-1);
-      rows.push({
-        kind: "question",
-        id: `q${message.id}`,
-        at: message.at,
-        message,
-        asked:
-          before?.kind === "answer" ? before.replies.at(-1)?.asked : undefined,
-      });
+      ask(message);
     } else if (message.role === "assistant") {
       const last = rows.at(-1);
       if (last?.kind === "answer" && sameAgent(last, message.agentId)) {
         last.replies.push(message);
       } else {
-        rows.push({
-          kind: "answer",
-          id: `a${message.id}`,
-          at: message.at,
-          replies: [message],
-          partial: null,
-          live: false,
-        });
+        const row = answerRow(message.at);
+        row.replies.push(message);
+        rows.push(row);
       }
     }
+  }
+  for (const each of sent) {
+    ask(
+      { id: 0, role: "user", text: each.text, key: each.key, at: each.at },
+      each
+    );
   }
   if (!live) {
     return rows;
@@ -737,14 +781,10 @@ const rowsOf = (
     last.partial = partial;
     last.live = true;
   } else {
-    rows.push({
-      kind: "answer",
-      id: "answering",
-      at: last?.at,
-      replies: [],
-      partial,
-      live: true,
-    });
+    const row = answerRow(last?.at);
+    row.partial = partial;
+    row.live = true;
+    rows.push(row);
   }
   return rows;
 };
@@ -835,6 +875,28 @@ const SentAt = ({
   </MessageFooter>
 );
 
+/** Under a question core refused: that it wasn't sent, why, and Try again. */
+const NotSent = ({
+  failure,
+  onAgain,
+}: {
+  failure: string;
+  onAgain: () => void;
+}) => {
+  const { t } = useLingui();
+  return (
+    <div {...stylex.props(styles.notSent)}>
+      <FailureLine>{t`Not sent. ${failure}`}</FailureLine>
+      <div>
+        <Button onClick={onAgain} size="sm" variant="outline">
+          <Icon icon={RefreshCwIcon} />
+          <Trans>Try again</Trans>
+        </Button>
+      </div>
+    </div>
+  );
+};
+
 /**
  * What the person asked, in their bubble: their answers to the agent's
  * questions (`asked`, the reply before it) as each question and its
@@ -843,9 +905,15 @@ const SentAt = ({
 const Question = ({
   message,
   asked,
+  sent,
+  onAgain,
 }: {
   message: Asked;
   asked: Answer["asked"];
+  /** Sent from this tab and not shown back yet: refused, it says so. */
+  sent?: SentQuestion;
+  /** Sends a question core refused again, under its own key. */
+  onAgain?: (question: SentQuestion) => void;
 }) => {
   const answered =
     asked === undefined ? undefined : answeredOf(asked, message.text);
@@ -876,6 +944,14 @@ const Question = ({
           </BubbleContent>
         </Bubble>
         <SentAt at={message.at} />
+        {sent?.failure === undefined ? null : (
+          <NotSent
+            failure={sent.failure}
+            onAgain={() => {
+              onAgain?.(sent);
+            }}
+          />
+        )}
       </MessageContent>
     </Message>
   );
@@ -1400,6 +1476,8 @@ export const ChatThread = ({
   build,
   newLineBefore,
   sources,
+  sent,
+  onAgain,
   children,
 }: {
   /**
@@ -1451,6 +1529,13 @@ export const ChatThread = ({
    * folds what an answer drew on under it.
    */
   sources?: ReactNode;
+  /**
+   * The questions sent from this tab that core hasn't shown back yet
+   * (sent-questions.ts): drawn after the messages, the answer after them.
+   */
+  sent?: readonly SentQuestion[];
+  /** Sends a question core refused again, under its own key. */
+  onAgain?: (question: SentQuestion) => void;
   /** Shown after the messages, in the thread: what is held, why it stopped. */
   children?: ReactNode;
 }) => {
@@ -1471,7 +1556,7 @@ export const ChatThread = ({
   const inBrain = useLocation({
     select: ({ pathname }) => pathname === "/brain" || pathname === "/brain/",
   });
-  const rows = rowsOf(messages, shown, running);
+  const rows = rowsOf(messages, shown, running, sent);
   const liveRow = rows.findLast(
     (row): row is AnswerTurn => row.kind === "answer" && row.live
   );
@@ -1604,7 +1689,12 @@ export const ChatThread = ({
                         {...column}
                       >
                         {row.kind === "question" ? (
-                          <Question asked={row.asked} message={row.message} />
+                          <Question
+                            asked={row.asked}
+                            message={row.message}
+                            onAgain={onAgain}
+                            sent={row.sent}
+                          />
                         ) : null}
                         {row.kind === "answer" ? (
                           <AnswerRow context={contextOf(row)} turn={row} />

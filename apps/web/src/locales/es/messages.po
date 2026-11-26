@@ -12031,6 +12031,10 @@ msgstr "Todavía no se ha guardado. Hasta entonces, tus líneas siguen yendo ado
 msgid "Not sent"
 msgstr "No enviado"
 
+#: src/chat/thread.tsx
+msgid "Not sent. {failure}"
+msgstr "No enviado. {failure}"
+
 #: src/apps/resource-bindings.tsx
 msgid "Not served"
 msgstr "Sin servir"

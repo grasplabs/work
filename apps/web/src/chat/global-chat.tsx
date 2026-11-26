@@ -8,6 +8,7 @@ import {
   use,
   useEffect,
   useEffectEvent,
+  useRef,
   useSyncExternalStore,
 } from "react";
 import type { ReactNode } from "react";
@@ -48,6 +49,7 @@ import {
 } from "./chat-subject.ts";
 import { useFollowedChat } from "./chat-watch.ts";
 import { useNoRoomBeside } from "./room-beside.ts";
+import { turnEnded } from "./sent-questions.ts";
 import type { SourceName } from "./sources.tsx";
 import { useAsk } from "./use-ask.ts";
 
@@ -249,6 +251,21 @@ const useGlobalChatValue = () => {
     subject.about === undefined ? undefined : { subject: subject.about }
   );
   const builds = useChatBuilds(chatId, view.running, view.worked);
+  // Its turn ended: its questions are in its messages now (sent-questions.ts).
+  const { running } = view;
+  const ran = useRef({ chatId, running });
+  useEffect(() => {
+    const before = ran.current;
+    ran.current = { chatId, running };
+    if (
+      chatId !== undefined &&
+      before.chatId === chatId &&
+      before.running &&
+      !running
+    ) {
+      turnEnded(chatId);
+    }
+  }, [chatId, running]);
   const { summary, retitle } = useChatSummary(chatId, view.running);
   // Core has no such chat (deleted, or not the person's): the next question
   // starts one, and a subject's is found again.
