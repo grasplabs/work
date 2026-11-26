@@ -181,6 +181,46 @@ const SaidLine = ({ line, said }: { line: string; said: number }) => {
   );
 };
 
+/**
+ * His line as it is read, typing: what he says before the question quiet
+ * above it, and the question large, as it is what they answer; anything
+ * after it quiet under it.
+ */
+const ReadLine = ({
+  line,
+  asked,
+  said,
+}: {
+  line: string;
+  asked: { question: string; at: number };
+  said: number;
+}) => {
+  const lead = line.slice(0, asked.at).trim();
+  const afterAt = asked.at + asked.question.length;
+  const after = line.slice(afterAt).trim();
+  return (
+    <>
+      {lead === "" ? null : (
+        <Text color="muted" size="lg">
+          <Streamed said={said} text={lead} />
+        </Text>
+      )}
+      <Heading level={1} size="xl">
+        <Streamed from={asked.at} said={said} text={asked.question} />
+      </Heading>
+      {after === "" ? null : (
+        <Text size="lg">
+          <Streamed
+            from={line.indexOf(after, afterAt)}
+            said={said}
+            text={after}
+          />
+        </Text>
+      )}
+    </>
+  );
+};
+
 /** His question alone, as the screen shows it while he talks around it: whole at once, fading in. */
 const AskedLine = ({ question }: { question: string }) => (
   <div {...stylex.props(fadeIn)}>
@@ -197,7 +237,8 @@ const AskedLine = ({ question }: { question: string }) => (
  * sentence, so voice and screen are two things that belong together, not
  * the same words twice. Until the question is there, nothing new stands:
  * no words that are taken away again. A line that asks nothing is shown as
- * he says it. Typing, nothing is heard: the screen shows all he says.
+ * he says it. Typing, nothing is heard: the screen shows all he says,
+ * the question large and what leads up to it quiet above it.
  */
 const Asking = () => {
   const loop = useLoop();
@@ -207,9 +248,12 @@ const Asking = () => {
   const said = loop.doing === "speaking" ? Math.max(loop.from, saidOf, 0) : -1;
   const heard = mode === "talk";
   const asked = heard ? questionOf(loop.line) : null;
+  const typedAsk = heard ? null : questionOf(loop.line);
   let shown: ReactNode = null;
   if (asked !== null) {
     shown = <AskedLine key={asked.question} question={asked.question} />;
+  } else if (typedAsk !== null) {
+    shown = <ReadLine asked={typedAsk} line={loop.line} said={said} />;
   } else if (!heard || loop.doing !== "speaking") {
     shown = <SaidLine line={loop.line} said={said} />;
   }
