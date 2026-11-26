@@ -6,6 +6,10 @@ packages:
 # Supply-chain defaults: new versions wait 3 days, exotic sub-dependencies are
 # blocked, and only the packages listed here may run install scripts.
 minimumReleaseAge: 4320
+# Waived by the owner for Damsko's code block highlighter, younger than
+# the rule until 2026-11-29 01:53 UTC; removed again once it is 3 days old.
+minimumReleaseAgeExclude:
+  - "@pierre/highlights@0.6.0"
 blockExoticSubdeps: true
 strictDepBuilds: true
 allowBuilds:
@@ -314,7 +318,9 @@ catalog:
   recharts: 3.10.1
   # Damsko's code block (packages/ui): its highlighter, on the page, each
   # language's grammar loaded when a block first shows it.
-  "@pierre/highlights": 0.5.2
+  "@pierre/highlights": 0.6.0
+  # DiffViewer's diffs (packages/ui): jsdiff.
+  diff: 9.0.0
   remark-gfm: 4.0.1
   shadcn: 4.23.0
   tailwind-merge: 3.7.0
