@@ -47,7 +47,7 @@ import type {
   AppPointerSetting,
   SharedMailboxSetting,
   SharedSyncPlaces,
-  ConnectionBrainAudienceSetting,
+  ConnectionAudienceSetting,
   ToolClassSetting,
   ToolkitKeyField,
 } from "@grasp-os/shared/connect";
@@ -1008,14 +1008,14 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
     });
   }
 
-  async brainAudiences(): Promise<ConnectionBrainAudienceSetting[]> {
+  async audiences(): Promise<ConnectionAudienceSetting[]> {
     return await withPerson(
       this.#check,
       async (identity) => await readConnectionAudiences(this.#env, identity)
     );
   }
 
-  async setBrainAudience(
+  async setAudience(
     connectionId: unknown,
     audience: unknown,
     from: unknown,

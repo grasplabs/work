@@ -288,6 +288,32 @@ describe("a side effect from chat", () => {
     ]);
   });
 
+  it("with no grant is held through a shared connection, and refused through its person's own personal one: that one only reads", async () => {
+    const anna = someone();
+    const shared = await addConnection();
+    const own = await addConnection({
+      scope: "personal",
+      ownerUserId: anna.userId,
+    });
+    const grantless = { origin: { ...chatOrigin, permissionId: null } };
+
+    const asked = {
+      shared: await outcome(hold(inChat(anna), mail(shared), grantless)),
+      own: await outcome(hold(inChat(anna), mail(own), grantless)),
+    };
+
+    const held = await waitingFor(anna);
+    expect({
+      asked,
+      ran: server.ran,
+      held: held.map(({ connectionId }) => connectionId),
+    }).toStrictEqual({
+      asked: { shared: "ok", own: "connect.read_only" },
+      ran: [],
+      held: [shared],
+    });
+  });
+
   it("on a native connection is shown as its tool describes it, in the input's own values, with the connection's name", async () => {
     const anna = someone();
     const connectionId = await addConnection({

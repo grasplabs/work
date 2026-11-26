@@ -4526,13 +4526,13 @@ const VoiceLine = ({
 const VoiceLead = ({
   speaker,
   seconds,
-  timed,
   compact,
+  timed,
 }: {
   speaker: ReactNode;
   seconds: number;
-  timed: boolean;
   compact: boolean;
+  timed: boolean;
 }) => {
   if (!isBlank(speaker)) {
     return <span {...stylex.props(styles.speaker)}>{speaker}</span>;
@@ -4645,11 +4645,10 @@ export const PromptInputVoice = ({
           <VoiceLead
             speaker={speaking ? speaker : undefined}
             seconds={seconds}
-            timed={timed}
             compact={compact}
+            timed={timed}
           />
-          {/* Nothing heard yet: no words and no lone caret, the field has the row. */}
-          {compact && heard && (
+          {compact && (
             <VoiceLine heard={heard} interim={interim} style={style}>
               {children}
             </VoiceLine>

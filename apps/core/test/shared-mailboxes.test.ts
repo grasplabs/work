@@ -10,6 +10,7 @@ import {
   withoutMarking,
 } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
+import { chooseAudience } from "./brain-audiences.ts";
 import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { acmeTenant } from "./sign-in-config.ts";
@@ -68,6 +69,9 @@ const connectShared = async (admin: Admin) => {
   if (connection === undefined) {
     throw new Error("Expected the shared connection");
   }
+  // Opened to everyone in the company, as the chat uses no shared one
+  // before an admin chooses who may (connection-audiences.ts).
+  await chooseAudience(admin.api, connection.id, { kind: "everyone" });
   return { id: connection.id, mailbox };
 };
 

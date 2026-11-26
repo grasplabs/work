@@ -624,7 +624,7 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
     });
   });
 
-  it("writes only while everything the App can reach is everyone's: a team's part of the Brain, a personal connection and another App each refuse, for good", async () => {
+  it("writes only while everything the App can reach is everyone's: a team's part of the Brain, a personal connection, a shared one only a team's audience holds and another App each refuse, for good", async () => {
     const admin = await person("admin");
     const ada = await signedIn(await person("builder"));
     const team = await teamOf(ada);
@@ -633,6 +633,8 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
     const mailbox = await appOf(ada, admin);
     const reaching = await appOf(ada, admin);
     const reached = await appOf(ada, admin);
+    const teamShared = await appOf(ada, admin);
+    const everyoneShared = await appOf(ada, admin);
     // One reaching an App that can't be placed.
     const cantPlace = await appOf(ada, admin);
     // A personal connection, granted and then revoked: it still counts.
@@ -644,6 +646,30 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
       )
       .bind(connection, ada.userId, now, now)
       .run();
+    // Shared connections an admin opened to Ada's team alone, and to
+    // everyone (GRA-2322).
+    const [teamMail, everyoneMail] = [
+      `connection-team-${unique()}`,
+      `connection-everyone-${unique()}`,
+    ];
+    for (const [id, teamId] of [
+      [teamMail, team],
+      [everyoneMail, null],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- two rows each
+      await connectDb()
+        .prepare(
+          "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, 'microsoft', 'shared', NULL, 'active', 'native', 'microsoft-365', ?, ?)"
+        )
+        .bind(id, now, now)
+        .run();
+      // oxlint-disable-next-line no-await-in-loop -- two rows each
+      await env.DB.prepare(
+        "INSERT INTO connection_brain_audiences (connection_id, team_id, changed_by, changed_at) VALUES (?, ?, ?, ?)"
+      )
+        .bind(id, teamId, admin.userId, now)
+        .run();
+    }
     const workflow = `workflow_${unique().replaceAll("-", "")}`;
     const unplaced = `workflow_${unique().replaceAll("-", "")}`;
     await env.DB.batch([
@@ -656,6 +682,10 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
         "revoked"
       ),
       // Reaching starts a workflow that calls the other App's functions.
+      grant("app", teamShared.app, "connection", teamMail, ["mail.read"]),
+      grant("app", everyoneShared.app, "connection", everyoneMail, [
+        "mail.read",
+      ]),
       grant("app", reaching.app, "workflow", workflow, ["start"]),
       grant("workflow", workflow, "app", reached.app, ["call"]),
       grant("app", cantPlace.app, "workflow", unplaced, ["start"]),
@@ -669,12 +699,17 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
       mailbox: await tried(mailbox),
       reaching: await tried(reaching),
       reached: await tried(reached),
+      teamShared: await tried(teamShared),
+      // Everyone's: written.
+      everyoneShared: entityOf(await tried(everyoneShared)) !== "",
       cantPlace: await tried(cantPlace),
     }).toStrictEqual({
       teamBrain: { failed: "permission.brain_write_reach" },
       mailbox: { failed: "permission.brain_write_reach" },
       reaching: { failed: "permission.brain_write_reach" },
       reached: { failed: "permission.brain_write_reach" },
+      teamShared: { failed: "permission.brain_write_reach" },
+      everyoneShared: true,
       cantPlace: { failed: "permission.brain_write_unplaced" },
     });
   });

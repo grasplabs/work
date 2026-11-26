@@ -155,7 +155,7 @@ import { markCaptured } from "./workflows/run-evidence.ts";
 
 // A shared connection's reads (GRA-1831; the threat model and the
 // decisions are on the issue) are kept by the same rules, in the shared
-// store, for whoever the connection's Brain audience holds at each recall
+// store, for whoever the connection's audience holds at each recall
 // (`connection` readers): one record for the whole audience, whoever read
 // it, so its key names no person (connection-capture-key.ts
 // `sharedReadHashOf`). Each is named first (shared-reads.ts

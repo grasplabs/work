@@ -54,7 +54,7 @@ import {
   brainSyncDisconnects,
   brainSyncItems,
   brainSyncSources,
-  connectionBrainAudiences,
+  connectionAudiences,
   connectionBrainErasures,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
@@ -92,7 +92,7 @@ import { erasureBegan, plainPrincipalOf } from "./source-readers.ts";
 //   goes to the shared store for that place's group, whatever its own
 //   readers say (none are read), so never to whoever connected it. Core
 //   puts a reader in the place's group only beside the connection's own,
-//   which its Brain audience holds (GRA-1831), and only while the place
+//   which its audience holds (GRA-1831), and only while the place
 //   is picked (brain-next.ts `withConnections`). So an un-pick hides the
 //   place in one statement (`hideUnpickedPlaces`), before the admin's
 //   save answers; the clock then erases it (`completeDroppedPlaces`), as
@@ -600,12 +600,12 @@ const closed = (connectionId: SQL | string): SQL =>
   sql`EXISTS (SELECT 1 FROM ${brainSyncDisconnects} WHERE ${brainSyncDisconnects.connectionId} = ${connectionId})`;
 
 /**
- * That the shared connection `connectionId` has a Brain audience now,
+ * That the shared connection `connectionId` has an audience now,
  * and no erasure of its records under way or closed by a disconnect
  * (connection-audiences.ts, shared-reads.ts), as SQL.
  */
 const audienced = (connectionId: SQL | string): SQL =>
-  sql`EXISTS (SELECT 1 FROM ${connectionBrainAudiences} WHERE ${connectionBrainAudiences.connectionId} = ${connectionId})
+  sql`EXISTS (SELECT 1 FROM ${connectionAudiences} WHERE ${connectionAudiences.connectionId} = ${connectionId})
     AND NOT EXISTS (SELECT 1 FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connectionId} AND (${connectionBrainErasures.erasing} = 1 OR ${connectionBrainErasures.closed} = 1))`;
 
 /** The row of the source of `place` of `of`'s sync, as SQL. */
