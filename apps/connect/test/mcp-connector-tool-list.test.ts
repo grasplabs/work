@@ -162,15 +162,21 @@ describe("a connector's tool list", () => {
     }));
     await listExpires(connectionId);
     await callAs(agent, { connectionId, action: "list_issues", input: {} });
-    const event = (counts: Record<string, number>) => ({
+    const event = (counts: Record<string, boolean | number>) => ({
       actor: { type: "system" },
       target: { type: "connection", id: connectionId },
       detail: { connector, ...counts },
     });
 
     await expect(recorded("connector.tools.changed")).resolves.toStrictEqual([
-      event({ added: first.length, removed: 0, changed: 0, reclassed: 0 }),
-      event({ added: 2, removed: 1, changed: 1, reclassed: 1 }),
+      event({
+        first: true,
+        added: first.length,
+        removed: 0,
+        changed: 0,
+        reclassed: 0,
+      }),
+      event({ first: false, added: 2, removed: 1, changed: 1, reclassed: 1 }),
     ]);
   });
 

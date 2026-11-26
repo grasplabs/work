@@ -25,7 +25,7 @@ import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
-import { and, desc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { recordEventIf, recordEvents, recordEventsIf } from "./audit.ts";
@@ -408,11 +408,11 @@ const serverFor = async (
   });
 };
 
-/** Orders tools by name, which a list holds each of once. */
 /** A tool as JSON whose keys a server may reorder without changing it. */
 const toolJson = (tool: ConnectorTool): string =>
   canonicalJson({ ...tool, annotations: { ...tool.annotations } });
 
+/** Orders tools by name, which a list holds each of once. */
 const byName = (a: ConnectorTool, b: ConnectorTool): number =>
   a.name < b.name ? -1 : 1;
 
@@ -579,6 +579,7 @@ export const currentTools = async (
     {
       entry: connectionEvent(null, "connector.tools.changed", connection.id, {
         connector: connection.server,
+        first: connection.toolListReadAt === null,
         ...listChanges(kept, tools, connection.scope),
       }),
       from: connections,
@@ -1013,33 +1014,50 @@ export const connectorTools = async (
     throw roleErrors.create("role.forbidden");
   }
   await requireConnector(env, connector);
-  const [rows, blocked] = await Promise.all([
-    drizzle(env.DB)
-      .select({ tool: connectionTools })
-      .from(connectionTools)
-      .innerJoin(connections, eq(connections.id, connectionTools.connectionId))
-      .where(
-        and(
-          eq(connections.server, connector),
-          eq(connections.serverKind, "connector"),
-          eq(connections.status, "active")
-        )
+  const db = drizzle(env.DB);
+  // One row a name, as the list read last holds it, however many people
+  // connected: what is read grows with the connector's tools alone.
+  const newest = db
+    .select({
+      name: connectionTools.name,
+      description: connectionTools.description,
+      inputSchema: connectionTools.inputSchema,
+      annotations: connectionTools.annotations,
+      rank: sql<number>`ROW_NUMBER() OVER (PARTITION BY ${connectionTools.name} ORDER BY ${connections.toolListReadAt} DESC)`.as(
+        "rank"
+      ),
+    })
+    .from(connectionTools)
+    .innerJoin(connections, eq(connections.id, connectionTools.connectionId))
+    .where(
+      and(
+        eq(connections.server, connector),
+        eq(connections.serverKind, "connector"),
+        eq(connections.status, "active")
       )
-      .orderBy(desc(connections.toolListReadAt)),
+    )
+    .as("newest");
+  const [rows, blocked] = await Promise.all([
+    db.select().from(newest).where(eq(newest.rank, 1)),
     blockedToolsOf(env.DB, connector),
   ]);
-  const listed = new Map<string, ConnectorTool>();
-  for (const { tool } of rows) {
-    if (!listed.has(tool.name)) {
-      listed.set(tool.name, keptTool(tool));
-    }
-  }
+  const listed = new Map(rows.map((row) => [row.name, row]));
   return [...new Set([...listed.keys(), ...blocked])].toSorted().map((name) => {
     const tool = listed.get(name);
     return {
       name,
       description: tool?.description ?? null,
-      class: tool === undefined ? null : classByRules(tool, "shared"),
+      class:
+        tool === undefined
+          ? null
+          : classByRules(
+              {
+                name,
+                inputSchema: storedSchema(tool.inputSchema),
+                annotations: tool.annotations,
+              },
+              "shared"
+            ),
       blocked: blocked.has(name),
     };
   });
