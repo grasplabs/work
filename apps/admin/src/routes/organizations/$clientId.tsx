@@ -49,8 +49,6 @@ export const Route = createFileRoute("/organizations/$clientId")({
     const { read } = await readOrganization({
       reads: context.reads,
       client,
-      admins: loaderData.admins,
-      adminsAsked: loaderData.adminsAsked,
       // Loaded while the tab shows it: its core is asked anew.
       onIt: context.shown() === client.id,
       preload,

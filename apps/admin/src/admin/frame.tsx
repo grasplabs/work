@@ -57,8 +57,8 @@ import {
 } from "@tanstack/react-router";
 import { Suspense, useEffect, useState, useSyncExternalStore } from "react";
 
-import type { ClientAdmin } from "../clients/admin.ts";
 import type { GridRow } from "../clients/grid.ts";
+import type { ClientSummary } from "../clients/summary.ts";
 import { FrameProfile } from "../frame/profile.tsx";
 import { FrameShell } from "../frame/shell.tsx";
 import { FrameSidebar } from "../frame/sidebar.tsx";
@@ -71,8 +71,8 @@ import type {
 } from "../frame/sidebar.tsx";
 import { PageLoading } from "./failure.tsx";
 import { GraspMark } from "./grasp-mark.ts";
-import { askedApps } from "./integrations-asked.ts";
-import { needsOf } from "./needs.ts";
+import { needCount, needsOf, summaryNeedsOf } from "./needs.ts";
+import type { OrgNeed } from "./needs.ts";
 import type { OrgRead } from "./org-reads.ts";
 import type { PlatformCounts } from "./platform.ts";
 import { ReadinessBanner } from "./readiness-parts.tsx";
@@ -81,8 +81,7 @@ import { sectionGroups, sectionTo, sectionWords } from "./sections.ts";
 import type { OrgSection } from "./sections.ts";
 import { useSettled } from "./settled.tsx";
 import type { Deferred } from "./settled.tsx";
-import { organizationOf, organizationsOf, unreadWords } from "./views.ts";
-import type { Organization } from "./views.ts";
+import { organizationOf } from "./views.ts";
 
 /** Where the sidebar keeps, in this browser, whether it is folded. */
 const sidebarKey = "grasp.admin.sidebar";
@@ -114,6 +113,15 @@ const sectionLink = (
     );
   };
 
+/** How many things need Grasp, as a row's count; none at 0. */
+const needsCount = (needs: number): Partial<SidebarRow> =>
+  needs > 0
+    ? {
+        count: needs,
+        countLabel: `${needs} ${needs === 1 ? "thing needs" : "things need"} Grasp`,
+      }
+    : {};
+
 /**
  * What an organization's row says at its end: how many things need Grasp
  * there; or, while its core isn't read, why, as a mark that leads to its
@@ -121,22 +129,16 @@ const sectionLink = (
  */
 const rowEnd = (
   client: GridRow,
-  organization: Organization | undefined,
+  entry: ClientSummary | undefined,
   needs: number
 ): Partial<SidebarRow> => {
-  if (organization === undefined || organization.admin.state === "answered") {
-    return needs > 0
-      ? {
-          count: needs,
-          countLabel: `${needs} ${needs === 1 ? "thing needs" : "things need"} Grasp`,
-        }
-      : {};
+  if (entry === undefined || entry.state === "answered") {
+    return needsCount(needs);
   }
-  const { admin } = organization;
-  const words = unreadWords(admin);
+  const words = entry.state === "not_deployed" ? "not deployed" : "unreachable";
   return {
     mark: {
-      icon: admin.error === "not_deployed" ? ClockIcon : CircleAlertIcon,
+      icon: entry.state === "not_deployed" ? ClockIcon : CircleAlertIcon,
       label: `${client.name}: ${words}. Open its Setup`,
       render: (look) => (
         <Link
@@ -156,13 +158,16 @@ const homeGroups = ({
   isAt,
 }: {
   clients: readonly GridRow[];
-  organizations: Map<string, Organization> | null;
+  organizations: Map<string, ClientSummary> | null;
   platform: PlatformCounts;
   isAt: (to: string, fuzzy?: boolean) => boolean;
 }): SidebarGroupEntry[] => {
-  const asked = askedApps(
-    [...(organizations?.values() ?? [])].map(({ admin }) => admin)
-  ).length;
+  // Each company's apps asked for, added up: one asked for at two counts twice.
+  const asked = [...(organizations?.values() ?? [])].reduce(
+    (sum, entry) =>
+      sum + (entry.state === "answered" ? entry.summary.asked : 0),
+    0
+  );
   const live = clients.filter(({ status }) => status !== "offboarded");
   return [
     {
@@ -210,9 +215,9 @@ const homeGroups = ({
       collapsible: true,
       count: live.length,
       rows: live.map((client) => {
-        const organization = organizations?.get(client.id);
+        const entry = organizations?.get(client.id);
         const needs =
-          organization === undefined ? 0 : needsOf(organization).length;
+          entry === undefined ? 0 : needCount(summaryNeedsOf(entry));
         return {
           id: client.id,
           label: client.name,
@@ -225,7 +230,7 @@ const homeGroups = ({
             />
           ),
           current: isAt(`/organizations/${client.id}`),
-          ...rowEnd(client, organization, needs),
+          ...rowEnd(client, entry, needs),
         };
       }),
     },
@@ -260,43 +265,49 @@ const homeGroups = ({
   ];
 };
 
-/** The Inbox view: what needs Grasp, by organization, the most pressing first. */
+/**
+ * The Inbox view: what needs Grasp, by organization, the most pressing
+ * first, from the summaries: a row for each kind, with how many of it.
+ */
 const inboxGroups = (
-  organizations: Map<string, Organization> | null
+  organizations: Map<string, ClientSummary> | null
 ): SidebarGroupEntry[] =>
-  [...(organizations?.values() ?? [])].flatMap((organization) => {
-    const needs = needsOf(organization);
-    const { id, name } = organization.admin.client;
+  [...(organizations?.values() ?? [])].flatMap((entry) => {
+    const needs = summaryNeedsOf(entry);
+    const { id, name } = entry.client;
     return needs.length === 0
       ? []
       : [
           {
             id: `inbox-${id}`,
             label: name,
-            count: needs.length,
+            count: needCount(needs),
             rows: needs.map((need, at) => ({
               id: `${id}-${String(at)}`,
               label: need.text,
               quiet: true,
               render: sectionLink(id, need.section, need.search),
+              ...needsCount(need.count),
             })),
           },
         ];
   });
 
-/** An organization's sections, as a level of the sidebar while one of its pages is open. */
+/**
+ * An organization's sections, as a level of the sidebar while one of its
+ * pages is open, each with how many of `needs` wait there.
+ */
 const organizationSection = (
   client: GridRow,
-  organization: Organization | undefined,
+  needs: readonly OrgNeed[],
   pathname: string
 ): SidebarSection => {
   const waiting = new Map<OrgSection, number>();
-  for (const need of organization === undefined ? [] : needsOf(organization)) {
-    waiting.set(need.section, (waiting.get(need.section) ?? 0) + 1);
+  for (const need of needs) {
+    waiting.set(need.section, (waiting.get(need.section) ?? 0) + need.count);
   }
   const base = `/organizations/${client.id}`;
   const row = (section: OrgSection): SidebarRow => {
-    const count = waiting.get(section) ?? 0;
     const path = sectionTo[section].replace("/organizations/$clientId", base);
     return {
       id: section,
@@ -305,12 +316,7 @@ const organizationSection = (
       render: sectionLink(client.id, section),
       current:
         section === "overview" ? pathname === base : pathname.startsWith(path),
-      ...(count > 0
-        ? {
-            count,
-            countLabel: `${count} ${count === 1 ? "thing needs" : "things need"} Grasp`,
-          }
-        : {}),
+      ...needsCount(waiting.get(section) ?? 0),
     };
   };
   return {
@@ -475,6 +481,21 @@ const Search = ({
   );
 };
 
+/**
+ * What waits in the open organization's sections: in full from its page's
+ * own read of its core once that is in, so the level follows the page as
+ * it is read again; from its summary until then.
+ */
+const levelNeeds = (
+  entry: ClientSummary | undefined,
+  openRead: OrgRead | undefined
+): OrgNeed[] => {
+  if (openRead !== undefined) {
+    return needsOf(organizationOf(openRead.admin));
+  }
+  return entry === undefined ? [] : summaryNeedsOf(entry);
+};
+
 type View = "home" | "inbox";
 
 /** The sidebar's two views: Home, and the Inbox of what needs Grasp, its count as the bell's dot. */
@@ -499,7 +520,7 @@ interface SidebarState {
 
 interface SidebarProps {
   clients: readonly GridRow[];
-  admins: readonly ClientAdmin[] | null;
+  summaries: readonly ClientSummary[] | null;
   platform: PlatformCounts;
   staff: Staff;
   state: SidebarState;
@@ -507,7 +528,7 @@ interface SidebarProps {
 
 const SidebarBody = ({
   clients,
-  admins,
+  summaries,
   platform,
   staff,
   state: { view, setView, searching, setSearching },
@@ -525,18 +546,13 @@ const SidebarBody = ({
     [router, setOpenMobile]
   );
   const organizations =
-    admins === null
+    summaries === null
       ? null
-      : new Map(
-          organizationsOf([...admins]).map((organization) => [
-            organization.admin.client.id,
-            organization,
-          ])
-        );
+      : new Map(summaries.map((entry) => [entry.client.id, entry]));
   const isAt = (to: string, fuzzy = true) =>
     matchRoute({ to, fuzzy }) !== false;
   const inbox = inboxGroups(organizations);
-  const waiting = inbox.reduce((sum, group) => sum + group.rows.length, 0);
+  const waiting = inbox.reduce((sum, group) => sum + (group.count ?? 0), 0);
   const open = useMatch({
     from: "/organizations/$clientId",
     shouldThrow: false,
@@ -583,7 +599,7 @@ const SidebarBody = ({
           },
           label: "Views",
         }}
-        {...(view === "inbox" && admins !== null
+        {...(view === "inbox" && summaries !== null
           ? { empty: "Nothing needs Grasp." }
           : {})}
         {...(shown === undefined
@@ -591,9 +607,7 @@ const SidebarBody = ({
           : {
               section: organizationSection(
                 shown,
-                openRead === undefined
-                  ? organizations?.get(shown.id)
-                  : organizationOf(openRead.admin),
+                levelNeeds(organizations?.get(shown.id), openRead),
                 pathname
               ),
             })}
@@ -614,7 +628,7 @@ const SettledOpen = ({
 /**
  * The sidebar, and while an organization's page is open, its level drawn
  * from that page's own read of its core (`read`), so what waits where
- * follows the page as it is read again; from the frame's reads until it
+ * follows the page as it is read again; from its summary until it
  * is in.
  */
 const AdminSidebar = (props: SidebarProps) => {
@@ -634,15 +648,15 @@ const AdminSidebar = (props: SidebarProps) => {
 };
 
 const SettledSidebar = ({
-  admins,
+  summaries,
   ...rest
 }: {
   clients: readonly GridRow[];
-  admins: Deferred<ClientAdmin[] | null>;
+  summaries: Deferred<ClientSummary[] | null>;
   platform: PlatformCounts;
   staff: Staff;
   state: SidebarState;
-}) => <AdminSidebar {...rest} admins={useSettled(admins)} />;
+}) => <AdminSidebar {...rest} summaries={useSettled(summaries)} />;
 
 // Readiness set aside for this session: a standing item staff know of
 // needn't stand over every page, as the product's AI-key banner across
@@ -685,13 +699,13 @@ const ReadinessAcross = ({
 /** The admin's frame around its pages. */
 export const AdminFrame = ({
   clients,
-  admins,
+  summaries,
   platform,
   staff,
   readiness,
 }: {
   clients: readonly GridRow[];
-  admins: Deferred<ClientAdmin[] | null>;
+  summaries: Deferred<ClientSummary[] | null>;
   platform: PlatformCounts;
   staff: Staff;
   readiness: Deferred<Readiness | null>;
@@ -724,20 +738,20 @@ export const AdminFrame = ({
         <Suspense
           fallback={
             <AdminSidebar
-              admins={null}
               clients={clients}
               platform={platform}
               staff={staff}
               state={state}
+              summaries={null}
             />
           }
         >
           <SettledSidebar
-            admins={admins}
             clients={clients}
             platform={platform}
             staff={staff}
             state={state}
+            summaries={summaries}
           />
         </Suspense>
       }

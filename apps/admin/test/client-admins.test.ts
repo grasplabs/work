@@ -7,6 +7,7 @@ import type { ClientAdmin } from "../src/clients/admin.ts";
 import {
   fetchClientAdmin,
   fetchClientAdmins,
+  fetchClientSummaries,
 } from "../src/clients/functions.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
@@ -16,7 +17,7 @@ import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { callServerFn } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
-import { emptyAdminSnapshot } from "./snapshots.ts";
+import { emptyAdminSnapshot, emptyAdminSummary } from "./snapshots.ts";
 
 const token = "test-deployer-token-admins-5c1e70";
 const cloudflare = mockCloudflareApi(token);
@@ -279,7 +280,7 @@ describe("every client's admin snapshot", () => {
     }).toStrictEqual({ state: "answered", readers: ["ada@grasp.test"] });
   });
 
-  it("reads one client alone for its page, and every other client without it", async () => {
+  it("reads one client alone for its page", async () => {
     const release = await importedRelease("feat(core): one page");
     const acme = await liveClient(release);
     const globex = await liveClient(release);
@@ -287,19 +288,12 @@ describe("every client's admin snapshot", () => {
     const one = await callServerFn(fetchClientAdmin, {
       clientId: acme.clientId,
     });
-    const rest = await callServerFn(fetchClientAdmins, {
-      except: [acme.clientId],
-    });
     const unknown = await callServerFn(fetchClientAdmin, {
       clientId: "no-such-client",
     });
 
     expect({
       one: one === null ? null : [one.client.id, one.state],
-      rest: {
-        acme: entryOf(rest, acme.clientId)?.state,
-        globex: entryOf(rest, globex.clientId)?.state,
-      },
       unknown,
       asked: {
         acme: acme.core.adminReaders.length,
@@ -307,9 +301,8 @@ describe("every client's admin snapshot", () => {
       },
     }).toStrictEqual({
       one: [acme.clientId, "answered"],
-      rest: { acme: undefined, globex: "answered" },
       unknown: null,
-      asked: { acme: 1, globex: 1 },
+      asked: { acme: 1, globex: 0 },
     });
   });
 
@@ -433,5 +426,58 @@ describe("every client's admin snapshot", () => {
         asked_at: "number",
       },
     });
+  });
+});
+
+describe("every client's summary", () => {
+  useStoreSecrets({ deployer: token });
+  beforeEach(async () => {
+    await db
+      .update(clients)
+      .set({ status: "offboarded" })
+      .where(eq(clients.status, "active"));
+  });
+
+  it("gives every client's counts as its core answers them, signed for the summary alone, one not answering or older as unreachable, one provisioning as not deployed, and records no reader", async () => {
+    const release = await importedRelease("feat(core): the summary");
+    const acme = await liveClient(release);
+    acme.core.summary = emptyAdminSummary([{ kind: "lead", count: 2 }]);
+    const down = await liveClient(release);
+    down.core.unhealthy = 1000;
+    const older = await liveClient(release);
+    older.core.summary = "absent";
+    const waiting = await recordClient("provisioning");
+
+    const read = await callServerFn(fetchClientSummaries, undefined, {
+      email: "ada@grasp.test",
+    });
+    const entry = (clientId: string) =>
+      read.find(({ client }) => client.id === clientId);
+
+    expect({
+      acme: entry(acme.clientId),
+      down: entry(down.clientId)?.state,
+      older: entry(older.clientId)?.state,
+      waiting: entry(waiting.clientId)?.state,
+      readers: [acme, down, older].flatMap(({ core }) => core.adminReaders),
+      kept: await storedReads([acme.clientId, older.clientId]),
+    }).toMatchObject({
+      acme: {
+        state: "answered",
+        summary: { needs: [{ kind: "lead", count: 2 }] },
+        billing: { state: "not_connected" },
+      },
+      down: "unreachable",
+      older: "unreachable",
+      waiting: "not_deployed",
+      readers: [],
+      kept: [],
+    });
+  });
+
+  it("refuses the read for anyone Access doesn't vouch for", async () => {
+    await expect(
+      callServerFn(fetchClientSummaries, undefined, { email: null })
+    ).rejects.toThrow("The server function answered 403");
   });
 });

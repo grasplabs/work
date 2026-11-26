@@ -483,6 +483,32 @@ export class AuditLog extends DurableObject<Env> {
   }
 
   /**
+   * How many people did something themselves in each week from `since`
+   * (a Monday, `YYYY-MM-DD`) on, by the Monday each week starts on (UTC),
+   * for the admin's summary (admin-summary.ts): a person counts once in a
+   * week in which the log holds at least one event whose `actor` is them
+   * (`actor.type` `person`, by `actor.userId`), dated by the event's own
+   * `at`. Weeks without anyone are left out. Only the counts leave the
+   * log. The events are found by the index on receipt time, as one is
+   * never received before it happened.
+   */
+  activePeople(since: string): { week: string; people: number }[] {
+    return this.ctx.storage.sql
+      .exec<{ week: string; people: number }>(
+        `SELECT date(json_extract(event, '$.at'), '-6 days', 'weekday 1') AS week,
+           COUNT(DISTINCT json_extract(event, '$.actor.userId')) AS people
+         FROM events
+         WHERE received_at >= ?
+           AND json_extract(event, '$.at') >= ?
+           AND json_extract(event, '$.actor.type') = 'person'
+         GROUP BY week`,
+        since,
+        since
+      )
+      .toArray();
+  }
+
+  /**
    * The positions that hold the entries the log received in the filter's
    * times, found with the index on receipt time, as times never go
    * backwards along the chain.

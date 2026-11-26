@@ -1,7 +1,14 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vite-plus/test";
 
-import { answeredAdmin, gridRow, openAdmin } from "../../test/app.tsx";
+import {
+  act,
+  answeredAdmin,
+  gridRow,
+  openAdmin,
+  settle,
+  summaryOf,
+} from "../../test/app.tsx";
 import type { Answers } from "../../test/app.tsx";
 import { daysAgo, readySnapshot, toldSnapshot } from "../../test/snapshots.ts";
 import type { ClientAdmin } from "../clients/admin.ts";
@@ -31,7 +38,10 @@ const unread = (
   error,
 });
 
-/** The frame's answers: these clients, and what their cores answered. */
+/**
+ * The frame's answers: these clients, what their cores answered, and their
+ * summaries, nothing needing Grasp in them.
+ */
 const frameOf = (
   rows: readonly GridRow[],
   admins: readonly ClientAdmin[],
@@ -39,6 +49,7 @@ const frameOf = (
 ): Answers => ({
   fetchClientGrid: rows,
   fetchClientAdmins: admins,
+  fetchClientSummaries: admins.map((admin) => summaryOf(admin)),
   fetchReadiness: { checks: [], blocking: 0 },
   ...more,
 });
@@ -139,6 +150,61 @@ describe("the admin's frame", () => {
     });
   });
 
+  it("counts and lists what needs Grasp from the summaries alone: a row a kind, naming nothing, with how many, and no core's snapshot read", async () => {
+    const acme = row("acme");
+    const { container, calls } = await openAdmin("/platform/releases", {
+      fetchClientGrid: [acme],
+      fetchClientSummaries: [
+        summaryOf(answeredAdmin({ client: acme }), [
+          { kind: "lead", count: 2 },
+          { kind: "read", count: 1 },
+        ]),
+      ],
+      fetchReleases: { releases: [], older: null, channelsOn: {} },
+    });
+    const inbox = [
+      ...container.querySelectorAll<HTMLElement>('[role="tab"]'),
+    ].find((tab) => tab.textContent?.includes("Inbox"));
+    const tab = inbox?.textContent;
+    await act(() => {
+      inbox?.click();
+    });
+    await settle();
+    // The Inbox's rows: each leads into Acme's sections.
+    const rows = [
+      ...container.querySelectorAll(
+        '[data-slot="sidebar"] a[href^="/organizations/acme/"]'
+      ),
+    ].map((link) => [link.textContent?.trim(), link.getAttribute("href")]);
+
+    expect({
+      count:
+        sidebarEntry(container, acme.name)?.textContent?.includes(
+          "3 things need Grasp"
+        ) ?? false,
+      tab: tab?.includes("3") ?? false,
+      rows,
+      snapshots: calls.filter(({ fn }) => fn.startsWith("fetchClientAdmin"))
+        .length,
+    }).toStrictEqual({
+      count: true,
+      tab: true,
+      rows: [
+        [
+          expect.stringContaining("A team’s lead hasn’t talked yet."),
+          "/organizations/acme/steps",
+        ],
+        [
+          expect.stringContaining(
+            "Interviews wait to be read by a person at Grasp."
+          ),
+          "/organizations/acme/interviews",
+        ],
+      ],
+      snapshots: 0,
+    });
+  });
+
   it("says nothing is asked for yet where the table of apps goes, with nothing to act on", async () => {
     const { container, main } = await openAdmin("/connectors", frameOf([], []));
     const page = container.querySelector("main");
@@ -207,7 +273,8 @@ describe("the admin's frame", () => {
       order: text.indexOf("Exact Online") < text.indexOf("Twinfield"),
       exact: rowOf("exact-online").includes(`${acme.name} and ${globex.name}`),
       twinfield: rowOf("twinfield").includes(acme.name),
-      sidebar: sidebar.includes("2 apps asked for"),
+      // Each company's requests added up, as the summaries count them.
+      sidebar: sidebar.includes("3 apps asked for"),
       nothingAsked: apps.main().includes("Nothing asked for yet"),
       companyAsked:
         company.container.querySelector(
@@ -241,7 +308,18 @@ describe("the admin's overview", () => {
           answeredAdmin({ client: acme, snapshot: readySnapshot("Acme") }),
           unread(down, "timeout"),
           unread(waiting, "not_deployed"),
-        ]
+        ],
+        {
+          // Acme's summary: its core counts three things needing Grasp.
+          fetchClientSummaries: [
+            summaryOf(answeredAdmin({ client: acme }), [
+              { kind: "go", count: 1 },
+              { kind: "agreement", count: 2 },
+            ]),
+            summaryOf(unread(down, "timeout")),
+            summaryOf(unread(waiting, "not_deployed")),
+          ],
+        }
       )
     );
     const page = container.querySelector("main");

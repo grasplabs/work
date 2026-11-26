@@ -19,6 +19,8 @@ import { ArrowRightIcon, ChevronRightIcon, PlusIcon } from "lucide-react";
 import { WithAdmins } from "../admin/admins.tsx";
 import { PageLoading } from "../admin/failure.tsx";
 import { needsOf } from "../admin/needs.ts";
+import { loadEveryAdmin } from "../admin/org-loads.ts";
+import { freshMs } from "../admin/org-reads.ts";
 import { AdminPage } from "../admin/page.tsx";
 import { Figure, KnowledgeDots, StageBar } from "../admin/parts.tsx";
 import { Section } from "../admin/section.tsx";
@@ -528,21 +530,26 @@ const Organizations = ({ admins }: { admins: readonly ClientAdmin[] }) => {
 };
 
 /** The overview's title and its action at once; the organizations once their cores answered. */
-const Overview = () => (
-  <AdminPage
-    action={
-      <Button nativeButton={false} render={<Link to="/new-organization" />}>
-        <PlusIcon data-icon="inline-start" />
-        New organization
-      </Button>
-    }
-    description="Every company with Grasp, from its first conversation on. Only Grasp sees this: a company sees numbers per team, never names."
-    overview
-    title="Organizations"
-  >
-    <WithAdmins>{(admins) => <Organizations admins={admins} />}</WithAdmins>
-  </AdminPage>
-);
+const Overview = () => {
+  const { admins } = Route.useLoaderData();
+  return (
+    <AdminPage
+      action={
+        <Button nativeButton={false} render={<Link to="/new-organization" />}>
+          <PlusIcon data-icon="inline-start" />
+          New organization
+        </Button>
+      }
+      description="Every company with Grasp, from its first conversation on. Only Grasp sees this: a company sees numbers per team, never names."
+      overview
+      title="Organizations"
+    >
+      <WithAdmins admins={admins}>
+        {(read) => <Organizations admins={read} />}
+      </WithAdmins>
+    </AdminPage>
+  );
+};
 
 /** The admin's overview: every organization together. */
 export const Route = createFileRoute("/")({
@@ -550,6 +557,10 @@ export const Route = createFileRoute("/")({
     const phase = ADMIN_PHASES.find((each) => each === search.phase);
     return phase === undefined ? {} : { phase };
   },
+  loader: loadEveryAdmin,
+  staleTime: freshMs,
+  // A preload reads nothing: opened, the page loads anew and reads them.
+  preloadStaleTime: 0,
   component: Overview,
   pendingComponent: PageLoading,
 });

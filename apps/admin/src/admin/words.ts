@@ -416,6 +416,32 @@ export const needLine = (need: Need, view: OrgView): string => {
   }
 };
 
+/**
+ * Each kind of need in a sentence that names nothing (no team, lead, piece
+ * of work or app), as the sidebar's Inbox lists them from the summaries,
+ * each beside how many there are of it. `needLine` says one in full.
+ */
+export const needKindLines: Record<Need["kind"], string> = {
+  paused: "The interviews are paused.",
+  transcript: "The first conversation with the sponsor waits on Grasp.",
+  ask: "The first conversation left things open to ask the sponsor.",
+  conflict: "Two sources disagree about the company.",
+  agreement: "An agreement isn’t in yet.",
+  lead: "A team’s lead hasn’t talked yet.",
+  quiet: "A team is quiet, and its link closes soon.",
+  blocked: "People describe a step of their work in two ways.",
+  split: "A piece of work is probably two workflows.",
+  few: "Work was heard from too few people before the link closed.",
+  read: "Interviews wait to be read by a person at Grasp.",
+  go: "Enough is known to open: the company waits for Grasp’s go.",
+  short: "The interviews are over, below what it opens at.",
+  contract: "The contract isn’t signed yet.",
+  ending: "The contract ends soon, with nothing agreed for after.",
+  signin: "A connection stopped until someone signs in again.",
+  budget: "AI use went over what the contract covers.",
+  overdue: "An invoice is overdue.",
+};
+
 /** Where someone stands with their link (the prototype's `link` words). */
 export const linkWords: Record<LinkState, string> = {
   waiting: "No link yet",

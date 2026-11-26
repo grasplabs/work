@@ -57,19 +57,17 @@ export const getRouter = () => {
   // admin records and a deploy applies later). Two retries reload the
   // frame and count, though nothing changed: Try again on a route that
   // failed, and on organizations that couldn't be read. Counting them
-  // costs at most one wait on the frame's read they start, after a
-  // failure; a way to reload without counting could be used to skip a
-  // real change. The router's events don't say
+  // costs at most a read of a core again, after a failure; a way to
+  // reload without counting could be used to skip a real change. The
+  // router's events don't say
   // why a load runs, so this is where a change is seen. Two limits, as
   // designed:
   // - only changes made in this tab are seen: one made in another tab, by
   //   another staff member, by the company or by a deploy finishing shows
   //   once the answer kept goes stale (`freshMs`), as before;
   // - every organization's answer counts as possibly changed, not only
-  //   the one changed: right after a change, coming to another one takes
-  //   the frame's read made after it, waiting for it up to `frameWaitMs`,
-  //   and asks its core alone when that read is late or has no answer of
-  //   it (late, a second read core's audit log records).
+  //   the one changed: right after a change, coming to another one asks
+  //   its core again, unless a read asked after the change is under way.
   const { invalidate } = router;
   router.invalidate = async (options) => {
     const frame = router.state.matches.find(

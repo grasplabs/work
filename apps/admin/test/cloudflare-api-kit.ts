@@ -8,6 +8,7 @@ import type {
   AdminKickoffView,
 } from "@grasp-os/shared/admin-kickoff";
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import type { AdminSummary } from "@grasp-os/shared/admin-summary";
 import type {
   BrainActionOutcome,
   BrainActionRequest,
@@ -164,6 +165,12 @@ export interface CoreState {
    * `absent` for a core from before the summary, which answers 404.
    */
   onboarding?: OnboardingSummary | "absent";
+  /**
+   * What its core answers the admin's signed summary request with
+   * (@grasp-os/shared/admin-summary): nothing begun or run unless set, or
+   * `absent` for a core from before the summary, which answers 404.
+   */
+  summary?: AdminSummary | "absent";
   /**
    * What its core answers the admin's signed admin snapshot request
    * with (@grasp-os/shared/admin-snapshot): a company with nothing begun

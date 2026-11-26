@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   act,
   answeredAdmin,
+  answeredSummary,
   gridRow,
   lineOf,
   openAdmin,
@@ -155,6 +156,12 @@ describe("an organization's billing, as Stripe's answer reads", () => {
       fetchClientGrid: [acme],
       fetchClientAdmins: [
         answeredAdmin({
+          client: acme,
+          billing: { state: "read", customerId, account: late },
+        }),
+      ],
+      fetchClientSummaries: [
+        answeredSummary({
           client: acme,
           billing: { state: "read", customerId, account: late },
         }),
