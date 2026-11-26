@@ -1,6 +1,6 @@
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "@earendil-works/pi-ai";
 import type { Message, Static } from "@earendil-works/pi-ai";
+import { defineTool } from "@earendil-works/pi-durable";
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import type {
   BrainEntityKind,
@@ -20,6 +20,7 @@ import {
   ownWordAs,
 } from "./brain-next.ts";
 import type { Remembered } from "./brain-next.ts";
+import { resultLimits } from "./code-mode.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
 
 // The agent remembers on its own (GRA-1814, the plan's decision 13): in a
@@ -377,80 +378,72 @@ export const rememberTool = (
   scope: Omit<AgentScope, "runId">,
   said: string,
   answering: () => string | undefined
-): AgentTool<typeof parameters, ChatSavedMemory> => ({
-  name: rememberName,
-  label: "Remember",
-  description: [
-    "Keeps something the person told you that will still matter in their later chats: a lasting fact about them, their work or the people and things they deal with, a decision, or how they want you to work. It is kept as their own word, for them alone; they see a notice of it and can undo it.",
-    "Memory is for what helps you help them next time. Most messages hold nothing worth keeping, so save rarely, and never what only matters to this chat.",
-    `A save replaces what you saved before only when it names the same subject (the person as "me", or another by the id an earlier save answered) and an attribute that holds one value. These attributes hold many values side by side, so a save adds beside the earlier ones: ${memoryChoices.manyValueAttributes.join(", ")}. Another person or thing named only by its name is a new one: name one you saved before by its id.`,
-    'When the person says something of theirs you saved or recalled no longer holds (it changed, they changed their mind, it was wrong: "it\'s sushi now" after "I love pizza"), name those memories in `replaces`: they stay as history, no longer in use, and the person can undo it. Something that sits beside them ("I also like sushi") replaces nothing: leave `replaces` out.',
-  ].join("\n"),
-  parameters,
-  executionMode: "sequential",
-  execute: async (toolCallId, input, signal) => {
-    if (isNamedMe(input.about)) {
-      throw new Error(namedMe);
-    }
-    if (!isTheirWords(said, input.quote)) {
-      throw new Error(notTheirWords);
-    }
-    const about = await subjectOf(env, scope.personId, input.about);
-    if (about === null) {
-      throw new Error(unknownEntity);
-    }
-    // Each memory once, however often the call names it.
-    const replaces =
-      input.replaces === undefined ? undefined : [...new Set(input.replaces)];
-    const replaced =
-      replaces === undefined
-        ? []
-        : await replacedOf(env, scope.personId, about.entity, replaces);
-    if (replaced === null) {
-      throw new Error(notTheirMemory);
-    }
-    const stated = await statedByThem(
-      env,
-      scope,
-      { said, answering: answering() },
-      about.subject,
-      input,
-      replaced
-    );
-    if (!stated) {
-      throw new Error(notTheirWords);
-    }
-    signal?.throwIfAborted();
-    const saved = await rememberFor(
-      env,
-      {
-        person: scope.personId,
-        actor: delegateActorOf(chatAuthority(scope), scope.via),
-        target: { type: "chat", id: scope.chatId },
-      },
-      {
-        change: `chat:${scope.chatId}:${toolCallId}`,
-        about: about.entity,
-        ...(input.attribute === undefined
-          ? {}
-          : { attribute: input.attribute }),
-        ...(input.value === undefined ? {} : { value: input.value }),
-        type: input.type,
-        statement: input.statement,
-        quote: input.quote,
-        ...(replaces === undefined ? {} : { replaces }),
+) =>
+  defineTool<typeof parameters, ChatSavedMemory>({
+    name: rememberName,
+    outputLimits: resultLimits,
+    description: [
+      "Keeps something the person told you that will still matter in their later chats: a lasting fact about them, their work or the people and things they deal with, a decision, or how they want you to work. It is kept as their own word, for them alone; they see a notice of it and can undo it.",
+      "Memory is for what helps you help them next time. Most messages hold nothing worth keeping, so save rarely, and never what only matters to this chat.",
+      `A save replaces what you saved before only when it names the same subject (the person as "me", or another by the id an earlier save answered) and an attribute that holds one value. These attributes hold many values side by side, so a save adds beside the earlier ones: ${memoryChoices.manyValueAttributes.join(", ")}. Another person or thing named only by its name is a new one: name one you saved before by its id.`,
+      'When the person says something of theirs you saved or recalled no longer holds (it changed, they changed their mind, it was wrong: "it\'s sushi now" after "I love pizza"), name those memories in `replaces`: they stay as history, no longer in use, and the person can undo it. Something that sits beside them ("I also like sushi") replaces nothing: leave `replaces` out.',
+    ].join("\n"),
+    parameters,
+    executionMode: "sequential",
+    execute: async (input, { callId }, { abortSignal }) => {
+      if (isNamedMe(input.about)) {
+        throw new Error(namedMe);
       }
-    );
-    return {
-      content: [
+      if (!isTheirWords(said, input.quote)) {
+        throw new Error(notTheirWords);
+      }
+      const about = await subjectOf(env, scope.personId, input.about);
+      if (about === null) {
+        throw new Error(unknownEntity);
+      }
+      // Each memory once, however often the call names it.
+      const replaces =
+        input.replaces === undefined ? undefined : [...new Set(input.replaces)];
+      const replaced =
+        replaces === undefined
+          ? []
+          : await replacedOf(env, scope.personId, about.entity, replaces);
+      if (replaced === null) {
+        throw new Error(notTheirMemory);
+      }
+      const stated = await statedByThem(
+        env,
+        scope,
+        { said, answering: answering() },
+        about.subject,
+        input,
+        replaced
+      );
+      if (!stated) {
+        throw new Error(notTheirWords);
+      }
+      abortSignal?.throwIfAborted();
+      const saved = await rememberFor(
+        env,
         {
-          type: "text",
-          text: `Saved as the memory with id ${saved.memory}, about the entity with id ${saved.entity}: give the entity's id to name it again, and the memory's to replace it. The person sees a notice of it and can undo it.`,
+          person: scope.personId,
+          actor: delegateActorOf(chatAuthority(scope), scope.via),
+          target: { type: "chat", id: scope.chatId },
         },
-      ],
-      // What the store kept, as the notice shows it: never the call's own
-      // fields, so the person sees what was saved.
-      details: {
+        {
+          change: `chat:${scope.chatId}:${callId}`,
+          about: about.entity,
+          ...(input.attribute === undefined
+            ? {}
+            : { attribute: input.attribute }),
+          ...(input.value === undefined ? {} : { value: input.value }),
+          type: input.type,
+          statement: input.statement,
+          quote: input.quote,
+          ...(replaces === undefined ? {} : { replaces }),
+        }
+      );
+      const details: ChatSavedMemory = {
         memory: saved.memory,
         type: saved.kept.type,
         statement: saved.kept.statement,
@@ -459,7 +452,17 @@ export const rememberTool = (
         ...("self" in about.subject ? {} : { about: about.subject.name }),
         // What it replaced, as the store holds it.
         ...(replaced.length === 0 ? {} : { replaced }),
-      },
-    };
-  },
-});
+      };
+      return {
+        output: [
+          {
+            type: "text" as const,
+            text: `Saved as the memory with id ${saved.memory}, about the entity with id ${saved.entity}: give the entity's id to name it again, and the memory's to replace it. The person sees a notice of it and can undo it.`,
+          },
+        ],
+        // What the store kept, as the notice shows it: never the call's own
+        // fields, so the person sees what was saved.
+        details,
+      };
+    },
+  });

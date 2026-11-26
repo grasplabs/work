@@ -33,7 +33,6 @@
     "@chat-adapter/slack": "catalog:",
     "@chat-adapter/teams": "catalog:",
     "@earendil-works/chord": "catalog:",
-    "@earendil-works/pi-agent-core": "catalog:",
     "@earendil-works/pi-ai": "catalog:",
     "@earendil-works/pi-durable": "catalog:",
     "@grasp-os/brain-next": "workspace:*",

@@ -22,13 +22,13 @@ import type {
   EntryRecord,
   JsonObject,
   Registry,
+  SessionEnd,
   SettledSubmissionRecord,
   Storage,
   Submission,
   SubmissionRecord,
   Wake,
 } from "@earendil-works/pi-durable";
-import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
 import { agentErrors } from "@grasp-os/shared/agent";
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import type { ChatMake } from "@grasp-os/shared/chat";
@@ -99,6 +99,22 @@ import { recallForTurn, turnRecallTool } from "./turn-recall.ts";
 // (`rebase` in chat-agent.ts) before its next turn, and after a turn the
 // guard stopped for it.
 
+/**
+ * What a chat's Harness needs of where it runs, and nothing else: on
+ * Cloudflare its Durable Object (chat-session.ts), the one host there is.
+ */
+export interface ChatHost {
+  /** Opens the storage pi keeps the chat in, again for each open. */
+  storage: () => Promise<Storage>;
+  /**
+   * Wakes the host when `wake` says, to `resume`: pi's `onWake`, and the
+   * Harness's own retry of a sync that failed (`ChatHarness.wake`).
+   */
+  arm: (wake: Wake) => void;
+  /** Keeps the host up until `work` settles: work no call waits on. */
+  waitUntil: (work: Promise<unknown>) => void;
+}
+
 /** One question of a chat, as its Workspace hands it over. */
 export interface TurnRequest {
   /** The turn's ID: the request ID of its input, so a retry finds it. */
@@ -164,7 +180,11 @@ export type TurnCapture = {
 } & Pick<TurnRequest["capture"], "attended">;
 
 /** Why a turn stopped before it answered, when no model said so. */
-export type TurnStop = "history_revoked" | "person_inactive" | "unreadable";
+export type TurnStop =
+  | "history_revoked"
+  | "person_inactive"
+  | "unreadable"
+  | "overdue";
 
 /** How a turn ended, as its Workspace reads it. */
 export interface TurnEnd {
@@ -214,6 +234,26 @@ const wordsPlease =
 const syncRetryMs = 15_000;
 
 /**
+ * Most a turn may run before it is stopped as overdue (`#watchdog`): far
+ * past any turn that ends, as each request has its deadline (models.ts)
+ * and each code run its own (`codeTimeoutMs`), so only a turn that would
+ * never end, such as one calling tools without end, meets it.
+ */
+const turnMostMs = 30 * 60_000;
+
+/**
+ * `turnMostMs`, or less where tests set `CHAT_TURN_MOST_MS`; never set in
+ * wrangler.jsonc.
+ */
+const turnMostOf = (env: Pick<Env, "CHAT_TURN_MOST_MS">): number => {
+  const set = Number(env.CHAT_TURN_MOST_MS);
+  return Number.isInteger(set) && set > 0 ? set : turnMostMs;
+};
+
+/** Most entries copied to the Workspace in one call (`#copy`). */
+const copyPage = 50;
+
+/**
  * The chat's turn: the one record of it, under way or the last. Written
  * as the turn is claimed (`#take`), before anything else of it, so a turn
  * this object holds no record of never ran; settled once (`#settle`), its
@@ -228,6 +268,8 @@ interface TurnRecord extends JsonObject {
   ended: boolean;
   answerId: number | null;
   captureOwed: boolean;
+  /** When the turn was claimed: none in a record an earlier release wrote. */
+  startedAt: number | null;
 }
 
 const TurnDoc = defineDoc<TurnRecord>({
@@ -239,6 +281,7 @@ const TurnDoc = defineDoc<TurnRecord>({
     ended: true,
     answerId: null,
     captureOwed: false,
+    startedAt: null,
   }),
   checkpointWhen: () => true,
 });
@@ -577,7 +620,9 @@ const stopOf = (error: Error): TurnStop =>
 
 /** One chat's Harness, opened on its object's storage. */
 export class ChatHarness {
-  readonly #ctx: DurableObjectState;
+  readonly #host: ChatHost;
+  /** Its host's name for it, in what it logs. */
+  readonly #name: string;
   readonly #env: Env;
   readonly #storage: Storage;
   readonly #harness: Harness;
@@ -634,43 +679,38 @@ export class ChatHarness {
    * busy, so the object's alarm wakes it to sync again (`wake`).
    */
   #behind = false;
-  /** Arms the object's alarm for what `wake` says. */
-  readonly #onWake: (wake: Wake) => void;
 
   constructor(
-    ctx: DurableObjectState,
+    host: ChatHost,
+    name: string,
     env: Env,
     storage: Storage,
     harness: Harness,
     conversation: Conversation,
     registry: Registry,
-    pi: MutableModels,
-    onWake: (wake: Wake) => void
+    pi: MutableModels
   ) {
-    this.#ctx = ctx;
+    this.#host = host;
+    this.#name = name;
     this.#env = env;
     this.#storage = storage;
     this.#harness = harness;
     this.#conversation = conversation;
     this.#registry = registry;
     this.#models = pi;
-    this.#onWake = onWake;
   }
 
   /**
-   * Opens the chat's Harness on its object's SQLite, in the EU as the
-   * object is. `onWake` arms the object's alarm. Nothing runs yet: the
-   * object sets up the turn under way, if any (`setUpStored`), then
-   * resumes it (`resume`).
+   * Opens the chat's Harness on its host's storage (`ChatHost`), `name`
+   * its host's name for it. Nothing runs yet: the host sets up the turn
+   * under way, if any (`setUpStored`), then resumes it (`resume`).
    */
   static async open(
-    ctx: DurableObjectState,
-    env: Env,
-    onWake: (wake: Wake) => void
+    host: ChatHost,
+    name: string,
+    env: Env
   ): Promise<ChatHarness> {
-    const storage = await openDurableObjectSqliteStorage(ctx.storage, {
-      prefix: "pi_",
-    });
+    const storage = await host.storage();
     const registry = createRegistry();
     const pi = createModels();
     const harness = await Harness.open(
@@ -689,13 +729,13 @@ export class ChatHarness {
           ...restartLimitOf(env),
         }),
         identity: { attribution: null },
-        onWake,
+        onWake: host.arm,
         // Said once, as the open that parks a task: what the object does
         // of it reads pi's state (`setUpStored`), at every open.
         onReport: (error, info) => {
           if (info.type === "task_parked") {
             log.warn("chat.task_parked", {
-              chatSession: ctx.id.name,
+              chatSession: name,
               task: info.task.kind,
               ...errorFields(error),
             });
@@ -706,14 +746,14 @@ export class ChatHarness {
     );
     const conversation = await harness.root(context);
     const opened = new ChatHarness(
-      ctx,
+      host,
+      name,
       env,
       storage,
       harness,
       conversation,
       registry,
-      pi,
-      onWake
+      pi
     );
     // The one watch of pi: called at once with the view as it is, then at
     // each commit. Whatever the Workspace was last told, and whatever a
@@ -1072,6 +1112,7 @@ export class ChatHarness {
       turn.ended = false;
       turn.answerId = null;
       turn.captureOwed = false;
+      turn.startedAt = Date.now();
     }, context);
     this.#answering = undefined;
     const turn = await this.#setUp(request);
@@ -1228,12 +1269,44 @@ export class ChatHarness {
     return this.#active;
   }
 
-  /** Goes on with what pi left pending, and with what sleeps till now. */
+  /**
+   * Goes on with what pi left pending, and with what sleeps till now; and
+   * stops the turn under way if it is overdue (`#watchdog`), which the
+   * alarm's heartbeat checks while a turn runs.
+   */
   resume(): void {
     this.#harness.resume();
     // An alarm armed for a sync that failed (`wake`) tries it again.
     if (this.#behind) {
       this.#syncSoon();
+    }
+    this.#host.waitUntil(this.#watchdog());
+  }
+
+  /**
+   * Stops the turn under way once it has run past `turnMostMs`: it ends
+   * as overdue, as a turn its guard stopped ends, rather than keeping its
+   * chat busy without end.
+   */
+  async #watchdog(): Promise<void> {
+    try {
+      const turn = await this.#harness.snapshot(TurnDoc, context);
+      if (
+        turn === undefined ||
+        turn.ended ||
+        typeof turn.startedAt !== "number" ||
+        Date.now() - turn.startedAt < turnMostOf(this.#env)
+      ) {
+        return;
+      }
+      log.warn("chat.turn_overdue", {
+        chatSession: this.#name,
+        turnId: requestOf(turn)?.turnId,
+        ms: Date.now() - turn.startedAt,
+      });
+      this.#stop("overdue");
+    } catch {
+      // pi closed: the turn is checked again as it opens.
     }
   }
 
@@ -1290,6 +1363,23 @@ export class ChatHarness {
     await this.#harness.close(context);
   }
 
+  /**
+   * Settles once pi has closed, its storage included: after `close`, or
+   * after its first failed storage call, which fails it for good. pi
+   * retries nothing: the host opens it again.
+   */
+  get closed(): Promise<SessionEnd> {
+    return this.#harness.closed;
+  }
+
+  /**
+   * Calls `listener` at once as pi begins to close, by `close` or by a
+   * failed storage call: no call should reach it from then on.
+   */
+  onClose(listener: () => void): void {
+    this.#harness.subscribeClose(listener);
+  }
+
   /** The chat's newest entry, read on pi's line. */
   async #newest(): Promise<EntryRecord | undefined> {
     const page = await this.#conversation.entries(
@@ -1302,7 +1392,7 @@ export class ChatHarness {
   }
 
   /** The chat's Workspace. */
-  #host(scope: TurnRequest["scope"]) {
+  #workspace(scope: TurnRequest["scope"]) {
     return workspace(this.#env, scope.workspaceId);
   }
 
@@ -1313,14 +1403,14 @@ export class ChatHarness {
    */
   async #guard(scope: TurnRequest["scope"]) {
     return await callObject(
-      async () => await this.#host(scope).turnGuard(scope.chatId)
+      async () => await this.#workspace(scope).turnGuard(scope.chatId)
     );
   }
 
   /** Stops the turn under way for `reason`. */
   #stop(reason: TurnStop): void {
     this.#stopped ??= reason;
-    this.#ctx.waitUntil(this.#conversation.abort(context));
+    this.#host.waitUntil(this.#conversation.abort(context));
   }
 
   /**
@@ -1333,7 +1423,7 @@ export class ChatHarness {
     // A stub a call, never one kept for the turn: a stub to a Workspace
     // that restarted mid-turn stays broken, its calls failing or never
     // answering, where a new one reaches the Workspace as it is now.
-    const host = () => this.#host(scope);
+    const host = () => this.#workspace(scope);
     const authority = chatAuthority(scope);
     const guard = await this.#guard(scope);
     if (guard.stop !== undefined) {
@@ -1394,7 +1484,7 @@ export class ChatHarness {
             }
             await host().codeRunOutput(scope.chatId, runId, callId, line);
           })();
-          this.#ctx.waitUntil(logged);
+          this.#host.waitUntil(logged);
         },
       },
       loader: quietLoader(env.LOADER),
@@ -1539,19 +1629,24 @@ export class ChatHarness {
       }
     })();
     this.#syncing = syncing;
-    this.#ctx.waitUntil(
+    this.#host.waitUntil(
       (async () => {
         try {
           await syncing;
           this.#behind = false;
         } catch (error) {
           log.warn("chat.sync_failed", {
-            chatSession: this.#ctx.id.name,
+            chatSession: this.#name,
+            turnId: this.#active,
             ...errorFields(error),
           });
           // Woken soon to sync again, even with nothing else to do.
           this.#behind = true;
-          this.#onWake(this.wake());
+          try {
+            this.#host.arm(this.wake());
+          } catch {
+            // pi failed: its host opens it again, which syncs as it opens.
+          }
         }
       })()
     );
@@ -1590,7 +1685,7 @@ export class ChatHarness {
     const partial = this.#partial;
     if (partial !== this.#told.partial) {
       await callObject(async () => {
-        await this.#host(scope).showPartial(scope.chatId, partial);
+        await this.#workspace(scope).showPartial(scope.chatId, partial);
       });
       this.#told.partial = partial;
     }
@@ -1609,7 +1704,7 @@ export class ChatHarness {
     );
     if (running !== this.#told.running) {
       await callObject(async () => {
-        await this.#host(scope).turnRunning(scope.chatId, running);
+        await this.#workspace(scope).turnRunning(scope.chatId, running);
       });
       this.#told.running = running;
     }
@@ -1658,7 +1753,7 @@ export class ChatHarness {
       return;
     }
     await callObject(async () => {
-      await this.#host(scope).captureTurn(scope.chatId, owed);
+      await this.#workspace(scope).captureTurn(scope.chatId, owed);
     });
     await this.#conversation.commit(async (tx) => {
       await tx.retireDoc(CaptureDoc, key);
@@ -1687,34 +1782,39 @@ export class ChatHarness {
 
   /**
    * Copies the entries committed since the last copy that show the person
-   * something to the chat's Workspace, then marks them copied. A copy sent
-   * again, as a restart between the two sends it, is kept once: the
-   * Workspace knows each by its entry.
+   * something to the chat's Workspace, then marks them copied: page after
+   * page, so a long backlog (a Workspace out of reach for a while) is never
+   * held at once. A copy sent again, as a restart between the two sends
+   * it, is kept once: the Workspace knows each by its entry.
    */
   async #copy(scope: TurnRequest["scope"]): Promise<void> {
+    let more = true;
+    while (more) {
+      // oxlint-disable-next-line no-await-in-loop -- page after page, in order
+      more = await this.#copyPage(scope);
+    }
+  }
+
+  /** Copies the next page of `#copy`: whether there may be more after it. */
+  async #copyPage(scope: TurnRequest["scope"]): Promise<boolean> {
     const copied = await this.#harness.snapshot(CopiedDoc, context);
     const after = copied?.after ?? null;
-    const entries: EntryRecord[] = [];
-    let cursor;
-    do {
-      // oxlint-disable-next-line no-await-in-loop -- page after page
-      const page = await this.#conversation.entries(
-        {
-          order: "ascending",
-          ...(after === null ? {} : { minEntryId: after }),
-        },
-        100,
-        cursor,
-        context
-      );
-      entries.push(...page.items.filter(({ id }) => id !== after));
-      cursor = page.next;
-    } while (cursor !== undefined);
+    const page = await this.#conversation.entries(
+      {
+        order: "ascending",
+        ...(after === null ? {} : { minEntryId: after }),
+      },
+      copyPage + 1,
+      undefined,
+      context
+    );
+    const entries = page.items.filter(({ id }) => id !== after);
     const shown: TurnMessage[] = [];
     const seen: EntryId[] = [];
     let last: EntryId | undefined;
     for (const [index, entry] of entries.entries()) {
-      const cut = this.#cutAttempt(entry, entries.slice(index + 1));
+      // oxlint-disable-next-line no-await-in-loop -- one after another, as committed
+      const cut = await this.#cutAttempt(entry, entries.slice(index + 1));
       // Copied only once it is known whether pi went on after it.
       if (cut === undefined) {
         break;
@@ -1731,14 +1831,14 @@ export class ChatHarness {
       }
     }
     if (last === undefined) {
-      return;
+      return false;
     }
     const answerId =
       shown.length === 0
         ? undefined
         : await callObject(
             async () =>
-              await this.#host(scope).keepTurnMessages(scope.chatId, shown)
+              await this.#workspace(scope).keepTurnMessages(scope.chatId, shown)
           );
     const through = last;
     await this.#conversation.commit(async (tx) => {
@@ -1767,6 +1867,7 @@ export class ChatHarness {
     for (const id of seen) {
       this.#thought.delete(id);
     }
+    return seen.length === entries.length && page.next !== undefined;
   }
 
   /**
@@ -1775,12 +1876,13 @@ export class ChatHarness {
    * never shown, as the person gets the whole answer from the attempt
    * after it. One a stop cut short ends its run, and is shown. Unknown
    * (`undefined`) while it is the newest response and pi still runs.
-   * `later` are the entries committed after it.
+   * `later` are entries committed after it, those read already: the rest
+   * are read when none of them says.
    */
-  #cutAttempt(
+  async #cutAttempt(
     entry: EntryRecord,
     later: readonly EntryRecord[]
-  ): boolean | undefined {
+  ): Promise<boolean | undefined> {
     const [message] = entry.model ?? [];
     if (
       entry.kind !== "pi.assistant" ||
@@ -1789,10 +1891,34 @@ export class ChatHarness {
     ) {
       return false;
     }
-    const next = later.find(({ kind }) => turnKinds.has(kind));
+    const next =
+      later.find(({ kind }) => turnKinds.has(kind)) ??
+      (await this.#nextInTurn(entry.id));
     if (next === undefined) {
       return this.#running ? undefined : false;
     }
     return next.kind === "pi.assistant";
+  }
+
+  /** The first entry of a turn's kinds (`turnKinds`) after entry `id`, if any. */
+  async #nextInTurn(id: EntryId): Promise<EntryRecord | undefined> {
+    let cursor: Cursor | undefined;
+    do {
+      // oxlint-disable-next-line no-await-in-loop -- page after page, oldest first
+      const page = await this.#conversation.entries(
+        { order: "ascending", minEntryId: id },
+        copyPage,
+        cursor,
+        context
+      );
+      const next = page.items.find(
+        (entry) => entry.id !== id && turnKinds.has(entry.kind)
+      );
+      if (next !== undefined) {
+        return next;
+      }
+      cursor = page.next;
+    } while (cursor !== undefined);
+    return undefined;
   }
 }

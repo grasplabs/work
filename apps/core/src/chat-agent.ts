@@ -1,5 +1,4 @@
 import type { Context } from "@earendil-works/chord";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ImageContent, Message, UserMessage } from "@earendil-works/pi-ai";
 import {
   estimateContextTokens,
@@ -23,6 +22,7 @@ import type {
   EntryRecord,
   Extension,
   HookApi,
+  ToolRegistration,
 } from "@earendil-works/pi-durable";
 import { agentErrors } from "@grasp-os/shared/agent";
 import {
@@ -36,7 +36,7 @@ import { z } from "zod";
 
 import { readDocs, searchDocs } from "./agent-docs.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
-import { dedicatedTools, durableTool } from "./agent-tools.ts";
+import { dedicatedTools } from "./agent-tools.ts";
 import {
   askQuestions,
   aboutNotes,
@@ -109,12 +109,12 @@ export interface ChatAgent {
    */
   history: readonly Message[];
   /** The tool that shows the turn's thinking in the brain (agent-thinking.ts), if it may. */
-  thinking?: AgentTool;
+  thinking?: ToolRegistration;
   /**
    * The tool that keeps what the person said worth keeping
    * (agent-remember.ts): only in their own chat, in a turn they started.
    */
-  remember?: AgentTool;
+  remember?: ToolRegistration;
   /**
    * The code runs whose results the chat may no longer send (workspace.ts),
    * asked before every model request and every compaction.
@@ -757,7 +757,7 @@ export const chatAgent = (agent: ChatAgent): Extension => {
     agent.context.channel === undefined &&
     scope.unattended !== true &&
     agent.context.make?.kind !== "agent";
-  const tools: AgentTool[] = [
+  const tools: ToolRegistration[] = [
     executeCode(agent),
     readApi(apis),
     ...(agent.context.builds === true
@@ -787,7 +787,7 @@ export const chatAgent = (agent: ChatAgent): Extension => {
   ];
   return defineExtension({
     name: chatAgentName(scope.chatId),
-    tools: tools.map((tool) => durableTool(tool)),
+    tools,
     sections: [
       // Not `instructions`, the key of a conversation's own, which pi renders last.
       section("preamble", () => instructions, { tag: false }),

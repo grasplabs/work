@@ -220,7 +220,6 @@ export const coreProject = (
               "@earendil-works/pi-ai/api/anthropic-messages",
               "@earendil-works/pi-ai/api/openai-completions",
               "@earendil-works/pi-ai/api/openai-responses",
-              "@earendil-works/pi-agent-core",
               "@earendil-works/pi-durable",
               "@earendil-works/pi-durable/storage/sqlite/cloudflare",
               "@earendil-works/chord",

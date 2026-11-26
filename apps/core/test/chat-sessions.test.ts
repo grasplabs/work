@@ -532,6 +532,161 @@ describe("a chat's ChatSession", () => {
     }
   });
 
+  it("answers once however often its alarm fires while a turn runs", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId);
+    const held = pausedReply(says("Once."), 1);
+    const provider = await fakeProviderFor([model], held.reply);
+    const { session, request } = sessionOf(asking, userId);
+    try {
+      const asked = session().run(request("turn-a", "Once?"));
+      await vi.waitFor(
+        () => {
+          expect(provider.requests).toHaveLength(1);
+        },
+        { timeout: 10_000 }
+      );
+      // Early and twice: each re-arms the heartbeat the next one runs.
+      const fired = [
+        await runDurableObjectAlarm(session()),
+        await runDurableObjectAlarm(session()),
+      ];
+      held.release();
+      const { answer } = await asked;
+      expect({
+        fired,
+        answer,
+        requests: provider.requests.length,
+        kept: await keptOf(asking.stub, asking.chat.id),
+      }).toStrictEqual({
+        fired: [true, true],
+        answer: "Once.",
+        requests: 1,
+        kept: ["user", "assistant:toolUse", "toolResult", "assistant:stop"],
+      });
+    } finally {
+      held.release();
+    }
+  });
+
+  it("opens pi again when its storage fails under a turn, and the turn answers, its caller none the wiser", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId);
+    const provider = await fakeProviderFor(
+      [model],
+      says("Never stored."),
+      says("Stored.")
+    );
+    const { session, request } = sessionOf(asking, userId);
+    // pi's tables, then a fault in them: the storage refuses the first
+    // answer's entry, which fails pi as a storage error does.
+    await session().activeTurn();
+    await runInDurableObject(session(), (_instance, state) => {
+      state.storage.sql.exec(
+        `CREATE TRIGGER test_fault BEFORE INSERT ON pi_entries WHEN NEW.record LIKE '%Never stored.%' AND NEW.record LIKE '%"stopReason":"stop"%' BEGIN SELECT RAISE(ABORT, 'Refused by the test'); END`
+      );
+    });
+    const end = await session().run(request("turn-a", "Stored?"));
+    expect({
+      outcome: end.outcome,
+      answer: end.answer,
+      requests: provider.requests.length,
+      // Open still: the next call needs no restart.
+      next: await session().activeTurn(),
+    }).toStrictEqual({
+      outcome: "answered",
+      answer: "Stored.",
+      requests: 2,
+      next: undefined,
+    });
+  });
+
+  it("tries a pi that fails to open again later and later, then stops, its chat no longer shown busy", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const never = Promise.withResolvers<boolean>();
+    const stuck = { ...says("Never."), pause: { at: 0, until: never.promise } };
+    const { id, stub, provider, newChat } = await personalChatsOf(
+      userId,
+      stuck
+    );
+    const { chat, ask } = await newChat();
+    const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
+    try {
+      void ask("Hello?").catch(() => "settled");
+      await vi.waitFor(
+        () => {
+          expect(provider.requests).toHaveLength(1);
+        },
+        { timeout: 10_000 }
+      );
+      // The Workspace first, so nothing asks for the turn again, then the
+      // chat's object, whose pi then can't open: its storage is of a newer
+      // pi, as after a rollback.
+      for (const stopped of [stub, session()]) {
+        // oxlint-disable-next-line no-await-in-loop -- one, then the other
+        await runInDurableObject(stopped, (_instance, state) => {
+          state.abort("Restarted by the test");
+        }).catch(() => {
+          // Aborting fails the call that aborted: that is the restart.
+        });
+      }
+      await runInDurableObject(session(), (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE pi_durable_schema SET version = version + 100"
+        );
+      });
+      const after: (number | null)[] = [];
+      for (let alarm = 1; alarm <= 6; alarm += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one alarm after another
+        await runDurableObjectAlarm(session());
+        const now = Date.now();
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        const next = await runInDurableObject(
+          session(),
+          async (_instance, state) => await state.storage.getAlarm()
+        );
+        after.push(next === null ? null : Math.round((next - now) / 1000));
+      }
+      const { running } = await workspace(env, id).chatSummary(chat.id, userId);
+      expect({ after, running }).toStrictEqual({
+        after: [30, 60, 120, 240, 480, null],
+        running: false,
+      });
+    } finally {
+      never.resolve(true);
+    }
+  });
+
+  it("stops a turn that runs past its time, as overdue", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId);
+    const never = Promise.withResolvers<boolean>();
+    const provider = await fakeProviderFor([model], {
+      ...says("Never."),
+      pause: { at: 0, until: never.promise },
+    });
+    const { session, request } = sessionOf(asking, userId);
+    const restore = await setObjectEnv(session(), { CHAT_TURN_MOST_MS: "1" });
+    try {
+      const asked = session().run(request("turn-a", "Forever?"));
+      await vi.waitFor(
+        () => {
+          expect(provider.requests).toHaveLength(1);
+        },
+        { timeout: 10_000 }
+      );
+      // The heartbeat's alarm finds it overdue.
+      await runDurableObjectAlarm(session());
+      await expect(asked).resolves.toMatchObject({
+        outcome: "failed",
+        stopped: "overdue",
+      });
+    } finally {
+      never.resolve(true);
+      await restore();
+    }
+  });
+
   it("is erased with its chat, a decision told meanwhile included, and takes nothing after", async () => {
     const { userId, person: signedIn } = await signedInWithRole(idp, "user");
     const { id, stub, chat, ask } = await chatOf(userId, says("Hi."));

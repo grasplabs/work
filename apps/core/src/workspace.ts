@@ -724,6 +724,9 @@ const turnStopError = (stop: TurnStop): Error => {
     case "history_revoked": {
       return agentErrors.create("agent.history_revoked");
     }
+    case "overdue": {
+      return agentErrors.create("agent.turn_overdue");
+    }
     case "person_inactive": {
       return permissionErrors.create("permission.person_inactive");
     }
