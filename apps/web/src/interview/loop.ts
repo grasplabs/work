@@ -46,7 +46,6 @@ import type { Live, LiveDoing, LiveSegment } from "./live.ts";
 import {
   hangUp,
   lastHeard,
-  listenForVoice,
   micMuted,
   muteMic,
   reachMic,
@@ -1550,8 +1549,6 @@ let liveReadsBack = false;
 let liveMuting: (() => void) | null = null;
 /** Keeps the level of their voice for the hill in the box, while in a session. */
 let liveLevel: (() => void) | null = null;
-/** While he speaks: hears whether they talk over him, to stop his voice here at once. */
-let liveOver: (() => void) | null = null;
 /** Their sentences just said: they rest over the box a moment before they go to the transcript. */
 let liveResting: string[] = [];
 let liveRest: number | undefined;
@@ -1849,18 +1846,12 @@ const liveDoing = (doing: LiveDoing): void => {
   if (doing === "speaking") {
     show("speaking");
     paceLive(true);
+    // His voice plays as Mistral sends it, as in Stephen Lab: when they talk over him, Mistral
+    // stops him itself. Hushing him here on what the microphone heard cut his own voice off.
     live?.hush(false);
-    if (liveOver === null && !micMuted()) {
-      // They talk over him: his voice stops here at once, as the room stops him too.
-      liveOver = listenForVoice(() => {
-        live?.hush(true);
-      });
-    }
     return;
   }
   paceLive(false);
-  liveOver?.();
-  liveOver = null;
   live?.hush(false);
   if (liveResting.length > 0 && liveRest === undefined && liveWords() === "") {
     keepResting();
@@ -1904,8 +1895,6 @@ const leaveLive = async ({ quick = false } = {}): Promise<void> => {
   liveMuting?.();
   liveMuting = null;
   paceLive(false);
-  liveOver?.();
-  liveOver = null;
   liveLevel?.();
   liveLevel = null;
   liveHeard.clear();

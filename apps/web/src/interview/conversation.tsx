@@ -62,12 +62,27 @@ const styles = stylex.create({
     paddingInline: { default: space["4"], [media.sm]: space["10"] },
     paddingBlockEnd: { default: space["3"], [media.sm]: space["6"] },
   },
+  // The stage stays where it stood, in the middle of the window: the transcript takes the room
+  // at its end, and the same room is left at its start, so opening it moves nothing.
   roomBeside: {
     gridTemplateColumns: {
       default: "minmax(0, 1fr)",
-      [beside]: "minmax(0, 1fr) 26rem",
+      [beside]: "minmax(18rem, 1fr) minmax(0, 44rem) minmax(18rem, 1fr)",
     },
     columnGap: space["10"],
+  },
+  // Closed, the transcript's column is no box at all, so the stage keeps the room's one row.
+  transcriptClosed: { display: "contents" },
+  centreBeside: { gridColumn: { default: null, [beside]: "2" } },
+  // The transcript's column: at the window's end, at most as wide as a chat reads well.
+  transcriptBeside: {
+    display: "flex",
+    flexDirection: "column",
+    minHeight: 0,
+    width: "100%",
+    maxWidth: { default: null, [beside]: "26rem" },
+    justifySelf: { default: null, [beside]: "end" },
+    gridColumn: { default: null, [beside]: "3" },
   },
   centre: {
     display: "flex",
@@ -226,25 +241,35 @@ const Room = ({
     <div {...stylex.props(styles.room, transcript && styles.roomBeside)}>
       <div
         inert={alone}
-        {...stylex.props(styles.centre, transcript && styles.hiddenNarrow)}
+        {...stylex.props(
+          styles.centre,
+          transcript && styles.hiddenNarrow,
+          transcript && styles.centreBeside
+        )}
       >
         {children}
       </div>
-      <Transcript
-        alone={alone}
-        lines={progress.lines}
-        onEdit={(at, text) => {
-          // Kept at once, as a removal is: their own words, put right.
-          update((now) => withLineText(now, at, text));
-          keepNow();
-        }}
-        onRemove={(at) => {
-          // Kept at once: removing can't wait for the next save.
-          update((now) => withoutLine(now, at));
-          keepNow();
-        }}
-        open={transcript}
-      />
+      <div
+        {...stylex.props(
+          transcript ? styles.transcriptBeside : styles.transcriptClosed
+        )}
+      >
+        <Transcript
+          alone={alone}
+          lines={progress.lines}
+          onEdit={(at, text) => {
+            // Kept at once, as a removal is: their own words, put right.
+            update((now) => withLineText(now, at, text));
+            keepNow();
+          }}
+          onRemove={(at) => {
+            // Kept at once: removing can't wait for the next save.
+            update((now) => withoutLine(now, at));
+            keepNow();
+          }}
+          open={transcript}
+        />
+      </div>
     </div>
   );
 };
