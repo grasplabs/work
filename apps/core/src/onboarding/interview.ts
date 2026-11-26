@@ -114,7 +114,7 @@ const weekPartMinutes = 4;
  * Not once the interview is at the read-back or they are back to add
  * something: nothing more is asked for then.
  */
-const openOf = (turn: TurnAsked, kind: TurnContext["kind"]): string[] => {
+const openOf = (turn: Situation, kind: TurnContext["kind"]): string[] => {
   if (turn.phase === "readback" || turn.adding) {
     return [];
   }
@@ -133,20 +133,25 @@ const openOf = (turn: TurnAsked, kind: TurnContext["kind"]): string[] => {
   ];
 };
 
+/** What of a turn tells where the interview stands, without its conversation. */
+export type Situation = Pick<
+  TurnAsked,
+  "phase" | "minutes" | "adding" | "facts"
+>;
+
 /**
- * What Stephen is told for one turn: who he talks to and about what, what
- * Grasp knows already, what he wrote down, what is still open, the
- * conversation, and what just happened. Who they are comes from the store, the conversation from the
- * page.
+ * Where the interview stands, as Stephen is told it: who he talks to and
+ * about what, what Grasp knows already, how long it has run, what he
+ * wrote down and what is still open. Who they are comes from the store.
+ * The first part of every turn's brief (`briefOf`), and what a live voice
+ * session is told, and told again after each answer (voice.ts).
  */
-export const briefOf = (
-  turn: TurnAsked,
+export const situationOf = (
+  turn: Situation,
   context: TurnContext,
   company: string
-): string => {
+): string[] => {
   const { name, team, lead, work, kind, known } = context;
-  const self = interviewerNames.stephen;
-  const lines = turn.lines.slice(-turnLinesMax);
   const toLearn =
     work === ""
       ? "The work to learn about: not named yet. In part 3, take the piece that repeats most and costs them most time, by what they said in part 2, and learn that one."
@@ -185,6 +190,24 @@ export const briefOf = (
           .map((fact) => `- [${fact.id}] ${fact.tag}: ${fact.text}`)
           .join("\n"),
     ...openOf(turn, kind),
+  ];
+};
+
+/**
+ * What Stephen is told for one turn: where the interview stands
+ * (`situationOf`), the conversation, and what just happened. The
+ * conversation comes from the page, or, in a live voice session, from
+ * what Mistral wrote down of it.
+ */
+export const briefOf = (
+  turn: TurnAsked,
+  context: TurnContext,
+  company: string
+): string => {
+  const self = interviewerNames.stephen;
+  const lines = turn.lines.slice(-turnLinesMax);
+  return [
+    ...situationOf(turn, context, company),
     "",
     "The conversation so far:",
     lines.length === 0
@@ -192,16 +215,16 @@ export const briefOf = (
       : lines
           .map(
             (line) =>
-              `${line.from === "stephen" ? self : name}: ${answerOf(line.text)}${line.file === undefined ? "" : ` [shared a file called "${fileCalled(line.file)}"]`}`
+              `${line.from === "stephen" ? self : context.name}: ${answerOf(line.text)}${line.file === undefined ? "" : ` [shared a file called "${fileCalled(line.file)}"]`}`
           )
           .join("\n"),
     "",
-    `What just happened: ${happenedOf(turn, name)[turn.event]}`,
+    `What just happened: ${happenedOf(turn, context.name)[turn.event]}`,
   ].join("\n");
 };
 
 /** Why a turn went wrong, as the page is told it. */
-class TurnFailedError extends Error {
+export class TurnFailedError extends Error {
   override name = "TurnFailedError";
   readonly status: number;
 
@@ -320,9 +343,18 @@ const speak = async (
   return textOfAnswer(answer);
 };
 
-/** Asks the notes' model what to write down from what was just said. */
-const write = async (
-  { env, system, brief, signal, count }: Turn,
+/**
+ * Asks the notes' model what to write down from what was just said: in a
+ * turn, and after each answer in a live voice session (voice.ts).
+ */
+export const write = async (
+  {
+    env,
+    system,
+    brief,
+    signal,
+    count,
+  }: Pick<Turn, "env" | "system" | "brief" | "signal" | "count">,
   model: string
 ): Promise<unknown> => {
   const call: ModelCall<unknown> = {
@@ -444,7 +476,7 @@ const holdTurn = async (held: Turn): Promise<void> => {
 const encoder = new TextEncoder();
 
 /** The organization's name, as Stephen is told it. */
-const companyOf = async (env: Env): Promise<string> => {
+export const companyOf = async (env: Env): Promise<string> => {
   const { name } = await readOrganization(env);
   return name;
 };

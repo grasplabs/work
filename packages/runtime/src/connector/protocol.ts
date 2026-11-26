@@ -169,15 +169,11 @@ export const mcpProtocolVersion = "2025-06-18";
 /** Longest wait a throttled answer passes on, in seconds. */
 export const maxRetryAfterSeconds = 3600;
 
-/** The methods an action may declare. */
-export const httpMethods = [
-  "GET",
-  "HEAD",
-  "POST",
-  "PUT",
-  "PATCH",
-  "DELETE",
-] as const;
+/**
+ * The methods an action may declare. Never DELETE: deleting is what Grasp
+ * never does (tool-rules.ts), whatever a tool is called.
+ */
+export const httpMethods = ["GET", "HEAD", "POST", "PUT", "PATCH"] as const;
 
 /**
  * A path segment an action leaves open, such as `{mailbox}`, maybe inside

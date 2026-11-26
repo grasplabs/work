@@ -31,7 +31,7 @@ export const composioClasses: Record<string, Record<string, ToolClass>> = {
     HUBSPOT_EXPORT_EVERYTHING: "read-company",
     HUBSPOT_REFUSED: "never",
     // Classed as a review could get them wrong: Never by their names
-    // (src/never.ts), whatever their class. The shareholders' list only
+    // (isNeverTool), whatever their class. The shareholders' list only
     // has a word of the rule inside another, and runs.
     HUBSPOT_DELETE_COMPANY: "change-company",
     HUBSPOT_SHARE_LIST: "read-company",
@@ -57,6 +57,20 @@ export const composioClasses: Record<string, Record<string, ToolClass>> = {
     HUBSPOT_UPDATE_DEAL: "change-company",
   },
   acme_erp: { ACME_ERP_LIST_ORDERS: "read-company" },
+  // A toolkit as big as one generated connector makes, for core's tool
+  // search (core's test/tool-search.test.ts): `BULK_TOOL_0` to
+  // `BULK_TOOL_2999` and the few its tests look for, each a read.
+  bulk: Object.fromEntries(
+    [
+      ...Array.from({ length: 3000 }, (_, index) => `BULK_TOOL_${index}`),
+      "BULK_FIND_SHIPMENT",
+      "BULK_LEDGER_EXPORT",
+      ...Array.from({ length: 6 }, (_, index) => `BULK_LEDGER_READ_${index}`),
+      ...Array.from({ length: 21 }, (_, index) => `BULK_QUOKKA_READ_${index}`),
+      "BULK_WOMBAT_READ_0",
+      "BULK_WOMBAT_READ_1",
+    ].map((name) => [name, "read-company"] as const)
+  ),
   // The tests' own mail server (connect.ts). `mail.relay` fails on
   // demand (idempotency.test.ts), so it is classed a read, which lets a
   // test take a failing tool down the read path.

@@ -342,11 +342,10 @@ describe("a tool with no spec to hold it to", () => {
           tool("deals.get", "GET /deals/{id}"),
           tool("deals.create", "POST /deals"),
           tool("deals.update", "PUT /deals/{id}"),
-          tool("deals.delete", "DELETE /deals/{id}"),
           tool("deals.followers.list", "GET /deals/{id}/followers", listed),
           tool(
-            "deals.products.deleteManyDealProducts",
-            "DELETE /deals/{id}/products"
+            "deals.products.updateManyDealProducts",
+            "PUT /deals/{id}/products"
           ),
           tool("deals.search.searchDeals", "GET /deals/search"),
         ],
@@ -363,7 +362,7 @@ describe("a tool with no spec to hold it to", () => {
           tool("pipedrive.deals.get", "GET /deals/{id}"),
           tool("deals.list", "GET /deals/{id}"),
           tool("deals.list", "GET /deals"),
-          tool("deals.products.delete", "DELETE /deals/{id}/products"),
+          tool("deals.products.update", "PUT /deals/{id}/products"),
           tool("deals.change", "PATCH /deals/{id}"),
           tool("deals.get", "GET /v1/deals/{id}"),
           {
@@ -382,7 +381,7 @@ describe("a tool with no spec to hold it to", () => {
       "deals.list: A list answers page(item): { items, next }.",
       "deals.list: GET /deals is named deals.<the vendor's operation name>.",
       "deals.list: A list answers page(item): { items, next }.",
-      "deals.products.delete: DELETE /deals/{id}/products is named deals.products.<the vendor's operation name>.",
+      "deals.products.update: PUT /deals/{id}/products is named deals.products.<the vendor's operation name>.",
       "deals.change: PATCH /deals/{id} is named deals.update.",
       "deals.get: GET /v1/deals/{id} is named v1.deals.get.",
       "deals.get: It declares no route it is named from.",
@@ -402,13 +401,13 @@ describe("a tool with no spec to hold it to", () => {
             "GET /pipelines/{pipeline}",
             "PATCH /deals/{id}",
           ]),
-          writing("deals.delete", ["DELETE /deals/{id}", "PATCH /deals/{id}"]),
+          writing("deals.update", ["PUT /deals/{id}", "PATCH /deals/{id}"]),
           writing("deals.get", ["GET /deals/{id}", "HEAD /deals"]),
         ],
         false
       )
     ).toStrictEqual([
-      "deals.delete: It declares 2 writes, and a tool sends one.",
+      "deals.update: It declares 2 writes, and a tool sends one.",
       "deals.get: HEAD /deals isn't a GET, as a tool's other routes are.",
     ]);
   });
@@ -442,8 +441,8 @@ describe("a tool with no spec to hold it to", () => {
           },
           tool("deals.getDeal", "GET /deals/{id}"),
           tool("deals.get", "GET /v2.0/deals/{id}"),
-          tool("deals.delete", "DELETE /{collection}/{id}"),
-          tool("drive.get", "DELETE /drive/root:/{name}:"),
+          tool("deals.update", "PATCH /{collection}/{id}"),
+          tool("drive.get", "PATCH /drive/root:/{name}:"),
           tool("content", "GET /drive/root:/{name}:/content"),
           tool(
             "drives.list",
@@ -463,8 +462,8 @@ describe("a tool with no spec to hold it to", () => {
     ).toStrictEqual([
       "deals.getDeal: GET /deals/{id} is named deals.get.",
       "deals.get: The segment \"v2.0\" of /v2.0/deals/{id} can't be part of a tool's name.",
-      "deals.delete: /{collection}/{id} names no collection.",
-      "drive.get: DELETE /drive/root:/{name}: is named drive.<the vendor's operation name>.",
+      "deals.update: /{collection}/{id} names no collection.",
+      "drive.get: PATCH /drive/root:/{name}: is named drive.<the vendor's operation name>.",
       "content: GET /drive/root:/{name}:/content is named drive.<the vendor's operation name>.",
       "drives.list: GET /drives/{drive}/root/search(q='{q}') is named drives.<the vendor's operation name>.",
       "me.drive.get: GET /me/drive/root:/{folder}/{name} is named me.drive.<the vendor's operation name>.",

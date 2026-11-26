@@ -2,6 +2,7 @@ import { v } from "@grasp-os/runtime/app";
 import type { ValueDescriptor } from "@grasp-os/runtime/app";
 import {
   hostSchema,
+  isNeverTool,
   keyHeaderSchema,
   plainEndpointSchema,
   routeSchema,
@@ -777,6 +778,13 @@ const named = (
           name === undefined
             ? "It needs a plain operation name for its tool's name, and has none."
             : `Another operation is named ${name}.`,
+      });
+      continue;
+    }
+    if (isNeverTool(name)) {
+      skipped.push({
+        operation: candidate.label,
+        reason: `Its tool, ${name}, is named for what Grasp never does.`,
       });
       continue;
     }

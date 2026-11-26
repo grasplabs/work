@@ -83,6 +83,7 @@ const modelShade: Record<Model, ChartColor> = {
   haiku: "chart-3",
   voice: "chart-4",
   ears: "chart-2",
+  conversation: "chart-6",
   // Never in a chart: it has no price, so no share of what was spent.
   other: "chart-2",
 };
@@ -130,6 +131,7 @@ const modelWords: Record<Model, string> = {
   haiku: MODEL_NAMES.haiku,
   voice: "Stephen’s voice",
   ears: "Stephen’s ears",
+  conversation: "Stephen’s live interviews",
   other: MODEL_NAMES.other,
 };
 
