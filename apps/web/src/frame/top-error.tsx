@@ -62,6 +62,13 @@ const subscribe = (listener: () => void): (() => void) => {
 
 const newest = (): Shown | null => shown.at(-1)?.error ?? null;
 
+/** Which error the bar shows now, by when it was put up: 0 while none shows. */
+const newestId = (): number => newest()?.id ?? 0;
+
+/** The newest error the bar shows, by when it was put up (0 while none): it grows as a new one shows, for Stephen to answer it in the setup (step-voice.tsx). */
+export const useNewestError = (): number =>
+  useSyncExternalStore(subscribe, newestId, newestId);
+
 /** Whether the bar shows an error now: what is drawn behind the page turns red with it. */
 let alarmed = false;
 const isAlarmed = (): boolean => alarmed;

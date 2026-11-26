@@ -47,7 +47,11 @@ import { fromTheTop } from "./field/poses.ts";
 import { StephenField } from "./field/stephen-field.tsx";
 import { LanguagePicker } from "./language-picker.tsx";
 import { StartOver } from "./start-over.tsx";
-import { useRememberLines } from "./step-voice.tsx";
+import {
+  answeredLately,
+  useRememberLines,
+  useStepTalk,
+} from "./step-voice.tsx";
 
 // The frame of the setup and of the page a member waits on: full screen,
 // outside the app. One quiet bar on top, Grasp's mark at its start, the
@@ -439,6 +443,7 @@ export const CalmFrame = ({
   language = true,
   pose = fromTheTop,
   centred = false,
+  covered = false,
   children,
 }: {
   /** Whose light or dark the bar's icon keeps. */
@@ -451,6 +456,12 @@ export const CalmFrame = ({
   centred?: boolean;
   /** The language in the bar: not on the step that asks for it. */
   language?: boolean;
+  /**
+   * Under a screen of a step's own over the whole window (the story at the
+   * end), whose bar has the tools: this bar can't be reached then, so it
+   * isn't offered at all.
+   */
+  covered?: boolean;
   /** Where Stephen's light rests on this screen and how it moves there. */
   pose?: Pose;
   children: ReactNode;
@@ -465,7 +476,7 @@ export const CalmFrame = ({
           <StephenField pose={pose}>
             {/* Every error is said here, at the very top, above the bar: it never covers the page. */}
             <TopErrorBar />
-            <header {...stylex.props(styles.bar)}>
+            <header inert={covered} {...stylex.props(styles.bar)}>
               <span {...stylex.props(styles.mark)}>
                 <Icon icon={GraspLogo} label="Grasp" />
               </span>
@@ -531,28 +542,44 @@ const saidOnArrival = new Set<string>();
 
 /**
  * Stephen says `line` as its step arrives, after `delay` ms: once in a visit, not again on the way
- * back. It is fetched from the moment the step opens (if the step before hasn't already), so he
- * starts on time, and remembered as what the step says, to be fetched ahead the next time through
- * (step-voice.tsx).
+ * back, whatever its words are by then (step-voice.tsx keeps which steps he told). A line that
+ * changes while the admin is on the step, such as what he found once they connect, is said then.
+ * It is fetched from the moment the step opens (if the step before hasn't already), so he starts
+ * on time, and remembered as what the step says, to be fetched ahead the next time through. Come
+ * on from the step before, he first answers the choice made there, when that is fetched already;
+ * when he has just answered something on this step (something gone wrong), the line waits for him
+ * to finish it.
  */
 const useSayOnce = (line: string, delay: number, when: boolean): void => {
   const remember = useRememberLines();
+  const talk = useStepTalk();
+  // Back on a step he told: the line it opens with isn't said again.
+  const heldBack = useRef(talk?.toldBefore === true ? line : null);
   useEffect(() => {
-    const due = when && !saidOnArrival.has(line);
+    const due = when && !saidOnArrival.has(line) && line !== heldBack.current;
     if (due) {
       prepare(line);
     }
     const id = due
       ? window.setTimeout(() => {
           saidOnArrival.add(line);
-          speak(line);
+          talk?.tell();
+          if (talk !== null && answeredLately(talk.step)) {
+            speak(line, { after: true });
+          } else {
+            const first = talk?.arriving() ?? null;
+            if (first !== null) {
+              speak(first);
+            }
+            speak(line, { after: first !== null });
+          }
           remember?.([line]);
         }, delay)
       : undefined;
     return () => {
       window.clearTimeout(id);
     };
-  }, [line, delay, when, remember]);
+  }, [line, delay, when, remember, talk]);
 };
 
 /**

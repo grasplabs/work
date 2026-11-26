@@ -5424,6 +5424,10 @@ msgstr "Gekopieerd uit een gekoppeld systeem, versie {version}"
 msgid "Copied from another system"
 msgstr "Overgenomen uit een ander systeem"
 
+#: src/onboarding/team-step.tsx
+msgid "Copied. Send it from your own email."
+msgstr "Gekopieerd. Stuur het vanuit je eigen mail."
+
 #: src/apps/app-settings.tsx
 msgid "Copies"
 msgstr "Kopieën"
@@ -7341,6 +7345,10 @@ msgstr "Alles wat Grasp doet draait op AI, van het lezen van je documenten tot e
 msgid "Everything Grasp learned about {company}, each fact traceable to the conversation, document or connection it came from."
 msgstr "Alles wat Grasp over {company} heeft geleerd, elk feit terug te leiden tot het gesprek, document of de koppeling waar het vandaan komt."
 
+#: src/onboarding/setup-steps.tsx
+msgid "Everything in Grasp runs on AI: reading your documents, the interviews, the plan. Here you choose which AI that is."
+msgstr "Alles in Grasp draait op AI: je documenten lezen, de interviews, het plan. Hier kies je welke AI dat is."
+
 #: src/connections/connection-audience.tsx
 msgid "Everything the Brain kept from it is erased for good, and nobody may use it from now on. This can't be undone. To open it again, choose who may use it once the erasure is done."
 msgstr "Alles wat het Brain ervan heeft bewaard, wordt voorgoed gewist, en vanaf nu mag niemand de verbinding gebruiken. Dit kan niet ongedaan worden gemaakt. Wil je hem weer openstellen, kies dan na het wissen wie hem mag gebruiken."
@@ -8192,9 +8200,21 @@ msgstr "Het gaat goed."
 msgid "Good"
 msgstr "Goed"
 
-#: src/onboarding/setup-steps.tsx
-msgid "Good, that’s settled. Everything in Grasp runs on AI: reading your documents, the interviews, the plan. Here you choose which AI that is."
-msgstr "Goed, dat is geregeld. Alles in Grasp draait op AI: je documenten lezen, de interviews, het plan. Hier kies je welke AI dat is."
+#: src/onboarding/sources-step.tsx
+msgid "Good to know where the work lives. That already helps."
+msgstr "Goed om te weten waar het werk staat. Dat helpt al."
+
+#: src/onboarding/leads-step.tsx
+msgid "Good, I’ll start with the leads you marked."
+msgstr "Mooi, ik begin bij de leidinggevenden die je hebt aangegeven."
+
+#: src/onboarding/sources-step.tsx
+msgid "Good, let’s connect it."
+msgstr "Goed, laten we het koppelen."
+
+#: src/onboarding/company-step.tsx
+msgid "Good, now I know who works where."
+msgstr "Mooi, nu weet ik wie waar werkt."
 
 #: src/onboarding/document-visitors.tsx
 msgid "Got a checklist? Toss it in!"
@@ -8208,9 +8228,33 @@ msgstr "Heb je een nieuwere lijst? Deel hem hier, dan vervangt hij de lijst die 
 msgid "Got it"
 msgstr "Begrepen"
 
+#: src/onboarding/documents-step.tsx
+msgid "Got it, I’ll read that one."
+msgstr "Ontvangen, die lees ik."
+
+#: src/onboarding/leads-step.tsx
+msgid "Got it, I’ll start with them."
+msgstr "Helder, die spreek ik als eerste."
+
+#: src/onboarding/leads-step.tsx
+msgid "Got it, now I know who I’ll talk to."
+msgstr "Helder, nu weet ik met wie ik ga praten."
+
+#: src/onboarding/leads-step.tsx
+msgid "Got it, they’re on the list now."
+msgstr "Helder, de lijst is bijgewerkt."
+
 #: src/interview/start.tsx
 msgid "Got it."
 msgstr "Genoteerd."
+
+#: src/onboarding/leads-step.tsx
+msgid "Got the list, they’re all here now."
+msgstr "Lijst ontvangen, iedereen staat er nu op."
+
+#: src/onboarding/documents-step.tsx
+msgid "Got them, I’ll read through those."
+msgstr "Ontvangen, die lees ik door."
 
 #: src/chat/connection-requests.tsx
 msgid "Grant"
@@ -8510,6 +8554,11 @@ msgstr "Tot dan kan het team van Grasp hier helpen"
 msgid "Great"
 msgstr "Heel goed"
 
+#. Stephen, as the next step arrives, in the language just chosen. Name your own language, not English: in Dutch “Fijn, dan praten we Nederlands.”
+#: src/onboarding/setup-steps.tsx
+msgid "Great, we’ll talk in English."
+msgstr "Fijn, dan praten we Nederlands."
+
 #: src/onboarding/campaign/concepts/canvas.tsx
 msgid "Green lines: new that day"
 msgstr "Groene lijnen: nieuw die dag"
@@ -8602,10 +8651,6 @@ msgstr "Dit gaat Grasp maken"
 #: src/onboarding/company-step.tsx
 msgid "Here’s your company"
 msgstr "Dit is je bedrijf"
-
-#: src/onboarding/platform-entry.tsx
-msgid "Here’s your Grasp."
-msgstr "Hier is je Grasp."
 
 #: src/onboarding/setup-steps.tsx
 msgid "Hi {admin}, I’m Stephen"
@@ -8719,6 +8764,10 @@ msgstr "Geschiedenis"
 msgctxt "an app's settings section"
 msgid "History"
 msgstr "Geschiedenis"
+
+#: src/onboarding/step-voice.tsx
+msgid "Hmm, that didn’t work. What happened is at the top."
+msgstr "Hm, dat ging niet goed. Bovenaan staat wat er gebeurde."
 
 #: src/settings/ai-providers.tsx
 msgid "Hold to delete the key"
@@ -10207,6 +10256,10 @@ msgstr "Hen {label} laten gebruiken?"
 msgid "Let webhook events no run waited for expire"
 msgstr "Heeft webhookgebeurtenissen laten verlopen waarop geen run wachtte"
 
+#: src/onboarding/platform-entry.tsx
+msgid "Let’s start exploring Grasp."
+msgstr "Laten we Grasp gaan ontdekken."
+
 #: src/apps/data-model-changes.tsx
 msgid "Lets {field} in {table} hold more. Every record already fits."
 msgstr "Laat {field} in {table} meer bevatten. Elk record past al."
@@ -11426,6 +11479,10 @@ msgstr "Volgende keren"
 msgid "Next week"
 msgstr "Volgende week"
 
+#: src/onboarding/team-step.tsx
+msgid "Next week, then."
+msgstr "Volgende week dan."
+
 #: src/onboarding/sources-step.tsx
 msgid "Next, I’d like to understand how the work actually gets done. Most of it lives in the tools your team already uses: shared drives, Teams channels and wikis, full of the files and pages people work from every day. Point me to the ones you use, and I’ll only read what you choose to share with me."
 msgstr "Nu wil ik graag begrijpen hoe het werk echt gedaan wordt. Het meeste daarvan zit in de tools die je team al gebruikt: gedeelde schijven, Teams-kanalen en wiki’s, vol bestanden en pagina’s waar mensen elke dag mee werken. Wijs me aan welke jullie gebruiken, en ik lees alleen wat jij met me deelt."
@@ -11562,6 +11619,10 @@ msgstr "Geen datum"
 #: src/connections/permissions/action-list.tsx
 msgid "No description."
 msgstr "Geen beschrijving."
+
+#: src/onboarding/documents-step.tsx
+msgid "No documents for now, that’s fine. You can add them later too."
+msgstr "Nog geen documenten, dat is prima. Je kunt ze later ook nog toevoegen."
 
 #: src/settings/event-source-activity.tsx
 msgid "No event accepted in the last seven days."
@@ -11753,6 +11814,10 @@ msgstr "Nog geen runs."
 msgid "No stack frames"
 msgstr "Geen stackframes"
 
+#: src/onboarding/company-step.tsx
+msgid "No staff list for now, that’s fine. We’ll sort it out together later."
+msgstr "Nog geen personeelslijst, dat is prima. Dat regelen we later samen."
+
 #: src/brain/brain.ts
 msgid "No stakeholder named yet"
 msgstr "Nog geen stakeholder genoemd"
@@ -11792,6 +11857,10 @@ msgstr "Geen tijdzone met die naam"
 #: src/connections/app/words.ts
 msgid "No tool matches"
 msgstr "Geen tool gevonden"
+
+#: src/onboarding/sources-step.tsx
+msgid "No tools for now, that’s fine. You can add them later too."
+msgstr "Nog geen tools, dat is prima. Je kunt ze later ook nog toevoegen."
 
 #: src/settings/event-source-activity.tsx
 msgid "No trigger matches this type. A test event starts no workflow."
@@ -11890,6 +11959,10 @@ msgstr "Niemand wacht op jouw beslissing over een deelverzoek."
 #: src/onboarding/leads-step.tsx
 msgid "Nobody on the list yet"
 msgstr "Nog niemand op de lijst"
+
+#: src/onboarding/leads-step.tsx
+msgid "Nobody on the list yet, that’s fine. We’ll add them together later."
+msgstr "Nog niemand op de lijst, dat is prima. Die voegen we later samen toe."
 
 #: src/agents/agent-page.tsx
 msgid "Nobody outside it can ask it anything, in Grasp or a chat app."
@@ -12322,6 +12395,10 @@ msgstr "genoteerd"
 msgid "Noted a question asked in a chat, to keep in its person's own Brain"
 msgstr "Een vraag uit een chat genoteerd, om te bewaren in het eigen Brain van de persoon"
 
+#: src/onboarding/sources-step.tsx
+msgid "Noted."
+msgstr "Genoteerd."
+
 #: src/drafts/share-with-team.tsx
 msgid "Nothing changed since the live version."
 msgstr "Er is niets veranderd sinds de live versie."
@@ -12653,6 +12730,10 @@ msgstr "Vaak gecorrigeerd"
 #: src/interview/rating.tsx
 msgid "Okay"
 msgstr "Oké"
+
+#: src/onboarding/leads-step.tsx
+msgid "Okay, I’ll leave them out."
+msgstr "Oké, die laat ik erbuiten."
 
 #: src/activity/audit-log.tsx
 msgid "Older"
@@ -13183,10 +13264,6 @@ msgstr "Grasp voor het hele bedrijf geopend"
 msgid "Opening {provider}"
 msgstr "{provider} wordt geopend"
 
-#: src/onboarding/platform-entry.tsx
-msgid "Opening Grasp"
-msgstr "Grasp wordt geopend"
-
 #: src/brain/note-reveal.tsx
 msgid "Opening the note"
 msgstr "De notitie gaat open"
@@ -13328,6 +13405,10 @@ msgstr "Onze e-mail kwam niet aan bij {names}. Stuur hun link zelf via Links om 
 #: src/onboarding/forget-kickoff.tsx
 msgid "Our first conversation is deleted. I’m still erasing what I took from it, and I finish that by myself."
 msgstr "Ons eerste gesprek is verwijderd. Ik ben nog bezig te wissen wat ik eruit heb gehaald, en dat maak ik zelf af."
+
+#: src/onboarding/setup-steps.tsx
+msgid "Our own system it is, so the AI is ready to go."
+msgstr "Dan wordt het ons eigen systeem, de AI staat klaar."
 
 #: src/connections/native-descriptions.ts
 msgid "Outlook mail and calendars, and files in OneDrive and SharePoint."
@@ -16766,6 +16847,10 @@ msgstr "Iets anders"
 msgid "Something to fix first"
 msgstr "Eerst iets oplossen"
 
+#: src/onboarding/step-voice.tsx
+msgid "Something went wrong there. The bar at the top says what to do."
+msgstr "Daar ging iets mis. De balk bovenaan zegt wat je kunt doen."
+
 #: src/pages/frame-failure.tsx
 msgid "Something went wrong while it opened."
 msgstr "Er ging iets mis bij het openen."
@@ -17263,6 +17348,10 @@ msgctxt "kind of app"
 msgid "Support"
 msgstr "Klantenservice"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Sure. Paste your key, and I’ll check that it works."
+msgstr "Prima. Plak je sleutel, dan controleer ik of hij werkt."
+
 #: src/settings/member-suspension.tsx
 msgid "Suspended"
 msgstr "Geschorst"
@@ -17622,6 +17711,18 @@ msgstr "Dank je. Wil je zeggen waarom?"
 #: src/interview/start.tsx
 msgid "Thanks for letting us know"
 msgstr "Bedankt dat je het laat weten"
+
+#: src/onboarding/documents-step.tsx
+msgid "Thanks for the document. I’ll read it before I talk to anyone."
+msgstr "Dank je voor het document. Ik lees het voordat ik met iemand praat."
+
+#: src/onboarding/documents-step.tsx
+msgid "Thanks for the documents. I’ll read them before I talk to anyone."
+msgstr "Dank je voor de documenten. Ik lees ze voordat ik met iemand praat."
+
+#: src/onboarding/sources-step.tsx
+msgid "Thanks. I’ll only read what you’ve shared with me there."
+msgstr "Dank je. Ik lees daar alleen wat je met me hebt gedeeld."
 
 #: src/routes/interview.tsx
 msgid "That account can't open this interview. Sign in with the work account your link was sent to."
@@ -18059,6 +18160,10 @@ msgstr "De gegevens zijn geen JSON."
 #: src/onboarding/send-plan-form.tsx
 msgid "The day after"
 msgstr "Overmorgen"
+
+#: src/onboarding/team-step.tsx
+msgid "The day after, then."
+msgstr "Overmorgen dan."
 
 #: src/onboarding/send-plan-form.tsx
 msgid "The day I start"
@@ -19117,6 +19222,10 @@ msgstr "Morgen"
 #: src/workflows/workflow-rows.tsx
 msgid "Tomorrow {time}"
 msgstr "Morgen {time}"
+
+#: src/onboarding/team-step.tsx
+msgid "Tomorrow it is."
+msgstr "Morgen dus."
 
 #: src/interview/start.tsx
 msgid "Tomorrow morning"
@@ -21791,6 +21900,10 @@ msgstr "Je eigen sleutel is gekoppeld en werkt."
 #: src/onboarding/setup-steps.tsx
 msgid "Your own key is connected and works. You can keep it, or change it here."
 msgstr "Je eigen sleutel is gekoppeld en werkt. Je kunt hem houden, of hier wijzigen."
+
+#: src/onboarding/setup-steps.tsx
+msgid "Your own key works, so the AI is ready to go."
+msgstr "Je eigen sleutel werkt, de AI staat klaar."
 
 #: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx

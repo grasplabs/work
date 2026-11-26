@@ -12,6 +12,11 @@ export interface EntryFact {
 
 export interface Entry {
   facts: EntryFact[];
+  /**
+   * Gets the platform's page ready while the chips gather: what it reads
+   * fetched and its code loaded, so `go` builds it from what is at hand.
+   */
+  ready?: () => Promise<void>;
   /** Changes the page under the layer to the platform; over once it is there. */
   go: () => Promise<void>;
 }
