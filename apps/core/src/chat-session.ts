@@ -413,25 +413,34 @@ export class ChatSession extends DurableObject<Env> {
    * alarm tells it again later, never opening pi meanwhile.
    */
   async #giveUp(): Promise<void> {
-    const name = this.ctx.id.name ?? "";
-    const failed = this.#failedOpens();
-    log.error("chat.gave_up", { chatSession: name, failedOpens: failed });
-    const [workspaceId, chatId] = name.split("/");
-    try {
-      await callObject(async () => {
-        await workspace(
-          this.env,
-          workspaceIdSchema.parse(workspaceId)
-        ).turnRunning(chatIdSchema.parse(chatId), false);
-      });
-    } catch (error) {
-      log.error("chat.gave_up_untold", {
+    // Inside the block, so no call opens pi meanwhile: one that comes waits,
+    // and opens it after; one that came first keeps it, and its wake.
+    await this.ctx.blockConcurrencyWhile(async () => {
+      if (this.#current !== undefined || this.#opened !== undefined) {
+        return;
+      }
+      const name = this.ctx.id.name ?? "";
+      log.error("chat.gave_up", {
         chatSession: name,
-        ...errorFields(error),
+        failedOpens: this.#failedOpens(),
       });
-      await this.ctx.storage.setAlarm(Date.now() + backoffMs(opensMost));
-      return;
-    }
-    await this.ctx.storage.deleteAlarm();
+      const [workspaceId, chatId] = name.split("/");
+      try {
+        await callObject(async () => {
+          await workspace(
+            this.env,
+            workspaceIdSchema.parse(workspaceId)
+          ).turnRunning(chatIdSchema.parse(chatId), false);
+        });
+      } catch (error) {
+        log.error("chat.gave_up_untold", {
+          chatSession: name,
+          ...errorFields(error),
+        });
+        await this.ctx.storage.setAlarm(Date.now() + backoffMs(opensMost));
+        return;
+      }
+      await this.ctx.storage.deleteAlarm();
+    });
   }
 }
