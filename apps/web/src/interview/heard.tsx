@@ -2,6 +2,7 @@ import {
   colors,
   font,
   media,
+  radius,
   size,
   space,
 } from "@grasp-os/ui/lib/tokens.stylex";
@@ -23,11 +24,12 @@ import { transcriptId } from "./transcript.tsx";
 // by one: what they said is theirs, and it is in the transcript once sent.
 //
 // When what they said is kept, it is a line of the transcript from then on,
-// and it is seen going there: the words lift off the composer, shrink and
-// fade on their way to their line in the open transcript, which fades in as
-// they reach it; with the transcript closed they go into its button, which
-// answers with one soft beat. Words that are dropped just fade where they
-// stand. With reduced motion nothing travels: they fade, and the line is there.
+// and it is seen becoming one where it stands: the words turn into the
+// transcript's own soft bubble, stay a moment, and fade, as their line
+// fades in in the open transcript (with it closed, its button answers with
+// one soft beat). Nothing flies: a sentence said rests, then goes. Words
+// that are dropped just fade where they stand. With reduced motion they
+// fade, and the line is there.
 
 /** How far apart words that come together leave, in ms. */
 const apartMs = 80;
@@ -35,10 +37,12 @@ const apartMs = 80;
 const fadeMs = 460;
 /** How long the lines take to glide up by one, in ms. */
 const glideMs = 280;
-/** How long the words take to reach the transcript, in ms. */
-const leaveMs = 700;
-/** How the words travel there: off gently, and gently in. */
-const travel = "cubic-bezier(0.45, 0, 0.2, 1)";
+/** How long the words take to become the transcript's bubble, in ms. */
+const bubbleMs = 320;
+/** How long the bubble stays before it goes, in ms. */
+const restMs = 900;
+/** How long the bubble takes to fade, in ms. */
+const fadeOutMs = 420;
 /** How long words that are only dropped take to go, in ms. */
 const goneMs = 260;
 /** The house curve: quick to start, long to settle. */
@@ -256,19 +260,15 @@ const leave = (stood: Stood, kept: boolean) => {
     return;
   }
   const { to, line } = taken;
-  // Their line comes as the words reach it, never before.
+  const goesAt = bubbleMs + restMs;
+  // Their line comes as the bubble goes, never before.
   if (line) {
     to.animate(
       [
         { opacity: 0, transform: "translateY(6px)" },
         { opacity: 1, transform: "none" },
       ],
-      {
-        duration: fadeMs,
-        delay: leaveMs * 0.5,
-        easing: settle,
-        fill: "backwards",
-      }
+      { duration: fadeMs, delay: goesAt, easing: settle, fill: "backwards" }
     );
   } else {
     to.animate(
@@ -277,38 +277,62 @@ const leave = (stood: Stood, kept: boolean) => {
         { transform: "scale(1.16)" },
         { transform: "scale(1)" },
       ],
-      { duration: 420, delay: leaveMs * 0.72, easing: "ease-in-out" }
+      { duration: 420, delay: goesAt, easing: "ease-in-out" }
     );
   }
-  // Measured a frame on: the transcript has made room for the line and followed it by then.
-  requestAnimationFrame(() => {
-    const goal = to.getBoundingClientRect();
-    const { box } = stood;
-    const scale = line
-      ? Math.min(1, Math.max(0.55, goal.width / box.width))
-      : 0.3;
-    // The words' foot, where the newest stand, lands on the line's own foot, or in the button's middle.
-    const x = line
-      ? goal.left + (goal.width - box.width * scale) / 2
-      : goal.left + goal.width / 2 - (box.width * scale) / 2;
-    const y = line ? goal.bottom - 10 : goal.top + goal.height / 2;
-    const dx = x - box.left;
-    const dy = y - box.bottom;
-    const going = holder.animate(
-      [
-        { opacity: 1, transform: "none", filter: "blur(0)" },
-        { opacity: 0.85, filter: "blur(0)", offset: 0.4 },
-        {
-          opacity: 0,
-          transform: `translate(${dx}px, ${dy}px) scale(${scale})`,
-          filter: "blur(2px)",
-        },
-      ],
-      { duration: leaveMs, easing: travel, fill: "forwards" }
-    );
-    going.addEventListener("finish", over);
-    going.addEventListener("cancel", over);
+  // The same words as the transcript's bubble of theirs, at the end of the room.
+  const bubble = stood.copy.cloneNode(true);
+  const words =
+    bubble instanceof HTMLElement ? bubble.querySelector("p") : null;
+  if (!(bubble instanceof HTMLElement) || words === null) {
+    over();
+    return;
+  }
+  Object.assign(bubble.style, {
+    position: "absolute",
+    inset: "0",
+    maskImage: "none",
+    alignItems: "flex-end",
   });
+  Object.assign(words.style, {
+    alignSelf: "flex-end",
+    width: "fit-content",
+    maxWidth: "85%",
+    paddingBlock: space["2"],
+    paddingInline: space["4"],
+    borderRadius: radius.xl,
+    borderEndEndRadius: radius.sm,
+    backgroundColor: colors.secondary,
+    color: colors.bodyForeground,
+  });
+  Object.assign(stood.copy.style, { position: "absolute", inset: "0" });
+  holder.append(bubble);
+  stood.copy.animate([{ opacity: 1 }, { opacity: 0 }], {
+    duration: bubbleMs,
+    easing: settle,
+    fill: "forwards",
+  });
+  bubble.animate(
+    [
+      { opacity: 0, transform: "scale(0.98)" },
+      { opacity: 1, transform: "none" },
+    ],
+    { duration: bubbleMs, easing: settle, fill: "backwards" }
+  );
+  const going = holder.animate(
+    [
+      { opacity: 1, transform: "none" },
+      { opacity: 0, transform: "translateY(-6px)" },
+    ],
+    {
+      duration: fadeOutMs,
+      delay: goesAt,
+      easing: "ease-out",
+      fill: "forwards",
+    }
+  );
+  going.addEventListener("finish", over);
+  going.addEventListener("cancel", over);
 };
 
 /**
