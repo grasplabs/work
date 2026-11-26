@@ -168,12 +168,11 @@ export interface StepAttempt {
    */
   aiTrouble?: AiWait;
   /**
-   * What its connector call failed with, when connect named how long to
-   * wait before it is tried again (`retryWaitMsOf`): its code, and the
-   * wait in ms. The step waits it out (`throttledMarker`) only when the
-   * attempt fails with that very code.
+   * How long, in ms, connect said its failed connector call should wait
+   * before it is tried again (`retryWaitMsOf`): the step waits it out
+   * (`throttledMarker`) when the attempt fails.
    */
-  namedWait?: NamedWait;
+  namedWaitMs?: number;
   /**
    * Whether it was held because a call of it under the step's key came
    * back of unknown outcome, for its person to resolve (`heldNoted`): its
@@ -280,19 +279,13 @@ export interface Busy {
   maxWaitMs: number;
 }
 
-/** A wait a call's failure named: its code, and the wait in ms. */
-export interface NamedWait {
-  code: string;
-  ms: number;
-}
-
 /** The field of a step's result that says its call named a wait (`throttledMarker`). */
 const throttledField = `${coreStepPrefix}throttled`;
 
 /**
- * What an attempt of a step answers when it failed with a failure trying
- * again may fix, the very one its connector call failed with naming how
- * long to wait first (`StepAttempt.namedWait`): a connection its vendor
+ * What an attempt of a step answers when its connector call failed with
+ * a failure trying again may fix, naming how long to wait first
+ * (`StepAttempt.namedWaitMs`): a connection its vendor
  * paused (`connect.rate_limited`), or a call its vendor turned away
  * asking to wait (`connect.server_unavailable`), an hour at most either
  * way. Recorded as the step's result, with how long the run sleeps, in
@@ -346,10 +339,10 @@ export const keyMarkerOf = (at: number, { provider, trouble }: AiWait) => ({
  * What an attempt that still holds its lease answers in place of how it
  * settled (`settled`), when its step waits before it runs again: its
  * model call failed for what its AI provider showed (`keyMarkerOf`),
- * whatever its code made of that; or it failed with a failure trying
- * again may fix, the one its call named a wait for (`throttledMarker`),
- * and the step's rounds, having slept `waits` so already, may sleep
- * this one too within `maxWaitMs`. None otherwise.
+ * whatever its code made of that; or it failed with what its connector
+ * call failed with, naming a wait (`throttledMarker`), and the step's
+ * rounds, having slept `waits` so already, may sleep this one too within
+ * `maxWaitMs`. None otherwise.
  */
 const waitMarkerOf = (
   attempt: StepAttempt,
@@ -360,17 +353,10 @@ const waitMarkerOf = (
   if (attempt.aiTrouble !== undefined) {
     return keyMarkerOf(Date.now(), attempt.aiTrouble);
   }
-  const named = attempt.namedWait;
-  const sleepMs = Math.max(
-    named?.ms ?? 0,
-    askAgainSeconds(waits.rounds) * 1000
-  );
+  const named = attempt.namedWaitMs;
+  const sleepMs = Math.max(named ?? 0, askAgainSeconds(waits.rounds) * 1000);
   const waitsOut =
-    !settled.ok &&
-    named !== undefined &&
-    settled.error.code === named.code &&
-    isRetryable(settled.error) &&
-    waits.sleptMs + sleepMs <= maxWaitMs;
+    !settled.ok && named !== undefined && waits.sleptMs + sleepMs <= maxWaitMs;
   return waitsOut ? throttledMarker(sleepMs) : undefined;
 };
 

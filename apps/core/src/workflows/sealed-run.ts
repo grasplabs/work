@@ -2989,13 +2989,12 @@ class SealedRun implements SealedRunKind {
           // decided, connect answering what they decided under its key.
           attempt.held ||= connectErrors.codeOf(error) === "connect.held";
           // Its connection paused, or its vendor asking to wait: the step
-          // waits that long before it runs again, should it fail with this
-          // (host.ts, `throttledMarker`), a wait the isolate never hears
-          // of. An attempt makes its call once (`#called`).
-          const ms = retryWaitMsOf(error);
-          if (ms !== undefined && isExpectedError(error)) {
-            attempt.namedWait = { code: error.code, ms };
-          }
+          // waits that long before it runs again (host.ts,
+          // `throttledMarker`), a wait the isolate never hears of. It is
+          // this failure's own: an attempt makes its call once (`#called`),
+          // and settles with the host's own failure of it, whatever its
+          // code reports (`attemptSettled`).
+          attempt.namedWaitMs = retryWaitMsOf(error);
           throw fixedMessage(error);
         }
       }
