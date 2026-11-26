@@ -35,7 +35,7 @@ const sectionOf = (view: AdminView): string =>
 
 /** The table's row of the work named `name`. */
 const rowOf = (html: string, name: string): string => {
-  const at = html.indexOf(`title="${name}"`);
+  const at = html.indexOf(`>${name}<`);
   return at === -1
     ? ""
     : html.slice(html.lastIndexOf("<tr", at), html.indexOf("</tr>", at));
@@ -68,7 +68,7 @@ describe("an organization's workflows", () => {
     }).toStrictEqual({
       // The head's row and one for the piece of work.
       rows: 2,
-      orders: `${orders.name} ${team(orders.team)} Being mapped 2 of 3 0 of 2 5 things missing Being mapped`,
+      orders: `${orders.name} ${team(orders.team)} Being mapped 2 of 3 0 of 2 5 things missing`,
       menu: true,
       // One workflow is read whole: nothing to narrow the list with.
       filters: [],
