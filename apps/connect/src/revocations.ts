@@ -5,7 +5,7 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { recordEventIf } from "./audit.ts";
-import { providerConfigFor } from "./connector-providers.ts";
+import { providerConfigFor, stillServes } from "./connector-providers.ts";
 import {
   connections,
   connectionTokens,
@@ -129,6 +129,11 @@ const revokeWith = async (
   const token = await tokenOf();
   if (token === "none") {
     return "nothing";
+  }
+  // Its connector moved as the token was read, and the token may be the
+  // new server's: owed, and tried again with the provider then.
+  if (!(await stillServes(env.DB, provider.connector))) {
+    return "failed";
   }
   if (token === "unreadable") {
     return "unreadable";

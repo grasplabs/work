@@ -45,17 +45,18 @@ const racingStatement = (
 
 /**
  * Connect's database, with `first` run once just before the first query
- * matching `query` is read: a change made by someone else between two
- * steps of one request.
+ * matching `query` is read, or the one after `skip` such reads: a change
+ * made by someone else between two steps of one request.
  */
 export const racingRead = (
   query: RegExp,
-  first: () => Promise<unknown>
+  first: () => Promise<unknown>,
+  { skip = 0 }: { skip?: number } = {}
 ): D1Database => {
-  let raced = false;
+  let reads = 0;
   const race = async (): Promise<void> => {
-    if (!raced) {
-      raced = true;
+    reads += 1;
+    if (reads === skip + 1) {
       await first();
     }
   };

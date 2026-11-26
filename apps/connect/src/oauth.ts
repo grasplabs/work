@@ -65,12 +65,12 @@ import {
   isConnectorId,
   prepareBuiltIn,
   providerConfigFor,
+  serverStands,
 } from "./connector-providers.ts";
 import {
   connections,
   connectionTokens,
   connectionTools,
-  connectors,
   httpConnections,
   oauthFlows,
   pendingActions,
@@ -86,6 +86,7 @@ import { rightsFor } from "./provider-rights.ts";
 import { grantedAsAsked, renewedAsGranted } from "./providers.ts";
 import type {
   ApiKeyProviderConfig,
+  ConnectorServer,
   OAuthClientCredentials,
   OAuthProviderConfig,
   ProviderAccount,
@@ -520,12 +521,12 @@ const confirmedAddressOf = (
 
 /**
  * What a connection is connected for: its scope, and its tenant if pinned.
- * `stateHash` is the sign-in flow it came back through; `checkedAt` the
- * connector, server URL and header a key was checked at.
+ * `stateHash` is the sign-in flow it came back through; `connector` the
+ * connector's server a key was checked at.
  */
 type Target = Pick<FlowRow, "scope" | "tenant"> & {
   stateHash?: string;
-  checkedAt?: { connector: string; url: string; header: string };
+  connector?: ConnectorServer;
 };
 
 /**
@@ -535,15 +536,13 @@ type Target = Pick<FlowRow, "scope" | "tenant"> & {
  * signs in, and then what a flow's code was exchanged for, or a key
  * checked at the old server or in the old header, is kept nowhere.
  */
-const flowStands = ({ stateHash, checkedAt }: Target): SQL =>
+const flowStands = ({ stateHash, connector }: Target): SQL =>
   sql.join(
     [
       stateHash === undefined
         ? sql`1`
         : sql`EXISTS (SELECT 1 FROM ${oauthFlows} WHERE ${oauthFlows.stateHash} = ${stateHash})`,
-      checkedAt === undefined
-        ? sql`1`
-        : sql`EXISTS (SELECT 1 FROM ${connectors} WHERE ${connectors.id} = ${checkedAt.connector} AND ${connectors.url} = ${checkedAt.url} AND ${connectors.header} = ${checkedAt.header})`,
+      connector === undefined ? sql`1` : serverStands(connector),
     ],
     sql` AND `
   );
@@ -1588,9 +1587,9 @@ export const connectWithKey = async (
   const target: Target = {
     scope,
     tenant: "",
-    ...(provider.checkedAt === undefined
+    ...(provider.connector === undefined
       ? {}
-      : { checkedAt: { connector: provider.id, ...provider.checkedAt } }),
+      : { connector: provider.connector }),
   };
   const replaced = await replaceKey(
     env,

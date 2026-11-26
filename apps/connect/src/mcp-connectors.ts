@@ -374,6 +374,7 @@ const serverFor = async (
   if (
     still?.url !== row.url ||
     still.auth !== row.auth ||
+    still.header !== row.header ||
     still.companyNetwork !== row.companyNetwork
   ) {
     throw connectErrors.create("connect.server_unavailable");

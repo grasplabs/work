@@ -6,6 +6,7 @@ import {
 } from "@grasp-os/shared/connect";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { and, eq, exists, inArray, isNull, like, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { recordEventIf } from "./audit.ts";
@@ -24,7 +25,11 @@ import { clientFor, discoverSignIn } from "./mcp-discovery.ts";
 import { McpError, modernMcpServer } from "./mcp.ts";
 import { giveUpOwed } from "./owed-revokes.ts";
 import { providerFor } from "./providers.ts";
-import type { ProviderAccount, ProviderConfig } from "./providers.ts";
+import type {
+  ConnectorServer,
+  ProviderAccount,
+  ProviderConfig,
+} from "./providers.ts";
 import { resealBatchSize, vaultFor } from "./vault.ts";
 import type { Vault } from "./vault.ts";
 
@@ -82,6 +87,38 @@ export const connectorRow = async (
         .where(eq(connectors.id, id))
         .get()
     : undefined;
+
+/** What a release's move of `row` changes (`ConnectorServer`). */
+const serverOf = (row: ConnectorRow): ConnectorServer => ({
+  id: row.id,
+  url: row.url,
+  auth: row.auth,
+  header: row.header,
+});
+
+/**
+ * Whether the connector's row still holds `server`: what was read with a
+ * provider read from it is that server's. Always for a provider of no
+ * connector.
+ */
+export const stillServes = async (
+  db: D1Database,
+  server: ConnectorServer | undefined
+): Promise<boolean> => {
+  if (server === undefined) {
+    return true;
+  }
+  const row = await connectorRow(db, server.id);
+  return (
+    row?.url === server.url &&
+    row.auth === server.auth &&
+    row.header === server.header
+  );
+};
+
+/** That the connector's row still holds `server`, as SQL, for a write. */
+export const serverStands = (server: ConnectorServer): SQL =>
+  sql`EXISTS (SELECT 1 FROM ${connectors} WHERE ${connectors.id} = ${server.id} AND ${connectors.url} = ${server.url} AND ${connectors.auth} = ${server.auth} AND ${connectors.header} IS ${server.header})`;
 
 /** A unique index refused the row: another connector has that URL. */
 export const isDuplicate = (error: unknown): boolean =>
@@ -382,7 +419,7 @@ const providerOf = async (
       kind: "api_key",
       id: row.id,
       server: row.id,
-      checkedAt: { url: row.url, header },
+      connector: serverOf(row),
       credential: (key) => ({ header, value: key }),
       account: async (key, owner, send) =>
         (await keyWorks(row.url, header, key, send)) ? ownAccount(owner) : null,
@@ -426,6 +463,7 @@ const providerOf = async (
     kind: "oauth",
     id: row.id,
     server: row.id,
+    connector: serverOf(row),
     pinned: false,
     isTenant: (tenant) => tenant === "",
     authorizationEndpoint: () => authorizationEndpoint,

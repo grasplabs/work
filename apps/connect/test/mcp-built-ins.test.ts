@@ -9,7 +9,7 @@ import { z } from "zod";
 import { prepareBuiltIn } from "../src/connector-providers.ts";
 import { connections } from "../src/db/schema.ts";
 import { currentTools } from "../src/mcp-connectors.ts";
-import { finishConnection } from "../src/oauth.ts";
+import { disconnect, finishConnection } from "../src/oauth.ts";
 import { retryRevocations } from "../src/revocations.ts";
 import {
   auditEvents,
@@ -587,58 +587,117 @@ describe("a built-in connector serving its vendor's MCP server", () => {
     });
   });
 
-  it("sends no refresh token read as its server moved to the issuer it moved from", async () => {
+  it.each([
+    ["its connection's", 0],
+    ["the refresh's", 1],
+  ])(
+    "sends no refresh token read as its server moved to the issuer it moved from, read after %s read of its tokens",
+    async (_, skip) => {
+      await parkEarlierLinears();
+      const anna = someone();
+      const annas = await connectLinear(
+        "linear",
+        anna,
+        "personal",
+        linearItself
+      );
+      await madeForAnotherUrl();
+      await env.DB.batch([
+        env.DB.prepare(
+          "UPDATE connectors SET token_endpoint = ? WHERE id = ?"
+        ).bind("https://mcp.linear-old.example/token", "linear"),
+        env.DB.prepare(
+          "UPDATE connection_tokens SET access_expires_at = 0 WHERE connection_id = ?"
+        ).bind(annas),
+      ]);
+      const connection = await drizzle(env.DB)
+        .select()
+        .from(connections)
+        .where(eq(connections.id, annas))
+        .get();
+      if (connection === undefined) {
+        throw new Error("Expected Anna's connection");
+      }
+      const before = sent.length;
+      // Once the old issuer was read for her credential, the release moves
+      // the connector and Anna signs in again, and her new token is due a
+      // refresh by the time it is read.
+      let moved = false;
+      const listed = await outcome(
+        currentTools(
+          {
+            ...env,
+            DB: racingRead(
+              /from "connection_tokens"/iu,
+              async () => {
+                moved = true;
+                await startLinear("linear", someone());
+                await connectLinear("linear", anna, "personal", linearItself);
+                await env.DB.prepare(
+                  "UPDATE connection_tokens SET access_expires_at = 0 WHERE connection_id = ?"
+                )
+                  .bind(annas)
+                  .run();
+              },
+              { skip }
+            ),
+          },
+          { ...connection, toolListFreshUntil: null }
+        )
+      );
+      expect({
+        moved,
+        listed,
+        toOld: sent
+          .slice(before)
+          .filter(({ url }) =>
+            url.startsWith("https://mcp.linear-old.example")
+          ),
+      }).toStrictEqual({
+        moved: true,
+        listed: "connect.server_unavailable",
+        toOld: [],
+      });
+    }
+  );
+
+  it("sends no token read as its server moved to revoke at the issuer it moved from, and owes its revoke", async () => {
     await parkEarlierLinears();
     const anna = someone();
     const annas = await connectLinear("linear", anna, "personal", linearItself);
     await madeForAnotherUrl();
     await env.DB.prepare(
-      "UPDATE connectors SET token_endpoint = ? WHERE id = ?"
+      "UPDATE connectors SET revocation_endpoint = ? WHERE id = ?"
     )
-      .bind("https://mcp.linear-old.example/token", "linear")
+      .bind("https://mcp.linear-old.example/revoke", "linear")
       .run();
-    const connection = await drizzle(env.DB)
-      .select()
-      .from(connections)
-      .where(eq(connections.id, annas))
-      .get();
-    if (connection === undefined) {
-      throw new Error("Expected Anna's connection");
-    }
     const before = sent.length;
-    // Once the old issuer was read for her credential, the release moves
-    // the connector and Anna signs in again, and her new token is due a
-    // refresh by the time it is read.
+    // As Anna disconnects, once the old issuer was read to revoke at, the
+    // release moves the connector and Anna signs in again.
     let moved = false;
-    const listed = await outcome(
-      currentTools(
-        {
-          ...env,
-          DB: racingRead(/from "connection_tokens"/iu, async () => {
-            moved = true;
-            await startLinear("linear", someone());
-            await connectLinear("linear", anna, "personal", linearItself);
-            await env.DB.prepare(
-              "UPDATE connection_tokens SET access_expires_at = 0 WHERE connection_id = ?"
-            )
-              .bind(annas)
-              .run();
-          }),
-        },
-        { ...connection, toolListFreshUntil: null }
-      )
+    await disconnect(
+      {
+        ...env,
+        DB: racingRead(/from "connection_tokens"/iu, async () => {
+          moved = true;
+          await startLinear("linear", someone());
+          await connectLinear("linear", anna, "personal", linearItself);
+        }),
+      },
+      { person: anna, connectionId: annas }
     );
+    const owed = await env.DB.prepare(
+      "SELECT COUNT(*) AS owed FROM token_revocations WHERE connection_id = ?"
+    )
+      .bind(annas)
+      .first("owed");
     expect({
       moved,
-      listed,
+      owed,
       toOld: sent
         .slice(before)
         .filter(({ url }) => url.startsWith("https://mcp.linear-old.example")),
-    }).toStrictEqual({
-      moved: true,
-      listed: "connect.server_unavailable",
-      toOld: [],
-    });
+    }).toStrictEqual({ moved: true, owed: 1, toOld: [] });
   });
 
   it("sends no owed revoke to the server its connector moved to as it was tried", async () => {
