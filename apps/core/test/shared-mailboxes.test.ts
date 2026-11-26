@@ -2,7 +2,13 @@ import { connectErrors } from "@grasp-os/shared/connect";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { codeResults, codeStep, chatOf, says } from "./agent-chat.ts";
+import {
+  codeResults,
+  codeStep,
+  chatOf,
+  says,
+  withoutMarking,
+} from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
@@ -108,7 +114,7 @@ const chatSorting = async (
   return async () => {
     await chat.ask("Sort the shared inbox.");
     const [result] = await codeResults(chat.stub, chat.chat.id);
-    return result?.text;
+    return result === undefined ? undefined : withoutMarking(result.text);
   };
 };
 

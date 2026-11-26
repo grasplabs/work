@@ -2,12 +2,14 @@ import { generatedContracts } from "@grasp-os/runtime/connector";
 import {
   actionShapeRequestSchema,
   connectErrors,
+  connectionToolsRequestSchema,
   connectorContractRequestSchema,
   connectorContractsRequestSchema,
   nativeOperationRequestSchema,
 } from "@grasp-os/shared/connect";
 import type {
   ActionShape,
+  ConnectionTool,
   ConnectorContract,
   ConnectorContractAction,
   NativeOperation,
@@ -17,7 +19,7 @@ import {
   httpActions,
 } from "@grasp-os/shared/http-connections";
 import { httpContract } from "@grasp-os/shared/http-contract";
-import { canonicalJson } from "@grasp-os/shared/json";
+import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -39,6 +41,8 @@ import {
   connectorActionShape,
   connectorContractId,
   connectorContract as connectorServedContract,
+  currentTools,
+  keptToolsNow,
 } from "./mcp-connectors.ts";
 
 // Generated connector contracts (spec 12). Which one a connection serves
@@ -193,6 +197,149 @@ export const connectorContracts = async (
     return [];
   }
   return [...generatedContracts(connector.manifest).keys()];
+};
+
+/** Most characters of a tool's description a search reads: its start. */
+const searchedChars = 500;
+
+/** The keys of a JSON Schema a search's one-line input type is written from. */
+const outlineKeys: ReadonlySet<string> = new Set([
+  "type",
+  "enum",
+  "const",
+  "required",
+  "properties",
+  "items",
+  "additionalProperties",
+  "anyOf",
+  "oneOf",
+]);
+
+/**
+ * What a search shows of an input schema (core's tool-search.ts): its
+ * types `levels` schemas deep, without descriptions or anything else, so
+ * a connector of thousands of tools hands each search a small answer.
+ */
+const outlineOf = (schema: unknown, levels: number): unknown => {
+  if (!isRecord(schema)) {
+    return schema;
+  }
+  if (levels === 0) {
+    return {};
+  }
+  const inner = (each: unknown): unknown => outlineOf(each, levels - 1);
+  const outlined: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (!outlineKeys.has(key)) {
+      continue;
+    }
+    if (key === "properties" && isRecord(value)) {
+      outlined[key] = Object.fromEntries(
+        Object.entries(value).map(([name, property]) => [name, inner(property)])
+      );
+    } else if (key === "items" || key === "additionalProperties") {
+      outlined[key] = inner(value);
+    } else if ((key === "anyOf" || key === "oneOf") && Array.isArray(value)) {
+      // A union's members are the schema's own level, as its type is.
+      outlined[key] = value.map((each) => outlineOf(each, levels));
+    } else {
+      outlined[key] = value;
+    }
+  }
+  return outlined;
+};
+
+/**
+ * A connection's tools with their descriptions and schemas: a native
+ * connection's from its connector's manifest, a connector's from its
+ * server's list; none of any other.
+ */
+const describedTools = async (
+  env: Env,
+  connection: Connection,
+  searched: ((work: Promise<unknown>) => void) | undefined
+): Promise<
+  { name: string; description: string; input: unknown; output: unknown }[]
+> => {
+  if (connection.serverKind === "connector") {
+    const listed =
+      searched === undefined
+        ? await currentTools(env, connection)
+        : await keptToolsNow(env, connection, searched);
+    return listed.map(({ name, description, inputSchema, outputSchema }) => ({
+      name,
+      description: description ?? "",
+      input: inputSchema,
+      output: outputSchema,
+    }));
+  }
+  const manifest =
+    connection.serverKind === "native"
+      ? nativeConnector(connection.server)?.manifest
+      : undefined;
+  if (manifest?.provider !== connection.provider) {
+    return [];
+  }
+  return Object.entries(manifest.actions).map(
+    ([name, { description, contract }]) => ({
+      name,
+      description,
+      input: contract.input,
+      output: contract.output,
+    })
+  );
+};
+
+/**
+ * The tools a call of `request`'s connection may name, with their
+ * descriptions and schemas (`ConnectionTool`): a native connection's as
+ * its connector's manifest in this release has them; a connector's, in
+ * full for the `actions` named, as its server lists them now
+ * (`currentTools`), else every one as a search reads it, as kept and at
+ * once, a stale list read again after (`later`). None for any other
+ * connection, or one that is gone. Throws `connect.server_unavailable`
+ * when a connector's list can't be read for the `actions` named.
+ */
+export const connectionTools = async (
+  env: Env,
+  request: unknown,
+  later: (work: Promise<unknown>) => void
+): Promise<ConnectionTool[]> => {
+  const parsed = connectionToolsRequestSchema.safeParse(request);
+  if (!parsed.success) {
+    throw connectErrors.create("connect.invalid");
+  }
+  const connection = await drizzle(env.DB)
+    .select()
+    .from(connections)
+    .where(eq(connections.id, parsed.data.connectionId))
+    .get();
+  if (connection === undefined || connection.status === "disconnected") {
+    return [];
+  }
+  const { actions } = parsed.data;
+  const tools = await describedTools(
+    env,
+    connection,
+    actions === undefined ? later : undefined
+  );
+  if (actions !== undefined) {
+    return tools
+      .filter(({ name }) => actions.includes(name))
+      .map(({ name, description, input, output }) => ({
+        name,
+        description,
+        input: JSON.stringify(input),
+        output: output === undefined ? null : JSON.stringify(output),
+      }));
+  }
+  return tools.map(({ name, description, input }) => ({
+    name,
+    // A character the cut splits reads U+FFFD.
+    description: description.slice(0, searchedChars).toWellFormed(),
+    input: JSON.stringify(outlineOf(input, 3)),
+    output: null,
+  }));
 };
 
 /** The properties a served JSON Schema names, or `null` for none it can tell. */

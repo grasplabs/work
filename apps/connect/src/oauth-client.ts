@@ -1,6 +1,7 @@
 import type { AccountLookup } from "@grasp-os/runtime/connector";
 import { fromBase64Url } from "@grasp-os/shared/encoding";
 
+import type { Outbound } from "./company-network.ts";
 import type {
   Credential,
   OAuthClientCredentials,
@@ -334,26 +335,30 @@ const textAt = (value: unknown, pointer: string | undefined): string | null => {
 
 /**
  * The account a token or key is for, as an app's lookup names it: one GET
- * to its lookup URL with the credential, its JSON answer read by the
- * record's pointers. `null` when the app refused the credential, or its
- * answer names no account. Nothing it sent back is logged or kept but
- * those fields.
+ * to its lookup URL with the credential, sent the connection's way out
+ * (`send`: through the company network for a connection reached through
+ * it), its JSON answer read by the record's pointers. `null` when the app
+ * refused the credential, or its answer names no account. Nothing it sent
+ * back is logged or kept but those fields.
  */
 export const lookupAccount = async (
   lookup: AccountLookup,
-  credential: Credential
+  credential: Credential,
+  send: Outbound
 ): Promise<ProviderAccount | null> => {
   let response: Response;
   try {
-    response = await fetch(lookup.url, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        [credential.header]: credential.value,
-      },
-      redirect: "manual",
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    response = await send(
+      new Request(lookup.url, {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          [credential.header]: credential.value,
+        },
+        redirect: "manual",
+        signal: AbortSignal.timeout(timeoutMs),
+      })
+    );
   } catch {
     return null;
   }

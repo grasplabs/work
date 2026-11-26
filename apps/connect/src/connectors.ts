@@ -11,7 +11,7 @@ import { loadConnector } from "./connector-isolate.ts";
 import type { EgressProps } from "./egress.ts";
 import { callTimeoutMs, mcpServer } from "./mcp.ts";
 import type { McpServer, McpTool, NativeMcpServer } from "./mcp.ts";
-import { credentialFor } from "./tokens.ts";
+import { connectorCredentialFor } from "./tokens.ts";
 
 // Native connectors: our own MCP servers (packages/connectors), shipped in
 // connect's release (build.ts) and run each in an isolate of its own
@@ -123,7 +123,7 @@ const isolateServer = async (
     connectionId: connection.id,
     hosts: manifest.hosts,
     ...egress,
-    credential: await credentialFor(env, connection.id),
+    ...(await connectorCredentialFor(env, connection.id)),
     // The egress closes when connect's MCP client gives up on the call.
     expiresAt: Date.now() + callTimeoutMs,
   };

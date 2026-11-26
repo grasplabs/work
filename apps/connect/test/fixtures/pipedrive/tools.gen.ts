@@ -747,12 +747,6 @@ const answers = {
       note: v.string().optional(),
     }).optional(),
   }),
-  "activities.delete": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      id: v.number().integer().optional(),
-    }).optional(),
-  }),
   "activities.update": v.object({
     success: v.boolean().optional(),
     data: v.object({
@@ -929,12 +923,6 @@ const answers = {
       custom_fields: v.record(v.json()).optional(),
     }).optional(),
   }),
-  "deals.delete": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      id: v.number().integer().optional(),
-    }).optional(),
-  }),
   "deals.update": v.object({
     success: v.boolean().optional(),
     data: v.object({
@@ -991,12 +979,6 @@ const answers = {
     data: v.array(items["deals.followers.changelog.list"]).optional(),
     additional_data: v.object({
       next_cursor: v.string().nullable().optional(),
-    }).optional(),
-  }),
-  "deals.followers.delete": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      user_id: v.number().integer().optional(),
     }).optional(),
   }),
   "deals.products.getDealsProducts": v.object({
@@ -1075,21 +1057,6 @@ const answers = {
       billing_frequency: v.string().optional(),
       billing_frequency_cycles: v.number().integer().nullable().optional(),
       billing_start_date: v.string().date().nullable().optional(),
-    }).optional(),
-  }),
-  "deals.products.deleteManyDealProducts": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      ids: v.array(v.number().integer()).optional(),
-    }).optional(),
-    additional_data: v.object({
-      more_items_in_collection: v.boolean().optional(),
-    }).nullable().optional(),
-  }),
-  "deals.products.delete": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      id: v.number().integer().optional(),
     }).optional(),
   }),
   "deals.products.update": v.object({
@@ -1172,12 +1139,6 @@ const answers = {
       updated_by: v.number().integer().optional(),
     }).optional(),
   }),
-  "deals.discounts.delete": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      id: v.number().integer().optional(),
-    }).optional(),
-  }),
   "deals.discounts.update": v.object({
     success: v.boolean().optional(),
     data: v.object({
@@ -1210,12 +1171,6 @@ const answers = {
       billing_date: v.string().optional(),
       description: v.string().optional(),
       deal_id: v.number().integer().optional(),
-    }).optional(),
-  }),
-  "deals.installments.delete": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      id: v.number().integer().optional(),
     }).optional(),
   }),
   "deals.installments.update": v.object({
@@ -1281,19 +1236,6 @@ const answers = {
         stage_ids: v.array(v.number().integer()).optional(),
         statuses: v.record(v.array(v.string())).optional(),
       }).optional(),
-    }).optional(),
-  }),
-  "dealFields.delete": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      field_name: v.string(),
-      field_code: v.string(),
-      description: v.string().optional(),
-      field_type: v.string(),
-      options: v.array(v.record(v.json())).nullable().optional(),
-      subfields: v.array(v.record(v.json())).nullable().optional(),
-      is_custom_field: v.boolean(),
-      is_optional_response_field: v.boolean(),
     }).optional(),
   }),
   "deals.convert.status.get": v.object({
@@ -1413,12 +1355,6 @@ const answers = {
       custom_fields: v.record(v.json()).optional(),
     }).optional(),
   }),
-  "persons.delete": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      id: v.number().integer().optional(),
-    }).optional(),
-  }),
   "persons.update": v.object({
     success: v.boolean().optional(),
     data: v.object({
@@ -1488,12 +1424,6 @@ const answers = {
     data: v.array(items["persons.followers.changelog.list"]).optional(),
     additional_data: v.object({
       next_cursor: v.string().nullable().optional(),
-    }).optional(),
-  }),
-  "persons.followers.delete": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      user_id: v.number().integer().optional(),
     }).optional(),
   }),
   "persons.picture.getPersonPicture": v.object({
@@ -1590,18 +1520,6 @@ const answers = {
       required_fields: v.object({
         enabled: v.boolean().optional(),
       }).optional(),
-    }).optional(),
-  }),
-  "personFields.delete": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      field_name: v.string(),
-      field_code: v.string(),
-      field_type: v.string(),
-      options: v.array(v.record(v.json())).nullable().optional(),
-      subfields: v.array(v.record(v.json())).nullable().optional(),
-      is_custom_field: v.boolean(),
-      is_optional_response_field: v.boolean(),
     }).optional(),
   }),
   "personFields.update": v.object({
@@ -1710,12 +1628,6 @@ const answers = {
       custom_fields: v.record(v.json()).optional(),
     }).optional(),
   }),
-  "organizations.delete": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      id: v.number().integer().optional(),
-    }).optional(),
-  }),
   "organizations.update": v.object({
     success: v.boolean().optional(),
     data: v.object({
@@ -1766,12 +1678,6 @@ const answers = {
     data: v.array(items["organizations.followers.changelog.list"]).optional(),
     additional_data: v.object({
       next_cursor: v.string().nullable().optional(),
-    }).optional(),
-  }),
-  "organizations.followers.delete": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      user_id: v.number().integer().optional(),
     }).optional(),
   }),
   "organizationFields.list": v.object({
@@ -1867,18 +1773,6 @@ const answers = {
       required_fields: v.object({
         enabled: v.boolean().optional(),
       }).optional(),
-    }).optional(),
-  }),
-  "organizationFields.delete": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      field_name: v.string(),
-      field_code: v.string(),
-      field_type: v.string(),
-      options: v.array(v.record(v.json())).nullable().optional(),
-      subfields: v.array(v.record(v.json())).nullable().optional(),
-      is_custom_field: v.boolean(),
-      is_optional_response_field: v.boolean(),
     }).optional(),
   }),
   "organizationFields.update": v.object({
@@ -1982,12 +1876,6 @@ const answers = {
       next_cursor: v.string().nullable().optional(),
     }).optional(),
   }),
-  "products.followers.delete": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      user_id: v.number().integer().optional(),
-    }).optional(),
-  }),
   "products.search.searchProducts": v.object({
     success: v.boolean().optional(),
     data: v.object({
@@ -2037,12 +1925,6 @@ const answers = {
         direct_cost: v.number().nullable().optional(),
         notes: v.string().optional(),
       })).optional(),
-    }).optional(),
-  }),
-  "products.delete": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      id: v.number().integer().optional(),
     }).optional(),
   }),
   "products.update": v.object({
@@ -2126,12 +2008,6 @@ const answers = {
       })).optional(),
     }).optional(),
   }),
-  "products.variations.delete": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      id: v.number().integer().optional(),
-    }).optional(),
-  }),
   "products.variations.update": v.object({
     success: v.boolean().optional(),
     data: v.object({
@@ -2176,12 +2052,6 @@ const answers = {
       product_id: v.number().integer().optional(),
       company_id: v.string().optional(),
       add_time: v.string().optional(),
-    }).optional(),
-  }),
-  "products.images.deleteProductImage": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      id: v.number().integer().optional(),
     }).optional(),
   }),
   "productFields.list": v.object({
@@ -2241,18 +2111,6 @@ const answers = {
         add_visible_flag: v.boolean().optional(),
         details_visible_flag: v.boolean().optional(),
       }).optional(),
-    }).optional(),
-  }),
-  "productFields.delete": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      field_name: v.string(),
-      field_code: v.string(),
-      field_type: v.string(),
-      options: v.array(v.record(v.json())).nullable().optional(),
-      subfields: v.array(v.record(v.json())).nullable().optional(),
-      is_custom_field: v.boolean(),
-      is_optional_response_field: v.boolean(),
     }).optional(),
   }),
   "productFields.update": v.object({
@@ -2444,12 +2302,6 @@ const answers = {
       update_time: v.string().nullable().optional(),
     }).optional(),
   }),
-  "stages.delete": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      id: v.number().integer().optional(),
-    }).optional(),
-  }),
   "stages.update": v.object({
     success: v.boolean().optional(),
     data: v.object({
@@ -2494,12 +2346,6 @@ const answers = {
       is_deal_probability_enabled: v.boolean().optional(),
       add_time: v.string().optional(),
       update_time: v.string().optional(),
-    }).optional(),
-  }),
-  "pipelines.delete": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      id: v.number().integer().optional(),
     }).optional(),
   }),
   "pipelines.update": v.object({
@@ -2585,18 +2431,6 @@ const answers = {
       required_fields: v.object({
         enabled: v.boolean().optional(),
       }).optional(),
-    }).optional(),
-  }),
-  "projectFields.delete": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      field_name: v.string(),
-      field_code: v.string(),
-      field_type: v.string(),
-      options: v.array(v.record(v.json())).nullable().optional(),
-      subfields: v.array(v.record(v.json())).nullable().optional(),
-      is_custom_field: v.boolean(),
-      is_optional_response_field: v.boolean(),
     }).optional(),
   }),
   "projectFields.update": v.object({
@@ -2692,12 +2526,6 @@ const answers = {
       status_change_time: v.string().optional(),
       archive_time: v.string().nullable().optional(),
       custom_fields: v.record(v.json()).optional(),
-    }).optional(),
-  }),
-  "projects.delete": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      id: v.number().integer().optional(),
     }).optional(),
   }),
   "projects.update": v.object({
@@ -2871,13 +2699,6 @@ const answers = {
     }).optional(),
     additional_data: v.record(v.json()).nullable().optional(),
   }),
-  "tasks.delete": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      id: v.number().integer().optional(),
-    }).optional(),
-    additional_data: v.record(v.json()).nullable().optional(),
-  }),
   "tasks.update": v.object({
     success: v.boolean().optional(),
     data: v.object({
@@ -2930,12 +2751,6 @@ const answers = {
       update_time: v.string().optional(),
     }).optional(),
   }),
-  "boards.delete": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      id: v.number().integer().optional(),
-    }).optional(),
-  }),
   "boards.update": v.object({
     success: v.boolean().optional(),
     data: v.object({
@@ -2978,12 +2793,6 @@ const answers = {
       order_nr: v.number().integer().optional(),
       add_time: v.string().optional(),
       update_time: v.string().optional(),
-    }).optional(),
-  }),
-  "phases.delete": v.object({
-    success: v.boolean().optional(),
-    data: v.object({
-      id: v.number().integer().optional(),
     }).optional(),
   }),
   "phases.update": v.object({
@@ -3038,7 +2847,7 @@ export const tools = {
   "activities.create": tool({
     description: "Add a new activity",
     readOnly: false,
-    reach: "company",
+    reach: "others",
     routes: ["POST /activities"],
     args: {
       subject: v.string().optional(),
@@ -3097,21 +2906,10 @@ export const tools = {
     returns: answers["activities.get"],
     handler: async (args, api) => await api.get("/activities/{id}", { path: { id: args.id }, query: { include_fields: args.include_fields?.join(",") }, returns: answers["activities.get"] }),
   }),
-  "activities.delete": tool({
-    description: "Delete an activity",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /activities/{id}"],
-    args: {
-      id: v.number().integer(),
-    },
-    returns: answers["activities.delete"],
-    handler: async (args, api) => await api.delete("/activities/{id}", { path: { id: args.id }, returns: answers["activities.delete"] }),
-  }),
   "activities.update": tool({
     description: "Update an activity",
     readOnly: false,
-    reach: "company",
+    reach: "others",
     routes: ["PATCH /activities/{id}"],
     args: {
       id: v.number().integer(),
@@ -3221,7 +3019,7 @@ export const tools = {
   "deals.create": tool({
     description: "Add a new deal",
     readOnly: false,
-    reach: "company",
+    reach: "others",
     routes: ["POST /deals"],
     args: {
       title: v.string(),
@@ -3294,21 +3092,10 @@ export const tools = {
     returns: answers["deals.get"],
     handler: async (args, api) => await api.get("/deals/{id}", { path: { id: args.id }, query: { include_fields: args.include_fields?.join(","), custom_fields: args.custom_fields?.join(","), include_option_labels: args.include_option_labels, include_labels: args.include_labels }, returns: answers["deals.get"] }),
   }),
-  "deals.delete": tool({
-    description: "Delete a deal",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /deals/{id}"],
-    args: {
-      id: v.number().integer(),
-    },
-    returns: answers["deals.delete"],
-    handler: async (args, api) => await api.delete("/deals/{id}", { path: { id: args.id }, returns: answers["deals.delete"] }),
-  }),
   "deals.update": tool({
     description: "Update a deal",
     readOnly: false,
-    reach: "company",
+    reach: "others",
     routes: ["PATCH /deals/{id}"],
     args: {
       id: v.number().integer(),
@@ -3357,7 +3144,7 @@ export const tools = {
   "deals.followers.create": tool({
     description: "Add a follower to a deal",
     readOnly: false,
-    reach: "company",
+    reach: "others",
     routes: ["POST /deals/{id}/followers"],
     args: {
       id: v.number().integer(),
@@ -3381,18 +3168,6 @@ export const tools = {
       const answer = await api.get("/deals/{id}/followers/changelog", { path: { id: args.id }, query: { limit: args.limit, cursor: args.cursor }, returns: answers["deals.followers.changelog.list"] });
       return { items: answer.data ?? [], next: answer.additional_data?.next_cursor ?? null };
     },
-  }),
-  "deals.followers.delete": tool({
-    description: "Delete a follower from a deal",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /deals/{id}/followers/{follower_id}"],
-    args: {
-      id: v.number().integer(),
-      follower_id: v.number().integer(),
-    },
-    returns: answers["deals.followers.delete"],
-    handler: async (args, api) => await api.delete("/deals/{id}/followers/{follower_id}", { path: { id: args.id, follower_id: args.follower_id }, returns: answers["deals.followers.delete"] }),
   }),
   "deals.products.getDealsProducts": tool({
     description: "Get deal products of several deals",
@@ -3473,30 +3248,6 @@ export const tools = {
     returns: answers["deals.products.create"],
     handler: async (args, api) => await api.post("/deals/{id}/products", { path: { id: args.id }, body: { product_id: args.product_id, item_price: args.item_price, quantity: args.quantity, tax: args.tax, comments: args.comments, discount: args.discount, is_enabled: args.is_enabled, tax_method: args.tax_method, discount_type: args.discount_type, product_variation_id: args.product_variation_id, billing_frequency: args.billing_frequency, billing_frequency_cycles: args.billing_frequency_cycles, billing_start_date: args.billing_start_date }, returns: answers["deals.products.create"] }),
   }),
-  "deals.products.deleteManyDealProducts": tool({
-    description: "Delete many products from a deal",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /deals/{id}/products"],
-    args: {
-      id: v.number().integer(),
-      ids: v.array(v.number().integer()).optional(),
-    },
-    returns: answers["deals.products.deleteManyDealProducts"],
-    handler: async (args, api) => await api.delete("/deals/{id}/products", { path: { id: args.id }, query: { ids: args.ids?.join(",") }, returns: answers["deals.products.deleteManyDealProducts"] }),
-  }),
-  "deals.products.delete": tool({
-    description: "Delete an attached product from a deal",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /deals/{id}/products/{product_attachment_id}"],
-    args: {
-      id: v.number().integer(),
-      product_attachment_id: v.number().integer(),
-    },
-    returns: answers["deals.products.delete"],
-    handler: async (args, api) => await api.delete("/deals/{id}/products/{product_attachment_id}", { path: { id: args.id, product_attachment_id: args.product_attachment_id }, returns: answers["deals.products.delete"] }),
-  }),
   "deals.products.update": tool({
     description: "Update the product attached to a deal",
     readOnly: false,
@@ -3573,18 +3324,6 @@ export const tools = {
     returns: answers["deals.discounts.create"],
     handler: async (args, api) => await api.post("/deals/{id}/discounts", { path: { id: args.id }, body: { description: args.description, amount: args.amount, type: args.type }, returns: answers["deals.discounts.create"] }),
   }),
-  "deals.discounts.delete": tool({
-    description: "Delete a discount from a deal",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /deals/{id}/discounts/{discount_id}"],
-    args: {
-      id: v.number().integer(),
-      discount_id: v.string(),
-    },
-    returns: answers["deals.discounts.delete"],
-    handler: async (args, api) => await api.delete("/deals/{id}/discounts/{discount_id}", { path: { id: args.id, discount_id: args.discount_id }, returns: answers["deals.discounts.delete"] }),
-  }),
   "deals.discounts.update": tool({
     description: "Update a discount added to a deal",
     readOnly: false,
@@ -3628,18 +3367,6 @@ export const tools = {
     },
     returns: answers["deals.installments.create"],
     handler: async (args, api) => await api.post("/deals/{id}/installments", { path: { id: args.id }, body: { description: args.description, amount: args.amount, billing_date: args.billing_date }, returns: answers["deals.installments.create"] }),
-  }),
-  "deals.installments.delete": tool({
-    description: "Delete an installment from a deal",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /deals/{id}/installments/{installment_id}"],
-    args: {
-      id: v.number().integer(),
-      installment_id: v.number().integer(),
-    },
-    returns: answers["deals.installments.delete"],
-    handler: async (args, api) => await api.delete("/deals/{id}/installments/{installment_id}", { path: { id: args.id, installment_id: args.installment_id }, returns: answers["deals.installments.delete"] }),
   }),
   "deals.installments.update": tool({
     description: "Update an installment added to a deal",
@@ -3695,20 +3422,9 @@ export const tools = {
     returns: answers["dealFields.get"],
     handler: async (args, api) => await api.get("/dealFields/{field_code}", { path: { field_code: args.field_code }, query: { include_fields: args.include_fields?.join(",") }, returns: answers["dealFields.get"] }),
   }),
-  "dealFields.delete": tool({
-    description: "Delete one deal field",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /dealFields/{field_code}"],
-    args: {
-      field_code: v.string(),
-    },
-    returns: answers["dealFields.delete"],
-    handler: async (args, api) => await api.delete("/dealFields/{field_code}", { path: { field_code: args.field_code }, returns: answers["dealFields.delete"] }),
-  }),
   "deals.convert.status.get": tool({
     description: "Get Deal conversion status",
-    readOnly: true,
+    readOnly: false,
     reach: "company",
     routes: ["GET /deals/{id}/convert/status/{conversion_id}"],
     args: {
@@ -3749,7 +3465,7 @@ export const tools = {
   "persons.create": tool({
     description: "Add a new person",
     readOnly: false,
-    reach: "company",
+    reach: "others",
     routes: ["POST /persons"],
     args: {
       name: v.string(),
@@ -3810,21 +3526,10 @@ export const tools = {
     returns: answers["persons.get"],
     handler: async (args, api) => await api.get("/persons/{id}", { path: { id: args.id }, query: { include_fields: args.include_fields?.join(","), custom_fields: args.custom_fields?.join(","), include_option_labels: args.include_option_labels, include_labels: args.include_labels }, returns: answers["persons.get"] }),
   }),
-  "persons.delete": tool({
-    description: "Delete a person",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /persons/{id}"],
-    args: {
-      id: v.number().integer(),
-    },
-    returns: answers["persons.delete"],
-    handler: async (args, api) => await api.delete("/persons/{id}", { path: { id: args.id }, returns: answers["persons.delete"] }),
-  }),
   "persons.update": tool({
     description: "Update a person",
     readOnly: false,
-    reach: "company",
+    reach: "others",
     routes: ["PATCH /persons/{id}"],
     args: {
       id: v.number().integer(),
@@ -3889,7 +3594,7 @@ export const tools = {
   "persons.followers.create": tool({
     description: "Add a follower to a person",
     readOnly: false,
-    reach: "company",
+    reach: "others",
     routes: ["POST /persons/{id}/followers"],
     args: {
       id: v.number().integer(),
@@ -3913,18 +3618,6 @@ export const tools = {
       const answer = await api.get("/persons/{id}/followers/changelog", { path: { id: args.id }, query: { limit: args.limit, cursor: args.cursor }, returns: answers["persons.followers.changelog.list"] });
       return { items: answer.data ?? [], next: answer.additional_data?.next_cursor ?? null };
     },
-  }),
-  "persons.followers.delete": tool({
-    description: "Delete a follower from a person",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /persons/{id}/followers/{follower_id}"],
-    args: {
-      id: v.number().integer(),
-      follower_id: v.number().integer(),
-    },
-    returns: answers["persons.followers.delete"],
-    handler: async (args, api) => await api.delete("/persons/{id}/followers/{follower_id}", { path: { id: args.id, follower_id: args.follower_id }, returns: answers["persons.followers.delete"] }),
   }),
   "persons.picture.getPersonPicture": tool({
     description: "Get picture of a person",
@@ -3995,17 +3688,6 @@ export const tools = {
     returns: answers["personFields.get"],
     handler: async (args, api) => await api.get("/personFields/{field_code}", { path: { field_code: args.field_code }, query: { include_fields: args.include_fields?.join(",") }, returns: answers["personFields.get"] }),
   }),
-  "personFields.delete": tool({
-    description: "Delete one person field",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /personFields/{field_code}"],
-    args: {
-      field_code: v.string(),
-    },
-    returns: answers["personFields.delete"],
-    handler: async (args, api) => await api.delete("/personFields/{field_code}", { path: { field_code: args.field_code }, returns: answers["personFields.delete"] }),
-  }),
   "personFields.update": tool({
     description: "Update one person field",
     readOnly: false,
@@ -4062,7 +3744,7 @@ export const tools = {
   "organizations.create": tool({
     description: "Add a new organization",
     readOnly: false,
-    reach: "company",
+    reach: "others",
     routes: ["POST /organizations"],
     args: {
       name: v.string(),
@@ -4106,21 +3788,10 @@ export const tools = {
     returns: answers["organizations.get"],
     handler: async (args, api) => await api.get("/organizations/{id}", { path: { id: args.id }, query: { include_fields: args.include_fields?.join(","), custom_fields: args.custom_fields?.join(","), include_option_labels: args.include_option_labels, include_labels: args.include_labels }, returns: answers["organizations.get"] }),
   }),
-  "organizations.delete": tool({
-    description: "Delete a organization",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /organizations/{id}"],
-    args: {
-      id: v.number().integer(),
-    },
-    returns: answers["organizations.delete"],
-    handler: async (args, api) => await api.delete("/organizations/{id}", { path: { id: args.id }, returns: answers["organizations.delete"] }),
-  }),
   "organizations.update": tool({
     description: "Update a organization",
     readOnly: false,
-    reach: "company",
+    reach: "others",
     routes: ["PATCH /organizations/{id}"],
     args: {
       id: v.number().integer(),
@@ -4168,7 +3839,7 @@ export const tools = {
   "organizations.followers.create": tool({
     description: "Add a follower to an organization",
     readOnly: false,
-    reach: "company",
+    reach: "others",
     routes: ["POST /organizations/{id}/followers"],
     args: {
       id: v.number().integer(),
@@ -4192,18 +3863,6 @@ export const tools = {
       const answer = await api.get("/organizations/{id}/followers/changelog", { path: { id: args.id }, query: { limit: args.limit, cursor: args.cursor }, returns: answers["organizations.followers.changelog.list"] });
       return { items: answer.data ?? [], next: answer.additional_data?.next_cursor ?? null };
     },
-  }),
-  "organizations.followers.delete": tool({
-    description: "Delete a follower from an organization",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /organizations/{id}/followers/{follower_id}"],
-    args: {
-      id: v.number().integer(),
-      follower_id: v.number().integer(),
-    },
-    returns: answers["organizations.followers.delete"],
-    handler: async (args, api) => await api.delete("/organizations/{id}/followers/{follower_id}", { path: { id: args.id, follower_id: args.follower_id }, returns: answers["organizations.followers.delete"] }),
   }),
   "organizationFields.list": tool({
     description: "Get all organization fields",
@@ -4267,17 +3926,6 @@ export const tools = {
     returns: answers["organizationFields.get"],
     handler: async (args, api) => await api.get("/organizationFields/{field_code}", { path: { field_code: args.field_code }, query: { include_fields: args.include_fields?.join(",") }, returns: answers["organizationFields.get"] }),
   }),
-  "organizationFields.delete": tool({
-    description: "Delete one organization field",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /organizationFields/{field_code}"],
-    args: {
-      field_code: v.string(),
-    },
-    returns: answers["organizationFields.delete"],
-    handler: async (args, api) => await api.delete("/organizationFields/{field_code}", { path: { field_code: args.field_code }, returns: answers["organizationFields.delete"] }),
-  }),
   "organizationFields.update": tool({
     description: "Update one organization field",
     readOnly: false,
@@ -4334,7 +3982,7 @@ export const tools = {
   "products.create": tool({
     description: "Add a product",
     readOnly: false,
-    reach: "company",
+    reach: "others",
     routes: ["POST /products"],
     args: {
       name: v.string(),
@@ -4378,7 +4026,7 @@ export const tools = {
   "products.followers.create": tool({
     description: "Add a follower to a product",
     readOnly: false,
-    reach: "company",
+    reach: "others",
     routes: ["POST /products/{id}/followers"],
     args: {
       id: v.number().integer(),
@@ -4402,18 +4050,6 @@ export const tools = {
       const answer = await api.get("/products/{id}/followers/changelog", { path: { id: args.id }, query: { limit: args.limit, cursor: args.cursor }, returns: answers["products.followers.changelog.list"] });
       return { items: answer.data ?? [], next: answer.additional_data?.next_cursor ?? null };
     },
-  }),
-  "products.followers.delete": tool({
-    description: "Delete a follower from a product",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /products/{id}/followers/{follower_id}"],
-    args: {
-      id: v.number().integer(),
-      follower_id: v.number().integer(),
-    },
-    returns: answers["products.followers.delete"],
-    handler: async (args, api) => await api.delete("/products/{id}/followers/{follower_id}", { path: { id: args.id, follower_id: args.follower_id }, returns: answers["products.followers.delete"] }),
   }),
   "products.search.searchProducts": tool({
     description: "Search products",
@@ -4442,21 +4078,10 @@ export const tools = {
     returns: answers["products.get"],
     handler: async (args, api) => await api.get("/products/{id}", { path: { id: args.id }, returns: answers["products.get"] }),
   }),
-  "products.delete": tool({
-    description: "Delete a product",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /products/{id}"],
-    args: {
-      id: v.number().integer(),
-    },
-    returns: answers["products.delete"],
-    handler: async (args, api) => await api.delete("/products/{id}", { path: { id: args.id }, returns: answers["products.delete"] }),
-  }),
   "products.update": tool({
     description: "Update a product",
     readOnly: false,
-    reach: "company",
+    reach: "others",
     routes: ["PATCH /products/{id}"],
     args: {
       id: v.number().integer(),
@@ -4528,18 +4153,6 @@ export const tools = {
     returns: answers["products.variations.create"],
     handler: async (args, api) => await api.post("/products/{id}/variations", { path: { id: args.id }, body: { name: args.name, prices: args.prices }, returns: answers["products.variations.create"] }),
   }),
-  "products.variations.delete": tool({
-    description: "Delete a product variation",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /products/{id}/variations/{product_variation_id}"],
-    args: {
-      id: v.number().integer(),
-      product_variation_id: v.number().integer(),
-    },
-    returns: answers["products.variations.delete"],
-    handler: async (args, api) => await api.delete("/products/{id}/variations/{product_variation_id}", { path: { id: args.id, product_variation_id: args.product_variation_id }, returns: answers["products.variations.delete"] }),
-  }),
   "products.variations.update": tool({
     description: "Update a product variation",
     readOnly: false,
@@ -4593,17 +4206,6 @@ export const tools = {
     returns: answers["products.images.create"],
     handler: async (args, api) => await api.post("/products/{id}/images", { path: { id: args.id }, returns: answers["products.images.create"] }),
   }),
-  "products.images.deleteProductImage": tool({
-    description: "Delete an image of a product",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /products/{id}/images"],
-    args: {
-      id: v.number().integer(),
-    },
-    returns: answers["products.images.deleteProductImage"],
-    handler: async (args, api) => await api.delete("/products/{id}/images", { path: { id: args.id }, returns: answers["products.images.deleteProductImage"] }),
-  }),
   "productFields.list": tool({
     description: "Get all product fields",
     readOnly: true,
@@ -4650,17 +4252,6 @@ export const tools = {
     },
     returns: answers["productFields.get"],
     handler: async (args, api) => await api.get("/productFields/{field_code}", { path: { field_code: args.field_code }, query: { include_fields: args.include_fields?.join(",") }, returns: answers["productFields.get"] }),
-  }),
-  "productFields.delete": tool({
-    description: "Delete one product field",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /productFields/{field_code}"],
-    args: {
-      field_code: v.string(),
-    },
-    returns: answers["productFields.delete"],
-    handler: async (args, api) => await api.delete("/productFields/{field_code}", { path: { field_code: args.field_code }, returns: answers["productFields.delete"] }),
   }),
   "productFields.update": tool({
     description: "Update one product field",
@@ -4711,7 +4302,7 @@ export const tools = {
   }),
   "leads.convert.status.get": tool({
     description: "Get Lead conversion status",
-    readOnly: true,
+    readOnly: false,
     reach: "company",
     routes: ["GET /leads/{id}/convert/status/{conversion_id}"],
     args: {
@@ -4834,17 +4425,6 @@ export const tools = {
     returns: answers["stages.get"],
     handler: async (args, api) => await api.get("/stages/{id}", { path: { id: args.id }, returns: answers["stages.get"] }),
   }),
-  "stages.delete": tool({
-    description: "Delete a stage",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /stages/{id}"],
-    args: {
-      id: v.number().integer(),
-    },
-    returns: answers["stages.delete"],
-    handler: async (args, api) => await api.delete("/stages/{id}", { path: { id: args.id }, returns: answers["stages.delete"] }),
-  }),
   "stages.update": tool({
     description: "Update stage details",
     readOnly: false,
@@ -4900,17 +4480,6 @@ export const tools = {
     },
     returns: answers["pipelines.get"],
     handler: async (args, api) => await api.get("/pipelines/{id}", { path: { id: args.id }, returns: answers["pipelines.get"] }),
-  }),
-  "pipelines.delete": tool({
-    description: "Delete a pipeline",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /pipelines/{id}"],
-    args: {
-      id: v.number().integer(),
-    },
-    returns: answers["pipelines.delete"],
-    handler: async (args, api) => await api.delete("/pipelines/{id}", { path: { id: args.id }, returns: answers["pipelines.delete"] }),
   }),
   "pipelines.update": tool({
     description: "Update a pipeline",
@@ -4976,17 +4545,6 @@ export const tools = {
     },
     returns: answers["projectFields.get"],
     handler: async (args, api) => await api.get("/projectFields/{field_code}", { path: { field_code: args.field_code }, returns: answers["projectFields.get"] }),
-  }),
-  "projectFields.delete": tool({
-    description: "Delete one project field",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /projectFields/{field_code}"],
-    args: {
-      field_code: v.string(),
-    },
-    returns: answers["projectFields.delete"],
-    handler: async (args, api) => await api.delete("/projectFields/{field_code}", { path: { field_code: args.field_code }, returns: answers["projectFields.delete"] }),
   }),
   "projectFields.update": tool({
     description: "Update one project field",
@@ -5084,17 +4642,6 @@ export const tools = {
     },
     returns: answers["projects.get"],
     handler: async (args, api) => await api.get("/projects/{id}", { path: { id: args.id }, returns: answers["projects.get"] }),
-  }),
-  "projects.delete": tool({
-    description: "Delete a project",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /projects/{id}"],
-    args: {
-      id: v.number().integer(),
-    },
-    returns: answers["projects.delete"],
-    handler: async (args, api) => await api.delete("/projects/{id}", { path: { id: args.id }, returns: answers["projects.delete"] }),
   }),
   "projects.update": tool({
     description: "Update a project",
@@ -5225,7 +4772,7 @@ export const tools = {
   "tasks.create": tool({
     description: "Add a task",
     readOnly: false,
-    reach: "company",
+    reach: "others",
     routes: ["POST /tasks"],
     args: {
       title: v.string(),
@@ -5254,21 +4801,10 @@ export const tools = {
     returns: answers["tasks.get"],
     handler: async (args, api) => await api.get("/tasks/{id}", { path: { id: args.id }, returns: answers["tasks.get"] }),
   }),
-  "tasks.delete": tool({
-    description: "Delete a task",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /tasks/{id}"],
-    args: {
-      id: v.number().integer(),
-    },
-    returns: answers["tasks.delete"],
-    handler: async (args, api) => await api.delete("/tasks/{id}", { path: { id: args.id }, returns: answers["tasks.delete"] }),
-  }),
   "tasks.update": tool({
     description: "Update a task",
     readOnly: false,
-    reach: "company",
+    reach: "others",
     routes: ["PATCH /tasks/{id}"],
     args: {
       id: v.number().integer(),
@@ -5319,17 +4855,6 @@ export const tools = {
     returns: answers["boards.get"],
     handler: async (args, api) => await api.get("/boards/{id}", { path: { id: args.id }, returns: answers["boards.get"] }),
   }),
-  "boards.delete": tool({
-    description: "Delete a project board",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /boards/{id}"],
-    args: {
-      id: v.number().integer(),
-    },
-    returns: answers["boards.delete"],
-    handler: async (args, api) => await api.delete("/boards/{id}", { path: { id: args.id }, returns: answers["boards.delete"] }),
-  }),
   "boards.update": tool({
     description: "Update a project board",
     readOnly: false,
@@ -5377,17 +4902,6 @@ export const tools = {
     },
     returns: answers["phases.get"],
     handler: async (args, api) => await api.get("/phases/{id}", { path: { id: args.id }, returns: answers["phases.get"] }),
-  }),
-  "phases.delete": tool({
-    description: "Delete a project phase",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /phases/{id}"],
-    args: {
-      id: v.number().integer(),
-    },
-    returns: answers["phases.delete"],
-    handler: async (args, api) => await api.delete("/phases/{id}", { path: { id: args.id }, returns: answers["phases.delete"] }),
   }),
   "phases.update": tool({
     description: "Update a project phase",

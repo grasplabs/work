@@ -1,0 +1,1 @@
+ALTER TABLE `connections` ADD `tool_list_tried_at` integer;

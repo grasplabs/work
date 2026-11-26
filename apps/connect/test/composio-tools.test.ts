@@ -91,7 +91,7 @@ const composio = fakeComposioApi(
         inputs: ["owner_id"],
         run: () => ({ output: { ran: "refused" } }),
       },
-      // Tools Grasp never runs (src/never.ts), classed all the same.
+      // Tools Grasp never runs (isNeverTool), classed all the same.
       ...neverTools.map((name) => ({
         name,
         readOnly: true,

@@ -1,4 +1,5 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { partFunction } from "@grasp-os/shared/interview-voice";
 import {
   inLanguage,
   leadPartsOf,
@@ -83,6 +84,40 @@ export const interviewerText = async (
   locale: InterviewLocale
 ): Promise<InterviewerText> => {
   const text = inLanguage(systems[kind], locale);
+  return { text, mark: await sha256Hex(text) };
+};
+
+/** How he asks for an example: the page shows where to drop it. */
+const VOICE_EXAMPLE =
+  "Then ask for one real example to share: their screen shows where to drop it.";
+
+/** What he does in the last part: the screen reads back what was written down. */
+const VOICE_READ_BACK = `Say one short line that you will now read back what was written down, and call ${partFunction} with readback. The screen reads it back.`;
+
+/** What a live session needs that a turn doesn't: everything he writes is said out loud. */
+const SPOKEN = `# This conversation
+You talk and they talk, live and out loud. Everything you write is said exactly as you write it: write only the words you say. No labels, no lists, no brackets, no notes to yourself.
+- They can talk over you. When they do, stop, take what they said, and go on from there. Do not repeat the line you were cut off in unless they ask.
+- What they say is written down for you by someone else, from what they said: you only talk.
+- Each time you go to another part of the interview, call ${partFunction} with the name of that part first, then say your line.
+- What follows is renewed after each of their answers: always go by the latest.`;
+
+/**
+ * The text for an interview held as one live voice session (voice.ts):
+ * who he is and how the interview goes, without what he writes down,
+ * which the notes' model is asked with the turn's own text, and with what
+ * a spoken session needs. Where the interview stands comes after it, and
+ * is renewed after each answer.
+ */
+export const voiceText = async (
+  kind: InterviewKind,
+  locale: InterviewLocale
+): Promise<InterviewerText> => {
+  const parts =
+    kind === "lead"
+      ? leadPartsOf(VOICE_READ_BACK)
+      : partsOf(VOICE_EXAMPLE, VOICE_READ_BACK);
+  const text = inLanguage([WHO, parts, LISTENING, SPOKEN].join("\n\n"), locale);
   return { text, mark: await sha256Hex(text) };
 };
 
