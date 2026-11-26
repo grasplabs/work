@@ -195,6 +195,13 @@ export const connections = sqliteTable(
      */
     toolListReadAt: timestamp("tool_list_read_at"),
     toolListFreshUntil: timestamp("tool_list_fresh_until"),
+    /**
+     * When connect last started reading that list after an answer, as it
+     * does for a stale one, whether the read worked or not: the next such
+     * read waits a while (mcp-connectors.ts `refreshLater`). Null until
+     * the first.
+     */
+    toolListTriedAt: timestamp("tool_list_tried_at"),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   },

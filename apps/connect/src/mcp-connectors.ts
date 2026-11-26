@@ -21,7 +21,7 @@ import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { recordEvents } from "./audit.ts";
@@ -82,6 +82,15 @@ const maxListTtlMs = 60 * 60 * 1000;
 
 /** How long a tool list is fresh when the server doesn't say. */
 const defaultListTtlMs = 5 * 60 * 1000;
+
+/**
+ * Least time between two reads of one connection's tool list after an
+ * answer (`refreshLater`): longer than a read may take, so asks at once
+ * start one read, and a server that failed isn't asked again at every ask.
+ * A list its server keeps fresh for less is read again after this, for
+ * offers and search; calls and requests read it live once it is stale.
+ */
+const laterReadGapMs = 5 * 60 * 1000;
 
 /**
  * Most tools one statement keeps: D1 binds at most 100 parameters a
@@ -486,19 +495,68 @@ const readToolList = async (
 };
 
 /**
+ * Reads `connection`'s tool list if no read after an answer started in
+ * the last `laterReadGapMs`: the read it marks started is the only one,
+ * however many asks see the list stale at once, and one that fails isn't
+ * tried again until the gap has passed.
+ */
+const readOnceLater = async (
+  env: Env,
+  connection: Connection,
+  now: number
+): Promise<void> => {
+  let started: { id: string }[];
+  try {
+    started = await drizzle(env.DB)
+      .update(connections)
+      .set({ toolListTriedAt: new Date(now) })
+      .where(
+        and(
+          eq(connections.id, connection.id),
+          eq(connections.status, "active"),
+          eq(connections.updatedAt, connection.updatedAt),
+          or(
+            isNull(connections.toolListFreshUntil),
+            lte(connections.toolListFreshUntil, new Date(now))
+          ),
+          or(
+            isNull(connections.toolListTriedAt),
+            lte(connections.toolListTriedAt, new Date(now - laterReadGapMs))
+          )
+        )
+      )
+      .returning({ id: connections.id });
+  } catch (error) {
+    log.warn("connections.tool_list_unread", {
+      connectionId: connection.id,
+      ...errorFields(error),
+    });
+    return;
+  }
+  if (started.length > 0) {
+    await readToolList(env, connection);
+  }
+};
+
+/**
  * Reads an active `connection`'s tool list again after an answer
- * (`later`), when it is stale or was never read, for the next ask to see.
+ * (`later`), when it is stale or was never read, for the next ask to see:
+ * one read at a time, and none for a while after one (`readOnceLater`).
+ * Freshness stays as it was, so a list that can't be read is still read
+ * live where a call or a request needs it, and says why it can't be.
  */
 const refreshLater = (
   env: Env,
   connection: Connection,
   later: (work: Promise<unknown>) => void
 ): void => {
+  const now = Date.now();
   if (
     connection.status === "active" &&
-    (connection.toolListFreshUntil?.getTime() ?? 0) <= Date.now()
+    (connection.toolListFreshUntil?.getTime() ?? 0) <= now &&
+    (connection.toolListTriedAt?.getTime() ?? 0) <= now - laterReadGapMs
   ) {
-    later(readToolList(env, connection));
+    later(readOnceLater(env, connection, now));
   }
 };
 
