@@ -4773,7 +4773,6 @@ msgstr "Klippen"
 #: src/interview/destination.tsx
 #: src/projects/project-chats.tsx
 #: src/settings/erasures.tsx
-#: src/shown-once.tsx
 #: src/workflows/start-run.tsx
 msgid "Close"
 msgstr "Schließen"
@@ -5298,7 +5297,6 @@ msgstr "Kopenhagen"
 #: src/settings/event-sources.tsx
 #: src/settings/guests.tsx
 #: src/settings/invitations.tsx
-#: src/shown-once.tsx
 msgid "Copied"
 msgstr "Kopiert"
 
@@ -5322,7 +5320,6 @@ msgstr "Kopien"
 #: src/frame/ui-words.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
-#: src/shown-once.tsx
 msgid "Copy"
 msgstr "Kopieren"
 
@@ -5344,7 +5341,6 @@ msgstr "E-Mail kopieren"
 msgid "Copy into the Brain from {label}"
 msgstr "Aus {label} ins Brain kopieren"
 
-#: src/settings/event-sources.tsx
 #: src/shown-once.tsx
 msgid "Copy it now: you won't see it again. Lost, it can only be replaced."
 msgstr "Kopieren Sie es jetzt: Sie sehen es nicht noch einmal. Geht es verloren, kann es nur ersetzt werden."
@@ -5365,7 +5361,6 @@ msgstr "Link für {name} kopieren"
 msgid "Copy the output"
 msgstr "Ausgabe kopieren"
 
-#: src/settings/event-sources.tsx
 #: src/shown-once.tsx
 msgid "Copy the secret"
 msgstr "Geheimnis kopieren"
@@ -15573,7 +15568,6 @@ msgid "Searching the docs for {query}"
 msgstr "Suche nach {query} in der Doku"
 
 #: src/connections/http-connections.tsx
-#: src/shown-once.tsx
 msgid "Secret"
 msgstr "Geheimnis"
 
