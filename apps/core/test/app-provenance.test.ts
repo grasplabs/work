@@ -8,6 +8,7 @@ import { z } from "zod";
 import { sourcesOfApps } from "../src/app-provenance.ts";
 import { newTeam } from "./admin-teams.ts";
 import { outlook, published, requestGranted } from "./apps.ts";
+import { chooseAudience } from "./brain-audiences.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
@@ -159,7 +160,8 @@ describe("sharing an App", () => {
     const mailbox = await mailboxOf(owner);
     const gone = `connection-gone-${unique()}`;
     // More shared ones than connect answers for at once, which everyone
-    // may read, then the mailbox and one connect never had.
+    // may read (an admin opened each to everyone), then the mailbox and
+    // one connect never had.
     const now = Date.now();
     const shared = Array.from(
       { length: connectionOwnersMax + 1 },
@@ -172,6 +174,13 @@ describe("sharing an App", () => {
             "INSERT INTO connections (id, provider, scope, status, server_kind, server, created_at, updated_at) VALUES (?, 'mail', 'shared', 'active', 'composio', 'https://backend.composio.dev/v3/mcp/none', ?, ?)"
           )
           .bind(id, now, now)
+      )
+    );
+    await env.DB.batch(
+      shared.map((id) =>
+        env.DB.prepare(
+          "INSERT INTO connection_brain_audiences (connection_id, team_id, changed_by, changed_at) VALUES (?, NULL, 'test-admin', ?)"
+        ).bind(id, now)
       )
     );
     for (const [index, connectionId] of [...shared, mailbox, gone].entries()) {
@@ -192,19 +201,65 @@ describe("sharing an App", () => {
     });
   });
 
-  it("reaches anyone when the App read only what everyone may: a shared connection", async () => {
-    const [owner, anna] = await Promise.all([
+  it("reaches a shared connection's audience alone: a team's members, nobody while it is nobody's, anyone while it is everyone's, and someone left out from their next call", async () => {
+    const [owner, member, outsider, admin] = await Promise.all([
       personApi("builder"),
       personApi("user"),
+      personApi("user"),
+      personApi("admin"),
     ]);
     const app = await newApp(owner);
-    const mail = await mailConnection();
+    const mail = await mailConnection([], ["mail.send"], {
+      audience: "nobody",
+    });
     await grantConnection(owner, app, mail.id);
+    const [finance, mixed] = await Promise.all([
+      newTeam(admin, [member]),
+      newTeam(admin, [member, outsider]),
+    ]);
+    const refused = [`connection:${mail.id}`];
 
-    await expect(
-      shareRefusal(owner, app, { type: "person", id: anna.userId })
-    ).resolves.toBe("ok");
-    await expect(anna.api.apps.get(app)).resolves.toMatchObject({ id: app });
+    const nobodys = await shareRefusal(owner, app, {
+      type: "person",
+      id: member.userId,
+    });
+    await chooseAudience(admin.api, mail.id, { kind: "team", teamId: finance });
+    const teams = {
+      outsider: await shareRefusal(owner, app, {
+        type: "person",
+        id: outsider.userId,
+      }),
+      mixedTeam: await shareRefusal(owner, app, { type: "team", id: mixed }),
+      member: await shareRefusal(owner, app, {
+        type: "person",
+        id: member.userId,
+      }),
+    };
+    const opened = await outcome(member.api.apps.get(app));
+    await chooseAudience(admin.api, mail.id, { kind: "nobody" });
+    const narrowed = await outcome(member.api.apps.get(app));
+    await chooseAudience(admin.api, mail.id, { kind: "everyone" });
+
+    expect({
+      nobodys,
+      teams,
+      opened,
+      narrowed,
+      everyone: await shareRefusal(owner, app, {
+        type: "person",
+        id: outsider.userId,
+      }),
+    }).toStrictEqual({
+      nobodys: { sources: refused, people: [member.userId] },
+      teams: {
+        outsider: { sources: refused, people: [outsider.userId] },
+        mixedTeam: { sources: refused, people: [outsider.userId] },
+        member: "ok",
+      },
+      opened: "ok",
+      narrowed: "app.unreadable",
+      everyone: "ok",
+    });
   });
 
   it("hides the App's permissions from someone it reaches once it read what they can't", async () => {
@@ -219,7 +274,9 @@ describe("sharing an App", () => {
       id: anna.userId,
       role: "builder",
     });
-    const mail = await mailConnection();
+    const mail = await mailConnection([], ["mail.send"], {
+      audience: "everyone",
+    });
     const shared = await grantConnection(owner, app, mail.id);
     // An agent's permission names the App too, as its exports'.
     const { id: agents } = await admin.api.permissions.request({
@@ -262,7 +319,7 @@ describe("sharing an App", () => {
       personApi("builder"),
     ]);
     const [mail, mailbox] = await Promise.all([
-      mailConnection(),
+      mailConnection([], ["mail.send"], { audience: "everyone" }),
       mailboxOf(owner),
     ]);
     const apps = await Promise.all(
@@ -707,7 +764,9 @@ describe("deciding many Apps at once past the walk's cap", () => {
       personApi("builder"),
       personApi("builder"),
     ]);
-    const mail = await mailConnection();
+    const mail = await mailConnection([], ["mail.send"], {
+      audience: "everyone",
+    });
     const shared = await Promise.all(
       Array.from({ length: 3 }, async () => await newApp(owner))
     );

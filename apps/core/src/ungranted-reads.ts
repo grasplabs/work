@@ -1,42 +1,48 @@
 import { connectErrors } from "@grasp-os/shared/connect";
 import type { ConnectionOwner } from "@grasp-os/shared/connect";
+import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { drizzle } from "drizzle-orm/d1";
 
 import { connectionReadOf } from "./agent-scope.ts";
 import { teamsOf } from "./auth/identity.ts";
+import { offeredToChat } from "./chat-connections.ts";
 import type { OutsideRead } from "./code-mode.ts";
 import { audiencesRead } from "./connection-audiences.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import { readsOnly } from "./tool-classes.ts";
 
-// What every agent a person asks in their own chat reads with no request
-// and no grant (GRA-2203, Nick: "connections are part of the brain"): the
-// person's own connections (their mailbox, their drive), and a shared
-// connection whose audience holds them now (GRA-2219: "thats perfect, as
-// long as it audited"). The plans and the threat models are on the
-// issues. In order, what holds:
+// What the chat's agent uses with no request and no grant (GRA-2203,
+// GRA-2219, GRA-2322; the plans and the threat models are on the issues).
+// Only a person's own chat has connections, in a turn they asked or one a
+// schedule or an event woke: a chat others share gets no
+// `env.connections` (agent-apis.ts `sharedApis`). In order, what holds:
 //
-// - Only in a turn whose answer reaches its person alone: their own chat
-//   or direct message, a turn they started (`AgentScope.ownChat`, the
-//   turn's `personal`). A chat others share, a turn nobody started, an App
-//   and a workflow keep their grants.
-// - Only a connection that is active and the person's own, or shared with
-//   an audience that holds them now: everyone, or a team they are in, as
-//   an admin chose it for what is kept of it in the Brain
-//   (connection-audiences.ts; none while it is erased or closed). Only a
-//   tool whose class is a read (`readsOnly`): one nobody classed is no
-//   read. Connect refuses anyone else's personal connection itself
-//   (`connect.not_owner`).
-// - Signed read-only (bindings.ts `signedUngrantedRead`): connect refuses
-//   any side effect of it, whatever a tool's class says. Every class the
-//   company turned off for the person, and every app the agent lacks,
-//   still refuses it (`requireToolClassOn`). A write needs a grant, as
-//   ever, and is held for the person.
-// - Everything after the call is a grant's: the chat marked before an
-//   answer of the person's own is handed over (private-reads.ts), the
-//   read pinned with the run (`ungrantedRead`), kept in the Brain
-//   (connection-capture.ts), and audited by connect.
+// - A person's own personal connection (their mailbox, their drive): only
+//   in a turn of their own chat they asked there and then
+//   (`AgentScope.ownChat`, the caller's to hold), and only a tool whose
+//   class is a read (`readsOnly`: one nobody classed is no read), signed
+//   read-only, so connect refuses any side effect of it. A write needs
+//   their own grant on a card in the chat, as ever. Connect refuses anyone
+//   else's personal connection itself (`connect.not_owner`).
+// - A shared connection: any of its tools, while its one audience
+//   (connection-audiences.ts) holds the person: everyone, or a team they
+//   are in. There is no grant per chat: the audience an admin chose is the
+//   only thing that lets anyone use it. A write is held for the person to
+//   confirm (connect holds every side effect of the chat's agent), and its
+//   confirmation is signed again by this same rule (decided-calls.ts), so
+//   narrowing the audience stops it. A grant to the agent on a shared
+//   connection (an admin's for a company agent, or one given in a chat
+//   before) holds only within the same audience
+//   (`requireAudienceOfGrant`): it never widens it.
+// - Either way, only a connection that is active; every class the company
+//   turned off for the person, and every app the agent lacks, still
+//   refuses it (`requireToolClassOn`); and everything after the call is a
+//   grant's: the chat marked before an answer of the person's own is
+//   handed over (private-reads.ts), the read pinned with the run
+//   (`ungrantedRead`), kept in the Brain (connection-capture.ts), and
+//   every call audited by connect with the agent and the person it acts
+//   for.
 
 /**
  * The shared connections whose audience holds `personId` now: everyone,
@@ -61,7 +67,7 @@ export const sharedFor = async (
 };
 
 /**
- * Whether `owner` is a connection `personId` reads with no grant, as far
+ * Whether `owner` is a connection `personId` uses with no grant, as far
  * as whose it is: their own, or shared with an audience in `shared`
  * (`sharedFor`). Its status is the caller's to judge.
  */
@@ -74,47 +80,78 @@ export const readsWithoutGrant = (
   (owner.ownerUserId === null && shared.has(owner.id));
 
 /**
- * The connection `connectionId`, active, that the person `onBehalfOf`
- * reads with no grant (`readsWithoutGrant`), when the tool `action` of it
- * only reads. Refused as one that needs connecting again
- * (`connect.connection_inactive`) when it waits for someone to sign in
- * again, and as a connection there isn't otherwise
- * (`connect.connection_not_found`), saying nothing of one they may not
- * read.
+ * Refuses (`permission.denied`) a call of `action` the chat's agent makes
+ * for the person `authority` acts for under a grant through the shared
+ * connection `connectionId` unless its audience holds them (`sharedFor`):
+ * no grant to the agent, everywhere or in a chat, widens the audience.
  */
-export const ungrantedReadConnection = async (
+export const requireAudienceOfGrant = async (
   env: Env,
   authority: Authority,
   connectionId: string,
   action: string
-): Promise<ConnectionOwner> => {
+): Promise<void> => {
   const [[owner], shared] = await Promise.all([
     connectionOwnersOf(env, [connectionId]),
     sharedFor(env, authority.onBehalfOf),
   ]);
+  // One connect doesn't know passes here: connect refuses it, as the
+  // connection there isn't (`connect.connection_not_found`).
+  if (owner?.ownerUserId === null && !shared.has(connectionId)) {
+    throw permissionErrors.create("permission.denied", { action });
+  }
+};
+
+/**
+ * The connection `connectionId`, active, that the chat's agent may call
+ * `action` of with no grant for the person `authority` acts for, and
+ * whether that call may only read: their own personal one, when `action`
+ * only reads; a shared one whose audience holds them (`sharedFor`), any
+ * of its tools. Refused as one that needs connecting again
+ * (`connect.connection_inactive`) when it waits for someone to sign in
+ * again, and as a connection there isn't otherwise
+ * (`connect.connection_not_found`), saying nothing of one they may not
+ * use.
+ */
+export const ungrantedConnection = async (
+  env: Env,
+  authority: Authority,
+  connectionId: string,
+  action: string
+): Promise<{ owner: ConnectionOwner; readOnly: boolean }> => {
+  const [[owner], shared, offered] = await Promise.all([
+    connectionOwnersOf(env, [connectionId]),
+    sharedFor(env, authority.onBehalfOf),
+    offeredToChat(env, { personId: authority.onBehalfOf }),
+  ]);
+  // Only one `list()` names: never an outside API or a connection whose
+  // entry is hidden, though its ID is known, also as a held write is
+  // confirmed.
   if (
     authority.subject.type !== "agent" ||
     owner === undefined ||
+    !offered.some(({ id }) => id === connectionId) ||
     !readsWithoutGrant(owner, authority.onBehalfOf, shared)
   ) {
     throw connectErrors.create("connect.connection_not_found");
   }
-  // One they read so that needs someone to sign in again (GRA-2227): said
+  // One they use so that needs someone to sign in again (GRA-2227): said
   // as such, so the agent can tell them.
   if (owner.status === "needs_reauth") {
     throw connectErrors.create("connect.connection_inactive");
   }
-  if (owner.status !== "active" || !readsOnly(owner, action)) {
+  const personal = owner.ownerUserId !== null;
+  if (owner.status !== "active" || (personal && !readsOnly(owner, action))) {
     throw connectErrors.create("connect.connection_not_found");
   }
-  return owner;
+  return { owner, readOnly: personal };
 };
 
 const ungrantedReadPrefix = "ungranted-read:";
 
 /**
- * The source a read of connection `connectionId` with no grant is recorded
- * as: readable while the person still reads it so, and it is not
+ * The source a call of connection `connectionId` with no grant is
+ * recorded as: readable while the person still uses it so, and it is not
  * disconnected (`ungrantedReadOf`, history-access.ts).
  */
 export const ungrantedRead = (connectionId: string): string =>

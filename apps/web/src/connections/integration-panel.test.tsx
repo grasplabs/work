@@ -315,7 +315,7 @@ describe("an app's panel", () => {
     await press(dialogAction("Connect"));
 
     // Only the connect: the stopped connection stays, with its consent, its
-    // Brain audience and its permissions, until someone disconnects it.
+    // audience and its permissions, until someone disconnects it.
     expect(
       sent.map((each) => ("toolkit" in each ? each.tools : each))
     ).toStrictEqual([

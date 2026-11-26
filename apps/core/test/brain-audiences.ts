@@ -1,25 +1,25 @@
 import type {
-  ConnectionBrainAudience,
+  ConnectionAudience,
   ConnectionsApi,
 } from "@grasp-os/shared/connect";
 
 // Choosing a shared connection's Brain audience in a test as an admin
 // looking at it now would (connection-audiences.ts): from the audience
 // core holds at that moment. A test of a change from a stale audience
-// calls `setBrainAudience` with its own `from`.
+// calls `setAudience` with its own `from`.
 
 /** Whoever chooses: a session's API. */
 interface Chooser {
-  connections: Pick<ConnectionsApi, "brainAudiences" | "setBrainAudience">;
+  connections: Pick<ConnectionsApi, "audiences" | "setAudience">;
 }
 
 /** The audience core holds for `connectionId` now, as `api` may read it: nobody if it may not. */
 export const audienceNow = async (
   api: Chooser,
   connectionId: string
-): Promise<ConnectionBrainAudience> => {
+): Promise<ConnectionAudience> => {
   try {
-    const listed = await api.connections.brainAudiences();
+    const listed = await api.connections.audiences();
     return (
       listed.find((each) => each.connectionId === connectionId)?.audience ?? {
         kind: "nobody",
@@ -38,9 +38,9 @@ export const audienceNow = async (
 export const chooseAudience = async (
   api: Chooser,
   connectionId: string,
-  audience: ConnectionBrainAudience
+  audience: ConnectionAudience
 ): Promise<void> => {
-  await api.connections.setBrainAudience(
+  await api.connections.setAudience(
     connectionId,
     audience,
     await audienceNow(api, connectionId),

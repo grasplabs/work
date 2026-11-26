@@ -3790,20 +3790,20 @@ export const sharedMailboxPointers = sqliteTable("shared_mailbox_pointers", {
 });
 
 /**
- * Who may read in the Brain what agents read through a shared connection
- * (connection-audiences.ts, GRA-1831): one row per shared connection an
- * admin chose an audience for, by connect's connection ID. `team_id` is
- * the one team; null is everyone in the company. No row is nobody.
+ * A shared connection's one audience (connection-audiences.ts, GRA-1831,
+ * GRA-2322): who may use it in chat, reach an App that read it (a
+ * workflow shared on its own isn't checked yet, GRA-2333), and read in the Brain what agents read through it. One row per
+ * shared connection an admin chose an audience for, by connect's
+ * connection ID. `team_id` is the one team; null is everyone in the
+ * company. No row is nobody. The table keeps the name it had when it
+ * decided the Brain alone: renaming it would gain nothing for a copy.
  */
-export const connectionBrainAudiences = sqliteTable(
-  "connection_brain_audiences",
-  {
-    connectionId: text("connection_id").primaryKey(),
-    teamId: text("team_id"),
-    changedBy: text("changed_by").notNull(),
-    changedAt: timestamp("changed_at").notNull(),
-  }
-);
+export const connectionAudiences = sqliteTable("connection_brain_audiences", {
+  connectionId: text("connection_id").primaryKey(),
+  teamId: text("team_id"),
+  changedBy: text("changed_by").notNull(),
+  changedAt: timestamp("changed_at").notNull(),
+});
 
 /**
  * Each record kept in the Brain from what agents read through a shared

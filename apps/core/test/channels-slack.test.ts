@@ -927,7 +927,9 @@ describe("a workflow offered in Slack", () => {
  */
 const heldInSlack = async (subject: string) => {
   const admin = await signedInApi(idp, "admin");
-  const mail = await mailConnection([], ["MAIL_SEND"]);
+  const mail = await mailConnection([], ["MAIL_SEND"], {
+    audience: "everyone",
+  });
   const binding = `MAIL${unique()}`.toUpperCase();
   await requestGranted(idp, admin, {
     subject: { type: "agent", agentId: chatAgentId },

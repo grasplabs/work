@@ -135,7 +135,7 @@ describe("the page a connection ends on", () => {
       ...(dialog()?.querySelectorAll('[data-slot="item"]') ?? []),
     ].map((each) => each.textContent);
     expect(items).toStrictEqual([
-      expect.stringContaining("For everyone"),
+      expect.stringContaining("For the company"),
       "HUBSPOT_LIST_CONTACTS",
       "HUBSPOT_CREATE_NOTE",
     ]);

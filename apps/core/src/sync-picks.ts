@@ -1,5 +1,5 @@
 import { actorOf } from "@grasp-os/shared/audit";
-import { connectionBrainAudienceSchema } from "@grasp-os/shared/connect";
+import { connectionAudienceSchema } from "@grasp-os/shared/connect";
 import type {
   ConnectionPerson,
   SharedSyncPlaces,
@@ -28,7 +28,7 @@ import {
 // sync.ts); core lets only the company's own admins ask (Grasp staff hold
 // no admin role here), and records the refusal of anyone else, which
 // connect never sees. Who may
-// read what a picked place brings is the connection's Brain audience
+// read what a picked place brings is the connection's audience
 // (connection-audiences.ts), not the source's permissions (GRA-2207): so
 // a save that picks a place is made only once the admin confirmed the
 // audience held now will read everything in it (`acknowledged`), and
@@ -42,7 +42,7 @@ const pickSchema = z.strictObject({
   feed: syncFeedSchema,
   from: syncPicksSchema,
   places: syncPicksSchema,
-  acknowledged: connectionBrainAudienceSchema.optional(),
+  acknowledged: connectionAudienceSchema.optional(),
 });
 
 /**
@@ -126,7 +126,7 @@ export const readSyncPlaces = async (
  * reads to `places`, the whole set, as one of the company's admins picked
  * them from `from`, the picks their page started from. A save that picks
  * a place `from` doesn't hold is refused (`sync.unacknowledged`), and
- * recorded, unless `acknowledged` is the connection's Brain audience held
+ * recorded, unless `acknowledged` is the connection's audience held
  * now: who will read everything in it. Connect checks the
  * connection and the places, refuses (`sync.picks_changed`) when the
  * picks held are no longer `from`, and records the change in the audit

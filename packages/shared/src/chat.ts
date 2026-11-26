@@ -1214,8 +1214,7 @@ export interface ChatUpdate {
 /**
  * A connection the chat's agent asked to use in this chat alone, waiting
  * for a decision: the person's own personal connection, which they grant
- * or deny themselves (`decidedBy: "you"`), or a shared one, which only an
- * admin grants (`"admin"`) and they may still withdraw. Everything but
+ * or deny themselves. Everything but
  * the connection's name is the request as stored: granting it grants
  * exactly this.
  */
@@ -1234,7 +1233,6 @@ export interface ChatConnectionRequest {
   reason: string | null;
   /** ISO 8601. */
   requestedAt: string;
-  decidedBy: "you" | "admin";
 }
 
 /** A question for the chat's agent, and the model to answer it with. */

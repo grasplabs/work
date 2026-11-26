@@ -1,5 +1,5 @@
 import type {
-  ConnectionBrainAudience,
+  ConnectionAudience,
   ListedConnection,
   SharedSyncPlaces,
 } from "@grasp-os/shared/connect";
@@ -36,9 +36,9 @@ import { ErrorText } from "../error-text.tsx";
 import { useCore } from "../use-core.ts";
 import { useChange } from "./use-change.ts";
 
-// For an admin, on a shared connection's card beside who may read in the
-// Brain what comes through it (brain-audience.tsx): which of its shared
-// drives or SharePoint libraries Grasp may copy into the Brain. The two
+// For an admin, on a shared connection's card beside who may use it and
+// read in the Brain what comes through it (connection-audience.tsx): which
+// of its shared drives or SharePoint libraries Grasp may copy into the Brain. The two
 // decisions belong together: everyone who may read it can read
 // everything in a picked place, whatever the source's own permissions
 // (GRA-2207). So a save that picks a place asks the admin to tick, for
@@ -157,7 +157,7 @@ const pickedFrom = async (
     feed: string;
     from: string[];
     places: string[];
-    acknowledged?: ConnectionBrainAudience;
+    acknowledged?: ConnectionAudience;
   }
 ): Promise<"picked" | "changed" | "unconfirmed"> => {
   try {
@@ -184,7 +184,7 @@ const samePlaces = (
   before.every((place) => picked.includes(place));
 
 /** An audience, as a value that tells one from another. */
-const keyOf = (audience: ConnectionBrainAudience): string =>
+const keyOf = (audience: ConnectionAudience): string =>
   audience.kind === "team" ? `team:${audience.teamId}` : audience.kind;
 
 /** What the admin ticks to say who will read everything in the places picked. */
@@ -193,7 +193,7 @@ const Readers = ({
   team,
   label,
 }: {
-  audience: ConnectionBrainAudience;
+  audience: ConnectionAudience;
   team: string | undefined;
   label: string;
 }) => {
@@ -223,8 +223,8 @@ const Readers = ({
   }
   return (
     <Trans>
-      Whoever you let read {label} in the Brain will be able to read everything
-      in the places you pick, whatever their permissions in {label}.
+      Whoever you let use {label} will be able to read everything in the places
+      you pick, whatever their permissions in {label}.
     </Trans>
   );
 };
@@ -241,8 +241,8 @@ const PlacesForm = ({
 }: {
   connection: ListedConnection;
   label: string;
-  /** The connection's Brain audience as core holds it now. */
-  audience: ConnectionBrainAudience;
+  /** The connection's audience as core holds it now. */
+  audience: ConnectionAudience;
   /** The name of the audience's team, if it is one the page knows. */
   team: string | undefined;
   places: SharedSyncPlaces;
@@ -403,8 +403,8 @@ export const SyncPlaces = ({
 }: {
   connection: ListedConnection;
   label: string;
-  /** The connection's Brain audience as core holds it now. */
-  audience: ConnectionBrainAudience;
+  /** The connection's audience as core holds it now. */
+  audience: ConnectionAudience;
   /** The name of the audience's team, if it is one the page knows. */
   team: string | undefined;
   /** Core holds another audience than `audience`: read it again. */
