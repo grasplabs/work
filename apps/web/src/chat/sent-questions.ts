@@ -1,6 +1,9 @@
 import type { ChatMessage } from "@grasp-os/shared/chat";
 import { useSyncExternalStore } from "react";
 
+import type { BoxMention } from "./mentions.tsx";
+import type { BoxFile } from "./use-ask.ts";
+
 // The questions the person sent from this tab that core hasn't shown back
 // yet, by chat: the thread draws each the moment Send is pressed, under
 // the key it goes with (`ChatQuestion.key`), and core's copy, which comes
@@ -21,6 +24,9 @@ export interface SentQuestion {
   at: string;
   /** Why core didn't take it, once it refused; none while on its way. */
   failure?: string;
+  /** The files it carries, and whom it mentions: sent again with it. */
+  files: readonly BoxFile[];
+  mentions: readonly BoxMention[];
 }
 
 const noQuestions: readonly SentQuestion[] = [];
@@ -36,10 +42,13 @@ const changed = (next: Map<string, readonly SentQuestion[]>): void => {
   }
 };
 
-/** `question` sent in `chatId`: drawn at once, or again as it goes once more. */
+/**
+ * `question` sent in `chatId`: drawn at once, or again as it goes once
+ * more. One core refused before it goes: the person moved on from it.
+ */
 export const questionSent = (chatId: string, question: SentQuestion): void => {
   const others = (sent.get(chatId) ?? noQuestions).filter(
-    ({ key }) => key !== question.key
+    ({ key, failure }) => key !== question.key && failure === undefined
   );
   changed(new Map(sent).set(chatId, [...others, question]));
 };

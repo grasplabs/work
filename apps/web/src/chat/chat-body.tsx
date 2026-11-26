@@ -225,7 +225,12 @@ export const ChatConversation = ({
         sent={sent}
         onAgain={(question) => {
           focusBox();
-          void ask(question.text, [], [], question.key);
+          void ask(
+            question.text,
+            question.files,
+            question.mentions,
+            question.key
+          );
         }}
         build={{
           model: composer.model,

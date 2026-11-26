@@ -711,10 +711,11 @@ const questionRowId = (message: Asked): string =>
  * The thread's rows: each question, then its replies as one answer per
  * agent, the reply being written joined to it; then the questions sent
  * from this tab that core hasn't shown back yet (`sent`), the answer being
- * written after them. An answer's row is named after the question it
- * answers (and how many answers came before it there), never after its
- * first reply: the row that says Grasp works on a question stays the
- * same row once its first reply is kept.
+ * written after those on their way, and those core refused last of all.
+ * An answer's row is named after the question it answers (and how many
+ * answers came before it there), never after its first reply: the row
+ * that says Grasp works on a question stays the same row once its first
+ * reply is kept.
  */
 const rowsOf = (
   messages: readonly ChatMessage[],
@@ -766,25 +767,32 @@ const rowsOf = (
       }
     }
   }
-  for (const each of sent) {
+  const asked = (each: SentQuestion): void => {
     ask(
       { id: 0, role: "user", text: each.text, key: each.key, at: each.at },
       each
     );
+  };
+  // On their way: Grasp's answer follows them.
+  for (const each of sent.filter(({ failure }) => failure === undefined)) {
+    asked(each);
   }
-  if (!live) {
-    return rows;
+  if (live) {
+    // Grasp works on the last question: its answer goes on, or begins.
+    const last = rows.at(-1);
+    if (last?.kind === "answer" && sameAgent(last, partial?.agentId)) {
+      last.partial = partial;
+      last.live = true;
+    } else {
+      const row = answerRow(last?.at);
+      row.partial = partial;
+      row.live = true;
+      rows.push(row);
+    }
   }
-  // Grasp works on the last question: its answer goes on, or begins.
-  const last = rows.at(-1);
-  if (last?.kind === "answer" && sameAgent(last, partial?.agentId)) {
-    last.partial = partial;
-    last.live = true;
-  } else {
-    const row = answerRow(last?.at);
-    row.partial = partial;
-    row.live = true;
-    rows.push(row);
+  // Refused: after everything, to send again, never inside an answer.
+  for (const each of sent.filter(({ failure }) => failure !== undefined)) {
+    asked(each);
   }
   return rows;
 };

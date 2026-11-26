@@ -119,6 +119,9 @@ const opened = async (
   ) => Promise<never> = async () => await Promise.withResolvers<never>().promise
 ) => {
   const asked: string[] = [];
+  // The key each question went with; the next one refused, once asked to.
+  const keys: string[] = [];
+  let refusing = false;
   const chats = {
     models: async () => await Promise.resolve(["openai/gpt-5"]),
     efforts: async () => await Promise.resolve({}),
@@ -134,7 +137,12 @@ const opened = async (
     agents: async () => await Promise.resolve([]),
     send: async (chatId: string, question: ChatQuestion) => {
       asked.push(`send ${chatId} ${question.text}`);
+      keys.push(question.key ?? "");
       await Promise.resolve();
+      if (refusing) {
+        refusing = false;
+        throw internalErrors.create("internal.unexpected");
+      }
     },
     heldCalls: async () => await Promise.resolve([]),
     watch,
@@ -189,7 +197,14 @@ const opened = async (
     await router.load();
   });
   await settled();
-  return { asked, router };
+  return {
+    asked,
+    keys,
+    router,
+    refuseNext: () => {
+      refusing = true;
+    },
+  };
 };
 
 /** The box to ask in, if the page has one. */
@@ -408,6 +423,42 @@ describe("a chat's own page", () => {
       back: { skeleton: false, questions: ["Question 1"] },
       now: { skeleton: false, questions: ["Question 1", "Question 3"] },
       signedOut: { skeleton: true, questions: [] },
+    });
+  });
+
+  it("keeps a question core refused in its chat, said not sent, out of the box, and sends it again under its key on Try again", async () => {
+    const { asked, keys, refuseNext } = await opened("chat-a");
+    refuseNext();
+    await typed("Did it go?");
+    await sent();
+    const again = await vi.waitFor(
+      () => {
+        const button = buttonNamed("Try again");
+        if (button === undefined) {
+          throw new Error("No Try again yet");
+        }
+        return button;
+      },
+      { timeout: 10_000 }
+    );
+    const refused = {
+      notSent: document.body.textContent.includes("Not sent."),
+      box: box()?.textContent,
+    };
+    await act(async () => {
+      again.click();
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({
+      refused,
+      asked,
+      sameKey: keys.length === 2 && keys[0] === keys[1],
+    }).toStrictEqual({
+      refused: { notSent: true, box: "" },
+      asked: ["send chat-a Did it go?", "send chat-a Did it go?"],
+      sameKey: true,
     });
   });
 

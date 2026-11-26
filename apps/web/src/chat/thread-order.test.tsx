@@ -126,11 +126,9 @@ const rows = (): HTMLElement[] => [
 const said = (): string[] =>
   rows().map((row) => {
     const words = row.textContent;
-    if (/Working on it|Writing|Thinking/u.test(words)) {
-      return words.includes("Answer") ? "working, with an answer" : "working";
-    }
-    // One digit: the row's time of day follows its words.
-    return /(?:Question|Answer) \d/u.exec(words)?.[0] ?? words;
+    // One digit: the row's time of day follows its words. A row with
+    // neither is Grasp at work, whatever its line says it does.
+    return /(?:Question|Answer) \d/u.exec(words)?.[0] ?? "working";
   });
 
 describe("the thread's order as a question is sent and answered", () => {
@@ -150,6 +148,8 @@ describe("the thread's order as a question is sent and answered", () => {
       key,
       text: "Question 3",
       at: "2026-11-26T09:02:00.000Z",
+      files: [],
+      mentions: [],
     };
 
     // Sent: drawn at once, after what was there.
@@ -199,6 +199,44 @@ describe("the thread's order as a question is sent and answered", () => {
     expect({ done: said(), same: rows().at(-1) === workingRow }).toStrictEqual({
       done: ["Question 1", "Answer 2"],
       same: true,
+    });
+  });
+
+  it("keeps a question core refused after the answer being written, never inside it", async () => {
+    const refused: SentQuestion = {
+      key: "2b0e5c1e-7a4f-4c5e-8d2f-9c3b1a0e6d4f",
+      text: "Question 9",
+      at: "2026-11-26T09:02:00.000Z",
+      failure: "Grasp can't be reached right now.",
+      files: [],
+      mentions: [],
+    };
+    await opened({
+      messages: [question(1), answer(2)],
+      sent: [refused],
+      partial: null,
+      running: false,
+    });
+    // An answer to the chat's last question goes on (sent elsewhere).
+    await show({
+      messages: [question(1), answer(2), question(3)],
+      running: true,
+    });
+    const working = said();
+    await show({
+      messages: [question(1), answer(2), question(3), answer(4)],
+      running: false,
+    });
+
+    expect({ working, done: said() }).toStrictEqual({
+      working: [
+        "Question 1",
+        "Answer 2",
+        "Question 3",
+        "working",
+        "Question 9",
+      ],
+      done: ["Question 1", "Answer 2", "Question 3", "Answer 4", "Question 9"],
     });
   });
 });

@@ -41,7 +41,7 @@ export const titleOf = (question: string): string => {
 };
 
 /** A file in the box, waiting for its question, by an ID of the page's own. */
-interface BoxFile {
+export interface BoxFile {
   id: string;
   file: File;
 }
@@ -230,8 +230,20 @@ export const useAsk = (
     let shownIn: string | undefined;
     const show = (id: string): void => {
       shownIn = id;
-      questionSent(id, { key, text: question, at: new Date().toISOString() });
+      // With its files and mentions, which Try again sends again with it.
+      questionSent(id, {
+        key,
+        text: question,
+        at: new Date().toISOString(),
+        files: carried,
+        mentions: mentioned,
+      });
+      // Out of the box, all of it: the question is in the chat now.
       setText((now) => (now === question ? "" : now));
+      if (mentioned.length > 0) {
+        setMentions([]);
+      }
+      setFiles((now) => now.filter((each) => !carried.includes(each)));
     };
     if (chatId !== undefined) {
       show(chatId);
@@ -305,10 +317,6 @@ export const useAsk = (
       return false;
     }
     unsent.current = null;
-    if (mentioned.length > 0) {
-      setMentions([]);
-    }
-    setFiles((now) => now.filter((each) => !carried.includes(each)));
     for (const { id } of carried) {
       attached.current.delete(id);
     }
