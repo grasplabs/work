@@ -1,7 +1,9 @@
 /**
  * An app that signs in with an API key, as connect's tests load it: one
  * connector written on `@grasp-os/sdk/connector`, its sign-in included,
- * and no change to connect. Its provider is test/app-provider.ts's fake.
+ * and no change to connect. Its provider is test/app-provider.ts's fake;
+ * its recorded answers (fixtures.json) are what core's tests and connect's
+ * build replay.
  * `boards.items.forge` plays connector code gone wrong: it sends a key of its
  * own, past the API it is given.
  */
@@ -14,7 +16,10 @@ export const sampleKeyApiHost = "api.sample-key.test";
 export const sampleKeyHeader = "x-api-key";
 
 const Item = v.object({ id: v.string(), title: v.string() });
-const Items = v.object({ items: v.array(Item) });
+const Items = v.object({
+  items: v.array(Item),
+  next_cursor: v.string().nullable().optional(),
+});
 
 export default defineConnector({
   name: "sample-key",
@@ -37,14 +42,15 @@ export default defineConnector({
       reach: "own",
       resource: "board",
       routes: ["GET /boards/{board}/items"],
-      args: { board: v.string().min(1) },
+      args: { board: v.string().min(1), cursor: v.string().optional() },
       returns: page(Item),
-      handler: async ({ board }, api) => {
+      handler: async ({ board, cursor }, api) => {
         const answer = await api.get("/boards/{board}/items", {
           path: { board },
+          query: { cursor },
           returns: Items,
         });
-        return { items: answer.items, next: null };
+        return { items: answer.items, next: answer.next_cursor ?? null };
       },
     }),
     "boards.items.forge": tool({

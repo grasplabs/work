@@ -17,6 +17,7 @@ import {
   consentCode,
   graphSentUrl,
   graphThrottleUrl,
+  recordedControlUrl,
 } from "./connect-providers.ts";
 import { createIdp } from "./fake-idp.ts";
 import { mailControlUrl, mailServerUrl } from "./mail-server.ts";
@@ -229,6 +230,43 @@ export const graphSent = async (): Promise<unknown[]> => {
   }
   const response = await providers.fetch(graphSentUrl);
   return z.array(z.unknown()).parse(await response.json());
+};
+
+/**
+ * The requests to `path` that the vendors answering from their recordings
+ * got with `credential` in header `name`, in order: each one's query, and
+ * the headers that carry a credential.
+ */
+export const recordedRequests = async (
+  path: string,
+  name: string,
+  credential: string
+): Promise<
+  { query: Record<string, string>; credentials: Record<string, string> }[]
+> => {
+  const providers = testBinding("CONNECT_PROVIDERS");
+  if (!isFetcher(providers)) {
+    throw new TypeError("Expected the providers Worker as CONNECT_PROVIDERS");
+  }
+  const response = await providers.fetch(recordedControlUrl);
+  return z
+    .array(
+      z.object({ url: z.string(), headers: z.record(z.string(), z.string()) })
+    )
+    .parse(await response.json())
+    .map(({ url, headers }) => ({ url: new URL(url), headers }))
+    .filter(
+      ({ url, headers }) =>
+        url.pathname === path && headers[name] === credential
+    )
+    .map(({ url, headers }) => ({
+      query: Object.fromEntries(url.searchParams),
+      credentials: Object.fromEntries(
+        Object.entries(headers).filter(([header]) =>
+          /auth|key|token|cookie/u.test(header)
+        )
+      ),
+    }));
 };
 
 /** Has Graph rate limit `mailbox`'s next `requests`, asking a wait. */

@@ -266,6 +266,58 @@ export default defineConnector({
 
 `page(Item)` is what a list answers, one page at a time: `{ items, next }`, where `next` is where the next page starts, or `null` after the last. `items.list` above takes the next page's start as its `cursor` argument.
 
+## Recorded answers
+
+A connector can keep its vendor's real answers beside its entry, in `fixtures.json`. Each case there is one tool called with some arguments, and each call of it: every request it sent, with what the vendor answered, and what the call answered. When a connector has the file, connect's build replays every case on workerd, running the connector's bundle as connect ships it, with the recordings as its only network in place of connect's egress, and refuses the connector when:
+
+- its output doesn't match its recordings: a call answers other than it was recorded answering, or fails where it answered (say, its `returns` doesn't take what the vendor answered), or it sends a request that wasn't recorded, sends one again, or leaves out one that was;
+- its paging never ends: past the vendor's last recorded page it still answers a `next`, or a `next` comes back;
+- an error maps to the wrong kind: an error case doesn't fail with the kind it names.
+
+Tests use the same recordings as the vendor, so nobody writes a fake of it by hand.
+
+You write the cases; a recording run fills in each call:
+
+```json fixtures.json
+{
+  "personal": ["name", "email"],
+  "secret": ["signing_secret"],
+  "cases": [
+    { "tool": "items.list", "args": { "board": "b-1" }, "cursor": "cursor" },
+    { "tool": "items.list", "args": { "board": "gone" }, "error": "not_found" }
+  ]
+}
+```
+
+- `tool` and `args`: a tool that only reads, and what it's called with. A recording run changes nothing at the vendor, so tools that write aren't recorded. The arguments are kept as you wrote them, so call by an id: a case whose arguments hold personal data isn't recorded.
+- `cursor`: for a list, the argument the next page's start goes in. The run follows `next` until the vendor's last page, at most 10 pages. A list recorded on one page proves nothing of its paging and is refused, so pick arguments that list a few pages.
+- `error`: for a call the vendor refuses, the kind it must fail with, as the vendor's docs say its answer means: `invalid`, `access_denied`, `not_found`, `conflict`, `throttled`, `unavailable` or `failed`. A vendor that answers its rate limit with a 403 is `throttled`, not `access_denied`.
+- `personal`: the fields whose values are personal data, wherever they are. Name them narrowly: every string under a field of that name is replaced, a pipeline's `name` as much as a person's. Leave out a field of digits alone, such as a postcode: its digits are replaced wherever they show, in a date too.
+- `secret`: the fields whose values are secrets other than the connection's own, such as a webhook's signing secret or a signed download URL. Leave it out when there are none. A tool whose call reaches a host the connector doesn't declare, such as a download's signed URL, isn't recorded.
+
+A call that doesn't end as its case says, one that fails in a case without `error` or succeeds in one with it, stops the run, with why. So does a request or an answer that isn't text, such as a file's bytes. A request that depends on the time or on chance (a date computed from now, a random nonce) is never sent the same way again, so its case can't replay: record it with arguments that fix those values, or leave it unrecorded.
+
+Nothing secret or personal may be kept. The first guard is how you record: only tools that read, from an account Grasp owns that holds only made-up data, and a person reading the plain-text recording in review, like code. The rules below are the second guard. They find only what they know of, so they catch a slip but can't make an account with real people's data safe to record: an encoding they don't know of gets past them.
+
+- Requests keep no headers, and answers keep only `content-type`, `link` and `retry-after`.
+- The connection's key or token is never replaced: a recording that would carry it anywhere, as is, percent-encoded, escaped in JSON or in base64, isn't written, and the run names the case, or the account lookup, that carried it. A vendor whose answers echo it, its account lookup's too, can't be recorded.
+- Every value under a field `secret` names is replaced by `[credential]` wherever it shows, in the same forms. A secret shorter than 8 characters, more likely a placeholder such as `hidden`, is replaced only where a whole JSON value is it.
+- Every string under a field `personal` names, and every email address anywhere, is replaced by a stand-in (`person-1`, or `person-1@example.com` for an address). The same value gets the same stand-in wherever it shows: as a whole value in JSON, and within any text (a URL, a header, a longer string), as a word, when it's at least 4 characters long. So the recording still links what the vendor linked. Personal fields are found in JSON: in an answer that isn't JSON, only email addresses are.
+- A recording that would still carry a secret or a personal value where no rule can replace it, such as within a cursor in base64, isn't written. Record that case with other arguments.
+
+A call's output is recorded last, by calling the tool again with only what is kept of its recording as the vendor. So an output holds only stand-ins, whatever the tool makes of them, such as a name it joins from two. Outputs are still checked for the credential and the personal values found, in case the tool decodes one the check couldn't see, such as from an HTML entity.
+
+Record on an account of Grasp's own that holds only made-up data, never a client's, and say so: the run doesn't start without `RECORD_MADE_UP_DATA=yes`. In Grasp's repository, from its root:
+
+```sh
+RECORD_MADE_UP_DATA=yes \
+RECORD_CONNECTOR=packages/connectors/boards/src/index.ts \
+RECORD_CREDENTIAL=<the API key, or an access token with the tools' scopes> \
+vp test run --project @grasp-os/connect test/fixtures.live.test.ts -u
+```
+
+The run makes each call through connect, as any call goes, and writes `fixtures.json` with what it recorded. Run it again when the vendor's answers change, and review the difference like code.
+
 ## Events and syncs
 
 A connector can also declare `events` (with `event`: what a workflow could start on, read by polling) and `syncs` (with `sync`: records kept in step with the vendor's, a page at a time from a checkpoint). They are declared and typed only, and their routes are checked against the connector's hosts. A route of theirs may not deliver to people (`GET /api/chat.postMessage`), since they run on their own and it would on every run. Connect doesn't serve them yet.

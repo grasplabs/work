@@ -1,0 +1,173 @@
+{
+  "personal": [
+    "name",
+    "email"
+  ],
+  "account": {
+    "request": {
+      "method": "GET",
+      "url": "https://api.sample-key.test/v1/whoami"
+    },
+    "answer": {
+      "status": 200,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "body": {
+        "account": {
+          "id": "team-1",
+          "name": "person-1",
+          "email": "person-2@example.com"
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "tool": "boards.items.list",
+      "args": {
+        "board": "board-1"
+      },
+      "cursor": "cursor",
+      "calls": [
+        {
+          "exchanges": [
+            {
+              "request": {
+                "method": "GET",
+                "url": "https://api.sample-key.test/v1/boards/board-1/items"
+              },
+              "answer": {
+                "status": 200,
+                "headers": {
+                  "content-type": "application/json"
+                },
+                "body": {
+                  "items": [
+                    {
+                      "id": "item-1",
+                      "title": "First"
+                    },
+                    {
+                      "id": "item-2",
+                      "title": "Second"
+                    }
+                  ],
+                  "next_cursor": "page-2"
+                }
+              }
+            }
+          ],
+          "output": {
+            "items": [
+              {
+                "id": "item-1",
+                "title": "First"
+              },
+              {
+                "id": "item-2",
+                "title": "Second"
+              }
+            ],
+            "next": "page-2"
+          }
+        },
+        {
+          "exchanges": [
+            {
+              "request": {
+                "method": "GET",
+                "url": "https://api.sample-key.test/v1/boards/board-1/items?cursor=page-2"
+              },
+              "answer": {
+                "status": 200,
+                "headers": {
+                  "content-type": "application/json"
+                },
+                "body": {
+                  "items": [
+                    {
+                      "id": "item-3",
+                      "title": "Third"
+                    }
+                  ],
+                  "next_cursor": null
+                }
+              }
+            }
+          ],
+          "output": {
+            "items": [
+              {
+                "id": "item-3",
+                "title": "Third"
+              }
+            ],
+            "next": null
+          }
+        }
+      ]
+    },
+    {
+      "tool": "boards.items.list",
+      "args": {
+        "board": "missing"
+      },
+      "error": "not_found",
+      "calls": [
+        {
+          "exchanges": [
+            {
+              "request": {
+                "method": "GET",
+                "url": "https://api.sample-key.test/v1/boards/missing/items"
+              },
+              "answer": {
+                "status": 404,
+                "headers": {
+                  "content-type": "application/json"
+                },
+                "body": {
+                  "message": "No such board"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tool": "boards.items.list",
+      "args": {
+        "board": "malformed"
+      },
+      "error": "failed",
+      "calls": [
+        {
+          "exchanges": [
+            {
+              "request": {
+                "method": "GET",
+                "url": "https://api.sample-key.test/v1/boards/malformed/items"
+              },
+              "answer": {
+                "status": 200,
+                "headers": {
+                  "content-type": "application/json"
+                },
+                "body": {
+                  "items": [
+                    {
+                      "id": 1,
+                      "title": null
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

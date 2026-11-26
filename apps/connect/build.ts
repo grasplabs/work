@@ -16,21 +16,29 @@ import {
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { checkFixtures } from "@grasp-os/compiler/fixtures";
 import { checkMirror } from "@grasp-os/compiler/mirror";
 import { readSpec } from "@grasp-os/compiler/openapi";
 import type { Spec } from "@grasp-os/compiler/openapi";
 import {
   connectorManifestSchema,
+  fixtureVendor,
+  fixturesSchema,
   shadowingConnectors,
   sharedMcpServers,
 } from "@grasp-os/runtime/connector";
 import type {
   ConnectorDeclaration,
   ConnectorManifest,
+  Fixtures,
 } from "@grasp-os/runtime/connector";
+import { isolateBase } from "@grasp-os/shared/runtime";
+import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import { build, defaultClientConditions } from "vite-plus";
 import type { Plugin, Rolldown } from "vite-plus";
 import { z } from "zod";
+
+import { callTimeoutMs } from "./src/mcp.ts";
 
 const root = import.meta.dirname;
 const packages = path.join(root, "../../packages/connectors");
@@ -148,6 +156,97 @@ const checkMirrorOf = async (
     throw new Error(
       `${declaration.name} breaks the mirror rule:\n${lines.join("\n")}`
     );
+  }
+};
+
+/** Where a connector's recorded vendor answers are: beside its entry. */
+export const fixturesFileOf = (entry: string): string =>
+  path.join(path.dirname(entry), "fixtures.json");
+
+/** The recorded vendor answers beside a connector's `entry`, if it has any. */
+const fixturesBeside = (entry: string): Fixtures | undefined => {
+  const file = fixturesFileOf(entry);
+  return existsSync(file)
+    ? fixturesSchema.parse(JSON.parse(readFileSync(file, "utf-8")))
+    : undefined;
+};
+
+/**
+ * Holds a connector to its recorded vendor answers (GRA-2328): each case
+ * replayed on workerd, in the bundle connect loads into an isolate, whose
+ * only network answers as recorded. The build fails on output that
+ * doesn't match the recordings, paging that never ends, or an error
+ * mapped to the wrong kind (@grasp-os/compiler/fixtures).
+ */
+const checkFixturesOf = async (
+  name: string,
+  code: string,
+  fixtures: Fixtures
+): Promise<void> => {
+  let vendor = fixtureVendor([]);
+  let unrecorded: string[] = [];
+  const workerd = new Miniflare(
+    convertV4MiniflareOptions({
+      modules: [{ type: "ESModule", path: "connector.js", contents: code }],
+      ...isolateBase,
+      outboundService: async (sent) => {
+        const request = new Request(sent.url, {
+          method: sent.method,
+          headers: [...sent.headers],
+          body:
+            sent.method === "GET" || sent.method === "HEAD"
+              ? null
+              : await sent.arrayBuffer(),
+        });
+        const answer = await vendor.answer(request);
+        if (answer !== undefined) {
+          return answer;
+        }
+        unrecorded.push(`${request.method} ${request.url}`);
+        return new Response("Not recorded", { status: 501 });
+      },
+    })
+  );
+  try {
+    const problems = await checkFixtures(
+      fixtures,
+      async (tool, args, exchanges) => {
+        vendor = fixtureVendor(exchanges);
+        unrecorded = [];
+        let answer: unknown;
+        try {
+          // As long as connect waits for a connector's answer, so a
+          // connector that never answers fails the build, not hangs it.
+          const response = await workerd.dispatchFetch("https://connector/", {
+            signal: AbortSignal.timeout(callTimeoutMs),
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              jsonrpc: "2.0",
+              id: 1,
+              method: "tools/call",
+              params: { name: tool, arguments: args },
+            }),
+          });
+          answer = await response.json();
+        } catch (error) {
+          answer = { error: { message: `it didn't answer: ${String(error)}` } };
+        }
+        return {
+          answer,
+          unrecorded,
+          repeated: vendor.repeated,
+          unsent: vendor.unsent(),
+        };
+      }
+    );
+    if (problems.length > 0) {
+      throw new Error(
+        `${name} doesn't replay its recorded vendor answers:\n${problems.join("\n")}`
+      );
+    }
+  } finally {
+    await workerd.dispose();
   }
 };
 
@@ -314,7 +413,9 @@ const bundle = async (entry: string): Promise<string> => {
 /**
  * Builds the connectors at `entries` into `outFile`. Each one's manifest
  * comes from its module (so the manifest and the tools can't drift apart)
- * and must be valid; two connectors may not share a name.
+ * and must be valid; two connectors may not share a name. One with
+ * `fixtures.json` beside its entry must replay it (`checkFixturesOf`),
+ * but for the one at `recording`, whose cases a live run is recording.
  *
  * Reading the manifest runs the connector's module in Node, at build time,
  * with the build's access (CI's): connector code and its dependencies are
@@ -323,7 +424,8 @@ const bundle = async (entry: string): Promise<string> => {
  */
 export const buildConnectors = async (
   entries: readonly string[],
-  outFile: string
+  outFile: string,
+  recording?: string
 ): Promise<void> => {
   const connectors: { manifest: ConnectorManifest; code: string }[] = [];
   for (const entry of entries) {
@@ -359,7 +461,13 @@ export const buildConnectors = async (
       throw new Error(`Two connectors are for the app ${manifest.provider}`);
     }
     // oxlint-disable-next-line no-await-in-loop -- one connector at a time
-    connectors.push({ manifest, code: await bundle(entry) });
+    const code = await bundle(entry);
+    const fixtures = fixturesBeside(entry);
+    if (fixtures !== undefined && entry !== recording) {
+      // oxlint-disable-next-line no-await-in-loop -- one connector at a time
+      await checkFixturesOf(manifest.name, code, fixtures);
+    }
+    connectors.push({ manifest, code });
   }
   const [shadowing] = shadowingConnectors(
     connectors.map(({ manifest }) => manifest)
