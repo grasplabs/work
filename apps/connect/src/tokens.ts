@@ -9,7 +9,7 @@ import { z } from "zod";
 
 import { recordEventIf } from "./audit.ts";
 import { pastAddressesAfter } from "./connections.ts";
-import { providerConfigFor } from "./connector-providers.ts";
+import { connectorRow, providerConfigFor } from "./connector-providers.ts";
 import {
   connections,
   connectionTokens,
@@ -717,11 +717,26 @@ const activeConnection = async (env: Env, connectionId: string) => {
     .from(connections)
     .where(eq(connections.id, connectionId))
     .get();
+  // A release may move a connector's server as its credential is read:
+  // its provider and its tokens are of one server, or neither is used.
+  const serverOf = async () =>
+    connection?.serverKind === "connector"
+      ? await connectorRow(env.DB, connection.server)
+      : undefined;
+  const server = await serverOf();
   const provider =
     connection === undefined
       ? undefined
       : await providerConfigFor(env, connection.provider);
   const row = await readRow(env.DB, connectionId);
+  const still = await serverOf();
+  if (
+    still?.url !== server?.url ||
+    still?.auth !== server?.auth ||
+    still?.header !== server?.header
+  ) {
+    throw connectErrors.create("connect.server_unavailable");
+  }
   if (
     connection?.status !== "active" ||
     provider === undefined ||

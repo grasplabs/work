@@ -587,6 +587,60 @@ describe("a built-in connector serving its vendor's MCP server", () => {
     });
   });
 
+  it("sends no refresh token read as its server moved to the issuer it moved from", async () => {
+    await parkEarlierLinears();
+    const anna = someone();
+    const annas = await connectLinear("linear", anna, "personal", linearItself);
+    await madeForAnotherUrl();
+    await env.DB.prepare(
+      "UPDATE connectors SET token_endpoint = ? WHERE id = ?"
+    )
+      .bind("https://mcp.linear-old.example/token", "linear")
+      .run();
+    const connection = await drizzle(env.DB)
+      .select()
+      .from(connections)
+      .where(eq(connections.id, annas))
+      .get();
+    if (connection === undefined) {
+      throw new Error("Expected Anna's connection");
+    }
+    const before = sent.length;
+    // Once the old issuer was read for her credential, the release moves
+    // the connector and Anna signs in again, and her new token is due a
+    // refresh by the time it is read.
+    let moved = false;
+    const listed = await outcome(
+      currentTools(
+        {
+          ...env,
+          DB: racingRead(/from "connection_tokens"/iu, async () => {
+            moved = true;
+            await startLinear("linear", someone());
+            await connectLinear("linear", anna, "personal", linearItself);
+            await env.DB.prepare(
+              "UPDATE connection_tokens SET access_expires_at = 0 WHERE connection_id = ?"
+            )
+              .bind(annas)
+              .run();
+          }),
+        },
+        { ...connection, toolListFreshUntil: null }
+      )
+    );
+    expect({
+      moved,
+      listed,
+      toOld: sent
+        .slice(before)
+        .filter(({ url }) => url.startsWith("https://mcp.linear-old.example")),
+    }).toStrictEqual({
+      moved: true,
+      listed: "connect.server_unavailable",
+      toOld: [],
+    });
+  });
+
   it("sends no owed revoke to the server its connector moved to as it was tried", async () => {
     const annas = await connectLinear(
       "linear",
