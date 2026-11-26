@@ -55,6 +55,20 @@ const models = {
   tts: "voxtral-mini-tts-3",
 } as const;
 
+/**
+ * When Mistral hears someone start and stop talking, as the chance its
+ * voice detection gives that they are talking. Sent whole, never left to
+ * the session: with every field empty, talking over him was not heard on
+ * the first try-out. Its realtime transcription's own defaults, but for
+ * a lower start, so a few words over him stop him; the record the page
+ * shows after each call (`recordOf`) says whether Mistral heard them.
+ */
+const turnDetection = {
+  start_threshold: 0.3,
+  end_threshold: 0.33,
+  min_silence_ms: 500,
+} as const;
+
 /** Stephen's voice, by its Mistral ID, as core says his lines (apps/core/src/platform-ai.ts). */
 const voice = "voice_485";
 
@@ -143,9 +157,7 @@ const openedSchema = z.object({
 export const sessionRequestOf = ({ locale }: VoiceLabInput) => ({
   instructions: instructionsOf(locale),
   llm: { model: models.llm },
-  // Mistral's own end-of-turn detection, at its defaults: the try-out is
-  // of the session as it comes.
-  stt: { model: models.stt, language: locale, turn_detection: {} },
+  stt: { model: models.stt, language: locale, turn_detection: turnDetection },
   tts: { model: models.tts, voice_id: voice },
   welcome_message: firstLines[locale],
   turn: { allow_interruptions: true },
@@ -209,21 +221,75 @@ export const openVoiceSession = async (
 };
 
 /**
- * Closes a session at Mistral, once the page left its room: it ends by
- * itself when it expires, so one that can't be closed is only logged.
+ * What Mistral kept of a call, in counts alone: how often he spoke, and
+ * how often it heard them talk over him and cut him off. Never what was
+ * said.
+ */
+export interface CallRecord {
+  spoke: number;
+  cutOff: number;
+}
+
+const recordSchema = z.object({
+  transcripts: z
+    .array(
+      z.looseObject({
+        role: z.string(),
+        is_interruption: z.boolean().optional(),
+      })
+    )
+    .nullish(),
+});
+
+/** The counts of a session's record, as Mistral answers it. */
+export const recordOf = (answer: unknown): CallRecord | null => {
+  const parsed = recordSchema.safeParse(answer);
+  if (!parsed.success) {
+    return null;
+  }
+  const his = (parsed.data.transcripts ?? []).filter(
+    ({ role }) => role === "assistant"
+  );
+  return {
+    spoke: his.length,
+    cutOff: his.filter(({ is_interruption }) => is_interruption === true)
+      .length,
+  };
+};
+
+/**
+ * Closes a session at Mistral, once the page left its room, and answers
+ * what Mistral kept of it, as counts (`recordOf`): read before it is
+ * closed, as a closed one may be gone. It ends by itself when it expires,
+ * so one that can't be read or closed is only logged.
  */
 export const closeVoiceSession = async (
   env: Env,
   sessionId: string
-): Promise<void> => {
+): Promise<CallRecord | null> => {
   const apiKey = await keyOf(env);
   if (apiKey === null) {
-    return;
+    return null;
+  }
+  const headers = { authorization: `Bearer ${apiKey}` };
+  let record: CallRecord | null = null;
+  try {
+    const response = await fetch(`${sessionsUrl}/${sessionId}`, {
+      headers,
+      signal: AbortSignal.timeout(sessionTimeoutMs),
+    });
+    record = response.ok ? recordOf(await response.json()) : null;
+    if (!response.ok) {
+      await response.body?.cancel();
+      log.warn("admin.voice_lab_not_read", { status: response.status });
+    }
+  } catch {
+    log.warn("admin.voice_lab_not_read", { status: 0 });
   }
   try {
     const response = await fetch(`${sessionsUrl}/${sessionId}`, {
       method: "DELETE",
-      headers: { authorization: `Bearer ${apiKey}` },
+      headers,
       signal: AbortSignal.timeout(sessionTimeoutMs),
     });
     await response.body?.cancel();
@@ -233,4 +299,5 @@ export const closeVoiceSession = async (
   } catch {
     log.warn("admin.voice_lab_not_closed", { status: 0 });
   }
+  return record;
 };

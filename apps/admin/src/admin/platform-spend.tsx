@@ -35,6 +35,7 @@ const featureWords: Record<PlatformAiFeature, string> = {
   conversion: "Document conversion",
   transcription: "Transcription",
   speech: "Speech",
+  conversation: "Voice interviews",
   organization: "The company’s own AI, on Grasp’s key",
 };
 
