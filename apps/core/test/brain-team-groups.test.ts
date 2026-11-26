@@ -16,15 +16,13 @@ import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
 
 // The company's own groups of teams, the brain's regions (core's
-// brain-team-groups.ts). What can go wrong, tried here: someone who isn't
-// an admin regrouping the company; a group naming a team the brain
-// doesn't have, or one team in two groups; a change kept without its
-// audit event, or an earlier set lost to it. And as Grasp arranges the
-// teams in no region by itself (GRA-1993): a team an admin placed moved;
-// more regions than the map's four lobes; the model given more than the
-// teams' names, or trusted when it invents a team; the staff list's save
-// held up or failed by the model, or a read asking it; a failure that
-// is never tried again, or tried forever.
+// brain-team-groups.ts), which Grasp arranges by itself (GRA-1993). What
+// can go wrong, tried here: a change kept without its audit event, or an
+// earlier set lost to it; a placed team moved; more regions than the
+// map's four lobes; the model given more than the teams' names, or
+// trusted when it invents a team; the staff list's save held up or
+// failed by the model, or a read asking it; a failure that is never tried
+// again, or tried forever.
 
 const idp = mockIdp();
 
@@ -138,6 +136,13 @@ const regionsRow = async () =>
     return row ?? null;
   });
 
+/** The ids of a set of groups as `brain_team_group_saves` keeps it. */
+const groupIds = (stored: string | undefined): string[] =>
+  z
+    .array(z.object({ id: z.string() }))
+    .parse(JSON.parse(stored ?? "[]"))
+    .map((group) => group.id);
+
 /** A staff-list team's id as the Brain named it before its bare id (GRA-2055). */
 const was = (id: string): string => `team-${id}`;
 
@@ -188,6 +193,12 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     const arranged = events.filter(
       ({ action }) => action === "brain.team_groups.arranged"
     );
+    // The set kept whole, before and after, by the save the event names.
+    const kept = await env.DB.prepare(
+      "SELECT before, after FROM brain_team_group_saves WHERE id = ?"
+    )
+      .bind(arranged[0]?.detail?.save ?? "")
+      .first<{ before: string; after: string }>();
 
     expect({
       ran,
@@ -208,6 +219,7 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
       namesAudited: names.some((name) =>
         JSON.stringify(arranged).includes(name)
       ),
+      kept: { before: groupIds(kept?.before), after: groupIds(kept?.after) },
     }).toStrictEqual({
       ran: true,
       asked: 1,
@@ -226,6 +238,10 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
         },
       ],
       namesAudited: false,
+      kept: {
+        before: gone.map((group) => group.id),
+        after: [...gone, ...teamGroups].map((group) => group.id),
+      },
     });
   });
 

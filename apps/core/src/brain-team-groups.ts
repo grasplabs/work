@@ -24,7 +24,8 @@ import { modelForRole, modelSettings, models } from "./models.ts";
 // - When: after an admin saves the staff list, as the onboarding's own
 //   work, from its alarm, tried again after a minute, five and thirty when
 //   it fails (onboarding/store.ts, `arrangeNext`), never in the save's
-//   request. Until then, and when it can't be done, the teams wait in no
+//   request. One arrangement at a time, the only writer of the groups: it
+//   rewrites them whole, so two at once would lose the first one's teams. Until then, and when it can't be done, the teams wait in no
 //   region; the map shows them as "Other teams".
 // - How many: the map has four lobes, so arranging makes no more than four
 //   regions in all; teams beyond them wait in no region.
