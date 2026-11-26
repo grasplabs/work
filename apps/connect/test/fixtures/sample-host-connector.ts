@@ -52,7 +52,7 @@ export default defineConnector({
       reach: "own",
       resource: "board",
       routes: ["GET /boards/{board}/items"],
-      args: { board: v.string().min(1) },
+      args: { board: v.string().segment() },
       returns: page(Item),
       handler: async ({ board }, api) => {
         const answer = await api.get("/boards/{board}/items", {
@@ -68,7 +68,7 @@ export default defineConnector({
       reach: "own",
       resource: "board",
       routes: ["GET /boards/{board}/items"],
-      args: { board: v.string().min(1) },
+      args: { board: v.string().segment() },
       returns: Reached,
       handler: async ({ board }) =>
         await reach(`https://${sampleHostFilled}`, board),
@@ -79,7 +79,7 @@ export default defineConnector({
       reach: "own",
       resource: "board",
       routes: ["GET /boards/{board}/items"],
-      args: { board: v.string().min(1) },
+      args: { board: v.string().segment() },
       returns: Reached,
       handler: async ({ board }) => await reach("https://other.invalid", board),
     }),

@@ -30,9 +30,9 @@ const read = (name: string, maybe: boolean): string => {
 /** A scalar's builder call, or undefined for a kind that holds values. */
 const scalarOf = (descriptor: ValueDescriptor): string | undefined => {
   if (descriptor.kind === "string") {
-    const format = (["email", "datetime", "date", "url"] as const).find(
-      (name) => descriptor[name] === true
-    );
+    const format = (
+      ["email", "datetime", "date", "url", "segment"] as const
+    ).find((name) => descriptor[name] === true);
     return format === undefined ? "v.string()" : `v.string().${format}()`;
   }
   if (descriptor.kind === "number") {

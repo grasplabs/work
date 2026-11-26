@@ -56,10 +56,11 @@ export const reviewRows = (
   return tools
     .toSorted((first, second) => first.slug.localeCompare(second.slug))
     .map(({ slug, description, readOnly }) => {
-      const given =
+      const entry =
         shipped !== undefined && Object.hasOwn(shipped, slug)
           ? shipped[slug]
           : undefined;
+      const given = typeof entry === "object" ? entry.class : entry;
       let suggested: string;
       if (isNeverTool(slug)) {
         suggested = "never";

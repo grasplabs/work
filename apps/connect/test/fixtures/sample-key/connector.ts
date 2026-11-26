@@ -48,7 +48,7 @@ export default defineConnector({
       reach: "own",
       resource: "board",
       routes: [`GET ${sampleKeyApiHost}/boards/{board}/items`],
-      args: { board: v.string().min(1), cursor: v.string().optional() },
+      args: { board: v.string().segment(), cursor: v.string().optional() },
       returns: page(Item),
       handler: async ({ board, cursor }, api) => {
         const answer = await api.get(
@@ -68,7 +68,7 @@ export default defineConnector({
       reach: "own",
       resource: "board",
       routes: [`GET ${sampleKeyFilesHost}/boards/{board}/files`],
-      args: { board: v.string().min(1) },
+      args: { board: v.string().segment() },
       returns: page(Item),
       handler: async ({ board }, api) => {
         const answer = await api.get(
@@ -87,7 +87,7 @@ export default defineConnector({
       reach: "own",
       resource: "board",
       routes: [`GET ${sampleKeyApiHost}/boards/{board}/items`],
-      args: { board: v.string().min(1) },
+      args: { board: v.string().segment() },
       returns: v.object({ headers: v.string() }),
       handler: async ({ board }) => {
         const response = await fetch(
@@ -103,7 +103,7 @@ export default defineConnector({
       reach: "own",
       resource: "board",
       routes: [`GET ${sampleKeyApiHost}/boards/{board}/items`],
-      args: { board: v.string().min(1) },
+      args: { board: v.string().segment() },
       returns: Items,
       handler: async ({ board }) => {
         const response = await fetch(

@@ -44,7 +44,7 @@ import {
   signedUngrantedCall,
 } from "./bindings.ts";
 import type { ConnectionGrant, UngrantedRead } from "./bindings.ts";
-import { readsMail, textsOf } from "./channels/stephen-rules.ts";
+import { textsOf } from "./channels/stephen-rules.ts";
 import {
   askInChat,
   askableConnections,
@@ -766,7 +766,6 @@ const checkedForChatApp = async (
 const keptForChatApp = async (
   env: Env,
   scope: AgentScope,
-  action: string,
   shape: ActionShape,
   output: unknown
 ): Promise<void> => {
@@ -774,7 +773,7 @@ const keptForChatApp = async (
     scope.chatId,
     scope.runId,
     textsOf(output),
-    { read: readsMail(action) ? "mail" : "record", where: shape.provider }
+    { read: shape.mail === true ? "mail" : "record", where: shape.provider }
   );
   if (kept !== "open") {
     throw runRefusal(kept);
@@ -1282,7 +1281,7 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
     // unmarked: before it is kept or recorded, and before it is handed over.
     await markIfNotEveryones(this.env, scope, connectionId);
     if (shape !== undefined) {
-      await keptForChatApp(this.env, scope, request.action, shape, output);
+      await keptForChatApp(this.env, scope, shape, output);
     }
     await recordSources(this.env, scope, [connectionId], [read]);
     // Recorded with the chat first: a run that ended since keeps nothing.

@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
+import { attachmentRefsJsonSchema } from "../src/connector-attachment-rules.ts";
 import {
   attachmentLimits,
+  attachmentRefsSchema,
   attachmentsMatch,
   attachmentsSchema,
 } from "../src/connector-attachments.ts";
@@ -23,6 +26,13 @@ const entryOf = async (name: string, text: string) => ({
 });
 
 describe("attachments", () => {
+  it("are named by run file ID in a contract exactly as a workflow's action names them", () => {
+    const { $schema: _marker, ...refs } = z.toJSONSchema(attachmentRefsSchema, {
+      io: "input",
+    });
+    expect(attachmentRefsJsonSchema).toStrictEqual(refs);
+  });
+
   it("match bytes only when each digest has its part, of its length and hash, and no part has none", async () => {
     const alpha = await entryOf("a.txt", "alpha");
     const twin = { ...alpha, name: "b.txt" };
