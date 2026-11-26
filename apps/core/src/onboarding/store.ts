@@ -110,6 +110,7 @@ import type {
   StephenSetup,
   StephenSetupView,
 } from "@grasp-os/shared/onboarding-staff";
+import { companyNameOf } from "@grasp-os/shared/organization";
 import { DurableObject } from "cloudflare:workers";
 import {
   and,
@@ -6668,9 +6669,9 @@ export class Onboarding extends DurableObject<Env> {
       .select({ name: organizations.name })
       .from(organizations)
       .limit(1);
-    const name = row?.name ?? "";
+    const domains = config?.domains ?? [];
     return {
-      company: name === "" ? (config?.domains[0] ?? "") : name,
+      company: companyNameOf(row?.name ?? "", domains) ?? domains[0] ?? "",
       locale: this.stephen().setup.languages[0] ?? "en",
       replyTo: config?.admins[0],
     };

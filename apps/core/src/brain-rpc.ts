@@ -32,6 +32,7 @@ import type { KickoffView } from "@grasp-os/shared/kickoff";
 import { minTeamShown, teamNameKey } from "@grasp-os/shared/onboarding";
 import type { OnboardingView } from "@grasp-os/shared/onboarding";
 import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
+import { companyNameOf } from "@grasp-os/shared/organization";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { hoursPerWeek } from "@grasp-os/shared/thinking";
@@ -40,6 +41,7 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { organizationId } from "./auth/auth.ts";
+import { signInConfig } from "./auth/config.ts";
 import { forget, forgetPreview } from "./brain-forget.ts";
 import {
   answerGap,
@@ -671,14 +673,17 @@ const kickoffTeamsOf = async (
   );
 };
 
-/** The organization's name, as its row has it. */
+/**
+ * The company's name: its row's, never the placeholder core made it with
+ * (`companyNameOf`); empty when nothing names it.
+ */
 const organizationName = async (env: Env): Promise<string> => {
   const row = await drizzle(env.DB)
     .select({ name: organizations.name })
     .from(organizations)
     .where(eq(organizations.id, organizationId))
     .get();
-  return row?.name ?? "";
+  return companyNameOf(row?.name ?? "", signInConfig(env)?.domains ?? []) ?? "";
 };
 
 /** A catalog entry's key: its source and id. */

@@ -29,6 +29,7 @@ import { NAMED } from "@grasp-os/shared/interviewers/stephen";
 import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import { interviewerNames } from "@grasp-os/shared/onboarding";
+import { companyNameOf } from "@grasp-os/shared/organization";
 
 import { errorResponse } from "../errors.ts";
 import { models } from "../models.ts";
@@ -523,10 +524,13 @@ const holdTurn = async (held: Turn): Promise<void> => {
 
 const encoder = new TextEncoder();
 
-/** The organization's name, as Stephen is told it. */
+/**
+ * The company's name, as Stephen is told it: never the placeholder core
+ * made the organization with (`companyNameOf`); empty when nothing names it.
+ */
 export const companyOf = async (env: Env): Promise<string> => {
-  const { name } = await readOrganization(env);
-  return name;
+  const { name, signInDomains } = await readOrganization(env);
+  return companyNameOf(name, signInDomains) ?? "";
 };
 
 /** One turn to hold, from what is known of who it is with. */
