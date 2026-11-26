@@ -1,19 +1,20 @@
-import { Button } from "@grasp-os/app-kit/components/button";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@grasp-os/app-kit/components/popover";
-import { Slider } from "@grasp-os/app-kit/components/slider";
-import { useLingui } from "@lingui/react/macro";
+} from "@grasp-os/ui/components/popover";
+import { Slider, SliderLabel } from "@grasp-os/ui/components/slider";
 import {
+  Icon,
   PauseIcon,
   PlayIcon,
-  Volume1Icon,
-  Volume2Icon,
-  VolumeXIcon,
-} from "lucide-react";
-import { useState } from "react";
+  VolumeIcon,
+  VolumeOffIcon,
+} from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 
 import {
   allowSound,
@@ -26,26 +27,26 @@ import {
 
 // Stephen's voice, bottom right on every step (prototype
 // `components/onboarding/onboarding-sound.tsx`): pause, to hold him
-// mid-sentence and go on from there; and the sound, on or off, with how
-// loud on hover.
+// mid-sentence and go on from there; and the sound: its button opens how
+// loud, with a way to turn it off or on again, as #2503 draws it. Damsko's
+// Popover opens on a press, never on hover, so how loud is a press away,
+// for the keys too.
 
-const loudIcon = (on: boolean, level: number) => {
-  if (!on || level === 0) {
-    return <VolumeXIcon />;
-  }
-  return level < 50 ? <Volume1Icon /> : <Volume2Icon />;
-};
+const styles = stylex.create({
+  controls: { display: "flex", alignItems: "center", gap: space["1"] },
+});
 
 /**
- * The sound on or off; hover it for how loud. When the browser held sound
- * back, it asks to turn it on, and the line being said starts again so it
- * is heard.
+ * How loud, from the sound's button: a slider from silent to full, said as
+ * a share (at nothing it is silent, the voice still on, as a mute), and
+ * the sound off or on again; its name says when the sound is off. When the browser held sound back,
+ * it asks to turn it on, and the line being said starts again so it is
+ * heard.
  */
 const SoundButton = () => {
   const { t } = useLingui();
   const voice = useVoice();
-  const [open, setOpen] = useState(false);
-  const level = Math.round(voice.volume * 100);
+  const silent = !voice.on || voice.volume === 0;
   if (voice.on && voice.blocked) {
     return (
       <Button
@@ -55,53 +56,49 @@ const SoundButton = () => {
         size="sm"
         variant="ghost"
       >
-        <Volume2Icon data-icon="inline-start" />
+        <Icon icon={VolumeIcon} />
         {t`Turn sound on`}
       </Button>
     );
   }
   return (
-    // Hovering shows how loud; a press only turns the sound on or off.
-    <Popover
-      onOpenChange={(next, details) => {
-        if (details.reason !== "trigger-press") {
-          setOpen(next);
-        }
-      }}
-      open={open}
-    >
-      <PopoverTrigger
-        closeDelay={250}
-        delay={120}
-        openOnHover
-        render={
-          <Button
-            aria-label={voice.on ? t`Turn sound off` : t`Turn sound on`}
-            aria-pressed={voice.on}
-            onClick={() => {
-              setVoiceOn(!voice.on);
-            }}
-            size="icon-sm"
-            variant="ghost"
-          />
-        }
-      >
-        {loudIcon(voice.on, level)}
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          aria-label={voice.on ? t`Volume` : t`Volume (sound off)`}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <Icon icon={silent ? VolumeOffIcon : VolumeIcon} />
+        </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-44" side="top" variant="snug">
+      <PopoverContent align="end" side="top">
         <Slider
-          aria-label={t`Volume`}
-          max={100}
+          format={{ style: "percent" }}
+          max={1}
           min={0}
           onValueChange={(value) => {
             const next = typeof value === "number" ? value : (value[0] ?? 0);
-            setVolume(next / 100);
+            setVolume(next);
             if (next > 0 && !voice.on) {
               setVoiceOn(true);
             }
           }}
-          value={level}
-        />
+          step={0.01}
+          value={voice.volume}
+        >
+          <SliderLabel>{t`Volume`}</SliderLabel>
+        </Slider>
+        <Button
+          onClick={() => {
+            setVoiceOn(!voice.on);
+          }}
+          size="sm"
+          variant="ghost"
+        >
+          <Icon icon={voice.on ? VolumeOffIcon : VolumeIcon} />
+          {voice.on ? t`Turn sound off` : t`Turn sound on`}
+        </Button>
       </PopoverContent>
     </Popover>
   );
@@ -111,14 +108,14 @@ export const SoundControls = () => {
   const { t } = useLingui();
   const { paused } = useVoice();
   return (
-    <div className="flex items-center gap-1">
+    <div {...stylex.props(styles.controls)}>
       <Button
         aria-label={paused ? t`Play` : t`Pause`}
         onClick={paused ? resumeVoice : pauseVoice}
         size="icon-sm"
         variant="ghost"
       >
-        {paused ? <PlayIcon /> : <PauseIcon />}
+        <Icon icon={paused ? PlayIcon : PauseIcon} />
       </Button>
       <SoundButton />
     </div>

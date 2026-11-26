@@ -9773,7 +9773,6 @@ msgid "Language"
 msgstr "Sprache"
 
 #: src/frame/language-button.tsx
-#: src/language-picker.tsx
 msgid "Language: {name}"
 msgstr "Sprache: {name}"
 
@@ -19521,6 +19520,10 @@ msgstr "Sprachgespräch"
 #: src/voice/sound-controls.tsx
 msgid "Volume"
 msgstr "Lautstärke"
+
+#: src/voice/sound-controls.tsx
+msgid "Volume (sound off)"
+msgstr "Lautstärke (Ton aus)"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
