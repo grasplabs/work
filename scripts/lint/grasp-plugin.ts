@@ -51,9 +51,10 @@
  *
  * no-class-strings: apps/web has no Tailwind, so a class list written in
  * its JSX styles nothing. It refuses a `className` (or `class`) that holds
- * class names as text: a string, a template's own text, either branch of
- * a condition, or an argument of a call (`cn("…")`), through TypeScript's
- * wrappers. Spaces alone name nothing (a `join(" ")`), and a class name
+ * class names as text: a string, a template's own text or what it puts
+ * in, an array's element, either branch of a condition, or a call's
+ * argument or what it is called on (`cn("…")`, `["…"].join(" ")`), through
+ * TypeScript's wrappers. Spaces alone name nothing (a `join(" ")`), and a class name
  * StyleX made (`stylex.props(…).className`) is no text, so both pass, as
  * does `{...stylex.props(…)}`.
  *
@@ -782,37 +783,34 @@ const motionUnit = (object: Node): MotionUnit | undefined => {
 /** Whether `text` names a class: anything but spaces, such as the one a join puts between names. */
 const namesClass = (text: string): boolean => text.trim() !== "";
 
-/** Whether `node` holds class names as text: a string, a template's own text, or one inside a condition or a call. */
-const holdsText = (node: Node | null | undefined): boolean => {
-  if (node === null || node === undefined) {
-    return false;
-  }
+/** What each kind of expression makes its class list of. */
+const partsOf: Record<string, (node: Node) => unknown[]> = {
+  TemplateLiteral: (node) => node.expressions ?? [],
+  ArrayExpression: (node) => node.elements ?? [],
+  MemberExpression: (node) => [node.object],
+  JSXExpressionContainer: (node) => [node.expression],
+  ConditionalExpression: (node) => [node.consequent, node.alternate],
+  LogicalExpression: (node) => [node.left, node.right],
+  CallExpression: (node) => [node.callee, ...(node.arguments ?? [])],
+};
+
+/** Whether `node` holds class names as text: a string, a template's own text, or either in what it is made of. */
+const holdsText = (node: Node): boolean => {
   if (valueWrappers.has(node.type)) {
-    return holdsText(node.expression);
+    return isNode(node.expression) && holdsText(node.expression);
   }
-  switch (node.type) {
-    case "Literal": {
-      return typeof node.value === "string" && namesClass(node.value);
-    }
-    case "TemplateLiteral": {
-      return (node.quasis ?? []).some((quasi) => namesClass(quasi.value.raw));
-    }
-    case "JSXExpressionContainer": {
-      return holdsText(node.expression);
-    }
-    case "ConditionalExpression": {
-      return holdsText(node.consequent) || holdsText(node.alternate);
-    }
-    case "LogicalExpression": {
-      return holdsText(node.left) || holdsText(node.right);
-    }
-    case "CallExpression": {
-      return (node.arguments ?? []).some((argument) => holdsText(argument));
-    }
-    default: {
-      return false;
-    }
+  if (node.type === "Literal") {
+    return typeof node.value === "string" && namesClass(node.value);
   }
+  if (
+    node.type === "TemplateLiteral" &&
+    (node.quasis ?? []).some((quasi) => namesClass(quasi.value.raw))
+  ) {
+    return true;
+  }
+  return nodes(...(partsOf[node.type]?.(node) ?? [])).some((part) =>
+    holdsText(part)
+  );
 };
 
 const noClassStrings = {

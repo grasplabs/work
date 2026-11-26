@@ -23,6 +23,9 @@ import * as stylex from "@stylexjs/stylex";
 const looks = stylex.create({ row: { display: "flex" } });
 `;
 
+/** A template placeholder's "$", put in apart so no string here holds a placeholder of its own. */
+const dollar = "$";
+
 /** Whether `value` is a rule as RuleTester takes it (the plugin's own types name only what it reads). */
 const isRule = (value: unknown): value is Parameters<RuleTester["run"]>[1] =>
   typeof value === "object" && value !== null && "create" in value;
@@ -83,6 +86,18 @@ tester.run("grasp/no-class-strings", rule, {
     {
       name: "a class list through a TypeScript wrapper",
       code: 'const Row = () => <div className={"flex gap-2" as string} />;',
+      filename,
+      errors: [{ messageId: "found" }],
+    },
+    {
+      name: "an array of class names, joined",
+      code: 'const Row = () => <div className={["flex", "gap-2"].join(" ")} />;',
+      filename,
+      errors: [{ messageId: "found" }],
+    },
+    {
+      name: "a class name a template puts in",
+      code: `const Row = ({ on }) => <div className={\`${dollar}{on ? "flex" : "block"}\`} />;`,
       filename,
       errors: [{ messageId: "found" }],
     },
