@@ -329,6 +329,65 @@ test("a person asks, and reads the agent's answer once its turn ends", async ({
   await expect(messages.getByRole("alert")).toHaveCount(0);
 });
 
+test("a person reads an answer in blocks: a table, a formula, code and a diagram, each with its own tools", async ({
+  pageOf,
+}) => {
+  const { user } = peopleIn("chat");
+  const page = await pageOf(user);
+  const { opener } = modelScripts.answersInBlocks;
+  const question = `${opener} (${crypto.randomUUID().slice(0, 8)})`;
+  await page.goto("/");
+
+  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+
+  const messages = page.getByRole("log", { name: "Messages" });
+  const answer = messages.getByRole("article").last();
+  await expect(answer.getByRole("table")).toContainText("North", {
+    timeout: 30_000,
+  });
+  await expect(
+    answer.getByRole("button", { name: "Copy table" })
+  ).toBeVisible();
+  await expect(
+    answer.getByRole("button", { name: "Download table" })
+  ).toBeVisible();
+  // The formula, drawn by KaTeX as maths a screen reader reads.
+  await expect(answer.locator("math")).toHaveCount(1);
+  // The code, which can be saved as a file as well as copied, coloured on
+  // the page under the frontend's own policy (no worker): its words in more
+  // than one colour.
+  await expect(
+    answer.getByRole("button", { name: "Download", exact: true })
+  ).toBeVisible();
+  await expect
+    .poll(
+      async () =>
+        await answer
+          .locator('[data-slot="code-block"] code[data-language="python"]')
+          .evaluate(
+            (code) =>
+              new Set(
+                [...code.querySelectorAll("span")]
+                  .filter(
+                    (span) =>
+                      span.children.length === 0 &&
+                      (span.textContent ?? "").trim() !== ""
+                  )
+                  .map((span) => getComputedStyle(span).color)
+              ).size
+          )
+    )
+    .toBeGreaterThan(1);
+  // The diagram, drawn by Mermaid, and its own download.
+  await expect(
+    answer.getByRole("application", { name: "Mermaid diagram" })
+  ).toBeVisible();
+  await expect(
+    answer.getByRole("button", { name: "Download diagram" })
+  ).toBeVisible();
+});
+
 test("a person comes back to a chat that answered while they were away, sees its dot, opens it and lands at the New line", async ({
   pageOf,
 }) => {

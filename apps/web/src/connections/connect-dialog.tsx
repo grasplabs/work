@@ -59,6 +59,8 @@ import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import type { Integration } from "./integrations.ts";
+import { SupportDetails, supportOfError } from "./support-details.tsx";
+import type { Support } from "./support-details.tsx";
 import { ToolChoice } from "./tool-choice.tsx";
 import { toolRules, withAllowed, withRead } from "./tool-choices.ts";
 import type { AllowedTool } from "./tool-choices.ts";
@@ -218,6 +220,7 @@ const useSignInStart = () => {
   const [attempt, setAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string>();
+  const [support, setSupport] = useState<Support>();
   const newest = useRef(0);
   const begin = async (
     action: (session: Session) => Promise<{ url: string }>
@@ -227,6 +230,7 @@ const useSignInStart = () => {
     setAttempt(mine);
     setBusy(true);
     setFailure(undefined);
+    setSupport(undefined);
     try {
       const started = await core.withSession(action);
       if (newest.current === mine) {
@@ -236,11 +240,12 @@ const useSignInStart = () => {
     } catch (error) {
       if (newest.current === mine) {
         setFailure(failureText(error));
+        setSupport(supportOfError(error));
         setBusy(false);
       }
     }
   };
-  return { attempt, begin, busy, failure };
+  return { attempt, begin, busy, failure, support };
 };
 
 /** How long a start may take before the dialog offers to try again. */
@@ -530,7 +535,7 @@ const NativeFlow = ({
   returnTo: string;
   onClose: () => void;
 }) => {
-  const { attempt, begin, busy, failure } = useSignInStart();
+  const { attempt, begin, busy, failure, support } = useSignInStart();
   const { t } = useLingui();
   const address = integration.companyNetwork;
   const [scope, setScope] = useState<ConnectionScope>(
@@ -599,6 +604,7 @@ const NativeFlow = ({
       {failure === undefined ? null : (
         <Alert variant="destructive">
           <AlertTitle>{failure}</AlertTitle>
+          {support === undefined ? null : <SupportDetails {...support} />}
         </Alert>
       )}
     </>
@@ -719,7 +725,7 @@ const KeyStep = ({
   returnTo: string;
   onClose: () => void;
 }) => {
-  const { attempt, begin, busy, failure } = useSignInStart();
+  const { attempt, begin, busy, failure, support } = useSignInStart();
   const { t, i18n } = useLingui();
   const core = useCore();
   const [values, setValues] = useState<Record<string, string>>({});
@@ -798,6 +804,7 @@ const KeyStep = ({
       {failure === undefined ? null : (
         <Alert variant="destructive">
           <AlertTitle>{failure}</AlertTitle>
+          {support === undefined ? null : <SupportDetails {...support} />}
         </Alert>
       )}
     </>
@@ -824,7 +831,7 @@ const ComposioFlow = ({
   returnTo: string;
   onClose: () => void;
 }) => {
-  const { attempt, begin, busy, failure } = useSignInStart();
+  const { attempt, begin, busy, failure, support } = useSignInStart();
   const core = useCore();
   const [listed, setListed] = useState<Loaded<CatalogTool[]>>();
   const [allowed, setAllowed] = useState<AllowedTool[]>([]);
@@ -946,6 +953,7 @@ const ComposioFlow = ({
             {failure === undefined ? null : (
               <Alert variant="destructive">
                 <AlertTitle>{failure}</AlertTitle>
+                {support === undefined ? null : <SupportDetails {...support} />}
               </Alert>
             )}
           </>

@@ -1,3 +1,9 @@
+import {
+  composioReasonSchema,
+  connectVersionSchema,
+  releaseNameSchema,
+} from "@grasp-os/shared/connect";
+import type { ComposioReason } from "@grasp-os/shared/connect";
 import { catalogGroups } from "@grasp-os/shared/connect-names";
 import type { CatalogGroup } from "@grasp-os/shared/connect-names";
 import { isAdmin } from "@grasp-os/shared/roles";
@@ -66,6 +72,7 @@ import { nothingKnown, recommendedOf } from "../connections/recommended.ts";
 import { RequestAppDialog } from "../connections/request-app-dialog.tsx";
 import { RequestedApps } from "../connections/requested-apps.tsx";
 import { RevocationsByHand } from "../connections/revocations-by-hand.tsx";
+import { SupportDetails, supportOf } from "../connections/support-details.tsx";
 import { formatNumber } from "../format.ts";
 import { PageNotLoaded } from "../frame/page-states.tsx";
 import { Page } from "../frame/page.tsx";
@@ -98,6 +105,14 @@ interface IntegrationsSearch {
   /** The app open over the page, by its key. */
   app?: string;
   connectionError?: string;
+  /**
+   * Why a Composio flow was refused, the release core runs and which
+   * version of connect refused, when core's callback named them: each
+   * only as its fixed form has it, for support.
+   */
+  connectionReason?: ComposioReason;
+  connectionRelease?: string;
+  connectionVersion?: string;
   /** A connection a flow just made, when core sent it back here. */
   connection?: string;
 }
@@ -454,11 +469,17 @@ const Returned = ({
 /** What the page must say before its tiles: a failed flow, staff's limits, Composio down, revokes to make. */
 const Notices = ({
   connectionError,
+  support,
   integrations,
   toRevoke,
   unlisted,
 }: {
   connectionError: string | undefined;
+  /** What core's callback named for support beside the failed flow. */
+  support: Pick<
+    IntegrationsSearch,
+    "connectionReason" | "connectionRelease" | "connectionVersion"
+  >;
   integrations: readonly Integration[];
   toRevoke: Parameters<typeof RevocationsByHand>[0]["toDos"];
   /** Composio's toolkits couldn't be listed. */
@@ -471,6 +492,15 @@ const Notices = ({
       {connectionError === undefined ? null : (
         <Alert variant="destructive">
           <AlertTitle>{connectionErrorMessage(connectionError)}</AlertTitle>
+          {identity.staff || isAdmin(identity.role) ? (
+            <SupportDetails
+              {...supportOf({
+                reason: support.connectionReason,
+                release: support.connectionRelease,
+                version: support.connectionVersion,
+              })}
+            />
+          ) : null}
         </Alert>
       )}
       {identity.staff ? (
@@ -583,7 +613,16 @@ const Integrations = () => {
   const { catalog, connections, known, requests, toRevoke, uses } =
     Route.useLoaderData();
   const { identity } = Route.useRouteContext();
-  const { q, group, app, connectionError, connection } = Route.useSearch();
+  const {
+    q,
+    group,
+    app,
+    connectionError,
+    connectionReason,
+    connectionRelease,
+    connectionVersion,
+    connection,
+  } = Route.useSearch();
   const { t, i18n } = useLingui();
   const listed = connections.state === "ready" ? connections.data : undefined;
   const integrations = integrationsOf(
@@ -649,6 +688,7 @@ const Integrations = () => {
         <Returned connection={connection} integrations={integrations} />
         <Notices
           connectionError={connectionError}
+          support={{ connectionReason, connectionRelease, connectionVersion }}
           integrations={integrations}
           toRevoke={toRevoke}
           unlisted={
@@ -760,6 +800,14 @@ export const Route = createFileRoute("/_shell/connectors/")({
     group: catalogGroups.find((each) => each === search.group),
     app: textOf(search.app),
     connectionError: textOf(search.connectionError),
+    connectionReason: composioReasonSchema.safeParse(search.connectionReason)
+      .data,
+    connectionRelease: releaseNameSchema.safeParse(
+      textOf(search.connectionRelease)
+    ).data,
+    connectionVersion: connectVersionSchema.safeParse(
+      textOf(search.connectionVersion)
+    ).data,
     connection: textOf(search.connection),
   }),
   // No `shouldReload`: the router reads the page again as it is entered,
