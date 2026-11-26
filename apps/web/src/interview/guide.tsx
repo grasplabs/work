@@ -1,13 +1,12 @@
 import type { Interviewer } from "@grasp-os/shared/onboarding";
 import { Heading } from "@grasp-os/ui/components/heading";
 import { fadeIn, visuallyHidden } from "@grasp-os/ui/lib/styles";
-import { colors, font, media, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { colors, media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { RefObject } from "react";
 
-import { pixelCursor } from "../onboarding/pixel-cursor.stylex.ts";
 import {
   Arrow,
   arrowCell,
@@ -89,24 +88,6 @@ const styles = stylex.create({
   arrow: {
     display: "block",
     filter: "drop-shadow(1px 1px 0 rgb(0 0 0 / 0.12))",
-  },
-  // His name on a little flag under the tip, as the setup's cursors have it.
-  flag: {
-    position: "absolute",
-    insetBlockStart: 26,
-    insetInlineStart: 14,
-    paddingBlock: 2,
-    paddingInline: 6,
-    whiteSpace: "nowrap",
-    backgroundColor: "currentColor",
-    clipPath: pixelCursor.steppedCorners,
-  },
-  name: {
-    color: colors.primaryForeground,
-    fontFamily: font.sans,
-    fontSize: font.textXs,
-    lineHeight: font.textXsLine,
-    fontWeight: font.weightMedium,
   },
   guide: {
     display: "flex",
@@ -296,19 +277,8 @@ const moveTo = async (
   to: Point,
   signal: AbortSignal
 ): Promise<void> => {
-  const flag = cursor.lastElementChild;
   const place = (at: Point): void => {
     cursor.style.transform = `translate3d(${at.x.toFixed(1)}px, ${at.y.toFixed(1)}px, 0)`;
-    // His name stays on screen: drawn in from the window's edge, above the tip near its foot.
-    if (flag instanceof HTMLElement) {
-      const over =
-        at.x + flag.offsetLeft + flag.offsetWidth - (window.innerWidth - 6);
-      const below =
-        at.y + flag.offsetTop + flag.offsetHeight - (window.innerHeight - 6);
-      const x = Math.min(0, -over);
-      const y = below > 0 ? -(flag.offsetTop + flag.offsetHeight + 4) : 0;
-      flag.style.transform = `translate(${x.toFixed(1)}px, ${y}px)`;
-    }
   };
   const far = Math.hypot(to.x - from.x, to.y - from.y);
   if (isStill() || far < 2) {
@@ -526,9 +496,6 @@ export const Guide = () => {
         >
           <Arrow />
         </svg>
-        <span {...stylex.props(styles.flag)}>
-          <span {...stylex.props(styles.name)}>Stephen</span>
-        </span>
       </div>
       <span {...stylex.props(visuallyHidden)}>
         {t`Step ${step} of ${total}`}
