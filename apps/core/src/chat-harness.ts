@@ -1765,16 +1765,21 @@ export class ChatHarness {
         turn.ended ||
         !this.#running ||
         requestOf(turn)?.turnId !== this.#active ||
-        typeof turn.startedAt !== "number" ||
         (Date.now() - this.#progressAt < turnIdleOf(this.#env) &&
-          Date.now() - turn.startedAt < turnMostMs)
+          // A turn an earlier release claimed says nothing of its start:
+          // only the idle limit holds for it.
+          (typeof turn.startedAt !== "number" ||
+            Date.now() - turn.startedAt < turnMostMs))
       ) {
         return;
       }
       log.warn("chat.turn_overdue", {
         chatSession: this.#name,
         turnId: requestOf(turn)?.turnId,
-        ms: Date.now() - turn.startedAt,
+        ms:
+          typeof turn.startedAt === "number"
+            ? Date.now() - turn.startedAt
+            : undefined,
         idleMs: Date.now() - this.#progressAt,
       });
       this.#stop("overdue");
