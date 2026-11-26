@@ -20,7 +20,6 @@ import {
 import { mockIdp } from "./idp.ts";
 import { linearConsentUrl, linearToolErrorUrl } from "./linear-service.ts";
 import { mailConnection, mailWithSearch } from "./mail-connection.ts";
-import { sampleKeyControlUrl } from "./sample-key-fake.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import {
   openRpc,
@@ -754,18 +753,8 @@ describe("a vendor's own error", slow, () => {
 describe("an app that isn't a connector", slow, () => {
   it("can't be started or connected with a key through core, though its key works at the app", async () => {
     const member = await signedInApi(idp, "user");
-    const internet = testBinding("CONNECT_PROVIDERS");
-    if (!isFetcher(internet)) {
-      throw new TypeError("Expected the providers Worker as CONNECT_PROVIDERS");
-    }
-    // The key would sign in at the app, were connect asked.
-    await internet.fetch(sampleKeyControlUrl, {
-      method: "POST",
-      body: JSON.stringify({
-        key: "sample-key-0001",
-        account: { id: "acct-1", name: "Acme", email: member.person.email },
-      }),
-    });
+    // The key would sign in at the app, were connect asked: its recorded
+    // answers take any key.
     const started = await outcome(
       member.api.connections.start({
         provider: "sample-key",

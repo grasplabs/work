@@ -21,6 +21,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./fixtures": "./src/fixtures.ts",
     "./inputs": "./src/inputs.ts",
     "./mirror": "./src/mirror.ts",
     "./openapi": "./src/openapi.ts",
