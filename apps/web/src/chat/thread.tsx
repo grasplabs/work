@@ -939,11 +939,18 @@ const Question = ({
 }) => {
   const answered =
     asked === undefined ? undefined : answeredOf(asked, message.text);
+  // Sent from here and not shown back yet: the files it carries, from the box.
+  const files =
+    sent?.files.map(({ id, file }) => ({
+      id,
+      name: file.name,
+      bytes: file.size,
+    })) ?? message.files;
   return (
     <Message align="end">
       <MessageContent>
-        {message.files === undefined || message.files.length === 0 ? null : (
-          <FileCards files={message.files} />
+        {files === undefined || files.length === 0 ? null : (
+          <FileCards files={files} />
         )}
         <Bubble align="end" variant="secondary">
           <BubbleContent>

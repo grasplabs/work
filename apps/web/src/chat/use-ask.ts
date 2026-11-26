@@ -28,6 +28,7 @@ import {
   isSending,
   questionRefused,
   questionSent,
+  refusedIn,
   sendBegan,
   sendEnded,
 } from "./sent-questions.ts";
@@ -204,6 +205,20 @@ export const useAsk = (
         : problems[0]
     );
   };
+  /**
+   * Takes box file `id` off its chat on core, where core took it already
+   * (a send that failed after it), so it holds none of the chat's places
+   * for files.
+   */
+  const removeAttached = (id: string): void => {
+    const known = attachedFiles.get(id);
+    attachedFiles.delete(id);
+    if (known !== undefined) {
+      void run(async (session) => {
+        await session.chats.removeFile(known.chatId, known.fileId);
+      });
+    }
+  };
   const removeFile = (id: string): void => {
     // Not while the question is on its way: its files are being attached
     // and named, so one taken out now would still be sent.
@@ -211,16 +226,8 @@ export const useAsk = (
       return;
     }
     setFiles((now) => now.filter((each) => each.id !== id));
-    // Core took it already (a send that failed after it): removed there
-    // too, so it holds none of the chat's places for files.
-    const known = attachedFiles.get(id);
-    attachedFiles.delete(id);
     setFileProblem(undefined);
-    if (known !== undefined) {
-      void run(async (session) => {
-        await session.chats.removeFile(known.chatId, known.fileId);
-      });
-    }
+    removeAttached(id);
   };
   /**
    * Asks `question`: true once core took it, false when it was not sent.
@@ -250,6 +257,15 @@ export const useAsk = (
     let shownIn: string | undefined;
     const show = (id: string): void => {
       shownIn = id;
+      // What the questions it drops (refused, and moved on from) had
+      // attached is taken off the chat again: nothing names it now.
+      for (const dropped of refusedIn(id)) {
+        if (dropped.key !== key) {
+          for (const { id: boxId } of dropped.files) {
+            removeAttached(boxId);
+          }
+        }
+      }
       sendBegan(id, key);
       // With its files and mentions, which Try again sends again with it.
       questionSent(id, {

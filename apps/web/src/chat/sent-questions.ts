@@ -91,6 +91,12 @@ export const questionSent = (chatId: string, question: SentQuestion): void => {
   changed(new Map(sent).set(chatId, [...others, question]));
 };
 
+/** The questions core refused in `chatId`, which the next one sent drops. */
+export const refusedIn = (chatId: string): readonly SentQuestion[] =>
+  (sent.get(chatId) ?? noQuestions).filter(
+    ({ failure }) => failure !== undefined
+  );
+
 /** Core refused question `key` in `chatId`: it stays, said not sent. */
 export const questionRefused = (
   chatId: string,

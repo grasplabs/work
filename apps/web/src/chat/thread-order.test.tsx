@@ -265,4 +265,29 @@ describe("the thread's order as a question is sent and answered", () => {
 
     expect(said()).toStrictEqual(["Question 1", "working", "Question 2"]);
   });
+
+  it("draws the files a question carries the moment it is sent, before core shows it back", async () => {
+    await opened({
+      messages: [],
+      sent: [
+        {
+          key: "5d2c3b4a-1e0f-4a9b-8c7d-6e5f4a3b2c1d",
+          text: "Question 1",
+          at: "2026-11-26T09:02:00.000Z",
+          behind: false,
+          files: [
+            {
+              id: "box-1",
+              file: new File(["revenue"], "revenue.csv", { type: "text/csv" }),
+            },
+          ],
+          mentions: [],
+        },
+      ],
+      partial: null,
+      running: false,
+    });
+
+    expect(rows()[0]?.textContent).toContain("revenue.csv");
+  });
 });
