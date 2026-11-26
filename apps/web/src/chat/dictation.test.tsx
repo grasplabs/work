@@ -374,16 +374,46 @@ describe("one dictation", () => {
     });
   });
 
-  it("stops when the line goes down mid-way", async () => {
-    const { told, mic, line } = await listening();
+  it("goes on when the line comes back after going down a moment, keeping what was heard before", async () => {
+    const { dictation, told, mic, line } = await listening();
 
     line.options.onLive(false);
+    line.options.onLive(true);
+    line.options.onPartial("are late");
+    const words = await dictation.finish();
 
     expect({
       problems: told.problems,
+      heard: told.heard,
+      words,
+      stopped: mic.stopped,
+    }).toStrictEqual({
+      problems: [],
+      heard: ["Which invoices", "Which invoices are late"],
+      words: "Which invoices Which invoices are late?",
+      stopped: true,
+    });
+  });
+
+  it("stops when the line goes down mid-way and doesn't come back in time", async () => {
+    const { told, mic, line } = await listening();
+
+    line.options.onLive(false);
+    vi.advanceTimersByTime(lineReadyMs - 1);
+    const before = [...told.problems];
+    vi.advanceTimersByTime(1);
+
+    expect({
+      before,
+      problems: told.problems,
       stopped: mic.stopped,
       closed: line.closed,
-    }).toStrictEqual({ problems: ["failed"], stopped: true, closed: true });
+    }).toStrictEqual({
+      before: [],
+      problems: ["failed"],
+      stopped: true,
+      closed: true,
+    });
   });
 
   it("stops when the line doesn't listen in time", async () => {

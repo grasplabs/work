@@ -39,7 +39,9 @@ const onboardingVoices = {
 
 /**
  * Each feature's provider and model: OpenAI's GPT-4o Transcribe writes
- * down speech, live and recorded; Mistral's Voxtral TTS 3 says an
+ * down a recording, and Mistral's Voxtral realtime transcription speech as
+ * it is said, live (`liveTranscription`: a dictation, an interview typed
+ * turn by turn); Mistral's Voxtral TTS 3 says an
  * interview's lines (`speech`), and ElevenLabs's Eleven v4 the admin's
  * onboarding (`onboardingSpeech`), each with its own voices; and Mistral
  * holds the interview itself. Its `line` model writes what the
@@ -54,6 +56,10 @@ const onboardingVoices = {
  */
 export const platformAi = {
   transcription: { provider: "openai", model: "gpt-4o-transcribe" },
+  liveTranscription: {
+    provider: "mistral",
+    model: "voxtral-mini-transcribe-realtime-2602",
+  },
   speech: {
     provider: "mistral",
     model: "voxtral-mini-tts-3-0",

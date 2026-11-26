@@ -32,9 +32,6 @@ export const writtenText = "Hello there";
 /** The delta a realtime stretch is first heard as. */
 export const partialText = "Hello";
 
-/** What a stretch settled at a pause (`{ pause: true }`) is written down as. */
-export const pausedText = "Before the pause";
-
 /** Bytes of samples the fake says for each character of a line, after its file's 44 of header. */
 export const speechBytesPerChar = 1440;
 
@@ -43,17 +40,15 @@ export const secondsPerCharacter = 0.03;
 
 /**
  * Where tests read the realtime sockets (GET: each one's opening, events,
- * audio bytes and close code, oldest first), and act as OpenAI on those
- * open: POST `{ close: code }` closes them, `{ error: code }` sends an
- * error event on them, and `{ pause: true }` settles the stretch so far at
- * a pause, as server VAD does, its transcript held back until after the
- * next commit's (`pausedText`).
+ * audio bytes and close code, oldest first), and act as Mistral on those
+ * open: POST `{ close: code }` closes them, and `{ error: code }` sends an
+ * error event on them.
  */
 export const realtimeControlUrl = "https://ai-providers-control.test/realtime";
 
 /** One realtime socket the fake took, as tests read it. */
 export interface RealtimeSocket {
-  /** The host it was opened at: OpenAI's EU host, or its US one. */
+  /** The host it was opened at: Mistral's. */
   host: string;
   path: string;
   authorization: string | null;
@@ -67,8 +62,6 @@ export interface RealtimeSocket {
   firstSamples: number[];
   /** How it closed, if it did: from core's side, or the fake's. */
   closed: number | null;
-  /** How many stretches it settled at a pause (`{ pause: true }`). */
-  paused: number;
 }
 
 /** Where tests plan replies (POST) and read the requests a key sent (GET). */
@@ -200,9 +193,13 @@ export const aiProvidersFake = () => {
   const realtime: {
     record: RealtimeSocket;
     /** What tests asked of it, done from its own request (`acting`). */
-    asked: ({ close: number } | { error: string } | { pause: true })[];
+    asked: ({ close: number } | { error: number })[];
   }[] = [];
-  /** A realtime transcription session, as OpenAI holds one. */
+  /**
+   * A realtime transcription session, as Mistral's Voxtral holds one: it
+   * says it was created, writes the first audio of a stretch down as
+   * `partialText`, and the rest (" there") when asked to flush.
+   */
   const openRealtime = (request: Request, url: URL): Response => {
     const { 0: client, 1: server } = new WebSocketPair();
     server.accept();
@@ -215,18 +212,15 @@ export const aiProvidersFake = () => {
       audioBytes: 0,
       firstSamples: [],
       closed: null,
-      paused: 0,
     };
-    const asked: ({ close: number } | { error: string } | { pause: true })[] =
-      [];
-    /** Items settled at a pause whose transcripts are still held back. */
-    const late: string[] = [];
+    const asked: ({ close: number } | { error: number })[] = [];
     realtime.push({ record, asked });
-    let items = 0;
-    let current: string | null = null;
+    /** Words of the stretch being said were written down already. */
+    let heard = false;
     const send = (event: Record<string, unknown>): void => {
       server.send(JSON.stringify(event));
     };
+    send({ type: "session.created", session: {} });
     // A socket is only used from the request it came with: what tests ask
     // of it is done from here, every few ms.
     const acting = setInterval(() => {
@@ -234,25 +228,8 @@ export const aiProvidersFake = () => {
         if ("close" in act) {
           record.closed ??= act.close;
           server.close(act.close, "");
-        } else if ("pause" in act) {
-          // Server VAD settles what was said so far, by itself.
-          if (current !== null) {
-            send({
-              type: "input_audio_buffer.speech_stopped",
-              item_id: current,
-            });
-            send({ type: "input_audio_buffer.committed", item_id: current });
-            late.push(current);
-            current = null;
-          }
-          record.paused += 1;
         } else {
-          server.send(
-            JSON.stringify({
-              type: "error",
-              error: { type: "server_error", code: act.error, message: "" },
-            })
-          );
+          send({ type: "error", error: { code: act.error, message: "" } });
         }
       }
     }, 10);
@@ -264,9 +241,9 @@ export const aiProvidersFake = () => {
       record.events.push(parsed.type);
       if (parsed.type === "session.update") {
         record.session = parsed.session;
-        send({ type: "session.updated" });
+        send({ type: "session.updated", session: parsed.session });
       } else if (
-        parsed.type === "input_audio_buffer.append" &&
+        parsed.type === "input_audio.append" &&
         typeof parsed.audio === "string"
       ) {
         const bytes = Uint8Array.from(
@@ -282,42 +259,13 @@ export const aiProvidersFake = () => {
         ) {
           record.firstSamples.push(view.getInt16(at, true));
         }
-        if (current === null) {
-          items += 1;
-          current = `item_${items}`;
-          send({
-            type: "conversation.item.input_audio_transcription.delta",
-            item_id: current,
-            delta: "Hello",
-          });
+        if (!heard) {
+          heard = true;
+          send({ type: "transcription.text.delta", text: "Hello" });
         }
-      } else if (parsed.type === "input_audio_buffer.commit") {
-        if (current === null) {
-          send({
-            type: "error",
-            error: {
-              type: "invalid_request_error",
-              code: "input_audio_buffer_commit_empty",
-              message: "Nothing in the buffer",
-            },
-          });
-          return;
-        }
-        send({ type: "input_audio_buffer.committed", item_id: current });
-        send({
-          type: "conversation.item.input_audio_transcription.completed",
-          item_id: current,
-          transcript: "Hello there",
-        });
-        current = null;
-        // What a pause settled before comes last: its transcript was late.
-        for (const item of late.splice(0)) {
-          send({
-            type: "conversation.item.input_audio_transcription.completed",
-            item_id: item,
-            transcript: "Before the pause",
-          });
-        }
+      } else if (parsed.type === "input_audio.flush" && heard) {
+        heard = false;
+        send({ type: "transcription.text.delta", text: " there" });
       }
     });
     server.addEventListener("close", (event) => {
@@ -479,6 +427,12 @@ export const aiProvidersFake = () => {
     body: string
   ): Response | undefined => {
     if (url.hostname === "api.mistral.ai") {
+      if (
+        url.pathname === "/v1/audio/transcriptions/realtime" &&
+        request.headers.get("upgrade") === "websocket"
+      ) {
+        return openRealtime(request, url);
+      }
       return request.method === "POST" && url.pathname === "/v1/audio/speech"
         ? spokenLine(body)
         : undefined;
@@ -496,12 +450,6 @@ export const aiProvidersFake = () => {
       url.hostname !== "eu.api.openai.com"
     ) {
       return undefined;
-    }
-    if (
-      url.pathname === "/v1/realtime" &&
-      request.headers.get("upgrade") === "websocket"
-    ) {
-      return openRealtime(request, url);
     }
     if (url.pathname === "/v1/audio/transcriptions") {
       // As OpenAI does: the audio's format by the file name's extension
@@ -554,10 +502,8 @@ export const aiProvidersFake = () => {
         }
         if (typeof parsed.close === "number") {
           asked.push({ close: parsed.close });
-        } else if (typeof parsed.error === "string") {
+        } else if (typeof parsed.error === "number") {
           asked.push({ error: parsed.error });
-        } else if (parsed.pause === true) {
-          asked.push({ pause: true });
         }
       }
       return new Response(null, { status: 204 });

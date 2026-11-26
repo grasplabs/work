@@ -29,7 +29,10 @@ import { jsonOf } from "../request-body.ts";
 import { isOwnOrigin } from "../rpc.ts";
 import { reachesWorkspace, sessionRecheckMs } from "../session-check.ts";
 import { auditStaffRoute } from "../staff-audit.ts";
-import { platformTranscription, transcriptionModel } from "../transcription.ts";
+import {
+  liveTranscriptionModel,
+  platformTranscription,
+} from "../transcription.ts";
 import { interviewCaller } from "./interview-caller.ts";
 import { onboardingStore } from "./store.ts";
 import type { Took, TranscriptionSessionNote } from "./store.ts";
@@ -596,7 +599,7 @@ class Relay {
     let listening: Listening;
     try {
       listening = await models(this.#env).listen({
-        model: transcriptionModel,
+        model: liveTranscriptionModel,
         seconds,
         // Open at most `maxOpenMs`, ended by the check after it.
         openMs: maxOpenMs + sessionRecheckMs,
