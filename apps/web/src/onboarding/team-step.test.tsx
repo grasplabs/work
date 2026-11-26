@@ -283,7 +283,9 @@ const send = async (): Promise<void> => {
 /** The text of the error the bar at the top says, if it says one: every error in the setup is said there. */
 const error = (): string | undefined =>
   document
-    .querySelector('[data-slot="alert"] [data-slot="alert-description"]')
+    .querySelector(
+      '[data-slot="top-error"]:not([inert]) [data-slot="alert-description"]'
+    )
     ?.textContent?.trim();
 
 // Browsers whose first language counts in another calendar. Safari writes

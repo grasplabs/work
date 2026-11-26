@@ -40,9 +40,11 @@ import type { AiReadiness } from "./setup.ts";
 
 const styles = stylex.create({
   stack: { display: "grid", gap: space[4], width: "100%" },
-  // The two ways as one list, as the connect step's permission answers stand.
+  // The two ways as one list, as the connect step's permission answers stand, on a solid card:
+  // the step's dither never shows through it (Ruben: "it shouldn't" be transparent).
   list: {
     display: "grid",
+    backgroundColor: colors.card,
     overflow: "hidden",
     borderWidth: 1,
     borderStyle: "solid",
@@ -60,7 +62,6 @@ const styles = stylex.create({
     borderTopStyle: "solid",
     borderTopColor: colors.border,
   },
-  chosen: { backgroundColor: colors.card },
   head: {
     display: "flex",
     flexWrap: "wrap",
@@ -343,11 +344,7 @@ export const AiChoice = ({
           {ways.map(({ value, label, description, recommended }, index) => (
             <div
               key={value}
-              {...stylex.props(
-                styles.way,
-                index > 0 && styles.between,
-                way === value && styles.chosen
-              )}
+              {...stylex.props(styles.way, index > 0 && styles.between)}
             >
               <Field orientation="horizontal">
                 <RadioGroupItem value={value} />

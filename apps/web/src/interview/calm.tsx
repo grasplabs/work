@@ -21,7 +21,13 @@ const styles = stylex.create({
     overflowY: "auto",
     boxSizing: "border-box",
     paddingInline: { default: space["4"], [media.sm]: space["10"] },
-    paddingBlock: { default: space["6"], [media.sm]: space["10"] },
+    paddingBlockStart: { default: space["6"], [media.sm]: space["10"] },
+    // As much again under it as the header takes above it, so its middle is the window's middle,
+    // not the middle of the room under the header.
+    paddingBlockEnd: {
+      default: `calc(4rem + ${space["6"]})`,
+      [media.sm]: `calc(5rem + ${space["10"]})`,
+    },
   },
   column: {
     display: "flex",
