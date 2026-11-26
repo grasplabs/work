@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import type {
-  ConnectionBrainAudience,
+  ConnectionAudience,
   SharedSyncPlaces,
 } from "@grasp-os/shared/connect";
 import { syncErrors } from "@grasp-os/shared/sync";
@@ -21,7 +21,7 @@ import type { CatalogConnection } from "./integrations.ts";
 import { SyncPlaces } from "./sync-places.tsx";
 
 // The places of a shared connection an admin picks to sync into the
-// Brain, on its card beside its Brain audience. These start from what an
+// Brain, on its card beside its audience. These start from what an
 // admin must not miss: that everyone in the audience will read everything
 // in a picked place, whatever the source lets them open, confirmed for
 // the audience held now; a save from a stale page undoing another admin's
@@ -56,15 +56,15 @@ const unreachable = "Grasp can't be reached right now.";
 /** What the admin ticks to confirm, for everyone in the company. */
 const everyoneReads = `Everyone in the company will be able to read everything in the places you pick, whatever their permissions in ${label}.`;
 
-/** The connection's Brain audience the card shows, for a test to change. */
-let audienceNow: ConnectionBrainAudience = { kind: "everyone" };
+/** The connection's audience the card shows, for a test to change. */
+let audienceNow: ConnectionAudience = { kind: "everyone" };
 const audienceListeners = new Set<() => void>();
 
 /**
  * The audience core holds, when another admin changed it behind the
  * card: the card shows it once it reads the audiences again.
  */
-let heldByCore: ConnectionBrainAudience | undefined;
+let heldByCore: ConnectionAudience | undefined;
 let audienceReads = 0;
 
 /** The card reads the audiences again: it shows what core holds. */
@@ -77,9 +77,7 @@ const audienceReadAgain = (): void => {
 };
 
 /** Has core hold `audience` now, as the card beside the picker reads it. */
-const audienceChosen = async (
-  audience: ConnectionBrainAudience
-): Promise<void> => {
+const audienceChosen = async (audience: ConnectionAudience): Promise<void> => {
   await act(async () => {
     audienceNow = audience;
     for (const listener of audienceListeners) {
@@ -150,7 +148,7 @@ const shown = async (
         feed: string;
         from: string[];
         places: string[];
-        acknowledged?: ConnectionBrainAudience;
+        acknowledged?: ConnectionAudience;
       }) => {
         asked.push(["pickSyncPlaces", request]);
         await Promise.resolve();

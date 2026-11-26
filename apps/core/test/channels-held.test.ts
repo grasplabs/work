@@ -122,7 +122,9 @@ describe("a Teams turn that holds writes", setUpTime, () => {
     const admin = await signedInApi(idp, "admin");
     // A send whose fields its server lists, so core can check a chat
     // app's write against them (channels/stephen-rules.ts).
-    const mail = await mailConnection([], ["MAIL_SEND"]);
+    const mail = await mailConnection([], ["MAIL_SEND"], {
+      audience: "everyone",
+    });
     const binding = `MAIL${unique()}`.toUpperCase();
     await requestGranted(idp, admin, {
       subject: { type: "agent", agentId: chatAgentId },
@@ -199,7 +201,9 @@ describe("a Teams turn that holds writes", setUpTime, () => {
 
   it("still gets its card, and the line that something went wrong, when Teams refuses a part of a long answer, and nothing is posted twice", async () => {
     const admin = await signedInApi(idp, "admin");
-    const mail = await mailConnection([], ["MAIL_SEND"]);
+    const mail = await mailConnection([], ["MAIL_SEND"], {
+      audience: "everyone",
+    });
     const binding = `MAIL${unique()}`.toUpperCase();
     await requestGranted(idp, admin, {
       subject: { type: "agent", agentId: chatAgentId },

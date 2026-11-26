@@ -115,7 +115,9 @@ const payroll = "app-read:payroll";
 const setUp = async (subject: PermissionSubjectInput = newAgent()) => {
   const admin = await personOf("admin");
   await requestGranted(idp, admin, outlook(subject));
-  const mail = await mailConnection();
+  const mail = await mailConnection([], ["mail.send"], {
+    audience: "everyone",
+  });
   await requestGranted(idp, admin, {
     subject,
     object: { type: "connection", connectionId: mail.id },

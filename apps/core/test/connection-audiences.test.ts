@@ -1,5 +1,5 @@
 import { recallBudgetMax } from "@grasp-os/brain-next/contract";
-import type { ConnectionBrainAudience } from "@grasp-os/shared/connect";
+import type { ConnectionAudience } from "@grasp-os/shared/connect";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -192,7 +192,7 @@ describe("a shared connection's Brain audience", setUpTime, () => {
       kind: "team",
       teamId: sales,
     });
-    const audiences = await admin.api.connections.brainAudiences();
+    const audiences = await admin.api.connections.audiences();
 
     expect({
       before,
@@ -386,7 +386,7 @@ describe("a shared connection's Brain audience", setUpTime, () => {
           teamId: crypto.randomUUID(),
         })
       ),
-      listedByMember: await outcome(member.api.connections.brainAudiences()),
+      listedByMember: await outcome(member.api.connections.audiences()),
     };
     const events = await auditedDuring(async () => {
       await chooseAudience(admin.api, shared, forSales);
@@ -398,7 +398,7 @@ describe("a shared connection's Brain audience", setUpTime, () => {
       await chooseAudience(admin.api, shared, { kind: "nobody" });
       await chooseAudience(admin.api, shared, { kind: "nobody" });
     });
-    const audiences = await admin.api.connections.brainAudiences();
+    const audiences = await admin.api.connections.audiences();
 
     expect({
       refused,
@@ -445,12 +445,12 @@ describe("a shared connection's Brain audience", setUpTime, () => {
     const forSales = { kind: "team", teamId: sales } as const;
     const forSupport = { kind: "team", teamId: support } as const;
     const set = async (
-      next: ConnectionBrainAudience,
-      from: ConnectionBrainAudience,
-      acknowledged?: ConnectionBrainAudience
+      next: ConnectionAudience,
+      from: ConnectionAudience,
+      acknowledged?: ConnectionAudience
     ): Promise<string> =>
       await outcome(
-        admin.api.connections.setBrainAudience(
+        admin.api.connections.setAudience(
           shared,
           next,
           from,
@@ -546,14 +546,14 @@ describe("a shared connection's Brain audience", setUpTime, () => {
     // choosing a team from there is refused too, never a silent opening.
     await chooseAudience(second.api, connectionId, { kind: "nobody" });
     const stale = await outcome(
-      first.api.connections.setBrainAudience(
+      first.api.connections.setAudience(
         connectionId,
         { kind: "team", teamId: support },
         { kind: "team", teamId: sales },
         { kind: "team", teamId: support }
       )
     );
-    const audiences = await first.api.connections.brainAudiences();
+    const audiences = await first.api.connections.audiences();
 
     expect({
       refused,
@@ -567,8 +567,8 @@ describe("a shared connection's Brain audience", setUpTime, () => {
         .filter((each) => each.connectionId === connectionId)
         .map(({ audience }) => audience),
     }).toStrictEqual({
-      refused: "connection.brain_audience_changed",
-      stale: "connection.brain_audience_changed",
+      refused: "connection.audience_changed",
+      stale: "connection.audience_changed",
       events: [
         {
           actor: { type: "person", userId: second.userId },

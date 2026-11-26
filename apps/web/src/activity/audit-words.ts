@@ -477,7 +477,7 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   },
   {
     action: "brain.connection_audience.changed",
-    text: msg`Changed who reads what a shared connection brings into the Brain`,
+    text: msg`Changed who may use a shared connection`,
   },
   {
     action: "brain.gap.answerer_erased",

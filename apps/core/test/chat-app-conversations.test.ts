@@ -589,9 +589,10 @@ describe("a conversation with the agent in Teams", setUpTime, () => {
       says("Only the shared one.")
     );
     const { userId, teams } = await memberAnsweredBy(idp, provider);
+    // A shared one everyone may use: called with no request, in Teams too.
     const [own, shared] = await Promise.all([
       mailConnection([], ["mail.search"], { owner: userId }),
-      mailConnection([], ["mail.search"]),
+      mailConnection([], ["mail.search"], { audience: "everyone" }),
     ]);
 
     await post(messageFrom(teams, { text: "Find the invoice in my mail." }));

@@ -1,8 +1,7 @@
-import { connectionOwnersMax } from "@grasp-os/shared/connect";
 import { log } from "@grasp-os/shared/log";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 
-import { connectionGrants } from "./agent-connections.ts";
+import { usableConnections } from "./agent-connections.ts";
 import { auditedCall, chatAuthority, requireOpenRun } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { forSandbox } from "./bindings.ts";
@@ -17,6 +16,7 @@ import type {
   SkillsReach,
   SkillVersion,
 } from "./brain-skills.ts";
+import { connectionOwnersOf } from "./connections.ts";
 import { heldNothing } from "./skill-needs.ts";
 import type { HeldCapabilities } from "./skill-needs.ts";
 
@@ -37,43 +37,25 @@ import type { HeldCapabilities } from "./skill-needs.ts";
 
 /**
  * What the chat's agent holds now, as a skill's needs are met against it
- * (skill-needs.ts): the providers of the active connections its
- * permissions here cover, and the actions those permissions give on them.
- * Holds nothing when that can't be read (connect out of reach): a skill
- * that needs anything is then left out, never given.
+ * (skill-needs.ts): the providers of the active connections it may use
+ * for its person here, granted or with no grant (`usableConnections`,
+ * what `env.connections.list()` lists), and the actions it may call on
+ * them. Holds nothing when that can't be read (connect out of reach): a
+ * skill that needs anything is then left out, never given.
  */
 export const heldBy = async (
   env: Env,
   scope: Omit<AgentScope, "runId">
 ): Promise<HeldCapabilities> => {
   try {
-    const grants = await connectionGrants(env, scope);
-    const ids = [
-      ...new Set(grants.map(({ connection }) => connection.connectionId)),
-    ];
-    const active = new Map<string, string>();
-    for (let at = 0; at < ids.length; at += connectionOwnersMax) {
-      // oxlint-disable-next-line no-await-in-loop -- a few batches, in order
-      const owners = await env.CONNECT.connectionOwners(
-        ids.slice(at, at + connectionOwnersMax)
-      );
-      for (const { id, provider, status } of owners) {
-        if (status === "active") {
-          active.set(id, provider);
-        }
-      }
-    }
-    const held = grants.filter(({ connection }) =>
-      active.has(connection.connectionId)
-    );
+    const usable = await usableConnections(env, scope);
+    const held = usable.filter(({ active }) => active);
+    const owners = await connectionOwnersOf(env, [
+      ...new Set(held.map(({ connection }) => connection.connectionId)),
+    ]);
     return {
-      connections: new Set(
-        held.flatMap(({ connection }) => {
-          const provider = active.get(connection.connectionId);
-          return provider === undefined ? [] : [provider];
-        })
-      ),
-      tools: new Set(held.flatMap(({ actions }) => actions)),
+      connections: new Set(owners.map(({ provider }) => provider)),
+      tools: new Set(held.flatMap(({ connection }) => connection.actions)),
     };
   } catch (error) {
     log.warn("skills.held_unavailable", {

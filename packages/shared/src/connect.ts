@@ -998,27 +998,27 @@ export interface ConnectionsApi extends StephenReachApi, AgentsApi {
     audience: ToolClassAudience
   ) => Promise<void>;
   /**
-   * The shared connections an admin chose who may read in the Brain what
-   * agents read through them (GRA-1831), and for whom, and those whose
-   * kept reads are being erased. Admins only.
+   * The shared connections an admin chose an audience for (GRA-2322), and
+   * which, and those whose kept reads are being erased. Admins only.
    */
-  brainAudiences: () => Promise<ConnectionBrainAudienceSetting[]>;
+  audiences: () => Promise<ConnectionAudienceSetting[]>;
   /**
-   * Chooses who may read in the Brain what agents read through the shared
-   * connection `connectionId`: one team, everyone, or nobody. Admins only,
+   * Chooses the audience of the shared connection `connectionId`, the one
+   * group that may use it and read what came from it, in chat, through the
+   * Apps that hold it and in the Brain: one team, everyone, or nobody. Admins only,
    * never Grasp staff; audited. Refused (`connection.brain_erasing`) while
    * what the Brain kept of it is being erased. `from` is the audience the
-   * admin was looking at: refused (`connection.brain_audience_changed`),
+   * admin was looking at: refused (`connection.audience_changed`),
    * with nothing changed, once another is held. A change that lets anyone
    * read who couldn't before is refused (`sync.unacknowledged`) unless
    * `acknowledged` is `audience`: the admin confirmed it reads everything
    * the connection brings, whatever the source's permissions (GRA-2207).
    */
-  setBrainAudience: (
+  setAudience: (
     connectionId: string,
-    audience: ConnectionBrainAudience,
-    from: ConnectionBrainAudience,
-    acknowledged?: ConnectionBrainAudience
+    audience: ConnectionAudience,
+    from: ConnectionAudience,
+    acknowledged?: ConnectionAudience
   ) => Promise<void>;
   /**
    * Erases everything the Brain kept from the shared connection
@@ -1052,13 +1052,13 @@ export interface ConnectionsApi extends StephenReachApi, AgentsApi {
     from: string[];
     places: string[];
     /**
-     * The connection's Brain audience the admin confirmed will read
+     * The connection's audience the admin confirmed will read
      * everything in the places picked, whatever the source's permissions
      * (GRA-2207). Needed when the save picks a place `from` doesn't hold,
      * and it must be the audience held now: else refused
      * (`sync.unacknowledged`), with nothing changed.
      */
-    acknowledged?: ConnectionBrainAudience;
+    acknowledged?: ConnectionAudience;
   }) => Promise<void>;
 }
 
@@ -1494,25 +1494,25 @@ export const sharedMailboxSchema = z
   .transform((mailbox) => mailbox.toLowerCase());
 
 /**
- * Who may read in the Brain what agents read through a shared connection
- * (GRA-1831), as an admin chooses: nobody, which it is until one chooses,
- * one team, or everyone in the company. The choice an uploaded document
- * has, but never one person: the connection is the company's.
+ * A shared connection's audience (GRA-2322), as an admin chooses it: the
+ * one group that may use the connection and read what came from it, in
+ * chat, through the Apps that hold it and in the Brain. Nobody, which it is until
+ * one chooses, one team, or everyone in the company. The choice an
+ * uploaded document has, but never one person: the connection is the
+ * company's.
  */
-export const connectionBrainAudienceSchema = z.discriminatedUnion("kind", [
+export const connectionAudienceSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("nobody") }),
   z.strictObject({ kind: z.literal("team"), teamId: identifierSchema }),
   z.strictObject({ kind: z.literal("everyone") }),
 ]);
-export type ConnectionBrainAudience = z.infer<
-  typeof connectionBrainAudienceSchema
->;
+export type ConnectionAudience = z.infer<typeof connectionAudienceSchema>;
 
-/** A shared connection's Brain audience, as an admin last chose it. */
-export interface ConnectionBrainAudienceSetting {
+/** A shared connection's audience, as an admin last chose it. */
+export interface ConnectionAudienceSetting {
   connectionId: string;
-  /** Who may read it now: nobody while an erasure is under way. */
-  audience: ConnectionBrainAudience;
+  /** Who may use it now: nobody while an erasure is under way. */
+  audience: ConnectionAudience;
   /**
    * Whether what the Brain kept of it is being erased: no audience can
    * be chosen until that has ended.
@@ -2753,10 +2753,10 @@ export interface ConnectApi
 /** Why connecting or disconnecting an account didn't work. */
 export const connectionErrors = defineErrorFamily({
   "connection.invalid": "That isn't a valid connection request.",
-  "connection.brain_audience_changed":
-    "Who may read this in the Brain was changed in the meantime. Look at it again before you change it.",
+  "connection.audience_changed":
+    "Who may use this connection was changed in the meantime. Look at it again before you change it.",
   "connection.brain_erasing":
-    "What the Brain kept from this connection is still being erased. Choose who may read it once that is done.",
+    "What the Brain kept from this connection is still being erased. Choose who may use it once that is done.",
   "connection.provider_unavailable":
     "Connecting this provider isn't set up for this deployment.",
   "connection.flow_invalid":
