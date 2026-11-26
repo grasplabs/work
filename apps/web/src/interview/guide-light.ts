@@ -1,33 +1,28 @@
-// The guide's light (guide.tsx): Stephen's dither pooling round the one
-// control the guide is telling about, on a canvas over the whole window
-// that never catches a press. It is the system's own dither (Bayer's 4×4,
-// 2px squares on a 3px pitch, as the header's texture and the voice's
-// hill), brightest at the control's edge and thinning out to nothing, so
-// it has no edge of its own; the control itself stays clear, a small gap
-// round it, so nothing it says is drawn over. Moved to the next control,
-// the light glides there, its squares lighting and going out as it passes
-// over the window's fixed grid; it breathes, slowly, while it rests. With
-// reduced motion it jumps and holds still. Read from the page at each
-// frame (where the control is, in what colour), never through React.
+// The guide's mark (guide.tsx): a fine line of the system's dither round
+// the one control Stephen is telling about, on a canvas over the whole
+// window that never catches a press. Bayer's 4×4, 2px squares on a 3px
+// pitch, as the header's texture and the voice's hill: one row a little
+// apart from the control, thinned by the threshold so it reads as a quiet
+// dotted outline, and one fainter row outside it so its edge is soft. No
+// glow, no fill: the control itself stays as it is. Aimed at the next
+// control, the outline glides there and takes its shape on the way; aimed
+// at nothing, it fades. With reduced motion it jumps. Read from the page at
+// each frame (where the control is, in what colour), never through React.
 import { BAYER_MATRIX } from "@grasp-os/ui/lib/utils";
 
 /** The grid: one square every PITCH pixels, DOT across. */
 const PITCH = 3;
 const DOT = 2;
-/**
- * How far the light reaches from the control's edge, at most and at least
- * (a small control's light stays its own, clear of its neighbours), and
- * the clear gap kept round it, in px.
- */
-const REACH = 56;
-const REACH_MIN = 26;
-const GAP = 3;
-/** How quickly the light follows to the next control, and fades in or out: a time constant, in ms. */
-const FOLLOW_MS = 130;
-const FADE_MS = 220;
-/** One slow breath, in ms, and how deep it goes. */
-const BREATH_MS = 3600;
-const BREATH = 0.14;
+/** The clear gap kept round the control, the outline's row, the faint row outside it, in px. */
+const GAP = 4;
+const LINE = 3;
+const EDGE = 3;
+/** How much of each row is lit: the outline, and its soft edge. */
+const LINE_LEVEL = 0.62;
+const EDGE_LEVEL = 0.2;
+/** How quickly the outline follows to the next control, and fades in or out: a time constant, in ms. */
+const FOLLOW_MS = 120;
+const FADE_MS = 200;
 
 /** Bayer's threshold for a cell, 0 to 1: the system's one dither. */
 const threshold = (column: number, row: number): number =>
@@ -64,13 +59,13 @@ const approach = (from: number, to: number, step: number): number =>
   from + (to - from) * step;
 
 export interface Light {
-  /** Where the light goes: a control, or nowhere (it fades). */
+  /** Where the outline goes: a control, or nowhere (it fades). */
   aim: (target: Element | null) => void;
   stop: () => void;
 }
 
 /**
- * Lights `canvas` (fixed over the window) round the control it is aimed
+ * Outlines, on `canvas` (fixed over the window), the control it is aimed
  * at, in the colour `colour` reads, until stopped; `still` under reduced
  * motion.
  */
@@ -101,6 +96,32 @@ export const startLight = (
     return ratio;
   };
 
+  const paintBox = (box: Box, strength: number): void => {
+    if (context === null) {
+      return;
+    }
+    const radius = Math.min(box.h / 2, box.w / 2, 12);
+    const reach = GAP + LINE + EDGE;
+    context.fillStyle = paint;
+    const fromColumn = Math.max(0, Math.floor((box.x - reach) / PITCH));
+    const toColumn = Math.ceil((box.x + box.w + reach) / PITCH);
+    const fromRow = Math.max(0, Math.floor((box.y - reach) / PITCH));
+    const toRow = Math.ceil((box.y + box.h + reach) / PITCH);
+    for (let row = fromRow; row <= toRow; row += 1) {
+      for (let column = fromColumn; column <= toColumn; column += 1) {
+        const x = column * PITCH;
+        const y = row * PITCH;
+        const away = outside(x + DOT / 2, y + DOT / 2, box, radius) - GAP;
+        if (away >= 0 && away < LINE + EDGE) {
+          const level = (away < LINE ? LINE_LEVEL : EDGE_LEVEL) * strength;
+          if (level > threshold(column, row)) {
+            context.fillRect(x, y, DOT, DOT);
+          }
+        }
+      }
+    }
+  };
+
   const draw = (now: number): void => {
     frame = requestAnimationFrame(draw);
     if (context === null) {
@@ -110,7 +131,7 @@ export const startLight = (
     const dt = Math.min(80, now - last);
     last = now;
     const aimed = target === null ? null : boxOf(target);
-    // Follows the control as it is now: a layout that moves takes the light with it.
+    // Follows the control as it is now: a layout that moves takes the outline with it.
     if (aimed !== null) {
       if (shown === null || still || alpha < 0.02) {
         shown = { ...aimed };
@@ -132,14 +153,10 @@ export const startLight = (
       paint = colour();
       paintAt = now;
     }
-    const breath = still
-      ? 1
-      : 1 - BREATH + BREATH * Math.sin((now / BREATH_MS) * Math.PI * 2);
-    const strength = alpha * breath;
     const key =
       shown === null
         ? "none"
-        : `${shown.x.toFixed(1)},${shown.y.toFixed(1)},${shown.w.toFixed(1)},${shown.h.toFixed(1)},${strength.toFixed(3)},${paint}`;
+        : `${shown.x.toFixed(1)},${shown.y.toFixed(1)},${shown.w.toFixed(1)},${shown.h.toFixed(1)},${alpha.toFixed(3)},${paint}`;
     // Nothing moved: nothing to draw again.
     if (key === drawn) {
       return;
@@ -147,33 +164,8 @@ export const startLight = (
     drawn = key;
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, window.innerWidth, window.innerHeight);
-    if (shown === null || strength < 0.01) {
-      return;
-    }
-    const box = shown;
-    const radius = Math.min(box.h / 2, box.w / 2, 18);
-    const reach = Math.max(
-      REACH_MIN,
-      Math.min(REACH, Math.min(box.w, box.h) * 0.9)
-    );
-    context.fillStyle = paint;
-    const fromColumn = Math.max(0, Math.floor((box.x - reach) / PITCH));
-    const toColumn = Math.ceil((box.x + box.w + reach) / PITCH);
-    const fromRow = Math.max(0, Math.floor((box.y - reach) / PITCH));
-    const toRow = Math.ceil((box.y + box.h + reach) / PITCH);
-    for (let row = fromRow; row <= toRow; row += 1) {
-      for (let column = fromColumn; column <= toColumn; column += 1) {
-        const x = column * PITCH;
-        const y = row * PITCH;
-        const away = outside(x + DOT / 2, y + DOT / 2, box, radius) - GAP;
-        if (away < 0 || away > reach) {
-          continue;
-        }
-        const level = (1 - away / reach) ** 1.8 * strength;
-        if (level > threshold(column, row)) {
-          context.fillRect(x, y, DOT, DOT);
-        }
-      }
+    if (shown !== null && alpha >= 0.01) {
+      paintBox(shown, alpha);
     }
   };
 

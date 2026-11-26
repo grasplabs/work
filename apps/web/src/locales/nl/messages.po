@@ -3923,8 +3923,8 @@ msgid "Before meetings"
 msgstr "Voor vergaderingen"
 
 #: src/interview/guide.tsx
-msgid "Before we start, a quick look around. You can just talk to me like you would to a colleague. Prefer to type? That works just as well."
-msgstr "Voordat we beginnen, even een korte rondleiding. Je kunt gewoon tegen me praten, zoals tegen een collega. Typ je liever? Dat kan net zo goed."
+msgid "Before we start, a quick look around. You can just talk to me like you would to a colleague."
+msgstr "Voordat we beginnen, even een korte rondleiding. Je kunt gewoon tegen me praten, zoals tegen een collega."
 
 #: src/apps/data-model-changes.tsx
 msgid "Before you make this change"
@@ -5379,7 +5379,6 @@ msgstr "Context"
 msgid "Context used"
 msgstr "Gebruikte context"
 
-#: src/interview/guide.tsx
 #: src/interview/rating.tsx
 #: src/interview/start.tsx
 #: src/onboarding/company-step.tsx
@@ -13966,6 +13965,14 @@ msgstr "Positie"
 msgid "Prague"
 msgstr "Praag"
 
+#: src/interview/guide.tsx
+msgid "Prefer to type? It’s right here."
+msgstr "Liever typen? Dat kan hier."
+
+#: src/interview/guide.tsx
+msgid "Prefer to type? Just press here—that works just as well."
+msgstr "Typ je liever? Druk dan hier, dat werkt net zo goed."
+
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Preference"
@@ -16660,7 +16667,6 @@ msgctxt "the Brain's skills page"
 msgid "Skills"
 msgstr "Skills"
 
-#: src/interview/guide.tsx
 #: src/onboarding/plan-story.tsx
 msgid "Skip"
 msgstr "Overslaan"
