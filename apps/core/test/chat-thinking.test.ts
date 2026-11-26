@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { resolverOf, showThinking } from "../src/agent-thinking.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { personalChatsOf, says, transcript } from "./agent-chat.ts";
+import { callTool, personalChatsOf, says, transcript } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
 import { aloneInTheStore, answering, onLink } from "./interview-link.ts";
 import type { Answer } from "./model-provider.ts";
@@ -197,7 +197,7 @@ describe("a step of thinking, checked", () => {
     });
     const shown = async (): Promise<unknown> => {
       try {
-        const { details } = await tool.execute("call", {
+        const { details } = await callTool(tool, "call", {
           step: "Reading the teams.",
           shape: "same-pain",
           move: "teams",

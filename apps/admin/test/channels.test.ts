@@ -25,6 +25,7 @@ import {
 import { parallelDeploys } from "../src/rollout/desired.ts";
 import { RolloutError } from "../src/rollout/errors.ts";
 import { reconcile } from "../src/rollout/reconciler.ts";
+import { channelReleases } from "../src/rollout/targets.ts";
 import { adminWorkflows } from "../src/workflow-runs.ts";
 import type { ApiCall } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
@@ -37,6 +38,7 @@ import {
   scriptsOf,
 } from "./placed.ts";
 import { racingDb } from "./racing-db.ts";
+import { onPi } from "./releases.ts";
 import { ended, followAdminRuns } from "./runs.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
@@ -47,6 +49,8 @@ import { useStoreSecrets } from "./secrets-store.ts";
 // - a new release never reaching Edge, or reaching clients beyond it;
 // - a promotion deploying a pinned client;
 // - a release skipping a channel;
+// - a channel set back to a release that can't read the chats its
+//   clients store;
 // - deploys going on in a channel after one failed, or never again once
 //   staff retry;
 // - a release that reaches Edge while Edge deploys, dropped;
@@ -311,6 +315,37 @@ describe("release channels", () => {
       skipping: "promotion_not_allowed",
       promoted: on(release),
       rolledBack: on(previous),
+    });
+  });
+
+  it("refuses to set a channel back to a release that can't read the chats its release stores, leaving its clients where they are", async () => {
+    const previous = await placedRelease("feat(core): pi 1.4", onPi("1.4.2"));
+    const client = await live("beta", previous);
+    await using runs = followRuns();
+    await promoteTo("beta", previous);
+    const release = await placedRelease("chore(deps): pi 1.6", onPi("1.6.1"));
+    await promoteTo("beta", release);
+    await runs.converge();
+
+    const back = await promoteRelease(env, staff, {
+      channel: "beta",
+      releaseId: previous,
+    }).then(
+      () => null,
+      (error: unknown) => (error instanceof RolloutError ? error.code : error)
+    );
+    await runs.converge();
+
+    const pointing = await channelReleases(db);
+
+    expect({
+      back,
+      channel: pointing.beta,
+      runs: await releasesOf(client.clientId),
+    }).toStrictEqual({
+      back: "channel_behind_chat_storage",
+      channel: release,
+      runs: on(release),
     });
   });
 

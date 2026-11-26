@@ -14,6 +14,7 @@ import { platformSpeech } from "../src/speech.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import {
+  askingTasks,
   askingWorkflow,
   endedRun,
   jsonWorkflowAppsOf,
@@ -43,7 +44,7 @@ import { outcome, signedInApi } from "./sign-in.ts";
 
 const idp = mockIdp();
 
-const mistral = "mistral/mistral-large-latest";
+const mistral = "mistral/mistral-large-2512";
 const anthropic = "anthropic/claude-sonnet-4-5";
 
 /** Priced in tiers: twice the input and half again the output past 272K. */
@@ -278,7 +279,7 @@ describe("model spend", { timeout: 60_000 }, () => {
     const ada = { type: "person", userId: builder.userId } as const;
     // A run of an independent workflow Ada started, asking Mistral Large
     // for her.
-    const { id } = await askingWorkflow(admin, builder);
+    const { id } = await askingWorkflow(admin, builder, askingTasks(), mistral);
     const run = await endedRun(builder, id, await startedBy(builder, id));
     const forAda = [
       hello({
