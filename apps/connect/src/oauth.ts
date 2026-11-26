@@ -12,6 +12,7 @@ import {
   connectWithKeySchema,
   disconnectPersonalSchema,
   disconnectSchema,
+  anyTenant,
   finishConnectionSchema,
   flowReturnSchema,
   oauthFlowLifetimeMs,
@@ -332,11 +333,15 @@ export const startConnection = async (
   // A suite's flow is pinned to the organization's tenant; an app's has
   // none, so it is always "" (`isTenant`).
   const tenant = provider.pinned ? (rest.tenant ?? "").toLowerCase() : "";
+  // A directory's flow for any organization signs in where the provider
+  // offers them all; the one it is for comes with its tokens.
+  const open = tenant === anyTenant ? provider.openTenant : undefined;
+  const at = open === undefined ? tenant : open.at;
   // An MCP server's client is the deployment's own, registered with its
   // own callback (mcp-discovery.ts): never through a relay.
   const relay = isConnectorId(provider.id) ? undefined : callbackOrigin;
   if (
-    !provider.isTenant(tenant) ||
+    !(provider.isTenant(tenant) || open !== undefined) ||
     // Only a stage's relay, for a client hosted in that same stage.
     (relay !== undefined && relayedClientOf(origin, relay) === null)
   ) {
@@ -370,9 +375,9 @@ export const startConnection = async (
     "oauth_flows.user_id"
   );
 
-  const url = new URL(provider.authorizationEndpoint(tenant));
+  const url = new URL(provider.authorizationEndpoint(at));
   const params = {
-    ...provider.authorizationParams(tenant),
+    ...provider.authorizationParams(at),
     response_type: "code",
     client_id: client.id,
     redirect_uri: redirectUri,
@@ -1238,6 +1243,29 @@ const liveConnectionIds = async (
 };
 
 /**
+ * How a flow for any organization (`anyTenant`) signs in: its provider's
+ * `openTenant`; null for a provider that has none; undefined for a flow
+ * pinned to one.
+ */
+const openOf = (
+  provider: OAuthProviderConfig,
+  { tenant }: Pick<FlowRow, "tenant">
+): OAuthProviderConfig["openTenant"] | null =>
+  tenant === anyTenant ? (provider.openTenant ?? null) : undefined;
+
+/**
+ * The flow as its tokens are held to it: for any organization, the one
+ * they name. None named, or not one of the provider's kind: no account is
+ * in "", so the account check refuses them (`connection.wrong_account`).
+ */
+const heldTo = <Flow extends Pick<FlowRow, "tenant">>(
+  open: OAuthProviderConfig["openTenant"],
+  flow: Flow,
+  tokens: TokenSet
+): Flow =>
+  open === undefined ? flow : { ...flow, tenant: open.of(tokens) ?? "" };
+
+/**
  * Stops the connections of a directory made before `connectionId`, just
  * made (GRA-2171). The directory is read through one connection, and an
  * admin who connects it again with another account (an administrator's
@@ -1277,6 +1305,10 @@ const replaceEarlierDirectories = async (
     .where(
       and(
         eq(connections.provider, made.provider),
+        // Only the same organization's: another company's account is one more list.
+        made.tenant === null
+          ? isNull(connections.tenant)
+          : eq(connections.tenant, made.tenant),
         ne(connections.id, connectionId),
         ne(connections.status, "disconnected"),
         lt(connections.createdAt, made.createdAt)
@@ -1373,9 +1405,16 @@ const finishFlow = async (
     throw connectionErrors.create("connection.provider_refused");
   }
 
+  // A flow for any organization: exchanged where it signed in, then held,
+  // as a pinned flow is, to the organization its tokens name.
+  const open = openOf(provider, flow);
+  if (open === null) {
+    await refuse("connection.flow_invalid");
+    throw connectionErrors.create("connection.flow_invalid");
+  }
   let tokens: TokenSet;
   try {
-    tokens = await exchangeCode(provider, client, flow.tenant, {
+    tokens = await exchangeCode(provider, client, open?.at ?? flow.tenant, {
       code,
       redirectUri: flow.redirectUri,
       verifier: await vault.open(flow.verifier, flowContext(flow.stateHash)),
@@ -1398,7 +1437,7 @@ const finishFlow = async (
   const connectionId = await keepTokens(
     env,
     setUp,
-    flow,
+    heldTo(open, flow, tokens),
     person,
     tokens,
     refuse

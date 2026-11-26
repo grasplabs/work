@@ -62,7 +62,6 @@ msgstr "{0} actions"
 msgid "{0} didn't connect"
 msgstr "{0} n'a pas été relié"
 
-#. placeholder {0}: account.tenant
 #. placeholder {0}: suiteNames[from]
 #: src/onboarding/company-step.tsx
 msgid "{0} is connected"
@@ -2456,8 +2455,12 @@ msgid "Add another"
 msgstr "En ajouter une autre"
 
 #: src/onboarding/company-step.tsx
-msgid "Add another Microsoft or Google account"
-msgstr "Ajouter un autre compte Microsoft ou Google"
+msgid "Add another Google account"
+msgstr "Ajouter un autre compte Google"
+
+#: src/onboarding/company-step.tsx
+msgid "Add another Microsoft account"
+msgstr "Ajouter un autre compte Microsoft"
 
 #: src/agents/setup/apps-step.tsx
 #: src/connections/add-connector.tsx
@@ -3067,8 +3070,8 @@ msgid "Anonymous"
 msgstr "Anonyme"
 
 #: src/onboarding/company-step.tsx
-msgid "Another {signIn} account is connected"
-msgstr "Un autre compte {signIn} est connecté"
+msgid "Another {signIn} account"
+msgstr "Un autre compte {signIn}"
 
 #: src/agents/new-agent.tsx
 msgid "Another agent has this name"
@@ -5102,7 +5105,6 @@ msgstr "Confirmé. Continue."
 #: src/connections/app/words.ts
 #: src/connections/integration-item.tsx
 #: src/connections/request-app-dialog.tsx
-#: src/onboarding/company-step.tsx
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
 msgid "Connect"
@@ -8947,11 +8949,6 @@ msgstr "J’accepte, commençons"
 #: src/onboarding/send-plan-form.tsx
 msgid "I can’t plan that day. Type one like {example}, from {earliest} to {latest}."
 msgstr "Je ne peux pas planifier ce jour. Saisissez-en un comme {example}, du {earliest} au {latest}."
-
-#. placeholder {0}: domain ?? ""
-#: src/onboarding/company-step.tsx
-msgid "I could not find a {signIn} account for {0}. Check how it is spelled."
-msgstr "Je n’ai pas trouvé de compte {signIn} pour {0}. Vérifiez l’orthographe."
 
 #: src/onboarding/company-step.tsx
 #: src/onboarding/people-add.tsx
@@ -13372,10 +13369,6 @@ msgstr "Autres fichiers"
 #: src/brain/brain-atlas.ts
 msgid "Other teams"
 msgstr "Autres équipes"
-
-#: src/onboarding/company-step.tsx
-msgid "other-company.com"
-msgstr "autre-entreprise.fr"
 
 #: src/projects/project-people-names.ts
 msgctxt "the rest of a list of people"
@@ -17854,10 +17847,6 @@ msgstr "Le compte connecté en tant que {label} ne peut ouvrir aucune bibliothè
 msgid "The account is no longer listed in the directory. If it was deleted and can still be restored there, restoring it lets Grasp lift the suspension at its next daily read. Otherwise, to end their access for good, remove them."
 msgstr "Le compte n’apparaît plus dans l’annuaire. S’il a été supprimé et peut encore y être restauré, le restaurer permet à Grasp de lever la suspension à sa prochaine lecture quotidienne. Sinon, pour mettre fin à son accès définitivement, retirez cette personne."
 
-#: src/onboarding/company-step.tsx
-msgid "The account’s domain"
-msgstr "Le domaine du compte"
-
 #: src/settings/erasures.tsx
 msgid "The address"
 msgstr "L’adresse"
@@ -21028,10 +21017,6 @@ msgstr "Quelles apps peut utiliser {name} ?"
 msgid "Which colours should it have?"
 msgstr "Quelles couleurs doit-il avoir ?"
 
-#: src/onboarding/company-step.tsx
-msgid "Which kind of account"
-msgstr "Quel type de compte"
-
 #: src/interview/read-back-story.tsx
 msgid "Which line do you want to change?"
 msgstr "Quelle ligne voulez-vous modifier ?"
@@ -21965,10 +21950,6 @@ msgstr "Votre exécution de la version {version} est terminée : {status}"
 #: src/pages/frame-failure.tsx
 msgid "Your session has ended"
 msgstr "Votre session est terminée"
-
-#: src/onboarding/company-step.tsx
-msgid "Your sign-in"
-msgstr "Votre connexion"
 
 #: src/routes/_shell.settings.profile.tsx
 msgid "Your sign-in, which your admin changes"

@@ -171,6 +171,11 @@ describe("the onboarding's directory", () => {
       own === undefined
         ? undefined
         : await admin.api.onboarding.readDirectoryAccount(own.id);
+    const anyOrganization = await admin.api.onboarding.connectOtherDirectory(
+      "microsoft",
+      null,
+      companyStep
+    );
     const otherTenant = crypto.randomUUID();
     const other = await admin.api.onboarding.connectOtherDirectory(
       "microsoft",
@@ -187,6 +192,10 @@ describe("the onboarding's directory", () => {
       read: read?.people.map(({ name }) => name),
       // Only that account's sign-in page: its tenant in the path.
       pinned: new URL(other.url).pathname.startsWith(`/${otherTenant}/`),
+      // None named: Entra's sign-in for work accounts of any organization.
+      anyOrganization: new URL(anyOrganization.url).pathname.startsWith(
+        "/organizations/"
+      ),
       notADomain: await outcome(
         admin.api.onboarding.connectOtherDirectory(
           "microsoft",
@@ -224,6 +233,7 @@ describe("the onboarding's directory", () => {
       ],
       read: ["Daan Bakker"],
       pinned: true,
+      anyOrganization: true,
       notADomain: "directory.invalid",
       elsewhere: "connection.invalid",
       unknownConnection: "directory.not_connected",

@@ -184,6 +184,16 @@ export interface OAuthProviderConfig {
   /** Parameters the authorization request adds to the standard ones. */
   authorizationParams: (tenant: string) => Record<string, string>;
   /**
+   * A directory's connection only: how a flow started for any organization
+   * (`anyTenant`) signs in, at the tenant `at` of the provider's endpoints,
+   * and the organization its tokens are then for (`of`), which the account
+   * check then holds them to as it holds a pinned flow's. `null` for none.
+   */
+  openTenant?: {
+    at: string;
+    of: (tokens: TokenSet) => string | null;
+  };
+  /**
    * Parameters every token request adds to the standard ones: an MCP
    * server's `resource` (RFC 8707), so its tokens are for it alone.
    */
@@ -547,6 +557,17 @@ const microsoftDirectory: OAuthProviderConfig = {
     required: ["User.Read.All", "Group.ReadBasic.All"],
   },
   sharedOnly: true,
+  // Another company's tenant, for its people only: Entra's sign-in for
+  // work accounts of any organization, the tenant the ID token's `tid` names.
+  openTenant: {
+    at: "organizations",
+    of: ({ idToken }) => {
+      const tid = microsoftClaims
+        .safeParse(idTokenClaims(idToken))
+        .data?.tid.toLowerCase();
+      return tid !== undefined && tenantKinds.guid.test(tid) ? tid : null;
+    },
+  },
   client: (env) =>
     credentials(
       env.MICROSOFT_DIRECTORY_CLIENT_ID,
@@ -586,6 +607,21 @@ const googleDirectory: OAuthProviderConfig = {
     required: [googleDirectoryScope],
   },
   sharedOnly: true,
+  // Another company's Workspace, for its people only: any account, whose
+  // hosted domain (`hd`, never a personal account's) is the tenant.
+  authorizationParams: (tenant) =>
+    tenant === ""
+      ? { access_type: "offline", prompt: "select_account consent" }
+      : google.authorizationParams(tenant),
+  openTenant: {
+    at: "",
+    of: ({ idToken }) => {
+      const hd = googleClaims
+        .safeParse(idTokenClaims(idToken))
+        .data?.hd?.toLowerCase();
+      return hd !== undefined && tenantKinds.domain.test(hd) ? hd : null;
+    },
+  },
   client: (env) =>
     credentials(
       env.GOOGLE_DIRECTORY_CLIENT_ID,

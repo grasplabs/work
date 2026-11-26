@@ -248,7 +248,7 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
 
   async connectOtherDirectory(
     suite: DirectorySuite,
-    domain: string,
+    domain: string | null,
     returnTo: string
   ): Promise<{ url: string }> {
     return await withPerson(

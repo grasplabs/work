@@ -1,4 +1,5 @@
 import { actorOf } from "@grasp-os/shared/audit";
+import { anyTenant } from "@grasp-os/shared/connect";
 import {
   accountDomainSchema,
   directoryErrors,
@@ -258,10 +259,11 @@ const microsoftTenantOf = async (domain: string): Promise<string> => {
 };
 
 /**
- * Starts connecting another of the company's accounts at `suite`, named
- * by its domain, for the roster only: the flow is pinned to that account's
- * tenant, so only its accounts can consent, and nobody signs in to Grasp
- * through it (sign-in stays the company's own tenant's).
+ * Starts connecting another account at `suite` for the roster only: with
+ * no `domain`, through the provider's sign-in for any organization, the
+ * connection then held to the one the admin signed in to (connect's
+ * `openTenant`); with one, a tenant connected before, pinned to it. Nobody
+ * signs in to Grasp through it (sign-in stays the company's own tenant's).
  */
 export const connectOtherDirectory = async (
   env: Env,
@@ -273,6 +275,18 @@ export const connectOtherDirectory = async (
   }: { suite: unknown; domain: unknown; returnTo: unknown }
 ): Promise<{ url: string }> => {
   const parsedSuite = directorySuiteSchema.safeParse(suite);
+  // None named: whichever organization the admin signs in to, as the sign-in says.
+  if (domain === undefined || domain === null || domain === "") {
+    if (!parsedSuite.success) {
+      throw directoryErrors.create("directory.invalid");
+    }
+    return await startOnboardingConnection(env, identity, {
+      provider: directoryProviders[parsedSuite.data],
+      suite: parsedSuite.data,
+      returnTo,
+      otherTenant: anyTenant,
+    });
+  }
   // A Microsoft account connected before comes back by its tenant's id, which needs no lookup.
   const tenantId =
     typeof domain === "string" ? domain.trim().toLowerCase() : "";
