@@ -1,5 +1,6 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
+import { Button } from "@grasp-os/ui/components/button";
+import { Heading } from "@grasp-os/ui/components/heading";
+import { Text } from "@grasp-os/ui/components/text";
 import { Trans } from "@lingui/react/macro";
 import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -41,16 +42,16 @@ const WaitingPage = () => {
   };
   return (
     <OnboardingFrame>
-      <PageHeaderTitle>
+      <Heading level={1}>
         <Trans>Grasp is almost ready for you</Trans>
-      </PageHeaderTitle>
-      <p className="text-muted-foreground text-balance">
+      </Heading>
+      <Text color="muted">
         <Trans>
           Your company’s admins are still setting Grasp up. There is nothing you
           need to do: this page opens Grasp for you as soon as they have
           finished.
         </Trans>
-      </p>
+      </Text>
       <Button
         disabled={busy}
         onClick={() => {
