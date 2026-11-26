@@ -148,13 +148,17 @@ const attach = async (
 };
 
 /**
- * Has Graph answer `mailbox`'s next request 429, asking to wait
- * `retryAfter` seconds: connect pauses the connection that long.
+ * Has Graph answer `mailbox`'s next `requests` requests 429, asking to
+ * wait `retryAfter` seconds: connect pauses the connection that long.
  */
-const throttle = async (mailbox: string, retryAfter: number): Promise<void> => {
+const throttle = async (
+  mailbox: string,
+  retryAfter: number,
+  requests = 1
+): Promise<void> => {
   await providers().fetch(graphThrottleUrl, {
     method: "POST",
-    body: JSON.stringify({ mailbox, requests: 1, retryAfter }),
+    body: JSON.stringify({ mailbox, requests, retryAfter }),
   });
 };
 
@@ -201,8 +205,26 @@ const refusal = async (promise: Promise<unknown>) => {
   }
 };
 
-/** A definition reading an attachment through binding `mail`. */
-const definitionOf = (mail: string): string =>
+/** The step reading an attachment through binding `mail`. */
+const readStep = {
+  id: "read",
+  type: "call",
+  connection: "mail",
+  action: "mail.readAttachment",
+  args: {
+    mailbox: { $expr: "args.mailbox" },
+    message: { $expr: "args.message" },
+    attachment: { $expr: "args.attachment" },
+    as: "text",
+  },
+};
+
+/**
+ * A definition reading an attachment through binding `mail`; `guarded`,
+ * in a try whose catch retries the read once, a second on, and then takes
+ * its failure.
+ */
+const definitionOf = (mail: string, guarded = false): string =>
   JSON.stringify({
     $schema: workflowSchemaUrl,
     args: objectSchema({
@@ -211,22 +233,21 @@ const definitionOf = (mail: string): string =>
       attachment: { kind: "string" },
     }),
     returns: objectSchema({ status: { kind: "string" } }),
-    result: { status: { $expr: "read.content" } },
+    result: { status: guarded ? "caught" : { $expr: "read.content" } },
     permissions: { connections: { mail: { contract: mail } } },
-    steps: [
-      {
-        id: "read",
-        type: "call",
-        connection: "mail",
-        action: "mail.readAttachment",
-        args: {
-          mailbox: { $expr: "args.mailbox" },
-          message: { $expr: "args.message" },
-          attachment: { $expr: "args.attachment" },
-          as: "text",
-        },
-      },
-    ],
+    steps: guarded
+      ? [
+          {
+            id: "guarded",
+            type: "try",
+            try: [readStep],
+            catch: {
+              retry: { attempts: 2, delay: "1 second", backoff: "constant" },
+              do: [{ id: "tell", type: "wait", until: { $expr: "0" } }],
+            },
+          },
+        ]
+      : [readStep],
   });
 
 /**
@@ -259,15 +280,23 @@ const nativeContract = async () => {
   return { admin, builder, connectionId, mailbox, key, read };
 };
 
-/** A published workflow reading attachments through `key`, its binding approved. */
-const readingWorkflow = async () => {
+/**
+ * A published workflow reading attachments through `key`, its binding
+ * approved; `guarded` as `definitionOf` says.
+ */
+const readingWorkflow = async (guarded = false) => {
   const { admin, builder, connectionId, mailbox, key } = await nativeContract();
   const workflow = await createWorkflowResource(
     env,
     builder,
     `native-${unique()}`
   );
-  await publishDefinition(env, builder, workflow.id, definitionOf(key));
+  await publishDefinition(
+    env,
+    builder,
+    workflow.id,
+    definitionOf(key, guarded)
+  );
   const permissionId = await granted(builder, admin, {
     subject: { type: "workflow", workflowId: workflow.id },
     object: { type: "connection", connectionId },
@@ -548,6 +577,36 @@ describe("a workflow binding a native connector's operation", () => {
       read: { status: "failed", code: "connect.rate_limited" },
       // Its first attempt and the engine's two retries, none waiting.
       tasks: [{ task: "read", state: "failed", attempts: 3 }],
+    });
+  });
+
+  it("gives a catch's retry of a step no more time to wait out pauses than the step had left", async () => {
+    const { builder, workflow, mailbox } = await readingWorkflow(true);
+    // Every request Graph gets is turned away, a pause of 3 seconds each.
+    await throttle(mailbox, 3, 1000);
+    let run = "";
+    const read = await withQuotas(
+      { ...configuredLimits, workflowQueuedStepMs: 5000 },
+      async () =>
+        await ran(
+          builder,
+          workflow.id,
+          { mailbox, message: "m1", attachment: "a1" },
+          (runId) => {
+            run = runId;
+          }
+        )
+    );
+    const { tasks } = await resourceRunTrace(env, builder, workflow.id, run);
+    expect({
+      read,
+      attempts: tasks.find(({ task }) => task === "read")?.attempts,
+    }).toStrictEqual({
+      read: { status: "completed", output: { status: "caught" } },
+      // Its first round: the attempt turned away, a sleep of the 5 seconds
+      // a step may wait, then the engine's three tries. Its retry: three
+      // tries more, none sleeping, as the step has no time left to wait.
+      attempts: 7,
     });
   });
 

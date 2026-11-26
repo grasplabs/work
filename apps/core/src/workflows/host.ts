@@ -296,16 +296,17 @@ const throttledField = `${coreStepPrefix}throttled`;
  * of the run's steps (`uncountedWaitStep`): the vendor ends it, not the
  * run's code. Each round sleeps the wait named or a busy step's backoff,
  * whichever is longer (`askAgainSeconds`), so a vendor that asks for a
- * second again and again costs a round a minute at most; a step's rounds
- * sleep the quota limits' `workflowQueuedStepMs` in all at most, past
- * which its failure is retried as any other. Workflow code can't return
- * it (`do` refuses it).
+ * second again and again costs a round a minute at most; a step's rounds,
+ * its catch's retries' included, sleep the quota limits'
+ * `workflowQueuedStepMs` in all at most, past which its failure is
+ * retried as any other. Workflow code can't return it (`do` refuses it).
  */
 const throttledMarker = (sleepMs: number) => ({ [throttledField]: sleepMs });
 
 /**
- * A step's waits its calls named, over its rounds in a row: how many it
- * slept, and how long in all, read off the journaled markers alone.
+ * A step's waits its calls named, over its rounds and its catch's retries
+ * of it: how many it slept, and how long in all, read off the journaled
+ * markers alone.
  */
 interface NamedWaits {
   rounds: number;
@@ -2204,7 +2205,10 @@ export class RunHost extends RpcTarget {
       let tries = 0;
       // The step's wait for load since its last admission (`LoadWait`).
       let load = loadWaitStart;
-      // The waits the step's calls named, over its rounds (`NamedWaits`).
+      // The waits the step's calls named, over its rounds and its catch's
+      // retries of it alike, so a retry gets no more time than the step
+      // had left (`NamedWaits`): every replay counts them again, the
+      // same, off the journaled markers.
       let named: NamedWaits = { rounds: 0, sleptMs: 0 };
       // Whether the next attempts collect a held call's decided outcome.
       let collecting = false;
@@ -2366,7 +2370,6 @@ export class RunHost extends RpcTarget {
       const rounds = async (base: string): Promise<unknown> => {
         tries = 0;
         load = loadWaitStart;
-        named = { rounds: 0, sleptMs: 0 };
         failed = undefined;
         collecting = false;
         let value = await this.#step.do(base, config, attemptStep);
