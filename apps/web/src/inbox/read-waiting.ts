@@ -66,14 +66,20 @@ export const readWaiting = async (
   {
     markShownRead: marking = true,
     everyonesOutcomes: listOutcomes = false,
-  }: { markShownRead?: boolean; everyonesOutcomes?: boolean } = {}
+    left,
+  }: {
+    markShownRead?: boolean;
+    everyonesOutcomes?: boolean;
+    /** The page's signal that it was left: everyone's are listed no further. */
+    left?: AbortSignal;
+  } = {}
 ): Promise<Waiting> => {
   // Everyone's, read beside the feed: the person's own are in the feed
   // already, for them to answer, so they are left out here.
   const [feed, everyonesOutcomes] = await Promise.all([
     loadFromCore(core, async (session) => await session.waiting.list()),
     listOutcomes && decidesRequests(identity)
-      ? readOutcomes(core, identity.userId)
+      ? readOutcomes(core, identity.userId, left)
       : undefined,
   ]);
   const notifications = partOf(feed, "notifications", (read) => {

@@ -22,17 +22,23 @@ export interface Outcomes {
   people: ReadonlyMap<string, string>;
 }
 
-/** Every open call of unknown outcome but `own`'s, each page within its own few seconds. */
+/**
+ * Every open call of unknown outcome but `own`'s, each page within its own
+ * few seconds, and no page more once the inbox is `left`: core audits
+ * each page it lists.
+ */
 export const readOutcomes = async (
   core: Pick<CoreConnection, "withSession">,
-  own: string
+  own: string,
+  left?: AbortSignal
 ): Promise<Loaded<Outcomes>> => {
   const [listed, people] = await Promise.all([
     loadEveryPage(
       core,
-      async (session, before) => await session.unknownOutcomes.listAll(before)
+      async (session, before) => await session.unknownOutcomes.listAll(before),
+      left
     ),
-    loadFromCore(core, readPeople),
+    loadFromCore(core, readPeople, left),
   ]);
   if (listed.state !== "ready") {
     return listed;
