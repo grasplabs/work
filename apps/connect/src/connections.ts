@@ -1,3 +1,4 @@
+import { isNeverTool } from "@grasp-os/runtime/connector";
 import {
   composioToolName,
   composioToolsSchema,
@@ -23,7 +24,6 @@ import { composioKey } from "./composio.ts";
 import { connections } from "./db/schema.ts";
 import { mcpServer } from "./mcp.ts";
 import type { McpServer } from "./mcp.ts";
-import { isNeverTool } from "./never.ts";
 import { keptToolClasses } from "./tool-rules.ts";
 
 // The connection registry: which connections exist, whose they are, and
@@ -203,7 +203,7 @@ const reviewedClass = (
  * recorded, or can't be read, allows none. A tool allowed by name alone
  * is a side effect with no resource.
  *
- * A tool Grasp never runs (never.ts) has no rule either.
+ * A tool Grasp never runs (`isNeverTool`) has no rule either.
  *
  * A call is a read only when both say so: the class Grasp gave the tool
  * and the admin's rule. Neither alone makes a change a read: a classed

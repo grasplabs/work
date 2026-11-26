@@ -575,7 +575,7 @@ describe("a connector", () => {
         ],
       });
     expect(() => withWrites(["GET", "HEAD", "POST"], false)).not.toThrow();
-    expect(() => withWrites(["GET", "POST", "DELETE"], false)).toThrow(
+    expect(() => withWrites(["GET", "POST", "PATCH"], false)).toThrow(
       "at most one write"
     );
   });
@@ -630,7 +630,7 @@ describe("a connector", () => {
             input,
             output: z.strictObject({}),
             readOnly: false,
-            reach: "own",
+            reach: "others",
             routes: [{ ...route, method: "POST" }],
             describe: { title: "Send an item", fields },
             run: async () => await Promise.resolve({ output: {} }),
@@ -838,7 +838,7 @@ describe("generated contracts", () => {
         toolNamed("items.get"),
         toolNamed("people.find"),
         // A family is the name but its last part, which may hold dots.
-        toolNamed("items.archive.all"),
+        toolNamed("items.reports.list"),
         // No family: in no contract, so neither served by connect nor in
         // the SDK's catalog.
         toolNamed("ping"),
@@ -855,7 +855,7 @@ describe("generated contracts", () => {
       )
     ).toStrictEqual({
       "example.items@1": { list: "items.list", get: "items.get" },
-      "example.items.archive@1": { all: "items.archive.all" },
+      "example.items.reports@1": { list: "items.reports.list" },
       "example.people@1": { find: "people.find" },
     });
   });

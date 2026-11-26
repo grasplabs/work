@@ -1,4 +1,10 @@
 import {
+  classByRules,
+  isJsonArray,
+  topNames,
+} from "@grasp-os/runtime/connector";
+import type { ToolHints } from "@grasp-os/runtime/connector";
+import {
   addConnectorSchema,
   connectErrors,
   connectionErrors,
@@ -40,15 +46,7 @@ import {
   textAnswer,
 } from "./served-schemas.ts";
 import { credentialFor, pausedWait } from "./tokens.ts";
-import {
-  classByRules,
-  classesOf,
-  isJsonArray,
-  keptToolClasses,
-  storedSchema,
-  topNames,
-} from "./tool-rules.ts";
-import type { ToolHints } from "./tool-rules.ts";
+import { classesOf, keptToolClasses, storedSchema } from "./tool-rules.ts";
 import { vaultFor } from "./vault.ts";
 
 // Connectors made from an MCP server's URL (GRA-1375), and connections to

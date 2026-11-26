@@ -31,7 +31,7 @@ export const composioClasses: Record<string, Record<string, ToolClass>> = {
     HUBSPOT_EXPORT_EVERYTHING: "read-company",
     HUBSPOT_REFUSED: "never",
     // Classed as a review could get them wrong: Never by their names
-    // (src/never.ts), whatever their class. The shareholders' list only
+    // (isNeverTool), whatever their class. The shareholders' list only
     // has a word of the rule inside another, and runs.
     HUBSPOT_DELETE_COMPANY: "change-company",
     HUBSPOT_SHARE_LIST: "read-company",
@@ -63,7 +63,7 @@ export const composioClasses: Record<string, Record<string, ToolClass>> = {
   bulk: Object.fromEntries(
     [
       ...Array.from({ length: 3000 }, (_, index) => `BULK_TOOL_${index}`),
-      "BULK_INVOICE_VOID",
+      "BULK_FIND_SHIPMENT",
       "BULK_LEDGER_EXPORT",
       ...Array.from({ length: 6 }, (_, index) => `BULK_LEDGER_READ_${index}`),
       ...Array.from({ length: 21 }, (_, index) => `BULK_QUOKKA_READ_${index}`),

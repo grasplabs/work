@@ -99,8 +99,19 @@ export const probe = async (
   },
   extra: Partial<Call> = {}
 ): Promise<Attempt> => {
-  const tool = input.mailbox === undefined ? "probe.fetch" : "probe.mailbox";
-  const { output } = await call(connection, tool, input, extra);
+  // A request other than a GET is the write probe's: a read sends none.
+  const writes =
+    input.mailbox === undefined &&
+    input.method !== undefined &&
+    input.method !== "GET";
+  let tool = writes ? "probe.send" : "probe.fetch";
+  if (input.mailbox !== undefined) {
+    tool = "probe.mailbox";
+  }
+  const { output } = await call(connection, tool, input, {
+    ...(writes && { idempotencyKey: `probe:${crypto.randomUUID()}` }),
+    ...extra,
+  });
   const attempt: unknown = JSON.parse(output);
   if (!isAttempt(attempt)) {
     throw new TypeError("Not a probe's report");

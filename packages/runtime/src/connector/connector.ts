@@ -124,7 +124,16 @@ export {
 export { addressesOf } from "./mail-addresses.ts";
 export type { Address } from "./mail-addresses.ts";
 export type { AccountLookup, SignIn, SignInInput } from "./sign-in.ts";
+export { jsonSchemaOf } from "../common/json-schema.ts";
 export { jsonBody, providerFetch, retryAfterOf, segment } from "./provider.ts";
+export {
+  classByRules,
+  isJsonArray,
+  isNeverTool,
+  ruledDeclaration,
+  topNames,
+} from "./tool-rules.ts";
+export type { RuledTool, ToolHints } from "./tool-rules.ts";
 export type { Provider, ProviderDefinition } from "./provider.ts";
 export {
   checkReadable,
