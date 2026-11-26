@@ -65,10 +65,25 @@ describe("who takes part", () => {
 });
 
 describe("the leads", () => {
-  it("has one lead a team: marking another moves it", () => {
+  it("lets a team have several leads: marking another adds them, the first still first", () => {
     const next = withLead(picks, "bob", true);
-    expect(next.teams.find(({ id }) => id === "sales")?.lead).toBe("bob");
-    expect(countsOf(next).leads).toBe(1);
+    expect(next.teams.find(({ id }) => id === "sales")).toMatchObject({
+      lead: "ann",
+      coLeads: ["bob"],
+    });
+    expect(countsOf(next).leads).toBe(2);
+  });
+
+  it("lets the next lead lead first once the first is unmarked, or no longer takes part", () => {
+    const two = withLead(picks, "bob", true);
+    expect(
+      withLead(two, "ann", false).teams.find(({ id }) => id === "sales")
+    ).toMatchObject({ lead: "bob", coLeads: [] });
+    expect(
+      withTaking(two, new Set(["ann"]), false).teams.find(
+        ({ id }) => id === "sales"
+      )
+    ).toMatchObject({ lead: "bob", coLeads: [] });
   });
 
   it("makes a lead take part", () => {

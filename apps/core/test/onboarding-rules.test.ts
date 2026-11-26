@@ -91,6 +91,21 @@ describe("whose links are due", () => {
     ]);
   });
 
+  it("sends every lead's on the start day when a team has several, the rest still waiting for the first", () => {
+    const twoLeads: Roster = {
+      ...roster,
+      teams: roster.teams.map((team) =>
+        team.id === "sales" ? { ...team, coLeads: ["sue"] } : team
+      ),
+    };
+    expect(dueLinks(twoLeads, plan, nothing, at("2026-10-12"))).toStrictEqual([
+      "lea",
+      "sue",
+      "oli",
+      "ona",
+    ]);
+  });
+
   it("sends the team's once its lead agreed and the work is mapped", () => {
     const facts: LinkFacts = {
       ...nothing,

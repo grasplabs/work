@@ -125,8 +125,17 @@ export const rosterTeamSchema = z.strictObject({
    */
   id: idSchema,
   name: nameSchema,
-  /** Its lead, by person: someone in the team. */
+  /**
+   * Its lead, by person: someone in the team. With several leads, the first
+   * marked: the one the team's map is drawn from and its links wait for.
+   */
   lead: idSchema.nullable(),
+  /**
+   * Who else leads it, by person: each in the team, none its `lead`, and
+   * none without a `lead`. They talk with Stephen about the whole team, as
+   * the lead does, at the team's moment, waiting for no one. Left out, none.
+   */
+  coLeads: z.array(idSchema).max(20).optional(),
   /**
    * What it does, in the admin's own words: every member reads it once the
    * admin confirms the list. Never what a lead's map says (GRA-1748).
@@ -136,6 +145,13 @@ export const rosterTeamSchema = z.strictObject({
   off: z.boolean().default(false),
 });
 export type RosterTeam = z.output<typeof rosterTeamSchema>;
+
+/** Everyone who leads `team`: its lead first, then who else leads it. */
+export const leadsOfTeam = (team: {
+  lead: string | null;
+  coLeads?: readonly string[] | undefined;
+}): string[] =>
+  team.lead === null ? [] : [team.lead, ...(team.coLeads ?? [])];
 
 /** Someone who works there. */
 export const rosterPersonSchema = z.strictObject({
@@ -203,6 +219,23 @@ export const rosterSchema = z
           path: ["teams", index, "lead"],
           message: "The lead is not in the team",
         });
+      }
+      const seen = new Set<string>(team.lead === null ? [] : [team.lead]);
+      for (const [at, coLead] of (team.coLeads ?? []).entries()) {
+        if (team.lead === null || seen.has(coLead)) {
+          context.addIssue({
+            code: "custom",
+            path: ["teams", index, "coLeads", at],
+            message: "A second lead needs a first, and leads once",
+          });
+        } else if (teamOf.get(coLead) !== team.id) {
+          context.addIssue({
+            code: "custom",
+            path: ["teams", index, "coLeads", at],
+            message: "The lead is not in the team",
+          });
+        }
+        seen.add(coLead);
       }
     }
   });

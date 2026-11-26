@@ -42,7 +42,7 @@ msgid "{0, plural, one {# thing that was said in it goes with it.} other {# thin
 msgstr "{0, plural, one {# thing that was said in it goes with it.} other {# things that were said in it go with it.}}"
 
 #. placeholder {0}: team.name
-#. placeholder {1}: lead.name
+#. placeholder {1}: formatList(ledBy)
 #: src/onboarding/leads-step.tsx
 msgid "{0} · led by {1}"
 msgstr "{0} · led by {1}"
@@ -4181,7 +4181,6 @@ msgstr "Can't offer Run: {unread}"
 #: src/chat/brain-questions.tsx
 #: src/chat/chat-window.tsx
 #: src/chat/delete-chat-dialog.tsx
-#: src/confirmed.tsx
 #: src/connections/add-connector.tsx
 #: src/connections/http-connections.tsx
 #: src/connections/request-app-dialog.tsx
@@ -4845,7 +4844,6 @@ msgstr "Cliffs"
 #: src/onboarding/campaign/campaign-page.tsx
 #: src/projects/project-chats.tsx
 #: src/settings/erasures.tsx
-#: src/shown-once.tsx
 #: src/workflows/start-run.tsx
 msgid "Close"
 msgstr "Close"
@@ -5404,7 +5402,6 @@ msgstr "Copenhagen"
 #: src/settings/event-sources.tsx
 #: src/settings/guests.tsx
 #: src/settings/invitations.tsx
-#: src/shown-once.tsx
 msgid "Copied"
 msgstr "Copied"
 
@@ -5431,7 +5428,6 @@ msgstr "Copies"
 
 #: src/frame/ui-words.tsx
 #: src/onboarding/review-parts.tsx
-#: src/shown-once.tsx
 msgid "Copy"
 msgstr "Copy"
 
@@ -5453,7 +5449,6 @@ msgstr "Copy email"
 msgid "Copy into the Brain from {label}"
 msgstr "Copy into the Brain from {label}"
 
-#: src/settings/event-sources.tsx
 #: src/shown-once.tsx
 msgid "Copy it now: you won't see it again. Lost, it can only be replaced."
 msgstr "Copy it now: you won't see it again. Lost, it can only be replaced."
@@ -5478,7 +5473,6 @@ msgstr "Copy the message"
 msgid "Copy the output"
 msgstr "Copy the output"
 
-#: src/settings/event-sources.tsx
 #: src/shown-once.tsx
 msgid "Copy the secret"
 msgstr "Copy the secret"
@@ -7246,8 +7240,8 @@ msgid "Everyone found"
 msgstr "Everyone found"
 
 #: src/onboarding/leads-step.tsx
-msgid "Everyone from {signIn} is listed below. Untick anyone who isn’t taking part, and mark each team’s lead—I’ll talk to them first."
-msgstr "Everyone from {signIn} is listed below. Untick anyone who isn’t taking part, and mark each team’s lead—I’ll talk to them first."
+msgid "Everyone from {signIn} is listed below. Untick anyone who isn’t taking part, and mark each team’s leads—I’ll talk to them first."
+msgstr "Everyone from {signIn} is listed below. Untick anyone who isn’t taking part, and mark each team’s leads—I’ll talk to them first."
 
 #: src/settings/staff-access.tsx
 msgid "Everyone from Grasp is signed out at once, and nobody from Grasp can sign in again until a new window is opened."
@@ -12597,8 +12591,8 @@ msgid "Now for the people I’ll be talking to. I don’t have anyone yet, so ad
 msgstr "Now for the people I’ll be talking to. I don’t have anyone yet, so add them here by email, or drop in a staff list if you have one. Then mark who leads each team. I always start with the leads, so they hear about this before their team does."
 
 #: src/onboarding/leads-step.tsx
-msgid "Now let’s decide who I’ll be talking to. Everyone from {signIn} is already here—just untick anyone who shouldn’t be included, and mark each team’s lead. I always speak with leads first so they know what’s coming before their team does. Missing someone? Add them by email."
-msgstr "Now let’s decide who I’ll be talking to. Everyone from {signIn} is already here—just untick anyone who shouldn’t be included, and mark each team’s lead. I always speak with leads first so they know what’s coming before their team does. Missing someone? Add them by email."
+msgid "Now let’s decide who I’ll be talking to. Everyone from {signIn} is already here—just untick anyone who shouldn’t be included, and mark each team’s leads, as many as it has. I always speak with leads first so they know what’s coming before their team does. Missing someone? Add them by email."
+msgstr "Now let’s decide who I’ll be talking to. Everyone from {signIn} is already here—just untick anyone who shouldn’t be included, and mark each team’s leads, as many as it has. I always speak with leads first so they know what’s coming before their team does. Missing someone? Add them by email."
 
 #: src/onboarding/company-step.tsx
 msgid "Now let’s get to know your company. A staff list works fine for that, one row per person with their team and job. Don’t have one at hand? No problem, skip it and we’ll sort it out together."
@@ -15832,7 +15826,6 @@ msgid "Searching the docs for {query}"
 msgstr "Searching the docs for {query}"
 
 #: src/connections/http-connections.tsx
-#: src/shown-once.tsx
 msgid "Secret"
 msgstr "Secret"
 

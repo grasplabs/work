@@ -178,9 +178,10 @@ const rowOf = (id: string): string =>
 
 /** The secret the page shows, if it shows one: its Copy field's value. */
 const secretShown = (): string | undefined =>
-  [...document.querySelectorAll("input")].find(
-    (input) => input.getAttribute("aria-label") === "Secret"
-  )?.value;
+  document
+    .querySelector('[aria-label="Copy the secret"]')
+    ?.closest('[data-slot="snippet"]')
+    ?.querySelector('[data-slot="snippet-value"]')?.textContent ?? undefined;
 
 describe(AppWebhooks, () => {
   afterEach(takenDown);

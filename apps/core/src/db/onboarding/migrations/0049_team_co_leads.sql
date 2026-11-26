@@ -1,0 +1,1 @@
+ALTER TABLE `teams` ADD `co_leads` text DEFAULT '[]' NOT NULL;

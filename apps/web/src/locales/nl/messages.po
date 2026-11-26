@@ -42,7 +42,7 @@ msgid "{0, plural, one {# thing that was said in it goes with it.} other {# thin
 msgstr "{0, plural, one {# ding dat erin gezegd is gaat mee.} other {# dingen die erin gezegd zijn gaan mee.}}"
 
 #. placeholder {0}: team.name
-#. placeholder {1}: lead.name
+#. placeholder {1}: formatList(ledBy)
 #: src/onboarding/leads-step.tsx
 msgid "{0} · led by {1}"
 msgstr "{0} · onder leiding van {1}"
@@ -4181,7 +4181,6 @@ msgstr "Uitvoeren kan niet: {unread}"
 #: src/chat/brain-questions.tsx
 #: src/chat/chat-window.tsx
 #: src/chat/delete-chat-dialog.tsx
-#: src/confirmed.tsx
 #: src/connections/add-connector.tsx
 #: src/connections/http-connections.tsx
 #: src/connections/request-app-dialog.tsx
@@ -4845,7 +4844,6 @@ msgstr "Kliffen"
 #: src/onboarding/campaign/campaign-page.tsx
 #: src/projects/project-chats.tsx
 #: src/settings/erasures.tsx
-#: src/shown-once.tsx
 #: src/workflows/start-run.tsx
 msgid "Close"
 msgstr "Sluiten"
@@ -5404,7 +5402,6 @@ msgstr "Kopenhagen"
 #: src/settings/event-sources.tsx
 #: src/settings/guests.tsx
 #: src/settings/invitations.tsx
-#: src/shown-once.tsx
 msgid "Copied"
 msgstr "Gekopieerd"
 
@@ -5431,7 +5428,6 @@ msgstr "Kopieën"
 
 #: src/frame/ui-words.tsx
 #: src/onboarding/review-parts.tsx
-#: src/shown-once.tsx
 msgid "Copy"
 msgstr "Kopiëren"
 
@@ -5453,7 +5449,6 @@ msgstr "E-mail kopiëren"
 msgid "Copy into the Brain from {label}"
 msgstr "Uit {label} naar het Brain kopiëren"
 
-#: src/settings/event-sources.tsx
 #: src/shown-once.tsx
 msgid "Copy it now: you won't see it again. Lost, it can only be replaced."
 msgstr "Kopieer het nu: je ziet het niet nog eens. Kwijt, dan kan het alleen worden vervangen."
@@ -5478,7 +5473,6 @@ msgstr "Kopieer het bericht"
 msgid "Copy the output"
 msgstr "Uitvoer kopiëren"
 
-#: src/settings/event-sources.tsx
 #: src/shown-once.tsx
 msgid "Copy the secret"
 msgstr "Geheim kopiëren"
@@ -7246,8 +7240,8 @@ msgid "Everyone found"
 msgstr "Iedereen die gevonden is"
 
 #: src/onboarding/leads-step.tsx
-msgid "Everyone from {signIn} is listed below. Untick anyone who isn’t taking part, and mark each team’s lead—I’ll talk to them first."
-msgstr "Iedereen uit {signIn} staat hieronder. Vink uit wie niet meedoet en geef per team de teamleider aan—hen spreek ik als eerste."
+msgid "Everyone from {signIn} is listed below. Untick anyone who isn’t taking part, and mark each team’s leads—I’ll talk to them first."
+msgstr "Iedereen uit {signIn} staat hieronder. Vink uit wie niet meedoet en geef per team de teamleiders aan—hen spreek ik als eerste."
 
 #: src/settings/staff-access.tsx
 msgid "Everyone from Grasp is signed out at once, and nobody from Grasp can sign in again until a new window is opened."
@@ -12597,8 +12591,8 @@ msgid "Now for the people I’ll be talking to. I don’t have anyone yet, so ad
 msgstr "Dan nu de mensen met wie ik ga praten. Ik heb nog niemand, dus voeg ze hier toe met hun e-mailadres, of zet er een personeelslijst in als je die hebt. Geef dan aan wie elk team leidt. Ik begin altijd bij de leidinggevenden, zodat zij het eerder horen dan hun team."
 
 #: src/onboarding/leads-step.tsx
-msgid "Now let’s decide who I’ll be talking to. Everyone from {signIn} is already here—just untick anyone who shouldn’t be included, and mark each team’s lead. I always speak with leads first so they know what’s coming before their team does. Missing someone? Add them by email."
-msgstr "Nu bepalen we met wie ik ga praten. Iedereen uit {signIn} staat er al in—vink uit wie niet meedoet en geef per team de teamleider aan. Ik spreek de teamleiders altijd als eerste, zodat zij op de hoogte zijn voordat hun team aan de beurt is. Mis je iemand? Voeg diegene toe via e-mail."
+msgid "Now let’s decide who I’ll be talking to. Everyone from {signIn} is already here—just untick anyone who shouldn’t be included, and mark each team’s leads, as many as it has. I always speak with leads first so they know what’s coming before their team does. Missing someone? Add them by email."
+msgstr "Nu bepalen we met wie ik ga praten. Iedereen uit {signIn} staat er al in—vink uit wie niet meedoet en geef per team de teamleiders aan, zoveel als het er heeft. Ik spreek de teamleiders altijd als eerste, zodat zij op de hoogte zijn voordat hun team aan de beurt is. Mis je iemand? Voeg diegene toe via e-mail."
 
 #: src/onboarding/company-step.tsx
 msgid "Now let’s get to know your company. A staff list works fine for that, one row per person with their team and job. Don’t have one at hand? No problem, skip it and we’ll sort it out together."
@@ -15832,7 +15826,6 @@ msgid "Searching the docs for {query}"
 msgstr "Zoekt in de docs naar {query}"
 
 #: src/connections/http-connections.tsx
-#: src/shown-once.tsx
 msgid "Secret"
 msgstr "Geheim"
 
