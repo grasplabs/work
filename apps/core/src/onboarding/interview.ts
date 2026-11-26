@@ -119,6 +119,17 @@ const happenedOf = (
 export const languageLast = (locale: TurnAsked["locale"]): string =>
   `Say your line in ${NAMED[locale]}: every word of it, your small words too, also when they answered in another language, and also a line from the examples in your instructions, which you say in ${NAMED[locale]}, never as it stands in English.`;
 
+/**
+ * What a live voice session's Stephen is told last, as it holds the whole
+ * conversation: one language from start to end, and what he does by a
+ * function is never said.
+ */
+export const spokenLast = (locale: TurnAsked["locale"]): string =>
+  [
+    `Speak ${NAMED[locale]} only, every word, from your first line to your last, whatever language they use or words they bring in: a name of a product they say stays a name, your sentence around it stays ${NAMED[locale]}.`,
+    "Calling a function is silent: never say its name, a part's name (such as open, week, anchor or readback) or that you go to another part; say your next line only.",
+  ].join("\n");
+
 /** Their work as a whole takes 4 minutes at most: a talker can fill the whole interview with it. */
 const weekPartMinutes = 4;
 
