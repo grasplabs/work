@@ -486,7 +486,7 @@ test("the company's admin goes through their onboarding: the staff list, the org
   ).toBeVisible();
   await page.getByRole("button", { name: "Continue" }).click();
 
-  // The message to send, the day the first links go out, and Ops later.
+  // The message to send, the day the first links go out, and Ops held back.
   await expect(
     page.getByRole("heading", {
       name: "Before I reach out, let your team know",
@@ -505,12 +505,8 @@ test("the company's admin goes through their onboarding: the staff list, the org
   // Only the teams that take part are there to hold back.
   await expect(page.getByRole("button", { name: /^Legal/u })).toHaveCount(0);
   await page.getByRole("button", { name: /^Ops/u }).click();
-  await page.getByRole("button", { name: "On a later day" }).click();
-  const later = isoOf(
-    await page
-      .getByLabel("The day the other teams get their links")
-      .inputValue()
-  );
+  // Taken out, Ops waits, unplanned, and the summary says so.
+  await expect(page.getByText("Ops gets no link yet.")).toBeVisible();
   const next = page
     .getByRole("status")
     .filter({ hasText: "What happens next" })
@@ -548,7 +544,7 @@ test("the company's admin goes through their onboarding: the staff list, the org
   ).toBeVisible();
 
   // Core keeps what was set: the leads, Legal off, the plan from that day
-  // with Ops on its own later day, and links for the three who take part,
+  // with Ops held back, unplanned, and links for the three who take part,
   // none out before the start.
   const { core, api } = apiOf(admin);
   try {
@@ -567,19 +563,15 @@ test("the company's admin goes through their onboarding: the staff list, the org
       off: roster?.teams.filter((team) => team.off).map(({ name }) => name),
       start: plan?.start,
       held: Object.keys(plan?.later ?? {}),
-      // Its own moment, on the later day, after the first links.
-      opsLater:
-        later > start &&
-        typeof opsAt === "string" &&
-        plan?.at !== undefined &&
-        opsAt > plan.at,
+      // No moment of its own yet.
+      opsLater: opsAt ?? null,
       waiting,
     }).toStrictEqual({
       leads: ["Lea Bakker", "Ona Smit"],
       off: ["Legal"],
       start,
       held: [ops],
-      opsLater: true,
+      opsLater: null,
       waiting: 3,
     });
   } finally {
