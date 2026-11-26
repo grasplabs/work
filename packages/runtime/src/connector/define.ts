@@ -13,8 +13,8 @@ import type {
 import { v } from "../common/values.ts";
 import { apiFor, routeOf } from "./api.ts";
 import type { Api, RouteText } from "./api.ts";
-import { provenanceMetaKey, resourceMetaKey } from "./manifest.ts";
 import type { ActionManifest, Route } from "./manifest.ts";
+import { provenanceMetaKey, resourceMetaKey } from "./protocol.ts";
 import {
   callMetaOf,
   checkOneWrite,
@@ -341,6 +341,7 @@ const toolOf = <Args extends ValueShape, Returns extends AnySchema>(
     throw new Error(`${name}: its resource must be a string argument`);
   }
   const action: ActionManifest = {
+    description: declaration.description,
     routes,
     readOnly,
     reach,

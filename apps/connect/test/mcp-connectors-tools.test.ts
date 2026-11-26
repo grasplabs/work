@@ -1,6 +1,11 @@
+import {
+  createExecutionContext,
+  waitOnExecutionContext,
+} from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
+import Connect from "../src/index.ts";
 import { callAs, outcome, someone } from "./connect.ts";
 import type { LinearTool } from "./linear-mcp-fake.ts";
 import {
@@ -27,6 +32,20 @@ const tool = (name: string, changes: Partial<LinearTool> = {}): LinearTool => ({
   description: `The ${name} tool.`,
   inputSchema: noInput,
   ...changes,
+});
+
+/** How long a test waits for a list read after an answer. */
+const waitForRead = { timeout: 10_000 };
+
+/** The tools `connectionId` offers to ask for (`offeredConnectorTools`). */
+const offered = async (connectionId: string): Promise<string[]> => {
+  const offers = await exports.default.offeredConnectorTools([connectionId]);
+  return offers[connectionId] ?? [];
+};
+
+/** A tool's changes that give it an input of `properties`. */
+const takes = (properties: Record<string, unknown>) => ({
+  inputSchema: { type: "object", properties },
 });
 
 /** Anna's connection to Linear, its list read once: its ID and agent. */
@@ -63,6 +82,160 @@ const answerText = async (request: Request, result: string) => {
 };
 
 describe("a connector's tools", () => {
+  it("are offered to ask for as kept at once, and read again for the next ask once stale or never read", async () => {
+    const listed = linear.tools;
+    try {
+      const { connector, connectionId: stale } = await connected();
+      linear.tools = [...listed, tool("list_cycles")];
+      await env.DB.prepare(
+        "UPDATE connections SET tool_list_fresh_until = 1 WHERE id = ?"
+      )
+        .bind(stale)
+        .run();
+      const kept = await offered(stale);
+      await vi.waitFor(async () => {
+        await expect(offered(stale)).resolves.toContain("list_cycles");
+      }, waitForRead);
+      // Its read at connecting failed: nothing is kept.
+      const unread = await connectLinear(connector, someone());
+      await env.DB.batch([
+        env.DB.prepare(
+          "DELETE FROM connection_tools WHERE connection_id = ?"
+        ).bind(unread),
+        env.DB.prepare(
+          "UPDATE connections SET tool_list_read_at = NULL, tool_list_fresh_until = NULL WHERE id = ?"
+        ).bind(unread),
+      ]);
+      const none = await offered(unread);
+      await vi.waitFor(async () => {
+        await expect(offered(unread)).resolves.toContain("list_issues");
+      }, waitForRead);
+
+      expect({ kept: kept.includes("list_cycles"), none }).toStrictEqual({
+        kept: false,
+        none: [],
+      });
+    } finally {
+      linear.tools = listed;
+    }
+  });
+
+  it("are read once for asks that find them stale at once, and not again for a while after that read failed", async () => {
+    const { connectionId } = await connected();
+    await listExpires(connectionId);
+    let reads = 0;
+    const failing = (): Response => {
+      reads += 1;
+      linear.next = failing;
+      return new Response(null, { status: 503 });
+    };
+    linear.next = failing;
+    try {
+      // Three asks at once, then whatever they started after their answers.
+      const ask = async () => {
+        const ctx = createExecutionContext();
+        const connect = new Connect(ctx, env);
+        await Promise.all([
+          connect.offeredConnectorTools([connectionId]),
+          connect.offeredConnectorTools([connectionId]),
+          connect.connectionTools({ connectionId }),
+        ]);
+        await waitOnExecutionContext(ctx);
+      };
+      await ask();
+      const once = reads;
+      await ask();
+      await ask();
+      const soon = reads;
+      // The gap since that read passes.
+      await env.DB.prepare(
+        "UPDATE connections SET tool_list_tried_at = 0 WHERE id = ?"
+      )
+        .bind(connectionId)
+        .run();
+      await ask();
+
+      expect({ once, soon, later: reads }).toStrictEqual({
+        once: 1,
+        soon: 1,
+        later: 2,
+      });
+    } finally {
+      linear.next = undefined;
+    }
+  });
+
+  it("are read after an answer at once when signed in again, though a read failed moments before", async () => {
+    const { anna, connector, connectionId } = await connected();
+    await listExpires(connectionId);
+    let reads = 0;
+    const failing = (): Response => {
+      reads += 1;
+      linear.next = failing;
+      return new Response(null, { status: 503 });
+    };
+    linear.next = failing;
+    try {
+      await offered(connectionId);
+      await vi.waitFor(() => {
+        expect(reads).toBeGreaterThan(0);
+      }, waitForRead);
+      // Its grant ran out: Anna signs in again.
+      await env.DB.batch([
+        env.DB.prepare(
+          "UPDATE connections SET status = 'needs_reauth' WHERE id = ?"
+        ).bind(connectionId),
+        env.DB.prepare(
+          "DELETE FROM connection_tokens WHERE connection_id = ?"
+        ).bind(connectionId),
+      ]);
+      const again = await connectLinear(connector, anna);
+      const signedIn = reads;
+      await offered(again);
+      await vi.waitFor(() => {
+        expect(reads).toBeGreaterThan(signedIn);
+      }, waitForRead);
+
+      expect(again).toBe(connectionId);
+    } finally {
+      linear.next = undefined;
+    }
+  });
+
+  it("are read and kept as it is connected, so they are offered before any call", async () => {
+    const connectionId = await connectLinear(await addLinear(), someone());
+    const [owner] = await exports.default.connectionOwners([connectionId]);
+
+    expect(Object.hasOwn(owner?.toolClasses ?? {}, "list_issues")).toBeTruthy();
+  });
+
+  it("are described to core's tool search as the server lists them: their types alone for a search, in full where named", async () => {
+    const { connectionId } = await connected();
+    const listed = linear.tools.find(({ name }) => name === "list_issues");
+    const searched = await exports.default.connectionTools({ connectionId });
+    const [full] = await exports.default.connectionTools({
+      connectionId,
+      actions: ["list_issues"],
+    });
+    const short = searched.find(({ name }) => name === "list_issues");
+
+    expect({
+      searched: { description: short?.description, output: short?.output },
+      full: {
+        name: full?.name,
+        description: full?.description,
+        input: full?.input === JSON.stringify(listed?.inputSchema),
+      },
+    }).toStrictEqual({
+      searched: { description: listed?.description, output: null },
+      full: {
+        name: "list_issues",
+        description: listed?.description,
+        input: true,
+      },
+    });
+  });
+
   it("are classed without their descriptions, and a poisoned schema isn't offered", async () => {
     const { connectionId, agent } = await connected();
     const depth = 100_000;
@@ -131,7 +304,7 @@ describe("a connector's tools", () => {
     }).toStrictEqual({
       read: true,
       status: "held",
-      get_status: "change-own",
+      get_status: "reach-others",
       create_issue: "change-own",
       deep: undefined,
       large: undefined,
@@ -343,6 +516,9 @@ describe("a connector's tools", () => {
       }),
       tool("find_and_send"),
       tool("read_messages"),
+      tool("list_sharepoint_sites"),
+      tool("get_payload"),
+      tool("dropbox_list_files"),
       tool("delete_issue"),
       tool("share_document"),
     ];
@@ -360,6 +536,9 @@ describe("a connector's tools", () => {
       list_rooms: classes.list_rooms,
       find_and_send: classes.find_and_send,
       read_messages: classes.read_messages,
+      list_sharepoint_sites: classes.list_sharepoint_sites,
+      get_payload: classes.get_payload,
+      dropbox_list_files: classes.dropbox_list_files,
       delete_issue: await outcome(
         callAs(agent, { connectionId, action: "delete_issue", input: {} })
       ),
@@ -376,11 +555,429 @@ describe("a connector's tools", () => {
       create_event: "reach-others",
       search_by: "reach-others",
       list_rooms: "reach-others",
-      find_and_send: "change-own",
+      find_and_send: "reach-others",
       read_messages: "read-others",
+      list_sharepoint_sites: "read-own",
+      get_payload: "read-own",
+      dropbox_list_files: "read-own",
       delete_issue: "connect.never",
       share_document: "connect.never",
       deleteSent: false,
+    });
+  });
+
+  it("are changes when a verb that reads is joined by one that changes, or by none the rules know", async () => {
+    linear.tools = [
+      ...linear.tools,
+      tool("search_replace"),
+      tool("findReplace"),
+      tool("list_mark_read"),
+      tool("get_lock"),
+      tool("get_set_x"),
+      tool("find_merge"),
+      tool("get_overwrite"),
+      tool("list_unhide"),
+      tool("get_deregister"),
+      tool("post_to_list"),
+      tool("whoami", { annotations: { readOnlyHint: true } }),
+      tool("query_database"),
+      tool("list_flagged", { annotations: { destructiveHint: true } }),
+    ];
+    const { connectionId, agent } = await connected();
+    const classes = await classesOf(connectionId);
+    const replaced = await callAs(agent, {
+      connectionId,
+      action: "search_replace",
+      input: {},
+    });
+
+    expect({
+      search_replace: classes.search_replace,
+      findReplace: classes.findReplace,
+      list_mark_read: classes.list_mark_read,
+      get_lock: classes.get_lock,
+      get_set_x: classes.get_set_x,
+      find_merge: classes.find_merge,
+      get_overwrite: classes.get_overwrite,
+      list_unhide: classes.list_unhide,
+      get_deregister: classes.get_deregister,
+      post_to_list: classes.post_to_list,
+      whoami: classes.whoami,
+      query_database: classes.query_database,
+      list_flagged: classes.list_flagged,
+      replaced: replaced.pending === undefined ? "ran" : "held",
+      sent: linear.calls.some(({ name }) => name === "search_replace"),
+    }).toStrictEqual({
+      search_replace: "change-own",
+      findReplace: "change-own",
+      list_mark_read: "change-own",
+      get_lock: "change-own",
+      get_set_x: "change-own",
+      find_merge: "change-own",
+      get_overwrite: "change-own",
+      list_unhide: "change-own",
+      get_deregister: "change-own",
+      post_to_list: "reach-others",
+      whoami: "reach-others",
+      query_database: "reach-others",
+      list_flagged: "reach-others",
+      replaced: "held",
+      sent: false,
+    });
+  });
+
+  it("reach others where a change delivers or names the people or places it acts on, and where a name can't be read", async () => {
+    const text = { type: "string" };
+    linear.tools = [
+      ...linear.tools,
+      tool("post_to_channel", takes({ channel: text, text })),
+      tool("save_note", takes({ sendTo: text, body: text })),
+      tool("create_message", takes({ toAddress: text, body: text })),
+      tool("update_issue", takes({ assignee: text })),
+      tool(
+        "add_link",
+        takes({
+          links: { type: "array", items: takes({ url: text }).inputSchema },
+        })
+      ),
+      tool("register_endpoint", takes({ webhook_url: text })),
+      tool("set_reminder", takes({ phone: text, user: text })),
+      tool("get_status", takes({ "r\u0435cipients": text })),
+      tool("assign_issue", takes({ assignee_id: { type: "integer" } })),
+      tool("reply_to_thread", takes({ thread_id: text, body: text })),
+      tool("send", takes({ id: text })),
+      tool("resend_notification", takes({ id: text })),
+      tool("post_list", takes({ list: text, text })),
+      tool("add_watchers", takes({ watchers: text })),
+      tool("save_task", takes({ username: text })),
+      tool("create_ticket", takes({ notice: takes({ to: text }).inputSchema })),
+      tool("get_weather", takes({ city: text, callback_url: text })),
+      tool("create_draft", takes({ to: text, cc: text, body: text })),
+      tool("send_draft", takes({ draftId: text })),
+      tool("submit_draft", takes({ to: text })),
+      tool("approve_draft", takes({ recipients: text })),
+      tool("save_draft", takes({ to: text, callback_url: text })),
+      tool(
+        "list_events",
+        takes({
+          from: { type: "string", format: "date-time" },
+          to: { type: "string", format: "date-time" },
+        })
+      ),
+      tool("list_issues_by", takes({ assignee: text, channel: text })),
+      tool("get_report", takes({ from: text, to: text })),
+      tool(
+        "get_summary",
+        takes({ recipient: { type: "integer", format: "date" } })
+      ),
+      tool(
+        "update_event",
+        takes({ event_id: text, notify_attendees: { type: "boolean" } })
+      ),
+      tool("edit_draft", takes({ to: text, send: { type: "boolean" } })),
+      tool(
+        "update_draft",
+        takes({
+          draft_id: text,
+          scheduledSendTime: { type: "string", format: "date-time" },
+        })
+      ),
+      tool(
+        "create_issue_from_draft",
+        takes({ draft_id: text, assignee: text })
+      ),
+      tool("reply_draft", takes({ draft_id: text })),
+      tool("write_draft", takes({ to: text, autosend: { type: "boolean" } })),
+      tool(
+        "save_draft_for",
+        takes({
+          to: text,
+          schedule_date: { type: "string", format: "date-time" },
+        })
+      ),
+      tool(
+        "update_ticket",
+        takes({ id: text, shouldnotify: { type: "boolean" } })
+      ),
+      tool("fetch_report", takes({ id: text, sendNow: { type: "boolean" } })),
+      tool(
+        "get_digest",
+        takes({
+          id: text,
+          send_now: { anyOf: [{ type: "boolean" }, { type: "null" }] },
+          notify: { type: ["boolean", "null"] },
+        })
+      ),
+      tool(
+        "read_summary",
+        takes({
+          id: text,
+          autosend: { type: "string", enum: ["true", "false"] },
+        })
+      ),
+      tool("list_deliveries", takes({ delivery_status: text })),
+      tool("list_notifications", {
+        inputSchema: {
+          type: "object",
+          properties: {
+            notification_type: { $ref: "#/$defs/Kind" },
+            delivery_status: { allOf: [{ $ref: "#/$defs/Kind" }] },
+          },
+          $defs: { Kind: { type: "string", enum: ["sent", "failed"] } },
+        },
+      }),
+      // Each definition names the next twice: read once each, not 2^40 times.
+      tool("get_fanout", {
+        inputSchema: {
+          type: "object",
+          properties: { send_now: { $ref: "#/$defs/A0" } },
+          $defs: Object.fromEntries(
+            Array.from({ length: 40 }, (_, index) => [
+              `A${index}`,
+              index === 39
+                ? { type: "boolean" }
+                : {
+                    anyOf: [
+                      { $ref: `#/$defs/A${index + 1}` },
+                      { $ref: `#/$defs/A${index + 1}` },
+                    ],
+                  },
+            ])
+          ),
+        },
+      }),
+      // A chain of $refs deeper than any schema nests: no stack overflow.
+      tool("get_chained", {
+        inputSchema: {
+          type: "object",
+          properties: { send_now: { $ref: "#/hops/0" } },
+          hops: Array.from({ length: 2000 }, (_, index) => ({
+            $ref: `#/hops/${index + 1}`,
+          })),
+        },
+      }),
+      tool("get_anchored", {
+        inputSchema: {
+          type: "object",
+          properties: { send_now: { $ref: "#Flag" } },
+          $defs: { Flag: { $anchor: "Flag", type: "boolean" } },
+        },
+      }),
+      tool("get_mixed", {
+        inputSchema: {
+          type: "object",
+          properties: { send_now: { type: "boolean", $ref: "#/$defs/Text" } },
+          $defs: { Text: { type: "string" } },
+        },
+      }),
+      tool("get_composed", {
+        inputSchema: {
+          type: "object",
+          properties: {
+            send_now: {
+              allOf: [{ type: "boolean" }, { $ref: "#/$defs/Text" }],
+            },
+          },
+          $defs: { Text: { type: "string" } },
+        },
+      }),
+      tool(
+        "get_worded",
+        takes({ id: text, notify: { enum: ["yes", "no", "all"] } })
+      ),
+      tool(
+        "get_options",
+        takes({ id: text, notify: { enum: [true, false, "all"] } })
+      ),
+      tool("get_brief", {
+        inputSchema: {
+          type: "object",
+          properties: { notify: { $ref: "#/$defs/Flag" } },
+          $defs: { Flag: { anyOf: [{ type: "boolean" }, { type: "null" }] } },
+        },
+      }),
+    ];
+    const { connectionId } = await connected();
+    const classes = await classesOf(connectionId);
+
+    expect({
+      post_to_channel: classes.post_to_channel,
+      save_note: classes.save_note,
+      create_message: classes.create_message,
+      update_issue: classes.update_issue,
+      add_link: classes.add_link,
+      register_endpoint: classes.register_endpoint,
+      set_reminder: classes.set_reminder,
+      get_status: classes.get_status,
+      assign_issue: classes.assign_issue,
+      reply_to_thread: classes.reply_to_thread,
+      send: classes.send,
+      resend_notification: classes.resend_notification,
+      post_list: classes.post_list,
+      add_watchers: classes.add_watchers,
+      save_task: classes.save_task,
+      create_ticket: classes.create_ticket,
+      get_weather: classes.get_weather,
+      create_draft: classes.create_draft,
+      send_draft: classes.send_draft,
+      submit_draft: classes.submit_draft,
+      approve_draft: classes.approve_draft,
+      save_draft: classes.save_draft,
+      list_events: classes.list_events,
+      list_issues_by: classes.list_issues_by,
+      get_report: classes.get_report,
+      get_summary: classes.get_summary,
+      update_event: classes.update_event,
+      edit_draft: classes.edit_draft,
+      update_draft: classes.update_draft,
+      create_issue_from_draft: classes.create_issue_from_draft,
+      reply_draft: classes.reply_draft,
+      write_draft: classes.write_draft,
+      save_draft_for: classes.save_draft_for,
+      update_ticket: classes.update_ticket,
+      fetch_report: classes.fetch_report,
+      get_digest: classes.get_digest,
+      read_summary: classes.read_summary,
+      list_deliveries: classes.list_deliveries,
+      list_notifications: classes.list_notifications,
+      get_mixed: classes.get_mixed,
+      get_options: classes.get_options,
+      get_composed: classes.get_composed,
+      get_worded: classes.get_worded,
+      get_brief: classes.get_brief,
+      get_fanout: classes.get_fanout,
+      get_anchored: classes.get_anchored,
+      get_chained: classes.get_chained,
+    }).toStrictEqual({
+      post_to_channel: "reach-others",
+      save_note: "reach-others",
+      create_message: "reach-others",
+      update_issue: "reach-others",
+      add_link: "reach-others",
+      register_endpoint: "reach-others",
+      set_reminder: "reach-others",
+      get_status: "reach-others",
+      assign_issue: "reach-others",
+      reply_to_thread: "reach-others",
+      send: "reach-others",
+      resend_notification: "reach-others",
+      post_list: "reach-others",
+      add_watchers: "reach-others",
+      save_task: "reach-others",
+      create_ticket: "reach-others",
+      get_weather: "reach-others",
+      create_draft: "change-own",
+      send_draft: "reach-others",
+      submit_draft: "reach-others",
+      approve_draft: "reach-others",
+      save_draft: "reach-others",
+      list_events: "read-own",
+      list_issues_by: "read-own",
+      get_report: "reach-others",
+      get_summary: "reach-others",
+      update_event: "reach-others",
+      edit_draft: "reach-others",
+      update_draft: "reach-others",
+      create_issue_from_draft: "reach-others",
+      reply_draft: "reach-others",
+      write_draft: "reach-others",
+      save_draft_for: "reach-others",
+      update_ticket: "reach-others",
+      fetch_report: "reach-others",
+      get_digest: "reach-others",
+      read_summary: "reach-others",
+      list_deliveries: "read-own",
+      list_notifications: "read-own",
+      get_mixed: "reach-others",
+      get_options: "reach-others",
+      get_composed: "reach-others",
+      get_worded: "reach-others",
+      get_brief: "reach-others",
+      get_fanout: "reach-others",
+      get_anchored: "reach-others",
+      get_chained: "reach-others",
+    });
+  });
+
+  it("never run what Grasp never does, however its name is inflected, joined or cased", async () => {
+    const refused = [
+      "list_deleted_items",
+      "deletion_request",
+      "softdelete_issue",
+      "bulkDelete",
+      "getACLs",
+      "HTTPDelete",
+      "list_shares",
+      "get_shared_link",
+      "make_sharelink",
+      "list_grants",
+      "revokes_token",
+      "get_forwarded",
+      "set_autoforward",
+      "mark_paid",
+      "drop_table",
+      "truncate_table",
+      "purge_cache",
+      "update_role",
+      "add_collaborator",
+      "create_webhook",
+      "cancel_subscription",
+      "purchase_seats",
+      "create_invoice",
+      "withdraw_funds",
+      "invite_user",
+      "bulk_unshare",
+      "update_userRoles",
+      "create_mailrule",
+      "enable_autopay",
+      "reshare_post",
+      "update_link_sharing",
+      "prune_branches",
+      "discard_changes",
+      "unlink_file",
+      "expunge_mailbox",
+      "set_out_of_office",
+      "set_automatic_replies",
+      "set_vacation_responder",
+      "create_hook",
+      "list_githooks",
+      "checkout_cart",
+      "empty_folder",
+      "clear_calendar",
+      "reset_account",
+      "uninstall_app",
+      "kv_del",
+      "fs_rm",
+      "rmdir",
+      "unset_value",
+      "update_access",
+      "add_editor",
+      "make_public",
+      "enable_link_sharing",
+      "sharefile",
+      "create_shareable_link",
+      "add_payee",
+      "update_ruleset",
+      "grantaccess",
+    ];
+    linear.tools = [...linear.tools, ...refused.map((name) => tool(name))];
+    const { connectionId, agent } = await connected();
+    const classes = await classesOf(connectionId);
+    const outcomes = await Promise.all(
+      refused.map(
+        async (action) =>
+          await outcome(callAs(agent, { connectionId, action, input: {} }))
+      )
+    );
+
+    expect({
+      classed: refused.filter((name) => Object.hasOwn(classes, name)),
+      outcomes,
+      sent: linear.calls.filter(({ name }) => refused.includes(name ?? "")),
+    }).toStrictEqual({
+      classed: [],
+      outcomes: refused.map(() => "connect.never"),
+      sent: [],
     });
   });
 });

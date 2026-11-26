@@ -3,6 +3,7 @@ import {
   confirmedMetaKey,
   effectKeyMetaKey,
   findMetaKey,
+  isNeverTool,
   maxRetryAfterSeconds,
   stampMetaKey,
 } from "@grasp-os/runtime/connector";
@@ -70,7 +71,6 @@ import type {
   McpTool,
   McpToolResult,
 } from "./mcp.ts";
-import { isNeverTool } from "./never.ts";
 import { heldFilesOf, hold, waitingUnder } from "./pending.ts";
 import type { HeldAction } from "./pending.ts";
 import {

@@ -43,6 +43,11 @@ export interface Integration {
   toolCount: number | undefined;
   /** Whether people are offered it; an entry the catalog doesn't list counts as not. */
   offered: boolean;
+  /**
+   * For a server inside the company's own network, the one address it is
+   * reached at through the company network: only admins connect it, shared.
+   */
+  companyNetwork?: string;
   /** Whether the catalog lists it to this person. */
   listed: boolean;
   /** Its connections this person can see, newest first. */
@@ -124,6 +129,9 @@ export const integrationsOf = (
     logo: entry.logo,
     toolCount: entry.toolCount ?? undefined,
     offered: entry.offered,
+    ...(entry.companyNetwork === undefined
+      ? {}
+      : { companyNetwork: entry.companyNetwork }),
     listed: true,
     connections: of(entry.source, entry.id),
   }));

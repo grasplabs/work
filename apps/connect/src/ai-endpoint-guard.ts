@@ -12,9 +12,9 @@
 //   RFC 1918, link-local, carrier-grade NAT, unique local IPv6, and names
 //   such as `localhost` or `*.internal`): refused, except on-prem
 //   (`RUNTIME_PROFILE=workerd`) for a host the deployment's own config
-//   names in `AI_PRIVATE_HOSTS`. Hosted connect runs on Cloudflare with
-//   `global_fetch_strictly_public`, which doesn't reach private networks
-//   anyway; this refuses them before that.
+//   names in `AI_PRIVATE_HOSTS`. Hosted, Cloudflare's egress doesn't
+//   route a Worker's requests to private networks anyway; this refuses
+//   them before that.
 // - A name that resolves to a private address (DNS rebinding, or a
 //   wildcard DNS name such as `127.0.0.1.nip.io` or
 //   `169-254-169-254.attacker.example`): connect can't resolve names
@@ -23,18 +23,18 @@
 //   address in it (four numeric labels in a row, a dashed quad, or a
 //   wildcard DNS service such as nip.io or sslip.io) is refused outright,
 //   wherever it points; on-prem, a private target is taken only as a name
-//   or address `AI_PRIVATE_HOSTS` lists exactly. On Cloudflare,
-//   `global_fetch_strictly_public` reaches public addresses only, so a
-//   name that resolves to a private one fails there whatever it is.
+//   or address `AI_PRIVATE_HOSTS` lists exactly. On Cloudflare, the
+//   platform's egress reaches public addresses only, so a name that
+//   resolves to a private one fails there whatever it is.
 //   The remaining limit, on plain workerd: an ordinary-looking name the
 //   attacker's DNS answers with a private or metadata address passes this
 //   check. What stops it there is workerd's network, never this guard:
-//   its default (`allow = ["public"]`) reaches public addresses only, and
-//   the on-prem setup opens it to each named host's own address alone
-//   (`allow = ["public", "10.0.0.8/32"]`), never to `private` (env.d.ts,
-//   `AI_PRIVATE_HOSTS`). The URL is checked when the key is saved and
-//   again for every request, so the host a request goes to is always the
-//   one checked.
+//   AI requests go out through the AI endpoints' own network
+//   (`AI_NETWORK`), which reaches public addresses and each named host's
+//   own address alone (`allow = ["public", "10.0.0.8/32"]`), never
+//   `private` (env.d.ts, `AI_PRIVATE_HOSTS`). The URL is checked when
+//   the key is saved and again for every request, so the host a request
+//   goes to is always the one checked.
 // - A redirect to somewhere else: model requests don't follow redirects
 //   (`redirect: "manual"`); a 3xx is a refusal.
 // - A key sent in the clear: plain HTTP only to a private host on-prem,

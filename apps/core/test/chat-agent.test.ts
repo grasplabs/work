@@ -22,7 +22,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { AgentApi } from "../src/agent-scope.ts";
 import { instructions, withheldResult } from "../src/agent.ts";
-import type { TurnSkill } from "../src/agent.ts";
+import type { CodeRunEnd, TurnSkill } from "../src/agent.ts";
 import {
   chatAgent,
   needsRebase,
@@ -33,7 +33,6 @@ import {
   tooLargeResult,
 } from "../src/chat-agent.ts";
 import type { ChatAgent } from "../src/chat-agent.ts";
-import type { CodeRunStatus } from "../src/code-run-statuses.ts";
 
 // The chat agent as a pi-durable extension, on a Harness of its own with a
 // fake provider and no Workspace: what the model is told and offered, the
@@ -180,8 +179,11 @@ const openChat = async (
         runs.opened.push(runId);
         return await Promise.resolve(runId);
       },
-      close: async (runId, status): Promise<CodeRunStatus> =>
-        await Promise.resolve(runs.revoked.has(runId) ? "revoked" : status),
+      close: async (runId, status): Promise<CodeRunEnd> =>
+        await Promise.resolve({
+          status: runs.revoked.has(runId) ? "revoked" : status,
+          readFrom: [],
+        }),
       output: (_runId, _callId, line) => {
         runs.lines.push(line);
       },
@@ -880,7 +882,8 @@ describe("a restart", () => {
       withheld: async () => await Promise.resolve(revoked),
       runs: {
         open: async () => await Promise.resolve("run-1"),
-        close: async (_runId, status) => await Promise.resolve(status),
+        close: async (_runId, status) =>
+          await Promise.resolve({ status, readFrom: [] }),
         output: () => {
           logged.resolve(true);
         },

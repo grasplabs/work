@@ -538,30 +538,54 @@ describe("a connector's server", () => {
         key: "notes-key",
       });
     const { connectionId } = await connect();
-    // The list is answered after Bob gave his key again.
+    // The list kept as Bob connected has gone stale.
+    await env.DB.prepare(
+      "UPDATE connections SET tool_list_fresh_until = NULL WHERE id = ?"
+    )
+      .bind(connectionId)
+      .run();
+    // The list read with his first key lists a tool of its own, and is
+    // answered after Bob gave his key again, which reads the list anew.
     let replaced = false;
+    const noInput = { type: "object", properties: {} };
     servers.set(origin, async (request) => {
       const answer = await serve?.(request);
-      const { method } = await rpcOf(request);
-      if (!replaced && method === "tools/list") {
-        replaced = true;
-        await connect();
+      const { id, method } = await rpcOf(request);
+      if (replaced || method !== "tools/list") {
+        return answer ?? new Response(null, { status: 404 });
       }
-      return answer ?? new Response(null, { status: 404 });
+      replaced = true;
+      await connect();
+      return Response.json({
+        jsonrpc: "2.0",
+        id,
+        result: {
+          resultType: "complete",
+          ttlMs: 300_000,
+          tools: [
+            { name: "list_notes", inputSchema: noInput },
+            { name: "first_key_only", inputSchema: noInput },
+          ],
+        },
+      });
     });
 
     const classes = await exports.default.connectorToolClasses(connectionId);
     const kept = await env.DB.prepare(
-      "SELECT count(*) AS kept FROM connection_tools WHERE connection_id = ?"
+      "SELECT name FROM connection_tools WHERE connection_id = ?"
     )
       .bind(connectionId)
-      .first<{ kept: number }>();
+      .all<{ name: string }>();
 
     expect({
       replaced,
       readForTheCall: classes.list_notes,
-      kept: kept?.kept,
-    }).toStrictEqual({ replaced: true, readForTheCall: "read-own", kept: 0 });
+      kept: kept.results.map(({ name }) => name),
+    }).toStrictEqual({
+      replaced: true,
+      readForTheCall: "read-own",
+      kept: ["list_notes"],
+    });
   });
 
   it("serves a personal connection to its owner alone, and each connector's credential to its own server alone", async () => {

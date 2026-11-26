@@ -56,12 +56,37 @@ export type {
   ToolResult,
 } from "./server.ts";
 export {
-  attachmentsMetaKey,
-  changeMetaKey,
-  confirmedMetaKey,
   connectorIsolateRequests,
   connectorManifestSchema,
   connectorNameSchema,
+  generatedContractMajor,
+  generatedContracts,
+  hostSchema,
+  maxProvenanceItems,
+  provenanceSchema,
+  readAsSchema,
+  recoveryModes,
+  redirectHostMatches,
+  routeSchema,
+  syncManifestSchema,
+  syncNameSchema,
+  syncParamsSchema,
+  syncPlacesParamsSchema,
+} from "./manifest.ts";
+export type {
+  ActionDescribe,
+  ActionManifest,
+  ConnectorManifest,
+  ContractAction,
+  RecoveryMode,
+  Route,
+  SyncManifest,
+  SyncParams,
+} from "./manifest.ts";
+export {
+  attachmentsMetaKey,
+  changeMetaKey,
+  confirmedMetaKey,
   effectAbsentMetaKey,
   effectKeyMetaKey,
   effectKeyPattern,
@@ -70,46 +95,23 @@ export {
   egressTooLargeMessage,
   findMetaKey,
   forbiddenInValue,
-  generatedContractMajor,
-  generatedContracts,
-  hostSchema,
   httpMethods,
   maxChangeBytes,
-  maxProvenanceItems,
   maxRetryAfterSeconds,
   mcpProtocolVersion,
   notPerformedMetaKey,
   outcomeUnknownMetaKey,
   pathMatches,
   provenanceMetaKey,
-  provenanceSchema,
-  readAsSchema,
-  recoveryModes,
-  redirectHostMatches,
   resourceMetaKey,
-  routeSchema,
   segmentValuePattern,
   stampHeader,
   stampMetaKey,
   stampPattern,
-  syncManifestSchema,
   syncMethod,
-  syncNameSchema,
-  syncParamsSchema,
   syncPlacesMethod,
-  syncPlacesParamsSchema,
-} from "./manifest.ts";
-export type {
-  ActionDescribe,
-  ActionManifest,
-  ConnectorManifest,
-  ContractAction,
-  EgressKind,
-  RecoveryMode,
-  Route,
-  SyncManifest,
-  SyncParams,
-} from "./manifest.ts";
+} from "./protocol.ts";
+export type { EgressKind } from "./protocol.ts";
 export {
   accountLookupSchema,
   endpointHost,
@@ -122,7 +124,16 @@ export {
 export { addressesOf } from "./mail-addresses.ts";
 export type { Address } from "./mail-addresses.ts";
 export type { AccountLookup, SignIn, SignInInput } from "./sign-in.ts";
+export { jsonSchemaOf } from "../common/json-schema.ts";
 export { jsonBody, providerFetch, retryAfterOf, segment } from "./provider.ts";
+export {
+  classByRules,
+  isJsonArray,
+  isNeverTool,
+  ruledDeclaration,
+  topNames,
+} from "./tool-rules.ts";
+export type { RuledTool, ToolHints } from "./tool-rules.ts";
 export type { Provider, ProviderDefinition } from "./provider.ts";
 export {
   checkReadable,

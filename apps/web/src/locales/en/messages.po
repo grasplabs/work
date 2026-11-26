@@ -7614,6 +7614,10 @@ msgstr "For {person}: {opening}"
 msgid "For {person}: {opening} · {last}"
 msgstr "For {person}: {opening} · {last}"
 
+#: src/connections/add-connector.tsx
+msgid "For a server inside your company's own network, with no public address."
+msgstr "For a server inside your company's own network, with no public address."
+
 #: src/settings/erasures.tsx
 msgid "For an address your company gave to someone else. Anyone signing in with it then gets in, {name} too if your sign-in provider still has it for them."
 msgstr "For an address your company gave to someone else. Anyone signing in with it then gets in, {name} too if your sign-in provider still has it for them."
@@ -8175,6 +8179,15 @@ msgstr "Grasp may read and write in {app}, only for what you allow."
 #: src/connections/connected-dialog.tsx
 msgid "Grasp may use {app} only through the tools you allowed."
 msgstr "Grasp may use {app} only through the tools you allowed."
+
+#: src/connections/connected-dialog.tsx
+msgid "Grasp reaches it at {address}, inside your network."
+msgstr "Grasp reaches it at {address}, inside your network."
+
+#. {address} is the server's address inside the company's network, e.g. http://10.0.0.8:8080.
+#: src/connections/connect-dialog.tsx
+msgid "Grasp reaches it through your company network at {address}. It is connected once, for everyone: your organization uses it through the permissions you grant."
+msgstr "Grasp reaches it through your company network at {address}. It is connected once, for everyone: your organization uses it through the permissions you grant."
 
 #: src/connections/integrations-band.tsx
 msgid "Grasp reaches only what you connect."
@@ -9446,6 +9459,10 @@ msgstr "Its data, as JSON"
 #: src/apps/app-settings.tsx
 msgid "Its definition to keep or move, and a blueprint others can start from."
 msgstr "Its definition to keep or move, and a blueprint others can start from."
+
+#: src/connections/add-connector.tsx
+msgid "Its host and port are the one address Grasp reaches inside your network, and plain HTTP is allowed there. An IP address is safer than a name, which trusts your company's own DNS. It signs in with a key in a header, and only admins connect it, as a shared connection."
+msgstr "Its host and port are the one address Grasp reaches inside your network, and plain HTTP is allowed there. An IP address is safer than a name, which trusts your company's own DNS. It signs in with a key in a header, and only admins connect it, as a shared connection."
 
 #: src/chat/agent-draft-card.tsx
 msgid "Its instructions"
@@ -13915,6 +13932,15 @@ msgstr "Rather type?"
 msgid "Reach others"
 msgstr "Reach others"
 
+#: src/connections/add-connector.tsx
+#: src/connections/connected-dialog.tsx
+msgid "Reached through your company network"
+msgstr "Reached through your company network"
+
+#: src/connections/app-page.tsx
+msgid "Reached through your company network at {address}."
+msgstr "Reached through your company network at {address}."
+
 #: src/activity/type-labels.ts
 msgid "Read"
 msgstr "Read"
@@ -17399,6 +17425,10 @@ msgid "The address can sign in again."
 msgstr "The address can sign in again."
 
 #: src/connections/add-connector.tsx
+msgid "The address is the server's own http:// or https:// URL inside your network, such as http://10.0.0.8:8080/mcp, with no query, fragment or user name in it."
+msgstr "The address is the server's own http:// or https:// URL inside your network, such as http://10.0.0.8:8080/mcp, with no query, fragment or user name in it."
+
+#: src/connections/add-connector.tsx
 msgid "The address is the server's own https:// URL, such as https://mcp.example.com/mcp, with no query, fragment or user name in it."
 msgstr "The address is the server's own https:// URL, such as https://mcp.example.com/mcp, with no query, fragment or user name in it."
 
@@ -17409,6 +17439,10 @@ msgstr "The address may be wrong, or the page was moved or removed."
 #: src/connections/add-connector.tsx
 msgid "The address of its MCP server, as its vendor gives it."
 msgstr "The address of its MCP server, as its vendor gives it."
+
+#: src/connections/add-connector.tsx
+msgid "The admin who connects it types its key, which goes in this header."
+msgstr "The admin who connects it types its key, which goes in this header."
 
 #: src/chat/connection-requests.tsx
 msgid "The agent asked an admin for {name}"

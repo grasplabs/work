@@ -251,7 +251,8 @@ const sendThroughConnect = async (
   target: ConnectTarget,
   host: string,
   request: Request,
-  { providerRequest, endsAt, signal }: SentBy
+  { providerRequest, endsAt, signal }: SentBy,
+  method?: "GET" | "DELETE"
 ): Promise<Response> => {
   const grant = await signModelGrant(env.CAPABILITY_SIGNING_KEY, {
     credential: target.credential,
@@ -260,6 +261,7 @@ const sendThroughConnect = async (
     request: providerRequest,
     notAfter: endsAt,
     body: await sha256HexOfBytes(await request.clone().arrayBuffer()),
+    ...(method === undefined ? {} : { method }),
   });
   signal?.throwIfAborted();
   const line = stopLine();
@@ -308,15 +310,18 @@ const platformUrl = (target: ConnectTarget, path: string): URL | undefined => {
 
 /**
  * Sends one request of a platform feature (speech, a recording written
- * down) to `path` at `target`'s provider through connect, as `sentBy`
- * names it: the placeholder where the key goes, which connect replaces
- * with Grasp's key, and only the headers given.
+ * down, a voice session) to `path` at `target`'s provider through connect,
+ * as `sentBy` names it: the placeholder where the key goes, which connect
+ * replaces with Grasp's key, and only the headers given. A POST with its
+ * body, or a voice session read (GET) or closed (DELETE), with none.
  */
 export const connectRequest = async (
   env: ConnectEnv,
   target: ConnectTarget,
   path: string,
-  init: { headers: Record<string, string>; body: BodyInit },
+  init:
+    | { method?: "POST"; headers: Record<string, string>; body: BodyInit }
+    | { method: "GET" | "DELETE"; headers: Record<string, string> },
   sentBy: SentBy
 ): Promise<Response> => {
   const url = platformUrl(target, path);
@@ -332,6 +337,16 @@ export const connectRequest = async (
     }
   }
   headers.set("x-request-id", sentBy.providerRequest);
+  if (!("body" in init)) {
+    return await sendThroughConnect(
+      env,
+      target,
+      url.hostname.toLowerCase(),
+      new Request(url, { method: init.method, headers }),
+      sentBy,
+      init.method
+    );
+  }
   // Read whole first, a form's boundary in its content type, as a body
   // that streams can't cross the service binding with the request.
   const asked = new Request(url, { method: "POST", headers, body: init.body });

@@ -7614,6 +7614,10 @@ msgstr "Für {person}: {opening}"
 msgid "For {person}: {opening} · {last}"
 msgstr "Für {person}: {opening} · {last}"
 
+#: src/connections/add-connector.tsx
+msgid "For a server inside your company's own network, with no public address."
+msgstr "Für einen Server im eigenen Netzwerk Ihres Unternehmens, ohne öffentliche Adresse."
+
 #: src/settings/erasures.tsx
 msgid "For an address your company gave to someone else. Anyone signing in with it then gets in, {name} too if your sign-in provider still has it for them."
 msgstr "Für eine Adresse, die Ihr Unternehmen jemand anderem gegeben hat. Wer sich damit anmeldet, kommt dann hinein, auch {name}, wenn Ihr Anmeldedienst sie noch für diese Person führt."
@@ -8175,6 +8179,15 @@ msgstr "Grasp darf in {app} lesen und schreiben, nur für das, was Sie erlauben.
 #: src/connections/connected-dialog.tsx
 msgid "Grasp may use {app} only through the tools you allowed."
 msgstr "Grasp darf {app} nur über die Werkzeuge nutzen, die Sie erlaubt haben."
+
+#: src/connections/connected-dialog.tsx
+msgid "Grasp reaches it at {address}, inside your network."
+msgstr "Grasp erreicht es unter {address}, in Ihrem Netzwerk."
+
+#. {address} is the server's address inside the company's network, e.g. http://10.0.0.8:8080.
+#: src/connections/connect-dialog.tsx
+msgid "Grasp reaches it through your company network at {address}. It is connected once, for everyone: your organization uses it through the permissions you grant."
+msgstr "Grasp erreicht es über das Netzwerk Ihres Unternehmens unter {address}. Es wird einmal verbunden, für alle: Ihre Organisation nutzt es über die Berechtigungen, die Sie erteilen."
 
 #: src/connections/integrations-band.tsx
 msgid "Grasp reaches only what you connect."
@@ -9446,6 +9459,10 @@ msgstr "Seine Daten, als JSON"
 #: src/apps/app-settings.tsx
 msgid "Its definition to keep or move, and a blueprint others can start from."
 msgstr "Ihre Definition zum Aufbewahren oder Umziehen und eine Vorlage, mit der andere beginnen können."
+
+#: src/connections/add-connector.tsx
+msgid "Its host and port are the one address Grasp reaches inside your network, and plain HTTP is allowed there. An IP address is safer than a name, which trusts your company's own DNS. It signs in with a key in a header, and only admins connect it, as a shared connection."
+msgstr "Sein Host und Port sind die eine Adresse, die Grasp in Ihrem Netzwerk erreicht, und dort ist einfaches HTTP erlaubt. Eine IP-Adresse ist sicherer als ein Name, der dem eigenen DNS Ihres Unternehmens vertraut. Er meldet sich mit einem Schlüssel in einem Header an, und nur Admins verbinden ihn, als gemeinsame Verbindung."
 
 #: src/chat/agent-draft-card.tsx
 msgid "Its instructions"
@@ -13915,6 +13932,15 @@ msgstr "Lieber tippen?"
 msgid "Reach others"
 msgstr "Andere erreichen"
 
+#: src/connections/add-connector.tsx
+#: src/connections/connected-dialog.tsx
+msgid "Reached through your company network"
+msgstr "Über das Netzwerk Ihres Unternehmens erreicht"
+
+#: src/connections/app-page.tsx
+msgid "Reached through your company network at {address}."
+msgstr "Über das Netzwerk Ihres Unternehmens unter {address} erreicht."
+
 #: src/activity/type-labels.ts
 msgid "Read"
 msgstr "Lesen"
@@ -17399,6 +17425,10 @@ msgid "The address can sign in again."
 msgstr "Mit der Adresse kann man sich wieder anmelden."
 
 #: src/connections/add-connector.tsx
+msgid "The address is the server's own http:// or https:// URL inside your network, such as http://10.0.0.8:8080/mcp, with no query, fragment or user name in it."
+msgstr "Die Adresse ist die eigene http://- oder https://-URL des Servers in Ihrem Netzwerk, etwa http://10.0.0.8:8080/mcp, ohne Query-Parameter, Fragment oder Benutzernamen."
+
+#: src/connections/add-connector.tsx
 msgid "The address is the server's own https:// URL, such as https://mcp.example.com/mcp, with no query, fragment or user name in it."
 msgstr "Die Adresse ist die eigene https://-URL des Servers, etwa https://mcp.example.com/mcp, ohne Query-Parameter, Fragment oder Benutzernamen."
 
@@ -17409,6 +17439,10 @@ msgstr "Die Adresse ist vielleicht falsch, oder die Seite wurde verschoben oder 
 #: src/connections/add-connector.tsx
 msgid "The address of its MCP server, as its vendor gives it."
 msgstr "Die Adresse ihres MCP-Servers, wie der Anbieter sie angibt."
+
+#: src/connections/add-connector.tsx
+msgid "The admin who connects it types its key, which goes in this header."
+msgstr "Der Admin, der ihn verbindet, gibt seinen Schlüssel ein, der in diesem Header mitgeschickt wird."
 
 #: src/chat/connection-requests.tsx
 msgid "The agent asked an admin for {name}"

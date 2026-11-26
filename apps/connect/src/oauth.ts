@@ -37,6 +37,8 @@ import { drizzle } from "drizzle-orm/d1";
 import { accountAddressesOf } from "./account-addresses.ts";
 import type { AccountAddresses } from "./account-addresses.ts";
 import { recordEventIf, recordEvents } from "./audit.ts";
+import { nativeConnector } from "./bundled-connectors.ts";
+import { companyAddressOf, companyRoute, outbound } from "./company-network.ts";
 import {
   abandonToolkitFlow,
   composioAccountStates,
@@ -472,6 +474,27 @@ const isDuplicate = (error: unknown): boolean =>
 /** What a connection keeps of its sign-in: tokens or a key, sealed. */
 type Kept = Parameters<typeof firstTokens>[2];
 
+/** The address a key was sealed with, of a connection reached through the company network. */
+const companyNetworkOf = (kept: Kept): string | null =>
+  "apiKey" in kept ? (kept.companyNetwork ?? null) : null;
+
+/**
+ * What a connection's event says of the company network it is reached
+ * through (company-network.ts): its address now, and the one it had
+ * before where that changed, so every change is one event with both.
+ */
+const companyNetworkDetail = (
+  kept: Kept,
+  before: string | null
+): Record<string, AuditDetailValue> => {
+  const after = companyNetworkOf(kept);
+  return {
+    ...(after !== null && { companyNetwork: after }),
+    ...(before !== null &&
+      before !== after && { previousCompanyNetwork: before }),
+  };
+};
+
 /**
  * The address a connection counts as confirmed when it is connected: the
  * account's, as its provider's checked ID token gave it, for a provider
@@ -525,6 +548,7 @@ const storeConnection = async (
       status: "active",
       serverKind: isConnectorId(provider.id) ? "connector" : "native",
       server: provider.server,
+      companyNetwork: companyNetworkOf(tokens),
       tenant: tenantOf(flow),
       accountId: account.id,
       accountName: account.name,
@@ -548,6 +572,7 @@ const storeConnection = async (
       connectionEvent(person, "connection.connect", connectionId, {
         provider: provider.id,
         scope: flow.scope,
+        ...companyNetworkDetail(tokens, null),
         outcome: "ok",
       }),
     ],
@@ -580,6 +605,7 @@ const signedInAgain = (
   // Read again, for the account it holds now (mcp-connectors.ts).
   toolListReadAt: null,
   toolListFreshUntil: null,
+  toolListTriedAt: null,
   updatedAt: now,
 });
 
@@ -612,6 +638,7 @@ const reconnect = async (
     connectionEvent(person, "connection.reconnected", held.id, {
       provider: provider.id,
       scope: held.scope,
+      ...companyNetworkDetail(tokens, held.companyNetwork),
       outcome: "ok",
     }),
     { from: connections, where: stillWaiting },
@@ -647,6 +674,7 @@ const reconnect = async (
         .set({
           status: "active",
           ...signedInAgain(provider, flow, account, addresses, now),
+          companyNetwork: companyNetworkOf(tokens),
         })
         .where(stillWaiting),
     ]
@@ -684,6 +712,7 @@ const renewInPlace = async (
     connectionEvent(person, "connection.reconnected", held.id, {
       provider: provider.id,
       scope: held.scope,
+      ...companyNetworkDetail(tokens, held.companyNetwork),
       outcome: "ok",
     }),
     { from: connections, where: stillActive },
@@ -709,7 +738,10 @@ const renewInPlace = async (
         ),
       db
         .update(connections)
-        .set(signedInAgain(provider, flow, account, addresses, now))
+        .set({
+          ...signedInAgain(provider, flow, account, addresses, now),
+          companyNetwork: companyNetworkOf(tokens),
+        })
         .where(stillActive),
     ]
   );
@@ -1318,7 +1350,7 @@ const replaceKey = async (
   scope: ConnectionScope,
   person: ConnectionPerson,
   account: ProviderAccount,
-  key: string
+  tokens: Kept
 ): Promise<string | undefined> => {
   const held = await connectionHolding(env, provider.id, account.id);
   if (
@@ -1329,12 +1361,7 @@ const replaceKey = async (
     return undefined;
   }
   const now = new Date();
-  const row = await firstTokens(
-    vault,
-    held.id,
-    { apiKey: key, expiresAt: apiKeyExpiresAt },
-    now
-  );
+  const row = await firstTokens(vault, held.id, tokens, now);
   const stillActive = sql`${connections.id} = ${held.id} AND ${connections.status} = 'active' AND NOT ${ownerErased(held.id)}`;
   const db = drizzle(env.DB);
   const replaced = await recordEventIf(
@@ -1342,6 +1369,7 @@ const replaceKey = async (
     connectionEvent(person, "connection.reconnected", held.id, {
       provider: provider.id,
       scope: held.scope,
+      ...companyNetworkDetail(tokens, held.companyNetwork),
       outcome: "ok",
     }),
     { from: connections, where: stillActive },
@@ -1369,6 +1397,7 @@ const replaceKey = async (
         .set({
           toolListReadAt: null,
           toolListFreshUntil: null,
+          toolListTriedAt: null,
           accountName: account.name,
           accountEmail: account.email?.toLowerCase() ?? null,
           pastVerifiedEmails: pastAddressesAfter(
@@ -1377,12 +1406,52 @@ const replaceKey = async (
           verifiedEmail: confirmedAddressOf(provider, account),
           verifiedEmailAt:
             confirmedAddressOf(provider, account) === null ? null : new Date(),
+          companyNetwork: companyNetworkOf(tokens),
           updatedAt: now,
         })
         .where(stillActive),
     ]
   );
   return replaced ? held.id : undefined;
+};
+
+/**
+ * The address a key's connection is reached at through the company
+ * network (company-network.ts), if it is: the one a connector made from a
+ * URL names, or the one the admin gave (`asked`) for an app whose
+ * connector has one host. Refused, and audited, for a person's own
+ * connection, and where the deployment has no route there.
+ */
+const keyCompanyNetwork = async (
+  env: Env,
+  provider: ApiKeyProviderConfig,
+  scope: ConnectionScope,
+  asked: string | undefined,
+  refuse: Refuse
+): Promise<string | undefined> => {
+  const companyNetwork =
+    provider.companyNetwork ??
+    (asked === undefined ? undefined : companyAddressOf(asked));
+  if (companyNetwork === undefined && asked === undefined) {
+    return undefined;
+  }
+  const reachesOneHost =
+    provider.companyNetwork !== undefined ||
+    nativeConnector(provider.server)?.manifest.hosts.length === 1;
+  if (
+    companyNetwork === undefined ||
+    (asked !== undefined && provider.companyNetwork !== undefined) ||
+    scope !== "shared" ||
+    !reachesOneHost
+  ) {
+    await refuse("connection.invalid");
+    throw connectionErrors.create("connection.invalid");
+  }
+  if (companyRoute(env) === undefined) {
+    await refuse("connection.company_network_unavailable");
+    throw connectionErrors.create("connection.company_network_unavailable");
+  }
+  return companyNetwork;
 };
 
 /**
@@ -1401,6 +1470,7 @@ export const connectWithKey = async (
     provider: providerId,
     scope,
     key,
+    companyNetwork: asked,
   } = connectionErrors.parse(
     "connection.invalid",
     connectWithKeySchema,
@@ -1438,18 +1508,34 @@ export const connectWithKey = async (
       connectionId
     );
   };
-  const account = await provider.account(key, ownerOf({ scope }, person));
+  const companyNetwork = await keyCompanyNetwork(
+    env,
+    provider,
+    scope,
+    asked,
+    refuse
+  );
+  const account = await provider.account(
+    key,
+    ownerOf({ scope }, person),
+    outbound(env, companyNetwork)
+  );
   if (account === null) {
     await refuse("connection.provider_refused", { outcome: "failed" });
     throw connectionErrors.create("connection.provider_refused");
   }
+  const kept: Kept = {
+    apiKey: key,
+    expiresAt: apiKeyExpiresAt,
+    ...(companyNetwork === undefined ? {} : { companyNetwork }),
+  };
   const replaced = await replaceKey(
     env,
     { provider, vault },
     scope,
     person,
     account,
-    key
+    kept
   );
   if (replaced !== undefined) {
     return { connectionId: replaced };
@@ -1463,7 +1549,7 @@ export const connectWithKey = async (
     { scope, tenant: "" },
     person,
     account,
-    { apiKey: key, expiresAt: apiKeyExpiresAt },
+    kept,
     undefined,
     refuse
   );
@@ -1519,6 +1605,9 @@ export const listConnections = async (
       connectedBy: row.connectedBy,
       accountName: row.accountName,
       createdAt: row.createdAt.toISOString(),
+      ...(row.companyNetwork !== null && {
+        companyNetwork: row.companyNetwork,
+      }),
       ...(row.serverKind === "composio" && {
         ...(row.composioAuth !== null && { composioAuth: row.composioAuth }),
         tools: allowedToolNames(row),

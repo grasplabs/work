@@ -3,6 +3,7 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { and, eq, like, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
+import type { Outbound } from "./company-network.ts";
 import { connectors } from "./db/schema.ts";
 import { McpError, modernMcpServer } from "./mcp.ts";
 import { providerFor } from "./providers.ts";
@@ -76,16 +77,20 @@ const ownAccount = (owner: string): ProviderAccount => ({
 /** Most tools a server may list for connect to read the list at all. */
 export const maxListedTools = 500;
 
-/** Whether the server at `url` lists its tools for `key` in `header`. */
+/**
+ * Whether the server at `url` lists its tools for `key` in `header`,
+ * asked the connection's way out (`send`).
+ */
 const keyWorks = async (
   url: string,
   header: string,
-  key: string
+  key: string,
+  send: Outbound
 ): Promise<boolean> => {
   const server = modernMcpServer(url, async (request) => {
     const headers = new Headers(request.headers);
     headers.set(header, key);
-    return await fetch(new Request(request, { headers }));
+    return await send(new Request(request, { headers, redirect: "manual" }));
   });
   try {
     await server.list(maxListedTools);
@@ -113,8 +118,11 @@ const providerOf = async (
       id: row.id,
       server: row.id,
       credential: (key) => ({ header, value: key }),
-      account: async (key, owner) =>
-        (await keyWorks(row.url, header, key)) ? ownAccount(owner) : null,
+      account: async (key, owner, send) =>
+        (await keyWorks(row.url, header, key, send)) ? ownAccount(owner) : null,
+      ...(row.companyNetwork === true && {
+        companyNetwork: new URL(row.url).origin,
+      }),
     };
   }
   const {
