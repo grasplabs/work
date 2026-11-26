@@ -123,6 +123,13 @@ const startersFor = (name: string | undefined): string[] => [
 
 const placeholder = "Ask about an organization, or compare them";
 
+/**
+ * The most characters a question may have: what Ask Grasp takes of one
+ * turn (src/admin/ask.ts, `maxTurnChars`, server-side). A longer one
+ * would be refused, and stay in the conversation.
+ */
+const maxQuestionChars = 8000;
+
 /** The box: the question as it is written, and the button that sends it, or stops the answer coming. */
 const Composer = ({
   waiting,
@@ -134,6 +141,7 @@ const Composer = ({
   onStop: () => void;
 }) => (
   <PromptInput
+    maxLength={maxQuestionChars}
     style={styles.composer}
     onSubmit={({ text }) => {
       if (text.trim() !== "" && !waiting) {
