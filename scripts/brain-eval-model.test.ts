@@ -223,13 +223,13 @@ describe("what a run is given", () => {
 
   it("refuses, before a run, a model of the catalog no run can reach", () => {
     expect({
-      openai: realProviderTakes("openai/gpt-4"),
+      openai: realProviderTakes("openai/gpt-4.1"),
       anthropic: realProviderTakes("anthropic/claude-sonnet-5"),
-      said: unreachableModel("openai/gpt-4"),
+      said: unreachableModel("openai/gpt-4.1"),
     }).toStrictEqual({
       openai: false,
       anthropic: true,
-      said: "A run reaches Anthropic, Mistral and OpenRouter models of the gateway's catalog, not openai/gpt-4",
+      said: "A run reaches Anthropic, Mistral and OpenRouter models of the gateway's catalog, not openai/gpt-4.1",
     });
   });
 });
