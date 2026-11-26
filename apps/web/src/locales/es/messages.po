@@ -401,6 +401,7 @@ msgstr "{count, plural, one {# persona, dirigida por {lead}} other {# personas, 
 
 #: src/onboarding/company-dots.tsx
 #: src/onboarding/company-rows.tsx
+#: src/onboarding/company-step.tsx
 #: src/settings/teams.tsx
 msgid "{count, plural, one {# person} other {# people}}"
 msgstr "{count, plural, one {# persona} other {# personas}}"
@@ -424,6 +425,10 @@ msgstr "{count, plural, one {# ejecución} other {# ejecuciones}}"
 #: src/brain/brain.ts
 msgid "{count, plural, one {# team, with its roles} other {# teams, with their roles}}"
 msgstr "{count, plural, one {# equipo, con sus roles} other {# equipos, con sus roles}}"
+
+#: src/onboarding/company-step.tsx
+msgid "{count, plural, one {# team} other {# teams}}"
+msgstr "{count, plural, one {# equipo} other {# equipos}}"
 
 #: src/drafts/share-with-team.tsx
 msgid "{count, plural, one {# test} other {# tests}}"
@@ -1466,8 +1471,8 @@ msgid "{shown} runs or more"
 msgstr "{shown} ejecuciones o más"
 
 #: src/onboarding/company-step.tsx
-msgid "{signIn} is connected. I can see {people} people in {teams} teams."
-msgstr "{signIn} está conectado. Veo {people} personas en {teams} equipos."
+msgid "{signIn} is connected"
+msgstr "{signIn} está conectado"
 
 #: src/agents/agent-documents.tsx
 msgid "{size} · Added {when}"
@@ -2871,7 +2876,6 @@ msgid "Amber"
 msgstr "Ámbar"
 
 #: src/onboarding/company-dots.tsx
-#: src/onboarding/company-step.tsx
 msgid "Among them {names}."
 msgstr "Entre ellas, {names}."
 
@@ -5168,6 +5172,11 @@ msgstr "Conecta primero: {systems}."
 #: src/connections/integrations-band.tsx
 msgid "Connect the apps your work runs on"
 msgstr "Conecta las apps con las que trabajas"
+
+#. placeholder {0}: suiteNames[fromDirectory]
+#: src/onboarding/company-step.tsx
+msgid "Connect your {0} account"
+msgstr "Conecta tu cuenta de {0}"
 
 #: src/onboarding/company-step.tsx
 msgid "Connect your {signIn} account"
@@ -8008,10 +8017,6 @@ msgstr "Según tus documentos y lo que pidió la gente."
 msgid "From your interview, version {version}"
 msgstr "De tu entrevista, versión {version}"
 
-#: src/onboarding/company-step.tsx
-msgid "From your staff list I can see {people} people in {teams} teams."
-msgstr "En tu lista de personal veo {people} personas en {teams} equipos."
-
 #: src/settings/backdrop-settings.tsx
 msgid "Fuji"
 msgstr "Fuji"
@@ -8876,6 +8881,10 @@ msgstr "De acuerdo, empecemos"
 #: src/interview/start.tsx
 msgid "I agree, let’s start"
 msgstr "Acepto, empecemos"
+
+#: src/onboarding/company-step.tsx
+msgid "I can see {people} in {teams}. Among them {names}."
+msgstr "Veo a {people} en {teams}. Entre ellas, {names}."
 
 #: src/onboarding/send-plan-form.tsx
 msgid "I can’t plan that day. Type one like {example}, from {earliest} to {latest}."
@@ -18586,9 +18595,11 @@ msgstr "Ya hay un equipo con este nombre."
 msgid "There is nobody in this list."
 msgstr "No hay nadie en esta lista."
 
+#. placeholder {0}: peopleWords(people)
+#. placeholder {1}: teamWords(teams)
 #: src/onboarding/company-step.tsx
-msgid "There it is, your company. I can see {people} people in {teams} teams. Have a quick look whether that seems right, and then we’ll move on."
-msgstr "Aquí está, tu empresa. Veo {people} personas en {teams} equipos. Echa un vistazo rápido a ver si te parece bien, y seguimos."
+msgid "There it is, your company. I can see {0} in {1}. Have a quick look whether that seems right, and then we’ll move on."
+msgstr "Aquí está tu empresa. Veo a {0} en {1}. Echa un vistazo rápido a ver si es correcto y seguimos."
 
 #. placeholder {0}: formatList(wrong.slice(0, 5))
 #: src/onboarding/people-add.tsx
@@ -20364,6 +20375,10 @@ msgstr "Lo que puede hacer"
 msgid "What he may do in {appName}, with each person's own sign-in: as for the whole company, or for fewer people."
 msgstr "Lo que puede hacer en {appName}, con el inicio de sesión de cada persona: como para toda la empresa o para menos personas."
 
+#: src/onboarding/company-step.tsx
+msgid "What I found"
+msgstr "Lo que he encontrado"
+
 #: src/brain/memories-page.tsx
 msgid "What is right"
 msgstr "Lo que es correcto"
@@ -21850,6 +21865,10 @@ msgstr "Tu inicio de sesión, que cambia tu administrador"
 #: src/brain/skills-page.tsx
 msgid "Your skills"
 msgstr "Tus skills"
+
+#: src/onboarding/company-step.tsx
+msgid "Your staff list"
+msgstr "Tu lista de personal"
 
 #: src/interview/words.ts
 msgid "Your story"
