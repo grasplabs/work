@@ -35,21 +35,20 @@ const tryEach = (calls: Record<string, string>): string =>
   };`;
 
 /**
- * A chat of `role`'s person answered by `replies`, whose agent may build
+ * A builder's chat answered by `replies`, whose agent may build
  * Apps; the Ledger, a builder's App marked as a blueprint and shared with
  * the person; and the Vault, a blueprint of
  * another builder's that the person has no role in: by their blueprints'
  * IDs.
  */
 const setUp = async (
-  replies: (apps: { ledger: string; vault: string }) => ProviderReply[],
-  role: "builder" | "user" = "builder"
+  replies: (apps: { ledger: string; vault: string }) => ProviderReply[]
 ) => {
   const [owner, stranger] = await Promise.all([
     signedInApi(idp, "builder"),
     signedInApi(idp, "builder"),
   ]);
-  const person = await signedInApi(idp, role);
+  const person = await signedInApi(idp, "builder");
   const { id: ledger } = await owner.api.apps.create({ name: "Ledger" });
   const version = await release(owner, ledger, {
     "src/routes/index.tsx":
@@ -80,8 +79,8 @@ describe(
   "the blueprints a chat's plan may start from",
   { timeout: 60_000 },
   () => {
-    it("lists only those its person may start from, whether they build or not", async () => {
-      const listing = () => [
+    it("lists only those its person may start from", async () => {
+      const { chat } = await setUp(() => [
         codeStep(
           tryEach({
             listed:
@@ -89,25 +88,14 @@ describe(
           })
         ),
         says("Listed."),
-      ];
-      // One chat at a time: the provider answers with the replies of the
-      // chat set up last.
-      const builds = await setUp(listing);
-      await builds.chat.ask("What could I start from?");
-      const uses = await setUp(listing, "user");
-      await uses.chat.ask("What could I start from?");
-
-      const results = await Promise.all(
-        [builds, uses].map(async ({ chat }) => {
-          const [result] = await codeResults(chat.stub, chat.chat.id);
-          return returned(result?.text);
-        })
-      );
-      // The Vault, of an App the person has no role in, is never listed.
-      expect(results).toStrictEqual([
-        { listed: [{ name: "Ledger", version: 1 }] },
-        { listed: [{ name: "Ledger", version: 1 }] },
       ]);
+      await chat.ask("What could I start from?");
+
+      const [result] = await codeResults(chat.stub, chat.chat.id);
+      // The Vault, of an App the person has no role in, is never listed.
+      expect(returned(result?.text)).toStrictEqual({
+        listed: [{ name: "Ledger", version: 1 }],
+      });
     });
   }
 );

@@ -34,7 +34,7 @@ import { docsPath } from "./security-headers.ts";
 /** The docs section of the system prompt: the guides, and how to read on. */
 export const docsSection = [
   "<docs>",
-  "How to build Apps and workflows with Grasp: the docs of the release this deployment runs. The guides are below in full; follow them, and never guess a shape that they or the API reference don't show. Find anything else with `searchDocs`, which answers the matching lines of each page it finds, and read a page with `readDocs`, from a line on when you know where: the API reference (`/reference` lists a page for each module App code imports), or a page a guide links to, such as `/guides/data`. The brain holds none of this: never search it for Grasp's docs or code.",
+  "How to build Apps and workflows with Grasp: the docs of the release this deployment runs. The guides are below in full; follow them, and never guess a shape that they or the API reference don't show. Find anything else with `searchDocs`, which answers the matching lines of each page it finds, and read a page with `readDocs`, from a line on when you know where: the API reference (`/reference` lists a page for each module App code imports), or a page a guide links to, such as `/guides/data`.",
   guides,
   sharedPrefixEnd,
 ].join("\n");
