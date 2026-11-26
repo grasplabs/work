@@ -4,10 +4,13 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { clientAdmins, defaultAdminReadOptions } from "../src/clients/admin.ts";
 import type { ClientAdmin } from "../src/clients/admin.ts";
+import { commandFn } from "../src/clients/command-functions.ts";
 import {
   fetchClientAdmin,
   fetchClientAdmins,
+  fetchClientSummaries,
 } from "../src/clients/functions.ts";
+import { clientSummaries } from "../src/clients/summary.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
 import { mockAccess } from "./access.ts";
@@ -16,7 +19,7 @@ import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { callServerFn } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
-import { emptyAdminSnapshot } from "./snapshots.ts";
+import { emptyAdminSnapshot, emptyAdminSummary } from "./snapshots.ts";
 
 const token = "test-deployer-token-admins-5c1e70";
 const cloudflare = mockCloudflareApi(token);
@@ -279,7 +282,7 @@ describe("every client's admin snapshot", () => {
     }).toStrictEqual({ state: "answered", readers: ["ada@grasp.test"] });
   });
 
-  it("reads one client alone for its page, and every other client without it", async () => {
+  it("reads one client alone for its page", async () => {
     const release = await importedRelease("feat(core): one page");
     const acme = await liveClient(release);
     const globex = await liveClient(release);
@@ -287,19 +290,12 @@ describe("every client's admin snapshot", () => {
     const one = await callServerFn(fetchClientAdmin, {
       clientId: acme.clientId,
     });
-    const rest = await callServerFn(fetchClientAdmins, {
-      except: [acme.clientId],
-    });
     const unknown = await callServerFn(fetchClientAdmin, {
       clientId: "no-such-client",
     });
 
     expect({
       one: one === null ? null : [one.client.id, one.state],
-      rest: {
-        acme: entryOf(rest, acme.clientId)?.state,
-        globex: entryOf(rest, globex.clientId)?.state,
-      },
       unknown,
       asked: {
         acme: acme.core.adminReaders.length,
@@ -307,9 +303,8 @@ describe("every client's admin snapshot", () => {
       },
     }).toStrictEqual({
       one: [acme.clientId, "answered"],
-      rest: { acme: undefined, globex: "answered" },
       unknown: null,
-      asked: { acme: 1, globex: 1 },
+      asked: { acme: 1, globex: 0 },
     });
   });
 
@@ -433,5 +428,188 @@ describe("every client's admin snapshot", () => {
         asked_at: "number",
       },
     });
+  });
+});
+
+describe("every client's summary", () => {
+  useStoreSecrets({ deployer: token });
+  beforeEach(async () => {
+    await db
+      .update(clients)
+      .set({ status: "offboarded" })
+      .where(eq(clients.status, "active"));
+  });
+
+  it("gives every client's counts as its core answers them, signed for the summary alone, one not answering as unreachable, one provisioning as not deployed, and records no reader", async () => {
+    const release = await importedRelease("feat(core): the summary");
+    const acme = await liveClient(release);
+    acme.core.summary = emptyAdminSummary([{ kind: "lead", count: 2 }]);
+    const down = await liveClient(release);
+    down.core.unhealthy = 1000;
+    const waiting = await recordClient("provisioning");
+
+    const read = await callServerFn(fetchClientSummaries, undefined, {
+      email: "ada@grasp.test",
+    });
+    const entry = (clientId: string) =>
+      read.find(({ client }) => client.id === clientId);
+
+    expect({
+      acme: entry(acme.clientId),
+      down: entry(down.clientId)?.state,
+      waiting: entry(waiting.clientId)?.state,
+      readers: [acme, down].flatMap(({ core }) => core.adminReaders),
+      kept: await storedReads([acme.clientId]),
+    }).toMatchObject({
+      acme: {
+        state: "answered",
+        summary: { needs: [{ kind: "lead", count: 2 }] },
+        billing: { state: "not_connected" },
+      },
+      down: "unreachable",
+      waiting: "not_deployed",
+      readers: [],
+      kept: [],
+    });
+  });
+
+  it("reads a core from before the summary in full, as before, as the staff member asking, and that one alone", async () => {
+    const release = await importedRelease("feat(core): an older core");
+    const older = await liveClient(release);
+    older.core.summary = "absent";
+    older.core.admin = { ...emptyAdminSnapshot("Older"), paused: true };
+    // Its snapshot can't be read either: a core that didn't answer.
+    const down = await liveClient(release);
+    down.core.summary = "absent";
+    down.core.admin = "garbled";
+    const acme = await liveClient(release);
+
+    const read = await callServerFn(fetchClientSummaries, undefined, {
+      email: "ada@grasp.test",
+    });
+    const entry = (clientId: string) =>
+      read.find(({ client }) => client.id === clientId);
+
+    expect({
+      older: entry(older.clientId),
+      down: entry(down.clientId)?.state,
+      acme: entry(acme.clientId)?.state,
+      readers: [older.core.adminReaders, acme.core.adminReaders],
+    }).toMatchObject({
+      older: {
+        state: "older",
+        admin: { state: "answered", snapshot: { paused: true } },
+      },
+      down: "unreachable",
+      acme: "answered",
+      readers: [["ada@grasp.test"], []],
+    });
+  });
+
+  it("keeps a client's summary a minute, so the frame's next loads don't ask its core again", async () => {
+    const release = await importedRelease("feat(core): a kept summary");
+    const acme = await liveClient(release);
+    acme.core.summary = emptyAdminSummary([{ kind: "lead", count: 1 }]);
+    const ask = async () => {
+      const read = await callServerFn(fetchClientSummaries, undefined, {
+        email: "ada@grasp.test",
+      });
+      return read.find(({ client }) => client.id === acme.clientId);
+    };
+
+    const first = await ask();
+    acme.core.summary = emptyAdminSummary([{ kind: "lead", count: 3 }]);
+    const second = await ask();
+
+    expect([first, second]).toMatchObject([
+      { summary: { needs: [{ kind: "lead", count: 1 }] } },
+      { summary: { needs: [{ kind: "lead", count: 1 }] } },
+    ]);
+  });
+
+  it("asks a client's core again after staff gave it a command, though its summary was kept", async () => {
+    const release = await importedRelease("feat(core): a command counted");
+    const acme = await liveClient(release);
+    acme.core.admin = emptyAdminSnapshot("Acme");
+    acme.core.summary = emptyAdminSummary([{ kind: "paused", count: 1 }]);
+    const ask = async () => {
+      const read = await callServerFn(fetchClientSummaries, undefined, {
+        email: "ada@grasp.test",
+      });
+      return read.find(({ client }) => client.id === acme.clientId);
+    };
+
+    const before = await ask();
+    // Staff resume the interviews: the company's core counts nothing paused now.
+    acme.core.summary = emptyAdminSummary();
+    await callServerFn(
+      commandFn,
+      {
+        clientId: acme.clientId,
+        id: crypto.randomUUID(),
+        command: { type: "onboarding.resume", payload: {} },
+      },
+      { email: "ada@grasp.test" }
+    );
+    const after = await ask();
+
+    expect([before, after]).toMatchObject([
+      { summary: { needs: [{ kind: "paused", count: 1 }] } },
+      { summary: { needs: [] } },
+    ]);
+  });
+
+  it("never keeps an answer to a read asked before a command forgot it: the next read answers what the command changed", async () => {
+    const release = await importedRelease(
+      "feat(core): a read across a command"
+    );
+    const acme = await liveClient(release);
+    acme.core.admin = emptyAdminSnapshot("Acme");
+    acme.core.summary = emptyAdminSummary([{ kind: "paused", count: 1 }]);
+    const ask = async () => {
+      const read = await callServerFn(fetchClientSummaries, undefined, {
+        email: "ada@grasp.test",
+      });
+      return read.find(({ client }) => client.id === acme.clientId);
+    };
+    // A read whose core answers what it held before the command, slowly.
+    const arrived = Promise.withResolvers<null>();
+    const released = Promise.withResolvers<null>();
+    acme.core.summaryHeld = async () => {
+      arrived.resolve(null);
+      await released.promise;
+    };
+    // Read here, in the test's own request, as the frame's read would be.
+    const slow = clientSummaries(env, staff);
+    await arrived.promise;
+    acme.core.summaryHeld = undefined;
+
+    // The command resumes the interviews, and forgets the kept summary.
+    acme.core.summary = emptyAdminSummary();
+    await callServerFn(
+      commandFn,
+      {
+        clientId: acme.clientId,
+        id: crypto.randomUUID(),
+        command: { type: "onboarding.resume", payload: {} },
+      },
+      { email: "ada@grasp.test" }
+    );
+    // The slow read answers after it, with what was before, and keeps it.
+    released.resolve(null);
+    const read = await slow;
+    const before = read.find(({ client }) => client.id === acme.clientId);
+    const after = await ask();
+
+    expect([before, after]).toMatchObject([
+      { summary: { needs: [{ kind: "paused", count: 1 }] } },
+      { summary: { needs: [] } },
+    ]);
+  });
+
+  it("refuses the read for anyone Access doesn't vouch for", async () => {
+    await expect(
+      callServerFn(fetchClientSummaries, undefined, { email: null })
+    ).rejects.toThrow("The server function answered 403");
   });
 });

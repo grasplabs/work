@@ -51,25 +51,28 @@ export const getRouter = () => {
   // (a command, a link, a client added, retried or discarded) reloads with
   // `invalidate`, the frame included, so its list and counts follow: from
   // then on, answers asked before it may be outdated (src/admin/org-loads.ts).
+  // The counts follow because the server functions that change what a
+  // summary counts (a command, the kickoff) forget that client's summary
+  // kept in the Worker's cache (`forgetSummary`, src/clients/summary.ts),
+  // so the frame's read after them asks its core; billing is never kept.
   // A reload that leaves the frame alone changes nothing a core answers:
   // Read again and Try again on an organization's section, and a Setup
   // reading itself again (its polls, and its own settings, which the
   // admin records and a deploy applies later). Two retries reload the
   // frame and count, though nothing changed: Try again on a route that
   // failed, and on organizations that couldn't be read. Counting them
-  // costs at most one wait on the frame's read they start, after a
-  // failure; a way to reload without counting could be used to skip a
-  // real change. The router's events don't say
+  // costs at most a read of a core again, after a failure; a way to
+  // reload without counting could be used to skip a real change. The
+  // router's events don't say
   // why a load runs, so this is where a change is seen. Two limits, as
   // designed:
   // - only changes made in this tab are seen: one made in another tab, by
   //   another staff member, by the company or by a deploy finishing shows
-  //   once the answer kept goes stale (`freshMs`), as before;
+  //   once the answer kept goes stale (`freshMs`), and in the frame's
+  //   counts once the summary kept goes (a minute);
   // - every organization's answer counts as possibly changed, not only
-  //   the one changed: right after a change, coming to another one takes
-  //   the frame's read made after it, waiting for it up to `frameWaitMs`,
-  //   and asks its core alone when that read is late or has no answer of
-  //   it (late, a second read core's audit log records).
+  //   the one changed: right after a change, coming to another one asks
+  //   its core again, unless a read asked after the change is under way.
   const { invalidate } = router;
   router.invalidate = async (options) => {
     const frame = router.state.matches.find(

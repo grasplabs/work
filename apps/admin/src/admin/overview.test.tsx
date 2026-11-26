@@ -1,9 +1,22 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vite-plus/test";
 
-import { answeredAdmin, gridRow, openAdmin } from "../../test/app.tsx";
+import {
+  act,
+  answeredAdmin,
+  answeredSummary,
+  gridRow,
+  openAdmin,
+  settle,
+  summaryOf,
+} from "../../test/app.tsx";
 import type { Answers } from "../../test/app.tsx";
-import { daysAgo, readySnapshot, toldSnapshot } from "../../test/snapshots.ts";
+import {
+  daysAgo,
+  emptyAdminSnapshot,
+  readySnapshot,
+  toldSnapshot,
+} from "../../test/snapshots.ts";
 import type { ClientAdmin } from "../clients/admin.ts";
 import type { GridRow } from "../clients/grid.ts";
 
@@ -31,7 +44,10 @@ const unread = (
   error,
 });
 
-/** The frame's answers: these clients, and what their cores answered. */
+/**
+ * The frame's answers: these clients, what their cores answered, and their
+ * summaries, nothing needing Grasp in them.
+ */
 const frameOf = (
   rows: readonly GridRow[],
   admins: readonly ClientAdmin[],
@@ -39,6 +55,7 @@ const frameOf = (
 ): Answers => ({
   fetchClientGrid: rows,
   fetchClientAdmins: admins,
+  fetchClientSummaries: admins.map((admin) => summaryOf(admin)),
   fetchReadiness: { checks: [], blocking: 0 },
   ...more,
 });
@@ -139,6 +156,147 @@ describe("the admin's frame", () => {
     });
   });
 
+  it("counts and lists what needs Grasp from the summaries alone: a row a kind, naming nothing, with how many, and no core's snapshot read", async () => {
+    const acme = row("acme");
+    const { container, calls } = await openAdmin("/platform/releases", {
+      fetchClientGrid: [acme],
+      fetchClientSummaries: [
+        summaryOf(answeredAdmin({ client: acme }), [
+          { kind: "lead", count: 2 },
+          { kind: "read", count: 1 },
+        ]),
+      ],
+      fetchReleases: { releases: [], older: null, channelsOn: {} },
+    });
+    const inbox = [
+      ...container.querySelectorAll<HTMLElement>('[role="tab"]'),
+    ].find((tab) => tab.textContent?.includes("Inbox"));
+    const tab = inbox?.textContent;
+    // Its row on Home, before the Inbox is open.
+    const count =
+      sidebarEntry(container, acme.name)?.textContent?.includes(
+        "3 things need Grasp"
+      ) ?? false;
+    await act(() => {
+      inbox?.click();
+    });
+    await settle();
+    // The Inbox's rows: each leads into Acme's sections.
+    const rows = [
+      ...container.querySelectorAll(
+        '[data-slot="sidebar"] a[href^="/organizations/acme/"]'
+      ),
+    ].map((link) => [link.textContent?.trim(), link.getAttribute("href")]);
+
+    expect({
+      count,
+      tab: tab?.includes("3") ?? false,
+      rows,
+      snapshots: calls.filter(({ fn }) => fn.startsWith("fetchClientAdmin"))
+        .length,
+    }).toStrictEqual({
+      count: true,
+      tab: true,
+      rows: [
+        [
+          expect.stringContaining("Team leads who haven’t talked yet"),
+          "/organizations/acme/steps",
+        ],
+        [
+          expect.stringContaining("Interviews waiting to be read at Grasp"),
+          "/organizations/acme/interviews",
+        ],
+      ],
+      snapshots: 0,
+    });
+  });
+
+  it("reads what needs Grasp at a core from before the summary in full, and asks first for its update", async () => {
+    const ready = row("ready");
+    const { container } = await openAdmin("/platform/releases", {
+      fetchClientGrid: [ready],
+      fetchClientSummaries: [
+        {
+          client: ready,
+          state: "older",
+          admin: answeredAdmin({
+            client: ready,
+            snapshot: readySnapshot("Ready"),
+          }),
+        },
+      ],
+      fetchReleases: { releases: [], older: null, channelsOn: {} },
+    });
+    const counted =
+      sidebarEntry(container, ready.name)?.textContent?.includes(
+        "things need Grasp"
+      ) ?? false;
+    const inbox = [
+      ...container.querySelectorAll<HTMLElement>('[role="tab"]'),
+    ].find((tab) => tab.textContent?.includes("Inbox"));
+    await act(() => {
+      inbox?.click();
+    });
+    await settle();
+    const lines = [
+      ...container.querySelectorAll(
+        '[data-slot="sidebar"] a[href^="/organizations/ready/"]'
+      ),
+    ].map((link) => [link.textContent ?? "", link.getAttribute("href")]);
+
+    expect({
+      counted,
+      first: lines[0],
+      // Said in full, as its snapshot has it.
+      go: lines.some(([line]) =>
+        (line ?? "").includes("85% of what Grasp needs is known")
+      ),
+    }).toStrictEqual({
+      counted: true,
+      first: [
+        expect.stringContaining("Update to see its counts"),
+        "/organizations/ready/setup",
+      ],
+      go: true,
+    });
+  });
+
+  it("leaves out of the Apps asked for count a company that doesn't share it, and counts one on an older core from its snapshot", async () => {
+    const acme = row("acme");
+    const ended = row("ended");
+    const older = row("older");
+    const shared = answeredSummary({ client: acme, asked: 2 });
+    const notShared = answeredSummary({ client: ended, asked: 5 });
+    const { container } = await openAdmin("/platform/releases", {
+      fetchClientGrid: [acme, ended, older],
+      fetchClientSummaries: [
+        shared,
+        {
+          client: older,
+          state: "older",
+          admin: answeredAdmin({
+            client: older,
+            snapshot: {
+              ...emptyAdminSnapshot("Older"),
+              asked: [asked("Exact", 3)],
+            },
+          }),
+        },
+        notShared.state === "answered"
+          ? {
+              ...notShared,
+              summary: { ...notShared.summary, asked: null, activity: null },
+            }
+          : notShared,
+      ],
+      fetchReleases: { releases: [], older: null, channelsOn: {} },
+    });
+    const sidebar =
+      container.querySelector('[data-slot="sidebar"]')?.textContent ?? "";
+
+    expect(sidebar).toContain("3 apps asked for");
+  });
+
   it("says nothing is asked for yet where the table of apps goes, with nothing to act on", async () => {
     const { container, main } = await openAdmin("/connectors", frameOf([], []));
     const page = container.querySelector("main");
@@ -207,7 +365,8 @@ describe("the admin's frame", () => {
       order: text.indexOf("Exact Online") < text.indexOf("Twinfield"),
       exact: rowOf("exact-online").includes(`${acme.name} and ${globex.name}`),
       twinfield: rowOf("twinfield").includes(acme.name),
-      sidebar: sidebar.includes("2 apps asked for"),
+      // Each company's requests added up, as the summaries count them.
+      sidebar: sidebar.includes("3 apps asked for"),
       nothingAsked: apps.main().includes("Nothing asked for yet"),
       companyAsked:
         company.container.querySelector(
@@ -241,7 +400,18 @@ describe("the admin's overview", () => {
           answeredAdmin({ client: acme, snapshot: readySnapshot("Acme") }),
           unread(down, "timeout"),
           unread(waiting, "not_deployed"),
-        ]
+        ],
+        {
+          // Acme's summary: its core counts three things needing Grasp.
+          fetchClientSummaries: [
+            summaryOf(answeredAdmin({ client: acme }), [
+              { kind: "go", count: 1 },
+              { kind: "agreement", count: 2 },
+            ]),
+            summaryOf(unread(down, "timeout")),
+            summaryOf(unread(waiting, "not_deployed")),
+          ],
+        }
       )
     );
     const page = container.querySelector("main");

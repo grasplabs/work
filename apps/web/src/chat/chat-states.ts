@@ -95,25 +95,30 @@ export const stepFinished = (status: StepStatus): boolean =>
 export type PromptStatus = "ready" | "submitted" | "streaming" | "error";
 
 /**
- * The box's status from the chat: `streaming` while Grasp answers, so
- * Send is Stop; `submitted` while a question is on its way to core and
- * no answer runs yet; `error` once the last question didn't go, its words
- * kept; else `ready`. A stop on its way is still `streaming`: the answer
- * runs until core says it stopped.
+ * The box's status from the chat: `streaming` while Grasp answers and
+ * nothing is typed, so Send is Stop; `submitted` while a question is on
+ * its way to core and no answer runs yet, or none is typed; `error` once
+ * the last question didn't go, its words kept; else `ready`, also while
+ * Grasp answers with something typed, which Send sends for core to queue.
+ * A stop on its way is still `streaming`: the answer runs until core says
+ * it stopped.
  */
 export const promptStatusOf = ({
   running,
+  typed,
   busy,
   failed,
 }: {
   /** Grasp answers in the chat now. */
   running: boolean;
+  /** Something is typed in the box. */
+  typed: boolean;
   /** A question or a stop is on its way to core. */
   busy: boolean;
   /** The last question didn't go. */
   failed: boolean;
 }): PromptStatus => {
-  if (running) {
+  if (running && !typed) {
     return "streaming";
   }
   if (busy) {

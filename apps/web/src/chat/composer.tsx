@@ -36,6 +36,7 @@ import {
 } from "@grasp-os/ui/components/prompt-input";
 import type { PromptInputSpeechButtonProps } from "@grasp-os/ui/components/prompt-input";
 import { Text } from "@grasp-os/ui/components/text";
+import { Icon, SquareIcon } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
 import { visuallyHidden } from "@grasp-os/ui/lib/styles";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
@@ -71,7 +72,9 @@ import { isEffort } from "./model-choice.ts";
 // pasted or dropped), the model that answers and how hard it thinks in one
 // Model selector; by Send, the microphone (dictation.ts); then Send, which
 // is Stop while Grasp answers (its status from the chat: chat-states.ts),
-// and what the page adds. In one row (the chat's idle bar) the text stands
+// and what the page adds. While Grasp answers the box still takes a
+// question, which core queues for it (`ChatsApi.send`): once something is
+// typed, Send sends it and Stop stands beside it. In one row (the chat's idle bar) the text stands
 // between the add menu and the rest, the model only once something is
 // typed, so the placeholder keeps its room, as on #2503. `@` mentions the
 // agents, Apps, workflows and people (mentions.tsx). The text is the
@@ -296,6 +299,7 @@ const BoxTools = ({
   answerer,
   speech,
   stop,
+  running,
   children,
 }: {
   attaches: boolean;
@@ -305,8 +309,14 @@ const BoxTools = ({
   answerer: ReactNode;
   speech: PromptInputSpeechButtonProps | undefined;
   stop: (() => void) | undefined;
+  /**
+   * Grasp answers: with something typed, Send sends it for core to queue,
+   * and Stop stands of its own before it.
+   */
+  running: boolean;
   children: ReactNode;
 }) => {
+  const { t } = useLingui();
   // In one row on a phone, what answers folds away at rest, so the
   // placeholder keeps its room, as #2503's row does.
   const phone = useNarrow();
@@ -320,6 +330,15 @@ const BoxTools = ({
       <PromptInputTools align="end">
         {compact && !folded ? answerer : null}
         {speech === undefined ? null : <PromptInputSpeechButton {...speech} />}
+        {running && typed && stop !== undefined ? (
+          <Button
+            aria-label={t({ message: "Stop", context: "stop an answer" })}
+            onClick={stop}
+            size="icon-sm"
+          >
+            <Icon icon={SquareIcon} />
+          </Button>
+        ) : null}
         <PromptInputSubmit {...(stop === undefined ? {} : { onStop: stop })} />
         {children}
       </PromptInputTools>
@@ -518,12 +537,11 @@ const valueFor = (text: string, mentions: readonly BoxMention[]): BoxValue => {
  * box saying it goes, and sent once core has, with no second press. Stop
  * lets a held question go unsent; when core can't say which models there
  * are (`unavailable`, why), it goes unsent too, and the box says why, its
- * words kept. Never while Grasp answers or a question is on its way, nor
- * with nothing typed.
+ * words kept. Never while a question is on its way, nor with nothing
+ * typed; while Grasp answers too, as core queues it (`ChatsApi.send`).
  */
 const useSend = ({
   text,
-  running,
   busy,
   offered,
   model,
@@ -531,7 +549,6 @@ const useSend = ({
   onSend,
 }: {
   text: string;
-  running: boolean;
   busy: boolean;
   offered: readonly string[] | undefined;
   model: string | undefined;
@@ -545,7 +562,7 @@ const useSend = ({
   /** Lets a held question go unsent. */
   letGo: () => void;
 } => {
-  const asked = !running && text.trim() !== "";
+  const asked = text.trim() !== "";
   const canSend = asked && !busy && !lacksModel(model);
   const loadingModels = offered === undefined && lacksModel(model);
   const [held, setHeld] = useState(false);
@@ -730,7 +747,6 @@ export const Composer = ({
   });
   const { held, heldFailure, submit, letGo } = useSend({
     text,
-    running,
     busy,
     offered,
     model,
@@ -739,6 +755,7 @@ export const Composer = ({
   });
   const failed = heldFailure ?? failure;
   const note = dictation.problem ?? failed;
+  const typed = text.trim() !== "";
   const canConnect = useMemberAdmin();
   const answerer = (
     <Answerer
@@ -772,6 +789,7 @@ export const Composer = ({
       }}
       status={promptStatusOf({
         running,
+        typed,
         busy: busy || held,
         failed: failed !== undefined,
       })}
@@ -798,12 +816,13 @@ export const Composer = ({
       <PromptInputFooter>
         <BoxTools
           answerer={answerer}
-          typed={text.trim() !== ""}
+          typed={typed}
           attaches={onAttach !== undefined}
           compact={compact}
           speech={dictation.speech}
           // Stop lets a held question go; else it stops the answer, where one can be.
           stop={held ? letGo : onStop}
+          running={running}
         >
           {children}
         </BoxTools>

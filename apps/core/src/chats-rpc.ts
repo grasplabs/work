@@ -29,6 +29,7 @@ import type {
   ChatRating,
   ChatSearchHit,
   ChatsApi,
+  ChatStopped,
   ChatAgent,
   ChatSummary,
   ChatListUpdate,
@@ -1328,7 +1329,13 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     });
   }
 
-  async cancel(chatId: string): Promise<boolean> {
+  async sendNow(chatId: string): Promise<void> {
+    await withPerson(this.#check, async ({ userId }) => {
+      await this.#chatsOf(userId).sendNow(chatIdOf(chatId), userId);
+    });
+  }
+
+  async cancel(chatId: string): Promise<ChatStopped | false> {
     return await withPerson(
       this.#check,
       async ({ userId }) =>

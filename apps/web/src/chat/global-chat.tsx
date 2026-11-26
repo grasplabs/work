@@ -241,7 +241,7 @@ const useGlobalChatValue = () => {
   // What each question is about: the page's subject, on the box's bar.
   const subject = useQuestionSubject(slot);
   const { view, failure, gone } = useFollowedChat(chatId);
-  const { composer, ask } = useAsk(
+  const { composer, ask, sendNow } = useAsk(
     chatId,
     offered?.models,
     offered?.efforts,
@@ -291,6 +291,8 @@ const useGlobalChatValue = () => {
     empty: chatId === undefined || (view.loaded && view.messages.length === 0),
     composer,
     ask,
+    /** Has the agent take the questions queued behind its answer at once. */
+    sendNow,
     /** The Apps its agent builds, read as it writes them. */
     builds,
     /** The questions the chat's agent asked last, answered in the person's next message. */

@@ -52,13 +52,23 @@ const partsOf = (code: string) =>
 const linesOf = (code: string) =>
   code.split(/[\n;]/u).filter((line) => line.trim() !== "").length;
 
+/**
+ * Why Mermaid may not draw this fence, if it may not: `limit` past a bound on its size, `source`
+ * for a way to an address in it; null when it may.
+ */
+export const refusalOf = (code: string): "limit" | "source" | null => {
+  if (
+    code.length > MOST_CHARACTERS ||
+    linesOf(code) > MOST_LINES ||
+    partsOf(code) > MOST_PARTS
+  ) {
+    return "limit";
+  }
+  return leadsAway(code) || leadsAway(decoded(code)) ? "source" : null;
+};
+
 /** Whether Mermaid may draw this fence: small enough, and with no way to an address in it. */
-export const drawable = (code: string) =>
-  code.length <= MOST_CHARACTERS &&
-  linesOf(code) <= MOST_LINES &&
-  partsOf(code) <= MOST_PARTS &&
-  !leadsAway(code) &&
-  !leadsAway(decoded(code));
+export const drawable = (code: string) => refusalOf(code) === null;
 
 // What a drawing may hold: SVG's own shapes, text and styles, nothing that leads or loads.
 const TAGS = new Set([

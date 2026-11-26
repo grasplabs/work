@@ -1,6 +1,7 @@
 import { adminCommandPath } from "@grasp-os/shared/admin-command";
 import { adminKickoffPath } from "@grasp-os/shared/admin-kickoff";
 import { adminSnapshotPath } from "@grasp-os/shared/admin-snapshot";
+import { adminSummaryPath } from "@grasp-os/shared/admin-summary";
 import { aiStatusReportPath } from "@grasp-os/shared/ai-status-report";
 import { auditExportPath } from "@grasp-os/shared/audit-log";
 import {
@@ -39,6 +40,7 @@ import { speechPath, transcriptionPath } from "@grasp-os/shared/voice";
 import { adminCommandResponse } from "./admin-command.ts";
 import { adminKickoffResponse } from "./admin-kickoff.ts";
 import { adminSnapshotResponse } from "./admin-snapshot.ts";
+import { adminSummaryResponse } from "./admin-summary.ts";
 import { aiStatusReportResponse } from "./ai-status-report.ts";
 import { appFileResponse, fileRouteOf } from "./app-file-route.ts";
 import { appLinkResponse, linkRouteOf } from "./app-link-route.ts";
@@ -356,6 +358,7 @@ const pathHandlers: ReadonlyMap<
   [auditExportPath, auditExportResponse],
   [errorReportPath, errorReportResponse],
   [onboardingSummaryPath, onboardingSummaryResponse],
+  [adminSummaryPath, adminSummaryResponse],
   [aiStatusReportPath, aiStatusReportResponse],
   [brainReportPath, brainReportResponse],
   [brainActionPath, brainActionResponse],
