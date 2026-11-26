@@ -13,7 +13,7 @@ import {
 import { DisconnectDialog, mayDisconnect } from "./connection-list.tsx";
 import { fixOf } from "./fix.ts";
 import type { Integration } from "./integrations.ts";
-import { reliedOnLapsed } from "./integrations.ts";
+import { connectionLabel, reliedOnLapsed } from "./integrations.ts";
 
 // What can be done to an app from its panel and its page, as its app
 // parts offer it (`AppActions`, app/parts.tsx): connect it, sign in to it again,
@@ -168,7 +168,6 @@ export const useMenuDisconnect = (
   if (removable === undefined) {
     return { actions: {}, dialog: null };
   }
-  const { name } = integration;
   return {
     actions: {
       onDisconnect: () => {
@@ -178,11 +177,7 @@ export const useMenuDisconnect = (
     dialog: (
       <DisconnectDialog
         connection={removable}
-        label={
-          removable.accountName === null
-            ? name
-            : `${name} (${removable.accountName})`
-        }
+        label={connectionLabel(removable, integration)}
         last={!integration.listed}
         onOpenChange={setOpen}
         open={open}

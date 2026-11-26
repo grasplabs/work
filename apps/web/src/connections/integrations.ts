@@ -1,4 +1,7 @@
-import { catalogSourceSchema } from "@grasp-os/shared/connect";
+import {
+  catalogSourceSchema,
+  urlConnectorIdSchema,
+} from "@grasp-os/shared/connect";
 import type {
   CatalogAuth,
   CatalogGroup,
@@ -349,6 +352,39 @@ export const httpConnectionsOf = (
       ? [{ connection, http: connection.http }]
       : []
   );
+
+/** A connection's name: its app's, with its account's where the provider names one. */
+export const connectionLabel = (
+  connection: Pick<ListedConnection, "accountName">,
+  integration: Pick<Integration, "name">
+): string =>
+  connection.accountName === null
+    ? integration.name
+    : `${integration.name} (${connection.accountName})`;
+
+/**
+ * Every live connection's name, by ID, as the Connectors page shows it:
+ * a catalog entry's (`connectionLabel`), an HTTP connection's own. A
+ * connector known by nothing but its ID is left unnamed.
+ */
+export const connectionNames = (
+  entries: readonly Entry[],
+  connections: readonly ListedConnection[]
+): Map<string, string> =>
+  new Map([
+    ...integrationsOf(entries, connections).flatMap((integration) =>
+      integration.connections.flatMap((connection): [string, string][] =>
+        // A connector known by nothing but its ID (connect's name falls
+        // back to it) is left unnamed: never shown by its ID.
+        urlConnectorIdSchema.safeParse(integration.name).success
+          ? []
+          : [[connection.id, connectionLabel(connection, integration)]]
+      )
+    ),
+    ...httpConnectionsOf(connections).map(
+      ({ connection, http }): [string, string] => [connection.id, http.name]
+    ),
+  ]);
 
 /** A name as it is compared: letters and digits only, so "Google Sheets" is "google_sheets". */
 export const plain = (name: string): string =>

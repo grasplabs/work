@@ -273,7 +273,16 @@ export const connectorKeyHeaderSchema = z
  */
 export const addConnectorSchema = z.strictObject({
   person: connectionPersonSchema,
-  name: z.string().trim().min(1).max(80),
+  // Shown as one line wherever its connections are named (the Connectors
+  // page, a chat's sources): no controls, no line or paragraph
+  // separators, and no invisible formatting (Cf: bidi controls that turn
+  // the text around it, zero-width and tag characters).
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(80)
+    .regex(/^[^\p{Cc}\p{Cf}\p{Zl}\p{Zp}]*$/u),
   /**
    * The server's own address: nothing but its origin and path, so no
    * query, fragment or credentials, not even empty ones. One that isn't a
