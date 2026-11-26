@@ -333,9 +333,10 @@ export const ChatFooter = ({
         style={styles.box}
         label={words.title}
         onAnswer={async (text) => await ask(text)}
-        // The box's editor takes its placeholder as it starts: another
-        // starts it afresh, with the text it holds.
-        key={placeholder}
+        // The box's editor takes its placeholder and its words as it
+        // starts: another placeholder, or another chat's draft (whose
+        // mentions may differ in the same words), starts it afresh.
+        key={`${chatId ?? "new"} ${placeholder}`}
         placeholder={placeholder}
         running={view.running}
       />

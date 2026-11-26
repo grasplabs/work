@@ -188,6 +188,7 @@ const shown = async (
             ? undefined
             : Promise.resolve({ state: "ready", data: from })
         }
+        opportunityId={from === undefined ? undefined : "opportunity-1"}
       />
     ),
   });
@@ -310,6 +311,27 @@ describe("Chat's page from Make something", () => {
       ],
       box: "Keep track of the month-end close: who does what, and remind people when they're late.",
       asked: [],
+    });
+  });
+
+  it("starts an opportunity's box with the draft the person left of its brief, and leaves Make something's own draft alone", async () => {
+    localStorage.setItem(
+      "grasp.chat.draft.user-1.new.opportunity.opportunity-1",
+      JSON.stringify({ text: "My own take on the brief", mentions: [] })
+    );
+    localStorage.setItem(
+      "grasp.chat.draft.user-1.new.make.workflow",
+      JSON.stringify({ text: "A workflow of my own", mentions: [] })
+    );
+    await shown({ kind: "workflow" }, undefined, { from: opportunity });
+    await settled();
+
+    expect({
+      box: box().textContent,
+      make: localStorage.getItem("grasp.chat.draft.user-1.new.make.workflow"),
+    }).toStrictEqual({
+      box: "My own take on the brief",
+      make: JSON.stringify({ text: "A workflow of my own", mentions: [] }),
     });
   });
 
