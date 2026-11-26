@@ -24,7 +24,13 @@ import {
   writeChoice,
 } from "./model-choice.ts";
 import type { ModelChoice } from "./model-choice.ts";
-import { questionRefused, questionSent } from "./sent-questions.ts";
+import {
+  isSending,
+  questionRefused,
+  questionSent,
+  sendBegan,
+  sendEnded,
+} from "./sent-questions.ts";
 
 // Asking in a chat, from the chat page or the chat dock on any other page:
 // the box's text, model, effort and files, and asking in the open chat, or
@@ -56,6 +62,14 @@ const problemOf = (file: File): string | undefined => {
   }
   return undefined;
 };
+
+/**
+ * The box's files core already took, by the box's ID for each and chat,
+ * for the whole tab: asking again in the same chat names them rather than
+ * attaching them twice, from whichever box asks again (a new chat's first
+ * question, sent again from the chat's page).
+ */
+const attachedFiles = new Map<string, { chatId: string; fileId: string }>();
 
 /** No model takes an effort, as before core says which do. */
 const noModelEfforts: Readonly<Record<string, ModelEfforts>> = {};
@@ -147,11 +161,6 @@ export const useAsk = (
       setStopped(undefined);
     }
   }
-  // The box's files core already took, by chat: asking again in the same
-  // chat names them rather than attaching them twice.
-  const attached = useRef(
-    new Map<string, { chatId: string; fileId: string }>()
-  );
   // The person's last choice in this browser, against what core offers
   // now: until they make one, the default model at its default effort.
   const [choice, setChoice] = useState<ModelChoice>(() =>
@@ -194,8 +203,8 @@ export const useAsk = (
     setFiles((now) => now.filter((each) => each.id !== id));
     // Core took it already (a send that failed after it): removed there
     // too, so it holds none of the chat's places for files.
-    const known = attached.current.get(id);
-    attached.current.delete(id);
+    const known = attachedFiles.get(id);
+    attachedFiles.delete(id);
     setFileProblem(undefined);
     if (known !== undefined) {
       void run(async (session) => {
@@ -215,7 +224,8 @@ export const useAsk = (
     mentioned: readonly BoxMention[] = [],
     again?: string
   ): Promise<boolean> => {
-    if (sending.current) {
+    // One at a time in a chat, whichever box sent the one on its way.
+    if (sending.current || (chatId !== undefined && isSending(chatId))) {
       return false;
     }
     sending.current = true;
@@ -230,6 +240,7 @@ export const useAsk = (
     let shownIn: string | undefined;
     const show = (id: string): void => {
       shownIn = id;
+      sendBegan(id, key);
       // With its files and mentions, which Try again sends again with it.
       questionSent(id, {
         key,
@@ -272,7 +283,7 @@ export const useAsk = (
         const askedIn = id;
         const fileIds: string[] = [];
         for (const { id: boxId, file } of carried) {
-          const known = attached.current.get(boxId);
+          const known = attachedFiles.get(boxId);
           if (known?.chatId === askedIn) {
             fileIds.push(known.fileId);
             continue;
@@ -284,7 +295,7 @@ export const useAsk = (
             name: file.name,
             bytes,
           });
-          attached.current.set(boxId, { chatId: askedIn, fileId });
+          attachedFiles.set(boxId, { chatId: askedIn, fileId });
           fileIds.push(fileId);
         }
         await session.chats.send(askedIn, {
@@ -307,6 +318,9 @@ export const useAsk = (
       }
     );
     sending.current = false;
+    if (shownIn !== undefined) {
+      sendEnded(shownIn, key);
+    }
     if (sent === undefined) {
       // Not sent: it stays in its chat, said not sent, to send again (or,
       // where no chat was made for it, in the box, which says why); a new
@@ -318,7 +332,7 @@ export const useAsk = (
     }
     unsent.current = null;
     for (const { id } of carried) {
-      attached.current.delete(id);
+      attachedFiles.delete(id);
     }
     // A new chat opened as it was made, above.
     if (chatId !== undefined) {

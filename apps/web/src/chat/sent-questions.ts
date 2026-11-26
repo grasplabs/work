@@ -33,6 +33,27 @@ const noQuestions: readonly SentQuestion[] = [];
 
 let sent = new Map<string, readonly SentQuestion[]>();
 
+/** The keys of the questions on their way to core now, by chat. */
+const sending = new Map<string, Set<string>>();
+
+/**
+ * Whether a question is on its way in `chatId`, from any box of this tab
+ * (Chat's start's, which the chat's page follows): the next waits for it,
+ * so none overtakes it.
+ */
+export const isSending = (chatId: string): boolean =>
+  (sending.get(chatId)?.size ?? 0) > 0;
+
+/** Question `key` set out for core in `chatId`. */
+export const sendBegan = (chatId: string, key: string): void => {
+  sending.set(chatId, new Set(sending.get(chatId)).add(key));
+};
+
+/** Question `key` reached core in `chatId`, or was refused. */
+export const sendEnded = (chatId: string, key: string): void => {
+  sending.get(chatId)?.delete(key);
+};
+
 const listeners = new Set<() => void>();
 
 const changed = (next: Map<string, readonly SentQuestion[]>): void => {
@@ -73,22 +94,23 @@ export const questionRefused = (
 /**
  * The chat's turn ended: whatever of its questions core took is in its
  * messages by now, with its key or, should its object have restarted
- * before keeping the key, without: only the ones it refused stay.
+ * before keeping the key, without. The ones it refused stay, and so do
+ * those still on their way (sent again while another answer ended).
  */
 export const turnEnded = (chatId: string): void => {
-  const questions = sent.get(chatId);
-  if (questions?.some(({ failure }) => failure === undefined) === true) {
-    changed(
-      new Map(sent).set(
-        chatId,
-        questions.filter(({ failure }) => failure !== undefined)
-      )
-    );
+  const questions = sent.get(chatId) ?? noQuestions;
+  const onTheirWay = sending.get(chatId);
+  const kept = questions.filter(
+    ({ key, failure }) => failure !== undefined || onTheirWay?.has(key) === true
+  );
+  if (kept.length !== questions.length) {
+    changed(new Map(sent).set(chatId, kept));
   }
 };
 
 /** Forgets every question sent: the person signed out. */
 export const forgetSentQuestions = (): void => {
+  sending.clear();
   changed(new Map());
 };
 
