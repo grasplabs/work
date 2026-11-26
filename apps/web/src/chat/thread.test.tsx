@@ -17,6 +17,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { act } from "react";
+import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -63,7 +64,9 @@ const thread = async (
   /** The agents the person may ask, which name the answers. */
   agents?: readonly ChatAgent[],
   /** The answer the New line goes over, the first the person hadn't seen. */
-  newLineBefore?: number
+  newLineBefore?: number,
+  /** What the chat read, as the page passes it. */
+  sources?: ReactNode
 ): Promise<void> => {
   const core = {
     withSession: async <T,>(
@@ -109,6 +112,7 @@ const thread = async (
         checking={checking}
         tools={tools}
         newLineBefore={newLineBefore}
+        sources={sources}
       />
     ),
   });
@@ -168,6 +172,12 @@ const firstStep = () => {
 /** Grasp's answer in the thread. */
 const answer = () =>
   document.querySelector<HTMLElement>('article[aria-label="Grasp"]');
+
+/** Which of Grasp's answers hold what the chat read, in order. */
+const holdingWhatWasRead = () =>
+  [...document.querySelectorAll('article[aria-label="Grasp"]')].map(
+    (each) => each.querySelector('[data-testid="read"]') !== null
+  );
 
 /** What the line over the answer says while Grasp works on it. */
 const workingLine = () =>
@@ -881,6 +891,51 @@ describe(ChatThread, () => {
     }).toStrictEqual({
       writing: { status: "streaming", words: true },
       kept: "done",
+    });
+  });
+
+  it("folds what the chat read under its last answer's words once that is done, and under no other", async () => {
+    const read = <p data-testid="read">Read Linear</p>;
+    const four: ChatMessage = {
+      id: 2,
+      role: "assistant",
+      text: "Four.",
+      code: [],
+      tools: [],
+      end: "done",
+      at: "2026-10-27T09:00:05.000Z",
+    };
+    const again: ChatMessage = { ...asked, id: 3, text: "And 3 + 3?" };
+    const six: ChatMessage = { ...four, id: 4, text: "Six." };
+    await thread(
+      [asked, four, again],
+      { text: "Six", code: [], tools: [], reasoning: "" },
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      read
+    );
+    const writing = holdingWhatWasRead();
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    await thread(
+      [asked, four, again, six],
+      null,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      read
+    );
+
+    expect({ writing, done: holdingWhatWasRead() }).toStrictEqual({
+      writing: [false, false],
+      done: [false, true],
     });
   });
 
