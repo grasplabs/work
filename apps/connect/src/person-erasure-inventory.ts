@@ -82,7 +82,9 @@ export const reviewedPersonColumns: Readonly<
   Record<string, readonly string[]>
 > = {
   call_changes: ["on_behalf_of"],
-  composio_flows: ["user_id"],
+  // `composio_user_id` is the deployment's host, Composio's one user of
+  // it, never a person; the flow, with `user_id`, is erased whole.
+  composio_flows: ["composio_user_id", "user_id"],
   connectors: ["created_by"],
   connector_blocked_tools: ["blocked_by"],
   connections: [

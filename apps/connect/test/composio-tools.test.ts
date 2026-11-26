@@ -13,6 +13,7 @@ import {
   callAs,
   chatOrigin,
   clientOrigin,
+  composioSession,
   outcome,
   someone,
 } from "./connect.ts";
@@ -161,7 +162,7 @@ const rules: (string | ComposioToolRule)[] = [
 const hubspot = async (): Promise<string> =>
   await addConnection({
     provider: "hubspot",
-    server: `https://backend.composio.dev/v3/mcp/${crypto.randomUUID()}?connected_account_id=ca_1`,
+    ...composioSession(),
     tools: JSON.stringify(rules),
   });
 
@@ -195,7 +196,7 @@ describe("a Composio toolkit no list of Grasp's names, such as Attio", () => {
     });
     const connectionId = await addConnection({
       provider: "attio",
-      server: `https://backend.composio.dev/v3/mcp/${crypto.randomUUID()}?connected_account_id=ca_attio`,
+      ...composioSession(),
       tools: JSON.stringify([
         { name: "ATTIO_SEARCH_RECORDS", read: true },
         // Composio says nothing of what it does: allowed as a change.
@@ -250,7 +251,7 @@ describe("a Composio tool stored as a read", () => {
   it("runs as a read only while Composio tags it read-only: one it doesn't, or a catalog connect can't read, holds it as a change", async () => {
     const connectionId = await addConnection({
       provider: "attio",
-      server: `https://backend.composio.dev/v3/mcp/${crypto.randomUUID()}?connected_account_id=ca_attio`,
+      ...composioSession(),
       // As a list stored before the connect form refused an untagged read.
       tools: JSON.stringify([
         { name: "ATTIO_SEARCH_RECORDS", read: true },
@@ -286,7 +287,7 @@ describe("a Composio tool stored as a read", () => {
   it("is refused when core let it through as another class than Composio's tag makes it now, so a read core took for a change never runs unpointed", async () => {
     const connectionId = await addConnection({
       provider: "attio",
-      server: `https://backend.composio.dev/v3/mcp/${crypto.randomUUID()}?connected_account_id=ca_attio`,
+      ...composioSession(),
       tools: JSON.stringify([{ name: "ATTIO_SEARCH_RECORDS", read: true }]),
     });
     const inChat = agentFor("user-anna", "agent-chat", "interactive");
@@ -378,7 +379,7 @@ describe("a Composio tool Grasp never runs", () => {
   it("is refused, neither offered nor run, even when the admin allowed it by name", async () => {
     const connectionId = await addConnection({
       provider: "hubspot",
-      server: `https://backend.composio.dev/v3/mcp/${crypto.randomUUID()}?connected_account_id=ca_1`,
+      ...composioSession(),
       tools: JSON.stringify([
         ...neverTools,
         { name: "HUBSPOT_LIST_SHAREHOLDERS", read: true },
@@ -806,7 +807,7 @@ describe("the admin's allowlist, when they connect", () => {
       person: admin,
       state,
     });
-    const [server] = composio.state.holds.servers.values();
+    const [server] = composio.state.holds.sessions.values();
     expect(server?.allowedTools).toStrictEqual([
       "HUBSPOT_LIST_CONTACTS",
       "HUBSPOT_GET_CONTACT",

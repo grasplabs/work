@@ -159,14 +159,21 @@ export const connections = sqliteTable(
     syncPicksVersion: integer("sync_picks_version"),
     connectedBy: text("connected_by"),
     /**
-     * For a Composio connection: the MCP server and the auth config
-     * Composio made for it, which disconnecting deletes with its account,
-     * and the tools the admin allowed, as a JSON array of names, or of
-     * rules saying which tools only read and which input property names a
+     * No longer read or written: the MCP server Composio's legacy API made
+     * for a Composio connection, before sessions. Migration 0044 cleared
+     * it and asked those connections to be connected again; the column is
+     * dropped in the next release (expand, then contract).
+     */
+    composioServerId: text("composio_server_id"),
+    /**
+     * For a Composio connection: the session and the auth config Composio
+     * made for it, which disconnecting deletes with its account, and the
+     * tools the admin allowed, as a JSON array of names, or of rules
+     * saying which tools only read and which input property names a
      * tool's resource (`ComposioToolRule`). A call of any other tool is
      * refused, and a Composio connection without them takes no calls.
      */
-    composioServerId: text("composio_server_id"),
+    composioSessionId: text("composio_session_id"),
     composioAuthConfigId: text("composio_auth_config_id"),
     /**
      * How a Composio connection was made, and so which consent the admin
@@ -636,6 +643,12 @@ export const composioFlows = sqliteTable(
     tools: text().notNull(),
     returnTo: text("return_to").notNull(),
     expiresAt: timestamp("expires_at").notNull(),
+    /**
+     * The Composio user the account is made for (this deployment's host):
+     * the session that serves it must be that user's. Null for a flow
+     * started before sessions, which can't finish.
+     */
+    composioUserId: text("composio_user_id"),
   },
   (table) => [
     index("composio_flows_expires_idx").on(table.expiresAt),
@@ -655,9 +668,14 @@ export const composioCleanups = sqliteTable(
   "composio_cleanups",
   {
     id: text().primaryKey(),
+    /**
+     * No longer read or written: a legacy MCP server to delete, before
+     * sessions. Migration 0044 cleared it; dropped in the next release.
+     */
     serverId: text("server_id"),
     connectedAccountId: text("connected_account_id"),
     authConfigId: text("auth_config_id"),
+    sessionId: text("session_id"),
     /**
      * For a flow's cleanup: the marker everything the flow made at Composio
      * carries in its name, which finds what no ID column names (an ID whose

@@ -296,7 +296,7 @@ describe("connecting a Composio toolkit with a key", () => {
     expect(heldAtComposio()).toStrictEqual({
       authConfigs: 1,
       accounts: 1,
-      servers: 1,
+      sessions: 1,
     });
   });
 
@@ -475,7 +475,7 @@ describe("connecting a Composio toolkit with a key", () => {
     // Both get past everything before making their server, then go on.
     let arrived = 0;
     const both = Promise.withResolvers<boolean>();
-    composio.state.serverGate = async () => {
+    composio.state.sessionGate = async () => {
       arrived += 1;
       if (arrived === 2) {
         both.resolve(true);
@@ -486,7 +486,7 @@ describe("connecting a Composio toolkit with a key", () => {
       outcome(connectWithKey(admin)),
       outcome(connectWithKey(admin)),
     ]);
-    composio.state.serverGate = undefined;
+    composio.state.sessionGate = undefined;
     // And once one is there, another connect makes nothing.
     const writes = composioWrites().length;
     const again = await outcome(connectWithKey(admin));
@@ -512,7 +512,7 @@ describe("connecting a Composio toolkit with a key", () => {
       again: "connection.already_connected",
       madeAgain: 0,
       live: 1,
-      held: { authConfigs: 1, accounts: 1, servers: 1 },
+      held: { authConfigs: 1, accounts: 1, sessions: 1 },
       cleanups: 0,
       connected: 1,
       consents: 1,
