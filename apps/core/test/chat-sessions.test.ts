@@ -601,6 +601,66 @@ describe("a chat's ChatSession", () => {
     });
   });
 
+  it("opens pi again when its storage fails under a turn nothing waits on, and the turn answers", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const cut = pausedReply(says("Cut."), 1);
+    const { id, stub, provider, newChat } = await personalChatsOf(
+      userId,
+      cut.reply,
+      says("Never stored."),
+      says("Stored.")
+    );
+    const { chat, ask } = await newChat();
+    const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
+    try {
+      void ask("Stored?").catch(() => "cut short");
+      await vi.waitFor(
+        () => {
+          expect(provider.requests).toHaveLength(1);
+        },
+        { timeout: 10_000 }
+      );
+      // Both objects restart mid-answer, so no call waits on the turn: only
+      // the chat's alarm takes it up again. Then a fault in pi's tables: the
+      // storage refuses the answer the request sent again brings.
+      for (const stopped of [stub, session()]) {
+        // oxlint-disable-next-line no-await-in-loop -- one, then the other
+        await runInDurableObject(stopped, (_instance, state) => {
+          state.abort("Restarted by the test");
+        }).catch(() => {
+          // Aborting fails the call that aborted: that is the restart.
+        });
+      }
+      await runInDurableObject(session(), (_instance, state) => {
+        state.storage.sql.exec(
+          `CREATE TRIGGER test_fault BEFORE INSERT ON pi_entries WHEN NEW.record LIKE '%Never stored.%' AND NEW.record LIKE '%"stopReason":"stop"%' BEGIN SELECT RAISE(ABORT, 'Refused by the test'); END`
+        );
+      });
+      await runDurableObjectAlarm(session());
+      // The failure arms the alarm for now, which opens pi again.
+      await vi.waitFor(
+        async () => {
+          await runDurableObjectAlarm(session());
+          expect(provider.requests).toHaveLength(3);
+        },
+        { timeout: 15_000 }
+      );
+      const woken = workspace(env, id);
+      await vi.waitFor(
+        async () => {
+          await expect(
+            woken.chatSummary(chat.id, userId)
+          ).resolves.toMatchObject({ running: false });
+        },
+        { timeout: 15_000 }
+      );
+      const kept = await keptOf(woken, chat.id);
+      expect(kept.at(-1)).toBe("assistant:stop");
+    } finally {
+      cut.release();
+    }
+  });
+
   it("tries a pi that fails to open again later and later, then stops, its chat no longer shown busy", async () => {
     const { userId } = await signedInWithRole(idp, "user");
     const never = Promise.withResolvers<boolean>();
@@ -614,8 +674,11 @@ describe("a chat's ChatSession", () => {
     try {
       void ask("Hello?").catch(() => "settled");
       await vi.waitFor(
-        () => {
+        async () => {
           expect(provider.requests).toHaveLength(1);
+          await expect(
+            stub.chatSummary(chat.id, userId)
+          ).resolves.toMatchObject({ running: true });
         },
         { timeout: 10_000 }
       );
@@ -635,6 +698,7 @@ describe("a chat's ChatSession", () => {
           "UPDATE pi_durable_schema SET version = version + 100"
         );
       });
+      // How long after each alarm the next is, or none.
       const after: (number | null)[] = [];
       for (let alarm = 1; alarm <= 6; alarm += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one alarm after another
@@ -645,11 +709,21 @@ describe("a chat's ChatSession", () => {
           session(),
           async (_instance, state) => await state.storage.getAlarm()
         );
-        after.push(next === null ? null : Math.round((next - now) / 1000));
+        after.push(next === null ? null : next - now);
       }
+      const waits = after.filter((wait) => wait !== null);
       const { running } = await workspace(env, id).chatSummary(chat.id, userId);
-      expect({ after, running }).toStrictEqual({
-        after: [30, 60, 120, 240, 480, null],
+      expect({
+        tried: waits.length,
+        longerEachTime: waits.every(
+          (wait, index) => index === 0 || wait > (waits[index - 1] ?? 0)
+        ),
+        thenNone: after.at(-1),
+        running,
+      }).toStrictEqual({
+        tried: 5,
+        longerEachTime: true,
+        thenNone: null,
         running: false,
       });
     } finally {

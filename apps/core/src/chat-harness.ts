@@ -250,9 +250,6 @@ const turnMostOf = (env: Pick<Env, "CHAT_TURN_MOST_MS">): number => {
   return Number.isInteger(set) && set > 0 ? set : turnMostMs;
 };
 
-/** Most entries copied to the Workspace in one call (`#copy`). */
-const copyPage = 50;
-
 /**
  * The chat's turn: the one record of it, under way or the last. Written
  * as the turn is claimed (`#take`), before anything else of it, so a turn
@@ -1300,9 +1297,13 @@ export class ChatHarness {
   async #watchdog(): Promise<void> {
     try {
       const turn = await this.#harness.snapshot(TurnDoc, context);
+      // Only while pi runs it: a turn that answered and waits only for its
+      // copy to reach the Workspace is never stopped.
       if (
         turn === undefined ||
         turn.ended ||
+        !this.#running ||
+        requestOf(turn)?.turnId !== this.#active ||
         typeof turn.startedAt !== "number" ||
         Date.now() - turn.startedAt < turnMostOf(this.#env)
       ) {
@@ -1807,39 +1808,34 @@ export class ChatHarness {
 
   /**
    * Copies the entries committed since the last copy that show the person
-   * something to the chat's Workspace, then marks them copied: page after
-   * page, so a long backlog (a Workspace out of reach for a while) is never
-   * held at once. A copy sent again, as a restart between the two sends
-   * it, is kept once: the Workspace knows each by its entry.
+   * something to the chat's Workspace, then marks them copied. A copy sent
+   * again, as a restart between the two sends it, is kept once: the
+   * Workspace knows each by its entry.
    */
   async #copy(scope: TurnRequest["scope"]): Promise<void> {
-    let more = true;
-    while (more) {
-      // oxlint-disable-next-line no-await-in-loop -- page after page, in order
-      more = await this.#copyPage(scope);
-    }
-  }
-
-  /** Copies the next page of `#copy`: whether there may be more after it. */
-  async #copyPage(scope: TurnRequest["scope"]): Promise<boolean> {
     const copied = await this.#harness.snapshot(CopiedDoc, context);
     const after = copied?.after ?? null;
-    const page = await this.#conversation.entries(
-      {
-        order: "ascending",
-        ...(after === null ? {} : { minEntryId: after }),
-      },
-      copyPage + 1,
-      undefined,
-      context
-    );
-    const entries = page.items.filter(({ id }) => id !== after);
+    const entries: EntryRecord[] = [];
+    let cursor;
+    do {
+      // oxlint-disable-next-line no-await-in-loop -- page after page
+      const page = await this.#conversation.entries(
+        {
+          order: "ascending",
+          ...(after === null ? {} : { minEntryId: after }),
+        },
+        100,
+        cursor,
+        context
+      );
+      entries.push(...page.items.filter(({ id }) => id !== after));
+      cursor = page.next;
+    } while (cursor !== undefined);
     const shown: TurnMessage[] = [];
     const seen: EntryId[] = [];
     let last: EntryId | undefined;
     for (const [index, entry] of entries.entries()) {
-      // oxlint-disable-next-line no-await-in-loop -- one after another, as committed
-      const cut = await this.#cutAttempt(entry, entries.slice(index + 1));
+      const cut = this.#cutAttempt(entry, entries.slice(index + 1));
       // Copied only once it is known whether pi went on after it.
       if (cut === undefined) {
         break;
@@ -1856,7 +1852,7 @@ export class ChatHarness {
       }
     }
     if (last === undefined) {
-      return false;
+      return;
     }
     const answerId =
       shown.length === 0
@@ -1892,7 +1888,6 @@ export class ChatHarness {
     for (const id of seen) {
       this.#thought.delete(id);
     }
-    return seen.length === entries.length && page.next !== undefined;
   }
 
   /**
@@ -1901,13 +1896,12 @@ export class ChatHarness {
    * never shown, as the person gets the whole answer from the attempt
    * after it. One a stop cut short ends its run, and is shown. Unknown
    * (`undefined`) while it is the newest response and pi still runs.
-   * `later` are entries committed after it, those read already: the rest
-   * are read when none of them says.
+   * `later` are the entries committed after it.
    */
-  async #cutAttempt(
+  #cutAttempt(
     entry: EntryRecord,
     later: readonly EntryRecord[]
-  ): Promise<boolean | undefined> {
+  ): boolean | undefined {
     const [message] = entry.model ?? [];
     if (
       entry.kind !== "pi.assistant" ||
@@ -1916,34 +1910,10 @@ export class ChatHarness {
     ) {
       return false;
     }
-    const next =
-      later.find(({ kind }) => turnKinds.has(kind)) ??
-      (await this.#nextInTurn(entry.id));
+    const next = later.find(({ kind }) => turnKinds.has(kind));
     if (next === undefined) {
       return this.#running ? undefined : false;
     }
     return next.kind === "pi.assistant";
-  }
-
-  /** The first entry of a turn's kinds (`turnKinds`) after entry `id`, if any. */
-  async #nextInTurn(id: EntryId): Promise<EntryRecord | undefined> {
-    let cursor: Cursor | undefined;
-    do {
-      // oxlint-disable-next-line no-await-in-loop -- page after page, oldest first
-      const page = await this.#conversation.entries(
-        { order: "ascending", minEntryId: id },
-        copyPage,
-        cursor,
-        context
-      );
-      const next = page.items.find(
-        (entry) => entry.id !== id && turnKinds.has(entry.kind)
-      );
-      if (next !== undefined) {
-        return next;
-      }
-      cursor = page.next;
-    } while (cursor !== undefined);
-    return undefined;
   }
 }
