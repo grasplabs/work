@@ -4856,7 +4856,6 @@ msgstr "Acantilados"
 #: src/onboarding/campaign/campaign-page.tsx
 #: src/projects/project-chats.tsx
 #: src/settings/erasures.tsx
-#: src/shown-once.tsx
 #: src/workflows/start-run.tsx
 msgid "Close"
 msgstr "Cerrar"
@@ -5415,7 +5414,6 @@ msgstr "Copenhague"
 #: src/settings/event-sources.tsx
 #: src/settings/guests.tsx
 #: src/settings/invitations.tsx
-#: src/shown-once.tsx
 msgid "Copied"
 msgstr "Copiado"
 
@@ -5442,7 +5440,6 @@ msgstr "Copias"
 
 #: src/frame/ui-words.tsx
 #: src/onboarding/review-parts.tsx
-#: src/shown-once.tsx
 msgid "Copy"
 msgstr "Copiar"
 
@@ -5464,7 +5461,6 @@ msgstr "Copiar correo"
 msgid "Copy into the Brain from {label}"
 msgstr "Copiar al Brain desde {label}"
 
-#: src/settings/event-sources.tsx
 #: src/shown-once.tsx
 msgid "Copy it now: you won't see it again. Lost, it can only be replaced."
 msgstr "Cópialo ahora: no lo volverás a ver. Si se pierde, solo se puede sustituir."
@@ -5489,7 +5485,6 @@ msgstr "Copiar el mensaje"
 msgid "Copy the output"
 msgstr "Copiar la salida"
 
-#: src/settings/event-sources.tsx
 #: src/shown-once.tsx
 msgid "Copy the secret"
 msgstr "Copiar el secreto"
@@ -15870,7 +15865,6 @@ msgid "Searching the docs for {query}"
 msgstr "Buscando {query} en la documentación"
 
 #: src/connections/http-connections.tsx
-#: src/shown-once.tsx
 msgid "Secret"
 msgstr "Secreto"
 
