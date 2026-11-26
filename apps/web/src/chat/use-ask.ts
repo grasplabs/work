@@ -15,6 +15,7 @@ import { useCoreAction } from "../use-core-action.ts";
 import { activeChat, setActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
 import type { Problem, StopNote } from "./dictation.ts";
+import { moveNewDraft, useDraft } from "./drafts.ts";
 import type { BoxMention } from "./mentions.tsx";
 import { chatMentionsOf } from "./mentions.tsx";
 import {
@@ -29,9 +30,10 @@ import type { ModelChoice } from "./model-choice.ts";
 // the box's text, model, effort and files, and asking in the open chat, or
 // in a new one named after the question. A question's files are attached to
 // its chat as it is sent, one at a time, then the question names them.
-// What is typed belongs to the chat it was typed in: once the box is
-// another chat's, it starts empty, never sending one chat's words or files
-// to the next (the chat a question here just made is the same draft's).
+// What is typed belongs to the chat it was typed in, kept as its draft
+// (drafts.ts): once the box is another chat's, it holds that chat's draft,
+// never sending one chat's words or files to the next (the chat a
+// question here just made takes what was typed meanwhile).
 
 /** A new chat's title: the start of its first question. */
 export const titleOf = (question: string): string => {
@@ -119,14 +121,15 @@ export const useAsk = (
 ) => {
   const { identity } = useRouteContext({ from: "/_shell" });
   const { busy, failure, run } = useCoreAction();
-  const [text, setText] = useState("");
+  const [draft, changeDraft] = useDraft(identity.userId, chatId, slot);
+  const { text, mentions } = draft;
   // Why dictating into the text stopped on its own, kept with it: the box
   // it stopped in may have gone (dictation.ts).
   const [stopped, setStopped] = useState<Problem>();
   const stopNote: StopNote = [stopped, setStopped];
-  // What the person mentioned in the box (`@`), each once: what the
-  // question names exactly, beside its words, and the chips the box shows.
-  const [mentions, setMentions] = useState<readonly BoxMention[]>([]);
+  // What the person mentioned in the box (`@`), each once, is the draft's
+  // too: what the question names exactly, beside its words, and the chips
+  // the box shows.
   const [files, setFiles] = useState<readonly BoxFile[]>([]);
   // Why a file the person chose stays out of the box.
   const [fileProblem, setFileProblem] = useState<string>();
@@ -137,8 +140,6 @@ export const useAsk = (
   if (chatId !== draftOf) {
     setDraftOf(chatId);
     if (chatId === undefined || chatId !== made) {
-      setText("");
-      setMentions([]);
       setFiles([]);
       setFileProblem(undefined);
       setStopped(undefined);
@@ -265,9 +266,13 @@ export const useAsk = (
     unsent.current = null;
     // Clears the box only of what was sent from it: asking again sends an
     // earlier question, and a draft the person started stays.
-    setText((now) => (now === question ? "" : now));
-    if (mentioned.length > 0) {
-      setMentions([]);
+    changeDraft((now) => ({
+      text: now.text === question ? "" : now.text,
+      mentions: mentioned.length > 0 ? [] : now.mentions,
+    }));
+    // A chat made for it takes what was typed while it was on its way.
+    if (chatId === undefined) {
+      moveNewDraft(identity.userId, slot, sent);
     }
     setFiles((now) => now.filter((each) => !carried.includes(each)));
     for (const { id } of carried) {
@@ -288,10 +293,14 @@ export const useAsk = (
   return {
     composer: {
       text,
-      onText: setText,
+      onText: (typed: string) => {
+        changeDraft((now) => ({ ...now, text: typed }));
+      },
       stopNote,
       mentions,
-      onMentions: setMentions,
+      onMentions: (named: readonly BoxMention[]) => {
+        changeDraft((now) => ({ ...now, mentions: named }));
+      },
       models,
       model,
       onModel: (chosen: string) => {

@@ -443,6 +443,41 @@ describe("Chat's page from Make something", () => {
     });
   });
 
+  it("keeps what is typed for a new chat when the page is left or loaded again, and lets it go once sent", async () => {
+    await shown();
+    await act(async () => {
+      typeInPrompt(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+    // Away and back: the page is made anew, as after a reload.
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    const { asked } = await shown();
+    const back = box().textContent;
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({
+      back,
+      asked,
+      kept: Object.keys(localStorage).filter((key) =>
+        key.startsWith("grasp.chat.draft.")
+      ),
+    }).toStrictEqual({
+      back: "What waits on me today?",
+      asked: [
+        "create What waits on me today? null",
+        "send chat-1 What waits on me today?",
+      ],
+      kept: [],
+    });
+  });
+
   it("sends a question asked before core has said which models there are once it has, with no second press", async () => {
     const models = Promise.withResolvers<string[]>();
     const { asked } = await shown(undefined, undefined, {
