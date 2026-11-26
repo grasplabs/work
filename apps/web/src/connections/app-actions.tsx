@@ -33,6 +33,7 @@ import { DisconnectDialog, mayDisconnect } from "./connection-list.tsx";
 import { fixOf } from "./fix.ts";
 import type { Integration } from "./integrations.ts";
 import { connectionLabel, reliedOnLapsed } from "./integrations.ts";
+import { supportOfError, useSupportLine } from "./support-details.tsx";
 import { allowedOf, toolRules } from "./tool-choices.ts";
 
 // What can be done to an app from its panel and its page, as its app
@@ -80,6 +81,7 @@ const ConnectToolkit = ({
   size: "xs" | "sm";
 }) => {
   const core = useCore();
+  const supportLine = useSupportLine();
   const [old] = stopped;
   // What the old connection allowed of what the catalog still lists: where
   // connecting again starts, each tool keeping the resource it was held to.
@@ -119,7 +121,13 @@ const ConnectToolkit = ({
       // The browser leaves for the provider's sign-in.
       goTo(started);
     } catch (error) {
-      toast.error(failureText(error));
+      const support = supportOfError(error);
+      toast.error(
+        failureText(error),
+        support === undefined
+          ? undefined
+          : { description: supportLine(support) }
+      );
       throw error;
     }
   };

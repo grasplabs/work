@@ -24,6 +24,23 @@ const rowOf = (page: Page, { account }: SeededConnection): Locator =>
     .getByRole("listitem")
     .filter({ hasText: account });
 
+/**
+ * The card of what `connection` holds beyond its row, on its integration
+ * `name`'s page: "Access" while it is the page's only account, else named
+ * after its account (connection-list.tsx). A retry's page also lists the
+ * accounts each earlier attempt seeded, and what that attempt left on them.
+ */
+const accessOf = (
+  page: Page,
+  name: string,
+  { account }: SeededConnection
+): Locator =>
+  page
+    .getByRole("region", { name: "Access", exact: true })
+    .or(
+      page.getByRole("region", { name: `${name} (${account})`, exact: true })
+    );
+
 test("a person comes back from connecting Microsoft 365, sees each account on its page, and signs in again to or disconnects one whose access ran out from its row", async ({
   pageOf,
 }) => {
@@ -292,10 +309,11 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
   const mailboxRow = rowOf(page, mailbox);
   await expect(mailboxRow).toContainText("Connected");
   await expect(mailboxRow).toContainText("Everyone");
-  const holders = page.getByRole("heading", {
+  const access = accessOf(page, "Microsoft 365", mailbox);
+  const holders = access.getByRole("heading", {
     name: "Apps and agents with a permission",
   });
-  const holder = page
+  const holder = access
     .getByRole("list", { name: "Apps and agents with a permission" })
     .getByRole("listitem")
     .filter({ hasText: appName });
@@ -307,7 +325,7 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
     .getByRole("button", { name: `Revoke App ${appName}'s permission` })
     .click();
   await expect(holder).toHaveCount(0);
-  // Nothing holds one now: the page says nothing of holders.
+  // Nothing holds one now: its card says nothing of holders.
   await expect(holders).toHaveCount(0);
 
   // Composio holds this one's tokens: who consented, to what, for which
@@ -315,11 +333,12 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
   // for its name. Its one account is disconnected from its row; the head
   // has nothing else to manage, so no Manage menu.
   await page.goto("/connectors/composio:hubspot");
-  await page
+  const consent = accessOf(page, "hubspot", toolkit);
+  await consent
     .getByRole("button", { name: /consented to this before connecting it$/u })
     .click();
-  await expect(page.getByText(composioConsentText)).toBeVisible();
-  await expect(page.getByRole("main")).toContainText(
+  await expect(consent.getByText(composioConsentText)).toBeVisible();
+  await expect(consent).toContainText(
     `Tools allowed: ${seededTools.join(", ")}`
   );
   await expect(

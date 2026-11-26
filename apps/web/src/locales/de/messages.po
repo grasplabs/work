@@ -2332,10 +2332,6 @@ msgstr "Ausweichmodell hinzufügen"
 msgid "Add a goal"
 msgstr "Ziel hinzufügen"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Add a group"
-msgstr "Gruppe hinzufügen"
-
 #: src/settings/workspace-name.tsx
 msgid "Add a logo"
 msgstr "Logo hinzufügen"
@@ -3922,7 +3918,6 @@ msgstr "Gebunden an"
 #: src/brain/brain-section.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.brain.tsx
-#: src/settings/sections.ts
 msgid "Brain"
 msgstr "Gehirn"
 
@@ -4119,7 +4114,6 @@ msgstr "Ausführen nicht möglich: {unread}"
 #: src/chat/brain-questions.tsx
 #: src/chat/chat-window.tsx
 #: src/chat/delete-chat-dialog.tsx
-#: src/confirmed.tsx
 #: src/connections/add-connector.tsx
 #: src/connections/app/words.ts
 #: src/connections/connect-dialog.tsx
@@ -4186,6 +4180,11 @@ msgstr "Fälle pro Woche"
 #: src/brain/opportunity-drafts.ts
 msgid "Cases a week: {cases}."
 msgstr "Fälle pro Woche: {cases}."
+
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Caution"
+msgstr "Vorsicht"
 
 #: src/agents/new-agent.tsx
 #: src/apps/app-workflows.tsx
@@ -4773,7 +4772,6 @@ msgstr "Klippen"
 #: src/interview/destination.tsx
 #: src/projects/project-chats.tsx
 #: src/settings/erasures.tsx
-#: src/shown-once.tsx
 #: src/workflows/start-run.tsx
 msgid "Close"
 msgstr "Schließen"
@@ -5298,7 +5296,6 @@ msgstr "Kopenhagen"
 #: src/settings/event-sources.tsx
 #: src/settings/guests.tsx
 #: src/settings/invitations.tsx
-#: src/shown-once.tsx
 msgid "Copied"
 msgstr "Kopiert"
 
@@ -5322,7 +5319,6 @@ msgstr "Kopien"
 #: src/frame/ui-words.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
-#: src/shown-once.tsx
 msgid "Copy"
 msgstr "Kopieren"
 
@@ -5344,7 +5340,6 @@ msgstr "E-Mail kopieren"
 msgid "Copy into the Brain from {label}"
 msgstr "Aus {label} ins Brain kopieren"
 
-#: src/settings/event-sources.tsx
 #: src/shown-once.tsx
 msgid "Copy it now: you won't see it again. Lost, it can only be replaced."
 msgstr "Kopieren Sie es jetzt: Sie sehen es nicht noch einmal. Geht es verloren, kann es nur ersetzt werden."
@@ -5352,6 +5347,10 @@ msgstr "Kopieren Sie es jetzt: Sie sehen es nicht noch einmal. Geht es verloren,
 #: src/drafts/share-with-team.tsx
 msgid "Copy link"
 msgstr "Link kopieren"
+
+#: src/frame/ui-words.tsx
+msgid "Copy table"
+msgstr "Tabelle kopieren"
 
 #: src/chat/thread.tsx
 msgid "Copy the answer"
@@ -5365,7 +5364,6 @@ msgstr "Link für {name} kopieren"
 msgid "Copy the output"
 msgstr "Ausgabe kopieren"
 
-#: src/settings/event-sources.tsx
 #: src/shown-once.tsx
 msgid "Copy the secret"
 msgstr "Geheimnis kopieren"
@@ -6049,6 +6047,10 @@ msgctxt "what else an answer to a decision says"
 msgid "Details"
 msgstr "Details"
 
+#: src/connections/support-details.tsx
+msgid "Details for support: {reason} (release {release}, connect {version})"
+msgstr "Details für den Support: {reason} (Release {release}, Connect {version})"
+
 #: src/settings/event-sources.tsx
 msgid "Details of {name}"
 msgstr "Details zu {name}"
@@ -6376,6 +6378,7 @@ msgstr "Punkte"
 msgid "Double-click or press F2 to rename"
 msgstr "Doppelklicken oder F2 drücken, um umzubenennen"
 
+#: src/frame/ui-words.tsx
 #: src/workflows/run-files.tsx
 #: src/workflows/version-source.tsx
 msgctxt "download a file"
@@ -6400,6 +6403,14 @@ msgstr "Als Markdown herunterladen"
 #: src/chat/chat-more.tsx
 msgid "Download as PDF"
 msgstr "Als PDF herunterladen"
+
+#: src/frame/ui-words.tsx
+msgid "Download diagram"
+msgstr "Diagramm herunterladen"
+
+#: src/frame/ui-words.tsx
+msgid "Download table"
+msgstr "Tabelle herunterladen"
 
 #: src/apps/app-code.tsx
 msgid "Download the file"
@@ -8301,14 +8312,6 @@ msgstr "Bis dahin kann das Grasp-Team hier helfen"
 msgid "Grid"
 msgstr "Punktraster"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Group {number}"
-msgstr "Gruppe {number}"
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "Groups of teams"
-msgstr "Gruppen von Teams"
-
 #: src/drafts/sharing.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/erasures.tsx
@@ -8864,6 +8867,11 @@ msgstr "In {name} importieren"
 #: src/apps/app-data.tsx
 msgid "Import or export"
 msgstr "Importieren oder exportieren"
+
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Important"
+msgstr "Wichtig"
 
 #: src/onboarding/hr-leads.tsx
 msgid "In {name}, make a service user that may read people’s basic and work details, and paste its ID and token here."
@@ -9779,7 +9787,6 @@ msgid "Language"
 msgstr "Sprache"
 
 #: src/frame/language-button.tsx
-#: src/language-picker.tsx
 msgid "Language: {name}"
 msgstr "Sprache: {name}"
 
@@ -10627,6 +10634,10 @@ msgid "Mentioned"
 msgstr "Genannt"
 
 #: src/frame/ui-words.tsx
+msgid "Mermaid diagram"
+msgstr "Mermaid-Diagramm"
+
+#: src/frame/ui-words.tsx
 msgid "Message actions"
 msgstr "Aktionen zur Nachricht"
 
@@ -11138,10 +11149,6 @@ msgstr "Neuer Chat"
 msgid "New field"
 msgstr "Neues Feld"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "New group"
-msgstr "Neue Gruppe"
-
 #: src/settings/ai-providers.tsx
 msgid "New key"
 msgstr "Neuer Schlüssel"
@@ -11421,10 +11428,6 @@ msgstr "Keine erste Zeile"
 #: src/brain/goals-editor.tsx
 msgid "No goals yet."
 msgstr "Noch keine Ziele."
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "No group"
-msgstr "Keine Gruppe"
 
 #: src/agents/agents-overview.tsx
 msgid "No job written yet"
@@ -12104,6 +12107,11 @@ msgstr "Funktioniert nicht"
 
 #: src/frame/ui-words.tsx
 msgctxt "a badge's dot"
+msgid "Note"
+msgstr "Hinweis"
+
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
 msgid "Note"
 msgstr "Hinweis"
 
@@ -14684,6 +14692,10 @@ msgstr "Behaltenes zurücksetzen"
 msgid "Reset what it keeps?"
 msgstr "Behaltenes zurücksetzen?"
 
+#: src/frame/ui-words.tsx
+msgid "Reset zoom"
+msgstr "Zoom zurücksetzen"
+
 #: src/apps/app-reset.tsx
 #: src/apps/reset-test-data.tsx
 msgid "Resetting"
@@ -15292,10 +15304,6 @@ msgstr "Änderungen speichern"
 msgid "Save first"
 msgstr "Zuerst speichern"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Save groups"
-msgstr "Gruppen speichern"
-
 #: src/apps/app-own-link.tsx
 msgid "Save link"
 msgstr "Link speichern"
@@ -15573,7 +15581,6 @@ msgid "Searching the docs for {query}"
 msgstr "Suche nach {query} in der Doku"
 
 #: src/connections/http-connections.tsx
-#: src/shown-once.tsx
 msgid "Secret"
 msgstr "Geheimnis"
 
@@ -17191,7 +17198,6 @@ msgstr "Teamgröße unbekannt."
 #: src/agents/setup/audience-step.tsx
 #: src/brain/brain.ts
 #: src/people/people-teams-picker.tsx
-#: src/routes/_shell.settings.brain.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/sections.ts
 #: src/settings/teams.tsx
@@ -17583,10 +17589,6 @@ msgstr "Der beste Teil seines Abschnitts"
 msgid "The board"
 msgstr "Die Geschäftsleitung"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "The brain has no teams to group yet."
-msgstr "Das Brain hat noch keine Teams zum Gruppieren."
-
 #: src/brain/learned-section.tsx
 msgid "The Brain hasn't learned anything from this version."
 msgstr "Das Brain hat aus dieser Version noch nichts gelernt."
@@ -17610,10 +17612,6 @@ msgstr "Das Gehirn, so wie die Person jedes Laufs es lesen darf"
 #: src/brain/brain-section.tsx
 msgid "The Brain's pages"
 msgstr "Die Seiten des Gehirns"
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "The brain's regions: your teams, grouped the way your company is. Grasp groups new teams by itself; rename a group or move a team here."
-msgstr "Die Bereiche des Brains: Ihre Teams, so gruppiert wie Ihr Unternehmen. Grasp gruppiert neue Teams selbst; hier benennen Sie eine Gruppe um oder verschieben ein Team."
 
 #: src/brain/atlas-overlays.tsx
 msgid "The brain's view"
@@ -18694,6 +18692,11 @@ msgstr "Zeitzone"
 msgid "Timeline"
 msgstr "Zeitverlauf"
 
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Tip"
+msgstr "Tipp"
+
 #: src/apps/app-access-requests.tsx
 msgid "To"
 msgstr "Bis"
@@ -19487,6 +19490,10 @@ msgstr "Alle anzeigen"
 msgid "View changes"
 msgstr "Änderungen ansehen"
 
+#: src/frame/ui-words.tsx
+msgid "View full screen"
+msgstr "Im Vollbild ansehen"
+
 #: src/brain/note-actions.tsx
 msgid "View in map"
 msgstr "In der Karte zeigen"
@@ -19528,6 +19535,10 @@ msgstr "Sprachgespräch"
 #: src/voice/sound-controls.tsx
 msgid "Volume"
 msgstr "Lautstärke"
+
+#: src/voice/sound-controls.tsx
+msgid "Volume (sound off)"
+msgstr "Lautstärke (Ton aus)"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
@@ -19683,6 +19694,11 @@ msgstr "Wanderer"
 
 #: src/frame/ui-words.tsx
 msgctxt "a badge's dot"
+msgid "Warning"
+msgstr "Warnung"
+
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
 msgid "Warning"
 msgstr "Warnung"
 
@@ -21486,12 +21502,14 @@ msgid "Zoom"
 msgstr "Zoom"
 
 #: src/brain/atlas-overlays.tsx
+#: src/frame/ui-words.tsx
 #: src/inbox/report-viewer.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Zoom in"
 msgstr "Vergrößern"
 
 #: src/brain/atlas-overlays.tsx
+#: src/frame/ui-words.tsx
 #: src/inbox/report-viewer.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Zoom out"

@@ -437,10 +437,11 @@ const styles = stylex.create({
       [media.forcedColors]: "CanvasText",
     },
   },
-  // Filling the card's height: it takes what the header and the footer leave, and clips.
+  // Filling the card's height: it takes what the header and the footer leave, and clips. From its
+  // own height, not from none: in a row sized by the cards, that height is what sizes it.
   contentFullHeight: {
     flexGrow: 1,
-    flexBasis: 0,
+    flexBasis: "auto",
     minHeight: 0,
     overflow: "hidden",
   },

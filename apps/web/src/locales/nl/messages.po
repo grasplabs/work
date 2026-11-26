@@ -2332,10 +2332,6 @@ msgstr "Reservemodel toevoegen"
 msgid "Add a goal"
 msgstr "Doel toevoegen"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Add a group"
-msgstr "Groep toevoegen"
-
 #: src/settings/workspace-name.tsx
 msgid "Add a logo"
 msgstr "Logo toevoegen"
@@ -3922,7 +3918,6 @@ msgstr "Gekoppeld aan"
 #: src/brain/brain-section.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.brain.tsx
-#: src/settings/sections.ts
 msgid "Brain"
 msgstr "Brein"
 
@@ -4119,7 +4114,6 @@ msgstr "Uitvoeren kan niet: {unread}"
 #: src/chat/brain-questions.tsx
 #: src/chat/chat-window.tsx
 #: src/chat/delete-chat-dialog.tsx
-#: src/confirmed.tsx
 #: src/connections/add-connector.tsx
 #: src/connections/app/words.ts
 #: src/connections/connect-dialog.tsx
@@ -4186,6 +4180,11 @@ msgstr "Gevallen per week"
 #: src/brain/opportunity-drafts.ts
 msgid "Cases a week: {cases}."
 msgstr "Gevallen per week: {cases}."
+
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Caution"
+msgstr "Let op"
 
 #: src/agents/new-agent.tsx
 #: src/apps/app-workflows.tsx
@@ -4773,7 +4772,6 @@ msgstr "Kliffen"
 #: src/interview/destination.tsx
 #: src/projects/project-chats.tsx
 #: src/settings/erasures.tsx
-#: src/shown-once.tsx
 #: src/workflows/start-run.tsx
 msgid "Close"
 msgstr "Sluiten"
@@ -5298,7 +5296,6 @@ msgstr "Kopenhagen"
 #: src/settings/event-sources.tsx
 #: src/settings/guests.tsx
 #: src/settings/invitations.tsx
-#: src/shown-once.tsx
 msgid "Copied"
 msgstr "Gekopieerd"
 
@@ -5322,7 +5319,6 @@ msgstr "Kopieën"
 #: src/frame/ui-words.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
-#: src/shown-once.tsx
 msgid "Copy"
 msgstr "Kopiëren"
 
@@ -5344,7 +5340,6 @@ msgstr "E-mail kopiëren"
 msgid "Copy into the Brain from {label}"
 msgstr "Uit {label} naar het Brain kopiëren"
 
-#: src/settings/event-sources.tsx
 #: src/shown-once.tsx
 msgid "Copy it now: you won't see it again. Lost, it can only be replaced."
 msgstr "Kopieer het nu: je ziet het niet nog eens. Kwijt, dan kan het alleen worden vervangen."
@@ -5352,6 +5347,10 @@ msgstr "Kopieer het nu: je ziet het niet nog eens. Kwijt, dan kan het alleen wor
 #: src/drafts/share-with-team.tsx
 msgid "Copy link"
 msgstr "Link kopiëren"
+
+#: src/frame/ui-words.tsx
+msgid "Copy table"
+msgstr "Tabel kopiëren"
 
 #: src/chat/thread.tsx
 msgid "Copy the answer"
@@ -5365,7 +5364,6 @@ msgstr "Kopieer de link voor {name}"
 msgid "Copy the output"
 msgstr "Uitvoer kopiëren"
 
-#: src/settings/event-sources.tsx
 #: src/shown-once.tsx
 msgid "Copy the secret"
 msgstr "Geheim kopiëren"
@@ -6049,6 +6047,10 @@ msgctxt "what else an answer to a decision says"
 msgid "Details"
 msgstr "Details"
 
+#: src/connections/support-details.tsx
+msgid "Details for support: {reason} (release {release}, connect {version})"
+msgstr "Details voor support: {reason} (release {release}, connect {version})"
+
 #: src/settings/event-sources.tsx
 msgid "Details of {name}"
 msgstr "Details van {name}"
@@ -6376,6 +6378,7 @@ msgstr "Stippen"
 msgid "Double-click or press F2 to rename"
 msgstr "Dubbelklik of druk op F2 om de naam te wijzigen"
 
+#: src/frame/ui-words.tsx
 #: src/workflows/run-files.tsx
 #: src/workflows/version-source.tsx
 msgctxt "download a file"
@@ -6400,6 +6403,14 @@ msgstr "Downloaden als Markdown"
 #: src/chat/chat-more.tsx
 msgid "Download as PDF"
 msgstr "Downloaden als pdf"
+
+#: src/frame/ui-words.tsx
+msgid "Download diagram"
+msgstr "Diagram downloaden"
+
+#: src/frame/ui-words.tsx
+msgid "Download table"
+msgstr "Tabel downloaden"
 
 #: src/apps/app-code.tsx
 msgid "Download the file"
@@ -8301,14 +8312,6 @@ msgstr "Tot dan kan het team van Grasp hier helpen"
 msgid "Grid"
 msgstr "Raster van stippen"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Group {number}"
-msgstr "Groep {number}"
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "Groups of teams"
-msgstr "Groepen van teams"
-
 #: src/drafts/sharing.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/erasures.tsx
@@ -8864,6 +8867,11 @@ msgstr "Importeren in {name}"
 #: src/apps/app-data.tsx
 msgid "Import or export"
 msgstr "Importeren of exporteren"
+
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Important"
+msgstr "Belangrijk"
 
 #: src/onboarding/hr-leads.tsx
 msgid "In {name}, make a service user that may read people’s basic and work details, and paste its ID and token here."
@@ -9779,7 +9787,6 @@ msgid "Language"
 msgstr "Taal"
 
 #: src/frame/language-button.tsx
-#: src/language-picker.tsx
 msgid "Language: {name}"
 msgstr "Taal: {name}"
 
@@ -10627,6 +10634,10 @@ msgid "Mentioned"
 msgstr "Genoemd"
 
 #: src/frame/ui-words.tsx
+msgid "Mermaid diagram"
+msgstr "Mermaid-diagram"
+
+#: src/frame/ui-words.tsx
 msgid "Message actions"
 msgstr "Acties bij bericht"
 
@@ -11138,10 +11149,6 @@ msgstr "Nieuwe chat"
 msgid "New field"
 msgstr "Nieuw veld"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "New group"
-msgstr "Nieuwe groep"
-
 #: src/settings/ai-providers.tsx
 msgid "New key"
 msgstr "Nieuwe sleutel"
@@ -11421,10 +11428,6 @@ msgstr "Geen eerste regel"
 #: src/brain/goals-editor.tsx
 msgid "No goals yet."
 msgstr "Nog geen doelen."
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "No group"
-msgstr "Geen groep"
 
 #: src/agents/agents-overview.tsx
 msgid "No job written yet"
@@ -12106,6 +12109,11 @@ msgstr "Werkt niet"
 msgctxt "a badge's dot"
 msgid "Note"
 msgstr "Notitie"
+
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Note"
+msgstr "Opmerking"
 
 #: src/routes/_shell.brain.$noteId.tsx
 msgctxt "tab: a piece of work's note in the brain"
@@ -14684,6 +14692,10 @@ msgstr "Wat het bewaart resetten"
 msgid "Reset what it keeps?"
 msgstr "Wat het bewaart resetten?"
 
+#: src/frame/ui-words.tsx
+msgid "Reset zoom"
+msgstr "Zoom herstellen"
+
 #: src/apps/app-reset.tsx
 #: src/apps/reset-test-data.tsx
 msgid "Resetting"
@@ -15292,10 +15304,6 @@ msgstr "Wijzigingen opslaan"
 msgid "Save first"
 msgstr "Eerst opslaan"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Save groups"
-msgstr "Groepen opslaan"
-
 #: src/apps/app-own-link.tsx
 msgid "Save link"
 msgstr "Link opslaan"
@@ -15573,7 +15581,6 @@ msgid "Searching the docs for {query}"
 msgstr "Zoekt in de docs naar {query}"
 
 #: src/connections/http-connections.tsx
-#: src/shown-once.tsx
 msgid "Secret"
 msgstr "Geheim"
 
@@ -17191,7 +17198,6 @@ msgstr "Teamomvang onbekend."
 #: src/agents/setup/audience-step.tsx
 #: src/brain/brain.ts
 #: src/people/people-teams-picker.tsx
-#: src/routes/_shell.settings.brain.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/sections.ts
 #: src/settings/teams.tsx
@@ -17583,10 +17589,6 @@ msgstr "Het beste deel van de passage"
 msgid "The board"
 msgstr "Het bestuur"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "The brain has no teams to group yet."
-msgstr "Het Brain heeft nog geen teams om te groeperen."
-
 #: src/brain/learned-section.tsx
 msgid "The Brain hasn't learned anything from this version."
 msgstr "Het Brain heeft nog niets uit deze versie geleerd."
@@ -17610,10 +17612,6 @@ msgstr "Het Brein, zoals de persoon van elke run het mag lezen"
 #: src/brain/brain-section.tsx
 msgid "The Brain's pages"
 msgstr "De pagina's van het Brain"
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "The brain's regions: your teams, grouped the way your company is. Grasp groups new teams by itself; rename a group or move a team here."
-msgstr "De regio’s van het Brain: je teams, gegroepeerd zoals je bedrijf is. Grasp groepeert nieuwe teams zelf; hier geef je een groep een andere naam of verplaats je een team."
 
 #: src/brain/atlas-overlays.tsx
 msgid "The brain's view"
@@ -18694,6 +18692,11 @@ msgstr "Tijdzone"
 msgid "Timeline"
 msgstr "Tijdlijn"
 
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
+msgid "Tip"
+msgstr "Tip"
+
 #: src/apps/app-access-requests.tsx
 msgid "To"
 msgstr "Tot"
@@ -19487,6 +19490,10 @@ msgstr "Alles bekijken"
 msgid "View changes"
 msgstr "Wijzigingen bekijken"
 
+#: src/frame/ui-words.tsx
+msgid "View full screen"
+msgstr "Volledig scherm bekijken"
+
 #: src/brain/note-actions.tsx
 msgid "View in map"
 msgstr "Bekijken op de kaart"
@@ -19528,6 +19535,10 @@ msgstr "Spraakgesprek"
 #: src/voice/sound-controls.tsx
 msgid "Volume"
 msgstr "Volume"
+
+#: src/voice/sound-controls.tsx
+msgid "Volume (sound off)"
+msgstr "Volume (geluid uit)"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
@@ -19683,6 +19694,11 @@ msgstr "Wandelaar"
 
 #: src/frame/ui-words.tsx
 msgctxt "a badge's dot"
+msgid "Warning"
+msgstr "Waarschuwing"
+
+#: src/frame/ui-words.tsx
+msgctxt "an alert in an answer"
 msgid "Warning"
 msgstr "Waarschuwing"
 
@@ -21486,12 +21502,14 @@ msgid "Zoom"
 msgstr "Zoom"
 
 #: src/brain/atlas-overlays.tsx
+#: src/frame/ui-words.tsx
 #: src/inbox/report-viewer.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Zoom in"
 msgstr "Inzoomen"
 
 #: src/brain/atlas-overlays.tsx
+#: src/frame/ui-words.tsx
 #: src/inbox/report-viewer.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Zoom out"

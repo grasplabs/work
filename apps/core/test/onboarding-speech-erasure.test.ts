@@ -446,6 +446,10 @@ describe("a line whose take-out fails", { timeout: 60_000 }, () => {
   it("leaves what one call's tries don't cover to the alarm, until nothing is left", async () => {
     // More lines waiting than one take-out's tries cover: 100 a try, 5 tries.
     const count = 100 * 5 + 1;
+    // Before any line is queued: the tests before this one leave the
+    // store's alarm set a moment ahead, and fired once the lines were
+    // queued, it took them out beside this call.
+    await noAlarm();
     const run = unique();
     const texts = Array.from(
       { length: count },
@@ -469,7 +473,7 @@ describe("a line whose take-out fails", { timeout: 60_000 }, () => {
       })
     );
     const store = onboardingStore(env);
-    await runInDurableObject(store, async (_instance, state) => {
+    await runInDurableObject(store, (_instance, state) => {
       for (const [at, key] of keys.entries()) {
         state.storage.sql.exec(
           "INSERT INTO forget_lines (key, queued) VALUES (?, ?)",
@@ -477,7 +481,6 @@ describe("a line whose take-out fails", { timeout: 60_000 }, () => {
           at + 1
         );
       }
-      await state.storage.deleteAlarm();
     });
 
     const gone = await store.forgetLinesNow();

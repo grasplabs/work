@@ -354,6 +354,11 @@ export interface FakeAccount {
   callbackUrl: string;
   redirectUrl: string;
   status: "INITIATED" | "ACTIVE" | "FAILED";
+  /**
+   * How many more reads see it still `INITIATED` before its `status`: an
+   * account Composio is still completing after its redirect.
+   */
+  pendingReads: number;
   /** The scheme and values it was made with, when made with a key. */
   state?: { authScheme: unknown; val: unknown };
 }
@@ -418,6 +423,21 @@ export const fakeComposioApi = (
      * API's base start with this, such as `DELETE /connected_accounts/`.
      */
     failing: string | undefined;
+    /**
+     * As `failing`, for its next `times` requests only, each counted down
+     * as it fails: a failure that passes. It answers `status` (503 by
+     * default), or, `broken`, 200 with a body that breaks off after its
+     * first bytes.
+     */
+    failingFor:
+      | { prefix: string; times: number; broken?: boolean; status?: number }
+      | undefined;
+    /**
+     * How its answers about an account write the toolkit's slug: as it is,
+     * in capitals, or with each `k` the Kelvin sign (U+212A), which
+     * Unicode lowers to `k`.
+     */
+    slugCase: "lower" | "upper" | "kelvin";
     /** Where it says a new server is, instead of its own MCP host. */
     serverUrlBase: string;
     /**
@@ -459,6 +479,8 @@ export const fakeComposioApi = (
     endless: false,
     toolsStatus: undefined,
     failing: undefined,
+    failingFor: undefined,
+    slugCase: "lower",
     serverUrlBase: mcpBase,
     accountInUrl: "own",
     holds: { authConfigs: new Map(), accounts: new Map(), servers: new Map() },
@@ -534,6 +556,7 @@ export const fakeComposioApi = (
         callbackUrl: String(body.callback_url),
         redirectUrl,
         status: "INITIATED",
+        pendingReads: 0,
       });
       return Response.json(
         {
@@ -593,6 +616,7 @@ export const fakeComposioApi = (
         callbackUrl: "",
         redirectUrl: "",
         status: "ACTIVE",
+        pendingReads: 0,
         state: { authScheme, val },
       });
       return Response.json(
@@ -654,14 +678,23 @@ export const fakeComposioApi = (
   const accountAt = (route: string): Response => {
     const id = route.slice("/connected_accounts/".length);
     const account = state.holds.accounts.get(id);
-    return account === undefined
-      ? notFound()
-      : Response.json({
-          id,
-          status: account.status,
-          toolkit: { slug: account.toolkit },
-          auth_config: { id: account.authConfigId },
-        });
+    if (account === undefined) {
+      return notFound();
+    }
+    const completing = account.pendingReads > 0;
+    account.pendingReads = Math.max(account.pendingReads - 1, 0);
+    return Response.json({
+      id,
+      status: completing ? "INITIATED" : account.status,
+      toolkit: {
+        slug: {
+          lower: account.toolkit,
+          upper: account.toolkit.toUpperCase(),
+          kelvin: account.toolkit.replaceAll("k", "\u212A"),
+        }[state.slugCase],
+      },
+      auth_config: { id: account.authConfigId },
+    });
   };
 
   /**
@@ -731,6 +764,34 @@ export const fakeComposioApi = (
     return notFound();
   };
 
+  /** How `state.failingFor` fails the request `call` names, if it does. */
+  const failForNow = (call: string): Response | undefined => {
+    const { failingFor } = state;
+    if (
+      failingFor === undefined ||
+      failingFor.times <= 0 ||
+      !call.startsWith(failingFor.prefix)
+    ) {
+      return undefined;
+    }
+    failingFor.times -= 1;
+    if (failingFor.broken !== true) {
+      return Response.json(
+        { error: { message: "Refused", slug: "Refused" } },
+        { status: failingFor.status ?? 503 }
+      );
+    }
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        start: (controller) => {
+          controller.enqueue(new TextEncoder().encode('{"id":'));
+          controller.error(new Error("The connection broke"));
+        },
+      }),
+      { headers: { "content-type": "application/json" } }
+    );
+  };
+
   const answer = async (request: Request): Promise<Response> => {
     const url = new URL(request.url);
     const route = url.pathname.slice(new URL(composioApiBase).pathname.length);
@@ -758,6 +819,10 @@ export const fakeComposioApi = (
       `${request.method} ${route}`.startsWith(state.failing)
     ) {
       return new Response("Service Unavailable", { status: 503 });
+    }
+    const failedFor = failForNow(`${request.method} ${route}`);
+    if (failedFor !== undefined) {
+      return failedFor;
     }
     const cursor = url.searchParams.get("cursor");
     if (request.method === "GET" && route === "/toolkits") {
@@ -820,6 +885,8 @@ export const fakeComposioApi = (
     state.endless = false;
     state.toolsStatus = undefined;
     state.failing = undefined;
+    state.failingFor = undefined;
+    state.slugCase = "lower";
     state.beforeUpdate = undefined;
     state.updateGate = undefined;
     state.serverGate = undefined;
@@ -852,23 +919,40 @@ export const fakeComposioApi = (
   return {
     state,
     /**
-     * The admin finishing at the auth link `url` as `status` says, as
-     * Composio would: the flow's `state`, from the callback URL it sends
-     * the browser back to.
+     * The admin finishing at the auth link `url`, as Composio would: the
+     * account ends `status`, after `pendingReads` reads that still see it
+     * completing, and Composio sends the browser to `callback`, the
+     * callback it was given with its own `status` (`success`, or `failed`
+     * for an account that failed, unless `says` says otherwise) and
+     * `connected_account_id` appended. `state` is the flow's, from it.
      */
     authorize: (
       url: string,
-      status: FakeAccount["status"] = "ACTIVE"
-    ): { state: string; account: FakeAccount } => {
-      const account = [...state.holds.accounts.values()].find(
-        ({ redirectUrl }) => redirectUrl === url
+      {
+        status = "ACTIVE",
+        pendingReads = 0,
+        says = status === "FAILED" ? "failed" : "success",
+      }: {
+        status?: FakeAccount["status"];
+        pendingReads?: number;
+        says?: string;
+      } = {}
+    ): { state: string; callback: string; account: FakeAccount } => {
+      const found = [...state.holds.accounts].find(
+        ([, { redirectUrl }]) => redirectUrl === url
       );
-      if (account === undefined) {
+      if (found === undefined) {
         throw new Error(`No account at ${url}`);
       }
+      const [accountId, account] = found;
       account.status = status;
+      account.pendingReads = pendingReads;
+      const callback = new URL(account.callbackUrl);
+      callback.searchParams.append("status", says);
+      callback.searchParams.append("connected_account_id", accountId);
       return {
-        state: new URL(account.callbackUrl).searchParams.get("state") ?? "",
+        state: callback.searchParams.get("state") ?? "",
+        callback: callback.href,
         account,
       };
     },

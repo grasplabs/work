@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-// Whether the window is wide (Tailwind's lg): from there, side panels sit
+// Whether the window is wide (Damsko's lg): from there, side panels sit
 // beside the page; narrower, they open in a sheet over it.
 
 const wideQuery = "(min-width: 64rem)";

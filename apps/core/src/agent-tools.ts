@@ -227,17 +227,9 @@ const pathParameter = Type.String({
   description: "The file's path in the App, such as `src/routes/index.tsx`.",
 });
 
-/** What `writeFile` and `editFile` say of what they answer with (`env.build.write`). */
+/** What the file tools say of what they answer with. */
 const answersWithDiagnostics =
-  "Answers with what fails in the whole App now (`errors`, and `diagnostics` by file: compile, types, lint and the React Compiler, all at once): fix the errors and write again. If the same error comes back three times, stop and tell the person in plain words what you're stuck on. Publishing refuses while any error remains.";
-
-/** What the file tools say of the files the definition tools write. */
-const generatedNote =
-  "grasp.config.ts and server/schema.ts are the code generated from the App's definition, which is no file: change it with the definition tools (addTable, addField, changeField, renameField, renameTable, setAccess, addIndex, addPermission and their remove counterparts), never by writing them.";
-
-/** What the definition tools say of what they answer with (`env.build.define`). */
-const definitionAnswer =
-  "Changes the App's definition in its draft, checked as it is made, and writes grasp.config.ts and server/schema.ts from it. A change the definition can't take answers `ok: false` and the `problem`, saving nothing. Otherwise it answers the `plan`, what the change does to the records the App holds (added, widened, kept, `checks`: fields the App's records may lack, which the version requires, where an `answer` (null until given) fills a record that lacks the field as the version is published; `refused`: what only a migration in server/migrations/ can do), and what fails in the whole App now, as writeFile does.";
+  "Answers with what fails in the whole App now (`errors`, and `diagnostics` by file: compile, types, lint and the React Compiler, all at once): fix the errors and write again, without asking the person about each. If the same error comes back three times, stop and tell the person in plain words what you're stuck on. Publishing refuses while any error remains.";
 
 /** A type, as the definition tools take it. */
 const typeParameter = Type.String({
@@ -585,7 +577,7 @@ const definitions = (known: Map<string, string>) => {
       name: "writeFile",
       label: "Write files",
       api: "build",
-      description: `Writes whole files into an App's draft, creating or replacing each: \`files\` by path, up to ${maxFilesPerWrite} in one call, which saves them together. ${generatedNote} ${answersWithDiagnostics}`,
+      description: `Writes whole files into an App's draft, creating or replacing each: \`files\` by path, up to ${maxFilesPerWrite} in one call, which saves them together. ${answersWithDiagnostics}`,
       parameters: Type.Object(
         {
           app: appParameter,
@@ -632,7 +624,7 @@ const definitions = (known: Map<string, string>) => {
       name: "editFile",
       label: "Edit a file",
       api: "build",
-      description: `Replaces \`oldText\`, which must occur exactly once in the file, with \`newText\`, in an App's draft. Read the file with \`readFile\` first: a file you haven't read or written in this chat is refused. For several edits, make several calls. ${generatedNote} ${answersWithDiagnostics}`,
+      description: `Replaces \`oldText\`, which must occur exactly once in the file, with \`newText\`, in an App's draft. Read the file with \`readFile\` first: a file you haven't read or written in this chat is refused. For several edits, make several calls. Answers as \`writeFile\` does.`,
       parameters: Type.Object(
         {
           app: appParameter,
@@ -682,7 +674,7 @@ const definitions = (known: Map<string, string>) => {
       name: "addTable",
       label: "Add a table",
       api: "build",
-      description: `Adds a table to the App's data model, with its fields (each a type by name) and its access (who reads and who writes its records; nobody until you say). ${definitionAnswer}`,
+      description: `Adds a table to the App's data model, with its fields (each a type by name) and its access (who reads and who writes its records; nobody until you say).`,
       parameters: Type.Object(
         {
           app: appParameter,
@@ -709,7 +701,7 @@ const definitions = (known: Map<string, string>) => {
       name: "addField",
       label: "Add a field",
       api: "build",
-      description: `Adds a field to a table. ${definitionAnswer}`,
+      description: `Adds a field to a table.`,
       parameters: Type.Object(
         {
           app: appParameter,
@@ -727,7 +719,7 @@ const definitions = (known: Map<string, string>) => {
       name: "changeField",
       label: "Change a field",
       api: "build",
-      description: `Changes a field's type. Widening it (a higher max, a value more, optional) keeps every record as it is; narrowing it checks every record as the version is published. ${definitionAnswer}`,
+      description: `Changes a field's type. Widening it (a higher max, a value more, optional) keeps every record as it is; narrowing it checks every record as the version is published.`,
       parameters: Type.Object(
         {
           app: appParameter,
@@ -745,7 +737,7 @@ const definitions = (known: Map<string, string>) => {
       name: "renameField",
       label: "Rename a field",
       api: "build",
-      description: `Renames a field: it keeps its ID, so its indexes, row rules and the values the App's records hold follow it, those moving to the new name as the version is published. ${definitionAnswer}`,
+      description: `Renames a field: it keeps its ID, so its indexes, row rules and the values the App's records hold follow it, those moving to the new name as the version is published.`,
       parameters: Type.Object(
         {
           app: appParameter,
@@ -770,7 +762,7 @@ const definitions = (known: Map<string, string>) => {
       name: "renameTable",
       label: "Rename a table",
       api: "build",
-      description: `Renames a table: it keeps its ID, so its records, indexes, row rules and every field that refers to it (\`v.id\`) follow it, the table taking the new name as the version is published. Change the code that names it (\`ctx.db.query("…")\`) to the new name. ${definitionAnswer}`,
+      description: `Renames a table: it keeps its ID, so its records, indexes, row rules and every field that refers to it (\`v.id\`) follow it, the table taking the new name as the version is published. Change the code that names it (\`ctx.db.query("…")\`) to the new name.`,
       parameters: Type.Object(
         {
           app: appParameter,
@@ -790,7 +782,7 @@ const definitions = (known: Map<string, string>) => {
       name: "setAccess",
       label: "Set a table's access",
       api: "build",
-      description: `Sets who reaches a table's records: its \`read\` and \`write\` access, and its row rules. The store enforces them on every read and write, whichever server function reads or writes. \`sensitive\` keeps the table's values out of its change history and records every read of it in the audit log. ${definitionAnswer}`,
+      description: `Sets who reaches a table's records: its \`read\` and \`write\` access, and its row rules. The store enforces them on every read and write, whichever server function reads or writes. \`sensitive\` keeps the table's values out of its change history and records every read of it in the audit log.`,
       parameters: Type.Object(
         {
           app: appParameter,
@@ -809,7 +801,7 @@ const definitions = (known: Map<string, string>) => {
       name: "addIndex",
       label: "Add an index",
       api: "build",
-      description: `Adds an index a query orders and pages a table by (\`.withIndex(name)\`): its fields in order, scalar ones or \`_createdAt\`/\`_updatedAt\`. With \`search\`, the table's one full-text search index instead, over its text fields (\`ctx.db.search(table, text)\`). ${definitionAnswer}`,
+      description: `Adds an index a query orders and pages a table by (\`.withIndex(name)\`): its fields in order, scalar ones or \`_createdAt\`/\`_updatedAt\`. With \`search\`, the table's one full-text search index instead, over its text fields (\`ctx.db.search(table, text)\`).`,
       parameters: Type.Object(
         {
           app: appParameter,
@@ -837,7 +829,7 @@ const definitions = (known: Map<string, string>) => {
       name: "addPermission",
       label: "Add a permission",
       api: "build",
-      description: `Adds something the App reaches outside itself, written as code declares it: \`permission.ai({ maxOutputTokens: 2000 })\`, \`permission.connection("mail", { contract: "microsoft-365.mail@1", actions: ["send"] })\`, \`permission.workflow("triage", { args: v.object({...}), returns: v.object({...}) })\`, \`permission.grasp()\` (the platform's statistics), \`permission.brain({...})\`, \`permission.files({ operations: [...] })\`, \`permission.links({ origins: [...] })\`, or \`people\` (reading the organization's people). Every server function may then use it, as its kind allows (\`ctx.connections.<alias>\`, \`ctx.ai\`, \`ctx.workflows.<alias>\`). It grants nothing: an admin binds or grants each. ${definitionAnswer}`,
+      description: `Adds something the App reaches outside itself, written as code declares it: \`permission.ai({ maxOutputTokens: 2000 })\`, \`permission.connection("mail", { contract: "microsoft-365.mail@1", actions: ["send"] })\`, \`permission.workflow("triage", { args: v.object({...}), returns: v.object({...}) })\`, \`permission.grasp()\` (the platform's statistics), \`permission.brain({...})\`, \`permission.files({ operations: [...] })\`, \`permission.links({ origins: [...] })\`, or \`people\` (reading the organization's people). Every server function may then use it, as its kind allows (\`ctx.connections.<alias>\`, \`ctx.ai\`, \`ctx.workflows.<alias>\`). It grants nothing: an admin binds or grants each.`,
       parameters: Type.Object(
         {
           app: appParameter,
@@ -852,7 +844,7 @@ const definitions = (known: Map<string, string>) => {
       name: "bindWorkflow",
       label: "Bind a workflow",
       api: "build",
-      description: `Binds workflow \`workflow\` under the App's workflow permission \`alias\` (added first with \`addPermission\`), with this draft: declares the events its pages and mutations send, the listen tasks waiting on them and the decisions people answer, as the workflow's live version has them, so \`workflows.<alias>\` in \`@server/_generated/api\` names them, and binds the workflow once the App version this draft becomes is published, in the same step. Its starts run the workflow's live version. Bind it again to declare what a new version of the workflow added. \`events\`, \`listens\` and \`decisions\`, each optional, declare only those of the live version by name (a listen task only with its declared events): leave out what the App no longer uses, so the workflow can drop it once this is published. ${definitionAnswer}`,
+      description: `Binds workflow \`workflow\` under the App's workflow permission \`alias\` (added first with \`addPermission\`), with this draft: declares the events its pages and mutations send, the listen tasks waiting on them and the decisions people answer, as the workflow's live version has them, so \`workflows.<alias>\` in \`@server/_generated/api\` names them, and binds the workflow once the App version this draft becomes is published, in the same step. Its starts run the workflow's live version, so bind only what the person asked for. Bind it again to declare what a new version of the workflow added. \`events\`, \`listens\` and \`decisions\`, each optional, declare only those of the live version by name (a listen task only with its declared events): leave out what the App no longer uses, so the workflow can drop it once this is published.`,
       parameters: Type.Object(
         {
           app: appParameter,
@@ -871,7 +863,7 @@ const definitions = (known: Map<string, string>) => {
       name: "moveField",
       label: "Move a field",
       api: "build",
-      description: `Moves a field to its place among its table's fields (\`to\`, from 0): the order the schema and the App's Data view list them in. Nothing a record holds changes. ${definitionAnswer}`,
+      description: `Moves a field to its place among its table's fields (\`to\`, from 0): the order the schema and the App's Data view list them in. Nothing a record holds changes.`,
       parameters: Type.Object(
         {
           app: appParameter,
@@ -888,7 +880,7 @@ const definitions = (known: Map<string, string>) => {
       name: "renameFunction",
       label: "Rename a function",
       api: "build",
-      description: `Renames a query or mutation, keeping its stable ID, so the workflows calling it keep calling it under its new name. Each one the code exports gets an ID as it is committed, and one gone loses it: code alone can't tell a rename from a function removed and another added, so say a rename with this, and move or rename the export in the code to the new path in the same turn. ${definitionAnswer}`,
+      description: `Renames a query or mutation, keeping its stable ID, so the workflows calling it keep calling it under its new name. Each one the code exports gets an ID as it is committed, and one gone loses it: code alone can't tell a rename from a function removed and another added, so say a rename with this, and move or rename the export in the code to the new path in the same turn.`,
       parameters: Type.Object(
         {
           app: appParameter,
@@ -904,7 +896,7 @@ const definitions = (known: Map<string, string>) => {
       name: "removeTable",
       label: "Remove a table",
       api: "build",
-      description: `Removes a table from the App's data model. Its records stay in the App's store, never dropped, but no function reads them any more; a table another table links to (\`v.id\`) can't go until that link does. ${definitionAnswer}`,
+      description: `Removes a table from the App's data model. Its records stay in the App's store, never dropped, but no function reads them any more; a table another table links to (\`v.id\`) can't go until that link does.`,
       parameters: Type.Object(
         { app: appParameter, table: tableParameter },
         { additionalProperties: false }
@@ -916,7 +908,7 @@ const definitions = (known: Map<string, string>) => {
       name: "removeField",
       label: "Remove a field",
       api: "build",
-      description: `Removes a field from a table. Its values stay in the records, never dropped. Refused while an index, the search index or a row rule reads it: remove or change those first. ${definitionAnswer}`,
+      description: `Removes a field from a table. Its values stay in the records, never dropped. Refused while an index, the search index or a row rule reads it: remove or change those first.`,
       parameters: Type.Object(
         { app: appParameter, table: tableParameter, field: fieldParameter },
         { additionalProperties: false }
@@ -928,7 +920,7 @@ const definitions = (known: Map<string, string>) => {
       name: "removeIndex",
       label: "Remove an index",
       api: "build",
-      description: `Removes an index by its name, or, with \`search\`, the table's search index. ${definitionAnswer}`,
+      description: `Removes an index by its name, or, with \`search\`, the table's search index.`,
       parameters: Type.Object(
         {
           app: appParameter,
@@ -945,7 +937,7 @@ const definitions = (known: Map<string, string>) => {
       name: "removePermission",
       label: "Remove a permission",
       api: "build",
-      description: `Removes a permission the App declares, by its alias (\`people\` for reading the organization's people). Server code that still uses it stops building. ${definitionAnswer}`,
+      description: `Removes a permission the App declares, by its alias (\`people\` for reading the organization's people). Server code that still uses it stops building.`,
       parameters: Type.Object(
         {
           app: appParameter,
