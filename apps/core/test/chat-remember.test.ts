@@ -17,6 +17,7 @@ import {
   chatOf,
   codeStep,
   model,
+  pausedReply,
   personalChatsOf,
   says,
   toolResults,
@@ -341,6 +342,71 @@ describe("the agent remembering in a person's own chat", () => {
         checkedTheirMessage: true,
         checkedTheSubject: true,
       });
+    }
+  );
+
+  it(
+    "keeps what the person said in a question they sent while the agent answered, as their own words",
+    slow,
+    async () => {
+      const member = await signedInApi(idp, "user");
+      const customer = `Acme ${unique()}`;
+      const said = `Our contract with ${customer} renews on 1 March.`;
+      const statement = `${customer} renews on 1 March`;
+      const first = pausedReply(says("Happy to help."), 2);
+      const provider = await fakeProvider(
+        first.reply,
+        toolStep("remember", {
+          about: { kind: "customer", name: customer },
+          attribute: "renewal_date",
+          value: "1 March",
+          type: "fact",
+          statement,
+          quote: `contract with ${customer} renews on 1 March`,
+        }),
+        checked(true),
+        says("Noted.")
+      );
+      const chat = await member.api.chats.create("Renewals");
+      try {
+        await member.api.chats.send(chat.id, {
+          text: "Can you help me keep track of renewals?",
+          model,
+        });
+        await vi.waitFor(
+          () => {
+            expect(provider.requests).toHaveLength(1);
+          },
+          { timeout: 10_000 }
+        );
+        // Queued while the first answer is written (chat-queued.test.ts).
+        await member.api.chats.send(chat.id, { text: said, model });
+        first.release();
+        await vi.waitFor(
+          async () => {
+            await expect(
+              keptFor(member.userId, customer)
+            ).resolves.toStrictEqual([[statement]]);
+          },
+          { timeout: 20_000 }
+        );
+        // The turn ends with its last answer, before the next test's.
+        await vi.waitFor(
+          async () => {
+            const listed = await member.api.chats.list();
+            expect(
+              listed.find(({ id }) => id === chat.id)?.running
+            ).toBeFalsy();
+            expect(provider.requests).toHaveLength(4);
+          },
+          { timeout: 20_000 }
+        );
+        expect(
+          checkInputs(provider).map(({ message }) => message)
+        ).toStrictEqual([expect.stringContaining(said)]);
+      } finally {
+        first.release();
+      }
     }
   );
 
@@ -970,7 +1036,8 @@ describe("the agent remembering in a person's own chat", () => {
           chatId: chat.id,
           personId: member.userId,
         },
-        "Not pizza any more, it's sushi now.",
+        async () =>
+          await Promise.resolve("Not pizza any more, it's sushi now."),
         () => {}
       );
       // The model's call as it comes in, checked by the tool's own schema.

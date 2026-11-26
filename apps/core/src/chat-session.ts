@@ -9,6 +9,7 @@ import { DurableObject } from "cloudflare:workers";
 import type {
   ChatHarness,
   ChatHost,
+  QueuedQuestion,
   TurnEnd,
   TurnRequest,
 } from "./chat-harness.ts";
@@ -376,6 +377,26 @@ export class ChatSession extends DurableObject<Env> {
     }
   }
 
+  /**
+   * Queues `question` into the chat's turn `turnId`, which runs
+   * (`ChatHarness.queueQuestion`): false when that turn takes no more.
+   */
+  async queueQuestion(
+    turnId: string,
+    question: QueuedQuestion
+  ): Promise<boolean> {
+    return await this.#work(
+      async (harness) => await harness.queueQuestion(turnId, question)
+    );
+  }
+
+  /** Has turn `turnId` take its queued questions now (`ChatHarness.sendNow`). */
+  async sendNow(turnId: string): Promise<void> {
+    await this.#work(async (harness) => {
+      await harness.sendNow(turnId);
+    });
+  }
+
   /** Tells the chat's agent `text` for its turn under way or its next. */
   async note(text: string): Promise<void> {
     await this.#work(async (harness) => {
@@ -388,11 +409,12 @@ export class ChatSession extends DurableObject<Env> {
     return await this.#work((harness) => harness.activeTurn());
   }
 
-  /** Stops the turn under way, if there is one, or turn `turnId` as it starts. */
-  async abort(turnId?: string): Promise<void> {
-    await this.#work(async (harness) => {
-      await harness.abort(turnId);
-    });
+  /**
+   * Stops the turn under way, if there is one, or turn `turnId` as it
+   * starts: the words of the questions queued into it that it dropped.
+   */
+  async abort(turnId?: string): Promise<string[]> {
+    return await this.#work(async (harness) => await harness.abort(turnId));
   }
 
   /**
