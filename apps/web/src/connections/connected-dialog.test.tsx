@@ -107,7 +107,7 @@ describe("the page a connection ends on", () => {
       }),
       { app: "Ledger" }
     );
-    expect(dialog()?.textContent).toContain("For everyone");
+    expect(dialog()?.textContent).toContain("For the company");
     expect(dialog()?.textContent).toContain(
       "Reached through your company network"
     );
