@@ -422,7 +422,7 @@ export const lookUp = async <Data, Output>(
 
 /** A connector: what connect knows of it, and its MCP server. */
 export interface Connector {
-  manifest: ConnectorManifest;
+  readonly manifest: ConnectorManifest;
   /** Answers one MCP request (Streamable HTTP, JSON responses, stateless). */
   fetch: (request: Request) => Promise<Response>;
 }
@@ -479,8 +479,9 @@ const refusal = (id: Id, code: number, message: string): Response =>
 
 /**
  * A connector's MCP server, from its tools and syncs. Throws if two tools
- * or two syncs share a name, or the manifest they make isn't valid (a
- * route to a host it doesn't list).
+ * or two syncs share a name, or, outside a connector's isolate, if the
+ * manifest they make isn't valid (a route to a host it doesn't list). In
+ * the isolate the manifest is built only when read (manifest-check.isolate.ts).
  */
 export const serveConnector = (
   base: ConnectorBase,
