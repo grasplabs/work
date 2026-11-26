@@ -10386,21 +10386,23 @@ export class Onboarding extends DurableObject<Env> {
     // DELETE_DAYS days, as their mail, the page and the admin's count say:
     // to add something, change it or delete it. After that it still opens
     // to read, and nothing more is added or deleted through it.
-    if (use !== "open") {
-      const [state] = this.#db
-        .select({ completedAt: interviewStates.completedAt })
-        .from(interviewStates)
-        .where(eq(interviewStates.person, person.id))
-        .all();
-      if (
-        state?.completedAt !== null &&
-        state?.completedAt !== undefined &&
-        dayOf(now) > addDays(dayOf(state.completedAt), DELETE_DAYS)
-      ) {
-        return refused("interview.closed");
-      }
+    if (use !== "open" && this.#pastItsDays(person.id, now)) {
+      return refused("interview.closed");
     }
     return answered({ person, link, roster, plan: row.plan });
+  }
+
+  /** Whether more than DELETE_DAYS days passed since `person` first approved what was read back. */
+  #pastItsDays(person: string, now: string): boolean {
+    const [state] = this.#db
+      .select({ completedAt: interviewStates.completedAt })
+      .from(interviewStates)
+      .where(eq(interviewStates.person, person))
+      .all();
+    const completed = state?.completedAt ?? null;
+    return (
+      completed !== null && dayOf(now) > addDays(dayOf(completed), DELETE_DAYS)
+    );
   }
 
   /**
