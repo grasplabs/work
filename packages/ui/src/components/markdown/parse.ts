@@ -551,3 +551,57 @@ export const HALF = new Set([
   "streamdown:incomplete-link",
   "streamdown:incomplete-image",
 ]);
+
+// Marks that are active somewhere in a cell's words: each written escaped, so the words read back
+// as words. A pipe is escaped even inside a code span, as GitHub's tables read it.
+const ACTIVE = /[\\`*_~[\]<>|$!#&]/gu;
+const BREAK = /^<br\s*\/?>$/iu;
+// The marks round emphasis, strong words and struck words.
+const AROUND = new Map([
+  ["emphasis", "*"],
+  ["strong", "**"],
+  ["delete", "~~"],
+]);
+/** `code` as a code span: fenced by one more backtick than its longest run, spaced off a backtick. */
+const spanOf = (code: string) => {
+  const longest = Math.max(
+    0,
+    ...[...code.matchAll(/`+/gu)].map(([run]) => run.length)
+  );
+  const fence = "`".repeat(longest + 1);
+  const pad = /^[` ]|[` ]$/u.test(code) ? " " : "";
+  return `${fence}${pad}${code}${pad}${fence}`.replaceAll("|", "\\|");
+};
+/**
+ * A table cell (or anything in one) as Markdown that reads back as the same cell: code as a code
+ * span, emphasis, strike-through, links and maths as written, every other active mark escaped,
+ * a tag dropped (as it is drawn), a line break a space.
+ */
+export const markdownOfCell = (node: RootContent): string => {
+  const kids = () =>
+    "children" in node
+      ? node.children.map((child) => markdownOfCell(child)).join("")
+      : "";
+  if (node.type === "inlineCode") {
+    return spanOf(node.value);
+  }
+  if (node.type === "inlineMath") {
+    return `$$${node.value.replaceAll("|", "\\|")}$$`;
+  }
+  if (node.type === "link") {
+    return `[${kids()}](<${node.url.replaceAll(/[<>|\\]/gu, "\\$&")}>)`;
+  }
+  if (node.type === "html") {
+    return BREAK.test(node.value) ? " " : "";
+  }
+  if (node.type === "break") {
+    return " ";
+  }
+  const around = AROUND.get(node.type);
+  if (around !== undefined) {
+    return `${around}${kids()}${around}`;
+  }
+  return "value" in node
+    ? node.value.replaceAll(ACTIVE, "\\$&").replaceAll(/\s*\n\s*/gu, " ")
+    : kids();
+};
