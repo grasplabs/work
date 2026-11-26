@@ -8,7 +8,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useState } from "react";
 import type { ComponentType } from "react";
 
-import { ErrorText } from "../error-text.tsx";
+import { TopError } from "../frame/top-error.tsx";
 import { chooseLocale, isLocale } from "../i18n.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { speak } from "../voice/voice.ts";
@@ -180,7 +180,7 @@ const Ai = ({ data, askedFor, path, go, onward }: StepProps) => {
         onWay={setWay}
         way={way}
       />
-      <ErrorText>{grasp.failure}</ErrorText>
+      <TopError>{grasp.failure}</TopError>
     </CalmStep>
   );
 };
@@ -217,7 +217,7 @@ const Differences = ({
   };
   return (
     <>
-      <ErrorText>{failure}</ErrorText>
+      <TopError>{failure}</TopError>
       {differences.map((difference) => (
         <DifferenceItem
           difference={difference}

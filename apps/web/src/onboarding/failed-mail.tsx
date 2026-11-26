@@ -1,13 +1,8 @@
 import type { LinkToSend } from "@grasp-os/shared/onboarding";
-import { colors } from "@grasp-os/ui/lib/tokens.stylex";
-import { Trans } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
+import { useLingui } from "@lingui/react/macro";
 
 import { formatList } from "../format.ts";
-
-const styles = stylex.create({
-  notice: { display: "block", color: colors.destructive },
-});
+import { TopError } from "../frame/top-error.tsx";
 
 // Whose link from Grasp failed, for the company's admin among the
 // interviews: the email with it didn't reach them, so they won't start
@@ -20,17 +15,15 @@ export const FailedMailNotice = ({
 }: {
   links: readonly LinkToSend[];
 }) => {
+  const { t } = useLingui();
   const failed = links.filter((link) => link.mailFailed);
-  if (failed.length === 0) {
-    return null;
-  }
   const names = formatList(failed.map(({ name }) => name));
+  // Said in the bar at the top, as every error in the setup is.
   return (
-    <output {...stylex.props(styles.notice)}>
-      <Trans>
-        Our email didn’t reach {names}. Send them their link yourself from Links
-        to send, or ask Grasp to check their address.
-      </Trans>
-    </output>
+    <TopError>
+      {failed.length === 0
+        ? null
+        : t`Our email didn’t reach ${names}. Send them their link yourself from Links to send, or ask Grasp to check their address.`}
+    </TopError>
   );
 };

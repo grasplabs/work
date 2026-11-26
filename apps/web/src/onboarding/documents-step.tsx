@@ -9,7 +9,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
 import { CoreTimeoutError } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
+import { TopError } from "../frame/top-error.tsx";
 import { isLocale } from "../i18n.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
@@ -155,7 +155,7 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
       title={t`Do you have anything that explains how you work?`}
     >
       <div {...stylex.props(styles.stack)}>
-        <ErrorText>{removeProblem}</ErrorText>
+        <TopError>{removeProblem}</TopError>
         <DocumentShelf
           busy={busy}
           coming={coming}

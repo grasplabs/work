@@ -3,6 +3,7 @@ import { Icon } from "@grasp-os/ui/lib/icons";
 import { fadeIn } from "@grasp-os/ui/lib/styles";
 import {
   colors,
+  duration,
   font,
   media,
   size,
@@ -21,6 +22,7 @@ import {
   onThemeChange,
   readTheme,
 } from "../frame/theme.ts";
+import { TopErrorBar, useAlarmed } from "../frame/top-error.tsx";
 import type { Pose } from "../onboarding/field/engine.ts";
 import { aside } from "../onboarding/field/poses.ts";
 import { StephenField } from "../onboarding/field/stephen-field.tsx";
@@ -96,6 +98,22 @@ const styles = stylex.create({
     display: { default: "block", [media.forcedColors]: "none" },
     backgroundImage: `linear-gradient(to bottom, ${colors.mint}, transparent 95%)`,
   },
+  // The same texture in the system's red, over it while an error shows in the bar at the top.
+  alarm: {
+    backgroundImage: `linear-gradient(to bottom, ${colors.destructive}, transparent 95%)`,
+    opacity: 0,
+    transitionProperty: { default: "opacity", [media.reducedMotion]: "none" },
+    transitionDuration: duration.ui,
+    transitionTimingFunction: duration.ease,
+  },
+  alarmOn: { opacity: size.textureStrength },
+  // The mint goes as the red comes, so the two never mix into a third colour.
+  calmGoing: {
+    transitionProperty: { default: "opacity", [media.reducedMotion]: "none" },
+    transitionDuration: duration.ui,
+    transitionTimingFunction: duration.ease,
+  },
+  calmGone: { opacity: 0 },
   // Over a surface rather than behind it: above its fill, never catching a press.
   over: { zIndex: 1 },
   main: {
@@ -180,6 +198,7 @@ export const Frame = ({
 }) => {
   // The screen it opened on is there at once; after a change (a pause, back from it), each fades in.
   const [seen, setSeen] = useState({ scene, moved: false });
+  const alarmed = useAlarmed();
   if (seen.scene !== scene) {
     setSeen({ scene, moved: true });
   }
@@ -202,7 +221,20 @@ export const Frame = ({
           aria-hidden="true"
           {...stylex.props(styles.field, styles.strip, seen.moved && fadeIn)}
         >
-          <span {...stylex.props(styles.texture)} />
+          <span
+            {...stylex.props(
+              styles.texture,
+              styles.calmGoing,
+              alarmed && styles.calmGone
+            )}
+          />
+          <span
+            {...stylex.props(
+              styles.texture,
+              styles.alarm,
+              alarmed && styles.alarmOn
+            )}
+          />
         </div>
       ) : null}
       <main key={scene} {...stylex.props(styles.main, seen.moved && fadeIn)}>
@@ -215,6 +247,7 @@ export const Frame = ({
   return (
     <div {...stylex.props(styles.frame)}>
       <StephenField pose={pose ?? aside}>{screen}</StephenField>
+      <TopErrorBar />
     </div>
   );
 };

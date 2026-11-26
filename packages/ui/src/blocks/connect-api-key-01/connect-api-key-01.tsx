@@ -187,6 +187,11 @@ export interface ConnectApiKeyProps {
     key: string;
     address?: string;
   }) => Promise<void>;
+  /**
+   * Where a refusal is said, for a page that says every error in one place of its own (a bar at
+   * the top): given, the reason goes here and nothing stands under the key, which is cleared still.
+   */
+  onRefused?: (reason: string) => void;
   /** Disconnects the connected provider, once asked and answered. Return a Promise to wait on it. */
   onDisconnect?: () => unknown;
   /**
@@ -257,6 +262,7 @@ const Logo = ({ provider }: { provider: ConnectApiKeyProvider }) => (
 const ConnectForm = ({
   provider,
   onConnect,
+  onRefused,
   onChange,
   words,
   formId,
@@ -264,6 +270,7 @@ const ConnectForm = ({
   formId: string | undefined;
   provider: ConnectApiKeyProvider;
   onConnect: ConnectApiKeyProps["onConnect"];
+  onRefused: ConnectApiKeyProps["onRefused"];
   onChange: () => void;
   words: ConnectApiKeyLabels;
 }) => {
@@ -287,11 +294,15 @@ const ConnectForm = ({
     if (!result.ok && !("busy" in result)) {
       // The service's own reason under the key, and the key cleared: a secret that did not work
       // is not kept in the page.
-      setRefused(
+      const reason =
         result.error instanceof Error && result.error.message !== ""
           ? result.error.message
-          : words.notConnected
-      );
+          : words.notConnected;
+      if (onRefused === undefined) {
+        setRefused(reason);
+      } else {
+        onRefused(reason);
+      }
       const field =
         form.current?.querySelector<HTMLInputElement>("[type=password]");
       if (field) {
@@ -487,6 +498,7 @@ export const ConnectApiKey = ({
   columns,
   connected,
   onConnect,
+  onRefused,
   onDisconnect,
   disconnectDetail,
   labels,
@@ -575,6 +587,7 @@ export const ConnectApiKey = ({
             setReplacing(false);
             setChosen(null);
           }}
+          onRefused={onRefused}
           onChange={change}
           words={words}
           formId={formId}

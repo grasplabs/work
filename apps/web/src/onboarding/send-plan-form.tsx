@@ -1,7 +1,7 @@
 import { Button } from "@grasp-os/ui/components/button";
 import { Card } from "@grasp-os/ui/components/card";
 import { DatePicker } from "@grasp-os/ui/components/date-picker";
-import { Field, FieldError } from "@grasp-os/ui/components/field";
+import { Field } from "@grasp-os/ui/components/field";
 import { Input } from "@grasp-os/ui/components/input";
 import { Separator } from "@grasp-os/ui/components/separator";
 import { Switch } from "@grasp-os/ui/components/switch";
@@ -20,6 +20,7 @@ import type { ReactNode } from "react";
 import { flushSync } from "react-dom";
 
 import { formatList } from "../format.ts";
+import { TopError } from "../frame/top-error.tsx";
 import { dateLocale } from "./date-locale.ts";
 import { dayChoices } from "./send-plan.ts";
 import type { SendChoice } from "./send-plan.ts";
@@ -215,7 +216,12 @@ const DayField = ({
           size="sm"
           value={value}
         />
-        <FieldError>{t`I can’t plan that day. Type one like ${example}, from ${earliest} to ${latest}.`}</FieldError>
+        {/* Said in the bar at the top, as every error in the setup is; the field keeps its mark. */}
+        <TopError>
+          {wrong
+            ? t`I can’t plan that day. Type one like ${example}, from ${earliest} to ${latest}.`
+            : null}
+        </TopError>
       </Field>
     </div>
   );

@@ -11,8 +11,8 @@ import {
 } from "react";
 import type { ReactNode } from "react";
 
-import { ErrorText } from "../error-text.tsx";
 import { formatDay } from "../format.ts";
+import { TopError } from "../frame/top-error.tsx";
 import { isLocale } from "../i18n.ts";
 import type { Pose } from "../onboarding/field/engine.ts";
 import { beside } from "../onboarding/field/poses.ts";
@@ -401,12 +401,9 @@ const BeforeTalk = ({
 };
 
 /** Why deleting or withdrawing didn't work, when it didn't. */
-const Failed = ({ message }: { message: string | null }) =>
-  message === null ? null : (
-    <Page>
-      <ErrorText>{message}</ErrorText>
-    </Page>
-  );
+const Failed = ({ message }: { message: string | null }) => (
+  <TopError>{message}</TopError>
+);
 
 /** They pause: the clock stops with them, and what is away from here is not interview time. */
 const pauseNow = (): void => {

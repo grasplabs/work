@@ -21,9 +21,11 @@ import { colors, radius, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
+import { useState } from "react";
 
 import { failureMessage } from "../chat/failure.ts";
 import { aiProviderLogos } from "../connections/brands.ts";
+import { TopError } from "../frame/top-error.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import type { AiReadiness } from "./setup.ts";
 
@@ -208,6 +210,8 @@ export const AiChoice = ({
   const { run } = useCoreAction();
   const listing = ai?.listing;
   const connect = useConnect(listing);
+  // A refused key is said in the bar at the top, as every error in the setup is.
+  const [refusal, setRefusal] = useState<string | null>(null);
   if (listing === undefined) {
     return null;
   }
@@ -232,68 +236,75 @@ export const AiChoice = ({
       ? { provider: own.provider, last: own.mask.replace("…", "") }
       : null;
   const keyBlock = (
-    <ConnectApiKey
-      // Two and two: the four providers stand as a square, not three and one.
-      // On the page, no card: the step's own title and line already say what the card's would.
-      bare
-      columns={2}
-      connected={connected}
-      // Sent by the step's own Continue in the foot, not a Connect of the block's.
-      formId={aiKeyForm}
-      labels={{
-        change: t({ context: "button", message: "Change" }),
-        connect: t`Connect`,
-        connectName: (name) => t`Connect ${name}`,
-        connected: t`Connected`,
-        connecting: t`Connecting`,
-        disconnect: t`Disconnect`,
-        disconnectTitle: (name) => t`Disconnect ${name}?`,
-        disconnecting: t`Disconnecting`,
-        keep: t`Keep it`,
-        key: t`Key`,
-        keyLine: (last, region) =>
-          region === undefined ? t`Key …${last}` : t`Key …${last} · ${region}`,
-        keyMissing: t`Paste the key.`,
-        keyNote: t`We store it sealed. You’ll only see its last four characters again.`,
-        notConnected: t`Not connected`,
-        notDisconnected: t`Couldn’t disconnect`,
-        replaceKey: t`Replace key`,
-      }}
-      disconnectDetail={t`Grasp stops using it and its key is removed. You can choose another way right after.`}
-      onConnect={async (choice) => {
-        onConnecting(true);
-        // The block says a refusal in the provider's words: thrown on, once Continue is free again.
-        const failed = await connect(choice).then(
-          () => null,
-          (error: unknown) =>
-            error instanceof Error ? error : new Error(String(error))
-        );
-        if (failed === null) {
+    <>
+      <TopError>{refusal}</TopError>
+      <ConnectApiKey
+        // Two and two: the four providers stand as a square, not three and one.
+        // On the page, no card: the step's own title and line already say what the card's would.
+        bare
+        columns={2}
+        connected={connected}
+        // Sent by the step's own Continue in the foot, not a Connect of the block's.
+        formId={aiKeyForm}
+        labels={{
+          change: t({ context: "button", message: "Change" }),
+          connect: t`Connect`,
+          connectName: (name) => t`Connect ${name}`,
+          connected: t`Connected`,
+          connecting: t`Connecting`,
+          disconnect: t`Disconnect`,
+          disconnectTitle: (name) => t`Disconnect ${name}?`,
+          disconnecting: t`Disconnecting`,
+          keep: t`Keep it`,
+          key: t`Key`,
+          keyLine: (last, region) =>
+            region === undefined
+              ? t`Key …${last}`
+              : t`Key …${last} · ${region}`,
+          keyMissing: t`Paste the key.`,
+          keyNote: t`We store it sealed. You’ll only see its last four characters again.`,
+          notConnected: t`Not connected`,
+          notDisconnected: t`Couldn’t disconnect`,
+          replaceKey: t`Replace key`,
+        }}
+        disconnectDetail={t`Grasp stops using it and its key is removed. You can choose another way right after.`}
+        onConnect={async (choice) => {
+          setRefusal(null);
+          onConnecting(true);
+          // The block says a refusal in the provider's words: thrown on, once Continue is free again.
+          const failed = await connect(choice).then(
+            () => null,
+            (error: unknown) =>
+              error instanceof Error ? error : new Error(String(error))
+          );
+          if (failed === null) {
+            await router.invalidate({ sync: true });
+          }
+          onConnecting(false);
+          if (failed !== null) {
+            throw failed;
+          }
+          onReady();
+        }}
+        // Removed, they choose again: another provider, or our own system above.
+        onDisconnect={async () => {
+          if (own === undefined) {
+            return;
+          }
+          const removed = await run(async (session) => {
+            await session.aiProviders.remove(own.provider);
+            return true;
+          });
+          if (removed !== true) {
+            throw new Error(t`Couldn’t disconnect`);
+          }
           await router.invalidate({ sync: true });
-        }
-        onConnecting(false);
-        if (failed !== null) {
-          throw failed;
-        }
-        onReady();
-      }}
-      // Removed, they choose again: another provider, or our own system above.
-      onDisconnect={async () => {
-        if (own === undefined) {
-          return;
-        }
-        const removed = await run(async (session) => {
-          await session.aiProviders.remove(own.provider);
-          return true;
-        });
-        if (removed !== true) {
-          throw new Error(t`Couldn’t disconnect`);
-        }
-        await router.invalidate({ sync: true });
-      }}
-      providers={providers}
-      title={t`Your own key`}
-    />
+        }}
+        onRefused={setRefusal}
+        providers={providers}
+        title={t`Your own key`}
+      />
+    </>
   );
   // Without ours on this deployment, a key is the one way: no choice to make.
   if (!listing.grasp.available) {

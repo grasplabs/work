@@ -1,7 +1,7 @@
 [
   {
     "path": "src/blocks/connect-api-key-01/connect-api-key-01.tsx",
-    "reason": "A columns prop, the most tiles in a row, so four providers stand two and two and not three and one; and bare, without its card, for a page whose own title says what the card's would. And formId: the page sends the key form with a button of its own (a setup's Continue in its foot), and the form shows no Connect.",
+    "reason": "A columns prop, the most tiles in a row, so four providers stand two and two and not three and one; and bare, without its card, for a page whose own title says what the card's would. And formId: the page sends the key form with a button of its own (a setup's Continue in its foot), and the form shows no Connect. And onRefused, for a page that says every error in one place of its own: a refused key goes there, not under the field.",
     "since": "2026-11-26"
   },
   {

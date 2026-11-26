@@ -4850,7 +4850,6 @@ msgstr "Cliffs"
 #: src/frame/ui-words.tsx
 #: src/interview/destination.tsx
 #: src/onboarding/campaign/campaign-page.tsx
-#: src/onboarding/sources-step.tsx
 #: src/projects/project-chats.tsx
 #: src/settings/erasures.tsx
 #: src/shown-once.tsx
@@ -19596,10 +19595,6 @@ msgstr "Uploads shared with a team or everyone, which only an admin can erase."
 #: src/chat/connection-requests.tsx
 msgid "Use {name} in this chat"
 msgstr "Use {name} in this chat"
-
-#: src/onboarding/company-step.tsx
-msgid "Use a staff list"
-msgstr "Use a staff list"
 
 #: src/onboarding/company-step.tsx
 msgid "Use a staff list instead"

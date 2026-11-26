@@ -33,6 +33,7 @@ import {
   onThemeChange,
   readTheme,
 } from "../frame/theme.ts";
+import { TopErrorBar } from "../frame/top-error.tsx";
 import { useCore } from "../use-core.ts";
 import { allowSound, setVoiceOn, useSay, useVoice } from "../voice/voice.ts";
 import type { Pose } from "./field/engine.ts";
@@ -480,6 +481,7 @@ export const CalmFrame = ({
               />
             ) : null}
           </StephenField>
+          <TopErrorBar />
         </div>
       </BackWay.Provider>
     </EndPlace.Provider>

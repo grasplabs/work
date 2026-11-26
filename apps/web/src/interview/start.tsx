@@ -26,7 +26,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
-import { ErrorText } from "../error-text.tsx";
+import { TopError } from "../frame/top-error.tsx";
 import { Actions, Page, Quiet, Words } from "./calm.tsx";
 import { budgetMinutes } from "./countdown.tsx";
 import { DitherOver } from "./frame.tsx";
@@ -310,7 +310,7 @@ to talk about your work?`.split("\n");
           <Button onClick={onAgree} size="lg" style={styles.agree}>
             {t`I agree, let’s start`}
           </Button>
-          {refusal === null ? null : <ErrorText>{refusal}</ErrorText>}
+          {refusal === null ? null : <TopError>{refusal}</TopError>}
         </div>
       </div>
       <div {...stylex.props(styles.foot)}>

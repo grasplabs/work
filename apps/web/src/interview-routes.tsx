@@ -5,7 +5,7 @@ import type { ErrorComponentProps } from "@tanstack/react-router";
 
 import { CoreConnection } from "./core-connection.ts";
 import { reportUncaughtErrors } from "./error-reports.ts";
-import { ErrorText } from "./error-text.tsx";
+import { TopError } from "./frame/top-error.tsx";
 import { UiWords } from "./frame/ui-words.tsx";
 import { Actions, Page as Calm, Words } from "./interview/calm.tsx";
 import { Frame } from "./interview/frame.tsx";
@@ -53,10 +53,8 @@ const InterviewError = ({ error }: ErrorComponentProps) => {
   return (
     <Frame pose={fromTheTop}>
       <Calm>
-        <Words
-          line={<ErrorText>{reason}</ErrorText>}
-          title={t`This page didn't load`}
-        />
+        <Words title={t`This page didn't load`} />
+        <TopError>{reason}</TopError>
         <Actions>
           <Button
             onClick={() => {
