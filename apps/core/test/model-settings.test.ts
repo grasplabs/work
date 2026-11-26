@@ -33,7 +33,7 @@ import {
 
 const idp = mockIdp();
 
-const mistral = "mistral/mistral-large-latest";
+const mistral = "mistral/mistral-large-2512";
 const anthropic = "anthropic/claude-sonnet-4-5";
 const euModel = "openai/gpt-5.4";
 /** The models the organization chose: its default, then its fallbacks. */
@@ -195,7 +195,7 @@ describe("model settings", { timeout: 60_000 }, () => {
     const { core } = await openRpc(session, { coreEnv: envWith() });
     await expect(core.authenticate().chats.names()).resolves.toStrictEqual({
       [anthropic]: "Claude Sonnet 4.5 (latest)",
-      [mistral]: "Mistral Large (latest)",
+      [mistral]: "Mistral Large 3",
     });
   });
 

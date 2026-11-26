@@ -35,7 +35,7 @@ import { outcome, signedInApi } from "./sign-in.ts";
 const firstTokenBudgetMs = 500;
 
 /** A model that doesn't think, on chat completions. */
-const mistral = "mistral/mistral-large-latest";
+const mistral = "mistral/mistral-large-2512";
 const anthropic = "anthropic/claude-sonnet-4-5";
 const openai = "openai/gpt-5.4";
 
@@ -102,13 +102,13 @@ const newPerson = () =>
 
 // Efforts: Claude Opus 4.8 and GPT-5.6 Sol take all five levels; GPT-5.4 none
 // past xhigh, Claude Sonnet 4.5 none past high, Claude Opus 4.6 all but
-// xhigh, and Mistral Small high only. Mistral Large doesn't think.
+// xhigh, and Mistral Small high only. Mistral Large 2512 doesn't think.
 const opus = "anthropic/claude-opus-4-8";
 const opus46 = "anthropic/claude-opus-4-6";
 const sol = "openai/gpt-5.6-sol";
 const mistralSmall = "mistral/mistral-small-latest";
-/** A model whose window is small: GPT-4's 8,192 tokens. */
-const smallWindow = "openai/gpt-4";
+/** A model whose window is small: GPT-4's 8,191 tokens, on OpenRouter. */
+const smallWindow = "openrouter/openai/gpt-4";
 
 /** The request body a call to `model` at `effort` sent the provider. */
 const sentAt = async (
@@ -266,7 +266,7 @@ describe("model gateway", { timeout: 30_000 }, () => {
     }
 
     const events = await auditedFor(trigger.userId, 3);
-    // GPT-5.4 has no max; Mistral Large doesn't think.
+    // GPT-5.4 has no max; Mistral Large 2512 doesn't think.
     expect(
       Object.fromEntries(
         events.map(({ model, detail }) => [model?.model, detail.effort])
@@ -274,7 +274,7 @@ describe("model gateway", { timeout: 30_000 }, () => {
     ).toStrictEqual({
       "claude-opus-4-8": "max",
       "gpt-5.4": "xhigh",
-      "mistral-large-latest": null,
+      "mistral-large-2512": null,
     });
   });
 
@@ -800,10 +800,10 @@ describe("model gateway", { timeout: 30_000 }, () => {
       work: work(),
     });
 
-    // GPT-4's window is 8,192 tokens, which OpenAI counts the answer's
-    // cap against.
+    // GPT-4's window is 8,191 tokens, which the answer's cap counts
+    // against.
     expect(provider.requests.map(({ body }) => body)).toMatchObject([
-      { max_output_tokens: 2048 },
+      { max_completion_tokens: 2047 },
     ]);
   });
 
@@ -830,14 +830,14 @@ describe("model gateway", { timeout: 30_000 }, () => {
         },
       });
 
-    // A quarter of GPT-4's 8,192-token window, and one token more.
-    await expect(call(2049)).rejects.toMatchObject({
+    // A quarter of GPT-4's 8,191-token window, and one token more.
+    await expect(call(2048)).rejects.toMatchObject({
       code: "model.answer_too_long",
     });
     expect(provider.requests).toStrictEqual([]);
-    await call(2048);
+    await call(2047);
     expect(provider.requests.map(({ body }) => body)).toMatchObject([
-      { max_output_tokens: 2048 },
+      { max_completion_tokens: 2047 },
     ]);
   });
 
