@@ -75,8 +75,6 @@
 @import "./icon-moves.css";
 
 @source "../";
-/* The kit's demos and examples, shown on the local kit pages (routes/kit_.*). */
-@source "../../../packages/app-kit/catalog";
 
 /*
  * No scrollbars anywhere in the product. Every area still scrolls with the
