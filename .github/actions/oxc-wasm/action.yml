@@ -6,13 +6,35 @@
 # only reads; the hash is what it is trusted for. Kept in the compiler's
 # node_modules, so nothing after it downloads. Once installed (Set up
 # runs it): restored node_modules may lack a newer pin's file.
+#
+# Restored from the Actions cache by its pin first, and downloaded only when
+# that missed: each of a full run's 75 jobs downloaded it, two calls to
+# GitHub's API each, and a 503 from the releases API (25 November 2026, six
+# jobs of one merge-queue run) or a connection that timed out (24 November)
+# failed the run. A restored file is checked against the pin's SHA-256 as
+# a downloaded one is. Only a job that says so saves it, as Set up's caches.
 name: oxc.wasm
-description: Download the pinned oxc.wasm into the compiler's node_modules
+description: Restore or download the pinned oxc.wasm into the compiler's node_modules
+
+inputs:
+  save:
+    description: "Save oxc.wasm when its cache missed: true or false"
+    default: "false"
 
 runs:
   using: composite
   steps:
+    - id: cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: packages/compiler/node_modules/.cache/oxc-wasm
+        key: oxc-wasm-${{ hashFiles('packages/compiler/oxc-wasm/pin.json') }}
     - shell: bash
       run: node packages/compiler/oxc-wasm/wasm.ts
       env:
         GITHUB_TOKEN: ${{ github.token }}
+    - if: steps.cache.outputs.cache-hit != 'true' && inputs.save == 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: packages/compiler/node_modules/.cache/oxc-wasm
+        key: oxc-wasm-${{ hashFiles('packages/compiler/oxc-wasm/pin.json') }}
