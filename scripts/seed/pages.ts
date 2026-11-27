@@ -292,11 +292,11 @@ const Board = () => {
         <TableBody>
           {records.items.map((record) => (
             <TableRow key={record._id}>
-              <TableCell className="font-medium">{record.title}</TableCell>
+              <TableCell>{record.title}</TableCell>
               <TableCell>{record.${party}}</TableCell>${
                 money
                   ? `
-              <TableCell className="text-right tabular-nums">
+              <TableCell className="text-right">
                 {euros(record.amount)}
               </TableCell>`
                   : ""
