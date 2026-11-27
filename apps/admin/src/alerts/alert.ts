@@ -60,6 +60,23 @@ export const alertEventSchema = z.discriminatedUnion("kind", [
 ]);
 export type AlertEvent = z.infer<typeof alertEventSchema>;
 
+/** The most characters of a failure's code a message carries. */
+const MAX_CODE_CHARS = 200;
+
+/**
+ * `event` with its code, if it has one, cut to its first line and
+ * `MAX_CODE_CHARS`: a code is meant to be short, but one that's a raw
+ * error message must not fill a message. Its whole text stays where it
+ * is, in the audit event.
+ */
+const bounded = (event: AlertEvent): AlertEvent =>
+  "code" in event
+    ? {
+        ...event,
+        code: (event.code.split(/\r?\n/u, 1)[0] ?? "").slice(0, MAX_CODE_CHARS),
+      }
+    : event;
+
 /** How many cron runs try a channel that refuses a message before giving up on it. */
 export const MAX_ATTEMPTS = 5;
 
@@ -86,9 +103,10 @@ const subjectOf = (event: AlertEvent): { key: string; failing: boolean } =>
  */
 export const alert = async (
   db: AdminDatabase,
-  event: AlertEvent,
+  given: AlertEvent,
   now = new Date()
 ): Promise<void> => {
+  const event = bounded(given);
   const { key, failing } = subjectOf(event);
   try {
     if (failing) {
@@ -214,12 +232,33 @@ const nameOf = async (
 };
 
 /**
+ * Saves `told` as the channels row `row`'s failure reached, while the row
+ * still holds that change: whether it did.
+ */
+const saveTold = async (
+  db: AdminDatabase,
+  row: typeof alerts.$inferSelect,
+  told: ReadonlySet<AlertChannel>
+): Promise<boolean> => {
+  const saved = await db
+    .update(alerts)
+    .set({ told: JSON.stringify([...told]) })
+    .where(and(eq(alerts.key, row.key), eq(alerts.changedAt, row.changedAt)))
+    .returning({ key: alerts.key });
+  return saved.length > 0;
+};
+
+/**
  * Tells one recorded change, `row`, to each channel still to tell that's
  * still on (`senders`): one switched off since is passed over. A channel
  * that refuses it, or isn't set up or can't be read just now, stays to
- * tell, for the next run, until `MAX_ATTEMPTS` runs tried. Saved only
- * while the row still holds this change: one that changed since is left
- * to the next run. A change that recovered is gone once told.
+ * tell, for the next run, until `MAX_ATTEMPTS` runs tried. A failure's
+ * channel is saved as told before the send, so a recovery recorded while
+ * it's on its way goes to that channel too, and taken back if it refuses:
+ * a run that dies in between tells that failure again, never loses its
+ * recovery. Saved only while the row still holds this change: one that
+ * changed since is left to the next run. A change that recovered is gone
+ * once told.
  */
 const deliverOne = async (
   env: Env,
@@ -228,25 +267,43 @@ const deliverOne = async (
   row: typeof alerts.$inferSelect
 ): Promise<void> => {
   const stored = readStored(row);
-  const left: AlertChannel[] = [];
-  const told = new Set(stored?.told);
   if (stored === null) {
     log.error("alerts.unreadable", { key: row.key });
-  } else {
-    const { event, pending } = stored;
-    const message = messageOf(env, event, await nameOf(db, event));
-    for (const channel of pending) {
-      const send = senders.get(channel);
-      if (send === undefined) {
-        continue;
-      }
+  }
+  const left: AlertChannel[] = [];
+  const told = new Set(stored?.told);
+  const message =
+    stored === null
+      ? null
+      : messageOf(env, stored.event, await nameOf(db, stored.event));
+  for (const channel of stored?.pending ?? []) {
+    const send = senders.get(channel);
+    if (send === undefined || message === null) {
+      continue;
+    }
+    if (send === null) {
+      log.warn("alerts.refused", { key: row.key, channel, code: "not_ready" });
+      left.push(channel);
+      continue;
+    }
+    if (row.failing) {
+      told.add(channel);
       // oxlint-disable-next-line no-await-in-loop -- two channels at most
-      const refused = send === null ? "not_ready" : await send(message);
-      if (refused === null) {
-        told.add(channel);
-      } else {
-        log.warn("alerts.refused", { key: row.key, channel, code: refused });
-        left.push(channel);
+      if (!(await saveTold(db, row, told))) {
+        // It recovered or changed since this run read it: the next run
+        // tells what it holds now.
+        return;
+      }
+    }
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    const refused = await send(message);
+    if (refused !== null) {
+      log.warn("alerts.refused", { key: row.key, channel, code: refused });
+      left.push(channel);
+      if (row.failing) {
+        told.delete(channel);
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        await saveTold(db, row, told);
       }
     }
   }
@@ -264,12 +321,7 @@ const deliverOne = async (
     ? db.delete(alerts).where(still)
     : db
         .update(alerts)
-        .set({
-          pending: JSON.stringify(pending),
-          attempts,
-          // Only a failure's: a recovery tells no one anything to recover from.
-          told: row.failing ? JSON.stringify([...told]) : row.told,
-        })
+        .set({ pending: JSON.stringify(pending), attempts })
         .where(still));
 };
 

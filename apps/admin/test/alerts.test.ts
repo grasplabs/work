@@ -38,19 +38,30 @@ interface DiscordPost {
   allowed_mentions: unknown;
 }
 
-/** What Discord was sent, and how it answers: 204 unless a test says otherwise. */
-const discord: { posts: DiscordPost[]; answer: () => Response } = {
+/**
+ * What Discord was sent, how each request would follow a redirect, and
+ * how it answers: 204 unless a test says otherwise.
+ */
+const discord: {
+  posts: DiscordPost[];
+  redirects: RequestRedirect[];
+  answer: () => Response;
+} = {
   posts: [],
+  redirects: [],
   answer: () => new Response(null, { status: 204 }),
 };
 
-/** The alert mail's binding as a deploy binds it, keeping each message it was given. */
-const mailbox = () => {
+/**
+ * The alert mail's binding as a deploy binds it, keeping each message it
+ * was given; `whileSending` runs while a message is on its way.
+ */
+const mailbox = (whileSending?: () => Promise<void>) => {
   const sent: EmailMessageBuilder[] = [];
   const binding: SendEmail = {
     send: async (message: EmailMessage | EmailMessageBuilder) => {
       // Taken a moment later, as Email Sending takes a message.
-      await Promise.resolve();
+      await (whileSending?.() ?? Promise.resolve());
       if ("subject" in message) {
         sent.push(message);
       }
@@ -150,11 +161,13 @@ describe("staff alerts", () => {
   beforeEach(async () => {
     discord.posts = [];
     discord.answer = () => new Response(null, { status: 204 });
+    discord.redirects = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const request = new Request(input, init);
       if (request.url !== webhook) {
         throw new Error(`Unexpected outbound request to ${request.url}`);
       }
+      discord.redirects.push(request.redirect);
       discord.posts.push(await request.json());
       return discord.answer();
     });
@@ -380,6 +393,88 @@ CREATE TABLE t (id TEXT);`,
       whileFailing,
       after: await db.select().from(alerts),
     }).toStrictEqual({ whileFailing: 1, after: [] });
+  });
+
+  it("sends the recovery to a channel whose failure was on its way when the recovery came", async () => {
+    let recovered = false;
+    const mail = mailbox(async () => {
+      if (!recovered) {
+        recovered = true;
+        // The deploy that works lands while the failure's mail is sent.
+        await alert(db, {
+          kind: "deployed",
+          clientId: "in-flight",
+          releaseId: "26.11.10",
+        });
+      }
+    });
+    await switchChannel("mail", true);
+    await alert(db, {
+      kind: "deploy_failed",
+      clientId: "in-flight",
+      releaseId: "26.11.9",
+      code: "probe_failed",
+    });
+
+    await deliver(mail.env);
+    await deliver(mail.env);
+
+    expect({
+      mail: mail.sent.map(({ subject }) => subject),
+      rows: await db.select().from(alerts),
+    }).toStrictEqual({
+      mail: [
+        "in-flight: deploy of 26.11.9 failed",
+        "in-flight deployed 26.11.10",
+      ],
+      rows: [],
+    });
+  });
+
+  it("takes a redirect from Discord's webhook as a refusal, never following it", async () => {
+    await withWebhook();
+    await switchChannel("discord", true);
+    discord.answer = () =>
+      new Response(null, {
+        status: 302,
+        headers: { location: "https://elsewhere.test/hook" },
+      });
+    await alert(db, {
+      kind: "import_failed",
+      releaseId: "26.11.11",
+      code: "Error",
+      attempt: 1,
+    });
+
+    await deliver();
+    discord.answer = () => new Response(null, { status: 204 });
+    await deliver();
+    await deliver();
+
+    expect({
+      redirects: discord.redirects,
+      tries: discord.posts.length,
+    }).toStrictEqual({ redirects: ["manual", "manual"], tries: 2 });
+  });
+
+  it("carries a code's first line only, and at most 200 characters of it", async () => {
+    await withWebhook();
+    await switchChannel("discord", true);
+    const long = "x".repeat(300);
+    await alert(db, {
+      kind: "deploy_failed",
+      clientId: "long-code",
+      releaseId: "26.11.12",
+      code: `${long}\nupstream said more on its second line`,
+    });
+
+    await deliver();
+
+    const [post] = discord.posts;
+    expect({
+      code: post?.content.includes(`(${"x".repeat(200)})`),
+      secondLine: post?.content.includes("upstream said more"),
+    }).toStrictEqual({ code: true, secondLine: false });
   });
 
   it("tries a channel that refuses again at the next run, up to its attempts, while the other channel is told once", async () => {

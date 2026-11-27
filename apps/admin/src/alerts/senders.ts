@@ -106,6 +106,9 @@ const discordSender = async (env: Env): Promise<AlertSender | null> => {
           allowed_mentions: { parse: [] },
         }),
         signal: AbortSignal.timeout(discordTimeoutMs),
+        // Discord answers a post itself: a redirect is a refusal, never
+        // followed with the message.
+        redirect: "manual",
       });
       await response.body?.cancel();
       return response.ok ? null : `discord_${response.status}`;
