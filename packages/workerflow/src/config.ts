@@ -7,7 +7,7 @@
 //             retries after the first attempt, the first 10 seconds after
 //             it failed, each one twice as long after the one before. An
 //             attempt the runtime cut off is no failure: it spends none
-//             (`maxCutOffs`)
+//             (`maxCutOffs`), unless the limit is 0
 //   timeout   "10 minutes", each attempt
 //   sensitive none: observers see the step's result
 //
@@ -97,9 +97,12 @@ export const defaultRollbackReplays = 10;
  * loop) from being tried for ever: at the last cut-off the step fails,
  * not to be retried, with a WorkflowInternalError (code
  * `workflow.attempts_cut_off`). The runtime restarts an object far less
- * often than this within one step's attempts, and a step that kills its
- * object is paced by the watchdog, a lease (a minute) per attempt, so it
- * stops within minutes. A fixed choice: no step config changes it.
+ * often than this within one step's attempts. How soon the next attempt
+ * comes after a cut-off is not bounded (the watchdog, or an earlier alarm
+ * the run object set), so this count is what limits a crash loop. A step
+ * whose retry limit is 0 is never tried again after a cut-off: steps are
+ * at least once unless `retries.limit` is 0. A fixed choice: no step
+ * config changes it.
  */
 export const maxCutOffs = 10;
 

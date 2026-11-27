@@ -61,7 +61,11 @@ export interface WorkflowStepContext<
    * its backoff; one cut off is retried at once, up to `maxCutOffs`
    * (config.ts) cut-offs, at the last of which the step fails with a
    * WorkflowInternalError (`workflow.attempts_cut_off`). So a step's
-   * attempt numbers can go past its retry limit plus one.
+   * attempt numbers can go past its retry limit plus one. Steps are at
+   * least once unless `retries.limit` is 0: such a step, cut off, fails
+   * with that error without running again. An outside system that takes
+   * `idempotencyKey` (below) as its idempotency key applies an at least
+   * once step's effect once.
    */
   readonly attempt: number;
   /**
@@ -140,7 +144,9 @@ export interface WorkflowStepConfig {
   readonly retries?: {
     /**
      * Retries after the first attempt, for attempts that fail or time
-     * out. An attempt the runtime cut off spends none.
+     * out. An attempt the runtime cut off spends none, and is run again,
+     * unless this is 0: a step with no retries runs at most once, and
+     * fails if cut off (`workflow.attempts_cut_off`).
      */
     readonly limit: number;
     readonly delay: WorkflowDuration | WorkflowDelayFunction;

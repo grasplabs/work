@@ -26,7 +26,8 @@
 // of its own: it spends none of the step's retries, adds nothing to its
 // backoff, and is tried again at once. Only `maxCutOffs` (config.ts) such
 // cut-offs are tried again; at the last, the step fails, not to be
-// retried (`#endCutOffIn`).
+// retried (`#endCutOffIn`). A step whose retry limit is 0 runs at most
+// once: cut off, it fails without running again.
 //
 // Gone quiet means only that every sibling the definition reaches through
 // microtasks (in the same turn, or after a step returns) has registered.
@@ -458,13 +459,16 @@ const hasEnded = (scope: AttemptScope | undefined): boolean =>
   scope?.live === false;
 
 /**
- * What a step fails with at its `maxCutOffs`th cut-off: Cloudflare's name
- * for an attempt lost to the engine, with a code of its own.
+ * What a step fails with at its last cut-off: its `maxCutOffs`th, or its
+ * first when it allows no retries. Cloudflare's name for an attempt lost
+ * to the engine, with a code of its own.
  */
-const cutOffTooOften = (): Error =>
+const cutOffEnd = (noRetries: boolean): Error =>
   namedError(
     "WorkflowInternalError",
-    `The step's attempts were cut off ${maxCutOffs} times before their outcome was journaled (the object running them was restarted or evicted), so it is not tried again`,
+    noRetries
+      ? "The step's attempt was cut off before its outcome was journaled (the object running it was restarted or evicted), and the step allows no retries, so it is not tried again"
+      : `The step's attempts were cut off ${maxCutOffs} times before their outcome was journaled (the object running them was restarted or evicted), so it is not tried again`,
     "workflow.attempts_cut_off"
   );
 
@@ -1357,10 +1361,11 @@ export class Activation {
    *   against the step's retries, and the retry waits its backoff.
    *
    * A cut-off spends none of the step's retries and is retried at once:
-   * the next activation came only when the runtime brought the object
-   * back, so a step that kills its object is paced a lease per attempt,
-   * and a backoff would only hold up a run cut off by a deploy. The step's
-   * `maxCutOffs`th cut-off fails it instead, not to be retried.
+   * a backoff would only hold up a run cut off by a deploy, and what
+   * stops a step that kills its object is the count, not the pace. The
+   * step's `maxCutOffs`th cut-off fails it instead, not to be retried, and
+   * so does the first of a step whose retry limit is 0: it runs at most
+   * once, for an effect that must not run twice.
    */
   #endCutOffIn(
     sql: SqlStorage,
@@ -1377,7 +1382,8 @@ export class Activation {
     const timedOut =
       latest.ended_at !== null && latest.ended_at >= latest.deadline;
     const cutOffs = readAttemptEnds(sql, step.ordinal, step.attempt).cutOff + 1;
-    if (!timedOut && cutOffs < maxCutOffs) {
+    const noRetries = config.limit === 0;
+    if (!timedOut && cutOffs < (noRetries ? 1 : maxCutOffs)) {
       return undefined;
     }
     const claim: Claim = {
@@ -1398,7 +1404,7 @@ export class Activation {
             retryable: true,
           }
         : {
-            error: JSON.stringify(errorRecord(cutOffTooOften())),
+            error: JSON.stringify(errorRecord(cutOffEnd(noRetries))),
             ended: "failed",
             retryable: false,
           }
