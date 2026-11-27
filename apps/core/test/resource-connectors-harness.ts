@@ -659,9 +659,9 @@ export const crmConnection = async () => {
   const now = Date.now();
   await connectDb()
     .prepare(
-      "INSERT INTO connections (id, provider, scope, status, server_kind, server, tools, created_at, updated_at) VALUES (?, 'crm', 'shared', 'active', 'composio', ?, ?, ?, ?)"
+      "INSERT INTO connections (id, provider, scope, status, server_kind, server, composio_session_id, tools, created_at, updated_at) VALUES (?, 'crm', 'shared', 'active', 'composio', ?, ?, ?, ?, ?)"
     )
-    .bind(id, mailServerUrl(name), JSON.stringify(crmRules()), now, now)
+    .bind(id, mailServerUrl(name), name, JSON.stringify(crmRules()), now, now)
     .run();
   const providers = testBinding("CONNECT_PROVIDERS");
   if (!isFetcher(providers)) {

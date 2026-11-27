@@ -82,6 +82,33 @@ const eventText = (
 };
 
 /**
+ * The statement that records `entry` only if a row of `from` matches
+ * `where`, as it runs in its batch (`recordEventsIf`): for a batch that
+ * records some events whatever happens and this one only with its change.
+ */
+export const guardedEvent = (
+  db: ReturnType<typeof drizzle>,
+  entry: AuditEntry,
+  { from, where, counted }: Pick<GuardedChange, "from" | "where" | "counted">
+) => {
+  const event = createAuditEvent(entry, "connect");
+  return db
+    .insert(auditOutbox)
+    .select(
+      db
+        .select({
+          id: sql<string>`${event.id}`.as("id"),
+          event: sql<string>`${eventText(event, counted)}`.as("event"),
+          createdAt: sql<Date>`${Date.now()}`.as("created_at"),
+        })
+        .from(from)
+        .where(where)
+        .limit(1)
+    )
+    .returning({ id: auditOutbox.id });
+};
+
+/**
  * Records each change's event only if a row of its `from` matches its
  * `where`, all in one transaction with the changes' `writes`, which the
  * same conditions guard: an event is kept exactly when its change is made,
@@ -93,25 +120,9 @@ export const recordEventsIf = async (
   changes: readonly [GuardedChange, ...GuardedChange[]]
 ): Promise<boolean[]> => {
   const db = drizzle(env.DB);
-  const events = changes.map(({ entry }) => createAuditEvent(entry, "connect"));
   const statements = changes.flatMap(
-    ({ from, where, writes, counted }, index) => [
-      db
-        .insert(auditOutbox)
-        .select(
-          db
-            .select({
-              id: sql<string>`${events[index]?.id}`.as("id"),
-              event: sql<string>`${eventText(events[index], counted)}`.as(
-                "event"
-              ),
-              createdAt: sql<Date>`${Date.now()}`.as("created_at"),
-            })
-            .from(from)
-            .where(where)
-            .limit(1)
-        )
-        .returning({ id: auditOutbox.id }),
+    ({ entry, from, where, writes, counted }) => [
+      guardedEvent(db, entry, { from, where, counted }),
       ...writes,
     ]
   );

@@ -885,7 +885,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
     const now = Date.now();
     await connectDb()
       .prepare(
-        "INSERT INTO connections (id, provider, scope, status, server_kind, server, tools, created_at, updated_at) VALUES (?, 'hubspot', 'shared', 'active', 'composio', 'https://hubspot.invalid/mcp', '[]', ?, ?)"
+        "INSERT INTO connections (id, provider, scope, status, server_kind, server, composio_session_id, tools, created_at, updated_at) VALUES (?, 'hubspot', 'shared', 'active', 'composio', 'https://hubspot.invalid/mcp', 'trs_fixture', '[]', ?, ?)"
       )
       .bind(`connection-${crypto.randomUUID()}`, now, now)
       .run();
