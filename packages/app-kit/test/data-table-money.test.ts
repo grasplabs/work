@@ -1,10 +1,10 @@
 import { v } from "@grasp-os/runtime/app";
 import { describe, expect, it } from "vite-plus/test";
 
-import { shownCell } from "../src/internal/data-grid-cells.ts";
-import { dataGridTexts } from "../src/internal/data-grid-text.ts";
+import { shownCell } from "../src/internal/data-table-cells.ts";
+import { dataTableTexts } from "../src/internal/data-table-text.ts";
 
-// Money in a grid's cell (pure logic): an amount of whole minor units,
+// Money in a data table's cell (pure logic): an amount of whole minor units,
 // divided by its currency's ISO 4217 decimals, never by what `Intl`
 // guesses in one engine or another. `Intl` puts a no-break space between
 // a currency code and its amount.
@@ -13,7 +13,7 @@ const money = v.money().descriptor;
 
 /** Money as a cell shows it in English. */
 const shown = (minorUnits: number, currency: string): string =>
-  shownCell({ minorUnits, currency }, money, dataGridTexts.en, "en");
+  shownCell({ minorUnits, currency }, money, dataTableTexts.en, "en");
 
 describe("money in a cell", () => {
   it("divides by its currency's ISO 4217 decimals", () => {

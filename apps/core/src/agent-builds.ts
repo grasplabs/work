@@ -1608,15 +1608,20 @@ const buildDeclaration = `/**
  * is \`/\`, \`tasks.$taskId.tsx\` is \`/tasks/$taskId\`), each
  * \`export const Route = createFileRoute("/tasks/$taskId")({ component })\`
  * and moving between them with TanStack's \`Link\` and \`useNavigate\`,
- * built on @grasp-os/app-kit: the stock default components on Base UI
- * (\`@grasp-os/app-kit/components/button\`, \`card\`, \`table\`, \`tabs\`,
- * \`dialog\`, …) with their default variants and sizes and the neutral
- * theme's tokens: no raw colours, arbitrary values or restyled components
- * (the lint names what to use instead). There are no layout components:
+ * built on @grasp-os/app-kit: every component of the registry's default
+ * style as its CLI installs them (\`@grasp-os/app-kit/components/button\`,
+ * \`card\`, \`table\`, \`tabs\`, \`dialog\`, \`chart\`, \`toast\`, …),
+ * used as their docs show them (charts import recharts' parts from
+ * \`recharts\`; \`message\`, \`bubble\`, \`attachment\`, \`trace\` and
+ * \`message-scroller\` for a conversation; \`code-block\` for code, whose
+ * copy button has no clipboard in a page's frame; \`questionnaire\`, whose
+ * last step calls its \`onSubmit\` with the answers as \`FormData\`, as the
+ * frame submits no form itself), with their variants and sizes and the
+ * neutral theme's tokens: no raw colours, arbitrary values or restyled
+ * components (the lint names what to use instead). There are no layout components:
  * lay a page out with Tailwind's layout classes on plain elements
  * (\`flex\`, \`grid\`, \`gap-4\`), its title an \`<h1>\`.
- * Don't wire tables and forms by hand:
- * - A list of records is a \`DataGrid\` (\`@grasp-os/app-kit/components/data-grid\`)
+ * - A list of records is a \`DataTable\` (\`@grasp-os/app-kit/components/data-table\`)
  *   over a query that takes \`pagination\` and answers pages: it reads them
  *   page by page and hands the query what the person searched, sorted and
  *   filtered, so the query does it over every record. Each cell shows and
@@ -1630,8 +1635,13 @@ const buildDeclaration = `/**
  *   read-only. \`bulkActions\` (rows with an \`_id\`) make rows selectable,
  *   \`rowActions\` give each row a menu, and a failed action or edit is
  *   shown. It shows its own empty, loading and failed states.
- *   \`<DataGrid label="Tasks" query={api.tasks.list} args={({ search, sort, filters }) => ({ search, status: filters.status, titleOrder: sort?.field === "title" ? sort.direction : undefined })} columns={[{ field: "title", sortable: true, edit: async (task, title) => await rename({ id: task._id, title }) }, { field: "status", filter: { open: "Open", done: "Done" } }, { field: "due", day: true }, { field: "notes", cell: (task) => <RichText value={task.notes} /> }]} search="Search tasks" rowActions={[{ label: "Open", onSelect: async (task) => await navigate({ to: "/tasks/$taskId", params: { taskId: task._id } }) }]} />\`
+ *   \`<DataTable label="Tasks" query={api.tasks.list} args={({ search, sort, filters }) => ({ search, status: filters.status, titleOrder: sort?.field === "title" ? sort.direction : undefined })} columns={[{ field: "title", sortable: true, edit: async (task, title) => await rename({ id: task._id, title }) }, { field: "status", filter: { open: "Open", done: "Done" } }, { field: "due", day: true }]} search="Search tasks" rowActions={[{ label: "Open", onSelect: async (task) => await navigate({ to: "/tasks/$taskId", params: { taskId: task._id } }) }]} />\`
  *   (\`navigate\` is \`useNavigate()\` from \`@tanstack/react-router\`)
+ * - A kit component takes layout classes alone where a page calls it
+ *   (margin, size, position, flex and grid placement, text alignment):
+ *   never a class of look, not even where the registry's docs show one
+ *   (\`<TableCell className="font-medium">\` is refused). Put the look on
+ *   a plain element inside it (\`<TableCell><span className="font-medium">\`).
  * - A form is \`useForm\` (a mutation's or action's arguments, or a
  *   \`v.object\`) with the fields of \`@grasp-os/app-kit/form\`, one per kind of
  *   value; each takes \`form\`, \`name\` and \`label\`, and its choices,
@@ -1643,15 +1653,11 @@ const buildDeclaration = `/**
  *   \`RelationField\` (\`v.id("table")\`: \`query\`, \`args={(search) => ({ search })}\`,
  *   \`optionLabel\`, and optionally \`lookup={{ query: api.people.get, args: (id) => ({ id }) }}\`,
  *   a query of one record that names the value it starts with, shown as
- *   its ID otherwise), \`FileField\` (\`v.file()\`: \`resource\`, the App's
+ *   its ID otherwise) and \`FileField\` (\`v.file()\`: \`resource\`, the App's
  *   files permission declaring \`upload\`, \`permissions.files\` from \`@server/_generated/api\`; the form doesn't submit while it
- *   uploads) and \`RichTextField\` (bold, italic and lists, kept as
- *   Markdown in a \`v.string()\`). Show Markdown with \`RichText\`
- *   (\`@grasp-os/app-kit/components/rich-text\`), which drops any HTML; given
- *   \`links={permissions.links}\` (the App's links permission, from \`@server/_generated/api\`), its
- *   links open through it; otherwise they show their address. Wrap the fields in \`Form\`, with
- *   \`FormError\` and \`SubmitButton\`.
- * - The grid's and the fields' own words follow the page's language
+ *   uploads). Wrap the fields in \`Form\`, with \`FormError\` and
+ *   \`SubmitButton\`: a page's frame submits no \`<form>\` itself.
+ * - The data table's and the fields' own words follow the page's language
  *   (English, German, Dutch, Spanish, French); pass \`text\` to say them
  *   otherwise.
  * What the App is, its definition (its name, its tables with their

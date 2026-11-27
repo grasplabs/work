@@ -42,6 +42,16 @@ import {
   NativeSelectOption,
 } from "@grasp-os/app-kit/components/native-select";
 import {
+  Questionnaire,
+  QuestionnaireActions,
+  QuestionnaireChoice,
+  QuestionnaireChoices,
+  QuestionnaireError,
+  QuestionnaireItem,
+  QuestionnaireSubmit,
+  QuestionnaireTitle,
+} from "@grasp-os/app-kit/components/questionnaire";
+import {
   RadioGroup,
   RadioGroupItem,
 } from "@grasp-os/app-kit/components/radio-group";
@@ -67,6 +77,7 @@ import {
   SearchIcon,
   UnderlineIcon,
 } from "lucide-react";
+import { useRef, useState } from "react";
 
 const ButtonDemo = () => (
   <div className="flex flex-wrap gap-2">
@@ -258,6 +269,50 @@ const ToggleGroupDemo = () => (
   </div>
 );
 
+const priorities = [
+  {
+    name: "priority",
+    required: true,
+    choices: [{ value: "speed" }, { value: "cost" }],
+  },
+] as const;
+
+/** One question; its answer said back once submitted, in the page. */
+const QuestionnaireDemo = () => {
+  const [answered, setAnswered] = useState<string | null>(null);
+  // A page's own ref, which the kit's frame fix keeps working beside.
+  const form = useRef<HTMLFormElement>(null);
+  return (
+    <div className="flex flex-col gap-4">
+      <Questionnaire
+        defaultItem="priority"
+        ref={form}
+        items={priorities}
+        onSubmit={(event) => {
+          event.preventDefault();
+          const answer = new FormData(event.currentTarget).get("priority");
+          setAnswered(typeof answer === "string" ? answer : "");
+        }}
+      >
+        <QuestionnaireItem name="priority" required>
+          <QuestionnaireTitle>
+            What matters most this quarter?
+          </QuestionnaireTitle>
+          <QuestionnaireChoices>
+            <QuestionnaireChoice value="speed">Speed</QuestionnaireChoice>
+            <QuestionnaireChoice value="cost">Cost</QuestionnaireChoice>
+          </QuestionnaireChoices>
+          <QuestionnaireError />
+        </QuestionnaireItem>
+        <QuestionnaireActions>
+          <QuestionnaireSubmit>Save answer</QuestionnaireSubmit>
+        </QuestionnaireActions>
+      </Questionnaire>
+      <output aria-label="Answer">{answered ?? "Not answered"}</output>
+    </div>
+  );
+};
+
 export const formDemos = {
   button: ButtonDemo,
   "button-group": ButtonGroupDemo,
@@ -270,6 +325,7 @@ export const formDemos = {
   "input-otp": InputOtpDemo,
   label: LabelDemo,
   "native-select": NativeSelectDemo,
+  questionnaire: QuestionnaireDemo,
   "radio-group": RadioGroupDemo,
   select: SelectDemo,
   slider: SliderDemo,

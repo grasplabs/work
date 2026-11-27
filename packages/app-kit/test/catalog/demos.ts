@@ -6,7 +6,8 @@
  */
 import type { ComponentType } from "react";
 
-import { dataGridDemos } from "./demos/data-grid.tsx";
+import { conversationDemos } from "./demos/conversation.tsx";
+import { dataTableDemos } from "./demos/data-table.tsx";
 import { directionDemos } from "./demos/direction.tsx";
 import { displayDemos } from "./demos/display.tsx";
 import { formDemos } from "./demos/forms.tsx";
@@ -14,7 +15,8 @@ import { navigationDemos } from "./demos/navigation.tsx";
 import { overlayDemos } from "./demos/overlays.tsx";
 
 export const demos: Record<string, ComponentType> = {
-  ...dataGridDemos,
+  ...conversationDemos,
+  ...dataTableDemos,
   ...directionDemos,
   ...displayDemos,
   ...formDemos,

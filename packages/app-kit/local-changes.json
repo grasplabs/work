@@ -1,0 +1,47 @@
+[
+  {
+    "path": "src/components/chart.tsx",
+    "reason": "ChartStyle writes its CSS as the <style>'s text, not with dangerouslySetInnerHTML: an App page's frame enforces Trusted Types with no policy, so innerHTML throws. Its surface, which takes keyboard focus (accessibilityLayer), shows a focus ring that upstream hides.",
+    "test": "packages/app-kit/test/kit.browser.test.tsx"
+  },
+  {
+    "path": "src/components/sidebar.tsx",
+    "reason": "SidebarProvider writes no cookie: an App page's frame has an opaque origin, where document.cookie throws.",
+    "test": "packages/app-kit/test/kit.browser.test.tsx"
+  },
+  {
+    "path": "src/components/slider.tsx",
+    "reason": "A single number value or defaultValue renders one thumb: upstream counts only arrays, so <Slider defaultValue={40} /> drew two.",
+    "test": "packages/app-kit/test/components.test.tsx"
+  },
+  {
+    "path": "src/components/calendar.tsx",
+    "reason": "The day button gets the ref its focus effect reads, which upstream never attaches, so the arrow keys move focus from day to day; and the two String.raw class strings move out of the component, as the React Compiler can't compile a tagged template whose raw text differs from its value.",
+    "test": "packages/app-kit/test/kit.browser.test.tsx"
+  },
+  {
+    "path": "src/components/toast.tsx",
+    "reason": "ToastAction's and ToastClose's default element is chosen in the body, not as the parameter's default: the React Compiler can't compile a JSX default.",
+    "test": "packages/compiler/build-unshipped-sources.test.ts"
+  },
+  {
+    "path": "src/components/menubar.tsx",
+    "reason": "A menubar's trigger shows a focus ring when the keyboard reaches it; upstream shows none.",
+    "test": "packages/app-kit/test/kit.browser.test.tsx"
+  },
+  {
+    "path": "src/components/combobox.tsx",
+    "reason": "ComboboxInput's trigger and clear buttons are named (Show options, Clear); upstream's are icons with no name.",
+    "test": "packages/app-kit/test/kit.browser.test.tsx"
+  },
+  {
+    "path": "src/components/toggle-group.tsx",
+    "reason": "The orientation reaches Base UI, not only the styles, so a vertical group moves with the up and down arrows.",
+    "test": "packages/app-kit/test/kit.browser.test.tsx"
+  },
+  {
+    "path": "src/components/questionnaire.tsx",
+    "reason": "Its last step completes in an App page's frame, which submits no form and fires no submit event: the form's requestSubmit() fires the submit event itself, and the submit button calls it on its click, so the questionnaire's checks and onSubmit run.",
+    "test": "packages/app-kit/test/kit.browser.test.tsx"
+  }
+]

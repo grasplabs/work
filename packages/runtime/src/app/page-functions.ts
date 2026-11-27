@@ -15,7 +15,7 @@ import { workflowReferenceLimits } from "./workflow-references.ts";
 
 // What a page knows of its App's public functions beyond their names:
 // what `useForm` checks a submission with (a mutation's or an action's
-// kind and arguments) and what `DataGrid` reads its columns from (a
+// kind and arguments) and what `DataTable` reads its columns from (a
 // query's declared return). A reference is a name and nothing else, so
 // this comes with the page's build instead (`.grasp/functions.ts`, which
 // the host generates from the release's manifest and the compiler builds

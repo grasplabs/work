@@ -1,7 +1,7 @@
 import type { Texts } from "./language.ts";
 
-/** What the data grid says, in the page's language unless the page says otherwise. */
-export interface DataGridText {
+/** What the data table says, in the page's language unless the page says otherwise. */
+export interface DataTableText {
   readonly search: string;
   readonly columns: string;
   readonly loadMore: string;
@@ -39,7 +39,7 @@ export interface DataGridText {
   readonly actionFailed: string;
 }
 
-export const dataGridTexts: Texts<DataGridText> = {
+export const dataTableTexts: Texts<DataTableText> = {
   en: {
     search: "Search",
     columns: "Columns",

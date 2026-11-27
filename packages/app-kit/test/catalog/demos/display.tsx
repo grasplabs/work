@@ -37,14 +37,9 @@ import {
   CarouselPrevious,
 } from "@grasp-os/app-kit/components/carousel";
 import {
-  Bar,
-  BarChart,
-  CartesianGrid,
   ChartContainer,
   ChartTooltip,
   ChartTooltipContent,
-  XAxis,
-  chartColor,
 } from "@grasp-os/app-kit/components/chart";
 import type { ChartConfig } from "@grasp-os/app-kit/components/chart";
 import {
@@ -58,7 +53,6 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "@grasp-os/app-kit/components/empty";
-import { Input } from "@grasp-os/app-kit/components/input";
 import {
   Item,
   ItemActions,
@@ -79,7 +73,6 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@grasp-os/app-kit/components/resizable";
-import { RichText } from "@grasp-os/app-kit/components/rich-text";
 import { ScrollArea } from "@grasp-os/app-kit/components/scroll-area";
 import { Separator } from "@grasp-os/app-kit/components/separator";
 import { Skeleton } from "@grasp-os/app-kit/components/skeleton";
@@ -94,6 +87,7 @@ import {
   TableRow,
 } from "@grasp-os/app-kit/components/table";
 import { ChevronRightIcon, InfoIcon } from "lucide-react";
+import { Bar, BarChart, CartesianGrid, XAxis } from "recharts";
 
 const AccordionDemo = () => (
   <Accordion defaultValue={["shipping"]}>
@@ -119,7 +113,7 @@ const AlertDemo = () => (
 );
 
 const AspectRatioDemo = () => (
-  <AspectRatio ratio="video">
+  <AspectRatio ratio={16 / 9}>
     <div className="bg-muted text-muted-foreground flex size-full items-center justify-center rounded-lg text-sm">
       16 by 9
     </div>
@@ -188,13 +182,8 @@ const CarouselDemo = () => (
             <CarouselItem key={slide}>
               <Card>
                 <CardContent>
-                  <div className="flex h-32 flex-col items-center justify-center gap-2">
+                  <div className="flex h-32 items-center justify-center">
                     <p className="text-lg">{slide} slide</p>
-                    {/* The arrow keys move the cursor here, not the slide. */}
-                    <Input
-                      aria-label={`${slide} slide note`}
-                      defaultValue="Note"
-                    />
                   </div>
                 </CardContent>
               </Card>
@@ -205,7 +194,6 @@ const CarouselDemo = () => (
         <CarouselNext />
       </Carousel>
     </div>
-    {/* Vertical: up and down move between the slides. */}
     <div className="py-12">
       <Carousel orientation="vertical" opts={{ align: "start" }}>
         <CarouselContent className="h-40">
@@ -219,8 +207,8 @@ const CarouselDemo = () => (
             </CarouselItem>
           ))}
         </CarouselContent>
-        <CarouselPrevious label="Previous card" />
-        <CarouselNext label="Next card" />
+        <CarouselPrevious />
+        <CarouselNext />
       </Carousel>
     </div>
   </div>
@@ -234,7 +222,7 @@ const visits = [
 ];
 
 const chartConfig = {
-  visits: { label: "Visits", color: "chart-1" },
+  visits: { label: "Visits", color: "var(--chart-1)" },
 } satisfies ChartConfig;
 
 const ChartDemo = () => (
@@ -243,7 +231,7 @@ const ChartDemo = () => (
       <CartesianGrid vertical={false} />
       <XAxis dataKey="month" tickLine={false} axisLine={false} />
       <ChartTooltip content={<ChartTooltipContent />} />
-      <Bar dataKey="visits" fill={chartColor("chart-1")} radius={4} />
+      <Bar dataKey="visits" fill="var(--color-visits)" radius={4} />
     </BarChart>
   </ChartContainer>
 );
@@ -384,14 +372,6 @@ const TableDemo = () => (
   </Table>
 );
 
-const RichTextDemo = () => (
-  <RichText
-    value={
-      "**Ship** the *plan* this week:\n\n- Draft it\n- [Review it](https://example.com)\n\n<b>Raw HTML</b> is dropped."
-    }
-  />
-);
-
 export const displayDemos = {
   accordion: AccordionDemo,
   alert: AlertDemo,
@@ -412,5 +392,4 @@ export const displayDemos = {
   skeleton: SkeletonDemo,
   spinner: SpinnerDemo,
   table: TableDemo,
-  "rich-text": RichTextDemo,
 };

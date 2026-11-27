@@ -1,21 +1,19 @@
-import { useSyncExternalStore } from "react";
+import * as React from "react"
 
-const MOBILE_BREAKPOINT = 768;
-const mobileQuery = `(max-width: ${MOBILE_BREAKPOINT - 1}px)`;
+const MOBILE_BREAKPOINT = 768
 
-const subscribe = (onChange: () => void): (() => void) => {
-  const query = matchMedia(mobileQuery);
-  query.addEventListener("change", onChange);
-  return () => {
-    query.removeEventListener("change", onChange);
-  };
-};
+export function useIsMobile() {
+  const [isMobile, setIsMobile] = React.useState<boolean | undefined>(undefined)
 
-const isMobileNow = (): boolean => matchMedia(mobileQuery).matches;
+  React.useEffect(() => {
+    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
+    const onChange = () => {
+      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
+    }
+    mql.addEventListener("change", onChange)
+    setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
+    return () => mql.removeEventListener("change", onChange)
+  }, [])
 
-/** Rendered on the server (the admin), there is no screen yet: not mobile. */
-const isMobileOnServer = (): boolean => false;
-
-/** Whether the screen is narrower than the sidebar's mobile breakpoint. */
-export const useIsMobile = (): boolean =>
-  useSyncExternalStore(subscribe, isMobileNow, isMobileOnServer);
+  return !!isMobile
+}

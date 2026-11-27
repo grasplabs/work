@@ -1,6 +1,6 @@
 import type { ValueDescriptor } from "../common/value-descriptor.ts";
 // `@grasp-os/runtime/forms`: what `@grasp-os/app-kit`'s form field helpers and
-// grids read beside their TanStack state: a form's submission status, how
+// data tables read beside their TanStack state: a form's submission status, how
 // to subscribe to it, what its validator declares of each field, and what
 // a query declares it answers. Not an App's import: pages get `useForm`
 // from `@grasp-os/sdk/react` and the components from `@grasp-os/app-kit`.
@@ -13,7 +13,7 @@ export type { ValueDescriptor } from "../common/value-descriptor.ts";
 
 /**
  * What the query `reference` names declares it answers, in the release
- * the page was built with (page-functions.ts): what a grid reads its
+ * the page was built with (page-functions.ts): what a data table reads its
  * columns' kinds from. Null for a query that declares no `returns`, and
  * for a name the release has no public query at.
  */
