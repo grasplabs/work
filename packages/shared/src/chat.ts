@@ -1209,6 +1209,13 @@ export interface ChatUpdate {
    * oldest first: whole in each update, left out while there are none.
    */
   queued?: ChatQueued[];
+  /**
+   * In a watch's first update only: the last message the person had seen
+   * as they began to follow the chat, as `markRead` answers it (0 for
+   * none, null for a chat made before chats kept it), so the page draws
+   * its New line at once, without asking.
+   */
+  seenUpTo?: number | null;
   /** The chat's provenance: in the first update, and whenever it changes. */
   provenance?: ChatProvenance;
   /**

@@ -53,6 +53,11 @@ export interface ChatView {
   /** Whether the first update has come. */
   loaded: boolean;
   /**
+   * Where the person had read the chat to as the tab began to follow it
+   * (`ChatUpdate.seenUpTo`), from the first update; none before it.
+   */
+  seenUpTo?: number | null;
+  /**
    * Whether the tab follows it again after a dropped connection and has
    * heard nothing yet since: what it shows may be behind.
    */
@@ -113,6 +118,8 @@ export const applyUpdate = (view: ChatView, update: ChatUpdate): ChatView => {
     checking: update.checking ?? false,
     waiting: update.waiting ?? null,
     loaded: true,
+    // From the first update: a watch started again later says it again.
+    seenUpTo: view.loaded ? view.seenUpTo : update.seenUpTo,
   };
 };
 

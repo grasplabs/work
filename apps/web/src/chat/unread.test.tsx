@@ -41,6 +41,7 @@ const answer = (id: number): ChatMessage => ({
 });
 
 interface View {
+  seenUpTo?: number | null;
   messages: readonly ChatMessage[];
   running: boolean;
   loaded: boolean;
@@ -198,6 +199,26 @@ describe("where the person has read a chat to", () => {
       marks: chat.markRead.mock.calls,
     }).toStrictEqual({
       first: { decided: false, before: undefined },
+      marks: [["chat-1", 4]],
+    });
+  });
+
+  it("draws the first New line from where core's watch said they had read to, never waiting for the mark", async () => {
+    showTab(true);
+    const view = {
+      messages: [question(1), answer(2), question(3), answer(4)],
+      running: false,
+      loaded: true,
+      seenUpTo: 2,
+    };
+    const chat = await opened(view, 2, { hold: true });
+
+    // The mark is still on its way: the line is there all the same.
+    expect({
+      line: chat.line(),
+      marks: chat.markRead.mock.calls,
+    }).toStrictEqual({
+      line: { decided: true, before: 4 },
       marks: [["chat-1", 4]],
     });
   });
