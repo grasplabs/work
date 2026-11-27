@@ -237,6 +237,28 @@ describe("a new chat's title", () => {
     );
   });
 
+  it("is never asked again of a fallback model when the default is already the small one", async () => {
+    const ann = await person();
+    const provider = await fakeProviderFor(
+      ["openai/gpt-6-luna", "openai/gpt-6.2-sol"],
+      says("Here it is.")
+    );
+    titlesAnswer(provider, { status: 401, errorType: "authentication_error" });
+    const list = await followList(ann);
+    const question = "Who signs off on the supplier contract?";
+
+    const chat = await askNew(ann, question, "openai/gpt-6-luna");
+
+    await until(() => {
+      expect(list.answered(chat)).toBeTruthy();
+      expect(provider.titles).toHaveLength(1);
+    });
+    await until(async () => {
+      await expect(listedTitle(ann, chat)).resolves.toBe(seedTitleOf(question));
+    });
+    expect(provider.titles).toHaveLength(1);
+  });
+
   it("goes to OpenAI's newest generation's cheapest model, never a cheaper older one, and to the default itself where the provider has none cheaper or of its maker", async () => {
     const ann = await person();
     const cases = [

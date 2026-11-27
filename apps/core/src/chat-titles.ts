@@ -104,6 +104,9 @@ export const generatedTitle = async (
       input: question.slice(0, questionChars),
       maxTokens: titleAnswerTokens,
       timeoutMs: titleTimeoutMs,
+      // One request: a title that fails is skipped, never asked again of
+      // the organization's other, dearer models.
+      providerRetries: false,
       purpose: chatTitlePurpose,
       trigger: delegateActorOf(authority, scope.via),
       work: { authority, context: chatContext(scope) },

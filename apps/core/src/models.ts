@@ -1902,8 +1902,7 @@ const routingOf = async (
   }
   const at = chosen.indexOf(call.model);
   // The default's small model (`smallModelOf`) goes too: of the default's
-  // maker, on the same key, and cheaper. It falls back to none: a small
-  // call that fails is skipped, never made again on a dearer model.
+  // maker, on the same key, and cheaper.
   const small =
     at === -1 && call.model === smallModelOf(routes, choice, source);
   if ((at === -1 && !small) || ref === undefined || connected === undefined) {
@@ -1917,7 +1916,7 @@ const routingOf = async (
       call,
       ref,
       target,
-      mayFallBack(call) && !small ? chosen.slice(at + 1) : []
+      mayFallBack(call) ? chosen.slice(at + 1) : []
     ),
   };
 };
