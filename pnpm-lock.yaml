@@ -1062,9 +1062,6 @@ importers:
       '@babel/core':
         specifier: 'catalog:'
         version: 7.29.7(supports-color@10.2.2)
-      '@grasp-os/app-kit':
-        specifier: workspace:*
-        version: link:../../packages/app-kit
       '@lingui/babel-plugin-lingui-macro':
         specifier: 'catalog:'
         version: 6.8.0(@babel/core@7.29.7(supports-color@10.2.2))
@@ -1252,6 +1249,9 @@ importers:
       babel-plugin-react-compiler:
         specifier: 'catalog:'
         version: 1.0.0
+      happy-dom:
+        specifier: 'catalog:'
+        version: 21.0.4
       playwright:
         specifier: 'catalog:'
         version: 1.63.0

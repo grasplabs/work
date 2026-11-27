@@ -108,8 +108,7 @@ const brainModuleImports = {
 };
 
 // apps/web and apps/admin draw with Damsko alone (AGENTS.md, Design):
-// nothing of the old kit, Lucide or Tailwind. The frontend's tests of the
-// kit's App page parts (src/app-kit) are tests, which may import anything.
+// nothing of the old kit, Lucide or Tailwind, in their tests either.
 const oldDesignImports = {
   group: [
     "@grasp-os/app-kit",
@@ -560,14 +559,13 @@ export default defineConfig({
         },
       },
       {
-        // A test's stand-ins are called by the test alone, and a test of
-        // the kit's App page parts (src/app-kit) hands them the kit's
-        // classes.
+        // A test's stand-ins are called by the test alone. Its imports
+        // reach what the frontend's own may not, apart from the old
+        // design's: the frontend's tests draw with Damsko too.
         files: ["apps/web/src/**/*.test.ts", "apps/web/src/**/*.test.tsx"],
         rules: {
-          "no-restricted-imports": "off",
+          "no-restricted-imports": ["error", { patterns: [oldDesignImports] }],
           "grasp/no-unbounded-rpc-target": "off",
-          "grasp/no-class-strings": "off",
         },
       },
       {

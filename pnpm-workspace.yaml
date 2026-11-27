@@ -303,7 +303,8 @@ catalog:
   "@oxc-project/types": 0.156.0
   # The WASI oxc.wasm runs on in the isolate, napi-rs's.
   "@tybys/wasm-util": 0.10.4
-  # A DOM for the web app's component tests that click and type.
+  # A DOM for the component tests that click and type: the web app's, and
+  # the kit's App page parts (packages/app-kit/test).
   happy-dom: 21.0.4
   # The kit's one-time-code input.
   input-otp: 1.5.0
