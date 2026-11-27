@@ -80,8 +80,11 @@ describe("an organization's AI use and hours", () => {
     const has = (text: string) => html.includes(text);
 
     expect({
-      // What core counted isn't said to be worked out.
-      workedOut: has("Worked out from what happened"),
+      // What core counted isn't said to be worked out, only what came before it; and it says it is in euros.
+      workedOut: has("worked out from what happened"),
+      euros: has(
+        "in euros at its sample prices: what the Worker counted, and what is worked out for the time before it counted"
+      ),
       month: has(`${monthName(snapshot.now)}</p>`),
       inAll: has("In all, so far"),
       spend: html.split(">€21<").length - 1,
@@ -106,6 +109,7 @@ describe("an organization's AI use and hours", () => {
       toCome: has("This section isn’t in the admin yet."),
     }).toStrictEqual({
       workedOut: false,
+      euros: true,
       month: true,
       inAll: true,
       // In all so far, and this month.

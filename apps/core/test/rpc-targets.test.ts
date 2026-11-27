@@ -217,6 +217,13 @@ const calls = {
     await page.pushed;
     return subscription;
   },
+  "authenticate.chats.watchList": async (chats, { held }) => {
+    const page = pageStub();
+    const subscription = holding(held, await chats.watchList(page.stub));
+    // The whole list, pushed at once: let go of after that.
+    await page.pushed;
+    return subscription;
+  },
   "authenticate.drafts.watch": async (drafts, { app, held }) => {
     const page = pageStub();
     // Held, and let go of, as a page does: it pushes only after a write.

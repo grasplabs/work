@@ -8,7 +8,6 @@ import {
   use,
   useEffect,
   useEffectEvent,
-  useRef,
   useSyncExternalStore,
 } from "react";
 import type { ReactNode } from "react";
@@ -48,7 +47,6 @@ import {
   useSubjectChat,
 } from "./chat-subject.ts";
 import { useFollowedChat } from "./chat-watch.ts";
-import { tellChatsChanged } from "./chats-changed.ts";
 import { useNoRoomBeside } from "./room-beside.ts";
 import type { SourceName } from "./sources.tsx";
 import { useAsk } from "./use-ask.ts";
@@ -262,17 +260,6 @@ const useGlobalChatValue = () => {
       setActiveChat(undefined, slot);
     }
   }, [chatId, gone, slot]);
-  // Its answer started or ended: the chats are listed again, so its row
-  // shows it working, and no more once it is done. Core says it runs
-  // before the watch does, so the list read then has it running.
-  const { running } = view;
-  const wasRunning = useRef(running);
-  useEffect(() => {
-    if (wasRunning.current !== running) {
-      tellChatsChanged();
-    }
-    wasRunning.current = running;
-  }, [running]);
   const layout = useChatLayout();
   const roomBeside = !useMatches(narrowQuery);
   const noRoomBeside = useNoRoomBeside();

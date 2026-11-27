@@ -1314,6 +1314,24 @@ export interface ChatQuestion {
 }
 
 /**
+ * What changed in the person's list of chats (`ChatsApi.watchList`) since
+ * the last update: each chat whose summary changed, whole (made, renamed,
+ * asked in, answered, read, back from the archive), and the IDs of those
+ * no longer in it (deleted, archived, or past the newest that `list`
+ * gives). The first update holds the whole list, `full`: the page
+ * replaces what it had. The list is in `lastAt` order, the most recent
+ * first.
+ */
+export interface ChatListUpdate {
+  chats: ChatSummary[];
+  removed: string[];
+  /** Whether `chats` is the whole list, which replaces any the page had. */
+  full: boolean;
+  /** How many chats the person archived. */
+  archived: number;
+}
+
+/**
  * A hold on a chat's updates (`watch`), until it's released: then core
  * sends no more, and the slot it took is free again.
  */
@@ -1421,15 +1439,18 @@ export interface ChatsApi {
   /** Renames one of the person's chats. */
   rename: (chatId: string, title: string) => Promise<void>;
   /**
-   * Marks one of the person's chats seen up to its latest message, while
-   * it is open in front of them: no answer in it is `unread` then. Answers
-   * the last message they had seen before, which the page draws its New
-   * line after: 0 when they had seen none, null for a chat made before
-   * chats kept it, which counts as read. It only moves forward, so a
-   * device that shows less never takes it back. Not audited: it changes
-   * nothing but where the person has read to.
+   * Marks one of the person's chats seen up to its latest message, or up
+   * to message `upTo`, the newest the page shows, where that is older:
+   * what came since, the page hasn't shown yet (it is following the chat
+   * again after a dropped connection). While it is open in front of them:
+   * no answer it showed is `unread` then. Answers the last message they
+   * had seen before, which the page draws its New line after: 0 when they
+   * had seen none, null for a chat made before chats kept it, which counts
+   * as read. It only moves forward, so a device that shows less never
+   * takes it back. Not audited: it changes nothing but where the person
+   * has read to.
    */
-  markRead: (chatId: string) => Promise<number | null>;
+  markRead: (chatId: string, upTo?: number) => Promise<number | null>;
   /**
    * Archives one of the person's chats: out of `list`, kept whole, opened
    * and asked in as ever. Nothing where it is archived already.
@@ -1584,5 +1605,14 @@ export interface ChatsApi {
     chatId: string,
     after: number | null,
     onUpdate: (update: ChatUpdate) => void
+  ) => Promise<ChatSubscriptionApi>;
+  /**
+   * Follows the person's list of chats, as `list` gives it: `onUpdate`
+   * gets the whole list, then what changes in it, as it changes, from
+   * this tab, another one or another device. Watching again after a lost
+   * connection starts with the whole list again.
+   */
+  watchList: (
+    onUpdate: (update: ChatListUpdate) => void
   ) => Promise<ChatSubscriptionApi>;
 }

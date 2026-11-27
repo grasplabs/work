@@ -353,7 +353,7 @@ export const OrganizationPlatformSpend = ({
 }) => (
   <Part aria-labelledby="own-features">
     <SectionHeader
-      description="What transcription and speech cost Grasp on its own keys for this organization: what each call used, recorded after it, in US dollars at list prices, read from its core now. Nothing caps them."
+      description="In US dollars at list prices, as its core recorded each call: what transcription and speech cost Grasp on its own keys for this organization, read from its core now. Nothing caps them."
       id="own-features"
       size="sm"
       title="Grasp’s own AI features"

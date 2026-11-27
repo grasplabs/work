@@ -11,112 +11,28 @@ import {
 import { announce } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import { Link, useMatchRoute, useRouter } from "@tanstack/react-router";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useState } from "react";
 import type { ReactNode } from "react";
 
 import type { RowAction, SidebarMore, SidebarRow } from "../frame/sidebar.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import { useCore } from "../use-core.ts";
-import { useTabShown } from "../use-tab-shown.ts";
 import { chatLink, useGoToChat } from "./chat-link.ts";
+import { useChatList } from "./chat-list.ts";
 import { useChatsWindow } from "./chat-switcher.tsx";
-import { onChatsChanged } from "./chats-changed.ts";
 import { DeleteChatDialog } from "./delete-chat-dialog.tsx";
 import { useChatOpenBeside } from "./global-chat.tsx";
 
 // The person's recent chats in the sidebar, as the reference's (#2503's
 // chat/sidebar-chats.tsx): the most recently used first, a few of them,
 // each a link to its own page, with its menu (open, rename, archive,
-// delete) and renamed in place too; the search (⌘K) finds the rest. Read
-// from core when the sidebar first shows, again after each page the router
-// resolves (a rename, an archive or a delete reads the page again), when
-// an answer starts or ends or a chat is read (chats-changed.ts), so a
-// row's Working mark and unread dot come and go with it, and when the
-// person comes back to the tab, for what was answered while they were
-// away. Core has no live word for a chat answering elsewhere (in the
-// background, on another device): while a listed chat works and the tab
-// is shown, the list is read again every few seconds, so its Working mark
-// turns into the dot without the person moving; it stops once none works.
+// delete) and renamed in place too; the search (⌘K) finds the rest. The
+// list is core's, pushed as it changes (chat-list.ts): a chat asked in
+// moves up as core takes the question, its Working mark comes and goes
+// with its answer and its unread dot once that ends, here, in the
+// background or on another device, with nothing read again.
 
 /** How many recent chats the sidebar lists. */
 const recentCount = 8;
-
-/** How often the list is read again while a listed chat works. */
-export const workingReadMs = 3000;
-
-/** The person's chats from core, the most recently used first; none while `enabled` is false. */
-const useChats = (enabled: boolean): ChatSummary[] => {
-  const core = useCore();
-  const router = useRouter();
-  const [chats, setChats] = useState<ChatSummary[]>([]);
-  // Only the latest read's answer shows: an earlier one may come back after it.
-  const latest = useRef(0);
-  // Whether a read is on its way: the reading while a chat works waits for
-  // it, so a core slower than its pace still has its answers shown.
-  const reading = useRef(false);
-  const read = useEffectEvent(() => {
-    latest.current += 1;
-    const asked = latest.current;
-    reading.current = true;
-    void (async () => {
-      try {
-        const listed = await core.withSession(
-          async (session) => await session.chats.list()
-        );
-        if (asked === latest.current) {
-          setChats(listed);
-        }
-      } catch {
-        // The sidebar keeps what it last read; the chats window says why.
-      }
-      if (asked === latest.current) {
-        reading.current = false;
-      }
-    })();
-  });
-  const readAgain = useEffectEvent(() => {
-    if (!reading.current) {
-      read();
-    }
-  });
-  useEffect(() => {
-    const readIf = (): void => {
-      if (enabled) {
-        read();
-      }
-    };
-    readIf();
-    const unsubscribe = router.subscribe("onResolved", readIf);
-    // An answer started or ended: its chat works, or no longer does.
-    const unheard = onChatsChanged(readIf);
-    const back = (): void => {
-      if (document.visibilityState === "visible") {
-        readIf();
-      }
-    };
-    document.addEventListener("visibilitychange", back);
-    return () => {
-      unsubscribe();
-      unheard();
-      document.removeEventListener("visibilitychange", back);
-    };
-  }, [enabled, router]);
-  // A chat works, answering where no page of this tab follows it: read
-  // again until none does, while anyone can see it.
-  const working =
-    useTabShown() && enabled && chats.some(({ running }) => running);
-  useEffect(() => {
-    const timer = working
-      ? setInterval(() => {
-          readAgain();
-        }, workingReadMs)
-      : undefined;
-    return () => {
-      clearInterval(timer);
-    };
-  }, [working]);
-  return enabled ? chats : [];
-};
 
 /**
  * Renaming and archiving a chat from its row, then reading the page again,
@@ -171,7 +87,7 @@ export const useRecentChats = ({
   enabled: boolean;
 }): { rows: SidebarRow[]; more: SidebarMore; dialog: ReactNode } => {
   const { t } = useLingui();
-  const chats = useChats(enabled);
+  const { chats } = useChatList(enabled);
   const matchRoute = useMatchRoute();
   const goToChat = useGoToChat();
   const openChats = useChatsWindow();
