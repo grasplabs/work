@@ -246,7 +246,10 @@ const useGlobalChatValue = () => {
     offered?.models,
     offered?.efforts,
     slot,
-    subject.about === undefined ? undefined : { subject: subject.about }
+    {
+      running: view.running,
+      ...(subject.about === undefined ? {} : { subject: subject.about }),
+    }
   );
   const builds = useChatBuilds(chatId, view.running, view.worked);
   const { summary, retitle } = useChatSummary(chatId, view.running);

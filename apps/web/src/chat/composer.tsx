@@ -35,6 +35,7 @@ import {
   usePromptInputAttachments,
 } from "@grasp-os/ui/components/prompt-input";
 import type { PromptInputSpeechButtonProps } from "@grasp-os/ui/components/prompt-input";
+import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Text } from "@grasp-os/ui/components/text";
 import { Icon, SquareIcon } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
@@ -632,6 +633,28 @@ const useBoxValue = (
   return [value, setValue];
 };
 
+/** That the connection to Grasp is coming back, as the line under the box says it. */
+const Reconnecting = () => {
+  const { t } = useLingui();
+  return (
+    <>
+      <Spinner />
+      {t`Reconnecting to Grasp…`}
+    </>
+  );
+};
+
+/**
+ * The line under the box: what went wrong (`said`), else that the
+ * connection is coming back, else none.
+ */
+const noteOf = (said: string | undefined, reconnecting: boolean): ReactNode => {
+  if (said !== undefined) {
+    return said;
+  }
+  return reconnecting ? <Reconnecting /> : undefined;
+};
+
 /** The box to ask in. Controlled: the page keeps the text and the model. */
 export const Composer = ({
   text,
@@ -649,6 +672,7 @@ export const Composer = ({
   running,
   busy,
   failure,
+  reconnecting = false,
   onSend,
   onStop,
   compact = false,
@@ -699,6 +723,8 @@ export const Composer = ({
   busy: boolean;
   /** Why the last question didn't go, under the box; its words are kept. */
   failure?: string;
+  /** The connection to Grasp is gone and coming back: said under the box. */
+  reconnecting?: boolean;
   onSend: () => void;
   /** Stops the answer being written; only where one can be. */
   onStop?: () => void;
@@ -754,7 +780,7 @@ export const Composer = ({
     onSend,
   });
   const failed = heldFailure ?? failure;
-  const note = dictation.problem ?? failed;
+  const note = noteOf(dictation.problem ?? failed, reconnecting);
   const typed = text.trim() !== "";
   const canConnect = useMemberAdmin();
   const answerer = (
@@ -800,7 +826,8 @@ export const Composer = ({
           question is about. */}
       {noProvider ? noProviderBanner(canConnect) : subjectBanner(subject)}
       {/* Under the box: why dictating stopped, else why the last question
-          didn't go. Each send clears the first, so the newest shows. */}
+          didn't go, else that the connection is coming back. Each send
+          clears the first, so the newest shows. */}
       {note === undefined ? null : <PromptInputNote>{note}</PromptInputNote>}
       {files.length === 0 ? null : (
         <PromptInputHeader>
