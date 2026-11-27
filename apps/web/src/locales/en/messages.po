@@ -4790,6 +4790,7 @@ msgstr "Choose what Grasp may do in {app}, then sign in there."
 msgid "Choose your AI"
 msgstr "Choose your AI"
 
+#: src/interview/start.tsx
 #: src/onboarding/language-choice.tsx
 msgid "Choose your language"
 msgstr "Choose your language"
@@ -8763,6 +8764,12 @@ msgstr "Hi {name}, I'm Stephen. Let's start with what your team handles overall,
 msgid "Hi {name}, I'm Stephen. Let's start with your work as a whole, then zoom in on one part of it. In a sentence or two, what do you do here?"
 msgstr "Hi {name}, I'm Stephen. Let's start with your work as a whole, then zoom in on one part of it. In a sentence or two, what do you do here?"
 
+#: src/interview/start.tsx
+msgid "Hi {name}, which language\n"
+"would you like to talk in?"
+msgstr "Hi {name}, which language\n"
+"would you like to talk in?"
+
 #: src/onboarding/team-step.tsx
 msgid "Hi everyone,"
 msgstr "Hi everyone,"
@@ -8778,6 +8785,12 @@ msgstr "Hi, I’m Stephen. I’ll guide you through setting up Grasp—it only t
 #: src/routes/waiting.tsx
 msgid "Hi, I’m Stephen. Your admins are still setting things up for you. As soon as they’re done, this page opens Grasp by itself, so you can just leave it open."
 msgstr "Hi, I’m Stephen. Your admins are still setting things up for you. As soon as they’re done, this page opens Grasp by itself, so you can just leave it open."
+
+#: src/interview/start.tsx
+msgid "Hi, which language\n"
+"would you like to talk in?"
+msgstr "Hi, which language\n"
+"would you like to talk in?"
 
 #: src/brain/opportunities-page.tsx
 msgctxt "opportunities hidden for every admin"

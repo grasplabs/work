@@ -2,7 +2,13 @@ import { Button } from "@grasp-os/ui/components/button";
 import { Heading } from "@grasp-os/ui/components/heading";
 import { Text } from "@grasp-os/ui/components/text";
 import { fadeIn, visuallyHidden } from "@grasp-os/ui/lib/styles";
-import { duration, media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import {
+  duration,
+  font,
+  media,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
@@ -141,6 +147,12 @@ const styles = stylex.create({
     paddingBlockStart: space["4"],
   },
   composer: { flexShrink: 0, paddingBlockStart: space["2"] },
+  // The room their words take over the box as they talk (heard.tsx: three lines and a half, and
+  // its gap), less what the stage and the box keep already: the line over it never runs under them.
+  heardRoom: {
+    flexShrink: 0,
+    height: `calc(3.5 * ${font.textBaseLine} + ${space["3"]} - ${space["6"]})`,
+  },
   // Paused, the box's place: as wide as the box, quiet.
   resume: { width: "100%", maxWidth: size.promptInputWidth },
   resumeRow: { display: "flex", justifyContent: "center" },
@@ -431,6 +443,9 @@ export const Conversation = ({
             </>
           )}
         </div>
+        {reading ? null : (
+          <div aria-hidden="true" {...stylex.props(styles.heardRoom)} />
+        )}
         <div
           ref={slot}
           {...stylex.props(styles.slot, paused && styles.slotHeld(boxHeight))}

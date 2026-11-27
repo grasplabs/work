@@ -1,6 +1,7 @@
 import type { InterviewLine } from "@grasp-os/shared/interview-links";
 import { Button } from "@grasp-os/ui/components/button";
 import { Icon, PencilIcon, TrashIcon } from "@grasp-os/ui/lib/icons";
+import { fadeIn } from "@grasp-os/ui/lib/styles";
 import {
   colors,
   duration,
@@ -13,6 +14,7 @@ import { pixel } from "@grasp-os/ui/lib/vars.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
+import type { ReactNode } from "react";
 
 import { Marked } from "./marked.tsx";
 import { useSmoothWords } from "./smooth-words.ts";
@@ -59,6 +61,8 @@ export interface Placed {
 const touch = "@media not ((hover: hover) and (pointer: fine))";
 
 const styles = stylex.create({
+  // A word's fade ends with it: a finished one holds no animation the page keeps weighing.
+  word: { animationFillMode: "backwards" },
   // The bin: hidden till a pointer rests on its line or the keyboard reaches it; quiet on touch.
   bin: {
     opacity: {
@@ -75,6 +79,8 @@ const styles = stylex.create({
     overflowWrap: "anywhere",
     margin: 0,
   },
+  // While his words come, lines break as they fill: evened out they would move as each word comes.
+  coming: { textWrap: "wrap" },
   // In the sans of theirs: the transcript is a record to read, the serif is for the stage.
   his: {
     fontFamily: font.sans,
@@ -273,6 +279,36 @@ const startOf = (text: string): string => {
   return words.length > namingWords ? `${start}…` : start;
 };
 
+/** A word with the space after it. */
+const WORD = /\S+\s*|\s+/gu;
+
+/**
+ * `text` as it grows: what stood there when it was first drawn stands, and
+ * each word that comes after fades in once whole, as the chat's answer does
+ * (Damsko's Markdown `Words`). Each keeps its place as its key, so a word
+ * never fades twice.
+ */
+const FadingWords = ({ text }: { text: string }) => {
+  const [plain, setPlain] = useState(text.length);
+  // Written again shorter (his line corrected as he was talked over): what stands is not news.
+  if (text.length < plain) {
+    setPlain(text.length);
+  }
+  if (text.length <= plain) {
+    return text;
+  }
+  const parts: ReactNode[] = [text.slice(0, plain)];
+  for (const word of text.slice(plain).matchAll(WORD)) {
+    const at = plain + word.index;
+    parts.push(
+      <span key={at} {...stylex.props(fadeIn, styles.word)}>
+        {word[0]}
+      </span>
+    );
+  }
+  return parts;
+};
+
 /** The words of one line, in whose voice they are, with what he marked in theirs. */
 const Words = ({
   line,
@@ -300,11 +336,12 @@ const Words = ({
       {...stylex.props(
         styles.line,
         stephen ? styles.his : styles.theirs,
+        streaming && styles.coming,
         extra
       )}
     >
       {stephen ? (
-        smooth
+        <FadingWords text={smooth} />
       ) : (
         <Marked marks={line.marks ?? []} names={names} text={line.text} />
       )}

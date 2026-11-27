@@ -26,7 +26,10 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { Flag } from "../frame/flag.tsx";
+import { languageOptions } from "../frame/language-options.ts";
 import { TopError } from "../frame/top-error.tsx";
+import { chooseLocale } from "../i18n.ts";
 import { Actions, Page, Quiet, Words } from "./calm.tsx";
 import { budgetMinutes } from "./countdown.tsx";
 import { DitherOver } from "./frame.tsx";
@@ -107,6 +110,26 @@ const styles = stylex.create({
     // from standing alone.
     color: colors.mutedForeground,
     textWrap: "pretty",
+  },
+  // The languages to talk in: side by side where they fit, each its flag and its own name.
+  languages: {
+    borderWidth: 0,
+    margin: 0,
+    padding: 0,
+    minWidth: 0,
+    display: "flex",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: space["3"],
+    maxWidth: "40rem",
+  },
+  hidden: {
+    position: "absolute",
+    width: 1,
+    height: 1,
+    overflow: "hidden",
+    clipPath: "inset(50%)",
+    whiteSpace: "nowrap",
   },
   // The one button: the whole width on a phone, its own width on a wider window.
   agree: { width: { default: "100%", [media.sm]: "auto" } },
@@ -249,6 +272,77 @@ const Answers = ({
 };
 
 /** The start: one decision, centred. */
+/**
+ * The very first screen: the language they want to talk in, each named in
+ * its own words with its flag. A press chooses it and goes on to the
+ * welcome in it; the header keeps the picker for later.
+ */
+export const PickLanguage = ({
+  name,
+  onPicked,
+  onChosen,
+}: {
+  name: string;
+  /** Called before the language changes, which can remount the page. */
+  onPicked: () => void;
+  /** Called once the language is in place, when the page is still the same one. */
+  onChosen: () => void;
+}) => {
+  const { t, i18n } = useLingui();
+  const title = useTitleSize();
+  const lines = (
+    name === ""
+      ? t`Hi, which language
+would you like to talk in?`
+      : t`Hi ${name}, which language
+would you like to talk in?`
+  ).split("\n");
+  return (
+    <div {...stylex.props(styles.page)}>
+      <div {...stylex.props(styles.column)}>
+        <Heading level={1} size={title.size} style={styles.title}>
+          {lines.map((line, at) => (
+            <span
+              key={line}
+              ref={at === 0 ? title.firstLine : undefined}
+              {...stylex.props(
+                styles.titleLine,
+                title.whole && styles.titleWhole
+              )}
+            >
+              {at === 0 ? "" : " "}
+              {line}
+            </span>
+          ))}
+        </Heading>
+        <fieldset {...stylex.props(styles.languages)}>
+          <legend
+            {...stylex.props(styles.hidden)}
+          >{t`Choose your language`}</legend>
+          {languageOptions.map(({ code, name: own, flag }) => (
+            <Button
+              aria-pressed={i18n.locale === code}
+              key={code}
+              onClick={() => {
+                onPicked();
+                void (async () => {
+                  await chooseLocale(code);
+                  onChosen();
+                })();
+              }}
+              size="lg"
+              variant={i18n.locale === code ? "secondary" : "outline"}
+            >
+              <Flag flag={flag} />
+              <span lang={code}>{own}</span>
+            </Button>
+          ))}
+        </fieldset>
+      </div>
+    </div>
+  );
+};
+
 export const Consent = ({
   name,
   company: named,

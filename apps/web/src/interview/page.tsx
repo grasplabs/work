@@ -61,7 +61,13 @@ import {
 } from "./progress.ts";
 import { readingPose } from "./read-back-story.tsx";
 import { setSound } from "./speech.ts";
-import { Consent, NotNow, remindTimes, Reminded } from "./start.tsx";
+import {
+  Consent,
+  NotNow,
+  PickLanguage,
+  remindTimes,
+  Reminded,
+} from "./start.tsx";
 import type { RemindAt } from "./start.tsx";
 import { useLoopWords } from "./words.ts";
 
@@ -77,6 +83,7 @@ import { useLoopWords } from "./words.ts";
 
 /** Where they are before the conversation: the start, or one of its ways out. */
 type Before =
+  | { at: "language" }
   | { at: "start" }
   | { at: "not-now" }
   | { at: "reminded"; picked: RemindAt };
@@ -330,6 +337,12 @@ const Withdrawn = ({
   );
 };
 
+/**
+ * Whether they picked their language on this visit. A new language remounts the
+ * whole page, so the pick lives outside it, or they would be asked again.
+ */
+let languagePicked = false;
+
 /** Before the conversation: the start, and its ways out. */
 const BeforeTalk = ({
   session,
@@ -339,7 +352,10 @@ const BeforeTalk = ({
   closes: string;
 }) => {
   const who = interviewerNames[useInterviewer()];
-  const [before, setBefore] = useState<Before>({ at: "start" });
+  // First the language they talk in, then the welcome in it.
+  const [before, setBefore] = useState<Before>(() =>
+    languagePicked ? { at: "start" } : { at: "language" }
+  );
   const [refusal, setRefusal] = useState<string | null>(null);
   // A second press while core is asked does nothing.
   const [asking, setAsking] = useState(false);
@@ -386,6 +402,19 @@ const BeforeTalk = ({
     });
   };
   switch (before.at) {
+    case "language": {
+      return (
+        <PickLanguage
+          name={session.name}
+          onPicked={() => {
+            languagePicked = true;
+          }}
+          onChosen={() => {
+            setBefore({ at: "start" });
+          }}
+        />
+      );
+    }
     case "not-now": {
       return (
         <NotNow

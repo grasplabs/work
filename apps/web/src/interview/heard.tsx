@@ -33,6 +33,10 @@ import { transcriptId } from "./transcript.tsx";
 
 /** How far apart words that come together leave, in ms. */
 const apartMs = 80;
+/** How far apart they leave at the least, when words are waiting to leave already. */
+const hurriedMs = 28;
+/** Words waiting longer than this to leave: those that come next leave hurried. */
+const behindMs = 240;
 /** How long a word's letters take to come, in ms. */
 const fadeMs = 460;
 /** How long the lines take to glide up by one, in ms. */
@@ -139,22 +143,34 @@ const fadeIn = (word: HTMLElement, delay: number, still: boolean) => {
   );
 };
 
-/** Words `from` to `count` of `room` arrive: their squares leave the field, and each fades in as they land. */
+/**
+ * Words `from` to `count` of `room` arrive: their squares leave the field,
+ * and each fades in as they land. They leave in the order they were said,
+ * after any still waiting to (`queue` holds when the last leaves, on the
+ * page's clock): never a later word before an earlier one. Far behind, as
+ * when a fast talker's words come in a burst, they leave closer together,
+ * so the words keep up with the voice.
+ */
 const arrive = (
   room: HTMLElement,
   air: HTMLCanvasElement | null,
   flight: Flight | null,
   from: number,
-  count: number
+  count: number,
+  queue: { current: number }
 ) => {
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const flies = !still && air !== null && flight !== null;
   const field = flies ? fieldIn(air) : null;
   const arrived = room.querySelectorAll<HTMLElement>("[data-word]");
+  const now = performance.now();
+  const waiting = Math.max(0, queue.current - now);
+  const apart = waiting > behindMs ? hurriedMs : apartMs;
   for (let index = from; index < count; index += 1) {
     const word = arrived[index];
     if (word !== undefined) {
-      const leaves = (index - from) * apartMs;
+      const leaves = waiting + (index - from) * apart;
+      queue.current = now + leaves + apart;
       if (flies && field !== null) {
         flight.fly(field, placeIn(word, air), leaves);
       }
@@ -354,6 +370,8 @@ export const Heard = ({ text, sent }: { text: string; sent: number }) => {
   // The words that stood there as it came: they never fly.
   const seen = useRef(count);
   const tall = useRef(0);
+  // When the last word waiting to leave leaves, on the page's clock.
+  const queue = useRef(0);
   // What stood there at the last draw with words in it, and how many lines of theirs were kept then.
   const stood = useRef<{ was: Stood; sent: number } | null>(null);
   useEffect(() => {
@@ -388,7 +406,7 @@ export const Heard = ({ text, sent }: { text: string; sent: number }) => {
       return;
     }
     if (from < count) {
-      arrive(paragraph, air.current, flight.current, from, count);
+      arrive(paragraph, air.current, flight.current, from, count, queue);
     }
     glide(paragraph, grew);
     const was = stoodIn(paragraph);
