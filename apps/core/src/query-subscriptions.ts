@@ -1028,6 +1028,16 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     const access = accessed.status === "fulfilled" ? accessed.value : "role";
     const roles = access === "open" ? read.value : undefined;
     if (access === "open" && roles !== undefined) {
+      // The reads above may have outlasted the session reading this began
+      // on: read it again if so, so nothing goes out on a reading older
+      // than `sessionRecheckMs`, a telling of the session's end lost or
+      // not (free while it is fresh, as every check shares it).
+      try {
+        await this.#reads.check();
+      } catch (error) {
+        this.#cleared.delete(key);
+        return { refusal: refusalResult(error) };
+      }
       this.#rolesSeen.set(app, roles);
       return { roles, by };
     }
