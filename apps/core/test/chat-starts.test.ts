@@ -258,6 +258,14 @@ describe("a chat a page starts", () => {
     await ben.api.chats.send(bens, startingWith(benStart));
     const deleted = await startedChat(ben, "Ben's deleted");
     await ben.api.chats.remove(deleted.id);
+    // A chat core named itself (a chat app's conversation, a wake-up's).
+    const corenamed = await objectOf(ben).createChat(
+      "Ben in Teams",
+      ben.userId,
+      chatAgentId,
+      undefined,
+      "teams"
+    );
     const benFollows = await follow(ben.api.chats, bens);
     await until(() => {
       expect(said(benFollows.messages()).at(-1)?.text).toBe("Ben's answer.");
@@ -268,6 +276,9 @@ describe("a chat a page starts", () => {
       ),
       deleted: await outcome(
         ann.api.chats.send(deleted.id, startingWith(startOf("Mine now")))
+      ),
+      corenamed: await outcome(
+        ann.api.chats.send(corenamed.id, startingWith(startOf("Mine now")))
       ),
       // With Ben's own start key too, as if Ann had seen it.
       key: await outcome(
@@ -285,6 +296,7 @@ describe("a chat a page starts", () => {
     }).toStrictEqual({
       taken: "agent.chat_not_found",
       deleted: "agent.chat_not_found",
+      corenamed: "agent.chat_not_found",
       key: "agent.chat_not_found",
       notAnId: "agent.chat_not_found",
       unknown: "agent.chat_not_found",

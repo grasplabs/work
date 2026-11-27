@@ -1158,8 +1158,6 @@ export class Workspace extends DurableObject<Env> {
     string,
     { chatId: ChatId; started: Promise<boolean> }
   >();
-  /** The chats a start is making now, by ID, each until it is done (`startChat`). */
-  readonly #starts = new Map<ChatId, Promise<true>>();
 
   /**
    * Set once its person's erasure began (`erasePerson`): from then on
@@ -1531,12 +1529,11 @@ export class Workspace extends DurableObject<Env> {
    * own app (`web`) otherwise. Started by "Make something" (`make`), it
    * keeps what it came to make, and the project Build it makes it in.
    *
-   * Its ID is taken company-wide (chat-ids.ts), so no two chats anywhere
-   * share one: the one the person's page named (`named`, with the start's
-   * key, `startChat`) first, refused as if there were no such chat when it
-   * is anyone's already; a random one as the chat is made, in the same
-   * step as a look for one (a chat app's conversation), so two messages
-   * at once make one chat.
+   * Its ID is taken company-wide first (chat-ids.ts), so no two chats
+   * anywhere share one: a random one, or the one the person's page named
+   * (`named`, with the start's key, `startChat`), refused as if there were
+   * no such chat when it is anyone's already, and answered with the chat
+   * that start made before.
    */
   async createChat(
     title: string,
@@ -1555,68 +1552,79 @@ export class Workspace extends DurableObject<Env> {
     }
     const channel = chatChannelSchema.parse(via);
     const id = named?.id ?? chatIdSchema.parse(crypto.randomUUID());
-    if (named !== undefined) {
-      await takeChatId(this.env, id, personId, named.key);
+    // Its ID taken company-wide, then the chat made, in one step that
+    // nothing else in this object runs during: two messages of a chat
+    // app's conversation at once make one chat, two starts of one chat at
+    // once make it once, and no chat is made, nor used, before its ID is
+    // taken. Nothing thrown inside: a refusal there would reset the object.
+    const made = await this.ctx.blockConcurrencyWhile(
+      async (): Promise<{ chat: Chat; made: boolean } | { error: unknown }> => {
+        try {
+          const repeated =
+            named === undefined
+              ? undefined
+              : this.#startedChat(id, personId, named.key);
+          if (repeated !== undefined) {
+            return { chat: repeated, made: false };
+          }
+          await takeChatId(this.env, id, personId, named?.key ?? null);
+          return {
+            chat: this.ctx.storage.transactionSync(() => {
+              // Never one of the person's own chats made over: one made
+              // before chat IDs were taken company-wide has none taken.
+              const there = this.#db
+                .select({ id: chats.id })
+                .from(chats)
+                .where(eq(chats.id, id))
+                .get();
+              if (there !== undefined) {
+                throw agentErrors.create("agent.chat_not_found");
+              }
+              if (channel === "web") {
+                this.requireRoomForChat(personId);
+              }
+              if (by !== undefined) {
+                this.#outboxed(by, "chat.created", id, {});
+              }
+              const now = new Date();
+              const chat = this.#db
+                .insert(chats)
+                .values({
+                  id,
+                  title,
+                  createdAt: now,
+                  lastAt: now,
+                  personId,
+                  agentId: agent.data,
+                  via: channel,
+                  thread: thread ?? null,
+                  makeKind: make?.kind ?? null,
+                  makeProject: make?.project ?? null,
+                  // Nothing seen yet: every answer is news until its person looks.
+                  readUpTo: 0,
+                })
+                .returning()
+                .get();
+              if (named !== undefined) {
+                this.#keepRequest("create", named.key, id);
+              }
+              return chat;
+            }),
+            made: true,
+          };
+        } catch (error) {
+          return { error };
+        }
+      }
+    );
+    if ("error" in made) {
+      throw made.error;
     }
-    const chat = this.ctx.storage.transactionSync(() => {
-      // Never one of the person's own chats made over: one made before
-      // chat IDs were taken company-wide has none taken.
-      const there = this.#db
-        .select({ id: chats.id })
-        .from(chats)
-        .where(eq(chats.id, id))
-        .get();
-      if (there !== undefined) {
-        throw agentErrors.create("agent.chat_not_found");
-      }
-      if (channel === "web") {
-        this.requireRoomForChat(personId);
-      }
-      // A start's key makes one chat: another start of another chat under
-      // it (made meanwhile) is refused.
-      const keyed =
-        named === undefined ? undefined : this.#requested("create", named.key);
-      if (keyed !== undefined && keyed.chatId !== id) {
-        throw agentErrors.create("agent.chat_not_found");
-      }
-      if (by !== undefined) {
-        this.#outboxed(by, "chat.created", id, {});
-      }
-      const now = new Date();
-      const made = this.#db
-        .insert(chats)
-        .values({
-          id,
-          title,
-          createdAt: now,
-          lastAt: now,
-          personId,
-          agentId: agent.data,
-          via: channel,
-          thread: thread ?? null,
-          makeKind: make?.kind ?? null,
-          makeProject: make?.project ?? null,
-          // Nothing seen yet: every answer is news until its person looks.
-          readUpTo: 0,
-        })
-        .returning()
-        .get();
-      if (named !== undefined) {
-        this.#keepRequest("create", named.key, id);
-      }
-      return made;
-    });
-    this.#deliverAudit();
-    this.#listChanged();
-    if (named === undefined) {
-      // A random ID nobody else has: a failure leaves the chat be, logged.
-      try {
-        await takeChatId(this.env, id, personId, null);
-      } catch (error) {
-        log.error("chat.id_untaken", { chatId: id, ...errorFields(error) });
-      }
+    if (made.made) {
+      this.#deliverAudit();
+      this.#listChanged();
     }
-    return chat;
+    return made.chat;
   }
 
   /**
@@ -1626,8 +1634,8 @@ export class Workspace extends DurableObject<Env> {
    * second tab, finds it, and two at once make it once. Anything else is
    * refused as if there were no such chat (`agent.chat_not_found`): an ID
    * that isn't a UUID, a chat there already (the person's own too, which
-   * a start never takes over or makes over), a deleted one, or anyone
-   * else's anywhere (chat-ids.ts).
+   * a start never takes over or makes over), a deleted one, a start key
+   * that made another chat, or anyone else's anywhere (chat-ids.ts).
    */
   async startChat(
     chatId: unknown,
@@ -1644,36 +1652,36 @@ export class Workspace extends DurableObject<Env> {
     if (!named.success) {
       throw agentErrors.create("agent.chat_not_found");
     }
-    const id = named.data;
-    // Starts of one chat at once go one after another.
-    for (
-      let before = this.#starts.get(id);
-      before !== undefined;
-      before = this.#starts.get(id)
-    ) {
-      // oxlint-disable-next-line no-await-in-loop -- one start at a time
-      await before;
+    await this.createChat(
+      start.title,
+      personId,
+      start.agentId,
+      start.by,
+      "web",
+      undefined,
+      start.make,
+      { id: named.data, key: start.key }
+    );
+  }
+
+  /**
+   * The chat the start with `key` made, `personId`'s chat `chatId`, within
+   * a day; none when it made none. Refused as no such chat once that chat
+   * is gone, or for a key that made another.
+   */
+  #startedChat(
+    chatId: ChatId,
+    personId: string,
+    key: string
+  ): Chat | undefined {
+    const made = this.#requested("create", key);
+    if (made === undefined) {
+      return undefined;
     }
-    if (this.chatStartedWith(id, personId, start.key)) {
-      return;
+    if (made.chatId !== chatId) {
+      throw agentErrors.create("agent.chat_not_found");
     }
-    const done = Promise.withResolvers<true>();
-    this.#starts.set(id, done.promise);
-    try {
-      await this.createChat(
-        start.title,
-        personId,
-        start.agentId,
-        start.by,
-        "web",
-        undefined,
-        start.make,
-        { id, key: start.key }
-      );
-    } finally {
-      done.resolve(true);
-      this.#starts.delete(id);
-    }
+    return this.#graspChat(made.chatId, personId);
   }
 
   /**
@@ -1682,15 +1690,11 @@ export class Workspace extends DurableObject<Env> {
    * no such chat once that chat is gone, or for a key that made another.
    */
   chatStartedWith(chatId: unknown, personId: string, key: string): boolean {
-    const made = this.#requested("create", key);
-    if (made === undefined) {
-      return false;
-    }
-    if (made.chatId !== chatId) {
+    const id = newChatIdSchema.safeParse(chatId);
+    if (!id.success) {
       throw agentErrors.create("agent.chat_not_found");
     }
-    this.#graspChat(made.chatId, personId);
-    return true;
+    return this.#startedChat(id.data, personId, key) !== undefined;
   }
 
   /**
