@@ -371,9 +371,7 @@ const startTurn = async (env: Env, row: WakeRow): Promise<void> => {
   const workspaceId = personalWorkspaceId(row.personId);
   const chats = workspace(env, workspaceId);
   const question = { text: row.opening, model };
-  // Its chat in its person's own object: a wake-up the release before
-  // gave a chat to has no workspace, and is theirs all the same.
-  if (row.chatId !== null && (row.workspaceId ?? workspaceId) === workspaceId) {
+  if (row.workspaceId === workspaceId && row.chatId !== null) {
     try {
       await chats.sendUnattended(row.chatId, question);
       return;
