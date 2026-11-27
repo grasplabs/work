@@ -21,7 +21,7 @@ export default defineConfig({
   // (apps/core/src/docs.ts).
   deployment: { base: "/docs" },
   theme: {
-    // The theme's tokens are the kit's (theme.css), light and dark.
+    // The theme's tokens are Grasp's own (theme.css), light and dark.
     mode: "system",
     toggle: true,
     fonts: {

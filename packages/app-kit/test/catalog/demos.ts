@@ -7,17 +7,17 @@
 import type { ComponentType } from "react";
 
 import { dataGridDemos } from "./demos/data-grid.tsx";
+import { directionDemos } from "./demos/direction.tsx";
 import { displayDemos } from "./demos/display.tsx";
 import { formDemos } from "./demos/forms.tsx";
-import { layoutDemos } from "./demos/layout.tsx";
 import { navigationDemos } from "./demos/navigation.tsx";
 import { overlayDemos } from "./demos/overlays.tsx";
 
 export const demos: Record<string, ComponentType> = {
   ...dataGridDemos,
+  ...directionDemos,
   ...displayDemos,
   ...formDemos,
-  ...layoutDemos,
   ...navigationDemos,
   ...overlayDemos,
 };

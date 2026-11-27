@@ -16,14 +16,6 @@ import {
   ItemGroup,
   ItemTitle,
 } from "@grasp-os/app-kit/components/item";
-import {
-  PageHeader,
-  PageHeaderActions,
-  PageHeaderContent,
-  PageHeaderDescription,
-  PageHeaderTitle,
-} from "@grasp-os/app-kit/components/page-header";
-import { Stack } from "@grasp-os/app-kit/components/stack";
 import { ChevronRightIcon, PlusIcon } from "lucide-react";
 
 interface Invoice {
@@ -46,21 +38,19 @@ const statusVariant = {
 } as const;
 
 export const ListExample = () => (
-  <Stack gap="lg">
-    <PageHeader>
-      <PageHeaderContent>
-        <PageHeaderTitle>Invoices</PageHeaderTitle>
-        <PageHeaderDescription>
+  <div className="flex flex-col gap-6">
+    <header className="flex flex-wrap items-end justify-between gap-4">
+      <div className="flex flex-col gap-1">
+        <h2 className="text-2xl font-semibold tracking-tight">Invoices</h2>
+        <p className="text-muted-foreground text-sm">
           What customers owe, newest first.
-        </PageHeaderDescription>
-      </PageHeaderContent>
-      <PageHeaderActions>
-        <Button>
-          <PlusIcon data-icon="inline-start" />
-          New invoice
-        </Button>
-      </PageHeaderActions>
-    </PageHeader>
+        </p>
+      </div>
+      <Button>
+        <PlusIcon data-icon="inline-start" />
+        New invoice
+      </Button>
+    </header>
     {invoices.length === 0 ? (
       <Empty>
         <EmptyHeader>
@@ -94,5 +84,5 @@ export const ListExample = () => (
         ))}
       </ItemGroup>
     )}
-  </Stack>
+  </div>
 );

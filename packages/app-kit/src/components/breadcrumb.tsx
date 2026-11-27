@@ -4,12 +4,10 @@ import { cn } from "@grasp-os/app-kit/lib/utils";
 import { ChevronRightIcon, MoreHorizontalIcon } from "lucide-react";
 import * as React from "react";
 
-// The kit's own words are English props, so a page that translates passes its own.
-
 function Breadcrumb({ className, ...props }: React.ComponentProps<"nav">) {
   return (
     <nav
-      aria-label="Breadcrumb"
+      aria-label="breadcrumb"
       data-slot="breadcrumb"
       className={cn(className)}
       {...props}
@@ -49,11 +47,7 @@ function BreadcrumbLink({
     defaultTagName: "a",
     props: mergeProps<"a">(
       {
-        // On one line: in a list that does not wrap, a long name ends in an ellipsis.
-        className: cn(
-          "hover:text-foreground truncate transition-colors",
-          className
-        ),
+        className: cn("hover:text-foreground transition-colors", className),
       },
       props
     ),
@@ -71,7 +65,7 @@ function BreadcrumbPage({ className, ...props }: React.ComponentProps<"span">) {
       role="link"
       aria-disabled="true"
       aria-current="page"
-      className={cn("text-foreground truncate font-normal", className)}
+      className={cn("text-foreground font-normal", className)}
       {...props}
     />
   );
@@ -90,19 +84,15 @@ function BreadcrumbSeparator({
       className={cn("[&>svg]:size-3.5", className)}
       {...props}
     >
-      {children ?? <ChevronRightIcon className="rtl:rotate-180" />}
+      {children ?? <ChevronRightIcon />}
     </li>
   );
 }
 
 function BreadcrumbEllipsis({
   className,
-  label = "More",
   ...props
-}: React.ComponentProps<"span"> & {
-  /** Read out in place of the dots. */
-  label?: string;
-}) {
+}: React.ComponentProps<"span">) {
   return (
     <span
       data-slot="breadcrumb-ellipsis"
@@ -115,7 +105,7 @@ function BreadcrumbEllipsis({
       {...props}
     >
       <MoreHorizontalIcon />
-      <span className="sr-only">{label}</span>
+      <span className="sr-only">More</span>
     </span>
   );
 }

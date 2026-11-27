@@ -15,7 +15,6 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@grasp-os/app-kit/components/pagination";
-import { Stack } from "@grasp-os/app-kit/components/stack";
 import {
   Table,
   TableBody,
@@ -52,7 +51,7 @@ const orders = [
 ] as const;
 
 export const TableExample = () => (
-  <Stack>
+  <div className="flex flex-col gap-4">
     <InputGroup>
       <InputGroupAddon>
         <SearchIcon />
@@ -116,5 +115,5 @@ export const TableExample = () => (
         </PaginationItem>
       </PaginationContent>
     </Pagination>
-  </Stack>
+  </div>
 );

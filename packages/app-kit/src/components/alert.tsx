@@ -4,13 +4,11 @@ import type { VariantProps } from "class-variance-authority";
 import * as React from "react";
 
 const alertVariants = cva(
-  "group/alert relative grid w-full gap-0.5 rounded-xl border px-4 py-3 text-left text-sm has-[[data-slot=alert-action][data-placement=corner]]:pe-18 has-[>svg]:grid-cols-[auto_1fr] has-[>svg]:gap-x-2.5 *:[svg]:row-span-2 *:[svg]:translate-y-0.5 *:[svg]:text-current *:[svg:not([class*='size-'])]:size-4",
+  "group/alert relative grid w-full gap-0.5 rounded-lg border px-4 py-3 text-left text-sm has-data-[slot=alert-action]:relative has-data-[slot=alert-action]:pr-18 has-[>svg]:grid-cols-[auto_1fr] has-[>svg]:gap-x-2.5 *:[svg]:row-span-2 *:[svg]:translate-y-0.5 *:[svg]:text-current *:[svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
         default: "bg-card text-card-foreground",
-        attention: "bg-card text-card-foreground *:[svg]:text-status-attention",
-        agreed: "bg-card text-card-foreground *:[svg]:text-status-agreed",
         destructive:
           "bg-card text-destructive *:data-[slot=alert-description]:text-destructive/90 *:[svg]:text-current",
       },
@@ -24,21 +22,12 @@ const alertVariants = cva(
 function Alert({
   className,
   variant,
-  live = "assertive",
   ...props
-}: React.ComponentProps<"div"> &
-  VariantProps<typeof alertVariants> & {
-    /**
-     * How a screen reader hears it: `assertive` interrupts (role `alert`),
-     * for what went wrong; `polite` waits its turn (role `status`), for
-     * where something stands.
-     */
-    live?: "assertive" | "polite";
-  }) {
+}: React.ComponentProps<"div"> & VariantProps<typeof alertVariants>) {
   return (
     <div
       data-slot="alert"
-      role={live === "polite" ? "status" : "alert"}
+      role="alert"
       className={cn(alertVariants({ variant }), className)}
       {...props}
     />
@@ -74,25 +63,11 @@ function AlertDescription({
   );
 }
 
-/*
- * `placement`: one small action in the corner (`corner`), or the choices a
- * confirmation asks for, in a row under what it says (`below`).
- */
-function AlertAction({
-  className,
-  placement = "corner",
-  ...props
-}: React.ComponentProps<"div"> & { placement?: "corner" | "below" }) {
+function AlertAction({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="alert-action"
-      data-placement={placement}
-      className={cn(
-        placement === "corner"
-          ? "absolute end-3 top-2.5"
-          : "mt-2.5 flex flex-wrap gap-2 group-has-[>svg]/alert:col-start-2",
-        className
-      )}
+      className={cn("absolute top-2.5 right-3", className)}
       {...props}
     />
   );

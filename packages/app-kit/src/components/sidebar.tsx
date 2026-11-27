@@ -4,11 +4,11 @@ import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
 import { Button } from "@grasp-os/app-kit/components/button";
 import { Input } from "@grasp-os/app-kit/components/input";
-import { Panel } from "@grasp-os/app-kit/components/panel";
 import { Separator } from "@grasp-os/app-kit/components/separator";
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@grasp-os/app-kit/components/sheet";
@@ -25,10 +25,11 @@ import type { VariantProps } from "class-variance-authority";
 import { PanelLeftIcon } from "lucide-react";
 import * as React from "react";
 
-// The sidebar's widths are CSS variables set in styles.css
-// (`[data-slot=sidebar-wrapper]`), not inline styles: a page sets its own
-// there. Whether the sidebar stays open is the page's to keep, through
-// `open` and `onOpenChange`; the kit writes no cookie or storage.
+// Changed from upstream, for an App page's frame: the sidebar's widths are
+// CSS variables set in styles.css (`[data-slot=sidebar-wrapper]`), not
+// inline styles, which the kit doesn't use; and it writes no cookie, which
+// the frame's sandbox refuses. Whether the sidebar stays open is the page's
+// to keep, through `open` and `onOpenChange`.
 const SIDEBAR_KEYBOARD_SHORTCUT = "b";
 
 interface SidebarContextProps {
@@ -68,7 +69,8 @@ function SidebarProvider({
   const [openMobile, setOpenMobile] = React.useState(false);
 
   // The sidebar's own state, unless the page controls it through `open`
-  // and `onOpenChange`.
+  // and `onOpenChange`. The React Compiler memoizes what upstream wraps in
+  // useCallback and useMemo (AGENTS.md).
   const [ownOpen, setOwnOpen] = React.useState(defaultOpen);
   const open = openProp ?? ownOpen;
   const setOpen = (value: boolean | ((current: boolean) => boolean)): void => {
@@ -120,7 +122,6 @@ function SidebarProvider({
   };
 
   return (
-    // The React Compiler memoizes the value; nothing here does by hand (AGENTS.md).
     // oxlint-disable-next-line react/jsx-no-constructed-context-values -- compiled
     <SidebarContext.Provider value={contextValue}>
       <div
@@ -145,10 +146,12 @@ function Sidebar({
   children,
   dir,
   label = "Sidebar",
+  description = "Displays the mobile sidebar.",
   ...props
 }: React.ComponentProps<"div"> & {
-  /** The sidebar's name on mobile, where it opens as a sheet. */
+  /** The sidebar's name and description on mobile, where it opens as a sheet. */
   label?: string;
+  description?: string;
   side?: "left" | "right";
   variant?: "sidebar" | "floating" | "inset";
   collapsible?: "offcanvas" | "icon" | "none";
@@ -163,7 +166,6 @@ function Sidebar({
           "bg-sidebar text-sidebar-foreground flex h-full w-(--sidebar-width) flex-col",
           className
         )}
-        dir={dir}
         {...props}
       >
         {children}
@@ -179,11 +181,12 @@ function Sidebar({
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
-          className="patterned bg-sidebar text-sidebar-foreground w-(--sidebar-width) p-0 [&>button]:hidden"
+          className="bg-sidebar text-sidebar-foreground w-(--sidebar-width) p-0 [&>button]:hidden"
           side={side}
         >
           <SheetHeader className="sr-only">
             <SheetTitle>{label}</SheetTitle>
+            <SheetDescription>{description}</SheetDescription>
           </SheetHeader>
           <div className="flex h-full w-full flex-col">{children}</div>
         </SheetContent>
@@ -191,56 +194,49 @@ function Sidebar({
     );
   }
 
-  const inset = variant === "floating" || variant === "inset";
-  let collapsedSize = "0px";
-  if (collapsible === "icon") {
-    // The floating and inset sidebars keep the shell's gap round the rail.
-    collapsedSize = inset
-      ? "calc(var(--sidebar-width-icon) + 2 * var(--app-shell-gap))"
-      : "var(--sidebar-width-icon)";
-  }
   return (
-    // The kit's Panel on its edge, as every collapsible region is: the
-    // sidebar's width eases between open and its rail (or nothing), and the
-    // page beside it narrows as it opens. It stays in view as the page
-    // scrolls.
-    <Panel
-      side={side}
-      open={state === "expanded"}
-      size="var(--sidebar-width)"
-      collapsedSize={collapsedSize}
-      bordered={!inset}
-      className={cn(
-        // The brand's ink with the Rings rising faintly from its foot
-        // (`patterned`, styles.css), reaching the window's edge.
-        "group peer patterned text-sidebar-foreground sticky top-0 hidden h-svh self-start md:flex",
-        inset && "p-(--app-shell-gap)",
-        className
-      )}
+    <div
+      className="group peer text-sidebar-foreground hidden md:block"
       data-state={state}
       data-collapsible={state === "collapsed" ? collapsible : ""}
       data-variant={variant}
       data-side={side}
       data-slot="sidebar"
-      dir={dir}
-      {...props}
     >
+      {/* This is what handles the sidebar gap on desktop */}
       <div
-        data-sidebar="sidebar"
-        data-slot="sidebar-inner"
-        // Its own width as it folds away, so it is cut off rather than
-        // squeezed; folding to its rail, it narrows with it.
+        data-slot="sidebar-gap"
         className={cn(
-          "bg-sidebar group-data-[variant=floating]:ring-sidebar-border flex h-full flex-none flex-col group-data-[collapsible=icon]:w-full group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:shadow-sm group-data-[variant=floating]:ring-1 group-data-[variant=inset]:bg-transparent",
-          // Inside the floating and inset sidebars' gap (the shell's).
-          inset
-            ? "w-[calc(var(--sidebar-width)-2*var(--app-shell-gap))]"
-            : "w-(--sidebar-width)"
+          "relative w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-linear",
+          "group-data-[collapsible=offcanvas]:w-0",
+          "group-data-[side=right]:rotate-180",
+          variant === "floating" || variant === "inset"
+            ? "group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4)))]"
+            : "group-data-[collapsible=icon]:w-(--sidebar-width-icon)"
         )}
+      />
+      <div
+        data-slot="sidebar-container"
+        data-side={side}
+        className={cn(
+          "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear data-[side=left]:left-0 data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] data-[side=right]:right-0 data-[side=right]:group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)] md:flex",
+          // Adjust the padding for floating and inset variants.
+          variant === "floating" || variant === "inset"
+            ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
+            : "group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[side=left]:border-r group-data-[side=right]:border-l",
+          className
+        )}
+        {...props}
       >
-        {children}
+        <div
+          data-sidebar="sidebar"
+          data-slot="sidebar-inner"
+          className="bg-sidebar group-data-[variant=floating]:ring-sidebar-border flex size-full flex-col group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:shadow-sm group-data-[variant=floating]:ring-1"
+        >
+          {children}
+        </div>
       </div>
-    </Panel>
+    </div>
   );
 }
 
@@ -307,25 +303,17 @@ function SidebarRail({
   );
 }
 
-function SidebarInset({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"main">) {
-  return useRender({
-    defaultTagName: "main",
-    props: mergeProps<"main">(
-      {
-        className: cn(
-          "bg-background relative flex w-full flex-1 flex-col md:peer-data-[variant=inset]:m-(--app-shell-gap) md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow-sm md:peer-data-[variant=inset]:peer-data-[collapsible=offcanvas]:ml-(--app-shell-gap) md:peer-data-[variant=inset]:dark:border md:peer-data-[variant=inset]:dark:shadow-xl",
-          className
-        ),
-      },
-      props
-    ),
-    render,
-    state: { slot: "sidebar-inset" },
-  });
+function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
+  return (
+    <main
+      data-slot="sidebar-inset"
+      className={cn(
+        "bg-background relative flex w-full flex-1 flex-col md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow-sm md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2",
+        className
+      )}
+      {...props}
+    />
+  );
 }
 
 function SidebarInput({
@@ -413,7 +401,7 @@ function SidebarGroupLabel({
     props: mergeProps<"div">(
       {
         className: cn(
-          "text-sidebar-foreground/70 ring-sidebar-ring ease-sidebar group-data-[collapsible=icon]:bg-sidebar-border flex h-8 shrink-0 items-center overflow-hidden rounded-md px-2 text-xs font-medium outline-hidden transition-[height,margin,color,background-color] duration-(--motion-duration) group-data-[collapsible=icon]:mx-2 group-data-[collapsible=icon]:mb-2 group-data-[collapsible=icon]:h-px group-data-[collapsible=icon]:rounded-none group-data-[collapsible=icon]:text-transparent focus-visible:ring-2 motion-reduce:transition-none [&>svg]:size-4 [&>svg]:shrink-0",
+          "text-sidebar-foreground/70 ring-sidebar-ring flex h-8 shrink-0 items-center rounded-md px-2 text-xs font-medium outline-hidden transition-[margin,opacity] duration-200 ease-linear group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0 focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
           className
         ),
       },
@@ -488,17 +476,13 @@ function SidebarMenuItem({ className, ...props }: React.ComponentProps<"li">) {
 }
 
 const sidebarMenuButtonVariants = cva(
-  "peer/menu-button group/menu-button ring-sidebar-ring hover:bg-sidebar-accent hover:text-sidebar-accent-foreground active:bg-sidebar-accent active:text-sidebar-accent-foreground data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground ease-sidebar [&>*:not(:first-child)]:ease-sidebar flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm outline-hidden transition-[width,height,padding,color,background-color] duration-(--motion-duration) group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-active:font-medium motion-reduce:transition-none [&_svg]:size-4 [&_svg]:shrink-0 [&>*:not(:first-child)]:transition-opacity [&>*:not(:first-child)]:duration-(--motion-duration) group-data-[collapsible=icon]:[&>*:not(:first-child)]:opacity-0 [&>kbd]:shrink-0 [&>span]:truncate",
+  "peer/menu-button group/menu-button ring-sidebar-ring hover:bg-sidebar-accent hover:text-sidebar-accent-foreground active:bg-sidebar-accent active:text-sidebar-accent-foreground data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm outline-hidden transition-[width,height,padding] group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-active:font-medium [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
   {
     variants: {
       variant: {
         default: "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
         outline:
           "bg-background hover:bg-sidebar-accent hover:text-sidebar-accent-foreground shadow-[0_0_0_1px_var(--sidebar-border)] hover:shadow-[0_0_0_1px_var(--sidebar-accent)]",
-        // A button that reads as a field, such as search: filled, quieter
-        // than what it opens; folded to the rail, an icon like the others.
-        field:
-          "bg-sidebar-accent/60 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-data-[collapsible=icon]:bg-transparent",
       },
       size: {
         default: "h-8 text-sm",
@@ -594,39 +578,18 @@ function SidebarMenuAction({
   });
 }
 
-const sidebarMenuBadgeVariants = cva(
-  "text-sidebar-foreground pointer-events-none absolute right-1 flex h-5 min-w-5 items-center justify-center rounded-md px-1 text-xs font-medium tabular-nums select-none group-data-[collapsible=icon]:hidden",
-  {
-    variants: {
-      /**
-       * `beside`: after its menu button, as shadcn's, set by the button's
-       * size. `inside`: in the button, so the count is part of its name;
-       * placed for a button of the default size.
-       */
-      placement: {
-        beside:
-          "peer-hover/menu-button:text-sidebar-accent-foreground peer-data-active/menu-button:text-sidebar-accent-foreground peer-data-[size=default]/menu-button:top-1.5 peer-data-[size=lg]/menu-button:top-2.5 peer-data-[size=sm]/menu-button:top-1",
-        inside: "top-1.5",
-      },
-    },
-    defaultVariants: {
-      placement: "beside",
-    },
-  }
-);
-
 function SidebarMenuBadge({
   className,
-  placement = "beside",
   ...props
-}: React.ComponentProps<"div"> &
-  VariantProps<typeof sidebarMenuBadgeVariants>) {
+}: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="sidebar-menu-badge"
       data-sidebar="menu-badge"
-      data-placement={placement}
-      className={cn(sidebarMenuBadgeVariants({ placement }), className)}
+      className={cn(
+        "text-sidebar-foreground peer-hover/menu-button:text-sidebar-accent-foreground peer-data-active/menu-button:text-sidebar-accent-foreground pointer-events-none absolute right-1 flex h-5 min-w-5 items-center justify-center rounded-md px-1 text-xs font-medium tabular-nums select-none group-data-[collapsible=icon]:hidden peer-data-[size=default]/menu-button:top-1.5 peer-data-[size=lg]/menu-button:top-2.5 peer-data-[size=sm]/menu-button:top-1",
+        className
+      )}
       {...props}
     />
   );
@@ -652,8 +615,8 @@ function SidebarMenuSkeleton({
           data-sidebar="menu-skeleton-icon"
         />
       )}
-      {/* Seven tenths wide, so a list of them looks like text. No width
-          prop: it would take a style attribute, which the kit doesn't use. */}
+      {/* Seven tenths wide, where upstream picks a random width: that takes
+          a style attribute, which the kit doesn't use. */}
       <Skeleton
         className="h-4 max-w-7/10 flex-1"
         data-sidebar="menu-skeleton-text"

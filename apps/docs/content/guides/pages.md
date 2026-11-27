@@ -26,12 +26,6 @@ Grasp generates the route tree from these files, as TanStack does in any project
 ```tsx src/routes/tasks.$taskId.tsx
 import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  PageHeader,
-  PageHeaderActions,
-  PageHeaderContent,
-  PageHeaderTitle,
-} from "@grasp-os/app-kit/components/page-header";
 import { Skeleton } from "@grasp-os/app-kit/components/skeleton";
 import { api } from "@server/_generated/api";
 import type { Id } from "@server/_generated/dataModel";
@@ -49,19 +43,15 @@ const Task = () => {
   }
   return (
     <main className="p-6">
-      <PageHeader>
-        <PageHeaderContent>
-          <PageHeaderTitle>{task.title}</PageHeaderTitle>
-        </PageHeaderContent>
-        <PageHeaderActions>
-          <Button
-            disabled={task.done}
-            onClick={async () => await complete({ id: task._id })}
-          >
-            Complete
-          </Button>
-        </PageHeaderActions>
-      </PageHeader>
+      <header className="flex flex-wrap items-center justify-between gap-4">
+        <h1 className="text-2xl font-semibold tracking-tight">{task.title}</h1>
+        <Button
+          disabled={task.done}
+          onClick={async () => await complete({ id: task._id })}
+        >
+          Complete
+        </Button>
+      </header>
     </main>
   );
 };
@@ -156,4 +146,6 @@ It is bundled into the App's build and runs on the kit's React. An import of a p
 
 ## How Pages look
 
-Pages are built from `@grasp-os/app-kit`, the same components and theme as Grasp itself: buttons, forms, tables, cards, charts and more, each under `@grasp-os/app-kit/components/<name>`. Lay them out with Tailwind's layout classes and leave their look to the components; Grasp's checks refuse raw colours and restyled components, so every App looks like Grasp.
+Pages are built from `@grasp-os/app-kit`: the stock default components on Base UI, in their neutral theme, light and dark. Buttons, inputs, selects, tables, cards, tabs, dialogs, charts and more, each under `@grasp-os/app-kit/components/<name>` with its default variants and sizes. Beside them are the parts bound to your App's data: `DataGrid` (`@grasp-os/app-kit/components/data-grid`), the form and its fields (`@grasp-os/app-kit/form`) and `RichText` (`@grasp-os/app-kit/components/rich-text`).
+
+There are no layout components: lay a Page out with Tailwind's layout classes on plain elements (`flex`, `grid`, `gap-4`, `p-6`), and give it its title as a heading (`<h1 className="text-2xl font-semibold tracking-tight">`). Leave the components' look to them; Grasp's checks refuse raw colours, arbitrary values and restyled components, and name the variant or theme colour to use instead.

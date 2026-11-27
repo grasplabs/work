@@ -24,11 +24,10 @@ import {
   DialogTrigger,
 } from "@grasp-os/app-kit/components/dialog";
 import { Field, FieldLabel } from "@grasp-os/app-kit/components/field";
-import { Inline } from "@grasp-os/app-kit/components/inline";
 import { Input } from "@grasp-os/app-kit/components/input";
 
 export const DialogExample = () => (
-  <Inline>
+  <div className="flex flex-wrap items-center gap-2">
     <Dialog>
       <DialogTrigger render={<Button />}>Rename</DialogTrigger>
       <DialogContent>
@@ -67,5 +66,5 @@ export const DialogExample = () => (
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
-  </Inline>
+  </div>
 );

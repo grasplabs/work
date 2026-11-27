@@ -18,7 +18,7 @@ export interface Board {
   noun: string;
   /** Its second text field: who or what a record is for. */
   party: string;
-  /** Its stages in order, each by its label; the last is done. */
+  /** Its stages in order, each by its label. */
   stages: Readonly<Record<string, string>>;
   /** Whether a record has an amount in euros. */
   money: boolean;
@@ -183,7 +183,6 @@ export const boardFiles = ({
   stages,
   money,
 }: Board): Record<string, string> => {
-  const done = Object.keys(stages).at(-1);
   const columns = [
     `{ field: "title", label: ${JSON.stringify(noun)} }`,
     JSON.stringify(party),
@@ -245,14 +244,6 @@ import {
   CardTitle,
 } from "@grasp-os/app-kit/components/card";
 import { DataGrid } from "@grasp-os/app-kit/components/data-grid";
-import { Grid } from "@grasp-os/app-kit/components/grid";
-import {
-  PageHeader,
-  PageHeaderContent,
-  PageHeaderDescription,
-  PageHeaderTitle,
-} from "@grasp-os/app-kit/components/page-header";
-import { Stat } from "@grasp-os/app-kit/components/stat";
 import { api } from "@server/_generated/api";
 import { createFileRoute } from "@tanstack/react-router";
 
@@ -263,28 +254,26 @@ const Board = () => {
   const setStage = useMutation(api.board.setStage);
   return (
     <main className="flex flex-col gap-6 p-6">
-      <PageHeader>
-        <PageHeaderContent>
-          <PageHeaderTitle>${jsxText(title)}</PageHeaderTitle>
-          <PageHeaderDescription>${jsxText(intro)}</PageHeaderDescription>
-        </PageHeaderContent>
-      </PageHeader>
-      <Grid columns={4}>
+      <header className="flex flex-col gap-1">
+        <h1 className="text-2xl font-semibold tracking-tight">${jsxText(title)}</h1>
+        <p className="text-muted-foreground text-sm">${jsxText(intro)}</p>
+      </header>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {Object.entries(stages).map(([stage, label]) => (
           <Card key={stage} size="sm">
             <CardHeader>
               <CardTitle>{label}</CardTitle>
             </CardHeader>
             <CardContent>
-              <Stat variant={stage === "${done}" ? "done" : "default"}>
+              <p className="text-2xl font-semibold tabular-nums">
                 {counts === undefined
                   ? "–"
                   : (counts.find((group) => group.stage === stage)?.count ?? 0)}
-              </Stat>
+              </p>
             </CardContent>
           </Card>
         ))}
-      </Grid>
+      </div>
       <DataGrid
         args={() => ({})}
         columns={[

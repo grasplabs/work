@@ -1,5 +1,3 @@
-"use client";
-
 import { Toggle as TogglePrimitive } from "@base-ui/react/toggle";
 import { cn } from "@grasp-os/app-kit/lib/utils";
 import { cva } from "class-variance-authority";

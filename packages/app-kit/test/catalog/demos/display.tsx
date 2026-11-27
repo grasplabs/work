@@ -25,10 +25,8 @@ import {
   CardAction,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
-  CardRow,
-  CardRowControl,
-  CardRowLabel,
   CardTitle,
 } from "@grasp-os/app-kit/components/card";
 import {
@@ -86,7 +84,6 @@ import { ScrollArea } from "@grasp-os/app-kit/components/scroll-area";
 import { Separator } from "@grasp-os/app-kit/components/separator";
 import { Skeleton } from "@grasp-os/app-kit/components/skeleton";
 import { Spinner } from "@grasp-os/app-kit/components/spinner";
-import { Stat } from "@grasp-os/app-kit/components/stat";
 import {
   Table,
   TableBody,
@@ -96,7 +93,7 @@ import {
   TableHeader,
   TableRow,
 } from "@grasp-os/app-kit/components/table";
-import { ChevronRightIcon, InfoIcon, LayoutGridIcon } from "lucide-react";
+import { ChevronRightIcon, InfoIcon } from "lucide-react";
 
 const AccordionDemo = () => (
   <Accordion defaultValue={["shipping"]}>
@@ -159,26 +156,22 @@ const CardDemo = () => (
         <p className="text-2xl font-semibold tabular-nums">€12,400</p>
       </CardContent>
     </Card>
-    <Card variant="panel">
+    <Card size="sm">
       <CardHeader>
         <CardTitle>Sign-in</CardTitle>
         <CardDescription>How people at Acme sign in.</CardDescription>
         <CardAction>
           <Button size="sm" variant="outline">
-            Save
+            Edit
           </Button>
         </CardAction>
       </CardHeader>
-      <CardRow>
-        <CardRowLabel>
-          <span>Provider</span>
-          <p className="text-muted-foreground">Where accounts live.</p>
-        </CardRowLabel>
-        <CardRowControl>Microsoft 365</CardRowControl>
-      </CardRow>
       <CardContent>
         <p>Everyone signs in with their work account.</p>
       </CardContent>
+      <CardFooter>
+        <Button size="sm">Save</Button>
+      </CardFooter>
     </Card>
   </div>
 );
@@ -283,58 +276,30 @@ const ItemDemo = () => (
         <ItemDescription>Every Monday at 9:00.</ItemDescription>
       </ItemContent>
     </Item>
-    {/* A card on its own, as an App a chat builds above its box. */}
-    <Item
-      render={<a aria-label="Invoice desk" href="#app" />}
-      size="sm"
-      variant="card"
-    >
-      <ItemMedia variant="tile">
-        <LayoutGridIcon />
+    {/* A link, as a row that opens a record. */}
+    <Item render={<a aria-label="Invoice desk" href="#app" />} size="sm">
+      <ItemMedia variant="icon">
+        <InfoIcon />
       </ItemMedia>
       <ItemContent>
         <ItemTitle>Invoice desk</ItemTitle>
         <ItemDescription>Unpublished changes</ItemDescription>
       </ItemContent>
+      <ItemActions>
+        <ChevronRightIcon aria-hidden="true" />
+      </ItemActions>
     </Item>
-    {/* Questions to start from: buttons in a named list. */}
-    <ItemGroup
-      aria-label="Questions to start with"
-      render={<ul />}
-      spacing="tight"
-    >
-      <li>
-        <Item
-          render={
-            <button
-              aria-label="Where does the most time still go?"
-              type="button"
-            />
-          }
-          size="sm"
-          variant="quiet"
-        >
-          Where does the most time still go?
-        </Item>
-      </li>
-    </ItemGroup>
-    <ItemGroup
-      aria-label="Questions to start from"
-      render={<ul />}
-      variant="card"
-    >
-      <li>
-        <Item
-          render={<button aria-label="Who needs Grasp today?" type="button" />}
-          size="sm"
-          variant="row"
-        >
-          <ItemContent>Who needs Grasp today?</ItemContent>
-          <ItemActions>
-            <ChevronRightIcon aria-hidden="true" />
-          </ItemActions>
-        </Item>
-      </li>
+    <ItemGroup aria-label="Recent reports">
+      <Item variant="muted">
+        <ItemContent>
+          <ItemTitle>October</ItemTitle>
+        </ItemContent>
+      </Item>
+      <Item variant="muted">
+        <ItemContent>
+          <ItemTitle>September</ItemTitle>
+        </ItemContent>
+      </Item>
     </ItemGroup>
   </div>
 );
@@ -419,21 +384,6 @@ const TableDemo = () => (
   </Table>
 );
 
-const StatDemo = () => (
-  <dl className="flex gap-8">
-    <div className="flex flex-col gap-0.5">
-      <dt className="text-muted-foreground text-sm">Hours handed back</dt>
-      <Stat render={<dd />}>1,284</Stat>
-    </div>
-    <div className="flex flex-col gap-0.5">
-      <dt className="text-muted-foreground text-sm">Waiting on you</dt>
-      <Stat render={<dd />} variant="attention">
-        3
-      </Stat>
-    </div>
-  </dl>
-);
-
 const RichTextDemo = () => (
   <RichText
     value={
@@ -453,7 +403,6 @@ export const displayDemos = {
   chart: ChartDemo,
   collapsible: CollapsibleDemo,
   empty: EmptyDemo,
-  stat: StatDemo,
   item: ItemDemo,
   kbd: KbdDemo,
   progress: ProgressDemo,
