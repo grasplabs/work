@@ -1,3 +1,4 @@
+import { actorOf } from "@grasp-os/shared/audit";
 import {
   chatFileMaxBytes,
   chatFilePath,
@@ -27,6 +28,7 @@ import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider, fakeProviderFor } from "./model-provider.ts";
 import {
+  openRpc,
   outcome,
   routed,
   signedIn,
@@ -558,6 +560,102 @@ describe("files attached to a question", slow, () => {
       afterwards: "ok",
       carriedStays: "agent.file_not_found",
     });
+  });
+
+  it("are attached once for a key, sent again on the next connection after the one it went on dropped mid-upload, and carried once", async () => {
+    const ann = await signedInApi(idp, "user");
+    const chat = await ann.api.chats.create("Dropped");
+    const key = crypto.randomUUID();
+    const plan = { name: "plan.md", bytes: utf8("# Plan\n\nShip it.") };
+    // The connection drops while the file is on its way: core takes it,
+    // and the page never hears its answer.
+    const dropping = await openRpc(ann.session);
+    const lost = outcome(
+      dropping.core.authenticate().chats.attachFile(chat.id, plan, key)
+    );
+    dropping.socket.close(1001, "Gone");
+    await vi.waitFor(
+      async () => {
+        await expect(keptFiles(ann)).resolves.toBe(1);
+      },
+      { timeout: 10_000 }
+    );
+    // However far its answer got before the socket closed.
+    await lost;
+
+    // The page sends it again on its next connection, twice at once as a
+    // page that retries early would: the file the first attached.
+    const [file, again] = await Promise.all([
+      ann.api.chats.attachFile(chat.id, plan, key),
+      ann.api.chats.attachFile(chat.id, plan, key),
+    ]);
+    await fakeProvider(says("Read it."));
+    const follower = await follow(ann, chat.id);
+    await ann.api.chats.send(chat.id, {
+      text: "Read the plan.",
+      model,
+      files: [file.id],
+    });
+    await settled(ann, chat.id);
+    const question = follower.messages().find(({ role }) => role === "user");
+    const events = await allEvents();
+
+    expect({
+      same: again.id === file.id,
+      kept: await keptFiles(ann),
+      attached: events.filter(
+        ({ action, target }) =>
+          action === "chat.file_attached" && target?.id === chat.id
+      ).length,
+      carried:
+        question?.role === "user"
+          ? question.files?.map(({ id }) => id)
+          : undefined,
+    }).toStrictEqual({
+      same: true,
+      kept: 1,
+      attached: 1,
+      carried: [file.id],
+    });
+    // Another chat's key says nothing of a file there, and a malformed key
+    // is refused.
+    const other = await ann.api.chats.create("Elsewhere");
+    await expect(
+      outcome(ann.api.chats.attachFile(other.id, plan, key))
+    ).resolves.toBe("agent.invalid_request");
+    await expect(
+      outcome(ann.api.chats.attachFile(chat.id, plan, "again"))
+    ).resolves.toBe("agent.invalid_request");
+  });
+
+  it("are attached once for a key two calls carry at once, each past core's look for a repeat before either was kept", async () => {
+    const ann = await signedInApi(idp, "user");
+    const chat = await ann.api.chats.create("At once");
+    const key = crypto.randomUUID();
+    const plan = {
+      name: "plan.md",
+      type: "md",
+      bytes: 6,
+      text: "# Plan",
+    } as const;
+
+    // As core hands both over once each found no file for the key and
+    // read its bytes (chats-rpc.ts): the object takes one, then the other.
+    const [first, second] = await runInDurableObject(
+      objectOf(ann),
+      (instance) => {
+        const by = actorOf({ userId: ann.userId, staff: false });
+        return [
+          instance.attachFile(chat.id, ann.userId, plan, by, key),
+          instance.attachFile(chat.id, ann.userId, plan, by, key),
+        ];
+      }
+    );
+
+    expect({
+      same: first !== undefined && second?.id === first.id,
+      kept: await keptFiles(ann),
+    }).toStrictEqual({ same: true, kept: 1 });
   });
 
   it("are their chat's person's alone, carried by one question, and go with the chat", async () => {
