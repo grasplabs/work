@@ -1,5 +1,6 @@
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { AppShellNavRow } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01-sidebar";
 import { Badge } from "@grasp-os/ui/components/badge";
 import {
   BrainIcon,
@@ -17,11 +18,7 @@ import type { IconData } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
 import { Link, useLocation, useMatch } from "@tanstack/react-router";
 
-import type {
-  LinkLook,
-  SidebarRow,
-  SidebarSection,
-} from "../frame/sidebar.tsx";
+import type { SidebarSection } from "../frame/sidebar.tsx";
 import { WayOut } from "../frame/way-out.tsx";
 import type { Outside } from "../frame/way-out.tsx";
 import { atlasOf, TEAM_FOLDER } from "./brain-atlas.ts";
@@ -107,11 +104,11 @@ export const useBrainSection = (
       | "/brain/opportunities"
       | "/brain/skills"
       | "/brain/sources"
-  ): SidebarRow => ({
+  ): AppShellNavRow => ({
     id: to,
     label,
     icon,
-    render: (look) => <Link {...look} to={to} />,
+    render: <Link to={to} />,
     current: pathname === to,
   });
   const parts: TreeNode[] = atlas.regions
@@ -145,14 +142,20 @@ export const useBrainSection = (
     title: t`Brain`,
     icon: BrainIcon,
     // Its name opens the Brain's overview: no Overview row of its own.
-    home: (look) => <Link {...look} to="/brain" />,
+    home: (lead, title) => (
+      <Link to="/brain">
+        {lead}
+        {title}
+      </Link>
+    ),
     homeCurrent: overview,
     back: {
       label: t`Back`,
-      render: (look) => <WayOut {...look} outside={outside} />,
+      link: <WayOut outside={outside} />,
     },
     groups: [
       {
+        id: "pages",
         rows: [
           ...(company === undefined
             ? []
@@ -161,12 +164,8 @@ export const useBrainSection = (
                   label: company.title,
                   id: company.id,
                   icon: BuildingIcon,
-                  render: (look: LinkLook) => (
-                    <Link
-                      {...look}
-                      params={{ noteId: company.id }}
-                      to="/brain/$noteId"
-                    />
+                  render: (
+                    <Link params={{ noteId: company.id }} to="/brain/$noteId" />
                   ),
                   current: noteId === company.id,
                 },
@@ -206,6 +205,7 @@ export const useBrainSection = (
         ],
       },
       {
+        id: "tree",
         label: t`In the brain`,
         rows: [],
         content: (

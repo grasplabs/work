@@ -47,7 +47,7 @@ import {
 } from "../lib/menu";
 import type { MenuKind } from "../lib/menu";
 import { focusRing, menuStyles, scrollbarHidden } from "../lib/styles";
-import { radius } from "../lib/tokens.stylex";
+import { radius, size, space } from "../lib/tokens.stylex";
 import { popup } from "../lib/tokens.values";
 import { slotProps, slotted } from "../lib/utils";
 import type { LayoutStyle } from "../lib/utils";
@@ -302,6 +302,10 @@ export interface ContextMenuSubContentProps {
 }
 
 const styles = stylex.create({
+  // The panel: a right-click menu's narrowest, tighter than a dropdown's.
+  content: {
+    minWidth: `min(${size.contextMenuWidth}, 100vw - 2 * ${space.popupGutter})`,
+  },
   // The area: as it is, with the shared focus ring when the keyboard reaches it.
   area: {
     display: "block",
@@ -431,6 +435,7 @@ export const ContextMenuContent = ({
       menuStyles.panel,
       menuStyles.motion,
       scrollbarHidden,
+      styles.content,
       style
     )}
   >

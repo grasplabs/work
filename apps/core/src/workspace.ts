@@ -1594,13 +1594,20 @@ export class Workspace extends DurableObject<Env> {
       : this.#graspChat(made.chatId, personId);
   }
 
-  /** The chat a request with `key` was kept for, and when, if one was within a day. */
+  /**
+   * The chat a request with `key` was kept for, and when, if one was
+   * within a day, with the file an `attach` attached.
+   */
   #requested(
-    kind: "create" | "send",
+    kind: "create" | "send" | "attach",
     key: string
-  ): { chatId: ChatId; at: Date } | undefined {
+  ): { chatId: ChatId; at: Date; fileId: string | null } | undefined {
     return this.#db
-      .select({ chatId: chatRequestKeys.chatId, at: chatRequestKeys.at })
+      .select({
+        chatId: chatRequestKeys.chatId,
+        at: chatRequestKeys.at,
+        fileId: chatRequestKeys.fileId,
+      })
       .from(chatRequestKeys)
       .where(
         and(
@@ -1635,8 +1642,16 @@ export class Workspace extends DurableObject<Env> {
     );
   }
 
-  /** Keeps `key` for what `chatId` just took, and drops the keys past their day. */
-  #keepRequest(kind: "create" | "send", key: string, chatId: ChatId): void {
+  /**
+   * Keeps `key` for what `chatId` just took (for an `attach`, the file
+   * `fileId`), and drops the keys past their day.
+   */
+  #keepRequest(
+    kind: "create" | "send" | "attach",
+    key: string,
+    chatId: ChatId,
+    fileId: string | null = null
+  ): void {
     const now = Date.now();
     this.#db
       .delete(chatRequestKeys)
@@ -1644,13 +1659,55 @@ export class Workspace extends DurableObject<Env> {
       .run();
     this.#db
       .insert(chatRequestKeys)
-      .values({ kind, key, chatId, at: new Date(now) })
-      // A question asked again after a restart lost it (`#questionStands`).
+      .values({ kind, key, chatId, fileId, at: new Date(now) })
+      // A question asked again after a restart lost it (`#questionStands`),
+      // or a file attached again after it was removed (`#attachedWith`).
       .onConflictDoUpdate({
         target: [chatRequestKeys.kind, chatRequestKeys.key],
-        set: { chatId, at: new Date(now) },
+        set: { chatId, fileId, at: new Date(now) },
       })
       .run();
+  }
+
+  /**
+   * The file `personId`'s chat attached with `key` within a day, as the
+   * first call attached it: what a repeat of `attachFile` answers, and
+   * what its caller asks first, so a repeat's bytes aren't read again
+   * (chats-rpc.ts).
+   */
+  fileAttachedWith(
+    chatId: unknown,
+    personId: string,
+    key: string
+  ): ChatFile | undefined {
+    const { id } = this.#graspChat(chatId, personId);
+    return this.#attachedWith(id, key);
+  }
+
+  /**
+   * The file chat `chatId` attached with `key` within a day, if it still
+   * has it: one removed since is attached anew. Another chat's key is
+   * refused, as it says nothing of a file here.
+   */
+  #attachedWith(chatId: ChatId, key: string): ChatFile | undefined {
+    const taken = this.#requested("attach", key);
+    if (taken === undefined) {
+      return undefined;
+    }
+    if (taken.chatId !== chatId) {
+      throw agentErrors.create("agent.invalid_request");
+    }
+    const row =
+      taken.fileId === null
+        ? undefined
+        : this.#db
+            .select(chatFileCard)
+            .from(chatFiles)
+            .where(
+              and(eq(chatFiles.chatId, chatId), eq(chatFiles.id, taken.fileId))
+            )
+            .get();
+    return row === undefined ? undefined : chatFileOf(row);
   }
 
   /**
@@ -1671,13 +1728,25 @@ export class Workspace extends DurableObject<Env> {
           bytes: number;
           picture: Uint8Array;
         },
-    by: AuditActor
+    by: AuditActor,
+    /**
+     * The page's key for this file (`ChatsApi.attachFile`): a repeat
+     * answers the file the first call attached, and attaches nothing.
+     * Checked and kept in the same transaction as the file, so of two at
+     * once only one attaches it.
+     */
+    key?: string
   ): ChatFile {
     const { id } = this.#graspChat(chatId, personId);
     if (this.#deleting.has(id)) {
       throw agentErrors.create("agent.chat_not_found");
     }
     const attached = this.ctx.storage.transactionSync(() => {
+      const before =
+        key === undefined ? undefined : this.#attachedWith(id, key);
+      if (before !== undefined) {
+        return before;
+      }
       const [kept] = this.#db
         .select({ files: count() })
         .from(chatFiles)
@@ -1726,10 +1795,13 @@ export class Workspace extends DurableObject<Env> {
         type: file.type,
         bytes: file.bytes,
       });
-      return row;
+      if (key !== undefined) {
+        this.#keepRequest("attach", key, id, row.id);
+      }
+      return chatFileOf(row);
     });
     this.#deliverAudit();
-    return chatFileOf(attached);
+    return attached;
   }
 
   /**

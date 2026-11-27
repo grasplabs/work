@@ -1,11 +1,11 @@
 import { canBuild, isMemberAdmin } from "@grasp-os/shared/roles";
+import { AppShellPage } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
 import { Button } from "@grasp-os/ui/components/button";
 import { PageHeader } from "@grasp-os/ui/components/page-header";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
 
 import { LoadingLines, PageNotLoaded } from "../frame/page-states.tsx";
-import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { MakeSomethingLink } from "../make/make-link.tsx";
 import {
@@ -57,7 +57,7 @@ const Workflows = () => {
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Workflows` }]} />
-      <Page>
+      <AppShellPage>
         <PageHeader actions={<WorkflowsActions />} title={t`Workflows`} />
         <WorkflowRows
           admin={isMemberAdmin(identity)}
@@ -65,7 +65,7 @@ const Workflows = () => {
           rows={page.overview.data}
           triggers={page.triggers}
         />
-      </Page>
+      </AppShellPage>
     </>
   );
 };
@@ -80,10 +80,10 @@ const WorkflowsPending = () => {
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Workflows` }]} />
-      <Page>
+      <AppShellPage>
         <PageHeader actions={<WorkflowsActions />} title={t`Workflows`} />
         <LoadingLines lines={6} />
-      </Page>
+      </AppShellPage>
     </>
   );
 };

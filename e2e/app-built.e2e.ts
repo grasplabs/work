@@ -75,8 +75,12 @@ test("a builder makes an App from what they want done, shares it with their team
   const chat = page.getByRole("region", { name: "Chat" });
   await expect(chat.getByText(appReady)).toBeVisible(agentTurn);
   // Where it stands, in the bar: beside the docked chat it gives way to
-  // the name and Share, so it is there, unseen.
-  await expect(page.getByText("Only you see this")).toBeAttached();
+  // the name and Share, so it is there, unseen. The bar says it once
+  // Grasp's turn is over, its check of the drafts it wrote included
+  // ("Checking the App…"), not as the chat's words show: on a loaded
+  // stack that check takes seconds more, so it is waited for as long as
+  // an agent's turn.
+  await expect(page.getByText("Only you see this")).toBeAttached(agentTurn);
 
   // The preview is the draft's page, on a store of its own.
   const preview = page.getByRole("region", { name: /, your version$/u });

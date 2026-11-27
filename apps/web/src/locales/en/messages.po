@@ -3086,7 +3086,7 @@ msgstr "Answered: {question}"
 msgid "Answered: {title}"
 msgstr "Answered: {title}"
 
-#: src/chat/sidebar-chats.tsx
+#: src/frame/ui-words.tsx
 msgid "Answering"
 msgstr "Answering"
 
@@ -4767,7 +4767,6 @@ msgstr "Cliffs"
 #: src/connections/connected-dialog.tsx
 #: src/connections/connection-list.tsx
 #: src/connections/request-app-dialog.tsx
-#: src/frame/app-sidebar.tsx
 #: src/frame/panels/head.tsx
 #: src/frame/ui-words.tsx
 #: src/interview/destination.tsx
@@ -6043,6 +6042,11 @@ msgctxt "a failed run's error code, folded away"
 msgid "Details"
 msgstr "Details"
 
+#: src/frame/ui-words.tsx
+msgctxt "a page's side panel"
+msgid "Details"
+msgstr "Details"
+
 #: src/inbox/decision-confirmation.tsx
 msgctxt "what else an answer to a decision says"
 msgid "Details"
@@ -6374,8 +6378,8 @@ msgstr "Door"
 msgid "Dots"
 msgstr "Dots"
 
-#: src/chat/sidebar-chats.tsx
 #: src/frame/panels/rename.tsx
+#: src/frame/ui-words.tsx
 msgid "Double-click or press F2 to rename"
 msgstr "Double-click or press F2 to rename"
 
@@ -10280,6 +10284,7 @@ msgstr "Loading the value"
 #: src/activity/audit-log.tsx
 #: src/apps/app-workspace.tsx
 #: src/frame/page-states.tsx
+#: src/frame/ui-words.tsx
 #: src/settings/erasures.tsx
 #: src/settings/section.tsx
 msgid "Loading…"
@@ -10840,11 +10845,11 @@ msgstr "More for {label}"
 #: src/agents/agent-overview.tsx
 #: src/agents/agent-page.tsx
 #: src/apps/app-page.tsx
+#: src/frame/ui-words.tsx
 #: src/settings/event-sources.tsx
 msgid "More for {name}"
 msgstr "More for {name}"
 
-#: src/chat/sidebar-chats.tsx
 #: src/projects/project-view.tsx
 msgid "More for {title}"
 msgstr "More for {title}"
@@ -14580,13 +14585,14 @@ msgstr "Removing"
 #: src/chat/sidebar-chats.tsx
 #: src/frame/panels/head.tsx
 #: src/frame/panels/rename.tsx
+#: src/frame/ui-words.tsx
 #: src/settings/teams.tsx
 msgid "Rename"
 msgstr "Rename"
 
-#: src/chat/sidebar-chats.tsx
-msgid "Rename {title}"
-msgstr "Rename {title}"
+#: src/frame/ui-words.tsx
+msgid "Rename {name}"
+msgstr "Rename {name}"
 
 #: src/chat/chat-window.tsx
 msgid "Rename chat"
@@ -14736,6 +14742,10 @@ msgstr "Resize"
 #: src/frame/panels/chat-panels-beside.tsx
 msgid "Resize the chat"
 msgstr "Resize the chat"
+
+#: src/frame/ui-words.tsx
+msgid "Resize the panel"
+msgstr "Resize the panel"
 
 #: src/frame/panels/float-window.tsx
 msgid "Resize the panel's height"
@@ -15495,7 +15505,7 @@ msgid "Search apps"
 msgstr "Search apps"
 
 #: src/chat/chat-window.tsx
-#: src/frame/app-sidebar.tsx
+#: src/frame/ui-words.tsx
 msgid "Search chats"
 msgstr "Search chats"
 
@@ -16101,9 +16111,10 @@ msgstr "Show older versions"
 msgid "Show or hide the chat"
 msgstr "Show or hide the chat"
 
-#: src/frame/app-frame.tsx
-#: src/frame/app-sidebar.tsx
-#: src/frame/site-header.tsx
+#: src/frame/ui-words.tsx
+msgid "Show or hide the panel"
+msgstr "Show or hide the panel"
+
 #: src/frame/ui-words.tsx
 msgid "Show or hide the sidebar"
 msgstr "Show or hide the sidebar"
@@ -16168,7 +16179,6 @@ msgstr "Showing the first part of this run"
 msgid "Shown with the App. It opens the App to nobody: who may use it is who it is shared with."
 msgstr "Shown with the App. It opens the App to nobody: who may use it is who it is shared with."
 
-#: src/frame/app-sidebar.tsx
 #: src/frame/ui-words.tsx
 msgid "Sidebar"
 msgstr "Sidebar"
@@ -19191,7 +19201,7 @@ msgstr "Unlinked a chat app account"
 msgid "Unpin"
 msgstr "Unpin"
 
-#: src/chat/sidebar-chats.tsx
+#: src/frame/ui-words.tsx
 msgid "Unread"
 msgstr "Unread"
 

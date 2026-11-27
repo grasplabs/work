@@ -32,11 +32,11 @@ import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
 
 import type { GridRow, LiveStatus } from "../clients/grid.ts";
-import { LoadingLines } from "../frame/page.tsx";
 import { channelWords } from "../rollout/channel-words.ts";
 import type { PromotionEvent } from "../rollout/channels.ts";
 import type { ChannelProgress } from "../rollout/progress.ts";
 import { Channels, openWords, RecentChanges } from "./channel-parts.tsx";
+import { LoadingLines } from "./failure.tsx";
 import { LoadingFigure, MissingFigure } from "./figures.tsx";
 import { PagePart } from "./page-part.tsx";
 import { channelsId } from "./platform-nav.tsx";

@@ -30,7 +30,7 @@ import * as stylex from "@stylexjs/stylex";
 import { Await, Link } from "@tanstack/react-router";
 import { Suspense, use } from "react";
 
-import { LoadingLines } from "../frame/page.tsx";
+import { LoadingLines } from "./failure.tsx";
 import { EmptyPart, PagePart, PartNote } from "./page-part.tsx";
 import {
   microsPerDollar,

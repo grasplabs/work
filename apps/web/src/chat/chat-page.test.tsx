@@ -122,9 +122,18 @@ const opened = async (
   /** How core takes a question, once it is asked: at once by default. */
   taking: () => Promise<void> = async () => {
     await Promise.resolve();
-  }
+  },
+  /**
+   * How each attaching of a file goes, in turn, before they all go
+   * through: a failure throws after core took it, its answer lost.
+   */
+  attaches: (Error | undefined)[] = []
 ) => {
   const asked: string[] = [];
+  /** The key each attaching of a file went with, in turn. */
+  const attachedWith: (string | undefined)[] = [];
+  /** The files each question sent names. */
+  const named: string[][] = [];
   const chats = {
     models: async () => await Promise.resolve(["openai/gpt-5"]),
     efforts: async () => await Promise.resolve({}),
@@ -138,8 +147,22 @@ const opened = async (
       return await Promise.withResolvers<never>().promise;
     },
     agents: async () => await Promise.resolve([]),
+    attachFile: async (
+      _chatId: string,
+      file: { name: string },
+      key?: string
+    ) => {
+      attachedWith.push(key);
+      const id = `file-${attachedWith.length}`;
+      const failure = attaches.shift();
+      if (failure !== undefined) {
+        throw failure;
+      }
+      return await Promise.resolve({ id, name: file.name, type: "csv" });
+    },
     send: async (chatId: string, question: ChatQuestion) => {
       asked.push(`send ${chatId} ${question.text}`);
+      named.push(question.files ?? []);
       await taking();
     },
     heldCalls: async () => await Promise.resolve([]),
@@ -203,7 +226,7 @@ const opened = async (
     await router.load();
   });
   await settled();
-  return { asked, router };
+  return { asked, attachedWith, named, router };
 };
 
 /** The box to ask in, if the page has one. */
@@ -491,6 +514,37 @@ describe("a chat's own page", () => {
         "Could not send. Your message is kept.",
         agentErrors.create("agent.invalid_question").message,
       ],
+    });
+  });
+
+  it("attaches a file again with the key it went with on the next connection when the one it went on broke mid-upload, and the question names it once", async () => {
+    const { asked, attachedWith, named } = await opened(
+      "chat-files",
+      undefined,
+      undefined,
+      undefined,
+      // Core took it; the socket broke before its answer came back.
+      [new Error("Peer closed WebSocket: 1006")]
+    );
+    await act(async () => {
+      seen.chat?.composer.onAttach?.([new File(["a,b"], "rows.csv")]);
+      await Promise.resolve();
+    });
+    await typed("What do these rows say?");
+
+    await sent();
+
+    const [key] = attachedWith;
+    expect({
+      keys: attachedWith,
+      asked,
+      named,
+    }).toStrictEqual({
+      // The same both times, so core, which keeps the file under its key,
+      // attaches it once.
+      keys: [expect.stringMatching(/^[\da-f-]{36}$/u), key],
+      asked: ["send chat-files What do these rows say?"],
+      named: [["file-2"]],
     });
   });
 

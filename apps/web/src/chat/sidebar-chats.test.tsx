@@ -1,6 +1,8 @@
-// @vitest-environment happy-dom
 import type { ChatListUpdate, ChatSummary } from "@grasp-os/shared/chat";
 import type { Identity } from "@grasp-os/shared/rpc";
+// @vitest-environment happy-dom
+import { AppShellSidebar } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
+import { AppShellNav } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01-sidebar";
 import { SidebarProvider, useSidebar } from "@grasp-os/ui/components/sidebar";
 import { Toaster } from "@grasp-os/ui/components/toast";
 import { i18n } from "@lingui/core";
@@ -19,7 +21,6 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { FrameSidebar } from "../frame/sidebar.tsx";
 import { forgetActiveChats, setActiveChat } from "./active-chat.ts";
 import { closeChat, openChat } from "./chat-layout.ts";
 import { GlobalChatProvider } from "./global-chat.tsx";
@@ -61,15 +62,12 @@ const Frame = () => {
       >
         Open the sheet
       </button>
-      <FrameSidebar
-        aria-label="Sidebar"
-        closeLabel="Close"
-        foldLabel="Show or hide the sidebar"
-        groups={[{ id: "chats", rows: chats.rows, more: chats.more }]}
-        mark={null}
-        navLabel="Main"
-        profile={null}
-      />
+      <AppShellSidebar>
+        <AppShellNav
+          aria-label="Main"
+          groups={[{ id: "chats", rows: chats.rows, more: chats.more }]}
+        />
+      </AppShellSidebar>
     </>
   );
 };
@@ -163,8 +161,34 @@ const press = (name: string) => {
   });
 };
 
+/** The test window's own media queries, to put back. */
+const ownMedia = window.matchMedia.bind(window);
+
+/** A phone's window, where the sidebar is a sheet: every width query under it holds. */
+const phoneWide = (phone: boolean) => {
+  Reflect.set(
+    window,
+    "matchMedia",
+    phone
+      ? (query: string) => ({
+          matches: query.includes("width <"),
+          media: query,
+          onchange: null,
+          addEventListener: () => {
+            // Nothing changes during a test.
+          },
+          removeEventListener: () => {
+            // Nothing to stop.
+          },
+          dispatchEvent: () => false,
+        })
+      : ownMedia
+  );
+};
+
 describe("the sidebar's recent chats on a phone", () => {
   afterEach(() => {
+    phoneWide(false);
     act(() => {
       root?.unmount();
     });
@@ -188,12 +212,14 @@ describe("the sidebar's recent chats on a phone", () => {
   });
 
   it("closes the sheet when All chats opens from it", async () => {
+    // A phone's window, where the sidebar is a sheet.
+    phoneWide(true);
     await shown();
+    press("Open the sheet");
+    expect(sheet()).toBe("sheet open");
     await vi.waitFor(() => {
       expect(button("All chats")).toBeDefined();
     });
-    press("Open the sheet");
-    expect(sheet()).toBe("sheet open");
     press("All chats");
     expect(sheet()).toBe("sheet closed");
   });
@@ -236,15 +262,12 @@ const RenameFrame = () => {
   const chats = useRecentChats({ enabled: true });
   return (
     <>
-      <FrameSidebar
-        aria-label="Sidebar"
-        closeLabel="Close"
-        foldLabel="Show or hide the sidebar"
-        groups={[{ id: "chats", rows: chats.rows, more: chats.more }]}
-        mark={null}
-        navLabel="Main"
-        profile={null}
-      />
+      <AppShellSidebar>
+        <AppShellNav
+          aria-label="Main"
+          groups={[{ id: "chats", rows: chats.rows, more: chats.more }]}
+        />
+      </AppShellSidebar>
       <Toaster />
     </>
   );

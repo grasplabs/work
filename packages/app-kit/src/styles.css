@@ -1,4 +1,4 @@
-/* Grasp OS theme. Shared by the frontend, the admin and every App page. */
+/* Grasp OS theme of every App page, which the SDK docs (apps/docs) wear too. */
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
@@ -32,8 +32,7 @@
  * the text on it, as shadcn's own do:
  *   - `highlight`: lime, the one action a page is for (Button
  *     variant="highlight"). Rare, so it keeps its meaning.
- *   - `tile`: the light ground of a brand's logo. `tinted`: a light tint
- *     of the primary (Bubble variant="tinted"). `row-group`: the band
+ *   - `tile`: the light ground of a brand's logo. `row-group`: the band
  *     over a group of rows.
  * Signals, which are never a ground for text:
  *   - `status-agreed` (green) for what is done, `status-attention` (amber)
@@ -41,10 +40,6 @@
  *     (Badge variant="passed" and "attention"), as shadcn's destructive is.
  *   - `destructive` (red) is for errors, a form's error or something that
  *     failed, and for actions that can't be undone. Nothing else is red.
- *   - `syntax-*`, the hues of highlighted code.
- *   - `mention-*`, what a mention in the box to ask in is (an App, a
- *     workflow, a person, a command), each its own hue, as the chip's icon
- *     and on a tint of itself.
  *   - `faint`, quieter than muted; `scrim`, what lies over the page behind
  *     a dialog; the brain's and the charts' own colours.
  * And three shadows: a block resting on the page, what floats above it,
@@ -61,7 +56,7 @@
     "Geist Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
     sans-serif;
   /*
-   * Where the page loads Newsreader (the frontend and the admin bundle it).
+   * Where the page loads Newsreader (the SDK docs bundle it).
    * An App page's frame loads no fonts, so there the serif falls back to
    * the sans, as the sans falls back to the system's: a system serif such
    * as Georgia has no light weight to set a title in.
@@ -71,8 +66,8 @@
     sans-serif;
   /*
    * JetBrains Mono, for code wherever it is shown, where the page loads it
-   * (the frontend and the admin bundle it); in an App screen's frame, the
-   * system's monospace.
+   * (the SDK docs bundle it); in an App screen's frame, the system's
+   * monospace.
    */
   --font-mono:
     "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco,
@@ -102,8 +97,6 @@
   --highlight-foreground: #062d22;
   --tile: #ffffff;
   --tile-foreground: #062d22;
-  --tinted: #dfe9e3;
-  --tinted-foreground: #062d22;
   --row-group: #f9faf9;
   --row-group-foreground: #062d22;
   /* Charts rank in the greens of the ink: the biggest part is the darkest. */
@@ -128,21 +121,6 @@
   --sidebar-ring: #6fb48a;
   --status-agreed: #1c7148;
   --status-attention: #82560f;
-  --mention-app: oklch(0.5 0.13 245);
-  --mention-workflow: oklch(0.5 0.14 305);
-  --mention-person: oklch(0.52 0.12 60);
-  --mention-agent: oklch(0.5 0.12 150);
-  --mention-command: oklch(0.5 0.1 165);
-  /*
-   * Code's colours, wherever code is highlighted (the chat's answers, an
-   * App's Code view): what a word is to the language, in quiet hues that
-   * keep the ink's weight. Comments and punctuation are the muted text,
-   * anything else the text itself.
-   */
-  --syntax-keyword: oklch(0.47 0.14 305);
-  --syntax-string: oklch(0.5 0.11 155);
-  --syntax-constant: oklch(0.53 0.13 55);
-  --syntax-function: oklch(0.47 0.12 250);
   /*
    * The brain's notes are the one place with colour: one soft hue per
    * group, as a dot per note in its file tree, note pages and the atlas's
@@ -202,8 +180,6 @@
     /* Brand logos are drawn for light backgrounds, so their tile stays light. */
     --tile: #f3f6f4;
     --tile-foreground: #062d22;
-    --tinted: #1f3a2f;
-    --tinted-foreground: #eef4f0;
     --row-group: #111d18;
     --row-group-foreground: #eef4f0;
     --chart-1: #eef4f0;
@@ -222,15 +198,6 @@
     --sidebar-ring: #6fb48a;
     --status-agreed: #3fae6a;
     --status-attention: #e2b360;
-    --mention-app: oklch(0.79 0.1 245);
-    --mention-workflow: oklch(0.78 0.11 305);
-    --mention-person: oklch(0.82 0.11 70);
-    --mention-agent: oklch(0.8 0.11 150);
-    --mention-command: oklch(0.8 0.1 165);
-    --syntax-keyword: oklch(0.78 0.11 305);
-    --syntax-string: oklch(0.8 0.12 155);
-    --syntax-constant: oklch(0.82 0.11 70);
-    --syntax-function: oklch(0.79 0.1 245);
     --graph-vision: oklch(0.72 0.13 70);
     --graph-teams: oklch(0.68 0.12 150);
     --graph-tools: oklch(0.68 0.12 250);
@@ -315,8 +282,6 @@
   --color-scrim: var(--scrim);
   --color-highlight: var(--highlight);
   --color-highlight-foreground: var(--highlight-foreground);
-  --color-tinted: var(--tinted);
-  --color-tinted-foreground: var(--tinted-foreground);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -335,15 +300,6 @@
   --color-tile-foreground: var(--tile-foreground);
   --color-status-agreed: var(--status-agreed);
   --color-status-attention: var(--status-attention);
-  --color-mention-app: var(--mention-app);
-  --color-mention-workflow: var(--mention-workflow);
-  --color-mention-person: var(--mention-person);
-  --color-mention-agent: var(--mention-agent);
-  --color-mention-command: var(--mention-command);
-  --color-syntax-keyword: var(--syntax-keyword);
-  --color-syntax-string: var(--syntax-string);
-  --color-syntax-constant: var(--syntax-constant);
-  --color-syntax-function: var(--syntax-function);
   --color-row-group: var(--row-group);
   --color-row-group-foreground: var(--row-group-foreground);
   --color-brain-heat: var(--brain-heat);
@@ -397,7 +353,7 @@
  * ink: soft white lines rising faintly from the foot. A pseudo-element of
  * layered gradients, which classes can't draw, shared by the sidebar's
  * container and its phone sheet (components/sidebar.tsx). The rings
- * themselves are drawn once, with a painted field's, below.
+ * themselves are drawn below.
  */
 @utility patterned {
   isolation: isolate;
@@ -414,231 +370,8 @@
   }
 }
 
-/*
- * The brand's painted field (brand book, chapter 05), drawn by
- * <PaintedField painting pattern> for the one or two things on a page
- * that matter most. Four layers, never fewer: the painting's base colour,
- * so the field has its tone before the painting comes; the painting, an
- * image file of a few kB that a browser fetches only where a field is
- * drawn (`?no-inline` keeps it out of this stylesheet); a fine grain; and
- * in ::before a pattern of white lines that fades out before the far
- * edge. Lines are white at 42% on a light painting and 10% on a dark one;
- * text is the ink on a light painting and the canvas on a dark one. In
- * dark mode each light painting gives way to a dark one, so a field never
- * stands as a bright block on a dark page. The base colours are the
- * paintings' own, not the theme's. An App page's frame loads no images
- * from here, so there a field is its base, grain and pattern.
- */
-@utility painted-field {
-  position: relative;
-  isolation: isolate;
-  overflow: hidden;
-  --field-lines: 0.42;
-  --field-text: var(--foreground);
-  --rings-at: 88% 0;
-  /* What is quieter on it is the same ink, a little lighter: never the page's grey, which a painting swallows. */
-  --muted-foreground: color-mix(in oklab, var(--field-text) 76%, transparent);
-  color: var(--field-text);
-  background-color: var(--field-base);
-  background-image:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 1'/%3E%3CfeComponentTransfer%3E%3CfeFuncR type='linear' slope='2.4' intercept='-.7'/%3E%3CfeFuncG type='linear' slope='2.4' intercept='-.7'/%3E%3CfeFuncB type='linear' slope='2.4' intercept='-.7'/%3E%3CfeFuncA type='linear' slope='0' intercept='.24'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
-    var(--field-paint);
-  background-position:
-    0 0,
-    center;
-  background-size: 180px, cover;
-  background-repeat: repeat, no-repeat;
-  background-blend-mode: overlay, normal;
-  box-shadow: inset 0 0 0 0.5px
-    color-mix(in oklab, var(--foreground) 7%, transparent);
-
-  &::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    z-index: -1;
-    border-radius: inherit;
-    pointer-events: none;
-    --line: oklch(1 0 0 / var(--field-lines));
-    --lit: oklch(1 0 0 / calc(var(--field-lines) * 0.45));
-    --dim: oklch(1 0 0 / calc(var(--field-lines) * 0.18));
-  }
-
-  &[data-painting="dawn"] {
-    --field-base: #b9c8c8;
-    --field-paint: url("../paintings/dawn.avif?no-inline");
-  }
-  &[data-painting="mist"] {
-    --field-base: #b4c6cc;
-    --field-paint: url("../paintings/mist.avif?no-inline");
-  }
-  &[data-painting="sand"] {
-    --field-base: #cdc8b2;
-    --field-paint: url("../paintings/sand.avif?no-inline");
-  }
-  &[data-painting="sage"] {
-    --field-base: #b8ccb2;
-    --field-paint: url("../paintings/sage.avif?no-inline");
-  }
-  &[data-painting="blush"] {
-    --field-base: #d6c4c4;
-    --field-paint: url("../paintings/blush.avif?no-inline");
-  }
-  &[data-painting="stone"] {
-    --field-base: #c8c8c6;
-    --field-paint: url("../paintings/stone.avif?no-inline");
-  }
-  &[data-painting="grove"] {
-    --field-base: #173f2d;
-    --field-paint: url("../paintings/grove.avif?no-inline");
-  }
-  &[data-painting="tide"] {
-    --field-base: #12282e;
-    --field-paint: url("../paintings/tide.avif?no-inline");
-  }
-  &[data-painting="ink"] {
-    --field-base: #0d1714;
-    --field-paint: url("../paintings/ink.avif?no-inline");
-  }
-
-  &:is([data-painting="grove"], [data-painting="tide"], [data-painting="ink"]) {
-    --field-lines: 0.1;
-    --field-text: var(--primary-foreground);
-  }
-
-  @variant dark {
-    --field-lines: 0.1;
-    --field-text: var(--foreground);
-    &[data-painting="sand"] {
-      --field-base: #173f2d;
-      --field-paint: url("../paintings/grove.avif?no-inline");
-    }
-    &[data-painting="sage"] {
-      --field-base: #173f2d;
-      --field-paint: url("../paintings/grove.avif?no-inline");
-    }
-    &[data-painting="dawn"] {
-      --field-base: #12282e;
-      --field-paint: url("../paintings/tide.avif?no-inline");
-    }
-    &[data-painting="mist"] {
-      --field-base: #12282e;
-      --field-paint: url("../paintings/tide.avif?no-inline");
-    }
-    &[data-painting="blush"] {
-      --field-base: #0d1714;
-      --field-paint: url("../paintings/ink.avif?no-inline");
-    }
-    &[data-painting="stone"] {
-      --field-base: #0d1714;
-      --field-paint: url("../paintings/ink.avif?no-inline");
-    }
-  }
-}
-
-/*
- * The book's seven patterns, white lines over the paint. Which one is a
- * data attribute (`data-pattern`), so no inline style is needed under the
- * strict CSP.
- */
-.painted-field[data-pattern="columns"]::before {
-  /* Six columns of light, each its own brightness. */
-  background:
-    repeating-linear-gradient(
-      90deg,
-      transparent 0 calc(100% / 6 - 1px),
-      var(--line) calc(100% / 6 - 1px) calc(100% / 6)
-    ),
-    linear-gradient(
-      90deg,
-      var(--lit) 0 16.66%,
-      var(--dim) 16.66% 33.33%,
-      var(--lit) 33.33% 50%,
-      transparent 50% 66.66%,
-      var(--lit) 66.66% 83.33%,
-      var(--dim) 83.33%
-    );
-  mask-image: linear-gradient(180deg, #000 30%, transparent 92%);
-}
-
-.painted-field[data-pattern="horizon"]::before {
-  /* Three wide columns and a horizon. */
-  background:
-    linear-gradient(
-      180deg,
-      transparent 38%,
-      var(--line) 38% calc(38% + 1px),
-      transparent calc(38% + 1px)
-    ),
-    repeating-linear-gradient(
-      90deg,
-      transparent 0 calc(100% / 3 - 1px),
-      var(--line) calc(100% / 3 - 1px) calc(100% / 3)
-    ),
-    linear-gradient(
-      90deg,
-      transparent 0 33.33%,
-      var(--lit) 33.33% 66.66%,
-      transparent 66.66%
-    );
-  mask-image: linear-gradient(180deg, #000 20%, transparent 95%);
-}
-
-.painted-field[data-pattern="grid"]::before {
-  /* Squares of 56px, strongest in the middle. */
-  background:
-    repeating-linear-gradient(90deg, transparent 0 55px, var(--line) 55px 56px),
-    repeating-linear-gradient(180deg, transparent 0 55px, var(--line) 55px 56px);
-  mask-image: radial-gradient(ellipse 70% 70% at 50% 40%, #000, transparent);
-}
-
-.painted-field[data-pattern="rows"]::before {
-  /* A line every 44px, with two lit bands. */
-  background:
-    repeating-linear-gradient(
-      180deg,
-      transparent 0 43px,
-      var(--line) 43px 44px
-    ),
-    linear-gradient(
-      180deg,
-      transparent 0 88px,
-      var(--lit) 88px 176px,
-      transparent 176px 264px,
-      var(--dim) 264px 352px,
-      transparent 352px
-    );
-  mask-image: linear-gradient(90deg, #000, transparent 90%);
-}
-
-.painted-field[data-pattern="dots"]::before {
-  /* A fine grid of dots, 22px apart: the quietest of the seven. */
-  background: radial-gradient(circle, var(--line) 1.2px, transparent 1.6px) 0 0
-    / 22px 22px;
-  mask-image: radial-gradient(
-    ellipse 80% 70% at 50% 30%,
-    #000,
-    transparent 85%
-  );
-}
-
-.painted-field[data-pattern="mosaic"]::before {
-  /* Staggered blocks of light, no lines. */
-  background: conic-gradient(
-      var(--lit) 25%,
-      transparent 0 50%,
-      var(--dim) 0 75%,
-      transparent 0
-    )
-    0 0 / 25% 33.33%;
-  mask-image: linear-gradient(180deg, #000 10%, transparent 88%);
-}
-
-/*
- * The Rings, the sidebar's and a field's alike: soft rings 64px apart,
- * from the top right of a field and the foot of the sidebar.
- */
-:is(.patterned, .painted-field[data-pattern="rings"])::before {
+/* The Rings: soft rings 64px apart, from the foot of the sidebar. */
+.patterned::before {
   background: repeating-radial-gradient(
     circle at var(--rings-at),
     transparent 0 63px,
@@ -678,10 +411,10 @@
 
 /*
  * Base UI hides native scrollbars (a Select's list, a scroll area) with
- * this class, and the rule in an inline <style> it renders. The frontend
- * renders Base UI with that element turned off (CSPProvider's
- * `disableStyleElements`, apps/web/src/main.tsx), which keeps its document
- * free of style elements nobody wrote; the rule lives here instead.
+ * this class, and the rule in an inline <style> it renders. Rendered with
+ * that element turned off (CSPProvider's `disableStyleElements`, as the
+ * kit's browser tests render it), which keeps a document free of style
+ * elements nobody wrote, the rule still holds: it lives here too.
  */
 .base-ui-disable-scrollbar {
   scrollbar-width: none;

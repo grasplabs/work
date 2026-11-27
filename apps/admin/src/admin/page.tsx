@@ -1,15 +1,15 @@
+/**
+ * An admin page in its frame, as Grasp Work heads one: Damsko's
+ * AppShellHeader (the fold while the sidebar is away, where the page is,
+ * its actions), then the page body (AppShellPage) and Damsko's PageHeader.
+ */
+import {
+  AppShellHeader,
+  AppShellPage,
+} from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
 import { PageHeader } from "@grasp-os/ui/components/page-header";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-
-import { PageBar } from "../frame/page-bar.tsx";
-import type { Crumb as BarCrumb, CrumbLook } from "../frame/page-bar.tsx";
-/**
- * An admin page in its frame, as Grasp Work heads one: the frame's bar
- * (PageBar: the fold while the sidebar is away, where the page is, its
- * actions), then the page body (Page) and Damsko's PageHeader.
- */
-import { Page } from "../frame/page.tsx";
 
 /** A page above this one in the bar: its name, and where it is. */
 export interface Crumb {
@@ -18,11 +18,6 @@ export interface Crumb {
 }
 
 const noParents: readonly Crumb[] = [];
-
-export const barLabels = {
-  breadcrumb: "Breadcrumb",
-  sidebar: "Show or hide the sidebar",
-};
 
 /**
  * The bar above an admin page: the pages above it (`parents`) and the
@@ -37,25 +32,19 @@ export const AdminHeader = ({
   page: string | null | undefined;
   parents?: readonly Crumb[];
   actions?: ReactNode;
-}) => {
-  let crumbs: BarCrumb[] = [];
-  if (page === null) {
-    crumbs = [{ label: "Home" }];
-  } else if (page !== undefined) {
-    crumbs = [
-      ...parents.map((parent) => ({
-        label: parent.label,
-        render: (look: CrumbLook) => <Link {...look} to={parent.to} />,
-      })),
-      { label: page },
-    ];
-  }
-  return <PageBar actions={actions} crumbs={crumbs} labels={barLabels} />;
-};
-
-/** The page body: as wide as the card, 24px in, as every Grasp Work page. */
-export const PageBody = ({ children }: { children: ReactNode }) => (
-  <Page>{children}</Page>
+}) => (
+  <AppShellHeader
+    actions={actions}
+    breadcrumb={
+      page === undefined
+        ? undefined
+        : parents.map((parent) => ({
+            label: parent.label,
+            render: <Link to={parent.to} />,
+          }))
+    }
+    title={page === null ? "Home" : page}
+  />
 );
 
 /**
@@ -79,13 +68,13 @@ export const AdminPage = ({
 }) => (
   <>
     <AdminHeader page={overview ? null : title} parents={parents} />
-    <PageBody>
+    <AppShellPage>
       <PageHeader
         actions={action}
         description={description === "" ? undefined : description}
         title={title}
       />
       {children}
-    </PageBody>
+    </AppShellPage>
   </>
 );

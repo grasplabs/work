@@ -1,4 +1,5 @@
 import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
+import { AppShellPage } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
 import { Container } from "@grasp-os/ui/components/container";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, redirect } from "@tanstack/react-router";
@@ -11,7 +12,6 @@ import type { AgentTab } from "../agents/tabs.tsx";
 import { agentInstructionsFor } from "../agents/unsaved-instructions.ts";
 import type { Session } from "../core.ts";
 import { PageNotLoaded } from "../frame/page-states.tsx";
-import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore, orNull } from "../load-from-core.tsx";
 import { readManaged } from "./_shell.agents.index.tsx";
@@ -122,11 +122,11 @@ const AgentLoading = () => {
       <SiteHeader
         crumbs={[{ label: t`Agents`, to: "/agents" }, { label: t`Agent` }]}
       />
-      <Page>
+      <AppShellPage>
         <Container size="sm">
           <SettingsSkeleton sections={[7, 1]} />
         </Container>
-      </Page>
+      </AppShellPage>
     </>
   );
 };

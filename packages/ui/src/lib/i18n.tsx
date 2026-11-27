@@ -117,6 +117,32 @@ export interface I18nCatalog {
     /** The safe answer AlertDialogCancel gives when it is given no words of its own. */
     cancel: string;
   };
+  appShell: {
+    /** The button that closes the sidebar's sheet on a narrow window. */
+    close: string;
+    /** Said once while a page loads (AppShellPageSkeleton). */
+    loading: string;
+    /** The name of a row's menu button, by the row's name ("More for Weekly numbers"). */
+    more: (name: string) => string;
+    /** The name of the page's panel's sheet on a narrow window. */
+    pagePanel: string;
+    /** The name of the title's field while the page is renamed in place. */
+    rename: string;
+    /** The name of the handle between the page and its panel. */
+    resize: string;
+    /** The name of a row's rename field, by the row's name ("Rename Weekly numbers"). */
+    renameRow: (name: string) => string;
+    /** Said of a row that renames, after its name. */
+    renameHint: string;
+    /** The search button in the sidebar's head. */
+    search: string;
+    /** The bar's button that shows the page's panel and sets it aside. */
+    togglePanel: string;
+    /** Said of a row with something there not seen yet (its dot). */
+    unread: string;
+    /** Said of a row where something works now (its Working mark). */
+    working: string;
+  };
   attachment: {
     /** A file's remove action, named for it ("Remove brief.pdf"). */
     remove: (name: string) => string;
@@ -796,6 +822,8 @@ export interface I18nCatalog {
     views: string;
   };
   sidebar: {
+    /** The way back in a level's head, named when it is its chevron alone. */
+    back: string;
     /** The main list's navigation, said as its landmark. */
     main: string;
     /** The sidebar's name, said as its landmark. */
@@ -976,6 +1004,20 @@ const english: I18nCatalog = {
   },
   alertDialog: {
     cancel: "Cancel",
+  },
+  appShell: {
+    close: "Close",
+    loading: "Loading…",
+    more: (name) => `More for ${name}`,
+    pagePanel: "Details",
+    rename: "Rename",
+    renameHint: "Double-click or press F2 to rename",
+    renameRow: (name) => `Rename ${name}`,
+    resize: "Resize the panel",
+    search: "Search",
+    togglePanel: "Show or hide the panel",
+    unread: "Unread",
+    working: "Working",
   },
   attachment: {
     remove: (name) => `Remove ${name}`,
@@ -1503,6 +1545,7 @@ const english: I18nCatalog = {
     views: "Views",
   },
   sidebar: {
+    back: "Back",
     main: "Main",
     name: "Sidebar",
     toggle: "Show or hide the sidebar",

@@ -1,10 +1,9 @@
 import type { Identity } from "@grasp-os/shared/rpc";
+import { AppShellCard } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
 import {
-  SidebarInset,
   SidebarProvider,
   SidebarTrigger,
 } from "@grasp-os/ui/components/sidebar";
-import { sidebarMarker } from "@grasp-os/ui/components/sidebar.stylex";
 import { Toaster } from "@grasp-os/ui/components/toast";
 import {
   colors,
@@ -13,13 +12,13 @@ import {
   size,
   space,
 } from "@grasp-os/ui/lib/tokens.stylex";
-import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import type { ChatPanels } from "../chat/chat-panel.tsx";
 import { ChatToggle } from "../chat/chat-toggle.tsx";
+import { useShownPresence } from "../chat/global-chat.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import { AiKeyBanner, providersOf } from "./ai-key-banner.tsx";
 import type { FailingProvider } from "./ai-key-banner.tsx";
@@ -38,63 +37,9 @@ import {
 export const sidebarKey = "grasp.sidebar";
 
 const styles = stylex.create({
-  // What the card holds, laid over its box, as Damsko's app-shell-01 lays
-  // it: the card is as tall as the window, never as the page, so the page
-  // scrolls inside it and its bar (SiteHeader) stays.
-  frame: {
-    position: "absolute",
-    inset: 0,
-    display: "flex",
-    flexDirection: "column",
-    overflow: "clip",
-    borderRadius: "inherit",
-    // A layer of its own, so the line inside the card's edge stands over
-    // all of it, the page's bar too, as the reference's.
-    zIndex: 0,
-    // The card's ground under the lg breakpoint too, as #2503's card
-    // (shell-card) is on a phone: Damsko's SidebarInset is a card only from
-    // lg and takes the page's ground under it, which in dark is the brand's
-    // night, a step darker than the card. From lg the card draws it.
-    backgroundColor: { default: colors.sidebarCard, [media.lg]: "transparent" },
-  },
-  // The page, under the banner: it scrolls up and down only, what is wider
-  // than the card is cut at its edge. Laid out down the card, at least as
-  // tall as it, as the pages expect (Chat's start fills it).
-  page: {
-    display: "flex",
-    flexDirection: "column",
-    boxSizing: "border-box",
-    height: "100%",
-    minHeight: 0,
-    overflowX: "clip",
-    overflowY: "auto",
-    scrollbarWidth: "none",
-    // A panel gone full screen lies over the card: the page fades out
-    // under it, and back a beat after the panel starts to leave.
-    transitionProperty: "opacity",
-    transitionDuration: duration.ui,
-    transitionTimingFunction: duration.ease,
-    transitionDelay: duration.press,
-  },
+  // The dock fades out under a panel gone full screen, as the card's page
+  // does, and back a beat after the panel starts to leave.
   covered: { opacity: 0, transitionDelay: "0s" },
-  // The AI providers' banner across the card's top fades with the page
-  // under a panel gone full screen, whose head stands where it is.
-  banner: {
-    flexShrink: 0,
-    transitionProperty: "opacity",
-    transitionDuration: duration.ui,
-    transitionTimingFunction: duration.ease,
-    transitionDelay: duration.press,
-  },
-  // The page and its panel, under the banner: what the chat's button
-  // stands over.
-  area: {
-    position: "relative",
-    display: "flex",
-    flexDirection: "column",
-    flexGrow: 1,
-    minHeight: 0,
-  },
   // The chat's button at the card's end, at the page bar's height, its
   // empty rim hanging out past the page's room, as the reference's (over
   // the page's panel too, when it has one).
@@ -175,6 +120,23 @@ const styles = stylex.create({
   roomForDock: (height: number) => ({
     paddingBlockEnd: `max(0px, calc(${height}px + ${space["4"]} + ${space["6"]} - ${space["8"]}))`,
   }),
+  // The page, under the banner, as AppShellContent lays it: it scrolls up
+  // and down only, what is wider than the card is cut at its edge. Laid
+  // out down the card, at least as tall as it, as the pages expect (Chat's
+  // start fills it). The product's own, not AppShellContent, for the room
+  // it keeps under a page that fills the card while the dock stands over
+  // its foot (`roomForDock`): AppShellContent takes layout alone (registry
+  // gap of 27 Nov 2026, "AppShellContent: room under the page").
+  page: {
+    display: "flex",
+    flexDirection: "column",
+    boxSizing: "border-box",
+    height: "100%",
+    minHeight: 0,
+    overflowX: "clip",
+    overflowY: "auto",
+    scrollbarWidth: "none",
+  },
   // Under the chat lying over it (full screen, or for want of room), the
   // card spans the room beside the sidebar, its margins in, edge to edge on
   // a phone: the ground the chat stands on (#2503's `cardCovered`).
@@ -258,22 +220,17 @@ const useDockHeight = (on: boolean): number | null => {
 };
 
 /**
- * The signed-in product's frame, on Damsko: its Sidebar beside the page,
- * or a sheet from the start on a narrow window, folded as the person left
- * it (`storageKey`); the page as a card on the sidebar's ground
- * (SidebarInset, the main landmark), the AI providers' banner across its
- * top, the page under it with its own bar (SiteHeader) and, when the page
- * has one, its side panel (page-panel.tsx), and over its foot what stays
- * at hand on every page (`dock`); beside or over the page, its panels
- * (`panels`), Grasp's chat. The shell's pages are in it, with all
- * of them, and a page outside the shell for someone signed in, such as a
- * decision opened from a link, with none of them.
- *
- * Composed from the parts Damsko's app-shell-01 composes, the way it lays
- * them, not the block itself: the block keeps the fold to itself, draws the
- * page's bar from props, and has one resizable panel and no dock, where
- * here each page draws its bar and the chat docks, floats and covers the
- * page. It moves onto the block once the block takes those.
+ * The signed-in product's frame, composed from Damsko's AppShell parts:
+ * the sidebar (AppShellSidebar, in app-sidebar.tsx) beside the page, or a
+ * sheet from the start on a narrow window, folded as the person left it
+ * (`storageKey`); the page's card (AppShellCard, the main landmark) with
+ * the AI providers' banner across its top, the page under it with its own
+ * bar (SiteHeader) and, when the page has one, its side panel
+ * (page-panel.tsx), and over its foot what stays at hand on every page
+ * (`dock`); beside or over the card, its panels (`panels`), Grasp's chat.
+ * The shell's pages are in it, with all of them, and a page outside the
+ * shell for someone signed in, such as a decision opened from a link, with
+ * none of them.
  */
 export const AppFrame = ({
   core,
@@ -297,55 +254,53 @@ export const AppFrame = ({
   panels?: ChatPanels;
   children: ReactNode;
 }) => {
-  const { t } = useLingui();
   const page = usePublishedPage();
   const dockHeight = useDockHeight(dockRoom);
   const cover = useChatCover(panels);
   const { covered, phone } = cover.place;
+  // Room at the page bar's end for the chat's button wherever the chat
+  // stands beside the page, docked about its subject too, as #2503's bar
+  // keeps it (app-shell's `data-shell-panels`).
+  const { placements } = useShownPresence();
+  const chatBeside =
+    placements.includes("floating") || placements.includes("docked");
   const card = (
-    <SidebarInset
-      style={[panels !== undefined && styles.card, covered && styles.spans]}
-    >
-      <div {...stylex.props(styles.frame)}>
-        <div
-          inert={covered}
-          {...stylex.props(styles.banner, covered && styles.covered)}
-        >
-          <AiKeyBanner
-            failing={failing}
-            identity={identity}
-            providers={providersOf(core)}
-          />
-        </div>
-        <div {...stylex.props(styles.area)}>
-          <PageWithPanel>
-            <div
-              data-slot="app-shell-page"
-              inert={covered}
-              ref={page}
-              {...stylex.props(
-                styles.page,
-                covered && styles.covered,
-                dockHeight !== null && styles.roomForDock(dockHeight)
-              )}
-            >
-              <InFrame value>{children}</InFrame>
-            </div>
-          </PageWithPanel>
+    <AppShellCard
+      banner={
+        <AiKeyBanner
+          failing={failing}
+          identity={identity}
+          providers={providersOf(core)}
+        />
+      }
+      covered={covered}
+      overlay={
+        <>
           <ChatToggle style={styles.chatToggle} />
           {/* On a phone the chat lies over the page under the bar's row,
               which keeps the menu's button, as #2503's shell does. */}
           {phone ? (
             <span {...stylex.props(styles.menuInk)}>
-              <SidebarTrigger
-                aria-label={t`Show or hide the sidebar`}
-                style={styles.menu}
-              />
+              <SidebarTrigger style={styles.menu} />
             </span>
           ) : null}
+        </>
+      }
+      style={[panels !== undefined && styles.card, covered && styles.spans]}
+    >
+      <PageWithPanel chatButtonRoom={chatBeside}>
+        <div
+          data-slot="app-shell-page"
+          ref={page}
+          {...stylex.props(
+            styles.page,
+            dockHeight !== null && styles.roomForDock(dockHeight)
+          )}
+        >
+          <InFrame value>{children}</InFrame>
         </div>
-      </div>
-    </SidebarInset>
+      </PageWithPanel>
+    </AppShellCard>
   );
   return (
     // Damsko's Toaster (below) is the app's one place for toasts: a page
@@ -356,26 +311,7 @@ export const AppFrame = ({
         {panels === undefined ? (
           card
         ) : (
-          <ChatPanelsBeside
-            card={
-              <>
-                {/* Damsko's SidebarInset is a card only beside an inset
-                  Sidebar, its sibling; beside the chat it stands in the
-                  panels' group, so it is given that sibling's mark here
-                  (registry gap of 24 Nov 2026: an inset that is a card
-                  wherever it stands). */}
-                <span
-                  aria-hidden="true"
-                  data-variant="inset"
-                  hidden
-                  {...stylex.props(sidebarMarker)}
-                />
-                {card}
-              </>
-            }
-            cover={cover}
-            panels={panels}
-          />
+          <ChatPanelsBeside card={card} cover={cover} panels={panels} />
         )}
         {dock === undefined ? null : (
           <div {...stylex.props(styles.dockLayer)}>

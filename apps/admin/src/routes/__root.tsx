@@ -1,3 +1,4 @@
+import { sidebarStateScript } from "@grasp-os/ui/components/sidebar";
 import { I18nProvider } from "@grasp-os/ui/lib/i18n";
 import {
   createRootRouteWithContext,
@@ -7,7 +8,7 @@ import {
 import type { ReactNode } from "react";
 
 import { FrameFailure } from "../admin/failure.tsx";
-import { AdminFrame, FrameLoading } from "../admin/frame.tsx";
+import { AdminFrame, FrameLoading, sidebarKey } from "../admin/frame.tsx";
 import { freshMs } from "../admin/org-reads.ts";
 import type { OrgReads } from "../admin/org-reads.ts";
 import { platformCounts } from "../admin/platform.ts";
@@ -143,8 +144,13 @@ export const Route = createRootRouteWithContext<AdminContext>()({
     ],
     links: [{ rel: "stylesheet", href: styles }, ...stylexDev.links],
     // Light or dark as staff chose, or as the system has it, set before first paint
-    // (public/theme.js, the admin's own), so the admin never flashes light.
-    scripts: [{ src: "/theme.js" }, ...stylexDev.scripts],
+    // (public/theme.js, the admin's own), so the admin never flashes light;
+    // and the sidebar folded as staff left it, before the page wakes.
+    scripts: [
+      { src: "/theme.js" },
+      { children: sidebarStateScript(sidebarKey) },
+      ...stylexDev.scripts,
+    ],
   }),
   shellComponent: RootDocument,
   // The document's body until the frame's records are in: also what the
