@@ -167,7 +167,12 @@ const styles = stylex.create({
   dayRule: { flexGrow: 1, flexBasis: 0, alignSelf: "center" },
   // A loading pair: the person's question over Grasp's answer.
   pair: { display: "grid", gap: space["6"] },
-  // Earlier messages, over the first one the thread has: in the middle.
+  // The earlier messages' row is no row of its own to the log, which keeps
+  // the first row in view in place as a page comes in over it
+  // (MessageScroller): at the very top that is the first message, never
+  // this row, which stays put.
+  olderRow: { display: "contents" },
+  // Its press, over the first message, in the middle.
   older: { display: "flex", justifyContent: "center" },
   // An answer's foot, as #2503's: its actions, then when it was given, on one line.
   foot: {
@@ -1739,7 +1744,7 @@ const OlderRow = ({
   style?: LayoutStyle | undefined;
 }) =>
   older === undefined ? null : (
-    <MessageScrollerItem style={style}>
+    <MessageScrollerItem style={[styles.olderRow, style]}>
       <EarlierMessages first={rows[0]?.id} older={older} />
     </MessageScrollerItem>
   );
