@@ -87,7 +87,7 @@ import type {
 } from "react";
 
 import { useI18n } from "../lib/i18n";
-import { Icon, PanelLeftIcon } from "../lib/icons";
+import { ChevronLeftIcon, Icon, PanelLeftIcon } from "../lib/icons";
 import { focusRingInset, scrollbarHidden } from "../lib/styles";
 import {
   colors,
@@ -100,14 +100,24 @@ import {
   space,
 } from "../lib/tokens.stylex";
 import { durations, px } from "../lib/tokens.values";
-import { announce, listOf, slotProps, slotWords } from "../lib/utils";
+import {
+  announce,
+  className,
+  listOf,
+  slotProps,
+  slotWords,
+} from "../lib/utils";
 import type { LayoutStyle } from "../lib/utils";
 import { iconVars, motionVars, skeletonVars } from "../lib/vars.stylex";
 import { Collapsible } from "./collapsible";
 import { Input } from "./input";
 import type { InputProps } from "./input";
 import { Sheet, SheetContent } from "./sheet";
-import { sidebarMarker, sidebarMenuItemMarker } from "./sidebar.stylex";
+import {
+  sidebarMarker,
+  sidebarMenuItemMarker,
+  sidebarWrapperMarker,
+} from "./sidebar.stylex";
 import { Skeleton } from "./skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip";
 import type { TooltipProps } from "./tooltip";
@@ -132,6 +142,10 @@ const BADGE = `calc(${font.textXsLine} + 2 * ${size.hairline})`;
 // Folded to its icons, a row is a square the row's height, in the middle of the rail.
 const SQUARE_MARGIN = `calc((${size.sidebarRailWidth} - 2 * ${space["2"]} - ${ROW}) / 2)`;
 const SQUARE_PADDING = `calc((${ROW} - ${ICON}) / 2)`;
+// A level's head: the room round its segment, the segment's corner and the corner of the two parts
+// in it, nested inside.
+const SEGMENT_INSET = "2px";
+const SEGMENT_CORNER = `calc(min(${radius.xl}, calc((${ACTION} + 2 * ${SEGMENT_INSET}) / 2)) - ${SEGMENT_INSET})`;
 // The sidebar's state as its parts read it: one that folds to its icons, folded off the canvas,
 // and folded to its icons. Each a function the compiler calls, as it reads the styles: a call of
 // `stylex.when` itself has no value when the page runs.
@@ -424,7 +438,6 @@ const styles = stylex.create({
     gap: space["1"],
     boxSizing: "border-box",
     width: "100%",
-    height: ROW,
     margin: 0,
     paddingBlockStart: space["2"],
     paddingBlockEnd: space["1"],
@@ -456,7 +469,7 @@ const styles = stylex.create({
     },
     marginBlockStart: {
       default: 0,
-      [onRail()]: `calc(-1 * ${ROW})`,
+      [onRail()]: `calc(-1 * (${font.textXsLine} + ${space["2"]} + ${space["1"]}))`,
     },
     transitionProperty: "margin-block-start, opacity",
     transitionDuration: motionVars.ui,
@@ -562,9 +575,17 @@ const styles = stylex.create({
       default: "100%",
       [onRail()]: ROW,
     },
+    // A row's height; a name over a second, quieter line (one element marked
+    // `data-sidebar-lines`) grows it to hold both.
+    minHeight: {
+      default: ROW,
+      [COARSE]: size.tapTarget,
+      [onRail()]: ROW,
+    },
     height: {
       default: ROW,
       [COARSE]: size.tapTarget,
+      ":has(> [data-sidebar-lines])": "auto",
       [onRail()]: ROW,
     },
     marginBlock: 0,
@@ -628,11 +649,19 @@ const styles = stylex.create({
   // its count.
   label: {
     flexGrow: 1,
+    // It gives way first, down to nothing, before anything beside it (a badge, a mark at its end):
+    // flex shrinks by weight times width, so its weight is far past any other's.
+    flexShrink: 100_000,
     minWidth: 0,
     overflow: "hidden",
     textOverflow: "ellipsis",
   },
   sm: {
+    minHeight: {
+      default: size.controlXs,
+      [COARSE]: size.tapTarget,
+      [onRail()]: ROW,
+    },
     height: {
       default: size.controlXs,
       [COARSE]: size.tapTarget,
@@ -645,6 +674,10 @@ const styles = stylex.create({
     borderRadius: radius.sidebarRowRadiusLg,
     cornerShape: radius.shape,
     color: colors.sidebarForeground,
+    minHeight: {
+      default: size.sidebarMenuButtonHeightLg,
+      [onRail()]: ROW,
+    },
     height: {
       default: size.sidebarMenuButtonHeightLg,
       [onRail()]: ROW,
@@ -682,6 +715,7 @@ const styles = stylex.create({
     flexShrink: 0,
     justifyContent: "center",
     width: { default: ACTION, [COARSE]: size.tapTarget },
+    minHeight: { default: ACTION, [COARSE]: size.tapTarget },
     height: { default: ACTION, [COARSE]: size.tapTarget },
     marginInline: 0,
     paddingInlineStart: 0,
@@ -810,25 +844,127 @@ const styles = stylex.create({
     inset: 0,
     visibility: "hidden",
   },
-  // The top of a level: the rows' inset, a hair under the sidebar's header.
+  // The top of a level, a hair under the sidebar's header: the way back and the level's name as one
+  // raised row (its segment), in the room a track round it would take.
   levelHeader: {
+    display: "flex",
+    flexDirection: "column",
     flexShrink: 0,
+    gap: size.sidebarRowGap,
+    paddingInline: space["2"],
     paddingBlockStart: space["1"],
   },
+  levelTrack: {
+    display: "flex",
+    boxSizing: "border-box",
+    width: "100%",
+    padding: { default: SEGMENT_INSET, [onRail()]: 0 },
+  },
+  // Folded to its icons, the two stand one over the other, each a row's square, flat on the rail.
+  levelSegment: {
+    display: "flex",
+    flexDirection: { default: "row", [onRail()]: "column" },
+    flexGrow: 1,
+    alignItems: "stretch",
+    minWidth: 0,
+    borderRadius: SEGMENT_CORNER,
+    cornerShape: radius.shape,
+    backgroundColor: {
+      default: colors.control,
+      [FORCED]: "Canvas",
+      [onRail()]: "transparent",
+    },
+    boxShadow: {
+      default: `inset 0 0 0 ${size.hairline} ${colors.borderStrongColor}`,
+      [FORCED]: "none",
+      [onRail()]: "none",
+    },
+    outline: { default: null, [FORCED]: `${size.hairline} solid CanvasText` },
+  },
+  // What the segment holds: a row's height, a row's type.
+  levelPart: {
+    position: "relative",
+    display: "flex",
+    alignItems: "center",
+    boxSizing: "border-box",
+    minHeight: { default: ROW, [COARSE]: size.tapTarget, [onRail()]: ROW },
+    margin: 0,
+    paddingBlock: 0,
+    borderWidth: 0,
+    fontFamily: font.sans,
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+    fontWeight: font.weightMedium,
+    letterSpacing: size.sidebarTracking,
+    textDecoration: "none",
+    whiteSpace: "nowrap",
+    backgroundColor: "transparent",
+    transitionProperty: "color, background-color",
+    transitionDuration: duration.hover,
+    transitionTimingFunction: duration.ease,
+  },
+  // Lit under the pointer: the parts that go somewhere.
+  levelPress: {
+    cursor: "pointer",
+    backgroundColor: {
+      default: "transparent",
+      [HOVER]: { default: "transparent", ":hover": colors.sidebarHover },
+    },
+  },
+  // The way back: its chevron alone, centred on the rows' icon column, the segment's start corners.
+  levelBack: {
+    justifyContent: "center",
+    flexShrink: 0,
+    width: { default: ACTION, [COARSE]: size.tapTarget, [onRail()]: ROW },
+    marginInline: { default: 0, [onRail()]: SQUARE_MARGIN },
+    borderStartStartRadius: SEGMENT_CORNER,
+    borderEndStartRadius: SEGMENT_CORNER,
+    borderStartEndRadius: { default: 0, [onRail()]: SEGMENT_CORNER },
+    borderEndEndRadius: { default: 0, [onRail()]: SEGMENT_CORNER },
+    cornerShape: radius.shape,
+    color: {
+      default: colors.sidebarSecondaryForeground,
+      [HOVER]: {
+        default: colors.sidebarSecondaryForeground,
+        ":hover": colors.sidebarForeground,
+      },
+      [FORCED]: "LinkText",
+    },
+  },
+  // A level's name: a heading, holding its icon and words, and with `asChild` the link to the
+  // level's own first page. Folded to its icons, its icon alone in a row's square.
+  levelTitle: {
+    display: "flex",
+    flexGrow: { default: 1, [onRail()]: 0 },
+    minWidth: 0,
+    width: { default: null, [onRail()]: ROW },
+    margin: 0,
+    marginInline: { default: 0, [onRail()]: SQUARE_MARGIN },
+    fontSize: "inherit",
+    fontWeight: "inherit",
+  },
+  levelHome: {
+    flexGrow: 1,
+    gap: size.sidebarIconGap,
+    minWidth: 0,
+    overflow: "hidden",
+    paddingInline: {
+      default: `calc(${size.sidebarRowInline} - ${SEGMENT_INSET})`,
+      [onRail()]: SQUARE_PADDING,
+    },
+    borderStartEndRadius: SEGMENT_CORNER,
+    borderEndEndRadius: SEGMENT_CORNER,
+    borderStartStartRadius: { default: 0, [onRail()]: SEGMENT_CORNER },
+    borderEndStartRadius: { default: 0, [onRail()]: SEGMENT_CORNER },
+    cornerShape: radius.shape,
+    color: { default: colors.sidebarForeground, [FORCED]: "CanvasText" },
+  },
+  levelHomeLink: { color: { default: null, [FORCED]: "LinkText" } },
   // A group that folds: the box a Collapsible draws, round its SidebarGroup.
   collapsible: {
     display: "grid",
     width: "100%",
     minWidth: 0,
-  },
-  // A level's name in a row's box, in the ink read first: a heading, so nothing answers the pointer.
-  levelTitle: {
-    // Never pressed, so a row's height on a touch screen too, and no edge in forced colours.
-    height: ROW,
-    borderWidth: 0,
-    color: colors.sidebarForeground,
-    backgroundColor: "transparent",
-    cursor: "default",
   },
 });
 
@@ -1000,12 +1136,17 @@ const inReach = (element: Element) =>
 
 /**
  * Where focus lands in a level it is moved into, or in a sidebar that opened while what held it went:
- * what held it there before, on the way back to a level; else the page you are on; else its first
+ * what held it there before, on the way back to a level; else the page you are on, its row before its
+ * head's name; else its first
  * stop. One that cannot take focus now (its group folded, its row gone) is passed over.
  */
 const landingIn = (level: HTMLElement, opener?: HTMLElement) =>
   [
     opener !== undefined && level.contains(opener) ? opener : null,
+    // The page's row first: the level's name in its head may say it is the page too.
+    level.querySelector<HTMLElement>(
+      '[data-slot="sidebar-content"] [aria-current="page"]'
+    ),
     level.querySelector<HTMLElement>('[aria-current="page"]'),
     ...level.querySelectorAll<HTMLElement>("a[href], button:not(:disabled)"),
   ].find((stop) => stop !== null && inReach(stop));
@@ -1079,26 +1220,53 @@ export const SidebarProvider = ({
   const element = useRef<HTMLDivElement | null>(null);
 
   // What held focus as the trigger or the keys folded or opened it. Once the change is
-  // drawn, if that went out of reach (folded away with it, hidden on the rail, or a trigger in the
-  // page that shows only while the sidebar is away), focus goes to a trigger still in reach, else
-  // to the open sidebar's current row.
+  // drawn and the sidebar has slid (none of it with reduced motion), if that went out of reach
+  // (folded away with it, hidden on the rail, or a trigger in the page that shows only while the
+  // sidebar is away), focus goes to a trigger still in reach, else to the open sidebar's current
+  // row; unless it folds or opens again first, which starts its own turn.
   const held = useRef<Element | null>(null);
+  const turns = useRef(0);
   useEffect(() => {
     const before = held.current;
     held.current = null;
     if (before === null || inReach(before)) {
       return;
     }
+    turns.current += 1;
+    const turn = turns.current;
     const wrapper = element.current;
-    const trigger = [
-      ...(wrapper?.querySelectorAll<HTMLElement>(
-        '[data-slot="sidebar-trigger"]'
-      ) ?? []),
-    ].find(inReach);
     const sidebar = wrapper?.querySelector<HTMLElement>(
       '[data-slot="sidebar"]'
     );
-    (trigger ?? (open && sidebar ? landingIn(sidebar) : undefined))?.focus();
+    const land = () => {
+      const active = document.activeElement;
+      // Not after another turn, and not over a place the person moved focus to themselves meanwhile.
+      if (
+        turn !== turns.current ||
+        (active !== null && active !== before && active !== document.body)
+      ) {
+        return;
+      }
+      const trigger = [
+        ...(wrapper?.querySelectorAll<HTMLElement>(
+          '[data-slot="sidebar-trigger"]'
+        ) ?? []),
+      ].find(inReach);
+      (trigger ?? (open && sidebar ? landingIn(sidebar) : undefined))?.focus();
+    };
+    // The slide itself: the panel's own transitions, never what moves inside it (a working mark,
+    // a spinner), which may run for ever.
+    const sliding =
+      sidebar
+        ?.querySelector<HTMLElement>('[data-slot="sidebar-container"]')
+        ?.getAnimations() ?? [];
+    const afterSlide = async () => {
+      await Promise.allSettled(
+        sliding.map(async ({ finished }) => await finished)
+      );
+      land();
+    };
+    void afterSlide();
   });
 
   const toggleSidebar = () => {
@@ -1160,7 +1328,7 @@ export const SidebarProvider = ({
         ref={watch}
         data-slot="sidebar-wrapper"
         data-sidebar-key={storageKey}
-        {...stylex.props(styles.wrapper, style)}
+        {...stylex.props(sidebarWrapperMarker, styles.wrapper, style)}
       >
         {children}
       </div>
@@ -1880,8 +2048,9 @@ export interface SidebarMenuButtonProps extends SlotPartProps, Own<"button"> {
   /**
    * An `<Icon />` and the words, as bare text; with `asChild`, the link that holds them
    * (`<a href>`, a router's link). The words end in an ellipsis where the row does, and a tooltip
-   * shows them whole while they are cut. An element you write (a `<span>` of two lines, a count, a
-   * product's working mark) is drawn as given.
+   * shows them whole while they are cut, giving way before anything beside them. An element you
+   * write (a count, a product's working mark) is drawn as given; a name over a second line, in one
+   * element marked `data-sidebar-lines`, grows the row to hold both.
    */
   children: ReactNode;
   /**
@@ -2292,70 +2461,183 @@ export const SidebarLevel = ({ children, value, style }: SidebarLevelProps) => {
   );
 };
 
+/** Whether a part stands in a SidebarLevelHeader, which draws it as a part of its one row. */
+const LevelHeaderContext = createContext(false);
+
 /** Every prop a SidebarLevelHeader takes. */
 export interface SidebarLevelHeaderProps extends PartProps, Own<"div"> {
-  /** The row that leads back, in a SidebarMenu, then the SidebarLevelTitle. */
+  /** The way back (a SidebarLevelTrigger), then the SidebarLevelTitle. */
   children: ReactNode;
 }
 
-/** The top of a level, which stays while its content scrolls: the way back, then its name. */
-export const SidebarLevelHeader = (props: SidebarLevelHeaderProps) =>
-  part("div", "level-header", [styles.group, styles.levelHeader], props);
+/**
+ * The top of a level, which stays while its content scrolls: the way back, its chevron alone, and
+ * the level's name, as one raised row. Folded to its icons, the two stand one over the other.
+ */
+export const SidebarLevelHeader = ({
+  children,
+  style,
+  ...rest
+}: SidebarLevelHeaderProps) => (
+  <div
+    {...rest}
+    data-slot="sidebar-level-header"
+    data-sidebar="level-header"
+    {...stylex.props(styles.levelHeader, style)}
+  >
+    <div {...stylex.props(styles.levelTrack)}>
+      <div
+        data-slot="sidebar-level-segment"
+        {...stylex.props(styles.levelSegment)}
+      >
+        <LevelHeaderContext value>{children}</LevelHeaderContext>
+      </div>
+    </div>
+  </div>
+);
 
 /** Every prop a SidebarLevelTitle takes: these, and the rest of an <h2>. */
 export interface SidebarLevelTitleProps extends PartProps, Own<"h2"> {
   /**
-   * An `<Icon />` and the level's name, as bare text ("Settings"). Folded to its icons, the
-   * sidebar shows the icon alone.
+   * An `<Icon />` (or a picture of the level's own) and the level's name, as bare text
+   * ("Settings"); with `asChild`, the link to the level's own first page that holds them. Folded to
+   * its icons, the sidebar shows the icon alone.
    */
   children: ReactNode;
+  /**
+   * Draws the one element given as the child (`<a href>`, a router's link) inside the heading: the
+   * name opens the level's own first page.
+   * @default false
+   */
+  asChild?: boolean;
+  /**
+   * The level's own first page is the page you are on (`aria-current`).
+   * @default false
+   */
+  isActive?: boolean;
 }
 
-/** A level's name: a heading in a row's box, under the way back. */
+/** A level's name: a heading beside the way back, and with `asChild` the link to its first page. */
 export const SidebarLevelTitle = ({
   children,
+  asChild,
+  isActive = false,
   style,
   ...rest
-}: SidebarLevelTitleProps) => (
-  <h2
-    {...rest}
-    data-slot="sidebar-level-title"
-    data-sidebar="level-title"
-    {...stylex.props(styles.button, styles.levelTitle, style)}
-  >
-    {withLabel(children).parts}
-  </h2>
-);
+}: SidebarLevelTitleProps) => {
+  const slot = slotWords(asChild, children);
+  return (
+    <h2
+      {...rest}
+      data-slot="sidebar-level-title"
+      data-sidebar="level-title"
+      {...stylex.props(styles.levelTitle, style)}
+    >
+      {renderElement(
+        "span",
+        {
+          "aria-current": isActive ? "page" : undefined,
+          className: className(
+            styles.levelPart,
+            styles.levelHome,
+            slot.render !== undefined && [
+              styles.levelPress,
+              styles.levelHomeLink,
+              focusRingInset,
+            ]
+          ),
+          children: withLabel(slot.children).parts,
+        },
+        slot.render
+      )}
+    </h2>
+  );
+};
 
 /** Every prop a SidebarLevelTrigger takes: a SidebarMenuButton's, and the level it shows. */
 export interface SidebarLevelTriggerProps extends Omit<
   SidebarMenuButtonProps,
-  "value"
+  "value" | "children"
 > {
   /** The level it shows: that SidebarLevel's `value`. */
   value: string;
+  /**
+   * An `<Icon />` and the words; with `asChild`, the link that holds them. In a SidebarLevelHeader
+   * it is the way back, its chevron alone: give it no words (with `asChild`, an empty link) and name
+   * it with `aria-label` ("Back").
+   */
+  children?: ReactNode;
 }
 
 /**
  * A row that shows another level, in a sidebar that keeps the level itself: a SidebarMenuButton, a
- * link with `asChild`. The row into a level and the row that leads back are both one. Where the
- * address says which level is shown, a plain SidebarMenuButton link does.
+ * link with `asChild`. The row into a level and the way back are both one; in a SidebarLevelHeader
+ * it is the way back, the head's chevron. Where the address says which level is shown, it is a
+ * link too, the router's, and the address decides.
  */
 export const SidebarLevelTrigger = ({
   value,
   onClick,
+  children,
+  asChild,
+  "aria-label": named,
+  style,
+  isActive,
+  tooltip,
+  size: sized,
+  variant,
   ...rest
 }: SidebarLevelTriggerProps) => {
   const { setValue } = useLevels("SidebarLevelTrigger");
-  return (
-    <SidebarMenuButton
-      {...rest}
-      onClick={(event) => {
-        onClick?.(event);
-        if (!event.defaultPrevented) {
-          setValue(value);
-        }
-      }}
-    />
+  const inHeader = use(LevelHeaderContext);
+  const { back } = useI18n().sidebar;
+  const show = (event: MouseEvent<HTMLButtonElement>) => {
+    onClick?.(event);
+    if (!event.defaultPrevented) {
+      setValue(value);
+    }
+  };
+  if (!inHeader) {
+    return (
+      <SidebarMenuButton
+        {...rest}
+        asChild={asChild}
+        isActive={isActive}
+        tooltip={tooltip}
+        size={sized}
+        variant={variant}
+        aria-label={named}
+        style={style}
+        onClick={show}
+      >
+        {children}
+      </SidebarMenuButton>
+    );
+  }
+  const slot = slotWords(asChild, children);
+  const label = named ?? back;
+  return renderElement(
+    "button",
+    mergeProps(rest, {
+      type: slot.render === undefined ? "button" : undefined,
+      "aria-label": label,
+      title: label,
+      "data-slot": "sidebar-level-back",
+      className: className(
+        styles.levelPart,
+        styles.levelPress,
+        styles.levelBack,
+        focusRingInset,
+        style
+      ),
+      onClick: show,
+      children:
+        listOf(slot.children).length > 0 ? (
+          slot.children
+        ) : (
+          <Icon icon={ChevronLeftIcon} />
+        ),
+    }),
+    slot.render
   );
 };
