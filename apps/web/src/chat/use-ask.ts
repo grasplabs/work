@@ -60,7 +60,7 @@ export const titleOf = (question: string): string => {
 };
 
 /** A file in the box, waiting for its question, by an ID of the page's own. */
-export interface BoxFile {
+interface BoxFile {
   id: string;
   file: File;
 }
@@ -390,20 +390,6 @@ export const useAsk = (
         : problems[0]
     );
   };
-  /**
-   * Takes box file `id` off its chat on core, where core took it already
-   * (a send that failed after it), so it holds none of the chat's places
-   * for files.
-   */
-  const removeAttached = (id: string): void => {
-    const known = attachedFiles.get(id);
-    attachedFiles.delete(id);
-    if (known !== undefined) {
-      void run(async (session) => {
-        await session.chats.removeFile(known.chatId, known.fileId);
-      });
-    }
-  };
   const removeFile = (id: string): void => {
     // Not while the question is on its way: its files are being attached
     // and named, so one taken out now would still be sent.
@@ -416,7 +402,11 @@ export const useAsk = (
     const known = attached.get(id);
     attached.delete(id);
     setFileProblem(undefined);
-    removeAttached(id);
+    if (known !== undefined) {
+      void run(async (session) => {
+        await session.chats.removeFile(known.chatId, known.fileId);
+      });
+    }
   };
   /**
    * Asks `question`: true once core took it, false when it was not sent.
@@ -532,9 +522,6 @@ export const useAsk = (
     );
     letGo();
     sending.current = false;
-    if (shownIn !== undefined) {
-      sendEnded(shownIn, key);
-    }
     if (sent === undefined) {
       // From the box, the question leaves the thread and goes back into a
       // box, which says why it wasn't sent; asked for the person, it only

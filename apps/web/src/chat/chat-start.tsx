@@ -291,17 +291,6 @@ export const ChatStart = ({
   // whose model the box shows (the first one's, else the first agent's).
   const agentsMentioned = mentions.filter(({ kind }) => kind === "agent");
   const answering = agentsMentioned.at(0)?.id ?? agents.at(0)?.id;
-  // The chat a question here opens shows it at once: its page's code
-  // (the router's chunk for it) and its conversation's are here already.
-  const router = useRouter();
-  useEffect(() => {
-    preloadThread();
-    // Where the app has the chat's page (a test may not).
-    const page = "/_shell/chats/$chatId";
-    if (Object.hasOwn(router.routesById, page)) {
-      void router.loadRouteChunk(router.routesById[page]);
-    }
-  }, [router]);
   useEffect(() => {
     if (named === undefined || mentioned.current || typed !== "") {
       return;

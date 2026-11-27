@@ -12037,10 +12037,6 @@ msgstr "Pas encore enregistré. D’ici là, vos lignes vont toujours là où el
 msgid "Not sent"
 msgstr "Non envoyé"
 
-#: src/chat/thread.tsx
-msgid "Not sent. {failure}"
-msgstr "Non envoyé. {failure}"
-
 #: src/apps/resource-bindings.tsx
 msgid "Not served"
 msgstr "Non servi"

@@ -12037,10 +12037,6 @@ msgstr "Not saved yet. Until it is, your lines still go where they went before."
 msgid "Not sent"
 msgstr "Not sent"
 
-#: src/chat/thread.tsx
-msgid "Not sent. {failure}"
-msgstr "Not sent. {failure}"
-
 #: src/apps/resource-bindings.tsx
 msgid "Not served"
 msgstr "Not served"

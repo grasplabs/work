@@ -103,6 +103,26 @@ describe("the question on its way", () => {
     }).toStrictEqual({ older: again, both: undefined });
   });
 
+  it("stays put while an older queued question is taken and kept, and goes only once core keeps it under its own key", () => {
+    const before = [asked(1, "Yes"), asked(2, "Done?")];
+    // An older question, queued behind an answer, is taken and kept while
+    // this one is still on its way (its file uploading).
+    const older = { ...asked(3, "And the totals?"), key: "key-0" };
+    const own = { ...asked(5, "Yes"), key: "key-1" };
+    // Kept without its key: its chat's object restarted before keeping it.
+    const lost = asked(5, "Yes");
+
+    expect({
+      olderTaken: shownPending(pending, [...before, older]),
+      ownKept: shownPending(pending, [...before, older, own]),
+      keptWithoutKey: shownPending(pending, [...before, older, lost]),
+    }).toStrictEqual({
+      olderTaken: pending,
+      ownKept: undefined,
+      keptWithoutKey: undefined,
+    });
+  });
+
   it("is taken back by the box that sent it while it is on the page, and by the box showing its chat once it is gone", () => {
     const start = boxOnPage();
     const question = { ...refused, owner: start.owner };

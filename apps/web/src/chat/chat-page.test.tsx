@@ -28,7 +28,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { loadFromCore } from "../load-from-core.tsx";
 import { wordsOf } from "../test-words.ts";
-import { activeChat, forgetActiveChats, setActiveChat } from "./active-chat.ts";
+import { activeChat, setActiveChat } from "./active-chat.ts";
 import { LoadedChatPage } from "./chat-page.tsx";
 import { GlobalChatProvider, useGlobalChat } from "./global-chat.tsx";
 import type { GlobalChat } from "./global-chat.tsx";
@@ -124,9 +124,6 @@ const opened = async (
   }
 ) => {
   const asked: string[] = [];
-  // The key each question went with; the next one refused, once asked to.
-  const keys: string[] = [];
-  let refusing = false;
   const chats = {
     models: async () => await Promise.resolve(["openai/gpt-5"]),
     efforts: async () => await Promise.resolve({}),
@@ -205,14 +202,7 @@ const opened = async (
     await router.load();
   });
   await settled();
-  return {
-    asked,
-    keys,
-    router,
-    refuseNext: () => {
-      refusing = true;
-    },
-  };
+  return { asked, router };
 };
 
 /** The box to ask in, if the page has one. */
@@ -350,41 +340,15 @@ const saysRestricted = () =>
     (badge) => wordsOf(badge) === "Restricted"
   );
 
-/** A question or an answer of a chat, by its ID. */
-const message = (id: number, role: "user" | "assistant"): ChatMessage =>
-  role === "user"
-    ? { id, role, text: `Question ${id}`, at: "2026-11-01T08:00:00.000Z" }
-    : {
-        id,
-        role,
-        text: `Answer ${id}`,
-        code: [],
-        tools: [],
-        end: "done",
-        at: "2026-11-01T08:01:00.000Z",
-      };
-
-/** Whether the page shows the thread's skeleton, and which questions it shows. */
-const shows = () => ({
-  skeleton: document.querySelector('[data-slot="message-skeleton"]') !== null,
-  questions: ["Question 1", "Question 3"].filter((words) =>
-    document.body.textContent.includes(words)
-  ),
-});
-
 describe("a chat's own page", () => {
-  afterEach(async () => {
+  afterEach(() => {
     act(() => {
       root?.unmount();
     });
-    // Its chat's watch stops a moment after.
-    await settled();
     root = undefined;
     document.body.replaceChildren();
     localStorage.clear();
     sessionStorage.clear();
-    // What the tab kept of chats is the person's: none for the next test.
-    forgetActiveChats();
     setActiveChat(undefined, "chat");
     seen.chat = undefined;
   });

@@ -83,13 +83,11 @@ import type { CardFile } from "./chat-files.tsx";
 import { answerStatusOf, stepFinished, stepStatusOf } from "./chat-states.ts";
 import { modelName } from "./composer.tsx";
 import { ConnectAiProvider } from "./connect-ai-provider.tsx";
-import { FailureLine } from "./failure-line.tsx";
 import { failureMessage, retryMends } from "./failure.ts";
 import { pendingCard } from "./make-card.tsx";
 import type { PendingQuestion } from "./pending-question.ts";
 import { recoveredSteps } from "./recovered.ts";
 import { SavedMemoryLine } from "./saved-memory.tsx";
-import type { SentQuestion } from "./sent-questions.ts";
 import { readingFileOf, signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
 import type { SourceName } from "./sources.tsx";
@@ -156,8 +154,6 @@ const styles = stylex.create({
     gap: space["1"],
   },
   flat: { margin: 0 },
-  // Under a question core refused, at its side: why, and Try again.
-  notSent: { display: "grid", gap: space["2"], justifyItems: "end" },
   // A day line, as #2503's thread draws it: the day between two hairlines.
   dayLine: { display: "flex", alignItems: "center", gap: space["3"] },
   dayRule: { flexGrow: 1, flexBasis: 0, alignSelf: "center" },
@@ -578,8 +574,6 @@ type Row =
       at: string;
       message: Asked;
       asked: Answer["asked"];
-      /** Sent from this tab, not shown back by core yet (sent-questions.ts). */
-      sent?: SentQuestion;
     }
   | { kind: "pending"; id: string; at?: undefined; question: PendingQuestion }
   | AnswerTurn
@@ -719,61 +713,65 @@ const sameAgent = (
 };
 
 /**
- * A question's row ID: the key the page sent it with, where it has one, so
- * the question drawn as it was sent and core's copy are the same row.
+ * A question's row ID: the key the page sent it with, where it has one,
+ * so the question drawn as it was sent (`pendingRowId`) and core's copy
+ * are one row, never drawn twice nor moved.
  */
-const questionRowId = (message: Asked): string =>
-  message.key === undefined ? `q${message.id}` : `q:${message.key}`;
+const questionRowId = (key: string | undefined, id: number): string =>
+  key === undefined ? `q${id}` : `q:${key}`;
+
+/** The row ID of the question on its way: the one core's copy takes. */
+const pendingRowId = (question: PendingQuestion): string => `q:${question.key}`;
 
 /**
- * The thread's rows: each question, then its replies as one answer per
- * agent, the reply being written joined to it; then the questions sent
- * from this tab that core hasn't shown back yet (`sent`), the answer being
- * written after those on their way, and those core refused last of all.
- * An answer's row is named after the question it answers (and how many
- * answers came before it there), never after its first reply: the row
- * that says Grasp works on a question stays the same row once its first
- * reply is kept.
+ * An answer's row ID: after the question it answers, and how many answers
+ * came before it there; never its first reply's, so the row Grasp works in
+ * stays the same row once that reply is kept.
  */
+const answerRowId = (question: string, answers: number): string =>
+  `${question}a${answers + 1}`;
+
+/**
+ * How many answer rows follow the last question in `rows`, and that
+ * question's row ID ("" before any question).
+ */
+const lastAsked = (rows: readonly Row[]): { id: string; answers: number } => {
+  const at = rows.findLastIndex(({ kind }) => kind === "question");
+  return {
+    id: rows[at]?.id ?? "",
+    answers: rows.slice(at + 1).filter(({ kind }) => kind === "answer").length,
+  };
+};
+
+/** The thread's rows: each question, then its replies as one answer per agent, the reply being written joined to it. */
 const rowsOf = (
   messages: readonly ChatMessage[],
   partial: ChatPartial | null,
-  live: boolean,
-  sent: readonly SentQuestion[] = []
+  live: boolean
 ): Row[] => {
   const rows: Row[] = [];
-  // The question the answers being drawn follow, and how many answer
-  // rows it has.
-  let question = "";
-  let answers = 0;
   const answerRow = (at: string | undefined): AnswerTurn => {
-    answers += 1;
+    const asked = lastAsked(rows);
     return {
       kind: "answer",
-      id: `${question}a${answers}`,
+      id: answerRowId(asked.id, asked.answers),
       at,
       replies: [],
       partial: null,
       live: false,
     };
   };
-  const ask = (message: Asked, from?: SentQuestion): void => {
-    const before = rows.at(-1);
-    question = questionRowId(message);
-    answers = 0;
-    rows.push({
-      kind: "question",
-      id: question,
-      at: message.at,
-      message,
-      asked:
-        before?.kind === "answer" ? before.replies.at(-1)?.asked : undefined,
-      ...(from === undefined ? {} : { sent: from }),
-    });
-  };
   for (const message of messages) {
     if (message.role === "user") {
-      ask(message);
+      const before = rows.at(-1);
+      rows.push({
+        kind: "question",
+        id: questionRowId(message.key, message.id),
+        at: message.at,
+        message,
+        asked:
+          before?.kind === "answer" ? before.replies.at(-1)?.asked : undefined,
+      });
     } else if (message.role === "assistant") {
       const last = rows.at(-1);
       if (last?.kind === "answer" && sameAgent(last, message.agentId)) {
@@ -785,37 +783,19 @@ const rowsOf = (
       }
     }
   }
-  const asked = (each: SentQuestion): void => {
-    ask(
-      { id: 0, role: "user", text: each.text, key: each.key, at: each.at },
-      each
-    );
-  };
-  const onTheirWay = sent.filter(({ failure }) => failure === undefined);
-  // On their way: Grasp's answer follows them, unless they wait behind it.
-  for (const each of onTheirWay.filter(({ behind }) => !behind)) {
-    asked(each);
+  if (!live) {
+    return rows;
   }
-  if (live) {
-    // Grasp works on the last question: its answer goes on, or begins.
-    const last = rows.at(-1);
-    if (last?.kind === "answer" && sameAgent(last, partial?.agentId)) {
-      last.partial = partial;
-      last.live = true;
-    } else {
-      const row = answerRow(last?.at);
-      row.partial = partial;
-      row.live = true;
-      rows.push(row);
-    }
-  }
-  // Sent while Grasp answered: after that answer, as core queues them.
-  for (const each of onTheirWay.filter(({ behind }) => behind)) {
-    asked(each);
-  }
-  // Refused: after everything, to send again, never inside an answer.
-  for (const each of sent.filter(({ failure }) => failure !== undefined)) {
-    asked(each);
+  // Grasp works on the last question: its answer goes on, or begins.
+  const last = rows.at(-1);
+  if (last?.kind === "answer" && sameAgent(last, partial?.agentId)) {
+    last.partial = partial;
+    last.live = true;
+  } else {
+    const row = answerRow(last?.at);
+    row.partial = partial;
+    row.live = true;
+    rows.push(row);
   }
   return rows;
 };
@@ -906,28 +886,6 @@ const SentAt = ({
   </MessageFooter>
 );
 
-/** Under a question core refused: that it wasn't sent, why, and Try again. */
-const NotSent = ({
-  failure,
-  onAgain,
-}: {
-  failure: string;
-  onAgain: () => void;
-}) => {
-  const { t } = useLingui();
-  return (
-    <div {...stylex.props(styles.notSent)}>
-      <FailureLine>{t`Not sent. ${failure}`}</FailureLine>
-      <div>
-        <Button onClick={onAgain} size="sm" variant="outline">
-          <Icon icon={RefreshCwIcon} />
-          <Trans>Try again</Trans>
-        </Button>
-      </div>
-    </div>
-  );
-};
-
 /**
  * What the person asked, in their bubble: their answers to the agent's
  * questions (`asked`, the reply before it) as each question and its
@@ -936,30 +894,17 @@ const NotSent = ({
 const Question = ({
   message,
   asked,
-  sent,
-  onAgain,
 }: {
   message: { text: string; files?: readonly CardFile[]; at: string };
   asked: Answer["asked"];
-  /** Sent from this tab and not shown back yet: refused, it says so. */
-  sent?: SentQuestion;
-  /** Sends a question core refused again, under its own key. */
-  onAgain?: (question: SentQuestion) => void;
 }) => {
   const answered =
     asked === undefined ? undefined : answeredOf(asked, message.text);
-  // Sent from here and not shown back yet: the files it carries, from the box.
-  const files =
-    sent?.files.map(({ id, file }) => ({
-      id,
-      name: file.name,
-      bytes: file.size,
-    })) ?? message.files;
   return (
     <Message align="end">
       <MessageContent>
-        {files === undefined || files.length === 0 ? null : (
-          <FileCards files={files} />
+        {message.files === undefined || message.files.length === 0 ? null : (
+          <FileCards files={message.files} />
         )}
         <Bubble align="end" variant="secondary">
           <BubbleContent>
@@ -982,14 +927,6 @@ const Question = ({
           </BubbleContent>
         </Bubble>
         <SentAt at={message.at} />
-        {sent?.failure === undefined ? null : (
-          <NotSent
-            failure={sent.failure}
-            onAgain={() => {
-              onAgain?.(sent);
-            }}
-          />
-        )}
       </MessageContent>
     </Message>
   );
@@ -1575,12 +1512,17 @@ const withLast = (
     };
     return [...rows, ...queuedRows, waiting, ...ending];
   }
-  const asked: Row = { kind: "pending", id: "pending", question: pending };
+  // Under the question core's copy of it takes the place of, as one row.
+  const asked: Row = {
+    kind: "pending",
+    id: pendingRowId(pending),
+    question: pending,
+  };
   const answering: Row[] = live.running
     ? [
         {
           kind: "answer",
-          id: "answering",
+          id: answerRowId(pendingRowId(pending), 0),
           at: undefined,
           replies: [],
           partial: live.partial,
@@ -1846,12 +1788,7 @@ export const ChatThread = ({
                         {...column}
                       >
                         {row.kind === "question" ? (
-                          <Question
-                            asked={row.asked}
-                            message={row.message}
-                            onAgain={onAgain}
-                            sent={row.sent}
-                          />
+                          <Question asked={row.asked} message={row.message} />
                         ) : null}
                         {row.kind === "pending" ? (
                           <Question

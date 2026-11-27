@@ -147,24 +147,37 @@ export const takesBack = (
 
 /**
  * Whether core has its own copy of `question`: queued behind the answer
- * being written, in its words, or in `messages`, the first question after
- * it (when where it went isn't known, the last question, in its words).
+ * being written, in its words, or in `messages`, with the key it went with
+ * (`ChatMessage.key`), never another question that came meanwhile (an
+ * older one queued, now taken). One kept without its key (its chat's
+ * object restarted before keeping it) is a question in its words, without
+ * a key, after where it went (where that isn't known, the last one).
  */
 export const taken = (
   question: PendingQuestion,
   messages: readonly ChatMessage[],
   queued: readonly ChatQueued[] = []
 ): boolean => {
-  const { after } = question;
+  const { after, key, text } = question;
   if (
-    queued.filter(({ text }) => text === question.text).length >
-    question.alreadyQueued
+    queued.filter((each) => each.text === text).length > question.alreadyQueued
   ) {
     return true;
   }
+  const asked = messages.filter(
+    (message): message is Extract<ChatMessage, { role: "user" }> =>
+      message.role === "user"
+  );
+  if (asked.some((message) => message.key === key)) {
+    return true;
+  }
+  // Without its key: in its words, after where it went (where that isn't
+  // known, the last question).
+  const unkeyed = (message: { key?: string; text: string } | undefined) =>
+    message !== undefined && message.key === undefined && message.text === text;
   return after === undefined
-    ? messages.findLast(({ role }) => role === "user")?.text === question.text
-    : messages.some(({ id, role }) => role === "user" && id > after);
+    ? unkeyed(asked.at(-1))
+    : asked.some((message) => message.id > after && unkeyed(message));
 };
 
 /**

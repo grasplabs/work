@@ -81,7 +81,6 @@ type ThreadComponent = typeof ChatThreadType;
 
 const loadThread = async (): Promise<{ default: ThreadComponent }> => {
   const { ChatThread: thread } = await import("./thread.tsx");
-  loadedThread = thread;
   return { default: thread };
 };
 
@@ -227,16 +226,6 @@ export const ChatConversation = ({
         }
         sourceNames={sourceNames}
         tools={view.tools}
-        sent={sent}
-        onAgain={(question) => {
-          focusBox();
-          void ask(
-            question.text,
-            question.files,
-            question.mentions,
-            question.key
-          );
-        }}
         build={{
           model: composer.model,
           effort: composer.effort,

@@ -1186,12 +1186,6 @@ export class Workspace extends DurableObject<Env> {
   /** Who follows each chat (`watch`), by chat and watch ID. */
   readonly #watchers = new Map<ChatId, Map<string, ChatWatch>>();
 
-  /** Who follows their list of chats (`watchChats`), by watch ID. */
-  readonly #listWatchers = new Map<string, ChatListWatch>();
-
-  /** Whether the list's watchers are told already this tick (`#listChanged`). */
-  #listTold = false;
-
   /**
    * Where each chat stood before the questions sent in it still being
    * taken moved it up (`#askedIn`), when those are, and every time such a
@@ -3070,7 +3064,7 @@ export class Workspace extends DurableObject<Env> {
     // the question is shown (`#store`), which waits on the chat's object
     // and may take seconds; back where it was if it is refused.
     const asked = this.#askedIn(chat.id);
-    void this.#takeQuestion(chat, question, started);
+    void this.#takeQuestion(chat, question, started, key);
     try {
       await started.promise;
       if (key !== undefined) {

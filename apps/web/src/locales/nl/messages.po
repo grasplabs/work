@@ -12037,10 +12037,6 @@ msgstr "Nog niet opgeslagen. Tot dan gaan je regels nog waar ze eerst heen ginge
 msgid "Not sent"
 msgstr "Niet verstuurd"
 
-#: src/chat/thread.tsx
-msgid "Not sent. {failure}"
-msgstr "Niet verstuurd. {failure}"
-
 #: src/apps/resource-bindings.tsx
 msgid "Not served"
 msgstr "Niet bediend"
