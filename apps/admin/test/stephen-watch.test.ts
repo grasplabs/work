@@ -3,8 +3,8 @@
  * through its own cron, against fake client cores.
  * Written from how watching could fail: a signal over its bar the client's
  * Setup doesn't say needs a look, or still says so once it's back under, a
- * client nobody watches because its core is older, or what the watch read
- * not on the client's page.
+ * client nobody watches because its core is older, what the watch read
+ * not on the client's page, or an organization's size miscounted.
  */
 import type {
   AdminSnapshot,
@@ -65,11 +65,29 @@ const liveClient = async (): Promise<{
   return { clientId, core };
 };
 
-/** What `core` answers: its company, and Stephen's counts. */
-const answering = (core: CoreState, stephen?: AdminStephenSignals): void => {
+/** A roster of `count` people, in one team. */
+const rosterOf = (count: number): AdminSnapshot["roster"] => ({
+  teams: [{ id: "all", name: "All", lead: null, does: "", off: false }],
+  people: Array.from({ length: count }, (_, index) => ({
+    id: `person-${index}`,
+    name: `Person ${index}`,
+    email: "",
+    team: "all",
+    title: "",
+    away: index === 0,
+  })),
+});
+
+/** What `core` answers: its company, Stephen's counts and its roster. */
+const answering = (
+  core: CoreState,
+  stephen?: AdminStephenSignals,
+  roster: AdminSnapshot["roster"] = null
+): void => {
   const snapshot: AdminSnapshot = {
     ...emptyAdminSnapshot(core.name),
     ...(stephen === undefined ? {} : { stephen }),
+    roster,
   };
   core.admin = snapshot;
 };
@@ -124,10 +142,14 @@ describe("the watch of Stephen", () => {
     });
   });
 
-  it("puts what it read on the client's page, a line a signal, and leaves a client whose core doesn't count Stephen yet unwatched", async () => {
+  it("puts what it read on the client's page, a line a signal and its size, and leaves a client whose core doesn't count Stephen yet unwatched", async () => {
     const acme = await liveClient();
+    const unlisted = await liveClient();
     const older = await liveClient();
-    answering(acme.core, { ...quiet, p90Ms: 15_000 });
+    // Everyone on the roster counts, someone away too.
+    answering(acme.core, { ...quiet, p90Ms: 15_000 }, rosterOf(3));
+    // No roster yet: its size is unknown.
+    answering(unlisted.core, quiet);
     answering(older.core);
 
     await watch();
@@ -139,6 +161,11 @@ describe("the watch of Stephen", () => {
       { clientId: acme.clientId },
       { email: staff.email }
     );
+    const unlistedSetup = await callServerFn(
+      fetchClientSetup,
+      { clientId: unlisted.clientId },
+      { email: staff.email }
+    );
     const olderSetup = await callServerFn(
       fetchClientSetup,
       { clientId: older.clientId },
@@ -146,6 +173,7 @@ describe("the watch of Stephen", () => {
     );
     expect({
       acme: acmeSetup?.watched?.signals,
+      unlisted: unlistedSetup?.watched?.signals.people,
       older: olderSetup?.watched,
     }).toStrictEqual({
       acme: {
@@ -160,7 +188,9 @@ describe("the watch of Stephen", () => {
         p90Ms: 15_000,
         companyAgain: 0,
         personalAgain: 0,
+        people: 3,
       },
+      unlisted: undefined,
       older: null,
     });
   });
