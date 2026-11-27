@@ -20,7 +20,8 @@ describe("what a step gave back", () => {
           logs: ["one", "two"],
           returned: [1, 2],
           cut: true,
-        })
+        }),
+        "code"
       )
     ).toStrictEqual({
       kind: "run",
@@ -32,7 +33,8 @@ describe("what a step gave back", () => {
     });
     expect(
       stepResultOf(
-        JSON.stringify({ status: "failed", error: "The ledger API is down" })
+        JSON.stringify({ status: "failed", error: "The ledger API is down" }),
+        "code"
       )
     ).toStrictEqual({
       kind: "run",
@@ -42,16 +44,16 @@ describe("what a step gave back", () => {
       error: "The ledger API is down",
       cut: false,
     });
-    expect(stepResultOf('{"returned":null}')).toMatchObject({
+    expect(stepResultOf('{"returned":null}', "code")).toMatchObject({
       returned: { value: null },
     });
   });
 
   it("reads a run that returned, logged and read nothing as nothing to show, and an object that only looks like one as text", () => {
     expect({
-      nothing: stepResultOf("{}"),
-      status: stepResultOf('{"status":"done"}'),
-      logs: stepResultOf('{"logs":"x"}'),
+      nothing: stepResultOf("{}", "code"),
+      status: stepResultOf('{"status":"done"}', "code"),
+      logs: stepResultOf('{"logs":"x"}', "code"),
     }).toStrictEqual({
       nothing: {
         kind: "run",
@@ -66,11 +68,31 @@ describe("what a step gave back", () => {
     });
   });
 
+  it("keeps a tool's words as words even when they look like a run's, as a file holding {} or logs does, and reads what a tool returned or why it failed", () => {
+    expect({
+      empty: stepResultOf("{}", "tool").kind,
+      logs: stepResultOf('{"logs":["hello"]}', "tool").kind,
+      returned: stepResultOf(
+        '{"readFrom":["connection conn-1"],"returned":"Hi"}',
+        "tool"
+      ).kind,
+      failed: stepResultOf('{"status":"threw","error":"Refused"}', "tool").kind,
+    }).toStrictEqual({
+      empty: "text",
+      logs: "text",
+      returned: "run",
+      failed: "run",
+    });
+  });
+
   it("keeps any other text as it is, a tool's own JSON too, and says when core cut it", () => {
     expect({
-      lines: stepResultOf("1: export default"),
-      json: stepResultOf('{"changed":["a.ts"]}'),
-      cut: stepResultOf("1: a\n2: b\n… (cut: over 20000 bytes of output)"),
+      lines: stepResultOf("1: export default", "tool"),
+      json: stepResultOf('{"changed":["a.ts"]}', "tool"),
+      cut: stepResultOf(
+        "1: a\n2: b\n… (cut: over 20000 bytes of output)",
+        "tool"
+      ),
     }).toStrictEqual({
       lines: { kind: "text", text: "1: export default", cut: false },
       json: { kind: "text", text: '{"changed":["a.ts"]}', cut: false },

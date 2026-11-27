@@ -72,8 +72,8 @@ export interface AnswerStep {
   status: StepStatus;
   /** What went in: a tool's arguments as JSON, or a code step's code. */
   input: string;
-  /** The language `input` is in: `json` for a tool's, `ts` for a code step's. */
-  inputLanguage: "json" | "ts";
+  /** What ran: a code step (its input is TypeScript), or a tool (its input JSON). */
+  from: "code" | "tool";
   /** What it gave back, as core gave it to the model (step-result.ts). */
   result: string | undefined;
   /** What a code step has logged so far, while it runs. */
@@ -354,14 +354,16 @@ const ReturnedValue = ({ label, value }: { label: string; value: unknown }) =>
 const StepResultParts = ({
   text,
   failed,
+  from,
   sourceNames,
 }: {
   text: string;
   failed: boolean;
+  from: "code" | "tool";
   sourceNames: ReadonlyMap<string, SourceName>;
 }) => {
   const { t } = useLingui();
-  const result = stepResultOf(text);
+  const result = stepResultOf(text, from);
   const why = t`Why it failed`;
   const gave = t({ message: "Result", context: "what a tool gave back" });
   const cut = result.cut ? (
@@ -474,7 +476,7 @@ const Step = ({
                     message: "Input",
                     context: "what a tool was given",
                   })}
-                  language={step.inputLanguage}
+                  language={step.from === "code" ? "ts" : "json"}
                   text={step.input}
                 />
               )}
@@ -484,6 +486,7 @@ const Step = ({
               {result === "" ? null : (
                 <StepResultParts
                   failed={failed}
+                  from={step.from}
                   sourceNames={sourceNames}
                   text={result}
                 />

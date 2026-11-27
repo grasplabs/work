@@ -355,7 +355,7 @@ const useAnswerSteps = (): ((
             active: summary(step.call, false),
             status,
             input: JSON.stringify(step.call.input, null, 2),
-            inputLanguage: "json",
+            from: "tool",
             result: result?.text,
           };
         }
@@ -371,7 +371,7 @@ const useAnswerSteps = (): ((
               : t`Running a code step`,
           status,
           input: step.code.code,
-          inputLanguage: "ts",
+          from: "code",
           result: result?.text,
           ...(result === undefined && logged !== undefined ? { logged } : {}),
         };

@@ -68,9 +68,26 @@ const runOf = (
     : undefined;
 };
 
-/** What the step whose result core gave as `text` gave back. */
-export const stepResultOf = (text: string): StepResult => {
-  const read = runOf(text);
+/**
+ * What the step whose result core gave as `text` gave back; `from` a code
+ * step, or a tool. A code step's result is always a run's. A tool's is a
+ * run's only where it returned something other than words, read from
+ * outside, or failed (core's `runTool`), so it says what it returned or
+ * why it failed: words it returned (a file's, which may hold `{}` or
+ * look like a run's in any other way) stay words.
+ */
+export const stepResultOf = (
+  text: string,
+  from: "code" | "tool"
+): StepResult => {
+  const parsed = runOf(text);
+  const read =
+    from === "tool" &&
+    parsed !== undefined &&
+    !parsed.returns &&
+    parsed.run.error === undefined
+      ? undefined
+      : parsed;
   if (read === undefined) {
     const cut = cutMarker.test(text);
     return { kind: "text", text: text.replace(cutMarker, ""), cut };
