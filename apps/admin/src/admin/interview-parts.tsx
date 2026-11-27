@@ -1,55 +1,36 @@
-import { Progress } from "@grasp-os/app-kit/components/progress";
 /**
  * The marks the Interviews section draws its counts with, ported from the
  * prototype (grasplabs/prototype `components/admin/admin-parts.tsx` and
- * `components/settings.tsx`): a panel with a title, bars told apart by a word, and a person as a dot. Where the
- * prototype sizes a bar with an inline style, a bar here is the UI's
- * progress bar, which is also announced as the share it is.
+ * `components/settings.tsx`), drawn with Damsko: a person as a dot, a
+ * team as dots, and someone as their initials.
  */
-import { cn } from "@grasp-os/app-kit/lib/utils";
-import type { LinkState } from "@grasp-os/shared/admin/onboarding-admin";
+import type {
+  LinkState,
+  PersonView,
+} from "@grasp-os/shared/admin/onboarding-admin";
+import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
+import { visuallyHidden } from "@grasp-os/ui/lib/styles";
+import { colors, radius, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 
-/** One row of a bar list: what it counts, how many, and the number as shown when it isn't the count. */
-export interface BarRow {
-  id: string;
-  label: string;
-  value: number;
-  shown?: string;
-}
-
-/**
- * A few things counted, as rows: what each is, a bar as long as its share
- * of the most, and the number. The words take the room they need and the
- * bars start in one line.
- */
-export const BarList = ({
-  rows,
-  label,
-}: {
-  rows: readonly BarRow[];
-  label: string;
-}) => {
-  const most = Math.max(1, ...rows.map((row) => row.value));
-  return (
-    <ul
-      aria-label={label}
-      className="grid grid-cols-[minmax(0,max-content)_minmax(5rem,1fr)_minmax(1.5rem,auto)] gap-x-3 gap-y-2.5"
-    >
-      {rows.map((row) => (
-        <li
-          className="col-span-3 grid grid-cols-subgrid items-center"
-          key={row.id}
-        >
-          <span className="text-muted-foreground truncate">{row.label}</span>
-          <Progress aria-label={row.label} max={most} value={row.value} />
-          <span className="text-right tabular-nums">
-            {row.shown ?? row.value}
-          </span>
-        </li>
-      ))}
-    </ul>
-  );
-};
+const styles = stylex.create({
+  dot: {
+    width: "0.5rem",
+    height: "0.5rem",
+    flexShrink: 0,
+    borderRadius: radius.circle,
+    boxSizing: "border-box",
+  },
+  talked: { backgroundColor: colors.foreground },
+  started: { backgroundColor: colors.mutedForeground, opacity: 0.6 },
+  not: { backgroundColor: colors.border },
+  none: {
+    borderWidth: size.hairline,
+    borderStyle: "solid",
+    borderColor: colors.border,
+  },
+  dots: { display: "flex", flexWrap: "wrap", gap: space["1"] },
+});
 
 /** How a person shows as a dot: talked, started, has not talked, or has no link yet. */
 type DotMark = "talked" | "started" | "not" | "none";
@@ -64,16 +45,37 @@ export const markOf = (state: LinkState): DotMark => {
   return state === "waiting" ? "none" : "not";
 };
 
-const dotInk: Record<DotMark, string> = {
-  talked: "bg-foreground",
-  started: "bg-muted-foreground/60",
-  not: "bg-border",
-  none: "border-border border",
-};
-
+/** A person as a dot; the words beside it say where they stand. */
 export const Dot = ({ mark }: { mark: DotMark }) => (
-  <span
-    aria-hidden
-    className={cn("size-2 flex-none rounded-full", dotInk[mark])}
-  />
+  <span aria-hidden {...stylex.props(styles.dot, styles[mark])} />
+);
+
+const dotOrder: readonly DotMark[] = ["talked", "started", "not", "none"];
+
+/** A team as dots, one a person: who talked, who started, who has not, who has no link yet. */
+export const PeopleDots = ({
+  people,
+  label,
+}: {
+  people: readonly PersonView[];
+  label: string;
+}) => (
+  <span {...stylex.props(styles.dots)}>
+    <span {...stylex.props(visuallyHidden)}>{label}</span>
+    {people
+      .toSorted(
+        (a, b) =>
+          dotOrder.indexOf(markOf(a.state)) - dotOrder.indexOf(markOf(b.state))
+      )
+      .map((each) => (
+        <Dot key={each.person.id} mark={markOf(each.state)} />
+      ))}
+  </span>
+);
+
+/** Someone as the first letters of their name, in a circle, beside their name. */
+export const Initials = ({ name }: { name: string }) => (
+  <Avatar decorative name={name} size="xs">
+    <AvatarFallback />
+  </Avatar>
 );

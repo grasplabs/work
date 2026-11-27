@@ -4,6 +4,7 @@ import type { CoreApi, Identity, SignInOption } from "@grasp-os/shared/rpc";
 import type { RpcStub } from "capnweb";
 
 import { forgetActiveChats } from "./chat/active-chat.ts";
+import { forgetDrafts } from "./chat/drafts.ts";
 import {
   connectCore,
   CoreTimeoutError,
@@ -933,5 +934,8 @@ export const signOut = async (core: CoreConnection): Promise<void> => {
   if (!response.ok) {
     throw new Error(`Signing out failed (${response.status}).`);
   }
+  // What they typed and didn't send stays in this browser no longer: a
+  // session that merely expired keeps it, to send once signed in again.
+  forgetDrafts();
   core.end("signed-out");
 };

@@ -4,6 +4,7 @@ import type { ComposioToolRule } from "@grasp-os/shared/connect";
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { forgetComposioCatalog } from "../src/catalog.ts";
 import { fakeComposioApi } from "./composio-api.ts";
 import {
   addConnection,
@@ -21,10 +22,11 @@ import type { Call } from "./connect.ts";
 // which of its tools only read, and which input property names the one
 // resource a call acts on. Connect goes by it, never by what Composio's
 // server declares about its own tools: a tool is a read only if the admin
-// said so, and held to one resource only by the property the admin named.
-// The ways that could fail come first: a server declaring a write
-// read-only, or naming a resource property of its own; an admin's rule
-// naming a property the tool doesn't take.
+// said so and Composio's catalog tags it read-only, and held to one
+// resource only by the property the admin named. The ways that could fail
+// come first: a server declaring a write read-only, or naming a resource
+// property of its own; a read stored for a tool the catalog doesn't tag;
+// an admin's rule naming a property the tool doesn't take.
 
 /** Tools the fake classes, that Grasp never runs by their names. */
 const neverTools = [
@@ -43,19 +45,57 @@ const composio = fakeComposioApi(
       slug: "hubspot",
       name: "HubSpot",
       tools: [
-        { slug: "HUBSPOT_LIST_CONTACTS", inputs: ["owner_id", "limit"] },
+        {
+          slug: "HUBSPOT_LIST_CONTACTS",
+          inputs: ["owner_id", "limit"],
+          tags: ["readOnlyHint"],
+        },
         {
           slug: "HUBSPOT_GET_CONTACT",
           inputs: ["contact_id"],
-          // Composio says it only reads; the list above, it says nothing of.
           tags: ["readOnlyHint"],
         },
         { slug: "HUBSPOT_CREATE_CONTACT", inputs: ["owner_id", "email"] },
+        {
+          slug: "HUBSPOT_LIST_SHAREHOLDERS",
+          inputs: ["owner_id"],
+          tags: ["readOnlyHint"],
+        },
+      ],
+    },
+    // A toolkit no list of Grasp's names: every tool as Composio serves it.
+    {
+      slug: "attio",
+      name: "Attio",
+      tools: [
+        {
+          slug: "ATTIO_SEARCH_RECORDS",
+          inputs: ["query"],
+          tags: ["readOnlyHint"],
+        },
+        { slug: "ATTIO_CREATE_NOTE", inputs: ["record_id", "title"] },
+        { slug: "ATTIO_ASSERT_COMPANY", inputs: ["name"] },
       ],
     },
   ],
   {
     mcpTools: [
+      {
+        name: "ATTIO_SEARCH_RECORDS",
+        readOnly: true,
+        inputs: ["query"],
+        run: ({ query }) => ({ output: { records: [], query } }),
+      },
+      {
+        name: "ATTIO_CREATE_NOTE",
+        inputs: ["record_id", "title"],
+        run: () => ({ output: { id: "note-1" } }),
+      },
+      {
+        name: "ATTIO_ASSERT_COMPANY",
+        inputs: ["name"],
+        run: () => ({ output: { id: "company-1" } }),
+      },
       {
         name: "HUBSPOT_LIST_CONTACTS",
         inputs: ["owner_id", "limit"],
@@ -77,8 +117,7 @@ const composio = fakeComposioApi(
         inputs: ["owner_id", "email"],
         run: () => ({ output: { id: "contact-3" } }),
       },
-      // Tools the server would run, that Grasp never classed or turned
-      // down (test/fixtures/composio-classes.ts), both claiming to read.
+      // Tools the server would run, both claiming to read.
       {
         name: "HUBSPOT_UNCLASSED",
         readOnly: true,
@@ -148,49 +187,129 @@ const read = (
   input: Call["input"] = {}
 ): Call => ({ connectionId, action, input });
 
-describe("a Composio tool Grasp didn't class", () => {
-  it("is neither offered nor run, whatever the admin allowed, and nothing goes out", async () => {
+describe("a Composio toolkit no list of Grasp's names, such as Attio", () => {
+  it("lists every tool, offers and runs what its admin allowed (a read as a read, one allowed by name alone held as a change), and refuses the rest", async () => {
+    const listed = await exports.default.catalogTools({
+      source: "composio",
+      id: "attio",
+    });
     const connectionId = await addConnection({
-      provider: "hubspot",
-      server: `https://backend.composio.dev/v3/mcp/${crypto.randomUUID()}?connected_account_id=ca_1`,
+      provider: "attio",
+      server: `https://backend.composio.dev/v3/mcp/${crypto.randomUUID()}?connected_account_id=ca_attio`,
       tools: JSON.stringify([
-        ...rules,
-        { name: "HUBSPOT_UNCLASSED", read: true },
-        { name: "HUBSPOT_REFUSED", read: true },
+        { name: "ATTIO_SEARCH_RECORDS", read: true },
+        // Composio says nothing of what it does: allowed as a change.
+        "ATTIO_ASSERT_COMPANY",
       ]),
     });
-    const requestsBefore = composio.state.mcp.requests;
-    const ends = await Promise.all(
-      ["HUBSPOT_UNCLASSED", "HUBSPOT_REFUSED"].map(
-        async (action) =>
-          await outcome(
-            callAs(agentFor("user-anna"), {
-              ...read(connectionId, action, { owner_id: owner }),
-              idempotencyKey: crypto.randomUUID(),
-            })
-          )
-      )
+    const anna = someone();
+    const inChat = agentFor(anna.userId, "agent-chat", "interactive");
+    const searched = await callAs(
+      inChat,
+      read(connectionId, "ATTIO_SEARCH_RECORDS", { query: "Acme" }),
+      { origin: chatOrigin }
     );
-    const listed = await exports.default.listConnections(someone());
-    const connection = listed.find(({ id }) => id === connectionId);
-    const classed = [
-      "HUBSPOT_LIST_CONTACTS",
-      "HUBSPOT_GET_CONTACT",
-      "HUBSPOT_CREATE_CONTACT",
-    ];
+    const asserted = await callAs(
+      inChat,
+      {
+        ...read(connectionId, "ATTIO_ASSERT_COMPANY", { name: "Acme" }),
+        idempotencyKey: crypto.randomUUID(),
+      },
+      { origin: chatOrigin }
+    );
+    const notAllowed = await outcome(
+      callAs(inChat, read(connectionId, "ATTIO_CREATE_NOTE", {}), {
+        origin: chatOrigin,
+      })
+    );
+    const connections = await exports.default.listConnections(anna);
     expect({
-      ends,
-      allowed: connection?.tools,
-      offered: connection?.offeredTools,
-      requests: composio.state.mcp.requests - requestsBefore,
-      ran: composio.state.mcp.ran,
+      listed: listed.map(({ name, readOnly }) => [name, readOnly]),
+      offered: connections.find(({ id }) => id === connectionId)?.offeredTools,
+      searched: searched.pending === undefined ? "ran" : "held",
+      asserted: asserted.pending === undefined ? "ran" : "held",
+      notAllowed,
+      ran: composio.state.mcp.ran.map(({ tool }) => tool),
     }).toStrictEqual({
-      ends: ["connect.action_not_found", "connect.action_not_found"],
-      // The admin's consent stays as they gave it.
-      allowed: [...classed, "HUBSPOT_UNCLASSED", "HUBSPOT_REFUSED"],
-      offered: classed,
-      requests: 0,
-      ran: [],
+      // Every tool Composio serves, a read only where it says so.
+      listed: [
+        ["ATTIO_SEARCH_RECORDS", true],
+        ["ATTIO_CREATE_NOTE", false],
+        ["ATTIO_ASSERT_COMPANY", false],
+      ],
+      offered: ["ATTIO_SEARCH_RECORDS", "ATTIO_ASSERT_COMPANY"],
+      searched: "ran",
+      asserted: "held",
+      notAllowed: "connect.action_not_found",
+      ran: ["ATTIO_SEARCH_RECORDS"],
+    });
+  });
+});
+
+describe("a Composio tool stored as a read", () => {
+  it("runs as a read only while Composio tags it read-only: one it doesn't, or a catalog connect can't read, holds it as a change", async () => {
+    const connectionId = await addConnection({
+      provider: "attio",
+      server: `https://backend.composio.dev/v3/mcp/${crypto.randomUUID()}?connected_account_id=ca_attio`,
+      // As a list stored before the connect form refused an untagged read.
+      tools: JSON.stringify([
+        { name: "ATTIO_SEARCH_RECORDS", read: true },
+        { name: "ATTIO_ASSERT_COMPANY", read: true },
+      ]),
+    });
+    const anna = someone();
+    const inChat = agentFor(anna.userId, "agent-chat", "interactive");
+    const ask = async (action: string) => {
+      const answer = await callAs(
+        inChat,
+        {
+          ...read(connectionId, action, { query: "Acme", name: "Acme" }),
+          idempotencyKey: crypto.randomUUID(),
+        },
+        { origin: chatOrigin }
+      );
+      return answer.pending === undefined ? "ran" : "held";
+    };
+    const tagged = await ask("ATTIO_SEARCH_RECORDS");
+    const untagged = await ask("ATTIO_ASSERT_COMPANY");
+    // A new isolate, its catalog not read yet, while Composio is down.
+    forgetComposioCatalog();
+    composio.state.health = "down";
+    const unread = await ask("ATTIO_SEARCH_RECORDS");
+    expect({ tagged, untagged, unread }).toStrictEqual({
+      tagged: "ran",
+      untagged: "held",
+      unread: "held",
+    });
+  });
+
+  it("is refused when core let it through as another class than Composio's tag makes it now, so a read core took for a change never runs unpointed", async () => {
+    const connectionId = await addConnection({
+      provider: "attio",
+      server: `https://backend.composio.dev/v3/mcp/${crypto.randomUUID()}?connected_account_id=ca_attio`,
+      tools: JSON.stringify([{ name: "ATTIO_SEARCH_RECORDS", read: true }]),
+    });
+    const inChat = agentFor("user-anna", "agent-chat", "interactive");
+    const search = read(connectionId, "ATTIO_SEARCH_RECORDS", { query: "x" });
+    const as = async (toolClass: "read-company" | "change-company") =>
+      await outcome(callAs(inChat, search, { origin: chatOrigin, toolClass }));
+    // Core read the catalog while Composio was down: a change, no pointers.
+    const takenForChange = await as("change-company");
+    const asRead = await as("read-company");
+    // Core read it as a read; the catalog can't be read as it runs.
+    forgetComposioCatalog();
+    composio.state.health = "down";
+    const unreadNow = await as("read-company");
+    expect({
+      takenForChange,
+      asRead,
+      unreadNow,
+      ran: composio.state.mcp.ran.map(({ tool }) => tool),
+    }).toStrictEqual({
+      takenForChange: "connect.class_changed",
+      asRead: "ok",
+      unreadNow: "connect.class_changed",
+      ran: ["ATTIO_SEARCH_RECORDS"],
     });
   });
 });
@@ -256,7 +375,7 @@ describe("a chat agent's read in a company app pointed at within some resources"
 });
 
 describe("a Composio tool Grasp never runs", () => {
-  it("is refused, neither offered nor run, even when the admin allowed it by name and a review classed it", async () => {
+  it("is refused, neither offered nor run, even when the admin allowed it by name", async () => {
     const connectionId = await addConnection({
       provider: "hubspot",
       server: `https://backend.composio.dev/v3/mcp/${crypto.randomUUID()}?connected_account_id=ca_1`,
@@ -299,43 +418,6 @@ describe("a Composio tool Grasp never runs", () => {
         )
       )
     ).resolves.toBe("ok");
-  });
-});
-
-describe("a Composio tool Grasp classed as a change", () => {
-  it("is held as a side effect even when the admin marked it as a read", async () => {
-    const connectionId = await addConnection({
-      provider: "hubspot",
-      server: `https://backend.composio.dev/v3/mcp/${crypto.randomUUID()}?connected_account_id=ca_1`,
-      tools: JSON.stringify([{ name: "HUBSPOT_CREATE_CONTACT", read: true }]),
-    });
-    const anna = someone();
-    const inChat = agentFor(anna.userId, "agent-chat", "interactive");
-    const create = read(connectionId, "HUBSPOT_CREATE_CONTACT", {
-      owner_id: owner,
-      email: "new@acme.test",
-    });
-    const withoutKey = await outcome(
-      callAs(agentFor(anna.userId), create, { origin: runOrigin })
-    );
-    const answer = await callAs(
-      inChat,
-      { ...create, idempotencyKey: crypto.randomUUID() },
-      { origin: chatOrigin }
-    );
-    const recorded = await events();
-    const held = recorded.find(({ detail }) => detail.outcome === "held");
-    expect({
-      withoutKey,
-      pending: answer.pending === undefined ? "ran" : "held",
-      audited: held?.detail.sideEffect,
-      ran: composio.state.mcp.ran,
-    }).toStrictEqual({
-      withoutKey: "connect.idempotency_key_required",
-      pending: "held",
-      audited: true,
-      ran: [],
-    });
   });
 });
 
@@ -643,7 +725,7 @@ const start = async (
   });
 
 describe("the admin's allowlist, when they connect", () => {
-  it("is kept with the flow, rules and all, and the log names each tool that runs unheld, and whether Composio said it only reads", async () => {
+  it("is kept with the flow, rules and all, and the log names each tool that runs unheld", async () => {
     const admin = someone("admin");
     const allowed = [
       { name: "HUBSPOT_LIST_CONTACTS", read: true },
@@ -665,20 +747,17 @@ describe("the admin's allowlist, when they connect", () => {
         action,
         toolCount: detail.toolCount,
         readCount: detail.readCount,
-        unhintedReadCount: detail.unhintedReadCount,
       }));
     expect(counted).toStrictEqual([
       {
         action: "connection.consent",
         toolCount: 3,
         readCount: 2,
-        unhintedReadCount: 1,
       },
       {
         action: "connection.connect",
         toolCount: 3,
         readCount: 2,
-        unhintedReadCount: undefined,
       },
     ]);
     const consent = recorded.find(
@@ -688,20 +767,18 @@ describe("the admin's allowlist, when they connect", () => {
       recorded
         .filter(({ action }) => action === "connection.consent.read_tools")
         .map(({ actor, detail }) => ({ actor, detail }))
-    ).toStrictEqual(
-      [
-        { hinted: false, part: 1, names1: "HUBSPOT_LIST_CONTACTS" },
-        { hinted: true, part: 1, names1: "HUBSPOT_GET_CONTACT" },
-      ].map((names) => ({
+    ).toStrictEqual([
+      {
         actor: consent?.actor,
         detail: {
           provider: "hubspot",
           scope: "shared",
           flowId: consent?.detail.flowId,
-          ...names,
+          part: 1,
+          names1: "HUBSPOT_LIST_CONTACTS,HUBSPOT_GET_CONTACT",
         },
-      }))
-    );
+      },
+    ]);
     expect(consent?.detail).not.toHaveProperty("unnamedReadCount");
   });
 

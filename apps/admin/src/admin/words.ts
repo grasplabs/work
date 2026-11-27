@@ -23,6 +23,8 @@ import type {
   Stage,
 } from "@grasp-os/shared/admin/onboarding-admin";
 
+import { interviewDay } from "./standing.ts";
+
 const months = [
   "Jan",
   "Feb",
@@ -271,7 +273,7 @@ const interviewsLine = (view: OrgView): string => {
     return `Closed. ${talked} of ${view.asked} talked`;
   }
   return view.told
-    ? `Day ${view.day} of ${days}. ${talked} of ${view.asked} talked`
+    ? `Day ${interviewDay(view) ?? days} of ${days}. ${talked} of ${view.asked} talked`
     : `${days === 14 ? "Two weeks" : `${days} days`}, from the day the team is told`;
 };
 

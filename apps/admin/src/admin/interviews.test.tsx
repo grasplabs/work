@@ -172,16 +172,18 @@ describe("an organization's interviews", () => {
     const { html } = await page(
       `/organizations/${acme.clientId}/interviews?tab=interviewers`
     );
-    /** The figure labelled `label`: its label up to the line under its number. */
-    const figureOf = (label: string) => {
-      const start = html.indexOf(`>${label}</span>`);
-      return start === -1
-        ? ""
-        : html.slice(start, html.indexOf("</div>", start));
-    };
+    /** The figure labelled `label`: its words, its label first. */
+    const figureOf = (label: string) =>
+      [
+        ...new DOMParser()
+          .parseFromString(html, "text/html")
+          .querySelectorAll('[data-slot="stat"]'),
+      ]
+        .map((stat) => stat.textContent ?? "")
+        .find((words) => words.startsWith(label)) ?? "";
 
     // None of the two who started.
-    expect(figureOf("Finished")).toContain(">0 of 2<");
+    expect(figureOf("Finished")).toContain("0 of 2");
   });
 
   it("measures Stephen across every organization in the Lab, each opening how he did there, never with what anyone said", async () => {

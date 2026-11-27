@@ -2,33 +2,20 @@
  * The interviews of one organization, by team and by name, ported from
  * the prototype (grasplabs/prototype `components/admin/org-progress.tsx`,
  * `org-people.tsx` and `org-transcripts.tsx`): two of the Interviews
- * section's tabs. The teams themselves, and one team whole, are in
- * teams.tsx; Stephen's own two tabs are in interviewers.tsx.
+ * section's tabs, composed as Grasp Work composes a page. The teams
+ * themselves, and one team whole, are in teams.tsx; Stephen's own two
+ * tabs are in interviewers.tsx.
  *
  * Core sends an interview as numbers only, so what was said is nowhere
  * here: someone's interview is its minutes and how much they agreed to,
- * beside their name. Staff act from here as from the company's Grasp
+ * beside their name, for support, as it always was; nothing more is
+ * derived about anyone. Staff act from here as from the company's Grasp
  * before (commands.tsx): marking the one reminder, asking a team in,
- * sending a failed mail again and giving someone a new start. The invitation and the list of links to send aren't here: a
- * link is a credential, which core never sends.
+ * sending a failed mail again and giving someone a new start. The
+ * invitation and the list of links to send aren't here: a link is a
+ * credential, which core never sends.
  */
 
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@grasp-os/app-kit/components/input-group";
-import { Progress } from "@grasp-os/app-kit/components/progress";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/app-kit/components/table";
-import { cn } from "@grasp-os/app-kit/lib/utils";
 import type { AdminLink } from "@grasp-os/shared/admin-snapshot";
 import type { Funnel } from "@grasp-os/shared/admin/admin-interviews";
 import { funnelOf, talkedByDay } from "@grasp-os/shared/admin/admin-interviews";
@@ -42,15 +29,93 @@ import type {
   OrgView,
   PersonView,
 } from "@grasp-os/shared/admin/onboarding-admin";
-import { SearchIcon } from "lucide-react";
+import { Badge } from "@grasp-os/ui/components/badge";
+import {
+  ChartBar,
+  ChartBarList,
+  ChartContainer,
+  ChartGrid,
+  ChartTooltip,
+  ChartXAxis,
+  ChartYAxis,
+} from "@grasp-os/ui/components/chart";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@grasp-os/ui/components/empty";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@grasp-os/ui/components/input-group";
+import {
+  Section as Part,
+  SectionHeader,
+} from "@grasp-os/ui/components/section-header";
+import { Text } from "@grasp-os/ui/components/text";
+import { Icon, SearchIcon } from "@grasp-os/ui/lib/icons";
+import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
+import { ActionRows } from "./action-rows.tsx";
+import type { ActionColumn } from "./action-rows.tsx";
 import { CommandMenu } from "./command-menu.tsx";
 import { CommandButton } from "./commands.tsx";
-import { BarList, Dot, markOf } from "./interview-parts.tsx";
-import { Section } from "./section.tsx";
+import { Dot, markOf } from "./interview-parts.tsx";
+import { interviewDay } from "./standing.ts";
 import { NoTeams, OneTeam, TeamList } from "./teams.tsx";
 import { formatDate, interviewPhaseWords, linkWords } from "./words.ts";
+
+const styles = stylex.create({
+  // The page's parts, a step further apart than the lines within each.
+  parts: { display: "flex", flexDirection: "column", gap: space["10"] },
+  part: { display: "flex", flexDirection: "column", gap: space["4"] },
+  // How far everyone has come and the days beside it, once there is room for both.
+  charts: {
+    display: "grid",
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      [media.lg]: "repeat(2, minmax(0, 1fr))",
+    },
+    gap: space["8"],
+  },
+  chart: { display: "flex", flexDirection: "column", gap: space["3"] },
+  // The search and how many it shows, at the end of the header.
+  search: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["3"],
+  },
+  searchField: { width: { default: "100%", [media.sm]: "14rem" } },
+  // All of them reminded at once: the line and its button.
+  remind: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: space["3"],
+  },
+  name: {
+    display: "inline-flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["2"],
+  },
+  // Where someone's link stands: their dot, then the words and what goes with them.
+  stands: { display: "flex", alignItems: "center", gap: space["2"] },
+  standsWords: { display: "flex", flexDirection: "column" },
+  actions: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: space["2"],
+  },
+});
 
 /** The day `day` of the organization's interviews, as a date. */
 const dayDate = (view: OrgView, day: number): string =>
@@ -68,39 +133,23 @@ const funnelWords: Record<FunnelStep, string> = {
   talked: "Talked",
 };
 
-/** How far everyone has come, as five bars: each as long as its share of everyone who is asked. */
-const FunnelBars = ({ funnel }: { funnel: Funnel }) => (
-  // Under a title of its own and from the top of its cell, as the days
-  // beside it are: centred, five bars floated in the middle of a cell as
-  // tall as that list.
-  <div className="bg-card flex flex-col gap-3 px-5 py-4">
-    <span className="font-medium">How far everyone has come</span>
-    <ul
+/** How far everyone has come, as five bars in their own order: each as long as its count. */
+const FunnelChart = ({ funnel }: { funnel: Funnel }) => (
+  <div {...stylex.props(styles.chart)}>
+    <Text size="sm" weight="medium">
+      How far everyone has come
+    </Text>
+    <ChartBarList
       aria-label="How far everyone has come"
-      className="flex flex-col gap-2.5"
-    >
-      {funnelSteps.map((step) => (
-        <li
-          className="grid grid-cols-[5.5rem_minmax(0,1fr)_2.5rem] items-center gap-3"
-          key={step}
-        >
-          <span
-            className={cn(
-              "truncate",
-              step === "talked" ? undefined : "text-muted-foreground"
-            )}
-          >
-            {funnelWords[step]}
-          </span>
-          <Progress
-            aria-label={funnelWords[step]}
-            max={Math.max(funnel.asked, 1)}
-            value={funnel[step]}
-          />
-          <span className="text-right tabular-nums">{funnel[step]}</span>
-        </li>
-      ))}
-    </ul>
+      config={{ people: { label: "People" } }}
+      data={funnelSteps.map((step) => ({
+        step: funnelWords[step],
+        people: funnel[step],
+      }))}
+      nameKey="step"
+      sortOrder="none"
+      summary={`${funnel.talked} of ${funnel.asked} asked have talked.`}
+    />
   </div>
 );
 
@@ -111,32 +160,45 @@ const FunnelBars = ({ funnel }: { funnel: Funnel }) => (
 const TalkedDays = ({ view, asked }: { view: OrgView; asked: number }) => {
   if (!view.told) {
     return (
-      <div className="bg-card flex flex-col gap-1 px-5 py-4">
-        <span className="font-medium">Talked, day by day</span>
-        <span className="text-muted-foreground">
-          Starts the day the company tells its team.
-        </span>
+      <div {...stylex.props(styles.chart)}>
+        <Text size="sm" weight="medium">
+          Talked, day by day
+        </Text>
+        <Empty align="start" size="sm">
+          <EmptyHeader>
+            <EmptyDescription>
+              Starts the day the company tells its team.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       </div>
     );
   }
   const days = talkedByDay(view).filter((each) => each.total !== null);
   const talked = days.at(-1)?.total ?? 0;
+  const day = interviewDay(view) ?? listenDays(view.org);
+  const line = `${talked} of ${asked} by day ${day} of ${listenDays(view.org)}`;
   return (
-    <div className="bg-card flex flex-col gap-3 px-5 py-4">
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="font-medium">Talked, day by day</span>
-        <span className="text-muted-foreground text-xs tabular-nums">
-          {`${talked} of ${asked} by day ${view.day} of ${listenDays(view.org)}`}
-        </span>
-      </div>
-      <BarList
-        label="Talked by each day"
-        rows={days.map((each) => ({
-          id: String(each.day),
-          label: dayDate(view, each.day),
-          value: each.total ?? 0,
+    <div {...stylex.props(styles.chart)}>
+      <Text size="sm" weight="medium">
+        {`Talked, day by day: ${line}`}
+      </Text>
+      <ChartContainer
+        aria-label="Talked by each day"
+        config={{ talked: { label: "Talked by then" } }}
+        data={days.map((each) => ({
+          day: dayDate(view, each.day),
+          talked: each.total ?? 0,
         }))}
-      />
+        summary={`${line}.`}
+        xKey="day"
+      >
+        <ChartGrid />
+        <ChartXAxis />
+        <ChartYAxis />
+        <ChartBar dataKey="talked" pattern="dither-pixels" />
+        <ChartTooltip />
+      </ChartContainer>
     </div>
   );
 };
@@ -180,18 +242,21 @@ export const InterviewTeams = ({
     links = `The links work until ${lastDay}.`;
   }
   return (
-    <>
-      <Section
-        description={`One reminder after ${REMIND_AFTER} working days, then nothing. ${links}`}
-        title="Where everyone stands"
-      >
-        <div className="bg-border grid gap-px border-t lg:grid-cols-2">
-          <FunnelBars funnel={funnel} />
+    <div {...stylex.props(styles.parts)}>
+      <Part aria-labelledby="standing">
+        <SectionHeader
+          description={`One reminder after ${REMIND_AFTER} working days, then nothing. ${links}`}
+          id="standing"
+          title="Where everyone stands"
+          variant="group"
+        />
+        <div {...stylex.props(styles.charts)}>
+          <FunnelChart funnel={funnel} />
           <TalkedDays asked={funnel.asked} view={view} />
         </div>
-      </Section>
+      </Part>
       <TeamList chart={chart} clientId={clientId} view={view} />
-    </>
+    </div>
   );
 };
 
@@ -245,13 +310,12 @@ const PersonActions = ({
 }) => {
   const { id, name } = each.person;
   return (
-    <span className="flex flex-wrap items-center justify-end gap-2">
+    <span {...stylex.props(styles.actions)}>
       {each.mayRemind ? (
         <CommandButton
           clientId={clientId}
           command={{ type: "onboarding.remind", payload: { people: [id] } }}
           label={`Mark ${name} reminded`}
-          variant="outline"
         >
           Mark reminded
         </CommandButton>
@@ -295,6 +359,93 @@ const PersonActions = ({
   );
 };
 
+/** One person as the list says them: their team, where their link stands, and their interview's numbers. */
+interface PersonRow {
+  each: PersonView;
+  clientId: string;
+  team: string;
+  /** They lead their team, which has a lead. */
+  lead: boolean;
+  link: AdminLink | undefined;
+  stands: string;
+  beside: string;
+  last: string;
+  minutes: string;
+  facts: string;
+}
+
+/** Their name, and the Badge of a team lead. */
+const PersonName = ({ row }: { row: PersonRow }) => (
+  <span {...stylex.props(styles.name)}>
+    {row.each.person.name}
+    {row.lead ? <Badge variant="outline">Team lead</Badge> : null}
+  </span>
+);
+
+/** Where their link stands: their dot, the words, and what goes with them. */
+const PersonStands = ({ row }: { row: PersonRow }) => (
+  <span {...stylex.props(styles.stands)}>
+    <Dot mark={markOf(row.each.state)} />
+    <span {...stylex.props(styles.standsWords)}>
+      {row.stands}
+      {row.beside === "" ? null : (
+        <Text color="muted" size="xs">
+          {row.beside}
+        </Text>
+      )}
+    </span>
+  </span>
+);
+
+/** Where someone's link stands, in a row's line: the words and what goes with them. */
+const standsFact = (row: PersonRow): string =>
+  row.beside === "" ? row.stands : `${row.stands}: ${row.beside}`;
+
+/** A figure that isn't there: left out of a row's line. */
+const shownFigure = (figure: string): string | null =>
+  figure === "–" ? null : figure;
+
+const personColumns: readonly ActionColumn<PersonRow>[] = [
+  { id: "team", head: "Team", cell: (row) => row.team },
+  {
+    id: "stands",
+    head: "Where the link stands",
+    cell: (row) => <PersonStands row={row} />,
+    wrap: true,
+    fact: standsFact,
+  },
+  {
+    id: "last",
+    head: "Last",
+    cell: (row) => row.last,
+    fact: (row) => (row.last === "" ? null : row.last),
+  },
+  {
+    id: "minutes",
+    head: "Minutes",
+    cell: (row) => row.minutes,
+    figure: true,
+    fact: (row) => shownFigure(row.minutes),
+  },
+  {
+    id: "facts",
+    head: "Facts agreed",
+    cell: (row) => row.facts,
+    figure: true,
+    fact: (row) => shownFigure(row.facts),
+  },
+];
+
+const personName = (row: PersonRow) => <PersonName row={row} />;
+
+const personActions = (row: PersonRow) => (
+  <PersonActions
+    clientId={row.clientId}
+    each={row.each}
+    failed={(row.link?.failedMail ?? null) !== null}
+  />
+);
+
 /**
  * Where every person stands with their link, by name: for Grasp only.
  * The company never sees this list: it gets numbers per team.
@@ -312,14 +463,15 @@ export const InterviewPeople = ({
   const [query, setQuery] = useState("");
   if (view.people.length === 0) {
     return (
-      <Section
-        description="Names come with the company’s own list. Until it is in, nobody is known here."
-        title="People"
-      >
-        <p className="text-muted-foreground border-t px-5 py-4">
-          No people yet.
-        </p>
-      </Section>
+      <Empty align="start" size="sm">
+        <EmptyHeader>
+          <EmptyTitle>No people yet</EmptyTitle>
+          <EmptyDescription>
+            Names come with the company’s own list. Until it is in, nobody is
+            known here.
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
   const teams = new Map(view.teams.map((team) => [team.team.id, team]));
@@ -338,164 +490,96 @@ export const InterviewPeople = ({
   const shown = view.people.filter(
     (each) => wanted === "" || each.person.name.toLowerCase().includes(wanted)
   );
+  const rows = shown.map((each): PersonRow => {
+    const team = teams.get(each.person.team);
+    const link = linkOf.get(each.person.id);
+    const interview = interviewOf.get(each.person.id);
+    return {
+      each,
+      clientId,
+      team: team?.team.name ?? "",
+      lead: each.person.lead && (team?.lead ?? null) !== null,
+      link,
+      stands:
+        each.out && each.state === "away" ? "Not asked" : linkWords[each.state],
+      beside: besideOf(each, link),
+      last: lastOf(view, each),
+      minutes: interview === undefined ? "–" : String(interview.minutes),
+      facts:
+        interview === undefined
+          ? "–"
+          : `${interview.approved ? interview.facts - interview.out : 0} of ${interview.facts}`,
+    };
+  });
   return (
-    <Section
-      action={
-        <div className="flex min-w-0 items-center gap-3">
-          <span
-            aria-live="polite"
-            className="text-muted-foreground tabular-nums max-sm:sr-only"
-          >
-            {`${shown.length} of ${view.people.length} people`}
+    <Part aria-labelledby="people">
+      <SectionHeader
+        actions={
+          <span {...stylex.props(styles.search)}>
+            <span aria-live="polite">
+              <Text color="muted" size="sm">
+                {`${shown.length} of ${view.people.length} people`}
+              </Text>
+            </span>
+            <InputGroup style={styles.searchField}>
+              <InputGroupInput
+                aria-label="Search people"
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                }}
+                placeholder="Search by name"
+                value={query}
+              />
+              <InputGroupAddon>
+                <Icon icon={SearchIcon} />
+              </InputGroupAddon>
+            </InputGroup>
           </span>
-          <InputGroup className="w-56">
-            <InputGroupInput
-              aria-label="Search people"
-              onChange={(event) => {
-                setQuery(event.target.value);
+        }
+        description="By name, for Grasp only: the company sees numbers per team. What anyone said stays in the company’s own Grasp."
+        id="people"
+        title="People"
+        variant="group"
+      />
+      <div {...stylex.props(styles.part)}>
+        {/* More than one: all at once, as each row does for its own. */}
+        {reminders.length > 1 ? (
+          <div {...stylex.props(styles.remind)}>
+            <Text color="muted" size="sm">
+              {`${reminders.length} people can still be reminded, once each.`}
+            </Text>
+            <CommandButton
+              clientId={clientId}
+              command={{
+                type: "onboarding.remind",
+                payload: { people: reminders },
               }}
-              placeholder="Search by name"
-              value={query}
-            />
-            <InputGroupAddon>
-              <SearchIcon />
-            </InputGroupAddon>
-          </InputGroup>
-        </div>
-      }
-      description="By name, for Grasp only: the company sees numbers per team. What anyone said stays in the company’s own Grasp."
-      title="People"
-    >
-      {/* More than one: all at once, as each row does for its own. */}
-      {reminders.length > 1 ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3">
-          <p className="text-muted-foreground">
-            {`${reminders.length} people can still be reminded, once each.`}
-          </p>
-          <CommandButton
-            clientId={clientId}
-            command={{
-              type: "onboarding.remind",
-              payload: { people: reminders },
-            }}
-            variant="outline"
-          >
-            {`Mark ${reminders.length} people reminded`}
-          </CommandButton>
-        </div>
-      ) : null}
-      <div className="border-t">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead variant="card">Name</TableHead>
-              <TableHead variant="card">Where the link stands</TableHead>
-              <TableHead className="hidden md:table-cell" variant="card">
-                Last
-              </TableHead>
-              <TableHead
-                className="hidden text-right lg:table-cell"
-                variant="card"
-              >
-                Minutes
-              </TableHead>
-              <TableHead
-                className="hidden text-right lg:table-cell"
-                variant="card"
-              >
-                Facts agreed
-              </TableHead>
-              <TableHead variant="card">
-                <span className="sr-only">What Grasp can do</span>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {shown.map((each) => {
-              const team = teams.get(each.person.team);
-              const link = linkOf.get(each.person.id);
-              const beside = besideOf(each, link);
-              const interview = interviewOf.get(each.person.id);
-              return (
-                <TableRow key={each.person.id}>
-                  <TableCell className="whitespace-normal" variant="card">
-                    <span className="flex flex-col">
-                      <span className="flex flex-wrap items-center gap-2">
-                        {each.person.name}
-                        {each.person.lead && team?.lead ? (
-                          <Badge variant="outline">Team lead</Badge>
-                        ) : null}
-                      </span>
-                      <span className="text-muted-foreground text-xs">
-                        {team?.team.name ?? ""}
-                      </span>
-                    </span>
-                  </TableCell>
-                  <TableCell className="whitespace-normal" variant="card">
-                    <span className="flex items-center gap-2">
-                      <Dot mark={markOf(each.state)} />
-                      <span className="flex flex-col">
-                        <span
-                          className={
-                            each.state === "completed"
-                              ? undefined
-                              : "text-muted-foreground"
-                          }
-                        >
-                          {each.out && each.state === "away"
-                            ? "Not asked"
-                            : linkWords[each.state]}
-                        </span>
-                        {beside === "" ? null : (
-                          <span className="text-muted-foreground text-xs">
-                            {beside}
-                          </span>
-                        )}
-                      </span>
-                    </span>
-                  </TableCell>
-                  <TableCell className="hidden md:table-cell" variant="card">
-                    <span className="text-muted-foreground">
-                      {lastOf(view, each)}
-                    </span>
-                  </TableCell>
-                  <TableCell
-                    className="hidden text-right lg:table-cell"
-                    variant="card"
-                  >
-                    <span className="tabular-nums">
-                      {interview?.minutes ?? "–"}
-                    </span>
-                  </TableCell>
-                  <TableCell
-                    className="hidden text-right lg:table-cell"
-                    variant="card"
-                  >
-                    <span className="tabular-nums">
-                      {interview === undefined
-                        ? "–"
-                        : `${interview.approved ? interview.facts - interview.out : 0} of ${interview.facts}`}
-                    </span>
-                  </TableCell>
-                  <TableCell variant="card">
-                    <PersonActions
-                      clientId={clientId}
-                      each={each}
-                      failed={(link?.failedMail ?? null) !== null}
-                    />
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-        {shown.length === 0 ? (
-          <p className="text-muted-foreground border-t px-5 py-4">
-            Nobody matches.
-          </p>
+            >
+              {`Mark ${reminders.length} people reminded`}
+            </CommandButton>
+          </div>
         ) : null}
+        {rows.length === 0 ? (
+          <Empty align="start" size="sm">
+            <EmptyHeader>
+              <EmptyDescription>Nobody matches.</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          // A person opens nothing of their own: each row holds what Grasp can do for them.
+          <ActionRows
+            actions={personActions}
+            actionsHead="What Grasp can do"
+            columns={personColumns}
+            label="People"
+            name={personName}
+            nameHead="Name"
+            rowKey={(row) => row.each.person.id}
+            rows={rows}
+          />
+        )}
       </div>
-    </Section>
+    </Part>
   );
 };
 

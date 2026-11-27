@@ -1,44 +1,19 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/app-kit/components/dialog";
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-} from "@grasp-os/app-kit/components/field";
-import { Input } from "@grasp-os/app-kit/components/input";
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@grasp-os/app-kit/components/native-select";
-import { Progress } from "@grasp-os/app-kit/components/progress";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/app-kit/components/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/app-kit/components/table";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/app-kit/components/toggle-group";
-import { cn } from "@grasp-os/app-kit/lib/utils";
+/**
+ * An organization's Workflows, ported from the prototype
+ * (grasplabs/prototype `components/admin/org-workflows.tsx`) and composed
+ * as Grasp Work composes a page: how many pieces of work stand where, as
+ * figures; then every piece of work in one table (a row each on a phone),
+ * with how far it is known, how many of the people who do it talked, how
+ * many of its steps enough of them described, and how much is still
+ * missing, all as the model counts them (`workflowListOf`). The rules
+ * that say when one counts as known are behind their own button, and
+ * staff change them there; each row counts its work as known by hand, or
+ * draws it again from what its people agreed to. Each change is a command
+ * to the company's Grasp (commands.tsx).
+ *
+ * Not here yet, as the prototype has it: a row opening the work's own
+ * record (its steps on the canvas, and who described which).
+ */
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import {
   STANDINGS,
@@ -48,21 +23,6 @@ import type {
   Standing,
   WorkflowRow,
 } from "@grasp-os/shared/admin/admin-workflows";
-/**
- * An organization's Workflows, ported from the prototype
- * (grasplabs/prototype `components/admin/org-workflows.tsx`): every piece
- * of work in one table, as the platform lists its workflows, with how far
- * it is known, how many of the people who do it talked, how many of its
- * steps enough of them described, and how much is still missing, all as
- * the model counts them (`workflowListOf`). The rules that say when one
- * counts as known are behind their own button, and staff change them
- * there; each row counts its work as known by hand, or draws it again
- * from what its people agreed to. Each change is a command to the
- * company's Grasp (commands.tsx).
- *
- * Not here yet, as the prototype has it: a row opening the work's own
- * record (its steps on the canvas, and who described which).
- */
 import {
   SETTLERS,
   STARTING_ORG_RULES,
@@ -72,20 +32,96 @@ import type {
   Settler,
 } from "@grasp-os/shared/admin/onboarding-admin";
 import { orgRulesSchema } from "@grasp-os/shared/onboarding-staff";
-import { SlidersHorizontalIcon, WorkflowIcon } from "lucide-react";
-import { useId, useState } from "react";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import { Badge } from "@grasp-os/ui/components/badge";
+import type { BadgeVariant } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@grasp-os/ui/components/dialog";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@grasp-os/ui/components/empty";
+import {
+  Field,
+  FieldDescription,
+  FieldLabel,
+} from "@grasp-os/ui/components/field";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@grasp-os/ui/components/native-select";
+import { NumberField } from "@grasp-os/ui/components/number-field";
+import { Progress } from "@grasp-os/ui/components/progress";
+import {
+  Section as Part,
+  SectionHeader,
+} from "@grasp-os/ui/components/section-header";
+import { Stat, StatGroup } from "@grasp-os/ui/components/stat";
+import { Text } from "@grasp-os/ui/components/text";
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@grasp-os/ui/components/toggle-group";
+import { Icon, SlidersHorizontalIcon } from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
+import { useState } from "react";
 
+import { ActionRows } from "./action-rows.tsx";
+import type { ActionColumn } from "./action-rows.tsx";
 import { CommandMenu } from "./command-menu.tsx";
 import { CommandFailure, useCommand } from "./commands.tsx";
-import { Attention } from "./parts.tsx";
-import { EmptySection } from "./section.tsx";
+
+const styles = stylex.create({
+  // The page's parts, a step further apart than the lines within each.
+  parts: { display: "flex", flexDirection: "column", gap: space["10"] },
+  part: { display: "flex", flexDirection: "column", gap: space["4"] },
+  // The filters, on one line that wraps on a phone.
+  filters: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["2"],
+  },
+  team: { width: "12rem" },
+  // So many of so many: the figure, then a thin bar.
+  meter: {
+    display: "flex",
+    alignItems: "center",
+    gap: space["3"],
+    minWidth: "9rem",
+  },
+  meterFigure: { flexShrink: 0, width: "3.5rem" },
+  meterBar: { flexGrow: 1 },
+  numberField: { width: "7rem" },
+  form: { display: "flex", flexDirection: "column", gap: space["5"] },
+  // The dialog's form holds its body and footer: it shrinks with the
+  // dialog so its body scrolls and its buttons stay in sight.
+  dialogForm: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+  },
+  settles: { width: "18rem" },
+});
 
 const all = "all";
 
 /** With more workflows than this, the list can be narrowed by standing and team. */
 const FILTER_FROM = 8;
 
-/** Each standing in words, as the list and its filter say it. */
+/** Each standing in words, as the figures, the list and its filter say it. */
 const standingWords: Record<Standing, string> = {
   known: "Known",
   nearly: "Nearly there",
@@ -93,11 +129,20 @@ const standingWords: Record<Standing, string> = {
   blocked: "Waits on a difference",
 };
 
-const standingDot: Record<Standing, string> = {
-  known: "bg-status-agreed",
-  nearly: "bg-foreground",
-  mapping: "bg-border",
-  blocked: "bg-status-attention",
+/** Each standing as a Badge: green once known, amber while it waits on a difference. */
+const standingTones: Record<Standing, BadgeVariant> = {
+  known: "success",
+  nearly: "info",
+  mapping: "default",
+  blocked: "warning",
+};
+
+/** What each standing's figure says under it. */
+const standingLines: Record<Standing, string> = {
+  known: "Enough people described every step",
+  nearly: "Close to known",
+  mapping: "Still being described",
+  blocked: "People describe it differently",
 };
 
 const percent = new Intl.NumberFormat("en", {
@@ -128,29 +173,7 @@ const lackingWords = ({ missing }: WorkflowRow): string =>
     ? "Nothing missing"
     : `${missing} ${plural(missing, "thing", "things")} missing`;
 
-/** Where a workflow stands, as a dot and a word. */
-const StageLine = ({
-  standing,
-  label,
-}: {
-  standing: Standing;
-  label: string;
-}) => (
-  <span
-    className={cn(
-      "flex items-center gap-2",
-      standing === "blocked" && "text-status-attention"
-    )}
-  >
-    <span
-      aria-hidden
-      className={cn("size-2 flex-none rounded-full", standingDot[standing])}
-    />
-    {label}
-  </span>
-);
-
-/** So many of so many, as a number and a thin bar; a dash when there is nothing to count. */
+/** So many of so many, as a number and a thin bar; nothing to count says so. */
 const Meter = ({
   value,
   total,
@@ -161,18 +184,23 @@ const Meter = ({
   label: string;
 }) => {
   if (total === 0) {
-    return <span className="text-muted-foreground">–</span>;
+    return (
+      <Text color="muted" size="sm">
+        None yet
+      </Text>
+    );
   }
   return (
-    <Progress
-      aria-label={label}
-      className="flex-nowrap items-center"
-      getAriaValueText={() => of(value, total)}
-      max={total}
-      value={Math.min(value, total)}
-    >
-      <span className="w-14 flex-none tabular-nums">{of(value, total)}</span>
-    </Progress>
+    <span {...stylex.props(styles.meter)}>
+      <span {...stylex.props(styles.meterFigure)}>{of(value, total)}</span>
+      <Progress
+        aria-label={label}
+        getAriaValueText={() => of(value, total)}
+        max={total}
+        style={styles.meterBar}
+        value={Math.min(value, total)}
+      />
+    </span>
   );
 };
 
@@ -194,27 +222,23 @@ const RuleField = ({
   /** A share in percent takes one decimal; counts stay whole. */
   step?: number;
   onChange: (value: number) => void;
-}) => {
-  const id = useId();
-  return (
-    <Field>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <Input
-        className="w-28"
-        id={id}
-        max={max}
-        min={min}
-        onChange={(event) => {
-          onChange(event.target.valueAsNumber);
-        }}
-        step={step}
-        type="number"
-        value={Number.isNaN(value) ? "" : value}
-      />
-      <FieldDescription>{description}</FieldDescription>
-    </Field>
-  );
-};
+}) => (
+  <Field>
+    <FieldLabel>{label}</FieldLabel>
+    <NumberField
+      max={max}
+      min={min}
+      // An emptied field is no number, which the rules' check refuses.
+      onValueChange={(next) => {
+        onChange(next ?? Number.NaN);
+      }}
+      step={step}
+      style={styles.numberField}
+      value={Number.isNaN(value) ? null : value}
+    />
+    <FieldDescription>{description}</FieldDescription>
+  </Field>
+);
 
 /**
  * The rules that say when a workflow counts as known at this
@@ -232,7 +256,6 @@ const Rules = ({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) => {
-  const settlesId = useId();
   const { busy, failure, give } = useCommand(clientId);
   const [draft, setDraft] = useState<OrgRules>(rules);
   const set = (change: Partial<OrgRules>) => {
@@ -248,7 +271,7 @@ const Rules = ({
   const fewer = draft.people - 1;
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>When a workflow is known</DialogTitle>
           <DialogDescription>
@@ -257,7 +280,7 @@ const Rules = ({
           </DialogDescription>
         </DialogHeader>
         <form
-          className="flex flex-col gap-5"
+          {...stylex.props(styles.dialogForm)}
           onSubmit={(event) => {
             event.preventDefault();
             if (parsed.success) {
@@ -265,92 +288,95 @@ const Rules = ({
             }
           }}
         >
-          <RuleField
-            description={`People who do the work themselves, or ${fewer} and a document, a log or an example. The lead’s own account is a guess, never one of them.`}
-            label="People per step"
-            max={10}
-            min={1}
-            onChange={(people) => {
-              set({ people });
-            }}
-            value={draft.people}
-          />
-          <RuleField
-            description="Approved interviews before it is checked. Fewer, and the workflow is still being mapped."
-            label="Before it is checked"
-            max={30}
-            min={1}
-            onChange={(minInterviews) => {
-              set({ minInterviews });
-            }}
-            value={draft.minInterviews}
-          />
-          <RuleField
-            description="How many of the last interviews are looked at for new facts."
-            label="Interviews looked at"
-            max={10}
-            min={1}
-            onChange={(run) => {
-              set({ run });
-            }}
-            value={draft.run}
-          />
-          <RuleField
-            description={`It stops once those added less than this share of new facts, in percent: then more interviews would only repeat what is known. Now ${percent.format(draft.stopShare)}.`}
-            label="When it stops"
-            max={100}
-            min={0}
-            onChange={(share) => {
-              set({ stopShare: share / 100 });
-            }}
-            step={0.1}
-            value={Math.round(draft.stopShare * 1000) / 10}
-          />
-          <RuleField
-            description="After this many interviews, Stephen asks the lead to split it: probably two workflows in one, or teams that work differently."
-            label="When it does not settle"
-            max={50}
-            min={1}
-            onChange={(maxInterviews) => {
-              set({ maxInterviews });
-            }}
-            value={draft.maxInterviews}
-          />
-          <Field>
-            <FieldLabel htmlFor={settlesId}>
-              When people say different things
-            </FieldLabel>
-            <NativeSelect
-              className="w-72"
-              id={settlesId}
-              onChange={(event) => {
-                const settles = SETTLERS.find(
-                  (each) => each === event.target.value
-                );
-                if (settles !== undefined) {
-                  set({ settles });
-                }
-              }}
-              value={draft.settles}
-            >
-              {SETTLERS.map((each) => (
-                <NativeSelectOption key={each} value={each}>
-                  {settlerWords[each]}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            <FieldDescription>
-              Most differences are findings: it depends on the case, the office
-              or the date. Only one nobody can explain needs someone to settle
-              it.
-            </FieldDescription>
-          </Field>
-          {parsed.success ? null : (
-            <p>
-              <Attention>One of these is out of its bounds.</Attention>
-            </p>
-          )}
-          <CommandFailure failure={failure} />
+          <DialogBody>
+            <div {...stylex.props(styles.form)}>
+              <RuleField
+                description={`People who do the work themselves, or ${fewer} and a document, a log or an example. The lead’s own account is a guess, never one of them.`}
+                label="People per step"
+                max={10}
+                min={1}
+                onChange={(people) => {
+                  set({ people });
+                }}
+                value={draft.people}
+              />
+              <RuleField
+                description="Approved interviews before it is checked. Fewer, and the workflow is still being mapped."
+                label="Before it is checked"
+                max={30}
+                min={1}
+                onChange={(minInterviews) => {
+                  set({ minInterviews });
+                }}
+                value={draft.minInterviews}
+              />
+              <RuleField
+                description="How many of the last interviews are looked at for new facts."
+                label="Interviews looked at"
+                max={10}
+                min={1}
+                onChange={(run) => {
+                  set({ run });
+                }}
+                value={draft.run}
+              />
+              <RuleField
+                description={`It stops once those added less than this share of new facts, in percent: then more interviews would only repeat what is known. Now ${percent.format(draft.stopShare)}.`}
+                label="When it stops"
+                max={100}
+                min={0}
+                onChange={(share) => {
+                  set({ stopShare: share / 100 });
+                }}
+                step={0.1}
+                value={Math.round(draft.stopShare * 1000) / 10}
+              />
+              <RuleField
+                description="After this many interviews, Stephen asks the lead to split it: probably two workflows in one, or teams that work differently."
+                label="When it does not settle"
+                max={50}
+                min={1}
+                onChange={(maxInterviews) => {
+                  set({ maxInterviews });
+                }}
+                value={draft.maxInterviews}
+              />
+              <Field>
+                <FieldLabel>When people say different things</FieldLabel>
+                <NativeSelect
+                  style={styles.settles}
+                  onChange={(event) => {
+                    const settles = SETTLERS.find(
+                      (each) => each === event.target.value
+                    );
+                    if (settles !== undefined) {
+                      set({ settles });
+                    }
+                  }}
+                  value={draft.settles}
+                >
+                  {SETTLERS.map((each) => (
+                    <NativeSelectOption key={each} value={each}>
+                      {settlerWords[each]}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+                <FieldDescription>
+                  Most differences are findings: it depends on the case, the
+                  office or the date. Only one nobody can explain needs someone
+                  to settle it.
+                </FieldDescription>
+              </Field>
+              {parsed.success ? null : (
+                <Alert live="polite" variant="warning">
+                  <AlertDescription>
+                    One of these is out of its bounds.
+                  </AlertDescription>
+                </Alert>
+              )}
+              <CommandFailure failure={failure} />
+            </div>
+          </DialogBody>
           <DialogFooter>
             {starting ? null : (
               <Button
@@ -374,14 +400,65 @@ const Rules = ({
   );
 };
 
-/** What Grasp can do for one workflow, in its row's menu: count it as known by hand, or stop; draw it again. */
-const WorkActions = ({
-  clientId,
-  row,
-}: {
-  clientId: string;
+/** One piece of work as the list says it: its row, its team's name, and the company it is for. */
+interface WorkLine {
   row: WorkflowRow;
-}) => {
+  team: string;
+  clientId: string;
+}
+
+/** Where a piece of work stands, as a Badge: counted by hand says so. */
+const StageBadge = ({ line }: { line: WorkLine }) => {
+  const { work, standing } = line.row;
+  return (
+    <Badge variant={work.byHand ? "success" : standingTones[standing]}>
+      {work.byHand ? "Counted as known by Grasp" : standingWords[standing]}
+    </Badge>
+  );
+};
+
+const workColumns: readonly ActionColumn<WorkLine>[] = [
+  { id: "team", head: "Team", cell: ({ team }) => team },
+  {
+    id: "stage",
+    head: "Stage",
+    cell: (line) => <StageBadge line={line} />,
+  },
+  {
+    id: "talked",
+    head: "Talked",
+    cell: ({ row }) => (
+      <Meter
+        label={`${row.work.work.name}: who talked`}
+        total={row.work.doers}
+        value={row.work.approved}
+      />
+    ),
+    fact: ({ row }) =>
+      row.work.doers === 0 ? null : of(row.work.approved, row.work.doers),
+  },
+  {
+    id: "steps",
+    head: "Steps described",
+    cell: ({ row }) => (
+      <Meter
+        label={`${row.work.work.name}: steps described`}
+        total={row.work.steps}
+        value={row.work.evidenced}
+      />
+    ),
+    fact: ({ row }) =>
+      row.work.steps === 0 ? null : of(row.work.evidenced, row.work.steps),
+  },
+  {
+    id: "missing",
+    head: "Missing",
+    cell: ({ row }) => lackingWords(row),
+  },
+];
+
+/** What Grasp can do for one workflow, in its row's menu: count it as known by hand, or stop; draw it again. */
+const workActions = ({ row, clientId }: WorkLine) => {
   const { id, byHand, work } = row.work;
   return (
     <CommandMenu
@@ -404,75 +481,28 @@ const WorkActions = ({
   );
 };
 
-/** One piece of work in the table. */
-const WorkRow = ({
-  row,
-  team,
-  clientId,
+/** How many pieces of work stand where: one figure a standing, of all of them. */
+const Figures = ({
+  counts,
+  total,
 }: {
-  row: WorkflowRow;
-  team: string;
-  clientId: string;
-}) => {
-  const { work, standing } = row;
-  const stage = work.byHand
-    ? "Counted as known by Grasp"
-    : standingWords[standing];
-  const lacking = lackingWords(row);
-  return (
-    <TableRow>
-      <TableCell variant="roomy">
-        <div className="flex min-w-0 items-center gap-3">
-          <span
-            aria-hidden
-            className="bg-muted text-muted-foreground flex size-8 flex-none items-center justify-center rounded-lg"
-          >
-            <WorkflowIcon className="size-4" />
-          </span>
-          <div className="flex min-w-0 flex-col gap-0.5">
-            <span className="truncate" title={work.work.name}>
-              {work.work.name}
-            </span>
-            <span className="text-muted-foreground truncate text-xs">
-              {team}
-            </span>
-            <span className="mt-1 @xl:hidden">
-              <StageLine label={stage} standing={standing} />
-            </span>
-          </div>
-        </div>
-      </TableCell>
-      <TableCell className="hidden @2xl:table-cell" variant="roomy">
-        <Meter
-          label={`${work.work.name}: who talked`}
-          total={work.doers}
-          value={work.approved}
-        />
-      </TableCell>
-      <TableCell className="hidden @3xl:table-cell" variant="roomy">
-        <Meter
-          label={`${work.work.name}: steps described`}
-          total={work.steps}
-          value={work.evidenced}
-        />
-      </TableCell>
-      <TableCell
-        className="hidden whitespace-normal @4xl:table-cell"
-        variant="roomy"
-      >
-        <span className={row.missing > 0 ? undefined : "text-muted-foreground"}>
-          {lacking}
-        </span>
-      </TableCell>
-      <TableCell className="hidden @xl:table-cell" variant="roomy">
-        <StageLine label={stage} standing={standing} />
-      </TableCell>
-      <TableCell variant="roomy">
-        <WorkActions clientId={clientId} row={row} />
-      </TableCell>
-    </TableRow>
-  );
-};
+  counts: Record<Standing, number>;
+  total: number;
+}) => (
+  <StatGroup aria-label="How far the work is known" columns={4}>
+    {STANDINGS.toReversed().map((standing) => (
+      <Stat
+        change={standingLines[standing]}
+        key={standing}
+        label={standingWords[standing]}
+        value={of(counts[standing], total)}
+        variant={
+          standing === "blocked" && counts.blocked > 0 ? "warning" : "default"
+        }
+      />
+    ))}
+  </StatGroup>
+);
 
 /**
  * The section for `view`. Until the company's core draws the work from
@@ -499,7 +529,14 @@ export const OrgWorkflows = ({
     } else if (view.told) {
       none = "None found yet. They show up here as the interviews come in.";
     }
-    return <EmptySection>{none}</EmptySection>;
+    return (
+      <Empty align="start" size="sm">
+        <EmptyHeader>
+          <EmptyTitle>No workflows yet</EmptyTitle>
+          <EmptyDescription>{none}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
   }
 
   const list = workflowListOf(view);
@@ -527,121 +564,89 @@ export const OrgWorkflows = ({
   ];
 
   return (
-    <div className="flex flex-col gap-8">
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            {filtered ? (
-              <>
-                <ToggleGroup
-                  aria-label="How far it is"
-                  onValueChange={(value: string[]) => {
-                    const [next] = value;
-                    setStanding(STANDINGS.find((each) => each === next) ?? all);
+    <div {...stylex.props(styles.parts)}>
+      <Figures counts={list.counts} total={list.rows.length} />
+      <Part aria-labelledby="work">
+        <SectionHeader
+          actions={
+            <Button
+              onClick={() => {
+                setRulesOpen(true);
+              }}
+              size="sm"
+              variant="outline"
+            >
+              <Icon icon={SlidersHorizontalIcon} />
+              When one counts as known
+            </Button>
+          }
+          description="Each piece of work as its team's lead named it, and how far its people described it."
+          id="work"
+          title="The work"
+          variant="group"
+        />
+        <div {...stylex.props(styles.part)}>
+          {filtered ? (
+            <div {...stylex.props(styles.filters)}>
+              <ToggleGroup
+                aria-label="How far it is"
+                onValueChange={(value) => {
+                  const [next] = value;
+                  setStanding(STANDINGS.find((each) => each === next) ?? all);
+                }}
+                size="sm"
+                value={[standing]}
+              >
+                {filters.map((each) => (
+                  <ToggleGroupItem key={each.value} value={each.value}>
+                    {each.label}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+              {teams.length > 2 ? (
+                <NativeSelect
+                  aria-label="Team"
+                  onChange={(event) => {
+                    setTeam(event.target.value);
                   }}
                   size="sm"
-                  spacing={0}
-                  value={[standing]}
-                  variant="outline"
+                  style={styles.team}
+                  value={team}
                 >
-                  {filters.map((each) => (
-                    <ToggleGroupItem key={each.value} value={each.value}>
+                  {teams.map((each) => (
+                    <NativeSelectOption key={each.value} value={each.value}>
                       {each.label}
-                    </ToggleGroupItem>
+                    </NativeSelectOption>
                   ))}
-                </ToggleGroup>
-                {teams.length > 2 ? (
-                  <Select
-                    items={teams}
-                    onValueChange={(value: string | null) => {
-                      setTeam(value ?? all);
-                    }}
-                    value={team}
-                  >
-                    <SelectTrigger aria-label="Team" className="w-48" size="sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        {teams.map((each) => (
-                          <SelectItem key={each.value} value={each.value}>
-                            {each.label}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                ) : null}
-              </>
-            ) : null}
-          </div>
-          <Button
-            onClick={() => {
-              setRulesOpen(true);
-            }}
-            size="sm"
-            variant="outline"
-          >
-            <SlidersHorizontalIcon data-icon="inline-start" />
-            When one counts as known
-          </Button>
+                </NativeSelect>
+              ) : null}
+            </div>
+          ) : null}
+          {shown.length === 0 ? (
+            <Empty align="start" size="sm">
+              <EmptyHeader>
+                <EmptyDescription>No workflow matches.</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : (
+            // A piece of work opens nothing of its own yet: each row holds what Grasp can do for it.
+            <ActionRows
+              actions={workActions}
+              actionsHead="What Grasp can do"
+              columns={workColumns}
+              label="Workflows"
+              name={({ row }) => row.work.work.name}
+              nameHead="Workflow"
+              rowKey={({ row }) => row.work.id}
+              rows={shown.map((row) => ({
+                row,
+                team: teamNames.get(row.work.team) ?? "",
+                clientId,
+              }))}
+            />
+          )}
         </div>
-
-        {shown.length === 0 ? (
-          <EmptySection>No workflow matches.</EmptySection>
-        ) : (
-          <div className="bg-card @container overflow-hidden rounded-xl border">
-            {/* Fixed widths for all but the first column, which takes the rest: the
-                others must leave it room at every width they show at, or the
-                workflow's name has none. */}
-            <Table className="table-fixed">
-              <TableHeader>
-                <TableRow>
-                  <TableHead variant="card">Workflow</TableHead>
-                  <TableHead
-                    className="hidden w-40 @2xl:table-cell"
-                    variant="card"
-                  >
-                    Talked
-                  </TableHead>
-                  <TableHead
-                    className="hidden w-40 @3xl:table-cell"
-                    variant="card"
-                  >
-                    Steps described
-                  </TableHead>
-                  <TableHead
-                    className="hidden w-32 @4xl:table-cell"
-                    variant="card"
-                  >
-                    Missing
-                  </TableHead>
-                  <TableHead
-                    className="hidden w-44 @xl:table-cell"
-                    variant="card"
-                  >
-                    Stage
-                  </TableHead>
-                  <TableHead className="w-14" variant="card">
-                    <span className="sr-only">What Grasp can do</span>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {shown.map((row) => (
-                  <WorkRow
-                    clientId={clientId}
-                    key={row.work.id}
-                    row={row}
-                    team={teamNames.get(row.work.team) ?? ""}
-                  />
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-      </div>
-
+      </Part>
       {rulesOpen ? (
         <Rules
           clientId={clientId}

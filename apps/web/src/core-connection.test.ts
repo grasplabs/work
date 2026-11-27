@@ -374,7 +374,7 @@ describe("the tab's one connection to core", () => {
     });
   });
 
-  it("stops every frame when the person signs out, and forgets the chat link they opened in the tab, so whoever signs in next isn't offered it", async () => {
+  it("stops every frame when the person signs out, and forgets the chat link they opened in the tab and what they typed and didn't send, so whoever signs in next isn't offered either", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => await Promise.resolve(new Response("{}")))
@@ -383,13 +383,20 @@ describe("the tab's one connection to core", () => {
     await core.session();
     const frame = frameOn(core);
     keepChatLink("their-chat-link-secret");
+    const draft = "grasp.chat.draft.one.chat-1";
+    localStorage.setItem(draft, JSON.stringify({ text: "Who owes us?" }));
     const kept = pendingChatLink();
 
     await signOut(core);
 
-    expect({ kept, after: pendingChatLink() }).toStrictEqual({
+    expect({
+      kept,
+      after: pendingChatLink(),
+      draft: localStorage.getItem(draft),
+    }).toStrictEqual({
       kept: "their-chat-link-secret",
       after: undefined,
+      draft: null,
     });
     expect(frame.told).toStrictEqual(["signed-out"]);
     expect(ended).toStrictEqual(["page reloads"]);

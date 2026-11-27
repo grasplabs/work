@@ -25,7 +25,6 @@ export const connectionEvent = (
     | "connection.tools"
     | "connection.tools.added"
     | "connection.tools.removed"
-    | "connection.tools.read_tools"
     | "connection.sync_places"
     | "connector.added"
     | "connector.tools.changed"
