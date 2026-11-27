@@ -4,6 +4,7 @@ import type { PreviewAt, PreviewBundle } from "@grasp-os/shared/chat";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { AppVersionPush } from "@grasp-os/shared/pages";
+import { evictDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -19,7 +20,7 @@ import { mockIdp } from "./idp.ts";
 import { loadFrame, servedAll } from "./page-frames.ts";
 import { deskFiles, notesApp, notesFiles } from "./preview-drafts.ts";
 import { outcome, previewCall, previewOf, refreshed } from "./previews.ts";
-import { followedVersion, signedInApi } from "./sign-in.ts";
+import { followedVersion, openRpc, signedInApi } from "./sign-in.ts";
 import { startedChat } from "./started-chats.ts";
 
 // The preview of an App's one shared draft: the draft's pages and server
@@ -46,6 +47,12 @@ const newApp = async (
   const { id } = await builder.api.apps.create({ name });
   await release(builder, id, files);
   return appIdSchema.parse(id);
+};
+
+/** `person` on a connection of its own: another page of theirs. */
+const reconnected = async (person: Person): Promise<Person> => {
+  const { core, closed } = await openRpc(person.session);
+  return { ...person, core, closed, api: core.authenticate() };
 };
 
 /** What a call answered, or the code of the error it failed with. */
@@ -224,27 +231,31 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
 
   it("tells every page that follows the draft of each write, whoever made it", async () => {
     const builder = await signedInApi(idp, "builder");
-    const colleague = await signedInApi(idp, "builder");
+    const other = await signedInApi(idp, "builder");
     const app = await notesApp(builder);
-    const watched = draftWatch(env, { kind: "app", id: app });
+    const subject = { kind: "app" as const, id: app };
     const heard = new Map<string, number[]>();
-    const follow = async (page: string, person: string): Promise<void> => {
-      await watched.watch(person, async (revision: number) => {
+    const follow = async (page: string, person: Person): Promise<void> => {
+      await person.api.drafts.watch(subject, (revision: number) => {
         heard.set(page, [...(heard.get(page) ?? []), revision]);
-        await Promise.resolve();
       });
     };
-    await follow("mine", builder.userId);
-    await follow("theirs", colleague.userId);
+    // A page hears the latest write as it follows: it may have read the
+    // draft before it.
+    const opened = await revisionOf(builder, app);
+    await follow("mine", builder);
+    await follow("also mine", await reconnected(builder));
+    // Someone who doesn't build the App follows nothing of its draft.
+    const outsider = await answer(follow("theirs", other));
 
     const written = await writeDraft(builder, app, {
       "src/routes/index.tsx": deskSaying("Drafted"),
     });
 
     await vi.waitFor(() => {
-      expect(Object.fromEntries(heard)).toStrictEqual({
-        mine: [written],
-        theirs: [written],
+      expect({ heard: Object.fromEntries(heard), outsider }).toStrictEqual({
+        heard: { mine: [opened, written], "also mine": [opened, written] },
+        outsider: "app.not_found",
       });
     });
   });
@@ -252,15 +263,18 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
   it("saves a write while a page that follows the draft never answers, and tells the others", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await notesApp(builder);
-    const watched = draftWatch(env, { kind: "app", id: app });
+    const subject = { kind: "app" as const, id: app };
     const heard: number[] = [];
-    await watched.watch(
-      builder.userId,
+    const opened = await revisionOf(builder, app);
+    // The page never answers: its callback's promise never settles.
+    await builder.api.drafts.watch(
+      subject,
+      // oxlint-disable-next-line typescript/no-misused-promises, typescript/strict-void-return -- see above
       async () => await Promise.withResolvers<never>().promise
     );
-    await watched.watch(builder.userId, async (revision: number) => {
+    const other = await reconnected(builder);
+    await other.api.drafts.watch(subject, (revision: number) => {
       heard.push(revision);
-      await Promise.resolve();
     });
 
     const written = await writeDraft(builder, app, {
@@ -271,9 +285,101 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
     await vi.waitFor(() => {
       expect({ saved, heard }).toStrictEqual({
         saved: written,
-        heard: [written],
+        heard: [opened, written],
       });
     });
+  });
+
+  it("tells a page of a write once the draft's object slept with its page still following, from what the page's socket carries", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await notesApp(builder);
+    const subject = { kind: "app" as const, id: app };
+    const heard: number[] = [];
+    const opened = await revisionOf(builder, app);
+    await builder.api.drafts.watch(subject, (revision: number) => {
+      heard.push(revision);
+    });
+    const first = await writeDraft(builder, app, {
+      "src/routes/index.tsx": deskSaying("First"),
+    });
+    await vi.waitFor(() => {
+      expect(heard).toStrictEqual([opened, first]);
+    });
+
+    // Hibernated: its memory gone, the page's socket kept.
+    await evictDurableObject(draftWatch(env, subject));
+    const second = await writeDraft(builder, app, {
+      "src/routes/index.tsx": deskSaying("Second"),
+    });
+
+    await vi.waitFor(() => {
+      expect(heard).toStrictEqual([opened, first, second]);
+    });
+  });
+
+  it("tells a page of a write made while the draft's object reset, once, as its socket opens again, and of the next write live", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await notesApp(builder);
+    const subject = { kind: "app" as const, id: app };
+    const heard: number[] = [];
+    const opened = await revisionOf(builder, app);
+    await builder.api.drafts.watch(subject, (revision: number) => {
+      heard.push(revision);
+    });
+    const first = await writeDraft(builder, app, {
+      "src/routes/index.tsx": deskSaying("First"),
+    });
+    await vi.waitFor(() => {
+      expect(heard).toStrictEqual([opened, first]);
+    });
+
+    // Reset: memory and sockets gone; the write lands at once, whether
+    // before the page's socket opens again or after.
+    await evictDurableObject(draftWatch(env, subject), {
+      webSockets: "close",
+    });
+    const second = await writeDraft(builder, app, {
+      "src/routes/index.tsx": deskSaying("Second"),
+    });
+    await vi.waitFor(() => {
+      expect(heard).toStrictEqual([opened, first, second]);
+    });
+    const third = await writeDraft(builder, app, {
+      "src/routes/index.tsx": deskSaying("Third"),
+    });
+
+    await vi.waitFor(() => {
+      expect(heard).toStrictEqual([opened, first, second, third]);
+    });
+  });
+
+  it("stops telling a page that let go of the draft, and tells the page that follows it after", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await notesApp(builder);
+    const subject = { kind: "app" as const, id: app };
+    const left: number[] = [];
+    const later: number[] = [];
+    const subscription = await builder.api.drafts.watch(
+      subject,
+      (revision: number) => {
+        left.push(revision);
+      }
+    );
+    await subscription.release();
+    const opened = await revisionOf(builder, app);
+    await builder.api.drafts.watch(subject, (revision: number) => {
+      later.push(revision);
+    });
+
+    const written = await writeDraft(builder, app, {
+      "src/routes/index.tsx": deskSaying("Drafted"),
+    });
+
+    await vi.waitFor(() => {
+      expect(later).toStrictEqual([opened, written]);
+    });
+    // Only the telling it heard as it followed.
+    expect(left.length <= 1).toBeTruthy();
   });
 
   it("tells the builders' pages when a version goes live under a draft that changes nothing, so they show the App live", async () => {
@@ -285,11 +391,10 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
       "src/routes/index.tsx": deskSaying("Later"),
     });
     const heard: number[] = [];
-    await draftWatch(env, { kind: "app", id: app }).watch(
-      builder.userId,
-      async (revision: number) => {
+    await builder.api.drafts.watch(
+      { kind: "app", id: app },
+      (revision: number) => {
         heard.push(revision);
-        await Promise.resolve();
       }
     );
     const before = await builder.api.drafts.get({ kind: "app", id: app });

@@ -9,7 +9,6 @@ import type {
   LiveVersion,
 } from "@grasp-os/shared/drafts";
 import { isExpectedError } from "@grasp-os/shared/errors";
-import { errorFields, log } from "@grasp-os/shared/log";
 import { pageErrors } from "@grasp-os/shared/pages";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -17,6 +16,7 @@ import type { Subject, SubjectKind } from "@grasp-os/shared/subject";
 import { z } from "zod";
 
 import { writeAppDraft } from "./app-review.ts";
+import { draftToldSchema } from "./draft-watch.ts";
 import {
   draftCheckpointsOf,
   draftOf,
@@ -33,6 +33,7 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { Subscription } from "./subscription.ts";
+import { followObject } from "./upstream.ts";
 import { writeWorkflowDraft } from "./workflow-editor.ts";
 
 // A signed-in person's `drafts` (GRA-1665): each App's and workflow's one
@@ -224,9 +225,10 @@ export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
 
   /**
    * Follows the draft for one page: `onRevision` hears its revision
-   * after each write, whoever made it (`DraftWatch.revised`). Only while
-   * the person builds the subject, checked before each push; counts as
-   * one of the connection's watches.
+   * after each write, whoever made it (draft-watch.ts), over a socket to
+   * the draft's object that hibernates with it (upstream.ts). Only while
+   * the person builds the subject, checked before each push reaches the
+   * page; counts as one of the connection's watches.
    */
   async watch(
     subject: Subject,
@@ -246,25 +248,39 @@ export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
       }
       const stillBuilds = async (): Promise<boolean> =>
         (await this.#stillOpen()) && (await this.#buildsNow(by, found));
-      const listener = callbackFor(onRevision, stillBuilds, refusals, () => {
-        this.#watches.delete(listener);
+      let following: Disposable | undefined;
+      const page = callbackFor(onRevision, stillBuilds, refusals, () => {
+        this.#watches.delete(page);
+        following?.[Symbol.dispose]();
       });
-      this.#watches.add(listener);
-      const watched = draftWatch(this.#env, found);
-      let watchId: string;
+      this.#watches.add(page);
+      /** The last telling the page took (draft-watch.ts): where a socket opened again starts. */
+      let after = 0;
       try {
-        watchId = await watched.watch(by.userId, listener);
+        following = await followObject({
+          open: async () =>
+            await draftWatch(this.#env, found).fetch(
+              `https://draft-watch/?${new URLSearchParams({ person: by.userId, after: String(after) }).toString()}`,
+              { headers: { Upgrade: "websocket" } }
+            ),
+          deliver: async (frame) => {
+            const told = draftToldSchema.parse(frame);
+            await page(told.revision);
+            after = told.seq;
+          },
+          ended: () => {
+            page[Symbol.dispose]();
+          },
+          refused: () => agentErrors.create("agent.invalid_request"),
+          logged: { ...found },
+        });
       } catch (error) {
-        listener[Symbol.dispose]();
+        page[Symbol.dispose]();
         throw error;
       }
       return new Subscription(async () => {
-        listener[Symbol.dispose]();
-        try {
-          await watched.unwatch(watchId);
-        } catch (error) {
-          log.warn("draft.unwatch_failed", { ...found, ...errorFields(error) });
-        }
+        page[Symbol.dispose]();
+        await Promise.resolve();
       });
     });
   }
