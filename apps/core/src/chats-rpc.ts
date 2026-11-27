@@ -23,6 +23,7 @@ import type {
   ChatConnectionRequest,
   ChatFile,
   ChatFileInput,
+  ChatHistoryPage,
   ChatListOptions,
   ChatQuestion,
   ChatRating,
@@ -1448,6 +1449,23 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         { chatId: id }
       );
     });
+  }
+
+  /**
+   * A page of the person's own chat before message `before`
+   * (`Workspace.history`), as its watch shows them: only theirs, in their
+   * own object, as every read of a chat.
+   */
+  async history(chatId: string, before: number): Promise<ChatHistoryPage> {
+    return await withPerson(
+      this.#check,
+      async ({ userId }) =>
+        await this.#chatsOf(userId).history(
+          await this.#idOf(chatId),
+          userId,
+          before
+        )
+    );
   }
 
   async watchList(

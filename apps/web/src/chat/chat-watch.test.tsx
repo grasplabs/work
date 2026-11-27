@@ -15,7 +15,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { starting, startTried } from "./chat-starts.ts";
-import { useFollowedChat } from "./chat-watch.ts";
+import { readOlder, useFollowedChat } from "./chat-watch.ts";
 import { useNewLine } from "./unread.ts";
 
 // One chat shown twice from the tab's one watch of it, as its page and the
@@ -103,6 +103,25 @@ const opened = async (chats: object) => {
     await router.load();
   });
 };
+
+/** Message `id` of a chat: a question when odd, else its answer. */
+const message = (id: number): ChatMessage =>
+  id % 2 === 1
+    ? {
+        id,
+        role: "user",
+        text: `Message ${id}`,
+        at: "2026-11-26T09:00:00.000Z",
+      }
+    : {
+        id,
+        role: "assistant",
+        text: `Message ${id}`,
+        code: [],
+        tools: [],
+        end: "done",
+        at: "2026-11-26T09:00:00.000Z",
+      };
 
 describe("a chat shown twice from one watch", () => {
   afterEach(() => {
@@ -345,6 +364,165 @@ describe("a chat shown twice from one watch", () => {
       meanwhile: { gone: undefined, messages: 0 },
       everGone: false,
       watches: 2,
+    });
+  });
+
+  it("puts an earlier page before the messages it has while new ones come live, keeping both", async () => {
+    shownChat = crypto.randomUUID();
+    const seen: number[][] = [];
+    const Reader = () => {
+      const { view } = useFollowedChat(shownChat);
+      seen.push(view.messages.map(({ id }) => id));
+      return null;
+    };
+
+    const page = Promise.withResolvers<{
+      messages: ChatMessage[];
+      older: boolean;
+    }>();
+    let push: ((update: ChatUpdate) => void) | undefined;
+    const update = (ids: number[], older?: boolean): ChatUpdate => ({
+      messages: ids.map(message),
+      partial: null,
+      running: false,
+      stopped: null,
+      held: 0,
+      worked: 0,
+      seenUpTo: 4,
+      ...(older === undefined ? {} : { older }),
+    });
+    const asked: number[] = [];
+    const chats = {
+      watch: async (
+        _chatId: string,
+        _after: number | null,
+        onUpdate: (next: ChatUpdate) => void
+      ) => {
+        push = onUpdate;
+        onUpdate(update([3, 4], true));
+        return await Promise.withResolvers<never>().promise;
+      },
+      history: async (_chatId: string, before: number) => {
+        asked.push(before);
+        return await page.promise;
+      },
+    };
+    const core = {
+      withSession: async <T,>(
+        run: (session: { chats: typeof chats }) => Promise<T>
+      ): Promise<T> => await run({ chats }),
+    };
+    const router = createRouter({
+      routeTree: createRootRoute({ component: Reader }),
+      history: createMemoryHistory(),
+      context: { core },
+    });
+    const host = document.createElement("div");
+    document.body.append(host);
+    await act(async () => {
+      root = createRoot(host);
+      root.render(<RouterProvider router={router} />);
+      await router.load();
+    });
+    await vi.waitFor(() => {
+      expect(seen.at(-1)).toStrictEqual([3, 4]);
+    });
+    let read: Promise<void> | undefined;
+    await act(async () => {
+      read = readOlder(shownChat);
+      // A second read while the first goes is the same read.
+      void readOlder(shownChat);
+      // An answer comes live meanwhile.
+      push?.(update([5, 6]));
+      await Promise.resolve();
+    });
+    const meanwhile = seen.at(-1);
+    await act(async () => {
+      page.resolve({ messages: [message(1), message(2)], older: false });
+      await read;
+    });
+
+    expect({ asked, meanwhile, after: seen.at(-1) }).toStrictEqual({
+      asked: [3],
+      meanwhile: [3, 4, 5, 6],
+      after: [1, 2, 3, 4, 5, 6],
+    });
+  });
+
+  it("says an earlier page didn't load, keeps what it has, and reads it on the next try", async () => {
+    shownChat = crypto.randomUUID();
+    const seen: { ids: number[]; failed: boolean; reading: boolean }[] = [];
+    const Reader = () => {
+      const { view, olderFailed, readingOlder } = useFollowedChat(shownChat);
+      seen.push({
+        ids: view.messages.map(({ id }) => id),
+        failed: olderFailed === true,
+        reading: readingOlder === true,
+      });
+      return null;
+    };
+    let reads = 0;
+    const chats = {
+      watch: async (
+        _chatId: string,
+        _after: number | null,
+        onUpdate: (next: ChatUpdate) => void
+      ) => {
+        onUpdate({
+          messages: [message(3), message(4)],
+          older: true,
+          partial: null,
+          running: false,
+          stopped: null,
+          held: 0,
+          worked: 0,
+          seenUpTo: 4,
+        });
+        return await Promise.withResolvers<never>().promise;
+      },
+      history: async () => {
+        reads += 1;
+        if (reads === 1) {
+          throw new Error("Grasp can't be reached right now.");
+        }
+        return await Promise.resolve({
+          messages: [message(1), message(2)],
+          older: false,
+        });
+      },
+    };
+    const core = {
+      withSession: async <T,>(
+        run: (session: { chats: typeof chats }) => Promise<T>
+      ): Promise<T> => await run({ chats }),
+    };
+    const router = createRouter({
+      routeTree: createRootRoute({ component: Reader }),
+      history: createMemoryHistory(),
+      context: { core },
+    });
+    const host = document.createElement("div");
+    document.body.append(host);
+    await act(async () => {
+      root = createRoot(host);
+      root.render(<RouterProvider router={router} />);
+      await router.load();
+    });
+    await vi.waitFor(() => {
+      expect(seen.at(-1)?.ids).toStrictEqual([3, 4]);
+    });
+    await act(async () => {
+      await readOlder(shownChat);
+    });
+    const failed = seen.at(-1);
+    await act(async () => {
+      await readOlder(shownChat);
+    });
+
+    expect({ failed, after: seen.at(-1), reads }).toStrictEqual({
+      failed: { ids: [3, 4], failed: true, reading: false },
+      after: { ids: [1, 2, 3, 4], failed: false, reading: false },
+      reads: 2,
     });
   });
 });

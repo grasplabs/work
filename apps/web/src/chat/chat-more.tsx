@@ -15,12 +15,12 @@ import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-import { copyText } from "../copy.ts";
+import { copyText, copyTextLater } from "../copy.ts";
 import { exportAs } from "../export/export-file.tsx";
 import type { ExportFormat } from "../export/export-file.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { chatMarkdown } from "./chat-markdown.ts";
-import { useFollowedChat } from "./chat-watch.ts";
+import { readWhole, useFollowedChat } from "./chat-watch.ts";
 import { DeleteChatDialog } from "./delete-chat-dialog.tsx";
 import type { SourceName } from "./sources.tsx";
 
@@ -110,19 +110,33 @@ export const useChatMenu = ({
   };
   // Until the chat's first update is in, there is only its title to copy.
   const ready = view.loaded;
-  const markdown = (): string =>
+  // The chat as Markdown: whole, its earlier pages read first, where the
+  // tab hasn't them (`readWhole`), never drawn for it.
+  const markdownOf = (whole: typeof view): string =>
     chatMarkdown({
       title: chat.title,
-      messages: view.messages,
-      partial: view.partial,
-      provenance: view.provenance,
+      messages: whole.messages,
+      partial: whole.partial,
+      provenance: whole.provenance,
       names: sourceNames,
       i18n,
     });
+  const markdown = async (): Promise<string> => {
+    const whole = view.older ? await readWhole(chat.id) : view;
+    if (whole === undefined) {
+      throw new Error("The chat's earlier messages didn't load");
+    }
+    return markdownOf(whole);
+  };
   const download = async (format: ExportFormat): Promise<void> => {
     try {
+      const text = await markdown();
       await exportAs(
-        { name: fileNameOf(chat.title), title: chat.title, markdown },
+        {
+          name: fileNameOf(chat.title),
+          title: chat.title,
+          markdown: () => text,
+        },
         format,
         i18n.locale
       );
@@ -138,7 +152,10 @@ export const useChatMenu = ({
       // The menu closes as it is chosen: a short notice says it is copied.
       onSelect: () => {
         void (async () => {
-          if (await copyText(markdown())) {
+          const copied = view.older
+            ? await copyTextLater(markdown())
+            : await copyText(markdownOf(view));
+          if (copied) {
             toast.success(t`Copied`);
           } else {
             toast.error(t`Copying didn't work`);
