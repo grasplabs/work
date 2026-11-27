@@ -2,6 +2,8 @@ import { agentErrors } from "@grasp-os/shared/agent";
 import { heldAppCallsPage, shownVisibly } from "@grasp-os/shared/chat";
 import type { ChatChannel, HeldAppCall } from "@grasp-os/shared/chat";
 import type { ConnectionPerson, PendingAction } from "@grasp-os/shared/connect";
+import { sameChat } from "@grasp-os/shared/ids";
+import type { ChatRef } from "@grasp-os/shared/ids";
 import { roleSchema } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, eq } from "drizzle-orm";
@@ -169,7 +171,7 @@ export const heldAppCallsIn = async (
 };
 
 /**
- * The writes for the card of a turn of chat `chatId`, which came through
+ * The writes for the card of a turn of chat `chat`, which came through
  * `platform`, for `userId`, oldest first (exactly as asked among writes to
  * an App; by time across kinds, a connection's first on a tie), in
  * `locale`: those connect held
@@ -185,13 +187,13 @@ export const heldAppCallsIn = async (
 export const turnHeldWrites = async (
   env: Env,
   {
+    chat,
     userId,
-    chatId,
     platform,
     locale,
   }: {
+    chat: ChatRef;
     userId: string;
-    chatId: string;
     platform: ChatChannel;
     locale: ChannelLocale;
   },
@@ -209,14 +211,14 @@ export const turnHeldWrites = async (
     .filter(
       ({ context, requestedAt }) =>
         context.type === "chat" &&
-        context.chatId === chatId &&
+        sameChat(context, chat) &&
         Date.parse(requestedAt) >= since
     )
     .map((held) => ({ at: Date.parse(held.requestedAt), view: viewOf(held) }));
-  const calls = await heldAppCallsIn(env, userId, chatId, platform);
+  const calls = await heldAppCallsIn(env, userId, chat.chatId, platform);
   const toApps = calls.map((call) => ({
     at: Date.parse(call.heldAt),
-    view: appViewOf(chatId, call, locale),
+    view: appViewOf(chat.chatId, call, locale),
   }));
   return [...writes, ...toApps]
     .toSorted((a, b) => a.at - b.at)

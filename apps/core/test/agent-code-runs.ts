@@ -4,6 +4,7 @@
  */
 import { applyOutput } from "@grasp-os/shared/chat";
 import type { ChatOutput, ChatUpdate } from "@grasp-os/shared/chat";
+import type { ChatRef } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 
@@ -113,13 +114,13 @@ export const withRevocationReads = async (
  */
 export const revokedRow = async (
   agentId: string,
-  { granted, chatId }: { granted: boolean; chatId: string | null }
+  { granted, chat }: { granted: boolean; chat: ChatRef | null }
 ) => {
   await env.DB.prepare(
     `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
       actions, binding, status, requested_by, requested_at, granted_by, granted_at,
-      revoked_by, revoked_at, chat_id)
-     VALUES (?, 'agent', ?, 'collection', ?, '["read"]', ?, 'revoked', 'test', 0, ?, ?, 'test', ?, ?)`
+      revoked_by, revoked_at, workspace_id, chat_id)
+     VALUES (?, 'agent', ?, 'collection', ?, '["read"]', ?, 'revoked', 'test', 0, ?, ?, 'test', ?, ?, ?)`
   )
     .bind(
       crypto.randomUUID(),
@@ -129,7 +130,8 @@ export const revokedRow = async (
       granted ? "test" : null,
       granted ? 0 : null,
       Date.now(),
-      chatId
+      chat?.workspaceId ?? null,
+      chat?.chatId ?? null
     )
     .run();
 };

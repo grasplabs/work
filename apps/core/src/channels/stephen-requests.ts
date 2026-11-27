@@ -307,7 +307,6 @@ export const toolsIn = (stored: string): RequestToolCall[] => {
 
 /** How a taken request ended, to settle it. */
 export interface Settled {
-  chatId: string | null;
   ended: "answered" | "stopped" | "failed";
   calls: readonly ToolCall[];
   sorted: Sorted | null;
@@ -344,7 +343,7 @@ export const heardRequest = async (
 export const settleRequest = async (
   env: Env,
   id: string,
-  { chatId, ended, calls, sorted }: Settled
+  { ended, calls, sorted }: Settled
 ): Promise<void> => {
   const heard = heardFrom(calls);
   try {
@@ -371,7 +370,6 @@ export const settleRequest = async (
     await db
       .update(stephenRequests)
       .set({
-        chatId,
         kind,
         outcome: outcomeOf(ended, { ...heard, kind }, sorted),
         tools: JSON.stringify(tools),

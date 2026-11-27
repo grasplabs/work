@@ -1,8 +1,8 @@
-import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { workspace } from "../src/durable-objects.ts";
+import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import {
   codeResults,
   codeStatuses,
@@ -130,12 +130,12 @@ describe("chat agent code output", () => {
 
   it("names the chat platform a chat came through in the record of a run's output it withheld", async () => {
     const { userId } = await signedInWithRole(idp, "user");
-    const id = workspaceIdSchema.parse(crypto.randomUUID());
-    const stub = workspace(env, id);
+    const agentId = crypto.randomUUID();
+    const stub = workspace(env, personalWorkspaceId(userId));
     const chat = await stub.createChat(
       "Questions",
       userId,
-      id,
+      agentId,
       undefined,
       "teams"
     );
@@ -170,7 +170,7 @@ describe("chat agent code output", () => {
             )
             .map(({ actor }) => actor)
         ).toStrictEqual([
-          { type: "agent", agentId: id, onBehalfOf: userId, via: "teams" },
+          { type: "agent", agentId, onBehalfOf: userId, via: "teams" },
         ]);
       },
       { timeout: 10_000, interval: 100 }

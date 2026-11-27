@@ -3,7 +3,7 @@ import type { AuditEntry } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { ConfirmedStart, HeldStart } from "@grasp-os/shared/held-starts";
-import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
+import type { ChatId, ChatRef } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
@@ -29,6 +29,7 @@ import { chatAuthority, chatContext } from "./agent-scope.ts";
 import type { AgentScope } from "./agent-scope.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Member } from "./auth/identity.ts";
+import { chatRefOf, ofChat } from "./chat-ref.ts";
 import {
   agentHeldStarts,
   workflowResources,
@@ -92,23 +93,21 @@ export const heldStartMs = 24 * 60 * 60 * 1000;
 /** Longest key an agent names for a start. */
 export const maxStartKeyLength = 128;
 
-/** The start key of the agent's `key` in `chatId`, which the run is admitted under. */
-const startKeyOf = (chatId: string, key: string): string =>
+/**
+ * The start key of the agent's `key` in chat `chatId`, which the run is
+ * admitted under: its receipts are its person's (`principal_id`), whose
+ * one workspace holds the chat, so the chat's ID alone tells it apart.
+ */
+const startKeyOf = (chatId: ChatId, key: string): string =>
   `chat:${chatId}:${key}`;
 
 /** The agent of `row` acting for its person, in its chat. */
-const invokerOf = (row: {
-  agentId: string;
-  personId: string;
-  workspaceId: string;
-  chatId: string;
-}): StartInvoker => ({
+const invokerOf = (
+  row: Pick<AgentScope, "agentId" | "personId" | "workspaceId" | "chatId">
+): StartInvoker => ({
   type: "agent",
-  authority: chatAuthority({ agentId: row.agentId, personId: row.personId }),
-  context: chatContext({
-    workspaceId: workspaceIdSchema.parse(row.workspaceId),
-    chatId: chatIdSchema.parse(row.chatId),
-  }),
+  authority: chatAuthority(row),
+  context: chatContext(row),
 });
 
 /** Where an agent's start stands, as the agent is told. */
@@ -234,8 +233,7 @@ export const holdStart = async (
   const db = drizzle(env.DB);
   const now = Date.now();
   const byKey = and(
-    eq(agentHeldStarts.workspaceId, scope.workspaceId),
-    eq(agentHeldStarts.chatId, scope.chatId),
+    ofChat(agentHeldStarts, scope),
     eq(agentHeldStarts.key, key)
   );
   const before = await db.select().from(agentHeldStarts).where(byKey).get();
@@ -245,12 +243,7 @@ export const holdStart = async (
   // What the person sees, as they'd see it: a workflow they have no role
   // in is one that doesn't exist.
   const workflow = await requireWorkflowRole(env, person, workflowId, "user");
-  const invoker = invokerOf({
-    agentId: scope.agentId,
-    personId: scope.personId,
-    workspaceId: scope.workspaceId,
-    chatId: scope.chatId,
-  });
+  const invoker = invokerOf(scope);
   // As the start would be decided, admitting nothing: its grant, its
   // person's role, its input as the version takes it.
   const decided = await decideWorkflowStart(env, invoker, workflow.id, {
@@ -265,15 +258,14 @@ export const holdStart = async (
     actor: delegateActorOf(chatAuthority(scope)),
     action: "workflow.start.held",
     target: { type: "workflow_resource", id: workflow.id },
-    detail: { held: id, chat: scope.chatId },
+    detail: { held: id, workspace: scope.workspaceId, chat: scope.chatId },
   };
   await auditedBatch(env, db, [
     db
       .insert(agentHeldStarts)
       .values({
         id,
-        workspaceId: scope.workspaceId,
-        chatId: scope.chatId,
+        ...chatRefOf(scope),
         agentId: scope.agentId,
         personId: scope.personId,
         workflowResourceId: workflow.id,
@@ -288,7 +280,8 @@ export const holdStart = async (
   ]);
   const held = await db.select().from(agentHeldStarts).where(byKey).get();
   if (held === undefined) {
-    throw new Error(`No held start under chat ${scope.chatId}'s key`);
+    // Its chat deleted meanwhile, its held starts with it.
+    throw workflowResourceErrors.create("workflow.start_held_gone");
   }
   return standingOf(held, now);
 };
@@ -545,23 +538,19 @@ export const sweepHeldStartInputs = async (
 };
 
 /**
- * Deletes the held starts of chat `chatId` of Workspace object
- * `workspaceId`, as the chat is deleted, never by a chat's ID alone, or of
- * person `personId`, as they are erased: what they were asked to start
+ * Deletes the held starts of chat `of.chat`, as it is deleted, or of
+ * person `of.personId`, as they are erased: what they were asked to start
  * goes with them.
  */
 export const dropHeldStarts = async (
   env: Env,
-  of: { workspaceId: string; chatId: string } | { personId: string }
+  of: { chat: ChatRef } | { personId: string }
 ): Promise<void> => {
   await drizzle(env.DB)
     .delete(agentHeldStarts)
     .where(
-      "chatId" in of
-        ? and(
-            eq(agentHeldStarts.workspaceId, of.workspaceId),
-            eq(agentHeldStarts.chatId, of.chatId)
-          )
+      "chat" in of
+        ? ofChat(agentHeldStarts, of.chat)
         : eq(agentHeldStarts.personId, of.personId)
     );
 };

@@ -3,7 +3,6 @@ import {
   agentIdSchema,
   chatIdSchema,
   workflowResourceIdSchema,
-  workspaceIdSchema,
 } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
@@ -11,6 +10,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { personOf } from "../src/connections.ts";
 import { appHost, workspace } from "../src/durable-objects.ts";
 import { confirmPendingAction } from "../src/pending-actions.ts";
+import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import { revokeWorkflowBinding } from "../src/workflow-bindings.ts";
 import type { CallingAgent } from "../src/workflow-start-intents.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
@@ -504,20 +504,20 @@ describe("runs started by a restricted App", () => {
     const starter = await startingApp(ada, admin, workflow.id, {
       restricted: false,
     });
-    const workspaceId = workspaceIdSchema.parse(crypto.randomUUID());
+    const workspaceId = personalWorkspaceId(ada.userId);
     const stub = workspace(env, workspaceId);
-    // The workspace's agent: its id is the workspace's.
-    const open = await stub.createChat("Questions", ada.userId, workspaceId);
-    const shut = await stub.createChat("Questions", ada.userId, workspaceId);
+    const agent = agentIdSchema.parse(crypto.randomUUID());
+    const open = await stub.createChat("Questions", ada.userId, agent);
+    const shut = await stub.createChat("Questions", ada.userId, agent);
     await stub.restrictChat(shut.id);
     await granted(ada, admin, {
-      subject: { type: "agent", agentId: agentIdSchema.parse(workspaceId) },
+      subject: { type: "agent", agentId: agent },
       object: { type: "app", appId: starter.app },
       actions: ["write"],
       binding: `DESK_${unique().toUpperCase().replaceAll("-", "_")}`,
     });
     const agentIn = (chatId: string): CallingAgent => ({
-      agentId: workspaceId,
+      agentId: agent,
       workspaceId,
       chatId: chatIdSchema.parse(chatId),
     });
@@ -525,7 +525,6 @@ describe("runs started by a restricted App", () => {
     const fromShut = await starter.start(env, agentIn(shut.id));
     // An agent's own start that names no chat: nothing to read, so
     // restricted.
-    const agent = agentIdSchema.parse(workspaceId);
     await granted(ada, admin, {
       subject: { type: "agent", agentId: agent },
       object: {

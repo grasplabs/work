@@ -3,7 +3,7 @@ import { v } from "@grasp-os/runtime/app";
 import { declaredWorkflows, generatedPaths } from "@grasp-os/runtime/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { FunctionResult } from "@grasp-os/shared/functions";
-import { appIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
@@ -31,6 +31,7 @@ import { withPageReferences } from "../src/page-references.ts";
 import { buildPages } from "../src/pages.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
+import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import { rollback } from "../src/publish.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import {
@@ -624,7 +625,7 @@ const startedFromChat = async (
   source: SourceRef
 ): Promise<void> => {
   const agentId = `agent-${unique()}`;
-  const workspaceId = workspaceIdSchema.parse(crypto.randomUUID());
+  const workspaceId = personalWorkspaceId(personId);
   const chat = await workspace(env, workspaceId).createChat(
     "Questions",
     personId,

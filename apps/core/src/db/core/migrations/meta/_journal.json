@@ -2101,6 +2101,13 @@
       "when": 1795765275221,
       "tag": "0299_chat_ids",
       "breakpoints": true
+    },
+    {
+      "idx": 300,
+      "version": "6",
+      "when": 1795789253932,
+      "tag": "0300_chats_by_ref",
+      "breakpoints": true
     }
   ]
 }

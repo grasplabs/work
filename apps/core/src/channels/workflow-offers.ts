@@ -1,5 +1,6 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import type { ChatRef } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
@@ -12,6 +13,7 @@ import type { AgentScope } from "../agent-scope.ts";
 import { activeMember } from "../auth/auth.ts";
 import type { Member } from "../auth/identity.ts";
 import { memberOf } from "../auth/identity.ts";
+import { chatRefOf, ofChat } from "../chat-ref.ts";
 import { chatWorkflowOffers, workflowResources } from "../db/core/schema.ts";
 import { notNullFailed } from "../db/d1.ts";
 import { isRestricted } from "../restricted.ts";
@@ -152,8 +154,7 @@ export const offerStart = async (
         // NULL, which fails the insert, once they are no longer a member:
         // removed, or erased after, as the turn that offers it ran.
         userId: sql`(SELECT ${person.userId} WHERE ${activeMember(person.userId)})`,
-        workspaceId: scope.workspaceId,
-        chatId: scope.chatId,
+        ...chatRefOf(scope),
         workflowId: workflow.id,
         workflowName: workflow.name,
         input: text,
@@ -170,20 +171,18 @@ export const offerStart = async (
 };
 
 /**
- * Posts in `thread` a card for each offer chat `chatId`'s turns made for
- * `userId` that none was posted for yet, each once.
+ * Posts in `thread` a card for each offer chat `chat`'s turns made that
+ * none was posted for yet, each once.
  */
 export const postOffers = async (
   env: Env,
   thread: Pick<Conversation, "post">,
   {
-    chatId,
-    userId,
+    chat,
     requestId,
     platform,
   }: {
-    chatId: string;
-    userId: string;
+    chat: ChatRef;
     requestId: string | null;
     /** Where it is posted, whose link and mention syntax is made inert. */
     platform: string;
@@ -197,8 +196,7 @@ export const postOffers = async (
     .set({ postedAt: now })
     .where(
       and(
-        eq(chatWorkflowOffers.chatId, chatId),
-        eq(chatWorkflowOffers.userId, userId),
+        ofChat(chatWorkflowOffers, chat),
         isNull(chatWorkflowOffers.postedAt),
         gt(chatWorkflowOffers.expiresAt, now)
       )

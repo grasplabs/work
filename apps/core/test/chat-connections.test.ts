@@ -5,6 +5,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { retryDisconnects } from "../src/members.ts";
+import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import {
   codeResults,
   codeStep,
@@ -847,13 +848,14 @@ describe("a connection the chat's agent asks for", setUpTime, () => {
         "INSERT INTO member_removals (organization_id, user_id, removed_at) VALUES ('organization', ?, ?)"
       ).bind(broken, now),
       env.DB.prepare(
-        "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at, chat_id) VALUES (?, 'agent', ?, 'connection', ?, 'not json', 'BROKEN', 'active', ?, ?, ?)"
+        "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at, workspace_id, chat_id) VALUES (?, 'agent', ?, 'connection', ?, 'not json', 'BROKEN', 'active', ?, ?, ?, ?)"
       ).bind(
         crypto.randomUUID(),
         chats.agent.agentId,
         mine.id,
         broken,
         now,
+        personalWorkspaceId(broken),
         crypto.randomUUID()
       ),
     ]);

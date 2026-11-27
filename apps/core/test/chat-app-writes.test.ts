@@ -1,5 +1,4 @@
 import { agentErrors } from "@grasp-os/shared/agent";
-import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -7,6 +6,7 @@ import { linearCopyOrigin } from "../../connect/test/linear-mcp-fake.ts";
 import type { Consent } from "../../connect/test/linear-mcp-fake.ts";
 import { heldWriteRefusal } from "../src/channels/stephen-rules.ts";
 import { workspace } from "../src/durable-objects.ts";
+import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import {
   codeResults,
   codeStep,
@@ -105,18 +105,18 @@ const setUp = async (via: "teams" | "web", ...replies: ProviderReply[]) => {
     method: "POST",
     body: JSON.stringify(mailTools),
   });
-  const id = workspaceIdSchema.parse(crypto.randomUUID());
-  const stub = workspace(env, id);
+  const agentId = crypto.randomUUID();
+  const stub = workspace(env, personalWorkspaceId(person.userId));
   const chat = await stub.createChat(
     "Questions",
     person.userId,
-    id,
+    agentId,
     undefined,
     via
   );
   const provider = await fakeProvider(...replies);
   await requestGranted(idp, admin, {
-    subject: { type: "agent", agentId: id },
+    subject: { type: "agent", agentId },
     object: { type: "connection", connectionId: mail.id },
     actions: ["MAIL_REPLY", "MAIL_READ"],
     binding: "MAIL",
@@ -315,12 +315,12 @@ describe("a chat app's writes", setUpTime, () => {
     await agentMayUse(connectionId);
     // Open to nobody until an admin chooses its audience (#2726).
     await chooseAudience(admin.api, connectionId, { kind: "everyone" });
-    const id = workspaceIdSchema.parse(crypto.randomUUID());
-    const stub = workspace(env, id);
+    const agentId = crypto.randomUUID();
+    const stub = workspace(env, personalWorkspaceId(person.userId));
     const chat = await stub.createChat(
       "Questions",
       person.userId,
-      id,
+      agentId,
       undefined,
       "teams"
     );
@@ -331,7 +331,7 @@ describe("a chat app's writes", setUpTime, () => {
       says("Found it.")
     );
     await requestGranted(idp, admin, {
-      subject: { type: "agent", agentId: id },
+      subject: { type: "agent", agentId },
       object: { type: "connection", connectionId },
       actions: ["list_issues"],
       binding: "INBOX",

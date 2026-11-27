@@ -18,7 +18,7 @@ import {
   identifierSchema,
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
-import type { ChatId } from "@grasp-os/shared/ids";
+import type { ChatRef } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { graspLockHash, packageErrors } from "@grasp-os/shared/packages";
 import type { GraspLock } from "@grasp-os/shared/packages";
@@ -160,6 +160,7 @@ const tellChats = async (
         });
       } catch (error) {
         log.warn("dependencies.chat_unreached", {
+          workspaceId: via.workspaceId,
           chatId: via.chatId,
           ...errorFields(error),
         });
@@ -339,13 +340,12 @@ export const dependencyStatus = async (
 };
 
 /**
- * The requests the agent of `chatId`, `userId`'s own chat, asked for and
- * that still wait: what the chat's card shows them to decide.
+ * The requests the agent of chat `chat` asked for and that still wait:
+ * what the chat's card shows its person to decide.
  */
 export const chatPackageRequests = async (
   env: Env,
-  userId: string,
-  chatId: ChatId
+  { workspaceId, chatId }: ChatRef
 ): Promise<DependencyRequest[]> => {
   const rows = await drizzle(env.DB)
     .select()
@@ -357,8 +357,8 @@ export const chatPackageRequests = async (
         // one's to decide.
         eq(dependencyRequests.subjectType, "app"),
         sql`EXISTS (SELECT 1 FROM json_each(coalesce(${dependencyRequests.requestedIn}, json_array(json(${dependencyRequests.requestedVia})))) AS asked
-          WHERE json_extract(asked.value, '$.chatId') = ${chatId}
-            AND json_extract(asked.value, '$.onBehalfOf') = ${userId})`
+          WHERE json_extract(asked.value, '$.workspaceId') = ${workspaceId}
+            AND json_extract(asked.value, '$.chatId') = ${chatId})`
       )
     )
     .orderBy(dependencyRequests.requestedAt);

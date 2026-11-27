@@ -1,5 +1,4 @@
 import { brainOf } from "@grasp-os/brain-next/contract";
-import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
@@ -27,6 +26,7 @@ import {
   requestPermission,
   revokePermission,
 } from "../src/permissions.ts";
+import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { workflowDraft } from "../src/workflow-editor.ts";
@@ -335,7 +335,7 @@ const keptFromChat = async (
   value: string
 ): Promise<string> => {
   const runId = crypto.randomUUID();
-  const workspaceId = workspaceIdSchema.parse(crypto.randomUUID());
+  const workspaceId = personalWorkspaceId(personId);
   const agentId = `agent-${unique()}`;
   const chat = await workspace(env, workspaceId).createChat(
     "Questions",
