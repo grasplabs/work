@@ -28,7 +28,6 @@ import {
 import { recheckedEvery, sessionRecheckMs } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { SessionRpc } from "./session-rpc.ts";
-import { watchEnds } from "./socket-watchers.ts";
 import { followObject } from "./upstream.ts";
 
 /** What the frontend reaches over `/rpc`, signed in or not. */
@@ -83,6 +82,17 @@ export const sessionUnverifiedCloseCode = 4503;
 
 /** The close code that asks the page to connect again at once. */
 export const reconnectCloseCode = 1012;
+
+/**
+ * Whether `error` is the platform's, or wraps it (a query's error names
+ * what it failed on as its `cause`): the invocation made all the
+ * subrequests it may.
+ */
+const outOfSubrequests = (error: unknown, depth = 0): boolean =>
+  error instanceof Error &&
+  depth < 5 &&
+  (/too many subrequests/iu.test(error.message) ||
+    outOfSubrequests(error.cause, depth + 1));
 
 /** The most tellings a connection's socket holds for it: a few, each a few characters. */
 const maxQueuedRechecks = 4096;
@@ -319,12 +329,12 @@ const sessionApi = (
             check.forget();
           },
           ended: (code) => {
-            // Let go of for good (past the object's bound, say): the
-            // connection ends, and the page connects again, with a socket
-            // of its own again.
-            if (code !== watchEnds.sessionEnded && openHere()) {
-              server.close(reconnectCloseCode, "Connect again");
-            }
+            // Let go of for good: past the object's bound (the person has
+            // more connections than it keeps), or a fault. The connection
+            // goes on without the telling's speed, its calls and pushes
+            // still gated on a fresh reading. Connecting again would only
+            // push out the person's next oldest, which would do the same.
+            log.warn("rpc.person_socket_ended", { code });
           },
           logged: { purpose: "connection" },
         });
@@ -441,6 +451,13 @@ export const serveRpc = (
       maxBigIntDigits: pageLimits.rpc.maxBigIntDigits,
     },
     onSendError: (error) => {
+      // A long-lived connection is one invocation, whose subrequests run
+      // out at last (core's limit, admin's upload.ts `workerLimits`):
+      // every call after would fail. The connection closes for the page
+      // to connect again, a new invocation with its own.
+      if (outOfSubrequests(error) && open) {
+        server.close(reconnectCloseCode, "Connect again");
+      }
       // Every call of the tab goes over this one connection, so each
       // failure gets a request ID of its own for the person to quote, and
       // its log line names the connection's too.

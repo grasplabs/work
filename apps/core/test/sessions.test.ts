@@ -6,7 +6,7 @@ import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 
 import { workspace } from "../src/durable-objects.ts";
 import { personalWorkspaceId } from "../src/personal-workspace.ts";
-import { sessionEndedCloseCode } from "../src/rpc.ts";
+import { reconnectCloseCode, sessionEndedCloseCode } from "../src/rpc.ts";
 import { recheckedEvery, sessionRecheckMs } from "../src/session-check.ts";
 import { mockIdp } from "./idp.ts";
 import { acmeTenant, clientOrigin } from "./sign-in-config.ts";
@@ -288,6 +288,38 @@ describe("sessions end", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("close a connection whose invocation made all the subrequests it may, for the page to connect again", async () => {
+    const person = entraPerson(acmeTenant);
+    const phone = await signedIn(idp, "microsoft", person);
+    const spent = { now: false };
+    const capped = {
+      ...env,
+      DB: new Proxy(env.DB, {
+        get: (target, property) => {
+          if (property === "prepare" && spent.now) {
+            return () => {
+              throw new Error("Too many subrequests.");
+            };
+          }
+          const value: unknown = Reflect.get(target, property);
+          return typeof value === "function"
+            ? (...args: unknown[]): unknown =>
+                Reflect.apply(value, target, args)
+            : value;
+        },
+      }),
+    };
+    const connection = await openRpc(phone, { coreEnv: capped });
+    using session = connection.core.authenticate();
+    await session.whoami();
+    spent.now = true;
+
+    // A call that reads the database, within its session reading's window.
+    await outcome(session.sessions.list());
+
+    await expect(connection.closed).resolves.toBe(reconnectCloseCode);
   });
 
   it("close an open connection as the session's own time runs out, with nothing told", async () => {
