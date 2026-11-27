@@ -55,7 +55,7 @@ import { pageFramePolicy } from "./security-headers.ts";
 // A source ending in `/` matches every path under it (CSP3), so the
 // policy stays the same few sources however many modules a build loads:
 // naming each module's address made a header of 16 KB for a page with
-// the data grid, past what proxies and Node take, and it grew with every
+// the data table, past what proxies and Node take, and it grew with every
 // module. A directory allows exactly what an exact address would only
 // because each directory holds one build's code and nothing else, and
 // never changes. How a looser `script-src` could be abused, and what

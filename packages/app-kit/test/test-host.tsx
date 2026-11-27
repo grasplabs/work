@@ -7,7 +7,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach } from "vite-plus/test";
 
-// What an App page's kit parts (the data grid, the form fields) are
+// What an App page's kit parts (the data table, the form fields) are
 // tested against: a real session client, as the platform mounts one, over
 // a host that answers each query and mutation as the test says. The host
 // is the outside system here; the client, the hooks and the kit are the

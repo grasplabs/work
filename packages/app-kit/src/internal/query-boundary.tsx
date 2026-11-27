@@ -2,7 +2,7 @@ import { Component } from "react";
 import type { ReactNode } from "react";
 
 // A query's failure, which the SDK's hooks throw while rendering, caught
-// where it happened (a grid's rows, a relation's list), so it shows in
+// where it happened (a data table's rows, a relation's list), so it shows in
 // that part's place rather than the whole screen's. React offers no hook
 // for this; the React Compiler leaves classes as they are.
 

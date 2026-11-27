@@ -15,7 +15,8 @@ import { workflowReferenceLimits } from "./workflow-references.ts";
 
 // What a page knows of its App's public functions beyond their names:
 // what `useForm` checks a submission with (a mutation's or an action's
-// kind and arguments). A reference is a name and nothing else, so
+// kind and arguments) and what `DataTable` reads its columns from (a
+// query's declared return). A reference is a name and nothing else, so
 // this comes with the page's build instead (`.grasp/functions.ts`, which
 // the host generates from the release's manifest and the compiler builds
 // in beside the route tree), and the client looks a function up by the
@@ -36,6 +37,8 @@ import { workflowReferenceLimits } from "./workflow-references.ts";
 export interface PageFunction {
   readonly kind: ReferenceKind;
   readonly args: ValueDescriptor;
+  /** Its declared return; null where it declares none. */
+  readonly returns: ValueDescriptor | null;
 }
 
 /** A release's public functions, by name. */
@@ -75,12 +78,13 @@ const pageFunctionOf = (value: unknown): PageFunction | undefined => {
     return undefined;
   }
   const args = descriptorIn(value.args);
-  if (args === undefined) {
+  const returns = value.returns === null ? null : descriptorIn(value.returns);
+  if (args === undefined || returns === undefined) {
     return undefined;
   }
   // SAFETY: one of `kinds`, checked above.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return { kind: value.kind as ReferenceKind, args };
+  return { kind: value.kind as ReferenceKind, args, returns };
 };
 
 /**
@@ -260,6 +264,7 @@ export const pageFunctionsOf = (
         {
           kind: fn.kind,
           args: fn.args,
+          returns: fn.returns,
         },
       ])
   );

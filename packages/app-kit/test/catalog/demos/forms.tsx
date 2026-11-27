@@ -46,6 +46,7 @@ import {
   QuestionnaireActions,
   QuestionnaireChoice,
   QuestionnaireChoices,
+  QuestionnaireError,
   QuestionnaireItem,
   QuestionnaireSubmit,
   QuestionnaireTitle,
@@ -301,6 +302,7 @@ const QuestionnaireDemo = () => {
             <QuestionnaireChoice value="speed">Speed</QuestionnaireChoice>
             <QuestionnaireChoice value="cost">Cost</QuestionnaireChoice>
           </QuestionnaireChoices>
+          <QuestionnaireError />
         </QuestionnaireItem>
         <QuestionnaireActions>
           <QuestionnaireSubmit>Save answer</QuestionnaireSubmit>

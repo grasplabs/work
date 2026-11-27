@@ -383,7 +383,7 @@ describe("pages", { timeout: 60_000 }, () => {
   });
 
   it("names the same few script sources however many modules a build loads", async () => {
-    // A page with the data grid or a chart loads about 150 of the kit's.
+    // A page with the data table or a chart loads about 150 of the kit's.
     const small = await policyOfBuild(1, 1);
     const large = await policyOfBuild(150, 60);
     expect({
