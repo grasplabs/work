@@ -306,6 +306,9 @@ const styles = stylex.create({
     fontWeight: font.weightMedium,
     letterSpacing: size.sidebarTracking,
   },
+  // A quiet row's field in the regular weight, an unread row's in the semibold, as their words.
+  fieldQuiet: { fontWeight: font.weightNormal },
+  fieldUnread: { fontWeight: font.weightSemibold },
 
   // ---- The switch ----
   row: {
@@ -864,11 +867,16 @@ const RenameField = ({
   label,
   name,
   at,
+  quiet,
+  unread,
   onDone,
 }: {
   label: string;
   name: string;
   at: NameAt;
+  /** The row's weight, which the field takes: regular for a quiet row, semibold for an unread one. */
+  quiet: boolean;
+  unread: boolean;
   /** With the new name, or none to keep the old one; `byKey` when a key ended it. */
   onDone: (name: string | undefined, byKey: boolean) => void;
 }) => {
@@ -911,6 +919,8 @@ const RenameField = ({
       type="text"
       {...stylex.props(
         styles.field,
+        quiet && styles.fieldQuiet,
+        unread && styles.fieldUnread,
         placed.at(
           `${String(at.start)}px`,
           `${String(at.top)}px`,
@@ -959,6 +969,10 @@ const ownName = (row: AppShellNavRow) =>
   row.onRename !== undefined ||
   (row.actions?.length ?? 0) > 0;
 
+/** Whether a row's unread dot shows: unread, and not working, whose mark takes the dot's place. */
+const dotShows = (row: AppShellNavRow): boolean =>
+  row.unread === true && row.working !== true;
+
 /** A mark at the row's end, where the dots stand on a row that has them. */
 const EndMark = ({
   slot,
@@ -997,10 +1011,11 @@ const rowWords = (
   row: AppShellNavRow,
   renaming: boolean,
   dots: boolean,
+  /** Its unread dot shows (`dotShows`). */
+  unread: boolean,
   words: { working: string; unread: string }
 ): ReactNode[] => {
   const counted = row.count !== undefined && row.count > 0;
-  const unread = row.unread === true && row.working !== true;
   return [
     row.icon === undefined ? null : <Icon icon={row.icon} key="icon" />,
     ownName(row) ? null : row.label,
@@ -1196,12 +1211,15 @@ const useRename = (row: AppShellNavRow) => {
 const RowButton = ({
   row,
   words,
+  unread,
   trigger,
   describedBy,
   inert,
 }: {
   row: AppShellNavRow;
   words: ReactNode[];
+  /** Its unread dot shows (`dotShows`): its name stands out too. */
+  unread: boolean;
   /** The tooltip trigger's props (CutTip), when the row has its own. */
   trigger: Record<string, unknown>;
   describedBy: string | undefined;
@@ -1213,8 +1231,7 @@ const RowButton = ({
     // While it is renamed: drawn under the field, out of reach.
     inert: inert || undefined,
     variant: row.quiet === true ? ("quiet" as const) : undefined,
-    // Its dot shows: its name stands out too.
-    unread: row.unread === true && row.working !== true,
+    unread,
     isActive: row.current === true,
   };
   const { isMobile, setOpenMobile } = useSidebar();
@@ -1302,7 +1319,8 @@ const Row = ({ row }: { row: AppShellNavRow }) => {
     }
     row.onAction?.(action.value);
   };
-  const words = rowWords(row, renaming, hasActions, said);
+  const unread = dotShows(row);
+  const words = rowWords(row, renaming, hasActions, unread, said);
   const describedBy = renames && !renaming ? hint : undefined;
   const button = (trigger: Record<string, unknown>) => (
     <RowButton
@@ -1310,6 +1328,7 @@ const Row = ({ row }: { row: AppShellNavRow }) => {
       inert={renaming}
       row={row}
       trigger={trigger}
+      unread={unread}
       words={words}
     />
   );
@@ -1325,6 +1344,8 @@ const Row = ({ row }: { row: AppShellNavRow }) => {
           label={said.renameRow(row.label)}
           name={row.label}
           onDone={onDone}
+          quiet={row.quiet === true}
+          unread={unread}
         />
       )}
       {/* Read only as the link's description, never as words after the row. */}

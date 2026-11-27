@@ -2082,7 +2082,9 @@ export interface SidebarMenuButtonProps extends SlotPartProps, Own<"button"> {
   variant?: "default" | "quiet" | "outline";
   /**
    * Something there the person has not seen yet (an unread chat): its words in the semibold
-   * weight, over its variant's, as a mail list draws unread mail. Marked `data-unread`.
+   * weight, over its variant's, as a mail list draws unread mail. Marked `data-unread`. The
+   * weight is only seen, never heard: say "Unread" in words in the row too, as AppShellNav's
+   * unread dot does; the button adds no words of its own.
    * @default false
    */
   unread?: boolean;
