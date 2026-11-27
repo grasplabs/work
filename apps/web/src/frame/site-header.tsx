@@ -10,7 +10,7 @@ export type Crumb =
       label: string;
       /**
        * The page's own name only: renamed in a small popup under it
-       * (AppShellHeader's `renameVariant="popup"`). A promise holds the
+       * (AppShellHeader's rename). A promise holds the
        * popup open while it works, and open with the words typed if it
        * rejects, saying `renameErrorText`.
        */
@@ -108,7 +108,6 @@ export const SiteHeader = ({
     page !== undefined && "onRename" in page && page.onRename !== undefined
       ? {
           onRename: page.onRename,
-          renameVariant: "popup" as const,
           ...(page.renameMaxLength === undefined
             ? {}
             : { renameMaxLength: page.renameMaxLength }),

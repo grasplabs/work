@@ -69,6 +69,7 @@ import {
   listStyles,
   scrollbarHidden,
   tapTarget,
+  valueFade,
 } from "../lib/styles";
 import {
   colors,
@@ -254,15 +255,6 @@ const HOVER = media.hover;
 const FORCED = media.forcedColors;
 // Focus from the keys, never after a press (lib/styles marks a pointer's focus).
 const KEYBOARD = ":focus-visible:not([data-focus-pointer])";
-// Where the words can be painted through a gradient, a long value fades at its end (below).
-// Not in Firefox: it passes the test, but a form control's words are not clipped there, so the
-// gradient filled the whole box and every value drew as a dark bar. There a long value is cut by
-// the box's edge as it scrolls.
-const CLIP_TEXT =
-  "@supports (background-clip: text) and (not (-moz-appearance: none))";
-const FADE_END = `linear-gradient(to right, currentColor calc(100% - ${space[5]}), transparent), linear-gradient(transparent, transparent)`;
-const FADE_END_RTL = `linear-gradient(to left, currentColor calc(100% - ${space[5]}), transparent), linear-gradient(transparent, transparent)`;
-
 const styles = stylex.create({
   // The box holds the input, its touch target and the chevron. It is as wide as its column. The
   // chevron stands on the input's end: its touch target stops at its own edge towards it.
@@ -313,32 +305,7 @@ const styles = stylex.create({
     // A typed value fades instead (below).
     textOverflow: { default: "clip", ":placeholder-shown": "ellipsis" },
     paddingInline: space[3],
-    // A value longer than the field fades out at its end, as Tabs and Code block do, never a cut
-    // through a letter. The words are painted through a gradient (clipped to the text) that ends in
-    // transparent over the last space-5 of the content box; a short value never reaches it. While
-    // the field has focus the words are plain ink, so the caret's end of the value always shows.
-    // The second, empty layer keeps the field's fill on its whole box.
-    // Input draws it only while the value is longer than the field (fits, below).
-    WebkitTextFillColor: {
-      default: null,
-      [CLIP_TEXT]: {
-        default: "transparent",
-        ":focus": "currentColor",
-        [FORCED]: "currentColor",
-      },
-    },
-    // In forced colours the background is dropped, so the words keep their own colour there.
-    backgroundImage: {
-      default: null,
-      [CLIP_TEXT]: { default: FADE_END, ":dir(rtl)": FADE_END_RTL },
-    },
-    backgroundOrigin: {
-      default: null,
-      [CLIP_TEXT]: "content-box, padding-box",
-    },
-    backgroundClip: { default: null, [CLIP_TEXT]: "text, padding-box" },
-    // One tile: words past the content box (in the end padding) take no paint, so stay unseen.
-    backgroundRepeat: { default: null, [CLIP_TEXT]: "no-repeat" },
+    // A value longer than the field fades out at its end (valueFade, lib/styles), always on here.
     // Focus is the edge itself (field-focus, in live and invalid below: a step darker and a faint
     // halo, no ring), with focusField (lib/styles) for forced colours.
     transitionProperty: "box-shadow, background-color",
@@ -1102,6 +1069,7 @@ export const Combobox = ({
               {...stylex.props(
                 stylex.defaultMarker(),
                 styles.input,
+                valueFade,
                 sizeStyles[scale],
                 styles.inputStart,
                 styles.inputEnd,

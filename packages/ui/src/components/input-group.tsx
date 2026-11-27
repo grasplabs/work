@@ -34,6 +34,8 @@ import {
   focusRing,
   scrollbarHidden,
   tapTarget,
+  valueFade,
+  valueFits,
 } from "../lib/styles";
 import {
   colors,
@@ -318,15 +320,6 @@ export const InputGroupText = ({ children, style }: InputGroupTextProps) => (
 
 // ---- InputGroupInput and InputGroupTextarea -------------------------------------------------------
 
-// Where the words can be painted through a gradient, a long value fades at its end.
-// Not in Firefox: it passes the test, but a form control's words are not clipped there, so the
-// gradient filled the whole box and every value drew as a dark bar. There a long value is cut by the
-// box's edge as it scrolls.
-const CLIP_TEXT =
-  "@supports (background-clip: text) and (not (-moz-appearance: none))";
-const FADE_END = `linear-gradient(to right, currentColor calc(100% - ${space[5]}), transparent)`;
-const FADE_END_RTL = `linear-gradient(to left, currentColor calc(100% - ${space[5]}), transparent)`;
-
 const fieldStyles = stylex.create({
   // What the input and the textarea share: no edge or fill of their own, the group draws them.
   base: {
@@ -387,39 +380,12 @@ const fieldStyles = stylex.create({
     // A placeholder too long ends in an ellipsis, never mid-word: Chromium reads the input's own
     // text-overflow for it, so it is set while the placeholder shows.
     textOverflow: { default: "clip", ":placeholder-shown": "ellipsis" },
-    // A value longer than the input fades out at its end, as Input's does, never a cut through a
-    // letter: the words are painted through a gradient that ends in transparent over the last
-    // space-5. Plain ink while it has focus, so the caret's end always shows.
-    WebkitTextFillColor: {
-      default: null,
-      [CLIP_TEXT]: {
-        default: "transparent",
-        ":focus": "currentColor",
-        [FORCED]: "currentColor",
-      },
-    },
-    // Drawn only while the value is longer than the input (fits, below). In forced colours the
-    // background is dropped, so the words keep their own colour there.
-    backgroundImage: {
-      default: null,
-      [CLIP_TEXT]: { default: FADE_END, ":dir(rtl)": FADE_END_RTL },
-    },
-    backgroundOrigin: { default: null, [CLIP_TEXT]: "content-box" },
-    backgroundClip: { default: null, [CLIP_TEXT]: "text" },
-    // One tile: words past the content box take no paint, so stay unseen.
-    backgroundRepeat: { default: null, [CLIP_TEXT]: "no-repeat" },
+    // A value longer than the input fades out at its end (valueFade, lib/styles), as Input's does.
     // The group's own clear square empties a search; the browser's cross would make two.
     // display: none, not appearance: none: WebKit draws its own cross with appearance none too.
     "::-webkit-search-cancel-button": { display: "none" },
   },
-  // A value that fits: no fade, every letter at full ink.
-  fits: {
-    WebkitTextFillColor: null,
-    backgroundImage: null,
-    backgroundOrigin: null,
-    backgroundClip: null,
-    backgroundRepeat: null,
-  },
+
   // Several lines, growing with its text up to textarea-height, then scrolling inside.
   textarea: {
     resize: "none",
@@ -495,7 +461,8 @@ export const InputGroupInput = ({
           {...stylex.props(
             fieldStyles.base,
             fieldStyles.input,
-            !long && fieldStyles.fits
+            valueFade,
+            !long && valueFits
           )}
         />
       )}
