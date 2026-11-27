@@ -195,6 +195,29 @@ export const ideasOf = async (
 };
 
 /**
+ * The draft a start with a purpose keeps (use-ask.ts `draft`): an
+ * opportunity's brief's, Make something's, an agent's Chat's, each its
+ * own; none for plain Chat's start, which keeps the person's next chat's.
+ */
+const startDraft = ({
+  opportunityId,
+  make,
+  agent,
+}: {
+  opportunityId: string | undefined;
+  make: ChatMake | undefined;
+  agent: string | undefined;
+}): { draft?: string } => {
+  if (opportunityId !== undefined) {
+    return { draft: `opportunity.${opportunityId}` };
+  }
+  if (make !== undefined) {
+    return { draft: `make.${make.kind}` };
+  }
+  return agent === undefined ? {} : { draft: `agent.${agent}` };
+};
+
+/**
  * Asks in a new chat, which opens full screen over the page; from Make
  * something (`make`), with `ideas` to start from, the chat made with what
  * to make. The agent `agent` names (the Agents page's "Chat") is mentioned
@@ -206,6 +229,7 @@ export const ChatStart = ({
   ideas,
   agent,
   opportunity,
+  opportunityId,
 }: {
   /** Only an App or a workflow: Make something starts no agent's setup. */
   make: (ChatMake & { kind: ChatPlanKind }) | undefined;
@@ -213,6 +237,8 @@ export const ChatStart = ({
   agent?: string | undefined;
   /** The opportunity whose brief the box starts with, once read. */
   opportunity?: Promise<Loaded<Opportunity | undefined>> | undefined;
+  /** That opportunity's ID, whose draft the box keeps. */
+  opportunityId?: string | undefined;
 }) => {
   const { t, i18n } = useLingui();
   const { offered, modelsUnavailable, retry } = useGlobalChat();
@@ -240,6 +266,7 @@ export const ChatStart = ({
         goToChat(chatId);
       },
       ...(make === undefined ? {} : { make }),
+      ...startDraft({ opportunityId, make, agent }),
     }
   );
   // The chat's page, which a question here opens, is loaded ahead: its
@@ -274,10 +301,11 @@ export const ChatStart = ({
       { kind: "agent", id: named.id, label: named.name, trigger: "@" },
     ]);
   }, [named, typed, onText, onMentions]);
-  // The opportunity's brief, once read, fills the box.
+  // The opportunity's brief, once read, fills the box, unless the person
+  // left a draft of it (edited) to come back to.
   const kind = make?.kind;
   useStartFrom(opportunity, (read) => {
-    if (kind !== undefined) {
+    if (kind !== undefined && typed === "") {
       onText(briefOf(read, kind, i18n));
     }
   });

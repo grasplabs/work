@@ -60,11 +60,18 @@ const setupOf = async (clientId: string, tab: SetupTab = "status") => ({
   html: (await setupPage(clientId, tab)) ?? "",
 });
 
-/** The part of a page titled `title`: from its label to its end. */
-const sectionOf = (html: string, title: string): string => {
-  const at = html.indexOf(`aria-label="${title}"`);
+/** The part of a page whose heading's id is `id`: from the region it names to its end. */
+const sectionOf = (html: string, id: string): string => {
+  const at = html.indexOf(`aria-labelledby="${id}"`);
   return at === -1 ? "" : html.slice(at, html.indexOf("</section>", at));
 };
+
+/** Its setting up's head, over its steps: why it stopped, and what staff do about it. */
+const progressHead = (html: string): string =>
+  html.slice(
+    html.indexOf('aria-labelledby="progress"'),
+    html.indexOf('aria-label="Steps"')
+  );
 
 describe("the company pages, in the admin", () => {
   it("shows a company just added its setting up step by step, and its Hosting under its settings with nothing to choose", async () => {
@@ -73,7 +80,7 @@ describe("the company pages, in the admin", () => {
 
     const { html } = await setupOf(client.id);
     const settings = await setupOf(client.id, "settings");
-    const hosting = sectionOf(settings.html, "Hosting");
+    const hosting = sectionOf(settings.html, "hosting");
 
     expect({
       steps: [
@@ -81,7 +88,7 @@ describe("the company pages, in the admin", () => {
         "Installing Grasp",
         "Inviting admins",
       ].every((line) => html.includes(line)),
-      onStatus: html.includes('aria-label="Hosting"'),
+      onStatus: html.includes('aria-labelledby="hosting"'),
       place: hosting.includes("Place and start provisioning"),
       release: hosting.includes('id="hosting-release"'),
       where: hosting.includes("Grasp Cloud, data kept in the EU"),
@@ -129,9 +136,7 @@ describe("the company pages, in the admin", () => {
       givenUp: html.includes("Stopped: it needs a look"),
       code: html.includes("probe_unanswered"),
       // Beside why it stopped, above its steps.
-      resume: html
-        .slice(0, html.indexOf('aria-label="Steps"'))
-        .includes("Retry now"),
+      resume: progressHead(html).includes("Retry now"),
     }).toStrictEqual({
       stopped: [false, true, true],
       givenUp: true,
@@ -200,9 +205,7 @@ describe("the company pages, in the admin", () => {
       own: html.includes(
         "A try stopped in its connect step without recording why"
       ),
-      earlier: html
-        .slice(0, html.indexOf('aria-label="Steps"'))
-        .includes("cloudflare_400_10000"),
+      earlier: progressHead(html).includes("cloudflare_400_10000"),
     }).toStrictEqual({ own: true, earlier: false });
   });
 
@@ -251,9 +254,7 @@ describe("the company pages, in the admin", () => {
       why: html.includes(
         "A try stopped in its connect step without recording why"
       ),
-      retry: html
-        .slice(0, html.indexOf('aria-label="Steps"'))
-        .includes(">Retry<"),
+      retry: progressHead(html).includes(">Retry<"),
     }).toStrictEqual({
       trying: false,
       ready: false,
@@ -301,7 +302,7 @@ describe("the company pages, in the admin", () => {
     const releases = await setupOf(client.id, "releases");
     const settings = await setupOf(client.id, "settings");
     const historyTab = await setupOf(client.id, "history");
-    const history = sectionOf(historyTab.html, "Its history");
+    const history = sectionOf(historyTab.html, "history");
 
     expect({
       channel:
@@ -314,9 +315,7 @@ describe("the company pages, in the admin", () => {
         "changed since its last deploy: apply it now"
       ),
       apply: settings.html.includes("Apply settings now"),
-      rotate: sectionOf(settings.html, "Its secrets").includes(
-        "Rotate secrets"
-      ),
+      rotate: sectionOf(settings.html, "secrets").includes("Rotate secrets"),
       history: ["Changed how its people sign in.", "Added it."].map((words) =>
         history.includes(words)
       ),
@@ -392,7 +391,7 @@ describe("the company pages, in the admin", () => {
     expect({
       failed: failedPage.html.includes(`Its deploy of ${release} failed`),
       why: failedPage.html.includes("cloudflare_400_10000"),
-      retry: sectionOf(failedPage.html, "What needs a look").includes("Retry"),
+      retry: sectionOf(failedPage.html, "needs").includes("Retry"),
       moved: movedPage.html.includes(`Its deploy of ${other} failed`),
     }).toStrictEqual({
       failed: true,

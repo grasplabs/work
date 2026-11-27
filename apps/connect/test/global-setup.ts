@@ -59,16 +59,6 @@ export const testConnectorsFile = path.join(
   "../dist/test/connectors.js"
 );
 
-/**
- * The classes of the fake Composio's tools, which connect's tests and the
- * connect core's tests bundle read in place of the release's
- * (`#composio-classes`).
- */
-export const testComposioClassesFile = path.join(
-  import.meta.dirname,
-  "fixtures/composio-classes.ts"
-);
-
 const builtSchema = z.array(
   z.object({
     manifest: z.looseObject({

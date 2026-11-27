@@ -112,23 +112,20 @@ describe("a turn nobody was there for", setUpTime, () => {
     });
   });
 
-  it("isn't offered what reaches other people: mail to someone is refused, not even held", async () => {
+  it("holds a Composio tool's change for its person, as its admin allowed it, and sends nothing meanwhile", async () => {
     const { person, mail, woken, said } = await setUp(
       sendsMail,
-      says("I can't send that.")
+      says("It waits for you.")
     );
     await woken("Send the invoices that are due.");
+    const waiting = await person.api.pendingActions.list();
     expect({
       said: await said(),
-      waiting: await person.api.pendingActions.list(),
+      waiting: waiting.map(({ action }) => action),
       sent: await mail.did(),
     }).toStrictEqual({
-      said: [
-        returnedText(
-          "Your company hasn't turned this kind of action on for you, so it wasn't done. An admin can turn it on."
-        ),
-      ],
-      waiting: [],
+      said: [returnedText("held")],
+      waiting: ["mail.send"],
       sent: { calls: 0, sent: [] },
     });
   });

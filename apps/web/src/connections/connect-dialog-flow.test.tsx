@@ -313,7 +313,7 @@ describe("choosing what Grasp may do in a toolkit", () => {
     expect(row("HUBSPOT_CREATE_NOTE").textContent).toContain("Write");
   });
 
-  it("sends a tool as only reading or as changing things, as its badge was last pressed", async () => {
+  it("sends a tool Composio says only reads as Read or Write, as its badge was last pressed, and offers any other only as Write", async () => {
     const sent = await opened(hubspot);
     await press(switchOf("HUBSPOT_LIST_CONTACTS"));
     await press(switchOf("HUBSPOT_CREATE_NOTE"));
@@ -322,15 +322,16 @@ describe("choosing what Grasp may do in a toolkit", () => {
         "button[aria-label*='Change to']"
       )
     );
-    await press(
-      row("HUBSPOT_CREATE_NOTE").querySelector(
-        "button[aria-label*='Change to']"
-      )
-    );
+    const noteRow = row("HUBSPOT_CREATE_NOTE");
+    const offered = {
+      toggle: noteRow.querySelector("button[aria-label*='Change to']"),
+      badge: noteRow.textContent.includes("Write"),
+    };
     await press(button("Consent and connect"));
-    expect(sent).toStrictEqual([
-      ["HUBSPOT_LIST_CONTACTS", { name: "HUBSPOT_CREATE_NOTE", read: true }],
-    ]);
+    expect({ offered, sent }).toStrictEqual({
+      offered: { toggle: null, badge: true },
+      sent: [["HUBSPOT_LIST_CONTACTS", "HUBSPOT_CREATE_NOTE"]],
+    });
   });
 
   it("shows what a refused start names for support under its refusal, only in its form", async () => {

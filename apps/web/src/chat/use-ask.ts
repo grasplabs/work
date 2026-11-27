@@ -21,6 +21,7 @@ import { activeChat, setActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
 import { useFollowedChat } from "./chat-watch.ts";
 import type { Problem, StopNote } from "./dictation.ts";
+import { emptyDraft, moveNewDraft, useDraft } from "./drafts.ts";
 import type { BoxMention } from "./mentions.tsx";
 import { chatMentionsOf } from "./mentions.tsx";
 import {
@@ -48,9 +49,10 @@ import { useReconnecting } from "./reconnecting.ts";
 // the box's text, model, effort and files, and asking in the open chat, or
 // in a new one named after the question. A question's files are attached to
 // its chat as it is sent, one at a time, then the question names them.
-// What is typed belongs to the chat it was typed in: once the box is
-// another chat's, it starts empty, never sending one chat's words or files
-// to the next (the chat a question here just made is the same draft's).
+// What is typed belongs to the chat it was typed in, kept as its draft
+// (drafts.ts): once the box is another chat's, it holds that chat's draft,
+// never sending one chat's words or files to the next (the chat a
+// question here just made takes what was typed meanwhile).
 
 /** A new chat's title: the start of its first question. */
 export const titleOf = (question: string): string => {
@@ -182,6 +184,13 @@ export interface AskOptions {
    * `chats.agents()`; the company's first one by default.
    */
   agentId?: string;
+  /**
+   * Whose draft a box with no chat yet keeps (drafts.ts): the slot's
+   * next chat's unless given, as a start with a purpose of its own has
+   * (Make something, an agent's Chat, an opportunity's brief), so what it
+   * fills in never takes the place of the person's own.
+   */
+  draft?: string;
 }
 
 const noOptions: AskOptions = {};
@@ -248,21 +257,23 @@ export const useAsk = (
   efforts: Readonly<Record<string, ModelEfforts>> = noModelEfforts,
   /** Which of the tab's open chats a new chat becomes. */
   slot: ChatSlot = "chat",
-  { onChat, subject, make, agentId }: AskOptions = noOptions
+  { onChat, subject, make, agentId, draft: drafting }: AskOptions = noOptions
 ) => {
   const { identity } = useRouteContext({ from: "/_shell" });
   const core = useCore();
   const { busy, failure, run } = useCoreAction();
   const holdHeartbeat = useHoldHeartbeat();
   const holdAlive = useHoldAlive();
-  const [text, setText] = useState("");
+  const draftScope = drafting ?? slot;
+  const [draft, changeDraft] = useDraft(identity.userId, chatId, draftScope);
+  const { text, mentions } = draft;
   // Why dictating into the text stopped on its own, kept with it: the box
   // it stopped in may have gone (dictation.ts).
   const [stopped, setStopped] = useState<Problem>();
   const stopNote: StopNote = [stopped, setStopped];
-  // What the person mentioned in the box (`@`), each once: what the
-  // question names exactly, beside its words, and the chips the box shows.
-  const [mentions, setMentions] = useState<readonly BoxMention[]>([]);
+  // What the person mentioned in the box (`@`), each once, is the draft's
+  // too: what the question names exactly, beside its words, and the chips
+  // the box shows.
   const [files, setFiles] = useState<readonly BoxFile[]>([]);
   // Why a file the person chose stays out of the box.
   const [fileProblem, setFileProblem] = useState<string>();
@@ -277,11 +288,13 @@ export const useAsk = (
     boxOf.current = chatId;
   }, [chatId]);
   const [made, setMade] = useState<string>();
+  // Which box the draft is in: another once the box shows another chat's
+  // draft, the same when a question made the chat it shows from its own.
+  const [box, setBox] = useState(0);
   if (chatId !== draftOf) {
     setDraftOf(chatId);
     if (chatId === undefined || chatId !== made) {
-      setText("");
-      setMentions([]);
+      setBox(box + 1);
       setFiles([]);
       setFileProblem(undefined);
       setStopped(undefined);
@@ -307,16 +320,6 @@ export const useAsk = (
   if (takesBack(here, owner) && here !== takenBack) {
     setTakenBack(here);
     setReturnedWhy(here.state.failed);
-    setText((now) => (now === "" ? here.text : `${here.text}\n\n${now}`));
-    setMentions((now) => [
-      ...here.mentions,
-      ...now.filter(
-        (each) =>
-          !here.mentions.some(
-            ({ kind, id }) => kind === each.kind && id === each.id
-          )
-      ),
-    ]);
     // At most as many as a question carries, its own first: any over that
     // stay out, and the box says so.
     const back = [...here.files, ...files];
@@ -334,11 +337,24 @@ export const useAsk = (
     }
     if (takesBack(here, owner)) {
       unsent.current = { key: here.key, question: here.text, asked: undefined };
+      // Its words and what they mention, into the draft.
+      changeDraft((now) => ({
+        text: now.text === "" ? here.text : `${here.text}\n\n${now.text}`,
+        mentions: [
+          ...here.mentions,
+          ...now.mentions.filter(
+            (each) =>
+              !here.mentions.some(
+                ({ kind, id }) => kind === each.kind && id === each.id
+              )
+          ),
+        ],
+      }));
       clearPending(pendingHere, here);
     } else if (here.state === "sent" && taken(here, messages, queued)) {
       clearPending(pendingHere, here);
     }
-  }, [here, owner, messages, queued, pendingHere]);
+  }, [here, owner, messages, queued, pendingHere, changeDraft]);
   // Another box's question on its way into this chat (Chat's start, which
   // opened it): this one waits for it, so the two never pass each other.
   const otherOnItsWay = here?.state === "sending" && here.owner !== owner;
@@ -439,10 +455,9 @@ export const useAsk = (
     let pendingIn = pendingKey(chatId, slot);
     setPending(pendingIn, asked);
     if (fromBox) {
-      setText((now) => (now === question ? "" : now));
-      if (mentioned.length > 0) {
-        setMentions([]);
-      }
+      // Clears the box only of what was sent from it: asking again sends
+      // an earlier question, and a draft the person started stays.
+      changeDraft((now) => (now.text === question ? emptyDraft : now));
       setFiles((now) => now.filter((each) => !carried.includes(each)));
     }
     const asking = async (session: Session): Promise<string> => {
@@ -469,6 +484,8 @@ export const useAsk = (
         setPending(pendingIn, asked);
         // The box is the chat's still once it opens.
         setMade(id);
+        // It takes what was typed for the next chat while it went.
+        moveNewDraft(identity.userId, draftScope, id);
         if (activeChat(slot) === undefined) {
           setActiveChat(id, slot);
         }
@@ -546,9 +563,12 @@ export const useAsk = (
       return;
     }
     const { dropped } = ended;
-    setText((now) =>
-      [...dropped, now].filter((each) => each.trim() !== "").join("\n\n")
-    );
+    changeDraft((now) => ({
+      ...now,
+      text: [...dropped, now.text]
+        .filter((each) => each.trim() !== "")
+        .join("\n\n"),
+    }));
   };
   /** Has the agent take the questions queued behind its answer at once. */
   const sendNow = async (id: string): Promise<void> => {
@@ -560,7 +580,7 @@ export const useAsk = (
     composer: {
       text,
       onText: (typed: string) => {
-        setText(typed);
+        changeDraft((now) => ({ ...now, text: typed }));
         // Changed since it failed to send: whatever is sent next is a new
         // question, even in the same words.
         if (unsent.current !== null && typed !== unsent.current.question) {
@@ -569,7 +589,9 @@ export const useAsk = (
       },
       stopNote,
       mentions,
-      onMentions: setMentions,
+      onMentions: (named: readonly BoxMention[]) => {
+        changeDraft((now) => ({ ...now, mentions: named }));
+      },
       models,
       model,
       onModel: (chosen: string) => {
@@ -604,6 +626,11 @@ export const useAsk = (
           }),
     },
     ask,
+    /**
+     * Changes when the box shows another chat's draft, not when a question
+     * made the chat it shows: the box's editor starts afresh with it.
+     */
+    box,
     sendNow,
   };
 };

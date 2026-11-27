@@ -1,20 +1,33 @@
+import { brainOf } from "@grasp-os/shared/admin/admin-health";
+import { ChartBarList } from "@grasp-os/ui/components/chart";
 import {
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
-} from "@grasp-os/app-kit/components/tabs";
-import { brainOf } from "@grasp-os/shared/admin/admin-health";
+} from "@grasp-os/ui/components/tabs";
+import { Text } from "@grasp-os/ui/components/text";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 
 import { BrainHealth } from "../../../admin/brain-health.tsx";
 import { loadBrainRead } from "../../../admin/brain-loads.ts";
 import { OrgData } from "../../../admin/org-data.tsx";
 import { useOrganization } from "../../../admin/organization.tsx";
-import { BarList } from "../../../admin/parts.tsx";
-import { Section } from "../../../admin/section.tsx";
+import { PagePart, PartNote } from "../../../admin/page-part.tsx";
 import { knowledgeSourceWords } from "../../../admin/words.ts";
 import { fetchBrainReport } from "../../../clients/brain-functions.ts";
+
+const styles = stylex.create({
+  // Each tab's parts, under the tabs.
+  tab: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["6"],
+    paddingBlockStart: space["4"],
+  },
+});
 
 /** The section's tabs: the Brain itself, the first, and the data kept of the interviews. */
 const brainTabs = ["brain", "data"] as const;
@@ -46,34 +59,37 @@ const TheBrain = () => {
   const brain = brainOf(view);
   return (
     <>
-      <p className="text-muted-foreground">
+      <Text color="muted">
         {`${admin.client.name} doesn’t share its brain with Grasp’s staff, so only its counts show here. What people said stays in their own interviews.`}
-      </p>
+      </Text>
 
-      <Section title="What it stands on">
-        <div className="border-t px-5 py-4">
-          {brain.sources.length > 0 ? (
-            <BarList
-              label="How much of each source is in"
-              rows={brain.sources.map(({ source, known }) => {
-                const share = Math.round(known * 100);
-                return {
-                  id: source,
-                  label: knowledgeSourceWords[source],
-                  value: share,
-                  shown: `${share}%`,
-                };
-              })}
-            />
-          ) : (
-            // The company's own Grasp counts what is known as one number, without its parts.
-            <p className="text-muted-foreground">
-              The company’s own Grasp counts what is known as one number, so how
-              much of each source is in doesn’t show here yet.
-            </p>
-          )}
-        </div>
-      </Section>
+      <PagePart title="What it stands on">
+        {brain.sources.length > 0 ? (
+          <ChartBarList
+            aria-label="How much of each source is in"
+            config={{ share: { label: "In" } }}
+            data={brain.sources.map(({ source, known }) => ({
+              source: knowledgeSourceWords[source],
+              share: Math.round(known * 100),
+            }))}
+            nameKey="source"
+            sortOrder="none"
+            summary={brain.sources
+              .map(
+                ({ source, known }) =>
+                  `${knowledgeSourceWords[source]}: ${Math.round(known * 100)}%`
+              )
+              .join(", ")}
+            valueFormatter={(share) => `${share}%`}
+          />
+        ) : (
+          // The company's own Grasp counts what is known as one number, without its parts.
+          <PartNote>
+            The company’s own Grasp counts what is known as one number, so how
+            much of each source is in doesn’t show here yet.
+          </PartNote>
+        )}
+      </PagePart>
 
       <BrainHealth clientId={admin.client.id} read={brainRead} />
     </>
@@ -87,25 +103,25 @@ const BrainSection = () => {
   const navigate = useNavigate({ from: Route.fullPath });
   return (
     <Tabs
-      onValueChange={(value: string) => {
+      onValueChange={(value) => {
         void navigate({ search: value === "data" ? { tab: "data" } : {} });
       }}
       value={tab}
     >
       <TabsList aria-label="Brain" variant="line">
         {brainTabs.map((each) => (
-          <TabsTrigger className="flex-none" key={each} value={each}>
+          <TabsTrigger key={each} value={each}>
             {tabWords[each]}
           </TabsTrigger>
         ))}
       </TabsList>
       <TabsContent value="brain">
-        <div className="mt-4 flex flex-col gap-6">
+        <div {...stylex.props(styles.tab)}>
           <TheBrain />
         </div>
       </TabsContent>
       <TabsContent value="data">
-        <div className="mt-4 flex flex-col gap-6">
+        <div {...stylex.props(styles.tab)}>
           <OrgData view={view} />
         </div>
       </TabsContent>

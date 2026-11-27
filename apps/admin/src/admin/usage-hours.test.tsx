@@ -2,7 +2,7 @@
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { companies } from "../../test/app.tsx";
+import { act, companies, settle } from "../../test/app.tsx";
 import { emptyAdminSnapshot } from "../../test/snapshots.ts";
 
 // An organization's AI use and hours, as the browser shows them from the
@@ -63,10 +63,13 @@ describe("an organization's AI use and hours", () => {
   /** A company answering `snapshot`: its page's path. */
   const liveClient = async (snapshot: AdminSnapshot): Promise<string> =>
     await Promise.resolve(shown.add(snapshot));
-  /** The page at `path`, its markup as the browser shows it. */
+  /** The page at `path`, its markup as the browser shows it, and its main part's alone. */
   const page = async (path: string) => {
     const opened = await shown.open(path);
-    return { html: opened.html() };
+    return {
+      html: opened.html(),
+      main: opened.container.querySelector("main")?.innerHTML ?? "",
+    };
   };
 
   it("shows what core counted: this month and in all, the tokens and minutes, and each use by model", async () => {
@@ -79,7 +82,7 @@ describe("an organization's AI use and hours", () => {
     expect({
       // What core counted isn't said to be worked out.
       workedOut: has("Worked out from what happened"),
-      month: has(`${monthName(snapshot.now)}</span>`),
+      month: has(`${monthName(snapshot.now)}</p>`),
       inAll: has("In all, so far"),
       spend: html.split(">€21<").length - 1,
       // Core doesn't send the contract yet: unknown, not unsigned.
@@ -115,6 +118,58 @@ describe("an organization's AI use and hours", () => {
     });
   });
 
+  it("splits what it cost into five parts at most, the four costliest and the rest together, by model or, once pressed, by use", async () => {
+    const empty = emptyAdminSnapshot("Acme");
+    // Six priced models, each costing less than the one before.
+    const base = await liveClient({
+      ...empty,
+      usage: [
+        {
+          day: empty.now.slice(0, 10),
+          use: {
+            reading: { "claude-opus-5-5": calls(4_000_000, 400_000) },
+            interviews: {
+              "claude-sonnet-5-5": calls(2_000_000, 200_000),
+              conversation: calls(0, 0, 6000),
+              voice: calls(0, 0, 3000),
+              transcription: calls(0, 0, 1200),
+            },
+            drawing: { "claude-haiku-4-5": calls(100_000, 10_000) },
+          },
+        },
+      ],
+    });
+    const opened = await shown.open(`${base}/ai-use`);
+    // The series the bars stand for, as the chart's table names them for a screen reader.
+    const series = () =>
+      [
+        ...opened.container.querySelectorAll(
+          '[data-slot="chart"] table thead th'
+        ),
+      ]
+        .slice(1)
+        .map((head) => head.textContent);
+
+    const byModel = series();
+    await act(() => {
+      [...opened.container.querySelectorAll("button")]
+        .find((button) => button.textContent === "By use")
+        ?.click();
+    });
+    await settle();
+
+    expect({ byModel, byUse: series() }).toStrictEqual({
+      byModel: [
+        "Claude Opus 5.5",
+        "Claude Sonnet 5.5",
+        "Stephen’s live interviews",
+        "Stephen’s voice",
+        "Other models",
+      ],
+      byUse: ["Reading", "Interviews", "Drawing the work"],
+    });
+  });
+
   it("names this month's figure after the month core is on, even before anything is used in it", async () => {
     const snapshot = usedSnapshot();
     const [used] = snapshot.usage;
@@ -130,7 +185,7 @@ describe("an organization's AI use and hours", () => {
     const { html } = await page(`${base}/ai-use`);
 
     expect({
-      thisMonth: html.includes(`>${monthName(snapshot.now)}</span>`),
+      thisMonth: html.includes(`>${monthName(snapshot.now)}</p>`),
       // This month took nothing; everything so far is the earlier month's.
       nothingYet: html.includes(">€0.00<"),
       inAll: html.includes(">€21<"),
@@ -184,7 +239,7 @@ describe("an organization's AI use and hours", () => {
     }).toStrictEqual({ nothing: false, figures: true, byUse: true });
   });
 
-  it("knows no hours while core sends no drawn work, saying why", async () => {
+  it("knows no hours while core sends no drawn work, saying why and leading to where they will come from", async () => {
     const untold = await liveClient(emptyAdminSnapshot("Acme"));
     const empty = emptyAdminSnapshot("Acme");
     // Told today, with its interviews from today on.
@@ -210,11 +265,17 @@ describe("an organization's AI use and hours", () => {
       toCome: [before, during].some(({ html }) =>
         html.includes("This section isn’t in the admin yet.")
       ),
+      // Before its interviews, its steps; during them, the interviews.
+      ways: [
+        before.main.includes(`href="${untold}/steps"`),
+        during.main.includes(`href="${told}/interviews"`),
+      ],
     }).toStrictEqual({
       none: [true, true],
       before: true,
       during: true,
       toCome: false,
+      ways: [true, true],
     });
   });
 });
