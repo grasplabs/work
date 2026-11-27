@@ -54,7 +54,7 @@ const submit = async (form: Element | null | undefined): Promise<void> => {
 
 /** What was agreed, as Acme's page shows it. */
 const agreedOn = (page: Element): string =>
-  page.querySelector('section[aria-label="Agreed before the first interview"]')
+  page.querySelector('section[aria-labelledby="contract-agreements"]')
     ?.textContent ?? "";
 
 /** Runs `move` on the page, then lets it come to rest. */
@@ -834,7 +834,7 @@ describe("a change on an organization's page", () => {
       agreed: agreedOn(container).includes("In place since 2 Sep 2026"),
       linked:
         container
-          .querySelector("#contract-billing")
+          .querySelector('section[aria-labelledby="contract-billing"]')
           ?.textContent?.includes("Everything billed is paid.") ?? false,
       asked: calls.filter(({ fn }) => fn === "fetchClientAdmin").length,
       // Once opened, and once in the reload that holds both.
@@ -963,7 +963,8 @@ describe("linking an organization to its Stripe customer", () => {
       }
     );
     const billing = () =>
-      container.querySelector("#contract-billing")?.textContent ?? "";
+      container.querySelector('section[aria-labelledby="contract-billing"]')
+        ?.textContent ?? "";
     const before = billing();
 
     const field = container.querySelector<HTMLInputElement>(
