@@ -17,7 +17,7 @@ import {
   Streamdown,
   useIsCodeFenceIncomplete,
 } from "streamdown";
-import type { ExtraProps } from "streamdown";
+import type { ExtraProps, StreamdownProps } from "streamdown";
 
 // The registry's Markdown (apps/v4/components/markdown.tsx in
 // github.com/shadcn-ui/ui, MIT), as its chat examples render a model's
@@ -33,6 +33,9 @@ import type { ExtraProps } from "streamdown";
 //   popups or navigation, it opens a URL only through a links permission
 //   of its App), so Streamdown's link, a button whose dialog opens or
 //   copies the address, would do nothing.
+// A page can't switch either off: the props that would replace or widen
+// the pipeline are the kit's (`PIPELINE`), and its link wins over a
+// page's `components`.
 // Upstream's `cn-markdown` class is left out: no style of the registry
 // gives it any CSS, and the lint refuses a class without any. An image
 // from another server stays an <img>, as upstream's: the frame's policy
@@ -132,27 +135,57 @@ function MarkdownLink({ href, children }: ComponentProps<"a"> & ExtraProps) {
 }
 
 // Streamdown memoizes on components, so keep the default stable.
-const DEFAULT_COMPONENTS = { a: MarkdownLink, code: MarkdownCode };
+const DEFAULT_COMPONENTS = { code: MarkdownCode };
 
-const REHYPE_PLUGINS = Object.entries(defaultRehypePlugins)
-  .filter(([name]) => name !== "raw")
-  .map(([, plugin]) => plugin);
+/**
+ * Streamdown's props that would replace or widen its safe handling of the
+ * text, each set by the kit whatever a page passes, and refused by the
+ * types: its rehype plugins, less rehype-raw; and its own (undefined), as
+ * a page's remark plugins, remark-rehype options, plugins or block
+ * component could put HTML or links back, a URL transform or allowed tags
+ * could let an address or a tag through the sanitizer, and its link
+ * safety only configures the link the kit replaces.
+ */
+type Pipeline =
+  | "rehypePlugins"
+  | "remarkPlugins"
+  | "remarkRehypeOptions"
+  | "urlTransform"
+  | "allowedTags"
+  | "literalTagContent"
+  | "plugins"
+  | "BlockComponent"
+  | "linkSafety";
+
+const PIPELINE: { [Prop in Pipeline]: StreamdownProps[Prop] } = {
+  rehypePlugins: Object.entries(defaultRehypePlugins)
+    .filter(([name]) => name !== "raw")
+    .map(([, plugin]) => plugin),
+  remarkPlugins: undefined,
+  remarkRehypeOptions: undefined,
+  urlTransform: undefined,
+  allowedTags: undefined,
+  literalTagContent: undefined,
+  plugins: undefined,
+  BlockComponent: undefined,
+  linkSafety: undefined,
+};
 
 function Markdown({
   className,
   components = DEFAULT_COMPONENTS,
   controls = false,
-  rehypePlugins = REHYPE_PLUGINS,
   ...props
-}: ComponentProps<typeof Streamdown>) {
+}: Omit<StreamdownProps, Pipeline>) {
   return (
     <Streamdown
       className={cn("w-full min-w-0 overflow-hidden", className)}
-      components={components}
       controls={controls}
       data-slot="markdown"
-      rehypePlugins={rehypePlugins}
       {...props}
+      {...PIPELINE}
+      // A page's components restyle the elements; the kit's link wins.
+      components={{ ...components, a: MarkdownLink }}
     />
   );
 }

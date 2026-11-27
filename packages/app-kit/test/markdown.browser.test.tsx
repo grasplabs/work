@@ -1,15 +1,18 @@
 // The kit's theme and the classes Streamdown draws with, as on a page.
 import "./kit.css";
 import { StrictMode } from "react";
+import type { ComponentProps } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
+import { defaultRehypePlugins } from "streamdown";
 import {
   afterAll,
   afterEach,
   beforeAll,
   describe,
   expect,
+  expectTypeOf,
   it,
 } from "vite-plus/test";
 
@@ -351,6 +354,59 @@ describe("the kit's Markdown, in an App page's frame", () => {
       markup: 0,
       text: true,
       blocked: [],
+      errors: [],
+    });
+  });
+
+  it("keeps its safe handling whatever a page passes: a link and raw HTML stay text", () => {
+    // What a page would pass to put links and HTML back: its own link,
+    // Streamdown's own rehype plugins (rehype-raw among them), remark-rehype
+    // passing HTML through, a URL transform, allowed tags, and a block
+    // component that writes the text as it likes. The types refuse each
+    // but `components`; spread past them, none changes anything.
+    const widening = {
+      rehypePlugins: Object.values(defaultRehypePlugins),
+      remarkPlugins: [],
+      remarkRehypeOptions: { allowDangerousHtml: true },
+      urlTransform: () => "https://evil.example/leak",
+      allowedTags: { a: ["href"], img: ["src", "onerror"] },
+      literalTagContent: ["a"],
+      plugins: {},
+      BlockComponent: () => <a href="https://evil.example">replaced</a>,
+      linkSafety: { enabled: false },
+    };
+    expectTypeOf<
+      Extract<keyof ComponentProps<typeof Markdown>, keyof typeof widening>
+    >().toBeNever();
+    // The root the page renders into.
+    show("");
+    flushSync(() => {
+      mounted?.render(
+        <Markdown
+          components={{
+            a: ({ href, children }) => <a href={href}>{children}</a>,
+            p: ({ children }) => <p data-page="">{children}</p>,
+          }}
+          {...widening}
+        >
+          {`See [the policy](https://example.com/policy).
+
+<a href="https://evil.example">raw</a> <img src="x" onerror="alert(1)">`}
+        </Markdown>
+      );
+    });
+
+    expect({
+      elements: markdown().querySelectorAll("a, img").length,
+      // The page's other components still restyle what they name.
+      paragraphs: texts("p[data-page]"),
+      errors,
+    }).toStrictEqual({
+      elements: 0,
+      paragraphs: [
+        "See the policy (https://example.com/policy).",
+        '<a href="https://evil.example">raw</a> <img src="x" onerror="alert(1)">',
+      ],
       errors: [],
     });
   });
