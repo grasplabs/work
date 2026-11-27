@@ -182,7 +182,7 @@ describe("connecting a Composio toolkit", () => {
       provider: "hubspot",
       scope: "shared",
       serverKind: "composio",
-      server: `https://backend.composio.dev/api/v3/tool_router/session/${sessionId}/mcp`,
+      server: `https://backend.composio.dev/tool_router/${sessionId}/mcp`,
       accountId,
       sessionId,
       tools: JSON.stringify(allowed),

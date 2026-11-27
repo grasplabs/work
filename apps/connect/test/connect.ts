@@ -35,11 +35,11 @@ type ConnectionRow = typeof connections.$inferInsert;
 
 /**
  * A Composio session as connect stores it for a connection: its ID, and
- * its MCP endpoint, as Composio answers it (`<api>/tool_router/session/<id>/mcp`).
+ * its MCP endpoint, as Composio answers it (`/tool_router/<id>/mcp`).
  */
 export const composioSession = (id = `trs_${crypto.randomUUID()}`) => ({
   composioSessionId: id,
-  server: `https://backend.composio.dev/api/v3/tool_router/session/${id}/mcp`,
+  server: `https://backend.composio.dev/tool_router/${id}/mcp`,
 });
 
 /** The session behind the test connections. */

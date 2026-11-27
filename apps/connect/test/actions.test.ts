@@ -283,6 +283,7 @@ describe("a call on a connection", () => {
       `https://127.0.0.1${path}`,
       // Another session's endpoint than the one stored for it.
       "https://backend.composio.dev/api/v3/tool_router/session/trs_other/mcp",
+      "https://backend.composio.dev/tool_router/trs_other/mcp",
       "https://backend.composio.dev/api/v3/connected_accounts",
       // Composio's legacy per-server MCP URL.
       "https://backend.composio.dev/v3/mcp/server-mail?user_id=grasp",

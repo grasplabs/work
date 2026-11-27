@@ -53,7 +53,11 @@ import {
   connectionEvent,
   packedNames,
 } from "./connection-audit.ts";
-import { offeredToolNames, sessionUrlProblem } from "./connections.ts";
+import {
+  offeredToolNames,
+  sessionUrlProblem,
+  urlShape,
+} from "./connections.ts";
 import type { Connection } from "./connections.ts";
 import {
   composioCleanups,
@@ -1445,6 +1449,8 @@ const serveAndStore = async (
   const { url } = session.mcp;
   const problem = sessionUrlProblem(url, sessionId);
   if (problem !== undefined) {
+    // Its shape alone, so one refusal shows what Composio answers.
+    log.warn("composio.session_url_refused", { problem, ...urlShape(url) });
     const error = new ComposioError(
       "Composio's session URL isn't one connect calls"
     );
