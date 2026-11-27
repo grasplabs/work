@@ -24,6 +24,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import type { PendingQuestion } from "./pending-question.ts";
 import { answerAgentsOf, ChatThread } from "./thread.tsx";
 import { newLineRow } from "./unread.ts";
 
@@ -76,6 +77,8 @@ const thread = async (
   modelWait?: ModelWait,
   /** The questions queued behind the answer, as core says. */
   queued?: readonly ChatQueued[],
+  /** The question on its way, as the page passes it. */
+  pending?: PendingQuestion,
   /** The connections' names, by ID, as the page passes them. */
   sourceNames?: ReadonlyMap<string, { name: string; provider: string }>
 ): Promise<void> => {
@@ -131,6 +134,7 @@ const thread = async (
         tools={tools}
         newLineBefore={newLineBefore}
         sources={sources}
+        pending={pending}
         sourceNames={sourceNames ?? new Map()}
       />
     ),
@@ -758,6 +762,55 @@ describe(ChatThread, () => {
     });
   });
 
+  it("draws a question on its way as the person's own at once, after the chat's last answer", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    await thread(
+      [
+        asked,
+        {
+          id: 2,
+          role: "assistant",
+          text: "Four.",
+          code: [],
+          tools: [],
+          end: "done",
+          at,
+        },
+      ],
+      null,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        text: "And 3 + 3?",
+        mentions: [],
+        files: [{ id: "f1", file: new File(["1,2"], "sums.csv") }],
+        after: 2,
+        at,
+        queues: false,
+        alreadyQueued: 0,
+        key: "key-1",
+        owner: "box",
+        fromBox: true,
+        state: "sending",
+      }
+    );
+
+    const rows = [...document.querySelectorAll("article")].map(
+      (row) => `${row.getAttribute("aria-label") ?? "You"}: ${row.textContent}`
+    );
+    expect(rows).toStrictEqual([
+      expect.stringMatching(/^You: What is 2 \+ 2\?/u),
+      expect.stringMatching(/^Grasp: Four\./u),
+      expect.stringMatching(/^You: sums\.csv.*And 3 \+ 3\?/u),
+    ]);
+  });
+
   it("says what each call of Grasp's tools did in one line, and unfolds what it was given and what came of it", async () => {
     const at = "2026-10-27T09:00:05.000Z";
     await thread([
@@ -951,6 +1004,7 @@ describe(ChatThread, () => {
       ],
       null,
       [],
+      undefined,
       undefined,
       undefined,
       undefined,

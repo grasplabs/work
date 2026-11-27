@@ -14,7 +14,8 @@ import {
 } from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Await, useRouteContext } from "@tanstack/react-router";
+import { Await, useRouteContext, useRouter } from "@tanstack/react-router";
+import type { AnyRoute } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
 import { briefOf, useStartFrom } from "../brain/opportunity-drafts.ts";
@@ -26,6 +27,7 @@ import { BlueprintIdeas, WorkflowIdeas } from "../make/make-ideas.tsx";
 import { agentModelOf } from "./agent-choice.tsx";
 import { useLook } from "./backdrop-look.ts";
 import { Backdrop } from "./backdrop/backdrop.tsx";
+import { preloadThread } from "./chat-body.tsx";
 import { useGoToChat } from "./chat-link.ts";
 import { Composer } from "./composer.tsx";
 import { useGlobalChat } from "./global-chat.tsx";
@@ -258,14 +260,29 @@ export const ChatStart = ({
     offered?.efforts,
     undefined,
     {
-      // The chat's own page (chat-link.ts), the question already in it.
-      onAsked: (chatId) => {
+      // The chat's own page (chat-link.ts), as soon as the chat is there,
+      // the question shown in it as it goes.
+      onChat: (chatId) => {
         goToChat(chatId);
       },
       ...(make === undefined ? {} : { make }),
       ...startDraft({ opportunityId, make, agent }),
     }
   );
+  // The chat's page, which a question here opens, is loaded ahead: its
+  // route's code and the conversation's, so the question shows the moment
+  // its chat is made.
+  const router = useRouter();
+  useEffect(() => {
+    // A router without the chat's page (a test's) has nothing to load.
+    const chatPage = new Map<string, AnyRoute>(
+      Object.entries(router.routesById)
+    ).get("/_shell/chats/$chatId");
+    if (chatPage !== undefined) {
+      void router.loadRouteChunk(chatPage);
+    }
+    void preloadThread();
+  }, [router]);
   // The agent the address names, mentioned in the box once the person's
   // agents are read: only one they may ask, and only into an empty box.
   const mentioned = useRef(false);

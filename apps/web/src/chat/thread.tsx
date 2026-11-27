@@ -79,11 +79,13 @@ import { answeredOf } from "./answered.ts";
 import { ThreadPlan } from "./build-progress.tsx";
 import type { ThreadBuild } from "./build-progress.tsx";
 import { FileCards } from "./chat-files.tsx";
+import type { CardFile } from "./chat-files.tsx";
 import { answerStatusOf, stepFinished, stepStatusOf } from "./chat-states.ts";
 import { modelName } from "./composer.tsx";
 import { ConnectAiProvider } from "./connect-ai-provider.tsx";
 import { failureMessage, retryMends } from "./failure.ts";
 import { pendingCard } from "./make-card.tsx";
+import type { PendingQuestion } from "./pending-question.ts";
 import { recoveredSteps } from "./recovered.ts";
 import { SavedMemoryLine } from "./saved-memory.tsx";
 import { readingFileOf, signOf } from "./sign.ts";
@@ -573,6 +575,7 @@ type Row =
       message: Asked;
       asked: Answer["asked"];
     }
+  | { kind: "pending"; id: string; at?: undefined; question: PendingQuestion }
   | AnswerTurn
   | { kind: "after"; id: string; at?: undefined; children: ReactNode }
   | {
@@ -859,7 +862,7 @@ const Question = ({
   message,
   asked,
 }: {
-  message: Asked;
+  message: { text: string; files?: readonly CardFile[]; at: string };
   asked: Answer["asked"];
 }) => {
   const answered =
@@ -1433,6 +1436,76 @@ export const answerAgentsOf = (
 /** The keys of the loading pairs: the same each time. */
 const loadingPairs = ["first", "second"] as const;
 
+/**
+ * Whether Grasp's live answer goes with the messages above: always, but
+ * while the question on its way is the one it answers.
+ */
+const answersAbove = (
+  running: boolean,
+  pending: PendingQuestion | undefined
+): boolean => running && (pending === undefined || pending.queues);
+
+/** What the thread shows after its messages, as a row, if anything. */
+const afterRow = (children: ReactNode): Row | undefined =>
+  children === undefined || children === null
+    ? undefined
+    : { kind: "after", id: "after", children };
+
+/**
+ * The thread's rows after its messages: the question on its way, as the
+ * last question, and the answer Grasp works on (`live`, from `partial`)
+ * after it, never under the answer before while core's copy of the
+ * question is on its way; then what is queued behind the answer, and the
+ * question on its way among them when it was sent while Grasp answered;
+ * then what the thread shows after (`after`).
+ */
+const withLast = (
+  rows: Row[],
+  pending: PendingQuestion | undefined,
+  live: { running: boolean; partial: ChatPartial | null },
+  queuedRows: Row[],
+  after: Row | undefined
+): Row[] => {
+  const ending = after === undefined ? [] : [after];
+  if (pending === undefined) {
+    return [...rows, ...queuedRows, ...ending];
+  }
+  if (pending.queues) {
+    const waiting: Row = {
+      kind: "queued",
+      id: "pending",
+      text: pending.text,
+      onSendNow: undefined,
+    };
+    return [...rows, ...queuedRows, waiting, ...ending];
+  }
+  const asked: Row = { kind: "pending", id: "pending", question: pending };
+  const answering: Row[] = live.running
+    ? [
+        {
+          kind: "answer",
+          id: "answering",
+          at: undefined,
+          replies: [],
+          partial: live.partial,
+          live: true,
+        },
+      ]
+    : [];
+  return [...rows, asked, ...answering, ...queuedRows, ...ending];
+};
+
+/** The question on its way as the person's bubble shows it. */
+const pendingMessage = ({ text, files, at }: PendingQuestion) => ({
+  text,
+  at,
+  files: files.map(({ id, file }) => ({
+    id,
+    name: file.name,
+    bytes: file.size,
+  })),
+});
+
 /** The chat's messages, and the response being written, oldest first. */
 export const ChatThread = ({
   agents = noAgents,
@@ -1452,6 +1525,7 @@ export const ChatThread = ({
   build,
   newLineBefore,
   sources,
+  pending,
   sourceNames,
   children,
 }: {
@@ -1508,6 +1582,8 @@ export const ChatThread = ({
    * folds what an answer drew on under it.
    */
   sources?: ReactNode;
+  /** The question on its way, drawn as the person's own until core's copy comes. */
+  pending?: PendingQuestion | undefined;
   /** The connections' names, by ID, which name where a step read from. */
   sourceNames: ReadonlyMap<string, SourceName>;
   /** Shown after the messages, in the thread: what is held, why it stopped. */
@@ -1530,7 +1606,7 @@ export const ChatThread = ({
   const inBrain = useLocation({
     select: ({ pathname }) => pathname === "/brain" || pathname === "/brain/",
   });
-  const rows = rowsOf(messages, shown, running);
+  const rows = rowsOf(messages, shown, answersAbove(running, pending));
   const liveRow = rows.findLast(
     (row): row is AnswerTurn => row.kind === "answer" && row.live
   );
@@ -1634,7 +1710,6 @@ export const ChatThread = ({
         turn.id === lastAnswerRow?.id && !turn.live ? sources : undefined,
     };
   };
-  const lined = withNewLine(withDayLines(rows), newLineBefore);
   const logId = useId();
   const waitingRows: Row[] = queued.map(({ id, text }, index) => ({
     kind: "queued",
@@ -1642,10 +1717,13 @@ export const ChatThread = ({
     text,
     onSendNow: running && index === queued.length - 1 ? onSendNow : undefined,
   }));
-  const items: Row[] =
-    children === undefined || children === null
-      ? [...lined, ...waitingRows]
-      : [...lined, ...waitingRows, { kind: "after", id: "after", children }];
+  const items = withLast(
+    withNewLine(withDayLines(rows), newLineBefore),
+    pending,
+    { running, partial: shown },
+    waitingRows,
+    afterRow(children)
+  );
   const column: { style?: LayoutStyle } = compact
     ? {}
     : { style: styles.column };
@@ -1666,11 +1744,19 @@ export const ChatThread = ({
                       <MessageScrollerItem
                         key={row.id}
                         messageId={row.id}
-                        scrollAnchor={row.kind === "question"}
+                        scrollAnchor={
+                          row.kind === "question" || row.kind === "pending"
+                        }
                         {...column}
                       >
                         {row.kind === "question" ? (
                           <Question asked={row.asked} message={row.message} />
+                        ) : null}
+                        {row.kind === "pending" ? (
+                          <Question
+                            asked={undefined}
+                            message={pendingMessage(row.question)}
+                          />
                         ) : null}
                         {row.kind === "answer" ? (
                           <AnswerRow context={contextOf(row)} turn={row} />

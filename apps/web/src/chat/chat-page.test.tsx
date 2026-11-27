@@ -24,7 +24,7 @@ import {
 import { act, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { loadFromCore } from "../load-from-core.tsx";
 import { wordsOf } from "../test-words.ts";
@@ -32,6 +32,7 @@ import { activeChat, setActiveChat } from "./active-chat.ts";
 import { LoadedChatPage } from "./chat-page.tsx";
 import { GlobalChatProvider, useGlobalChat } from "./global-chat.tsx";
 import type { GlobalChat } from "./global-chat.tsx";
+import { setPending } from "./pending-question.ts";
 import { typeInPrompt } from "./test-typing.ts";
 
 // A chat's own page, read as its route reads it, against core's chats
@@ -115,7 +116,12 @@ const opened = async (
     chatId: string,
     after: number | null,
     onUpdate: (update: ChatUpdate) => void
-  ) => Promise<never> = async () => await Promise.withResolvers<never>().promise
+  ) => Promise<never> = async () =>
+    await Promise.withResolvers<never>().promise,
+  /** How core takes a question, once it is asked: at once by default. */
+  taking: () => Promise<void> = async () => {
+    await Promise.resolve();
+  }
 ) => {
   const asked: string[] = [];
   const chats = {
@@ -133,7 +139,7 @@ const opened = async (
     agents: async () => await Promise.resolve([]),
     send: async (chatId: string, question: ChatQuestion) => {
       asked.push(`send ${chatId} ${question.text}`);
-      await Promise.resolve();
+      await taking();
     },
     heldCalls: async () => await Promise.resolve([]),
     cancel: async (chatId: string) => {
@@ -259,6 +265,37 @@ const restricted =
  * A watch that sends the chat as an answer is written, a question queued
  * behind it, then holds.
  */
+/** Each row of the thread holding `words`, as it reads. */
+const drawn = (words = "Spain?") =>
+  [...document.querySelectorAll("article")]
+    .filter((row) => row.textContent.includes(words))
+    .map((row) => wordsOf(row));
+
+/** Grasp answering France?, with `queued` behind it, as core sends it. */
+const answering = (queued: { id: string; text: string }[]): ChatUpdate => ({
+  messages: [
+    {
+      id: 1,
+      role: "user",
+      text: "France?",
+      at: "2026-11-01T08:00:00.000Z",
+    },
+  ],
+  partial: {
+    from: 0,
+    text: "Paris",
+    code: [],
+    tools: [],
+    reasoning: { from: 0, text: "" },
+  },
+  running: true,
+  queued,
+  stopped: null,
+  held: 0,
+  worked: 0,
+  provenance: { sources: [], restricted: false },
+});
+
 const answeringWithQueued = async (
   _chatId: string,
   _after: number | null,
@@ -352,6 +389,116 @@ describe("a chat's own page", () => {
       typedForA: "Half a thought for A",
       onB: "",
     });
+  });
+
+  it("shows a question in the thread the moment it is sent, and puts it back in the box with why once core refuses it, before what was typed since", async () => {
+    const taken = Promise.withResolvers<undefined>();
+    await opened(
+      "chat-a",
+      undefined,
+      async (_chatId, _after, onUpdate) => {
+        await Promise.resolve();
+        onUpdate({
+          messages: [
+            {
+              id: 1,
+              role: "user",
+              text: "Which deals closed?",
+              at: "2026-11-01T08:00:00.000Z",
+            },
+          ],
+          partial: null,
+          running: false,
+          stopped: null,
+          held: 0,
+          worked: 0,
+        });
+        return await Promise.withResolvers<never>().promise;
+      },
+      async () => {
+        await taken.promise;
+      }
+    );
+    await typed("And which are late?");
+    await sent();
+    // The thread, which loads once a chat is shown.
+    // The thread, which loads once a chat is shown.
+    await vi.waitFor(
+      async () => {
+        await settled();
+        expect(document.querySelector("article")).not.toBeNull();
+      },
+      { timeout: 15_000 }
+    );
+    const meanwhile = {
+      box: box()?.textContent,
+      thread: [...document.querySelectorAll("article")].map((row) =>
+        wordsOf(row)
+      ),
+    };
+    await typed("Only this month");
+    await act(async () => {
+      taken.reject(agentErrors.create("agent.invalid_question"));
+      await taken.promise.catch(() => {});
+    });
+    await settled();
+
+    expect({
+      meanwhile,
+      box: box()?.textContent,
+      thread: document.body.textContent.split("And which are late?").length - 1,
+      notes: [
+        ...document.querySelectorAll('[data-slot="prompt-input-note"]'),
+      ].map((note) => note.textContent),
+    }).toStrictEqual({
+      meanwhile: {
+        box: "",
+        thread: [
+          expect.stringContaining("Which deals closed?"),
+          expect.stringContaining("And which are late?"),
+        ],
+      },
+      box: "And which are late?\n\nOnly this month",
+      thread: 1,
+      notes: [
+        "Could not send. Your message is kept.",
+        agentErrors.create("agent.invalid_question").message,
+      ],
+    });
+  });
+
+  it("takes back a chat's refused question with its own files alone, none of the chat it came from", async () => {
+    const { router } = await opened("chat-a");
+    await act(async () => {
+      seen.chat?.composer.onAttach?.([new File(["a"], "from-a.csv")]);
+      await Promise.resolve();
+    });
+    setPending("chat-b", {
+      text: "And B?",
+      mentions: [],
+      files: [{ id: "file-b", file: new File(["b"], "for-b.csv") }],
+      after: 0,
+      at: "2026-11-01T08:00:00.000Z",
+      queues: false,
+      alreadyQueued: 0,
+      key: "key-b",
+      owner: "a box no longer here",
+      fromBox: true,
+      state: { failed: "Refused." },
+    });
+
+    await act(async () => {
+      await router.navigate({
+        to: "/chats/$chatId",
+        params: { chatId: "chat-b" },
+      });
+    });
+    await settled();
+
+    expect({
+      box: box()?.textContent,
+      files: seen.chat?.composer.files.map(({ name }) => name),
+    }).toStrictEqual({ box: "And B?", files: ["for-b.csv"] });
   });
 
   it("shows the chat to ask in at once, its name as the person's list has it, while core's read of it is still on its way", async () => {
@@ -456,6 +603,47 @@ describe("a chat's own page", () => {
       stopAtRest: true,
       stopBeside: true,
       asked: ["send chat-a Spain?"],
+    });
+  });
+
+  it("draws a question sent while the answer is written once, as queued, before and after core queues it", async () => {
+    const taken = Promise.withResolvers<boolean>();
+    let update: ((next: ChatUpdate) => void) | undefined;
+    await opened(
+      "chat-a",
+      undefined,
+      async (_chatId, _after, onUpdate) => {
+        await Promise.resolve();
+        update = onUpdate;
+        onUpdate(answering([]));
+        return await Promise.withResolvers<never>().promise;
+      },
+      async () => {
+        await taken.promise;
+      }
+    );
+    await settled();
+    await typed("Spain?");
+    await sent();
+    // The thread, which loads once a chat is shown.
+    await vi.waitFor(
+      async () => {
+        await settled();
+        expect(document.body.textContent).toContain("Spain?");
+      },
+      { timeout: 15_000 }
+    );
+    const onItsWay = drawn();
+    await act(async () => {
+      update?.(answering([{ id: "8", text: "Spain?" }]));
+      taken.resolve(true);
+      await taken.promise;
+    });
+    await settled();
+
+    expect({ onItsWay, queuedByCore: drawn() }).toStrictEqual({
+      onItsWay: [expect.stringContaining("Queued")],
+      queuedByCore: [expect.stringContaining("Queued")],
     });
   });
 

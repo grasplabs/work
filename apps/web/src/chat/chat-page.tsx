@@ -17,6 +17,7 @@ import { useChatList } from "./chat-list.ts";
 import { ChatMoreMenu, useRenameChat } from "./chat-more.tsx";
 import { useFollowedChat } from "./chat-watch.ts";
 import { useGlobalChat } from "./global-chat.tsx";
+import { usePending } from "./pending-question.ts";
 import { reading } from "./reading.stylex.ts";
 
 // A chat as its own page (routes/_shell.chats.$chatId.tsx), as #2503 has
@@ -80,6 +81,16 @@ export const ChatPage = ({
       setActiveChat(chatId, "chat");
     }
   }, [other, gone, chatId]);
+  // Opened by a question Chat's start sent, whose box went with that page:
+  // the cursor goes on in this one, as T3 Code focuses a thread's box as
+  // it opens. Never taken from where the person put it.
+  const arriving = usePending(chatId) !== undefined;
+  useEffect(() => {
+    const focused = document.activeElement;
+    if (ours && arriving && (focused === null || focused === document.body)) {
+      boxOf(page.current)?.focus();
+    }
+  }, [ours, arriving]);
   const summary = ours ? chat.summary : undefined;
   // As the person's list has it until the page's own read answers.
   const listed = useChatList().chats.find(({ id }) => id === chatId);
