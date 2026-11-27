@@ -85,7 +85,7 @@ const ReleasesPage = () => {
         {releases.length === 0 ? (
           <EmptyPart>
             No releases yet. Every merge to main publishes one, and the admin
-            imports it within a minute.
+            imports it within a minute or two.
           </EmptyPart>
         ) : (
           <ItemGroup aria-labelledby="every-release" separated>

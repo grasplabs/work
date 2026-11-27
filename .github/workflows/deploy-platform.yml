@@ -203,13 +203,27 @@ jobs:
         run: |
           set -euo pipefail
           # What apps/admin/cf-worker.ts fills in: the store, the stage's
-          # hostname map, and the secrets the store has (an optional one it
-          # lacks stays unbound).
+          # hostname map, the secrets the store has (an optional one it
+          # lacks stays unbound), and the account's queues (the release
+          # manifests' queue isn't consumed until it's made, the cron
+          # importing alone till then).
           cd apps/admin
           hosts=$(vp exec node ../../scripts/platform-names.ts "$STAGE" routerHosts)
           ROUTER_HOSTS_ID=$(vp exec cf kv namespaces list --per-page 100 | jq -r --arg title "$hosts" '[.[] | select(.title == $title) | .id] | if length == 1 then .[0] else error("expected one KV namespace " + $title) end')
           STORED_SECRETS=$(vp exec cf secrets-store secrets list --store-id "$SECRETS_STORE_ID" --per-page 100 | jq -r '[.[].name] | join(",")')
-          export ROUTER_HOSTS_ID STORED_SECRETS
+          # From the API itself, as cf's queues list takes no page size: up
+          # to 500 on one page, and a second page stops the deploy. Workers
+          # Scripts Write, which the token has, may list them. Any answer
+          # but a list stops the deploy too, but a refusal (403), which
+          # costs only the trigger.
+          answer=$(curl -sS -w '\n%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/queues?per_page=500")
+          status=${answer##*$'\n'}
+          case "$status" in
+            200) QUEUES=$(jq -er 'if .success == true and (.result | type) == "array" and all(.result[]; .queue_name | type == "string") and (.result_info.total_pages // 1) <= 1 then [.result[].queue_name] | join(",") else error("unexpected answer listing the account'"'"'s queues") end' <<< "${answer%$'\n'*}") ;;
+            403) echo "::warning::The token may not list the account's queues, so the admin consumes none"; QUEUES="" ;;
+            *) echo "::error::Listing the account's queues answered HTTP $status"; exit 1 ;;
+          esac
+          export ROUTER_HOSTS_ID STORED_SECRETS QUEUES
           # Built for the stage (Vite's mode, which cloudflare.config.ts
           # reads), then that build deployed with cf, naming the same mode.
           vp build --mode "$STAGE"

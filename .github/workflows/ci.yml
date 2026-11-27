@@ -979,13 +979,14 @@ jobs:
   # Beside release, not after it: it uses nothing of the build, and each
   # takes about 2 minutes (November 2026). Before publish-release, which
   # waits for both: the staging admin imports a release from its bucket
-  # within 5 minutes of its publish (apps/admin/wrangler.jsonc), so the
-  # admin that imports and rolls out a release is always at least as new
-  # as the release, and a release that needs an admin change never meets
-  # the old admin. A deploy that fails holds the release back, and the run
-  # goes red. One staging platform deploy at a time, by hand or from here:
-  # the job's own concurrency group (deploy-platform-staging), apart from
-  # this run's, waits for one deploying and replaces one still waiting.
+  # as soon as it's published, or by its cron within a minute
+  # (apps/admin/wrangler.jsonc), so the admin that imports and rolls out a
+  # release is always at least as new as the release, and a release that
+  # needs an admin change never meets the old admin. A deploy that fails
+  # holds the release back, and the run goes red. One staging platform
+  # deploy at a time, by hand or from here: the job's own concurrency group
+  # (deploy-platform-staging), apart from this run's, waits for one
+  # deploying and replaces one still waiting.
   deploy-platform:
     name: deploy-platform
     if: github.event_name == 'push'

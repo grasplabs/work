@@ -83,7 +83,7 @@ describe("Platform's Readiness", () => {
       },
       blocking: 2,
       release:
-        "No release is imported yet. CI publishes one for every merge to main, and the admin imports it within five minutes; Releases lists any it couldn't import, and why.",
+        "No release is imported yet. CI publishes one for every merge to main, and the admin imports it within a minute or two.",
     });
   });
 
