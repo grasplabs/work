@@ -52,7 +52,7 @@ import type { DataColumn, RowLook } from "./data-rows.tsx";
 import { LoadingFigure } from "./figures.tsx";
 import { needCount, summaryNeedsOf } from "./needs.ts";
 import type { OrgNeed } from "./needs.ts";
-import { microsPerDollar } from "./platform-spend-sums.ts";
+import { microsPerDollar, nearLimit } from "./platform-spend-sums.ts";
 import type {
   OrganizationSpend,
   PlatformSpend,
@@ -69,7 +69,7 @@ import {
   whereWords,
 } from "./standing.ts";
 import type { Phase, Standing } from "./standing.ts";
-import { formatDay, plural } from "./words.ts";
+import { dollarsWhole, formatDay, plural } from "./words.ts";
 
 const WIDE = "@media (width >= 64rem)";
 
@@ -109,9 +109,6 @@ const styles = stylex.create({
 /** At most this many of what needs Grasp on Home: the rest is in the sidebar's Inbox. */
 const needsShown = 6;
 
-/** From this share of its limit on, an organization's AI use is near it. */
-const nearShare = 0.8;
-
 /** The days of runs the table counts, today's included. */
 const weekDays = 7;
 
@@ -132,14 +129,8 @@ interface Row {
   needs: OrgNeed[];
 }
 
-/** Dollars, whole: what a month of AI cost, said at a glance. */
-const wholeDollars = new Intl.NumberFormat("en", {
-  style: "currency",
-  currency: "USD",
-  maximumFractionDigits: 0,
-});
 const dollarsOf = (micros: number): string =>
-  wholeDollars.format(micros / microsPerDollar);
+  dollarsWhole(micros / microsPerDollar);
 
 const rowOf = (entry: ClientSummary): Row => ({
   entry,
@@ -234,13 +225,6 @@ const missingWords = (row: Row): string => {
     }
   }
 };
-
-/** Its AI on Grasp's key at or past `nearShare` of its limit. */
-const nearLimit = (spend: OrganizationSpend | undefined): boolean =>
-  spend?.graspAi !== null &&
-  spend?.graspAi !== undefined &&
-  spend.graspAi.limit > 0 &&
-  spend.graspAi.spent >= spend.graspAi.limit * nearShare;
 
 /**
  * Grasp's AI this month so far, beside last month's, and how many

@@ -3,8 +3,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { act, gridRow, openAdmin, settle, until } from "../../test/app.tsx";
 import type { Answers } from "../../test/app.tsx";
+import type { LiveStatus } from "../clients/grid.ts";
 import type { OffboardedClient } from "../hosting/offboarding.ts";
 import type { ChannelProgress } from "../rollout/progress.ts";
+import type { PlatformSpend } from "./platform-spend-sums.ts";
 import type { Readiness } from "./readiness.ts";
 
 // Platform's pages and Home's banner as the browser shows them from what
@@ -33,6 +35,24 @@ const platformAnswers = (readiness: Readiness): Answers => ({
   fetchReadiness: readiness,
   fetchPlatform: { channels: [], history: [], events: [] },
   fetchPlatformSpend: null,
+});
+
+/** The figure labelled `label`, as its words read: label, value, then how it moved. */
+const figureOf = (root: Element, label: string): string =>
+  [...root.querySelectorAll('[data-slot="stat"]')]
+    .map((stat) => stat.textContent ?? "")
+    .find((words) => words.startsWith(label)) ?? "";
+
+/** The page's part headings, in order. */
+const headings = (root: Element): string[] =>
+  [...root.querySelectorAll("main h2")].map((each) => each.textContent ?? "");
+
+/** What an account answered live: read, in sync, its core reached unless `reach` says. */
+const liveOf = (reach: LiveStatus["reach"] = "reachable"): LiveStatus => ({
+  drift: reach === "reachable" ? "in_sync" : "unknown",
+  sharedSecretsCurrent: true,
+  reach,
+  onboarding: null,
 });
 
 /** An offboarded client, `days` days ago, its 30 days kept. */
@@ -87,6 +107,18 @@ describe("Home's banner and Platform's Readiness", () => {
     }).toStrictEqual({ banner: true, panel: true });
   });
 
+  it("says at a glance on Platform that onboarding is ready, with no Readiness lines once every one is", async () => {
+    const { container } = await openAdmin("/platform", platformAnswers(ready));
+
+    expect({
+      figure: figureOf(container, "Onboarding"),
+      lines: headings(container).includes("Readiness"),
+    }).toStrictEqual({
+      figure: "OnboardingReadyNothing stops a new organization",
+      lines: false,
+    });
+  });
+
   it("shows no banner once nothing required blocks", async () => {
     const { main } = await openAdmin("/", { fetchReadiness: ready });
 
@@ -109,6 +141,109 @@ describe("Home's banner and Platform's Readiness", () => {
     expect(
       container.querySelector('[data-slot="sidebar"]')?.textContent
     ).toContain("1 company needs a look");
+  });
+});
+
+describe("Platform's overview at a glance", () => {
+  it("counts the cores that answer and the companies that need a look, once their accounts are read", async () => {
+    const { container, main } = await openAdmin("/platform", {
+      ...platformAnswers(ready),
+      fetchClientGrid: [
+        gridRow({ id: "acme", name: "Acme" }),
+        gridRow({ id: "bolt", name: "Bolt" }),
+        gridRow({
+          id: "cork",
+          name: "Cork",
+          lastDeploy: {
+            releaseId: "39.01.10",
+            status: "failed",
+            at: new Date(),
+          },
+        }),
+      ],
+      fetchGridLive: {
+        acme: liveOf(),
+        bolt: liveOf("unreachable"),
+        cork: liveOf(),
+      },
+    });
+    await until(() => figureOf(container, "Cores answering").includes(" of "));
+
+    expect({
+      cores: figureOf(container, "Cores answering"),
+      look: figureOf(container, "Need a look"),
+      listed: ["Acme", "Bolt", "Cork"].filter((name) =>
+        [...container.querySelectorAll('[aria-labelledby="needs-a-look"] li')]
+          .map((row) => row.textContent ?? "")
+          .some((row) => row.startsWith(name))
+      ),
+      failed: main().includes("Its last deploy failed (39.01.10)."),
+    }).toStrictEqual({
+      cores: "Cores answering2 of 31 not answering",
+      look: "Need a look21 deploy failed and 1 not answering",
+      listed: ["Bolt", "Cork"],
+      failed: true,
+    });
+  });
+
+  it("sums what Grasp's own AI costs, with this month's pace and the organizations near their limit", async () => {
+    const now = new Date();
+    const period = (back: number) =>
+      new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back, 1))
+        .toISOString()
+        .slice(0, 7);
+    const month = (back: number, micros: number) => ({
+      period: period(back),
+      micros,
+      byFeature: [{ feature: null, micros }],
+      byModel: [{ model: "anthropic/claude-sonnet-5-5", micros }],
+    });
+    const spend: PlatformSpend = {
+      thisMonth: month(0, 300_000_000),
+      lastMonth: month(1, 200_000_000),
+      byOrganization: [
+        {
+          clientId: "acme",
+          name: "Acme",
+          thisMonth: 190_000_000,
+          lastMonth: 150_000_000,
+          graspAi: { spent: 190_000_000, limit: 200_000_000 },
+        },
+        {
+          clientId: "bolt",
+          name: "Bolt",
+          thisMonth: 110_000_000,
+          lastMonth: 50_000_000,
+          graspAi: { spent: 110_000_000, limit: 400_000_000 },
+        },
+      ],
+      organizations: 3,
+      unread: [{ clientId: "cork", name: "Cork" }],
+      unreported: [],
+    };
+    const { container, main } = await openAdmin("/platform", {
+      ...platformAnswers(ready),
+      fetchPlatformSpend: spend,
+    });
+    await until(() => figureOf(container, "Near their limit") !== "");
+    // Before its third day a month's pace says too little, so it isn't said.
+    const paced = now.getUTCDate() > 3;
+
+    expect({
+      thisMonth: main().includes("$300.00"),
+      pace: main().includes("on pace for $"),
+      lastMonth: main().includes("$200.00"),
+      near: figureOf(container, "Near their limit"),
+      leftOut: main().includes(
+        "Read from 2 of 3 active organizations. Not in these sums, as their core didn’t answer: Cork."
+      ),
+    }).toStrictEqual({
+      thisMonth: true,
+      pace: paced,
+      lastMonth: true,
+      near: "Near their limit1of 2 on a limit",
+      leftOut: true,
+    });
   });
 });
 
@@ -154,7 +289,7 @@ describe("Platform's Offboarded and Releases", () => {
       fetchOffboardedClients: [],
     });
 
-    expect(main()).toContain("No client is offboarded.");
+    expect(main()).toContain("No client is offboarded");
   });
 
   it("says a release that isn't one isn't there, asking the Worker nothing", async () => {
@@ -237,9 +372,9 @@ const press = async (root: () => Element | Document, name: string) => {
 /** The question, while it stands. */
 const question = () => document.querySelector('[role="alertdialog"]');
 
-/** Beta's panel. */
+/** Beta's part of the channels, named by its heading. */
 const betaPanel = (root: Element) =>
-  root.querySelector('section[aria-label="Beta"]') ?? root;
+  root.querySelector('section[aria-labelledby="channel-beta"]') ?? root;
 
 /** Presses Escape where focus is. */
 const escape = async () => {

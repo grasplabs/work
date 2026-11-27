@@ -75,18 +75,6 @@ const speech = (micros: number): PlatformSpendRow => ({
   micros,
 });
 
-/** The table labelled `label` on a page, its tags left out. */
-const tableText = (html: string, label: string): string => {
-  const at = html.indexOf(`aria-label="${label}"`);
-  return at === -1
-    ? ""
-    : html
-        .slice(html.indexOf(">", at) + 1, html.indexOf("</table>", at))
-        .replaceAll(/<[^>]+>/gu, " ")
-        .replaceAll(/\s+/gu, " ")
-        .trim();
-};
-
 /** Markup as its words, its tags left out. */
 const words = (part: string) =>
   part
@@ -275,7 +263,7 @@ describe("what Grasp's own AI features cost", () => {
       organizations: spend.organizations,
       unread: spend.unread.map(({ name }) => name),
       unreported: spend.unreported.map(({ name }) => name),
-      shown: tableText(html, "Top organizations"),
+      shown: barsText(html, "By organization"),
     }).toStrictEqual({
       thisMonth: {
         period: thisPeriod,
@@ -318,7 +306,12 @@ describe("what Grasp's own AI features cost", () => {
       organizations: 4,
       unread: [],
       unreported: [],
-      shown: `Organization ${thisMonth} ${lastMonth} Calder $5.00 $0.00 Acme $3.55 $0.50 Brightline $0.00 $9.00`,
+      shown: [
+        `By organization, ${thisMonth} and ${lastMonth}`,
+        "Calder $5.00 $0.00",
+        "Acme $3.55 $0.50",
+        "Brightline $0.00 $9.00",
+      ],
     });
   });
 });
