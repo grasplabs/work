@@ -330,6 +330,13 @@
       "when": 1795789254237,
       "tag": "0046_deleted_chats",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "6",
+      "when": 1795806078632,
+      "tag": "0047_chat_deletes",
+      "breakpoints": true
     }
   ]
 }
