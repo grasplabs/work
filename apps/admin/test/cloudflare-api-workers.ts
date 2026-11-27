@@ -19,6 +19,21 @@ import type {
 } from "./cloudflare-api-kit.ts";
 import { sqlStatements } from "./sql-statements.ts";
 
+/**
+ * The upload's `code_update_strategy` as the API takes it: `immediate`
+ * alone (the API refuses a `max_delay` with it), or `deferred` with an
+ * optional `max_delay` of 0 to 86,400 seconds; or none, for the default.
+ */
+const codeUpdateStrategySchema = z
+  .union([
+    z.strictObject({ mode: z.literal("immediate") }),
+    z.strictObject({
+      mode: z.literal("deferred"),
+      max_delay: z.number().min(0).max(86_400).multipleOf(0.001).optional(),
+    }),
+  ])
+  .optional();
+
 /** Why an upload is refused, or what it uploaded. */
 const readUpload = async (
   account: AccountState,
@@ -45,6 +60,11 @@ const readUpload = async (
   );
   if (!modules.some(({ name }) => name === metadata.main_module)) {
     return refusal(400, 10_021, "No such module: the main module");
+  }
+  if (
+    !codeUpdateStrategySchema.safeParse(metadata.code_update_strategy).success
+  ) {
+    return refusal(400, 10_000, "Invalid code_update_strategy");
   }
   const assets = z
     .object({ jwt: z.string().optional() })
