@@ -1,4 +1,5 @@
 import { isMemberAdmin } from "@grasp-os/shared/roles";
+import { AppShellPage } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
 import { Sheet, SheetContent, SheetTitle } from "@grasp-os/ui/components/sheet";
 import { visuallyHidden } from "@grasp-os/ui/lib/styles";
 import { useLingui } from "@lingui/react/macro";
@@ -9,7 +10,6 @@ import {
   useSearch,
 } from "@tanstack/react-router";
 
-import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import {
   PageSkeletonAppPage,
@@ -39,13 +39,13 @@ export const IntegrationsSkeleton = () => {
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Connectors` }]} />
-      <Page>
+      <AppShellPage>
         <PageSkeletonIntegrations
           band={overview}
           label={t`Loading connectors`}
           runs={overview ? [{ tiles: 3, note: true }, 2, 4] : undefined}
         />
-      </Page>
+      </AppShellPage>
       {app === undefined ? null : (
         <Sheet
           modal={false}
@@ -89,7 +89,7 @@ export const IntegrationSkeleton = () => {
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Connectors`, to: "/connectors" }]} />
-      <Page>
+      <AppShellPage>
         <PageSkeletonAppPage
           accounts={1}
           connection={words.connection}
@@ -97,7 +97,7 @@ export const IntegrationSkeleton = () => {
           mayDo={words.mayDo}
           offer={isMemberAdmin(identity)}
         />
-      </Page>
+      </AppShellPage>
     </>
   );
 };

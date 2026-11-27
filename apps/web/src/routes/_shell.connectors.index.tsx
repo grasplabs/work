@@ -9,6 +9,7 @@ import type { CatalogGroup } from "@grasp-os/shared/connect-names";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ConnectionWorkflows } from "@grasp-os/shared/workflows";
+import { AppShellPage } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
 import { Alert, AlertTitle } from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -75,7 +76,6 @@ import { RevocationsByHand } from "../connections/revocations-by-hand.tsx";
 import { SupportDetails, supportOf } from "../connections/support-details.tsx";
 import { formatNumber } from "../format.ts";
 import { PageNotLoaded } from "../frame/page-states.tsx";
-import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 
@@ -665,7 +665,7 @@ const Integrations = () => {
         open={requesting}
       />
       <SiteHeader crumbs={crumbs} />
-      <Page>
+      <AppShellPage>
         <PageHeader
           actions={
             <div {...stylex.props(styles.actions)}>
@@ -768,7 +768,7 @@ const Integrations = () => {
             />
           ) : null}
         </div>
-      </Page>
+      </AppShellPage>
       {opened === undefined ? null : (
         <IntegrationPanel
           from={from}

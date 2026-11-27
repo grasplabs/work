@@ -8,6 +8,7 @@ import type {
   ProjectRole,
 } from "@grasp-os/shared/projects";
 import { canBuild } from "@grasp-os/shared/roles";
+import { AppShellPage } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
 import {
   Alert,
   AlertDescription,
@@ -83,7 +84,6 @@ import {
   formatTime,
 } from "../format.ts";
 import { pageText } from "../frame/page-text.ts";
-import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { roleLabel } from "../labels.ts";
 import { useCoreAction } from "../use-core-action.ts";
@@ -1158,7 +1158,7 @@ export const ProjectView = ({
           { label: project.name },
         ]}
       />
-      <Page>
+      <AppShellPage>
         <div {...stylex.props(pageText.text)}>
           <Container align="center" size="lg">
             <div {...stylex.props(styles.body)}>
@@ -1222,7 +1222,7 @@ export const ProjectView = ({
             </div>
           </Container>
         </div>
-      </Page>
+      </AppShellPage>
       <ProjectDialog
         editing={project}
         onDone={() => {

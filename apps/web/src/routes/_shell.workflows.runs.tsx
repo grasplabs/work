@@ -5,6 +5,7 @@ import type {
   RunFilter,
   RunsPage,
 } from "@grasp-os/shared/workflows";
+import { AppShellPage } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
 import { PageHeader } from "@grasp-os/ui/components/page-header";
 import {
   Select,
@@ -24,7 +25,6 @@ import { useEffect, useRef, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
-import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -258,7 +258,7 @@ const WorkflowRuns = () => {
       <SiteHeader
         crumbs={[{ label: t`Workflows`, to: "/workflows" }, { label: title }]}
       />
-      <Page>
+      <AppShellPage>
         <PageHeader title={title} />
         {page.today.state === "ready" ? (
           <TodayLanes
@@ -271,7 +271,7 @@ const WorkflowRuns = () => {
         )}
         <Figures activity={page.activity} />
         <RunsLogRead log={page.log} named={page.named} />
-      </Page>
+      </AppShellPage>
     </>
   );
 };
@@ -288,10 +288,10 @@ const RunsPending = () => {
       <SiteHeader
         crumbs={[{ label: t`Workflows`, to: "/workflows" }, { label: title }]}
       />
-      <Page>
+      <AppShellPage>
         <PageHeader title={title} />
         <LoadingLines lines={6} />
-      </Page>
+      </AppShellPage>
     </>
   );
 };

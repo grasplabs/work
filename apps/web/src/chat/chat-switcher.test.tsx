@@ -335,6 +335,24 @@ describe("the chats window", () => {
     });
   });
 
+  it("leaves ⌘K to rich text, where the keys shape the text", async () => {
+    await shown(async () => await Promise.resolve([]));
+    const editor = document.createElement("div");
+    editor.contentEditable = "true";
+    document.body.append(editor);
+    editor.focus();
+
+    await act(async () => {
+      editor.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true })
+      );
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect(dialog()).toBeNull();
+  });
+
   it("closes again with the same keys", async () => {
     await shown(async () => await Promise.resolve([]));
     await openWindow({ key: "k", ctrlKey: true });
