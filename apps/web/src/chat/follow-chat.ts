@@ -13,17 +13,19 @@ import type {
   ChatToolEvent,
   ChatUpdate,
 } from "@grasp-os/shared/chat";
-import { failureText } from "@grasp-os/shared/errors";
+import { authErrors, failureText } from "@grasp-os/shared/errors";
 import type { ModelWait } from "@grasp-os/shared/models";
 import { RpcStub } from "capnweb";
 
 import type { CoreConnection } from "../core-connection.ts";
-import { CoreTimeoutError, isTransient, retrying } from "../core.ts";
+import { CoreTimeoutError, isTransient, retrying, wait } from "../core.ts";
+import type { Session } from "../core.ts";
 
 // Following one chat as it streams (`chats.watch` in core), on the tab's
 // connection, which connects again when it drops. After a drop, the watch starts
 // again after the last message this page has, so nothing is missed or
-// shown twice; a reload starts from the first.
+// shown twice; a reload starts from the first. The person's list of chats
+// is followed the same way (chat-list.ts).
 
 /** A chat as the page shows it, put together from its updates. */
 export interface ChatView {
@@ -50,6 +52,11 @@ export interface ChatView {
   waiting: ModelWait | null;
   /** Whether the first update has come. */
   loaded: boolean;
+  /**
+   * Whether the tab follows it again after a dropped connection and has
+   * heard nothing yet since: what it shows may be behind.
+   */
+  resuming?: boolean;
 }
 
 export const emptyView: ChatView = {
@@ -111,9 +118,11 @@ export const applyUpdate = (view: ChatView, update: ChatUpdate): ChatView => {
 
 /**
  * The pauses before trying again to start following while core fails: only
- * a few, so a chat whose core keeps failing says so. A try made while the
- * tab's connection is down waits a few seconds for the next connection,
- * and says core can't be reached if none comes.
+ * a few, so a chat whose core keeps failing says so. The first try, as the
+ * chat opens, waits a few seconds for the tab's connection, and says core
+ * can't be reached if none comes; a try after the connection dropped waits
+ * for the next one as long as it takes, so a chat (or the list) is
+ * followed again the moment core is back, however long it was gone.
  */
 const startRetryMs = [1000, 2000, 4000] as const;
 
@@ -128,43 +137,91 @@ const releaseQuietly = async (subscription: {
   }
 };
 
+/** The pauses between tries to follow what is followed until sign-out: longer each time, then the longest. */
+const untilSignedOutMs = [1000, 2000, 4000, 8000, 15_000] as const;
+
 /**
- * Follows `chatId` over `core`: `onUpdate` gets every update, `onFailed`
- * why following stopped for good, and whether that is because core has no
- * such chat for the person (`gone`: deleted, or not theirs). Any other
- * refusal (too many pages following chats, say) leaves the chat theirs, and
- * only says why. Returns what stops it.
+ * `attempt` until it succeeds, waiting longer between tries: given up only
+ * once the person's session ended (signed out) or following stopped.
  */
-export const followChat = (
+const retryingUntilSignedOut = async <T>(
+  attempt: () => Promise<T>,
+  stopped: AbortSignal
+): Promise<T> => {
+  for (let tries = 0; ; tries += 1) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one try at a time
+      return await attempt();
+    } catch (error) {
+      if (
+        stopped.aborted ||
+        authErrors.codeOf(error) === "auth.unauthenticated"
+      ) {
+        throw error;
+      }
+    }
+    // oxlint-disable-next-line no-await-in-loop -- waiting longer between tries
+    await wait(
+      untilSignedOutMs[Math.min(tries, untilSignedOutMs.length - 1)] ?? 0
+    );
+  }
+};
+
+/**
+ * Follows what `watch` subscribes to over `core`, until stopped: again on
+ * the next connection whenever the one it was on drops, as `watch` then
+ * says to (from where the page got to). `onFailed` gets why following
+ * stopped for good, and whether that is because core has no such thing
+ * for the person (`agent.chat_not_found`). Returns what stops it.
+ */
+export const follow = (
   core: CoreConnection,
-  chatId: string,
-  onUpdate: (update: ChatUpdate) => void,
-  onFailed: (reason: string, gone: boolean) => void
+  watch: (
+    session: Session
+  ) => Promise<{ release: () => Promise<void> } & Disposable>,
+  onFailed: (reason: string, gone: boolean) => void,
+  {
+    untilSignedOut = false,
+    onDropped,
+  }: {
+    /**
+     * Whether it is followed whatever fails, until the person's session
+     * ends (the list of chats, which nothing reads again): every failure
+     * tried again, ever less often, and a connection waited for as long
+     * as it takes.
+     */
+    untilSignedOut?: boolean;
+    /** The connection dropped: what the page has may be behind until the next update. */
+    onDropped?: () => void;
+  } = {}
 ): (() => void) => {
   let closed = false;
-  let after: number | null = null;
+  // Gives up waiting for a connection once following stops.
+  const stopping = new AbortController();
   let release: (() => void) | undefined;
-  const received = (update: ChatUpdate): void => {
-    const last = update.messages.at(-1);
-    if (last !== undefined) {
-      after = last.id;
-    }
-    onUpdate(update);
-  };
-  const watch = async (): Promise<void> => {
+  const attempt = async (again: boolean) =>
+    await core.withSession(
+      watch,
+      again || untilSignedOut ? stopping.signal : undefined
+    );
+  const start = async (again: boolean): Promise<void> => {
     try {
-      const subscription = await retrying(
-        async () =>
-          await core.withSession(
-            async (session) =>
-              await session.chats.watch(chatId, after, received)
-          ),
-        startRetryMs,
-        // No connection came in its few seconds: say so, rather than wait
-        // on, as a page does when core is out of reach.
-        (failure) =>
-          isTransient(failure) && !(failure instanceof CoreTimeoutError)
-      );
+      const subscription = untilSignedOut
+        ? await retryingUntilSignedOut(
+            async () => await attempt(again),
+            stopping.signal
+          )
+        : await retrying(
+            async () => await attempt(again),
+            startRetryMs,
+            // No connection came in its few seconds: say so, rather than
+            // wait on, as a page does when core is out of reach. Stopped:
+            // nothing more to try.
+            (failure) =>
+              !stopping.signal.aborted &&
+              isTransient(failure) &&
+              !(failure instanceof CoreTimeoutError)
+          );
       release = () => {
         void releaseQuietly(subscription);
         subscription[Symbol.dispose]();
@@ -173,13 +230,14 @@ export const followChat = (
         release();
         return;
       }
-      // The connection dropped: watch again on the next, after the last
-      // message this page has. Core answers the watch with a stub.
+      // The connection dropped: watch again on the next. Core answers
+      // the watch with a stub.
       const stub: unknown = subscription;
       if (stub instanceof RpcStub) {
         stub.onRpcBroken(() => {
           if (!closed) {
-            void watch();
+            onDropped?.();
+            void start(true);
           }
         });
       }
@@ -192,9 +250,42 @@ export const followChat = (
       }
     }
   };
-  void watch();
+  void start(false);
   return () => {
     closed = true;
+    stopping.abort();
     release?.();
   };
+};
+
+/**
+ * Follows `chatId` over `core`: `onUpdate` gets every update, `onFailed`
+ * why following stopped for good, and whether that is because core has no
+ * such chat for the person (`gone`: deleted, or not theirs). Any other
+ * refusal (too many pages following chats, say) leaves the chat theirs, and
+ * only says why. After a drop it watches again after the last message the
+ * page has. Returns what stops it.
+ */
+export const followChat = (
+  core: CoreConnection,
+  chatId: string,
+  onUpdate: (update: ChatUpdate) => void,
+  onFailed: (reason: string, gone: boolean) => void,
+  /** The connection dropped: watched again, from the next update on. */
+  onDropped?: () => void
+): (() => void) => {
+  let after: number | null = null;
+  const received = (update: ChatUpdate): void => {
+    const last = update.messages.at(-1);
+    if (last !== undefined) {
+      after = last.id;
+    }
+    onUpdate(update);
+  };
+  return follow(
+    core,
+    async (session) => await session.chats.watch(chatId, after, received),
+    onFailed,
+    onDropped === undefined ? {} : { onDropped }
+  );
 };
