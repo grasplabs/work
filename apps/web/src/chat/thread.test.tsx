@@ -790,7 +790,6 @@ describe(ChatThread, () => {
         text: "And 3 + 3?",
         mentions: [],
         files: [{ id: "f1", file: new File(["1,2"], "sums.csv") }],
-        after: 2,
         at,
         queues: false,
         alreadyQueued: 0,
@@ -922,7 +921,6 @@ describe(ChatThread, () => {
         text: asked.text,
         mentions: [],
         files: [],
-        after: 2,
         at,
         queues: false,
         alreadyQueued: 0,
@@ -1738,10 +1736,11 @@ describe("a thread's New line", () => {
   });
 
   /** The thread's rows' ids, in order: the line, and the answer under it. */
-  const cameBackRows = ["q1", "a2", "q3", newLineRow, "a4"];
+  // Each answer's row is named after the question it answers.
+  const cameBackRows = ["q1", "q1a1", "q3", newLineRow, "q3a1"];
 
   it("goes to the New line when it lies further from the view than the browser draws: the end not drawn, as after scrolling back before the dock closed", async () => {
-    const scrolled = laidOut({ height: 2000, drawnRows: ["q1", "a2"] });
+    const scrolled = laidOut({ height: 2000, drawnRows: ["q1", "q1a1"] });
     await thread(cameBack, null, [], undefined, undefined, undefined, 4);
     await act(async () => {
       await Promise.resolve();

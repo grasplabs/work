@@ -28,12 +28,6 @@ export interface PendingQuestion {
   text: string;
   mentions: readonly BoxMention[];
   files: readonly PendingFile[];
-  /**
-   * The chat's last message when it was sent: the first question after it
-   * is core's copy of this one. Unknown (the chat's messages not read yet
-   * as it went): its copy is the last question, in its words.
-   */
-  after: number | undefined;
   /** When it was sent, as this browser's clock says. */
   at: string;
   /**
@@ -147,24 +141,25 @@ export const takesBack = (
 
 /**
  * Whether core has its own copy of `question`: queued behind the answer
- * being written, in its words, or in `messages`, the first question after
- * it (when where it went isn't known, the last question, in its words).
+ * being written, in its words, or in `messages`, with the key it went with
+ * (`ChatMessage.key`), never another question that came meanwhile (an
+ * older one queued, now taken). Core keeps the key in the question's own
+ * entry, so its copy has it whatever restarted on the way.
  */
 export const taken = (
   question: PendingQuestion,
   messages: readonly ChatMessage[],
   queued: readonly ChatQueued[] = []
 ): boolean => {
-  const { after } = question;
+  const { key, text } = question;
   if (
-    queued.filter(({ text }) => text === question.text).length >
-    question.alreadyQueued
+    queued.filter((each) => each.text === text).length > question.alreadyQueued
   ) {
     return true;
   }
-  return after === undefined
-    ? messages.findLast(({ role }) => role === "user")?.text === question.text
-    : messages.some(({ id, role }) => role === "user" && id > after);
+  return messages.some(
+    (message) => message.role === "user" && message.key === key
+  );
 };
 
 /**

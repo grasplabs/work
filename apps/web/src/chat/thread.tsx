@@ -718,6 +718,48 @@ const sameAgent = (
 };
 
 /**
+ * A question's row ID: the key the page sent it with, where it has one,
+ * so the question drawn as it was sent (`pendingRowId`) and core's copy
+ * are one row, never drawn twice nor moved. A key a question before it
+ * took already (`used`: core forgets a key after a day, and the page may
+ * send it again) gives way to its ID, so no two rows share one.
+ */
+const questionRowId = (
+  key: string | undefined,
+  id: number,
+  used: Set<string>
+): string => {
+  if (key === undefined || used.has(key)) {
+    return `q${id}`;
+  }
+  used.add(key);
+  return `q:${key}`;
+};
+
+/** The row ID of the question on its way: the one core's copy takes. */
+const pendingRowId = (question: PendingQuestion): string => `q:${question.key}`;
+
+/**
+ * An answer's row ID: after the question it answers, and how many answers
+ * came before it there; never its first reply's, so the row Grasp works in
+ * stays the same row once that reply is kept.
+ */
+const answerRowId = (question: string, answers: number): string =>
+  `${question}a${answers + 1}`;
+
+/**
+ * How many answer rows follow the last question in `rows`, and that
+ * question's row ID ("" before any question).
+ */
+const lastAsked = (rows: readonly Row[]): { id: string; answers: number } => {
+  const at = rows.findLastIndex(({ kind }) => kind === "question");
+  return {
+    id: rows[at]?.id ?? "",
+    answers: rows.slice(at + 1).filter(({ kind }) => kind === "answer").length,
+  };
+};
+
+/**
  * Whether `message` asks again what was asked last, after it was stopped
  * or failed (Try again, Ask again, or the same words sent again): the
  * question it repeats is the last one, nothing after it was answered to
@@ -750,22 +792,23 @@ const asksAgain = (
 };
 
 /**
- * An answer's row: live for the one Grasp works on now (`answering`),
- * and marked when it answers a question asked again.
+ * An answer's row: live for the one Grasp works on now, and marked when
+ * it answers a question asked again.
  */
 const answerRow = (
   id: string,
   at: string | undefined,
   replies: Answer[],
   partial: ChatPartial | null,
-  again: boolean
+  again: boolean,
+  live = false
 ): AnswerTurn => ({
   kind: "answer",
   id,
   at,
   replies,
   partial,
-  live: id === "answering",
+  live,
   ...(again ? { again: true as const } : {}),
 });
 
@@ -784,6 +827,7 @@ const rowsOf = (
   // Asked again: its answer starts a row of its own, never joined to the
   // answer that stopped.
   let again = false;
+  const keys = new Set<string>();
   for (const message of messages) {
     if (message.role === "user" && asksAgain(rows, message)) {
       again = true;
@@ -792,7 +836,7 @@ const rowsOf = (
       const before = rows.at(-1);
       rows.push({
         kind: "question",
-        id: `q${message.id}`,
+        id: questionRowId(message.key, message.id, keys),
         at: message.at,
         message,
         asked:
@@ -805,8 +849,15 @@ const rowsOf = (
       if (joins) {
         last.replies.push(message);
       } else {
+        const asked = lastAsked(rows);
         rows.push(
-          answerRow(`a${message.id}`, message.at, [message], null, again)
+          answerRow(
+            answerRowId(asked.id, asked.answers),
+            message.at,
+            [message],
+            null,
+            again
+          )
         );
       }
       again = false;
@@ -821,7 +872,17 @@ const rowsOf = (
     last.partial = partial;
     last.live = true;
   } else {
-    rows.push(answerRow("answering", last?.at, [], partial, again));
+    const asked = lastAsked(rows);
+    rows.push(
+      answerRow(
+        answerRowId(asked.id, asked.answers),
+        last?.at,
+        [],
+        partial,
+        again,
+        true
+      )
+    );
   }
   return rows;
 };
@@ -1539,14 +1600,19 @@ const withLast = (
     return [...rows, ...queuedRows, waiting, ...ending];
   }
   // Asked again after it stopped: no second bubble, its answer under the
-  // one that stopped (`asksAgain`).
+  // one that stopped (`asksAgain`). Else under the question core's copy
+  // of it takes the place of, as one row.
   const again = asksAgain(rows, pending);
   const asked: Row[] = again
     ? []
-    : [{ kind: "pending", id: "pending", question: pending }];
+    : [{ kind: "pending", id: pendingRowId(pending), question: pending }];
+  const last = lastAsked(rows);
+  const answerId = again
+    ? answerRowId(last.id, last.answers)
+    : answerRowId(pendingRowId(pending), 0);
   const answering: Row[] =
     live.running || again
-      ? [answerRow("answering", undefined, [], live.partial, again)]
+      ? [answerRow(answerId, undefined, [], live.partial, again, true)]
       : [];
   return [...rows, ...asked, ...answering, ...queuedRows, ...ending];
 };

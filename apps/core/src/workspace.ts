@@ -506,8 +506,19 @@ const followUpText = (name: string): string =>
   `The person addressed you too, ${JSON.stringify(name)}, in their question above. Answer it now as yourself, from what you know and may do. Don't repeat what another agent already said: add to it, or say where you differ.`;
 
 /**
+ * How a question sent while its chat's turn runs goes into that turn
+ * (`ChatHarness.queueQuestion`): its own ID there, and the page's key for
+ * it (`send`), which its entry keeps with it.
+ */
+interface QueuedAs {
+  id: string;
+  key: string | undefined;
+}
+
+/**
  * The turn's question (`TurnRequest`): as asked, with the files it carries,
- * and what the chat was started to make (`make`), if anything.
+ * what the chat was started to make (`make`), if anything, and the page's
+ * key for it (`key`), which its entry keeps with it.
  */
 const turnQuestion = (
   {
@@ -520,9 +531,11 @@ const turnQuestion = (
     followUp,
   }: z.output<typeof questionSchema>,
   files: { id: string; type: string }[],
-  make: ChatMake | null
+  make: ChatMake | null,
+  key: string | undefined
 ): TurnRequest["question"] => ({
   ...(followUp === undefined ? {} : { followUp }),
+  ...(key === undefined ? {} : { key }),
   text,
   model,
   ...(effort === undefined ? {} : { effort }),
@@ -1222,7 +1235,8 @@ export class Workspace extends DurableObject<Env> {
     message: Message,
     thinkingMs: number | null = null,
     built: ShownBuilt | null = null,
-    agentId: string | null = null
+    agentId: string | null = null,
+    requestKey: string | null = null
   ): { id: number; createdAt: Date } {
     const stored = this.#db
       .insert(chatMessages)
@@ -1232,6 +1246,7 @@ export class Workspace extends DurableObject<Env> {
         createdAt: new Date(),
         thinkingMs,
         agentId,
+        requestKey,
         built: built === null ? null : JSON.stringify(built),
       })
       .returning({ id: chatMessages.id, createdAt: chatMessages.createdAt })
@@ -1390,12 +1405,15 @@ export class Workspace extends DurableObject<Env> {
       files = [],
       built,
       agentId,
+      key,
     }: {
       thinkingMs?: number;
       files?: readonly string[];
       built?: ShownBuilt;
       /** The agent whose turn it is from; none for the person's own words. */
       agentId?: string;
+      /** The page's key for a question it sent (`send`). */
+      key?: string;
     } = {}
   ): number {
     // A question and the files it carries are kept together: each file is
@@ -1407,7 +1425,8 @@ export class Workspace extends DurableObject<Env> {
             message,
             thinkingMs ?? null,
             built ?? null,
-            agentId ?? null
+            agentId ?? null,
+            key ?? null
           )
         : this.ctx.storage.transactionSync(() => {
             const stored = this.#store(
@@ -1415,7 +1434,8 @@ export class Workspace extends DurableObject<Env> {
               message,
               thinkingMs ?? null,
               built ?? null,
-              agentId ?? null
+              agentId ?? null,
+              key ?? null
             );
             this.#db
               .update(chatFiles)
@@ -1438,7 +1458,8 @@ export class Workspace extends DurableObject<Env> {
         thinkingMs ?? null,
         message.role === "assistant" && this.#asksIn(chatId),
         built,
-        agentId
+        agentId,
+        key
       ),
       files.length === 0 ? undefined : this.#filesAfter(chatId, id - 1)
     );
@@ -2745,11 +2766,14 @@ export class Workspace extends DurableObject<Env> {
       onText,
       calls,
       remembered,
+      key,
     }: {
       started?: () => void;
       onText?: (text: string) => unknown;
       calls?: ToolCall[];
       remembered?: ChatSavedMemory[];
+      /** The page's key for the question, kept with it in its turn. */
+      key?: string;
     } = {}
   ): Promise<Answer> {
     // What the turn's record times from (turn-records.ts).
@@ -2894,7 +2918,8 @@ export class Workspace extends DurableObject<Env> {
         question: turnQuestion(
           { ...parsed.data, model: asked },
           files,
-          makeOf(chat)
+          makeOf(chat),
+          key
         ),
         shared,
         audience,
@@ -3037,7 +3062,7 @@ export class Workspace extends DurableObject<Env> {
     // the question is shown (`#store`), which waits on the chat's object
     // and may take seconds; back where it was if it is refused.
     const asked = this.#askedIn(chat.id);
-    void this.#takeQuestion(chat, question, started);
+    void this.#takeQuestion(chat, question, started, key);
     try {
       await started.promise;
       if (key !== undefined) {
@@ -3169,10 +3194,13 @@ export class Workspace extends DurableObject<Env> {
   async #takeQuestion(
     chat: Chat,
     question: Question,
-    started: PromiseWithResolvers<boolean>
+    started: PromiseWithResolvers<boolean>,
+    /** The page's key for it (`send`): its ID in the turn too, where given. */
+    key: string | undefined
   ): Promise<void> {
-    // The question's own ID in its turn: the same however often it is sent there.
-    const id = crypto.randomUUID();
+    // The question's own ID in its turn: the same however often it is sent
+    // there, as the page's key is.
+    const id = key ?? crypto.randomUUID();
     // Whether the chat's ChatSession was asked for a turn this object's
     // restart left running there: once, and only when the chat shows one.
     let askedLeft = false;
@@ -3182,7 +3210,7 @@ export class Workspace extends DurableObject<Env> {
         if (live === undefined && !askedLeft && this.#isRunning(chat.id)) {
           askedLeft = true;
           // oxlint-disable-next-line no-await-in-loop -- once, see above
-          if (await this.#queueIntoLeft(chat, id, question)) {
+          if (await this.#queueIntoLeft(chat, { id, key }, question)) {
             started.resolve(true);
             return;
           }
@@ -3190,7 +3218,7 @@ export class Workspace extends DurableObject<Env> {
           continue;
         }
         if (live === undefined) {
-          const ended = this.#sentTurns(chat, question, started);
+          const ended = this.#sentTurns(chat, question, started, key);
           this.#sent.add(ended);
           void this.#forget(ended);
           return;
@@ -3204,7 +3232,7 @@ export class Workspace extends DurableObject<Env> {
               agentId: live.agentId,
               underWay: live.underWay.promise,
             },
-            id,
+            { id, key },
             question
           )
         ) {
@@ -3236,7 +3264,8 @@ export class Workspace extends DurableObject<Env> {
   async #queueInto(
     chat: Chat,
     live: Pick<LiveTurn, "id" | "agentId"> & { underWay: Promise<boolean> },
-    id: string,
+    /** Its own ID in the turn, and the page's key, which goes with it. */
+    { id, key }: QueuedAs,
     question: Question
   ): Promise<boolean> {
     const parsed = questionSchema.safeParse(question);
@@ -3272,6 +3301,7 @@ export class Workspace extends DurableObject<Env> {
     const carried = this.#unsentFiles(chat.id, files);
     const queued: QueuedQuestion = {
       id,
+      ...(key === undefined ? {} : { key }),
       text,
       files: carried.map(({ id: fileId, type }) => ({ id: fileId, type })),
       ...(subject === undefined ? {} : { subject }),
@@ -3295,7 +3325,7 @@ export class Workspace extends DurableObject<Env> {
    */
   async #queueIntoLeft(
     chat: Chat,
-    id: string,
+    as: QueuedAs,
     question: Question
   ): Promise<boolean> {
     const turnId = await this.#activeTurn(chat.id);
@@ -3309,7 +3339,7 @@ export class Workspace extends DurableObject<Env> {
         agentId: this.#chat(chat.id).agentId,
         underWay: Promise.resolve(true),
       },
-      id,
+      as,
       question
     );
   }
@@ -3328,7 +3358,9 @@ export class Workspace extends DurableObject<Env> {
   async #sentTurns(
     chat: Chat,
     question: Question,
-    started: PromiseWithResolvers<boolean>
+    started: PromiseWithResolvers<boolean>,
+    /** The page's key for the question, which the first turn keeps with it. */
+    key: string | undefined
   ): Promise<void> {
     const addressed = (question.mentions ?? []).flatMap((mention) =>
       mention.kind === "agent" ? [mention] : []
@@ -3338,7 +3370,8 @@ export class Workspace extends DurableObject<Env> {
       first === undefined ? chat : { ...chat, agentId: first.id },
       question,
       started,
-      false
+      false,
+      key
     );
     for (const next of rest) {
       if (!answered) {
@@ -3390,7 +3423,9 @@ export class Workspace extends DurableObject<Env> {
      * a turn nobody waits on, whose reason goes on the chat instead.
      */
     started: PromiseWithResolvers<boolean> | undefined,
-    unattended: boolean
+    unattended: boolean,
+    /** The page's key for the question (`send`). */
+    key?: string
   ): Promise<boolean> {
     let underWay = false;
     try {
@@ -3399,6 +3434,7 @@ export class Workspace extends DurableObject<Env> {
           underWay = true;
           started?.resolve(true);
         },
+        ...(key === undefined ? {} : { key }),
       });
       return answer.outcome === "answered";
     } catch (error) {
@@ -3930,6 +3966,7 @@ export class Workspace extends DurableObject<Env> {
       files = [],
       thinkingMs,
       built,
+      key,
     } of messages) {
       answered ||= message.role === "assistant";
       if (entryId <= before.through) {
@@ -3939,11 +3976,12 @@ export class Workspace extends DurableObject<Env> {
       if (message.role === "assistant") {
         this.#partials.delete(chatId);
       }
-      const id = this.#keep(
-        chatId,
-        message,
-        keptWith(message, turnAgentId, { files, thinkingMs, built })
-      );
+      // A question with the key its page sent it with, which its entry
+      // keeps (`TurnMessage.key`).
+      const id = this.#keep(chatId, message, {
+        ...keptWith(message, turnAgentId, { files, thinkingMs, built }),
+        ...(key === undefined ? {} : { key }),
+      });
       if (message.role === "assistant") {
         answer = id;
       }
@@ -6122,7 +6160,15 @@ export class Workspace extends DurableObject<Env> {
       .orderBy(asc(chatMessages.id))
       .all()
       .flatMap((row) => {
-        const { id, message, createdAt, thinkingMs, built, agentId } = row;
+        const {
+          id,
+          message,
+          createdAt,
+          thinkingMs,
+          built,
+          agentId,
+          requestKey,
+        } = row;
         const stored = storedMessageSchema.parse(JSON.parse(message));
         const run = resultRunId(stored);
         const shown = withFiles(
@@ -6135,7 +6181,8 @@ export class Workspace extends DurableObject<Env> {
             thinkingMs,
             asking,
             builtOf(built),
-            agentId ?? undefined
+            agentId ?? undefined,
+            requestKey ?? undefined
           ),
           carried
         );

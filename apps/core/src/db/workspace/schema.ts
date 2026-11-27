@@ -162,6 +162,13 @@ export const chatMessages = sqliteTable(
      */
     rating: text({ enum: ["up", "down"] }),
     ratingReason: text("rating_reason"),
+    /**
+     * The page's key for a question (`ChatQuestion.key`), which the page
+     * drew it under the moment it was sent: the page knows its own
+     * question by it (`ChatMessage.key`). Null for any other message, and
+     * for a question sent without one.
+     */
+    requestKey: text("request_key"),
   },
   (table) => [index("chat_messages_chat").on(table.chatId, table.id)]
 );

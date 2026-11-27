@@ -504,7 +504,6 @@ describe("a chat's own page", () => {
       text: "And B?",
       mentions: [],
       files: [{ id: "file-b", file: new File(["b"], "for-b.csv") }],
-      after: 0,
       at: "2026-11-01T08:00:00.000Z",
       queues: false,
       alreadyQueued: 0,

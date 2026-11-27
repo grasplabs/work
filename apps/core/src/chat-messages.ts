@@ -319,7 +319,8 @@ export const partialOf = (message: AssistantMessage): ChatPartial => ({
  * plan (`proposePlan`) only there too: one a chat app's
  * model calls anyway was never offered, so it shows as the failed call it
  * is, never as questions. The person's Build it shows what it built
- * (`built`). An answer names the agent that gave it (`agentId`).
+ * (`built`). An answer names the agent that gave it (`agentId`), a
+ * question the key the page sent it with (`key`).
  */
 export const chatMessageOf = (
   id: number,
@@ -328,7 +329,8 @@ export const chatMessageOf = (
   thinkingMs: number | null = null,
   asking = false,
   built?: ShownBuilt,
-  agentId?: string
+  agentId?: string,
+  key?: string
 ): ChatMessage | undefined => {
   const at = createdAt.toISOString();
   if (message.role === "user") {
@@ -337,6 +339,7 @@ export const chatMessageOf = (
       role: "user",
       text: textOf(message.content),
       ...(built === undefined ? {} : { built }),
+      ...(key === undefined ? {} : { key }),
       at,
     };
   }
