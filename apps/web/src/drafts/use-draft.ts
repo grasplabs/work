@@ -4,6 +4,7 @@ import { RpcStub } from "capnweb";
 import { useEffect, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
+import { isTransient, wait } from "../core.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 
@@ -32,11 +33,17 @@ const releaseQuietly = async (subscription: {
   }
 };
 
+/** The pauses before following the draft again after a try that failed: longer each time, then the longest. */
+const followAgainMs = [1000, 2000, 4000, 8000, 15_000] as const;
+
 /**
  * Follows the draft of `subject` over `core`: `onWritten` hears of each
- * write. Followed again on the next connection when the tab's drops; a
- * watch core refuses just ends, as the other reads still come. Returns
- * what stops it.
+ * write. Followed again whenever following stops by itself: the tab's
+ * connection dropped, core let go of the follow (its object reset for
+ * good, or more pages of the person's followed it), or a try failed while
+ * core was out of reach or failing, waiting longer each time it fails. A
+ * refusal (no longer a builder of it) ends it, as the other reads still
+ * come. Returns what stops it.
  */
 const followDraft = (
   core: CoreConnection,
@@ -45,15 +52,30 @@ const followDraft = (
 ): (() => void) => {
   let closed = false;
   let release: (() => void) | undefined;
+  let failures = 0;
   const watch = async (again = false): Promise<void> => {
+    // Ends once: whichever of a dropped connection or core letting go of
+    // the callback comes first follows again, never both.
+    let current = true;
+    const followAgain = (): void => {
+      if (current && !closed) {
+        current = false;
+        void watch(true);
+      }
+    };
+    const heard = Object.assign(
+      () => {
+        onWritten();
+      },
+      { [Symbol.dispose]: followAgain }
+    );
     try {
       const subscription = await core.withSession(
-        async (session) =>
-          await session.drafts.watch(subject, () => {
-            onWritten();
-          })
+        async (session) => await session.drafts.watch(subject, heard)
       );
+      failures = 0;
       release = () => {
+        current = false;
         void releaseQuietly(subscription);
         subscription[Symbol.dispose]();
       };
@@ -61,22 +83,27 @@ const followDraft = (
         release();
         return;
       }
-      // Followed again after the connection dropped: whatever was written
-      // while it was down is read now.
+      // Followed again: whatever was written meanwhile is read now.
       if (again) {
         onWritten();
       }
       const stub: unknown = subscription;
       if (stub instanceof RpcStub) {
-        stub.onRpcBroken(() => {
-          if (!closed) {
-            void watch(true);
-          }
-        });
+        stub.onRpcBroken(followAgain);
       }
-    } catch {
-      // Refused or out of reach: the chat's writes and the page's own
-      // still read it again.
+    } catch (error) {
+      current = false;
+      if (closed || !isTransient(error)) {
+        // Refused: the chat's writes and the page's own still read it again.
+        return;
+      }
+      await wait(
+        followAgainMs[Math.min(failures, followAgainMs.length - 1)] ?? 0
+      );
+      failures += 1;
+      if (!closed) {
+        void watch(true);
+      }
     }
   };
   void watch();

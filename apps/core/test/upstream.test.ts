@@ -1,4 +1,4 @@
-import { evictDurableObject } from "cloudflare:test";
+import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -31,7 +31,8 @@ const follow = async (
   deliver: (told: { seq: number; revision: number }) => Promise<void>,
   ended: (code: number) => void = () => {
     // Not expected.
-  }
+  },
+  maxQueued = 16 * 1024
 ) => {
   let after = 0;
   return await followObject({
@@ -40,14 +41,47 @@ const follow = async (
         `https://draft-watch/?${new URLSearchParams({ person, after: String(after) }).toString()}`,
         { headers: { Upgrade: "websocket" } }
       ),
-    deliver: async (frame) => {
-      const told = draftToldSchema.parse(frame);
+    parse: (frame) => draftToldSchema.parse(frame),
+    deliver: async (told) => {
       await deliver(told);
       after = told.seq;
     },
+    maxQueued,
     ended,
-    refused: () => new Error("Refused"),
     logged: {},
+  });
+};
+
+/** Sends `text` as a frame on every socket of `subject`'s draft object, as a fault would. */
+const sendRaw = async (
+  subject: ReturnType<typeof newSubject>,
+  text: string
+): Promise<void> => {
+  await runInDurableObject(draftWatch(env, subject), (_instance, state) => {
+    for (const socket of state.getWebSockets()) {
+      socket.send(text);
+    }
+  });
+};
+
+/** How many sockets `subject`'s draft object holds. */
+const socketsOf = async (
+  subject: ReturnType<typeof newSubject>
+): Promise<number> =>
+  await runInDurableObject(
+    draftWatch(env, subject),
+    (_instance, state) => state.getWebSockets().length
+  );
+
+/** Closes every socket of `subject`'s draft object with `code`. */
+const closeAll = async (
+  subject: ReturnType<typeof newSubject>,
+  code: number
+): Promise<void> => {
+  await runInDurableObject(draftWatch(env, subject), (_instance, state) => {
+    for (const socket of state.getWebSockets()) {
+      socket.close(code, "By the test");
+    }
   });
 };
 
@@ -150,5 +184,129 @@ describe("a page's watch of an object", () => {
     await scheduler.wait(100);
 
     expect(taken).toStrictEqual([1]);
+  });
+
+  it("ends a watch that is sent a frame it doesn't carry, or one larger than it takes, telling why, and opens it no more", async () => {
+    const endings: number[] = [];
+    const bad = newSubject();
+    using badWatch = await follow(bad, "person", quiet, (code) => {
+      endings.push(code);
+    });
+    void badWatch;
+    const large = newSubject();
+    using largeWatch = await follow(
+      large,
+      "person",
+      quiet,
+      (code) => {
+        endings.push(code);
+      },
+      1024
+    );
+    void largeWatch;
+
+    await sendRaw(bad, "not json");
+    await sendRaw(
+      large,
+      JSON.stringify({ seq: 1, revision: 1, pad: "x".repeat(2048) })
+    );
+
+    await vi.waitFor(() => {
+      expect(endings.toSorted((a, b) => a - b)).toStrictEqual([
+        watchEnds.invalid,
+        watchEnds.tooLarge,
+      ]);
+    }, carried);
+    await vi.waitFor(async () => {
+      await expect(socketsOf(bad)).resolves.toBe(0);
+      await expect(socketsOf(large)).resolves.toBe(0);
+    }, carried);
+  });
+
+  it("catches a slow page up from what it took once frames for it outgrow the watch's bound, each telling reaching it, the last one too", async () => {
+    const subject = newSubject();
+    const taken: number[] = [];
+    const slow = Promise.withResolvers<true>();
+    let first = true;
+    using watch = await follow(
+      subject,
+      "person",
+      async ({ revision }) => {
+        if (first) {
+          first = false;
+          await slow.promise;
+        }
+        taken.push(revision);
+      },
+      undefined,
+      256
+    );
+    void watch;
+    const object = draftWatch(env, subject);
+    await object.revised(1);
+    // Many more than the bound holds while the page takes the first.
+    for (let revision = 2; revision <= 40; revision += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await object.revised(revision);
+    }
+    slow.resolve(true);
+
+    await vi.waitFor(() => {
+      expect(taken.at(-1)).toBe(40);
+    }, carried);
+    // In order, never one twice.
+    expect(taken).toStrictEqual(taken.toSorted((a, b) => a - b));
+    expect(new Set(taken).size).toBe(taken.length);
+  });
+
+  it("ends a watch its object ends for good (gone), and opens it again after any other close", async () => {
+    const subject = newSubject();
+    const endings: number[] = [];
+    const taken: number[] = [];
+    using watch = await follow(
+      subject,
+      "person",
+      async ({ revision }) => {
+        taken.push(revision);
+        await Promise.resolve();
+      },
+      (code) => {
+        endings.push(code);
+      }
+    );
+    void watch;
+
+    await closeAll(subject, 1011);
+    await draftWatch(env, subject).revised(1);
+    await vi.waitFor(() => {
+      expect(taken).toStrictEqual([1]);
+    }, carried);
+    await closeAll(subject, watchEnds.gone);
+
+    await vi.waitFor(() => {
+      expect(endings).toStrictEqual([watchEnds.gone]);
+    }, carried);
+  });
+
+  it("closes a socket whose state its object can't read, which the Worker opens again", async () => {
+    const subject = newSubject();
+    const taken: number[] = [];
+    using watch = await follow(subject, "person", async ({ revision }) => {
+      taken.push(revision);
+      await Promise.resolve();
+    });
+    void watch;
+    // As another version's code would have left it.
+    await runInDurableObject(draftWatch(env, subject), (_instance, state) => {
+      for (const socket of state.getWebSockets()) {
+        socket.serializeAttachment({ v: 0, shape: "older" });
+      }
+    });
+
+    await draftWatch(env, subject).revised(1);
+
+    await vi.waitFor(() => {
+      expect(taken).toStrictEqual([1]);
+    }, carried);
   });
 });

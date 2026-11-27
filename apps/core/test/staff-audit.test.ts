@@ -455,7 +455,8 @@ describe("Grasp staff's views, audited", () => {
         new SessionRpc(
           env,
           async () => await Promise.resolve(staff),
-          crypto.randomUUID()
+          crypto.randomUUID(),
+          new AbortController().signal
         ),
         "session"
       );
