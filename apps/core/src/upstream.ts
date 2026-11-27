@@ -150,6 +150,12 @@ export const followObject = async (
       return response;
     }
     opened.accept();
+    if (stopped) {
+      // Let go of while it opened (or while the frames before it were
+      // handed over): it must hold no place in the object.
+      opened.close(1000, "Released");
+      return opened;
+    }
     socket = opened;
     opened.addEventListener("message", ({ data }) => {
       if (socket !== opened || stopped) {
