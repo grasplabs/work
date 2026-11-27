@@ -106,6 +106,34 @@ export const withRevocationReads = async (
   }
 };
 
+/**
+ * A revoked permission of `agentId`, stored as a revocation leaves one:
+ * granted before, or (`granted: false`) a request declined before anyone
+ * granted it; held everywhere, or in one chat.
+ */
+export const revokedRow = async (
+  agentId: string,
+  { granted, chatId }: { granted: boolean; chatId: string | null }
+) => {
+  await env.DB.prepare(
+    `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
+      actions, binding, status, requested_by, requested_at, granted_by, granted_at,
+      revoked_by, revoked_at, chat_id)
+     VALUES (?, 'agent', ?, 'collection', ?, '["read"]', ?, 'revoked', 'test', 0, ?, ?, 'test', ?, ?)`
+  )
+    .bind(
+      crypto.randomUUID(),
+      agentId,
+      crypto.randomUUID(),
+      `R${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`.toUpperCase(),
+      granted ? "test" : null,
+      granted ? 0 : null,
+      Date.now(),
+      chatId
+    )
+    .run();
+};
+
 /** The chat's code run records, oldest first, as the object keeps them. */
 export const runRecords = async (stub: WorkspaceStub, chatId: string) =>
   await runInDurableObject(stub, (_instance, state) =>
