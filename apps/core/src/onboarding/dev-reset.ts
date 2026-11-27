@@ -18,6 +18,16 @@ import { onboardingStore } from "./store.ts";
 /** The same sites `fetch` reports for a request a page of our own made, or none at all. */
 const sameSiteFetches = new Set(["same-origin", "none"]);
 
+/** A POST from a page of a local stack's own: what every route here answers, and nothing else. */
+const isLocalPost = (request: Request, env: Env): boolean => {
+  const fetchSite = request.headers.get("sec-fetch-site");
+  return (
+    isLocalDevRequest(request, env) &&
+    request.method === "POST" &&
+    (fetchSite === null || sameSiteFetches.has(fetchSite))
+  );
+};
+
 const notFound = (requestId: string): Response =>
   errorResponse(404, requestErrors.create("request.not_found"), requestId);
 
@@ -26,12 +36,7 @@ export const devResetResponse = async (
   env: Env,
   requestId: string
 ): Promise<Response> => {
-  const fetchSite = request.headers.get("sec-fetch-site");
-  if (
-    !isLocalDevRequest(request, env) ||
-    request.method !== "POST" ||
-    (fetchSite !== null && !sameSiteFetches.has(fetchSite))
-  ) {
+  if (!isLocalPost(request, env)) {
     return notFound(requestId);
   }
   const person = await identify(env, request.headers);
@@ -60,12 +65,7 @@ export const devInterviewLinkResponse = async (
   env: Env,
   requestId: string
 ): Promise<Response> => {
-  const fetchSite = request.headers.get("sec-fetch-site");
-  if (
-    !isLocalDevRequest(request, env) ||
-    request.method !== "POST" ||
-    (fetchSite !== null && !sameSiteFetches.has(fetchSite))
-  ) {
+  if (!isLocalPost(request, env)) {
     return notFound(requestId);
   }
   const caller = await interviewCaller(env, request.headers);
@@ -96,12 +96,7 @@ export const devVoiceBudgetResponse = async (
   env: Env,
   requestId: string
 ): Promise<Response> => {
-  const fetchSite = request.headers.get("sec-fetch-site");
-  if (
-    !isLocalDevRequest(request, env) ||
-    request.method !== "POST" ||
-    (fetchSite !== null && !sameSiteFetches.has(fetchSite))
-  ) {
+  if (!isLocalPost(request, env)) {
     return notFound(requestId);
   }
   const person = await identify(env, request.headers);

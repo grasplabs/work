@@ -1429,13 +1429,6 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * On a local stack only (`vp run dev`): everything this onboarding kept,
-   * wiped, so its admin can walk the setup and an interview again from the
-   * start without stopping the stack (dev-reset.ts). Its tables are made
-   * again at once and its one row as it is first made, so the next request
-   * finds it as new. Anywhere else it does nothing.
-   */
-  /**
    * Today's voice given back to everyone, on a local stack only
    * (`DEV_SKIP_ROUTER_SECRET`), so the live interview can be tried again
    * the same day. Anywhere else it does nothing.
@@ -1449,6 +1442,13 @@ export class Onboarding extends DurableObject<Env> {
     return true;
   }
 
+  /**
+   * On a local stack only (`vp run dev`): everything this onboarding kept,
+   * wiped, so its admin can walk the setup and an interview again from the
+   * start without stopping the stack (dev-reset.ts). Its tables are made
+   * again at once and its one row as it is first made, so the next request
+   * finds it as new. Anywhere else it does nothing.
+   */
   async startOverLocally(): Promise<boolean> {
     if (this.env.DEV_SKIP_ROUTER_SECRET !== "true") {
       return false;

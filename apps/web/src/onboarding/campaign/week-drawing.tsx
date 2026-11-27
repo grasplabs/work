@@ -6,7 +6,8 @@
 import { visuallyHidden } from "@grasp-os/ui/lib/styles";
 import * as stylex from "@stylexjs/stylex";
 
-import { bayerAt, usePixels } from "./pixels.ts";
+import { bayerAt } from "../dither.ts";
+import { usePixels } from "./pixels.ts";
 import type { Put } from "./pixels.ts";
 
 const styles = stylex.create({
