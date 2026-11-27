@@ -1244,6 +1244,36 @@ describe("provisioning a placed client", () => {
     expect(secretsOn(connect).has("STRAY_KEY")).toBeFalsy();
   });
 
+  it("lets a deploy's busy Durable Objects finish on their code, in every upload of core and connect, a rotation's again too", async () => {
+    const manifest = await importRelease();
+    const { account, clientId, held } = await setUp(manifest);
+    await expect(failing(held, unbound)).resolves.toMatchObject({
+      code: "probe_unqualified",
+    });
+    // A rotation uploads both scripts again with nothing else changed.
+    await db
+      .update(clients)
+      .set({ generation: 2, rotatedAt: new Date() })
+      .where(eq(clients.id, clientId));
+    await expect(failing(held, unbound)).resolves.toMatchObject({
+      code: "probe_unqualified",
+    });
+    const { core, connect } = await scriptsOf(clientId);
+    const strategiesOf = (script: string) =>
+      (account.namespaces.get(namespace)?.get(script)?.versions ?? []).map(
+        ({ metadata }) => metadata.code_update_strategy
+      );
+
+    const deferred = { mode: "deferred", max_delay: 900 };
+    expect({
+      core: strategiesOf(core),
+      connect: strategiesOf(connect),
+    }).toStrictEqual({
+      core: [deferred, deferred],
+      connect: [deferred, deferred],
+    });
+  });
+
   it("records no secret as removed while the upload that would drop it hasn't landed, and both once it has", async () => {
     const manifest = await importRelease();
     const { account, clientId, held } = await setUp(manifest);
