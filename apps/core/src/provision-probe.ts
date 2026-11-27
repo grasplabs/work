@@ -1,4 +1,6 @@
+import { deploymentConfig } from "@grasp-os/shared/config";
 import { log } from "@grasp-os/shared/log";
+import { platformChangeSchema } from "@grasp-os/shared/platform-change";
 import {
   connectVersionPurpose,
   provisionProbeMaxBytes,
@@ -40,9 +42,10 @@ import { callSandboxed } from "./sandboxed.ts";
 // - Making core work for nobody: nothing is read, armed or called before
 //   the signature verifies.
 // - Leaking what the answer is about: binding and task names from core's
-//   own code, each with a yes or no, core's and connect's version ids and
-//   the client id the admin deployed. No resource id, no error message, no secret and
-//   nothing a client's people entered.
+//   own code, each with a yes or no, core's and connect's version ids, the
+//   release and the client id the admin deployed, and the name of the last
+//   migration of each database, a file of core's own release. No resource
+//   id, no error message, no secret and nothing a client's people entered.
 
 /** What a bucket is asked for: a key nothing writes, so the answer is "none". */
 const absentKey = "platform/probe";
@@ -192,6 +195,28 @@ const objects =
 const d1 = (database: D1Database) => async () =>
   await database.prepare("SELECT 1").first();
 
+/**
+ * The name of the last migration applied to `database`, as the admin and
+ * Wrangler record them (`d1_migrations`); null when none is, or the
+ * database didn't answer, which is logged by its error's kind only.
+ */
+const lastMigration = async (
+  binding: string,
+  database: D1Database
+): Promise<string | null> => {
+  try {
+    return await database
+      .prepare("SELECT name FROM d1_migrations ORDER BY id DESC LIMIT 1")
+      .first<string>("name");
+  } catch (error) {
+    log.warn("probe.schema_failed", {
+      binding,
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
+    return null;
+  }
+};
+
 /** A bucket's no-op: the head of a key nothing writes. */
 const r2 = (bucket: R2Bucket) => async () => await bucket.head(absentKey);
 
@@ -209,9 +234,10 @@ const modelFiles = (bucket: R2Bucket) => async () => {
 };
 
 /**
- * Core as the probe finds it: each private binding asked its no-op;
- * connect asked to arm its clock, which also says its binding answers;
- * core's own clock armed.
+ * Core as the probe finds it: the release its deploy named; each private
+ * binding asked its no-op; its database's last migration; connect asked
+ * to arm its clock, which also says its binding answers; core's own clock
+ * armed.
  */
 const probed = async (env: Env): Promise<ProvisionProbe> => {
   const namespaces = Object.entries(objectNamespaces(env));
@@ -226,6 +252,7 @@ const probed = async (env: Env): Promise<ProvisionProbe> => {
     connectAnswering,
     connect,
     core,
+    dbSchema,
     ...namespaced
   ] = await Promise.all([
     answers("DB", d1(env.DB)),
@@ -238,6 +265,7 @@ const probed = async (env: Env): Promise<ProvisionProbe> => {
     connectVersion(env),
     registration("connect", async () => await env.CONNECT.ensureClock()),
     registration("core", async () => await clock(env).ensureRegistered()),
+    lastMigration("DB", env.DB),
     ...namespaces.map(
       async ([name, namespace]) => await answers(name, objects(env, namespace))
     ),
@@ -246,6 +274,13 @@ const probed = async (env: Env): Promise<ProvisionProbe> => {
     version: env.CF_VERSION_METADATA?.id ?? null,
     connectVersion: connectAnswering,
     clientId: env.CLIENT_ID ?? null,
+    release:
+      deploymentConfig(
+        platformChangeSchema,
+        "PLATFORM_CHANGE",
+        env.PLATFORM_CHANGE
+      )?.release ?? null,
+    schema: { DB: dbSchema },
     bindings: {
       DB: db,
       FILES: files,
