@@ -35,6 +35,7 @@ import type { ReactElement, ReactNode } from "react";
 
 import { PanelPlaceContext } from "./float-window.tsx";
 import type { PanelPlacement } from "./float-window.tsx";
+import { NAME_HANDLE } from "./floating.ts";
 import { SHELL } from "./shell.ts";
 
 // Below this the shell is a phone's: the panels lie over the page, so there is no placement to switch.
@@ -515,6 +516,7 @@ export const PanelTitle = ({
     // name too) and opens nothing; a key (F2, Enter) opens it. Only the name's own: the popup's
     // presses reach here too, through React's tree.
     <span
+      {...{ [NAME_HANDLE]: "" }}
       onKeyDownCapture={() => {
         pressed.current = false;
       }}

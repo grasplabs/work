@@ -165,6 +165,12 @@ export const sizeByKey = (
 const CONTROL =
   "button, a, input, textarea, select, [contenteditable], [role=button], [role=link], [data-no-drag]";
 
+/**
+ * Marks the element round the panel's name (head.tsx): the name is a control only for its keys and
+ * its menu, so a press on it may start a drag.
+ */
+export const NAME_HANDLE = "data-name-handle";
+
 /** Whether a press on the head may start a drag: the main button, on the head itself, not a control. */
 export const draggable = (event: {
   button: number;
@@ -174,13 +180,14 @@ export const draggable = (event: {
   if (event.button !== 0 || !(event.target instanceof Element)) {
     return false;
   }
-  // The control the press is on may be the one listening (the head's move control, the panel's name,
-  // which is a control only for its double-click and its keys); any other control keeps its press.
+  // The control the press is on may be the one listening (the head's move control), or the panel's
+  // name the listener holds (`NAME_HANDLE`); any other control keeps its press.
   const control = event.target.closest(CONTROL);
   return (
     control === null ||
     control === event.currentTarget ||
-    !event.currentTarget.contains(control)
+    !event.currentTarget.contains(control) ||
+    event.currentTarget.hasAttribute(NAME_HANDLE)
   );
 };
 
