@@ -121,6 +121,7 @@ const shown = async (
     modelsAgain = models,
     sends = [],
     creates = [],
+    taking = Promise.resolve(true),
   }: {
     agents?: ChatAgent[];
     named?: string;
@@ -133,11 +134,15 @@ const shown = async (
     sends?: (Error | undefined)[];
     /** How each making of a chat goes, in turn, before they all go through. */
     creates?: (Error | undefined)[];
+    /** When core takes a question sent: at once by default. */
+    taking?: Promise<boolean>;
   } = {}
 ) => {
   const asked: string[] = [];
   /** The key each create and send went with. */
   const keys: string[] = [];
+  /** How many hold the connection checked now (`keepAlive`). */
+  const kept = { alive: 0 };
   /** How core is reached now, as the tab's connection finds it. */
   const reached = { reach: "reachable", watchers: new Set<() => void>() };
   let modelReads = 0;
@@ -170,6 +175,7 @@ const shown = async (
       if (failure !== undefined) {
         throw failure;
       }
+      await taking;
       asked.push(
         `send ${chatId} ${question.text}${question.mentions === undefined ? "" : ` ${JSON.stringify(question.mentions)}`}`
       );
@@ -191,8 +197,11 @@ const shown = async (
         reached.watchers.delete(changed);
       };
     },
-    keepAlive: () => () => {
-      // Nothing is asked of the stand-in.
+    keepAlive: () => {
+      kept.alive += 1;
+      return () => {
+        kept.alive -= 1;
+      };
     },
   };
   const rootRoute = createRootRoute({ component: Outlet });
@@ -252,7 +261,7 @@ const shown = async (
       changed();
     }
   };
-  return { asked, keys, reach };
+  return { asked, keys, reach, kept };
 };
 
 const box = (): HTMLElement => {
@@ -621,6 +630,37 @@ describe("Chat's page from Make something", () => {
     const made = keys.filter((each) => each.startsWith("create "));
     // Two tries of the first, one of the second.
     expect(new Set(made).size).toBe(2);
+  });
+
+  it("keeps the connection checked while a question is on its way, after Chat's start went as its chat opened", async () => {
+    const taken = Promise.withResolvers<boolean>();
+    const { kept } = await shown(undefined, undefined, {
+      taking: taken.promise,
+    });
+    await act(async () => {
+      typeInPrompt(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+    // The chat's page opened: Chat's start, and its box, are gone.
+    const meanwhile = {
+      startGone: document.querySelector('[role="textbox"]') === null,
+      alive: kept.alive,
+    };
+    await act(async () => {
+      taken.resolve(true);
+      await taken.promise;
+    });
+    await settled();
+
+    expect({ meanwhile, after: kept.alive }).toStrictEqual({
+      meanwhile: { startGone: true, alive: 1 },
+      after: 0,
+    });
   });
 
   it("sends a question asked before core has said which models there are once it has, with no second press", async () => {

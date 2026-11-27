@@ -58,3 +58,13 @@ export const useHoldHeartbeat = (): (() => () => void) => {
   const core = useConnection();
   return () => core?.holdHeartbeat?.() ?? noWatching();
 };
+
+/**
+ * Keeps the tab's connection checked for as long as what is on its way
+ * holds it (`CoreConnection.keepAlive`), not only while the box that sent
+ * it is on the page: returns what lets it go.
+ */
+export const useHoldAlive = (): (() => () => void) => {
+  const core = useConnection();
+  return () => core?.keepAlive?.() ?? noWatching();
+};

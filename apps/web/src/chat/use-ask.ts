@@ -15,7 +15,7 @@ import type { CoreConnection } from "../core-connection.ts";
 import { CoreTimeoutError, isConnectionFailure, timeoutMs } from "../core.ts";
 import type { Session } from "../core.ts";
 import { useCoreAction } from "../use-core-action.ts";
-import { useHoldHeartbeat } from "../use-core-reach.ts";
+import { useHoldAlive, useHoldHeartbeat } from "../use-core-reach.ts";
 import { useCore } from "../use-core.ts";
 import { activeChat, setActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
@@ -191,8 +191,12 @@ export interface Unsent {
   key: string;
   /** Its words. */
   question: string;
-  /** All it was asked with ({@link askedWith}). */
-  asked: string;
+  /**
+   * All it was asked with ({@link askedWith}); none for one this box took
+   * back from another (Chat's start, gone once it opened the chat): then
+   * its words alone say it is the same question.
+   */
+  asked: string | undefined;
 }
 
 /**
@@ -220,8 +224,17 @@ export const askedWith = (asked: {
  * the way; else a new one. Anything changed (another file, model, agent,
  * chat) makes it a new question, which core takes as one.
  */
-export const questionKeyFor = (unsent: Unsent | null, asked: string): string =>
-  unsent?.asked === asked ? unsent.key : crypto.randomUUID();
+export const questionKeyFor = (
+  unsent: Unsent | null,
+  question: string,
+  asked: string
+): string =>
+  unsent !== null &&
+  (unsent.asked === undefined
+    ? unsent.question === question
+    : unsent.asked === asked)
+    ? unsent.key
+    : crypto.randomUUID();
 
 /**
  * What the box to ask in needs: the text, model and effort, and asking in
@@ -241,6 +254,7 @@ export const useAsk = (
   const core = useCore();
   const { busy, failure, run } = useCoreAction();
   const holdHeartbeat = useHoldHeartbeat();
+  const holdAlive = useHoldAlive();
   const [text, setText] = useState("");
   // Why dictating into the text stopped on its own, kept with it: the box
   // it stopped in may have gone (dictation.ts).
@@ -274,6 +288,10 @@ export const useAsk = (
       setReturnedWhy(undefined);
     }
   }
+  // A question that failed to send: asked again, it goes with the same
+  // key, so a chat made for it, or the question itself, is never made
+  // twice (`questionKeyFor`).
+  const unsent = useRef<Unsent | null>(null);
   // The question on its way here (pending-question.ts), and the box's own
   // ID, which only it takes back.
   const owner = useBoxOwner();
@@ -308,12 +326,16 @@ export const useAsk = (
     }
   }
   // Taken back, or core's copy in the thread: it is no longer on its way.
+  // Taken back, its key is this box's to send it again with, so core
+  // takes it once even if the first try reached it.
   useEffect(() => {
-    if (
-      here !== undefined &&
-      (takesBack(here, owner) ||
-        (here.state === "sent" && taken(here, messages, queued)))
-    ) {
+    if (here === undefined) {
+      return;
+    }
+    if (takesBack(here, owner)) {
+      unsent.current = { key: here.key, question: here.text, asked: undefined };
+      clearPending(pendingHere, here);
+    } else if (here.state === "sent" && taken(here, messages, queued)) {
       clearPending(pendingHere, here);
     }
   }, [here, owner, messages, queued, pendingHere]);
@@ -338,10 +360,6 @@ export const useAsk = (
   // is on its way would ask it twice. A ref, as `busy` is only seen on the
   // next render.
   const sending = useRef(false);
-  // A question that failed to send: asked again, it goes with the same
-  // key, so a chat made for it, or the question itself, is never made
-  // twice (`questionKeyFor`).
-  const unsent = useRef<Unsent | null>(null);
   const attach = (chosen: readonly File[]): void => {
     const problems = chosen.flatMap((file) => problemOf(file) ?? []);
     const added = chosen
@@ -403,7 +421,7 @@ export const useAsk = (
       mentions: named,
       subject,
     });
-    const key = questionKeyFor(unsent.current, askedAs);
+    const key = questionKeyFor(unsent.current, question, askedAs);
     // The thread shows the question at once, and the box lets go of it.
     const asked: PendingQuestion = {
       text: question,
@@ -413,6 +431,7 @@ export const useAsk = (
         chatId === undefined || loaded ? (messages.at(-1)?.id ?? 0) : undefined,
       at: new Date().toISOString(),
       queues: running,
+      key,
       owner,
       fromBox,
       state: "sending",
@@ -476,6 +495,9 @@ export const useAsk = (
     };
     // Why it failed, kept with the question for whichever box takes it back.
     let why: string | undefined;
+    // Checked for as long as it is on its way, whatever box shows it then:
+    // Chat's start goes as the chat's page opens.
+    const letGo = holdAlive();
     const sent = await run(
       reaching(core, asking),
       fromBox
@@ -484,6 +506,7 @@ export const useAsk = (
           }
         : undefined
     );
+    letGo();
     sending.current = false;
     if (sent === undefined) {
       // From the box, the question leaves the thread and goes back into a

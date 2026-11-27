@@ -666,19 +666,28 @@ export class CoreConnection {
       return;
     }
     const holds = this.#holds;
-    // Behind a large message, a ping waits as long as a slow upload may
-    // take, so a socket that died while one went is still let go of.
-    const pinged = this.#answersWithin(
-      api.ping(),
-      this.#held > 0 ? heldPingMs : timeoutMs
-    );
+    const ping = api.ping();
+    // Its answer, however late: one that comes while core is asked over
+    // HTTP still says the socket works.
+    let heard = false;
+    const hear = async (): Promise<void> => {
+      await settled(ping);
+      heard = true;
+    };
+    void hear();
     if (
-      (await pinged) ||
+      // Behind a large message, a ping waits as long as a slow upload may
+      // take, so a socket that died while one went is still let go of.
+      (await this.#answersWithin(
+        ping,
+        this.#held > 0 ? heldPingMs : timeoutMs
+      )) ||
       // Behind a large message that went out meanwhile, a ping is late,
       // not lost.
       this.#holds !== holds ||
       this.#live !== api ||
-      (await this.#checkHost()) === "busy"
+      (await this.#checkHost()) === "busy" ||
+      heard
     ) {
       return;
     }

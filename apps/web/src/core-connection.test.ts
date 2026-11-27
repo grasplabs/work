@@ -59,6 +59,8 @@ interface Fake {
   break: () => void;
   /** Stops it answering anything, without saying so, as a socket the network died under. */
   silence: () => void;
+  /** Answers every ping it held back since, as a socket that recovers. */
+  speak: () => void;
   readonly session: object;
 }
 
@@ -67,10 +69,14 @@ interface Fake {
  * signed in, in turn, the last for every connection after.
  */
 const tab = (answers: Answer[]) => {
-  /** Whether the tab is in front, and what a fresh request to core finds. */
-  const page: { visible: boolean; host: HostCheck } = {
+  /**
+   * Whether the tab is in front, what a fresh request to core finds, and
+   * how long core takes to say it.
+   */
+  const page: { visible: boolean; host: HostCheck; hostTakesMs: number } = {
     visible: true,
     host: "answers",
+    hostTakesMs: 0,
   };
   const opened: Fake[] = [];
   const ended: string[] = [];
@@ -89,6 +95,7 @@ const tab = (answers: Answer[]) => {
       }
       let broken: (() => void) | undefined;
       let silent = false;
+      const held: (() => void)[] = [];
       const session = {
         whoami: async () => {
           asked.push("whoami");
@@ -114,6 +121,12 @@ const tab = (answers: Answer[]) => {
         silence: () => {
           silent = true;
         },
+        speak: () => {
+          silent = false;
+          for (const pong of held.splice(0)) {
+            pong();
+          }
+        },
         session,
       };
       opened.push(fake);
@@ -131,7 +144,11 @@ const tab = (answers: Answer[]) => {
         ping: async () => {
           asked.push("ping");
           if (silent) {
-            return await Promise.withResolvers<never>().promise;
+            const later = Promise.withResolvers<string>();
+            held.push(() => {
+              later.resolve("pong");
+            });
+            return await later.promise;
           }
           return await Promise.resolve("pong");
         },
@@ -155,7 +172,13 @@ const tab = (answers: Answer[]) => {
       offline = onOffline;
     },
     clock: { now: () => Date.now(), visible: () => page.visible },
-    checkHost: async () => await Promise.resolve(page.host),
+    checkHost: async () => {
+      const said = Promise.withResolvers<HostCheck>();
+      setTimeout(() => {
+        said.resolve(page.host);
+      }, page.hostTakesMs);
+      return await said.promise;
+    },
   });
   return {
     core,
@@ -547,6 +570,27 @@ describe("the tab's one connection to core", () => {
       hidden: false,
       busy: false,
       dead: true,
+    });
+  });
+
+  it("keeps a socket whose ping answers late, while core is asked over HTTP", async () => {
+    const { core, page, opened } = tab([one, one]);
+    await core.session();
+    const letGo = core.keepAlive();
+    await vi.advanceTimersByTimeAsync(0);
+    opened[0]?.silence();
+    page.hostTakesMs = 3000;
+    // The next ping (at 2.5 s) waits out its 5 s; core is asked, and takes
+    // 3 s; the socket recovers meanwhile.
+    await vi.advanceTimersByTimeAsync(heartbeatMs + 5000 + 250 + 1000);
+    opened[0]?.speak();
+    await vi.advanceTimersByTimeAsync(3000);
+    const kept = opened[0]?.disposed;
+    letGo();
+
+    expect({ kept, opened: opened.length }).toStrictEqual({
+      kept: false,
+      opened: 1,
     });
   });
 
