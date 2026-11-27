@@ -146,22 +146,25 @@ const sectionOf = async (
     title:
       container.querySelector("main h1")?.textContent ===
       (section === "overview" ? client.name : sectionWords[section].title),
-    // Its sections in the sidebar's level, and over each one where to see
-    // why it isn't read.
+    // Its sections in the sidebar's level, and over each one how it
+    // stands: not answering, or being set up.
     column:
       (column?.includes("Details") ?? false) &&
-      page.includes("Not read now: see its Setup"),
+      ["Not answering", "Being set up"].some((words) => page.includes(words)),
     failed: page.includes("This couldn’t be shown"),
-    fromCore: ["Needs Grasp", "% known", "From the company"].some((words) =>
-      page.includes(words)
-    ),
+    fromCore: [
+      "What else needs Grasp",
+      "People active last week",
+      "Talked",
+      "From the company",
+    ].some((words) => page.includes(words)),
     toSetup:
       container.querySelector(
         `main a[href="/organizations/${client.id}/setup"]`
       ) !== null,
     state: [
       "isn’t set up yet",
-      "See its Setup progress",
+      "See how its setting up goes",
       "’s Grasp didn’t answer",
       "Try again",
     ].filter((words) => page.includes(words)),
@@ -373,7 +376,7 @@ describe("an organization's sections without its core", () => {
       which: "one not deployed yet",
       client: waitingRow,
       admin: waitingAdmin,
-      state: ["isn’t set up yet", "See its Setup progress"],
+      state: ["isn’t set up yet", "See how its setting up goes"],
     },
   ];
 

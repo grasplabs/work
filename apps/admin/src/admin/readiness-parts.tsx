@@ -1,13 +1,8 @@
 /**
- * Platform's Readiness checklist (src/admin/readiness.ts), and the banner
- * Home shows while a required line isn't ready.
+ * Platform's Readiness checklist (src/admin/readiness.ts), and the
+ * one-line banner across the frame while a required line isn't ready.
  */
-import {
-  Alert,
-  AlertAction,
-  AlertDescription,
-  AlertTitle,
-} from "@grasp-os/ui/components/alert";
+import { Alert, AlertAction, AlertTitle } from "@grasp-os/ui/components/alert";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { CardContent } from "@grasp-os/ui/components/card";
@@ -122,7 +117,9 @@ export const ReadinessPanel = ({ readiness }: { readiness: Readiness }) => {
 
 /**
  * The banner across the top of the frame while a required line isn't
- * ready; nothing once all are. `onClose` sets it aside.
+ * ready, in one line: how many things stop an organization being
+ * onboarded, and the way to Readiness, which says what each is. Nothing
+ * once all are. `onClose` sets it aside.
  */
 export const ReadinessBanner = ({
   readiness,
@@ -134,9 +131,6 @@ export const ReadinessBanner = ({
   if (readiness.blocking === 0) {
     return null;
   }
-  const first = readiness.checks.find(
-    ({ required, status }) => required && status !== "ready"
-  );
   return (
     <Alert
       appearance="banner"
@@ -147,9 +141,6 @@ export const ReadinessBanner = ({
       <AlertTitle>
         {`Grasp can't onboard an organization yet: ${readiness.blocking} ${readiness.blocking === 1 ? "thing to fix" : "things to fix"}.`}
       </AlertTitle>
-      {first === undefined ? null : (
-        <AlertDescription>{`${first.title}: ${first.words}`}</AlertDescription>
-      )}
       <AlertAction>
         <Button asChild size="xs" variant="outline">
           <Link hash={readinessId} to="/platform">

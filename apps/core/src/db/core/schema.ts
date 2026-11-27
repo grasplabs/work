@@ -7168,7 +7168,12 @@ export const chatTurns = sqliteTable(
     cacheWriteTokens: integer("cache_write_tokens").notNull(),
     /** US dollars at list prices, as the gateway charged each response. */
     cost: real().notNull(),
-    /** Each tool it called, by name: `{ "<tool>": { "calls": n, "ms": t } }`. */
+    /**
+     * Each tool it called, by name: `{ "<tool>": { "calls": n, "ms": t } }`,
+     * `t` the sum of its calls' own times, a wait for a slot among the
+     * reads of one round included (chat-agent.ts `readsAtOnce`): reads that
+     * ran together overlap, so `t` may pass the turn's.
+     */
     tools: text({ mode: "json" })
       .$type<Record<string, { calls: number; ms: number }>>()
       .notNull(),
@@ -7187,6 +7192,12 @@ export const chatTurns = sqliteTable(
     code: text(),
     /** Whether pi compacted the chat during the turn. */
     compacted: integer({ mode: "boolean" }).notNull(),
+    /**
+     * Questions the person sent while the turn ran, which it took in and
+     * answered after its own (chat-harness.ts `queueQuestion`): its times and use
+     * cover them too.
+     */
+    queued: integer().notNull().default(0),
     /** Whether a restart cut it short and the chat's object took it up again: its times are then unknown. */
     resumed: integer({ mode: "boolean" }).notNull(),
   },

@@ -13913,6 +13913,10 @@ msgstr "Frage"
 msgid "Question {current} of {total}"
 msgstr "Frage {current} von {total}"
 
+#: src/chat/thread.tsx
+msgid "Queued"
+msgstr "In der Warteschlange"
+
 #: src/agents/setup/thinking-step.tsx
 msgid "Quick and careful. Good for most jobs."
 msgstr "Schnell und sorgfältig. Gut für die meisten Aufgaben."
@@ -14240,6 +14244,10 @@ msgstr "Neu verbinden"
 #: src/projects/project-view.tsx
 msgid "Reconnect it so the Apps and workflows that use it work again."
 msgstr "Verbinden Sie es neu, damit die Apps und Workflows, die es nutzen, wieder laufen."
+
+#: src/chat/composer.tsx
+msgid "Reconnecting to Grasp…"
+msgstr "Verbindung zu Grasp wird wiederhergestellt…"
 
 #: src/apps/app-data.tsx
 msgid "record"
@@ -15673,6 +15681,10 @@ msgstr "Einladungen senden"
 msgid "Send it when"
 msgstr "Senden, wenn"
 
+#: src/chat/thread.tsx
+msgid "Send now"
+msgstr "Jetzt senden"
+
 #: src/settings/event-sources.tsx
 msgid "Send one event"
 msgstr "Ein Event senden"
@@ -16850,6 +16862,7 @@ msgctxt "stop a workflow's run"
 msgid "Stop"
 msgstr "Stoppen"
 
+#: src/chat/composer.tsx
 #: src/frame/ui-words.tsx
 msgctxt "stop an answer"
 msgid "Stop"

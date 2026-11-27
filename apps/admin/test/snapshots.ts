@@ -6,6 +6,7 @@
  */
 import type { AdminKickoffView } from "@grasp-os/shared/admin-kickoff";
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import type { AdminSummary } from "@grasp-os/shared/admin-summary";
 import { STARTING_ORG_RULES } from "@grasp-os/shared/admin/onboarding-admin";
 import type {
   AiStatusReport,
@@ -47,6 +48,38 @@ export const aiStatusOf = (
           lastMonth: { period: monthBack(1), rows: spend.lastMonth ?? [] },
         },
       };
+
+/**
+ * A company's summary with nothing begun and nothing run, `needs` as
+ * given: what a core answers the admin's summary request with.
+ */
+export const emptyAdminSummary = (
+  needs: AdminSummary["needs"] = []
+): AdminSummary => ({
+  now: new Date().toISOString(),
+  onboarding: {
+    stage: "none",
+    day: null,
+    days: null,
+    known: 0,
+    threshold: 80,
+    told: false,
+    paused: false,
+    ready: false,
+    open: true,
+    openedAt: null,
+  },
+  needs,
+  connectors: { works: 0, again: 0, stopped: 0 },
+  asked: 0,
+  activity: {
+    runs: [],
+    workflowsLive: 0,
+    appsLive: 0,
+    agentsOn: 0,
+    activePeople: [],
+  },
+});
 
 /** A company with nothing begun: what a core answers that has no onboarding. */
 export const emptyAdminSnapshot = (name: string): AdminSnapshot => ({

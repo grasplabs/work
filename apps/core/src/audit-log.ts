@@ -1,3 +1,4 @@
+import { adminSummaryWeeks } from "@grasp-os/shared/admin-summary";
 import {
   auditEventMaxBytes,
   auditEventSchema,
@@ -21,9 +22,11 @@ import {
   and,
   asc,
   between,
+  count,
   desc,
   eq,
   gt,
+  gte,
   inArray,
   isNotNull,
   isNull,
@@ -45,7 +48,7 @@ import type {
   StretchVerification,
 } from "./audit-chain.ts";
 import migrations from "./db/audit-log/migrations/migrations.js";
-import { archives, events } from "./db/audit-log/schema.ts";
+import { activeWeeks, archives, events } from "./db/audit-log/schema.ts";
 import { migrateOnWake } from "./db/migrate.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 
@@ -108,6 +111,16 @@ export const archiveRetentionDays = 7 * 365;
 // nothing). Daily, not at each event's exact deadline: that would archive
 // a stretch per event, and each `audit.archived` event would bring an
 // alarm of its own. An event is archived at most a day past retention.
+
+/** The Monday, `YYYY-MM-DD` in UTC, of the week `at` falls in. */
+const mondayOf = (at: string | Date): string => {
+  const day = Math.floor(new Date(at).getTime() / dayMs);
+  // 1 January 1970 was a Thursday, three days after a Monday.
+  return new Date((day - ((day + 3) % 7)) * dayMs).toISOString().slice(0, 10);
+};
+
+/** The weeks `active_weeks` keeps: the admin summary's, this one included, and one more. */
+const activeWeeksKept = adminSummaryWeeks + 1;
 
 /** Most stretches one retention pass archives, and purges. */
 const stretchesPerPass = 10;
@@ -237,6 +250,8 @@ export interface SearchQuery {
 interface Incoming {
   id: string;
   event: string;
+  /** Who did it, in its week, when its actor is a person (`activeWeeks`). */
+  person: { userId: string; week: string } | null;
 }
 
 /**
@@ -260,7 +275,15 @@ const prepare = (input: AuditEvent): Incoming => {
       `Audit event ${parsed.id} is over ${auditEventMaxBytes} bytes`
     );
   }
-  return { id: parsed.id, event };
+  const { actor, at } = parsed;
+  return {
+    id: parsed.id,
+    event,
+    person:
+      actor.type === "person"
+        ? { userId: actor.userId, week: mondayOf(at) }
+        : null,
+  };
 };
 
 /**
@@ -442,6 +465,12 @@ export class AuditLog extends DurableObject<Env> {
    */
   override async alarm(): Promise<void> {
     await this.#rearm(Date.now() + dayMs);
+    // First, and on its own: a retention pass that fails never keeps it.
+    try {
+      this.#forgetOldWeeks();
+    } catch (error) {
+      log.error("audit.active_weeks_unpruned", errorFields(error));
+    }
     let moved = false;
     try {
       moved = await retainAuditLog(this);
@@ -480,6 +509,44 @@ export class AuditLog extends DurableObject<Env> {
   head(): ChainLink {
     const { seq, hash } = this.#tail();
     return { seq, hash };
+  }
+
+  /**
+   * Forgets who was active when before the weeks the admin's summary
+   * counts, and one more: kept no longer than that purpose needs.
+   */
+  #forgetOldWeeks(): void {
+    // The Monday of the oldest week kept, this one counted.
+    const oldest = mondayOf(
+      new Date(Date.now() - (activeWeeksKept - 1) * 7 * dayMs)
+    );
+    this.#db.delete(activeWeeks).where(lt(activeWeeks.week, oldest)).run();
+  }
+
+  /**
+   * Forgets the weeks person `userId` was active in, as their erasure
+   * does (person-erasure.ts, the `identity` area): their events stay, as
+   * the audit log's always do (D2).
+   */
+  forgetPerson(userId: string): void {
+    this.#db.delete(activeWeeks).where(eq(activeWeeks.userId, userId)).run();
+  }
+
+  /**
+   * How many people did something themselves in each week from `since`
+   * (a Monday, `YYYY-MM-DD`) on, by the Monday each week starts on (UTC),
+   * for the admin's summary (admin-summary.ts): the rows of `active_weeks`
+   * counted by week, each a person in a week in which the log appended an
+   * event whose actor is them. Weeks without anyone are left out. Only the
+   * counts leave the log.
+   */
+  activePeople(since: string): { week: string; people: number }[] {
+    return this.#db
+      .select({ week: activeWeeks.week, people: count() })
+      .from(activeWeeks)
+      .where(gte(activeWeeks.week, since))
+      .groupBy(activeWeeks.week)
+      .all();
   }
 
   /**
@@ -1000,9 +1067,26 @@ export class AuditLog extends DurableObject<Env> {
     // reading the head and writing after it, and fork the chain.
     return await this.ctx.blockConcurrencyWhile(async () => {
       const { entries, conflicts, conflictIds } = await this.#link(incoming);
+      const people = new Map(incoming.map(({ id, person }) => [id, person]));
+      const erased = await this.#erasedAmong(
+        entries.flatMap(({ id }) => {
+          const person = people.get(id);
+          return person === undefined || person === null ? [] : [person.userId];
+        })
+      );
       this.#db.transaction((tx) => {
         for (const entry of entries) {
           tx.insert(events).values(entry).run();
+          // Who did it, in its week: once each (`activePeople`), never
+          // someone whose erasure was asked for.
+          const person = people.get(entry.id);
+          if (
+            person !== undefined &&
+            person !== null &&
+            !erased.has(person.userId)
+          ) {
+            tx.insert(activeWeeks).values(person).onConflictDoNothing().run();
+          }
         }
       });
       return {
@@ -1012,6 +1096,33 @@ export class AuditLog extends DurableObject<Env> {
         conflictIds,
       };
     });
+  }
+
+  /**
+   * Of `userIds`, those whose erasure an admin asked for, as core's
+   * erasure ledger keeps them for good (`person_erasures`, by user ID): an
+   * event of theirs still waiting in an outbox when their erasure ran must
+   * not count them active again once it arrives. Read while nothing else
+   * appends, so an erasure's `forgetPerson` after it runs after the rows it
+   * would remove. When the ledger can't be read, every one of them counts
+   * as erased: the chain never waits on it, and a week counted short is
+   * the safe side.
+   */
+  async #erasedAmong(userIds: readonly string[]): Promise<Set<string>> {
+    if (userIds.length === 0) {
+      return new Set();
+    }
+    try {
+      const { results } = await this.env.DB.prepare(
+        "SELECT user_id AS userId FROM person_erasures WHERE user_id IN (SELECT value FROM json_each(?))"
+      )
+        .bind(JSON.stringify([...new Set(userIds)]))
+        .all<{ userId: string }>();
+      return new Set(results.map(({ userId }) => userId));
+    } catch (error) {
+      log.warn("audit.erasures_unread", errorFields(error));
+      return new Set(userIds);
+    }
   }
 
   /**

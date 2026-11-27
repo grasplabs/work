@@ -20,7 +20,7 @@ mockAccess();
 describe("an organization's pages", () => {
   useStoreSecrets({ deployer: token });
   // Only each test's own clients are listed: an earlier test's accounts
-  // are gone from the fake, and the overview counts every client.
+  // are gone from the fake, and Home counts every client.
   beforeEach(async () => {
     await db
       .update(clients)
@@ -35,7 +35,6 @@ describe("an organization's pages", () => {
     const answers = await Promise.all(
       [
         "/",
-        "/?phase=ready",
         "/platform",
         "/new-organization",
         `/organizations/${acme.clientId}`,
@@ -52,7 +51,7 @@ describe("an organization's pages", () => {
       answers,
       readers: acme.core.adminReaders,
     }).toStrictEqual({
-      answers: [403, 403, 403, 403, 403, 403].map((status) => ({
+      answers: [403, 403, 403, 403, 403].map((status) => ({
         status,
         body: "Forbidden",
       })),

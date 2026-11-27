@@ -1,16 +1,26 @@
-import { Button } from "@grasp-os/app-kit/components/button";
+import { Button } from "@grasp-os/ui/components/button";
+import { Icon, PlusIcon } from "@grasp-os/ui/lib/icons";
+import { visuallyHidden } from "@grasp-os/ui/lib/styles";
+import * as stylex from "@stylexjs/stylex";
 import {
   createFileRoute,
   getRouteApi,
   rootRouteId,
 } from "@tanstack/react-router";
-import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 
 import { WithAdmins } from "../admin/admins.tsx";
 import { AskChat } from "../admin/ask-chat.tsx";
 import { documentOf } from "../admin/ask-document.ts";
+import { loadEveryAdmin } from "../admin/org-loads.ts";
+import { freshMs } from "../admin/org-reads.ts";
 import { AdminHeader } from "../admin/page.tsx";
+
+const styles = stylex.create({
+  // The chat, as tall as the page under the bar: the conversation scrolls
+  // inside it, the box stays at its foot.
+  page: { display: "flex", flexDirection: "column", flexGrow: 1, minHeight: 0 },
+});
 
 /** Every organization, as the admin's layout read them. */
 const adminRoute = getRouteApi(rootRouteId);
@@ -29,6 +39,7 @@ const localToday = (): string => {
 const AskPage = () => {
   const { clients } = adminRoute.useLoaderData();
   const { about } = Route.useSearch();
+  const { admins } = Route.useLoaderData();
   const [chat, setChat] = useState(0);
   const name =
     about === undefined
@@ -45,20 +56,20 @@ const AskPage = () => {
             size="sm"
             variant="outline"
           >
-            <PlusIcon data-icon="inline-start" />
+            <Icon icon={PlusIcon} />
             New chat
           </Button>
         }
         page="Ask Grasp"
       />
-      <div className="flex min-h-0 flex-1 flex-col text-sm">
-        <h1 className="sr-only">Ask Grasp</h1>
+      <div {...stylex.props(styles.page)}>
+        <h1 {...stylex.props(visuallyHidden)}>Ask Grasp</h1>
         {/* Asked over every organization as its core answered, once they are in. */}
-        <WithAdmins>
-          {(admins) => (
+        <WithAdmins admins={admins}>
+          {(read) => (
             <AskChat
               about={name}
-              document={() => documentOf(admins, localToday())}
+              document={() => documentOf(read, localToday())}
               key={chat}
             />
           )}
@@ -72,5 +83,9 @@ const AskPage = () => {
 export const Route = createFileRoute("/ask")({
   validateSearch: (search: Record<string, unknown>): { about?: string } =>
     typeof search.about === "string" ? { about: search.about } : {},
+  loader: loadEveryAdmin,
+  staleTime: freshMs,
+  // A preload reads nothing: opened, the page loads anew and reads them.
+  preloadStaleTime: 0,
   component: AskPage,
 });

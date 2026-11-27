@@ -5,14 +5,14 @@
  * through the router, a round trip staff wait on, which core's audit log
  * records; so a page asks once, and reuses the answer:
  *
- * - while a read of a client is under way, whoever else asks for it (the
- *   frame and the organization's page, on the same render) waits on that
- *   one; one asked anew, after a change, waits only on a read begun in
+ * - while a read of a client is under way, whoever else asks for it (a
+ *   page of every organization and the organization's own, on the same
+ *   render) waits on that one; one asked anew, after a change, waits only on a read begun in
  *   the same load of the router, never on an older one;
  * - the newest question wins: answers are ordered by when they were
  *   asked, never by when they came in, so a slow read asked before a
  *   change can't replace the answer asked after it, whoever asked
- *   (the page alone, or the frame for every client);
+ *   (the organization's page alone, or a page of every organization);
  * - an answer stays fresh `freshMs`, moving between an organization's
  *   sections, or coming back to it, asks its core nothing, unless it was
  *   asked before the last change staff made: then a read asked after that
@@ -64,8 +64,6 @@ export interface OrgReads {
   loadBegan: () => void;
   /** Marks a read asked now, before it is sent: what its answers are `remember`ed with. */
   ask: () => number;
-  /** When the read of client `clientId` under way was asked (`ask`), if one is. */
-  reading: (clientId: string) => number | undefined;
   /**
    * Staff may have changed something (src/router.tsx: a reload of the
    * frame, as every change makes): answers asked before now may be
@@ -147,9 +145,9 @@ export const orgReads = (): OrgReads => {
         return await pending.answer;
       }
       // Asked anew, an answer to a read asked in this same load (and after
-      // `after`, the last change) is that load's read, already in: the
-      // frame's read of the open one can answer before the page's load
-      // asks. One that failed kept nothing, so it is read again.
+      // `after`, the last change) is that load's read, already in: a read
+      // of every organization can answer before the page's load asks. One
+      // that failed kept nothing, so it is read again.
       const kept = answers.get(clientId);
       if (anew && kept !== undefined && kept.asked > since) {
         return kept.admin;
@@ -177,7 +175,6 @@ export const orgReads = (): OrgReads => {
       loadFrom = asks;
     },
     ask,
-    reading: (clientId) => underWay.get(clientId)?.asked,
     changed: () => {
       lastChange = asks;
     },

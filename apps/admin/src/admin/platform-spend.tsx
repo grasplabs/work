@@ -26,7 +26,11 @@ import * as stylex from "@stylexjs/stylex";
 import { Await, Link as RouterLink } from "@tanstack/react-router";
 
 import { Panel, PanelNote } from "./panel.tsx";
-import { microsPerDollar, organizationSpendOf } from "./platform-spend-sums.ts";
+import {
+  microsPerDollar,
+  organizationSpendOf,
+  topOrganizationsMost,
+} from "./platform-spend-sums.ts";
 import type {
   OrganizationSpend,
   PlatformSpend,
@@ -271,11 +275,11 @@ const TopOrganizations = ({
 
 /** Which organizations aren't in the sums, as their core didn't answer. */
 const unreadLine = ({ unread, organizations }: PlatformSpend): string =>
-  `Read from ${organizations - unread.length} of ${organizations} active organizations. Not in these sums, as their core didn’t answer: ${unread.join(", ")}.`;
+  `Read from ${organizations - unread.length} of ${organizations} active organizations. Not in these sums, as their core didn’t answer: ${unread.map(({ name }) => name).join(", ")}.`;
 
 /** Which organizations aren't in the sums, as their core's release doesn't report it. */
 const unreportedLine = ({ unreported }: PlatformSpend): string =>
-  `Not reported by their release, so not in these sums: ${unreported.join(", ")}.`;
+  `Not reported by their release, so not in these sums: ${unreported.map(({ name }) => name).join(", ")}.`;
 
 /**
  * Every active organization's spend on Grasp's keys summed, read from
@@ -295,11 +299,15 @@ export const PlatformSpendPanel = ({
         if (all === null) {
           return <PanelNote>The organizations couldn’t be read now.</PanelNote>;
         }
+        // Those that cost the most, this month then last: none that cost nothing.
+        const top = all.byOrganization
+          .filter(({ thisMonth, lastMonth }) => thisMonth + lastMonth > 0)
+          .slice(0, topOrganizationsMost);
         return (
           <>
             <SpendBody overview={all} />
-            {all.top.length === 0 ? null : (
-              <TopOrganizations overview={all} top={all.top} />
+            {top.length === 0 ? null : (
+              <TopOrganizations overview={all} top={top} />
             )}
             {all.unread.length === 0 ? null : (
               <PanelNote>{unreadLine(all)}</PanelNote>

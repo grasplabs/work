@@ -6,44 +6,14 @@ import { Progress } from "@grasp-os/app-kit/components/progress";
  */
 import { Stat } from "@grasp-os/app-kit/components/stat";
 import { cn } from "@grasp-os/app-kit/lib/utils";
-import { STAGES } from "@grasp-os/shared/admin/onboarding-admin";
 import type {
   LinkState,
   OrgKnowledge,
   PersonView,
-  Stage,
-  StageStatus,
 } from "@grasp-os/shared/admin/onboarding-admin";
 import { CheckIcon } from "lucide-react";
 import { Fragment } from "react";
 import type { ReactNode } from "react";
-
-const segment: Record<StageStatus, string> = {
-  done: "bg-foreground",
-  now: "bg-foreground/45",
-  waits: "bg-status-attention",
-  later: "bg-border",
-};
-
-/** The steps of an onboarding as a short bar: done, in hand, waiting on someone, not yet. */
-export const StageBar = ({
-  stages,
-  label,
-}: {
-  stages: Record<Stage, StageStatus>;
-  label: string;
-}) => (
-  <span className="flex w-28 gap-0.5">
-    <span className="sr-only">{label}</span>
-    {STAGES.map((stage) => (
-      <span
-        aria-hidden
-        className={cn("h-1 flex-1 rounded-full", segment[stages[stage]])}
-        key={stage}
-      />
-    ))}
-  </span>
-);
 
 /** Where the rounding of a share of the dots may land just under a whole one. */
 const dotSlack = 1e-9;

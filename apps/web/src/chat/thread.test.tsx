@@ -6,6 +6,7 @@ import type {
   ChatAgent,
   ChatMessage,
   ChatPartial,
+  ChatQueued,
   ChatToolEvent,
 } from "@grasp-os/shared/chat";
 import type { ModelWait } from "@grasp-os/shared/models";
@@ -23,6 +24,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import type { PendingQuestion } from "./pending-question.ts";
 import { answerAgentsOf, ChatThread } from "./thread.tsx";
 import { newLineRow } from "./unread.ts";
 
@@ -39,6 +41,9 @@ let root: Root | undefined;
 
 /** The memories the page undid, by id, in order. */
 const forgotten: string[] = [];
+
+/** How often the thread asked for the queued questions to be sent now. */
+const sentNow: string[] = [];
 
 /** What core answers the page's undo of a memory. */
 let forgetAnswer: "done" | "nothing" = "done";
@@ -69,7 +74,11 @@ const thread = async (
   /** What the chat read, as the page passes it. */
   sources?: ReactNode,
   /** What the turn's model request waits on, as core says. */
-  modelWait?: ModelWait
+  modelWait?: ModelWait,
+  /** The questions queued behind the answer, as core says. */
+  queued?: readonly ChatQueued[],
+  /** The question on its way, as the page passes it. */
+  pending?: PendingQuestion
 ): Promise<void> => {
   const core = {
     withSession: async <T,>(
@@ -116,9 +125,14 @@ const thread = async (
         }
         checking={checking}
         modelWait={modelWait ?? null}
+        queued={queued}
+        onSendNow={() => {
+          sentNow.push("now");
+        }}
         tools={tools}
         newLineBefore={newLineBefore}
         sources={sources}
+        pending={pending}
       />
     ),
   });
@@ -256,6 +270,50 @@ describe(ChatThread, () => {
     document.body.replaceChildren();
     forgotten.length = 0;
     forgetAnswer = "done";
+    sentNow.length = 0;
+  });
+
+  it("draws the questions queued behind the answer last, in order, each saying so, Send now on the newest", async () => {
+    await thread(
+      [asked],
+      {
+        text: "Four",
+        reasoning: "",
+        code: [],
+        tools: [],
+      },
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      [
+        { id: "7", text: "And 3 + 3?" },
+        { id: "8", text: "And 4 + 4?" },
+      ]
+    );
+    const rows = [...document.querySelectorAll('[data-slot="message"]')];
+    const sendNow = [...document.querySelectorAll("button")].filter(
+      (button) => button.textContent.trim() === "Send now"
+    );
+    act(() => {
+      sendNow[0]?.click();
+    });
+
+    expect({
+      // The question, the answer being written, then each queued one.
+      last: rows.slice(-2).map((row) => row.textContent),
+      sendNow: sendNow.length,
+      newest: rows.at(-1)?.contains(sendNow[0] ?? null),
+      sentNow,
+    }).toStrictEqual({
+      last: ["And 3 + 3?Queued", "And 4 + 4?QueuedSend now"],
+      sendNow: 1,
+      newest: true,
+      sentNow: ["now"],
+    });
   });
 
   it("says under a call of remember who or what it is about, when it isn't the person", async () => {
@@ -701,6 +759,53 @@ describe(ChatThread, () => {
     });
   });
 
+  it("draws a question on its way as the person's own at once, after the chat's last answer", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    await thread(
+      [
+        asked,
+        {
+          id: 2,
+          role: "assistant",
+          text: "Four.",
+          code: [],
+          tools: [],
+          end: "done",
+          at,
+        },
+      ],
+      null,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        text: "And 3 + 3?",
+        mentions: [],
+        files: [{ id: "f1", file: new File(["1,2"], "sums.csv") }],
+        after: 2,
+        at,
+        queues: false,
+        owner: "box",
+        fromBox: true,
+        state: "sending",
+      }
+    );
+
+    const rows = [...document.querySelectorAll("article")].map(
+      (row) => `${row.getAttribute("aria-label") ?? "You"}: ${row.textContent}`
+    );
+    expect(rows).toStrictEqual([
+      expect.stringMatching(/^You: What is 2 \+ 2\?/u),
+      expect.stringMatching(/^Grasp: Four\./u),
+      expect.stringMatching(/^You: sums\.csv.*And 3 \+ 3\?/u),
+    ]);
+  });
+
   it("draws a question asked again after it stopped once, its new answer after the one that stopped; the same words after an answer that ended are a new question", async () => {
     const at = "2026-10-27T09:00:05.000Z";
     const reply = (
@@ -782,6 +887,49 @@ describe(ChatThread, () => {
       // The answer being written: a row of its own.
       expect.stringMatching(/^Grasp/u),
     ]);
+  });
+
+  it("draws a question asked again after it stopped, on its way, with no second bubble, its answer coming under the one that stopped", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    await thread(
+      [
+        asked,
+        {
+          id: 2,
+          role: "assistant",
+          text: "Let me",
+          code: [],
+          tools: [],
+          end: "cancelled",
+          at,
+        },
+      ],
+      null,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        text: asked.text,
+        mentions: [],
+        files: [],
+        after: 2,
+        at,
+        queues: false,
+        owner: "box",
+        fromBox: false,
+        state: "sending",
+      }
+    );
+
+    const rows = [...document.querySelectorAll("article")].map(
+      (row) => row.getAttribute("aria-label") ?? "You"
+    );
+    expect(rows).toStrictEqual(["You", "Grasp", "Grasp"]);
   });
 
   it("says what each call of Grasp's tools did in one line, and unfolds what it was given and what came of it", async () => {

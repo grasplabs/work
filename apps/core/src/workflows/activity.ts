@@ -18,9 +18,11 @@ import type { Member } from "../auth/identity.ts";
 import { workflowDecisions } from "../db/core/schema.ts";
 import { resourceDecisionPending } from "../decisions/decisions.ts";
 import { runView, visibleToMember } from "./run-view.ts";
+import type { Visible } from "./run-view.ts";
 
 // The runs a person can list, started over the last days, and the people
-// they needed: the Workflows page's and the weekly report's. The same runs as the Workflows
+// they needed: the Workflows page's and the weekly report's; and every
+// run, counted the same way, for Grasp's admin (admin-summary.ts). The same runs as the Workflows
 // page's Runs tab (run-view.ts), and, like it, a read nobody audits: counts
 // of runs the person may list one by one anyway.
 //
@@ -157,14 +159,13 @@ const workflowsOf = (
 };
 
 /**
- * The runs `by` can list started over `days` UTC days up to `to` (today
- * unless given), both included (`runActivityQuerySchema`, as `input`), by
- * day and how they stand at `now`, the decisions they asked for, and each
- * workflow's, by name. A `to` after today is refused.
+ * The runs `visible` holds, counted as `runActivity` counts a person's:
+ * also the company's own counts, every run of every workflow (core's
+ * admin-summary.ts).
  */
-export const runActivity = async (
+export const activityOf = async (
   env: Env,
-  by: Member,
+  visible: Visible,
   input?: unknown,
   now = new Date()
 ): Promise<RunActivity> => {
@@ -181,7 +182,6 @@ export const runActivity = async (
   const first = last - parsed.data.days + 1;
   // Up to now on today, or to the end of an earlier last day.
   const until = last === today ? now : new Date((last + 1) * dayMs - 1);
-  const visible = await visibleToMember(env, by);
   const db = drizzle(env.DB);
   const run = runView(
     db,
@@ -244,3 +244,17 @@ export const runActivity = async (
   );
   return activity;
 };
+
+/**
+ * The runs `by` can list started over `days` UTC days up to `to` (today
+ * unless given), both included (`runActivityQuerySchema`, as `input`), by
+ * day and how they stand at `now`, the decisions they asked for, and each
+ * workflow's, by name. A `to` after today is refused.
+ */
+export const runActivity = async (
+  env: Env,
+  by: Member,
+  input?: unknown,
+  now = new Date()
+): Promise<RunActivity> =>
+  await activityOf(env, await visibleToMember(env, by), input, now);
