@@ -749,6 +749,34 @@ CREATE TABLE t (id TEXT);`,
     });
   });
 
+  it("reads a blob the imported release checked again where another manifest serves it under another extension", async () => {
+    const token = crypto.randomUUID();
+    const imported = await publishRelease({
+      notes: "feat(core): served as script",
+      assets: { "/a.js": `a ${token}` },
+    });
+    await runImport();
+    const [key] = Object.keys(imported.manifest.assets).map(assetKey);
+    // The same blob, at the same key and size, now said to be a stylesheet:
+    // its content key takes the extension, so it isn't one.
+    const renamed = nextReleaseId();
+    await putManifest({
+      ...imported,
+      id: renamed,
+      manifestText: imported.manifestText
+        .replace(`"releaseId": "${imported.id}"`, `"releaseId": "${renamed}"`)
+        .replace('"/a.js"', '"/a.css"'),
+    });
+    const { store, reads } = countingStore();
+
+    const result = await runImport(store);
+
+    expect({
+      failed: result.failed.includes(renamed),
+      read: reads.get(key ?? ""),
+    }).toStrictEqual({ failed: true, read: 1 });
+  });
+
   it("tries a read R2 fails again, and imports the release in the same run", async () => {
     const release = await largeRelease("feat(core): a read fails twice");
     const [, key] = blobsOf(release.manifest).map((blob) => blob.key);

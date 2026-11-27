@@ -13,14 +13,15 @@
  *
  * - its manifest: its id the one its key names, every blob at its content
  *   address, every static file it indexes one a Worker serves (`blobsOf`);
- * - each blob no imported release whose bundle is kept names: read whole
- *   and hashed, as CI hashed it (`checkBlob`);
- * - each blob such a release names too, most of a release, as a merge
- *   changes a few files: not read again. Blobs are content-addressed, and
- *   that release's import read and hashed it (or one before it did), and
+ * - each blob the newest imported release whose bundle is kept checked
+ *   the same way (the same key, size and, for a static file, extension:
+ *   `checksOf`), most of a release, as a merge changes a few files: not
+ *   read again. Blobs are content-addressed, that release's import read
+ *   and hashed it (or found it so checked by the release before it), and
  *   retention never deletes a blob a kept release names. Its head says
  *   it's still there, at its size, and, for a module or migration, with
  *   the SHA-256 R2 checked as CI stored it (`storedBlobProblem`);
+ * - each other blob: read whole and hashed, as CI hashed it (`checkBlob`);
  * - its model files, about 100 MB and never read whole here: by their
  *   heads, there, at their size, with the SHA-256 R2 computed when CI
  *   stored them.
@@ -58,6 +59,7 @@ import {
   blobSize,
   blobsOf,
   checkBlob,
+  checksOf,
   manifestKey,
   mapConcurrently,
   releaseManifestSchema,
@@ -74,13 +76,12 @@ import {
   compareReleaseIds,
   releaseIdSchema,
 } from "@grasp-os/shared/release-id";
-import { eq, sql } from "drizzle-orm";
+import { desc, eq, isNull, sql } from "drizzle-orm";
 
 import { actIfChanged } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import {
   auditEvents,
-  releaseBlobs,
   releaseImportFailures,
   releaseImportProgress,
   releases,
@@ -149,7 +150,7 @@ const READS_AT_ONCE = 2;
  */
 const RETRY_DELAYS_MS = [250, 1000, 2000] as const;
 
-/** Largest manifest the import reads; today's is about 35 KB. */
+/** Largest manifest the import reads; today's is about 350 KB. */
 export const MAX_MANIFEST_BYTES = 1_000_000;
 
 /**
@@ -352,41 +353,54 @@ const parseManifest = (
 };
 
 /**
- * Which of `blobs` an imported release whose bundle is kept names: those
- * an earlier import checked, still in the bucket. One indexed look-up per
- * key, the keys as one JSON parameter (D1 binds at most 100 a statement).
+ * What the newest imported release whose bundle is kept checked of each
+ * of its blobs (`checksOf`), by key: a release shares most of its blobs
+ * with the one before it. Its import read and hashed each, or found it
+ * checked the same way by the release before it, and so on back; and
+ * retention never deletes a blob a kept release names. Nothing when no
+ * release is imported, or its manifest no longer parses as this admin's
+ * (another manifest version): then every blob is read.
  */
-const importedBlobs = async (
-  db: AdminDatabase,
-  blobs: readonly ReleaseBlob[]
-): Promise<Set<string>> => {
-  const keys = JSON.stringify(blobs.map(({ key }) => key));
-  const rows = await db.all<{ blob: string }>(sql`
-    SELECT value AS blob FROM json_each(${keys})
-    WHERE EXISTS (
-      SELECT 1 FROM ${releaseBlobs}
-      JOIN ${releases} ON ${releases.id} = ${releaseBlobs.releaseId}
-      WHERE ${releaseBlobs.blobKey} = value AND ${releases.bundleDeletedAt} IS NULL
-    )`);
-  return new Set(rows.map(({ blob }) => blob));
+const checkedBefore = async (
+  db: AdminDatabase
+): Promise<Map<string, ReadonlySet<string>>> => {
+  const [newest] = await db
+    .select({ manifest: releases.manifest })
+    .from(releases)
+    .where(isNull(releases.bundleDeletedAt))
+    .orderBy(desc(releases.importedAt))
+    .limit(1);
+  const parsed =
+    newest === undefined
+      ? undefined
+      : releaseManifestSchema.safeParse(JSON.parse(newest.manifest));
+  if (parsed?.success !== true) {
+    return new Map();
+  }
+  return new Map(
+    blobsOf(parsed.data).map((blob) => [blob.key, new Set(checksOf(blob))])
+  );
 };
 
 /**
- * Checks `blobs` against the manifest, in its order: a blob in `imported`
- * by its head, any other read whole. Returns how many of them, from the
- * first, checked out, and, when one didn't, why.
+ * Checks `blobs` against the manifest, in its order: one whose checks are
+ * all among those `before` holds of its key by its head, any other read
+ * whole. Returns, once every check it started has settled, how many of
+ * them, from the first, checked out, and, when one didn't, why.
  */
 const checkBlobs = async (
   reader: Reader,
   blobs: readonly ReleaseBlob[],
-  imported: ReadonlySet<string>
+  before: ReadonlyMap<string, ReadonlySet<string>>
 ): Promise<{ checked: number; error?: Error }> => {
   const done = blobs.map(() => false);
+  const started: Promise<void>[] = [];
   // Set once one fails: a read still waiting for its turn isn't made.
   let stopped = false;
   const whole = gate(READS_AT_ONCE);
   const checkOne = async ([index, blob]: [number, ReleaseBlob]) => {
-    if (imported.has(blob.key)) {
+    const checked = before.get(blob.key);
+    if (checksOf(blob).every((check) => checked?.has(check) === true)) {
       const problem = storedBlobProblem(blob, await reader.head(blob.key));
       if (problem !== undefined) {
         throw new Error(`${blob.key} ${problem}`);
@@ -406,11 +420,20 @@ const checkBlobs = async (
     done[index] = true;
   };
   try {
-    await mapConcurrently([...blobs.entries()], REQUESTS_AT_ONCE, checkOne);
+    await mapConcurrently(
+      [...blobs.entries()],
+      REQUESTS_AT_ONCE,
+      async (entry) => {
+        const check = checkOne(entry);
+        started.push(check);
+        await check;
+      }
+    );
     return { checked: blobs.length };
   } catch (error) {
     stopped = true;
-    // The checks still running may yet finish: only those already done count.
+    // The run goes on only once nothing of this release is still read.
+    await Promise.allSettled(started);
     return { checked: done.indexOf(false), error: asError(error) };
   }
 };
@@ -436,7 +459,7 @@ const checkModelFiles = async (
 };
 
 /** How many of release `id`'s blobs an earlier attempt checked, for this very manifest. */
-const checkedBefore = async (
+const resumeAt = async (
   db: AdminDatabase,
   id: string,
   manifestSha256: string
@@ -500,15 +523,11 @@ const importRelease = async (
   // manifest it has now names them.
   await recordBlobs(db, id, manifest);
   const manifestSha256 = await sha256OfBytes(manifestBytes);
-  const from = Math.min(
-    await checkedBefore(db, id, manifestSha256),
-    blobs.length
-  );
-  const left = blobs.slice(from);
+  const from = Math.min(await resumeAt(db, id, manifestSha256), blobs.length);
   const { checked, error } = await checkBlobs(
     reader,
-    left,
-    await importedBlobs(db, left)
+    blobs.slice(from),
+    await checkedBefore(db)
   );
   let failure = error;
   if (failure === undefined) {

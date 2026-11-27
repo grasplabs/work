@@ -564,6 +564,25 @@ export const checkBlob = async (
 };
 
 /**
+ * What checking `blob`'s bytes proves, at each place the manifest names
+ * it, as text: for a module or migration, its SHA-256 and size; for an
+ * entry of the asset index, its size; for a static file a Worker serves,
+ * its content key, the extension that key takes, and its size. A blob is
+ * checked for another manifest by an earlier check of the same key only
+ * where each of its checks is among that one's.
+ */
+export const checksOf = (blob: ReleaseBlob): string[] =>
+  blob.expectations.map((expectation) => {
+    if (expectation.kind === "file") {
+      return `file ${expectation.sha256} ${expectation.size}`;
+    }
+    if (expectation.kind === "asset") {
+      return `asset ${expectation.size}`;
+    }
+    return `served ${expectation.hash} .${extensionOf(expectation.path)} ${expectation.size}`;
+  });
+
+/**
  * Why what a bucket reports of the object at `blob`'s key (null: there's
  * none) isn't `blob`, or undefined when nothing it reports says so: it's
  * there, at the size every place names, and a blob named by its SHA-256
@@ -571,8 +590,7 @@ export const checkBlob = async (
  * every blob with its SHA-256, which R2 checks as it takes the bytes
  * (scripts/release/upload-release.ts). What this can't see, only reading
  * the bytes does: an asset's (named by Cloudflare's content key, which R2
- * doesn't compute, and which takes each path's extension), or a file's R2
- * kept no SHA-256 for, of the same size.
+ * doesn't compute), or a file's R2 kept no SHA-256 for, of the same size.
  */
 export const storedBlobProblem = (
   blob: ReleaseBlob,
