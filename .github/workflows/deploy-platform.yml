@@ -202,13 +202,20 @@ jobs:
         run: |
           set -euo pipefail
           # What apps/admin/cf-worker.ts fills in: the store, the stage's
-          # hostname map, and the secrets the store has (an optional one it
-          # lacks stays unbound).
+          # hostname map, the secrets the store has (an optional one it
+          # lacks stays unbound), and the account's queues (the release
+          # manifests' queue, until it's made, isn't consumed; nor while
+          # the token can't list queues, which only costs the import its
+          # trigger: the cron still imports).
           cd apps/admin
           hosts=$(vp exec node ../../scripts/platform-names.ts "$STAGE" routerHosts)
           ROUTER_HOSTS_ID=$(vp exec cf kv namespaces list --per-page 100 | jq -r --arg title "$hosts" '[.[] | select(.title == $title) | .id] | if length == 1 then .[0] else error("expected one KV namespace " + $title) end')
           STORED_SECRETS=$(vp exec cf secrets-store secrets list --store-id "$SECRETS_STORE_ID" --per-page 100 | jq -r '[.[].name] | join(",")')
-          export ROUTER_HOSTS_ID STORED_SECRETS
+          QUEUES=$(vp exec cf queues list | jq -r '[.[].queue_name] | join(",")') || {
+            echo "::warning::Couldn't list the account's queues, so the admin consumes none"
+            QUEUES=""
+          }
+          export ROUTER_HOSTS_ID STORED_SECRETS QUEUES
           # Built for the stage (Vite's mode, which cloudflare.config.ts
           # reads), then that build deployed with cf, naming the same mode.
           vp build --mode "$STAGE"

@@ -74,10 +74,11 @@ export const releaseImportFailures = sqliteTable("release_import_failures", {
 });
 
 /**
- * How far the import has checked a published release whose blobs don't fit
- * in one run's reads (src/releases/import.ts): the first `verifiedBlobs`
- * of them, in its manifest's order, for the manifest with that sha256.
- * Gone once it's imported, or once an attempt fails.
+ * How far the import has checked a published release it didn't finish,
+ * as a run's requests ran out or an attempt failed partway
+ * (src/releases/import.ts): the first `verifiedBlobs` of them, in its
+ * manifest's order, for the manifest with that sha256, where the next
+ * attempt goes on. Gone once it's imported.
  */
 export const releaseImportProgress = sqliteTable("release_import_progress", {
   releaseId: text("release_id").primaryKey(),

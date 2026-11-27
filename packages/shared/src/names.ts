@@ -8,6 +8,7 @@
  * | Router Worker                | `grasp-router`          | `grasp-router-staging`           |
  * | Connect gateway Worker       | `grasp-connect-gateway` | `grasp-connect-gateway-staging`  |
  * | Releases bucket (R2)         | `grasp-releases`        | `grasp-releases-staging`         |
+ * | Its manifests' queue         | `grasp-release-manifests` | `grasp-release-manifests-staging` |
  * | Router's hostname map (KV)   | `grasp-router-hosts`    | `grasp-router-hosts-staging`     |
  * | Clients' dispatch namespace  | `grasp-clients`         | `grasp-clients-staging`          |
  * | A Secrets Store secret       | `NAME`                  | `NAME_STAGING`                   |
@@ -62,6 +63,13 @@ export const adminDatabaseName = (stage: Stage): string =>
 /** The R2 bucket the admin imports releases from, in `stage`. */
 export const releasesBucketName = (stage: Stage): string =>
   staged(`${namePrefix}releases`, stage);
+
+/**
+ * The queue the releases bucket in `stage` tells of each manifest written
+ * to, which the admin consumes.
+ */
+export const releaseManifestsQueueName = (stage: Stage): string =>
+  staged(`${namePrefix}release-manifests`, stage);
 
 /**
  * Grasp's Cloudflare account, "Grasp Work", where both stages run: an id,

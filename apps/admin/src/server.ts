@@ -9,14 +9,16 @@
  * The admin can have a hostname of its own (src/admin-host.ts). Its pages
  * are served from the root.
  *
- * The cron imports newly published releases (src/releases/import.ts),
- * each taken to Edge as it's saved (src/rollout/channels.ts), deletes the
+ * Newly published releases are imported (src/releases/import.ts), each
+ * taken to Edge as it's saved (src/rollout/channels.ts), as soon as R2
+ * says a manifest was written, through the admin's queue, and by the cron
+ * every minute besides. Every fifth minute the cron then deletes the
  * bundles of releases never promoted past Edge after 14 days
- * (src/releases/retention.ts), deploys each client
- * whose Workers run something other than its target
- * (src/rollout/reconciler.ts), then resumes provisioning that isn't
- * getting anywhere (src/hosting/reconcile.ts); the watch's own cron reads
- * how Stephen fares at every client every hour (src/clients/watch.ts).
+ * (src/releases/retention.ts), deploys each client whose Workers run
+ * something other than its target (src/rollout/reconciler.ts), then
+ * resumes provisioning that isn't getting anywhere
+ * (src/hosting/reconcile.ts); the watch's own cron reads how Stephen fares
+ * at every client every hour (src/clients/watch.ts).
  * `AdminRuns` holds the admin's runs on Workerflow (src/workflow-runs.ts):
  * applying a client's settings now
  * (src/clients/apply.ts), attempts at provisioning a client placed in a
@@ -40,6 +42,7 @@ import { adminDatabase } from "./db/act.ts";
 import { errorCode } from "./deploy/errors.ts";
 import { reconcileProvisioning } from "./hosting/reconcile.ts";
 import { importReleases } from "./releases/import.ts";
+import type { ImportResult } from "./releases/import.ts";
 import { deleteExpiredBundles } from "./releases/retention.ts";
 import { reconcile } from "./rollout/reconciler.ts";
 
@@ -57,48 +60,77 @@ const withStaff = withAccess(async (request, staff) =>
     : await handler.fetch(request, { context: { staff } })
 );
 
+/** Every this many minutes, the admin's cron runs the rest of its tick after the import. */
+const TICK_MINUTES = 5;
+
+/** The import, its failure logged by its code: nothing imported then. */
+const importNow = async (env: Env): Promise<ImportResult> => {
+  try {
+    return await importReleases(env.RELEASES, adminDatabase(env.DB));
+  } catch (error) {
+    log.error("releases.import_failed", { error: errorCode(error) });
+    return { imported: [], failed: [], caughtUp: false };
+  }
+};
+
+/**
+ * Each client to its target, Edge's new release among them: on the tick,
+ * and at once when an import took a release to Edge, as a staff member's
+ * promotion does (src/rollout/functions.ts). The reconciler acts only
+ * while it holds its lease, so runs that overlap are safe.
+ */
+const reconcileNow = async (env: Env): Promise<void> => {
+  try {
+    await reconcile(env);
+  } catch (error) {
+    log.error("reconcile.failed", { error: errorCode(error) });
+  }
+};
+
 export default {
   // Past the Access check, a page may move to the admin's own hostname
   // (src/admin-host.ts), so nothing about it shows to anyone else.
   fetch: async (request: Request, env: Env) =>
     await withStaff(request, env, () => adminHostRedirect(request, env)),
   scheduled: async (controller, env) => {
+    const at = new Date(controller.scheduledTime);
     if (controller.cron === watchCron) {
-      await watchStephen(env, new Date(controller.scheduledTime));
+      await watchStephen(env, at);
       return;
     }
-    // An import that fails never keeps stuck provisioning from resuming:
-    // logged by its code, and reconciling runs all the same.
-    let caughtUp = false;
-    try {
-      ({ caughtUp } = await importReleases(
-        env.RELEASES,
-        adminDatabase(env.DB)
-      ));
-    } catch (error) {
-      log.error("releases.import_failed", { error: errorCode(error) });
-    }
+    // Every minute, the import; every fifth, the rest of the tick after
+    // it, in the same invocation, so retention never runs beside the
+    // cron's import. An import that fails never keeps stuck provisioning
+    // from resuming: logged by its code, and the rest runs all the same.
+    const { imported, caughtUp } = await importNow(env);
+    const tick = at.getUTCMinutes() % TICK_MINUTES === 0;
     // Bundles of releases never promoted past Edge go after 14 days: only
     // once the import read every release published, so each one's blobs
     // are on record and kept.
     try {
-      if (caughtUp) {
-        await deleteExpiredBundles(
-          adminDatabase(env.DB),
-          env.RELEASES,
-          new Date(controller.scheduledTime)
-        );
+      if (tick && caughtUp) {
+        await deleteExpiredBundles(adminDatabase(env.DB), env.RELEASES, at);
       }
     } catch (error) {
       log.error("releases.retention_failed", { error: errorCode(error) });
     }
-    // Each client to its target: Edge's new release among them.
-    try {
-      await reconcile(env);
-    } catch (error) {
-      log.error("reconcile.failed", { error: errorCode(error) });
+    if (tick || imported.length > 0) {
+      await reconcileNow(env);
     }
-    // After the import: a client waiting for a newer release takes it.
-    await reconcileProvisioning(env, new Date(controller.scheduledTime));
+    if (tick) {
+      // After the import: a client waiting for a newer release takes it.
+      await reconcileProvisioning(env, at);
+    }
+  },
+  // R2's event notifications of a manifest written under releases/
+  // (apps/admin/wrangler.jsonc): each batch, whatever it holds, runs the
+  // import once, which reads the bucket, never the message, and is
+  // acknowledged, as the import logs its own failures and the cron tries
+  // again. The import records and audits a release once beside the cron's.
+  queue: async (_batch, env) => {
+    const { imported } = await importNow(env);
+    if (imported.length > 0) {
+      await reconcileNow(env);
+    }
   },
 } satisfies ExportedHandler<Env>;

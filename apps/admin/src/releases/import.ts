@@ -1,22 +1,46 @@
 /**
  * Imports the releases CI publishes to R2 (scripts/release/upload-release.ts)
- * into the admin's database, on the admin's cron.
+ * into the admin's database: as soon as R2 tells the admin a manifest was
+ * written (its event notification, through the admin's queue), and on the
+ * admin's cron every minute, which catches whatever the queue doesn't
+ * bring (src/server.ts). Each run is the same import, and reads what the
+ * bucket holds, never what told it to run.
  *
  * CI writes a release's blobs first and its manifest,
  * `releases/<id>/manifest.json`, last, so a release is listed only once its
- * manifest exists. Each new one has every blob checked against its manifest
- * (`verifyReleaseBlobs`, the check CI ran before publishing) and is then
- * recorded with its audit event. Its model files, about 100 MB and never
- * read whole here, are checked by what R2 reports of each: there, at its
- * size, with the SHA-256 R2 computed when CI stored it. This protects
+ * manifest exists. A new one is checked against its manifest, then
+ * recorded with its audit event:
+ *
+ * - its manifest: its id the one its key names, every blob at its content
+ *   address, every static file it indexes one a Worker serves (`blobsOf`);
+ * - each blob no imported release whose bundle is kept names: read whole
+ *   and hashed, as CI hashed it (`checkBlob`);
+ * - each blob such a release names too, most of a release, as a merge
+ *   changes a few files: not read again. Blobs are content-addressed, and
+ *   that release's import read and hashed it (or one before it did), and
+ *   retention never deletes a blob a kept release names. Its head says
+ *   it's still there, at its size, and, for a module or migration, with
+ *   the SHA-256 R2 checked as CI stored it (`storedBlobProblem`);
+ * - its model files, about 100 MB and never read whole here: by their
+ *   heads, there, at their size, with the SHA-256 R2 computed when CI
+ *   stored them.
+ *
+ * So a release imports only with every blob there at its size, every blob
+ * new to it hashed, and every module and migration at its SHA-256 where R2
+ * kept one. What the import doesn't see is a blob an earlier import
+ * checked that has since been rewritten with other bytes of the same size
+ * and, for a module or migration, without a SHA-256. The deploy stops
+ * that before it serves: it hashes every module, migration and static
+ * file as it reads them from the bucket (src/deploy/release.ts), and each
+ * model file as it streams (src/deploy/model-files.ts). This protects
  * against partial or corrupted uploads, not against whoever can write to
  * the bucket: a release that's consistent with its own manifest imports.
  *
- * A release with more blobs than one run reads is checked a batch at a
- * time, over as many runs as it takes: each run records how many of its
- * blobs, in its manifest's order, are checked, for that manifest's sha256
- * (`releaseImportProgress`), and the next run goes on from there. It is
- * imported once the last batch checks out.
+ * A request R2 fails is tried again, after a short wait, a few times. A run
+ * makes at most {@link MAX_REQUESTS_PER_RUN} requests; a release it doesn't
+ * finish, or one that fails, goes on from the blobs it checked: how many
+ * of them, in its manifest's order, are checked, for that manifest's
+ * sha256 (`releaseImportProgress`).
  *
  * A release that doesn't verify is recorded as failed, audited, and tried
  * again after a wait that doubles with each attempt, so a broken release
@@ -31,14 +55,21 @@ import "@tanstack/react-start/server-only";
 import { toHex } from "@grasp-os/shared/encoding";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
-  blobCount,
+  blobSize,
+  blobsOf,
+  checkBlob,
   manifestKey,
+  mapConcurrently,
   releaseManifestSchema,
   sha256OfBytes,
+  storedBlobProblem,
   storedModelFileProblem,
-  verifyReleaseBlobs,
 } from "@grasp-os/shared/release";
-import type { Bytes, ReleaseManifest } from "@grasp-os/shared/release";
+import type {
+  Bytes,
+  ReleaseBlob,
+  ReleaseManifest,
+} from "@grasp-os/shared/release";
 import {
   compareReleaseIds,
   releaseIdSchema,
@@ -49,6 +80,7 @@ import { actIfChanged } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import {
   auditEvents,
+  releaseBlobs,
   releaseImportFailures,
   releaseImportProgress,
   releases,
@@ -76,31 +108,56 @@ const RELEASES_PREFIX = "releases/";
 export const MAX_IMPORTS_PER_RUN = 5;
 
 /**
- * Most R2 reads a run makes, which count towards the Worker's subrequest
- * limit. A release costs its manifest plus one read per blob (about 700
- * today); what doesn't fit in what the run has left is checked on the
- * next runs.
+ * Most requests to R2 a run makes, heads, reads and their retries alike.
+ * Every call to R2 or D1 is a subrequest, and the Workers Paid plan allows
+ * 10,000 an invocation by default, which the admin keeps (no `limits` of
+ * subrequests in its wrangler.jsonc; "Subrequests" at
+ * developers.cloudflare.com/workers/platform/limits/, read 27 Nov 2026).
+ * The import takes half: the rest is for its D1 statements, its listing
+ * (a page per 1,000 releases), and, on the cron, the retention and
+ * reconciling that share the invocation. A release built from main today
+ * (1,163 blobs and 3 model files) costs 1,167, so a run imports four; a
+ * release it doesn't finish goes on next run from where it got.
  */
-export const MAX_READS_PER_RUN = 500;
+export const MAX_REQUESTS_PER_RUN = 5000;
 
 /**
- * Most blobs a release may name: about three times today's, read over a
- * few runs. A bound on a broken manifest, not on the runs: the batches
- * keep each run within its reads whatever the count.
+ * Most blobs a release may name: about 1.7 times today's. A bound on a
+ * broken manifest, well inside a run's requests, so any release a run
+ * starts with all of them left fits in it.
  */
 export const MAX_BLOBS_PER_RELEASE = 2000;
 
 /**
- * Blobs read at once. A release's largest module is about 10 MB today:
- * two at a time, with their hashing, stays well inside the Worker's memory.
+ * Requests in flight at once. A Worker has at most six waiting for their
+ * response headers, and the rest only queue ("Simultaneous open
+ * connections" on the limits page above).
  */
-const READ_CONCURRENCY = 2;
+const REQUESTS_AT_ONCE = 6;
+
+/**
+ * Blobs read whole at once. A release's largest are about 14 MB (the
+ * compiler's WebAssembly), and hashing a static file holds its base64
+ * too: two at a time stay well inside the Worker's 128 MB.
+ */
+const READS_AT_ONCE = 2;
+
+/**
+ * The waits before each retry of a request R2 failed (threw at): about
+ * three seconds in all, then the release fails, and goes on from there at
+ * its next attempt.
+ */
+const RETRY_DELAYS_MS = [250, 1000, 2000] as const;
 
 /** Largest manifest the import reads; today's is about 35 KB. */
 export const MAX_MANIFEST_BYTES = 1_000_000;
 
-/** The wait after a release's first failed attempt: the next run. */
-const FIRST_RETRY_MS = 5 * 60 * 1000;
+/**
+ * The wait after a release's first failed attempt: the next cron run, a
+ * minute later, a little under so that a run starting a moment early
+ * still tries.
+ */
+const FIRST_RETRY_MS = 50 * 1000;
 /** The longest wait between attempts. */
 const MAX_RETRY_MS = 24 * 60 * 60 * 1000;
 
@@ -142,42 +199,136 @@ const publishedIds = async (store: ReleaseStore): Promise<string[]> => {
 /** Newest first, by id (`compareReleaseIds`): local builds last. */
 const newestFirst = (a: string, b: string): number => compareReleaseIds(b, a);
 
-/** Reads from `store`, counting the reads. */
-class Reader {
-  reads = 0;
-  readonly #store: ImportStore;
-
-  constructor(store: ImportStore) {
-    this.#store = store;
-  }
-
-  /** The head of the object at `key`, or null when there's none. */
-  async head(key: string): Promise<R2Object | null> {
-    this.reads += 1;
-    return await this.#store.head(key);
-  }
-
-  /**
-   * The object at `key`, or undefined when there's none. Refuses one whose
-   * size fails `sizeOk` before reading its body.
-   */
-  async read(
-    key: string,
-    sizeOk: (size: number) => boolean,
-    expected: string
-  ): Promise<Bytes | undefined> {
-    this.reads += 1;
-    const object = await this.#store.get(key);
-    if (object === null) {
-      return undefined;
-    }
-    if (!sizeOk(object.size)) {
-      await object.body.cancel();
-      throw new Error(`${key} is ${object.size} bytes; expected ${expected}`);
-    }
-    return new Uint8Array(await object.arrayBuffer());
+/** The run's requests are spent: what it was checking goes on next run. */
+class RequestsSpentError extends Error {
+  constructor() {
+    super("The run's requests to R2 are spent");
+    this.name = "RequestsSpentError";
   }
 }
+
+/** What R2 reports of an object: its size and the SHA-256 (hex) it kept, if any. */
+interface StoredObject {
+  size: number;
+  sha256?: string;
+}
+
+/**
+ * Reads from `store` within the run's requests ({@link MAX_REQUESTS_PER_RUN}),
+ * each request R2 fails tried again after a wait (`RETRY_DELAYS_MS`).
+ */
+const readerOf = (store: ImportStore) => {
+  let left = MAX_REQUESTS_PER_RUN;
+  const request = async <T>(
+    send: () => Promise<T>,
+    key: string
+  ): Promise<T> => {
+    for (let attempt = 0; ; attempt += 1) {
+      if (left <= 0) {
+        throw new RequestsSpentError();
+      }
+      left -= 1;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- tries in turn
+        return await send();
+      } catch (error) {
+        const wait = RETRY_DELAYS_MS[attempt];
+        if (wait === undefined) {
+          throw error;
+        }
+        log.warn("release.import_retry", { key, ...errorFields(error) });
+        // oxlint-disable-next-line no-await-in-loop -- waits between tries
+        await scheduler.wait(wait);
+      }
+    }
+  };
+  return {
+    /** Whether the run has requests left. */
+    spent: (): boolean => left <= 0,
+
+    /** What R2 reports of the object at `key`, or null when there's none. */
+    head: async (key: string): Promise<StoredObject | null> => {
+      const head = await request(async () => await store.head(key), key);
+      if (head === null) {
+        return null;
+      }
+      const { sha256 } = head.checksums;
+      return {
+        size: head.size,
+        ...(sha256 === undefined
+          ? {}
+          : { sha256: toHex(new Uint8Array(sha256)) }),
+      };
+    },
+
+    /**
+     * The object at `key`, or undefined when there's none. Refuses one
+     * whose size fails `sizeOk` before reading its body.
+     */
+    read: async (
+      key: string,
+      sizeOk: (size: number) => boolean,
+      expected: string
+    ): Promise<Bytes | undefined> => {
+      // Only what R2 fails is tried again, never a size that's wrong.
+      const read = await request(async () => {
+        const object = await store.get(key);
+        if (object === null) {
+          return null;
+        }
+        if (!sizeOk(object.size)) {
+          await object.body.cancel();
+          return { size: object.size };
+        }
+        return { bytes: new Uint8Array(await object.arrayBuffer()) };
+      }, key);
+      if (read === null) {
+        return undefined;
+      }
+      if (!("bytes" in read)) {
+        throw new Error(`${key} is ${read.size} bytes; expected ${expected}`);
+      }
+      return read.bytes;
+    },
+  };
+};
+
+type Reader = ReturnType<typeof readerOf>;
+
+/** `error` as an Error, whatever was thrown. */
+const asError = (error: unknown): Error =>
+  error instanceof Error ? error : new Error(String(error));
+
+/**
+ * Runs the tasks it's given at most `slots` at a time, the others as slots
+ * free up, in the order they came.
+ */
+const gate = (slots: number) => {
+  let free = slots;
+  const waiting: (() => void)[] = [];
+  return async <T>(task: () => Promise<T>): Promise<T> => {
+    if (free > 0) {
+      free -= 1;
+    } else {
+      const { promise, resolve } = Promise.withResolvers<boolean>();
+      waiting.push(() => {
+        resolve(true);
+      });
+      await promise;
+    }
+    try {
+      return await task();
+    } finally {
+      // A slot freed goes to the next task waiting, if any.
+      const wake = waiting.shift();
+      if (wake === undefined) {
+        free += 1;
+      } else {
+        wake();
+      }
+    }
+  };
+};
 
 /**
  * The manifest at `id`'s key, checked to be release `id`'s, and its text:
@@ -201,6 +352,70 @@ const parseManifest = (
 };
 
 /**
+ * Which of `blobs` an imported release whose bundle is kept names: those
+ * an earlier import checked, still in the bucket. One indexed look-up per
+ * key, the keys as one JSON parameter (D1 binds at most 100 a statement).
+ */
+const importedBlobs = async (
+  db: AdminDatabase,
+  blobs: readonly ReleaseBlob[]
+): Promise<Set<string>> => {
+  const keys = JSON.stringify(blobs.map(({ key }) => key));
+  const rows = await db.all<{ blob: string }>(sql`
+    SELECT value AS blob FROM json_each(${keys})
+    WHERE EXISTS (
+      SELECT 1 FROM ${releaseBlobs}
+      JOIN ${releases} ON ${releases.id} = ${releaseBlobs.releaseId}
+      WHERE ${releaseBlobs.blobKey} = value AND ${releases.bundleDeletedAt} IS NULL
+    )`);
+  return new Set(rows.map(({ blob }) => blob));
+};
+
+/**
+ * Checks `blobs` against the manifest, in its order: a blob in `imported`
+ * by its head, any other read whole. Returns how many of them, from the
+ * first, checked out, and, when one didn't, why.
+ */
+const checkBlobs = async (
+  reader: Reader,
+  blobs: readonly ReleaseBlob[],
+  imported: ReadonlySet<string>
+): Promise<{ checked: number; error?: Error }> => {
+  const done = blobs.map(() => false);
+  // Set once one fails: a read still waiting for its turn isn't made.
+  let stopped = false;
+  const whole = gate(READS_AT_ONCE);
+  const checkOne = async ([index, blob]: [number, ReleaseBlob]) => {
+    if (imported.has(blob.key)) {
+      const problem = storedBlobProblem(blob, await reader.head(blob.key));
+      if (problem !== undefined) {
+        throw new Error(`${blob.key} ${problem}`);
+      }
+    } else {
+      const size = blobSize(blob);
+      await whole(async () => {
+        if (stopped) {
+          throw new Error(`${blob.key} wasn't read: another blob failed`);
+        }
+        await checkBlob(
+          blob,
+          await reader.read(blob.key, (actual) => actual === size, String(size))
+        );
+      });
+    }
+    done[index] = true;
+  };
+  try {
+    await mapConcurrently([...blobs.entries()], REQUESTS_AT_ONCE, checkOne);
+    return { checked: blobs.length };
+  } catch (error) {
+    stopped = true;
+    // The checks still running may yet finish: only those already done count.
+    return { checked: done.indexOf(false), error: asError(error) };
+  }
+};
+
+/**
  * Throws unless the bucket holds each model file `manifest` names at its
  * size, stored with its SHA-256: R2 computes and checks that when CI
  * stores it (scripts/release/upload-release.ts), so its head says what
@@ -213,30 +428,52 @@ const checkModelFiles = async (
 ): Promise<void> => {
   for (const file of manifest.modelFiles) {
     // oxlint-disable-next-line no-await-in-loop -- a few files
-    const head = await reader.head(file.r2Key);
-    const sha256 = head?.checksums.sha256;
-    const problem = storedModelFileProblem(
-      file,
-      head === null
-        ? null
-        : {
-            size: head.size,
-            ...(sha256 === undefined
-              ? {}
-              : { sha256: toHex(new Uint8Array(sha256)) }),
-          }
-    );
+    const problem = storedModelFileProblem(file, await reader.head(file.r2Key));
     if (problem !== undefined) {
       throw new Error(`${file.r2Key} (${file.name}) ${problem}`);
     }
   }
 };
 
+/** How many of release `id`'s blobs an earlier attempt checked, for this very manifest. */
+const checkedBefore = async (
+  db: AdminDatabase,
+  id: string,
+  manifestSha256: string
+): Promise<number> => {
+  const [progress] = await db
+    .select()
+    .from(releaseImportProgress)
+    .where(eq(releaseImportProgress.releaseId, id));
+  // Another manifest (a broken upload put right) is checked from its start.
+  return progress?.manifestSha256 === manifestSha256
+    ? progress.verifiedBlobs
+    : 0;
+};
+
+/** Records that the first `verifiedBlobs` of release `id`'s blobs checked out. */
+const recordChecked = async (
+  db: AdminDatabase,
+  id: string,
+  manifestSha256: string,
+  verifiedBlobs: number
+): Promise<void> => {
+  const updatedAt = new Date();
+  await db
+    .insert(releaseImportProgress)
+    .values({ releaseId: id, manifestSha256, verifiedBlobs, updatedAt })
+    .onConflictDoUpdate({
+      target: releaseImportProgress.releaseId,
+      set: { manifestSha256, verifiedBlobs, updatedAt },
+    });
+};
+
 /**
  * Verifies release `id` and records it: `absent` when it has no manifest
- * (yet), `deferred` when the run's reads ran out before its last blob,
- * the blobs checked so far recorded for the next run. Throws when it
- * doesn't verify.
+ * (yet), `deferred` when the run's requests ran out first, the blobs
+ * checked so far recorded for the next run. Throws when it doesn't verify,
+ * the blobs checked before the one that didn't recorded for its next
+ * attempt.
  */
 const importRelease = async (
   reader: Reader,
@@ -252,10 +489,10 @@ const importRelease = async (
     return "absent";
   }
   const { manifest, text } = parseManifest(id, manifestBytes);
-  const blobs = blobCount(manifest);
-  if (blobs > MAX_BLOBS_PER_RELEASE) {
+  const blobs = blobsOf(manifest);
+  if (blobs.length > MAX_BLOBS_PER_RELEASE) {
     throw new Error(
-      `Release ${id} names ${blobs} blobs; at most ${MAX_BLOBS_PER_RELEASE} are read`
+      `Release ${id} names ${blobs.length} blobs; at most ${MAX_BLOBS_PER_RELEASE} are read`
     );
   }
   // Before anything is checked: retention keeps the blobs of a release
@@ -263,43 +500,32 @@ const importRelease = async (
   // manifest it has now names them.
   await recordBlobs(db, id, manifest);
   const manifestSha256 = await sha256OfBytes(manifestBytes);
-  // Where an earlier run got to, for this very manifest: another (a broken
-  // upload put right) is checked from its start.
-  const [progress] = await db
-    .select()
-    .from(releaseImportProgress)
-    .where(eq(releaseImportProgress.releaseId, id));
-  const from =
-    progress?.manifestSha256 === manifestSha256
-      ? Math.min(progress.verifiedBlobs, blobs)
-      : 0;
-  // What this run may still read.
-  const budget = MAX_READS_PER_RUN - reader.reads;
-  const to = Math.min(blobs, from + Math.max(budget, 0));
-  if (budget < 0 || (to <= from && from < blobs)) {
-    return "deferred";
-  }
-  await verifyReleaseBlobs(
-    manifest,
-    async (key, size) =>
-      await reader.read(key, (actual) => actual === size, String(size)),
-    { concurrency: READ_CONCURRENCY, from, to }
+  const from = Math.min(
+    await checkedBefore(db, id, manifestSha256),
+    blobs.length
   );
-  if (to === blobs) {
-    // Once, with its last batch: a head per file, a few reads past the
-    // run's bound at most.
-    await checkModelFiles(reader, manifest);
+  const left = blobs.slice(from);
+  const { checked, error } = await checkBlobs(
+    reader,
+    left,
+    await importedBlobs(db, left)
+  );
+  let failure = error;
+  if (failure === undefined) {
+    try {
+      await checkModelFiles(reader, manifest);
+    } catch (modelError) {
+      failure = asError(modelError);
+    }
   }
-  if (to < blobs) {
-    const updatedAt = new Date();
-    await db
-      .insert(releaseImportProgress)
-      .values({ releaseId: id, manifestSha256, verifiedBlobs: to, updatedAt })
-      .onConflictDoUpdate({
-        target: releaseImportProgress.releaseId,
-        set: { manifestSha256, verifiedBlobs: to, updatedAt },
-      });
-    return "deferred";
+  if (failure !== undefined) {
+    if (checked > 0) {
+      await recordChecked(db, id, manifestSha256, from + checked);
+    }
+    if (failure instanceof RequestsSpentError) {
+      return "deferred";
+    }
+    throw failure;
   }
   await actIfChanged(
     db,
@@ -377,17 +603,13 @@ const recordFailure = async (
     .select(
       sql`SELECT ${crypto.randomUUID()}, ${at}, 'system', 'release.import_failed', NULL, ${id}, json_object('attempts', ${attempts}) FROM ${releaseImportFailures} WHERE ${releaseImportFailures.releaseId} = ${id}`
     );
-  // A failed attempt starts the next from the release's first blob.
-  const restart = db
-    .delete(releaseImportProgress)
-    .where(eq(releaseImportProgress.releaseId, id));
-  await db.batch([record, audit, restart]);
+  await db.batch([record, audit]);
 };
 
 /**
  * Imports the releases published to `store` that `db` doesn't hold yet,
  * newest first: until {@link MAX_IMPORTS_PER_RUN} are imported or
- * {@link MAX_READS_PER_RUN} are spent, a release the reads ran out in
+ * {@link MAX_REQUESTS_PER_RUN} are spent, a release the requests ran out in
  * going on from there next run. A release that failed is
  * passed over until its next attempt is due.
  */
@@ -408,15 +630,12 @@ export const importReleases = async (
     .filter((id) => (due.get(id) ?? 0) <= now.getTime())
     .toSorted(newestFirst);
 
-  const reader = new Reader(store);
+  const reader = readerOf(store);
   const result: ImportResult = { imported: [], failed: [], caughtUp: false };
   let read = 0;
   // One release at a time, to bound the blobs read at once.
   for (const id of pending) {
-    if (
-      result.imported.length >= MAX_IMPORTS_PER_RUN ||
-      reader.reads >= MAX_READS_PER_RUN
-    ) {
+    if (result.imported.length >= MAX_IMPORTS_PER_RUN || reader.spent()) {
       break;
     }
     read += 1;
@@ -425,6 +644,11 @@ export const importReleases = async (
       // oxlint-disable-next-line no-await-in-loop -- one release at a time
       outcome = await importRelease(reader, db, id);
     } catch (error) {
+      if (error instanceof RequestsSpentError) {
+        // Spent at its manifest: nothing of it checked yet.
+        read -= 1;
+        break;
+      }
       result.failed.push(id);
       log.error("release.import_failed", {
         releaseId: id,
@@ -435,7 +659,7 @@ export const importReleases = async (
       continue;
     }
     if (outcome === "deferred") {
-      // The reads ran out in its blobs: the next run goes on from there.
+      // The requests ran out in its blobs: the next run goes on from there.
       break;
     }
     if (outcome === "imported") {

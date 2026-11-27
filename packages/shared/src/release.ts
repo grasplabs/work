@@ -379,7 +379,7 @@ type Expectation =
   | { kind: "asset"; size: number }
   | { kind: "served"; path: string; hash: string; size: number };
 
-/** Blobs read at once while verifying, unless the caller says otherwise. */
+/** Blobs read at once while verifying. */
 const VERIFY_CONCURRENCY = 8;
 
 /**
@@ -415,6 +415,13 @@ export const mapConcurrently = async <T, R>(
   );
   return results;
 };
+
+/** A blob a release names, and what its bytes must be at each place it's named. */
+export interface ReleaseBlob {
+  /** Its R2 key: its content address. */
+  key: string;
+  expectations: Expectation[];
+}
 
 /** Every blob the manifest names, with what its bytes must be. */
 const expectationsOf = (
@@ -518,53 +525,89 @@ const check = async (
 };
 
 /**
- * Checks a release's blobs against its manifest: every module, migration
- * and asset is stored at its content address, is present, and its bytes
- * hash to it (not its model files, which aren't in a build and are each
- * checked where they're stored, without reading 100 MB whole); every entry in the asset index is one a Worker serves. Each
- * blob is read once, through `read`, at most `concurrency` at a time, and
- * checked for every place the manifest names it; a reader that keeps what
- * it returns holds exactly the bytes that were checked. Throws on the
- * first mismatch.
- *
- * `from` and `to` check only the blobs at those places, in the order the
- * manifest names them (the same for the same manifest), so a reader with a
- * bound on its reads can check a release a batch at a time.
+ * Every blob a release names but its model files (which aren't in a build
+ * and are each checked where they're stored, without reading 100 MB
+ * whole), in the order its manifest names them, the same for the same
+ * manifest, each with what its bytes must be wherever it's named. Throws
+ * unless every module, migration and asset is named by its content
+ * address and every entry in the asset index is one a Worker serves.
+ */
+export const blobsOf = (manifest: ReleaseManifest): ReleaseBlob[] =>
+  [...expectationsOf(manifest)].map(([key, expectations]) => ({
+    key,
+    expectations,
+  }));
+
+/**
+ * The size the manifest gives `blob`. Every place it's named gives one;
+ * they differ only in a broken manifest, which `checkBlob` and
+ * `storedBlobProblem` refuse.
+ */
+export const blobSize = (blob: ReleaseBlob): number =>
+  blob.expectations[0]?.size ?? 0;
+
+/**
+ * Throws unless `bytes`, read from `blob`'s key (undefined: nothing is
+ * stored there), hash to what every place the manifest names it says.
+ */
+export const checkBlob = async (
+  blob: ReleaseBlob,
+  bytes: Bytes | undefined
+): Promise<void> => {
+  if (bytes === undefined) {
+    throw new Error(`${blob.key} is missing from the release`);
+  }
+  for (const expectation of blob.expectations) {
+    // oxlint-disable-next-line no-await-in-loop -- a blob's checks run in turn
+    await check(blob.key, bytes, expectation);
+  }
+};
+
+/**
+ * Why what a bucket reports of the object at `blob`'s key (null: there's
+ * none) isn't `blob`, or undefined when nothing it reports says so: it's
+ * there, at the size every place names, and a blob named by its SHA-256
+ * (a module or migration) has that SHA-256 if R2 kept one. CI stores
+ * every blob with its SHA-256, which R2 checks as it takes the bytes
+ * (scripts/release/upload-release.ts). What this can't see, only reading
+ * the bytes does: an asset's (named by Cloudflare's content key, which R2
+ * doesn't compute, and which takes each path's extension), or a file's R2
+ * kept no SHA-256 for, of the same size.
+ */
+export const storedBlobProblem = (
+  blob: ReleaseBlob,
+  stored: { size: number; sha256?: string } | null
+): string | undefined => {
+  if (stored === null) {
+    return "is missing from the release";
+  }
+  if (blob.expectations.some(({ size: named }) => named !== stored.size)) {
+    return `is ${stored.size} bytes, not ${blobSize(blob)}`;
+  }
+  const named = blob.expectations.flatMap((expectation) =>
+    expectation.kind === "file" ? [expectation.sha256] : []
+  );
+  return stored.sha256 !== undefined &&
+    named.some((hash) => hash !== stored.sha256)
+    ? "doesn't match its hash"
+    : undefined;
+};
+
+/**
+ * Checks a release's blobs against its manifest (`blobsOf`): each one is
+ * read once, through `read`, a few at a time, and checked for every place
+ * the manifest names it (`checkBlob`); a reader that keeps what it
+ * returns holds exactly the bytes that were checked. Throws on the first
+ * mismatch.
  */
 export const verifyReleaseBlobs = async (
   manifest: ReleaseManifest,
-  read: ReadBlob,
-  {
-    concurrency = VERIFY_CONCURRENCY,
-    from = 0,
-    to,
-  }: { concurrency?: number; from?: number; to?: number } = {}
+  read: ReadBlob
 ): Promise<void> => {
-  const verifyOne = async ([key, expectations]: [
-    string,
-    Expectation[],
-  ]): Promise<void> => {
-    // Every place names the blob's size; they differ only in a broken
-    // manifest, which the checks below then refuse.
-    const bytes = await read(key, expectations[0]?.size ?? 0);
-    if (bytes === undefined) {
-      throw new Error(`${key} is missing from the release`);
-    }
-    for (const expectation of expectations) {
-      // oxlint-disable-next-line no-await-in-loop -- a blob's checks run in turn
-      await check(key, bytes, expectation);
-    }
-  };
-  await mapConcurrently(
-    [...expectationsOf(manifest)].slice(from, to),
-    concurrency,
-    verifyOne
-  );
+  await mapConcurrently(blobsOf(manifest), VERIFY_CONCURRENCY, async (blob) => {
+    await checkBlob(blob, await read(blob.key, blobSize(blob)));
+  });
 };
-
-/** How many blobs verifying a release reads, besides its manifest (its model files aren't read). */
-export const blobCount = (manifest: ReleaseManifest): number =>
-  expectationsOf(manifest).size;
 
 /**
  * Every blob key the manifest names, its model files' included. Blobs are

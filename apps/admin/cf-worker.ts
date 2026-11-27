@@ -14,9 +14,10 @@
  *   cf's `domains`, any other route as a fetch trigger, so every deploy
  *   applies them (without them it is uploaded and served nowhere);
  * - fills in what a deploy passes (the account's Secrets Store, the
- *   stage's hostname map and the store's secrets, `DeployInputs`), leaving
- *   out bindings to optional secrets the store doesn't have yet, and
- *   stopping on a required one;
+ *   stage's hostname map, the store's secrets and the account's queues,
+ *   `DeployInputs`), leaving out bindings to optional secrets the store
+ *   doesn't have yet, and stopping on a required one, and leaving out the
+ *   consumer of a queue the account doesn't have yet;
  * - stops a deploy whose stage sets no Access application in its vars
  *   (`CF_ACCESS_AUD`, `CF_ACCESS_ISS`): every request would be refused.
  *
@@ -36,6 +37,8 @@ export interface DeployInputs {
   ROUTER_HOSTS_ID?: string;
   /** The names of the secrets the store has, comma-separated. */
   STORED_SECRETS?: string;
+  /** The names of the account's queues, comma-separated. */
+  QUEUES?: string;
 }
 
 /** The vars without which the admin refuses every request (src/access.ts). */
@@ -83,6 +86,7 @@ const notInherited = new Set([
   "secrets_store_secrets",
   "ratelimits",
   "services",
+  "queues",
 ]);
 
 /** `config`'s view for `stage`: an environment over the top level, as Wrangler merges them. */
@@ -165,20 +169,49 @@ const storageBindings = (config: Json, inputs: DeployInputs): Env => {
   return env;
 };
 
+/** The names a deploy passed in `names`, comma-separated; undefined when it passed none (a build). */
+const namesIn = (names: string | undefined): Set<string> | undefined =>
+  names === undefined
+    ? undefined
+    : new Set(
+        names
+          .split(",")
+          .map((name) => name.trim())
+          .filter(Boolean)
+      );
+
+/**
+ * Its queue consumers: one of a queue the account doesn't have is left
+ * out, as a deploy that names it stops. Without QUEUES (a build), each
+ * stays.
+ */
+const queueTriggers = (
+  config: Json,
+  inputs: DeployInputs
+): NonNullable<WorkerConfig["triggers"]> => {
+  const queues = namesIn(inputs.QUEUES);
+  return list(objectOf(config.queues).consumers)
+    .filter((consumer) => queues?.has(text(consumer.queue)) ?? true)
+    .map((consumer) =>
+      triggers.queue({
+        name: text(consumer.queue),
+        ...(consumer.max_batch_timeout === undefined
+          ? {}
+          : { maxBatchTimeout: Number(consumer.max_batch_timeout) }),
+        ...(consumer.max_concurrency === undefined
+          ? {}
+          : { maxConcurrency: Number(consumer.max_concurrency) }),
+      })
+    );
+};
+
 /**
  * Its Secrets Store bindings, in the deploy's store: one to an optional
  * secret the store lacks is left out; a required one it lacks stops it.
  * Without STORED_SECRETS (a build), every binding stays.
  */
 const secretBindings = (config: Json, inputs: DeployInputs): Env => {
-  const stored =
-    inputs.STORED_SECRETS === undefined
-      ? undefined
-      : new Set(
-          inputs.STORED_SECRETS.split(",")
-            .map((name) => name.trim())
-            .filter(Boolean)
-        );
+  const stored = namesIn(inputs.STORED_SECRETS);
   const env: Env = {};
   const missing: string[] = [];
   for (const secret of list(config.secrets_store_secrets)) {
@@ -317,7 +350,11 @@ export const cfWorker = (
       ...strings(objectOf(config.triggers).crons).map((schedule) =>
         triggers.scheduled({ schedule })
       ),
+      ...queueTriggers(config, inputs),
     ],
+    ...(objectOf(config.limits).cpu_ms === undefined
+      ? {}
+      : { limits: { cpuMs: Number(objectOf(config.limits).cpu_ms) } }),
     env: {
       ...textBindings(config),
       ...storageBindings(config, inputs),
