@@ -21,6 +21,10 @@
 
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import {
+  AppShellHeader,
+  AppShellPage,
+} from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
+import {
   Alert,
   AlertAction,
   AlertDescription,
@@ -59,11 +63,10 @@ import type { ReactNode } from "react";
 
 import type { ClientAdmin } from "../clients/admin.ts";
 import type { GridRow } from "../clients/grid.ts";
-import { PageBar } from "../frame/page-bar.tsx";
 import { channelWords } from "../rollout/channel-words.ts";
 import type { OrgRead } from "./org-reads.ts";
 import { standingTime } from "./org-status.ts";
-import { AdminHeader, barLabels, PageBody } from "./page.tsx";
+import { AdminHeader } from "./page.tsx";
 import {
   orgSections,
   originsOf,
@@ -463,27 +466,25 @@ export const OrganizationPage = ({
   const { title, about } = sectionWords[section];
   return (
     <OrgReadContext value={read}>
-      <PageBar
-        crumbs={
+      <AppShellHeader
+        breadcrumb={
           section === "overview"
-            ? [{ label: name }]
+            ? undefined
             : [
                 {
                   label: name,
-                  render: (look) => (
+                  render: (
                     <Link
-                      {...look}
                       params={{ clientId: client.id }}
                       to="/organizations/$clientId"
                     />
                   ),
                 },
-                { label: title },
               ]
         }
-        labels={barLabels}
+        title={section === "overview" ? name : title}
       />
-      <PageBody>
+      <AppShellPage>
         <PageHeader
           description={
             <span {...stylex.props(styles.meta)}>
@@ -509,7 +510,7 @@ export const OrganizationPage = ({
             <SectionGate section={section} />
           </Suspense>
         )}
-      </PageBody>
+      </AppShellPage>
     </OrgReadContext>
   );
 };
@@ -521,7 +522,7 @@ export const OrganizationPage = ({
 export const OffboardedPage = ({ client }: { client: GridRow }) => (
   <>
     <AdminHeader page={client.name} />
-    <PageBody>
+    <AppShellPage>
       <PageHeader title={client.name} />
       <Empty>
         <EmptyHeader>
@@ -538,7 +539,7 @@ export const OffboardedPage = ({ client }: { client: GridRow }) => (
           </Button>
         </EmptyContent>
       </Empty>
-    </PageBody>
+    </AppShellPage>
   </>
 );
 

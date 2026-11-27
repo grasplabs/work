@@ -62,7 +62,7 @@ import { Suspense, use } from "react";
 
 import type { ClientSetup } from "../clients/setup.ts";
 import type { ClientSummary } from "../clients/summary.ts";
-import { LoadingLines } from "../frame/page.tsx";
+import { LoadingLines } from "./failure.tsx";
 import { LoadingFigure, MissingFigure } from "./figures.tsx";
 import { NextRow, WaitsOn } from "./next-row.tsx";
 import { needAction, needSince, partyOf, partyWords } from "./org-status.ts";

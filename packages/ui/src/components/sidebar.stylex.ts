@@ -10,3 +10,10 @@ export const sidebarMarker = stylex.defineMarker();
 
 /** A menu item, marked so its action shows while the pointer or focus is anywhere on the item. */
 export const sidebarMenuItemMarker = stylex.defineMarker();
+
+/**
+ * The row the sidebar and the page stand in (SidebarProvider's), marked so a part in the page
+ * follows the sidebar's state from its attributes alone, before React wakes: a fold in the page's
+ * bar that shows only while the sidebar is folded away.
+ */
+export const sidebarWrapperMarker = stylex.defineMarker();

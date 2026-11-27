@@ -8,6 +8,7 @@
  * column and the admin's sidebar, which keep working; only a frame that
  * can't be read at all shows `FrameFailure` in its place.
  */
+import { AppShellPageSkeleton } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Empty,
@@ -24,7 +25,6 @@ import * as stylex from "@stylexjs/stylex";
 import { Link, useMatch, useRouter } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 
-import { LoadingLines } from "../frame/page.tsx";
 import { AdminHeader } from "./page.tsx";
 import type { Crumb } from "./page.tsx";
 
@@ -44,18 +44,32 @@ const styles = stylex.create({
     justifyContent: "center",
     gap: space["2"],
   },
-  // The pages' usual layout while they load: a heading and its line, then
-  // a few lines of content.
-  loading: {
+  lines: {
     display: "flex",
     flexDirection: "column",
-    gap: space["6"],
-    padding: space["6"],
+    gap: space["2"],
+    width: "100%",
   },
-  lines: { display: "flex", flexDirection: "column", gap: space["2"] },
-  title: { width: "12rem", maxWidth: "100%" },
-  lead: { width: "18rem", maxWidth: "100%" },
+  line: { width: "100%" },
+  lastLine: { width: "66%" },
 });
+
+/** Skeleton lines where a list or text will be, announced once as loading. */
+export const LoadingLines = ({ lines = 3 }: { lines?: number }) => (
+  <output
+    aria-busy="true"
+    aria-label="Loading…"
+    {...stylex.props(styles.lines)}
+  >
+    {Array.from({ length: lines }, (_, line) => (
+      <Skeleton
+        key={line}
+        size="default"
+        style={line === lines - 1 ? styles.lastLine : styles.line}
+      />
+    ))}
+  </output>
+);
 
 /**
  * Reads the page again and shows it anew: its loaders run again, and
@@ -207,17 +221,11 @@ export const NotFound = () => (
 /**
  * What a page shows while a slow read comes: the bar, and the pages'
  * usual layout (a heading, a line under it, then its content) as
- * skeletons, announced once as loading.
+ * skeletons in the page's room, announced once as loading.
  */
 export const PageLoading = () => (
   <>
     <AdminHeader page={undefined} />
-    <div {...stylex.props(styles.loading)}>
-      <div {...stylex.props(styles.lines)}>
-        <Skeleton size="lg" style={styles.title} />
-        <Skeleton size="default" style={styles.lead} />
-      </div>
-      <LoadingLines lines={4} />
-    </div>
+    <AppShellPageSkeleton />
   </>
 );

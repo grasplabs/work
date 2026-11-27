@@ -510,6 +510,8 @@
   --damsko-menu-gap: 10px;
   /* The narrowest a dropdown menu is, so a short list still reads as a menu. */
   --damsko-menu-width: 249px;
+  /* The narrowest a right-click menu is: tighter than a dropdown's, as it opens beside what was pressed. */
+  --damsko-context-menu-width: 192px;
   /* The edge and shadow of a menu: high lift. */
   --damsko-menu-shadow: var(--damsko-shadow-lg);
   /* Room inside a menu item, round its icon, words and keys. */
@@ -951,6 +953,8 @@
   /* Sidebar: sidebar colours. */
   /* The page's card on the ground. */
   --damsko-sidebar-card: light-dark(oklch(1 0 0), oklch(0.215 0 0));
+  /* The menu that opens from the sidebar's foot. */
+  --damsko-sidebar-menu: light-dark(var(--damsko-sidebar-card), oklch(0.26 0 0));
   /* A row or button under the pointer. */
   --damsko-sidebar-hover: light-dark(oklch(0 0 0 / 0.035), oklch(1 0 0 / 0.05));
   /* A rule that parts the sidebar, and a badge's edge. */
@@ -970,6 +974,8 @@
   --damsko-sidebar-row-inline: 8px;
   /* A row's corner, and a group's label's: the squircle that reads like the original frame's round 6px, which is what a browser with no squircle draws. Its own token, not the row corner: the frame's rows are tighter than a list's. */
   --damsko-sidebar-row-radius: 11px;
+  /* The corner of the menu that opens from the sidebar's foot: the squircle that reads like a round 8px, tighter than a popup's. */
+  --damsko-sidebar-menu-radius: 14px;
   /* A large row's corner (the person at the sidebar's foot), so it nests in the sidebar's foot: the squircle that reads like the original's round 10px, which is what a browser with no squircle draws. */
   --damsko-sidebar-row-radius-lg: 18px;
   /* The room between a row's icon and its words. */
@@ -1294,6 +1300,7 @@
     --damsko-radius-sm: 4px;
     --damsko-radius-2xl: 11px;
     --damsko-radius-md: 12px;
+    --damsko-sidebar-menu-radius: 8px;
     --damsko-sidebar-row-radius: 6px;
     --damsko-sidebar-row-radius-lg: 10px;
     --damsko-tree-view-guide-elbow: 12px;
