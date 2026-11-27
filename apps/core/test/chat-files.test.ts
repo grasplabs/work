@@ -35,6 +35,7 @@ import {
   signedInApi,
   staffPerson,
 } from "./sign-in.ts";
+import { startedChat } from "./started-chats.ts";
 
 // Files attached to a chat's questions: the person attaches a file, core
 // reads its text with Knowledge's extractor, and the question that names
@@ -253,7 +254,7 @@ const storedMessages = async (
 describe("files attached to a question", slow, () => {
   it("reach the agent as data in a code step's result, never in its instructions, the question or by name, and show with the question", async () => {
     const ann = await signedInApi(idp, "user");
-    const chat = await ann.api.chats.create("Notes");
+    const chat = await startedChat(ann, "Notes");
     const notes = await ann.api.chats.attachFile(chat.id, {
       name: attackName,
       bytes: utf8(`# Notes\n\n${injection}`),
@@ -379,7 +380,7 @@ describe("files attached to a question", slow, () => {
 
   it("are refused unless they are what their name says, within the limits, with text", async () => {
     const ann = await signedInApi(idp, "user");
-    const chat = await ann.api.chats.create("Limits");
+    const chat = await startedChat(ann, "Limits");
     const attach = async (name: string, bytes: Uint8Array) =>
       await outcome(ann.api.chats.attachFile(chat.id, { name, bytes }));
     const pdf = await fixture("expense-policy.pdf");
@@ -455,7 +456,7 @@ describe("files attached to a question", slow, () => {
   it("free their place once their person removes one no question carried, and only then, audited", async () => {
     const ann = await signedInApi(idp, "user");
     const ben = await signedInApi(idp, "user");
-    const chat = await ann.api.chats.create("Full");
+    const chat = await startedChat(ann, "Full");
     const files = [];
     for (let index = 0; index < chatFilesMax; index += 1) {
       // oxlint-disable-next-line no-await-in-loop -- in order, as a person attaches them
@@ -519,7 +520,7 @@ describe("files attached to a question", slow, () => {
 
   it("aren't removed while their chat's agent works, as a starting question may carry them", async () => {
     const ann = await signedInApi(idp, "user");
-    const chat = await ann.api.chats.create("Busy");
+    const chat = await startedChat(ann, "Busy");
     const [carried, waiting] = await Promise.all(
       ["plan.md", "notes.md"].map(
         async (name) =>
@@ -562,7 +563,7 @@ describe("files attached to a question", slow, () => {
 
   it("are attached once for a key, sent again on the next connection after the one it went on dropped mid-upload, and carried once", async () => {
     const ann = await signedInApi(idp, "user");
-    const chat = await ann.api.chats.create("Dropped");
+    const chat = await startedChat(ann, "Dropped");
     const key = crypto.randomUUID();
     const plan = { name: "plan.md", bytes: utf8("# Plan\n\nShip it.") };
     // The connection drops while the file is on its way: core takes it,
@@ -617,7 +618,7 @@ describe("files attached to a question", slow, () => {
     });
     // Another chat's key says nothing of a file there, and a malformed key
     // is refused.
-    const other = await ann.api.chats.create("Elsewhere");
+    const other = await startedChat(ann, "Elsewhere");
     await expect(
       outcome(ann.api.chats.attachFile(other.id, plan, key))
     ).resolves.toBe("agent.invalid_request");
@@ -628,7 +629,7 @@ describe("files attached to a question", slow, () => {
 
   it("are attached once for a key two calls carry at once, each past core's look for a repeat before either was kept", async () => {
     const ann = await signedInApi(idp, "user");
-    const chat = await ann.api.chats.create("At once");
+    const chat = await startedChat(ann, "At once");
     const key = crypto.randomUUID();
     const plan = {
       name: "plan.md",
@@ -659,8 +660,8 @@ describe("files attached to a question", slow, () => {
   it("are their chat's person's alone, carried by one question, and go with the chat", async () => {
     const ann = await signedInApi(idp, "user");
     const ben = await signedInApi(idp, "user");
-    const first = await ann.api.chats.create("First");
-    const second = await ann.api.chats.create("Second");
+    const first = await startedChat(ann, "First");
+    const second = await startedChat(ann, "Second");
     const file = await ann.api.chats.attachFile(first.id, {
       name: "plan.md",
       bytes: utf8("# Plan\n\nShip it."),
@@ -730,8 +731,8 @@ describe("pictures attached to a question", slow, () => {
     const ann = await signedInApi(idp, "user");
     const ben = await signedInApi(idp, "user");
     const staff = await signedIn(idp, "grasp-staff", staffPerson());
-    const chat = await ann.api.chats.create("Screenshots");
-    const benChat = await ben.api.chats.create("Ben's");
+    const chat = await startedChat(ann, "Screenshots");
+    const benChat = await startedChat(ben, "Ben's");
     // A pasted screenshot has no name worth trusting: its bytes say.
     const shot = await ann.api.chats.attachFile(chat.id, {
       name: "Image 1",
@@ -823,7 +824,7 @@ describe("pictures attached to a question", slow, () => {
 
   it("are refused unless their bytes are a PNG, JPEG, WebP or GIF within the limits, whatever their name", async () => {
     const ann = await signedInApi(idp, "user");
-    const chat = await ann.api.chats.create("Limits");
+    const chat = await startedChat(ann, "Limits");
     const attach = async (name: string, bytes: Uint8Array) =>
       await outcome(ann.api.chats.attachFile(chat.id, { name, bytes }));
     expect({
@@ -879,7 +880,7 @@ describe("pictures attached to a question", slow, () => {
 
   it("go with their chat, and when their person removes one no question carried", async () => {
     const ann = await signedInApi(idp, "user");
-    const chat = await ann.api.chats.create("Gone");
+    const chat = await startedChat(ann, "Gone");
     const carried = await ann.api.chats.attachFile(chat.id, {
       name: "Image 1",
       bytes: png({ size: chatPictureMaxBytes }),
@@ -921,7 +922,7 @@ describe("pictures attached to a question", slow, () => {
 
   it("are shown newest first, as many as one request has room for, an older one keeping its line alone", async () => {
     const ann = await signedInApi(idp, "user");
-    const chat = await ann.api.chats.create("Many");
+    const chat = await startedChat(ann, "Many");
     const attach = async (name: string, bytes: Uint8Array) =>
       await ann.api.chats.attachFile(chat.id, { name, bytes });
     const oldest = await attach("Image 1", realPng);
@@ -956,7 +957,7 @@ describe("pictures attached to a question", slow, () => {
 
   it("reach no model that can't see pictures, whose question's words stand alone", async () => {
     const ann = await signedInApi(idp, "user");
-    const chat = await ann.api.chats.create("Words");
+    const chat = await startedChat(ann, "Words");
     const shot = await ann.api.chats.attachFile(chat.id, {
       name: "Image 1",
       bytes: realPng,

@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
@@ -43,8 +44,9 @@ const toolsPerConnection = 1000;
 
 /**
  * A `bulk` connection, `owner`'s own or else shared, allowing `tools` as
- * reads, whose server takes an invoice for each. A Composio connection's
- * tools are searched by their names alone, so the tests find them by name.
+ * reads, whose server takes an invoice for each, as its session lists
+ * them, kept for search as connecting keeps them (a `describe` of one
+ * reads and keeps them all). The tests find them by name.
  */
 const bulkConnection = async (tools: readonly string[], owner?: string) => {
   const connection = await mailConnection(
@@ -62,6 +64,13 @@ const bulkConnection = async (tools: readonly string[], owner?: string) => {
       },
     }))
   );
+  const [first] = tools;
+  if (first !== undefined) {
+    await env.CONNECT.connectionTools({
+      connectionId: connection.id,
+      actions: [first],
+    });
+  }
   return connection;
 };
 
@@ -123,7 +132,8 @@ describe("a chat's tool search", setUpTime, () => {
         action: needle,
         summary: "",
         class: "read-own",
-        input: "unknown",
+        // Its input as the session lists it, for the agent to call with.
+        input: "{ invoice: string }",
       },
       matches: 1,
       output: { shipment: "SHP-7" },

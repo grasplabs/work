@@ -1066,7 +1066,12 @@ export const turnCheck = async (
   const chats = workspace(env, scope.workspaceId);
   let shown = false;
   try {
-    const subjects = await turnSubjects(env, scope.chatId, turnId);
+    const subjects = await turnSubjects(
+      env,
+      scope.personId,
+      scope.chatId,
+      turnId
+    );
     const written = subjects.flatMap(({ kind, id }) =>
       kind === "app" ? [id] : []
     );

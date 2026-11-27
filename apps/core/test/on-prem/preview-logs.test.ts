@@ -18,6 +18,7 @@ import { release } from "../apps.ts";
 import { mockIdp } from "../idp.ts";
 import { fakeProvider } from "../model-provider.ts";
 import { signedInApi } from "../sign-in.ts";
+import { startedChat } from "../started-chats.ts";
 
 // What a spec 8 draft's function writes with `console` in its sealed
 // preview on-prem (GRA-689): it runs in a sandbox session, which the
@@ -91,7 +92,7 @@ describe(
         name: "Invoice desk",
       });
       await release(builder, app, releasedDesk);
-      const chat = await builder.api.chats.create("Invoice desk");
+      const chat = await startedChat(builder, "Invoice desk");
       const stub = workspace(env, personalWorkspaceId(builder.userId));
       await fakeProvider(
         codeStep(`export default async (self, env) => {

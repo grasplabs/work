@@ -25,6 +25,7 @@ import { mockIdp } from "./idp.ts";
 import type { Answer, FakeProvider } from "./model-provider.ts";
 import { configuredLimits } from "./quota-limits.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
+import { startedChat, startedThrough } from "./started-chats.ts";
 import { connectDb } from "./test-env.ts";
 
 // Making something new, in any chat (its threat model): the person says
@@ -163,10 +164,10 @@ const plannedChat = async (
     planStep(plan),
     says("It's ready to try.")
   );
-  const chat = await builder.api.chats.create(
+  const chat = await startedChat(
+    builder,
     "Something new",
-    undefined,
-    started
+    started === undefined ? {} : { make: started }
   );
   await make(builder, chat.id, "Keep track of the month-end close.");
   const messages = await messagesOf(chats.stub, chat.id, builder.userId);
@@ -268,8 +269,8 @@ describe("Make something", { timeout: 120_000 }, () => {
       planStep(pagePlan),
       says("Hello.")
     );
-    const making = await builder.api.chats.create("Something new", undefined, {
-      kind: "app",
+    const making = await startedChat(builder, "Something new", {
+      make: { kind: "app" },
     });
     const other = await newChat();
 
@@ -471,7 +472,7 @@ describe("Make something", { timeout: 120_000 }, () => {
     const started = { kind: "app", project } as const;
     const { chat, callId } = await plannedChat(owner, pagePlan, started);
     const refused = await outcome(
-      other.api.chats.create("Something new", undefined, started)
+      startedThrough(other.api.chats, "Something new", { make: started })
     );
 
     const made = await owner.api.chats.build(chat.id, {

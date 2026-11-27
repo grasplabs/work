@@ -19,6 +19,7 @@ import { mockIdp } from "./idp.ts";
 import { fakeProvider, fakeProviderFor } from "./model-provider.ts";
 import { turnRecordsOf } from "./model-usage.ts";
 import { outcome, signedInApi, signedInWithRole } from "./sign-in.ts";
+import { startedChat } from "./started-chats.ts";
 
 // A question sent while the chat's agent works on another is queued into
 // that turn (chat-harness.ts `queueQuestion`), in pi's own queue, as Claude Code,
@@ -141,7 +142,7 @@ describe("a question sent while the agent answers", slow, () => {
     const ann = await signedInApi(idp, "user");
     const first = pausedReply(says("Paris."), 2);
     const provider = await fakeProvider(first.reply, says("Berlin."));
-    const chat = await ann.api.chats.create("Capitals");
+    const chat = await startedChat(ann, "Capitals");
     const tab = await follow(ann, chat.id);
     const otherTab = await follow(ann, chat.id);
     try {
@@ -224,7 +225,7 @@ describe("a question sent while the agent answers", slow, () => {
       says("Madrid."),
       says("Berlin.")
     );
-    const chat = await ann.api.chats.create("Overtaken");
+    const chat = await startedChat(ann, "Overtaken");
     const tab = await follow(ann, chat.id);
     // Germany's call to the chat's object is held on its way, so Spain,
     // sent after it from another tab, reaches the agent first. Told by
@@ -316,7 +317,7 @@ describe("a question sent while the agent answers", slow, () => {
       says("Paris."),
       says("Berlin.")
     );
-    const chat = await ann.api.chats.create("Preparing");
+    const chat = await startedChat(ann, "Preparing");
     const tab = await follow(ann, chat.id);
     // A chat's first message has no analysis beside its recall: one first.
     await ann.api.chats.send(chat.id, { text: "Hi?", model });
@@ -376,7 +377,7 @@ describe("a question sent while the agent answers", slow, () => {
   it("is dropped unanswered when the person stops the answer", async () => {
     const ann = await signedInApi(idp, "user");
     const provider = await fakeProvider({ hang: true }, says("Never."));
-    const chat = await ann.api.chats.create("Stopped");
+    const chat = await startedChat(ann, "Stopped");
     const tab = await follow(ann, chat.id);
     await ann.api.chats.send(chat.id, { text: "First?", model });
     await vi.waitFor(
@@ -412,7 +413,7 @@ describe("a question sent while the agent answers", slow, () => {
     const ann = await signedInApi(idp, "user");
     const first = pausedReply(says("A long answer."), 6);
     const provider = await fakeProvider(first.reply, says("Short."));
-    const chat = await ann.api.chats.create("Now");
+    const chat = await startedChat(ann, "Now");
     const tab = await follow(ann, chat.id);
     try {
       await ann.api.chats.send(chat.id, { text: "Tell me all.", model });
@@ -651,7 +652,7 @@ describe("a question sent while the agent answers", slow, () => {
     const ann = await signedInApi(idp, "user");
     const first = pausedReply(says("Paris."), 2);
     const provider = await fakeProvider(first.reply, says("Berlin."));
-    const chat = await ann.api.chats.create("Left running");
+    const chat = await startedChat(ann, "Left running");
     const id = personalWorkspaceId(ann.userId);
     try {
       await ann.api.chats.send(chat.id, { text: "France?", model });
@@ -706,7 +707,7 @@ describe("a question sent while the agent answers", slow, () => {
       writing.reply,
       says("Short.")
     );
-    const chat = await ann.api.chats.create("Restarted");
+    const chat = await startedChat(ann, "Restarted");
     const id = personalWorkspaceId(ann.userId);
     try {
       await ann.api.chats.send(chat.id, { text: "Tell me all.", model });

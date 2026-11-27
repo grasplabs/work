@@ -24,14 +24,21 @@
  * written only if absent, so a published release never changes.
  *
  * With --assign-id (CI's publish) the release gets its id here, from the
- * bucket (@grasp-os/shared/release-id): the next `YY.MM.N` of the month,
- * claimed by writing its manifest only if absent. When
- * another publish claimed that id first, it takes the next one, so two
- * publishes never share an id. Once published, `commits/<sha>` records the
- * id, and a re-run of the same commit's publish publishes nothing again.
- * One that stopped between its manifest and that marker is found by its
- * commit among the month's releases (and the month before's) and marked
- * then, rather than published under a second id.
+ * bucket (@grasp-os/shared/release-id): the next `YY.MM.N` after the ids
+ * a listing of the month finds, claimed by writing its manifest only if
+ * absent. When another publish claimed that id first, it takes the next
+ * one, so two publishes never share an id. Before each claim it writes
+ * the id to `commits/<sha>`, so a commit's manifest is only ever at the
+ * id its marker names: a re-run of the commit's publish reads the marker
+ * and that one manifest, and publishes nothing again when the manifest is
+ * the commit's. The marker is written only over the one last read or
+ * written (its ETag), or only if absent, so two runs of one commit, or a
+ * late write of its own, never leave it naming a lost id. No other
+ * manifest is read: past a listing page per 1,000 releases of the month,
+ * a publish asks the same of the bucket however many releases it holds.
+ * It publishes only while the commit is main's head (--head, which CI
+ * asks GitHub for right before): a re-run of a push main has moved past
+ * publishes nothing, rather than an older commit under a newer id.
  * Without it (Promote release) the release keeps the id it has.
  *
  * With --dry-run it verifies the release and says what it would upload,
@@ -39,7 +46,7 @@
  *
  * Env: R2_ENDPOINT (https://<account id>.eu.r2.cloudflarestorage.com),
  *      R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
- * Usage: vp run release:upload --release <dir> [--assign-id] [--dry-run]
+ * Usage: vp run release:upload --release <dir> [--assign-id --head <sha>] [--dry-run]
  */
 import { createHash } from "node:crypto";
 import path from "node:path";
@@ -48,21 +55,22 @@ import { parseArgs } from "node:util";
 import {
   commitKey,
   manifestKey,
+  mapConcurrently,
+  releaseManifestSchema,
   storedModelFileProblem,
 } from "@grasp-os/shared/release";
 import type { StoredModelFile } from "@grasp-os/shared/release";
-import { nextReleaseId, releaseMonthPrefix } from "@grasp-os/shared/release-id";
-import { z } from "zod";
+import {
+  nextReleaseId,
+  releaseIdSchema,
+  releaseMonthPrefix,
+} from "@grasp-os/shared/release-id";
 
 import { stampReleaseId } from "./assign-lib.ts";
-import { releasesBucketFromEnv } from "./bucket-lib.ts";
+import { REQUESTS_AT_ONCE, releasesBucketFromEnv } from "./bucket-lib.ts";
 import type { ReleasesBucket } from "./bucket-lib.ts";
 import { verifyRelease } from "./manifest-lib.ts";
 
-/** What a published manifest is read for when looking for a commit's release. */
-const publishedCommitSchema = z.object({ commit: z.string() });
-
-const UPLOAD_CONCURRENCY = 8;
 const HTTP_NOT_FOUND = 404;
 const HTTP_PRECONDITION_FAILED = 412;
 /**
@@ -75,11 +83,15 @@ const { values: args } = parseArgs({
   options: {
     release: { type: "string" },
     "assign-id": { type: "boolean", default: false },
+    head: { type: "string" },
     "dry-run": { type: "boolean", default: false },
   },
 });
 if (args.release === undefined) {
   throw new Error("--release <dir> is required");
+}
+if (args["assign-id"] && !args["dry-run"] && args.head === undefined) {
+  throw new Error("--assign-id needs --head <main's head commit>");
 }
 const releaseDir = path.resolve(args.release);
 
@@ -124,6 +136,37 @@ const storedSha256 = async (
     throw new Error(`GET ${key}: ${get.status}`);
   }
   return sha256Base64(new Uint8Array(await get.arrayBuffer()));
+};
+
+/**
+ * PUTs `bytes` at `key`, stored with their SHA-256, only if R2 holds
+ * nothing there. Undefined when this put stored them; otherwise the
+ * SHA-256 of what `key` holds (`storedSha256`). A try that took but whose
+ * answer was lost, sent again by the bucket's retries, finds its own bytes
+ * there: the SHA-256 it reports is then theirs, never a failure.
+ */
+const putIfAbsent = async (
+  bucket: ReleasesBucket,
+  key: string,
+  bytes: Buffer,
+  contentType?: string
+): Promise<string | undefined> => {
+  const put = await bucket.fetch(bucket.url(key), {
+    method: "PUT",
+    body: bytes,
+    headers: {
+      ...(contentType === undefined ? {} : { "Content-Type": contentType }),
+      "If-None-Match": "*",
+      "x-amz-checksum-sha256": sha256Base64(bytes),
+    },
+  });
+  if (put.status === HTTP_PRECONDITION_FAILED) {
+    return (await storedSha256(bucket, key)) ?? "none";
+  }
+  if (!put.ok) {
+    throw new Error(`PUT ${key}: ${put.status} ${await put.text()}`);
+  }
+  return undefined;
 };
 
 /** SHA-256 hex as R2's checksum header writes it, base64. */
@@ -213,78 +256,37 @@ const uploadModelFile = async (
 /** The model files' keys: uploaded by `uploadModelFile`, never by the blobs' rule. */
 const modelKeys = new Set(manifest.modelFiles.map(({ r2Key }) => r2Key));
 
+/**
+ * Uploads each blob R2 lacks, `REQUESTS_AT_ONCE` blobs at a time, each a
+ * HEAD and, when absent, a PUT: a request in flight per blob.
+ */
 const uploadBlobs = async (bucket: ReleasesBucket): Promise<void> => {
-  const uploadBlob = async (
-    key: string,
-    bytes: Buffer
-  ): Promise<"uploaded" | "skipped"> => {
+  const uploadBlob = async ([key, bytes]: [string, Buffer]): Promise<
+    "uploaded" | "skipped"
+  > => {
     if (modelKeys.has(key)) {
       return await uploadModelFile(bucket, key, bytes);
     }
-    const expected = sha256Base64(bytes);
-    const existing = await storedSha256(bucket, key);
-    if (existing !== undefined) {
-      assertStored(key, existing, expected);
-      return "skipped";
+    // There already, from an earlier release, or put by another writer
+    // since the HEAD: kept only if it's these bytes.
+    const held =
+      (await storedSha256(bucket, key)) ??
+      (await putIfAbsent(bucket, key, bytes));
+    if (held === undefined) {
+      return "uploaded";
     }
-    const put = await bucket.fetch(bucket.url(key), {
-      method: "PUT",
-      body: bytes,
-      headers: { "If-None-Match": "*", "x-amz-checksum-sha256": expected },
-    });
-    if (put.status === HTTP_PRECONDITION_FAILED) {
-      // Another writer stored it since the HEAD: skipped only if it matches.
-      assertStored(key, (await storedSha256(bucket, key)) ?? "none", expected);
-      return "skipped";
-    }
-    if (!put.ok) {
-      throw new Error(`PUT ${key}: ${put.status} ${await put.text()}`);
-    }
-    return "uploaded";
+    assertStored(key, held, sha256Base64(bytes));
+    return "skipped";
   };
-
-  // A fixed number of workers, each taking the next blob off the queue.
-  const queue = [...blobs];
-  const results: ("uploaded" | "skipped")[] = [];
-  const work = async (): Promise<void> => {
-    for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
-      // oxlint-disable-next-line no-await-in-loop -- each worker uploads one blob at a time
-      results.push(await uploadBlob(...next));
-    }
-  };
-  await Promise.all(Array.from({ length: UPLOAD_CONCURRENCY }, work));
+  const results = await mapConcurrently(
+    [...blobs],
+    REQUESTS_AT_ONCE,
+    uploadBlob
+  );
   const uploaded = results.filter((result) => result === "uploaded").length;
   console.info(
     `Blobs: ${uploaded} uploaded, ${results.length - uploaded} already there`
   );
-};
-
-/** PUTs `bytes` at `key`; false when `onlyIfAbsent` and R2 holds something there. */
-const putFile = async (
-  bucket: ReleasesBucket,
-  key: string,
-  bytes: Buffer,
-  {
-    onlyIfAbsent,
-    contentType = "application/json",
-  }: { onlyIfAbsent: boolean; contentType?: string }
-): Promise<boolean> => {
-  const response = await bucket.fetch(bucket.url(key), {
-    method: "PUT",
-    body: bytes,
-    headers: {
-      "Content-Type": contentType,
-      "x-amz-checksum-sha256": sha256Base64(bytes),
-      ...(onlyIfAbsent ? { "If-None-Match": "*" } : {}),
-    },
-  });
-  if (onlyIfAbsent && response.status === HTTP_PRECONDITION_FAILED) {
-    return false;
-  }
-  if (!response.ok) {
-    throw new Error(`PUT ${key}: ${response.status} ${await response.text()}`);
-  }
-  return true;
 };
 
 /**
@@ -293,105 +295,168 @@ const putFile = async (
  */
 const publishAsBuilt = async (bucket: ReleasesBucket): Promise<void> => {
   const published = manifestKey(manifest.releaseId);
-  if ((await storedSha256(bucket, published)) !== undefined) {
-    console.warn(`::warning::${published} is already published; left as it is`);
-    return;
-  }
-  if (
-    !(await putFile(bucket, published, manifestBytes, { onlyIfAbsent: true }))
-  ) {
+  const held = await putIfAbsent(
+    bucket,
+    published,
+    manifestBytes,
+    "application/json"
+  );
+  if (held !== undefined && held !== sha256Base64(manifestBytes)) {
     console.warn(`::warning::${published} is already published; left as it is`);
     return;
   }
   console.info(`Published ${published}`);
 };
 
-/** The release `manifest.commit` was published as already, if it was. */
-const publishedAs = async (
-  bucket: ReleasesBucket
-): Promise<string | undefined> => {
-  const marker = commitKey(manifest.commit);
-  const response = await bucket.fetch(bucket.url(marker));
-  if (response.status === HTTP_NOT_FOUND) {
-    return undefined;
+/**
+ * Whether release `id`'s manifest is published, and is a release manifest
+ * of `manifest.commit` under that id. An earlier attempt's, of another
+ * build of the commit, counts: its blobs went up before it, and this
+ * run's own new blobs are then left for no release to name.
+ */
+const isThisCommits = async (
+  bucket: ReleasesBucket,
+  id: string
+): Promise<boolean> => {
+  const published = await bucket.fetch(bucket.url(manifestKey(id)));
+  if (published.status === HTTP_NOT_FOUND) {
+    return false;
   }
-  if (!response.ok) {
-    throw new Error(`GET ${marker}: ${response.status}`);
+  if (!published.ok) {
+    throw new Error(`GET ${manifestKey(id)}: ${published.status}`);
   }
-  const id = await response.text();
-  return id.trim();
+  let stored: unknown;
+  try {
+    stored = JSON.parse(await published.text());
+  } catch {
+    return false;
+  }
+  const parsed = releaseManifestSchema.safeParse(stored);
+  return (
+    parsed.success &&
+    parsed.data.releaseId === id &&
+    parsed.data.commit === manifest.commit
+  );
 };
 
-/** The UTC month before `at`'s. */
-const monthBefore = (at: Date): Date =>
-  new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth() - 1, 1));
+/** Where this commit's marker is: the id of the release it's published as. */
+const markerKey = commitKey(manifest.commit);
+
+/** The commit's marker as the bucket holds it: the id it names, and its ETag. */
+interface Marker {
+  id: string;
+  etag: string;
+}
+
+const etagOf = (response: Response, what: string): string => {
+  const etag = response.headers.get("etag");
+  if (etag === null) {
+    throw new Error(`${what} ${markerKey}: no ETag`);
+  }
+  return etag;
+};
+
+/** The commit's marker; undefined when there's none. */
+const readMarker = async (
+  bucket: ReleasesBucket
+): Promise<Marker | undefined> => {
+  const named = await bucket.fetch(bucket.url(markerKey));
+  if (named.status === HTTP_NOT_FOUND) {
+    return undefined;
+  }
+  if (!named.ok) {
+    throw new Error(`GET ${markerKey}: ${named.status}`);
+  }
+  const text = await named.text();
+  return { id: releaseIdSchema.parse(text.trim()), etag: etagOf(named, "GET") };
+};
 
 /**
- * The release `manifest.commit` was published as by an attempt that
- * stopped before writing its marker (`commits/<sha>`): the release of this
- * month or the month before whose manifest names the commit. Its marker
- * is written then, so the next run finds it at once.
+ * Writes `id` to the commit's marker, only over the marker this publish
+ * last read or wrote (`etag`), or only if absent when it found none.
+ * Resolves with the new ETag, or with the id the commit is published as
+ * when another run of the commit changed the marker meanwhile and that
+ * id's manifest is the commit's. Changed to the same id, the marker is
+ * this write's own (its answer lost) or a twin run's on the same id, whose
+ * claim this one's then meets: either way it goes on to the claim.
  */
-const publishedUnmarked = async (
-  bucket: ReleasesBucket
-): Promise<string | undefined> => {
-  const now = new Date();
-  const months = [
-    releaseMonthPrefix(now),
-    releaseMonthPrefix(monthBefore(now)),
-  ];
-  for (const month of months) {
-    // oxlint-disable-next-line no-await-in-loop -- this month first
-    for (const id of await bucket.listIds(month)) {
-      // oxlint-disable-next-line no-await-in-loop -- a few releases a month
-      const response = await bucket.fetch(bucket.url(manifestKey(id)));
-      if (response.status === HTTP_NOT_FOUND) {
-        continue;
-      }
-      if (!response.ok) {
-        throw new Error(`GET ${manifestKey(id)}: ${response.status}`);
-      }
-      // oxlint-disable-next-line no-await-in-loop -- a few releases a month
-      const { commit } = publishedCommitSchema.parse(await response.json());
-      if (commit === manifest.commit) {
-        // oxlint-disable-next-line no-await-in-loop -- once, when found
-        await putFile(
-          bucket,
-          commitKey(manifest.commit),
-          Buffer.from(`${id}\n`),
-          { onlyIfAbsent: true, contentType: "text/plain" }
-        );
-        return id;
-      }
-    }
+const writeMarker = async (
+  bucket: ReleasesBucket,
+  id: string,
+  etag: string | undefined
+): Promise<{ etag: string } | { publishedAs: string }> => {
+  const bytes = Buffer.from(`${id}\n`);
+  const put = await bucket.fetch(bucket.url(markerKey), {
+    method: "PUT",
+    body: bytes,
+    headers: {
+      "Content-Type": "text/plain",
+      "x-amz-checksum-sha256": sha256Base64(bytes),
+      ...(etag === undefined ? { "If-None-Match": "*" } : { "If-Match": etag }),
+    },
+  });
+  if (put.ok) {
+    return { etag: etagOf(put, "PUT") };
   }
-  return undefined;
+  if (put.status !== HTTP_PRECONDITION_FAILED) {
+    throw new Error(`PUT ${markerKey}: ${put.status} ${await put.text()}`);
+  }
+  const now = await readMarker(bucket);
+  if (now?.id === id) {
+    return { etag: now.etag };
+  }
+  if (now !== undefined && (await isThisCommits(bucket, now.id))) {
+    return { publishedAs: now.id };
+  }
+  throw new Error(
+    `${markerKey} changed under this publish (it names ${now?.id ?? "nothing"}): another publish of ${manifest.commit} is under way; nothing published`
+  );
 };
 
 /**
  * Publishes the release under the next id of the month (CI's publish):
- * each attempt claims an id with the first key it writes under it, only
- * if absent, and moves on to the next id when another publish has it.
+ * each attempt names its id in the commit's marker (over `etag`, the
+ * marker as read before the upload), then claims it by writing the
+ * manifest only if absent, and moves on to the next id when another
+ * publish has it.
  */
-const publishWithNextId = async (bucket: ReleasesBucket): Promise<void> => {
-  const marker = commitKey(manifest.commit);
-  const taken = new Set(await bucket.listIds(releaseMonthPrefix(new Date())));
+const publishWithNextId = async (
+  bucket: ReleasesBucket,
+  etag: string | undefined
+): Promise<void> => {
+  const now = new Date();
+  const taken = new Set(await bucket.listIds(releaseMonthPrefix(now)));
+  let markerTag = etag;
   for (let attempt = 1; attempt <= MAX_ID_ATTEMPTS; attempt += 1) {
-    const id = nextReleaseId(taken, new Date());
+    const id = nextReleaseId(taken, now);
     taken.add(id);
     const stamped = stampReleaseId(manifestBytes, id);
     const published = manifestKey(id);
-    // The manifest is the claim, only if absent.
+    // The marker first, so the commit's manifest is only ever at the id
+    // its marker names.
     // oxlint-disable-next-line no-await-in-loop -- one id at a time, until one is ours
-    const claimed = await putFile(bucket, published, stamped.manifestBytes, {
-      onlyIfAbsent: true,
-    });
+    const named = await writeMarker(bucket, id, markerTag);
+    if ("publishedAs" in named) {
+      console.warn(
+        `::warning::${manifest.commit} was published meanwhile, as release ${named.publishedAs}, by another run; nothing published again`
+      );
+      return;
+    }
+    markerTag = named.etag;
+    // The manifest is the claim, only if absent. Found there already, it's
+    // this commit's when an earlier try or attempt put it there: a lost
+    // answer, or a build of the same commit, whose bytes may differ.
+    const claimed =
+      // oxlint-disable-next-line no-await-in-loop -- one id at a time, until one is ours
+      (await putIfAbsent(
+        bucket,
+        published,
+        stamped.manifestBytes,
+        "application/json"
+      )) === undefined ||
+      // oxlint-disable-next-line no-await-in-loop -- only when the id was taken
+      (await isThisCommits(bucket, id));
     if (claimed) {
-      // oxlint-disable-next-line no-await-in-loop -- once, when published
-      await putFile(bucket, marker, Buffer.from(`${id}\n`), {
-        onlyIfAbsent: true,
-        contentType: "text/plain",
-      });
       console.info(`Published ${published}: release ${id}`);
       return;
     }
@@ -408,11 +473,19 @@ if (args["dry-run"]) {
       ? `Dry run: release ${manifest.releaseId} verified; would upload whichever of its ${blobs.size} blobs R2 lacks, then publish it as the month's next release`
       : `Dry run: release ${manifest.releaseId} verified; would upload whichever of its ${blobs.size} blobs R2 lacks, then ${manifestKey(manifest.releaseId)}`
   );
+} else if (args["assign-id"] && args.head !== manifest.commit) {
+  // Main has moved on since this run started: the newer push publishes
+  // its own release, which carries this commit's changes.
+  console.info(
+    `::notice::Not publishing ${manifest.commit}: main's head is ${String(args.head)} now, which publishes its own release`
+  );
 } else {
   const bucket = releasesBucketFromEnv();
-  const earlier = args["assign-id"]
-    ? ((await publishedAs(bucket)) ?? (await publishedUnmarked(bucket)))
-    : undefined;
+  const marker = args["assign-id"] ? await readMarker(bucket) : undefined;
+  const earlier =
+    marker !== undefined && (await isThisCommits(bucket, marker.id))
+      ? marker.id
+      : undefined;
   if (earlier === undefined) {
     // Before anything is uploaded, the files the directory doesn't carry;
     // after, every one, as the import will check them.
@@ -423,7 +496,7 @@ if (args["dry-run"]) {
     await uploadBlobs(bucket);
     await assertModelFilesStored(bucket, manifest.modelFiles);
     await (args["assign-id"]
-      ? publishWithNextId(bucket)
+      ? publishWithNextId(bucket, marker?.etag)
       : publishAsBuilt(bucket));
   } else {
     // A re-run of the commit's publish: the release it published stands.

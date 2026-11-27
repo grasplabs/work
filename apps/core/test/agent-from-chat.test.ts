@@ -27,6 +27,7 @@ import {
   staffPerson,
   unique,
 } from "./sign-in.ts";
+import { startedChat, startedThrough } from "./started-chats.ts";
 
 // An agent made from the chat (GRA-1854): the person asks for one in
 // their words, the chat's agent drafts it (`draftAgent`), and Make it
@@ -96,7 +97,7 @@ const draftedChat = async (person: Person, draft: Record<string, unknown>) => {
     draftStep(draft),
     says("It's made.")
   );
-  const chat = await person.api.chats.create("An agent");
+  const chat = await startedChat(person, "An agent");
   await person.api.chats.send(chat.id, {
     text: "Make me an HR agent that checks incoming mail once a week.",
     model,
@@ -303,8 +304,10 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
       draftStep(draft),
       says("It's made.")
     );
-    const chat = await admin.api.chats.create("New agent", undefined, {
-      kind: "agent",
+    const chat = await startedThrough(admin.api.chats, "New agent", {
+      make: {
+        kind: "agent",
+      },
     });
     await admin.api.chats.send(chat.id, {
       text: "I want to set up an agent",
@@ -406,16 +409,20 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
 
     expect({
       member: await outcome(
-        member.api.chats.create("New agent", undefined, setUp)
+        startedThrough(member.api.chats, "New agent", { make: setUp })
       ),
       builder: await outcome(
-        builder.api.chats.create("New agent", undefined, setUp)
+        startedThrough(builder.api.chats, "New agent", { make: setUp })
       ),
-      staff: await outcome(staff.chats.create("New agent", undefined, setUp)),
+      staff: await outcome(
+        startedThrough(staff.chats, "New agent", { make: setUp })
+      ),
       inProject: await outcome(
-        admin.api.chats.create("New agent", undefined, {
-          ...setUp,
-          project: "project-1",
+        startedThrough(admin.api.chats, "New agent", {
+          make: {
+            ...setUp,
+            project: "project-1",
+          },
         })
       ),
     }).toStrictEqual({
@@ -768,7 +775,7 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
         toolStep("draftAgentChange", change),
         says("It's changed.")
       );
-      const chat = await person.api.chats.create("A change");
+      const chat = await startedChat(person, "A change");
       await person.api.chats.send(chat.id, {
         text: "Give it the calendar.",
         model,

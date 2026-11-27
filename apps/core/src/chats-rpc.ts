@@ -9,17 +9,16 @@ import type {
 } from "@grasp-os/shared/agents";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
-  chatMakeSchema,
   chatMentionsSchema,
   chatListOptionsSchema,
   chatRatingReasonMax,
+  chatStartSchema,
   chatTitleSchema,
   unmetNeeds,
 } from "@grasp-os/shared/chat";
 import type {
   ChatBuild,
   ChatBuilt,
-  ChatMake,
   ChatPlan,
   ChatConnectionRequest,
   ChatFile,
@@ -28,6 +27,7 @@ import type {
   ChatQuestion,
   ChatRating,
   ChatSearchHit,
+  ChatStart,
   ChatsApi,
   ChatStopped,
   ChatAgent,
@@ -104,8 +104,7 @@ import {
   createWorkflowResource,
   requireWorkflowRole,
 } from "./workflow-resources.ts";
-import { makeOf, questionSchema, stopReason } from "./workspace.ts";
-import type { Chat } from "./workspace.ts";
+import { questionSchema, stopReason } from "./workspace.ts";
 
 /** The page's key for a request it may repeat (`ChatQuestion.key`). */
 const requestKeySchema = z.uuid();
@@ -130,6 +129,7 @@ const askedSchema = questionSchema.omit({ built: true }).extend({
   subject: subjectSchema.optional(),
   mentions: chatMentionsSchema.optional(),
   key: requestKeySchema.optional(),
+  start: chatStartSchema.optional(),
 });
 
 /** Build it as the page sends it (`ChatBuild`). */
@@ -281,22 +281,6 @@ const subjectOfBuilt = ({ app, workflow }: ChatBuilt) => {
 };
 
 /**
- * A chat just made, or made before for the same key, as its person's list
- * shows it: nothing running in it yet, and archived if a repeat finds it so.
- */
-const summaryOfMade = (chat: Chat): ChatSummary => ({
-  id: chat.id,
-  title: chat.title,
-  agentId: chat.agentId,
-  createdAt: chat.createdAt.toISOString(),
-  lastAt: chat.lastAt.toISOString(),
-  running: false,
-  unread: false,
-  make: makeOf(chat),
-  archived: chat.archivedAt !== null,
-});
-
-/**
  * Keeps what Build it made as the chat's work (drafts.ts,
  * `keepMadeInChat`): where it was made, so the chat lists it at once. A
  * failure is logged for Grasp and never fails the build, which made it
@@ -324,6 +308,14 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   /** This connection's watches, each until it's released. */
   readonly #watches = new Set<Disposable>();
   /**
+   * The chats a call on this connection is starting now (`ChatStart`),
+   * each until that call is done, by ID: a call about one of them that
+   * came after it waits for it (`#idOf`), so the page that named a new
+   * chat follows and reads it at once, from its next call, as a
+   * connection's reads see its own writes.
+   */
+  readonly #starts = new Map<string, Promise<true>>();
+  /**
    * Whether this connection may still follow chats, before each push: its
    * session holds, as the connection's own check last read it, the same
    * reading its calls share (at most `sessionRecheckMs` old,
@@ -340,6 +332,86 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   /** The object that holds `userId`'s chats. */
   #chatsOf(userId: string) {
     return workspace(this.#env, personalWorkspaceId(userId));
+  }
+
+  /**
+   * `call`, which starts chat `chatId` when it carries a `start`: known to
+   * this connection as starting it until it is done (`#starts`), from
+   * before this call yields, so a call that came after it finds it.
+   */
+  async #starting<T>(
+    chatId: unknown,
+    start: unknown,
+    call: Promise<T>
+  ): Promise<T> {
+    if (start === undefined || typeof chatId !== "string") {
+      return await call;
+    }
+    const done = Promise.withResolvers<true>();
+    this.#starts.set(chatId, done.promise);
+    try {
+      return await call;
+    } finally {
+      done.resolve(true);
+      if (this.#starts.get(chatId) === done.promise) {
+        this.#starts.delete(chatId);
+      }
+    }
+  }
+
+  /** Once no call on this connection is starting chat `chatId` (`#starts`). */
+  async #started(chatId: unknown): Promise<void> {
+    if (typeof chatId === "string") {
+      await this.#starts.get(chatId);
+    }
+  }
+
+  /** A chat's ID from the page, once no call here is starting it (`#started`). */
+  async #idOf(chatId: unknown): Promise<ChatId> {
+    await this.#started(chatId);
+    return chatIdOf(chatId);
+  }
+
+  /**
+   * The chat `start` names, as its object makes it (`startChat`): with an
+   * agent the person may talk to (`chatAgentOf`), or the company's first;
+   * from "Make something", what it came to make, for a builder, and the
+   * project, for a builder of it, checked now: Build it makes things
+   * there. One to set up an agent only for the company's own admins, who
+   * alone make one; Grasp staff never set one up.
+   */
+  async #startOf(person: Identity, { key, title, agentId, make }: ChatStart) {
+    if (make?.kind === "agent") {
+      requireCompanyAdmin(person);
+    } else if (make !== undefined) {
+      requireBuilder(person);
+      if (make.project !== undefined) {
+        requireNotStaff(person);
+        await requireProjectRole(this.#env, person, make.project, "builder");
+      }
+    }
+    const agent = await chatAgentOf(this.#env, person.userId, agentId);
+    return { key, title, agentId: agent, make, by: actorOf(person) };
+  }
+
+  /**
+   * Makes chat `chatId`, which `start` names, unless that start made it
+   * already: what it is checked for (`#startOf`) only for a new one, as
+   * its agent or project may be gone since the first call made it.
+   */
+  async #start(
+    person: Identity,
+    chatId: ChatId,
+    start: ChatStart
+  ): Promise<void> {
+    const chats = this.#chatsOf(person.userId);
+    if (!(await chats.chatStartedWith(chatId, person.userId, start.key))) {
+      await chats.startChat(
+        chatId,
+        person.userId,
+        await this.#startOf(person, start)
+      );
+    }
   }
 
   async models(): Promise<string[]> {
@@ -405,7 +477,10 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     return await withPerson(
       this.#check,
       async ({ userId }) =>
-        await this.#chatsOf(userId).chatSummary(chatIdOf(chatId), userId)
+        await this.#chatsOf(userId).chatSummary(
+          await this.#idOf(chatId),
+          userId
+        )
     );
   }
 
@@ -414,72 +489,6 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       this.#check,
       async ({ userId }) => await chatAgentsFor(this.#env, userId)
     );
-  }
-
-  /**
-   * A new chat, with the agent `agentId` (`chatAgentOf`), or the company's
-   * first; from "Make something" (`make`), keeping what it came to make,
-   * for a builder, and the project, for a builder of it, checked now:
-   * Build it makes things there. One to set up an agent only for the
-   * company's own admins, who alone make one.
-   */
-  async create(
-    title: string,
-    agentId?: string,
-    make?: ChatMake,
-    key?: string
-  ): Promise<ChatSummary> {
-    return await withPerson(this.#check, async (person) => {
-      const { userId } = person;
-      const parsed = chatTitleSchema.safeParse(title);
-      const making =
-        make === undefined ? undefined : chatMakeSchema.safeParse(make);
-      const keyed = requestKeySchema.optional().safeParse(key);
-      if (!parsed.success || making?.success === false || !keyed.success) {
-        throw agentErrors.create(
-          parsed.success ? "agent.invalid_request" : "agent.invalid_title"
-        );
-      }
-      // A repeat answers the chat it made before anything a new chat is
-      // checked for: its agent or project may be gone since.
-      const repeated =
-        keyed.data === undefined
-          ? undefined
-          : await this.#chatsOf(userId).chatMadeWith(userId, keyed.data);
-      if (repeated !== undefined) {
-        return summaryOfMade(repeated);
-      }
-      // An agent's setup is for the company's own admins, as making one is
-      // (`makeAgent`): refused as the chat starts, never after its
-      // questions. Grasp staff never set one up.
-      if (making?.data.kind === "agent") {
-        requireCompanyAdmin(person);
-      } else if (making !== undefined) {
-        requireBuilder(person);
-        if (making.data.project !== undefined) {
-          requireNotStaff(person);
-          await requireProjectRole(
-            this.#env,
-            person,
-            making.data.project,
-            "builder"
-          );
-        }
-      }
-      // Only an agent the person may talk to, refused before a chat is made.
-      const agent = await chatAgentOf(this.#env, userId, agentId);
-      const chat = await this.#chatsOf(userId).createChat(
-        parsed.data,
-        userId,
-        agent,
-        actorOf(person),
-        "web",
-        undefined,
-        making?.data,
-        keyed.data
-      );
-      return summaryOfMade(chat);
-    });
   }
 
   /**
@@ -510,7 +519,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
 
   async rename(chatId: string, title: string): Promise<void> {
     await withPerson(this.#check, async (person) => {
-      const id = chatIdOf(chatId);
+      const id = await this.#idOf(chatId);
       const parsed = chatTitleSchema.safeParse(title);
       if (!parsed.success) {
         throw agentErrors.create("agent.invalid_title");
@@ -532,7 +541,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         throw agentErrors.create("agent.invalid_request");
       }
       return await this.#chatsOf(userId).markChatRead(
-        chatIdOf(chatId),
+        await this.#idOf(chatId),
         userId,
         upTo
       );
@@ -549,7 +558,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
 
   async setProject(chatId: string, project: string | null): Promise<void> {
     await withPerson(this.#check, async (person) => {
-      const id = chatIdOf(chatId);
+      const id = await this.#idOf(chatId);
       if (project !== null && typeof project !== "string") {
         throw agentErrors.create("agent.invalid_request");
       }
@@ -572,7 +581,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   async #archive(chatId: string, archived: boolean): Promise<void> {
     await withPerson(this.#check, async (person) => {
       await this.#chatsOf(person.userId).archiveChat(
-        chatIdOf(chatId),
+        await this.#idOf(chatId),
         person.userId,
         archived,
         actorOf(person)
@@ -586,7 +595,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     rating: ChatRating | null
   ): Promise<void> {
     await withPerson(this.#check, async (person) => {
-      const id = chatIdOf(chatId);
+      const id = await this.#idOf(chatId);
       const parsed = ratedSchema.safeParse({ messageId, rating });
       if (!parsed.success) {
         throw agentErrors.create("agent.invalid_request");
@@ -610,7 +619,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   async remove(chatId: string): Promise<void> {
     await withPerson(this.#check, async (person) => {
       await this.#chatsOf(person.userId).deleteChat(
-        chatIdOf(chatId),
+        await this.#idOf(chatId),
         person.userId,
         await personOf(this.#env, person),
         actorOf(person)
@@ -622,39 +631,50 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
    * Reads the file's text (chat-files.ts), outside the person's Workspace
    * object, or takes it whole when its bytes are a picture, then attaches
    * it to their chat there, audited. With `key`, a repeat answers the file
-   * the first call attached.
+   * the first call attached. With `start`, for the question that starts
+   * the chat, the chat is made first (`#start`), as `send` makes it.
    */
   async attachFile(
     chatId: string,
     file: ChatFileInput,
-    key?: string
+    key?: string,
+    start?: ChatStart
   ): Promise<ChatFile> {
-    return await withPerson(this.#check, async (person) => {
-      const id = chatIdOf(chatId);
-      const keyed = requestKeySchema.optional().safeParse(key);
-      if (!keyed.success) {
-        throw agentErrors.create("agent.invalid_request");
-      }
-      const chats = this.#chatsOf(person.userId);
-      // A repeat is answered before its bytes are read again: a page sends
-      // one when the connection broke before it heard the first.
-      const repeated =
-        keyed.data === undefined
-          ? undefined
-          : await chats.fileAttachedWith(id, person.userId, keyed.data);
-      if (repeated !== undefined) {
-        return repeated;
-      }
-      const read =
-        readChatPicture(file) ?? (await readChatFile(this.#env, file));
-      return await chats.attachFile(
-        id,
-        person.userId,
-        read,
-        actorOf(person),
-        keyed.data
-      );
-    });
+    return await this.#starting(
+      chatId,
+      start,
+      withPerson(this.#check, async (person) => {
+        const id =
+          start === undefined ? await this.#idOf(chatId) : chatIdOf(chatId);
+        const keyed = requestKeySchema.optional().safeParse(key);
+        const starts = chatStartSchema.optional().safeParse(start);
+        if (!keyed.success || !starts.success) {
+          throw agentErrors.create("agent.invalid_request");
+        }
+        if (starts.data !== undefined) {
+          await this.#start(person, id, starts.data);
+        }
+        const chats = this.#chatsOf(person.userId);
+        // A repeat is answered before its bytes are read again: a page
+        // sends one when the connection broke before it heard the first.
+        const repeated =
+          keyed.data === undefined
+            ? undefined
+            : await chats.fileAttachedWith(id, person.userId, keyed.data);
+        if (repeated !== undefined) {
+          return repeated;
+        }
+        const read =
+          readChatPicture(file) ?? (await readChatFile(this.#env, file));
+        return await chats.attachFile(
+          id,
+          person.userId,
+          read,
+          actorOf(person),
+          keyed.data
+        );
+      })
+    );
   }
 
   async removeFile(chatId: string, fileId: string): Promise<void> {
@@ -663,7 +683,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         throw agentErrors.create("agent.file_not_found");
       }
       await this.#chatsOf(person.userId).removeFile(
-        chatIdOf(chatId),
+        await this.#idOf(chatId),
         person.userId,
         fileId,
         actorOf(person)
@@ -671,42 +691,66 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     });
   }
 
+  /**
+   * Asks in the person's chat; one that starts its chat (`ChatQuestion.start`)
+   * makes it first (`#start`), in the same call, so a new chat costs the
+   * page no call of its own before its question goes.
+   */
   async send(chatId: string, question: ChatQuestion): Promise<void> {
-    await withPerson(this.#check, async (person) => {
-      const id = chatIdOf(chatId);
-      // Its strings and effort only: whatever else the page passed goes no
-      // further.
-      const parsed = askedSchema.safeParse(question);
-      if (!parsed.success) {
-        throw agentErrors.create("agent.invalid_question");
-      }
-      const { subject: named, mentions: picked, key, ...asked } = parsed.data;
-      // A repeat is answered before anything it names is looked up: what
-      // the first call found may be gone since, and that refuses only a
-      // new question.
-      if (
-        key !== undefined &&
-        (await this.#chatsOf(person.userId).sentBefore(id, person.userId, key))
-      ) {
-        return;
-      }
-      const [subject, mentions] = await Promise.all([
-        named === undefined ? undefined : this.#subjectOf(person, named),
-        picked === undefined || picked.length === 0
-          ? undefined
-          : mentionsOf(this.#env, person, picked),
-      ]);
-      await this.#chatsOf(person.userId).send(
-        id,
-        person.userId,
-        {
-          ...asked,
-          ...(subject === undefined ? {} : { subject }),
-          ...(mentions === undefined ? {} : { mentions }),
-        },
-        key
-      );
-    });
+    await this.#starting(
+      chatId,
+      // Whether it starts a chat is read before anything is checked, so
+      // a call that came after it waits for it whatever it turns out.
+      typeof question === "object" && question !== null
+        ? Reflect.get(question, "start")
+        : undefined,
+      withPerson(this.#check, async (person) => {
+        // Its strings and effort only: whatever else the page passed goes
+        // no further.
+        const parsed = askedSchema.safeParse(question);
+        if (!parsed.success) {
+          throw agentErrors.create("agent.invalid_question");
+        }
+        const {
+          subject: named,
+          mentions: picked,
+          key,
+          start,
+          ...asked
+        } = parsed.data;
+        const id =
+          start === undefined ? await this.#idOf(chatId) : chatIdOf(chatId);
+        const chats = this.#chatsOf(person.userId);
+        if (start !== undefined) {
+          await this.#start(person, id, start);
+        }
+        // A repeat is answered before anything it names is looked up: what
+        // the first call found may be gone since, and that refuses only a
+        // new question.
+        if (
+          key !== undefined &&
+          (await chats.sentBefore(id, person.userId, key))
+        ) {
+          return;
+        }
+        const [subject, mentions] = await Promise.all([
+          named === undefined ? undefined : this.#subjectOf(person, named),
+          picked === undefined || picked.length === 0
+            ? undefined
+            : mentionsOf(this.#env, person, picked),
+        ]);
+        await chats.send(
+          id,
+          person.userId,
+          {
+            ...asked,
+            ...(subject === undefined ? {} : { subject }),
+            ...(mentions === undefined ? {} : { mentions }),
+          },
+          key
+        );
+      })
+    );
   }
 
   /**
@@ -730,7 +774,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   async build(chatId: string, build: ChatBuild): Promise<ChatBuilt> {
     return await withPerson(this.#check, async (person) => {
       requireBuilder(person);
-      const id = chatIdOf(chatId);
+      const id = await this.#idOf(chatId);
       const parsed = buildSchema.safeParse(build);
       if (!parsed.success) {
         throw agentErrors.create("agent.invalid_request");
@@ -862,7 +906,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     make: AgentDraftMake
   ): Promise<AgentDraftMade> {
     return await withPerson(this.#check, async (person) => {
-      const id = chatIdOf(chatId);
+      const id = await this.#idOf(chatId);
       const parsed = draftMakeSchema.safeParse(make);
       if (!parsed.success) {
         throw agentErrors.create("agent.invalid_request");
@@ -983,7 +1027,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     make: AgentDraftMake
   ): Promise<AgentDraftMade> {
     return await withPerson(this.#check, async (person) => {
-      const id = chatIdOf(chatId);
+      const id = await this.#idOf(chatId);
       const parsed = draftMakeSchema.safeParse(make);
       if (!parsed.success) {
         throw agentErrors.create("agent.invalid_request");
@@ -1268,13 +1312,16 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     return await withPerson(
       this.#check,
       async ({ userId }) =>
-        await chatWork(this.#env, await this.#ownChat(userId, chatId))
+        await chatWork(this.#env, userId, await this.#ownChat(userId, chatId))
     );
   }
 
   /** The person's own chat `chatId`, or refused as if there were none. */
   async #ownChat(userId: string, chatId: unknown): Promise<ChatId> {
-    return await this.#chatsOf(userId).requireChat(chatIdOf(chatId), userId);
+    return await this.#chatsOf(userId).requireChat(
+      await this.#idOf(chatId),
+      userId
+    );
   }
 
   /**
@@ -1333,11 +1380,10 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   // decided on its card there (channels/held.ts), and its conversation is
   // no chat here (GRA-1919).
   async heldCalls(chatId: string, after?: string): Promise<HeldAppCall[]> {
-    return await withPerson(
-      this.#check,
-      async (person) =>
-        await heldAppCallsOf(this.#env, person, chatId, "web", after)
-    );
+    return await withPerson(this.#check, async (person) => {
+      await this.#started(chatId);
+      return await heldAppCallsOf(this.#env, person, chatId, "web", after);
+    });
   }
 
   async confirmHeldCall(
@@ -1346,6 +1392,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     requestHash: string
   ): Promise<void> {
     await withPerson(this.#check, async (person) => {
+      await this.#started(chatId);
       await confirmHeldAppCall(
         this.#env,
         person,
@@ -1358,13 +1405,14 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
 
   async declineHeldCall(chatId: string, id: string): Promise<void> {
     await withPerson(this.#check, async (person) => {
+      await this.#started(chatId);
       await declineHeldAppCall(this.#env, person, { chatId, via: "web" }, id);
     });
   }
 
   async sendNow(chatId: string): Promise<void> {
     await withPerson(this.#check, async ({ userId }) => {
-      await this.#chatsOf(userId).sendNow(chatIdOf(chatId), userId);
+      await this.#chatsOf(userId).sendNow(await this.#idOf(chatId), userId);
     });
   }
 
@@ -1372,7 +1420,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     return await withPerson(
       this.#check,
       async ({ userId }) =>
-        await this.#chatsOf(userId).cancel(chatIdOf(chatId), userId)
+        await this.#chatsOf(userId).cancel(await this.#idOf(chatId), userId)
     );
   }
 
@@ -1382,7 +1430,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     onUpdate: (update: ChatUpdate) => void
   ): Promise<Subscription> {
     return await withPerson(this.#check, async ({ userId }) => {
-      const id = chatIdOf(chatId);
+      const id = await this.#idOf(chatId);
       // Where the page got to: watched again from there.
       let from = after;
       return await this.#follow(

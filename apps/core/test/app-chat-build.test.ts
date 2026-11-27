@@ -15,6 +15,7 @@ import {
 } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInApi, unique } from "./sign-in.ts";
+import { startedChat } from "./started-chats.ts";
 
 // An App's own chat building the App from nothing, as a model that knows
 // only what the chat gives it would: it reads how an App is written in
@@ -204,7 +205,7 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
       codeStep(calling(app.id)),
       says("The board is drafted.")
     );
-    const chat = await builder.api.chats.create("App changes");
+    const chat = await startedChat(builder, "App changes");
 
     await stub.ask(chat.id, {
       text: "Build a kanban with four columns.",

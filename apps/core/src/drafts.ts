@@ -1312,12 +1312,13 @@ export const rebaseDraft = async (
 };
 
 /**
- * The subjects whose drafts chat `chatId`'s agent wrote in turn `turnId`:
- * those with a checkpoint of that turn's, kept with the draft, so a
- * restart forgets none.
+ * The subjects whose drafts `personId`'s chat `chatId`'s agent wrote in
+ * turn `turnId`: those with a checkpoint of that turn's, kept with the
+ * draft, so a restart forgets none.
  */
 export const turnSubjects = async (
   env: Env,
+  personId: string,
   chatId: string,
   turnId: string
 ): Promise<Subject[]> => {
@@ -1329,6 +1330,7 @@ export const turnSubjects = async (
     .from(draftCheckpoints)
     .where(
       and(
+        eq(draftCheckpoints.personId, personId),
         eq(draftCheckpoints.chatId, chatId),
         eq(draftCheckpoints.turnId, turnId)
       )
@@ -1338,12 +1340,14 @@ export const turnSubjects = async (
 };
 
 /**
- * What chat `chatId` worked on, the most recently first: each subject
- * with a checkpoint naming the chat (its agent's writes, and what its
- * Build it made, `keepMadeInChat`), at its latest one.
+ * What `personId`'s chat `chatId` worked on, the most recently first: each
+ * subject with a checkpoint naming the chat (its agent's writes, and what
+ * its Build it made, `keepMadeInChat`), at its latest one. By the person
+ * whose chat it is too, never by a chat's ID alone.
  */
 export const chatWork = async (
   env: Env,
+  personId: string,
   chatId: string
 ): Promise<ChatWork[]> => {
   const rows = await drizzle(env.DB)
@@ -1356,8 +1360,9 @@ export const chatWork = async (
     .from(draftCheckpoints)
     .where(
       and(
+        eq(draftCheckpoints.personId, personId),
         eq(draftCheckpoints.chatId, chatId),
-        sql`${draftCheckpoints.number} = (SELECT MAX(number) FROM draft_checkpoints AS own WHERE own.subject_kind = ${draftCheckpoints.subjectKind} AND own.subject_id = ${draftCheckpoints.subjectId} AND own.chat_id = ${chatId})`
+        sql`${draftCheckpoints.number} = (SELECT MAX(number) FROM draft_checkpoints AS own WHERE own.subject_kind = ${draftCheckpoints.subjectKind} AND own.subject_id = ${draftCheckpoints.subjectId} AND own.chat_id = ${chatId} AND own.person_id = ${personId})`
       )
     )
     .orderBy(desc(draftCheckpoints.createdAt))

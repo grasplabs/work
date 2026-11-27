@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import { agentErrors } from "@grasp-os/shared/agent";
 import type { Blueprint } from "@grasp-os/shared/apps";
 import type {
   ChatAgent,
@@ -26,11 +27,14 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { CoreTimeoutError, timeoutMs } from "../core.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { examplesFor } from "../make/examples.ts";
-import { activeChat } from "./active-chat.ts";
+import { activeChat, forgetActiveChats } from "./active-chat.ts";
+import { ChatPage } from "./chat-page.tsx";
 import { ChatStart } from "./chat-start.tsx";
 import type { MakeIdeas } from "./chat-start.tsx";
+import { startOf } from "./chat-starts.ts";
 import { GlobalChatProvider } from "./global-chat.tsx";
 import { typeInPrompt } from "./test-typing.ts";
 
@@ -139,7 +143,16 @@ const shown = async (
   } = {}
 ) => {
   const asked: string[] = [];
-  /** The key each create and send went with. */
+  /** Whether the tab has lost its connection: every call fails before it goes. */
+  let offline = false;
+  /** The page names each new chat: by the order they were named here. */
+  const names = new Map<string, string>();
+  const nameOf = (chatId: string): string => {
+    const name = names.get(chatId) ?? `chat-${names.size + 1}`;
+    names.set(chatId, name);
+    return name;
+  };
+  /** The key each start and send went with. */
   const keys: string[] = [];
   /** How many hold the connection checked now (`keepAlive`). */
   const kept = { alive: 0 };
@@ -154,30 +167,27 @@ const shown = async (
     efforts: async () => await Promise.resolve({}),
     list: async () => await Promise.resolve([]),
     agents: async () => await Promise.resolve(agents),
-    create: async (
-      title: string,
-      agentId?: string,
-      made?: ChatMake,
-      key?: string
-    ) => {
-      keys.push(`create ${key}`);
-      const failure = creates.shift();
-      if (failure !== undefined) {
-        throw failure;
-      }
-      const by = agentId === undefined ? "" : ` with ${agentId}`;
-      asked.push(`create ${title} ${JSON.stringify(made ?? null)}${by}`);
-      return await Promise.resolve({ id: "chat-1", title });
-    },
     send: async (chatId: string, question: ChatQuestion) => {
       keys.push(`send ${question.key}`);
+      const { start } = question;
+      if (start !== undefined) {
+        keys.push(`create ${start.key}`);
+        const failure = creates.shift();
+        if (failure !== undefined) {
+          throw failure;
+        }
+        const by = start.agentId === undefined ? "" : ` with ${start.agentId}`;
+        asked.push(
+          `create ${start.title} ${JSON.stringify(start.make ?? null)}${by}`
+        );
+      }
       const failure = sends.shift();
       if (failure !== undefined) {
         throw failure;
       }
       await taking;
       asked.push(
-        `send ${chatId} ${question.text}${question.mentions === undefined ? "" : ` ${JSON.stringify(question.mentions)}`}`
+        `send ${nameOf(chatId)} ${question.text}${question.mentions === undefined ? "" : ` ${JSON.stringify(question.mentions)}`}`
       );
       await Promise.resolve();
     },
@@ -187,7 +197,13 @@ const shown = async (
   const core = {
     withSession: async <T,>(
       action: (session: { chats: typeof chats }) => Promise<T>
-    ): Promise<T> => await action({ chats }),
+    ): Promise<T> => {
+      // No connection came in time: what the tab's connection says then.
+      if (offline) {
+        throw new CoreTimeoutError(timeoutMs);
+      }
+      return await action({ chats });
+    },
     get reach() {
       return reached.reach;
     },
@@ -238,8 +254,16 @@ const shown = async (
       />
     ),
   });
+  // The chat a question here starts opens on its own page at once.
+  const chatPage = createRoute({
+    getParentRoute: () => shell,
+    path: "/chats/$chatId",
+    component: () => (
+      <ChatPage chatId={chatPage.useParams().chatId} title={undefined} />
+    ),
+  });
   const router = createRouter({
-    routeTree: rootRoute.addChildren([shell.addChildren([page])]),
+    routeTree: rootRoute.addChildren([shell.addChildren([page, chatPage])]),
     history: createMemoryHistory(),
     context: { core },
   });
@@ -262,7 +286,12 @@ const shown = async (
       changed();
     }
   };
-  return { asked, keys, reach, kept };
+  /** Where the tab is now. */
+  const path = () => router.state.location.pathname;
+  const goOffline = () => {
+    offline = true;
+  };
+  return { asked, keys, reach, kept, nameOf, path, goOffline };
 };
 
 const box = (): HTMLElement => {
@@ -329,6 +358,7 @@ describe("Chat's page from Make something", () => {
     root = undefined;
     document.body.replaceChildren();
     localStorage.clear();
+    forgetActiveChats();
     vi.useRealTimers();
   });
 
@@ -472,7 +502,7 @@ describe("Chat's page from Make something", () => {
   });
 
   it("makes the chat with what to make, which it keeps, on the first question", async () => {
-    const { asked } = await shown({
+    const { asked, nameOf } = await shown({
       kind: "app",
       project: "project-1",
     });
@@ -487,7 +517,7 @@ describe("Chat's page from Make something", () => {
     });
     await settled();
 
-    expect({ asked, open: activeChat() }).toStrictEqual({
+    expect({ asked, open: nameOf(activeChat() ?? "") }).toStrictEqual({
       asked: [
         'create Track the month-end close {"kind":"app","project":"project-1"}',
         "send chat-1 Track the month-end close",
@@ -656,6 +686,66 @@ describe("Chat's page from Make something", () => {
     });
   });
 
+  it("opens the chat a question starts, and puts the question back into its box, when it fails before any call goes", async () => {
+    const { keys, path, goOffline } = await shown();
+    await act(async () => {
+      typeInPrompt(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+    goOffline();
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({
+      page: path().startsWith("/chats/"),
+      box: box().textContent,
+      notes: notes(),
+      calls: keys,
+    }).toStrictEqual({
+      page: true,
+      box: "What waits on me today?",
+      notes: [
+        "Could not send. Your message is kept.",
+        "Grasp can't be reached right now. Try again in a moment.",
+      ],
+      calls: [],
+    });
+  });
+
+  it("lets go of a chat whose start core refused for good, and keeps one refused for now to start again", async () => {
+    const { path } = await shown(undefined, undefined, {
+      creates: [
+        agentErrors.create("agent.too_many_chats"),
+        agentErrors.create("agent.chat_not_found"),
+      ],
+    });
+    const ask = async (): Promise<string> => {
+      await act(async () => {
+        box().replaceChildren();
+        typeInPrompt(box(), "What waits on me today?");
+        await Promise.resolve();
+      });
+      await act(async () => {
+        box().closest("form")?.requestSubmit();
+        await Promise.resolve();
+      });
+      await settled();
+      return path().slice("/chats/".length);
+    };
+    const forNow = await ask();
+    const kept = startOf(forNow) !== undefined;
+    const forGood = await ask();
+
+    expect({
+      same: forGood === forNow,
+      kept,
+      after: startOf(forGood),
+    }).toStrictEqual({ same: true, kept: true, after: undefined });
+  });
+
   it("sends a question that failed as a new one once its words were changed, even back to the same words", async () => {
     const { keys } = await shown(undefined, undefined, {
       creates: [
@@ -684,14 +774,65 @@ describe("Chat's page from Make something", () => {
     await write("Yes, go on");
     await ask("Yes");
 
-    const made = keys.filter((each) => each.startsWith("create "));
-    // Two tries of the first, one of the second.
-    expect(new Set(made).size).toBe(2);
+    const sent = keys.filter((each) => each.startsWith("send "));
+    // Two tries of the first, one of the second, in the chat the first
+    // started.
+    expect(new Set(sent).size).toBe(2);
+  });
+
+  it("opens the chat a question starts on its own page at once, the question in it, with no call to make the chat before it", async () => {
+    const taken = Promise.withResolvers<boolean>();
+    const { asked, keys, path } = await shown(undefined, undefined, {
+      taking: taken.promise,
+    });
+    await act(async () => {
+      typeInPrompt(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    // Core hasn't taken it yet: the chat's page shows it already, once the
+    // thread's code is in (loaded ahead in the app).
+    await vi.waitFor(
+      async () => {
+        await settled();
+        expect(document.querySelector("article")).not.toBeNull();
+      },
+      { timeout: 15_000 }
+    );
+    const meanwhile = {
+      page: path().startsWith("/chats/"),
+      shown: document.body.textContent.includes("What waits on me today?"),
+      calls: [...keys],
+    };
+    await act(async () => {
+      taken.resolve(true);
+      await taken.promise;
+    });
+    await settled();
+
+    expect({ meanwhile, asked }).toStrictEqual({
+      meanwhile: {
+        page: true,
+        shown: true,
+        // One call: the question, with the chat it starts.
+        calls: [
+          expect.stringMatching(/^send /u),
+          expect.stringMatching(/^create /u),
+        ],
+      },
+      asked: [
+        "create What waits on me today? null",
+        "send chat-1 What waits on me today?",
+      ],
+    });
   });
 
   it("keeps the connection checked while a question is on its way, after Chat's start went as its chat opened", async () => {
     const taken = Promise.withResolvers<boolean>();
-    const { kept } = await shown(undefined, undefined, {
+    const { kept, path } = await shown(undefined, undefined, {
       taking: taken.promise,
     });
     await act(async () => {
@@ -705,7 +846,7 @@ describe("Chat's page from Make something", () => {
     await settled();
     // The chat's page opened: Chat's start, and its box, are gone.
     const meanwhile = {
-      startGone: document.querySelector('[role="textbox"]') === null,
+      startGone: path().startsWith("/chats/"),
       alive: kept.alive,
     };
     await act(async () => {

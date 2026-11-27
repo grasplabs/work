@@ -234,6 +234,7 @@ export const holdStart = async (
   const db = drizzle(env.DB);
   const now = Date.now();
   const byKey = and(
+    eq(agentHeldStarts.workspaceId, scope.workspaceId),
     eq(agentHeldStarts.chatId, scope.chatId),
     eq(agentHeldStarts.key, key)
   );
@@ -544,19 +545,23 @@ export const sweepHeldStartInputs = async (
 };
 
 /**
- * Deletes the held starts of chat `chatId`, as the chat is deleted, or of
+ * Deletes the held starts of chat `chatId` of Workspace object
+ * `workspaceId`, as the chat is deleted, never by a chat's ID alone, or of
  * person `personId`, as they are erased: what they were asked to start
  * goes with them.
  */
 export const dropHeldStarts = async (
   env: Env,
-  of: { chatId: string } | { personId: string }
+  of: { workspaceId: string; chatId: string } | { personId: string }
 ): Promise<void> => {
   await drizzle(env.DB)
     .delete(agentHeldStarts)
     .where(
       "chatId" in of
-        ? eq(agentHeldStarts.chatId, of.chatId)
+        ? and(
+            eq(agentHeldStarts.workspaceId, of.workspaceId),
+            eq(agentHeldStarts.chatId, of.chatId)
+          )
         : eq(agentHeldStarts.personId, of.personId)
     );
 };

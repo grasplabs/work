@@ -57,15 +57,16 @@ permissions:
 
 jobs:
   # From CI only (a push to main): deploys only main's head. A push that
-  # main has moved past, whether a newer push landed while it built or it
-  # is a rerun of an older one, deploys nothing, and CI publishes nothing
-  # for it either (the `current` output): deploying it would roll the
-  # platform back under newer releases, and publishing it would let the
-  # old admin roll out a release without its platform. The newer push
-  # deploys and publishes everything, since a release is a build of all of
-  # main. Main's head, not "not older than what's deployed": the newest
-  # push deploys anyway, and nothing records what's deployed. A run by
-  # hand deploys whatever commit of main it was started on, on purpose.
+  # main has moved past, whether a newer push landed while it waited for
+  # its turn or it is a rerun of an older one, deploys nothing, and CI
+  # publishes nothing for it either (the `current` output): deploying it
+  # would roll the platform back under newer releases, and publishing it
+  # would let the old admin roll out a release without its platform. The
+  # newer push deploys and publishes everything, since a release is a
+  # build of all of main. Main's head, not "not older than what's
+  # deployed": the newest push deploys anyway, and nothing records what's
+  # deployed. A run by hand deploys whatever commit of main it was started
+  # on, on purpose.
   head:
     name: head
     if: github.event_name == 'push'

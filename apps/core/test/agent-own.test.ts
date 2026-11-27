@@ -11,6 +11,7 @@ import { mockIdp } from "./idp.ts";
 import { saveInstructions } from "./instruction-saves.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
+import { startedThrough } from "./started-chats.ts";
 
 // A person's own agents: anyone makes one for themselves, and only they
 // see, ask and change it. These start from the ways it can fail: someone
@@ -72,7 +73,9 @@ describe("a person's own agents", slow, () => {
     );
     const provider = await fakeProvider(says("Noted."));
 
-    const chat = await ann.api.chats.create("Notes", mine.id);
+    const chat = await startedThrough(ann.api.chats, "Notes", {
+      agentId: mine.id,
+    });
     await ann.api.chats.send(chat.id, { text: "Draft this week.", model });
     await settled(ann, chat.id);
 
@@ -97,8 +100,12 @@ describe("a person's own agents", slow, () => {
         "short, no greetings"
       ),
       // Nobody else starts a chat with it, by its ID.
-      benChat: await outcome(ben.api.chats.create("Theirs", mine.id)),
-      adminChat: await outcome(admin.api.chats.create("Theirs", mine.id)),
+      benChat: await outcome(
+        startedThrough(ben.api.chats, "Theirs", { agentId: mine.id })
+      ),
+      adminChat: await outcome(
+        startedThrough(admin.api.chats, "Theirs", { agentId: mine.id })
+      ),
       // Its owner alone, in Grasp's own chat alone.
       reach: [
         await agentFor(env, mine.id, ann.userId),
@@ -308,7 +315,9 @@ describe("a person's own agents", slow, () => {
     const ann = await signedInApi(idp, "user");
     const admin = await signedInApi(idp, "admin");
     const mine = await ann.api.connections.makeOwnAgent(said("Scribe"));
-    const chat = await ann.api.chats.create("Notes", mine.id);
+    const chat = await startedThrough(ann.api.chats, "Notes", {
+      agentId: mine.id,
+    });
     await fakeProvider(says("Noted."));
 
     const byAnn = await outcome(
