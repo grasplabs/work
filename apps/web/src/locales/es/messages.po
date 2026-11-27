@@ -3087,6 +3087,7 @@ msgid "Answered: {title}"
 msgstr "Respondida: {title}"
 
 #: src/chat/sidebar-chats.tsx
+#: src/frame/ui-words.tsx
 msgid "Answering"
 msgstr "Respondiendo"
 
@@ -6043,6 +6044,11 @@ msgctxt "a failed run's error code, folded away"
 msgid "Details"
 msgstr "Detalles"
 
+#: src/frame/ui-words.tsx
+msgctxt "a page's side panel"
+msgid "Details"
+msgstr "Detalles"
+
 #: src/inbox/decision-confirmation.tsx
 msgctxt "what else an answer to a decision says"
 msgid "Details"
@@ -6376,6 +6382,7 @@ msgstr "Puntos"
 
 #: src/chat/sidebar-chats.tsx
 #: src/frame/panels/rename.tsx
+#: src/frame/ui-words.tsx
 msgid "Double-click or press F2 to rename"
 msgstr "Haz doble clic o pulsa F2 para cambiar el nombre"
 
@@ -10280,6 +10287,7 @@ msgstr "Cargando el valor"
 #: src/activity/audit-log.tsx
 #: src/apps/app-workspace.tsx
 #: src/frame/page-states.tsx
+#: src/frame/ui-words.tsx
 #: src/settings/erasures.tsx
 #: src/settings/section.tsx
 msgid "Loading…"
@@ -10840,6 +10848,7 @@ msgstr "Más para {label}"
 #: src/agents/agent-overview.tsx
 #: src/agents/agent-page.tsx
 #: src/apps/app-page.tsx
+#: src/frame/ui-words.tsx
 #: src/settings/event-sources.tsx
 msgid "More for {name}"
 msgstr "Más de {name}"
@@ -14580,9 +14589,14 @@ msgstr "Eliminando"
 #: src/chat/sidebar-chats.tsx
 #: src/frame/panels/head.tsx
 #: src/frame/panels/rename.tsx
+#: src/frame/ui-words.tsx
 #: src/settings/teams.tsx
 msgid "Rename"
 msgstr "Cambiar nombre"
+
+#: src/frame/ui-words.tsx
+msgid "Rename {name}"
+msgstr "Cambiar el nombre de {name}"
 
 #: src/chat/sidebar-chats.tsx
 msgid "Rename {title}"
@@ -14736,6 +14750,10 @@ msgstr "Cambiar el tamaño"
 #: src/frame/panels/chat-panels-beside.tsx
 msgid "Resize the chat"
 msgstr "Cambiar el ancho del chat"
+
+#: src/frame/ui-words.tsx
+msgid "Resize the panel"
+msgstr "Cambiar el tamaño del panel"
 
 #: src/frame/panels/float-window.tsx
 msgid "Resize the panel's height"
@@ -15496,6 +15514,7 @@ msgstr "Buscar apps"
 
 #: src/chat/chat-window.tsx
 #: src/frame/app-sidebar.tsx
+#: src/frame/ui-words.tsx
 msgid "Search chats"
 msgstr "Buscar chats"
 
@@ -16100,6 +16119,10 @@ msgstr "Mostrar versiones anteriores"
 #: src/chat/chat-toggle.tsx
 msgid "Show or hide the chat"
 msgstr "Mostrar u ocultar el chat"
+
+#: src/frame/ui-words.tsx
+msgid "Show or hide the panel"
+msgstr "Mostrar u ocultar el panel"
 
 #: src/frame/app-frame.tsx
 #: src/frame/app-sidebar.tsx
@@ -19192,6 +19215,7 @@ msgid "Unpin"
 msgstr "Desfijar"
 
 #: src/chat/sidebar-chats.tsx
+#: src/frame/ui-words.tsx
 msgid "Unread"
 msgstr "No leído"
 

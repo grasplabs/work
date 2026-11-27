@@ -238,8 +238,6 @@ const styles = stylex.create({
     marginInlineStart: "auto",
     marginInlineEnd: `calc(${size.sidebarRowInline} - (${size.sidebarIconButton} - ${size.sidebarIcon}) / 2)`,
   },
-  // A group label as tall as its words and their room, as the reference's.
-  label: { height: "auto" },
   labelWords: {
     flexGrow: 1,
     minWidth: 0,
@@ -364,8 +362,6 @@ const styles = stylex.create({
         colors.sidebarForeground,
     },
   },
-  // The row's menu on a right-click, as narrow as the reference's.
-  contextMenu: { minWidth: "12rem" },
   // The Working mark at a row's end, in an icon's room, never squeezed.
   working: {
     display: "inline-flex",
@@ -989,10 +985,7 @@ const Row = ({ row }: { row: SidebarRow }) => {
           <ContextMenuTrigger aria-label={row.label} tabStop={false}>
             {held}
           </ContextMenuTrigger>
-          <ContextMenuContent
-            finalFocus={renaming ? "none" : linkOf}
-            style={styles.contextMenu}
-          >
+          <ContextMenuContent finalFocus={renaming ? "none" : linkOf}>
             <MenuEntries actions={actions} menu="context" onChoose={choose} />
           </ContextMenuContent>
         </ContextMenu>
@@ -1064,9 +1057,7 @@ const Group = ({ group }: { group: SidebarGroupEntry }) => {
   if (group.collapsible !== true) {
     return (
       <SidebarGroup>
-        <SidebarGroupLabel id={labelId} style={styles.label}>
-          {words}
-        </SidebarGroupLabel>
+        <SidebarGroupLabel id={labelId}>{words}</SidebarGroupLabel>
         <Rows group={group} labelledBy={labelId} />
       </SidebarGroup>
     );
@@ -1075,7 +1066,7 @@ const Group = ({ group }: { group: SidebarGroupEntry }) => {
     <SidebarCollapsible name={group.id ?? label}>
       <SidebarGroup>
         <CollapsibleTrigger asChild>
-          <SidebarGroupLabel asChild style={styles.label}>
+          <SidebarGroupLabel asChild>
             <button id={labelId} type="button">
               {words}
               <span aria-hidden="true" {...stylex.props(styles.chevron)}>

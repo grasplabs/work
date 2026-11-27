@@ -2,6 +2,7 @@ import { createFileRoute, getRouteApi } from "@tanstack/react-router";
 import { Suspense } from "react";
 
 import { AdminsUnread } from "../admin/admins.tsx";
+import { LoadingLines } from "../admin/failure.tsx";
 import { HomeBody, NewOrganization } from "../admin/home.tsx";
 import { freshMs } from "../admin/org-reads.ts";
 import { AdminPage } from "../admin/page.tsx";
@@ -9,7 +10,6 @@ import type { PlatformSpend } from "../admin/platform-spend-sums.ts";
 import { useSettled } from "../admin/settled.tsx";
 import type { Deferred } from "../admin/settled.tsx";
 import type { ClientSummary } from "../clients/summary.ts";
-import { LoadingLines } from "../frame/page.tsx";
 import { fetchPlatformSpend } from "../platform-ai-functions.ts";
 
 const root = getRouteApi("__root__");
