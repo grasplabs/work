@@ -1,5 +1,9 @@
 // @vitest-environment happy-dom
-import type { ChatSearchHit, ChatSummary } from "@grasp-os/shared/chat";
+import type {
+  ChatListUpdate,
+  ChatSearchHit,
+  ChatSummary,
+} from "@grasp-os/shared/chat";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -44,20 +48,36 @@ const lease = chat("lease", "Lease of the office");
 const travel = chat("travel", "Trip to Lyon");
 
 /**
- * A page in the frame, with nothing of the chats on it, whose core lists
- * `listed` (or, archived, `archived`) and finds `found` for any search.
+ * A page in the frame, with nothing of the chats on it, whose core pushes
+ * `listed` and counts `archivedCount` archived chats, lists the archived
+ * ones as `archived` answers, and finds `found` for any search.
  */
 const shown = async (
   found: (query: string) => Promise<ChatSearchHit[]>,
   listed: ChatSummary[] = [board, lease, travel],
-  archived: () => Promise<ChatSummary[]> = async () => await Promise.resolve([])
+  archived: () => Promise<ChatSummary[]> = async () =>
+    await Promise.resolve([]),
+  archivedCount = 0
 ) => {
   const asked: string[] = [];
   const chats = {
-    list: async (which?: { archived?: boolean }) =>
-      which?.archived === true
-        ? await archived()
-        : await Promise.resolve(listed),
+    watchList: async (onUpdate: (update: ChatListUpdate) => void) => {
+      onUpdate({
+        chats: listed,
+        removed: [],
+        full: true,
+        archived: archivedCount,
+      });
+      return await Promise.resolve({
+        release: async () => {
+          await Promise.resolve();
+        },
+        [Symbol.dispose]: () => {
+          // Nothing more is pushed.
+        },
+      });
+    },
+    list: async () => await archived(),
     search: async (query: string) => {
       asked.push(query);
       return await found(query);
@@ -123,20 +143,6 @@ const rows = (): string[] =>
       }
       return (read.textContent ?? "").trim();
     });
-
-/**
- * Core's archived chats: at once, as the window counts them when it opens
- * on the rest, then `opened` for the archived list itself.
- */
-const archivedThen =
-  (archived: ChatSummary[], opened: () => Promise<ChatSummary[]>) =>
-  async (): Promise<ChatSummary[]> => {
-    archivedThen.counted += 1;
-    return archivedThen.counted === 1
-      ? await Promise.resolve(archived)
-      : await opened();
-  };
-archivedThen.counted = 0;
 
 /** Chooses the window's row `value` ("archived", "back", a chat's ID), as a click would. */
 const choose = async (value: string): Promise<void> => {
@@ -276,11 +282,11 @@ describe("the chats window", () => {
   it("lists the archived chats alone, never the rest's rows meanwhile, and drops a list that comes late", async () => {
     const late = Promise.withResolvers<ChatSummary[]>();
     const old = { ...chat("old", "Old budget"), archived: true };
-    archivedThen.counted = 0;
     await shown(
       async () => await Promise.resolve([]),
       [board, lease, travel],
-      archivedThen([old], async () => await late.promise)
+      async () => await late.promise,
+      1
     );
     await openWindow({ key: "k", metaKey: true });
 
@@ -305,11 +311,11 @@ describe("the chats window", () => {
   it("counts the archived chats in the search's name only once their list has come", async () => {
     const later = Promise.withResolvers<ChatSummary[]>();
     const old = { ...chat("old", "Old budget"), archived: true };
-    archivedThen.counted = 0;
     await shown(
       async () => await Promise.resolve([]),
       [board, lease, travel],
-      archivedThen([old], async () => await later.promise)
+      async () => await later.promise,
+      1
     );
     await openWindow({ key: "k", metaKey: true });
     const search = () =>

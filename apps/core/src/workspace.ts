@@ -147,6 +147,8 @@ import type {
   TurnRequest,
   TurnStop,
 } from "./chat-harness.ts";
+import { ChatListWatch } from "./chat-list-watch.ts";
+import type { ChatList, ChatListListener } from "./chat-list-watch.ts";
 import {
   chatMessageOf,
   partialOf,
@@ -1170,6 +1172,22 @@ export class Workspace extends DurableObject<Env> {
   readonly #watchers = new Map<ChatId, Map<string, ChatWatch>>();
 
   /**
+   * Where each chat stood before the questions sent in it still being
+   * taken moved it up (`#askedIn`), when those are, and every time such a
+   * question moved it to.
+   */
+  readonly #asking = new Map<
+    ChatId,
+    { stood: Date; taking: Set<number>; moves: Set<number> }
+  >();
+
+  /** Who follows their list of chats (`watchChats`), by watch ID. */
+  readonly #listWatchers = new Map<string, ChatListWatch>();
+
+  /** Whether the list's watchers are told already this tick (`#listChanged`). */
+  #listTold = false;
+
+  /**
    * Bumped whenever a chat's agent writes an App's draft, so its watchers
    * read what it worked on again (`draftWritten`). In memory only.
    */
@@ -1224,6 +1242,12 @@ export class Workspace extends DurableObject<Env> {
       .where(eq(chats.id, chatId))
       .run();
     this.#keepSaid(chatId, stored.id, message);
+    // A step's result changes nothing the list shows that the answer
+    // around it won't: no title, read or working state, and its chat
+    // moved up as it was asked in.
+    if (message.role !== "toolResult") {
+      this.#listChanged();
+    }
     return stored;
   }
 
@@ -1532,6 +1556,7 @@ export class Workspace extends DurableObject<Env> {
       return made;
     });
     this.#deliverAudit();
+    this.#listChanged();
     return chat;
   }
 
@@ -2858,6 +2883,7 @@ export class Workspace extends DurableObject<Env> {
       live.underWay.resolve(true);
       started?.();
       this.#changed(chat.id);
+      this.#listChanged();
       if (onText !== undefined) {
         live.onText = throttled(onText);
       }
@@ -2909,6 +2935,7 @@ export class Workspace extends DurableObject<Env> {
     live.underWay.resolve(false);
     live.ended.resolve();
     this.#turns.delete(chatId);
+    this.#listChanged();
     this.#partials.delete(chatId);
     this.#waits.delete(chatId);
     // A turn that stopped short of a step's result shows no output on.
@@ -3006,12 +3033,20 @@ export class Workspace extends DurableObject<Env> {
     if (key !== undefined) {
       this.#starting.set(key, { chatId: chat.id, started: started.promise });
     }
+    // Asked: first in its person's list now, as Send was pressed, not once
+    // the question is shown (`#store`), which waits on the chat's object
+    // and may take seconds; back where it was if it is refused.
+    const asked = this.#askedIn(chat.id);
     void this.#takeQuestion(chat, question, started);
     try {
       await started.promise;
       if (key !== undefined) {
         this.#keepRequest("send", key, chat.id);
       }
+      this.#settledAsk(chat.id, asked, true);
+    } catch (error) {
+      this.#settledAsk(chat.id, asked, false);
+      throw error;
     } finally {
       if (key !== undefined) {
         this.#starting.delete(key);
@@ -3019,6 +3054,73 @@ export class Workspace extends DurableObject<Env> {
     }
     // The alarm keeps the object up until the turn ends (`alarm`).
     await this.#alarmBy(Date.now());
+  }
+
+  /**
+   * Moves chat `chatId` up its person's list as a question is sent in it
+   * (`send`), keeping where it stood before the first of those still
+   * being taken: what a refused one puts it back to. Answers when.
+   */
+  #askedIn(chatId: ChatId): Date {
+    const asked = new Date();
+    const asking = this.#asking.get(chatId) ?? {
+      stood: this.#chat(chatId).lastAt,
+      taking: new Set<number>(),
+      moves: new Set<number>(),
+    };
+    asking.taking.add(asked.getTime());
+    asking.moves.add(asked.getTime());
+    this.#asking.set(chatId, asking);
+    this.#movedTo(chatId, asked);
+    return asked;
+  }
+
+  /**
+   * The question sent in chat `chatId` at `asked` was taken, or refused.
+   * Taken, the chat was asked in then: where it stands from now on. Once
+   * none is still being taken, a chat no question since moved (its last
+   * activity still one of theirs) goes back to where it stood.
+   */
+  #settledAsk(chatId: ChatId, asked: Date, taken: boolean): void {
+    const asking = this.#asking.get(chatId);
+    if (asking === undefined) {
+      return;
+    }
+    asking.taking.delete(asked.getTime());
+    if (taken) {
+      asking.stood = asked;
+    }
+    if (asking.taking.size > 0) {
+      return;
+    }
+    this.#asking.delete(chatId);
+    const { lastAt } = this.#chat(chatId);
+    // Last moved by a refused question: back where it stood. One a
+    // message or a note moved since stays where that put it.
+    if (
+      asking.moves.has(lastAt.getTime()) &&
+      lastAt.getTime() !== asking.stood.getTime()
+    ) {
+      this.#movedTo(chatId, asking.stood, lastAt);
+    }
+  }
+
+  /**
+   * Moves the chat in its person's list to `lastAt`, as active then;
+   * given `from`, only while nothing moved it since.
+   */
+  #movedTo(chatId: ChatId, lastAt: Date, from?: Date): void {
+    this.#db
+      .update(chats)
+      .set({ lastAt })
+      .where(
+        and(
+          eq(chats.id, chatId),
+          from === undefined ? undefined : eq(chats.lastAt, from)
+        )
+      )
+      .run();
+    this.#listChanged();
   }
 
   /**
@@ -3756,6 +3858,7 @@ export class Workspace extends DurableObject<Env> {
       this.ctx.storage.kv.delete(key);
     }
     this.#changed(chatId);
+    this.#listChanged();
   }
 
   /**
@@ -4902,26 +5005,36 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Marks `personId`'s chat `chatId` seen up to its latest message
+   * Marks `personId`'s chat `chatId` seen up to its latest message, or
+   * to `upTo`, the newest the page shows, where that is older
    * (`ChatsApi.markRead`), never back: a page that shows less, on another
    * device, leaves it where a newer one put it. The last message they had
    * seen before: 0 for none, null for a chat made before chats kept it,
    * which counts as read. Only their own chat in Grasp
    * (`#graspChat`): anyone else's is refused as if there were none.
    */
-  markChatRead(chatId: unknown, personId: string): number | null {
+  markChatRead(
+    chatId: unknown,
+    personId: string,
+    upTo?: number
+  ): number | null {
     const chat = this.#graspChat(chatId, personId);
     const latest = this.#db
       .select({ id: sql<number | null>`max(${chatMessages.id})` })
       .from(chatMessages)
       .where(eq(chatMessages.chatId, chat.id))
       .get()?.id;
-    if (typeof latest === "number" && latest > (chat.readUpTo ?? 0)) {
+    const seen =
+      typeof latest === "number" && upTo !== undefined
+        ? Math.min(latest, upTo)
+        : latest;
+    if (typeof seen === "number" && seen > (chat.readUpTo ?? 0)) {
       this.#db
         .update(chats)
-        .set({ readUpTo: latest })
+        .set({ readUpTo: seen })
         .where(eq(chats.id, chat.id))
         .run();
+      this.#listChanged();
     }
     return chat.readUpTo;
   }
@@ -5232,6 +5345,7 @@ export class Workspace extends DurableObject<Env> {
       this.#outboxed(by, "chat.renamed", id);
     });
     this.#deliverAudit();
+    this.#listChanged();
   }
 
   /**
@@ -5303,6 +5417,7 @@ export class Workspace extends DurableObject<Env> {
       );
     });
     this.#deliverAudit();
+    this.#listChanged();
   }
 
   /**
@@ -5496,6 +5611,7 @@ export class Workspace extends DurableObject<Env> {
           .where(eq(chatRequestKeys.chatId, id))
           .run();
         this.#db.delete(chats).where(eq(chats.id, id)).run();
+        this.#listChanged();
         this.ctx.storage.kv.delete(`${traceKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${builtKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${runningKeyPrefix}${id}`);
@@ -5581,6 +5697,10 @@ export class Workspace extends DurableObject<Env> {
       }
     }
     this.#watchers.clear();
+    for (const watch of this.#listWatchers.values()) {
+      watch[Symbol.dispose]();
+    }
+    this.#listWatchers.clear();
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     // Its tables went with its storage: they are made again, empty, as for
@@ -5621,14 +5741,8 @@ export class Workspace extends DurableObject<Env> {
       this.#scopeOf(this.#graspChat(chatId, personId))
     );
     // Read again after the await: the chat may have gone meanwhile.
-    const { id } = this.#graspChat(chatId, personId);
-    let watching = 0;
-    for (const watchers of this.#watchers.values()) {
-      watching += watchers.size;
-    }
-    if (watching >= maxWatchers) {
-      throw agentErrors.create("agent.too_many_watches");
-    }
+    const { id, readUpTo } = this.#graspChat(chatId, personId);
+    this.#requireRoomToWatch();
     const watchId = crypto.randomUUID();
     const watch = new ChatWatch(
       listener.dup(),
@@ -5636,7 +5750,8 @@ export class Workspace extends DurableObject<Env> {
       () => this.#provenance(id),
       () => {
         this.unwatch(id, watchId);
-      }
+      },
+      readUpTo
     );
     const watchers = this.#watchers.get(id) ?? new Map<string, ChatWatch>();
     watchers.set(watchId, watch);
@@ -5646,6 +5761,83 @@ export class Workspace extends DurableObject<Env> {
       this.#toolEvents(id)
     );
     return watchId;
+  }
+
+  /** Refuses another watcher once the object holds its most (chats' and lists' together). */
+  #requireRoomToWatch(): void {
+    let watching = this.#listWatchers.size;
+    for (const watchers of this.#watchers.values()) {
+      watching += watchers.size;
+    }
+    if (watching >= maxWatchers) {
+      throw agentErrors.create("agent.too_many_watches");
+    }
+  }
+
+  /**
+   * Follows `personId`'s list of chats, as `chats` gives it: `listener`
+   * gets the whole list, then what changes in it (chat-watch.ts,
+   * `ChatListWatch`). Returns the ID `unwatchChats` drops it by; one that
+   * can't be reached drops itself.
+   */
+  watchChats(personId: string, listener: ChatListListener): string {
+    this.#requireRoomToWatch();
+    const watchId = crypto.randomUUID();
+    const watch = new ChatListWatch(listener.dup(), personId, () => {
+      this.unwatchChats(watchId);
+    });
+    this.#listWatchers.set(watchId, watch);
+    watch.push(this.#listOf(personId));
+    return watchId;
+  }
+
+  /** Drops the list's watcher `watchChats` kept as `watchId`, if it still does. */
+  unwatchChats(watchId: string): void {
+    const watch = this.#listWatchers.get(watchId);
+    this.#listWatchers.delete(watchId);
+    watch?.[Symbol.dispose]();
+  }
+
+  /**
+   * Tells whoever follows a list of chats that it may have changed: a
+   * chat made, renamed, archived or deleted, asked in, answered, running
+   * or not, read. Once a tick, however many changes it made: each
+   * watcher then sends only what of its list did change.
+   */
+  #listChanged(): void {
+    if (this.#listTold || this.#listWatchers.size === 0) {
+      return;
+    }
+    this.#listTold = true;
+    queueMicrotask(() => {
+      this.#listTold = false;
+      // Read once for each person followed, whoever many follow it.
+      const lists = new Map<string, ChatList>();
+      for (const watch of this.#listWatchers.values()) {
+        const list = lists.get(watch.personId) ?? this.#listOf(watch.personId);
+        lists.set(watch.personId, list);
+        watch.push(list);
+      }
+    });
+  }
+
+  /** `personId`'s list as its watchers follow it: what `chats` gives, and how many they archived. */
+  #listOf(personId: string): ChatList {
+    return {
+      chats: this.chats(personId),
+      archived: this.#archivedCount(personId),
+    };
+  }
+
+  /** How many chats `personId` archived. */
+  #archivedCount(personId: string): number {
+    return (
+      this.#db
+        .select({ archived: count() })
+        .from(chats)
+        .where(and(shownInGrasp(personId), isNotNull(chats.archivedAt)))
+        .get()?.archived ?? 0
+    );
   }
 
   /** Drops the watcher `watch` kept as `watchId`, if it still does. */
@@ -5714,6 +5906,7 @@ export class Workspace extends DurableObject<Env> {
       .set({ lastAt: new Date() })
       .where(eq(chats.id, chatId))
       .run();
+    this.#listChanged();
     this.#changed(chatId);
   }
 

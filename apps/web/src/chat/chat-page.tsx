@@ -2,7 +2,7 @@ import type { ChatSummary } from "@grasp-os/shared/chat";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import {
   LoadingLines,
@@ -13,6 +13,7 @@ import { SiteHeader } from "../frame/site-header.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { setActiveChat } from "./active-chat.ts";
 import { boxOf, ChatConversation, ChatFooter } from "./chat-body.tsx";
+import { useChatList } from "./chat-list.ts";
 import { ChatMoreMenu, useRenameChat } from "./chat-more.tsx";
 import { useFollowedChat } from "./chat-watch.ts";
 import { useGlobalChat } from "./global-chat.tsx";
@@ -80,8 +81,10 @@ export const ChatPage = ({
     }
   }, [other, gone, chatId]);
   const summary = ours ? chat.summary : undefined;
+  // As the person's list has it until the page's own read answers.
+  const listed = useChatList().chats.find(({ id }) => id === chatId);
   // Renamed since, or named by its agent once a turn ended: the newer name.
-  const name = summary?.title ?? title ?? words.title;
+  const name = summary?.title ?? title ?? listed?.title ?? words.title;
   const rename = useRenameChat(chatId, retitle);
   // The rename where the name stands, opened by its own keys or the menu's Rename.
   const [renaming, setRenaming] = useState(false);
@@ -137,23 +140,43 @@ export const ChatPage = ({
   );
 };
 
+/** What `page` answers, once it has: nothing before. */
+const useAnswered = <T,>(page: Promise<T>): T | undefined => {
+  const [answered, setAnswered] = useState<{ page: Promise<T>; value: T }>();
+  useEffect(() => {
+    let current = true;
+    void (async () => {
+      const value = await page;
+      if (current) {
+        setAnswered({ page, value });
+      }
+    })();
+    return () => {
+      current = false;
+    };
+  }, [page]);
+  return answered?.page === page ? answered.value : undefined;
+};
+
 /**
- * Chat `chatId`'s page as its route read it (`page`, the chat's summary):
- * the chat, or, where core has none of it for the person, not found, and
- * where the read failed otherwise, why, with Try again; never a chat to
- * ask in that core didn't give.
+ * Chat `chatId`'s page, shown at once, as its route reads the chat's
+ * summary (`page`) beside it: the chat, or, once the read says core has
+ * none of it for the person, not found, and where the read failed
+ * otherwise, why, with Try again; never a chat to ask in that core didn't
+ * give.
  */
 export const LoadedChatPage = ({
   chatId,
   page,
 }: {
   chatId: string;
-  page: Loaded<ChatSummary>;
+  page: Promise<Loaded<ChatSummary>>;
 }) => {
   const { t } = useLingui();
-  if (page.state !== "ready") {
-    return <PageNotLoaded crumbs={[{ label: t`Chat` }]} page={page} />;
+  const read = useAnswered(page);
+  if (read !== undefined && read.state !== "ready") {
+    return <PageNotLoaded crumbs={[{ label: t`Chat` }]} page={read} />;
   }
   // Another chat is another page: nothing typed in one stays for the next.
-  return <ChatPage chatId={chatId} key={chatId} title={page.data.title} />;
+  return <ChatPage chatId={chatId} key={chatId} title={read?.data.title} />;
 };

@@ -627,6 +627,12 @@ describe("chats", () => {
       { timeout: 10_000 }
     );
     const answered = await unread();
+    // Followed again, as a page opens it: its first update says where she
+    // had read to, as the mark would, before anything is marked.
+    const opened = await follow(ann.chats, chat.id);
+    await vi.waitFor(() => {
+      expect(opened.updates).not.toHaveLength(0);
+    });
     const second = await ann.chats.markRead(chat.id);
 
     expect({
@@ -636,6 +642,7 @@ describe("chats", () => {
       read,
       again,
       answered,
+      watched: opened.updates[0]?.seenUpTo,
       second,
       done: await unread(),
     }).toStrictEqual({
@@ -645,8 +652,49 @@ describe("chats", () => {
       read: false,
       again: seen,
       answered: true,
+      watched: seen,
       second: seen,
       done: false,
+    });
+  });
+
+  it("are read only up to the newest message the page shows, what came since still unread", async () => {
+    const ann = await person();
+    await answering(ann, says("First."), says("Second."));
+    const chat = await ann.chats.create("Behind");
+    const follower = await follow(ann.chats, chat.id);
+    await ann.chats.send(chat.id, { text: "One?", model });
+    await settled(follower);
+    const onPage =
+      follower.updates.flatMap(({ messages }) => messages).at(-1)?.id ?? 0;
+    // An answer the page hasn't shown yet: its watch is catching up.
+    await ann.chats.send(chat.id, { text: "Two?", model });
+    await vi.waitFor(
+      () => {
+        expect(follower.messages().at(-1)?.text).toBe("Second.");
+      },
+      { timeout: 10_000 }
+    );
+    const before = await ann.chats.markRead(chat.id, onPage);
+    const behind = await ann.chats.summary(chat.id);
+    // Never back: a page that shows even less moves nothing.
+    await ann.chats.markRead(chat.id, 1);
+    const again = await ann.chats.markRead(chat.id);
+    const caughtUp = await ann.chats.summary(chat.id);
+    const malformed = await outcome(ann.chats.markRead(chat.id, -1));
+
+    expect({
+      before,
+      behind: behind.unread,
+      again,
+      caughtUp: caughtUp.unread,
+      malformed,
+    }).toStrictEqual({
+      before: 0,
+      behind: true,
+      again: onPage,
+      caughtUp: false,
+      malformed: "agent.invalid_request",
     });
   });
 
@@ -675,7 +723,7 @@ describe("chats", () => {
     }).toStrictEqual({ before: false, seenUpTo: null, after: false });
   });
 
-  it("are listed by their latest message: a chat just continued comes first", async () => {
+  it("are listed by their latest message: a chat just asked in comes first, before its question shows", async () => {
     const ann = await person();
     const older = await ann.chats.create("Invoices");
     const newer = await ann.chats.create("Travel");
@@ -688,10 +736,15 @@ describe("chats", () => {
       ])
     );
 
-    await answering(ann, says("Noted."));
+    const { reply, release } = pausedReply(says("Noted."), 1);
+    await answering(ann, reply);
     const follower = await follow(ann.chats, older.id);
     await ann.chats.send(older.id, { text: "Any news?", model });
+    // Taken, its answer not begun: first already.
+    const asked = await ann.chats.list();
+    release();
     await settled(follower);
+    expect(asked.map(({ id }) => id)).toStrictEqual([older.id, newer.id]);
     const answered = follower.messages().at(-1)?.at;
 
     const listed = await ann.chats.list();
@@ -1743,6 +1796,9 @@ describe("chats", () => {
       "agent.invalid_question",
     ]);
     expect(gateway.requests).toHaveLength(0);
+    // Not taken, so not moved up its person's list either.
+    const after = await ann.chats.summary(chat.id);
+    expect(after.lastAt).toBe(chat.lastAt);
     const follower = await follow(ann.chats, chat.id);
     await vi.waitFor(
       () => {
