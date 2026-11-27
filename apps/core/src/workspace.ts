@@ -29,6 +29,7 @@ import {
   chatPlatformSchema,
   chatToolEventsKept,
   heldAppCallsPage,
+  seedTitleOf,
 } from "@grasp-os/shared/chat";
 import type {
   ChatChannel,
@@ -162,6 +163,7 @@ import {
   snippetOf,
   snippetReach,
 } from "./chat-search.ts";
+import { generatedTitle } from "./chat-titles.ts";
 import { toolCallSchema, toolEventOf } from "./chat-tool-events.ts";
 import type { ToolCall } from "./chat-tool-events.ts";
 import { ChatWatch } from "./chat-watch.ts";
@@ -1141,8 +1143,9 @@ export class Workspace extends DurableObject<Env> {
   readonly #waits = new Map<ChatId, ModelWait>();
 
   /**
-   * Turns `send` started, each settled once its turn ends: the alarm waits
-   * for them, so the object stays up while its agent works with nobody
+   * Turns `send` started, each settled once its turn ends, and the chat
+   * titles asked for as they began (`#nameChat`): the alarm waits for
+   * them, so the object stays up while its agent works with nobody
    * waiting on a call.
    */
   readonly #sent = new Set<Promise<unknown>>();
@@ -2980,6 +2983,9 @@ export class Workspace extends DurableObject<Env> {
       started?.();
       this.#changed(chat.id);
       this.#listChanged();
+      if (via === "web" && !unattended) {
+        this.#nameChat(chat.id, parsed.data.text, scope);
+      }
       if (onText !== undefined) {
         live.onText = throttled(onText);
       }
@@ -3019,6 +3025,52 @@ export class Workspace extends DurableObject<Env> {
     } finally {
       this.#endLive(chat.id, live);
     }
+  }
+
+  /**
+   * Names chat `chatId` from `question` in the background, as its first
+   * turn begins: asked once, when nothing was said in it yet and it is
+   * still called after that question (`seedTitleOf`), never for a later
+   * question, whether this one's title came or not. Nothing waits on it:
+   * the title lands once the small model answers (chat-titles.ts), only if
+   * the chat is still called so then, checked in the same write, so a
+   * rename or a plan's name that came first stays. Never rejects; kept
+   * with the turns the alarm waits for, so the object stays up for it.
+   */
+  #nameChat(
+    chatId: ChatId,
+    question: string,
+    scope: Omit<AgentScope, "runId">
+  ): void {
+    const seed = seedTitleOf(question);
+    const [said] = this.#db
+      .select({ id: chatMessages.id })
+      .from(chatMessages)
+      .where(eq(chatMessages.chatId, chatId))
+      .limit(1)
+      .all();
+    if (said !== undefined || this.#chat(chatId).title !== seed) {
+      return;
+    }
+    const naming = (async () => {
+      try {
+        const title = await generatedTitle(this.env, scope, question);
+        if (title === undefined || title === seed) {
+          return;
+        }
+        this.#db
+          .update(chats)
+          .set({ title })
+          .where(and(eq(chats.id, chatId), eq(chats.title, seed)))
+          .run();
+        this.#listChanged();
+      } catch (error) {
+        // Never expected: the chat keeps its seed.
+        log.error("chat.title_unsaved", errorFields(error));
+      }
+    })();
+    this.#sent.add(naming);
+    void this.#forget(naming);
   }
 
   /**

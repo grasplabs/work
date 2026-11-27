@@ -706,10 +706,10 @@ describe("model spend", { timeout: 60_000 }, () => {
     );
   });
 
-  it("sum a month's spend in the overview: the total across every caller, and each workflow's apart", async () => {
+  it("sum a month's spend in the overview: the total across every caller, chat's with its titles, and each workflow's apart", async () => {
     const invoices = `workflow-${crypto.randomUUID()}`;
     const orders = `workflow-${crypto.randomUUID()}`;
-    const { call, month } = withProvider(times(5, pricedAnswer));
+    const { call, month } = withProvider(times(6, pricedAnswer));
     const step = async (workflowId: string) =>
       await call(
         hello({
@@ -724,13 +724,16 @@ describe("model spend", { timeout: 60_000 }, () => {
       Array.from({ length: 3 }, () => async () => await step(invoices))
     );
     await step(orders);
-    // A new person: the total counts every caller, in this month.
+    // A new person: the total counts every caller, in this month, and
+    // chat's spend its turns and its titles.
     await call(hello());
-    await recordedUsage(month, 5);
+    await call(hello({ purpose: "chat.title" }));
+    await recordedUsage(month, 6);
     const spend = await monthSpend(env, month);
 
     expect({
       total: Math.round(spend.total * 1_000_000),
+      chat: Math.round(spend.chat * 1_000_000),
       workflows: spend.workflows.map(({ appId, workflowId, amount }) => [
         appId,
         workflowId,
@@ -738,7 +741,8 @@ describe("model spend", { timeout: 60_000 }, () => {
       ]),
       more: spend.more,
     }).toStrictEqual({
-      total: 5 * pricedMicros,
+      total: 6 * pricedMicros,
+      chat: 2 * pricedMicros,
       workflows: [
         [null, invoices, 3 * pricedMicros],
         [null, orders, pricedMicros],

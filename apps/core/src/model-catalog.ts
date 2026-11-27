@@ -129,6 +129,41 @@ export const parseModelRef = (ref: string): ModelRef | undefined => {
 };
 
 /**
+ * Who makes `ref`'s model: its provider, or on OpenRouter, which passes
+ * each call on to the model's maker, the maker its ID names first
+ * (`openrouter/anthropic/…`).
+ */
+const makerOf = ({ provider, id }: ModelRef): string =>
+  provider === "openrouter" ? `${provider}/${id.split("/")[0]}` : provider;
+
+/** What a million tokens read and a million written cost, at list price. */
+const priceOf = ({ catalog: { cost } }: ModelRef): number =>
+  cost.input + cost.output;
+
+/**
+ * The model a small call of core's own (a chat's title) goes to for an
+ * organization whose default model is `model`: its provider's small model
+ * (`AiProviderSpec.smallModel`, the cheapest of its newest generation)
+ * where that is of the same maker and cheaper at the catalog's list
+ * prices, so the call goes nowhere the default doesn't, and never costs
+ * more; else `model` itself. An OpenAI-compatible endpoint's models have
+ * no price and no small model: its default.
+ */
+export const smallModelFor = (model: string): string => {
+  const ref = parseModelRef(model);
+  const named =
+    ref === undefined ? undefined : aiProviders[ref.provider].smallModel;
+  const small = named === undefined ? undefined : parseModelRef(named);
+  return named !== undefined &&
+    ref !== undefined &&
+    small !== undefined &&
+    makerOf(small) === makerOf(ref) &&
+    priceOf(small) < priceOf(ref)
+    ? named
+    : model;
+};
+
+/**
  * The models an admin can choose of `provider`, by `<provider>/<model>`,
  * as `parseModelRef` takes them, with pi's name for each; none for an
  * OpenAI-compatible endpoint, whose models the organization names.

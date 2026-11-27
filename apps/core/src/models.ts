@@ -71,6 +71,7 @@ import {
   aiRoutesOf,
   readAiSource,
   readModelChoice,
+  smallModelOf,
   usableModels,
 } from "./ai-model-choice.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
@@ -237,6 +238,24 @@ export const modelSettings = async (env: Env): Promise<ModelsNow> => {
     readAiSource(env),
   ]);
   return { models: usableModels(routes, choice, source) };
+};
+
+/**
+ * The model a small call of core's own goes to now (`smallModelOf`).
+ * Throws `model.no_provider` while the organization has no model to use,
+ * as every call would.
+ */
+const smallModelNow = async (env: Env): Promise<string> => {
+  const [routes, choice, source] = await Promise.all([
+    aiRoutesOf(env),
+    readModelChoice(env),
+    readAiSource(env),
+  ]);
+  const model = smallModelOf(routes, choice, source);
+  if (model === undefined) {
+    throw modelErrors.create("model.no_provider");
+  }
+  return model;
 };
 
 /**
@@ -1729,10 +1748,17 @@ const parseCall = <Schema extends z.ZodType>(
  *   admins chose, of an AI provider it connected, with its key.
  * - `test`: an admin's test of a provider the organization connected
  *   (ai-providers.ts): any of that provider's models, with its key.
+ * - `small`: a small call of core's own (a chat's title, chat-titles.ts),
+ *   to its default's small model (`smallModelOf`) alone, with no fallback:
+ *   of the default's maker, on the same key, and cheaper. Only core's own
+ *   code goes this way (`models(env).small`): a call that merely names
+ *   that model, such as a chat turn's, goes as `chosen` and is refused
+ *   unless the admins chose it.
  */
 type Via =
   | { kind: "chosen" }
-  | { kind: "test"; provider: ConnectTarget["provider"] };
+  | { kind: "test"; provider: ConnectTarget["provider"] }
+  | { kind: "small" };
 
 const chosenVia: Via = { kind: "chosen" };
 
@@ -1882,7 +1908,11 @@ const routingOf = async (
     return await graspRouting(env, call, ref);
   }
   const at = chosen.indexOf(call.model);
-  if (at === -1 || ref === undefined || connected === undefined) {
+  const allowed =
+    via.kind === "small"
+      ? call.model === smallModelOf(routes, choice, source)
+      : at !== -1;
+  if (!allowed || ref === undefined || connected === undefined) {
     return await refuse(env, call, { code: "model.not_allowed" });
   }
   const target = { credential: "organization" as const, ...connected };
@@ -1893,7 +1923,7 @@ const routingOf = async (
       call,
       ref,
       target,
-      mayFallBack(call) ? chosen.slice(at + 1) : []
+      via.kind === "chosen" && mayFallBack(call) ? chosen.slice(at + 1) : []
     ),
   };
 };
@@ -3716,6 +3746,20 @@ export const models = (env: Env) => ({
   call: async <Output = undefined>(
     call: ModelCall<Output>
   ): Promise<ModelAnswer<Output>> => await callModel(env, call),
+  /**
+   * A small call of core's own, such as a chat's title: to the
+   * organization's default's small model (`smallModelOf`), the only route
+   * that model takes when the admins didn't choose it, and with no
+   * fallback to their other, dearer models.
+   */
+  small: async <Output = undefined>(
+    call: Omit<ModelCall<Output>, "model">
+  ): Promise<ModelAnswer<Output>> =>
+    await callModel(
+      env,
+      { ...call, model: await smallModelNow(env) },
+      { kind: "small" }
+    ),
   /**
    * An admin's test of a provider the organization connected: a call to
    * any of its models with the organization's key, whether or not chosen,
