@@ -4,7 +4,6 @@
   "@grasp-os/app-kit test/data-grid-money.test.ts": 0.1,
   "@grasp-os/app-kit test/rich-text-marks.test.ts": 0.1,
   "@grasp-os/app-kit test/rich-text.test.tsx": 0.8,
-  "@grasp-os/app-kit test/row-ends.test.ts": 0.1,
   "@grasp-os/app-kit:browser (chromium) test/kit.browser.test.tsx": 41.6,
   "@grasp-os/brain-next test/chunk-blocks.test.ts": 12.7,
   "@grasp-os/brain-next test/chunks.test.ts": 3.2,

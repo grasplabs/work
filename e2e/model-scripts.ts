@@ -29,6 +29,11 @@ export interface ModelScript {
   opener: string;
   /** The agent's replies, a turn of its each. */
   replies: readonly ScriptedReply[];
+  /**
+   * The title the chat's small model names it with (core's
+   * chat-titles.ts); none, and the chat keeps the start of its question.
+   */
+  title?: string;
 }
 
 /** The agent says `text`, and is done. */
@@ -193,6 +198,7 @@ export const modelScripts = {
     replies: [
       says("Revenue by region, the deals that closed, and the pipeline."),
     ],
+    title: "Weekly sales report contents",
   },
   /**
    * An answer written slowly, its first words then a pause: the person
@@ -503,13 +509,47 @@ const wordsOf = (content: unknown): string => {
   return first.success ? first.data.text : "";
 };
 
+/** The script `words` open: the longest opener in them, as one may begin another's. */
+const scriptOf = (words: string): ModelScript | undefined =>
+  Object.values<ModelScript>(modelScripts)
+    .filter(({ opener }) => words.includes(opener))
+    .toSorted((a, b) => b.opener.length - a.opener.length)[0];
+
+/** How core's request for a chat's title begins its instructions (core's chat-titles.ts). */
+const titleOpening = "You name a chat.";
+
+/** A request for a chat's title: its instructions, then the question alone. */
+const titleRequestSchema = z.object({
+  messages: z
+    .array(z.object({ role: z.string(), content: z.unknown() }))
+    .min(1),
+});
+
+/**
+ * The scripted title for a provider request's `body`, when it asks for a
+ * chat's title and the chat's question opens a script with one; else
+ * none, and the fake refuses it, so the chat keeps its first title.
+ */
+export const scriptedTitle = (body: unknown): Answer | undefined => {
+  const request = titleRequestSchema.safeParse(body);
+  if (
+    !request.success ||
+    !(JSON.stringify(body) ?? "").includes(titleOpening)
+  ) {
+    return undefined;
+  }
+  const question = request.data.messages.find(({ role }) => role === "user");
+  const title = scriptOf(wordsOf(question?.content))?.title;
+  return title === undefined ? undefined : says(title);
+};
+
 /**
  * The scripted answer to a provider request's `body`: the next of the
  * replies of the script its chat opened with, by the words its person
  * opened it with alone. Only an agent's turn has
  * one, as only it offers tools: anything else the stack asks a model for,
- * such as a chat's title, has none, nor has a turn past a script's end, so
- * the fake refuses it as it refuses every other request.
+ * such as a chat's title (`scriptedTitle`), has none, nor has a turn past
+ * a script's end, so the fake refuses it as it refuses every other request.
  */
 export const scriptedAnswer = (body: unknown): Answer | undefined => {
   const request = requestSchema.safeParse(body);
@@ -518,11 +558,7 @@ export const scriptedAnswer = (body: unknown): Answer | undefined => {
   }
   const { system, messages } = request.data;
   const opened = wordsOf(messages.find(({ role }) => role === "user")?.content);
-  // The longest opener the chat opened with: one script's opener may
-  // begin another's.
-  const [script] = Object.values<ModelScript>(modelScripts)
-    .filter(({ opener }) => opened.includes(opener))
-    .toSorted((a, b) => b.opener.length - a.opener.length);
+  const script = scriptOf(opened);
   const turn = messages.filter(({ role }) => role === "assistant").length;
   const reply = script?.replies[turn];
   if (typeof reply !== "function") {

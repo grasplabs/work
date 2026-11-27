@@ -1,8 +1,9 @@
 /**
  * A stand-in for Composio, the outside system connect calls for the
  * catalog and for Composio connections: its REST API, as Composio
- * documents it, and the MCP servers it makes, each a real MCP server
- * (test/mcp-server.ts). It answers connect's outbound requests to
+ * documents it, and the sessions it makes, each one's MCP endpoint a real
+ * MCP server (test/mcp-server.ts). Its legacy per-server MCP API isn't
+ * served: any request to it fails the test (`legacyRequests`). It answers connect's outbound requests to
  * Composio's host, so connect runs unchanged. Tests choose the toolkits and
  * tools it has, whether it is up, and how an admin fares at its auth link,
  * and read back what connect asked of it and what it holds.
@@ -204,8 +205,15 @@ export interface LogoRequest {
 /** Items per page: few, so a short list takes more than one. */
 const fakePageSize = 2;
 
-/** Where Composio serves the MCP servers it makes. */
-const mcpBase = "https://backend.composio.dev/v3/mcp/";
+/**
+ * Where Composio serves a session's MCP endpoint: `<base><session id>/mcp`,
+ * on its API host (`POST /tool_router/session`'s `mcp.url`).
+ */
+export const sessionUrlBase =
+  "https://backend.composio.dev/api/v3/tool_router/session/";
+
+/** Where Composio's legacy API served the MCP servers it made. */
+const legacyMcpBase = "https://backend.composio.dev/v3/mcp/";
 
 const toolkitItem = ({
   slug,
@@ -413,17 +421,27 @@ export interface FakeAccount {
   state?: { authScheme: unknown; val: unknown };
 }
 
-/** An MCP server connect made. */
-export interface FakeMcpServerConfig {
-  name: string;
-  authConfigIds: string[];
+/** A session connect made, as Composio holds its config. */
+export interface FakeSession {
+  userId: string;
+  /** The toolkits it enables (`toolkits.enable`). */
+  toolkits: string[];
+  /** Its auth configs, by toolkit. */
+  authConfigs: Record<string, string>;
+  /** The connected accounts pinned to it, by toolkit. */
+  connectedAccounts: Record<string, string[]>;
+  /** The tools it allows of its toolkit (`tools.<toolkit>.enable`). */
   allowedTools: string[];
+  /** The rest of what it was made with, as sent. */
+  body: Record<string, unknown>;
+  /** Up by one with each change (`config_version`). */
+  configVersion: number;
 }
 
 interface Holdings {
   authConfigs: Map<string, FakeAuthConfig>;
   accounts: Map<string, FakeAccount>;
-  servers: Map<string, FakeMcpServerConfig>;
+  sessions: Map<string, FakeSession>;
 }
 
 const bodyOf = async (request: Request): Promise<Record<string, unknown>> => {
@@ -442,6 +460,33 @@ const nested = (value: unknown, key: string): unknown =>
   typeof value === "object" && value !== null
     ? Object.entries(value).find(([name]) => name === key)?.[1]
     : undefined;
+
+/**
+ * Whether Composio's own tool for `area` is on in a session made with
+ * `body`, as Composio's defaults have it when the body leaves it out: on
+ * (`manage_connections`, `search`, `workbench`), off (`proxy_execute`,
+ * outside the workbench), or an object (`instant`, usage with Composio's
+ * own accounts).
+ */
+const switchedOn = (body: Record<string, unknown>, area: string): boolean => {
+  const given = nested(body, area);
+  if (area === "instant") {
+    return given !== false;
+  }
+  const enable = nested(given, "enable");
+  return area === "proxy_execute" ? enable === true : enable !== false;
+};
+
+/** The entries of `value`, an object, or none. */
+const entriesOf = (value: unknown): [string, unknown][] =>
+  typeof value === "object" && value !== null ? Object.entries(value) : [];
+
+/** Composio's error answer for a request it can't take, with `message`. */
+const invalid = (message: string): Response =>
+  Response.json(
+    { error: { message, code: 1400, slug: "BadRequest", status: 400 } },
+    { status: 400 }
+  );
 
 /**
  * Composio with `toolkits`, for each test in the file. `extra` are items
@@ -498,13 +543,20 @@ export const fakeComposioApi = (
      * Unicode lowers to `k`.
      */
     slugCase: "lower" | "upper" | "kelvin";
-    /** Where it says a new server is, instead of its own MCP host. */
-    serverUrlBase: string;
+    /** Where it says a new session's MCP endpoint is, `<base><id>/mcp`. */
+    sessionUrlBase: string;
     /**
-     * Which account the URL it generates names: the one asked for, another
-     * one, or none (a URL for no one account).
+     * What it answers of a session it made, in place of its config as held:
+     * a test's Composio that answers for another user, say.
      */
-    accountInUrl: "own" | "other" | "none";
+    answeredConfig:
+      | ((config: Record<string, unknown>) => Record<string, unknown>)
+      | undefined;
+    /**
+     * Requests to Composio's legacy per-server MCP API (`/mcp/...`), which
+     * connect never sends: any fails the test.
+     */
+    legacyRequests: string[];
     /** What connect made at Composio and hasn't deleted. */
     holds: Holdings;
     /** Every request connect sent to the logo host, in order. */
@@ -514,24 +566,24 @@ export const fakeComposioApi = (
      * `pngLogo` for any other.
      */
     logos: Map<string, () => Response>;
-    /** The MCP servers' requests and tool runs, all of them together. */
+    /** The sessions' MCP requests and tool runs, all of them together. */
     mcp: typeof mcp.state;
     /**
-     * Runs as it takes a server's update, before applying it: another
+     * Runs as it takes a session's update, before applying it: another
      * change landing in between, once.
      */
     beforeUpdate: (() => Promise<void>) | undefined;
     /**
-     * Awaited as it takes a server's update: before applying it
+     * Awaited as it takes a session's update: before applying it
      * (`"apply"`), and after, before answering (`"answer"`). A test holds a
      * send there, or drops it there for good, as a crash would.
      */
     updateGate: ((at: "apply" | "answer") => Promise<void>) | undefined;
     /**
-     * Awaited as it takes the making of an MCP server, before making it: a
+     * Awaited as it takes the making of a session, before making it: a
      * test holds two connects there, past everything before it.
      */
-    serverGate: (() => Promise<void>) | undefined;
+    sessionGate: (() => Promise<void>) | undefined;
   } = {
     requests: [],
     health: "up",
@@ -541,15 +593,16 @@ export const fakeComposioApi = (
     failing: undefined,
     failingFor: undefined,
     slugCase: "lower",
-    serverUrlBase: mcpBase,
-    accountInUrl: "own",
-    holds: { authConfigs: new Map(), accounts: new Map(), servers: new Map() },
+    sessionUrlBase,
+    answeredConfig: undefined,
+    legacyRequests: [],
+    holds: { authConfigs: new Map(), accounts: new Map(), sessions: new Map() },
     logoRequests: [],
     logos: new Map(),
     mcp: mcp.state,
     beforeUpdate: undefined,
     updateGate: undefined,
-    serverGate: undefined,
+    sessionGate: undefined,
   };
 
   /** The logo host's answer, as `state.logos` has it. */
@@ -565,6 +618,151 @@ export const fakeComposioApi = (
       state.logos.get(slug)?.() ??
       new Response(pngLogo, { headers: { "content-type": "image/png" } })
     );
+  };
+
+  /**
+   * A session's answer, as Composio gives it to making or changing one:
+   * its ID, MCP endpoint, tools and config, the toolkits' Composio tools
+   * echoed as on or off (`switchedOn`), unless `state.answeredConfig`
+   * answers otherwise.
+   */
+  const sessionAnswer = (
+    sessionId: string,
+    session: FakeSession,
+    status: number
+  ): Response => {
+    const { body } = session;
+    const config: Record<string, unknown> = {
+      user_id: session.userId,
+      toolkits: { enabled: session.toolkits },
+      auth_configs: session.authConfigs,
+      connected_accounts: session.connectedAccounts,
+      tools: Object.fromEntries(
+        session.toolkits.map((toolkit) => [
+          toolkit,
+          { enabled: session.allowedTools },
+        ])
+      ),
+      manage_connections: { enabled: switchedOn(body, "manage_connections") },
+      search: { enable: switchedOn(body, "search") },
+      workbench: { enable: switchedOn(body, "workbench") },
+      proxy_execute: { enable: switchedOn(body, "proxy_execute") },
+      instant: switchedOn(body, "instant") ? {} : false,
+      preload: nested(body, "preload") ?? { tools: [] },
+      execute: nested(body, "execute") ?? { enable_multi_execute: true },
+    };
+    return Response.json(
+      {
+        session_id: sessionId,
+        mcp: { type: "http", url: `${state.sessionUrlBase}${sessionId}/mcp` },
+        tool_router_tools: session.allowedTools,
+        config: state.answeredConfig?.(config) ?? config,
+        config_version: session.configVersion,
+      },
+      { status }
+    );
+  };
+
+  /**
+   * The tools `tools` (a session's `tools`) enable of `toolkit`, if each is
+   * one of the toolkit's, as Composio requires: `undefined` when one isn't,
+   * or when it enables none, which Composio may take for every tool, and
+   * connect never sends.
+   */
+  const enabledTools = (
+    tools: unknown,
+    toolkit: string
+  ): string[] | undefined => {
+    const names = stringsOf(nested(nested(tools, toolkit), "enable"));
+    const known = new Set(
+      toolkits
+        .find(({ slug }) => slug === toolkit)
+        ?.tools.map(({ slug }) => slug)
+    );
+    return names.length > 0 && names.every((name) => known.has(name))
+      ? names
+      : undefined;
+  };
+
+  /**
+   * Makes a session as Composio does (`POST /tool_router/session`): each
+   * pinned account must exist and be the session user's, at most one a
+   * toolkit, and each tool one of its toolkit's.
+   */
+  const makeSession = (body: Record<string, unknown>): Response => {
+    const userId = nested(body, "user_id");
+    if (typeof userId !== "string" || userId === "") {
+      return invalid("user_id is required");
+    }
+    const sessionToolkits = stringsOf(
+      nested(nested(body, "toolkits"), "enable")
+    );
+    const pinned = Object.fromEntries(
+      entriesOf(nested(body, "connected_accounts")).map(([toolkit, ids]) => [
+        toolkit,
+        stringsOf(ids),
+      ])
+    );
+    for (const ids of Object.values(pinned)) {
+      if (ids.length > 1) {
+        return invalid("Only one connected account per toolkit");
+      }
+      for (const id of ids) {
+        if (state.holds.accounts.get(id)?.userId !== userId) {
+          return invalid("The connected account isn't the session user's");
+        }
+      }
+    }
+    const [toolkit = ""] = sessionToolkits;
+    const allowedTools = enabledTools(nested(body, "tools"), toolkit);
+    if (allowedTools === undefined) {
+      return invalid("Unknown tool slugs");
+    }
+    const sessionId = `trs_${crypto.randomUUID()}`;
+    const session: FakeSession = {
+      userId,
+      toolkits: sessionToolkits,
+      authConfigs: Object.fromEntries(
+        entriesOf(nested(body, "auth_configs")).map(([key, value]) => [
+          key,
+          String(value),
+        ])
+      ),
+      connectedAccounts: pinned,
+      allowedTools,
+      body,
+      configVersion: 1,
+    };
+    state.holds.sessions.set(sessionId, session);
+    return sessionAnswer(sessionId, session, 201);
+  };
+
+  /**
+   * Changes a session's tools as Composio does
+   * (`PATCH /tool_router/session/{id}`): what the body leaves out stays.
+   */
+  const updateSession = async (
+    request: Request,
+    sessionId: string
+  ): Promise<Response> => {
+    const session = state.holds.sessions.get(sessionId);
+    if (session === undefined) {
+      return notFound();
+    }
+    const before = state.beforeUpdate;
+    state.beforeUpdate = undefined;
+    await before?.();
+    const body = await bodyOf(request);
+    const [toolkit = ""] = session.toolkits;
+    const allowedTools = enabledTools(nested(body, "tools"), toolkit);
+    if (allowedTools === undefined) {
+      return invalid("Unknown tool slugs");
+    }
+    await state.updateGate?.("apply");
+    session.allowedTools = allowedTools;
+    session.configVersion += 1;
+    await state.updateGate?.("answer");
+    return sessionAnswer(sessionId, session, 200);
   };
 
   /** What connect creates at Composio, by route, from the request's body. */
@@ -690,44 +888,25 @@ export const fakeComposioApi = (
         { status: 201 }
       );
     },
-    "/mcp/servers": async (body) => {
-      await state.serverGate?.();
-      const serverId = crypto.randomUUID();
-      state.holds.servers.set(serverId, {
-        name: String(body.name),
-        authConfigIds: stringsOf(body.auth_config_ids),
-        allowedTools: stringsOf(body.allowed_tools),
-      });
-      return Response.json({ id: serverId }, { status: 201 });
-    },
-    "/mcp/servers/generate": (body) => {
-      const serverId = String(body.mcp_server_id);
-      if (!state.holds.servers.has(serverId)) {
-        return notFound();
-      }
-      const base = `${state.serverUrlBase}${serverId}`;
-      return Response.json({
-        mcp_url: base,
-        connected_account_urls: stringsOf(body.connected_account_ids).map(
-          (account) =>
-            ({
-              own: `${base}?connected_account_id=${account}`,
-              other: `${base}?connected_account_id=ca_someone_else`,
-              none: base,
-            })[state.accountInUrl]
-        ),
-        user_ids_url: [],
-      });
+    "/tool_router/session": async (body) => {
+      await state.sessionGate?.();
+      return makeSession(body);
     },
   };
 
   /** A deletion of something connect made, by route. */
   const deletion = (route: string): Response => {
+    const session = /^\/tool_router\/session\/(?<id>[^/]+)$/u.exec(route)
+      ?.groups?.id;
+    if (session !== undefined) {
+      return state.holds.sessions.delete(session)
+        ? Response.json({ session_id: session, deleted: true })
+        : notFound();
+    }
     const [, area, id] = route.split("/");
     const held = {
       auth_configs: state.holds.authConfigs,
       connected_accounts: state.holds.accounts,
-      mcp: state.holds.servers,
     }[area ?? ""];
     return held?.delete(id ?? "") === true
       ? Response.json({ success: true })
@@ -759,21 +938,15 @@ export const fakeComposioApi = (
 
   /**
    * Lists of what connect made, as Composio filters them: auth configs by
-   * a search of their name, servers by their name and auth configs, and
-   * connected accounts by their auth configs.
+   * a search of their name, and connected accounts by their auth configs.
    */
   const listing = (route: string, query: URLSearchParams): Response => {
     const { holds } = state;
-    const search = query.get("search") ?? query.get("name") ?? "";
+    const search = query.get("search") ?? "";
     const byAuthConfig = query.get("auth_config_ids");
     const lists: Record<string, { id: string; name?: string | null }[]> = {
       "/auth_configs": [...holds.authConfigs]
         .filter(([, { name }]) => (name ?? "").includes(search))
-        .map(([id, { name }]) => ({ id, name })),
-      "/mcp/servers": [...holds.servers]
-        .filter(([, { name }]) =>
-          name.toLowerCase().includes(search.toLowerCase())
-        )
         .map(([id, { name }]) => ({ id, name })),
       "/connected_accounts": [...holds.accounts]
         .filter(([, { authConfigId }]) => authConfigId === byAuthConfig)
@@ -793,24 +966,14 @@ export const fakeComposioApi = (
     if (request.method === "DELETE") {
       return deletion(route);
     }
-    if (request.method === "PATCH" && route.startsWith("/mcp/")) {
-      // Composio's update of a server: its allowlist, here.
-      const server = state.holds.servers.get(route.slice("/mcp/".length));
-      if (server === undefined) {
-        return notFound();
-      }
-      const before = state.beforeUpdate;
-      state.beforeUpdate = undefined;
-      await before?.();
-      const body = await bodyOf(request);
-      await state.updateGate?.("apply");
-      server.allowedTools = stringsOf(body.allowed_tools);
-      await state.updateGate?.("answer");
-      return Response.json({ id: route.slice("/mcp/".length) });
+    const patched = /^\/tool_router\/session\/(?<id>[^/]+)$/u.exec(route)
+      ?.groups?.id;
+    if (request.method === "PATCH" && patched !== undefined) {
+      return await updateSession(request, patched);
     }
     if (
       request.method === "GET" &&
-      ["/auth_configs", "/mcp/servers", "/connected_accounts"].includes(route)
+      ["/auth_configs", "/connected_accounts"].includes(route)
     ) {
       return listing(route, query);
     }
@@ -876,6 +1039,10 @@ export const fakeComposioApi = (
       keyed: request.headers.get("x-api-key") === testComposioKey,
       followsRedirects: request.redirect === "follow",
     });
+    if (route.startsWith("/mcp")) {
+      state.legacyRequests.push(`${request.method} ${route}`);
+      return notFound();
+    }
     if (request.headers.get("x-api-key") !== testComposioKey) {
       return Response.json(
         { error: { message: "Invalid API key" } },
@@ -940,19 +1107,25 @@ export const fakeComposioApi = (
     state.slugCase = "lower";
     state.beforeUpdate = undefined;
     state.updateGate = undefined;
-    state.serverGate = undefined;
-    state.serverUrlBase = mcpBase;
-    state.accountInUrl = "own";
+    state.sessionGate = undefined;
+    state.sessionUrlBase = sessionUrlBase;
+    state.answeredConfig = undefined;
+    state.legacyRequests = [];
     state.holds = {
       authConfigs: new Map(),
       accounts: new Map(),
-      servers: new Map(),
+      sessions: new Map(),
     };
     mcp.reset();
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const request = new Request(input, init);
-      if (request.url.startsWith(mcpBase)) {
+      const { pathname } = new URL(request.url);
+      if (request.url.startsWith(sessionUrlBase) && pathname.endsWith("/mcp")) {
         return await mcp.answer(request);
+      }
+      if (request.url.startsWith(legacyMcpBase)) {
+        state.legacyRequests.push(`${request.method} ${pathname}`);
+        throw new Error("A request to Composio's legacy MCP server");
       }
       if (request.url.startsWith(`https://${logoHost}/`)) {
         return logoAnswer(request);
@@ -965,6 +1138,12 @@ export const fakeComposioApi = (
   });
   afterEach(() => {
     vi.restoreAllMocks();
+    // Connect never asks Composio's legacy per-server MCP API anything.
+    if (state.legacyRequests.length > 0) {
+      throw new Error(
+        `Legacy MCP requests: ${state.legacyRequests.join(", ")}`
+      );
+    }
   });
 
   return {

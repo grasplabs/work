@@ -58,7 +58,7 @@ const connection = async ({
   const now = Date.now();
   await connectDb()
     .prepare(
-      "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, 'hubspot', ?, ?, ?, 'composio', 'hubspot', ?, ?)"
+      "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, composio_session_id, created_at, updated_at) VALUES (?, 'hubspot', ?, ?, ?, 'composio', 'hubspot', 'trs_fixture', ?, ?)"
     )
     .bind(id, owner === null ? "shared" : "personal", owner, status, now, now)
     .run();

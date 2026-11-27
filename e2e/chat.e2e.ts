@@ -14,7 +14,8 @@ import { e2eModel } from "./stack.ts";
 // there, reads the writes its agent holds for them
 // (one as its tool describes it, one by its raw input), confirms and
 // rejects them, and sees nothing of held writes while they are switched
-// off, and reads the agent's answer to a chat a script opens. The stack's
+// off, and reads the agent's answer to a chat a script opens, which the
+// sidebar then shows by the title the chat was named with. The stack's
 // provider answers only a scripted chat (e2e/model-scripts.ts) and refuses
 // the key of any other, so that answer is the gateway's failure;
 // streaming, resuming and the person check themselves are core's tests
@@ -308,7 +309,7 @@ test("a person asks, and reads the agent's answer once its turn ends", async ({
 }) => {
   const { user } = peopleIn("chat");
   const page = await pageOf(user);
-  const { opener, replies } = modelScripts.answers;
+  const { opener, replies, title } = modelScripts.answers;
   const [answer] = replies;
   // Unique to the attempt; the scripted model answers what it opens with.
   const question = `${opener} (${crypto.randomUUID().slice(0, 8)})`;
@@ -329,6 +330,16 @@ test("a person asks, and reads the agent's answer once its turn ends", async ({
     messages.getByRole("button", { name: "Ask again" })
   ).toBeVisible();
   await expect(messages.getByRole("alert")).toHaveCount(0);
+  // Named from its question by the small model, in the background: the
+  // sidebar shows the title in place of the question's start, the page
+  // never loaded again.
+  await expect(page).toHaveURL(/\/chats\/[^/?#]+$/u);
+  const chatId = new URL(page.url()).pathname.split("/").at(-1) ?? "";
+  await expect(
+    page
+      .getByRole("navigation", { name: "Main" })
+      .locator(`a[href="/chats/${chatId}"]`)
+  ).toHaveText(title);
 });
 
 test("a person asks again while the answer is still being written, sees it queued, and both are answered in order", async ({

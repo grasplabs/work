@@ -15,9 +15,12 @@
  * vite.config.ts (Node) and the tests (workerd), so it only holds data.
  */
 
-/** A server's URL, as its connection stores it. */
+/**
+ * A server's URL, as its connection stores it: the MCP endpoint of
+ * Composio's session `name` (its `composio_session_id`).
+ */
 export const mailServerUrl = (name: string): string =>
-  `https://backend.composio.dev/v3/mcp/${name}?user_id=grasp`;
+  `https://backend.composio.dev/api/v3/tool_router/session/${name}/mcp`;
 
 /** Where tests plan a server's calls and read what it did. */
 export const mailControlUrl = (name: string): string =>
@@ -75,7 +78,8 @@ const mailServer = async (request, url) => {
     }
     return Response.json({ calls: server.calls, sent: server.sent, searched: server.searched, holding: server.holding, ran: server.ran });
   }
-  const server = mailServerNamed(url.pathname.split("/").at(-1));
+  // The session's name, before its endpoint's last segment, mcp.
+  const server = mailServerNamed(url.pathname.split("/").at(-2));
   const { id, method, params } = await request.json();
   if (id === undefined) {
     return new Response(null, { status: 202 });

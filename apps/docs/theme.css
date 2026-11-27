@@ -1,31 +1,42 @@
 /*
- * The docs wear the product's theme: Blume's tokens read the kit's
- * (@grasp-os/app-kit), so each value still stands once, in the kit.
- */
-@import "@grasp-os/app-kit/styles.css";
-
-/*
- * In both themes: Blume sets dark values of its own under `data-theme`,
- * where the kit's dark ones apply too (styles.css).
+ * The docs keep Grasp's colours, here and nowhere else: App pages' kit
+ * (@grasp-os/app-kit) wears the stock default theme. Blume's tokens in
+ * both themes, as Blume sets dark values of its own under `data-theme`;
+ * paper keeps the light ones.
  */
 :root,
 :root[data-theme="dark"] {
-  --blume-background: var(--background);
-  --blume-foreground: var(--foreground);
-  --blume-muted: var(--muted);
-  --blume-muted-foreground: var(--muted-foreground);
-  --blume-border: var(--border);
-  --blume-accent: var(--primary);
-  --blume-accent-foreground: var(--primary-foreground);
-  --blume-action: var(--primary);
-  --blume-action-foreground: var(--primary-foreground);
-  --blume-code-background: var(--muted);
-  --blume-radius: var(--radius);
+  --blume-background: #fbfdff;
+  --blume-foreground: #062d22;
+  --blume-muted: #f3f6f4;
+  --blume-muted-foreground: #5a7264;
+  --blume-border: #e0e7e2;
+  --blume-accent: #062d22;
+  --blume-accent-foreground: #fbfdff;
+  --blume-action: #062d22;
+  --blume-action-foreground: #fbfdff;
+  --blume-code-background: #f3f6f4;
+  --blume-radius: 0.625rem;
+}
+
+@media screen {
+  :root[data-theme="dark"] {
+    --blume-background: #0d1714;
+    --blume-foreground: #eef4f0;
+    --blume-muted: #1b2a24;
+    --blume-muted-foreground: #94a89c;
+    --blume-border: oklch(1 0 0 / 10%);
+    --blume-accent: #eef4f0;
+    --blume-accent-foreground: #062d22;
+    --blume-action: #eef4f0;
+    --blume-action-foreground: #062d22;
+    --blume-code-background: #1b2a24;
+  }
 }
 
 /*
- * Newsreader (Blume's display font) for page titles only, as the product
- * sets them (PageHeaderTitle); every other heading in Geist.
+ * Newsreader (Blume's display font) for page titles only, as Grasp sets
+ * them; every other heading in Geist.
  */
 h2,
 h3,

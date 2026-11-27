@@ -2,7 +2,8 @@
  * Composio's REST API as the connect Worker reaches it in core's tests:
  * part of the `connect-providers` Worker (test/connect-providers.ts), so
  * the real connect runs unchanged behind core. It lists three toolkits:
- * HubSpot, one it holds no app for, and one that takes a key. An admin's
+ * HubSpot, one it holds no app for, and one that takes a key, and makes
+ * a session for a connection as Composio does. An admin's
  * auth at its link succeeds at once: the link it gives is the callback
  * connect asked it to send the browser back to, with `status=success` and
  * the `connected_account_id` appended, as Composio's redirect does; a key
@@ -201,16 +202,38 @@ const composioApi = async (request, url) => {
       auth_config: { id: authConfig },
     });
   }
-  if (request.method === "POST" && route === "/mcp/servers") {
-    return Response.json({ id: crypto.randomUUID() });
+  if (request.method === "POST" && route === "/tool_router/session") {
+    const body = await request.json();
+    const id = "trs_" + crypto.randomUUID();
+    return Response.json(
+      {
+        session_id: id,
+        mcp: { type: "http", url: "https://backend.composio.dev/api/v3/tool_router/session/" + id + "/mcp" },
+        tool_router_tools: [],
+        // As Composio echoes it: its answers' words for the lists.
+        config: {
+          user_id: body.user_id,
+          toolkits: { enabled: body.toolkits?.enable ?? [] },
+          connected_accounts: body.connected_accounts,
+          tools: Object.fromEntries(
+            Object.entries(body.tools ?? {}).map(([toolkit, tools]) => [toolkit, { enabled: tools.enable ?? [] }])
+          ),
+          manage_connections: { enabled: body.manage_connections?.enable !== false },
+          search: { enable: body.search?.enable !== false },
+          workbench: { enable: body.workbench?.enable !== false },
+          proxy_execute: { enable: body.proxy_execute?.enable === true },
+          multi_account: { enable: body.multi_account?.enable === true },
+          execute: { enable_multi_execute: body.execute?.enable_multi_execute !== false },
+          instant: body.instant === false ? false : {},
+        },
+        config_version: 1,
+      },
+      { status: 201 }
+    );
   }
-  if (request.method === "POST" && route === "/mcp/servers/generate") {
-    const { mcp_server_id, connected_account_ids } = await request.json();
-    return Response.json({
-      connected_account_urls: connected_account_ids.map(
-        (id) => "https://backend.composio.dev/v3/mcp/" + mcp_server_id + "?connected_account_id=" + id
-      ),
-    });
+  if (route.startsWith("/mcp")) {
+    // Composio's legacy MCP servers: connect never asks for one.
+    return new Response("Legacy MCP servers are not served", { status: 410 });
   }
   if (request.method === "DELETE") {
     return Response.json({ success: true });

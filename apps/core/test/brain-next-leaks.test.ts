@@ -680,7 +680,7 @@ describe(
       const toolkitConnection = `connection-${toolkitCaptureMarker}`;
       await connectDb()
         .prepare(
-          "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tools, created_at, updated_at) VALUES (?, 'mail', 'personal', ?, 'active', 'composio', 'https://mail.test/mcp', ?, ?, ?)"
+          "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, composio_session_id, tools, created_at, updated_at) VALUES (?, 'mail', 'personal', ?, 'active', 'composio', 'https://mail.test/mcp', 'trs_fixture', ?, ?, ?)"
         )
         .bind(
           toolkitConnection,
@@ -732,7 +732,7 @@ describe(
       const runConnection = `connection-${runCaptureMarker}`;
       await connectDb()
         .prepare(
-          "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tools, created_at, updated_at) VALUES (?, 'mail', 'personal', ?, 'active', 'composio', 'https://mail.test/mcp', ?, ?, ?)"
+          "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, composio_session_id, tools, created_at, updated_at) VALUES (?, 'mail', 'personal', ?, 'active', 'composio', 'https://mail.test/mcp', 'trs_fixture', ?, ?, ?)"
         )
         .bind(
           runConnection,
@@ -795,7 +795,7 @@ describe(
         const id = `connection-${marker}`;
         await connectDb()
           .prepare(
-            "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tools, created_at, updated_at) VALUES (?, 'mail', 'shared', NULL, 'active', 'composio', 'https://mail.test/mcp', ?, ?, ?)"
+            "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, composio_session_id, tools, created_at, updated_at) VALUES (?, 'mail', 'shared', NULL, 'active', 'composio', 'https://mail.test/mcp', 'trs_fixture', ?, ?, ?)"
           )
           .bind(
             id,

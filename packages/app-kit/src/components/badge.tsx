@@ -9,14 +9,7 @@ const badgeVariants = cva(
   {
     variants: {
       variant: {
-        // A plain value, in grey: a badge is never black.
-        default: "bg-muted text-foreground [a]:hover:bg-muted/80",
-        // Done, approved, tested: green on a tint of itself, as destructive is red.
-        passed:
-          "bg-status-agreed/10 text-status-agreed dark:bg-status-agreed/20",
-        // Needs a look: amber on a tint of itself.
-        attention:
-          "bg-status-attention/10 text-status-attention dark:bg-status-attention/20",
+        default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
         secondary:
           "bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",
         destructive:

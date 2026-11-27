@@ -20,7 +20,7 @@ import type { Actors } from "./composio-connections-harness.ts";
 
 describe("Composio's tool list through crashes", () => {
   it("keeps a change and the clock's reconcile in step, crashing anywhere", async () => {
-    const { admin, connectionId, serverId } = await setUp();
+    const { admin, connectionId, sessionId } = await setUp();
     const actors: Actors = {
       a: changeTo(admin, connectionId, ["HUBSPOT_LIST_CONTACTS"]),
       r: async (actorEnv) => {
@@ -28,8 +28,8 @@ describe("Composio's tool list through crashes", () => {
       },
     };
     const wrong = walkAll
-      ? await everyWalk(connectionId, serverId, actors)
-      : await drawnWalks(connectionId, serverId, actors, {
+      ? await everyWalk(connectionId, sessionId, actors)
+      : await drawnWalks(connectionId, sessionId, actors, {
           fixed: [
             // The narrowing, answered, crashes before the change's write:
             // Composio narrower than connect.

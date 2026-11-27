@@ -30,7 +30,7 @@ function DialogOverlay({
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
       className={cn(
-        "data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0 bg-scrim fixed inset-0 isolate z-50 duration-100 supports-backdrop-filter:backdrop-blur-xs",
+        "data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0 fixed inset-0 isolate z-50 bg-black/10 duration-100 supports-backdrop-filter:backdrop-blur-xs",
         className
       )}
       {...props}
@@ -38,13 +38,11 @@ function DialogOverlay({
   );
 }
 
-// Never taller than the screen: the content scrolls, and the header and
-// footer stick to its very top and bottom edges (a sticky inset counts
-// from inside the padding, hence the negative one, and their negative
-// margin and padding cover that padding), so the title and the actions
-// stay in view on a short screen. The close button is `fixed`, which
-// inside the popup (it is transformed to centre it) holds it to the
-// popup's corner rather than scrolling with the content.
+// Changed from upstream: never taller than the screen, its content
+// scrolling, so the fields and buttons of a tall dialog stay in reach in a
+// short App frame. The close button is `fixed`, which inside the popup (it
+// is transformed to centre it) holds it to the popup's corner rather than
+// scrolling with the content.
 function DialogContent({
   className,
   children,
@@ -62,7 +60,7 @@ function DialogContent({
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(
-          "bg-popover shadow-lifted text-popover-foreground data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 fixed top-1/2 left-1/2 z-50 grid max-h-[calc(100svh-2rem)] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-6 overflow-y-auto rounded-xl p-6 text-sm duration-100 outline-none sm:max-w-md",
+          "bg-popover text-popover-foreground ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 fixed top-1/2 left-1/2 z-50 grid max-h-[calc(100svh-2rem)] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-6 overflow-y-auto rounded-xl p-6 text-sm ring-1 duration-100 outline-none sm:max-w-md",
           className
         )}
         {...props}
@@ -74,7 +72,7 @@ function DialogContent({
             render={
               <Button
                 variant="ghost"
-                className="fixed top-4 right-4 z-20"
+                className="fixed top-4 right-4"
                 size="icon-sm"
               />
             }
@@ -92,10 +90,7 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn(
-        "bg-popover sticky -top-6 z-10 -mt-6 flex flex-col gap-2 pt-6",
-        className
-      )}
+      className={cn("flex flex-col gap-2", className)}
       {...props}
     />
   );
@@ -116,7 +111,7 @@ function DialogFooter({
     <div
       data-slot="dialog-footer"
       className={cn(
-        "bg-popover sticky -bottom-6 z-10 -mb-6 flex flex-col-reverse gap-2 pb-6 sm:flex-row sm:justify-end",
+        "flex flex-col-reverse gap-2 sm:flex-row sm:justify-end",
         className
       )}
       {...props}
@@ -135,10 +130,7 @@ function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
   return (
     <DialogPrimitive.Title
       data-slot="dialog-title"
-      className={cn(
-        "font-serif text-xl leading-6.5 tracking-[-0.016em]",
-        className
-      )}
+      className={cn("font-heading leading-none font-medium", className)}
       {...props}
     />
   );

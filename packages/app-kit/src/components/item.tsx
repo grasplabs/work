@@ -6,48 +6,18 @@ import { cva } from "class-variance-authority";
 import type { VariantProps } from "class-variance-authority";
 import * as React from "react";
 
-/*
- * `spacing`: how close the items sit. By default as far apart as their size
- * asks; `tight` and `snug` keep a list of small items together, as the
- * prototype's Landscape lists a vendor's documents and an insight's evidence;
- * `none` lets quiet rows touch, as under a chat's box.
- */
-/*
- * `variant="card"`: the items as rows on a card, each under a line (its
- * items take `variant="row"`), as a page's questions to start from.
- */
-function ItemGroup({
-  className,
-  spacing = "default",
-  variant = "default",
-  render,
-  ...props
-}: useRender.ComponentProps<"div"> & {
-  spacing?: "default" | "tight" | "snug" | "none";
-  variant?: "default" | "card";
-}) {
-  // `render` makes it a `ul` of `li`s, a list by its own element.
-  return useRender({
-    defaultTagName: "div",
-    props: mergeProps<"div">(
-      {
-        role: "list",
-        className: cn(
-          "group/item-group flex w-full flex-col",
-          variant === "default" &&
-            spacing === "default" &&
-            "gap-4 has-data-[size=sm]:gap-2.5 has-data-[size=xs]:gap-2",
-          variant === "default" && spacing === "tight" && "gap-1",
-          variant === "default" && spacing === "snug" && "gap-1.5",
-          variant === "card" && "bg-card overflow-hidden rounded-xl border",
-          className
-        ),
-      },
-      props
-    ),
-    render,
-    state: { slot: "item-group", spacing, variant },
-  });
+function ItemGroup({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      role="list"
+      data-slot="item-group"
+      className={cn(
+        "group/item-group flex w-full flex-col gap-4 has-data-[size=sm]:gap-2.5 has-data-[size=xs]:gap-2",
+        className
+      )}
+      {...props}
+    />
+  );
 }
 
 function ItemSeparator({
@@ -64,27 +34,14 @@ function ItemSeparator({
   );
 }
 
-// A row that is a button reads from the left, as a row of text does, and
-// one a person picked (`aria-pressed`) shows it as its hover does.
 const itemVariants = cva(
-  "group/item focus-visible:border-ring focus-visible:ring-ring/50 [a]:hover:bg-muted [button]:hover:bg-muted aria-pressed:bg-muted flex w-full flex-wrap items-center rounded-md border text-sm transition-colors duration-100 outline-none focus-visible:ring-[3px] [a]:transition-colors [button]:text-left",
+  "group/item focus-visible:border-ring focus-visible:ring-ring/50 [a]:hover:bg-muted flex w-full flex-wrap items-center rounded-md border text-sm transition-colors duration-100 outline-none focus-visible:ring-[3px] [a]:transition-colors",
   {
     variants: {
       variant: {
         default: "border-transparent",
         outline: "border-border",
         muted: "bg-muted/50 border-transparent",
-        // A quiet row with no line round it, as the rows under a chat's box,
-        // so the box stays what the page is about: a question to ask in
-        // muted text (a button), or a place to open (a link).
-        quiet:
-          "[button]:text-muted-foreground [button]:hover:text-foreground rounded-lg border-0 text-left disabled:pointer-events-none disabled:opacity-50",
-        // A row of a card list (`ItemGroup variant="card"`), under a line.
-        // Disabled as a button is: faded, and nothing to press.
-        // A card standing on its own, as one beside a chat's box: the box's
-        // surface and corners, so the two read as one family.
-        card: "bg-card [a]:hover:bg-muted/40 [button]:hover:bg-muted/40 border-border rounded-xl shadow-xs",
-        row: "[button]:hover:bg-muted/60 focus-visible:bg-muted/60 rounded-none border-0 border-b text-left focus-visible:ring-inset disabled:pointer-events-none disabled:opacity-50 in-[li:last-child]:border-b-0 aria-disabled:pointer-events-none aria-disabled:opacity-50",
       },
       size: {
         default: "gap-3.5 px-4 py-3.5",
@@ -92,13 +49,6 @@ const itemVariants = cva(
         xs: "gap-2 px-2.5 py-2 in-data-[slot=dropdown-menu-content]:p-0",
       },
     },
-    compoundVariants: [
-      // In line with the text in the chat's box above the questions.
-      { variant: "quiet", size: "sm", className: "px-4.5 py-2" },
-      { variant: "row", size: "sm", className: "gap-3 px-3.5 py-2.5" },
-      // In line with the title of a panel card above the rows (`Card variant="panel"`).
-      { variant: "row", size: "default", className: "gap-3 px-5 py-3" },
-    ],
     defaultVariants: {
       variant: "default",
       size: "default",
@@ -137,8 +87,6 @@ const itemMediaVariants = cva(
       variant: {
         default: "bg-transparent",
         icon: "[&_svg:not([class*='size-'])]:size-4",
-        // The icon on a tile of its own, centred on the item's text.
-        tile: "bg-muted text-foreground size-9 rounded-lg group-has-data-[slot=item-description]/item:translate-y-0 group-has-data-[slot=item-description]/item:self-center [&_svg:not([class*='size-'])]:size-4",
         image:
           "size-10 overflow-hidden rounded-sm group-data-[size=sm]/item:size-8 group-data-[size=xs]/item:size-6 [&_img]:size-full [&_img]:object-cover",
       },

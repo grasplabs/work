@@ -4,12 +4,13 @@ import type {
   ChatSummary,
 } from "@grasp-os/shared/chat";
 import { chatIdSchema } from "@grasp-os/shared/ids";
+import { RpcStub } from "capnweb";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { ChatListWatch } from "../src/chat-list-watch.ts";
-import { personalWorkspaceId } from "../src/chats-rpc.ts";
+import { ChatsRpc, personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { sessionRecheckMs } from "../src/session-check.ts";
 import { model, pausedReply, says } from "./agent-chat.ts";
@@ -62,6 +63,43 @@ const followList = async (chats: Person["api"]["chats"]) => {
     rows: () =>
       list.map(({ title, running, unread }) => ({ title, running, unread })),
     archived: () => updates.at(-1)?.archived,
+  };
+};
+
+/**
+ * `someone`'s chats as their connection reaches them, its session read by
+ * `check` (the connection's own reads it from the session store): a
+ * follower of their list over it, and how to fail its next readings, as
+ * the store failing a moment (a network error, a deploy) fails them.
+ */
+const listOverFlakySession = async (someone: Person) => {
+  const identity = await someone.api.whoami();
+  let failing = 0;
+  const chats = new ChatsRpc(env, async () => {
+    if (failing > 0) {
+      failing -= 1;
+      throw new Error("D1_ERROR: Network connection lost.");
+    }
+    return await Promise.resolve(identity);
+  });
+  const titles: string[][] = [];
+  // The page's callback as core gets it, a stub, whose calls core never
+  // waits on.
+  // oxlint-disable-next-line typescript/no-misused-promises, typescript/strict-void-return -- see above
+  const onUpdate: (update: ChatListUpdate) => void = new RpcStub(
+    (update: ChatListUpdate) => {
+      const before = update.full ? [] : (titles.at(-1) ?? []);
+      titles.push([...before, ...update.chats.map(({ title }) => title)]);
+    }
+  );
+  await chats.watchList(onUpdate);
+  return {
+    /** The titles the follower has now. */
+    titles: () => titles.at(-1) ?? [],
+    /** Fails the session's next `times` readings. */
+    fail: (times: number) => {
+      failing = times;
+    },
   };
 };
 
@@ -289,6 +327,37 @@ describe("a person's list of chats", () => {
             .map(({ text }) => text)
             .filter((text) => text !== "")
         ).toStrictEqual(["Still there?", "Still here."]);
+      },
+      { timeout: 20_000 }
+    );
+  }, 30_000);
+
+  it("keeps coming when the session can't be read a moment, as a push goes out or as it is taken up again after a reset", async () => {
+    const ann = await person();
+    const follower = await listOverFlakySession(ann);
+    await until(() => {
+      expect(follower.titles()).toStrictEqual([]);
+    });
+    // The session store fails as a chat made on another device goes out.
+    follower.fail(1);
+    await ann.api.chats.create("Made meanwhile");
+    await until(() => {
+      expect(follower.titles()).toContain("Made meanwhile");
+    });
+    // And as the watch is taken up again after the object reset.
+    follower.fail(1);
+    await runInDurableObject(
+      workspace(env, personalWorkspaceId(ann.userId)),
+      (_instance, state) => {
+        state.abort("Reset by the test");
+      }
+    ).catch(() => {
+      // Aborting fails the call that aborted: that is the reset.
+    });
+    await ann.api.chats.create("Made after the reset");
+    await vi.waitFor(
+      () => {
+        expect(follower.titles()).toContain("Made after the reset");
       },
       { timeout: 20_000 }
     );

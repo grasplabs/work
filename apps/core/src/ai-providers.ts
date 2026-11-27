@@ -305,12 +305,12 @@ const addProvider = async (
   return listed(saved, await providerHealthOf(env));
 };
 
-/** The model a test of `provider` asks: the one named, or its own. */
+/** The model a test of `provider` asks: the one named, or its small model. */
 const testModelOf = (
   provider: AiProviderId,
   model: string | undefined
 ): string => {
-  const named = model ?? aiProviders[provider].testModel;
+  const named = model ?? aiProviders[provider].smallModel;
   if (named === undefined || parseModelRef(named)?.provider !== provider) {
     throw aiProviderErrors.create("ai_provider.model_unavailable");
   }

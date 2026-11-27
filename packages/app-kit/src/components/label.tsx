@@ -1,3 +1,5 @@
+"use client";
+
 import { cn } from "@grasp-os/app-kit/lib/utils";
 import * as React from "react";
 

@@ -1043,8 +1043,8 @@ const readBody = async (request: Request): Promise<unknown> => {
  * sent in place of `fetch` (`fetch`), until it's emptied (`reset`). Add
  * accounts with `addAccount`; plan failures with `failCall`.
  */
-/** Composio's MCP server list, as the admin's readiness reads it. */
-const composioMcpServers = "https://backend.composio.dev/api/v3.1/mcp/servers";
+/** Composio's API, as the admin's readiness reads it. */
+const composioApi = "https://backend.composio.dev/api/v3.1/";
 
 export const fakeCloudflareApi = (token: string) => {
   const accounts = new Map<string, AccountState>();
@@ -1454,19 +1454,24 @@ export const fakeCloudflareApi = (token: string) => {
 
   /** What the API, or a client's hostname through the router, answers `fetch(input, init)` with. */
   /**
-   * Composio's MCP server list, as the readiness check reads it with the
-   * shared key: `allowed` lists none, `forbidden` refuses the key (403),
-   * as Composio does a scoped key without MCP (Legacy).
+   * Composio's lists, as the readiness check reads them with the shared
+   * key: each lists none, but those `refused` names by their path's first
+   * segment (`auth_configs`, `connected_accounts`, `session_configs`),
+   * which it refuses (403), as Composio does a scoped key without that
+   * permission. `paths` are the paths it was asked, `keys` the keys.
    */
-  const composio: { mcp: "allowed" | "forbidden"; keys: string[] } = {
-    mcp: "allowed",
-    keys: [],
-  };
+  const composio: {
+    refused: Set<string>;
+    paths: string[];
+    keys: string[];
+  } = { refused: new Set(), paths: [], keys: [] };
   const composioAnswer = (request: Request): Response => {
+    const url = new URL(request.url);
+    const path = url.pathname.slice(new URL(composioApi).pathname.length);
+    composio.paths.push(`${path}${url.search}`);
     composio.keys.push(request.headers.get("x-api-key") ?? "");
-    return composio.mcp === "allowed"
-      ? Response.json({ items: [], next_cursor: null })
-      : Response.json(
+    return composio.refused.has(path.split("/")[0] ?? "")
+      ? Response.json(
           {
             error: {
               message: "The API key doesn't have permissions",
@@ -1475,7 +1480,8 @@ export const fakeCloudflareApi = (token: string) => {
             },
           },
           { status: 403 }
-        );
+        )
+      : Response.json({ items: [], next_cursor: null });
   };
 
   const answerFetch = async (
@@ -1483,7 +1489,7 @@ export const fakeCloudflareApi = (token: string) => {
     init?: RequestInit
   ): Promise<Response> => {
     const request = new Request(input, init);
-    if (request.url.startsWith(composioMcpServers)) {
+    if (request.url.startsWith(composioApi)) {
       return composioAnswer(request);
     }
     if (!request.url.startsWith(`${base}/`)) {
@@ -1552,7 +1558,8 @@ export const fakeCloudflareApi = (token: string) => {
 
   /** Empties the fake: no accounts, calls or plans left. */
   const reset = (): void => {
-    composio.mcp = "allowed";
+    composio.refused.clear();
+    composio.paths.length = 0;
     composio.keys.length = 0;
     accounts.clear();
     cores.clear();
@@ -1589,7 +1596,7 @@ export const fakeCloudflareApi = (token: string) => {
       script: string;
       url: string;
     }[] => dispatched,
-    /** Composio's MCP server list, and the keys it was read with. */
+    /** Composio's lists, and what they were read with. */
     composio,
     /** Empties the fake. */
     reset,

@@ -273,6 +273,12 @@ const monthRunsOf = async (
  */
 export const chatTurnPurpose = "chat.turn";
 
+/**
+ * What naming a chat is called for (chat-titles.ts): counted in chat's
+ * spend with its turns.
+ */
+export const chatTitlePurpose = "chat.title";
+
 /** The day `at` falls on in `timeZone`, one the runtime knows: `YYYY-MM-DD`. */
 const dayIn = (timeZone: string, at: Date): string =>
   new Intl.DateTimeFormat("en-CA", {
@@ -324,7 +330,7 @@ export const monthSpend = async (
       .select({
         day,
         amount: spent,
-        chat: sql<number>`sum(case when ${modelUsage.purpose} = ${chatTurnPurpose} then ${modelUsage.cost} else 0 end)`,
+        chat: sql<number>`sum(case when ${inArray(modelUsage.purpose, [chatTurnPurpose, chatTitlePurpose])} then ${modelUsage.cost} else 0 end)`,
       })
       .from(modelUsage)
       .where(organizationIn(month))
