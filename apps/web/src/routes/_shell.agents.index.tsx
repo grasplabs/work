@@ -1,5 +1,6 @@
 import type { AgentSettings, AgentWake } from "@grasp-os/shared/agents";
 import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
+import { AppShellPage } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
 import { Button } from "@grasp-os/ui/components/button";
 import { Icon, PlusIcon } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
@@ -12,7 +13,6 @@ import { AgentTabsWaiting, agentsTabOf } from "../agents/tabs.tsx";
 import type { AgentsTab } from "../agents/tabs.tsx";
 import type { Session } from "../core.ts";
 import { PageNotLoaded } from "../frame/page-states.tsx";
-import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 
@@ -133,7 +133,7 @@ const AgentsLoading = () => {
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Agents` }]} />
-      <Page>
+      <AppShellPage>
         <AgentsSkeleton
           actions={
             identity.staff ? undefined : (
@@ -146,7 +146,7 @@ const AgentsLoading = () => {
           cards={4}
           toolbar={admin ? <AgentTabsWaiting tab={tab} /> : undefined}
         />
-      </Page>
+      </AppShellPage>
     </>
   );
 };

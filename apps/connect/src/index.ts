@@ -453,7 +453,7 @@ export default class Connect
   async connectionOwners(
     connectionIds: readonly string[]
   ): Promise<ConnectionOwner[]> {
-    return await connectionOwners(this.env.DB, connectionIds);
+    return await connectionOwners(this.env, connectionIds);
   }
 
   async connectorToolClasses(

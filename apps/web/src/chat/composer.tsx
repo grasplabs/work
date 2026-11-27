@@ -35,7 +35,9 @@ import {
   usePromptInputAttachments,
 } from "@grasp-os/ui/components/prompt-input";
 import type { PromptInputSpeechButtonProps } from "@grasp-os/ui/components/prompt-input";
+import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Text } from "@grasp-os/ui/components/text";
+import { Icon, SquareIcon } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
 import { visuallyHidden } from "@grasp-os/ui/lib/styles";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
@@ -44,7 +46,7 @@ import { msg, select } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useEffectEvent, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { makerMark } from "../frame/brands.ts";
@@ -72,7 +74,9 @@ import { isEffort } from "./model-choice.ts";
 // mark, its name) and how hard it thinks in one Model selector, then the
 // microphone (dictation.ts); then Send, quiet until something is typed, which
 // is Stop while Grasp answers (its status from the chat: chat-states.ts),
-// and what the page adds. In one row (the chat's idle bar) the text stands
+// and what the page adds. While Grasp answers the box still takes a
+// question, which core queues for it (`ChatsApi.send`): once something is
+// typed, Send sends it and Stop stands beside it. In one row (the chat's idle bar) the text stands
 // between the add menu and the rest, the model only once something is
 // typed, so the placeholder keeps its room, as on #2503. `@` mentions the
 // agents, Apps, workflows and people (mentions.tsx). The text is the
@@ -303,6 +307,7 @@ const BoxTools = ({
   answerer,
   speech,
   stop,
+  running,
   children,
 }: {
   attaches: boolean;
@@ -312,8 +317,14 @@ const BoxTools = ({
   answerer: ReactNode;
   speech: PromptInputSpeechButtonProps | undefined;
   stop: (() => void) | undefined;
+  /**
+   * Grasp answers: with something typed, Send sends it for core to queue,
+   * and Stop stands of its own before it.
+   */
+  running: boolean;
   children: ReactNode;
 }) => {
+  const { t } = useLingui();
   // In one row on a phone, what answers folds away at rest, so the
   // placeholder keeps its room, as #2503's row does.
   const phone = useNarrow();
@@ -324,6 +335,15 @@ const BoxTools = ({
       <PromptInputTools align="end">
         {folded ? null : answerer}
         {speech === undefined ? null : <PromptInputSpeechButton {...speech} />}
+        {running && typed && stop !== undefined ? (
+          <Button
+            aria-label={t({ message: "Stop", context: "stop an answer" })}
+            onClick={stop}
+            size="icon-sm"
+          >
+            <Icon icon={SquareIcon} />
+          </Button>
+        ) : null}
         <PromptInputSubmit {...(stop === undefined ? {} : { onStop: stop })} />
         {children}
       </PromptInputTools>
@@ -522,12 +542,11 @@ const valueFor = (text: string, mentions: readonly BoxMention[]): BoxValue => {
  * box saying it goes, and sent once core has, with no second press. Stop
  * lets a held question go unsent; when core can't say which models there
  * are (`unavailable`, why), it goes unsent too, and the box says why, its
- * words kept. Never while Grasp answers or a question is on its way, nor
- * with nothing typed.
+ * words kept. Never while a question is on its way, nor with nothing
+ * typed; while Grasp answers too, as core queues it (`ChatsApi.send`).
  */
 const useSend = ({
   text,
-  running,
   busy,
   offered,
   model,
@@ -535,7 +554,6 @@ const useSend = ({
   onSend,
 }: {
   text: string;
-  running: boolean;
   busy: boolean;
   offered: readonly string[] | undefined;
   model: string | undefined;
@@ -549,7 +567,7 @@ const useSend = ({
   /** Lets a held question go unsent. */
   letGo: () => void;
 } => {
-  const asked = !running && text.trim() !== "";
+  const asked = text.trim() !== "";
   const canSend = asked && !busy && !lacksModel(model);
   const loadingModels = offered === undefined && lacksModel(model);
   const [held, setHeld] = useState(false);
@@ -619,6 +637,53 @@ const useBoxValue = (
   return [value, setValue];
 };
 
+/** That the connection to Grasp is coming back, as the line under the box says it. */
+const Reconnecting = () => {
+  const { t } = useLingui();
+  return (
+    <>
+      <Spinner />
+      {t`Reconnecting to Grasp…`}
+    </>
+  );
+};
+
+/**
+ * The line under the box: what went wrong (`said`), else that the
+ * connection is coming back, else none.
+ */
+const noteOf = (said: string | undefined, reconnecting: boolean): ReactNode => {
+  if (said !== undefined) {
+    return said;
+  }
+  return reconnecting ? <Reconnecting /> : undefined;
+};
+
+/**
+ * `stop`, after which the text takes the focus where Stop had it: Stop
+ * gives way to Send, which can't hold the focus with nothing typed, and
+ * it would fall to the page. A stopgap: remove this hook (and the text's
+ * `ref`) once Damsko's Submit focuses the text on a stop as it does on a
+ * send.
+ */
+const useFocusAfterStop = (stop: (() => void) | undefined) => {
+  const textBox = useRef<HTMLDivElement>(null);
+  const stopHere =
+    stop === undefined
+      ? undefined
+      : () => {
+          const here =
+            textBox.current
+              ?.closest("form")
+              ?.contains(document.activeElement) === true;
+          stop();
+          if (here) {
+            textBox.current?.focus();
+          }
+        };
+  return { textBox, stopHere };
+};
+
 /** The box to ask in. Controlled: the page keeps the text and the model. */
 export const Composer = ({
   text,
@@ -636,6 +701,7 @@ export const Composer = ({
   running,
   busy,
   failure,
+  reconnecting = false,
   onSend,
   onStop,
   compact = false,
@@ -686,6 +752,8 @@ export const Composer = ({
   busy: boolean;
   /** Why the last question didn't go, under the box; its words are kept. */
   failure?: string;
+  /** The connection to Grasp is gone and coming back: said under the box. */
+  reconnecting?: boolean;
   onSend: () => void;
   /** Stops the answer being written; only where one can be. */
   onStop?: () => void;
@@ -734,15 +802,16 @@ export const Composer = ({
   });
   const { held, heldFailure, submit, letGo } = useSend({
     text,
-    running,
     busy,
     offered,
     model,
     unavailable,
     onSend,
   });
+  const { textBox, stopHere } = useFocusAfterStop(held ? letGo : onStop);
   const failed = heldFailure ?? failure;
-  const note = dictation.problem ?? failed;
+  const note = noteOf(dictation.problem ?? failed, reconnecting);
+  const typed = text.trim() !== "";
   const canConnect = useMemberAdmin();
   const answerer = (
     <Answerer
@@ -776,6 +845,7 @@ export const Composer = ({
       }}
       status={promptStatusOf({
         running,
+        typed,
         busy: busy || held,
         failed: failed !== undefined,
       })}
@@ -786,7 +856,8 @@ export const Composer = ({
           question is about. */}
       {noProvider ? noProviderBanner(canConnect) : subjectBanner(subject)}
       {/* Under the box: why dictating stopped, else why the last question
-          didn't go. Each send clears the first, so the newest shows. */}
+          didn't go, else that the connection is coming back. Each send
+          clears the first, so the newest shows. */}
       {note === undefined ? null : <PromptInputNote>{note}</PromptInputNote>}
       {files.length === 0 ? null : (
         <PromptInputHeader>
@@ -795,6 +866,7 @@ export const Composer = ({
       )}
       <PromptInputBody>
         <PromptInputTextarea
+          ref={textBox}
           aria-label={label ?? t`Your question`}
           {...(placeholder === undefined ? {} : { placeholder })}
         />
@@ -802,12 +874,13 @@ export const Composer = ({
       <PromptInputFooter>
         <BoxTools
           answerer={answerer}
-          typed={text.trim() !== ""}
+          typed={typed}
           attaches={onAttach !== undefined}
           compact={compact}
           speech={dictation.speech}
           // Stop lets a held question go; else it stops the answer, where one can be.
-          stop={held ? letGo : onStop}
+          stop={stopHere}
+          running={running}
         >
           {children}
         </BoxTools>

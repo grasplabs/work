@@ -10,7 +10,7 @@
  * away anyway (core's src/channels/). It asks Teams for no permissions, no
  * tabs and no domains: everything he does goes through the bot.
  *
- * The icons are drawn here from the Grasp mark (packages/app-kit/src/components/grasp-mark.tsx),
+ * The icons are drawn here from the Grasp mark (src/admin/grasp-mark.ts),
  * as Grasp's favicon colours it: the colour one 192 pixels square on
  * Grasp's green, the outline one 32 pixels square in white on transparent,
  * as Teams asks for each. Drawn rather than kept as images, so the
@@ -100,8 +100,8 @@ export const teamsManifest = (bot: TeamsBot, clientName: string) => {
 type Point = readonly [number, number];
 
 /**
- * The Grasp mark's four shapes, in its 82 × 68 box (packages/app-kit/src/components/grasp-mark.tsx
- * draws the same paths): none overlaps another.
+ * The Grasp mark's four shapes, in its 82 × 68 box (src/admin/grasp-mark.ts
+ * draws the same shapes, scaled to its icon's grid): none overlaps another.
  */
 const markShapes: readonly (readonly Point[])[] = [
   [

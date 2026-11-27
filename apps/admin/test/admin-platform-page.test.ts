@@ -65,7 +65,7 @@ describe("the admin's Platform page", () => {
 
     const html = await platformPage();
     const text = textOf(html);
-    const at = html.indexOf('aria-label="Needs a look"');
+    const at = html.indexOf('aria-labelledby="needs-a-look"');
     const needsALook =
       at === -1 ? "" : textOf(html.slice(at, html.indexOf("</section>", at)));
 

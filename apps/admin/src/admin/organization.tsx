@@ -20,7 +20,10 @@
  */
 
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
-import { dateOn, listenDays } from "@grasp-os/shared/admin/onboarding-admin";
+import {
+  AppShellHeader,
+  AppShellPage,
+} from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
 import {
   Alert,
   AlertAction,
@@ -47,7 +50,7 @@ import {
   RefreshCwIcon,
 } from "@grasp-os/ui/lib/icons";
 import { visuallyHidden } from "@grasp-os/ui/lib/styles";
-import { colors, font, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import {
   Link,
@@ -55,14 +58,15 @@ import {
   useChildMatches,
   useRouter,
 } from "@tanstack/react-router";
-import { createContext, Suspense, use, useState } from "react";
+import { createContext, Fragment, Suspense, use, useState } from "react";
+import type { ReactNode } from "react";
 
 import type { ClientAdmin } from "../clients/admin.ts";
 import type { GridRow } from "../clients/grid.ts";
-import { PageBar } from "../frame/page-bar.tsx";
+import { channelWords } from "../rollout/channel-words.ts";
 import type { OrgRead } from "./org-reads.ts";
-import { AdminHeader, barLabels, PageBody } from "./page.tsx";
-import { KnowledgeDots } from "./parts.tsx";
+import { standingTime } from "./org-status.ts";
+import { AdminHeader } from "./page.tsx";
 import {
   orgSections,
   originsOf,
@@ -73,34 +77,20 @@ import {
 import type { OrgSection, Origin } from "./sections.ts";
 import { Ago, useSettled } from "./settled.tsx";
 import type { Deferred } from "./settled.tsx";
+import { standingOfView, standingTones, standingWords } from "./standing.ts";
+import type { Standing } from "./standing.ts";
 import { organizationOf, unreadWhy, whyUnread } from "./views.ts";
-import { formatDate, stageLines } from "./words.ts";
+import { plural } from "./words.ts";
 
 const styles = stylex.create({
-  // How much is known: the dots over a line that says when it opens, in
-  // the warning's colour once it waits on Grasp's go.
-  knowing: {
-    display: "flex",
-    flexDirection: "column",
-    gap: space["1"],
-    minWidth: 0,
-  },
-  opens: {
-    fontSize: font.textXs,
-    lineHeight: font.textXsLine,
-    color: colors.mutedForeground,
-  },
-  opensWaits: { color: colors.warning },
-  // Where the organization stands, over every section: how much is known
-  // and, once the team is told, the day the interviews are on.
+  // Where the organization stands, over every section: its Badge, then its facts.
   status: {
     display: "flex",
     flexWrap: "wrap",
     alignItems: "center",
-    columnGap: space["4"],
+    columnGap: space["3"],
     rowGap: space["2"],
   },
-  statusLink: { color: "inherit", textDecoration: "none" },
   // Under the page's title, its sentence, then where its figures come
   // from and when they were read, a line each.
   lines: { display: "flex", flexDirection: "column", gap: space["1"] },
@@ -202,18 +192,6 @@ const SourceNote = ({ origins }: { origins: readonly Origin[] }) => {
   );
 };
 
-/** What the company is, where, and how many people it has, for under its name. */
-const aboutOf = (view: AdminView): string => {
-  const people = view.org.teams.reduce((sum, team) => sum + team.people, 0);
-  return [
-    view.org.about,
-    view.org.place,
-    people > 0 ? `${people} ${people === 1 ? "person" : "people"}` : "",
-  ]
-    .filter((part) => part !== "")
-    .join(" · ");
-};
-
 /**
  * Reads the organization's core again, keeping what the page shows until
  * the answer is in: `busy` while it is read.
@@ -224,8 +202,10 @@ const useReadAgain = (): { busy: boolean; readAgain: () => void } => {
   // The router never throws for a load: one that fails shows where it would be.
   const read = async () => {
     setBusy(true);
+    // Its page and the section's own reads under it (the overview's AI
+    // status and history), so what failed is asked again too.
     await router.invalidate({
-      filter: (match) => match.routeId === "/organizations/$clientId",
+      filter: (match) => match.routeId.startsWith("/organizations/$clientId"),
     });
     setBusy(false);
   };
@@ -261,24 +241,24 @@ const UnreadSection = ({
         </EmptyTitle>
         <EmptyDescription>
           {section === "overview"
-            ? "Everything here comes from its own Grasp, which the admin can’t read now. Its Setup shows what the admin itself knows, and what to do."
+            ? `${unreadWhy(admin)} Its Setup shows what the admin itself knows, and what to do.`
             : unreadWhy(admin)}
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
         <div {...stylex.props(styles.buttons)}>
+          {/* The page's one primary action: a link that looks like a button, announced as the link it is. */}
+          <Button asChild>
+            <Link params={{ clientId }} to={sectionTo.setup}>
+              {unset ? "See how its setting up goes" : "Open its Setup"}
+            </Link>
+          </Button>
           {unset ? null : (
-            <Button disabled={busy} onClick={readAgain}>
+            <Button disabled={busy} onClick={readAgain} variant="outline">
               <Icon icon={RefreshCwIcon} />
               {busy ? "Asking again…" : "Try again"}
             </Button>
           )}
-          {/* A link that looks like a button: it is announced as the link it is. */}
-          <Button asChild variant="outline">
-            <Link params={{ clientId }} to={sectionTo.setup}>
-              {unset ? "See its Setup progress" : "Its Setup"}
-            </Link>
-          </Button>
         </div>
       </EmptyContent>
     </Empty>
@@ -369,78 +349,69 @@ const SectionGate = ({ section }: { section: OrgSection }) => {
   );
 };
 
-/** The overview's line under its name: what the company is, or why nothing of it is read. */
-const OverviewAbout = () => {
-  const { admin } = useOrgRead();
-  const { view } = organizationOf(admin);
-  if (view !== null) {
-    return aboutOf(view);
-  }
-  return admin.state === "answered" ? "" : unreadWhy(admin);
-};
-
-/** How many dots say how much is known. */
-const knowledgeDots = 20;
-
 /**
- * Where the organization stands, in sight on every section: how much Grasp
- * knows and whether it is ready to open (to its Steps), and, once the team
- * is told, the day its interviews are on; while its core isn't read, where
- * to see why (its Setup).
+ * Where the organization stands, in sight on every section: its standing
+ * as a Badge, then how long it has been there, the release it runs on its
+ * channel and how many members it has. While its core isn't read: not set
+ * up yet, or not answering since when; on its Setup, which says why
+ * itself, nothing.
  */
-const OrgStatus = ({
-  clientId,
+const StatusLine = ({
+  client,
   section,
 }: {
-  clientId: string;
+  client: GridRow;
   section: OrgSection;
 }) => {
   const { admin } = useOrgRead();
   const { view } = organizationOf(admin);
-  if (view === null) {
-    // On its Setup, which says why itself, no way to where staff already are.
-    return admin.state === "answered" || section === "setup" ? null : (
-      <Badge asChild variant="warning">
-        <Link params={{ clientId }} to="/organizations/$clientId/setup">
-          Not read now: see its Setup
-        </Link>
-      </Badge>
-    );
+  const release =
+    client.release === null
+      ? null
+      : `${client.release} on ${channelWords[client.channel]}`;
+  let standing: Standing = "unreachable";
+  let facts: ReactNode[] = [];
+  if (admin.state === "answered") {
+    if (view === null) {
+      return null;
+    }
+    standing = standingOfView(view, admin.snapshot.gate.open);
+    const members = admin.snapshot.members.length;
+    facts = [
+      standingTime(standing, view, admin.snapshot),
+      release,
+      `${members} ${plural(members, "member", "members")}`,
+    ];
+  } else if (section === "setup") {
+    return null;
+  } else if (admin.error === "not_deployed") {
+    standing = "not_deployed";
+    facts = ["Its first release isn’t live yet", release];
+  } else {
+    facts = [
+      admin.lastAnsweredAt === null ? (
+        "It has never answered"
+      ) : (
+        <>
+          Last answered <Ago at={admin.lastAnsweredAt} />
+        </>
+      ),
+      release,
+    ];
   }
-  const opens = stageLines(view).open;
-  const waits = view.knowledge.ready && view.knowledge.opened === null;
-  const days = listenDays(view.org);
+  const shown = facts.filter((fact) => fact !== null);
   return (
     <span {...stylex.props(styles.status)}>
-      <Link
-        params={{ clientId }}
-        to="/organizations/$clientId/steps"
-        {...stylex.props(styles.statusLink, styles.knowing)}
-      >
-        <KnowledgeDots
-          count={knowledgeDots}
-          knowledge={view.knowledge}
-          label={opens}
-        />
-        <span
-          aria-hidden
-          {...stylex.props(styles.opens, waits && styles.opensWaits)}
-        >
-          {opens}
-        </span>
-      </Link>
-      {view.told ? (
-        <span {...stylex.props(styles.knowing)}>
-          <Text as="span" color="default" size="xs">
-            Day {view.day} of {days}
-          </Text>
-          <Text as="span" color="muted" size="xs">
-            {view.closed
-              ? `The interviews closed on ${formatDate(dateOn(view.org, days - 1))}`
-              : `The interviews, on ${formatDate(dateOn(view.org, view.day))}`}
-          </Text>
-        </span>
-      ) : null}
+      <Badge variant={standingTones[standing]}>{standingWords[standing]}</Badge>
+      <Text as="span" color="muted" size="sm">
+        {shown.map((fact, index) => (
+          // The facts keep their order: their place names them.
+          <Fragment key={index}>
+            {index === 0 ? null : " · "}
+            {fact}
+          </Fragment>
+        ))}
+      </Text>
     </span>
   );
 };
@@ -495,39 +466,31 @@ export const OrganizationPage = ({
   const { title, about } = sectionWords[section];
   return (
     <OrgReadContext value={read}>
-      <PageBar
-        crumbs={
+      <AppShellHeader
+        breadcrumb={
           section === "overview"
-            ? [{ label: name }]
+            ? undefined
             : [
                 {
                   label: name,
-                  render: (look) => (
+                  render: (
                     <Link
-                      {...look}
                       params={{ clientId: client.id }}
                       to="/organizations/$clientId"
                     />
                   ),
                 },
-                { label: title },
               ]
         }
-        labels={barLabels}
+        title={section === "overview" ? name : title}
       />
-      <PageBody>
+      <AppShellPage>
         <PageHeader
           description={
             <span {...stylex.props(styles.meta)}>
-              {section === "overview" ? (
-                <Suspense fallback={null}>
-                  <OverviewAbout />
-                </Suspense>
-              ) : (
-                <span>{about}</span>
-              )}
+              {section === "overview" ? null : <span>{about}</span>}
               <Suspense fallback={null}>
-                <OrgStatus clientId={client.id} section={section} />
+                <StatusLine client={client} section={section} />
                 <span {...stylex.props(styles.lines)}>
                   <ReadNotes section={section} />
                 </span>
@@ -547,7 +510,7 @@ export const OrganizationPage = ({
             <SectionGate section={section} />
           </Suspense>
         )}
-      </PageBody>
+      </AppShellPage>
     </OrgReadContext>
   );
 };
@@ -559,7 +522,7 @@ export const OrganizationPage = ({
 export const OffboardedPage = ({ client }: { client: GridRow }) => (
   <>
     <AdminHeader page={client.name} />
-    <PageBody>
+    <AppShellPage>
       <PageHeader title={client.name} />
       <Empty>
         <EmptyHeader>
@@ -576,7 +539,7 @@ export const OffboardedPage = ({ client }: { client: GridRow }) => (
           </Button>
         </EmptyContent>
       </Empty>
-    </PageBody>
+    </AppShellPage>
   </>
 );
 

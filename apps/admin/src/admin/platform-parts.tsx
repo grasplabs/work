@@ -76,6 +76,9 @@ export const needWords = (need: PlatformNeed): string => {
     case "drift": {
       return `${driftWords[need.drift]}.`;
     }
+    case "unreachable": {
+      return "Its core doesn't answer.";
+    }
     default: {
       return "";
     }

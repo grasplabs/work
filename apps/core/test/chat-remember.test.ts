@@ -1,8 +1,8 @@
+import { compile } from "@earendil-works/pi-schema";
 import { personalBrainOf } from "@grasp-os/brain-next/contract";
 import type { MemoriesCursor } from "@grasp-os/brain-next/contract";
 import type { ChatMessage } from "@grasp-os/shared/chat";
 import { env } from "cloudflare:workers";
-import { Value } from "typebox/value";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
@@ -13,9 +13,11 @@ import { keepAudience } from "../src/chat-audiences.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import {
+  callTool,
   chatOf,
   codeStep,
   model,
+  pausedReply,
   personalChatsOf,
   says,
   toolResults,
@@ -340,6 +342,71 @@ describe("the agent remembering in a person's own chat", () => {
         checkedTheirMessage: true,
         checkedTheSubject: true,
       });
+    }
+  );
+
+  it(
+    "keeps what the person said in a question they sent while the agent answered, as their own words",
+    slow,
+    async () => {
+      const member = await signedInApi(idp, "user");
+      const customer = `Acme ${unique()}`;
+      const said = `Our contract with ${customer} renews on 1 March.`;
+      const statement = `${customer} renews on 1 March`;
+      const first = pausedReply(says("Happy to help."), 2);
+      const provider = await fakeProvider(
+        first.reply,
+        toolStep("remember", {
+          about: { kind: "customer", name: customer },
+          attribute: "renewal_date",
+          value: "1 March",
+          type: "fact",
+          statement,
+          quote: `contract with ${customer} renews on 1 March`,
+        }),
+        checked(true),
+        says("Noted.")
+      );
+      const chat = await member.api.chats.create("Renewals");
+      try {
+        await member.api.chats.send(chat.id, {
+          text: "Can you help me keep track of renewals?",
+          model,
+        });
+        await vi.waitFor(
+          () => {
+            expect(provider.requests).toHaveLength(1);
+          },
+          { timeout: 10_000 }
+        );
+        // Queued while the first answer is written (chat-queued.test.ts).
+        await member.api.chats.send(chat.id, { text: said, model });
+        first.release();
+        await vi.waitFor(
+          async () => {
+            await expect(
+              keptFor(member.userId, customer)
+            ).resolves.toStrictEqual([[statement]]);
+          },
+          { timeout: 20_000 }
+        );
+        // The turn ends with its last answer, before the next test's.
+        await vi.waitFor(
+          async () => {
+            const listed = await member.api.chats.list();
+            expect(
+              listed.find(({ id }) => id === chat.id)?.running
+            ).toBeFalsy();
+            expect(provider.requests).toHaveLength(4);
+          },
+          { timeout: 20_000 }
+        );
+        expect(
+          checkInputs(provider).map(({ message }) => message)
+        ).toStrictEqual([expect.stringContaining(said)]);
+      } finally {
+        first.release();
+      }
     }
   );
 
@@ -969,7 +1036,8 @@ describe("the agent remembering in a person's own chat", () => {
           chatId: chat.id,
           personId: member.userId,
         },
-        "Not pizza any more, it's sushi now.",
+        async () =>
+          await Promise.resolve("Not pizza any more, it's sushi now."),
         () => {}
       );
       // The model's call as it comes in, checked by the tool's own schema.
@@ -982,19 +1050,23 @@ describe("the agent remembering in a person's own chat", () => {
         quote: "it's sushi now",
         replaces: [pizza],
       };
-      if (!Value.Check(tool.parameters, input)) {
+      if (!compile(tool.parameters).check(input)) {
         throw new Error("Not the tool's input");
       }
       // A restart replays the same call, by its id.
-      const first = await tool.execute("call_replayed", input);
-      const again = await tool.execute("call_replayed", input);
+      const first = await callTool(tool, "call_replayed", input);
+      const again = await callTool(tool, "call_replayed", input);
       const replayed = await ownHistoryOf(member.userId);
-      await member.api.brainMemories.forget(first.details.memory);
-      const afterUndo = await tool.execute("call_replayed", input);
+      const saved = first.details?.memory;
+      if (saved === undefined) {
+        throw new Error("Nothing saved");
+      }
+      await member.api.brainMemories.forget(saved);
+      const afterUndo = await callTool(tool, "call_replayed", input);
 
       expect({
         again: again.details,
-        afterUndo: afterUndo.details.memory === first.details.memory,
+        afterUndo: afterUndo.details?.memory === saved,
         replayed,
         // The Undo stands: the replay replaced nothing again.
         kept: await ownHistoryOf(member.userId),

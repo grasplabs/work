@@ -1,8 +1,10 @@
-// @vitest-environment happy-dom
 import type {
   ListedConnection,
   OfferedCatalog,
 } from "@grasp-os/shared/connect";
+// @vitest-environment happy-dom
+import { AppShellSidebar } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
+import { AppShellNav } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01-sidebar";
 import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -20,7 +22,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { FrameSidebar } from "../frame/sidebar.tsx";
+import { FrameLevels } from "../frame/sidebar.tsx";
 import type { Outside } from "../frame/way-out.tsx";
 import { useIntegrationsSection } from "./integrations-sidebar.tsx";
 
@@ -69,16 +71,11 @@ const Frame = () => {
   const section = useIntegrationsSection(cameFrom);
   return (
     <>
-      <FrameSidebar
-        aria-label="Sidebar"
-        closeLabel="Close"
-        foldLabel="Show or hide the sidebar"
-        groups={[]}
-        mark={null}
-        navLabel="Main"
-        profile={null}
-        {...(section === undefined ? {} : { section })}
-      />
+      <AppShellSidebar>
+        <FrameLevels section={section}>
+          <AppShellNav aria-label="Main" groups={[]} />
+        </FrameLevels>
+      </AppShellSidebar>
       <Outlet />
     </>
   );

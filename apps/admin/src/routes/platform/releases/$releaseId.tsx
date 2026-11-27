@@ -1,17 +1,13 @@
 import { releaseIdSchema } from "@grasp-os/shared/release-id";
 import { Button } from "@grasp-os/ui/components/button";
-import { CardContent } from "@grasp-os/ui/components/card";
 import {
   Item,
-  ItemActions,
   ItemContent,
+  ItemDescription,
   ItemGroup,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
-import { Link } from "@grasp-os/ui/components/link";
 import { Text } from "@grasp-os/ui/components/text";
-import { space } from "@grasp-os/ui/lib/tokens.stylex";
-import * as stylex from "@stylexjs/stylex";
 import {
   createFileRoute,
   Link as RouterLink,
@@ -19,24 +15,23 @@ import {
 } from "@tanstack/react-router";
 
 import { PageLoading } from "../../../admin/failure.tsx";
-import { AdminPage } from "../../../admin/page.tsx";
-import { Panel, PanelNote } from "../../../admin/panel.tsx";
+import { EmptyPart, PagePart } from "../../../admin/page-part.tsx";
 import {
   channelsId,
-  PlatformNav,
+  PlatformPage,
   platformCrumb,
   releasesCrumb,
 } from "../../../admin/platform-nav.tsx";
-import { Facts, listed } from "../../../admin/release-parts.tsx";
+import { actorWords } from "../../../admin/setup-history.ts";
+import { Facts } from "../../../admin/setup-parts.tsx";
 import { formatTime } from "../../../releases/format.ts";
 import { fetchRelease } from "../../../releases/functions.ts";
 import type { WorkerView } from "../../../releases/queries.ts";
 import { releaseTitle } from "../../../releases/version.ts";
 import { channelWords } from "../../../rollout/channel-words.ts";
 
-const styles = stylex.create({
-  page: { display: "flex", flexDirection: "column", gap: space["6"] },
-});
+/** A list, in words: `none` when it's empty. */
+const listed = (items: readonly string[]): string => items.join(", ") || "none";
 
 /** One of the release's Workers, in a line: what deploying it changes. */
 const workerLine = (worker: WorkerView): string =>
@@ -51,7 +46,7 @@ const ReleasePage = () => {
   const release = Route.useLoaderData();
   const title = releaseTitle(release.notes);
   return (
-    <AdminPage
+    <PlatformPage
       action={
         <Button asChild>
           <RouterLink hash={channelsId} to="/platform">
@@ -63,107 +58,88 @@ const ReleasePage = () => {
       parents={[platformCrumb, releasesCrumb]}
       title={release.id}
     >
-      <PlatformNav />
-      <div {...stylex.props(styles.page)}>
-        <Panel title="What it holds">
-          {release.notes === "" ? (
-            <PanelNote>No note.</PanelNote>
-          ) : (
-            <CardContent>
-              <Text size="sm">{release.notes}</Text>
-            </CardContent>
-          )}
-        </Panel>
-        <Panel
-          description="Every time a channel was set to it, the newest first."
-          title="Channels"
-        >
-          {release.history.length === 0 ? (
-            <PanelNote>It hasn&apos;t been on a channel.</PanelNote>
-          ) : (
-            <CardContent flush>
-              <ItemGroup separated>
-                {release.history.map((event) => (
-                  <Item
-                    key={`${event.at.getTime()}-${event.channel}`}
-                    size="sm"
-                  >
-                    <ItemContent>
-                      <ItemTitle>{`${channelWords[event.channel]}, by ${event.actor}`}</ItemTitle>
-                    </ItemContent>
-                    <ItemActions>
-                      <Text as="span" color="muted" size="xs">
-                        {formatTime(event.at)}
-                      </Text>
-                    </ItemActions>
-                  </Item>
-                ))}
-              </ItemGroup>
-            </CardContent>
-          )}
-        </Panel>
-        <Panel title="Who runs it">
-          {release.running.length === 0 ? (
-            <PanelNote>No company runs it now.</PanelNote>
-          ) : (
-            <CardContent flush>
-              <ItemGroup separated>
-                {release.running.map((client) => (
-                  <Item key={client.id} size="sm">
-                    <ItemContent>
-                      <ItemTitle>
-                        <Link asChild variant="plain">
-                          <RouterLink
-                            params={{ clientId: client.id }}
-                            to="/organizations/$clientId/setup"
-                          >
-                            {client.name}
-                          </RouterLink>
-                        </Link>
-                      </ItemTitle>
-                    </ItemContent>
-                  </Item>
-                ))}
-              </ItemGroup>
-            </CardContent>
-          )}
-        </Panel>
-        <Panel title="The record">
-          <Facts
-            rows={[
-              { label: "Commit", value: release.commitSha, mono: true },
-              { label: "Built (UTC)", value: formatTime(release.builtAt) },
-              {
-                label: "Imported (UTC)",
-                value: formatTime(release.importedAt),
-              },
-              {
-                label: "Bundle",
-                value:
-                  release.bundleDeletedAt === null
-                    ? "Kept"
-                    : `Deleted ${formatTime(release.bundleDeletedAt)} UTC: never promoted past Edge`,
-                attention: release.bundleDeletedAt !== null,
-              },
-              {
-                label: "Manifest SHA-256",
-                value: release.manifestSha256,
-                mono: true,
-              },
-              {
-                label: "Compatibility date",
-                value: release.compatibilityDate,
-                mono: true,
-              },
-              ...release.workers.map((worker) => ({
-                label: worker.app,
-                value: workerLine(worker),
-              })),
-            ]}
-          />
-        </Panel>
-      </div>
-    </AdminPage>
+      <PagePart id="holds" title="What it holds">
+        {release.notes === "" ? (
+          <EmptyPart>No note.</EmptyPart>
+        ) : (
+          <Text size="sm">{release.notes}</Text>
+        )}
+      </PagePart>
+      <PagePart
+        description="Every time a channel was set to it, the newest first."
+        id="channels"
+        title="Channels"
+      >
+        {release.history.length === 0 ? (
+          <EmptyPart>It hasn&apos;t been on a channel.</EmptyPart>
+        ) : (
+          <ItemGroup aria-labelledby="channels" separated>
+            {release.history.map((event) => (
+              <Item key={`${event.at.getTime()}-${event.channel}`} size="sm">
+                <ItemContent>
+                  <ItemTitle>{channelWords[event.channel]}</ItemTitle>
+                  <ItemDescription>{`${actorWords(event.actor)} · ${formatTime(event.at)}`}</ItemDescription>
+                </ItemContent>
+              </Item>
+            ))}
+          </ItemGroup>
+        )}
+      </PagePart>
+      <PagePart id="runs" title="Who runs it">
+        {release.running.length === 0 ? (
+          <EmptyPart>No company runs it now.</EmptyPart>
+        ) : (
+          <ItemGroup aria-labelledby="runs" separated>
+            {release.running.map((client) => (
+              <Item asChild key={client.id} size="sm">
+                <RouterLink
+                  params={{ clientId: client.id }}
+                  to="/organizations/$clientId/setup"
+                >
+                  <ItemContent>
+                    <ItemTitle>{client.name}</ItemTitle>
+                  </ItemContent>
+                </RouterLink>
+              </Item>
+            ))}
+          </ItemGroup>
+        )}
+      </PagePart>
+      <PagePart id="record" title="The record">
+        <Facts
+          rows={[
+            { label: "Commit", value: release.commitSha, mono: true },
+            { label: "Built (UTC)", value: formatTime(release.builtAt) },
+            {
+              label: "Imported (UTC)",
+              value: formatTime(release.importedAt),
+            },
+            {
+              label: "Bundle",
+              value:
+                release.bundleDeletedAt === null
+                  ? "Kept"
+                  : `Deleted ${formatTime(release.bundleDeletedAt)} UTC: never promoted past Edge`,
+              attention: release.bundleDeletedAt !== null,
+            },
+            {
+              label: "Manifest SHA-256",
+              value: release.manifestSha256,
+              mono: true,
+            },
+            {
+              label: "Compatibility date",
+              value: release.compatibilityDate,
+              mono: true,
+            },
+            ...release.workers.map((worker) => ({
+              label: worker.app,
+              value: workerLine(worker),
+            })),
+          ]}
+        />
+      </PagePart>
+    </PlatformPage>
   );
 };
 

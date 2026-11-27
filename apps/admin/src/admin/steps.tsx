@@ -1,11 +1,9 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Progress } from "@grasp-os/app-kit/components/progress";
 /**
- * One organization's onboarding, step by step, ported from the prototype
- * (grasplabs/prototype `components/admin/org-steps.tsx` and the
- * `stage-*.tsx` it opens): the steps from the first conversation until
- * Grasp opens, each with where it stands, and the step that is chosen
- * opened underneath. It opens on the step the organization is at.
+ * One organization's onboarding, step by step, composed as Grasp Work
+ * composes a page: the steps from the first conversation until Grasp
+ * opens as a row of tabs, each saying where it stands, and the chosen one
+ * opened under them, its content on the page. It opens on the step the
+ * organization is at.
  *
  * Staff steer the onboarding from here, each change a command to the
  * company's Grasp (commands.tsx): pausing the interviews, the share at
@@ -14,54 +12,121 @@ import { Progress } from "@grasp-os/app-kit/components/progress";
  * open nothing here, for their own section shows them, with what staff do
  * there: what was agreed is the Contract's, the team leads and the
  * interviews are the Interviews'; each goes there. What the admin can't do
- * yet (starting the research) says so where its buttons were. Nor is the
- * company's own link here, as the prototype had it under the steps: a
- * link is a credential, and core never sends one. And nothing anyone
- * said is shown: not the first conversation, not what the research
- * found, only what the model counts.
+ * yet (starting the research) says so where its buttons would be. Nor is
+ * the company's own link here: a link is a credential, and core never
+ * sends one. And nothing anyone said is shown: not the first
+ * conversation, not what the research found, only what the model counts.
  */
-import { Stat } from "@grasp-os/app-kit/components/stat";
-import { cn } from "@grasp-os/app-kit/lib/utils";
-import { VISION_FIELDS } from "@grasp-os/shared/admin/interviews";
 import {
   dateOn,
   mayInvite,
   RESEARCH_SOURCES,
 } from "@grasp-os/shared/admin/onboarding-admin";
 import type {
+  OrgKnowledge,
   OrgView,
   ResearchSource,
   Stage,
   StageStatus,
 } from "@grasp-os/shared/admin/onboarding-admin";
 import type { OnboardingFlow } from "@grasp-os/shared/onboarding-flow";
-import { Link } from "@tanstack/react-router";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { ChartBarList } from "@grasp-os/ui/components/chart";
 import {
-  ArrowRightIcon,
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { KeyValueList } from "@grasp-os/ui/components/key-value";
+import {
+  Section as Part,
+  SectionHeader,
+} from "@grasp-os/ui/components/section-header";
+import { Stat } from "@grasp-os/ui/components/stat";
+import { TabsLink, TabsNav } from "@grasp-os/ui/components/tabs";
+import { Text } from "@grasp-os/ui/components/text";
+import {
   ArrowUpRightIcon,
-  BriefcaseIcon,
-  Building2Icon,
-  CheckIcon,
-  CircleDotIcon,
+  BuildingIcon,
+  CircleCheckIcon,
   CircleIcon,
+  ClockIcon,
+  FileDocIcon,
+  FolderIcon,
   GlobeIcon,
   HourglassIcon,
-  LibraryIcon,
-  MessageSquareTextIcon,
-  NewspaperIcon,
+  Icon,
+  MessageSquareIcon,
   ScaleIcon,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+  UsersIcon,
+  WorkflowIcon,
+} from "@grasp-os/ui/lib/icons";
+import type { IconData } from "@grasp-os/ui/lib/icons";
+import { visuallyHidden } from "@grasp-os/ui/lib/styles";
+import { colors, radius, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
+import { Link } from "@tanstack/react-router";
+import { Fragment } from "react";
 import type { ReactNode } from "react";
 
 import { GateControls } from "./commands.tsx";
 import type { GateState } from "./commands.tsx";
-import { opensElsewhere, stageShown, stagesIn } from "./flow-stages.ts";
-import { Kickoff, visionWords } from "./kickoff.tsx";
-import { Attention, Done, KnowledgeDots } from "./parts.tsx";
-import { Section, SectionRow } from "./section.tsx";
+import { elsewhereOf, stageShown, stagesIn } from "./flow-stages.ts";
+import { Kickoff } from "./kickoff.tsx";
 import { sectionTo } from "./sections.ts";
 import { formatDate, stageWords } from "./words.ts";
+
+const styles = stylex.create({
+  // The steps' tabs, then the open step's parts, a step further apart than the lines within each.
+  parts: { display: "flex", flexDirection: "column", gap: space["8"] },
+  part: { display: "flex", flexDirection: "column", gap: space["4"] },
+  // The share that is known and the go beside it, the go under it on a phone.
+  opens: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    columnGap: space["8"],
+    rowGap: space["4"],
+  },
+  known: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    gap: space["3"],
+    minWidth: 0,
+    maxWidth: "25rem",
+  },
+  // As wide as what it stands in, at most forty dots and their gaps: on a phone each dot shrinks.
+  dots: {
+    display: "flex",
+    alignItems: "center",
+    gap: space["1"],
+  },
+  dot: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    maxWidth: "0.375rem",
+    aspectRatio: "1",
+    borderRadius: radius.circle,
+    backgroundColor: colors.border,
+  },
+  filled: { backgroundColor: colors.foreground },
+  // Where Grasp opens: a thin upright line between the dots.
+  gate: {
+    width: size.hairline,
+    height: "0.875rem",
+    flexShrink: 0,
+    marginInline: "0.125rem",
+    backgroundColor: colors.foreground,
+  },
+});
 
 /** `count` and the thing it counts: one for one, many for the rest. */
 const counted = (count: number, one: string, other: string): string =>
@@ -79,105 +144,43 @@ const statusWords: Record<StageStatus, string> = {
   later: "Later",
 };
 
-const StageMark = ({ status }: { status: StageStatus }) => {
-  if (status === "done") {
-    return (
-      <CheckIcon aria-hidden className="text-status-agreed size-4 flex-none" />
-    );
-  }
-  if (status === "now") {
-    return <CircleDotIcon aria-hidden className="size-4 flex-none" />;
-  }
-  if (status === "waits") {
-    return (
-      <HourglassIcon
-        aria-hidden
-        className="text-status-attention size-4 flex-none"
-      />
-    );
-  }
-  return <CircleIcon aria-hidden className="text-border size-4 flex-none" />;
-};
-
 /**
- * Where something the prototype does here would be: not in the admin
- * yet, for it writes to the company's Grasp.
+ * Each step's mark, by where it stands, as the overview marks who a need
+ * waits on: a clock while it is in Grasp's hands, an hourglass while it
+ * waits on someone else.
  */
-const NotHere = ({ children }: { children: ReactNode }) => (
-  <p
-    className="text-muted-foreground border-t px-5 py-3 text-xs"
-    data-slot="not-in-admin"
-  >
-    {children}
-  </p>
-);
-
-/** How many columns the steps take when wide, by how many the flow has: a class each, as a class is never built from a number. */
-const stageColumns: Record<number, string> = {
-  1: "lg:grid-cols-1",
-  2: "lg:grid-cols-2",
-  3: "lg:grid-cols-3",
-  4: "lg:grid-cols-4",
-  5: "lg:grid-cols-5",
-  6: "lg:grid-cols-6",
-  7: "lg:grid-cols-7",
+const statusIcons: Record<StageStatus, IconData> = {
+  done: CircleCheckIcon,
+  now: ClockIcon,
+  waits: HourglassIcon,
+  later: CircleIcon,
 };
 
-const stageLinkClass =
-  "hover:bg-muted/50 focus-visible:ring-ring/50 relative flex h-full w-full items-center gap-3 px-5 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-inset lg:flex-col lg:items-start lg:gap-2 lg:px-4 lg:py-4";
+// ---- The steps ----------------------------------------------------------
 
-/** A step's mark and name, with where it stands said to a screen reader. */
+/** A step's name, with where it stands said to a screen reader, and a mark where it leads to another section. */
 const StageName = ({
   stage,
   status,
-  leaves = false,
+  leaves,
 }: {
   stage: Stage;
   status: StageStatus;
-  /** The step is shown in another section, which its link goes to. */
-  leaves?: boolean;
+  leaves: boolean;
 }) => (
   <>
-    <StageMark status={status} />
-    <span className="min-w-0 flex-1 font-medium lg:flex-none">
-      {stageWords[stage]}
-      <span className="sr-only">: {statusWords[status]}</span>
-    </span>
-    {/* In the same corner of every step that leads elsewhere, so the names line up whether or not one does. */}
-    {leaves ? (
-      <ArrowUpRightIcon
-        aria-hidden
-        className="text-muted-foreground size-3.5 flex-none lg:absolute lg:top-4 lg:right-4"
-      />
-    ) : null}
+    {stageWords[stage]}
+    <span {...stylex.props(visuallyHidden)}>: {statusWords[status]}</span>
+    {leaves ? <Icon icon={ArrowUpRightIcon} /> : null}
   </>
 );
 
-/** A step another section shows: a link there. */
-const StageElsewhere = ({
-  stage,
-  status,
-  clientId,
-}: {
-  stage: keyof typeof opensElsewhere;
-  status: StageStatus;
-  clientId: string;
-}) => {
-  const { section, search } = opensElsewhere[stage];
-  return (
-    <Link
-      className={stageLinkClass}
-      params={{ clientId }}
-      search={search}
-      to={sectionTo[section]}
-    >
-      <StageName leaves stage={stage} status={status} />
-    </Link>
-  );
-};
-
-/** The steps: each a link that opens it underneath, the open one marked as a chosen tab is, or a link to the section that shows it. */
-const StageList = ({
+/**
+ * The steps, as tabs that each have their own address: one that opens
+ * here opens underneath, marked as the page; one another section shows
+ * goes there.
+ */
+const StageTabs = ({
   view,
   stage,
   shown,
@@ -189,103 +192,64 @@ const StageList = ({
   shown: readonly Stage[];
   clientId: string;
 }) => (
-  <nav
-    aria-label="The steps of this onboarding"
-    className="bg-card overflow-hidden rounded-xl border"
-  >
-    <ol className={cn("grid", stageColumns[shown.length])}>
-      {shown.map((each) => {
-        const open = each === stage;
-        const status = view.stages[each];
-        return (
-          <li
-            className="border-b last:border-b-0 lg:border-r lg:border-b-0 lg:last:border-r-0"
-            key={each}
-          >
-            {each in opensElsewhere ? (
-              <StageElsewhere
-                clientId={clientId}
-                // SAFETY: just checked to be one of its keys.
-                // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-                stage={each as keyof typeof opensElsewhere}
-                status={status}
-              />
-            ) : (
-              <Link
-                // The router marks the link the page is on itself, as the page.
-                activeOptions={{ exact: true }}
-                aria-current={open ? "page" : undefined}
-                className={cn(
-                  stageLinkClass,
-                  open &&
-                    "bg-muted/50 after:bg-foreground after:absolute after:inset-y-0 after:left-0 after:w-0.5 lg:after:inset-x-0 lg:after:top-auto lg:after:bottom-0 lg:after:h-0.5 lg:after:w-auto"
-                )}
-                params={{ clientId }}
-                search={{ stage: each }}
-                to={sectionTo.steps}
-              >
-                <StageName stage={each} status={status} />
-              </Link>
-            )}
-          </li>
-        );
-      })}
-    </ol>
-  </nav>
+  <TabsNav aria-label="The steps of this onboarding">
+    {shown.map((each) => {
+      const status = view.stages[each];
+      const elsewhere = elsewhereOf(each);
+      return (
+        <TabsLink
+          asChild
+          current={each === stage}
+          icon={statusIcons[status]}
+          key={each}
+        >
+          {elsewhere === undefined ? (
+            <Link
+              params={{ clientId }}
+              search={{ stage: each }}
+              to={sectionTo.steps}
+            >
+              <StageName leaves={false} stage={each} status={status} />
+            </Link>
+          ) : (
+            <Link
+              params={{ clientId }}
+              search={elsewhere.search}
+              to={sectionTo[elsewhere.section]}
+            >
+              <StageName leaves stage={each} status={status} />
+            </Link>
+          )}
+        </TabsLink>
+      );
+    })}
+  </TabsNav>
 );
 
+// ---- The first conversation ---------------------------------------------
+
 /**
- * What the first conversation brought, as the model counts it: which of
- * the ten things are in, by name, never what was said about them.
+ * What the first conversation brought, before the company's Grasp has
+ * answered with each of the ten: where its transcript stands, as the
+ * model counts it. What it brought stays in the company's own Grasp.
  */
 const Brought = ({ view }: { view: OrgView }) => {
-  const { vision } = view;
-  if (vision === null) {
-    return (
-      <p className="text-muted-foreground">
-        Stephen has read it. What it brought stays in the company’s own Grasp.
-      </p>
-    );
-  }
-  const inNow = VISION_FIELDS.filter((field) => vision.fields[field]).length;
+  const words: Record<OrgView["state"]["conversation"], string> = {
+    none: "Once the transcript is in, Stephen reads it.",
+    in: "Stephen has not read this transcript yet.",
+    read: "Stephen has read it. What it brought stays in the company’s own Grasp.",
+  };
   return (
-    <>
-      <div className="flex w-full flex-col gap-2">
-        <span className="text-muted-foreground tabular-nums">
-          {inNow} of {VISION_FIELDS.length} in
-        </span>
-        <Progress
-          aria-label="What it brought"
-          value={(inNow / VISION_FIELDS.length) * 100}
-        />
-      </div>
-      <ul className="grid w-full gap-2 sm:grid-cols-2">
-        {VISION_FIELDS.map((field) =>
-          vision.fields[field] ? (
-            <li className="rounded-lg border p-3" key={field}>
-              <Done>{visionWords[field]}</Done>
-            </li>
-          ) : (
-            <li
-              className="border-status-attention/60 flex flex-col gap-0.5 rounded-lg border border-dashed p-3"
-              key={field}
-            >
-              <span className="font-medium">{visionWords[field]}</span>
-              <span className="text-status-attention">
-                Missing: ask the sponsor
-              </span>
-            </li>
-          )
-        )}
-      </ul>
-    </>
+    <Text color="muted" size="sm">
+      {words[view.state.conversation]}
+    </Text>
   );
 };
 
 /**
- * The first conversation with the sponsor: whether it is in, whether
- * Stephen read it, and what it brought; and bringing it in, with the
- * sponsor's answers to what it left open (src/admin/kickoff.tsx).
+ * The first conversation with the sponsor: bringing it in, and each of
+ * the ten things it brought or left open, with the sponsor's answers
+ * (kickoff.tsx).
  */
 const Conversation = ({
   view,
@@ -293,35 +257,32 @@ const Conversation = ({
 }: {
   view: OrgView;
   clientId: string;
-}) => {
-  const { conversation } = view.state;
-  return (
-    <Section title="The first conversation">
-      <div className="flex flex-col items-start gap-3 border-t px-5 py-4">
-        <span className="font-medium">What it brought</span>
-        {conversation === "read" ? (
-          <Brought view={view} />
-        ) : (
-          <p className="text-muted-foreground">
-            {conversation === "in"
-              ? "Stephen has not read this transcript yet."
-              : "Once the transcript is in, Stephen reads it for the ten things he needs before his first interview."}
-          </p>
-        )}
-      </div>
-      {/* Keyed by the company: another's drafts and answers never carry over. */}
-      <Kickoff clientId={clientId} key={clientId} />
-    </Section>
-  );
-};
+}) => (
+  <Part aria-labelledby="conversation">
+    <SectionHeader
+      description="Stephen reads it for the ten things he needs before his first interview."
+      id="conversation"
+      title="The first conversation"
+      variant="group"
+    />
+    {/* Keyed by the company: another's drafts and answers never carry over. */}
+    <Kickoff
+      brought={<Brought view={view} />}
+      clientId={clientId}
+      key={clientId}
+    />
+  </Part>
+);
 
-const sourceIcons: Record<ResearchSource, LucideIcon> = {
-  register: Building2Icon,
+// ---- The research -------------------------------------------------------
+
+const sourceIcons: Record<ResearchSource, IconData> = {
+  register: BuildingIcon,
   website: GlobeIcon,
-  news: NewspaperIcon,
-  jobs: BriefcaseIcon,
+  news: FileDocIcon,
+  jobs: UsersIcon,
   regulator: ScaleIcon,
-  reviews: MessageSquareTextIcon,
+  reviews: MessageSquareIcon,
 };
 
 /** Each public place the research looks, and what it gives. */
@@ -353,6 +314,14 @@ const sourceWords: Record<ResearchSource, { label: string; gives: string }> = {
   },
 };
 
+/** Whether a place was looked up, as a Badge. */
+const LookedUp = ({ looked }: { looked: boolean }) =>
+  looked ? (
+    <Badge variant="success">Looked up</Badge>
+  ) : (
+    <Badge>Not looked up yet</Badge>
+  );
+
 /**
  * The research into the company, never into its people: six public
  * places and the library of what companies like it usually do, each
@@ -363,72 +332,70 @@ const sourceWords: Record<ResearchSource, { label: string; gives: string }> = {
 const Research = ({ view }: { view: OrgView }) => {
   const { org, state } = view;
   const done = state.research === "done";
-  const notYet = (
-    <span className="text-muted-foreground">Not looked up yet</span>
-  );
   return (
-    <Section title="The research">
-      {state.conversation === "read" || done ? null : (
-        <p className="text-muted-foreground border-t px-5 py-3">
-          It starts once Stephen has read the first conversation: that tells him
-          what to look for.
-        </p>
-      )}
-      <ul className="bg-border grid gap-px border-t md:grid-cols-2 xl:grid-cols-3">
+    <Part aria-labelledby="research">
+      <SectionHeader
+        description={
+          state.conversation === "read" || done
+            ? "Public places only, and never its people."
+            : "It starts once Stephen has read the first conversation: that tells him what to look for."
+        }
+        id="research"
+        title="The research"
+        variant="group"
+      />
+      <ItemGroup aria-labelledby="research" separated>
         {RESEARCH_SOURCES.map((source) => {
-          const Icon = sourceIcons[source];
           const finding = org.research.find((each) => each.source === source);
-          const disagrees = (finding?.conflict ?? "") !== "";
+          const disagrees = done && (finding?.conflict ?? "") !== "";
           return (
-            <li className="bg-card flex flex-col gap-2 p-5" key={source}>
-              <span className="flex items-center gap-2">
-                <Icon
-                  aria-hidden
-                  className="text-muted-foreground size-4 flex-none"
-                />
-                <span className="font-medium">{sourceWords[source].label}</span>
-              </span>
-              <span className="text-muted-foreground text-xs">
-                {sourceWords[source].gives}
-              </span>
-              {done && finding !== undefined ? <Done>Looked up</Done> : notYet}
-              {done && disagrees ? (
-                <Attention>
-                  {state.passed.includes(source)
-                    ? "It disagrees with the company’s own account: passed on to its admin."
-                    : "It disagrees with the company’s own account. Its admin says which is right."}
-                </Attention>
-              ) : null}
-            </li>
+            <Item key={source}>
+              <ItemMedia variant="icon">
+                <Icon icon={sourceIcons[source]} />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>{sourceWords[source].label}</ItemTitle>
+                <ItemDescription>
+                  {disagrees
+                    ? `${sourceWords[source].gives} ${
+                        state.passed.includes(source)
+                          ? "It disagrees with the company’s own account: passed on to its admin."
+                          : "It disagrees with the company’s own account. Its admin says which is right."
+                      }`
+                    : sourceWords[source].gives}
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                {disagrees ? <Badge variant="warning">Disagrees</Badge> : null}
+                <LookedUp looked={done && finding !== undefined} />
+              </ItemActions>
+            </Item>
           );
         })}
-        <li className="bg-card col-span-full flex flex-col gap-2 p-5">
-          <span className="flex items-center gap-2">
-            <LibraryIcon
-              aria-hidden
-              className="text-muted-foreground size-4 flex-none"
-            />
-            <span className="font-medium">
-              What companies like this usually do
-            </span>
-          </span>
-          <span className="text-muted-foreground text-xs">
-            The work such a company usually does, and where it usually stalls.
-          </span>
-          {done && org.library !== "" ? <Done>Looked up</Done> : notYet}
-        </li>
-      </ul>
-      <NotHere>
+        <Item>
+          <ItemMedia variant="icon">
+            <Icon icon={FolderIcon} />
+          </ItemMedia>
+          <ItemContent>
+            <ItemTitle>What companies like this usually do</ItemTitle>
+            <ItemDescription>
+              The work such a company usually does, and where it usually stalls.
+            </ItemDescription>
+          </ItemContent>
+          <ItemActions>
+            <LookedUp looked={done && org.library !== ""} />
+          </ItemActions>
+        </Item>
+      </ItemGroup>
+      <Text color="muted" size="xs">
         Starting the research and passing a disagreement on to the company’s
         admin aren’t in the admin yet.
-      </NotHere>
-    </Section>
+      </Text>
+    </Part>
   );
 };
 
-/** While the company has paused its interviews: core lets nobody open or save one. */
-const pausedLine =
-  "The company has paused its interviews: nobody can open or go on with one until it resumes them.";
+// ---- What the company does itself ---------------------------------------
 
 /** Each screen of the company's own onboarding, as staff read where its admin is. */
 const adminStepWords: Readonly<Record<string, string>> = {
@@ -446,6 +413,9 @@ const adminStepWords: Readonly<Record<string, string>> = {
   done: "Finished every screen",
 };
 
+/** Something still to come, as a quiet Badge. */
+const notYet = <Badge>Not yet</Badge>;
+
 /**
  * What the company does itself, in its own onboarding: its admin
  * connects the sign-in, names the team leads and tells the team. Grasp
@@ -457,46 +427,89 @@ const Company = ({ view }: { view: OrgView }) => {
   const teams = view.teams.length;
   const connected = state.client !== "none";
   const named = state.client === "leads" || state.client === "told";
-  const waits = <span className="text-muted-foreground">Not yet</span>;
-  let told = waits;
+  let told: ReactNode = notYet;
   if (view.told) {
-    told = <Done>On {dayDate(view, 0)}</Done>;
+    told = `On ${dayDate(view, 0)}`;
   } else if (!mayInvite(state.agreed)) {
-    told = (
-      <span className="text-status-attention sm:text-right">
-        Waits until everything is agreed
-      </span>
-    );
+    told = <Badge variant="warning">Waits until everything is agreed</Badge>;
   }
   return (
-    <Section title="What the company does itself">
-      <SectionRow label="Where its admin is">
-        {view.org.adminStep === undefined ? (
-          <span className="text-muted-foreground">Not started</span>
-        ) : (
-          <span>
-            {adminStepWords[view.org.adminStep] ?? view.org.adminStep}
-          </span>
-        )}
-      </SectionRow>
-      <SectionRow label="The sign-in is connected">
-        {connected ? (
-          <Done>
-            {people} people in {counted(teams, "team", "teams")}
-          </Done>
-        ) : (
-          waits
-        )}
-      </SectionRow>
-      <SectionRow label="The team leads are named">
-        {named ? (
-          <Done>{counted(teams, "team lead", "team leads")}</Done>
-        ) : (
-          waits
-        )}
-      </SectionRow>
-      <SectionRow label="The team is told">{told}</SectionRow>
-    </Section>
+    <Part aria-labelledby="company">
+      <SectionHeader
+        description="Grasp waits on each of these, in the company’s own onboarding."
+        id="company"
+        title="What the company does itself"
+        variant="group"
+      />
+      <KeyValueList
+        divided
+        items={[
+          {
+            id: "admin",
+            label: "Where its admin is",
+            value:
+              view.org.adminStep === undefined
+                ? "Not started"
+                : (adminStepWords[view.org.adminStep] ?? view.org.adminStep),
+          },
+          {
+            id: "connected",
+            label: "The sign-in is connected",
+            value: connected
+              ? `${people} people in ${counted(teams, "team", "teams")}`
+              : notYet,
+          },
+          {
+            id: "leads",
+            label: "The team leads are named",
+            value: named ? counted(teams, "team lead", "team leads") : notYet,
+          },
+          { id: "told", label: "The team is told", value: told },
+        ]}
+        orientation="horizontal"
+      />
+    </Part>
+  );
+};
+
+// ---- Grasp opens --------------------------------------------------------
+
+/** Where the rounding of a share of the dots may land just under a whole one. */
+const dotSlack = 1e-9;
+
+/** How many dots the share that is known is drawn in. */
+const dotCount = 40;
+
+/**
+ * How much Grasp knows, in dots: dark for what is in, filling from the
+ * start, with a mark at the share where Grasp opens. Dark up to the mark
+ * is ready. `label` says it to a screen reader.
+ */
+const KnowledgeDots = ({
+  knowledge,
+  label,
+}: {
+  knowledge: Pick<OrgKnowledge, "percent" | "threshold">;
+  label: string;
+}) => {
+  const filled = Math.floor((knowledge.percent / 100) * dotCount + dotSlack);
+  const gate = Math.round((knowledge.threshold / 100) * dotCount);
+  const mark = <span aria-hidden {...stylex.props(styles.gate)} />;
+  return (
+    <span {...stylex.props(styles.dots)}>
+      <span {...stylex.props(visuallyHidden)}>{label}</span>
+      {Array.from({ length: dotCount }, (_, at) => (
+        <Fragment key={at}>
+          {at === gate ? mark : null}
+          <span
+            aria-hidden
+            {...stylex.props(styles.dot, at < filled && styles.filled)}
+          />
+        </Fragment>
+      ))}
+      {/* Where Grasp opens only once every dot is filled, the mark stands after the last. */}
+      {gate >= dotCount ? mark : null}
+    </span>
   );
 };
 
@@ -515,38 +528,38 @@ const knowledgeWords: Record<
   review: "Workflows known",
 };
 
-/** Where Grasp's go stands, in a line under the percentage. */
-const goLine = (view: OrgView): ReactNode => {
+/** While the company has paused its interviews: core lets nobody open or save one. */
+const pausedLine =
+  "The company has paused its interviews: nobody can open or go on with one until it resumes them.";
+
+/** Where Grasp's go stands, in a line under the share that is known. */
+const GoLine = ({ view }: { view: OrgView }) => {
   const { knowledge, org } = view;
   const { threshold } = knowledge;
   if (knowledge.opened !== null) {
     return (
-      <Done>
-        Open since {dayDate(view, knowledge.opened)}. {org.name} is in, and
-        Stephen keeps learning from here.
-      </Done>
+      <Alert live="off" variant="success">
+        <AlertDescription>
+          {`Open since ${dayDate(view, knowledge.opened)}. ${org.name} is in, and Stephen keeps learning from here.`}
+        </AlertDescription>
+      </Alert>
     );
   }
-  if (knowledge.ready) {
+  if (knowledge.ready || view.closed) {
     return (
-      <Attention>
-        Enough is known: it is past {threshold}%. {org.name} comes in the moment
-        Grasp gives its go.
-      </Attention>
-    );
-  }
-  if (view.closed) {
-    return (
-      <Attention>
-        The interviews are over and it stayed below {threshold}%. Grasp can open
-        it anyway, with what is not known shown as still open.
-      </Attention>
+      <Alert live="off" variant="warning">
+        <AlertDescription>
+          {knowledge.ready
+            ? `Enough is known: it is past ${threshold}%. ${org.name} comes in the moment Grasp gives its go.`
+            : `The interviews are over and it stayed below ${threshold}%. Grasp can open it anyway, with what is not known shown as still open.`}
+        </AlertDescription>
+      </Alert>
     );
   }
   return (
-    <span className="text-muted-foreground">
-      Not enough is known yet. It can open once it is past {threshold}%.
-    </span>
+    <Text color="muted" size="sm">
+      {`Not enough is known yet. It can open once it is past ${threshold}%.`}
+    </Text>
   );
 };
 
@@ -569,7 +582,6 @@ const Opens = ({
   paused: boolean;
 }) => {
   const { knowledge } = view;
-  const known = `${knowledge.percent}% of what Grasp needs is known.`;
   const notKnown = view.works.filter(
     (work) =>
       work.state === "blocked" ||
@@ -577,61 +589,95 @@ const Opens = ({
       work.state === "saturating"
   ).length;
   return (
-    <Section
-      description="What is not known by then shows to the company as still open."
-      title="Grasp opens"
-    >
-      <div className="flex flex-col gap-5 border-t px-5 py-5">
-        <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
-          <div className="flex min-w-0 flex-col gap-3">
-            <Stat>{knowledge.percent}%</Stat>
-            <KnowledgeDots count={40} knowledge={knowledge} label={known} />
-          </div>
-          <GateControls clientId={clientId} gate={gate} paused={paused} />
-        </div>
-        <div aria-live="polite">{goLine(view)}</div>
-        {paused ? <Attention>{pausedLine}</Attention> : null}
-      </div>
-
-      {knowledge.sources.length > 0 ? (
-        <ul aria-label="How the brain fills" className="flex flex-col">
-          {knowledge.sources.map((each) => (
-            <li
-              className="grid items-center gap-x-6 gap-y-1.5 border-t px-5 py-2.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,14rem)_4.5rem]"
-              key={each.source}
-            >
-              <span className="min-w-0">{knowledgeWords[each.source]}</span>
-              <Progress
-                aria-label={knowledgeWords[each.source]}
-                value={each.known * 100}
+    <>
+      <Part aria-labelledby="opens">
+        <SectionHeader
+          description="What is not known by then shows to the company as still open."
+          id="opens"
+          title="Grasp opens"
+          variant="group"
+        />
+        <div {...stylex.props(styles.part)}>
+          <div {...stylex.props(styles.opens)}>
+            <div {...stylex.props(styles.known)}>
+              <Stat
+                change={
+                  knowledge.ready
+                    ? `Past the ${knowledge.threshold}% it opens at`
+                    : `Opens at ${knowledge.threshold}%`
+                }
+                label="Known"
+                unstyled
+                value={`${knowledge.percent}%`}
+                variant={knowledge.ready ? "success" : "default"}
               />
-              <span className="text-muted-foreground tabular-nums sm:text-right">
-                {each.points} of {each.weight}
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-
-      {view.told && notKnown > 0 ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3">
-          <span className="text-muted-foreground">
-            {counted(notKnown, "workflow is", "workflows are")} not known yet.
-          </span>
-          <Button
-            nativeButton={false}
-            render={<Link params={{ clientId }} to={sectionTo.workflows} />}
-            size="sm"
-            variant="outline"
-          >
-            All workflows
-            <ArrowRightIcon data-icon="inline-end" />
-          </Button>
+              <KnowledgeDots
+                knowledge={knowledge}
+                label={`${knowledge.percent}% of what Grasp needs is known.`}
+              />
+            </div>
+            <GateControls clientId={clientId} gate={gate} paused={paused} />
+          </div>
+          <div aria-live="polite">
+            <GoLine view={view} />
+          </div>
+          {paused ? (
+            <Alert live="off" variant="warning">
+              <AlertDescription>{pausedLine}</AlertDescription>
+            </Alert>
+          ) : null}
         </div>
+      </Part>
+      {knowledge.sources.length > 0 ? (
+        <Part aria-labelledby="fills">
+          <SectionHeader
+            description="The points each place gives, of the most it can."
+            id="fills"
+            title="How the brain fills"
+            variant="group"
+          />
+          <ChartBarList
+            aria-label="How the brain fills"
+            config={{
+              points: { label: "Points" },
+              weight: { label: "Most it can give" },
+            }}
+            data={knowledge.sources.map((each) => ({
+              place: knowledgeWords[each.source],
+              points: each.points,
+              weight: each.weight,
+            }))}
+            nameKey="place"
+            sortOrder="none"
+            summary={`${knowledge.percent}% of what Grasp needs is known, from ${counted(knowledge.sources.length, "place", "places")}.`}
+          />
+        </Part>
       ) : null}
-    </Section>
+      {view.told && notKnown > 0 ? (
+        <ItemGroup aria-label="Workflows not known yet">
+          <Item asChild variant="outline">
+            <Link params={{ clientId }} to={sectionTo.workflows}>
+              <ItemMedia variant="icon">
+                <Icon icon={WorkflowIcon} />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>
+                  {`${counted(notKnown, "workflow is", "workflows are")} not known yet`}
+                </ItemTitle>
+                <ItemDescription>
+                  They show to the company as still open. See them all under
+                  Workflows.
+                </ItemDescription>
+              </ItemContent>
+            </Link>
+          </Item>
+        </ItemGroup>
+      ) : null}
+    </>
   );
 };
+
+// ---- The page -----------------------------------------------------------
 
 /** One organization's onboarding: its steps, and the chosen one opened underneath. */
 export const OrgSteps = ({
@@ -656,8 +702,8 @@ export const OrgSteps = ({
   const shown = stagesIn(flow);
   const stage = stageShown(shown, asked, view.stages);
   return (
-    <>
-      <StageList clientId={clientId} shown={shown} stage={stage} view={view} />
+    <div {...stylex.props(styles.parts)}>
+      <StageTabs clientId={clientId} shown={shown} stage={stage} view={view} />
       {stage === "conversation" ? (
         <Conversation clientId={clientId} view={view} />
       ) : null}
@@ -666,6 +712,6 @@ export const OrgSteps = ({
       {stage === "open" ? (
         <Opens clientId={clientId} gate={gate} paused={paused} view={view} />
       ) : null}
-    </>
+    </div>
   );
 };

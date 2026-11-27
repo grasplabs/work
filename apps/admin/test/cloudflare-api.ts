@@ -14,6 +14,11 @@ import {
   adminSnapshotRequestSchema,
 } from "@grasp-os/shared/admin-snapshot";
 import {
+  adminSummaryPath,
+  adminSummaryPurpose,
+  adminSummaryRequestSchema,
+} from "@grasp-os/shared/admin-summary";
+import {
   aiStatusReportPath,
   aiStatusReportPurpose,
   aiStatusReportRequestSchema,
@@ -95,7 +100,12 @@ import {
   forgetDatabases,
   workerRoutes,
 } from "./cloudflare-api-workers.ts";
-import { aiStatusOf, emptyAdminSnapshot, emptyKickoff } from "./snapshots.ts";
+import {
+  aiStatusOf,
+  emptyAdminSnapshot,
+  emptyAdminSummary,
+  emptyKickoff,
+} from "./snapshots.ts";
 
 /** A client's core where it runs: the account its scripts are in, and its own state. */
 interface CoreHost {
@@ -363,6 +373,44 @@ const answerSummary = async (
     return new Response("Forbidden", { status: 403 });
   }
   return Response.json(core.onboarding ?? noOnboarding);
+};
+
+/**
+ * What a client's core answers the admin's summary request with, as core
+ * does (core's src/admin-summary.ts): the account's summary once the
+ * signature checks out, with the key its live version's auth secret
+ * gives, and the request parses; 403 otherwise; 404 from a core from
+ * before the summary. It names nobody, so no reader is kept.
+ */
+const answerAdminSummary = async (
+  { core }: CoreHost,
+  live: VersionState,
+  request: Request
+): Promise<Response> => {
+  if (core.summary === "absent") {
+    return new Response("Not found", { status: 404 });
+  }
+  const body = await request.text();
+  const key = await hkdfHmacKey(
+    live.secrets.get("BETTER_AUTH_SECRET") ?? "",
+    adminSummaryPurpose,
+    ["sign"]
+  );
+  const expected = toHex(
+    new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))
+    )
+  );
+  const asked = adminSummaryRequestSchema.safeParse(JSON.parse(body));
+  if (
+    request.headers.get(platformUpdateSignatureHeader) !== expected ||
+    !asked.success
+  ) {
+    return new Response("Forbidden", { status: 403 });
+  }
+  const summary = core.summary ?? emptyAdminSummary();
+  await core.summaryHeld?.();
+  return Response.json(summary);
 };
 
 /**
@@ -643,6 +691,7 @@ const signedPosts: ReadonlyMap<
   (host: CoreHost, live: VersionState, request: Request) => Promise<Response>
 > = new Map([
   [onboardingSummaryPath, answerSummary],
+  [adminSummaryPath, answerAdminSummary],
   [provisionProbePath, answerProbe],
   [connectVersionPath, answerConnectVersion],
   [adminKickoffPath, answerKickoff],
@@ -994,6 +1043,9 @@ const readBody = async (request: Request): Promise<unknown> => {
  * sent in place of `fetch` (`fetch`), until it's emptied (`reset`). Add
  * accounts with `addAccount`; plan failures with `failCall`.
  */
+/** Composio's MCP server list, as the admin's readiness reads it. */
+const composioMcpServers = "https://backend.composio.dev/api/v3.1/mcp/servers";
+
 export const fakeCloudflareApi = (token: string) => {
   const accounts = new Map<string, AccountState>();
   const calls: ApiCall[] = [];
@@ -1401,11 +1453,39 @@ export const fakeCloudflareApi = (token: string) => {
   };
 
   /** What the API, or a client's hostname through the router, answers `fetch(input, init)` with. */
+  /**
+   * Composio's MCP server list, as the readiness check reads it with the
+   * shared key: `allowed` lists none, `forbidden` refuses the key (403),
+   * as Composio does a scoped key without MCP (Legacy).
+   */
+  const composio: { mcp: "allowed" | "forbidden"; keys: string[] } = {
+    mcp: "allowed",
+    keys: [],
+  };
+  const composioAnswer = (request: Request): Response => {
+    composio.keys.push(request.headers.get("x-api-key") ?? "");
+    return composio.mcp === "allowed"
+      ? Response.json({ items: [], next_cursor: null })
+      : Response.json(
+          {
+            error: {
+              message: "The API key doesn't have permissions",
+              code: 1001,
+              status: 403,
+            },
+          },
+          { status: 403 }
+        );
+  };
+
   const answerFetch = async (
     input: RequestInfo | URL,
     init?: RequestInit
   ): Promise<Response> => {
     const request = new Request(input, init);
+    if (request.url.startsWith(composioMcpServers)) {
+      return composioAnswer(request);
+    }
     if (!request.url.startsWith(`${base}/`)) {
       const url = new URL(request.url);
       const core = await routedCore(url);
@@ -1472,6 +1552,8 @@ export const fakeCloudflareApi = (token: string) => {
 
   /** Empties the fake: no accounts, calls or plans left. */
   const reset = (): void => {
+    composio.mcp = "allowed";
+    composio.keys.length = 0;
     accounts.clear();
     cores.clear();
     coreRequests.length = 0;
@@ -1507,6 +1589,8 @@ export const fakeCloudflareApi = (token: string) => {
       script: string;
       url: string;
     }[] => dispatched,
+    /** Composio's MCP server list, and the keys it was read with. */
+    composio,
     /** Empties the fake. */
     reset,
     /** Every call the fake got in this test, in order. */

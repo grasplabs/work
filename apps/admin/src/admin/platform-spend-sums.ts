@@ -14,8 +14,17 @@ import type { PlatformAiFeature } from "@grasp-os/shared/platform-ai";
 /** Millionths of a US dollar in a dollar, as core reports them. */
 export const microsPerDollar = 1_000_000;
 
-/** The most organizations the platform's overview lists. */
+/** The most organizations the platform's overview draws. */
 export const topOrganizationsMost = 10;
+
+/** From this share of its limit on, an organization's AI use is near it. */
+const nearShare = 0.8;
+
+/** A day, in milliseconds. */
+const dayMs = 86_400_000;
+
+/** Until a month is this many days old, its pace says too little to tell. */
+const paceAfterDays = 3;
 
 /** What one UTC month cost, in all, by feature and by model, the dearest first. */
 export interface MonthSpend {
@@ -38,20 +47,33 @@ export interface OrganizationSpend {
   name: string;
   thisMonth: number;
   lastMonth: number;
+  /**
+   * Its own AI on Grasp's key this month (`spent`) against what it may
+   * use a month (`limit`), in micros; null while it runs its AI on its
+   * own key, or its release doesn't report it.
+   */
+  graspAi: { spent: number; limit: number } | null;
 }
 
-/** The platform's: every active organization's summed, and those that cost the most. */
+/** An organization the sums name: its stable id, and its name to say. */
+export interface SpendOrganization {
+  clientId: string;
+  name: string;
+}
+
+/** The platform's: every active organization's summed, and each one's. */
 export interface PlatformSpend extends SpendOverview {
-  top: OrganizationSpend[];
+  /** Each organization whose core reported it, the dearest this month first, then last. */
+  byOrganization: OrganizationSpend[];
   /** How many active organizations were read. */
   organizations: number;
   /** The active organizations whose core didn't answer: not in the sums. */
-  unread: string[];
+  unread: SpendOrganization[];
   /**
    * The active organizations whose core answered on a release that
    * doesn't report what Grasp's features cost: not in the sums either.
    */
-  unreported: string[];
+  unreported: SpendOrganization[];
 }
 
 /** `rows` summed by `keyOf`, the dearest first. */
@@ -105,3 +127,28 @@ export const organizationSpendOf = ({
           platformSpend.lastMonth,
         ]),
       };
+
+/** Its own AI on Grasp's key at or past `nearShare` of its limit. */
+export const nearLimit = (spend: OrganizationSpend | undefined): boolean =>
+  spend?.graspAi !== null &&
+  spend?.graspAi !== undefined &&
+  spend.graspAi.limit > 0 &&
+  spend.graspAi.spent >= spend.graspAi.limit * nearShare;
+
+/**
+ * What `month` comes to by its end at the pace it went so far, in micros,
+ * on `now`'s clock: null for a month that isn't `now`'s (UTC), or before
+ * it is `paceAfterDays` old.
+ */
+export const monthPace = (month: MonthSpend, now: Date): number | null => {
+  const [year = Number.NaN, number = Number.NaN] = month.period
+    .split("-")
+    .map(Number);
+  const start = Date.UTC(year, number - 1, 1);
+  const end = Date.UTC(year, number, 1);
+  const elapsed = now.getTime() - start;
+  if (elapsed < paceAfterDays * dayMs || now.getTime() >= end) {
+    return null;
+  }
+  return Math.round((month.micros / elapsed) * (end - start));
+};

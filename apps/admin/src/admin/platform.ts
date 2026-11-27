@@ -16,7 +16,8 @@ export type PlatformNeed =
   | { kind: "stopped" }
   | { kind: "setup_unread" }
   | { kind: "failed"; releaseId: string }
-  | { kind: "drift"; drift: "drifted" | "split" | "off_pin" };
+  | { kind: "drift"; drift: "drifted" | "split" | "off_pin" }
+  | { kind: "unreachable" };
 
 export const needsOf = (row: GridRow, live?: LiveStatus): PlatformNeed[] => {
   if (row.status === "offboarded") {
@@ -38,6 +39,10 @@ export const needsOf = (row: GridRow, live?: LiveStatus): PlatformNeed[] => {
   const drift = live?.drift;
   if (drift === "drifted" || drift === "split" || drift === "off_pin") {
     needs.push({ kind: "drift", drift });
+  }
+  // Read, and the router doesn't reach its core: its people can't either.
+  if (live?.reach === "unreachable" || live?.reach === "no_route") {
+    needs.push({ kind: "unreachable" });
   }
   return needs;
 };

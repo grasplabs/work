@@ -551,3 +551,81 @@ export const HALF = new Set([
   "streamdown:incomplete-link",
   "streamdown:incomplete-image",
 ]);
+
+// Marks that are active somewhere in a cell's words: each written escaped, so the words read back
+// as words. A pipe is escaped even inside a code span, as GitHub's tables read it.
+const ACTIVE = /[\\`*_~[\]<>|$!#&]/gu;
+const BREAK = /^<br\s*\/?>$/iu;
+// The marks round emphasis, strong words and struck words.
+const AROUND = new Map([
+  ["emphasis", "*"],
+  ["strong", "**"],
+  ["delete", "~~"],
+]);
+/** `code` as a code span: fenced by one more backtick than its longest run, spaced off a backtick. */
+const spanOf = (code: string) => {
+  const longest = Math.max(
+    0,
+    ...[...code.matchAll(/`+/gu)].map(([run]) => run.length)
+  );
+  const fence = "`".repeat(longest + 1);
+  const pad = /^[` ]|[` ]$/u.test(code) ? " " : "";
+  return `${fence}${pad}${code}${pad}${fence}`.replaceAll("|", "\\|");
+};
+/** Words as Markdown that reads back as the same words: every active mark escaped, on one line. */
+const wordsOf = (value: string) =>
+  value.replaceAll(ACTIVE, "\\$&").replaceAll(/\s*\n\s*/gu, " ");
+/**
+ * A table cell (or anything in one) as Markdown that reads back as the same cell: code as a code
+ * span, emphasis, strike-through, links, pictures (their alt text the words), notes' marks and
+ * maths as written, every other active mark escaped, a tag dropped (as it is drawn), a line break
+ * a space. The table is copied without the answer's definitions, so a link or a picture by
+ * reference is written with its address from `definitions`.
+ */
+export const markdownOfCell = (
+  node: RootContent,
+  definitions: readonly Extract<RootContent, { type: "definition" }>[]
+): string => {
+  const kids = () =>
+    "children" in node
+      ? node.children
+          .map((child) => markdownOfCell(child, definitions))
+          .join("")
+      : "";
+  if (node.type === "inlineCode") {
+    return spanOf(node.value);
+  }
+  if (node.type === "inlineMath") {
+    return `$$${node.value.replaceAll("|", "\\|")}$$`;
+  }
+  if (
+    node.type === "link" ||
+    node.type === "linkReference" ||
+    node.type === "image" ||
+    node.type === "imageReference"
+  ) {
+    const url =
+      "url" in node
+        ? node.url
+        : definitions.find((each) => each.identifier === node.identifier)?.url;
+    const picture = "alt" in node;
+    const words = picture ? wordsOf(node.alt ?? "") : kids();
+    return url === undefined
+      ? words
+      : `${picture ? "!" : ""}[${words}](<${url.replaceAll(/[<>|\\]/gu, "\\$&")}>)`;
+  }
+  if (node.type === "footnoteReference") {
+    return `[^${(node.label ?? node.identifier).replaceAll("|", "\\|")}]`;
+  }
+  if (node.type === "html") {
+    return BREAK.test(node.value) ? " " : "";
+  }
+  if (node.type === "break") {
+    return " ";
+  }
+  const around = AROUND.get(node.type);
+  if (around !== undefined) {
+    return `${around}${kids()}${around}`;
+  }
+  return "value" in node ? wordsOf(node.value) : kids();
+};

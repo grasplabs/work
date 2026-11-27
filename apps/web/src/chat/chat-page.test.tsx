@@ -4,6 +4,8 @@ import { agentErrors } from "@grasp-os/shared/agent";
 import type {
   ChatQuestion,
   ChatSummary,
+  ChatListUpdate,
+  ChatMessage,
   ChatUpdate,
 } from "@grasp-os/shared/chat";
 import { internalErrors } from "@grasp-os/shared/errors";
@@ -23,14 +25,15 @@ import {
 import { act, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { loadFromCore } from "../load-from-core.tsx";
 import { wordsOf } from "../test-words.ts";
-import { activeChat, setActiveChat } from "./active-chat.ts";
+import { activeChat, forgetActiveChats, setActiveChat } from "./active-chat.ts";
 import { LoadedChatPage } from "./chat-page.tsx";
 import { GlobalChatProvider, useGlobalChat } from "./global-chat.tsx";
 import type { GlobalChat } from "./global-chat.tsx";
+import { setPending } from "./pending-question.ts";
 import { typeInPrompt } from "./test-typing.ts";
 
 // A chat's own page, read as its route reads it, against core's chats
@@ -83,7 +86,7 @@ const Page = () => {
   return (
     <>
       <Probe />
-      <LoadedChatPage chatId={chatId} page={chatRoute.useLoaderData()} />
+      <LoadedChatPage chatId={chatId} page={chatRoute.useLoaderData().page} />
     </>
   );
 };
@@ -114,19 +117,63 @@ const opened = async (
     chatId: string,
     after: number | null,
     onUpdate: (update: ChatUpdate) => void
-  ) => Promise<never> = async () => await Promise.withResolvers<never>().promise
+  ) => Promise<never> = async () =>
+    await Promise.withResolvers<never>().promise,
+  /** How core takes a question, once it is asked: at once by default. */
+  taking: () => Promise<void> = async () => {
+    await Promise.resolve();
+  },
+  /**
+   * How each attaching of a file goes, in turn, before they all go
+   * through: a failure throws after core took it, its answer lost.
+   */
+  attaches: (Error | undefined)[] = []
 ) => {
   const asked: string[] = [];
+  /** The key each attaching of a file went with, in turn. */
+  const attachedWith: (string | undefined)[] = [];
+  /** The files each question sent names. */
+  const named: string[][] = [];
   const chats = {
     models: async () => await Promise.resolve(["openai/gpt-5"]),
     efforts: async () => await Promise.resolve({}),
-    list: async () => await Promise.resolve([]),
+    watchList: async (onUpdate: (update: ChatListUpdate) => void) => {
+      onUpdate({
+        chats: [summaryOf(first)],
+        removed: [],
+        full: true,
+        archived: 0,
+      });
+      return await Promise.withResolvers<never>().promise;
+    },
     agents: async () => await Promise.resolve([]),
+    attachFile: async (
+      _chatId: string,
+      file: { name: string },
+      key?: string
+    ) => {
+      attachedWith.push(key);
+      const id = `file-${attachedWith.length}`;
+      const failure = attaches.shift();
+      if (failure !== undefined) {
+        throw failure;
+      }
+      return await Promise.resolve({ id, name: file.name, type: "csv" });
+    },
     send: async (chatId: string, question: ChatQuestion) => {
       asked.push(`send ${chatId} ${question.text}`);
-      await Promise.resolve();
+      named.push(question.files ?? []);
+      await taking();
     },
     heldCalls: async () => await Promise.resolve([]),
+    cancel: async (chatId: string) => {
+      asked.push(`cancel ${chatId}`);
+      return await Promise.resolve({ dropped: ["Germany?"] });
+    },
+    sendNow: async (chatId: string) => {
+      asked.push(`sendNow ${chatId}`);
+      await Promise.resolve();
+    },
     watch,
     summary,
   };
@@ -152,13 +199,14 @@ const opened = async (
     getParentRoute: () => shell,
     path: "/chats/$chatId",
     // As the chat's route reads it (routes/_shell.chats.$chatId.tsx).
-    loader: async ({ params: { chatId } }) =>
-      await loadFromCore(
+    loader: ({ params: { chatId } }) => ({
+      page: loadFromCore(
         // SAFETY: a stand-in for the parts of core's API the page reads.
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
         core as never,
         async (session) => await session.chats.summary(chatId)
       ),
+    }),
     component: () => <Page />,
   });
   const router = createRouter({
@@ -178,7 +226,7 @@ const opened = async (
     await router.load();
   });
   await settled();
-  return { asked, router };
+  return { asked, attachedWith, named, router };
 };
 
 /** The box to ask in, if the page has one. */
@@ -237,21 +285,120 @@ const restricted =
     return await Promise.withResolvers<never>().promise;
   };
 
+/**
+ * A watch that sends the chat as an answer is written, a question queued
+ * behind it, then holds.
+ */
+/** Each row of the thread holding `words`, as it reads. */
+const drawn = (words = "Spain?") =>
+  [...document.querySelectorAll("article")]
+    .filter((row) => row.textContent.includes(words))
+    .map((row) => wordsOf(row));
+
+/** Grasp answering France?, with `queued` behind it, as core sends it. */
+const answering = (queued: { id: string; text: string }[]): ChatUpdate => ({
+  messages: [
+    {
+      id: 1,
+      role: "user",
+      text: "France?",
+      at: "2026-11-01T08:00:00.000Z",
+    },
+  ],
+  partial: {
+    from: 0,
+    text: "Paris",
+    code: [],
+    tools: [],
+    reasoning: { from: 0, text: "" },
+  },
+  running: true,
+  queued,
+  stopped: null,
+  held: 0,
+  worked: 0,
+  provenance: { sources: [], restricted: false },
+});
+
+const answeringWithQueued = async (
+  _chatId: string,
+  _after: number | null,
+  onUpdate: (update: ChatUpdate) => void
+): Promise<never> => {
+  await Promise.resolve();
+  onUpdate({
+    messages: [
+      {
+        id: 1,
+        role: "user",
+        text: "France?",
+        at: "2026-11-01T08:00:00.000Z",
+      },
+    ],
+    partial: {
+      from: 0,
+      text: "Paris",
+      code: [],
+      tools: [],
+      reasoning: { from: 0, text: "" },
+    },
+    running: true,
+    queued: [{ id: "7", text: "Germany?" }],
+    stopped: null,
+    held: 0,
+    worked: 0,
+    provenance: { sources: [], restricted: false },
+  });
+  return await Promise.withResolvers<never>().promise;
+};
+
+/** A button by its accessible name, its words or its label. */
+const buttonLabelled = (name: string): HTMLButtonElement | undefined =>
+  [...document.querySelectorAll("button")].find(
+    (each) => each.getAttribute("aria-label") === name || wordsOf(each) === name
+  );
+
 /** Whether the page says the chat is restricted. */
 const saysRestricted = () =>
   [...document.querySelectorAll('[data-slot="badge"]')].some(
     (badge) => wordsOf(badge) === "Restricted"
   );
 
+/** A question or an answer of a chat, by its ID. */
+const message = (id: number, role: "user" | "assistant"): ChatMessage =>
+  role === "user"
+    ? { id, role, text: `Question ${id}`, at: "2026-11-01T08:00:00.000Z" }
+    : {
+        id,
+        role,
+        text: `Answer ${id}`,
+        code: [],
+        tools: [],
+        end: "done",
+        at: "2026-11-01T08:01:00.000Z",
+      };
+
+/** Whether the page shows the thread's skeleton, and which questions it shows. */
+const shows = () => ({
+  skeleton: document.querySelector('[data-slot="message-skeleton"]') !== null,
+  questions: ["Question 1", "Question 3"].filter((words) =>
+    document.body.textContent.includes(words)
+  ),
+});
+
 describe("a chat's own page", () => {
-  afterEach(() => {
+  afterEach(async () => {
     act(() => {
       root?.unmount();
     });
+    // Its chat's watch stops a moment after.
+    await settled();
     root = undefined;
     document.body.replaceChildren();
     localStorage.clear();
     sessionStorage.clear();
+    // What the tab kept of chats is the person's: none for the next test.
+    forgetActiveChats();
     setActiveChat(undefined, "chat");
     seen.chat = undefined;
   });
@@ -291,6 +438,226 @@ describe("a chat's own page", () => {
     expect({ typedForA, onB: box()?.textContent }).toStrictEqual({
       typedForA: "Half a thought for A",
       onB: "",
+    });
+  });
+
+  it("shows a question in the thread the moment it is sent, and puts it back in the box with why once core refuses it, before what was typed since", async () => {
+    const taken = Promise.withResolvers<undefined>();
+    await opened(
+      "chat-a",
+      undefined,
+      async (_chatId, _after, onUpdate) => {
+        await Promise.resolve();
+        onUpdate({
+          messages: [
+            {
+              id: 1,
+              role: "user",
+              text: "Which deals closed?",
+              at: "2026-11-01T08:00:00.000Z",
+            },
+          ],
+          partial: null,
+          running: false,
+          stopped: null,
+          held: 0,
+          worked: 0,
+        });
+        return await Promise.withResolvers<never>().promise;
+      },
+      async () => {
+        await taken.promise;
+      }
+    );
+    await typed("And which are late?");
+    await sent();
+    // The thread, which loads once a chat is shown.
+    // The thread, which loads once a chat is shown.
+    await vi.waitFor(
+      async () => {
+        await settled();
+        expect(document.querySelector("article")).not.toBeNull();
+      },
+      { timeout: 15_000 }
+    );
+    const meanwhile = {
+      box: box()?.textContent,
+      thread: [...document.querySelectorAll("article")].map((row) =>
+        wordsOf(row)
+      ),
+    };
+    await typed("Only this month");
+    await act(async () => {
+      taken.reject(agentErrors.create("agent.invalid_question"));
+      await taken.promise.catch(() => {});
+    });
+    await settled();
+
+    expect({
+      meanwhile,
+      box: box()?.textContent,
+      thread: document.body.textContent.split("And which are late?").length - 1,
+      notes: [
+        ...document.querySelectorAll('[data-slot="prompt-input-note"]'),
+      ].map((note) => note.textContent),
+    }).toStrictEqual({
+      meanwhile: {
+        box: "",
+        thread: [
+          expect.stringContaining("Which deals closed?"),
+          expect.stringContaining("And which are late?"),
+        ],
+      },
+      box: "And which are late?\n\nOnly this month",
+      thread: 1,
+      notes: [
+        "Could not send. Your message is kept.",
+        agentErrors.create("agent.invalid_question").message,
+      ],
+    });
+  });
+
+  it("attaches a file again with the key it went with on the next connection when the one it went on broke mid-upload, and the question names it once", async () => {
+    const { asked, attachedWith, named } = await opened(
+      "chat-files",
+      undefined,
+      undefined,
+      undefined,
+      // Core took it; the socket broke before its answer came back.
+      [new Error("Peer closed WebSocket: 1006")]
+    );
+    await act(async () => {
+      seen.chat?.composer.onAttach?.([new File(["a,b"], "rows.csv")]);
+      await Promise.resolve();
+    });
+    await typed("What do these rows say?");
+
+    await sent();
+
+    const [key] = attachedWith;
+    expect({
+      keys: attachedWith,
+      asked,
+      named,
+    }).toStrictEqual({
+      // The same both times, so core, which keeps the file under its key,
+      // attaches it once.
+      keys: [expect.stringMatching(/^[\da-f-]{36}$/u), key],
+      asked: ["send chat-files What do these rows say?"],
+      named: [["file-2"]],
+    });
+  });
+
+  it("takes back a chat's refused question with its own files alone, none of the chat it came from", async () => {
+    const { router } = await opened("chat-a");
+    await act(async () => {
+      seen.chat?.composer.onAttach?.([new File(["a"], "from-a.csv")]);
+      await Promise.resolve();
+    });
+    setPending("chat-b", {
+      text: "And B?",
+      mentions: [],
+      files: [{ id: "file-b", file: new File(["b"], "for-b.csv") }],
+      at: "2026-11-01T08:00:00.000Z",
+      queues: false,
+      alreadyQueued: 0,
+      key: "key-b",
+      owner: "a box no longer here",
+      fromBox: true,
+      state: { failed: "Refused." },
+    });
+
+    await act(async () => {
+      await router.navigate({
+        to: "/chats/$chatId",
+        params: { chatId: "chat-b" },
+      });
+    });
+    await settled();
+
+    expect({
+      box: box()?.textContent,
+      files: seen.chat?.composer.files.map(({ name }) => name),
+    }).toStrictEqual({ box: "And B?", files: ["for-b.csv"] });
+  });
+
+  it("shows the chat to ask in at once, its name as the person's list has it, while core's read of it is still on its way", async () => {
+    await opened(
+      "chat-a",
+      async () => await Promise.withResolvers<never>().promise
+    );
+
+    expect({
+      box: box() !== null,
+      named: document.body.textContent.includes("Chat chat-a"),
+    }).toStrictEqual({ box: true, named: true });
+  });
+
+  it("shows a chat it showed before at once on coming back, never its skeleton, then as core has it now, and forgets it once the person signs out", async () => {
+    // Chat A's first watch sends two messages at once; the second waits
+    // until the test lets it go, then sends four; any after, nothing.
+    let opens = 0;
+    const later = Promise.withResolvers<boolean>();
+    const { router } = await opened(
+      "chat-a",
+      undefined,
+      async (chatId, _after, onUpdate) => {
+        if (chatId === "chat-a") {
+          opens += 1;
+          const first = opens === 1;
+          await (first ? Promise.resolve() : later.promise);
+          if (opens > 2) {
+            return await Promise.withResolvers<never>().promise;
+          }
+          onUpdate({
+            messages: first
+              ? [message(1, "user"), message(2, "assistant")]
+              : [1, 2, 3, 4].map((id) =>
+                  message(id, id % 2 === 1 ? "user" : "assistant")
+                ),
+            partial: null,
+            running: false,
+            stopped: null,
+            held: 0,
+            worked: 0,
+            seenUpTo: 2,
+          });
+        }
+        return await Promise.withResolvers<never>().promise;
+      }
+    );
+    const go = async (chatId: string) => {
+      await act(async () => {
+        await router.navigate({ to: "/chats/$chatId", params: { chatId } });
+      });
+      await settled();
+    };
+    // Shown once, its thread's code loaded.
+    await vi.waitFor(
+      () => {
+        expect(shows().questions).toStrictEqual(["Question 1"]);
+      },
+      { timeout: 10_000 }
+    );
+    await go("chat-b");
+    await go("chat-a");
+    const back = shows();
+    await act(async () => {
+      later.resolve(true);
+      await later.promise;
+    });
+    await settled();
+    const now = shows();
+    await go("chat-b");
+    act(() => {
+      forgetActiveChats();
+    });
+    await go("chat-a");
+
+    expect({ back, now, signedOut: shows() }).toStrictEqual({
+      back: { skeleton: false, questions: ["Question 1"] },
+      now: { skeleton: false, questions: ["Question 1", "Question 3"] },
+      signedOut: { skeleton: true, questions: [] },
     });
   });
 
@@ -369,6 +736,76 @@ describe("a chat's own page", () => {
     expect({ writing, held: saysRestricted() }).toStrictEqual({
       writing: true,
       held: true,
+    });
+  });
+
+  it("takes a question while the answer is written, Stop standing beside Send", async () => {
+    const { asked } = await opened("chat-a", undefined, answeringWithQueued);
+    await settled();
+    const stopAtRest = buttonLabelled("Stop") !== undefined;
+    await typed("Spain?");
+    const stopBeside = buttonLabelled("Stop") !== undefined;
+    await sent();
+
+    expect({ stopAtRest, stopBeside, asked }).toStrictEqual({
+      stopAtRest: true,
+      stopBeside: true,
+      asked: ["send chat-a Spain?"],
+    });
+  });
+
+  it("draws a question sent while the answer is written once, as queued, before and after core queues it", async () => {
+    const taken = Promise.withResolvers<boolean>();
+    let update: ((next: ChatUpdate) => void) | undefined;
+    await opened(
+      "chat-a",
+      undefined,
+      async (_chatId, _after, onUpdate) => {
+        await Promise.resolve();
+        update = onUpdate;
+        onUpdate(answering([]));
+        return await Promise.withResolvers<never>().promise;
+      },
+      async () => {
+        await taken.promise;
+      }
+    );
+    await settled();
+    await typed("Spain?");
+    await sent();
+    // The thread, which loads once a chat is shown.
+    await vi.waitFor(
+      async () => {
+        await settled();
+        expect(document.body.textContent).toContain("Spain?");
+      },
+      { timeout: 15_000 }
+    );
+    const onItsWay = drawn();
+    await act(async () => {
+      update?.(answering([{ id: "8", text: "Spain?" }]));
+      taken.resolve(true);
+      await taken.promise;
+    });
+    await settled();
+
+    expect({ onItsWay, queuedByCore: drawn() }).toStrictEqual({
+      onItsWay: [expect.stringContaining("Queued")],
+      queuedByCore: [expect.stringContaining("Queued")],
+    });
+  });
+
+  it("puts the questions Stop dropped back in an empty box", async () => {
+    const { asked } = await opened("chat-a", undefined, answeringWithQueued);
+    await settled();
+    act(() => {
+      buttonLabelled("Stop")?.click();
+    });
+    await settled();
+
+    expect({ asked, box: box()?.textContent }).toStrictEqual({
+      asked: ["cancel chat-a"],
+      box: "Germany?",
     });
   });
 

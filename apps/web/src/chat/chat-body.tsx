@@ -25,6 +25,7 @@ import {
   ModelsUnavailableNotice,
   unavailableText,
 } from "./models-unavailable.tsx";
+import { pendingKey, shownPending, usePending } from "./pending-question.ts";
 import { ChatSources } from "./sources.tsx";
 import { useSubjectBar } from "./subject-bar.tsx";
 import type { ChatThread as ChatThreadType } from "./thread.tsx";
@@ -78,10 +79,26 @@ const styles = stylex.create({
 // chat is shown: most pages show the chat idle.
 type ThreadComponent = typeof ChatThreadType;
 
-const ChatThread = lazy(async (): Promise<{ default: ThreadComponent }> => {
+const loadThread = async (): Promise<{ default: ThreadComponent }> => {
   const { ChatThread: thread } = await import("./thread.tsx");
   return { default: thread };
-});
+};
+
+const LazyThread = lazy(loadThread);
+
+/** The conversation's code, once loaded ahead: drawn with no wait at all. */
+let loadedThread: ThreadComponent | undefined;
+
+/**
+ * Loads the conversation's code ahead, where a question is about to open
+ * a chat (Chat's start): the question then shows the moment its chat's
+ * page does, not after the code arrives, nor after the moment React holds
+ * a loading state it showed.
+ */
+export const preloadThread = async (): Promise<void> => {
+  const { default: thread } = await loadThread();
+  loadedThread = thread;
+};
 
 /** The chat loading, in the thread's place: the shape of a question and its answer. */
 const Loading = () => {
@@ -136,12 +153,19 @@ export const ChatConversation = ({
     failure,
     empty,
     ask,
+    sendNow,
     composer,
     offered,
     sourceNames,
   } = chat;
   // Read as it opens here; the New line over what the person hadn't seen.
   const newLine = useNewLine(chatId, view, seen);
+  // The question on its way here, drawn at once.
+  const pending = shownPending(
+    usePending(pendingKey(chatId, chat.slot)),
+    view.messages,
+    view.queued
+  );
   // A subject's chat, while core finds it, or why it gave none.
   if (finding.searching || finding.failure !== undefined) {
     return finding.failure === undefined ? (
@@ -162,20 +186,31 @@ export const ChatConversation = ({
       </div>
     );
   }
-  if (chatId === undefined || empty) {
+  if (chatId === undefined || (empty && pending === undefined)) {
     // Before anything is asked the chat is empty: the box at its foot is enough.
     return <div {...stylex.props(styles.grow)} />;
   }
   const lastQuestion = view.messages.findLast(({ role }) => role === "user");
+  const ChatThread = loadedThread ?? LazyThread;
   return (
     <Suspense fallback={<Loading />}>
       <ChatThread
         agents={offered?.agents}
         chatId={chatId}
         compact={compact}
-        loaded={newLine.decided || failure !== undefined}
+        // As soon as the chat's view is there: kept from before, its line
+        // comes as core says where they read to; else the watch's first
+        // update says it at once (unread.ts). Or a question sent from here
+        // is on its way: drawn at once.
+        loaded={
+          newLine.decided ||
+          view.loaded ||
+          failure !== undefined ||
+          pending !== undefined
+        }
         messages={view.messages}
         newLineBefore={newLine.before}
+        pending={pending}
         // Ask again goes as its answer is drawn anew: the person is taken
         // to the box, not left on the page.
         onRetry={() => {
@@ -186,12 +221,17 @@ export const ChatConversation = ({
         }}
         output={view.output}
         partial={view.partial}
+        queued={view.queued}
+        onSendNow={() => {
+          void sendNow(chatId);
+        }}
         checking={view.checking}
         modelWait={view.waiting}
         running={view.running}
         sources={
           <ChatSources names={sourceNames} sources={view.provenance.sources} />
         }
+        sourceNames={sourceNames}
         tools={view.tools}
         build={{
           model: composer.model,
@@ -279,6 +319,7 @@ export const ChatFooter = ({
     retry,
     summary,
     offered,
+    box,
   } = chat;
   const work = workOf(builds);
   const unavailable = unavailableText(modelsUnavailable);
@@ -333,9 +374,11 @@ export const ChatFooter = ({
         style={styles.box}
         label={words.title}
         onAnswer={async (text) => await ask(text)}
-        // The box's editor takes its placeholder as it starts: another
-        // starts it afresh, with the text it holds.
-        key={placeholder}
+        // The box's editor takes its placeholder and its words as it
+        // starts: another placeholder, or another chat's draft (whose
+        // mentions may differ in the same words), starts it afresh; the
+        // chat a question made from this draft keeps it, and its cursor.
+        key={`${box} ${placeholder}`}
         placeholder={placeholder}
         running={view.running}
       />

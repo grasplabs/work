@@ -8,8 +8,8 @@ import type { AllowedTool } from "../tool-choices.ts";
 // provider's hint says a tool reads (`CatalogTool.readOnly`); a tool without
 // it changes things, and one whose action deletes, cancels, removes or
 // revokes is the riskiest of those. Grasp never checks a hint: a tool the
-// admin marks Read runs without asking, so nothing here marks a tool Read
-// that its provider didn't.
+// admin marks Read runs without asking, so only a tool its provider tags
+// read-only can be Read at all (connect refuses any other).
 
 /** How much a tool can do: look only, create or change, or take away. */
 export type ToolKind = "look" | "change" | "remove";

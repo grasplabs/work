@@ -335,6 +335,56 @@ const toolkitDetail = ({ slug, name, keyAuth }: FakeToolkit) => {
   };
 };
 
+/**
+ * Composio's answer to a read of the catalog of `toolkits`: their list
+ * (`GET /toolkits`), one toolkit (`GET /toolkits/{slug}`) or its tools
+ * (`GET /tools`), or undefined for any other request.
+ */
+const catalogAnswer = (
+  toolkits: readonly FakeToolkit[],
+  request: Request
+): Response | undefined => {
+  const url = new URL(request.url);
+  const route = url.pathname.slice(new URL(composioApiBase).pathname.length);
+  if (request.method !== "GET") {
+    return undefined;
+  }
+  if (route === "/toolkits") {
+    return page(toolkits.map(toolkitItem), url.searchParams.get("cursor"));
+  }
+  if (route.startsWith("/toolkits/")) {
+    const toolkit = toolkits.find(({ slug }) => route === `/toolkits/${slug}`);
+    return toolkit === undefined
+      ? notFound()
+      : Response.json(toolkitDetail(toolkit));
+  }
+  if (route !== "/tools") {
+    return undefined;
+  }
+  const toolkit = toolkits.find(
+    ({ slug }) => slug === url.searchParams.get("toolkit_slug")
+  );
+  return page(
+    (toolkit?.tools ?? []).map(
+      ({ slug, description, inputs = [], tags, isDeprecated = false }) => ({
+        slug,
+        name: slug,
+        description,
+        toolkit: { slug: toolkit?.slug, name: toolkit?.name },
+        input_parameters: {
+          type: "object",
+          properties: Object.fromEntries(
+            inputs.map((input) => [input, { type: "string" }])
+          ),
+        },
+        tags,
+        is_deprecated: isDeprecated,
+      })
+    ),
+    url.searchParams.get("cursor")
+  );
+};
+
 /** An auth config connect made: Composio's app for one toolkit, or its own. */
 export interface FakeAuthConfig {
   toolkit: string;
@@ -426,11 +476,21 @@ export const fakeComposioApi = (
     /**
      * As `failing`, for its next `times` requests only, each counted down
      * as it fails: a failure that passes. It answers `status` (503 by
-     * default), or, `broken`, 200 with a body that breaks off after its
-     * first bytes.
+     * default) with Composio's error envelope, its `code` when given (403
+     * names 1001 by default, as a key without the route's permission), or,
+     * `broken`, 200 with a body that breaks off after its first bytes.
      */
     failingFor:
-      | { prefix: string; times: number; broken?: boolean; status?: number }
+      | {
+          prefix: string;
+          times: number;
+          broken?: boolean;
+          status?: number;
+          /** Composio's number for the error; `null` sends none. */
+          code?: number | null;
+          /** Composio's name for the error; `null` sends none. */
+          slug?: string | null;
+        }
       | undefined;
     /**
      * How its answers about an account write the toolkit's slug: as it is,
@@ -776,9 +836,24 @@ export const fakeComposioApi = (
     }
     failingFor.times -= 1;
     if (failingFor.broken !== true) {
+      const status = failingFor.status ?? 503;
+      const defaultCode = status === 403 ? 1001 : null;
+      const code =
+        failingFor.code === undefined ? defaultCode : failingFor.code;
+      const slug = failingFor.slug === undefined ? "Refused" : failingFor.slug;
+      // As Composio's envelope has it: its message may repeat what was
+      // sent, so connect reads only the slug and the code.
       return Response.json(
-        { error: { message: "Refused", slug: "Refused" } },
-        { status: failingFor.status ?? 503 }
+        {
+          error: {
+            message: "The API key doesn't have permissions: sent ak_secret",
+            status,
+            ...(slug === null ? {} : { slug }),
+            ...(code === null ? {} : { code }),
+            request_id: "req_test",
+          },
+        },
+        { status }
       );
     }
     return new Response(
@@ -832,43 +907,19 @@ export const fakeComposioApi = (
         state.endless
       );
     }
-    if (request.method === "GET" && route.startsWith("/toolkits/")) {
-      const toolkit = toolkits.find(
-        ({ slug }) => route === `/toolkits/${slug}`
+    if (
+      request.method === "GET" &&
+      route === "/tools" &&
+      state.toolsStatus !== undefined
+    ) {
+      return Response.json(
+        { error: { message: "Invalid request" } },
+        { status: state.toolsStatus }
       );
-      return toolkit === undefined
-        ? notFound()
-        : Response.json(toolkitDetail(toolkit));
     }
-    if (request.method === "GET" && route === "/tools") {
-      if (state.toolsStatus !== undefined) {
-        return Response.json(
-          { error: { message: "Invalid request" } },
-          { status: state.toolsStatus }
-        );
-      }
-      const toolkit = toolkits.find(
-        ({ slug }) => slug === url.searchParams.get("toolkit_slug")
-      );
-      return page(
-        (toolkit?.tools ?? []).map(
-          ({ slug, description, inputs = [], tags, isDeprecated = false }) => ({
-            slug,
-            name: slug,
-            description,
-            toolkit: { slug: toolkit?.slug, name: toolkit?.name },
-            input_parameters: {
-              type: "object",
-              properties: Object.fromEntries(
-                inputs.map((input) => [input, { type: "string" }])
-              ),
-            },
-            tags,
-            is_deprecated: isDeprecated,
-          })
-        ),
-        cursor
-      );
+    const listed = catalogAnswer(toolkits, request);
+    if (listed !== undefined) {
+      return listed;
     }
     return await manage(request, route, url.searchParams);
   };
@@ -957,4 +1008,50 @@ export const fakeComposioApi = (
       };
     },
   };
+};
+
+/**
+ * Composio's MCP server at `url` with `tools`, for each test in the file,
+ * as `fakeMcpServer`; Composio's catalog lists them as the tools of
+ * `toolkit`, tagged read-only as each declares itself.
+ */
+export const fakeComposioServer = (
+  url: string,
+  tools: readonly FakeTool[],
+  toolkit: string
+) => {
+  const { state, answer, reset } = mcpServerWith(tools);
+  const toolkits: FakeToolkit[] = [
+    {
+      slug: toolkit,
+      name: toolkit,
+      tools: tools.map(({ name, inputs, readOnly }) => ({
+        slug: name,
+        inputs,
+        ...(readOnly === true ? { tags: ["readOnlyHint"] } : {}),
+      })),
+    },
+  ];
+  beforeEach(() => {
+    forgetComposioCatalog();
+    reset();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = new Request(input, init);
+      if (request.url === url) {
+        return await answer(request);
+      }
+      const listed = request.url.startsWith(`${composioApiBase}/`)
+        ? catalogAnswer(toolkits, request)
+        : undefined;
+      if (listed === undefined) {
+        throw new Error(`Unexpected outbound request to ${request.url}`);
+      }
+      return listed;
+    });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  return state;
 };

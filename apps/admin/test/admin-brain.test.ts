@@ -73,6 +73,15 @@ const textOf = (html: string): string =>
     .replaceAll(/\s+/gu, " ")
     .replaceAll("&#x27;", "'");
 
+/** The button in `html` whose words are `words`, as HTML, or "" when there is none. */
+const buttonOf = (html: string, words: string): string =>
+  [...html.matchAll(/<button[^>]*>.*?<\/button>/gsu)]
+    .map(([button]) => button)
+    .find((button) => textOf(button).trim() === words) ?? "";
+
+/** What needs someone is drawn as a warning badge. */
+const amber = 'data-variant="warning"';
+
 /** The Recall section of a page's HTML: from its title to the next section's. */
 const recallPartOf = (html: string): string =>
   html.slice(html.indexOf(">Recall<"), html.indexOf(">Model spend<"));
@@ -133,14 +142,14 @@ describe("how an organization's Brain is doing", () => {
         "Waiting 12 brain.embed: oldest added 1 hour ago, 2 running"
       ),
       parked: text.includes("What it works on can't be read. unreadable"),
-      requeue: html.includes(">Requeue</button>"),
+      requeue: buttonOf(html, "Requeue") !== "",
       store: text.includes("1.2 GB 12% of 10.0 GB"),
       near: text.includes("Near its limit"),
       ledger: text.includes("Read through"),
       embedding: [
         text.includes("Embedding model test-model@0a1b"),
         text.includes("Embedded 38 of 40 passages"),
-        html.includes(">Re-embed</button>"),
+        buttonOf(html, "Re-embed") !== "",
       ],
       erased: text.includes(
         "3 deleted for good, 0 past their retention, 0 people erased, and 1 withdrawn"
@@ -308,7 +317,7 @@ describe("how an organization's Brain is doing", () => {
 
     const { html } = await brainPage(acme.clientId);
     const text = textOf(html);
-    const button = /<button[^>]*>Re-embed<\/button>/u.exec(html)?.[0] ?? "";
+    const button = buttonOf(html, "Re-embed");
 
     expect({
       shown: button !== "",
@@ -349,7 +358,7 @@ describe("how an organization's Brain is doing", () => {
         "No embedding model runs yet, so the Brain recalls by words alone."
       ),
       counts: text.includes("Embedded 0 of 40"),
-      reembed: html.includes(">Re-embed</button>"),
+      reembed: buttonOf(html, "Re-embed") !== "",
     }).toStrictEqual({ line: true, counts: false, reembed: false });
   });
 
@@ -395,7 +404,7 @@ describe("how an organization's Brain is doing", () => {
 
     expect({
       shown: textOf(row).includes(`${label} Failed 5 min ago`),
-      amber: row.includes("text-status-attention"),
+      amber: row.includes(amber),
     }).toStrictEqual({ shown: true, amber: true });
   });
 
@@ -436,9 +445,9 @@ describe("how an organization's Brain is doing", () => {
       without: text.includes(
         "3 timed out, 0 failed, 1 refused, and 0 unusable"
       ),
-      amber: failing.includes("text-status-attention"),
+      amber: failing.includes(amber),
       notYet: textOf(fine).includes("Meaning 0 0"),
-      calm: fine.includes("text-status-attention"),
+      calm: fine.includes(amber),
     }).toStrictEqual({
       since: true,
       ways: [true, true, true],
@@ -664,9 +673,9 @@ describe("how an organization's Brain is doing", () => {
       waiting: text.includes("Oldest added 1 hour ago. 30"),
       parked: text.includes("Parked"),
       notRebuilt: text.includes("Embedding not done"),
-      amber: failing.includes("text-status-attention"),
+      amber: failing.includes(amber),
       one: textOf(fine).includes("1 person"),
-      calm: fine.includes("text-status-attention"),
+      calm: fine.includes(amber),
     }).toStrictEqual({
       stores: true,
       waiting: true,
@@ -792,12 +801,12 @@ describe("how an organization's Brain is doing", () => {
       ),
       // The fine one after them, folded under Details.
       fineLast: text.indexOf("0a1b2c3d4e5f") > text.indexOf("2c3d4e5f6071"),
-      details: synced.includes(">Details</button>"),
-      amber: synced.includes("text-status-attention"),
+      details: buttonOf(synced, "Details") !== "",
+      amber: synced.includes(amber),
       calm: {
         none: calmText.includes("its daily relist past its day. None"),
         keptError: calmText.includes("sync.throttled 1 hour ago Fine"),
-        amber: calmPart.includes("text-status-attention"),
+        amber: calmPart.includes(amber),
       },
     }).toStrictEqual({
       needSomeone: true,

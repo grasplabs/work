@@ -1,11 +1,12 @@
 /**
- * The release channels on Platform, derived live (src/rollout/progress.ts):
- * each channel's release, how many of its companies run it, each company's
- * state, Retry once a deploy failed, and Promote with only the moves the
- * channel may make. Then the latest changes of a channel's release, from the
- * audit log.
+ * The release channels on Platform, derived live (src/rollout/progress.ts),
+ * set on the page as Grasp Work sets its parts: each channel a part of its
+ * own, its release under its name and what staff may do with it at the
+ * end of that line (Retry once a deploy failed, Promote with only the moves
+ * the channel may make), then how many of its organizations run it, each
+ * one a row to its Setup. Then the latest changes of a channel's release,
+ * from the audit log.
  */
-import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,7 +20,6 @@ import {
 } from "@grasp-os/ui/components/alert-dialog";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
-import { CardContent, CardFooter } from "@grasp-os/ui/components/card";
 import {
   Collapsible,
   CollapsibleContent,
@@ -29,6 +29,7 @@ import {
   Item,
   ItemActions,
   ItemContent,
+  ItemDescription,
   ItemGroup,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -37,10 +38,11 @@ import {
   NativeSelect,
   NativeSelectOption,
 } from "@grasp-os/ui/components/native-select";
-import { Progress } from "@grasp-os/ui/components/progress";
-import { Text } from "@grasp-os/ui/components/text";
+import { Progress, ProgressLabel } from "@grasp-os/ui/components/progress";
+import { Section, SectionHeader } from "@grasp-os/ui/components/section-header";
+import { Separator } from "@grasp-os/ui/components/separator";
 import { visuallyHidden } from "@grasp-os/ui/lib/styles";
-import { colors, media, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { colors, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { Link as RouterLink, useRouter } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -53,41 +55,29 @@ import { promoteReleaseFn, retryChannelFn } from "../rollout/functions.ts";
 import type { ChannelProgress, ClientProgress } from "../rollout/progress.ts";
 import { useRolloutAction } from "../rollout/use-action.ts";
 import { thenRefresh } from "../use-action.ts";
-import { Panel, PanelNote } from "./panel.tsx";
+import { EmptyPart, PagePart, PartNote } from "./page-part.tsx";
 import { fetchChannels } from "./platform-data.ts";
 import { clientStateWords } from "./platform-parts.tsx";
-import { formatList } from "./words.ts";
+import { actorWords } from "./setup-history.ts";
+import { Failure } from "./setup-parts.tsx";
+import { formatList, plural } from "./words.ts";
 
 const styles = stylex.create({
-  // A company's state: in the warning's colour once its deploy failed,
+  // A company's state: in the destructive colour once its deploy failed,
   // quiet while it waits or is pinned.
-  figures: { fontVariantNumeric: "tabular-nums" },
-  stateFailed: { color: colors.warning },
+  stateFailed: { color: colors.destructive },
   stateQuiet: { color: colors.mutedForeground },
-  // The release under a channel's name: its id, then its title in two
-  // lines at most, three lines kept so the channels stand level.
-  release: {
-    display: "flex",
-    flexDirection: "column",
-    gap: space["1"],
-    minHeight: "3.75rem",
-  },
-  releaseTitle: {
-    display: "-webkit-box",
-    overflow: "hidden",
-    WebkitBoxOrient: "vertical",
-    WebkitLineClamp: 2,
-  },
-  progress: { display: "flex", flexDirection: "column", gap: space["2"] },
-  progressLine: {
+  // Edge, Beta and Stable, one under the other, a hairline between two.
+  channels: { display: "flex", flexDirection: "column", gap: space["6"] },
+  // Its release and what staff do with it, then how far it has come.
+  channel: { display: "flex", flexDirection: "column", gap: space["4"] },
+  promote: {
     display: "flex",
     flexWrap: "wrap",
     alignItems: "center",
-    justifyContent: "space-between",
-    columnGap: space["4"],
-    rowGap: space["1"],
-    minHeight: space["6"],
+    gap: space["2"],
   },
+  select: { width: "11rem" },
   stands: {
     display: "flex",
     alignItems: "center",
@@ -103,35 +93,6 @@ const styles = stylex.create({
     whiteSpace: "nowrap",
     color: colors.mutedForeground,
   },
-  actions: {
-    display: "flex",
-    flexDirection: "column",
-    gap: space["3"],
-    width: "100%",
-  },
-  promote: {
-    display: "flex",
-    flexWrap: "wrap",
-    alignItems: "center",
-    gap: space["2"],
-  },
-  select: { flexGrow: 1, flexBasis: 0, minWidth: 0 },
-  retry: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "flex-start",
-    gap: space["1"],
-  },
-  // Edge, Beta and Stable side by side from a desktop's width.
-  channels: {
-    display: "grid",
-    gap: space["6"],
-    gridTemplateColumns: {
-      default: "minmax(0, 1fr)",
-      [media.xl]: "repeat(3, minmax(0, 1fr))",
-    },
-  },
-  quiet: { color: colors.mutedForeground },
 });
 
 /** What a channel with no release yet says. */
@@ -140,49 +101,38 @@ const emptyWords = (channel: ChannelProgress["channel"]): string =>
     ? "No release yet: Edge takes each new release as the admin imports it."
     : `No release yet. Promote a release to ${channelWords[channel]} first: its companies wait until then.`;
 
-/** One company of a channel: its name, where it stands, and why. */
+/** One company of a channel, a row to its Setup: where it stands, and why. */
 const ClientLine = ({ client }: { client: ClientProgress }) => (
-  <Item size="sm">
-    <ItemContent>
-      <ItemTitle>
-        <Link asChild variant="plain">
-          <RouterLink
-            params={{ clientId: client.id }}
-            to="/organizations/$clientId/setup"
-          >
-            {client.name}
-          </RouterLink>
-        </Link>
-      </ItemTitle>
-    </ItemContent>
-    <ItemActions>
-      <span
-        {...stylex.props(
-          styles.figures,
-          client.state === "failed" && styles.stateFailed,
-          (client.state === "waiting" || client.state === "pinned") &&
-            styles.stateQuiet
-        )}
-      >
-        {clientStateWords[client.state]}
-        {client.pinnedReleaseId === null ? null : ` ${client.pinnedReleaseId}`}
-        {client.error === null ? null : ` ${client.error}`}
-      </span>
-    </ItemActions>
+  <Item asChild size="sm">
+    <RouterLink
+      params={{ clientId: client.id }}
+      to="/organizations/$clientId/setup"
+    >
+      <ItemContent>
+        <ItemTitle>{client.name}</ItemTitle>
+      </ItemContent>
+      <ItemActions>
+        <span
+          {...stylex.props(
+            client.state === "failed" && styles.stateFailed,
+            (client.state === "waiting" || client.state === "pinned") &&
+              styles.stateQuiet
+          )}
+        >
+          {clientStateWords[client.state]}
+          {client.pinnedReleaseId === null
+            ? null
+            : ` ${client.pinnedReleaseId}`}
+          {client.error === null ? null : ` ${client.error}`}
+        </span>
+      </ItemActions>
+    </RouterLink>
   </Item>
 );
 
-/** Why the last move didn't apply, where it was made: said when it appears. */
-const Refused = ({ failure }: { failure: string | null }) =>
-  failure === null ? null : (
-    <Alert appearance="subtle" variant="destructive">
-      <AlertDescription>{failure}</AlertDescription>
-    </Alert>
-  );
-
 /** How many companies, in words: "1 company", "3 companies". */
 const companies = (count: number): string =>
-  count === 1 ? "1 company" : `${count} companies`;
+  `${count} ${plural(count, "company", "companies")}`;
 
 /**
  * The question before a move that changes what a channel's companies run:
@@ -294,7 +244,7 @@ const Promote = ({ channel }: { channel: ChannelProgress }) => {
           }
         />
       </AlertDialog>
-      <Refused failure={failure} />
+      <Failure failure={failure} />
     </form>
   );
 };
@@ -311,7 +261,7 @@ const Retry = ({ channel }: { channel: ChannelProgress }) => {
     (client) => client.state === "failed"
   ).length;
   return (
-    <div {...stylex.props(styles.retry)}>
+    <>
       <AlertDialog>
         <AlertDialogTrigger asChild>
           <Button disabled={busy} size="sm">
@@ -338,8 +288,8 @@ const Retry = ({ channel }: { channel: ChannelProgress }) => {
           title={`Retry ${name}’s failed deploys?`}
         />
       </AlertDialog>
-      <Refused failure={failure} />
-    </div>
+      <Failure failure={failure} />
+    </>
   );
 };
 
@@ -352,135 +302,133 @@ const openStates = [
   "pinned",
 ] as const satisfies readonly ClientProgress["state"][];
 
-/** Where a channel's companies stand, in a few words: all of them up to date, or how many aren't and why. */
-const standsWords = (clients: readonly ClientProgress[]): string => {
+/** How many companies aren't up to date and why, in a few words; null when all of them are. */
+export const openWords = (
+  clients: readonly ClientProgress[]
+): string | null => {
   const parts = openStates.flatMap((state) => {
     const count = clients.filter((client) => client.state === state).length;
     return count === 0
       ? []
       : [`${count} ${clientStateWords[state].toLowerCase()}`];
   });
-  return parts.length === 0 ? "All up to date" : formatList(parts);
+  return parts.length === 0 ? null : formatList(parts);
 };
 
 /**
  * A channel's companies, folded under one line that says how many there
- * are and where they stand: three channels side by side stay one height
- * and in line, however many companies each has. Open from the start while
- * a deploy moves or failed, which is when each company's state is what the
- * page is opened for. Kept on the page while folded: found by its search.
+ * are and where they stand. Open from the start while a deploy moves or
+ * failed, which is when each company's state is what the page is opened
+ * for. Kept on the page while folded: found by its search.
  */
 const ChannelClients = ({ channel }: { channel: ChannelProgress }) => {
   const { clients } = channel;
-  if (clients.length === 0) {
-    return <PanelNote>No company follows it.</PanelNote>;
-  }
   const moving = clients.some(
     ({ state }) =>
       state === "failed" || state === "deploying" || state === "waiting"
   );
-  const count =
-    clients.length === 1 ? "1 organization" : `${clients.length} organizations`;
   return (
-    <CardContent>
-      <Collapsible defaultOpen={moving}>
-        <CollapsibleTrigger>
-          <span {...stylex.props(styles.stands)}>
-            <span>{count}</span>
-            <span {...stylex.props(visuallyHidden)}>: </span>
-            <span
-              {...stylex.props(
-                styles.standsWords,
-                channel.failed && styles.stateFailed
-              )}
-            >
-              {standsWords(clients)}
-            </span>
+    <Collapsible defaultOpen={moving}>
+      <CollapsibleTrigger>
+        <span {...stylex.props(styles.stands)}>
+          <span>{`${clients.length} ${plural(clients.length, "organization", "organizations")}`}</span>
+          <span {...stylex.props(visuallyHidden)}>: </span>
+          <span
+            {...stylex.props(
+              styles.standsWords,
+              channel.failed && styles.stateFailed
+            )}
+          >
+            {openWords(clients) ?? "All up to date"}
           </span>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <ItemGroup separated>
-            {clients.map((client) => (
-              <ClientLine client={client} key={client.id} />
-            ))}
-          </ItemGroup>
-        </CollapsibleContent>
-      </Collapsible>
-    </CardContent>
+        </span>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <ItemGroup separated>
+          {clients.map((client) => (
+            <ClientLine client={client} key={client.id} />
+          ))}
+        </ItemGroup>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+};
+
+/** A channel's release under its name: its id, to its page, and its title. */
+const ReleaseLine = ({ channel }: { channel: ChannelProgress }) => {
+  if (channel.releaseId === null) {
+    return emptyWords(channel.channel);
+  }
+  const title = releaseTitle(channel.notes);
+  return (
+    <>
+      <Link asChild variant="plain">
+        <RouterLink
+          params={{ releaseId: channel.releaseId }}
+          to="/platform/releases/$releaseId"
+        >
+          {channel.releaseId}
+        </RouterLink>
+      </Link>
+      {title === "" ? null : ` · ${title}`}
+    </>
   );
 };
 
 /**
- * One channel: its release, its progress, its companies and what can be
- * done. The same parts at the same heights in each, so Edge, Beta and
- * Stable line up side by side: the release in three lines at most, how
- * many companies run it, the companies folded under one line, and what
- * staff can do at the foot of the card.
+ * One channel: its name, its release and what staff can do with it on
+ * one line, how many of its companies run that release, and its companies
+ * folded under that.
  */
-const ChannelPanel = ({ channel }: { channel: ChannelProgress }) => {
-  const title = releaseTitle(channel.notes);
-  const promotes = channel.promotable.length > 0;
+const ChannelPart = ({ channel }: { channel: ChannelProgress }) => {
+  const name = channelWords[channel.channel];
+  const heading = `channel-${channel.channel}`;
+  const actions =
+    channel.failed || channel.promotable.length > 0 ? (
+      <>
+        {channel.failed ? <Retry channel={channel} /> : null}
+        <Promote channel={channel} />
+      </>
+    ) : undefined;
   return (
-    <Panel
-      description={
-        <span {...stylex.props(styles.release)}>
-          {channel.releaseId === null ? (
-            emptyWords(channel.channel)
-          ) : (
-            <>
-              <Link asChild variant="plain">
-                <RouterLink
-                  params={{ releaseId: channel.releaseId }}
-                  to="/platform/releases/$releaseId"
-                >
-                  {channel.releaseId}
-                </RouterLink>
-              </Link>
-              {title === "" ? null : (
-                <span title={title} {...stylex.props(styles.releaseTitle)}>
-                  {title}
-                </span>
-              )}
-            </>
+    <Section aria-labelledby={heading}>
+      <SectionHeader
+        actions={actions}
+        badge={
+          channel.failed ? (
+            <Badge variant="destructive">
+              Failed: nothing new starts until Retry
+            </Badge>
+          ) : undefined
+        }
+        description={<ReleaseLine channel={channel} />}
+        headingLevel={3}
+        id={heading}
+        size="sm"
+        title={name}
+        variant="group"
+      />
+      {channel.clients.length === 0 ? (
+        <PartNote>No company follows it.</PartNote>
+      ) : (
+        <div {...stylex.props(styles.channel)}>
+          {channel.releaseId === null ? null : (
+            <Progress
+              aria-label={`${name} companies up to date`}
+              value={
+                channel.following === 0
+                  ? 0
+                  : (channel.upToDate / channel.following) * 100
+              }
+              variant={channel.failed ? "destructive" : "default"}
+            >
+              <ProgressLabel>{`${channel.upToDate} of ${channel.following} up to date`}</ProgressLabel>
+            </Progress>
           )}
-        </span>
-      }
-      title={channelWords[channel.channel]}
-    >
-      <CardContent>
-        <div {...stylex.props(styles.progress)}>
-          <span {...stylex.props(styles.progressLine)}>
-            <Text as="span" color="default" size="sm">
-              {channel.releaseId === null
-                ? "Nothing to roll out yet"
-                : `${channel.upToDate} of ${channel.following} up to date`}
-            </Text>
-            {channel.failed ? (
-              <Badge variant="warning">
-                Failed: nothing new starts until Retry
-              </Badge>
-            ) : null}
-          </span>
-          <Progress
-            aria-label={`${channelWords[channel.channel]} companies up to date`}
-            value={
-              channel.releaseId === null || channel.following === 0
-                ? 0
-                : (channel.upToDate / channel.following) * 100
-            }
-          />
+          <ChannelClients channel={channel} />
         </div>
-      </CardContent>
-      <ChannelClients channel={channel} />
-      {channel.failed || promotes ? (
-        <CardFooter>
-          <div {...stylex.props(styles.actions)}>
-            {channel.failed ? <Retry channel={channel} /> : null}
-            <Promote channel={channel} />
-          </div>
-        </CardFooter>
-      ) : null}
-    </Panel>
+      )}
+    </Section>
   );
 };
 
@@ -502,7 +450,7 @@ interface Followed {
  * so its waiting companies don't count. Once the page itself is read
  * again (after Promote or Retry), its own channels show.
  */
-const useFollowDeploys = (
+export const useFollowDeploys = (
   channels: readonly ChannelProgress[]
 ): readonly ChannelProgress[] => {
   const [followed, setFollowed] = useState<Followed | null>(null);
@@ -541,69 +489,63 @@ const useFollowDeploys = (
   return shown;
 };
 
-/** Edge, Beta and Stable, side by side where there's room. */
+/** Edge, Beta and Stable, one under the other, as `useFollowDeploys` follows them. */
 export const Channels = ({
   id,
   channels,
 }: {
   id: string;
   channels: readonly ChannelProgress[];
-}) => {
-  const shown = useFollowDeploys(channels);
-  return (
-    <div id={id} {...stylex.props(styles.channels)}>
-      {shown.map((channel) => (
-        <ChannelPanel channel={channel} key={channel.channel} />
+}) => (
+  <PagePart
+    description="Every company follows one. Edge takes each release as the admin imports it; staff promote it to Beta, then to Stable."
+    id={id}
+    title="Channels"
+  >
+    <div {...stylex.props(styles.channels)}>
+      {channels.map((channel, at) => (
+        <div key={channel.channel} {...stylex.props(styles.channel)}>
+          {at === 0 ? null : <Separator />}
+          <ChannelPart channel={channel} />
+        </div>
       ))}
     </div>
-  );
-};
+  </PagePart>
+);
 
 /** The latest changes of a channel's release, the newest first, as the audit log keeps it. */
-export const PromotionHistory = ({
+export const RecentChanges = ({
   history,
 }: {
   history: readonly PromotionEvent[];
 }) => (
-  <Panel
-    description="The latest changes of a channel's release, the newest first. Edge's come by themselves as releases are imported."
-    title="Promotions"
-  >
+  <PagePart id="changes" title="Recent changes">
     {history.length === 0 ? (
-      <PanelNote>No release has gone to a channel yet.</PanelNote>
+      <EmptyPart>No release has gone to a channel yet.</EmptyPart>
     ) : (
-      <CardContent flush>
-        <ItemGroup separated>
-          {history.map((event) => (
-            <Item
-              key={`${event.at.getTime()}-${event.channel}-${event.releaseId}`}
-              size="sm"
-            >
-              <ItemContent>
-                <ItemTitle>
-                  {`${channelWords[event.channel]} ${event.back ? "set back" : "set"} to `}
-                  <span {...stylex.props(styles.figures)}>
-                    {event.releaseId}
-                  </span>
-                  {event.from === null ? null : (
-                    <span {...stylex.props(styles.quiet)}>
-                      {` from ${event.from}`}
-                    </span>
-                  )}
-                  <span {...stylex.props(styles.quiet)}>
-                    {` by ${event.actor}`}
-                  </span>
-                </ItemTitle>
-              </ItemContent>
-              <ItemActions>
-                <Text as="span" color="muted" size="xs">
-                  {formatTime(event.at)}
-                </Text>
-              </ItemActions>
-            </Item>
-          ))}
-        </ItemGroup>
-      </CardContent>
+      <ItemGroup aria-labelledby="changes" separated>
+        {history.map((event) => (
+          <Item
+            key={`${event.at.getTime()}-${event.channel}-${event.releaseId}`}
+            size="sm"
+          >
+            <ItemContent>
+              <ItemTitle>
+                {`${channelWords[event.channel]} ${event.back ? "set back" : "set"} to ${event.releaseId}`}
+              </ItemTitle>
+              <ItemDescription>
+                {[
+                  event.from === null ? null : `From ${event.from}`,
+                  actorWords(event.actor),
+                  `${formatTime(event.at)} UTC`,
+                ]
+                  .filter((part) => part !== null)
+                  .join(" · ")}
+              </ItemDescription>
+            </ItemContent>
+          </Item>
+        ))}
+      </ItemGroup>
     )}
-  </Panel>
+  </PagePart>
 );

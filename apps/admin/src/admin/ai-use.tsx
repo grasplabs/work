@@ -1,48 +1,19 @@
 /**
- * What one company takes in AI, and what that costs Grasp, ported from the
- * prototype (grasplabs/prototype `components/admin/org-usage.tsx`). At a
- * glance: this month against what the contract covers, and everything so
- * far. Then how it went over time, and what each use cost, split by which
- * model did it, with its tokens and minutes. One month can be looked at
- * alone. Every figure is the model's (`usageOf`, `usageIn`): what core
- * counted as it happened, and what the model works out from what happened
- * before it counted.
+ * What one company takes in AI, and what that costs Grasp, composed as
+ * the organization's Overview is: the figures first (this month against
+ * what the contract covers, everything so far, its tokens and minutes),
+ * then what it cost over time, split by model or by use, with the line the
+ * contract covers, then what each use cost and which model did it, and
+ * last what Grasp's own AI features cost on Grasp's keys for it. One month
+ * can be looked at alone. Every figure is the model's (`usageOf`,
+ * `usageIn`): what core counted as it happened, and what the model works
+ * out from what happened before it counted.
  *
  * Not here yet, as the prototype has it: the numbers workflow by
  * workflow, which need the company's live workflows, and core doesn't send
  * those yet.
  */
 
-import { buttonVariants } from "@grasp-os/app-kit/components/button";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  chartColor,
-  ReferenceLine,
-  XAxis,
-  YAxis,
-} from "@grasp-os/app-kit/components/chart";
-import type {
-  ChartColor,
-  ChartConfig,
-} from "@grasp-os/app-kit/components/chart";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/app-kit/components/select";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/app-kit/components/toggle-group";
-import { cn } from "@grasp-os/app-kit/lib/utils";
 import {
   MODEL_NAMES,
   MODELS,
@@ -56,13 +27,64 @@ import type {
   Use,
   UsePeriod,
 } from "@grasp-os/shared/admin/admin-usage";
+import type { AiStatusReport } from "@grasp-os/shared/ai-status-report";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  ChartBar,
+  ChartContainer,
+  ChartGrid,
+  ChartLegend,
+  ChartReferenceLine,
+  ChartTooltip,
+  ChartXAxis,
+  ChartYAxis,
+} from "@grasp-os/ui/components/chart";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@grasp-os/ui/components/empty";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import {
+  Section as Part,
+  SectionHeader,
+} from "@grasp-os/ui/components/section-header";
+import {
+  Select,
+  SelectContent,
+  SelectTrigger,
+  SelectValue,
+} from "@grasp-os/ui/components/select";
+import { Stat, StatGroup } from "@grasp-os/ui/components/stat";
+import { Text } from "@grasp-os/ui/components/text";
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@grasp-os/ui/components/toggle-group";
+import {
+  colors,
+  font,
+  media,
+  radius,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { useOrganization } from "./organization.tsx";
-import { Figure } from "./parts.tsx";
-import { Section } from "./section.tsx";
-import { sectionTo } from "./sections.ts";
+import { OrganizationPlatformSpend } from "./platform-spend.tsx";
+import { sectionTo, sectionWords } from "./sections.ts";
 import {
   euro,
   euros,
@@ -77,47 +99,91 @@ import {
 const allMonths = "all";
 
 /**
- * Each model in a shade of its own, the careful one the darkest. Mistral's two share the shades
- * of the two they stand in for: an organization's interviews are written with either pair.
+ * The most parts a bar is split into: Damsko's chart has five tones, the
+ * value colour and then four, and a sixth part would repeat the fifth.
  */
-const modelShade: Record<Model, ChartColor> = {
-  opus: "chart-1",
-  sonnet: "chart-5",
-  haiku: "chart-3",
-  mistralMedium: "chart-1",
-  mistralSmall: "chart-5",
-  voice: "chart-4",
-  ears: "chart-2",
-  conversation: "chart-6",
-  // Never in a chart: it has no price, so no share of what was spent.
-  other: "chart-2",
-};
-const purposeShade: Record<Purpose, ChartColor> = {
-  interviews: "chart-1",
-  drawing: "chart-5",
-  runs: "chart-3",
-  chat: "chart-4",
-  reading: "chart-2",
-  opinions: "chart-6",
-};
+const mostParts = 5;
 
-/** A shade as a swatch's class, and as an SVG mark's fill. */
-const swatch: Record<ChartColor, string> = {
-  "chart-1": "bg-chart-1",
-  "chart-2": "bg-chart-2",
-  "chart-3": "bg-chart-3",
-  "chart-4": "bg-chart-4",
-  "chart-5": "bg-chart-5",
-  "chart-6": "bg-chart-6",
-};
-const fill: Record<ChartColor, string> = {
-  "chart-1": "fill-chart-1",
-  "chart-2": "fill-chart-2",
-  "chart-3": "fill-chart-3",
-  "chart-4": "fill-chart-4",
-  "chart-5": "fill-chart-5",
-  "chart-6": "fill-chart-6",
-};
+// Under forced colours, every part in the text colour, as the chart draws its own.
+const FORCED = media.forcedColors;
+
+/** The chart's tones in its order, so a model's swatch is its colour in the bars. */
+const tones = stylex.create({
+  0: {
+    fill: { default: colors.chartPlain, [FORCED]: "CanvasText" },
+    backgroundColor: { default: colors.chartPlain, [FORCED]: "CanvasText" },
+  },
+  1: {
+    fill: { default: colors.chart2, [FORCED]: "CanvasText" },
+    backgroundColor: { default: colors.chart2, [FORCED]: "CanvasText" },
+  },
+  2: {
+    fill: { default: colors.chart3, [FORCED]: "CanvasText" },
+    backgroundColor: { default: colors.chart3, [FORCED]: "CanvasText" },
+  },
+  3: {
+    fill: { default: colors.chart4, [FORCED]: "CanvasText" },
+    backgroundColor: { default: colors.chart4, [FORCED]: "CanvasText" },
+  },
+  4: {
+    fill: { default: colors.chart5, [FORCED]: "CanvasText" },
+    backgroundColor: { default: colors.chart5, [FORCED]: "CanvasText" },
+  },
+});
+
+/** A tone by its place among the parts: past the fifth, the fifth's. */
+const toneAt = (index: number) =>
+  [tones[0], tones[1], tones[2], tones[3], tones[4]][
+    Math.min(index, mostParts - 1)
+  ];
+
+const styles = stylex.create({
+  // The page's parts, a step further apart than the lines within each, as the Overview's.
+  parts: { display: "flex", flexDirection: "column", gap: space["10"] },
+  // The line on how the figures were found, and the choice of month, in one row.
+  top: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: space["3"],
+  },
+  note: { minWidth: 0, flexGrow: 1, flexBasis: "16rem" },
+  month: { width: "12rem", maxWidth: "100%" },
+  // A use's models, as one bar of their shares, and each named with its share.
+  shares: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["2"],
+    minWidth: 0,
+    marginBlockStart: space["1"],
+  },
+  bar: { display: "block", width: "100%", height: "0.5rem" },
+  part: { stroke: colors.background },
+  models: {
+    display: "flex",
+    flexWrap: "wrap",
+    columnGap: space["3"],
+    rowGap: space["1"],
+    color: colors.mutedForeground,
+    fontFamily: font.sans,
+    fontSize: font.textXs,
+    lineHeight: font.textXsLine,
+  },
+  model: {
+    display: "flex",
+    alignItems: "center",
+    gap: space["2"],
+    whiteSpace: "nowrap",
+  },
+  swatch: {
+    width: "0.5rem",
+    height: "0.5rem",
+    flexShrink: 0,
+    borderRadius: radius.xs,
+  },
+  figure: { fontVariantNumeric: "tabular-nums" },
+});
 
 /** What AI is used for, in a word. */
 const purposeWords: Record<Purpose, string> = {
@@ -146,75 +212,65 @@ const modelWords: Record<Model, string> = {
 const taken = (use: Use): boolean =>
   use.tokensIn + use.tokensOut + use.spoken + use.heard + use.spend > 0;
 
+/** What `each` of `items` comes to, together. */
+const sumOf = <Each,>(items: readonly Each[], each: (item: Each) => number) =>
+  items.reduce((sum, item) => sum + each(item), 0);
+
 type Split = "model" | "purpose";
 
-const splitOf = (value: unknown): Split =>
-  value === "purpose" ? "purpose" : "model";
-
-/** Use split both ways: by what did it, and by what it was for. */
-type SplitUse = Pick<UsePeriod, "models" | "purposes">;
-
-/** One part of a split: its key, its words, its shade, and what it took of some use. */
-interface SplitKey {
-  key: Model | Purpose;
+/** One part of a bar: its key in the chart's rows, its words, and what it gathers. */
+interface BarPart<Key extends string> {
+  key: string;
   label: string;
-  shade: ChartColor;
-  takenIn: (split: SplitUse) => Use;
-  /** What it cost on one day. */
-  spentOn: (day: Usage["days"][number]) => number;
+  members: readonly Key[];
 }
 
-/** What the bars are split by: each model, or each use. */
-const keysOf = (split: Split): SplitKey[] =>
-  split === "model"
-    ? MODELS.map((key) => ({
-        key,
-        label: modelWords[key],
-        shade: modelShade[key],
-        takenIn: (each) => each.models[key],
-        spentOn: (day) => day.models[key],
-      }))
-    : PURPOSES.map((key) => ({
-        key,
-        label: purposeWords[key],
-        shade: purposeShade[key],
-        takenIn: (each) => each.purposes[key],
-        spentOn: (day) => day.purposes[key],
-      }));
-
-/** A share as an SVG length. */
-const svgShare = (share: number): string => `${share * 100}%`;
-
 /**
- * Parts of one whole side by side, as one bar: each as wide as its share,
- * in its shade. An SVG, so the widths need no inline style.
+ * What the bars are split into, the costliest at the foot: each on its own
+ * while there are five or fewer, else the four costliest and the rest
+ * together, as the chart tells five apart.
  */
-const ShareBar = ({
-  parts,
-  className,
-}: {
-  parts: { key: string; share: number; shade: ChartColor }[];
-  className?: string;
-}) => {
-  const at = parts.map((_, index) =>
-    parts.slice(0, index).reduce((sum, part) => sum + part.share, 0)
-  );
-  return (
-    <svg aria-hidden className={cn("block w-full", className)}>
-      {parts.map((part, index) => (
-        <rect
-          className={cn(fill[part.shade], "stroke-card")}
-          height="100%"
-          key={part.key}
-          rx="3"
-          strokeWidth="2"
-          width={svgShare(part.share)}
-          x={svgShare(at[index] ?? 0)}
-        />
-      ))}
-    </svg>
-  );
+const partsOf = <Key extends string>(
+  keys: readonly Key[],
+  spent: (key: Key) => number,
+  words: Record<Key, string>,
+  rest: string
+): BarPart<Key>[] => {
+  const ranked = keys
+    .filter((key) => spent(key) > 0)
+    .toSorted((one, other) => spent(other) - spent(one));
+  const own =
+    ranked.length <= mostParts ? ranked : ranked.slice(0, mostParts - 1);
+  const parts: BarPart<Key>[] = own.map((key) => ({
+    key,
+    label: words[key],
+    members: [key],
+  }));
+  return own.length === ranked.length
+    ? parts
+    : [
+        ...parts,
+        { key: "rest", label: rest, members: ranked.slice(own.length) },
+      ];
 };
+
+/** The models' parts of what was spent in `period`. */
+const modelPartsOf = (period: UsePeriod): BarPart<Model>[] =>
+  partsOf(
+    MODELS,
+    (model) => period.models[model].spend,
+    modelWords,
+    "Other models"
+  );
+
+/** The uses' parts of what was spent in `period`. */
+const purposePartsOf = (period: UsePeriod): BarPart<Purpose>[] =>
+  partsOf(
+    PURPOSES,
+    (purpose) => period.purposes[purpose].spend,
+    purposeWords,
+    "Other uses"
+  );
 
 /** The choice of month: every month together, or one of them, the latest first. */
 const MonthSelect = ({
@@ -225,257 +281,272 @@ const MonthSelect = ({
   months: string[];
   value: string;
   onChange: (value: string) => void;
-}) => {
-  const items = [
-    { value: allMonths, label: "Everything so far" },
-    ...months.toReversed().map((month) => ({
-      value: month,
-      label: formatMonth(month),
-    })),
-  ];
-  return (
-    <Select
-      items={items}
-      onValueChange={(next: string | null) => {
-        onChange(next ?? allMonths);
-      }}
-      value={value}
+}) => (
+  <Select
+    items={[
+      { value: allMonths, label: "Everything so far" },
+      ...months.toReversed().map((month) => ({
+        value: month,
+        label: formatMonth(month),
+      })),
+    ]}
+    onValueChange={(next) => {
+      onChange(next ?? allMonths);
+    }}
+    value={value}
+  >
+    <SelectTrigger
+      aria-label="Which month to show"
+      size="sm"
+      style={styles.month}
     >
-      <SelectTrigger
-        aria-label="Which month to show"
-        className="w-48 max-w-full"
-        size="sm"
-      >
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectGroup>
-          {items.map((item) => (
-            <SelectItem key={item.value} value={item.value}>
-              {item.label}
-            </SelectItem>
-          ))}
-        </SelectGroup>
-      </SelectContent>
-    </Select>
-  );
-};
+      <SelectValue />
+    </SelectTrigger>
+    <SelectContent />
+  </Select>
+);
 
-/** A choice between splitting by model and by use, named `label`. */
+/** What the bars are split by, as the choice beside them says it. */
 const SplitToggle = ({
-  label,
   value,
   onChange,
 }: {
-  label: string;
   value: Split;
   onChange: (value: Split) => void;
 }) => (
   <ToggleGroup
-    aria-label={label}
-    onValueChange={(next: unknown[]) => {
-      onChange(splitOf(next[0] ?? value));
+    aria-label="What the bars are split by"
+    onValueChange={(next) => {
+      // A press on the pressed one keeps it: one of the two is always shown.
+      if (next[0] === "model" || next[0] === "purpose") {
+        onChange(next[0]);
+      }
     }}
     size="sm"
-    spacing={0}
     value={[value]}
-    variant="outline"
   >
     <ToggleGroupItem value="model">By model</ToggleGroupItem>
     <ToggleGroupItem value="purpose">By use</ToggleGroupItem>
   </ToggleGroup>
 );
 
+/** One part of the bars, with what one month's or one day's use of it cost. */
+interface Series {
+  key: string;
+  label: string;
+  inMonth: (each: Usage["months"][number]) => number;
+  onDay: (each: Usage["days"][number]) => number;
+}
+
+/** The bars' parts, split by model or by use, as `period` ranks them. */
+const seriesOf = (split: Split, period: UsePeriod): Series[] =>
+  split === "model"
+    ? modelPartsOf(period).map(({ key, label, members }) => ({
+        key,
+        label,
+        inMonth: (each) => sumOf(members, (model) => each.models[model].spend),
+        onDay: (each) => sumOf(members, (model) => each.models[model]),
+      }))
+    : purposePartsOf(period).map(({ key, label, members }) => ({
+        key,
+        label,
+        inMonth: (each) =>
+          sumOf(members, (purpose) => each.purposes[purpose].spend),
+        onDay: (each) => sumOf(members, (purpose) => each.purposes[purpose]),
+      }));
+
 /**
  * What was spent over time, as bars split by model or by use: month by
  * month over everything so far, with the line the contract covers; day by
- * day inside one month, or while there is only one.
+ * day inside one month, or while there is only one. Each point is named
+ * as people read it ("Oct 2026", "2 Nov"), so the tooltip and the table a
+ * screen reader reads say it whole.
  */
 const OverTime = ({
   month,
+  monthly,
   split,
   covered,
+  period,
 }: {
   month: string | null;
+  /** Month by month: every month together, while there is more than one. */
+  monthly: boolean;
   split: Split;
   covered: number | null;
+  period: UsePeriod;
 }) => {
   const { view } = useOrganization();
   const { usage } = view;
-  const monthly = month === null && usage.months.length > 1;
-  const keys = keysOf(split);
-  // One row a bar: when it is, and what each key cost then.
-  const data: Record<string, number | string>[] = monthly
+  const series = seriesOf(split, period);
+  // One row a bar: when it is, and what each part cost then.
+  const data: Record<string, string | number>[] = monthly
     ? usage.months.map((each) => ({
-        at: each.month,
+        at: formatMonth(each.month),
         ...Object.fromEntries(
-          keys.map(({ key, takenIn }) => [key, takenIn(each).spend])
+          series.map((one) => [one.key, one.inMonth(each)])
         ),
       }))
     : usage.days
         .filter((each) => month === null || each.day.startsWith(month))
         .map((each) => ({
-          at: each.day,
+          at: formatDay(each.day),
           ...Object.fromEntries(
-            keys.map(({ key, spentOn }) => [key, spentOn(each)])
+            series.map((one) => [one.key, one.onDay(each)])
           ),
         }));
-  const config: ChartConfig = Object.fromEntries(
-    keys.map(({ key, label, shade }) => [key, { label, color: shade }])
-  );
-  const labels = new Map<unknown, string>(
-    keys.map(({ key, label }) => [key, label])
-  );
-  const bars = keys.filter(({ key }) =>
-    data.some((each) => Number(each[key] ?? 0) > 0)
-  );
+  const spentAt = data.map((row) => ({
+    at: String(row.at),
+    spend: sumOf(series, (one) => Number(row[one.key] ?? 0)),
+  }));
+  let most: (typeof spentAt)[number] | undefined;
+  for (const row of spentAt) {
+    if (most === undefined || row.spend > most.spend) {
+      most = row;
+    }
+  }
   const line = monthly ? covered : null;
-  const said = (value: unknown) =>
-    monthly ? formatMonth(String(value)) : formatDay(String(value));
   return (
-    <>
-      <ChartContainer className="aspect-auto h-52 w-full" config={config}>
-        <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-          <CartesianGrid vertical={false} />
-          <XAxis
-            axisLine={false}
-            dataKey="at"
-            minTickGap={24}
-            tickFormatter={said}
-            tickLine={false}
-          />
-          <YAxis
-            axisLine={false}
-            tickFormatter={(value: number) => euros(value)}
-            tickLine={false}
-            width={44}
-          />
-          <ChartTooltip
-            content={
-              <ChartTooltipContent
-                formatter={(value, name) =>
-                  `${labels.get(name) ?? ""}: ${euro(Number(value))}`
-                }
-                labelFormatter={said}
-              />
-            }
-          />
-          {line === null ? null : (
-            <ReferenceLine
-              stroke="var(--status-attention)"
-              strokeDasharray="4 4"
-              y={line}
-            />
-          )}
-          {bars.map(({ key, shade }) => (
-            <Bar
-              dataKey={key}
-              fill={chartColor(shade)}
-              isAnimationActive={false}
-              key={key}
-              maxBarSize={36}
-              stackId="spend"
-            />
-          ))}
-        </BarChart>
-      </ChartContainer>
-      <ul className="text-muted-foreground flex flex-wrap justify-center gap-x-4 gap-y-1 px-2 pt-3 text-xs">
-        {bars.map(({ key, label, shade }) => (
-          <li className="flex items-center gap-1.5" key={key}>
-            <span
-              aria-hidden
-              className={cn("size-2 flex-none rounded-xs", swatch[shade])}
-            />
-            {label}
-          </li>
-        ))}
-        {line === null ? null : (
-          <li className="flex items-center gap-1.5">
-            <span
-              aria-hidden
-              className="border-status-attention h-px w-3 flex-none border-t border-dashed"
-            />
-            What the contract covers
-          </li>
-        )}
-      </ul>
-    </>
+    <ChartContainer
+      aria-label={
+        monthly ? "What it cost, month by month" : "What it cost, day by day"
+      }
+      config={Object.fromEntries(
+        series.map(({ key, label }) => [key, { label }])
+      )}
+      data={data}
+      summary={
+        most === undefined || most.spend === 0
+          ? "Nothing spent."
+          : `The most, ${euro(most.spend)}, ${monthly ? "in" : "on"} ${most.at}.`
+      }
+      xKey="at"
+      xLabel={monthly ? "Month" : "Day"}
+    >
+      <ChartGrid />
+      <ChartXAxis />
+      <ChartYAxis valueFormatter={(value) => euros(Number(value))} width={56} />
+      {series.map(({ key }) => (
+        <ChartBar dataKey={key} key={key} stackId="spend" />
+      ))}
+      {line === null ? null : (
+        <ChartReferenceLine y={line}>Contract</ChartReferenceLine>
+      )}
+      <ChartTooltip valueFormatter={euro} />
+      <ChartLegend />
+    </ChartContainer>
+  );
+};
+
+/** A use's tokens and minutes by voice, in a line; empty where it took neither. */
+const takenLine = (use: Use): string => {
+  const minutes = use.spoken + use.heard;
+  return [
+    use.tokensIn + use.tokensOut > 0
+      ? `${tokens(use.tokensIn)} read, ${tokens(use.tokensOut)} written`
+      : "",
+    minutes > 0 ? `${whole(minutes)} min by voice` : "",
+  ]
+    .filter((line) => line !== "")
+    .join(" · ");
+};
+
+/**
+ * Parts of one whole side by side, as one bar: each as wide as its share,
+ * in its tone. An SVG, so the widths need no inline style.
+ */
+const ShareBar = ({
+  parts,
+}: {
+  parts: { key: string; share: number; tone: number }[];
+}) => {
+  const at = parts.map((_, index) =>
+    sumOf(parts.slice(0, index), (part) => part.share)
+  );
+  return (
+    <svg aria-hidden {...stylex.props(styles.bar)}>
+      {parts.map((part, index) => (
+        <rect
+          {...stylex.props(toneAt(part.tone), styles.part)}
+          height="100%"
+          key={part.key}
+          rx="2"
+          strokeWidth="2"
+          width={`${part.share * 100}%`}
+          x={`${(at[index] ?? 0) * 100}%`}
+        />
+      ))}
+    </svg>
   );
 };
 
 /**
- * Each use of AI that took something: what it cost, split by what did it,
- * and under it the tokens and the minutes by voice it took. A use on a
- * model without a price cost nothing, and still shows what it took.
+ * Each use of AI that took something, a row each: what it cost, which
+ * models did it and their shares, in the tones the bars split by model
+ * draw them, and the tokens and minutes by voice it took. A use on a model
+ * without a price cost nothing, and still shows what it took.
  */
 const WhichModel = ({ period }: { period: UsePeriod }) => {
+  const modelParts = modelPartsOf(period);
+  const toneOf = (model: Model): number =>
+    Math.max(
+      0,
+      modelParts.findIndex((part) => part.members.includes(model))
+    );
   const purposes = PURPOSES.filter((purpose) =>
     taken(period.purposes[purpose])
   );
   return (
-    <ul className="flex min-w-0 flex-col gap-4 border-t px-5 py-5">
+    <ItemGroup aria-labelledby="which-model" separated>
       {purposes.map((purpose) => {
         const use = period.purposes[purpose];
         const of = use.spend;
-        const minutes = use.spoken + use.heard;
-        const parts = MODELS.filter(
+        const models = MODELS.filter(
           (model) => period.matrix[purpose][model].spend > 0
         );
+        const line = takenLine(use);
         return (
-          <li className="flex min-w-0 flex-col gap-1.5" key={purpose}>
-            <span className="flex items-baseline justify-between gap-3">
-              <span>{purposeWords[purpose]}</span>
-              <span
-                className={cn(
-                  "tabular-nums",
-                  of === 0 && "text-muted-foreground"
-                )}
-              >
-                {of > 0 ? euro(of) : "–"}
-              </span>
-            </span>
-            {parts.length > 0 ? (
-              <ShareBar
-                className="h-2.5"
-                parts={parts.map((model) => ({
-                  key: model,
-                  share: period.matrix[purpose][model].spend / of,
-                  shade: modelShade[model],
-                }))}
-              />
-            ) : null}
-            <span className="text-muted-foreground flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
-              {parts.map((model) => (
-                <span
-                  className="flex items-center gap-1.5 whitespace-nowrap"
-                  key={model}
-                >
-                  <span
-                    aria-hidden
-                    className={cn(
-                      "size-2 rounded-xs",
-                      swatch[modelShade[model]]
-                    )}
+          <Item key={purpose}>
+            <ItemContent>
+              <ItemTitle>{purposeWords[purpose]}</ItemTitle>
+              {line === "" ? null : <ItemDescription>{line}</ItemDescription>}
+              {models.length === 0 ? null : (
+                <span {...stylex.props(styles.shares)}>
+                  <ShareBar
+                    parts={models.map((model) => ({
+                      key: model,
+                      share: period.matrix[purpose][model].spend / of,
+                      tone: toneOf(model),
+                    }))}
                   />
-                  {modelWords[model]}{" "}
-                  {formatPercent(period.matrix[purpose][model].spend / of)}
+                  <span {...stylex.props(styles.models)}>
+                    {models.map((model) => (
+                      <span key={model} {...stylex.props(styles.model)}>
+                        <span
+                          aria-hidden
+                          {...stylex.props(
+                            styles.swatch,
+                            toneAt(toneOf(model))
+                          )}
+                        />
+                        {`${modelWords[model]} ${formatPercent(period.matrix[purpose][model].spend / of)}`}
+                      </span>
+                    ))}
+                  </span>
                 </span>
-              ))}
-              <span className="tabular-nums sm:ml-auto">
-                {[
-                  use.tokensIn + use.tokensOut > 0
-                    ? `${tokens(use.tokensIn)} read, ${tokens(use.tokensOut)} written`
-                    : "",
-                  minutes > 0 ? `${whole(minutes)} min by voice` : "",
-                ]
-                  .filter((line) => line !== "")
-                  .join(" · ")}
-              </span>
-            </span>
-          </li>
+              )}
+            </ItemContent>
+            <ItemActions>
+              <Text as="span" color={of === 0 ? "muted" : "default"}>
+                <span {...stylex.props(styles.figure)}>
+                  {of > 0 ? euro(of) : "No cost"}
+                </span>
+              </Text>
+            </ItemActions>
+          </Item>
         );
       })}
-    </ul>
+    </ItemGroup>
   );
 };
 
@@ -504,63 +575,57 @@ const coveredLineOf = (
 const NothingUsed = () => {
   const { admin } = useOrganization();
   return (
-    <Section
-      description="It starts when Stephen reads the first conversation, and grows with every interview."
-      title="Nothing used yet"
-    >
-      <div className="flex border-t px-5 py-4">
-        <Link
-          className={buttonVariants({ size: "sm", variant: "outline" })}
-          params={{ clientId: admin.client.id }}
-          to={sectionTo.steps}
-        >
-          To the first conversation
-        </Link>
-      </div>
-    </Section>
+    <Empty>
+      <EmptyHeader>
+        <EmptyMedia icon={sectionWords.usage.icon} />
+        <EmptyTitle level={2}>Nothing used yet</EmptyTitle>
+        <EmptyDescription>
+          It starts when Stephen reads the first conversation, and grows with
+          every interview.
+        </EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button asChild variant="outline">
+          <Link params={{ clientId: admin.client.id }} to={sectionTo.steps}>
+            To the first conversation
+          </Link>
+        </Button>
+      </EmptyContent>
+    </Empty>
   );
 };
 
-/** An organization's AI use: what it took, what that cost, and what did it. */
-export const AiUse = () => {
+/** What it took, what that cost and what did it, once anything is used. */
+const Used = () => {
   const { view } = useOrganization();
   const { usage, contract } = view;
   const [period, setPeriod] = useState(allMonths);
-  const [stack, setStack] = useState<Split>("model");
-
-  // Nothing used is nothing counted: a model without a price adds tokens
-  // but no spend, and its use still shows.
-  if (!taken(usage.total)) {
-    return <NothingUsed />;
-  }
+  const [split, setSplit] = useState<Split>("model");
 
   const month = period === allMonths ? null : period;
+  const monthly = month === null && usage.months.length > 1;
   const now = usageIn(usage, month);
   const covered =
     contract.status === "signed" && contract.aiIncluded > 0
       ? contract.aiIncluded
       : null;
-  // The month the tile on the contract is about: the one picked, or the one
-  // the view is counted to, which `thisMonth` is, used in or not.
+  // The month the figure on the contract is about: the one picked, or the
+  // one the view is counted to, which `thisMonth` is, used in or not.
   const shown = month ?? view.asOf.slice(0, 7);
   const inMonth = month === null ? usage.thisMonth : now.total;
   const over = covered !== null && inMonth.spend > covered;
   const first = usage.months[0]?.month;
-  const coveredLine = coveredLineOf(
-    inMonth.spend,
-    covered,
-    view.unknown.contract
-  );
 
   return (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        {/* Said only of figures that aren't counted: what they are instead. */}
-        <p className="text-muted-foreground min-w-0 flex-1 basis-64">
+      <div {...stylex.props(styles.top)}>
+        {/* What these figures are: the admin's estimate in euros, apart from
+            the US dollars its core records for Grasp's own AI features. */}
+        <Text color="muted" style={styles.note}>
           {usage.counted
-            ? ""
-            : "Worked out from what happened: every interview, who is in, and each workflow that runs."}
-        </p>
+            ? "The admin’s estimate, in euros at its sample prices: what the Worker counted, and what is worked out for the time before it counted."
+            : "The admin’s estimate, in euros at its sample prices, worked out from what happened: every interview, who is in, and each workflow that runs."}
+        </Text>
         <MonthSelect
           months={usage.months.map((each) => each.month)}
           onChange={setPeriod}
@@ -568,62 +633,86 @@ export const AiUse = () => {
         />
       </div>
 
-      <section
-        aria-label="AI use in short"
-        className="@container overflow-hidden rounded-xl border"
-      >
-        <div className="bg-border grid grid-cols-2 gap-px @3xl:grid-cols-4">
-          <Figure
-            attention={over}
-            label={formatMonth(shown)}
-            sub={coveredLine}
-            value={euro(inMonth.spend)}
-          />
-          <Figure
-            label="In all, so far"
-            sub={
-              first === undefined ? undefined : `since ${formatMonth(first)}`
-            }
-            value={euro(usage.total.spend)}
-          />
-          <Figure
-            label="Tokens"
-            sub={`${tokens(now.total.tokensIn)} read, ${tokens(now.total.tokensOut)} written`}
-            value={tokens(now.total.tokensIn + now.total.tokensOut)}
-          />
-          <Figure
-            label="Minutes by voice"
-            sub={`${whole(now.total.spoken)} spoken, ${whole(now.total.heard)} heard`}
-            value={whole(now.total.spoken + now.total.heard)}
-          />
-        </div>
-      </section>
+      <StatGroup aria-label="AI use in short" columns={4}>
+        <Stat
+          change={coveredLineOf(inMonth.spend, covered, view.unknown.contract)}
+          label={formatMonth(shown)}
+          value={euro(inMonth.spend)}
+          variant={over ? "warning" : "default"}
+        />
+        <Stat
+          change={
+            first === undefined ? undefined : `since ${formatMonth(first)}`
+          }
+          label="In all, so far"
+          value={euro(usage.total.spend)}
+        />
+        <Stat
+          change={`${tokens(now.total.tokensIn)} read, ${tokens(now.total.tokensOut)} written`}
+          label="Tokens"
+          value={tokens(now.total.tokensIn + now.total.tokensOut)}
+        />
+        <Stat
+          change={`${whole(now.total.spoken)} spoken, ${whole(now.total.heard)} heard`}
+          label="Minutes by voice"
+          value={whole(now.total.spoken + now.total.heard)}
+        />
+      </StatGroup>
 
-      <Section
-        action={
-          <SplitToggle
-            label="What the bars are split by"
-            onChange={setStack}
-            value={stack}
-          />
-        }
-        description={
-          covered !== null && month === null
-            ? `Against the ${euros(covered)} of AI use a month the contract covers.`
-            : undefined
-        }
-        title="What it cost, over time"
-      >
-        <div className="border-t px-3 pt-4 pb-3">
-          <OverTime covered={covered} month={month} split={stack} />
-        </div>
-      </Section>
+      <Part aria-labelledby="over-time">
+        <SectionHeader
+          actions={<SplitToggle onChange={setSplit} value={split} />}
+          description={
+            covered !== null && monthly
+              ? `Against the ${euros(covered)} of AI use a month the contract covers`
+              : undefined
+          }
+          id="over-time"
+          size="sm"
+          title="What it cost, over time"
+          variant="group"
+        />
+        <OverTime
+          covered={covered}
+          month={month}
+          monthly={monthly}
+          period={now}
+          split={split}
+        />
+      </Part>
 
       {taken(now.total) ? (
-        <Section title="Which model does what">
+        <Part aria-labelledby="which-model">
+          <SectionHeader
+            description="What each use cost, and the models that did it"
+            id="which-model"
+            size="sm"
+            title="Which model does what"
+            variant="group"
+          />
           <WhichModel period={now} />
-        </Section>
+        </Part>
       ) : null}
     </>
+  );
+};
+
+/**
+ * An organization's AI use: what it took, what that cost, and what did it;
+ * then what Grasp's own AI features cost on Grasp's keys for it, from its
+ * core's AI status (`aiStatus`, not awaited).
+ */
+export const AiUse = ({
+  aiStatus,
+}: {
+  aiStatus: Promise<AiStatusReport | null>;
+}) => {
+  const { view } = useOrganization();
+  return (
+    <div {...stylex.props(styles.parts)}>
+      {/* Nothing used is nothing counted: a model without a price adds tokens but no spend, and its use still shows. */}
+      {taken(view.usage.total) ? <Used /> : <NothingUsed />}
+      <OrganizationPlatformSpend status={aiStatus} />
+    </div>
   );
 };

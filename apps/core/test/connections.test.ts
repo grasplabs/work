@@ -496,6 +496,31 @@ describe("the catalog", () => {
         group: "CRM",
         auth: "key",
       },
+      // The toolkits of the tests' mail connections (test/composio-api.ts).
+      {
+        entry: "composio:mail",
+        description: null,
+        group: "Other",
+        auth: "managed",
+      },
+      {
+        entry: "composio:mail_own",
+        description: null,
+        group: "Other",
+        auth: "managed",
+      },
+      {
+        entry: "composio:crm",
+        description: null,
+        group: "Other",
+        auth: "managed",
+      },
+      {
+        entry: "composio:bulk",
+        description: null,
+        group: "Other",
+        auth: "managed",
+      },
     ]);
   });
 
@@ -823,6 +848,10 @@ describe("offering catalog entries", () => {
         "hubspot:false",
         "acme_erp:true",
         "acme_crm:true",
+        "mail:true",
+        "mail_own:true",
+        "crm:true",
+        "bulk:true",
       ],
       anna: [
         "native:microsoft",
@@ -830,6 +859,10 @@ describe("offering catalog entries", () => {
         "connector:notion",
         "composio:acme_erp",
         "composio:acme_crm",
+        "composio:mail",
+        "composio:mail_own",
+        "composio:crm",
+        "composio:bulk",
       ],
     });
     const refused = await auditedDuring(async () => {
@@ -927,6 +960,10 @@ describe("offering catalog entries", () => {
       "composio:hubspot",
       "composio:acme_erp",
       "composio:acme_crm",
+      "composio:mail",
+      "composio:mail_own",
+      "composio:crm",
+      "composio:bulk",
     ]);
     await expect(
       outcome(admin.connections.connectToolkit(toolkitRequest))
@@ -954,7 +991,7 @@ describe("offering catalog entries", () => {
     ]);
     await expect(
       anna.connections.catalogTools("composio", "hubspot")
-    ).resolves.toHaveLength(2);
+    ).resolves.toHaveLength(4);
   });
 
   it("is changed by the organization's admins only, never by staff, and only for entries there can be", async () => {

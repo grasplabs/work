@@ -1,66 +1,53 @@
-import { CardContent } from "@grasp-os/ui/components/card";
 import {
   Item,
-  ItemActions,
   ItemContent,
+  ItemDescription,
   ItemGroup,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
-import { Text } from "@grasp-os/ui/components/text";
-import { space } from "@grasp-os/ui/lib/tokens.stylex";
-import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { PageLoading } from "../../admin/failure.tsx";
-import { AdminPage } from "../../admin/page.tsx";
-import { EmptyPanel, Panel } from "../../admin/panel.tsx";
+import { EmptyPart, PagePart } from "../../admin/page-part.tsx";
 import { fetchPlatform } from "../../admin/platform-data.ts";
-import { platformCrumb, PlatformNav } from "../../admin/platform-nav.tsx";
+import { platformCrumb, PlatformPage } from "../../admin/platform-nav.tsx";
 import { eventWords } from "../../admin/platform-parts.tsx";
 import type { StaffEvent } from "../../admin/platform-reads.ts";
 import { SharedSecrets } from "../../admin/secrets-parts.tsx";
-import { formatDate } from "../../admin/words.ts";
 import { fetchClientGrid } from "../../clients/functions.ts";
+import { formatTime } from "../../releases/format.ts";
 
-const styles = stylex.create({
-  page: { display: "flex", flexDirection: "column", gap: space["6"] },
-});
-
-/** A day, as the admin's pages say it. */
-const dayOf = (at: Date): string => formatDate(at.toISOString().slice(0, 10));
-
-/** What someone at Grasp did, as the admin's audit log keeps it. */
+/** What someone at Grasp did, the latest first, as the admin's audit log keeps it. */
 const DoneHere = ({
   events,
   names,
 }: {
   events: StaffEvent[];
   names: ReadonlyMap<string, string>;
-}) =>
-  events.length === 0 ? (
-    <EmptyPanel>Nobody at Grasp did anything here yet.</EmptyPanel>
-  ) : (
-    <Panel title="Done here">
-      <CardContent flush>
-        <ItemGroup separated>
-          {events.map((event) => (
-            <Item key={event.id} size="sm">
-              <ItemContent>
-                <ItemTitle>
-                  {eventWords(event, (id) => names.get(id) ?? id)}
-                </ItemTitle>
-              </ItemContent>
-              <ItemActions>
-                <Text as="span" color="muted" size="xs">
-                  {dayOf(event.at)}
-                </Text>
-              </ItemActions>
-            </Item>
-          ))}
-        </ItemGroup>
-      </CardContent>
-    </Panel>
-  );
+}) => (
+  <PagePart
+    description="What someone at Grasp did to the platform by hand, the latest first."
+    id="done-here"
+    title="Done here"
+  >
+    {events.length === 0 ? (
+      <EmptyPart>Nobody at Grasp did anything here yet.</EmptyPart>
+    ) : (
+      <ItemGroup aria-labelledby="done-here" separated>
+        {events.map((event) => (
+          <Item key={event.id} size="sm">
+            <ItemContent>
+              <ItemTitle>
+                {eventWords(event, (id) => names.get(id) ?? id)}
+              </ItemTitle>
+              <ItemDescription>{`${formatTime(event.at)} UTC`}</ItemDescription>
+            </ItemContent>
+          </Item>
+        ))}
+      </ItemGroup>
+    )}
+  </PagePart>
+);
 
 /**
  * Platform's Maintenance page: what is rarely needed and so stays off its
@@ -71,13 +58,10 @@ const MaintenancePage = () => {
   const { rows, platform } = Route.useLoaderData();
   const names = new Map(rows.map(({ id, name }) => [id, name]));
   return (
-    <AdminPage parents={[platformCrumb]} title="Maintenance">
-      <PlatformNav />
-      <div {...stylex.props(styles.page)}>
-        <SharedSecrets />
-        <DoneHere events={platform.events} names={names} />
-      </div>
-    </AdminPage>
+    <PlatformPage parents={[platformCrumb]} title="Maintenance">
+      <SharedSecrets />
+      <DoneHere events={platform.events} names={names} />
+    </PlatformPage>
   );
 };
 

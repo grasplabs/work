@@ -1,7 +1,8 @@
+import { appShellVars } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01.stylex";
 import { Sheet, SheetContent } from "@grasp-os/ui/components/sheet";
 import { SidePanelPlacementProvider } from "@grasp-os/ui/components/side-panel";
 import type { SidePanelPlacement } from "@grasp-os/ui/components/side-panel";
-import { colors, size } from "@grasp-os/ui/lib/tokens.stylex";
+import { colors, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import {
   createContext,
@@ -133,7 +134,20 @@ const useAskedOpen = (
 const styles = stylex.create({
   // The page's room under the banner: the page's column, then its panel.
   body: { display: "flex", flexGrow: 1, minHeight: 0 },
-  page: { display: "flex", flexDirection: "column", flexGrow: 1, minWidth: 0 },
+  // The page's column. Under every page the room for the chat's dock over
+  // its foot, 96px, as #2503's shell gives a page (frame/page.tsx), so its
+  // last row is never under the dock: AppShellPage's room below.
+  page: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minWidth: 0,
+    "--damsko-app-shell-page-room-below": space["24"],
+  },
+  // Room at the page bar's end for the chat's button, which the frame lays
+  // over the card's end at the bar's height (app-frame.tsx).
+  chatButtonRoom: { [appShellVars.barEndRoom]: size.sidebarIconButton },
+
   // In the page's card, at its end, flush with its end and foot: a hairline
   // at its start, on the card's ground.
   panel: {
@@ -160,7 +174,14 @@ const styles = stylex.create({
  * coming and going never draws the page anew: it keeps its scroll place
  * and what was typed in it.
  */
-export const PageWithPanel = ({ children }: { children: ReactNode }) => {
+export const PageWithPanel = ({
+  chatButtonRoom = false,
+  children,
+}: {
+  /** Whether the page's bar keeps room at its end for the chat's button. */
+  chatButtonRoom?: boolean;
+  children: ReactNode;
+}) => {
   const body = useRef<HTMLDivElement>(null);
   const width = useWidth(body);
   const [host, setHost] = useState<HTMLElement | null>(null);
@@ -183,7 +204,14 @@ export const PageWithPanel = ({ children }: { children: ReactNode }) => {
       value={{ host, placement: narrow ? "sheet" : "beside", claim: setClaim }}
     >
       <div ref={body} {...stylex.props(styles.body)}>
-        <div {...stylex.props(styles.page)}>{children}</div>
+        <div
+          {...stylex.props(
+            styles.page,
+            chatButtonRoom && styles.chatButtonRoom
+          )}
+        >
+          {children}
+        </div>
         {open && !narrow ? (
           <div data-slot="app-shell-page-panel" {...stylex.props(styles.panel)}>
             {seat}

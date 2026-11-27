@@ -11,9 +11,8 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from "@grasp-os/ui/components/toggle-group";
-import { Icon, SearchIcon, TriangleAlertIcon } from "@grasp-os/ui/lib/icons";
-import { colors, size, space } from "@grasp-os/ui/lib/tokens.stylex";
-import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
+import { Icon, SearchIcon } from "@grasp-os/ui/lib/icons";
+import { colors, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
@@ -60,13 +59,6 @@ const styles = stylex.create({
     cursor: "pointer",
   },
   about: { paddingInlineStart: space[4], paddingBlockEnd: space[1] },
-  warn: {
-    display: "flex",
-    alignItems: "center",
-    gap: space[1],
-    color: colors.warning,
-    [iconVars.size]: size.iconSm,
-  },
 });
 
 /** One action: its name, its choice, and its description when opened. */
@@ -82,8 +74,6 @@ const Row = ({
   const { t } = useLingui();
   const [open, setOpen] = useState(false);
   const { tool, name, deprecated } = entry;
-  // Marked Read against its provider's word: it would change things without asking.
-  const readAgainstHint = choice === "read" && !tool.readOnly;
   return (
     <li {...stylex.props(styles.row)}>
       <div {...stylex.props(styles.line)}>
@@ -117,22 +107,18 @@ const Row = ({
           <ToggleGroupItem value="off">
             {t({ message: "Off", context: "what a tool may do" })}
           </ToggleGroupItem>
-          <ToggleGroupItem value="read">
-            {t({ message: "Read", context: "what a tool may do" })}
-          </ToggleGroupItem>
+          {/* Read only where Composio tags the tool read-only: connect
+              refuses a read for any other. */}
+          {tool.readOnly ? (
+            <ToggleGroupItem value="read">
+              {t({ message: "Read", context: "what a tool may do" })}
+            </ToggleGroupItem>
+          ) : null}
           <ToggleGroupItem value="write">
             {t({ message: "Write", context: "what a tool may do" })}
           </ToggleGroupItem>
         </ToggleGroup>
       </div>
-      {readAgainstHint ? (
-        <span {...stylex.props(styles.warn, styles.about)}>
-          <Icon icon={TriangleAlertIcon} />
-          <Text as="span" color="secondary" size="xs">
-            {t`Composio says this changes things. As Read, it would do so without asking.`}
-          </Text>
-        </span>
-      ) : null}
       {open ? (
         <div {...stylex.props(styles.about)}>
           <Text color="muted" size="xs">

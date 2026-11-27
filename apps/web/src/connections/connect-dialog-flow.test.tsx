@@ -357,16 +357,20 @@ describe("choosing what Grasp may do in a toolkit", () => {
     ]);
   });
 
-  it("sends each tool as it was last set when choosing per action, and warns of Read against the hint", async () => {
+  it("sends each tool as it was last set when choosing per action, and offers Read only where Composio says the tool only reads", async () => {
     const sent = await opened(hubspot);
     await press(radio("Choose myself"));
+    const offered = {
+      reads: toggle("HUBSPOT_LIST_CONTACTS", "Read") !== undefined,
+      changes: toggle("HUBSPOT_CREATE_NOTE", "Read") !== undefined,
+    };
     await press(toggle("HUBSPOT_LIST_CONTACTS", "Off"));
-    await press(toggle("HUBSPOT_CREATE_NOTE", "Read"));
-    expect(row("HUBSPOT_CREATE_NOTE").textContent).toContain(
-      "As Read, it would do so without asking."
-    );
+    await press(toggle("HUBSPOT_CREATE_NOTE", "Write"));
     await press(button("Allow and sign in"));
-    expect(sent).toStrictEqual([[{ name: "HUBSPOT_CREATE_NOTE", read: true }]]);
+    expect({ offered, sent }).toStrictEqual({
+      offered: { reads: true, changes: false },
+      sent: [["HUBSPOT_CREATE_NOTE"]],
+    });
   });
 
   it("can't connect with every tool off", async () => {

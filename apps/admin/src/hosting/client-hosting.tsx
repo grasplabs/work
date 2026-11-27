@@ -6,13 +6,21 @@
  * Which release it runs once live is its channel's or its pin's, which the
  * reconciler deploys (src/rollout/reconciler.ts): nothing here changes it.
  */
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
-import { Field, FieldLabel } from "@grasp-os/app-kit/components/field";
+import { Button } from "@grasp-os/ui/components/button";
+import { Checkbox } from "@grasp-os/ui/components/checkbox";
+import { Field, FieldLabel } from "@grasp-os/ui/components/field";
+import { Text } from "@grasp-os/ui/components/text";
 import { rootRouteId, useNavigate, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
-import type { ReactNode } from "react";
 
+import {
+  Actions,
+  ErrorCode,
+  Facts,
+  Failure,
+  FormStack,
+} from "../admin/setup-parts.tsx";
+import type { Fact } from "../admin/setup-parts.tsx";
 import { formatTime } from "../releases/format.ts";
 import { thenRefresh, useAction } from "../use-action.ts";
 import {
@@ -44,26 +52,6 @@ const destinationWords = ({ destinationId }: ClientHostingView): string =>
     ? "No destination: this admin's STAGE names no stage."
     : `Goes in ${destinationId}, Grasp's shared destination.`;
 
-/**
- * Facts, as a list of terms: what each is in one column, the fact beside
- * it, in the text's own face, so the list reads as the rest of the page
- * and not as a log.
- */
-const Facts = ({
-  facts,
-}: {
-  facts: readonly (readonly [string, ReactNode])[];
-}) => (
-  <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[11rem_minmax(0,1fr)]">
-    {facts.map(([term, value]) => (
-      <div className="contents" key={term}>
-        <dt className="text-muted-foreground">{term}</dt>
-        <dd className="wrap-break-word">{value}</dd>
-      </div>
-    ))}
-  </dl>
-);
-
 /** Run statuses of an attempt that ended without finishing. */
 const endedRuns: ReadonlySet<string> = new Set([
   "errored",
@@ -90,23 +78,27 @@ const stopCodeOf = (
 /** A stop's code, and what it means. */
 const StopReason = ({ code }: { code: string | null }) =>
   code === null ? null : (
-    <p className="text-destructive text-sm" role="alert">
-      <span className="font-mono">{code}</span>
-      {`: ${operationErrorWords(code)}`}
-    </p>
+    <Failure
+      failure={
+        <>
+          <ErrorCode code={code} />
+          {`: ${operationErrorWords(code)}`}
+        </>
+      }
+    />
   );
 
 /** Where the client's provisioning operation is, as facts. */
 const operationFacts = (
   operation: NonNullable<ClientHostingView["operation"]>,
   run: ClientHostingView["run"]
-): (readonly [string, ReactNode])[] => [
-  ["Release", operation.releaseId],
-  ["Status", statusWords[operation.status]],
-  ["Last step done", operation.step ?? "none yet"],
-  ["Attempt", run ?? "none"],
-  ["Started by", operation.startedBy],
-  ["Updated (UTC)", formatTime(operation.updatedAt)],
+): Fact[] => [
+  { label: "Release", value: operation.releaseId },
+  { label: "Status", value: statusWords[operation.status] },
+  { label: "Last step done", value: operation.step ?? "none yet" },
+  { label: "Attempt", value: run ?? "none" },
+  { label: "Started by", value: operation.startedBy },
+  { label: "Updated (UTC)", value: formatTime(operation.updatedAt) },
 ];
 
 /**
@@ -129,22 +121,21 @@ const Offboarding = ({ view }: { view: ClientHostingView }) => {
   const { offboardedAt } = view;
   if (offboardedAt === null) {
     return (
-      <div className="flex flex-col gap-3 border-t pt-4">
-        <p className="text-sm">
+      <FormStack>
+        <Text>
           Offboarding takes its address out of the router at once: its people
           reach it no more. Nothing is deleted.
-        </p>
+        </Text>
         <Field orientation="horizontal">
           <Checkbox
             checked={understood}
-            id="offboard-understood"
-            onCheckedChange={setUnderstood}
+            onCheckedChange={(checked) => {
+              setUnderstood(checked === true);
+            }}
           />
-          <FieldLabel htmlFor="offboard-understood">
-            It stops serving its people now
-          </FieldLabel>
+          <FieldLabel>It stops serving its people now</FieldLabel>
         </Field>
-        <div className="flex flex-wrap items-center gap-4">
+        <Actions>
           <Button
             size="sm"
             disabled={busy || !understood}
@@ -160,19 +151,15 @@ const Offboarding = ({ view }: { view: ClientHostingView }) => {
           >
             Offboard it
           </Button>
-          {failure === null ? null : (
-            <p className="text-destructive text-sm" role="alert">
-              {failure}
-            </p>
-          )}
-        </div>
-      </div>
+          <Failure failure={failure} />
+        </Actions>
+      </FormStack>
     );
   }
   return (
-    <p className="border-t pt-4 text-sm">
+    <Text>
       {`Offboarded on ${formatTime(offboardedAt)} UTC: its resources are deleted, after their retention, from Platform's Offboarded page.`}
-    </p>
+    </Text>
   );
 };
 
@@ -210,23 +197,22 @@ const Discard = ({ view }: { view: ClientHostingView }) => {
     });
   };
   return (
-    <div className="flex flex-col gap-3 border-t pt-4">
-      <p className="text-sm">
+    <FormStack>
+      <Text>
         Added by mistake, or for a test? It was never placed and nothing of it
         exists anywhere: discarding it removes its record, and its id can be
         used again. The audit log keeps what was done.
-      </p>
+      </Text>
       <Field orientation="horizontal">
         <Checkbox
           checked={understood}
-          id="discard-understood"
-          onCheckedChange={setUnderstood}
+          onCheckedChange={(checked) => {
+            setUnderstood(checked === true);
+          }}
         />
-        <FieldLabel htmlFor="discard-understood">
-          Remove this organization for good
-        </FieldLabel>
+        <FieldLabel>Remove this organization for good</FieldLabel>
       </Field>
-      <div className="flex flex-wrap items-center gap-4">
+      <Actions>
         <Button
           size="sm"
           disabled={busy || !understood}
@@ -235,13 +221,9 @@ const Discard = ({ view }: { view: ClientHostingView }) => {
         >
           Discard it
         </Button>
-        {failure === null ? null : (
-          <p className="text-destructive text-sm" role="alert">
-            {failure}
-          </p>
-        )}
-      </div>
-    </div>
+        <Failure failure={failure} />
+      </Actions>
+    </FormStack>
   );
 };
 
@@ -289,17 +271,18 @@ export const ClientHosting = ({ view }: { view: ClientHostingView }) => {
     view.operation?.status !== "done";
   const mail = mailNotice(view);
   return (
-    <div className="flex flex-col gap-5">
+    <>
       <Facts
-        facts={[
-          ["Where it runs", hostingWords(view.hosting)],
-          [
-            view.placement === null ? "Destination" : "Placed",
-            view.placement === null
-              ? destinationWords(view)
-              : `Placed in ${view.placement.destinationId} by ${view.placement.placedBy} on ${formatTime(view.placement.placedAt)} UTC. It stays there: moving it is a migration.`,
-          ],
-          ...(mail === null ? [] : [["Mail", mail] as const]),
+        rows={[
+          { label: "Where it runs", value: hostingWords(view.hosting) },
+          {
+            label: view.placement === null ? "Destination" : "Placed",
+            value:
+              view.placement === null
+                ? destinationWords(view)
+                : `Placed in ${view.placement.destinationId} by ${view.placement.placedBy} on ${formatTime(view.placement.placedAt)} UTC. It stays there: moving it is a migration.`,
+          },
+          ...(mail === null ? [] : [{ label: "Mail", value: mail }]),
           ...(view.operation === null
             ? []
             : operationFacts(view.operation, view.run)),
@@ -311,22 +294,16 @@ export const ClientHosting = ({ view }: { view: ClientHostingView }) => {
       {view.placement === null ? null : <Offboarding view={view} />}
       {discardable(view) ? <Discard view={view} /> : null}
       {view.notStarted === null ? null : (
-        <p className="text-sm">{notStartedWords(view.notStarted)}</p>
+        <Text>{notStartedWords(view.notStarted)}</Text>
       )}
       {stopped ? (
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-center gap-4">
-            <Button disabled={busy} onClick={retry} size="sm" variant="outline">
-              Retry now
-            </Button>
-            {failure === null ? null : (
-              <p className="text-destructive text-sm" role="alert">
-                {failure}
-              </p>
-            )}
-          </div>
-        </div>
+        <Actions>
+          <Button disabled={busy} onClick={retry} size="sm" variant="outline">
+            Retry now
+          </Button>
+          <Failure failure={failure} />
+        </Actions>
       ) : null}
-    </div>
+    </>
   );
 };

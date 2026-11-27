@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   act,
   answeredAdmin,
+  answeredSummary,
   gridRow,
   lineOf,
   openAdmin,
@@ -68,6 +69,15 @@ const late: BillingAccount = {
   ],
 };
 
+/** Billing's figure labelled `label`: its value, then what it says under it. */
+const figureOf = (root: Element, label: string): string[] => {
+  const name = [...root.querySelectorAll('[aria-label="Its billing"] p')].find(
+    (element) => element.textContent === label
+  );
+  const figures = name?.parentElement?.nextElementSibling;
+  return [...(figures?.children ?? [])].map((part) => part.textContent ?? "");
+};
+
 /** Acme's Contract tab and its overview, with `billing`. */
 const opened = async (
   billing: Extract<ClientAdmin, { state: "answered" }>["billing"]
@@ -81,19 +91,22 @@ const opened = async (
     answers
   );
   const contractText = contract.main();
-  const billingPart = contract.container.querySelector("#contract-billing");
-  const invoices = contract.container.querySelector("#contract-invoices");
+  const billingPart = contract.container.querySelector(
+    'section[aria-labelledby="contract-billing"]'
+  );
+  const invoices = contract.container.querySelector(
+    'section[aria-labelledby="contract-invoices"]'
+  );
   const lines = Object.fromEntries(
-    [
-      "Customer in Stripe",
-      "How it pays",
-      "Open",
-      "Overdue",
-      "Last paid",
-      "Next invoice",
-    ].map((label) => [
+    ["Customer in Stripe", "How it pays"].map((label) => [
       label,
       billingPart === null ? undefined : lineOf(billingPart, label),
+    ])
+  );
+  const figures = Object.fromEntries(
+    ["Open", "Overdue", "Last paid", "Next invoice"].map((label) => [
+      label,
+      figureOf(contract.container, label),
     ])
   );
   const opens = [...contract.container.querySelectorAll("a")].some(
@@ -106,6 +119,7 @@ const opened = async (
   return {
     contract: contractText,
     lines,
+    figures,
     opens,
     invoices: invoices?.textContent ?? null,
     field: field === null ? null : field.value,
@@ -115,15 +129,17 @@ const opened = async (
 
 describe("an organization's billing, as Stripe's answer reads", () => {
   it("shows a linked company's customer, how it pays, what it paid last and its next invoice, all paid, and nothing that needs Grasp", async () => {
-    const { contract, lines, opens, invoices, overview } = await opened({
-      state: "read",
-      customerId,
-      account: paid,
-    });
+    const { contract, lines, figures, opens, invoices, overview } =
+      await opened({
+        state: "read",
+        customerId,
+        account: paid,
+      });
 
     expect({
       line: contract.includes("Everything billed is paid."),
       lines,
+      figures,
       opens,
       invoices: ["NK-0002", "NK-0001"].map((number) =>
         invoices?.includes(number)
@@ -134,12 +150,15 @@ describe("an organization's billing, as Stripe's answer reads", () => {
     }).toStrictEqual({
       line: true,
       lines: {
-        "Customer in Stripe": "Noordkade B.V.",
+        // The link says it opens a new tab, as Damsko's Link to another site does.
+        "Customer in Stripe": "Noordkade B.V. (opens in a new tab)",
         "How it pays": "Stripe charges it each time",
-        Open: "Nothing",
-        Overdue: "Nothing",
-        "Last paid": `€1,815.00 on ${formatDate(day(-9))}`,
-        "Next invoice": `€1,500.00 on ${formatDate(day(20))}, before tax`,
+      },
+      figures: {
+        Open: ["Nothing", "Nothing to pay"],
+        Overdue: ["Nothing", "None"],
+        "Last paid": ["€1,815.00", formatDate(day(-9))],
+        "Next invoice": ["€1,500.00", `On ${formatDate(day(20))}, before tax`],
       },
       opens: true,
       invoices: [true, true],
@@ -159,6 +178,12 @@ describe("an organization's billing, as Stripe's answer reads", () => {
           billing: { state: "read", customerId, account: late },
         }),
       ],
+      fetchClientSummaries: [
+        answeredSummary({
+          client: acme,
+          billing: { state: "read", customerId, account: late },
+        }),
+      ],
     });
     const inbox = [
       ...container.querySelectorAll<HTMLElement>('[role="tab"]'),
@@ -169,7 +194,7 @@ describe("an organization's billing, as Stripe's answer reads", () => {
     await settle();
     const overdue = [
       ...container.querySelectorAll('[data-slot="sidebar"] a'),
-    ].find((link) => link.textContent?.includes("is overdue"));
+    ].find((link) => link.textContent?.includes("Overdue invoices"));
 
     expect(overdue?.getAttribute("href")).toBe(
       `/organizations/${acme.id}/details?tab=contract`
@@ -177,7 +202,7 @@ describe("an organization's billing, as Stripe's answer reads", () => {
   });
 
   it("shows an overdue invoice in Billing and among what needs Grasp", async () => {
-    const { contract, lines, invoices, overview } = await opened({
+    const { contract, lines, figures, invoices, overview } = await opened({
       state: "read",
       customerId,
       account: late,
@@ -186,8 +211,8 @@ describe("an organization's billing, as Stripe's answer reads", () => {
     expect({
       line: contract.includes("1 invoice is overdue, €1,815.00 in all."),
       pays: lines["How it pays"],
-      open: lines.Open,
-      overdue: lines.Overdue,
+      open: figures.Open,
+      overdue: figures.Overdue,
       invoice: /NK-0003.*?Overdue/su.test(invoices ?? ""),
       need: overview.includes(
         `An invoice of €1,815.00 is overdue: it was due on ${formatDate(day(-10))}.`
@@ -195,8 +220,8 @@ describe("an organization's billing, as Stripe's answer reads", () => {
     }).toStrictEqual({
       line: true,
       pays: "It is sent each invoice, to pay within 14 days",
-      open: "€1,815.00, 1 invoice",
-      overdue: `€1,815.00, due since ${formatDate(day(-10))}`,
+      open: ["€1,815.00", "1 invoice"],
+      overdue: ["€1,815.00", `Due since ${formatDate(day(-10))}`],
       invoice: true,
       need: true,
     });

@@ -6,6 +6,7 @@ import type {
   ChatMessage,
   ChatOutput,
   ChatPartial,
+  ChatQueued,
   ChatReasoning,
   ChatToolCall,
   ChatToolEvent,
@@ -78,15 +79,18 @@ import { answeredOf } from "./answered.ts";
 import { ThreadPlan } from "./build-progress.tsx";
 import type { ThreadBuild } from "./build-progress.tsx";
 import { FileCards } from "./chat-files.tsx";
+import type { CardFile } from "./chat-files.tsx";
 import { answerStatusOf, stepFinished, stepStatusOf } from "./chat-states.ts";
 import { modelName } from "./composer.tsx";
 import { ConnectAiProvider } from "./connect-ai-provider.tsx";
 import { failureMessage, retryMends } from "./failure.ts";
 import { pendingCard } from "./make-card.tsx";
+import type { PendingQuestion } from "./pending-question.ts";
 import { recoveredSteps } from "./recovered.ts";
 import { SavedMemoryLine } from "./saved-memory.tsx";
 import { readingFileOf, signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
+import type { SourceName } from "./sources.tsx";
 import { shortTime, turnsOf, workedFor } from "./turns.ts";
 import { newLineRow, OpenAtNewLine } from "./unread.ts";
 
@@ -314,6 +318,8 @@ const stepsOf = (reply: Stepped): StepOf[] =>
 /** What the steps of a turn need to know of where the turn is. */
 interface StepContext {
   results: ReadonlyMap<string, Result>;
+  /** The connections' names, by ID, which name where a step read from. */
+  sourceNames: ReadonlyMap<string, SourceName>;
   recovered: ReadonlySet<string>;
   /** What the running code step has logged so far. */
   output: ChatOutput | null;
@@ -351,6 +357,7 @@ const useAnswerSteps = (): ((
             active: summary(step.call, false),
             status,
             input: JSON.stringify(step.call.input, null, 2),
+            from: "tool",
             result: result?.text,
           };
         }
@@ -366,7 +373,9 @@ const useAnswerSteps = (): ((
               : t`Running a code step`,
           status,
           input: step.code.code,
-          result: result?.text ?? logged,
+          from: "code",
+          result: result?.text,
+          ...(result === undefined && logged !== undefined ? { logged } : {}),
         };
       })
     );
@@ -555,6 +564,11 @@ interface AnswerTurn {
   partial: ChatPartial | null;
   /** Grasp works on this answer now. */
   live: boolean;
+  /**
+   * It answers a question asked again (`asksAgain`), which has no row of
+   * its own: it is where the thread goes, as a question's row is.
+   */
+  again?: true;
 }
 
 /** One row of the thread. */
@@ -566,8 +580,17 @@ type Row =
       message: Asked;
       asked: Answer["asked"];
     }
+  | { kind: "pending"; id: string; at?: undefined; question: PendingQuestion }
   | AnswerTurn
   | { kind: "after"; id: string; at?: undefined; children: ReactNode }
+  | {
+      kind: "queued";
+      id: string;
+      at?: undefined;
+      text: string;
+      /** Only on the newest: has Grasp take them all now. */
+      onSendNow: (() => void) | undefined;
+    }
   | { kind: "new"; id: string; at?: undefined }
   | {
       kind: "day";
@@ -694,19 +717,126 @@ const sameAgent = (
   return before === undefined || agentId === undefined || before === agentId;
 };
 
-/** The thread's rows: each question, then its replies as one answer per agent, the reply being written joined to it. */
+/**
+ * A question's row ID: the key the page sent it with, where it has one,
+ * so the question drawn as it was sent (`pendingRowId`) and core's copy
+ * are one row, never drawn twice nor moved. A key a question before it
+ * took already (`used`: core forgets a key after a day, and the page may
+ * send it again) gives way to its ID, so no two rows share one.
+ */
+const questionRowId = (
+  key: string | undefined,
+  id: number,
+  used: Set<string>
+): string => {
+  if (key === undefined || used.has(key)) {
+    return `q${id}`;
+  }
+  used.add(key);
+  return `q:${key}`;
+};
+
+/** The row ID of the question on its way: the one core's copy takes. */
+const pendingRowId = (question: PendingQuestion): string => `q:${question.key}`;
+
+/**
+ * An answer's row ID: after the question it answers, and how many answers
+ * came before it there; never its first reply's, so the row Grasp works in
+ * stays the same row once that reply is kept.
+ */
+const answerRowId = (question: string, answers: number): string =>
+  `${question}a${answers + 1}`;
+
+/**
+ * How many answer rows follow the last question in `rows`, and that
+ * question's row ID ("" before any question).
+ */
+const lastAsked = (rows: readonly Row[]): { id: string; answers: number } => {
+  const at = rows.findLastIndex(({ kind }) => kind === "question");
+  return {
+    id: rows[at]?.id ?? "",
+    answers: rows.slice(at + 1).filter(({ kind }) => kind === "answer").length,
+  };
+};
+
+/**
+ * Whether `message` asks again what was asked last, after it was stopped
+ * or failed (Try again, Ask again, or the same words sent again): the
+ * question it repeats is the last one, nothing after it was answered to
+ * the end, and it carries nothing of its own to show (files, a Build it).
+ * Until core marks a retry itself, the words say it. The one rule for a
+ * question core has and one on its way (`withLast`), so a retry never
+ * shows a second bubble, not even for a moment.
+ */
+const asksAgain = (
+  rows: readonly Row[],
+  message: Pick<Asked, "text" | "built"> & { files?: readonly unknown[] }
+): boolean => {
+  const at = rows.findLastIndex(({ kind }) => kind === "question");
+  const asked = rows[at];
+  return (
+    asked?.kind === "question" &&
+    asked.message.text === message.text &&
+    (message.files ?? []).length === 0 &&
+    message.built === undefined &&
+    rows
+      .slice(at + 1)
+      .every(
+        (row) =>
+          row.kind === "day" ||
+          row.kind === "new" ||
+          (row.kind === "answer" &&
+            ["cancelled", "failed"].includes(row.replies.at(-1)?.end ?? ""))
+      )
+  );
+};
+
+/**
+ * An answer's row: live for the one Grasp works on now, and marked when
+ * it answers a question asked again.
+ */
+const answerRow = (
+  id: string,
+  at: string | undefined,
+  replies: Answer[],
+  partial: ChatPartial | null,
+  again: boolean,
+  live = false
+): AnswerTurn => ({
+  kind: "answer",
+  id,
+  at,
+  replies,
+  partial,
+  live,
+  ...(again ? { again: true as const } : {}),
+});
+
+/**
+ * The thread's rows: each question, then its replies as one answer per
+ * agent, the reply being written joined to it. A question asked again
+ * after it was stopped or failed is drawn once, as the references draw a
+ * retry: its new answer follows the one that stopped, under it.
+ */
 const rowsOf = (
   messages: readonly ChatMessage[],
   partial: ChatPartial | null,
   live: boolean
 ): Row[] => {
   const rows: Row[] = [];
+  // Asked again: its answer starts a row of its own, never joined to the
+  // answer that stopped.
+  let again = false;
+  const keys = new Set<string>();
   for (const message of messages) {
-    if (message.role === "user") {
+    if (message.role === "user" && asksAgain(rows, message)) {
+      again = true;
+    } else if (message.role === "user") {
+      again = false;
       const before = rows.at(-1);
       rows.push({
         kind: "question",
-        id: `q${message.id}`,
+        id: questionRowId(message.key, message.id, keys),
         at: message.at,
         message,
         asked:
@@ -714,18 +844,23 @@ const rowsOf = (
       });
     } else if (message.role === "assistant") {
       const last = rows.at(-1);
-      if (last?.kind === "answer" && sameAgent(last, message.agentId)) {
+      const joins =
+        !again && last?.kind === "answer" && sameAgent(last, message.agentId);
+      if (joins) {
         last.replies.push(message);
       } else {
-        rows.push({
-          kind: "answer",
-          id: `a${message.id}`,
-          at: message.at,
-          replies: [message],
-          partial: null,
-          live: false,
-        });
+        const asked = lastAsked(rows);
+        rows.push(
+          answerRow(
+            answerRowId(asked.id, asked.answers),
+            message.at,
+            [message],
+            null,
+            again
+          )
+        );
       }
+      again = false;
     }
   }
   if (!live) {
@@ -733,18 +868,21 @@ const rowsOf = (
   }
   // Grasp works on the last question: its answer goes on, or begins.
   const last = rows.at(-1);
-  if (last?.kind === "answer" && sameAgent(last, partial?.agentId)) {
+  if (!again && last?.kind === "answer" && sameAgent(last, partial?.agentId)) {
     last.partial = partial;
     last.live = true;
   } else {
-    rows.push({
-      kind: "answer",
-      id: "answering",
-      at: last?.at,
-      replies: [],
-      partial,
-      live: true,
-    });
+    const asked = lastAsked(rows);
+    rows.push(
+      answerRow(
+        answerRowId(asked.id, asked.answers),
+        last?.at,
+        [],
+        partial,
+        again,
+        true
+      )
+    );
   }
   return rows;
 };
@@ -844,7 +982,7 @@ const Question = ({
   message,
   asked,
 }: {
-  message: Asked;
+  message: { text: string; files?: readonly CardFile[]; at: string };
   asked: Answer["asked"];
 }) => {
   const answered =
@@ -880,6 +1018,37 @@ const Question = ({
     </Message>
   );
 };
+
+/**
+ * A question sent while Grasp works that it hasn't taken yet, at the
+ * thread's end, as T3 Code and Claude Code list theirs: the person's own
+ * words in an outlined bubble, as it isn't asked yet, saying it is queued.
+ * On the newest, Send now (Claude Code's and T3 Code's) has Grasp take
+ * them all at once.
+ */
+const QueuedQuestion = ({
+  row: { text, onSendNow },
+}: {
+  row: Extract<Row, { kind: "queued" }>;
+}) => (
+  <Message align="end">
+    <MessageContent>
+      <Bubble align="end" variant="outline">
+        <BubbleContent>{text}</BubbleContent>
+      </Bubble>
+      <MessageFooter>
+        <Text color="muted" size="sm">
+          <Trans>Queued</Trans>
+        </Text>
+        {onSendNow === undefined ? null : (
+          <Button onClick={onSendNow} size="sm" variant="ghost">
+            <Trans>Send now</Trans>
+          </Button>
+        )}
+      </MessageFooter>
+    </MessageContent>
+  </Message>
+);
 
 /** Everything an answer is drawn from, beyond its own replies. */
 interface AnswerContext extends StepContext {
@@ -1088,6 +1257,7 @@ const AnswerBody = ({
         <AnswerSteps
           line={line}
           live={live}
+          sourceNames={context.sourceNames}
           steps={steps}
           workingLabel={working}
         />
@@ -1352,6 +1522,9 @@ const AnswerRow = ({
 /** Where the page passes no calls of the chat's code. */
 const noTools: readonly ChatToolEvent[] = [];
 
+/** Where nothing is queued. */
+const noQueued: readonly ChatQueued[] = [];
+
 /** Where the page passes no agents. */
 const noAgents: readonly ChatAgent[] = [];
 
@@ -1383,6 +1556,78 @@ export const answerAgentsOf = (
 /** The keys of the loading pairs: the same each time. */
 const loadingPairs = ["first", "second"] as const;
 
+/**
+ * Whether Grasp's live answer goes with the messages above: always, but
+ * while the question on its way is the one it answers.
+ */
+const answersAbove = (
+  running: boolean,
+  pending: PendingQuestion | undefined
+): boolean => running && (pending === undefined || pending.queues);
+
+/** What the thread shows after its messages, as a row, if anything. */
+const afterRow = (children: ReactNode): Row | undefined =>
+  children === undefined || children === null
+    ? undefined
+    : { kind: "after", id: "after", children };
+
+/**
+ * The thread's rows after its messages: the question on its way, as the
+ * last question, and the answer Grasp works on (`live`, from `partial`)
+ * after it, never under the answer before while core's copy of the
+ * question is on its way; then what is queued behind the answer, and the
+ * question on its way among them when it was sent while Grasp answered;
+ * then what the thread shows after (`after`).
+ */
+const withLast = (
+  rows: Row[],
+  pending: PendingQuestion | undefined,
+  live: { running: boolean; partial: ChatPartial | null },
+  queuedRows: Row[],
+  after: Row | undefined
+): Row[] => {
+  const ending = after === undefined ? [] : [after];
+  if (pending === undefined) {
+    return [...rows, ...queuedRows, ...ending];
+  }
+  if (pending.queues) {
+    const waiting: Row = {
+      kind: "queued",
+      id: "pending",
+      text: pending.text,
+      onSendNow: undefined,
+    };
+    return [...rows, ...queuedRows, waiting, ...ending];
+  }
+  // Asked again after it stopped: no second bubble, its answer under the
+  // one that stopped (`asksAgain`). Else under the question core's copy
+  // of it takes the place of, as one row.
+  const again = asksAgain(rows, pending);
+  const asked: Row[] = again
+    ? []
+    : [{ kind: "pending", id: pendingRowId(pending), question: pending }];
+  const last = lastAsked(rows);
+  const answerId = again
+    ? answerRowId(last.id, last.answers)
+    : answerRowId(pendingRowId(pending), 0);
+  const answering: Row[] =
+    live.running || again
+      ? [answerRow(answerId, undefined, [], live.partial, again, true)]
+      : [];
+  return [...rows, ...asked, ...answering, ...queuedRows, ...ending];
+};
+
+/** The question on its way as the person's bubble shows it. */
+const pendingMessage = ({ text, files, at }: PendingQuestion) => ({
+  text,
+  at,
+  files: files.map(({ id, file }) => ({
+    id,
+    name: file.name,
+    bytes: file.size,
+  })),
+});
+
 /** The chat's messages, and the response being written, oldest first. */
 export const ChatThread = ({
   agents = noAgents,
@@ -1392,6 +1637,8 @@ export const ChatThread = ({
   output,
   partial,
   running,
+  queued = noQueued,
+  onSendNow,
   checking = false,
   modelWait = null,
   tools = noTools,
@@ -1400,6 +1647,8 @@ export const ChatThread = ({
   build,
   newLineBefore,
   sources,
+  pending,
+  sourceNames,
   children,
 }: {
   /**
@@ -1418,6 +1667,10 @@ export const ChatThread = ({
   partial: ChatPartial | null;
   /** Whether the agent is working on the chat now. */
   running: boolean;
+  /** The questions sent meanwhile that it hasn't taken yet, oldest first. */
+  queued?: readonly ChatQueued[];
+  /** Has the agent take the queued questions at once, while it works. */
+  onSendNow?: () => void;
   /** Whether its turn checks the drafts it wrote now, past its answer. */
   checking?: boolean;
   /**
@@ -1451,6 +1704,10 @@ export const ChatThread = ({
    * folds what an answer drew on under it.
    */
   sources?: ReactNode;
+  /** The question on its way, drawn as the person's own until core's copy comes. */
+  pending?: PendingQuestion | undefined;
+  /** The connections' names, by ID, which name where a step read from. */
+  sourceNames: ReadonlyMap<string, SourceName>;
   /** Shown after the messages, in the thread: what is held, why it stopped. */
   children?: ReactNode;
 }) => {
@@ -1471,7 +1728,7 @@ export const ChatThread = ({
   const inBrain = useLocation({
     select: ({ pathname }) => pathname === "/brain" || pathname === "/brain/",
   });
-  const rows = rowsOf(messages, shown, running);
+  const rows = rowsOf(messages, shown, answersAbove(running, pending));
   const liveRow = rows.findLast(
     (row): row is AnswerTurn => row.kind === "answer" && row.live
   );
@@ -1550,6 +1807,7 @@ export const ChatThread = ({
     return {
       chatId,
       results,
+      sourceNames,
       recovered,
       output,
       running,
@@ -1574,12 +1832,20 @@ export const ChatThread = ({
         turn.id === lastAnswerRow?.id && !turn.live ? sources : undefined,
     };
   };
-  const lined = withNewLine(withDayLines(rows), newLineBefore);
   const logId = useId();
-  const items: Row[] =
-    children === undefined || children === null
-      ? lined
-      : [...lined, { kind: "after", id: "after", children }];
+  const waitingRows: Row[] = queued.map(({ id, text }, index) => ({
+    kind: "queued",
+    id: `queued:${id}`,
+    text,
+    onSendNow: running && index === queued.length - 1 ? onSendNow : undefined,
+  }));
+  const items = withLast(
+    withNewLine(withDayLines(rows), newLineBefore),
+    pending,
+    { running, partial: shown },
+    waitingRows,
+    afterRow(children)
+  );
   const column: { style?: LayoutStyle } = compact
     ? {}
     : { style: styles.column };
@@ -1600,14 +1866,27 @@ export const ChatThread = ({
                       <MessageScrollerItem
                         key={row.id}
                         messageId={row.id}
-                        scrollAnchor={row.kind === "question"}
+                        scrollAnchor={
+                          row.kind === "question" ||
+                          row.kind === "pending" ||
+                          (row.kind === "answer" && row.again === true)
+                        }
                         {...column}
                       >
                         {row.kind === "question" ? (
                           <Question asked={row.asked} message={row.message} />
                         ) : null}
+                        {row.kind === "pending" ? (
+                          <Question
+                            asked={undefined}
+                            message={pendingMessage(row.question)}
+                          />
+                        ) : null}
                         {row.kind === "answer" ? (
                           <AnswerRow context={contextOf(row)} turn={row} />
+                        ) : null}
+                        {row.kind === "queued" ? (
+                          <QueuedQuestion row={row} />
                         ) : null}
                         {row.kind === "after" ? row.children : null}
                         {row.kind === "new" ? <NewLine /> : null}

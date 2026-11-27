@@ -113,14 +113,20 @@ export const useIntegrationsSection = (
     title: t`Connectors`,
     icon: CableIcon,
     // Its name opens the overview: no Overview row of its own.
-    home: (look) => <Link {...look} to="/connectors" />,
+    home: (lead, title) => (
+      <Link to="/connectors">
+        {lead}
+        {title}
+      </Link>
+    ),
     homeCurrent: overview !== undefined && chosen === undefined,
     back: {
       label: t`Back`,
-      render: (look) => <WayOut {...look} outside={outside} />,
+      link: <WayOut outside={outside} />,
     },
     groups: [
       {
+        id: "kinds",
         label: t`Kinds of app`,
         rows: kinds.map((group) => {
           const count = counts.get(group);
@@ -128,9 +134,7 @@ export const useIntegrationsSection = (
             id: group,
             label: i18n._(groupLabel[group]),
             icon: kindIcons[group],
-            render: (look) => (
-              <Link {...look} search={{ group }} to="/connectors" />
-            ),
+            render: <Link search={{ group }} to="/connectors" />,
             current: chosen === group,
             ...(count === undefined ? {} : { end: formatNumber(count) }),
           };

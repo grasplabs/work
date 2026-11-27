@@ -1,12 +1,23 @@
-// Grasp's admin frame, composed as Grasp Work's (src/frame/ holds the
-// parts, as apps/web/src/frame holds the product's), filled with the
-// admin's places: Grasp's mark, the search and the fold; the Home | Inbox
-// switch, Home listing the admin's places, every organization and the
-// labs, the Inbox what needs Grasp; an organization's sections as a level
-// of the sidebar while one of its pages is open, as the product's Settings
-// is; the staff member at its foot. Readiness stands across the card's top
-// until set aside for the session, as the product's AI-key banner does.
+// Grasp's admin frame: Damsko's AppShell, filled with the admin's places.
+// Grasp's mark, the search and the fold; the Home | Inbox switch, Home
+// listing the admin's places, every organization and the labs, the Inbox
+// what needs Grasp; an organization's sections as a level of the sidebar
+// while one of its pages is open, as the product's Settings is; the staff
+// member at its foot. Readiness stands across the card's top until set
+// aside for the session, as the product's AI-key banner does.
 
+import { AppShell } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
+import {
+  AppShellNav,
+  AppShellNavEmpty,
+  AppShellProfile,
+  AppShellSwitch,
+} from "@grasp-os/ui/blocks/app-shell-01/app-shell-01-sidebar";
+import type {
+  AppShellNavGroup,
+  AppShellNavRow,
+  AppShellTab,
+} from "@grasp-os/ui/blocks/app-shell-01/app-shell-01-sidebar";
 import {
   Command,
   CommandEmpty,
@@ -20,11 +31,22 @@ import {
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
 import {
+  SidebarLevel,
+  SidebarLevelHeader,
+  SidebarLevels,
+  SidebarLevelTitle,
+  SidebarLevelTrigger,
   SidebarMenu,
+  SidebarMenuAction,
   SidebarMenuItem,
   SidebarMenuSkeleton,
   useSidebar,
 } from "@grasp-os/ui/components/sidebar";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@grasp-os/ui/components/tooltip";
 import {
   AudioWaveformIcon,
   BellIcon,
@@ -43,6 +65,7 @@ import {
   SunIcon,
   WrenchIcon,
 } from "@grasp-os/ui/lib/icons";
+import type { IconData } from "@grasp-os/ui/lib/icons";
 import { focusRing } from "@grasp-os/ui/lib/styles";
 import { radius } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
@@ -56,23 +79,14 @@ import {
   useRouter,
 } from "@tanstack/react-router";
 import { Suspense, useEffect, useState, useSyncExternalStore } from "react";
+import type { ReactNode } from "react";
 
-import type { ClientAdmin } from "../clients/admin.ts";
 import type { GridRow } from "../clients/grid.ts";
-import { FrameProfile } from "../frame/profile.tsx";
-import { FrameShell } from "../frame/shell.tsx";
-import { FrameSidebar } from "../frame/sidebar.tsx";
-import type {
-  RenderLink,
-  SidebarTab,
-  SidebarGroupEntry,
-  SidebarRow,
-  SidebarSection,
-} from "../frame/sidebar.tsx";
+import type { ClientSummary } from "../clients/summary.ts";
 import { PageLoading } from "./failure.tsx";
 import { GraspMark } from "./grasp-mark.ts";
-import { askedApps } from "./integrations-asked.ts";
-import { needsOf } from "./needs.ts";
+import { needCount, needsOf, summaryNeedsOf } from "./needs.ts";
+import type { OrgNeed } from "./needs.ts";
 import type { OrgRead } from "./org-reads.ts";
 import type { PlatformCounts } from "./platform.ts";
 import { ReadinessBanner } from "./readiness-parts.tsx";
@@ -81,11 +95,14 @@ import { sectionGroups, sectionTo, sectionWords } from "./sections.ts";
 import type { OrgSection } from "./sections.ts";
 import { useSettled } from "./settled.tsx";
 import type { Deferred } from "./settled.tsx";
-import { organizationOf, organizationsOf, unreadWords } from "./views.ts";
-import type { Organization } from "./views.ts";
+import { organizationOf } from "./views.ts";
 
-/** Where the sidebar keeps, in this browser, whether it is folded. */
-const sidebarKey = "grasp.admin.sidebar";
+/**
+ * Where the sidebar keeps, in this browser, whether it is folded and which
+ * of its groups are; drawn so before the page wakes (`sidebarStateScript`
+ * in the root's head).
+ */
+export const sidebarKey = "grasp.admin.sidebar";
 
 const styles = stylex.create({
   home: { display: "flex", borderRadius: radius.sm, color: "inherit" },
@@ -95,24 +112,72 @@ export interface Staff {
   name: string;
 }
 
-/** A link to one of an organization's sections, in a sidebar row's look. */
+/** A place with a navigation of its own (an organization), a level of the sidebar while one of its pages is open. */
+interface SidebarSection {
+  id: string;
+  clientId: string;
+  title: string;
+  /** Its own first page is the page shown. */
+  homeCurrent: boolean;
+  groups: readonly AppShellNavGroup[];
+}
+
+/** A link to one of an organization's sections, drawn as a sidebar row. */
 const sectionLink = (
   clientId: string,
   section: OrgSection,
   search?: { tab: "contract" }
-): RenderLink =>
-  function SectionLink(look) {
-    return (
-      <Link
-        {...look}
-        // The overview is only itself; a section holds the pages under it.
-        activeOptions={{ exact: section === "overview", includeSearch: false }}
-        params={{ clientId }}
-        search={search}
-        to={sectionTo[section]}
-      />
-    );
-  };
+) => (
+  <Link
+    // The overview is only itself; a section holds the pages under it.
+    activeOptions={{ exact: section === "overview", includeSearch: false }}
+    params={{ clientId }}
+    search={search}
+    to={sectionTo[section]}
+  />
+);
+
+/**
+ * An organization's mark at its row's end, while its core isn't read: a
+ * link to its Setup, which says more, said by its tooltip, folded or open.
+ */
+const SetupMark = ({
+  clientId,
+  icon,
+  label,
+}: {
+  clientId: string;
+  icon: IconData;
+  label: string;
+}) => (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <SidebarMenuAction aria-label={label} asChild>
+        <Link params={{ clientId }} to="/organizations/$clientId/setup">
+          <Icon icon={icon} />
+        </Link>
+      </SidebarMenuAction>
+    </TooltipTrigger>
+    <TooltipContent side="end">{label}</TooltipContent>
+  </Tooltip>
+);
+
+/** How many apps a company asked Grasp for, as its summary or, from an older core, its snapshot says. */
+const askedOf = (entry: ClientSummary): number => {
+  if (entry.state === "answered") {
+    return entry.summary.asked ?? 0;
+  }
+  return entry.state === "older" ? entry.admin.snapshot.asked.length : 0;
+};
+
+/** How many things need Grasp, as a row's count; none at 0. */
+const needsCount = (needs: number): Partial<AppShellNavRow> =>
+  needs > 0
+    ? {
+        count: needs,
+        countText: `${needs} ${needs === 1 ? "thing needs" : "things need"} Grasp`,
+      }
+    : {};
 
 /**
  * What an organization's row says at its end: how many things need Grasp
@@ -121,31 +186,25 @@ const sectionLink = (
  */
 const rowEnd = (
   client: GridRow,
-  organization: Organization | undefined,
+  entry: ClientSummary | undefined,
   needs: number
-): Partial<SidebarRow> => {
-  if (organization === undefined || organization.admin.state === "answered") {
-    return needs > 0
-      ? {
-          count: needs,
-          countLabel: `${needs} ${needs === 1 ? "thing needs" : "things need"} Grasp`,
-        }
-      : {};
+): Partial<AppShellNavRow> => {
+  if (
+    entry === undefined ||
+    entry.state === "answered" ||
+    entry.state === "older"
+  ) {
+    return needsCount(needs);
   }
-  const { admin } = organization;
-  const words = unreadWords(admin);
+  const words = entry.state === "not_deployed" ? "not deployed" : "unreachable";
   return {
-    mark: {
-      icon: admin.error === "not_deployed" ? ClockIcon : CircleAlertIcon,
-      label: `${client.name}: ${words}. Open its Setup`,
-      render: (look) => (
-        <Link
-          {...look}
-          params={{ clientId: client.id }}
-          to="/organizations/$clientId/setup"
-        />
-      ),
-    },
+    endAction: (
+      <SetupMark
+        clientId={client.id}
+        icon={entry.state === "not_deployed" ? ClockIcon : CircleAlertIcon}
+        label={`${client.name}: ${words}. Open its Setup`}
+      />
+    ),
   };
 };
 
@@ -156,13 +215,18 @@ const homeGroups = ({
   isAt,
 }: {
   clients: readonly GridRow[];
-  organizations: Map<string, Organization> | null;
+  organizations: Map<string, ClientSummary> | null;
   platform: PlatformCounts;
   isAt: (to: string, fuzzy?: boolean) => boolean;
-}): SidebarGroupEntry[] => {
-  const asked = askedApps(
-    [...(organizations?.values() ?? [])].map(({ admin }) => admin)
-  ).length;
+}): AppShellNavGroup[] => {
+  // Each company's apps asked for, added up: one asked for at two counts
+  // twice. A company that doesn't share it (it ended Grasp's staff
+  // access) isn't counted; one on a core from before the summary is
+  // counted from its snapshot.
+  const asked = [...(organizations?.values() ?? [])].reduce(
+    (sum, entry) => sum + askedOf(entry),
+    0
+  );
   const live = clients.filter(({ status }) => status !== "offboarded");
   return [
     {
@@ -172,19 +236,19 @@ const homeGroups = ({
           id: "home",
           label: "Home",
           icon: HouseIcon,
-          render: (look) => <Link {...look} to="/" />,
+          render: <Link to="/" />,
           current: isAt("/", false),
         },
         {
           id: "platform",
           label: "Platform",
           icon: ServerIcon,
-          render: (look) => <Link {...look} to="/platform" />,
+          render: <Link to="/platform" />,
           current: isAt("/platform"),
           ...(platform.needLook > 0
             ? {
                 count: platform.needLook,
-                countLabel: `${platform.needLook} ${platform.needLook === 1 ? "company needs" : "companies need"} a look`,
+                countText: `${platform.needLook} ${platform.needLook === 1 ? "company needs" : "companies need"} a look`,
               }
             : {}),
         },
@@ -192,12 +256,12 @@ const homeGroups = ({
           id: "asked",
           label: "Apps asked for",
           icon: WrenchIcon,
-          render: (look) => <Link {...look} to="/connectors" />,
+          render: <Link to="/connectors" />,
           current: isAt("/connectors"),
           ...(asked > 0
             ? {
                 count: asked,
-                countLabel: `${asked} ${asked === 1 ? "app" : "apps"} asked for`,
+                countText: `${asked} ${asked === 1 ? "app" : "apps"} asked for`,
               }
             : {}),
         },
@@ -210,22 +274,21 @@ const homeGroups = ({
       collapsible: true,
       count: live.length,
       rows: live.map((client) => {
-        const organization = organizations?.get(client.id);
+        const entry = organizations?.get(client.id);
         const needs =
-          organization === undefined ? 0 : needsOf(organization).length;
+          entry === undefined ? 0 : needCount(summaryNeedsOf(entry));
         return {
           id: client.id,
           label: client.name,
           icon: BuildingIcon,
-          render: (look) => (
+          render: (
             <Link
-              {...look}
               params={{ clientId: client.id }}
               to="/organizations/$clientId"
             />
           ),
           current: isAt(`/organizations/${client.id}`),
-          ...rowEnd(client, organization, needs),
+          ...rowEnd(client, entry, needs),
         };
       }),
     },
@@ -238,21 +301,21 @@ const homeGroups = ({
           id: "ask",
           label: "Ask Grasp",
           icon: SparklesIcon,
-          render: (look) => <Link {...look} to="/ask" />,
+          render: <Link to="/ask" />,
           current: isAt("/ask"),
         },
         {
           id: "lab",
           label: "Stephen Lab",
           icon: FlaskConicalIcon,
-          render: (look) => <Link {...look} to="/lab" />,
+          render: <Link to="/lab" />,
           current: isAt("/lab"),
         },
         {
           id: "voice",
           label: "Voice Lab",
           icon: AudioWaveformIcon,
-          render: (look) => <Link {...look} to="/voice-lab" />,
+          render: <Link to="/voice-lab" />,
           current: isAt("/voice-lab"),
         },
       ],
@@ -260,43 +323,49 @@ const homeGroups = ({
   ];
 };
 
-/** The Inbox view: what needs Grasp, by organization, the most pressing first. */
+/**
+ * The Inbox view: what needs Grasp, by organization, the most pressing
+ * first, from the summaries: a row for each kind, with how many of it.
+ */
 const inboxGroups = (
-  organizations: Map<string, Organization> | null
-): SidebarGroupEntry[] =>
-  [...(organizations?.values() ?? [])].flatMap((organization) => {
-    const needs = needsOf(organization);
-    const { id, name } = organization.admin.client;
+  organizations: Map<string, ClientSummary> | null
+): AppShellNavGroup[] =>
+  [...(organizations?.values() ?? [])].flatMap((entry) => {
+    const needs = summaryNeedsOf(entry);
+    const { id, name } = entry.client;
     return needs.length === 0
       ? []
       : [
           {
             id: `inbox-${id}`,
             label: name,
-            count: needs.length,
+            count: needCount(needs),
             rows: needs.map((need, at) => ({
               id: `${id}-${String(at)}`,
               label: need.text,
               quiet: true,
               render: sectionLink(id, need.section, need.search),
+              ...needsCount(need.count),
             })),
           },
         ];
   });
 
-/** An organization's sections, as a level of the sidebar while one of its pages is open. */
+/**
+ * An organization's sections, as a level of the sidebar while one of its
+ * pages is open, each with how many of `needs` wait there.
+ */
 const organizationSection = (
   client: GridRow,
-  organization: Organization | undefined,
+  needs: readonly OrgNeed[],
   pathname: string
 ): SidebarSection => {
   const waiting = new Map<OrgSection, number>();
-  for (const need of organization === undefined ? [] : needsOf(organization)) {
-    waiting.set(need.section, (waiting.get(need.section) ?? 0) + 1);
+  for (const need of needs) {
+    waiting.set(need.section, (waiting.get(need.section) ?? 0) + need.count);
   }
   const base = `/organizations/${client.id}`;
-  const row = (section: OrgSection): SidebarRow => {
-    const count = waiting.get(section) ?? 0;
+  const row = (section: OrgSection): AppShellNavRow => {
     const path = sectionTo[section].replace("/organizations/$clientId", base);
     return {
       id: section,
@@ -305,28 +374,14 @@ const organizationSection = (
       render: sectionLink(client.id, section),
       current:
         section === "overview" ? pathname === base : pathname.startsWith(path),
-      ...(count > 0
-        ? {
-            count,
-            countLabel: `${count} ${count === 1 ? "thing needs" : "things need"} Grasp`,
-          }
-        : {}),
+      ...needsCount(waiting.get(section) ?? 0),
     };
   };
   return {
     id: `organization:${client.id}`,
+    clientId: client.id,
     title: client.name,
-    icon: BuildingIcon,
-    home: (look) => (
-      <Link
-        {...look}
-        activeOptions={{ exact: true, includeSearch: false }}
-        params={{ clientId: client.id }}
-        to="/organizations/$clientId"
-      />
-    ),
     homeCurrent: pathname === base,
-    back: { label: "Back", render: (look) => <Link {...look} to="/" /> },
     groups: [
       { id: "overview", rows: [row("overview")] },
       ...sectionGroups.map((group) => ({
@@ -380,7 +435,7 @@ const onTheme = (listener: () => void) => {
 const StaffMenu = ({ staff }: { staff: Staff }) => {
   const theme = useSyncExternalStore(onTheme, readTheme, () => "system");
   return (
-    <FrameProfile
+    <AppShellProfile
       detail="Grasp staff"
       entries={[
         {
@@ -401,8 +456,8 @@ const StaffMenu = ({ staff }: { staff: Staff }) => {
           action: {
             label: "Sign out",
             icon: LogOutIcon,
-            danger: true,
-            render: <a aria-label="Sign out" href="/cdn-cgi/access/logout" />,
+            destructive: true,
+            href: "/cdn-cgi/access/logout",
           },
         },
       ]}
@@ -475,42 +530,102 @@ const Search = ({
   );
 };
 
+/**
+ * What waits in the open organization's sections: in full from its page's
+ * own read of its core once that is in, so the level follows the page as
+ * it is read again; from its summary until then.
+ */
+const levelNeeds = (
+  entry: ClientSummary | undefined,
+  openRead: OrgRead | undefined
+): OrgNeed[] => {
+  if (openRead !== undefined) {
+    return needsOf(organizationOf(openRead.admin));
+  }
+  return entry === undefined ? [] : summaryNeedsOf(entry);
+};
+
 type View = "home" | "inbox";
 
 /** The sidebar's two views: Home, and the Inbox of what needs Grasp, its count as the bell's dot. */
-const viewTabs = (waiting: number): SidebarTab[] => [
+const viewTabs = (waiting: number): AppShellTab[] => [
   { value: "home", label: "Home", icon: HouseIcon },
   {
     value: "inbox",
     label: "Inbox",
     icon: BellIcon,
     count: waiting,
-    countLabel: `${waiting} ${waiting === 1 ? "thing needs" : "things need"} Grasp`,
+    countText: `${waiting} ${waiting === 1 ? "thing needs" : "things need"} Grasp`,
   },
 ];
 
-/** The sidebar's view and whether the search is open: kept by the frame, so they stay as the organizations come in. */
+/** A place's level: Back and its name as one row, then its rows. */
+const SectionLevel = ({ section }: { section: SidebarSection }) => (
+  <SidebarLevel value={section.id}>
+    <SidebarLevelHeader>
+      <SidebarLevelTrigger asChild value="main">
+        <Link to="/" />
+      </SidebarLevelTrigger>
+      <SidebarLevelTitle asChild isActive={section.homeCurrent}>
+        <Link
+          activeOptions={{ exact: true, includeSearch: false }}
+          params={{ clientId: section.clientId }}
+          to="/organizations/$clientId"
+        >
+          <Icon icon={BuildingIcon} />
+          {section.title}
+        </Link>
+      </SidebarLevelTitle>
+    </SidebarLevelHeader>
+    <AppShellNav aria-label={section.title} groups={section.groups} />
+  </SidebarLevel>
+);
+
+/** The sidebar's view: kept by the frame, so it stays as the organizations come in. */
 interface SidebarState {
   view: View;
   setView: (view: View) => void;
-  searching: boolean;
-  setSearching: (searching: boolean) => void;
 }
 
 interface SidebarProps {
   clients: readonly GridRow[];
-  admins: readonly ClientAdmin[] | null;
+  summaries: readonly ClientSummary[] | null;
   platform: PlatformCounts;
   staff: Staff;
   state: SidebarState;
 }
 
+/** The main list, and while one of its pages is open an organization's level in its place. */
+const Levels = ({
+  section,
+  children,
+}: {
+  section: SidebarSection | undefined;
+  children: ReactNode;
+}) => {
+  // The last level stays (unseen) after staff leave it, so the main list
+  // comes back in from the way they went.
+  const [last, setLast] = useState(section);
+  if (section !== undefined && section !== last) {
+    setLast(section);
+  }
+  const shown = section ?? last;
+  return (
+    <SidebarLevels value={section?.id ?? "main"}>
+      <SidebarLevel value="main">{children}</SidebarLevel>
+      {shown === undefined ? null : (
+        <SectionLevel key={shown.id} section={shown} />
+      )}
+    </SidebarLevels>
+  );
+};
+
 const SidebarBody = ({
   clients,
-  admins,
+  summaries,
   platform,
   staff,
-  state: { view, setView, searching, setSearching },
+  state: { view, setView },
   openRead,
 }: SidebarProps & { openRead: OrgRead | undefined }) => {
   const router = useRouter();
@@ -525,80 +640,56 @@ const SidebarBody = ({
     [router, setOpenMobile]
   );
   const organizations =
-    admins === null
+    summaries === null
       ? null
-      : new Map(
-          organizationsOf([...admins]).map((organization) => [
-            organization.admin.client.id,
-            organization,
-          ])
-        );
+      : new Map(summaries.map((entry) => [entry.client.id, entry]));
   const isAt = (to: string, fuzzy = true) =>
     matchRoute({ to, fuzzy }) !== false;
   const inbox = inboxGroups(organizations);
-  const waiting = inbox.reduce((sum, group) => sum + group.rows.length, 0);
+  const waiting = inbox.reduce((sum, group) => sum + (group.count ?? 0), 0);
   const open = useMatch({
     from: "/organizations/$clientId",
     shouldThrow: false,
   })?.loaderData;
   const shown = open?.state === "open" ? open.client : undefined;
+  const groups =
+    view === "inbox"
+      ? inbox
+      : homeGroups({ clients, organizations, platform, isAt });
   return (
     <>
-      <FrameSidebar
-        aria-label="Sidebar"
-        closeLabel="Close"
-        foldLabel="Show or hide the sidebar"
-        groups={
-          view === "inbox"
-            ? inbox
-            : homeGroups({ clients, organizations, platform, isAt })
+      <Levels
+        section={
+          shown === undefined
+            ? undefined
+            : organizationSection(
+                shown,
+                levelNeeds(organizations?.get(shown.id), openRead),
+                pathname
+              )
         }
-        mark={
-          <Link
-            onClick={() => {
-              setView("home");
-            }}
-            to="/"
-            {...stylex.props(styles.home, focusRing)}
-          >
-            <Icon icon={GraspMark} label="Grasp admin" />
-          </Link>
-        }
-        navLabel={view === "inbox" ? "Inbox" : "Main"}
-        profile={<StaffMenu staff={staff} />}
-        search={{
-          label: "Search",
-          shortcut: "⌘K",
-          onSearch: () => {
-            setSearching(true);
-          },
-        }}
-        views={{
-          tabs: viewTabs(waiting),
-          tab: view,
-          onTabChange: (next) => {
+      >
+        <AppShellSwitch
+          aria-label="Views"
+          onValueChange={(next) => {
             if (next === "home" || next === "inbox") {
               setView(next);
             }
-          },
-          label: "Views",
-        }}
-        {...(view === "inbox" && admins !== null
-          ? { empty: "Nothing needs Grasp." }
-          : {})}
-        {...(shown === undefined
-          ? {}
-          : {
-              section: organizationSection(
-                shown,
-                openRead === undefined
-                  ? organizations?.get(shown.id)
-                  : organizationOf(openRead.admin),
-                pathname
-              ),
-            })}
-      />
-      <Search clients={clients} onOpenChange={setSearching} open={searching} />
+          }}
+          tabs={viewTabs(waiting)}
+          value={view}
+        >
+          <AppShellNav
+            aria-label={view === "inbox" ? "Inbox" : "Main"}
+            groups={groups}
+          >
+            {view === "inbox" && summaries !== null && groups.length === 0 ? (
+              <AppShellNavEmpty>Nothing needs Grasp.</AppShellNavEmpty>
+            ) : null}
+          </AppShellNav>
+        </AppShellSwitch>
+      </Levels>
+      <StaffMenu staff={staff} />
     </>
   );
 };
@@ -614,7 +705,7 @@ const SettledOpen = ({
 /**
  * The sidebar, and while an organization's page is open, its level drawn
  * from that page's own read of its core (`read`), so what waits where
- * follows the page as it is read again; from the frame's reads until it
+ * follows the page as it is read again; from its summary until it
  * is in.
  */
 const AdminSidebar = (props: SidebarProps) => {
@@ -634,15 +725,15 @@ const AdminSidebar = (props: SidebarProps) => {
 };
 
 const SettledSidebar = ({
-  admins,
+  summaries,
   ...rest
 }: {
   clients: readonly GridRow[];
-  admins: Deferred<ClientAdmin[] | null>;
+  summaries: Deferred<ClientSummary[] | null>;
   platform: PlatformCounts;
   staff: Staff;
   state: SidebarState;
-}) => <AdminSidebar {...rest} admins={useSettled(admins)} />;
+}) => <AdminSidebar {...rest} summaries={useSettled(summaries)} />;
 
 // Readiness set aside for this session: a standing item staff know of
 // needn't stand over every page, as the product's AI-key banner across
@@ -685,66 +776,67 @@ const ReadinessAcross = ({
 /** The admin's frame around its pages. */
 export const AdminFrame = ({
   clients,
-  admins,
+  summaries,
   platform,
   staff,
   readiness,
 }: {
   clients: readonly GridRow[];
-  admins: Deferred<ClientAdmin[] | null>;
+  summaries: Deferred<ClientSummary[] | null>;
   platform: PlatformCounts;
   staff: Staff;
   readiness: Deferred<Readiness | null>;
 }) => {
   const [view, setView] = useState<View>("home");
   const [searching, setSearching] = useState(false);
-  const state = { view, setView, searching, setSearching };
-  // ⌘K opens the search, wherever focus is.
-  useEffect(() => {
-    const key = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === "k") {
-        event.preventDefault();
-        setSearching(true);
-      }
-    };
-    window.addEventListener("keydown", key);
-    return () => {
-      window.removeEventListener("keydown", key);
-    };
-  }, []);
-
+  const state = { view, setView };
   return (
-    <FrameShell
+    <AppShell
       banner={
         <Suspense fallback={null}>
           <ReadinessAcross readiness={readiness} />
         </Suspense>
       }
+      mark={
+        <Link
+          onClick={() => {
+            setView("home");
+          }}
+          to="/"
+          {...stylex.props(styles.home, focusRing)}
+        >
+          <Icon icon={GraspMark} label="Grasp admin" />
+        </Link>
+      }
+      onSearch={() => {
+        setSearching(true);
+      }}
       sidebar={
         <Suspense
           fallback={
             <AdminSidebar
-              admins={null}
               clients={clients}
               platform={platform}
               staff={staff}
               state={state}
+              summaries={null}
             />
           }
         >
           <SettledSidebar
-            admins={admins}
             clients={clients}
             platform={platform}
             staff={staff}
             state={state}
+            summaries={summaries}
           />
         </Suspense>
       }
       storageKey={sidebarKey}
     >
       <Outlet />
-    </FrameShell>
+      <Search clients={clients} onOpenChange={setSearching} open={searching} />
+    </AppShell>
   );
 };
 
@@ -753,12 +845,14 @@ const loadingEntries = 6;
 
 /** The frame while the admin's own records come, before the first page shows. */
 export const FrameLoading = () => (
-  <FrameShell
+  <AppShell
+    mark={<Icon icon={GraspMark} label="Grasp admin" />}
+    onSearch={() => {
+      // Nothing to search while the admin's records come.
+    }}
     sidebar={
-      <FrameSidebar
-        aria-label="Sidebar"
-        closeLabel="Close"
-        foldLabel="Show or hide the sidebar"
+      <AppShellNav
+        aria-label="Main"
         groups={[
           {
             id: "loading",
@@ -774,19 +868,10 @@ export const FrameLoading = () => (
             ),
           },
         ]}
-        mark={<Icon icon={GraspMark} label="Grasp admin" />}
-        navLabel="Main"
-        search={{
-          label: "Search",
-          shortcut: "⌘K",
-          onSearch: () => {
-            // Nothing to search while the admin's records come.
-          },
-        }}
       />
     }
     storageKey={sidebarKey}
   >
     <PageLoading />
-  </FrameShell>
+  </AppShell>
 );

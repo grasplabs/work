@@ -1,9 +1,9 @@
+import { AppShellPage } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
 import { Container } from "@grasp-os/ui/components/container";
 import { PageHeader } from "@grasp-os/ui/components/page-header";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, Outlet, useLocation } from "@tanstack/react-router";
 
-import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { sectionsFor } from "../settings/sections.ts";
 
@@ -43,7 +43,7 @@ const SettingsLayout = () => {
             : [{ label: t`Settings` }, { label: i18n._(current.label) }]
         }
       />
-      <Page>
+      <AppShellPage>
         {current?.wide === true ? (
           <>
             {header}
@@ -55,7 +55,7 @@ const SettingsLayout = () => {
             <Outlet />
           </Container>
         )}
-      </Page>
+      </AppShellPage>
     </>
   );
 };

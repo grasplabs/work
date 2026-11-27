@@ -3,8 +3,9 @@ import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
-import { withheldResult } from "../src/agent.ts";
+import { brainResults, withheldResult } from "../src/agent.ts";
 import { addSource, forgetAs, rememberAs } from "../src/brain-next.ts";
 import { turnRecallMethod } from "../src/brain-search.ts";
 import { newTeam } from "./admin-teams.ts";
@@ -229,7 +230,7 @@ describe("a chat's brain", setUpTime, () => {
 
     /** Each request's own recall part, if it carries one. */
     const recalled = provider.requests.map(({ body }) =>
-      JSON.stringify(body).includes("[Recall ")
+      JSON.stringify(body).includes("<recall ")
     );
     const recalls = await vi.waitFor(
       async () => {
@@ -335,6 +336,53 @@ const searchEventOf = async (
 };
 
 describe("the model's search of the brain", setUpTime, () => {
+  it("hands over only data, the recall before the question and the search alike, and says how to read it once, in the instructions of every request", async () => {
+    const person = await signedInWithRole(idp, "user");
+    const depot = word();
+    await searchedBrainOf(person.userId, depot);
+    const { stub, chat, provider, ask } = await chatOf(
+      person.userId,
+      toolStep("searchBrain", { question: `depot ${depot}` }),
+      says("Seven.")
+    );
+
+    await ask(`When does depot ${depot} open?`);
+
+    const results = [
+      ...(await toolResults(stub, chat.id, { recalls: true })),
+      ...(await toolResults(stub, chat.id)),
+    ];
+    const handed = results.map(({ text }) =>
+      z.record(z.string(), z.unknown()).parse(returnedOf(text))
+    );
+    expect({
+      tools: results.map(({ tool }) => tool),
+      found: handed.map(({ evidence, memories }) => [
+        Array.isArray(evidence) && evidence.length > 0,
+        Array.isArray(memories) && memories.length > 0,
+      ]),
+      // Each field is one the instructions name: no prose rides along,
+      // for the person to read in the step and the model to pay for again.
+      unexplained: handed.map((fields) =>
+        Object.keys(fields).filter(
+          (key) => !brainResults.includes(`\`${key}\``)
+        )
+      ),
+      // Once in each request: the recall's, then the search's.
+      told: provider.requests.map(
+        ({ body }) => JSON.stringify(body).split(brainResults).length - 1
+      ),
+    }).toStrictEqual({
+      tools: ["searchBrain", "searchBrain"],
+      found: [
+        [true, true],
+        [true, true],
+      ],
+      unexplained: [[], []],
+      told: [1, 1],
+    });
+  });
+
   it("searches the whole brain in one call: an old memory of the person's own the recall before the question didn't hand over, their document and what everyone may read, and marks the chat", async () => {
     const person = await signedInWithRole(idp, "user");
     const depot = word();

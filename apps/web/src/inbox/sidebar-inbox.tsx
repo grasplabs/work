@@ -1,4 +1,8 @@
 import type { Identity } from "@grasp-os/shared/rpc";
+import type {
+  AppShellNavGroup,
+  AppShellNavRow,
+} from "@grasp-os/ui/blocks/app-shell-01/app-shell-01-sidebar";
 import { BellIcon } from "@grasp-os/ui/lib/icons";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -7,7 +11,6 @@ import { Link, useLocation } from "@tanstack/react-router";
 import type { CoreConnection } from "../core-connection.ts";
 import { formatAge } from "../format.ts";
 import { useFrameRead } from "../frame/frame-read.ts";
-import type { SidebarGroupEntry, SidebarRow } from "../frame/sidebar.tsx";
 import { kindMark } from "./inbox-kind.tsx";
 import { inboxItems, unread } from "./items.ts";
 import type { InboxItem } from "./items.ts";
@@ -122,7 +125,7 @@ const byAge = (a: InboxItem, b: InboxItem): number => {
  */
 export const useInboxGroups = (
   items: readonly InboxItem[] | undefined
-): SidebarGroupEntry[] => {
+): AppShellNavGroup[] => {
   const { t } = useLingui();
   const { pathname, search } = useLocation();
   const waitedLabel = (duration: string): string => t`Waiting for ${duration}`;
@@ -133,19 +136,19 @@ export const useInboxGroups = (
   const onInbox = pathname === "/inbox";
   const asked: { item?: unknown } = search;
   const openItem = onInbox ? asked.item : undefined;
-  const all: SidebarRow = {
+  const all: AppShellNavRow = {
     id: "view-all",
     label: t({ message: "All", context: "inbox filter, short" }),
     icon: BellIcon,
     count: counted.length,
-    countLabel: waitingLabel(counted.length),
-    render: (look) => <Link {...look} to="/inbox" />,
+    countText: waitingLabel(counted.length),
+    render: <Link to="/inbox" />,
     current: onInbox && openItem === undefined,
   };
 
   const now = new Date();
   const longest = counted.toSorted(byAge).slice(0, longestShown);
-  const longestRows: SidebarRow[] = longest.map((item) => {
+  const longestRows: AppShellNavRow[] = longest.map((item) => {
     const age = item.date === "" ? undefined : formatAge(item.date, now);
     return {
       id: item.id,
@@ -153,10 +156,8 @@ export const useInboxGroups = (
       icon: kindMark[item.kind],
       ...(age === undefined
         ? {}
-        : { end: age.short, endLabel: waitedLabel(age.long) }),
-      render: (look) => (
-        <Link {...look} search={{ item: item.id }} to="/inbox" />
-      ),
+        : { end: age.short, endText: waitedLabel(age.long) }),
+      render: <Link search={{ item: item.id }} to="/inbox" />,
       current: openItem === item.id,
     };
   });

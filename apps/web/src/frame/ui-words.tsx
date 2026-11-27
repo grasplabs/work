@@ -81,6 +81,21 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
     alertDialog: {
       cancel: t({ message: "Cancel", context: "leave a question unanswered" }),
     },
+    appShell: {
+      close: t({ message: "Close", context: "close a dialog or panel" }),
+      loading: t`Loading…`,
+      more: (name) => t`More for ${name}`,
+      pagePanel: t({ message: "Details", context: "a page's side panel" }),
+      rename: t`Rename`,
+      renameHint: t`Double-click or press F2 to rename`,
+      renameRow: (name) => t`Rename ${name}`,
+      resize: t`Resize the panel`,
+      search: t`Search chats`,
+      togglePanel: t`Show or hide the panel`,
+      unread: t`Unread`,
+      // A row's Working mark: an agent answers there now.
+      working: t`Answering`,
+    },
     attachment: {
       remove: (name) => t`Remove ${name}`,
     },
@@ -705,6 +720,7 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       views: t({ message: "Views", context: "a side panel's views" }),
     },
     sidebar: {
+      back: t`Back`,
       main: t`Main`,
       name: t`Sidebar`,
       toggle: t`Show or hide the sidebar`,

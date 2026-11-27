@@ -437,12 +437,9 @@ const withoutDomAtLoad: Plugin = {
 
 /**
  * The kit's files that opt a component out of the React Compiler, each for
- * a library the compiler lists as incompatible (AGENTS.md): RecordGrid,
- * for TanStack Virtual's `useVirtualizer`.
+ * a library the compiler lists as incompatible (AGENTS.md). None does.
  */
-const kitOptOuts: ReadonlySet<string> = new Set([
-  "src/components/record-grid.tsx",
-]);
+const kitOptOuts: ReadonlySet<string> = new Set<string>();
 
 /**
  * Compiles the kit's own sources with oxc and its React Compiler, the same

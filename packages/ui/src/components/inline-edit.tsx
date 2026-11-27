@@ -28,6 +28,7 @@ import {
   font,
   media,
   radius,
+  size,
   space,
 } from "../lib/tokens.stylex";
 import { announce } from "../lib/utils";
@@ -81,6 +82,7 @@ const styles = stylex.create({
   // The read view: the words where they stand, as a button with no look of one but a quiet fill
   // under a pointer, so it shows it can be changed.
   text: {
+    position: "relative",
     display: "block",
     minWidth: 0,
     margin: 0,
@@ -106,6 +108,15 @@ const styles = stylex.create({
     transitionProperty: "background-color",
     transitionDuration: duration.hover,
     transitionTimingFunction: duration.ease,
+  },
+  // A finger's height on a touch screen, up and down round its line, the look unchanged.
+  target: {
+    position: "absolute",
+    insetInline: 0,
+    insetBlock: {
+      default: 0,
+      [media.pointerCoarse]: `min(0px, calc((100% - ${size.tapTarget}) / 2))`,
+    },
   },
   // The field and, under it, what it says while it saves or why it did not.
   editor: {
@@ -313,6 +324,7 @@ export const InlineEdit = ({
             }}
             {...stylex.props(styles.text, focusRing)}
           >
+            <span aria-hidden="true" {...stylex.props(styles.target)} />
             {children ?? value}
           </button>
           <span id={hint} {...stylex.props(visuallyHidden)}>

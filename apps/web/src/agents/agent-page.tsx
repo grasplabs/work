@@ -9,6 +9,7 @@ import type { InstructionFileText } from "@grasp-os/shared/instruction-files";
 import type { Member } from "@grasp-os/shared/members";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import type { StephenWeek } from "@grasp-os/shared/stephen-requests";
+import { AppShellPage } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -57,7 +58,6 @@ import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { pageText } from "../frame/page-text.ts";
-import { Page } from "../frame/page.tsx";
 import { InstructionFileEditor } from "../settings/instruction-file.tsx";
 import {
   AudienceControl,
@@ -668,7 +668,7 @@ export const AgentPage = ({
   const shownTab =
     own && (tab === "access" || tab === "schedule") ? "overview" : tab;
   return (
-    <Page>
+    <AppShellPage>
       <div {...stylex.props(pageText.text)}>
         <Container size="sm">
           {shownTab === "overview" ? null : (
@@ -818,6 +818,6 @@ export const AgentPage = ({
           </div>
         </Container>
       </div>
-    </Page>
+    </AppShellPage>
   );
 };

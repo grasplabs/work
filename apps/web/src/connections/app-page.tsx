@@ -127,10 +127,11 @@ export const IntegrationAppPage = ({
       return;
     }
     const allowed = allowedOf(changeable);
-    const offered = new Set(
-      tools?.state === "ready" ? tools.data.map(({ name }) => name) : []
+    const next = withChoices(
+      allowed,
+      changes,
+      tools?.state === "ready" ? tools.data : []
     );
-    const next = withChoices(allowed, changes, offered);
     if (
       JSON.stringify(toolRules(next)) === JSON.stringify(toolRules(allowed))
     ) {

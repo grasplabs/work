@@ -1,3 +1,4 @@
+import { useRouteContext } from "@tanstack/react-router";
 import { useSyncExternalStore } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
@@ -8,7 +9,12 @@ import type { ChatView } from "./follow-chat.ts";
 // One watch per chat per tab, whoever shows it: the chat page and the chat
 // dock on every other page read the same chat from the same watch
 // (`followChat`), which starts with the first to show it and stops with
-// the last.
+// the last. The last view of a chat nobody shows any more is kept for the
+// tab, the newest few, by person: shown again at once when the chat is,
+// while its watch starts again, whose first update replaces it whole
+// (the chat's messages as core has them now, a rating or an erased
+// result's stand-in too). Forgotten with the person's other chats when
+// they sign out (active-chat.ts).
 
 /** A chat as the tab follows it, and why following it stopped, if it did. */
 export interface FollowedChat {
@@ -27,9 +33,51 @@ interface Watch {
   listeners: Set<() => void>;
   /** Stops following it; set once following has started. */
   stop?: () => void;
+  /** Whether its view is a kept one, which the first update replaces. */
+  kept: boolean;
 }
 
 const watches = new Map<string, Watch>();
+
+/** How many chats' last views the tab keeps. */
+export const keptViews = 20;
+
+/**
+ * The last view of each chat nobody shows now, by person and chat, the
+ * newest last: as it is shown again, stale (`ChatView.stale`), with no
+ * word of where the person had read to, which only core may say.
+ */
+const kept = new Map<string, FollowedChat>();
+
+const keptKey = (userId: string, chatId: string): string =>
+  JSON.stringify([userId, chatId]);
+
+/** Keeps `view` as the last of its chat, the oldest kept let go past the most. */
+const keep = (key: string, view: ChatView): void => {
+  kept.delete(key);
+  kept.set(key, {
+    view: { ...view, seenUpTo: undefined, stale: true },
+    failure: undefined,
+  });
+  for (const oldest of kept.keys()) {
+    if (kept.size <= keptViews) {
+      break;
+    }
+    kept.delete(oldest);
+  }
+};
+
+/**
+ * Counts each time the kept views were forgotten: a watch shown before
+ * keeps nothing as it stops after.
+ */
+let forgotten = 0;
+
+/** Forgets every chat's kept view: the person signed out. */
+export const forgetKeptViews = (): void => {
+  kept.clear();
+  forgotten += 1;
+};
 
 const notStarted: FollowedChat = { view: emptyView, failure: undefined };
 
@@ -37,6 +85,20 @@ const changed = (watch: Watch, state: FollowedChat): void => {
   watch.state = state;
   for (const listener of watch.listeners) {
     listener();
+  }
+};
+
+/**
+ * The person read chat `chatId` up to message `id` (`markRead`, from any
+ * view of it): the tab's watch of it says so from now on, so another view
+ * of it opened after (the dock after the page) draws no New line over what
+ * was read meanwhile.
+ */
+export const readTo = (chatId: string, id: number): void => {
+  const watch = watches.get(chatId);
+  const { view } = watch?.state ?? notStarted;
+  if (watch !== undefined && view.loaded && (view.seenUpTo ?? 0) < id) {
+    changed(watch, { ...watch.state, view: { ...view, seenUpTo: id } });
   }
 };
 
@@ -50,30 +112,48 @@ const subscribers = new WeakMap<
   Map<string, (listener: () => void) => () => void>
 >();
 
-/** Shows `chatId` to `listener`, starting its watch if nobody else shows it. */
+/**
+ * Shows `chatId` to `listener`, starting its watch if nobody else shows it:
+ * from its kept view, if the tab has one of `userId`'s.
+ */
 const subscribe = (
   core: CoreConnection,
+  userId: string,
   chatId: string,
   listener: () => void
 ): (() => void) => {
+  const key = keptKey(userId, chatId);
+  const since = forgotten;
   let watch = watches.get(chatId);
   if (watch === undefined) {
+    const last = kept.get(key);
     const started: Watch = {
-      state: notStarted,
+      state: last ?? notStarted,
       listeners: new Set(),
+      kept: last !== undefined,
     };
     watches.set(chatId, started);
     started.stop = followChat(
       core,
       chatId,
       (update) => {
+        // The first update holds the whole chat: it replaces a kept view.
+        const from = started.kept ? emptyView : started.state.view;
+        started.kept = false;
         changed(started, {
           ...started.state,
-          view: applyUpdate(started.state.view, update),
+          view: applyUpdate(from, update),
         });
       },
       (failure, gone) => {
         changed(started, { ...started.state, failure, gone });
+      },
+      // Behind until the watch answers again (`applyUpdate` clears it).
+      () => {
+        changed(started, {
+          ...started.state,
+          view: { ...started.state.view, resuming: true },
+        });
       }
     );
     watch = started;
@@ -88,7 +168,11 @@ const subscribe = (
       if (followed.listeners.size === 0 && watches.get(chatId) === followed) {
         followed.stop?.();
         watches.delete(chatId);
-        subscribers.get(core)?.delete(chatId);
+        subscribers.get(core)?.delete(key);
+        const { view, failure } = followed.state;
+        if (view.loaded && failure === undefined && since === forgotten) {
+          keep(key, view);
+        }
       }
     }, 0);
   };
@@ -96,16 +180,18 @@ const subscribe = (
 
 const subscriberFor = (
   core: CoreConnection,
+  userId: string,
   chatId: string
 ): ((listener: () => void) => () => void) => {
   const ofCore =
     subscribers.get(core) ??
     new Map<string, (listener: () => void) => () => void>();
   subscribers.set(core, ofCore);
-  let subscriber = ofCore.get(chatId);
+  const key = keptKey(userId, chatId);
+  let subscriber = ofCore.get(key);
   if (subscriber === undefined) {
-    subscriber = (listener) => subscribe(core, chatId, listener);
-    ofCore.set(chatId, subscriber);
+    subscriber = (listener) => subscribe(core, userId, chatId, listener);
+    ofCore.set(key, subscriber);
   }
   return subscriber;
 };
@@ -115,14 +201,23 @@ const followNothing = (): (() => void) => () => {
   // Nothing was followed, so there is nothing to stop.
 };
 
-/** `chatId` as the tab follows it, as it streams; nothing without one. */
+/**
+ * `chatId` as the tab follows it, as it streams, from its kept view while
+ * its watch starts again; nothing without one.
+ */
 export const useFollowedChat = (chatId: string | undefined): FollowedChat => {
   const core = useCore();
+  // Whose views are kept: the signed-in person's, under the shell.
+  const { identity } = useRouteContext({ strict: false });
   return useSyncExternalStore(
-    chatId === undefined ? followNothing : subscriberFor(core, chatId),
+    chatId === undefined
+      ? followNothing
+      : subscriberFor(core, identity?.userId ?? "", chatId),
     () =>
       chatId === undefined
         ? notStarted
-        : (watches.get(chatId)?.state ?? notStarted)
+        : (watches.get(chatId)?.state ??
+          kept.get(keptKey(identity?.userId ?? "", chatId)) ??
+          notStarted)
   );
 };

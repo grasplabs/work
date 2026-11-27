@@ -31,7 +31,6 @@
   },
   "devDependencies": {
     "@babel/core": "catalog:",
-    "@grasp-os/app-kit": "workspace:*",
     "@lingui/babel-plugin-lingui-macro": "catalog:",
     "@lingui/cli": "catalog:",
     "@lingui/conf": "catalog:",

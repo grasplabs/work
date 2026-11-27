@@ -285,6 +285,43 @@ describe("an app's panel", () => {
     });
   });
 
+  it("sets every one of a toolkit's 120 tools at once, then keeps a change made to one tool after it", async () => {
+    const many: CatalogTool[] = Array.from({ length: 120 }, (_, index) => ({
+      name:
+        index < 60
+          ? `HUBSPOT_LIST_THINGS_${index}`
+          : `HUBSPOT_UPDATE_THING_${index}`,
+      description: null,
+      inputs: [],
+      readOnly: index < 60,
+    }));
+    const sent = await opened("hubspot", [], person(), {
+      catalogTools: async () => await Promise.resolve(many),
+    });
+    await press(buttons("Connect")[0]);
+    // Every read at once: the dialog starts with every tool that only reads.
+    // Then one change allowed on its own, choosing per tool.
+    await press(document.querySelectorAll('[data-slot="radio-group-item"]')[3]);
+    const one = document.querySelector(
+      '[aria-label="What Grasp may do: Update thing 77"]'
+    );
+    await press(
+      [...(one?.querySelectorAll("button") ?? [])].find(
+        (each) => each.textContent.trim() === "Write"
+      )
+    );
+    await press(dialogAction("Allow and sign in"));
+
+    const [first] = sent;
+    const chosen = first !== undefined && "tools" in first ? first.tools : [];
+    expect({
+      reads: chosen.filter(
+        (tool) => typeof tool !== "string" && tool.read === true
+      ).length,
+      changes: chosen.filter((tool) => typeof tool === "string"),
+    }).toStrictEqual({ reads: 60, changes: ["HUBSPOT_UPDATE_THING_77"] });
+  });
+
   it("has an admin connect a stopped toolkit again from what it allowed, disconnecting nothing", async () => {
     const stopped: ListedConnection = {
       id: "c-hubspot",

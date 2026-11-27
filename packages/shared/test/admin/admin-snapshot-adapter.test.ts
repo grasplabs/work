@@ -7,7 +7,7 @@ import {
   adminOrgOf,
   staffSnapshotOf,
 } from "../../src/admin/admin-snapshot-adapter.ts";
-import { adminViewOf, portfolioOf } from "../../src/admin/admin-view.ts";
+import { adminViewOf } from "../../src/admin/admin-view.ts";
 import { recordOf } from "../../src/admin/onboarding-admin-record.ts";
 import { STARTING_ORG_RULES } from "../../src/admin/onboarding-admin.ts";
 import { orgOfSnapshot } from "../../src/admin/org-adapter.ts";
@@ -583,12 +583,9 @@ describe("an organization from core's admin snapshot", () => {
     expect({
       unknown: view.unknown,
       contractNeed: view.needs.some((need) => need.kind === "contract"),
-      counted: portfolioOf([view]).counted,
     }).toStrictEqual({
       unknown: { contract: true, works: false },
       contractNeed: false,
-      // Its hours are counted from the work core sends; its fees not yet.
-      counted: { fees: 0, value: 1 },
     });
     // Once core holds them, the draft contract waits for Grasp as before.
     expect({

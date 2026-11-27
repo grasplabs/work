@@ -168,11 +168,13 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   await page.keyboard.press("Escape");
   await expect(chats).toHaveCount(0);
 
-  // Trying again asks the question again.
+  // Trying again asks the question again, in place: drawn once, its new
+  // answer under the one that failed.
   await messages.getByRole("button", { name: "Try again" }).click();
+  await expect(messages.getByRole("alert")).toHaveCount(2, { timeout: 30_000 });
   await expect(
     messages.getByRole("article", { name: "You" }).filter({ hasText: question })
-  ).toHaveCount(2);
+  ).toHaveCount(1);
   // The first try's failure stays where it was; the new one is last.
   await expect(messages.getByRole("alert").last()).toContainText(
     "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
@@ -329,6 +331,52 @@ test("a person asks, and reads the agent's answer once its turn ends", async ({
   await expect(messages.getByRole("alert")).toHaveCount(0);
 });
 
+test("a person asks again while the answer is still being written, sees it queued, and both are answered in order", async ({
+  pageOf,
+}) => {
+  const { user } = peopleIn("chat");
+  const page = await pageOf(user);
+  const { opener } = modelScripts.answersWhileAsked;
+  const question = `${opener} (${crypto.randomUUID().slice(0, 8)})`;
+  const again = "And by when is the budget set?";
+  const firstAnswer =
+    "First the goals, then the budget and who owns each part.";
+  const secondAnswer = "The budget is set by the end of the month.";
+  await page.goto("/");
+
+  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  const messages = page.getByRole("log", { name: "Messages" });
+  // The answer's first words, the rest still on its way.
+  await expect(messages.getByText("First the goals")).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(messages.getByText(firstAnswer)).toHaveCount(0);
+
+  // The box still takes a question, and the thread shows it queued.
+  const box = page.getByRole("textbox", { name: "Ask Grasp" });
+  await box.fill(again);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(box).toHaveText("");
+  await expect(messages.getByText("Queued")).toBeVisible();
+
+  await expect(messages.getByText(secondAnswer)).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(messages.getByText("Queued")).toHaveCount(0);
+  // In order: the question, its answer, the question asked meanwhile, its answer.
+  const said = (await messages.textContent()) ?? "";
+  const at = [question, firstAnswer, again, secondAnswer].map((words) =>
+    said.indexOf(words)
+  );
+  expect(at.every((index) => index >= 0)).toBeTruthy();
+  expect(at).toStrictEqual(at.toSorted((one, other) => one - other));
+  await expect(
+    messages.getByRole("button", { name: "Ask again" })
+  ).toBeVisible();
+  await expect(messages.getByRole("alert")).toHaveCount(0);
+});
+
 test("a person reads an answer in blocks: a table, a formula, code and a diagram, each with its own tools", async ({
   pageOf,
 }) => {
@@ -379,7 +427,16 @@ test("a person reads an answer in blocks: a table, a formula, code and a diagram
           )
     )
     .toBeGreaterThan(1);
-  // The diagram, drawn by Mermaid, and its own download.
+  // The diagram, drawn by Pele, and its own download. A diagram is drawn
+  // once it comes near the screen, and this one ends a long answer that may
+  // open at its start, below the fold: read down to it, as a person does,
+  // then wait for its settled state, `data-diagram`, which names why when
+  // it is not drawn.
+  const diagram = answer.locator('[data-slot="markdown-diagram"]');
+  await diagram.scrollIntoViewIfNeeded();
+  await expect(diagram).toHaveAttribute("data-diagram", "drawn", {
+    timeout: 15_000,
+  });
   await expect(
     answer.getByRole("application", { name: "Mermaid diagram" })
   ).toBeVisible();
@@ -431,6 +488,57 @@ test("a person comes back to a chat that answered while they were away, sees its
   await expect(
     sidebar.getByRole("link", { name: title, exact: true })
   ).toBeVisible();
+});
+
+test("a person's list follows what happens elsewhere: a chat answered in the background gets its dot, and a question from another tab moves its chat up, with no page change", async ({
+  pageOf,
+}) => {
+  const { user } = peopleIn("chat");
+  const page = await pageOf(user);
+  const tag = crypto.randomUUID().slice(0, 8);
+  const older = `Invoices ${tag}`;
+  const newer = `Travel ${tag}`;
+  const { core, api } = apiOf(user);
+  try {
+    const first = await api.chats.create(older);
+    await api.chats.create(newer);
+    await page.goto("/apps");
+    const sidebar = page.getByRole("navigation", { name: "Main" });
+    const titles = sidebar
+      .getByRole("link")
+      .filter({ hasText: tag })
+      .filter({ hasNotText: "Answering" });
+    await expect(titles).toHaveText([newer, older]);
+
+    // Asked on another device, and answered there while this page stays
+    // on Apps: the row moves up and gets its dot, nothing read again.
+    await api.chats.send(first.id, {
+      text: `${modelScripts.answersAtLength.opener} (${older})`,
+      model: e2eModel,
+    });
+    await expect(
+      sidebar.getByRole("link", { name: `${older} Unread` })
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(titles).toHaveText([`${older}Unread`, newer]);
+  } finally {
+    core[Symbol.dispose]();
+  }
+
+  // A second tab asks in the other chat: the first tab's list reorders.
+  const other = await page.context().newPage();
+  await other.goto("/");
+  await other
+    .getByRole("navigation", { name: "Main" })
+    .getByRole("link", { name: newer, exact: true })
+    .click();
+  await other
+    .getByRole("textbox", { name: "Ask Grasp" })
+    .fill(`${modelScripts.answersAtLength.opener} (${newer})`);
+  await other.getByRole("button", { name: "Send", exact: true }).click();
+  const sidebar = page.getByRole("navigation", { name: "Main" });
+  await expect(
+    sidebar.getByRole("link").filter({ hasText: tag }).first()
+  ).toContainText(newer);
 });
 
 test("a person answers the agent's questions in the box's place, and sends the answers", async ({
@@ -534,7 +642,7 @@ test("one control picks the model and how hard it thinks, sends both with the qu
 
   // The stack's first model doesn't think: the control names it alone.
   await expect(control).toHaveAccessibleName(
-    "Model: mistral-large-latest. Change model"
+    "Model: mistral-large-2512. Change model"
   );
   await control.click();
   // The models by their makers; one that thinks offers its efforts

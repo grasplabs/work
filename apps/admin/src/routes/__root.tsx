@@ -1,3 +1,4 @@
+import { sidebarStateScript } from "@grasp-os/ui/components/sidebar";
 import { I18nProvider } from "@grasp-os/ui/lib/i18n";
 import {
   createRootRouteWithContext,
@@ -7,15 +8,15 @@ import {
 import type { ReactNode } from "react";
 
 import { FrameFailure } from "../admin/failure.tsx";
-import { AdminFrame, FrameLoading } from "../admin/frame.tsx";
-import { openClientId, readAdmins } from "../admin/org-loads.ts";
+import { AdminFrame, FrameLoading, sidebarKey } from "../admin/frame.tsx";
 import { freshMs } from "../admin/org-reads.ts";
 import type { OrgReads } from "../admin/org-reads.ts";
 import { platformCounts } from "../admin/platform.ts";
 import { fetchReadiness } from "../admin/readiness.ts";
 import type { Readiness } from "../admin/readiness.ts";
 import { fetchStaff } from "../admin/staff-functions.ts";
-import { fetchClientGrid } from "../clients/functions.ts";
+import { fetchClientGrid, fetchClientSummaries } from "../clients/functions.ts";
+import type { ClientSummary } from "../clients/summary.ts";
 
 import styles from "../styles.css?url";
 
@@ -74,14 +75,15 @@ const RootDocument = ({ children }: { children: ReactNode }) => (
 );
 
 const Frame = () => {
-  const { clients, admins, platform, staff, readiness } = Route.useLoaderData();
+  const { clients, summaries, platform, staff, readiness } =
+    Route.useLoaderData();
   return (
     <AdminFrame
-      admins={admins}
       clients={clients}
       platform={platform}
       readiness={readiness}
       staff={staff}
+      summaries={summaries}
     />
   );
 };
@@ -92,12 +94,14 @@ const Frame = () => {
  * Grasp's staff only: a request Access doesn't vouch for gets nothing
  * (src/access.ts), so nothing here, not even that it exists, is seen by
  * anyone else. Every organization is every client the admin knows, from
- * its own D1 at once; as its core answers now (`readAdmins`) after, not
- * waited on: a page never waits on a client's core it doesn't show.
+ * its own D1 at once; its summary as its core answers now
+ * (`fetchClientSummaries`: counts only, which no core audits) after, not
+ * waited on: a page never waits on a client's core it doesn't show. The
+ * pages that show what only the snapshots hold read those themselves
+ * (src/admin/org-loads.ts).
  *
- * Each read asks every client's core, whose audit log records it, so not
- * on every click: the read stands `freshMs`, and older, is read again
- * behind the page shown.
+ * The read asks every client's core, so not on every click: it stands
+ * `freshMs`, and older, is read again behind the page shown.
  */
 export const Route = createRootRouteWithContext<AdminContext>()({
   // Rendered in the browser alone: the Worker answers a page with the
@@ -108,28 +112,27 @@ export const Route = createRootRouteWithContext<AdminContext>()({
   ssr: false,
   // Beside Platform, what the admin recorded alone: no account is read.
   // Every client's core is asked at once, beside the grid, never after it.
-  loader: async ({ context, location, preload }) => {
+  loader: async () => {
     const grid = fetchClientGrid();
     const staff = fetchStaff();
     // Never awaited, nor a failure of the frame: the banner shows once it
     // is in, and stays away when it couldn't be read.
     const readiness = readinessOrNone();
-    const open = openClientId(location.pathname);
-    const frame = readAdmins(
-      context.reads,
-      grid,
-      open,
-      // Loaded while the tab shows it (src/admin/org-loads.ts).
-      open !== undefined && !preload && context.shown() === open
-    );
+    // Not waited on; null when they couldn't be read at all.
+    const summaries = (async (): Promise<ClientSummary[] | null> => {
+      try {
+        return await fetchClientSummaries();
+      } catch {
+        return null;
+      }
+    })();
     const clients = await grid;
     return {
       clients,
       staff: await staff,
       readiness,
       platform: platformCounts(clients),
-      admins: frame.admins,
-      adminsAsked: frame.asked,
+      summaries,
     };
   },
   staleTime: freshMs,
@@ -141,8 +144,13 @@ export const Route = createRootRouteWithContext<AdminContext>()({
     ],
     links: [{ rel: "stylesheet", href: styles }, ...stylexDev.links],
     // Light or dark as staff chose, or as the system has it, set before first paint
-    // (public/theme.js, the admin's own), so the admin never flashes light.
-    scripts: [{ src: "/theme.js" }, ...stylexDev.scripts],
+    // (public/theme.js, the admin's own), so the admin never flashes light;
+    // and the sidebar folded as staff left it, before the page wakes.
+    scripts: [
+      { src: "/theme.js" },
+      { children: sidebarStateScript(sidebarKey) },
+      ...stylexDev.scripts,
+    ],
   }),
   shellComponent: RootDocument,
   // The document's body until the frame's records are in: also what the

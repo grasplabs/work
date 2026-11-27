@@ -6,6 +6,7 @@ import type {
   ChatAgent,
   ChatMessage,
   ChatPartial,
+  ChatQueued,
   ChatToolEvent,
 } from "@grasp-os/shared/chat";
 import type { ModelWait } from "@grasp-os/shared/models";
@@ -23,6 +24,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import type { PendingQuestion } from "./pending-question.ts";
 import { answerAgentsOf, ChatThread } from "./thread.tsx";
 import { newLineRow } from "./unread.ts";
 
@@ -39,6 +41,9 @@ let root: Root | undefined;
 
 /** The memories the page undid, by id, in order. */
 const forgotten: string[] = [];
+
+/** How often the thread asked for the queued questions to be sent now. */
+const sentNow: string[] = [];
 
 /** What core answers the page's undo of a memory. */
 let forgetAnswer: "done" | "nothing" = "done";
@@ -69,7 +74,13 @@ const thread = async (
   /** What the chat read, as the page passes it. */
   sources?: ReactNode,
   /** What the turn's model request waits on, as core says. */
-  modelWait?: ModelWait
+  modelWait?: ModelWait,
+  /** The questions queued behind the answer, as core says. */
+  queued?: readonly ChatQueued[],
+  /** The question on its way, as the page passes it. */
+  pending?: PendingQuestion,
+  /** The connections' names, by ID, as the page passes them. */
+  sourceNames?: ReadonlyMap<string, { name: string; provider: string }>
 ): Promise<void> => {
   const core = {
     withSession: async <T,>(
@@ -116,9 +127,15 @@ const thread = async (
         }
         checking={checking}
         modelWait={modelWait ?? null}
+        queued={queued}
+        onSendNow={() => {
+          sentNow.push("now");
+        }}
         tools={tools}
         newLineBefore={newLineBefore}
         sources={sources}
+        pending={pending}
+        sourceNames={sourceNames ?? new Map()}
       />
     ),
   });
@@ -256,6 +273,50 @@ describe(ChatThread, () => {
     document.body.replaceChildren();
     forgotten.length = 0;
     forgetAnswer = "done";
+    sentNow.length = 0;
+  });
+
+  it("draws the questions queued behind the answer last, in order, each saying so, Send now on the newest", async () => {
+    await thread(
+      [asked],
+      {
+        text: "Four",
+        reasoning: "",
+        code: [],
+        tools: [],
+      },
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      [
+        { id: "7", text: "And 3 + 3?" },
+        { id: "8", text: "And 4 + 4?" },
+      ]
+    );
+    const rows = [...document.querySelectorAll('[data-slot="message"]')];
+    const sendNow = [...document.querySelectorAll("button")].filter(
+      (button) => button.textContent.trim() === "Send now"
+    );
+    act(() => {
+      sendNow[0]?.click();
+    });
+
+    expect({
+      // The question, the answer being written, then each queued one.
+      last: rows.slice(-2).map((row) => row.textContent),
+      sendNow: sendNow.length,
+      newest: rows.at(-1)?.contains(sendNow[0] ?? null),
+      sentNow,
+    }).toStrictEqual({
+      last: ["And 3 + 3?Queued", "And 4 + 4?QueuedSend now"],
+      sendNow: 1,
+      newest: true,
+      sentNow: ["now"],
+    });
   });
 
   it("says under a call of remember who or what it is about, when it isn't the person", async () => {
@@ -701,6 +762,181 @@ describe(ChatThread, () => {
     });
   });
 
+  it("draws a question on its way as the person's own at once, after the chat's last answer", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    await thread(
+      [
+        asked,
+        {
+          id: 2,
+          role: "assistant",
+          text: "Four.",
+          code: [],
+          tools: [],
+          end: "done",
+          at,
+        },
+      ],
+      null,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        text: "And 3 + 3?",
+        mentions: [],
+        files: [{ id: "f1", file: new File(["1,2"], "sums.csv") }],
+        at,
+        queues: false,
+        alreadyQueued: 0,
+        key: "key-1",
+        owner: "box",
+        fromBox: true,
+        state: "sending",
+      }
+    );
+
+    const rows = [...document.querySelectorAll("article")].map(
+      (row) => `${row.getAttribute("aria-label") ?? "You"}: ${row.textContent}`
+    );
+    expect(rows).toStrictEqual([
+      expect.stringMatching(/^You: What is 2 \+ 2\?/u),
+      expect.stringMatching(/^Grasp: Four\./u),
+      expect.stringMatching(/^You: sums\.csv.*And 3 \+ 3\?/u),
+    ]);
+  });
+
+  it("draws a question asked again after it stopped once, its new answer after the one that stopped; the same words after an answer that ended are a new question", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    const reply = (
+      id: number,
+      text: string,
+      end: "done" | "cancelled"
+    ): ChatMessage => ({
+      id,
+      role: "assistant",
+      text,
+      code: [],
+      tools: [],
+      end,
+      at,
+    });
+    await thread([
+      asked,
+      reply(2, "Let me", "cancelled"),
+      { ...asked, id: 3 },
+      reply(4, "Four.", "done"),
+      { ...asked, id: 5 },
+      reply(6, "Still four.", "done"),
+    ]);
+
+    const rows = [...document.querySelectorAll("article")].map(
+      (row) => `${row.getAttribute("aria-label") ?? "You"}: ${row.textContent}`
+    );
+    expect(rows).toStrictEqual([
+      expect.stringMatching(/^You: What is 2 \+ 2\?/u),
+      expect.stringMatching(/^Grasp: Let me.*Stopped/u),
+      expect.stringMatching(/^Grasp: Four\./u),
+      expect.stringMatching(/^You: What is 2 \+ 2\?/u),
+      expect.stringMatching(/^Grasp: Still four\./u),
+    ]);
+  });
+
+  it("answers a question asked again in a row of its own while it is written, and draws the same words with a file of their own as a new question", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    const stopped: ChatMessage = {
+      id: 2,
+      role: "assistant",
+      text: "Let me",
+      code: [],
+      tools: [],
+      end: "failed",
+      at,
+    };
+    await thread(
+      [
+        asked,
+        stopped,
+        {
+          ...asked,
+          id: 3,
+          files: [
+            {
+              id: "f1",
+              name: "sums.csv",
+              type: "csv",
+              bytes: 3,
+              createdAt: at,
+            },
+          ],
+        },
+        { ...stopped, id: 4 },
+        { ...asked, id: 5 },
+      ],
+      { text: "Four", code: [], tools: [], reasoning: "" }
+    );
+
+    const rows = [...document.querySelectorAll("article")].map(
+      (row) => `${row.getAttribute("aria-label") ?? "You"}: ${row.textContent}`
+    );
+    expect(rows).toStrictEqual([
+      expect.stringMatching(/^You: What is 2 \+ 2\?/u),
+      expect.stringMatching(/^Grasp: Let me/u),
+      expect.stringMatching(/^You: sums\.csv.*What is 2 \+ 2\?/u),
+      expect.stringMatching(/^Grasp: Let me/u),
+      // The answer being written: a row of its own.
+      expect.stringMatching(/^Grasp/u),
+    ]);
+  });
+
+  it("draws a question asked again after it stopped, on its way, with no second bubble, its answer coming under the one that stopped", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    await thread(
+      [
+        asked,
+        {
+          id: 2,
+          role: "assistant",
+          text: "Let me",
+          code: [],
+          tools: [],
+          end: "cancelled",
+          at,
+        },
+      ],
+      null,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        text: asked.text,
+        mentions: [],
+        files: [],
+        at,
+        queues: false,
+        alreadyQueued: 0,
+        key: "key-1",
+        owner: "box",
+        fromBox: false,
+        state: "sending",
+      }
+    );
+
+    const rows = [...document.querySelectorAll("article")].map(
+      (row) => row.getAttribute("aria-label") ?? "You"
+    );
+    expect(rows).toStrictEqual(["You", "Grasp", "Grasp"]);
+  });
+
   it("says what each call of Grasp's tools did in one line, and unfolds what it was given and what came of it", async () => {
     const at = "2026-10-27T09:00:05.000Z";
     await thread([
@@ -734,7 +970,7 @@ describe(ChatThread, () => {
         id: 3,
         role: "result",
         callId: "write",
-        text: 'Returned:\n{"changed":["src/routes/index.tsx"]}',
+        text: '{"returned":{"changed":["src/routes/index.tsx"]}}',
         failed: false,
         at,
       },
@@ -754,7 +990,10 @@ describe(ChatThread, () => {
     expect({
       lines,
       given: opened?.includes('"src/routes/index.tsx": "export default"'),
-      came: opened?.includes('{"changed":["src/routes/index.tsx"]}'),
+      came:
+        opened?.includes('"changed": [') === true &&
+        opened.includes('"src/routes/index.tsx"') &&
+        !opened.includes("returned"),
       stopped: document
         .querySelectorAll('[role="listitem"]')[1]
         ?.textContent.includes(", Stopped"),
@@ -811,7 +1050,7 @@ describe(ChatThread, () => {
         id: 4,
         role: "result",
         callId: "again",
-        text: "Returned:\n[]",
+        text: '{"returned":[]}',
         failed: false,
         at,
       },
@@ -836,24 +1075,98 @@ describe(ChatThread, () => {
       failed?.querySelector<HTMLElement>("button[aria-expanded]")?.click();
       await Promise.resolve();
     });
-    const [input, error] = [...(failed?.querySelectorAll("pre") ?? [])].map(
-      (block) => ({
+    const input = failed
+      ?.querySelector('[aria-label="Input"]')
+      ?.textContent.includes('"question": "expense policy"');
+    const error = [...(failed?.querySelectorAll("pre") ?? [])]
+      .map((block) => ({
         label: block.previousElementSibling?.textContent,
         text: block.textContent,
-      })
-    );
+      }))
+      .at(-1);
 
     expect({ line, input, error }).toStrictEqual({
       // Both searches ran; the one that failed is counted again as failed.
       line: "Searched 2 times; 1 step failed 5.0s",
-      input: {
-        label: "Input",
-        text: JSON.stringify({ question: "expense policy" }, null, 2),
-      },
+      input: true,
       error: {
         label: "Why it failed",
         text: "The brain could not be searched.",
       },
+    });
+  });
+
+  it("opens a code step to where it read from, what it logged and what it returned, in words and data, never the JSON core gave the model", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    await thread(
+      [
+        asked,
+        {
+          id: 2,
+          role: "assistant",
+          text: "",
+          code: [{ callId: "run", code: "return await env.gmail.list();" }],
+          tools: [],
+          end: "done",
+          at,
+        },
+        {
+          id: 3,
+          role: "result",
+          callId: "run",
+          text: JSON.stringify({
+            readFrom: [
+              "connection conn-1 (messages.list)",
+              "connection conn-2",
+              "connection conn-3",
+            ],
+            logs: ["Reading the inbox", "Found 2"],
+            returned: { unread: 2, from: ["Acme", "Globex"] },
+            cut: true,
+          }),
+          failed: false,
+          at,
+        },
+      ],
+      null,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      new Map([["conn-1", { name: "Gmail", provider: "gmail" }]])
+    );
+    await openSteps();
+    await act(async () => {
+      document
+        .querySelector<HTMLElement>('[role="listitem"] button[aria-expanded]')
+        ?.click();
+      await Promise.resolve();
+    });
+    const opened =
+      document.querySelector('[role="listitem"]')?.textContent ?? "";
+
+    expect({
+      read: opened.includes("Read from Gmail and 2 connections"),
+      logged: opened.includes("Reading the inbox\nFound 2"),
+      returned:
+        document
+          .querySelector('[role="listitem"] [aria-label="Result"]')
+          ?.textContent.includes('"unread": 2') === true,
+      cut: opened.includes("Part of what came back was left out"),
+      raw: ["readFrom", "returned", "logs", "conn-1", '"cut"'].filter((word) =>
+        opened.includes(word)
+      ),
+    }).toStrictEqual({
+      read: true,
+      logged: true,
+      returned: true,
+      cut: true,
+      raw: [],
     });
   });
 
@@ -863,7 +1176,7 @@ describe(ChatThread, () => {
       id,
       role: "result",
       callId,
-      text: "Returned:\nnull",
+      text: '{"returned":null}',
       failed: false,
       at,
     });
@@ -1423,10 +1736,11 @@ describe("a thread's New line", () => {
   });
 
   /** The thread's rows' ids, in order: the line, and the answer under it. */
-  const cameBackRows = ["q1", "a2", "q3", newLineRow, "a4"];
+  // Each answer's row is named after the question it answers.
+  const cameBackRows = ["q1", "q1a1", "q3", newLineRow, "q3a1"];
 
   it("goes to the New line when it lies further from the view than the browser draws: the end not drawn, as after scrolling back before the dock closed", async () => {
-    const scrolled = laidOut({ height: 2000, drawnRows: ["q1", "a2"] });
+    const scrolled = laidOut({ height: 2000, drawnRows: ["q1", "q1a1"] });
     await thread(cameBack, null, [], undefined, undefined, undefined, 4);
     await act(async () => {
       await Promise.resolve();

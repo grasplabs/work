@@ -257,39 +257,3 @@ export const historyOf = (view: AdminView): (LogEvent | AccountEvent)[] => {
       HISTORY_ORDER.indexOf(a.kind) - HISTORY_ORDER.indexOf(b.kind)
   );
 };
-
-/** Every organization together. */
-export interface Portfolio {
-  orgs: number;
-  /** Enough is known, and they wait for Grasp's go. */
-  ready: number;
-  /** Grasp is open for them. */
-  open: number;
-  /** What the contracts that run today bring a month, in euros before VAT. */
-  fees: number;
-  /** AI used this month, in euros. */
-  spend: number;
-  /** Hours a week freed in live workflows, and what they are worth a month. */
-  freed: number;
-  value: number;
-  /** How many of them the fees, and the hours and their worth, are counted from: not those whose contract or work isn't known yet. */
-  counted: { fees: number; value: number };
-}
-
-export const portfolioOf = (views: AdminView[]): Portfolio => {
-  const sum = (of: (view: AdminView) => number) =>
-    views.reduce((total, view) => total + of(view), 0);
-  return {
-    orgs: views.length,
-    ready: views.filter((view) => view.knowledge.ready && !view.open).length,
-    open: views.filter((view) => view.open).length,
-    fees: sum((view) => (view.contract.running ? view.contract.fee : 0)),
-    spend: sum((view) => view.usage.thisMonth.spend),
-    freed: sum((view) => view.value.freed),
-    value: sum((view) => view.value.value),
-    counted: {
-      fees: views.filter((view) => !view.unknown.contract).length,
-      value: views.filter((view) => !view.unknown.works).length,
-    },
-  };
-};

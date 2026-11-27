@@ -51,6 +51,8 @@ const styles = stylex.create({
     justifyContent: "flex-end",
     gap: space["2"],
   },
+  // The share it opens at as wide as its words, beside the buttons.
+  threshold: { width: "auto" },
 });
 
 /** What staff read when a command didn't apply, by why. */
@@ -319,6 +321,7 @@ export const GateControls = ({
             }
           }}
           size="sm"
+          style={styles.threshold}
           value={String(gate.threshold)}
         >
           {gateThresholds.map((each) => (

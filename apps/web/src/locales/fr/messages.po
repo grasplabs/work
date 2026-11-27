@@ -1734,6 +1734,11 @@ msgstr "{triggers, plural, one {# déclencheur, et lancer à la main.} other {# 
 msgid "{uninterviewed} of {total} not interviewed yet"
 msgstr "{uninterviewed} sur {total} pas encore interviewées"
 
+#. Connections a step read from that the page has no name for, as the last item of the list in “Read from {sources}”.
+#: src/chat/answer-steps.tsx
+msgid "{unknown, plural, one {a connection} other {# connections}}"
+msgstr "{unknown, plural, one {une connexion} other {# connexions}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{unnamed} of {total} seen in use, never named"
 msgstr "{unnamed} sur {total} vues en usage, jamais citées"
@@ -3184,7 +3189,7 @@ msgstr "Réponse apportée : {question}"
 msgid "Answered: {title}"
 msgstr "Répondu : {title}"
 
-#: src/chat/sidebar-chats.tsx
+#: src/frame/ui-words.tsx
 msgid "Answering"
 msgstr "Répond"
 
@@ -4862,7 +4867,6 @@ msgstr "Falaises"
 #: src/connections/connected-dialog.tsx
 #: src/connections/connection-list.tsx
 #: src/connections/request-app-dialog.tsx
-#: src/frame/app-sidebar.tsx
 #: src/frame/panels/head.tsx
 #: src/frame/top-error.tsx
 #: src/frame/ui-words.tsx
@@ -5023,10 +5027,6 @@ msgstr "Terminé"
 #: src/connections/connect-dialog.tsx
 msgid "Composio keeps the key in its cloud. Grasp uses it only for what you allow."
 msgstr "Composio conserve la clé dans son cloud. Grasp ne l’utilise que pour ce que vous autorisez."
-
-#: src/connections/permissions/action-list.tsx
-msgid "Composio says this changes things. As Read, it would do so without asking."
-msgstr "Selon Composio, ceci modifie des choses. En lecture, il le ferait sans demander."
 
 #: src/routes/_shell.connectors.index.tsx
 msgid "Composio's toolkits can't be listed right now. Try again shortly."
@@ -6206,6 +6206,11 @@ msgctxt "a failed run's error code, folded away"
 msgid "Details"
 msgstr "Détails"
 
+#: src/frame/ui-words.tsx
+msgctxt "a page's side panel"
+msgid "Details"
+msgstr "Détails"
+
 #: src/inbox/decision-confirmation.tsx
 msgctxt "what else an answer to a decision says"
 msgid "Details"
@@ -6559,8 +6564,8 @@ msgstr "Porte"
 msgid "Dots"
 msgstr "Points"
 
-#: src/chat/sidebar-chats.tsx
 #: src/frame/panels/rename.tsx
+#: src/frame/ui-words.tsx
 msgid "Double-click or press F2 to rename"
 msgstr "Double-cliquez ou appuyez sur F2 pour renommer"
 
@@ -10586,6 +10591,7 @@ msgstr "Chargement de la valeur"
 #: src/activity/audit-log.tsx
 #: src/apps/app-workspace.tsx
 #: src/frame/page-states.tsx
+#: src/frame/ui-words.tsx
 #: src/settings/erasures.tsx
 #: src/settings/section.tsx
 msgid "Loading…"
@@ -10599,6 +10605,11 @@ msgstr "Lieu"
 #: src/frame/sign-in/sign-in.tsx
 msgid "Log in"
 msgstr "Se connecter"
+
+#: src/chat/answer-steps.tsx
+msgctxt "what a code step logged"
+msgid "Logged"
+msgstr "Journalisé"
 
 #: src/settings/org-card.tsx
 msgid "Logo"
@@ -11134,11 +11145,11 @@ msgstr "Plus pour {label}"
 #: src/agents/agent-overview.tsx
 #: src/agents/agent-page.tsx
 #: src/apps/app-page.tsx
+#: src/frame/ui-words.tsx
 #: src/settings/event-sources.tsx
 msgid "More for {name}"
 msgstr "Plus pour {name}"
 
-#: src/chat/sidebar-chats.tsx
 #: src/projects/project-view.tsx
 msgid "More for {title}"
 msgstr "Plus pour {title}"
@@ -13611,6 +13622,10 @@ msgstr "Paris"
 msgid "Part of the brain not found"
 msgstr "Partie du brain introuvable"
 
+#: src/chat/answer-steps.tsx
+msgid "Part of what came back was left out, to fit what the model reads."
+msgstr "Une partie de ce qui a été renvoyé a été omise, pour tenir dans ce que lit le modèle."
+
 #: src/inbox/outcome-details.tsx
 msgid "Part of what was sent is cut short above. Show it all, or exactly what was sent, before you say it didn't happen."
 msgstr "Une partie de ce qui a été envoyé est tronquée ci-dessus. Affichez tout, ou exactement ce qui a été envoyé, avant de dire que ce n'est pas arrivé."
@@ -14260,6 +14275,10 @@ msgstr "Question"
 msgid "Question {current} of {total}"
 msgstr "Question {current} sur {total}"
 
+#: src/chat/thread.tsx
+msgid "Queued"
+msgstr "En file d'attente"
+
 #: src/agents/setup/thinking-step.tsx
 msgid "Quick and careful. Good for most jobs."
 msgstr "Rapide et soigné. Convient à la plupart des tâches."
@@ -14366,6 +14385,11 @@ msgstr "Lu dans"
 #: src/brain/sources-page.tsx
 msgid "Read from {name} on {readOn}"
 msgstr "Lu depuis {name} le {readOn}"
+
+#. The outside systems a step of the answer read from; {sources} is their names, as a list.
+#: src/chat/answer-steps.tsx
+msgid "Read from {sources}"
+msgstr "Lu depuis {sources}"
 
 #: src/brain/sources-page.tsx
 msgctxt "a source of the Brain"
@@ -14580,6 +14604,10 @@ msgstr "Reconnecter"
 #: src/projects/project-view.tsx
 msgid "Reconnect it so the Apps and workflows that use it work again."
 msgstr "Reconnectez-le pour que les Apps et les workflows qui l’utilisent fonctionnent à nouveau."
+
+#: src/chat/composer.tsx
+msgid "Reconnecting to Grasp…"
+msgstr "Reconnexion à Grasp…"
 
 #: src/apps/app-data.tsx
 msgid "record"
@@ -14904,13 +14932,14 @@ msgstr "Retrait en cours"
 #: src/chat/sidebar-chats.tsx
 #: src/frame/panels/head.tsx
 #: src/frame/panels/rename.tsx
+#: src/frame/ui-words.tsx
 #: src/settings/teams.tsx
 msgid "Rename"
 msgstr "Renommer"
 
-#: src/chat/sidebar-chats.tsx
-msgid "Rename {title}"
-msgstr "Renommer {title}"
+#: src/frame/ui-words.tsx
+msgid "Rename {name}"
+msgstr "Renommer {name}"
 
 #: src/chat/chat-window.tsx
 msgid "Rename chat"
@@ -15065,6 +15094,10 @@ msgstr "Redimensionner"
 #: src/frame/panels/chat-panels-beside.tsx
 msgid "Resize the chat"
 msgstr "Redimensionner la conversation"
+
+#: src/frame/ui-words.tsx
+msgid "Resize the panel"
+msgstr "Redimensionner le panneau"
 
 #: src/frame/panels/float-window.tsx
 msgid "Resize the panel's height"
@@ -15831,7 +15864,7 @@ msgid "Search by name, team or email"
 msgstr "Rechercher par nom, équipe ou e-mail"
 
 #: src/chat/chat-window.tsx
-#: src/frame/app-sidebar.tsx
+#: src/frame/ui-words.tsx
 msgid "Search chats"
 msgstr "Rechercher dans les chats"
 
@@ -16057,6 +16090,10 @@ msgstr "Envoyer les invitations"
 #: src/apps/app-webhooks.tsx
 msgid "Send it when"
 msgstr "L'envoyer quand"
+
+#: src/chat/thread.tsx
+msgid "Send now"
+msgstr "Envoyer maintenant"
 
 #: src/settings/event-sources.tsx
 msgid "Send one event"
@@ -16486,9 +16523,10 @@ msgstr "Afficher les versions plus anciennes"
 msgid "Show or hide the chat"
 msgstr "Afficher ou masquer le chat"
 
-#: src/frame/app-frame.tsx
-#: src/frame/app-sidebar.tsx
-#: src/frame/site-header.tsx
+#: src/frame/ui-words.tsx
+msgid "Show or hide the panel"
+msgstr "Afficher ou masquer le panneau"
+
 #: src/frame/ui-words.tsx
 msgid "Show or hide the sidebar"
 msgstr "Afficher ou masquer la barre latérale"
@@ -16553,7 +16591,6 @@ msgstr "Affichage de la première partie de cette exécution"
 msgid "Shown with the App. It opens the App to nobody: who may use it is who it is shared with."
 msgstr "Affiché avec l’application. Cela ne la rend accessible à personne : seules les personnes avec qui elle est partagée peuvent l’utiliser."
 
-#: src/frame/app-sidebar.tsx
 #: src/frame/ui-words.tsx
 msgid "Sidebar"
 msgstr "Barre latérale"
@@ -17256,6 +17293,7 @@ msgctxt "stop a workflow's run"
 msgid "Stop"
 msgstr "Arrêter"
 
+#: src/chat/composer.tsx
 #: src/frame/ui-words.tsx
 msgctxt "stop an answer"
 msgid "Stop"
@@ -19698,7 +19736,7 @@ msgstr "Rallumer le micro"
 msgid "Unpin"
 msgstr "Désépingler"
 
-#: src/chat/sidebar-chats.tsx
+#: src/frame/ui-words.tsx
 msgid "Unread"
 msgstr "Non lu"
 

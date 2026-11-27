@@ -1,16 +1,10 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@grasp-os/app-kit/components/input-group";
 /**
  * The company's teams as Grasp knows them, ported from the prototype
  * (grasplabs/prototype `components/admin/org-organization.tsx`,
  * `org-team.tsx` and `organization-parts.ts`) and shown where the
- * interviews are (the Teams tab of Interviews): every team as a row with
- * where it stands, its people as dots and what needs a look there; a row
+ * interviews are (the Teams tab of Interviews), composed as Grasp Work
+ * lists things: every team a row of a table (a card on a phone) with who
+ * leads it, where it stands, what needs a look and who talked; a row
  * opens the team, with everyone in it, the work it does and where that
  * work goes. Every figure is the shared model's (`organizationOf`).
  *
@@ -21,13 +15,6 @@ import {
  * admin never shows. Nor is where a piece of work goes said in the words
  * of whoever said it, when it isn't one of the company's own teams.
  */
-import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
-import { Progress } from "@grasp-os/app-kit/components/progress";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/app-kit/components/toggle-group";
-import { cn } from "@grasp-os/app-kit/lib/utils";
 import type {
   ChartTeam,
   Organization,
@@ -40,28 +27,104 @@ import type {
   PersonView,
   WorkEvidence,
 } from "@grasp-os/shared/admin/onboarding-admin";
-import { Link } from "@tanstack/react-router";
+import { Badge } from "@grasp-os/ui/components/badge";
+import type { BadgeVariant } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+} from "@grasp-os/ui/components/empty";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@grasp-os/ui/components/input-group";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemDetail,
+  ItemGrid,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { Progress } from "@grasp-os/ui/components/progress";
+import {
+  Section as Part,
+  SectionHeader,
+} from "@grasp-os/ui/components/section-header";
+import { Stat, StatGroup } from "@grasp-os/ui/components/stat";
+import { Text } from "@grasp-os/ui/components/text";
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@grasp-os/ui/components/toggle-group";
 import {
   ArrowLeftIcon,
-  ArrowRightIcon,
-  ChevronRightIcon,
+  Icon,
   SearchIcon,
-} from "lucide-react";
+  TriangleAlertIcon,
+} from "@grasp-os/ui/lib/icons";
+import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
+import { Link } from "@tanstack/react-router";
 import { useState } from "react";
-import type { ReactNode } from "react";
 
 import { CommandButton } from "./commands.tsx";
-import {
-  AttentionDot,
-  Dot,
-  Figure,
-  Initials,
-  markOf,
-  PeopleDots,
-} from "./parts.tsx";
-import { EmptySection, Section } from "./section.tsx";
+import { DataRows } from "./data-rows.tsx";
+import type { DataColumn, RowLook } from "./data-rows.tsx";
+import { Dot, Initials, markOf, PeopleDots } from "./interview-parts.tsx";
 import { sectionTo } from "./sections.ts";
 import { formatDate, linkWords, talkedWords, workflowWords } from "./words.ts";
+
+const styles = stylex.create({
+  // The parts of a page, a step further apart than the lines within each.
+  parts: { display: "flex", flexDirection: "column", gap: space["10"] },
+  part: { display: "flex", flexDirection: "column", gap: space["4"] },
+  // The filters and the search on one line, the search under them on a phone.
+  tools: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: space["3"],
+  },
+  search: { width: { default: "100%", [media.sm]: "16rem" } },
+  // Who talked: the dots, then how many in words.
+  talked: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    columnGap: space["3"],
+    rowGap: space["1"],
+  },
+  // A control in a row that opens its team: above the row's stretched press.
+  raised: { position: "relative", zIndex: 1 },
+  // Where someone's link stands: their dot, then the words.
+  stands: { display: "inline-flex", alignItems: "center", gap: space["2"] },
+  // A team's people beside its work, once there is room for both.
+  team: {
+    display: "grid",
+    alignItems: "start",
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      [media.xl]: "minmax(0, 1fr) 24rem",
+    },
+    gap: space["10"],
+  },
+  // The way back, then where the team stands, on one line.
+  back: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: space["3"],
+  },
+  badges: { display: "flex", flexWrap: "wrap", gap: space["2"] },
+});
 
 /** `count` and the thing it counts: one for one, many for the rest. */
 const counted = (count: number, one: string, other: string): string =>
@@ -71,8 +134,6 @@ const counted = (count: number, one: string, other: string): string =>
 const SEARCH_FROM = 8;
 /** How many people a search shows by name before it asks for more of the name. */
 const mostFound = 6;
-/** How many of the people who do a piece of work show as their initials. */
-const mostFaces = 5;
 /** Up to how many of the people who do a piece of work are named by their first names. */
 const mostNamed = 3;
 
@@ -114,86 +175,68 @@ const flagAbout: Record<TeamFlag["kind"], string> = {
     "Stephen asks them which work comes back most, until someone names the piece of work to ask them about.",
 };
 
-const isKnown = (work: WorkEvidence): boolean =>
-  work.state === "complete" || work.state === "variants";
-
-/** How a piece of work is marked: known in the colour of agreed, waiting on an answer in the colour of attention. */
-const workTone = (work: WorkEvidence): string => {
-  if (isKnown(work)) {
-    return "bg-status-agreed";
+/** How a piece of work stands, as a Badge: green once known, amber while it waits on an answer. */
+const workTone = (work: WorkEvidence): BadgeVariant => {
+  if (work.state === "complete" || work.state === "variants") {
+    return "success";
   }
-  return work.state === "blocked"
-    ? "bg-status-attention"
-    : "bg-muted-foreground/60";
+  return work.state === "blocked" ? "warning" : "default";
 };
 
 /** A team's name, by its id. */
 const teamName = (view: OrgView, id: string | null): string =>
   view.teams.find((each) => each.team.id === id)?.team.name ?? "";
 
-/** A link to one team, open where the teams are, or to all of them. */
-const TeamLink = ({
-  clientId,
-  team,
-  ...props
-}: {
-  clientId: string;
-  team: string | null;
-  className?: string;
-  "aria-label"?: string;
-  children?: ReactNode;
-}) => (
-  <Link
-    {...props}
-    params={{ clientId }}
-    search={team === null ? {} : { team }}
-    to={sectionTo.interviews}
-  />
-);
+/** Where someone's link stands, in words: one who isn't asked says so. */
+const linkLine = (one: PersonView): string =>
+  one.out && one.state === "away" ? "Not asked" : linkWords[one.state];
 
-/** How far a team's work is known, as one bar under it. */
-const WorkBar = ({ team }: { team: ChartTeam }) => (
-  <Progress
-    aria-label={`${team.known} of ${team.works.length} pieces of work known`}
-    value={(team.known / Math.max(team.works.length, 1)) * 100}
-  />
+/** Where someone's link stands: their dot, then the words. */
+const LinkStands = ({ one }: { one: PersonView }) => (
+  <span {...stylex.props(styles.stands)}>
+    <Dot mark={markOf(one.state)} />
+    {linkLine(one)}
+  </span>
 );
 
 /** Before anyone is on the list: the teams the sponsor named, if any, by name and size. */
 export const NoTeams = ({ view }: { view: OrgView }) => {
   const named = view.vision?.teams ?? [];
-  const line =
-    named.length > 0
-      ? "The teams as the sponsor named them. The real teams, with everyone in them, come with the company’s own list."
-      : "Nobody is on the list yet. The company’s admin shares its staff list in their onboarding.";
   return (
-    <>
-      <Section description={line} title={view.org.name} />
+    <div {...stylex.props(styles.part)}>
+      <Empty align="start" size="sm">
+        <EmptyHeader>
+          <EmptyDescription>
+            {named.length > 0
+              ? "The teams as the sponsor named them. The real teams, with everyone in them, come with the company’s own list."
+              : "Nobody is on the list yet. The company’s admin shares its staff list in their onboarding."}
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
       {named.length > 0 ? (
-        <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <ItemGrid aria-label="The teams as the sponsor named them">
           {named.map((each) => {
             const count = each.people ?? 0;
             return (
-              <li
-                className="flex flex-col gap-1 rounded-xl border border-dashed px-4 py-3"
-                key={each.name}
-              >
-                <span className="font-medium">{each.name}</span>
-                <span className="text-muted-foreground text-xs">
-                  {count > 0
-                    ? `About ${counted(count, "person", "people")}, as the sponsor said.`
-                    : "How many people is not known yet."}
-                </span>
-              </li>
+              <Item key={each.name} variant="outline">
+                <ItemContent>
+                  <ItemTitle>{each.name}</ItemTitle>
+                  <ItemDescription>
+                    {count > 0
+                      ? `About ${counted(count, "person", "people")}, as the sponsor said.`
+                      : "How many people is not known yet."}
+                  </ItemDescription>
+                </ItemContent>
+              </Item>
             );
           })}
-        </ul>
+        </ItemGrid>
       ) : null}
-    </>
+    </div>
   );
 };
 
-/** People whose name has `wanted` in it, each opening their team. */
+/** People whose name has what was searched in it, each opening their team. */
 const Found = ({
   view,
   found,
@@ -203,39 +246,44 @@ const Found = ({
   found: readonly PersonView[];
   clientId: string;
 }) => (
-  <ul className="bg-card flex flex-col overflow-hidden rounded-xl border">
-    {found.slice(0, mostFound).map((each) => (
-      <li className="border-t first:border-t-0" key={each.person.id}>
-        <TeamLink
-          className="hover:bg-muted/50 focus-visible:ring-ring/50 flex w-full items-center gap-3 px-4 py-2 text-left outline-none focus-visible:ring-3 focus-visible:ring-inset"
-          clientId={clientId}
-          team={each.person.team}
-        >
-          <Initials name={each.person.name} />
-          <span className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate">{each.person.name}</span>
-            <span className="text-muted-foreground truncate text-xs">
-              {teamName(view, each.person.team)}
-            </span>
-          </span>
-          <span className="text-muted-foreground flex flex-none items-center gap-2 text-xs">
-            <Dot mark={markOf(each.state)} />
-            <span className="max-sm:sr-only">
-              {each.out ? "Team does not take part" : linkWords[each.state]}
-            </span>
-          </span>
-        </TeamLink>
-      </li>
-    ))}
-    {found.length > mostFound ? (
-      <li className="text-muted-foreground border-t px-4 py-2 text-xs">
-        And {found.length - mostFound} more: type more of the name.
-      </li>
-    ) : null}
-  </ul>
+  <Part aria-labelledby="found">
+    <SectionHeader
+      description={
+        found.length > mostFound
+          ? `And ${found.length - mostFound} more: type more of the name.`
+          : undefined
+      }
+      id="found"
+      title="People"
+      variant="group"
+    />
+    <ItemGroup aria-labelledby="found" separated>
+      {found.slice(0, mostFound).map((each) => (
+        <Item asChild key={each.person.id} size="sm">
+          <Link
+            params={{ clientId }}
+            search={{ team: each.person.team }}
+            to={sectionTo.interviews}
+          >
+            <ItemMedia>
+              <Initials name={each.person.name} />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>{each.person.name}</ItemTitle>
+              <ItemDescription>
+                {`${teamName(view, each.person.team)} · ${
+                  each.out ? "Team does not take part" : linkWords[each.state]
+                }`}
+              </ItemDescription>
+            </ItemContent>
+          </Link>
+        </Item>
+      ))}
+    </ItemGroup>
+  </Part>
 );
 
-/** Work one team hands to another, as the people who do it said. */
+/** Work one team hands to another, as the people who do it said, each opening the workflows. */
 const Between = ({
   view,
   chart,
@@ -245,35 +293,28 @@ const Between = ({
   chart: Organization;
   clientId: string;
 }) => (
-  <Section
-    description="Work one team hands to another, as the people who do it said. Work stalls most where it changes hands."
-    title="Where the work goes between teams"
-  >
-    <ul className="flex flex-col">
+  <Part aria-labelledby="between">
+    <SectionHeader
+      description="Work one team hands to another, as the people who do it said. Work stalls most where it changes hands."
+      id="between"
+      title="Where the work goes between teams"
+      variant="group"
+    />
+    <ItemGroup aria-labelledby="between" separated>
       {chart.between.map((each) => (
-        <li className="border-t" key={each.work.id}>
-          <Link
-            aria-label={`Open the workflows: “${each.work.name}”`}
-            className="hover:bg-muted/50 focus-visible:ring-ring/50 grid w-full items-center gap-x-4 gap-y-0.5 px-5 py-2.5 text-left outline-none focus-visible:ring-3 focus-visible:ring-inset sm:grid-cols-2"
-            params={{ clientId }}
-            to={sectionTo.workflows}
-          >
-            <span className="flex min-w-0 flex-wrap items-center gap-x-2">
-              <span className="truncate">{teamName(view, each.from)}</span>
-              <ArrowRightIcon
-                aria-hidden
-                className="text-muted-foreground size-3.5 flex-none"
-              />
-              <span className="truncate">{teamName(view, each.to)}</span>
-            </span>
-            <span className="text-muted-foreground min-w-0 truncate">
-              {each.work.name}
-            </span>
+        <Item asChild key={each.work.id} size="sm">
+          <Link params={{ clientId }} to={sectionTo.workflows}>
+            <ItemContent>
+              <ItemTitle>
+                {`${teamName(view, each.from)} → ${teamName(view, each.to)}`}
+              </ItemTitle>
+              <ItemDescription>{each.work.name}</ItemDescription>
+            </ItemContent>
           </Link>
-        </li>
+        </Item>
       ))}
-    </ul>
-  </Section>
+    </ItemGroup>
+  </Part>
 );
 
 /** Whether a team is shown under `filter`. */
@@ -347,113 +388,120 @@ const besideStanding = (team: ChartTeam): readonly TeamFlag[] =>
       !(flag.kind === "noLead" && team.view.next.kind === "lead-unknown")
   );
 
-/**
- * One team in the list: its name, which opens it, who leads it and where
- * it stands, what needs a look there, and its people as dots. A team that
- * does not take part can be asked in until the interviews close.
- */
-const TeamRow = ({
-  view,
-  team,
-  clientId,
-}: {
-  view: OrgView;
+/** One team as the list has it, with what its row needs to say it. */
+interface TeamRow {
   team: ChartTeam;
+  view: OrgView;
   clientId: string;
-}) => {
-  const each = team.view;
-  const { lead, next } = each;
-  const { name } = each.team;
-  const people = each.people.length;
-  const talked = talkedWords(each.counts.completed, each.asked);
-  const line = [
-    lead !== null && next.kind !== "lead" ? lead.person.name : "",
-    standsOf(view, each),
-  ]
-    .filter((part) => part !== "")
-    .join(" · ");
-  const flags = each.off ? [] : besideStanding(team);
-  const [flag] = flags;
-  return (
-    // The whole row opens the team, as every list's rows open what they name: it answers the pointer and ends in a chevron.
-    <li className="hover:bg-muted/50 relative grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-5 gap-y-2 border-t px-5 py-3 transition-colors md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)_auto]">
-      <span className="flex min-w-0 flex-col">
-        <TeamLink
-          aria-label={`Open ${name}`}
-          className={cn(
-            "focus-visible:ring-ring/50 truncate rounded-sm outline-none after:absolute after:inset-0 focus-visible:ring-3",
-            each.off && "text-muted-foreground"
-          )}
-          clientId={clientId}
-          team={each.team.id}
-        >
-          {name}
-        </TeamLink>
-        <span
-          className={cn(
-            "truncate text-xs",
-            next.kind === "lead" && next.reminded
-              ? "text-status-attention"
-              : "text-muted-foreground"
-          )}
-        >
-          {line}
-        </span>
-        {flag === undefined ? null : (
-          <span className="flex items-baseline gap-1.5 truncate text-xs">
-            <AttentionDot />
-            {flagLine(flag)}
-            {flags.length > 1 ? (
-              <span className="text-muted-foreground tabular-nums">
-                {` +${flags.length - 1}`}
-              </span>
-            ) : null}
-          </span>
-        )}
-      </span>
-      <span className="col-span-2 flex min-w-0 items-center gap-4 md:col-span-1">
-        {each.off || !view.told ? (
-          <span className="text-muted-foreground text-xs tabular-nums">
-            {counted(people, "person", "people")}
-          </span>
-        ) : (
-          <>
-            <span className="min-w-0 flex-1">
-              <PeopleDots label={talked} people={each.people} />
-            </span>
-            <span
-              aria-hidden
-              className="text-muted-foreground flex-none text-xs tabular-nums"
-            >
-              {talked}
-            </span>
-          </>
-        )}
-      </span>
-      <span className="col-start-2 row-start-1 flex items-center gap-3 md:col-start-auto md:row-start-auto">
-        {each.off && !view.closed ? (
-          // Above the row's link, so it is pressed itself.
-          <span className="relative">
-            <CommandButton
-              clientId={clientId}
-              command={{
-                type: "onboarding.ask_in",
-                payload: { team: each.team.id },
-              }}
-              label={`Ask ${name} in`}
-            >
-              Ask it in
-            </CommandButton>
-          </span>
-        ) : null}
-        <ChevronRightIcon
-          aria-hidden
-          className="text-muted-foreground size-4 flex-none"
-        />
-      </span>
-    </li>
+}
+
+/** A team's lead, or that it has none named. */
+const leadOf = ({ team }: TeamRow): string =>
+  team.view.lead?.person.name ?? "Not named";
+
+/** Where a team stands, amber while its lead was reminded and hasn't talked. */
+const Standing = ({ team, view }: TeamRow) => {
+  const { next } = team.view;
+  const words = standsOf(view, team.view);
+  return next.kind === "lead" && next.reminded ? (
+    <Badge variant="warning">{words}</Badge>
+  ) : (
+    words
   );
 };
+
+/** What needs a look at a team, the first and how many more; none for a team left out. */
+const lookOf = ({ team }: TeamRow): string => {
+  const flags = team.view.off ? [] : besideStanding(team);
+  const [flag] = flags;
+  if (flag === undefined) {
+    return "";
+  }
+  return flags.length > 1
+    ? `${flagLine(flag)}, and ${flags.length - 1} more`
+    : flagLine(flag);
+};
+
+/** Who talked there: its people as dots and in words, or how many while nobody is asked. */
+const TalkedCell = ({ team, view }: TeamRow) => {
+  const each = team.view;
+  if (each.off || !view.told) {
+    return counted(each.people.length, "person", "people");
+  }
+  const talked = talkedWords(each.counts.completed, each.asked);
+  return (
+    <span {...stylex.props(styles.talked)}>
+      <PeopleDots label={talked} people={each.people} />
+      <span aria-hidden>{talked}</span>
+    </span>
+  );
+};
+
+/** Who talked there, in words, on a card. */
+const talkedFact = ({ team, view }: TeamRow): string =>
+  team.view.off || !view.told
+    ? counted(team.view.people.length, "person", "people")
+    : talkedWords(team.view.counts.completed, team.view.asked);
+
+/** Asking a team in that doesn't take part, until the interviews close: above the row's press. */
+const AskIn = ({ team, view, clientId }: TeamRow) =>
+  team.view.off && !view.closed ? (
+    <span {...stylex.props(styles.raised)}>
+      <CommandButton
+        clientId={clientId}
+        command={{
+          type: "onboarding.ask_in",
+          payload: { team: team.view.team.id },
+        }}
+        label={`Ask ${team.view.team.name} in`}
+      >
+        Ask it in
+      </CommandButton>
+    </span>
+  ) : null;
+
+const teamColumns: readonly DataColumn<TeamRow>[] = [
+  { id: "lead", head: "Team lead", cell: leadOf },
+  {
+    id: "stands",
+    head: "Where it stands",
+    cell: (row) => <Standing {...row} />,
+    wrap: true,
+    fact: () => null,
+  },
+  {
+    id: "look",
+    head: "Needs a look",
+    cell: lookOf,
+    wrap: true,
+    fact: (row) => (lookOf(row) === "" ? null : lookOf(row)),
+  },
+  {
+    id: "talked",
+    head: "Talked",
+    cell: (row) => <TalkedCell {...row} />,
+    fact: talkedFact,
+  },
+  {
+    id: "ask",
+    head: "",
+    cell: (row) => <AskIn {...row} />,
+    // A card is its link whole: a team is asked in from its own page.
+    fact: () => null,
+  },
+];
+
+/** Under a team's name on a card: where it stands. */
+const teamLead = (row: TeamRow) => <Standing {...row} />;
+
+const teamLink = ({ team, clientId }: TeamRow, look: RowLook) => (
+  <Link
+    params={{ clientId }}
+    search={{ team: team.view.team.id }}
+    to={sectionTo.interviews}
+    {...look}
+  />
+);
 
 /**
  * Every team, and the work that goes between them. A long list can be
@@ -496,74 +544,70 @@ export const TeamList = ({
         named(each.view.team.name) ||
         each.view.people.some((one) => named(one.person.name)))
   );
-
   return (
     <>
       {long ? (
-        <div className="flex flex-wrap items-center gap-2">
+        <div {...stylex.props(styles.tools)}>
           {shownFilters.length > 1 ? (
             <ToggleGroup
               aria-label="Which teams to show"
-              className="flex-wrap"
               onValueChange={(value) => {
                 setFilter(filters.find((each) => each === value[0]) ?? "all");
               }}
               size="sm"
-              spacing={0}
               value={[filter]}
-              variant="outline"
             >
               {shownFilters.map((each) => (
                 <ToggleGroupItem key={each} value={each}>
-                  {filterWords[each]}
-                  <span className="text-muted-foreground tabular-nums">
-                    {counts[each]}
-                  </span>
+                  {`${filterWords[each]} ${counts[each]}`}
                 </ToggleGroupItem>
               ))}
             </ToggleGroup>
           ) : null}
-          <div className="w-full sm:ml-auto sm:w-64">
-            <InputGroup>
-              <InputGroupInput
-                aria-label="Find a team or a person"
-                onChange={(event) => {
-                  setQuery(event.target.value);
-                }}
-                placeholder="Find a team or a person"
-                value={query}
-              />
-              <InputGroupAddon>
-                <SearchIcon />
-              </InputGroupAddon>
-            </InputGroup>
-          </div>
+          <InputGroup style={styles.search}>
+            <InputGroupInput
+              aria-label="Find a team or a person"
+              onChange={(event) => {
+                setQuery(event.target.value);
+              }}
+              placeholder="Find a team or a person"
+              value={query}
+            />
+            <InputGroupAddon>
+              <Icon icon={SearchIcon} />
+            </InputGroupAddon>
+          </InputGroup>
         </div>
       ) : null}
-
       {found.length > 0 ? (
         <Found clientId={clientId} found={found} view={view} />
       ) : null}
-
-      <Section title="Teams">
+      <Part aria-labelledby="teams">
+        <SectionHeader
+          description={`${counted(chart.teams.length, "team", "teams")}, ${chart.taking} taking part.`}
+          id="teams"
+          title="Teams"
+          variant="group"
+        />
         {shown.length === 0 ? (
-          <p className="text-muted-foreground border-t px-5 py-4">
-            No team matches.
-          </p>
+          <Empty align="start" size="sm">
+            <EmptyHeader>
+              <EmptyDescription>No team matches.</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         ) : (
-          <ul className="flex flex-col">
-            {shown.map((each) => (
-              <TeamRow
-                clientId={clientId}
-                key={each.view.team.id}
-                team={each}
-                view={view}
-              />
-            ))}
-          </ul>
+          <DataRows
+            columns={teamColumns}
+            label="Teams"
+            lead={teamLead}
+            link={teamLink}
+            name={({ team }) => team.view.team.name}
+            nameHead="Team"
+            rowKey={({ team }) => team.view.team.id}
+            rows={shown.map((team) => ({ team, view, clientId }))}
+          />
         )}
-      </Section>
-
+      </Part>
       {chart.between.length > 0 ? (
         <Between chart={chart} clientId={clientId} view={view} />
       ) : null}
@@ -600,28 +644,28 @@ const TeamFigures = ({ view, team }: { view: OrgView; team: ChartTeam }) => {
   }
   let linksSub = each.off ? "Does not take part" : "No links out yet";
   if (each.sent !== null) {
-    linksSub = `Links out since ${formatDate(dateOn(view.org, each.sent))}`;
+    linksSub = `Links out since ${dayDate(view, each.sent)}`;
   }
   return (
-    <div className="@container border-t">
-      <div className="bg-border grid grid-cols-2 gap-px @3xl:grid-cols-4">
-        <Figure label="People" sub={peopleSub} value={people} />
-        <Figure
-          label="Talked"
-          sub={linksSub}
-          value={counts ? `${each.counts.completed} of ${each.asked}` : "–"}
-        />
-        <Figure
-          label="Pieces of work"
-          sub={works === 0 ? "Named by its lead" : "As its lead named them"}
-          value={works}
-        />
-        <Figure
-          label="Known"
-          value={works === 0 ? "–" : `${team.known} of ${works}`}
-        />
-      </div>
-    </div>
+    <StatGroup aria-label={`${each.team.name} in figures`} columns={4}>
+      <Stat change={peopleSub} label="People" value={String(people)} />
+      <Stat
+        change={linksSub}
+        label="Talked"
+        value={counts ? `${each.counts.completed} of ${each.asked}` : "Not yet"}
+      />
+      <Stat
+        change={works === 0 ? "Named by its lead" : "As its lead named them"}
+        label="Pieces of work"
+        value={String(works)}
+      />
+      <Stat
+        change={works === 0 ? "Once its lead named them" : undefined}
+        label="Known"
+        value={works === 0 ? "None yet" : `${team.known} of ${works}`}
+        variant={works > 0 && team.known === works ? "success" : "default"}
+      />
+    </StatGroup>
   );
 };
 
@@ -635,76 +679,67 @@ const TeamPeople = ({
 }) => {
   const each = team.view;
   return (
-    <Section
-      description={
-        team.small
-          ? `Fewer than ${MIN_GROUP}: the company never sees this team’s numbers apart.`
-          : "By name, for Grasp only."
-      }
-      title="People"
-    >
+    <Part aria-labelledby="team-people">
+      <SectionHeader
+        description={
+          team.small
+            ? `Fewer than ${MIN_GROUP}: the company never sees this team’s numbers apart.`
+            : "By name, for Grasp only."
+        }
+        id="team-people"
+        title="People"
+        variant="group"
+      />
       {each.people.length === 0 ? (
-        <p className="text-muted-foreground border-t px-5 py-4">
-          Nobody is in this team yet.
-        </p>
+        <Empty align="start" size="sm">
+          <EmptyHeader>
+            <EmptyDescription>Nobody is in this team yet.</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
-        <ul className="flex flex-col">
+        <ItemGroup aria-labelledby="team-people" separated>
           {each.people.map((one) => {
             const who = one.person;
             const about = [titles.get(who.id) ?? "", askedAbout(team, one)]
               .filter((part) => part !== "")
               .join(" · ");
             return (
-              <li
-                className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 border-t px-5 py-2.5"
-                key={who.id}
-              >
-                <Initials name={who.name} />
-                <span className="flex min-w-0 flex-col">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate">{who.name}</span>
+              <Item key={who.id} size="sm">
+                <ItemMedia>
+                  <Initials name={who.name} />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>
+                    {who.name}
                     {who.lead && each.lead !== null ? (
-                      <Badge variant="outline">Team lead</Badge>
+                      <ItemDetail>
+                        <Badge variant="outline">Team lead</Badge>
+                      </ItemDetail>
                     ) : null}
-                  </span>
+                  </ItemTitle>
                   {about === "" ? null : (
-                    <span className="text-muted-foreground truncate text-xs">
-                      {about}
-                    </span>
+                    <ItemDescription>{about}</ItemDescription>
                   )}
-                </span>
-                <span className="text-muted-foreground flex flex-none items-center gap-2 text-xs">
-                  <Dot mark={markOf(one.state)} />
-                  <span className="max-sm:sr-only">
-                    {one.out && one.state === "away"
-                      ? "Not asked"
-                      : linkWords[one.state]}
-                  </span>
-                </span>
-              </li>
+                </ItemContent>
+                <ItemActions>
+                  <Text color="muted" size="sm">
+                    <LinkStands one={one} />
+                  </Text>
+                </ItemActions>
+              </Item>
             );
           })}
-        </ul>
+        </ItemGroup>
       )}
-    </Section>
+    </Part>
   );
 };
 
-/** Who does a piece of work, as their initials and their first names. */
-const Doers = ({ doers }: { doers: readonly PersonView[] }) => (
-  <span className="text-muted-foreground mt-1 flex items-center gap-2 text-xs">
-    <span aria-hidden className="flex flex-none gap-0.5">
-      {doers.slice(0, mostFaces).map((one) => (
-        <Initials key={one.person.id} name={one.person.name} />
-      ))}
-    </span>
-    <span className="min-w-0 truncate">
-      {doers.length <= mostNamed
-        ? doers.map((one) => one.person.first).join(", ")
-        : `${doers.length} do it`}
-    </span>
-  </span>
-);
+/** Who does a piece of work, by their first names, or how many. */
+const doersWords = (doers: readonly PersonView[]): string =>
+  doers.length <= mostNamed
+    ? doers.map((one) => one.person.first).join(", ")
+    : `${doers.length} do it`;
 
 /** The work a team does: how far each piece is known, its part of the team's work, and who does it. */
 const TeamWork = ({
@@ -716,67 +751,92 @@ const TeamWork = ({
 }) => {
   const works = team.works.length;
   return (
-    <Section
-      description={
-        works === 0
-          ? "Its lead names the team’s work in their interview: what there is, how much of it, and who does which."
-          : "As its lead named it, with each piece’s part of the team’s work."
-      }
-      title="The work it does"
-    >
+    <Part aria-labelledby="team-work">
+      <SectionHeader
+        description={
+          works === 0
+            ? "Its lead names the team’s work in their interview: what there is, how much of it, and who does which."
+            : "As its lead named it, with each piece’s part of the team’s work."
+        }
+        id="team-work"
+        title="The work it does"
+        variant="group"
+      />
       {works > 0 ? (
-        <>
-          <div className="px-5 pb-4">
-            <WorkBar team={team} />
-          </div>
-          <ul className="flex flex-col">
+        <div {...stylex.props(styles.part)}>
+          <Progress
+            aria-label={`${team.known} of ${works} pieces of work known`}
+            max={works}
+            value={team.known}
+          />
+          <ItemGroup aria-labelledby="team-work" separated>
             {team.works.map((work) => {
-              const title = work.evidence.work.name;
               const doers = work.doers.length;
+              const talked =
+                doers > 0
+                  ? `${work.evidence.approved} of ${doers} talked: ${doersWords(work.doers)}`
+                  : "Nobody named for it";
               return (
-                <li className="border-t" key={work.evidence.id}>
-                  <Link
-                    aria-label={`Open the workflows: “${title}”`}
-                    className="hover:bg-muted/50 focus-visible:ring-ring/50 flex w-full flex-col gap-1 px-5 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-inset"
-                    params={{ clientId }}
-                    to={sectionTo.workflows}
-                  >
-                    <span className="flex items-start justify-between gap-3">
-                      <span className="min-w-0">{title}</span>
-                      <span className="text-muted-foreground flex-none text-xs tabular-nums">
-                        {Math.round(work.share * 100)}%
-                      </span>
-                    </span>
-                    <span className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
-                      <span className="flex items-center gap-1.5">
-                        <span
-                          aria-hidden
-                          className={cn(
-                            "size-1.5 rounded-full",
-                            workTone(work.evidence)
-                          )}
-                        />
+                <Item asChild key={work.evidence.id} size="sm">
+                  <Link params={{ clientId }} to={sectionTo.workflows}>
+                    <ItemContent>
+                      <ItemTitle>
+                        {work.evidence.work.name}
+                        <ItemDetail>{`${Math.round(work.share * 100)}%`}</ItemDetail>
+                      </ItemTitle>
+                      <ItemDescription>{talked}</ItemDescription>
+                    </ItemContent>
+                    <ItemActions>
+                      <Badge variant={workTone(work.evidence)}>
                         {workflowWords[work.evidence.state]}
-                      </span>
-                      <span className="tabular-nums">
-                        {doers > 0
-                          ? `${work.evidence.approved} of ${doers} talked`
-                          : "Nobody named for it"}
-                      </span>
-                    </span>
-                    {doers > 0 ? <Doers doers={work.doers} /> : null}
+                      </Badge>
+                    </ItemActions>
                   </Link>
-                </li>
+                </Item>
               );
             })}
-          </ul>
-        </>
+          </ItemGroup>
+        </div>
       ) : null}
-    </Section>
+    </Part>
   );
 };
 
-/** Where a team's work comes from and goes to, by the company's own teams. */
+/** One hand-over of a team's work: to the other team's page when it is one of the company's own. */
+const Handoff = ({
+  clientId,
+  other,
+  title,
+  work,
+}: {
+  clientId: string;
+  /** The other team, or none for somewhere outside the company's teams. */
+  other: string | null;
+  title: string;
+  work: string;
+}) => {
+  const content = (
+    <ItemContent>
+      <ItemTitle>{title}</ItemTitle>
+      <ItemDescription>{work}</ItemDescription>
+    </ItemContent>
+  );
+  return other === null ? (
+    <Item size="sm">{content}</Item>
+  ) : (
+    <Item asChild size="sm">
+      <Link
+        params={{ clientId }}
+        search={{ team: other }}
+        to={sectionTo.interviews}
+      >
+        {content}
+      </Link>
+    </Item>
+  );
+};
+
+/** Where a team's work comes from and goes to, by the company's own teams, each opening the other team. */
 const TeamHandoffs = ({
   view,
   team,
@@ -787,71 +847,36 @@ const TeamHandoffs = ({
   clientId: string;
 }) => {
   const { name } = team.view.team;
-  const otherLink =
-    "truncate rounded-sm hover:underline focus-visible:ring-3 focus-visible:ring-ring/50 outline-none";
   return (
-    <Section
-      description="Who gets each piece of work next, as the people who do it said."
-      title="Where its work goes"
-    >
-      <ul className="flex flex-col">
+    <Part aria-labelledby="team-handoffs">
+      <SectionHeader
+        description="Who gets each piece of work next, as the people who do it said."
+        id="team-handoffs"
+        title="Where its work goes"
+        variant="group"
+      />
+      <ItemGroup aria-labelledby="team-handoffs" separated>
         {team.from.map((hand) => (
-          <li
-            className="flex flex-col gap-0.5 border-t px-5 py-2.5"
+          <Handoff
+            clientId={clientId}
             key={`from-${hand.work.id}`}
-          >
-            <span className="flex min-w-0 items-center gap-2">
-              <TeamLink
-                className={otherLink}
-                clientId={clientId}
-                team={hand.from}
-              >
-                {teamName(view, hand.from)}
-              </TeamLink>
-              <ArrowRightIcon
-                aria-hidden
-                className="text-muted-foreground size-3.5 flex-none"
-              />
-              <span className="text-muted-foreground truncate">{name}</span>
-            </span>
-            <span className="text-muted-foreground truncate text-xs">
-              {hand.work.name}
-            </span>
-          </li>
+            other={hand.from}
+            title={`${teamName(view, hand.from)} → ${name}`}
+            work={hand.work.name}
+          />
         ))}
         {team.to.map((hand) => (
-          <li
-            className="flex flex-col gap-0.5 border-t px-5 py-2.5"
+          <Handoff
+            clientId={clientId}
             key={`to-${hand.work.id}`}
-          >
-            <span className="flex min-w-0 items-center gap-2">
-              <span className="text-muted-foreground truncate">{name}</span>
-              <ArrowRightIcon
-                aria-hidden
-                className="text-muted-foreground size-3.5 flex-none"
-              />
-              {/* Somewhere outside the teams is said in someone's words: not shown here. */}
-              {hand.to === null ? (
-                <span className="text-muted-foreground truncate">
-                  Outside the company’s teams
-                </span>
-              ) : (
-                <TeamLink
-                  className={otherLink}
-                  clientId={clientId}
-                  team={hand.to}
-                >
-                  {teamName(view, hand.to)}
-                </TeamLink>
-              )}
-            </span>
-            <span className="text-muted-foreground truncate text-xs">
-              {hand.work.name}
-            </span>
-          </li>
+            other={hand.to}
+            // Somewhere outside the teams is said in someone's words: not shown here.
+            title={`${name} → ${hand.to === null ? "Outside the company’s teams" : teamName(view, hand.to)}`}
+            work={hand.work.name}
+          />
         ))}
-      </ul>
-    </Section>
+      </ItemGroup>
+    </Part>
   );
 };
 
@@ -859,42 +884,74 @@ const TeamHandoffs = ({
 const TeamFlags = ({ view, team }: { view: OrgView; team: ChartTeam }) => {
   if (team.view.off) {
     return (
-      <EmptySection>
-        {view.closed
-          ? "This team did not take part, and the interviews have closed."
-          : "This team does not take part: nobody in it gets a link, and nothing waits for it. Asked in, its lead gets a link first, then everyone else."}
-      </EmptySection>
+      <Empty align="start" size="sm">
+        <EmptyHeader>
+          <EmptyDescription>
+            {view.closed
+              ? "This team did not take part, and the interviews have closed."
+              : "This team does not take part: nobody in it gets a link, and nothing waits for it. Asked in, its lead gets a link first, then everyone else."}
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
   if (team.flags.length === 0) {
     return null;
   }
   return (
-    <ul className="bg-card flex flex-col overflow-hidden rounded-xl border">
-      {team.flags.map((flag) => (
-        <li
-          className="flex flex-col gap-0.5 border-t px-5 py-3 first:border-t-0"
-          key={flag.kind === "nobody" ? `nobody-${flag.work.id}` : flag.kind}
-        >
-          <span className="flex items-center gap-2">
-            <span
-              aria-hidden
-              className="bg-status-attention size-1.5 flex-none rounded-full"
-            />
-            {flagLine(flag)}
-          </span>
-          <span className="text-muted-foreground">{flagAbout[flag.kind]}</span>
-        </li>
-      ))}
-    </ul>
+    <Part aria-labelledby="team-look">
+      <SectionHeader id="team-look" title="Needs a look" variant="group" />
+      <ItemGroup aria-labelledby="team-look" separated>
+        {team.flags.map((flag) => (
+          <Item
+            key={flag.kind === "nobody" ? `nobody-${flag.work.id}` : flag.kind}
+          >
+            <ItemMedia variant="icon">
+              <Icon icon={TriangleAlertIcon} />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>{flagLine(flag)}</ItemTitle>
+              <ItemDescription>{flagAbout[flag.kind]}</ItemDescription>
+            </ItemContent>
+          </Item>
+        ))}
+      </ItemGroup>
+    </Part>
   );
 };
 
+/** The apps a team works in, with how many pieces of work each is in. */
+const TeamTools = ({ team }: { team: ChartTeam }) => (
+  <Part aria-labelledby="team-tools">
+    <SectionHeader
+      description="As the people who do the work named them, with how many pieces of work each is in."
+      id="team-tools"
+      title="The apps it works in"
+      variant="group"
+    />
+    <span {...stylex.props(styles.badges)}>
+      {team.tools.map((tool) => (
+        <Badge key={tool.name} variant="outline">
+          {`${tool.name} · ${tool.works}`}
+        </Badge>
+      ))}
+    </span>
+  </Part>
+);
+
+/** A team's heading: its name, what it does and who leads it. */
+const teamLine = (team: ChartTeam): string => {
+  const { lead, team: named } = team.view;
+  const led =
+    lead === null ? "No team lead named yet." : `Led by ${lead.person.name}.`;
+  return named.does === "" ? led : `${named.does}. ${led}`;
+};
+
 /**
- * One team, whole: who leads it, everyone in it with what each is asked
- * about and where they stand, the work it does with who does which piece
- * and how far each is known, the apps it works in, and where its work
- * comes from and goes to.
+ * One team, whole: who leads it, its figures, what needs a look there,
+ * everyone in it with what each is asked about and where they stand, the
+ * work it does with who does which piece and how far each is known, the
+ * apps it works in, and where its work comes from and goes to.
  */
 export const OneTeam = ({
   view,
@@ -908,77 +965,42 @@ export const OneTeam = ({
   titles: ReadonlyMap<string, string>;
 }) => {
   const each = team.view;
-  const { lead } = each;
   return (
-    <>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Button
-          className="-ml-2"
-          nativeButton={false}
-          render={<TeamLink clientId={clientId} team={null} />}
-          size="sm"
-          variant="outline"
-        >
-          <ArrowLeftIcon data-icon="inline-start" />
-          All teams
-        </Button>
-        <span className={each.off ? "text-muted-foreground" : undefined}>
-          {each.off
-            ? "Does not take part in the interviews"
-            : "Takes part in the interviews"}
-        </span>
-      </div>
-
-      <section className="bg-card overflow-hidden rounded-xl border">
-        <div className="flex flex-wrap items-start gap-x-8 gap-y-4 px-5 py-4">
-          <div className="flex min-w-0 flex-1 basis-64 flex-col gap-0.5">
-            <PageHeaderTitle render={<h2>{each.team.name}</h2>} />
-            {each.team.does === "" ? null : (
-              <p className="text-muted-foreground">{each.team.does}</p>
-            )}
-          </div>
-          <div className="flex min-w-0 flex-col gap-1.5">
-            <span className="text-muted-foreground text-xs">Team lead</span>
-            <span className="flex items-center gap-2">
-              {lead === null ? null : <Initials name={lead.person.name} />}
-              <span
-                className={lead === null ? "text-muted-foreground" : undefined}
-              >
-                {lead === null ? "Not named yet" : lead.person.name}
-              </span>
-            </span>
-          </div>
+    <div {...stylex.props(styles.parts)}>
+      <div {...stylex.props(styles.part)}>
+        <div {...stylex.props(styles.back)}>
+          <Button asChild size="sm" variant="ghost">
+            <Link params={{ clientId }} to={sectionTo.interviews}>
+              <Icon icon={ArrowLeftIcon} />
+              All teams
+            </Link>
+          </Button>
+          <AskIn clientId={clientId} team={team} view={view} />
         </div>
+        <SectionHeader
+          badge={
+            each.off ? (
+              <Badge>Does not take part in the interviews</Badge>
+            ) : (
+              <Badge variant="success">Takes part in the interviews</Badge>
+            )
+          }
+          description={teamLine(team)}
+          title={each.team.name}
+        />
         <TeamFigures team={team} view={view} />
-      </section>
-
+      </div>
       <TeamFlags team={team} view={view} />
-
-      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
+      <div {...stylex.props(styles.team)}>
         <TeamPeople team={team} titles={titles} />
-        <div className="flex min-w-0 flex-col gap-6">
+        <div {...stylex.props(styles.parts)}>
           <TeamWork clientId={clientId} team={team} />
-          {team.tools.length > 0 ? (
-            <Section
-              description="As the people who do the work named them, with how many pieces of work each is in."
-              title="The apps it works in"
-            >
-              <ul className="flex flex-wrap gap-2 border-t px-5 py-4">
-                {team.tools.map((tool) => (
-                  <li key={tool.name}>
-                    <Badge variant="outline">
-                      {`${tool.name} · ${tool.works}`}
-                    </Badge>
-                  </li>
-                ))}
-              </ul>
-            </Section>
-          ) : null}
+          {team.tools.length > 0 ? <TeamTools team={team} /> : null}
           {team.to.length + team.from.length > 0 ? (
             <TeamHandoffs clientId={clientId} team={team} view={view} />
           ) : null}
         </div>
       </div>
-    </>
+    </div>
   );
 };

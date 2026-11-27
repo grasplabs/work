@@ -1,21 +1,13 @@
-@import "@grasp-os/app-kit/styles.css";
 /*
- * Damsko's styles (packages/ui), for the parts that are Damsko's, beside
- * the kit's theme until the last page moves: its tokens under its own
- * names (--damsko-*), its themes (the root's `data-theme`, which the
- * document sets to Evergreen, as apps/web does) and its fonts, served from
- * this origin. Its colours follow the root's `data-mode`, which
- * public/theme.js sets: what staff chose, or the system. Not its base.css: Tailwind's
- * preflight is the reset here.
+ * The admin's one stylesheet, as the frontend's (apps/web/src/styles.css):
+ * Damsko's look (packages/ui), its base, the reset its components were
+ * drawn on, then its tokens under its own names (--damsko-*), its themes
+ * (the root's `data-theme`, Evergreen, as apps/web) and modes (the root's
+ * `data-mode`, which public/theme.js writes: what staff chose, or the
+ * system) and its fonts, served from this origin. Every component and page
+ * styles itself with StyleX on those tokens.
  */
+@import "@grasp-os/ui/styles/base.css";
 @import "@grasp-os/ui/styles/tokens.css";
 @import "@grasp-os/ui/styles/themes.css";
 @import "@grasp-os/ui/styles/fonts.css";
-/* The theme's sans, bundled so it is served from this origin. */
-@import "@fontsource-variable/geist";
-/* Newsreader, the theme's serif (`font-serif`), for titles and key figures. */
-@import "@fontsource-variable/newsreader/opsz.css";
-/* JetBrains Mono, the theme's code font (`font-mono`). */
-@import "@fontsource-variable/jetbrains-mono";
-
-@source "../";

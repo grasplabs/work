@@ -40,7 +40,9 @@ import type {
   ChatOutput,
   ChatPlan,
   ChatProvenance,
+  ChatQueued,
   ChatRating,
+  ChatStopped,
   ChatSearchHit,
   ChatSearchSnippet,
   ChatSummary,
@@ -138,12 +140,15 @@ import {
 } from "./chat-audiences.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
 import type {
+  QueuedQuestion,
   TurnCapture,
   TurnEnd,
   TurnMessage,
   TurnRequest,
   TurnStop,
 } from "./chat-harness.ts";
+import { ChatListWatch } from "./chat-list-watch.ts";
+import type { ChatList, ChatListListener } from "./chat-list-watch.ts";
 import {
   chatMessageOf,
   partialOf,
@@ -207,10 +212,11 @@ import {
   readableSources,
   withheldDetail,
 } from "./history-access.ts";
+import { allInOrder } from "./in-order.ts";
 import { instructionFilesFor } from "./instruction-files.ts";
 import type { InstructionContext } from "./instruction-files.ts";
 import { chatTurnPurpose } from "./model-spend.ts";
-import { inputTokens, modelSettings, models } from "./models.ts";
+import { modelSettings, models } from "./models.ts";
 import type { OutsideTextNote } from "./outside-text.ts";
 import type { WorkContext } from "./restricted.ts";
 import { outsideReadOf } from "./ungranted-reads.ts";
@@ -229,6 +235,8 @@ interface LiveTurn {
   id: string;
   /** The agent it runs as: the one its answers are kept under. */
   agentId: string;
+  /** Whether nobody asked for it there and then (`askUnattended`): it only reads. */
+  unattended: boolean;
   /**
    * Gives the chat back the agent it had before this turn: set while the
    * turn may still be refused before it starts, and run as it ends then.
@@ -251,10 +259,13 @@ interface LiveTurn {
   /** Tells a chat platform's asker the answer's text so far. */
   onText?: (text: string) => unknown;
   /**
-   * What its model requests read from the provider's prompt cache, of all
-   * the prompt tokens they sent, recorded once the turn ends.
+   * Whether it got under way (`started`), told once: true as it goes to
+   * its ChatSession, false when it was refused before. What a question
+   * queued into it (`send`) waits for first.
    */
-  cache: { requests: number; inputTokens: number; cacheReadTokens: number };
+  underWay: PromiseWithResolvers<boolean>;
+  /** Settles once this object holds the turn no more (`#endLive`). */
+  ended: PromiseWithResolvers<void>;
 }
 
 /**
@@ -495,8 +506,19 @@ const followUpText = (name: string): string =>
   `The person addressed you too, ${JSON.stringify(name)}, in their question above. Answer it now as yourself, from what you know and may do. Don't repeat what another agent already said: add to it, or say where you differ.`;
 
 /**
+ * How a question sent while its chat's turn runs goes into that turn
+ * (`ChatHarness.queueQuestion`): its own ID there, and the page's key for
+ * it (`send`), which its entry keeps with it.
+ */
+interface QueuedAs {
+  id: string;
+  key: string | undefined;
+}
+
+/**
  * The turn's question (`TurnRequest`): as asked, with the files it carries,
- * and what the chat was started to make (`make`), if anything.
+ * what the chat was started to make (`make`), if anything, and the page's
+ * key for it (`key`), which its entry keeps with it.
  */
 const turnQuestion = (
   {
@@ -509,9 +531,11 @@ const turnQuestion = (
     followUp,
   }: z.output<typeof questionSchema>,
   files: { id: string; type: string }[],
-  make: ChatMake | null
+  make: ChatMake | null,
+  key: string | undefined
 ): TurnRequest["question"] => ({
   ...(followUp === undefined ? {} : { followUp }),
+  ...(key === undefined ? {} : { key }),
   text,
   model,
   ...(effort === undefined ? {} : { effort }),
@@ -725,6 +749,12 @@ const turnStopError = (stop: TurnStop): Error => {
     case "history_revoked": {
       return agentErrors.create("agent.history_revoked");
     }
+    case "overdue": {
+      return agentErrors.create("agent.turn_overdue");
+    }
+    case "lost": {
+      return agentErrors.create("agent.turn_lost");
+    }
     case "person_inactive": {
       return permissionErrors.create("permission.person_inactive");
     }
@@ -846,6 +876,17 @@ const builtSchema = z.array(z.string());
  * object does.
  */
 const runningKeyPrefix = "running:";
+
+/**
+ * The questions queued into a chat's turn that it hasn't taken yet, as
+ * `queued:<chat>`: a copy of what its `ChatSession` holds in pi
+ * (`turnQueued`), for its watchers, kept through a restart of this object.
+ */
+const queuedKeyPrefix = "queued:";
+
+const chatQueuedSchema = z.array(
+  z.object({ id: z.string(), text: z.string() })
+);
 
 /**
  * What of a chat's `ChatSession` its messages were kept of, as
@@ -1144,6 +1185,22 @@ export class Workspace extends DurableObject<Env> {
   readonly #watchers = new Map<ChatId, Map<string, ChatWatch>>();
 
   /**
+   * Where each chat stood before the questions sent in it still being
+   * taken moved it up (`#askedIn`), when those are, and every time such a
+   * question moved it to.
+   */
+  readonly #asking = new Map<
+    ChatId,
+    { stood: Date; taking: Set<number>; moves: Set<number> }
+  >();
+
+  /** Who follows their list of chats (`watchChats`), by watch ID. */
+  readonly #listWatchers = new Map<string, ChatListWatch>();
+
+  /** Whether the list's watchers are told already this tick (`#listChanged`). */
+  #listTold = false;
+
+  /**
    * Bumped whenever a chat's agent writes an App's draft, so its watchers
    * read what it worked on again (`draftWritten`). In memory only.
    */
@@ -1178,7 +1235,8 @@ export class Workspace extends DurableObject<Env> {
     message: Message,
     thinkingMs: number | null = null,
     built: ShownBuilt | null = null,
-    agentId: string | null = null
+    agentId: string | null = null,
+    requestKey: string | null = null
   ): { id: number; createdAt: Date } {
     const stored = this.#db
       .insert(chatMessages)
@@ -1188,6 +1246,7 @@ export class Workspace extends DurableObject<Env> {
         createdAt: new Date(),
         thinkingMs,
         agentId,
+        requestKey,
         built: built === null ? null : JSON.stringify(built),
       })
       .returning({ id: chatMessages.id, createdAt: chatMessages.createdAt })
@@ -1198,6 +1257,12 @@ export class Workspace extends DurableObject<Env> {
       .where(eq(chats.id, chatId))
       .run();
     this.#keepSaid(chatId, stored.id, message);
+    // A step's result changes nothing the list shows that the answer
+    // around it won't: no title, read or working state, and its chat
+    // moved up as it was asked in.
+    if (message.role !== "toolResult") {
+      this.#listChanged();
+    }
     return stored;
   }
 
@@ -1340,12 +1405,15 @@ export class Workspace extends DurableObject<Env> {
       files = [],
       built,
       agentId,
+      key,
     }: {
       thinkingMs?: number;
       files?: readonly string[];
       built?: ShownBuilt;
       /** The agent whose turn it is from; none for the person's own words. */
       agentId?: string;
+      /** The page's key for a question it sent (`send`). */
+      key?: string;
     } = {}
   ): number {
     // A question and the files it carries are kept together: each file is
@@ -1357,7 +1425,8 @@ export class Workspace extends DurableObject<Env> {
             message,
             thinkingMs ?? null,
             built ?? null,
-            agentId ?? null
+            agentId ?? null,
+            key ?? null
           )
         : this.ctx.storage.transactionSync(() => {
             const stored = this.#store(
@@ -1365,7 +1434,8 @@ export class Workspace extends DurableObject<Env> {
               message,
               thinkingMs ?? null,
               built ?? null,
-              agentId ?? null
+              agentId ?? null,
+              key ?? null
             );
             this.#db
               .update(chatFiles)
@@ -1388,7 +1458,8 @@ export class Workspace extends DurableObject<Env> {
         thinkingMs ?? null,
         message.role === "assistant" && this.#asksIn(chatId),
         built,
-        agentId
+        agentId,
+        key
       ),
       files.length === 0 ? undefined : this.#filesAfter(chatId, id - 1)
     );
@@ -1506,6 +1577,7 @@ export class Workspace extends DurableObject<Env> {
       return made;
     });
     this.#deliverAudit();
+    this.#listChanged();
     return chat;
   }
 
@@ -1522,13 +1594,20 @@ export class Workspace extends DurableObject<Env> {
       : this.#graspChat(made.chatId, personId);
   }
 
-  /** The chat a request with `key` was kept for, and when, if one was within a day. */
+  /**
+   * The chat a request with `key` was kept for, and when, if one was
+   * within a day, with the file an `attach` attached.
+   */
   #requested(
-    kind: "create" | "send",
+    kind: "create" | "send" | "attach",
     key: string
-  ): { chatId: ChatId; at: Date } | undefined {
+  ): { chatId: ChatId; at: Date; fileId: string | null } | undefined {
     return this.#db
-      .select({ chatId: chatRequestKeys.chatId, at: chatRequestKeys.at })
+      .select({
+        chatId: chatRequestKeys.chatId,
+        at: chatRequestKeys.at,
+        fileId: chatRequestKeys.fileId,
+      })
       .from(chatRequestKeys)
       .where(
         and(
@@ -1563,8 +1642,16 @@ export class Workspace extends DurableObject<Env> {
     );
   }
 
-  /** Keeps `key` for what `chatId` just took, and drops the keys past their day. */
-  #keepRequest(kind: "create" | "send", key: string, chatId: ChatId): void {
+  /**
+   * Keeps `key` for what `chatId` just took (for an `attach`, the file
+   * `fileId`), and drops the keys past their day.
+   */
+  #keepRequest(
+    kind: "create" | "send" | "attach",
+    key: string,
+    chatId: ChatId,
+    fileId: string | null = null
+  ): void {
     const now = Date.now();
     this.#db
       .delete(chatRequestKeys)
@@ -1572,13 +1659,55 @@ export class Workspace extends DurableObject<Env> {
       .run();
     this.#db
       .insert(chatRequestKeys)
-      .values({ kind, key, chatId, at: new Date(now) })
-      // A question asked again after a restart lost it (`#questionStands`).
+      .values({ kind, key, chatId, fileId, at: new Date(now) })
+      // A question asked again after a restart lost it (`#questionStands`),
+      // or a file attached again after it was removed (`#attachedWith`).
       .onConflictDoUpdate({
         target: [chatRequestKeys.kind, chatRequestKeys.key],
-        set: { chatId, at: new Date(now) },
+        set: { chatId, fileId, at: new Date(now) },
       })
       .run();
+  }
+
+  /**
+   * The file `personId`'s chat attached with `key` within a day, as the
+   * first call attached it: what a repeat of `attachFile` answers, and
+   * what its caller asks first, so a repeat's bytes aren't read again
+   * (chats-rpc.ts).
+   */
+  fileAttachedWith(
+    chatId: unknown,
+    personId: string,
+    key: string
+  ): ChatFile | undefined {
+    const { id } = this.#graspChat(chatId, personId);
+    return this.#attachedWith(id, key);
+  }
+
+  /**
+   * The file chat `chatId` attached with `key` within a day, if it still
+   * has it: one removed since is attached anew. Another chat's key is
+   * refused, as it says nothing of a file here.
+   */
+  #attachedWith(chatId: ChatId, key: string): ChatFile | undefined {
+    const taken = this.#requested("attach", key);
+    if (taken === undefined) {
+      return undefined;
+    }
+    if (taken.chatId !== chatId) {
+      throw agentErrors.create("agent.invalid_request");
+    }
+    const row =
+      taken.fileId === null
+        ? undefined
+        : this.#db
+            .select(chatFileCard)
+            .from(chatFiles)
+            .where(
+              and(eq(chatFiles.chatId, chatId), eq(chatFiles.id, taken.fileId))
+            )
+            .get();
+    return row === undefined ? undefined : chatFileOf(row);
   }
 
   /**
@@ -1599,13 +1728,25 @@ export class Workspace extends DurableObject<Env> {
           bytes: number;
           picture: Uint8Array;
         },
-    by: AuditActor
+    by: AuditActor,
+    /**
+     * The page's key for this file (`ChatsApi.attachFile`): a repeat
+     * answers the file the first call attached, and attaches nothing.
+     * Checked and kept in the same transaction as the file, so of two at
+     * once only one attaches it.
+     */
+    key?: string
   ): ChatFile {
     const { id } = this.#graspChat(chatId, personId);
     if (this.#deleting.has(id)) {
       throw agentErrors.create("agent.chat_not_found");
     }
     const attached = this.ctx.storage.transactionSync(() => {
+      const before =
+        key === undefined ? undefined : this.#attachedWith(id, key);
+      if (before !== undefined) {
+        return before;
+      }
       const [kept] = this.#db
         .select({ files: count() })
         .from(chatFiles)
@@ -1654,10 +1795,13 @@ export class Workspace extends DurableObject<Env> {
         type: file.type,
         bytes: file.bytes,
       });
-      return row;
+      if (key !== undefined) {
+        this.#keepRequest("attach", key, id, row.id);
+      }
+      return chatFileOf(row);
     });
     this.#deliverAudit();
-    return chatFileOf(attached);
+    return attached;
   }
 
   /**
@@ -2661,18 +2805,20 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Refuses a turn its person may no longer take, or one for a chat that
-   * holds all it may.
+   * holds all it may; else their role, which the turn's context reads.
    */
   async #mayTakeTurn(
     chatId: Chat["id"],
     personId: Chat["personId"]
-  ): Promise<void> {
-    if ((await memberRole(this.env.DB, personId)) === undefined) {
+  ): Promise<Role> {
+    const role = await memberRole(this.env.DB, personId);
+    if (role === undefined) {
       throw permissionErrors.create("permission.person_inactive");
     }
     if (this.#storedChars(chatId) > maxChatChars) {
       throw agentErrors.create("agent.chat_full");
     }
+    return role;
   }
 
   /**
@@ -2692,13 +2838,18 @@ export class Workspace extends DurableObject<Env> {
       onText,
       calls,
       remembered,
+      key,
     }: {
       started?: () => void;
       onText?: (text: string) => unknown;
       calls?: ToolCall[];
       remembered?: ChatSavedMemory[];
+      /** The page's key for the question, kept with it in its turn. */
+      key?: string;
     } = {}
   ): Promise<Answer> {
+    // What the turn's record times from (turn-records.ts).
+    const sentAt = Date.now();
     const parsed = questionSchema.safeParse(question);
     if (!parsed.success) {
       throw agentErrors.create("agent.invalid_question");
@@ -2721,39 +2872,47 @@ export class Workspace extends DurableObject<Env> {
     const live: LiveTurn = {
       id: crypto.randomUUID(),
       agentId: chat.agentId,
+      unattended,
       reads: [],
       calls,
       remembered,
-      cache: { requests: 0, inputTokens: 0, cacheReadTokens: 0 },
+      underWay: Promise.withResolvers(),
+      ended: Promise.withResolvers(),
     };
     this.#turns.set(chat.id, live);
     try {
-      // Refused before anything is prepared while the chat's ChatSession
-      // has a turn under way: one this object's restart left there. That
-      // object refuses it again as it claims the turn.
-      if ((await this.#activeTurn(chat.id)) !== undefined) {
-        throw agentErrors.create("agent.busy");
-      }
-      await this.#mayTakeTurn(chat.id, personId);
+      // The checks before anything is prepared, each only a read, at once
+      // and refused in this order, as one after another would be.
+      const [, role, agent] = await allInOrder([
+        // Refused while the chat's ChatSession has a turn under way: one
+        // this object's restart left there. That object refuses it again
+        // as it claims the turn. Asking opens the chat's pi meanwhile.
+        (async () => {
+          if ((await this.#activeTurn(chat.id)) !== undefined) {
+            throw agentErrors.create("agent.busy");
+          }
+        })(),
+        this.#mayTakeTurn(chat.id, personId),
+        // The chat's agent as the company has it now: a paused one takes
+        // no turn, nor one an admin deleted, and nothing is read for
+        // either. Refused before its reach, so each for what it is.
+        turnAgent(this.env, chat.agentId),
+        // Another of the company's agents answers only those an admin let
+        // it answer, and in a chat app only where it works (agent-reach.ts).
+        requireAgentReaches(this.env, chat.agentId, personId, via),
+      ]);
       // The agent this turn runs as becomes the chat's, before anything is
-      // checked of it: the chat is the context its reads and code work in
-      // (restricted.ts), which is its agent's alone. A next question that
-      // addresses none then goes to it, and a turn a restart cut short
-      // keeps its answers under it (`keepTurnMessages`). After the checks
-      // above, so no turn under way loses its chat to another agent.
+      // read for the turn: the chat is the context its reads and code work
+      // in (restricted.ts), which is its agent's alone. A next question
+      // that addresses none then goes to it, and a turn a restart cut
+      // short keeps its answers under it (`keepTurnMessages`). After the
+      // checks above, so no turn under way loses its chat to another agent.
       const was = this.#chat(chat.id).agentId;
       this.#setChatAgent(chat.id, chat.agentId);
       // Put back if the turn is refused before it starts (`#endLive`).
       live.unstarted = () => {
         this.#setChatAgent(chat.id, was);
       };
-      // The chat's agent as the company has it now: a paused one takes no
-      // turn, nor one an admin deleted, and nothing is read for either.
-      // Before its reach is asked, so each is refused for what it is.
-      const agent = await turnAgent(this.env, chat.agentId);
-      // Another of the company's agents answers only those an admin let
-      // it answer, and in a chat app only where it works (agent-reach.ts).
-      await requireAgentReaches(this.env, chat.agentId, personId, via);
       // Before anything is kept: a file it names that the chat hasn't, or
       // that another question carried, refuses the question.
       const files = this.#unsentFiles(chat.id, parsed.data.files ?? []);
@@ -2774,53 +2933,65 @@ export class Workspace extends DurableObject<Env> {
       if (shared && audience === undefined) {
         throw permissionErrors.create("permission.context_invalid");
       }
-      // Before the model is admitted: what memory reads is a source too.
       // Whether the turn's answer reaches its person alone: the one gate
       // for their own content, whatever reads it (`answersAlone`).
       const personal = answersAlone(chat, unattended);
-      const context = await this.#turnContext(
-        scope,
-        authority,
-        work,
-        { shared, personal, unattended },
-        agent
-      );
-      // Refuses a model the deployment or its rules don't allow before
-      // anything is kept or shown as started. The chat's object admits it again for its
-      // turn, as it sets up a turn a restart cut short on its own, with
-      // nobody here to admit it; and every request by the rules then.
-      // The agent's own model, where an admin gave it one the organization
-      // still has: else the one the question names.
-      const asked = await this.#turnModel(
-        context.agentModel,
-        parsed.data.model
-      );
-      await models(this.env).agent(
-        {
-          model: asked,
-          effort: parsed.data.effort,
-          purpose: chatTurnPurpose,
-          trigger: delegateActorOf(authority, via),
-          provenance: this.#sources(chat.id),
-          work: { authority, context: work },
-        },
-        () => this.#sources(chat.id)
-      );
+      // What the model reads besides the question, and the model admitted,
+      // at once: neither reads the other. A refusal of the context's is
+      // said first, as before.
+      const [context, asked] = await allInOrder([
+        this.#turnContext(
+          scope,
+          authority,
+          work,
+          { shared, personal, unattended },
+          agent,
+          role
+        ),
+        // Refuses a model the deployment or its rules don't allow before
+        // anything is kept or shown as started. The chat's object admits it
+        // again for its turn, as it sets up a turn a restart cut short on
+        // its own, with nobody here to admit it; and every request by the
+        // rules then. The agent's own model, where an admin gave it one the
+        // organization still has: else the one the question names.
+        (async () => {
+          const model = await this.#turnModel(
+            agent?.model ?? undefined,
+            parsed.data.model
+          );
+          await models(this.env).agent(
+            {
+              model,
+              effort: parsed.data.effort,
+              purpose: chatTurnPurpose,
+              trigger: delegateActorOf(authority, via),
+              provenance: this.#sources(chat.id),
+              work: { authority, context: work },
+            },
+            () => this.#sources(chat.id)
+          );
+          return model;
+        })(),
+      ]);
       this.#stopped.delete(chat.id);
       // Under way: the chat keeps the agent it answers as.
       delete live.unstarted;
+      live.underWay.resolve(true);
       started?.();
       this.#changed(chat.id);
+      this.#listChanged();
       if (onText !== undefined) {
         live.onText = throttled(onText);
       }
       const end = await this.#runTurn({
         turnId: live.id,
+        sentAt,
         scope,
         question: turnQuestion(
           { ...parsed.data, model: asked },
           files,
-          makeOf(chat)
+          makeOf(chat),
+          key
         ),
         shared,
         audience,
@@ -2852,23 +3023,16 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Ends what the object holds of `live`, the chat's turn, however it
-   * ended: its cache share logged, its partial answer and output dropped.
+   * ended: its partial answer and output dropped. What it used, the
+   * cache's share included, is in its record (turn-records.ts).
    */
   #endLive(chatId: ChatId, live: LiveTurn): void {
     // Refused before it started: the chat stays with the agent it had.
     live.unstarted?.();
-    const { cache } = live;
-    if (cache.requests > 0) {
-      // A log line, as the compiler's cache logs its own (`build.cache`):
-      // a measure of how the cache does, not something done.
-      log.info("chat.turn_cache", {
-        chatId,
-        turnId: live.id,
-        ...cache,
-        share: cache.cacheReadTokens / cache.inputTokens,
-      });
-    }
+    live.underWay.resolve(false);
+    live.ended.resolve();
     this.#turns.delete(chatId);
+    this.#listChanged();
     this.#partials.delete(chatId);
     this.#waits.delete(chatId);
     // A turn that stopped short of a step's result shows no output on.
@@ -2966,14 +3130,20 @@ export class Workspace extends DurableObject<Env> {
     if (key !== undefined) {
       this.#starting.set(key, { chatId: chat.id, started: started.promise });
     }
-    const ended = this.#sentTurns(chat, question, started);
-    this.#sent.add(ended);
-    void this.#forget(ended);
+    // Asked: first in its person's list now, as Send was pressed, not once
+    // the question is shown (`#store`), which waits on the chat's object
+    // and may take seconds; back where it was if it is refused.
+    const asked = this.#askedIn(chat.id);
+    void this.#takeQuestion(chat, question, started, key);
     try {
       await started.promise;
       if (key !== undefined) {
         this.#keepRequest("send", key, chat.id);
       }
+      this.#settledAsk(chat.id, asked, true);
+    } catch (error) {
+      this.#settledAsk(chat.id, asked, false);
+      throw error;
     } finally {
       if (key !== undefined) {
         this.#starting.delete(key);
@@ -2981,6 +3151,73 @@ export class Workspace extends DurableObject<Env> {
     }
     // The alarm keeps the object up until the turn ends (`alarm`).
     await this.#alarmBy(Date.now());
+  }
+
+  /**
+   * Moves chat `chatId` up its person's list as a question is sent in it
+   * (`send`), keeping where it stood before the first of those still
+   * being taken: what a refused one puts it back to. Answers when.
+   */
+  #askedIn(chatId: ChatId): Date {
+    const asked = new Date();
+    const asking = this.#asking.get(chatId) ?? {
+      stood: this.#chat(chatId).lastAt,
+      taking: new Set<number>(),
+      moves: new Set<number>(),
+    };
+    asking.taking.add(asked.getTime());
+    asking.moves.add(asked.getTime());
+    this.#asking.set(chatId, asking);
+    this.#movedTo(chatId, asked);
+    return asked;
+  }
+
+  /**
+   * The question sent in chat `chatId` at `asked` was taken, or refused.
+   * Taken, the chat was asked in then: where it stands from now on. Once
+   * none is still being taken, a chat no question since moved (its last
+   * activity still one of theirs) goes back to where it stood.
+   */
+  #settledAsk(chatId: ChatId, asked: Date, taken: boolean): void {
+    const asking = this.#asking.get(chatId);
+    if (asking === undefined) {
+      return;
+    }
+    asking.taking.delete(asked.getTime());
+    if (taken) {
+      asking.stood = asked;
+    }
+    if (asking.taking.size > 0) {
+      return;
+    }
+    this.#asking.delete(chatId);
+    const { lastAt } = this.#chat(chatId);
+    // Last moved by a refused question: back where it stood. One a
+    // message or a note moved since stays where that put it.
+    if (
+      asking.moves.has(lastAt.getTime()) &&
+      lastAt.getTime() !== asking.stood.getTime()
+    ) {
+      this.#movedTo(chatId, asking.stood, lastAt);
+    }
+  }
+
+  /**
+   * Moves the chat in its person's list to `lastAt`, as active then;
+   * given `from`, only while nothing moved it since.
+   */
+  #movedTo(chatId: ChatId, lastAt: Date, from?: Date): void {
+    this.#db
+      .update(chats)
+      .set({ lastAt })
+      .where(
+        and(
+          eq(chats.id, chatId),
+          from === undefined ? undefined : eq(chats.lastAt, from)
+        )
+      )
+      .run();
+    this.#listChanged();
   }
 
   /**
@@ -3017,6 +3254,169 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * Takes the question `send` was asked, and tells `started` once it is
+   * taken, or why it wasn't: queued into the chat's turn while one runs
+   * here (`#queueInto`), or into the one this object's restart left
+   * running in its ChatSession (`#queueIntoLeft`), else asked in a turn of
+   * its own (`#sentTurns`),
+   * as it is once the turn it was meant for takes no more. Whether a turn
+   * runs is decided with nothing awaited before the new one claims the
+   * chat, so of two questions at once one starts it and the other queues.
+   */
+  async #takeQuestion(
+    chat: Chat,
+    question: Question,
+    started: PromiseWithResolvers<boolean>,
+    /** The page's key for it (`send`): its ID in the turn too, where given. */
+    key: string | undefined
+  ): Promise<void> {
+    // The question's own ID in its turn: the same however often it is sent
+    // there, as the page's key is.
+    const id = key ?? crypto.randomUUID();
+    // Whether the chat's ChatSession was asked for a turn this object's
+    // restart left running there: once, and only when the chat shows one.
+    let askedLeft = false;
+    try {
+      for (;;) {
+        const live = this.#turns.get(chat.id);
+        if (live === undefined && !askedLeft && this.#isRunning(chat.id)) {
+          askedLeft = true;
+          // oxlint-disable-next-line no-await-in-loop -- once, see above
+          if (await this.#queueIntoLeft(chat, { id, key }, question)) {
+            started.resolve(true);
+            return;
+          }
+          // A turn may have started here meanwhile: looked for again.
+          continue;
+        }
+        if (live === undefined) {
+          const ended = this.#sentTurns(chat, question, started, key);
+          this.#sent.add(ended);
+          void this.#forget(ended);
+          return;
+        }
+        if (
+          // oxlint-disable-next-line no-await-in-loop -- once more only when that turn ended meanwhile
+          await this.#queueInto(
+            chat,
+            {
+              id: live.id,
+              agentId: live.agentId,
+              underWay: live.underWay.promise,
+            },
+            { id, key },
+            question
+          )
+        ) {
+          started.resolve(true);
+          return;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await live.ended.promise;
+      }
+    } catch (error) {
+      started.reject(error);
+    }
+  }
+
+  /**
+   * Queues `question`, a person's question to their chat's agent sent
+   * while its turn `live` runs, into that turn (`ChatHarness.queueQuestion`), as
+   * Claude Code, Codex and T3 Code take a message sent while their agent
+   * works: shown queued (`turnQueued`) until the agent takes it as its
+   * current step ends, then answered in order, in the same turn, by the
+   * same model. Checked as a question of a turn of its own is, for what
+   * still holds of it (its person, the chat's room, its files). One that
+   * addresses another agent, which answers in a turn of its own, is
+   * refused as before (`agent.busy`), as the turn's ChatSession refuses
+   * one sent while a turn nobody asked for runs (a wake), which only
+   * reads, so never answers in the person's own scope. False when the
+   * turn takes no more.
+   */
+  async #queueInto(
+    chat: Chat,
+    live: Pick<LiveTurn, "id" | "agentId"> & { underWay: Promise<boolean> },
+    /** Its own ID in the turn, and the page's key, which goes with it. */
+    { id, key }: QueuedAs,
+    question: Question
+  ): Promise<boolean> {
+    const parsed = questionSchema.safeParse(question);
+    if (!parsed.success) {
+      throw agentErrors.create("agent.invalid_question");
+    }
+    const {
+      text,
+      files = [],
+      subject,
+      mentions,
+      built,
+      followUp,
+    } = parsed.data;
+    if (
+      followUp === true ||
+      mentions?.some(({ kind }) => kind === "agent") === true
+    ) {
+      throw agentErrors.create("agent.busy");
+    }
+    if (!(await live.underWay)) {
+      return false;
+    }
+    if (this.#deleting.has(chat.id)) {
+      throw agentErrors.create("agent.chat_not_found");
+    }
+    // Its person still a member, the chat with room, and the turn's agent
+    // not paused or deleted since it started: checked as a turn's are.
+    await allInOrder([
+      this.#mayTakeTurn(chat.id, chat.personId),
+      turnAgent(this.env, live.agentId),
+    ]);
+    const carried = this.#unsentFiles(chat.id, files);
+    const queued: QueuedQuestion = {
+      id,
+      ...(key === undefined ? {} : { key }),
+      text,
+      files: carried.map(({ id: fileId, type }) => ({ id: fileId, type })),
+      ...(subject === undefined ? {} : { subject }),
+      ...(mentions === undefined ? {} : { mentions }),
+      ...(built === undefined ? {} : { built }),
+    };
+    return await this.#toSession(
+      chat.id,
+      async (session) => await session.queueQuestion(live.id, queued)
+    );
+  }
+
+  /**
+   * Queues `question` into the chat's turn that runs in its ChatSession
+   * though this object holds none (`#turns`): one this object's restart
+   * left there, which goes on answering. As `#queueInto` does, the turn
+   * under way and running as the chat's agent, which it became as the turn
+   * began. False when there is none, or it takes no more: the question is
+   * then asked in a turn of its own, refused while that one settles
+   * (`agent.busy`), as before.
+   */
+  async #queueIntoLeft(
+    chat: Chat,
+    as: QueuedAs,
+    question: Question
+  ): Promise<boolean> {
+    const turnId = await this.#activeTurn(chat.id);
+    if (turnId === undefined || this.#turns.has(chat.id)) {
+      return false;
+    }
+    return await this.#queueInto(
+      chat,
+      {
+        id: turnId,
+        agentId: this.#chat(chat.id).agentId,
+        underWay: Promise.resolve(true),
+      },
+      as,
+      question
+    );
+  }
+
+  /**
    * The turns of a question `send` was asked: one for each agent the
    * person addressed in it (an agent `mentions` names, as core found each
    * one they may ask, chats-rpc.ts), in the order they named them, each
@@ -3030,7 +3430,9 @@ export class Workspace extends DurableObject<Env> {
   async #sentTurns(
     chat: Chat,
     question: Question,
-    started: PromiseWithResolvers<boolean>
+    started: PromiseWithResolvers<boolean>,
+    /** The page's key for the question, which the first turn keeps with it. */
+    key: string | undefined
   ): Promise<void> {
     const addressed = (question.mentions ?? []).flatMap((mention) =>
       mention.kind === "agent" ? [mention] : []
@@ -3040,7 +3442,8 @@ export class Workspace extends DurableObject<Env> {
       first === undefined ? chat : { ...chat, agentId: first.id },
       question,
       started,
-      false
+      false,
+      key
     );
     for (const next of rest) {
       if (!answered) {
@@ -3092,7 +3495,9 @@ export class Workspace extends DurableObject<Env> {
      * a turn nobody waits on, whose reason goes on the chat instead.
      */
     started: PromiseWithResolvers<boolean> | undefined,
-    unattended: boolean
+    unattended: boolean,
+    /** The page's key for the question (`send`). */
+    key?: string
   ): Promise<boolean> {
     let underWay = false;
     try {
@@ -3101,6 +3506,7 @@ export class Workspace extends DurableObject<Env> {
           underWay = true;
           started?.resolve(true);
         },
+        ...(key === undefined ? {} : { key }),
       });
       return answer.outcome === "answered";
     } catch (error) {
@@ -3173,7 +3579,8 @@ export class Workspace extends DurableObject<Env> {
    * What the model reads this turn besides the question: the instruction
    * files of where it works (instruction-files.ts, read now, so an edit
    * counts from the next turn), the skills it may use, from the Brain,
-   * and how to answer on the chat platform it came through, if any.
+   * and how to answer on the chat platform it came through, if any. Each
+   * read on its own, so all at once; a refusal said in this order.
    */
   async #turnContext(
     scope: Parameters<typeof auditAgentCall>[1],
@@ -3184,20 +3591,69 @@ export class Workspace extends DurableObject<Env> {
       personal,
       unattended,
     }: { shared: boolean; personal: boolean; unattended: boolean },
-    agent: Awaited<ReturnType<typeof turnAgent>>
+    agent: Awaited<ReturnType<typeof turnAgent>>,
+    /** The chat's person's role now (`#mayTakeTurn`). */
+    role: Role
   ): Promise<TurnContext> {
     const chat = this.#chat(work.chatId);
     const { via } = chat;
-    // A Brain that can't give the files leaves the turn without them, as
-    // it does without skills (below) and without the person's own file
-    // when their store fails (brain-next.ts): missing guidance is no
-    // question of access. A refusal (who it acts for, where) still
-    // refuses the turn. One that went without them is recorded, as the
-    // skills' call records it (`unavailable`, below).
-    let instructions: Awaited<ReturnType<typeof instructionFilesFor>> = [];
+    const [instructions, skills, channel, kept, person] = await allInOrder([
+      this.#turnInstructions(chat, scope, authority, shared, personal),
+      this.#turnSkills(scope, authority, shared),
+      // A chat that came through a chat platform: how to answer there.
+      via === "web" ? undefined : channelText(),
+      // The documents an admin gave the chat's agent, by name.
+      agent === undefined ? [] : documentsOf(this.env, agent.id),
+      namedPerson(this.env, scope.personId, personal),
+    ]);
+    // Only who builds is told how, reads Grasp's docs and gets the APIs
+    // and tools to build with, in their own chat, in Grasp's app or their
+    // direct message on a chat app: thousands of tokens in every request,
+    // of no use to anyone else. Building, an App included, needs a role
+    // that builds (app-access.ts).
+    const builds = buildsIn({ shared, role });
+    // Who drafts an agent for its person to make (`draftAgent`).
+    const drafts = draftsOf({ shared, unattended, via, role });
+    const documents = kept.map(({ id, name, type }) => ({ id, name, type }));
+    return {
+      ...person,
+      instructions: instructions.map(({ file, text }) => ({ file, text })),
+      skills,
+      channel,
+      builds,
+      ...(drafts === undefined ? {} : { drafts }),
+      // The first agent as Grasp ships it, with no document, is told
+      // nothing more.
+      ...(agent === undefined ||
+      (agent.changedAt === null && documents.length === 0)
+        ? {}
+        : {
+            agent: {
+              name: agent.name,
+              ...(documents.length === 0 ? {} : { documents }),
+            },
+          }),
+    };
+  }
+
+  /**
+   * The instruction files a turn of `chat` reads. A Brain that can't give
+   * them leaves the turn without them, as it does without skills
+   * (`#turnSkills`) and without the person's own file when their store
+   * fails (brain-next.ts): missing guidance is no question of access. A
+   * refusal (who it acts for, where) still refuses the turn. One that went
+   * without them is recorded, as the skills' call records it.
+   */
+  async #turnInstructions(
+    chat: Chat,
+    scope: Parameters<typeof auditAgentCall>[1],
+    authority: Authority,
+    shared: boolean,
+    personal: boolean
+  ): Promise<Awaited<ReturnType<typeof instructionFilesFor>>> {
     try {
       const appId = await lastAppOf(this.env, chat);
-      instructions = await instructionFilesFor(
+      return await instructionFilesFor(
         this.env,
         authority,
         instructionContextOf(shared, appId, personal)
@@ -3213,15 +3669,24 @@ export class Workspace extends DurableObject<Env> {
         method: "brain.instructions",
         detail: { files: 0, turn: true, unavailable: true },
       });
+      return [];
     }
-    // The skills the chat may use, from the Brain: guidance, never a grant
-    // (brain-skills.ts). Their own skills only where the scope says so, a
-    // turn they asked for in their own chat, and their teams' only where
-    // nobody else reads the answer (`skillsReachOf`); only those whose
-    // needs the chat's agent meets now (`heldIn`). Recorded as the code's
-    // calls are, by count. A Brain that can't answer leaves the turn
-    // without them, not without an answer: missing guidance is no
-    // question of access.
+  }
+
+  /**
+   * The skills a turn may use, from the Brain: guidance, never a grant
+   * (brain-skills.ts). Their own skills only where the scope says so, a
+   * turn they asked for in their own chat, and their teams' only where
+   * nobody else reads the answer (`skillsReachOf`); only those whose needs
+   * the chat's agent meets now (`heldIn`). Recorded as the code's calls
+   * are, by count. A Brain that can't answer leaves the turn without
+   * them, not without an answer: missing guidance is no question of access.
+   */
+  async #turnSkills(
+    scope: Parameters<typeof auditAgentCall>[1],
+    authority: Authority,
+    shared: boolean
+  ): Promise<Awaited<ReturnType<typeof skillsFor>>> {
     let skills: Awaited<ReturnType<typeof skillsFor>> = [];
     let unavailable = false;
     try {
@@ -3246,44 +3711,7 @@ export class Workspace extends DurableObject<Env> {
         ...(unavailable ? { unavailable } : {}),
       },
     });
-    // A chat that came through a chat platform: how to answer there.
-    const channel = via === "web" ? undefined : await channelText();
-    // Only who builds is told how, reads Grasp's docs and gets the APIs
-    // and tools to build with, in their own chat, in Grasp's app or their
-    // direct message on a chat app: thousands of tokens in every request,
-    // of no use to anyone else. Building, an App included, needs a role
-    // that builds (app-access.ts).
-    const role = await memberRole(this.env.DB, scope.personId);
-    const builds = buildsIn({ shared, role });
-    // Who drafts an agent for its person to make (`draftAgent`).
-    const drafts = draftsOf({ shared, unattended, via, role });
-    // The documents an admin gave the chat's agent, by name.
-    const kept =
-      agent === undefined ? [] : await documentsOf(this.env, agent.id);
-    const documents = kept.map(({ id, name, type }) => ({ id, name, type }));
-    return {
-      ...(await namedPerson(this.env, scope.personId, personal)),
-      instructions: instructions.map(({ file, text }) => ({ file, text })),
-      skills,
-      channel,
-      builds,
-      ...(drafts === undefined ? {} : { drafts }),
-      // The first agent as Grasp ships it, with no document, is told
-      // nothing more.
-      ...(agent === undefined ||
-      (agent.changedAt === null && documents.length === 0)
-        ? {}
-        : {
-            agent: {
-              name: agent.name,
-              ...(documents.length === 0 ? {} : { documents }),
-            },
-          }),
-      // The model an admin gave the agent, for its turns.
-      ...(agent?.model === null || agent?.model === undefined
-        ? {}
-        : { agentModel: agent.model }),
-    };
+    return skills;
   }
 
   /**
@@ -3510,6 +3938,19 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * The chat's `ChatSession` gave its turn up, as it couldn't open the
+   * chat for a while (chat-session.ts): no longer running, and stopped
+   * with why, which the chat shows with a Try again.
+   */
+  turnLost(chatId: ChatId): void {
+    if (this.chatState(chatId) === undefined || this.#deleting.has(chatId)) {
+      return;
+    }
+    this.#stopped.set(chatId, agentErrors.create("agent.turn_lost").message);
+    this.turnRunning(chatId, false);
+  }
+
+  /**
    * The chat's `ChatSession` says whether a turn of the chat runs there,
    * as its record of the turn is claimed and settled (chat-harness.ts):
    * what the chat's lists and watchers show.
@@ -3525,6 +3966,33 @@ export class Workspace extends DurableObject<Env> {
       this.ctx.storage.kv.delete(key);
     }
     this.#changed(chatId);
+    this.#listChanged();
+  }
+
+  /**
+   * The chat's `ChatSession` says which questions queued into its turn it
+   * hasn't taken yet (chat-harness.ts `queueQuestion`): what the chat's watchers
+   * show, kept through a restart of this object.
+   */
+  turnQueued(chatId: ChatId, queued: readonly ChatQueued[]): void {
+    if (this.chatState(chatId) === undefined || this.#deleting.has(chatId)) {
+      return;
+    }
+    const key = `${queuedKeyPrefix}${chatId}`;
+    if (queued.length === 0) {
+      this.ctx.storage.kv.delete(key);
+    } else {
+      this.ctx.storage.kv.put(key, queued);
+    }
+    this.#changed(chatId);
+  }
+
+  /** The questions queued into the chat's turn, as its ChatSession last said. */
+  #queued(chatId: ChatId): ChatQueued[] {
+    const kept = chatQueuedSchema.safeParse(
+      this.ctx.storage.kv.get(`${queuedKeyPrefix}${chatId}`)
+    );
+    return kept.success ? kept.data : [];
   }
 
   /**
@@ -3570,6 +4038,7 @@ export class Workspace extends DurableObject<Env> {
       files = [],
       thinkingMs,
       built,
+      key,
     } of messages) {
       answered ||= message.role === "assistant";
       if (entryId <= before.through) {
@@ -3578,20 +4047,13 @@ export class Workspace extends DurableObject<Env> {
       through = Math.max(through, entryId);
       if (message.role === "assistant") {
         this.#partials.delete(chatId);
-        // Only a response the provider counted a prompt for: not a request
-        // the gateway refused, held or cancelled before any count.
-        const prompt = inputTokens(message.usage);
-        if (live !== undefined && prompt > 0) {
-          live.cache.requests += 1;
-          live.cache.inputTokens += prompt;
-          live.cache.cacheReadTokens += message.usage.cacheRead;
-        }
       }
-      const id = this.#keep(
-        chatId,
-        message,
-        keptWith(message, turnAgentId, { files, thinkingMs, built })
-      );
+      // A question with the key its page sent it with, which its entry
+      // keeps (`TurnMessage.key`).
+      const id = this.#keep(chatId, message, {
+        ...keptWith(message, turnAgentId, { files, thinkingMs, built }),
+        ...(key === undefined ? {} : { key }),
+      });
       if (message.role === "assistant") {
         answer = id;
       }
@@ -3958,11 +4420,17 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Stops `personId`'s own chat's running turn, if there is one: the model
-   * request or code run in flight ends, and the turn answers `cancelled`.
-   * Answered once its ChatSession has the stop, kept (`ChatSession.abort`):
+   * request or code run in flight ends, and the turn answers `cancelled`;
+   * the questions queued into it are dropped (pi withdraws them), as Codex
+   * hands queued messages back on an interrupt rather than send them. The
+   * page puts them back in its box. Answered once its ChatSession has the
+   * stop, kept (`ChatSession.abort`):
    * a stop that can't reach it fails, for its person to try again.
    */
-  async cancel(chatId: unknown, personId: string): Promise<boolean> {
+  async cancel(
+    chatId: unknown,
+    personId: string
+  ): Promise<ChatStopped | false> {
     const { id } = this.#graspChat(chatId, personId);
     // The ChatSession's turn; or the question this object is preparing,
     // whose stop is kept for it as it is claimed.
@@ -3970,10 +4438,27 @@ export class Workspace extends DurableObject<Env> {
     if (turnId === undefined) {
       return false;
     }
+    const dropped = await this.#toSession(
+      id,
+      async (session) => await session.abort(turnId)
+    );
+    return { dropped };
+  }
+
+  /**
+   * Has `personId`'s own chat's running turn take the questions queued
+   * into it now (`ChatSession.sendNow`), stopping the answer being
+   * written; nothing when no turn runs, or none is queued.
+   */
+  async sendNow(chatId: unknown, personId: string): Promise<void> {
+    const { id } = this.#graspChat(chatId, personId);
+    const turnId = await this.#activeTurn(id);
+    if (turnId === undefined) {
+      return;
+    }
     await this.#toSession(id, async (session) => {
-      await session.abort(turnId);
+      await session.sendNow(turnId);
     });
-    return true;
   }
 
   /**
@@ -4630,26 +5115,36 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Marks `personId`'s chat `chatId` seen up to its latest message
+   * Marks `personId`'s chat `chatId` seen up to its latest message, or
+   * to `upTo`, the newest the page shows, where that is older
    * (`ChatsApi.markRead`), never back: a page that shows less, on another
    * device, leaves it where a newer one put it. The last message they had
    * seen before: 0 for none, null for a chat made before chats kept it,
    * which counts as read. Only their own chat in Grasp
    * (`#graspChat`): anyone else's is refused as if there were none.
    */
-  markChatRead(chatId: unknown, personId: string): number | null {
+  markChatRead(
+    chatId: unknown,
+    personId: string,
+    upTo?: number
+  ): number | null {
     const chat = this.#graspChat(chatId, personId);
     const latest = this.#db
       .select({ id: sql<number | null>`max(${chatMessages.id})` })
       .from(chatMessages)
       .where(eq(chatMessages.chatId, chat.id))
       .get()?.id;
-    if (typeof latest === "number" && latest > (chat.readUpTo ?? 0)) {
+    const seen =
+      typeof latest === "number" && upTo !== undefined
+        ? Math.min(latest, upTo)
+        : latest;
+    if (typeof seen === "number" && seen > (chat.readUpTo ?? 0)) {
       this.#db
         .update(chats)
-        .set({ readUpTo: latest })
+        .set({ readUpTo: seen })
         .where(eq(chats.id, chat.id))
         .run();
+      this.#listChanged();
     }
     return chat.readUpTo;
   }
@@ -4960,6 +5455,7 @@ export class Workspace extends DurableObject<Env> {
       this.#outboxed(by, "chat.renamed", id);
     });
     this.#deliverAudit();
+    this.#listChanged();
   }
 
   /**
@@ -5031,6 +5527,7 @@ export class Workspace extends DurableObject<Env> {
       );
     });
     this.#deliverAudit();
+    this.#listChanged();
   }
 
   /**
@@ -5224,9 +5721,11 @@ export class Workspace extends DurableObject<Env> {
           .where(eq(chatRequestKeys.chatId, id))
           .run();
         this.#db.delete(chats).where(eq(chats.id, id)).run();
+        this.#listChanged();
         this.ctx.storage.kv.delete(`${traceKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${builtKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${runningKeyPrefix}${id}`);
+        this.ctx.storage.kv.delete(`${queuedKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${copiedKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${draftMadeKeyPrefix}${id}`);
         if (audited) {
@@ -5308,6 +5807,10 @@ export class Workspace extends DurableObject<Env> {
       }
     }
     this.#watchers.clear();
+    for (const watch of this.#listWatchers.values()) {
+      watch[Symbol.dispose]();
+    }
+    this.#listWatchers.clear();
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     // Its tables went with its storage: they are made again, empty, as for
@@ -5348,14 +5851,8 @@ export class Workspace extends DurableObject<Env> {
       this.#scopeOf(this.#graspChat(chatId, personId))
     );
     // Read again after the await: the chat may have gone meanwhile.
-    const { id } = this.#graspChat(chatId, personId);
-    let watching = 0;
-    for (const watchers of this.#watchers.values()) {
-      watching += watchers.size;
-    }
-    if (watching >= maxWatchers) {
-      throw agentErrors.create("agent.too_many_watches");
-    }
+    const { id, readUpTo } = this.#graspChat(chatId, personId);
+    this.#requireRoomToWatch();
     const watchId = crypto.randomUUID();
     const watch = new ChatWatch(
       listener.dup(),
@@ -5363,7 +5860,8 @@ export class Workspace extends DurableObject<Env> {
       () => this.#provenance(id),
       () => {
         this.unwatch(id, watchId);
-      }
+      },
+      readUpTo
     );
     const watchers = this.#watchers.get(id) ?? new Map<string, ChatWatch>();
     watchers.set(watchId, watch);
@@ -5373,6 +5871,83 @@ export class Workspace extends DurableObject<Env> {
       this.#toolEvents(id)
     );
     return watchId;
+  }
+
+  /** Refuses another watcher once the object holds its most (chats' and lists' together). */
+  #requireRoomToWatch(): void {
+    let watching = this.#listWatchers.size;
+    for (const watchers of this.#watchers.values()) {
+      watching += watchers.size;
+    }
+    if (watching >= maxWatchers) {
+      throw agentErrors.create("agent.too_many_watches");
+    }
+  }
+
+  /**
+   * Follows `personId`'s list of chats, as `chats` gives it: `listener`
+   * gets the whole list, then what changes in it (chat-watch.ts,
+   * `ChatListWatch`). Returns the ID `unwatchChats` drops it by; one that
+   * can't be reached drops itself.
+   */
+  watchChats(personId: string, listener: ChatListListener): string {
+    this.#requireRoomToWatch();
+    const watchId = crypto.randomUUID();
+    const watch = new ChatListWatch(listener.dup(), personId, () => {
+      this.unwatchChats(watchId);
+    });
+    this.#listWatchers.set(watchId, watch);
+    watch.push(this.#listOf(personId));
+    return watchId;
+  }
+
+  /** Drops the list's watcher `watchChats` kept as `watchId`, if it still does. */
+  unwatchChats(watchId: string): void {
+    const watch = this.#listWatchers.get(watchId);
+    this.#listWatchers.delete(watchId);
+    watch?.[Symbol.dispose]();
+  }
+
+  /**
+   * Tells whoever follows a list of chats that it may have changed: a
+   * chat made, renamed, archived or deleted, asked in, answered, running
+   * or not, read. Once a tick, however many changes it made: each
+   * watcher then sends only what of its list did change.
+   */
+  #listChanged(): void {
+    if (this.#listTold || this.#listWatchers.size === 0) {
+      return;
+    }
+    this.#listTold = true;
+    queueMicrotask(() => {
+      this.#listTold = false;
+      // Read once for each person followed, whoever many follow it.
+      const lists = new Map<string, ChatList>();
+      for (const watch of this.#listWatchers.values()) {
+        const list = lists.get(watch.personId) ?? this.#listOf(watch.personId);
+        lists.set(watch.personId, list);
+        watch.push(list);
+      }
+    });
+  }
+
+  /** `personId`'s list as its watchers follow it: what `chats` gives, and how many they archived. */
+  #listOf(personId: string): ChatList {
+    return {
+      chats: this.chats(personId),
+      archived: this.#archivedCount(personId),
+    };
+  }
+
+  /** How many chats `personId` archived. */
+  #archivedCount(personId: string): number {
+    return (
+      this.#db
+        .select({ archived: count() })
+        .from(chats)
+        .where(and(shownInGrasp(personId), isNotNull(chats.archivedAt)))
+        .get()?.archived ?? 0
+    );
   }
 
   /** Drops the watcher `watch` kept as `watchId`, if it still does. */
@@ -5441,6 +6016,7 @@ export class Workspace extends DurableObject<Env> {
       .set({ lastAt: new Date() })
       .where(eq(chats.id, chatId))
       .run();
+    this.#listChanged();
     this.#changed(chatId);
   }
 
@@ -5610,6 +6186,7 @@ export class Workspace extends DurableObject<Env> {
             },
       output: outputOf(this.#outputs.get(chatId)),
       running: this.#isRunning(chatId),
+      queued: this.#queued(chatId),
       provenanceVersion: this.#provenanceVersions.get(chatId) ?? 0,
       stopped: stopped ?? null,
       held: this.#heldVersions.get(chatId) ?? 0,
@@ -5655,7 +6232,15 @@ export class Workspace extends DurableObject<Env> {
       .orderBy(asc(chatMessages.id))
       .all()
       .flatMap((row) => {
-        const { id, message, createdAt, thinkingMs, built, agentId } = row;
+        const {
+          id,
+          message,
+          createdAt,
+          thinkingMs,
+          built,
+          agentId,
+          requestKey,
+        } = row;
         const stored = storedMessageSchema.parse(JSON.parse(message));
         const run = resultRunId(stored);
         const shown = withFiles(
@@ -5668,7 +6253,8 @@ export class Workspace extends DurableObject<Env> {
             thinkingMs,
             asking,
             builtOf(built),
-            agentId ?? undefined
+            agentId ?? undefined,
+            requestKey ?? undefined
           ),
           carried
         );

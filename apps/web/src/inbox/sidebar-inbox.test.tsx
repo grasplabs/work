@@ -1,8 +1,13 @@
-// @vitest-environment happy-dom
 import type { PendingAction } from "@grasp-os/shared/connect";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { WaitingFeed } from "@grasp-os/shared/waiting";
+// @vitest-environment happy-dom
+import { AppShellSidebar } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
+import {
+  AppShellNav,
+  AppShellNavEmpty,
+} from "@grasp-os/ui/blocks/app-shell-01/app-shell-01-sidebar";
 import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -19,7 +24,6 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { FrameSidebar } from "../frame/sidebar.tsx";
 import { useInboxGroups, useWaitingItems } from "./sidebar-inbox.tsx";
 
 // The sidebar's Inbox view against core's feed of what waits, faked as the
@@ -125,19 +129,17 @@ const shown = async (feed: WaitingFeed, who: Identity = identity) => {
   };
   const Frame = () => {
     const items = useWaitingItems(who, true);
+    const groups = useInboxGroups(items);
     return (
       <>
         <output>{items?.length}</output>
-        <FrameSidebar
-          aria-label="Sidebar"
-          closeLabel="Close"
-          empty="Nothing waits for you."
-          foldLabel="Show or hide the sidebar"
-          groups={useInboxGroups(items)}
-          mark={null}
-          navLabel="Inbox"
-          profile={null}
-        />
+        <AppShellSidebar>
+          <AppShellNav aria-label="Inbox" groups={groups}>
+            {groups.length === 0 ? (
+              <AppShellNavEmpty>Nothing waits for you.</AppShellNavEmpty>
+            ) : null}
+          </AppShellNav>
+        </AppShellSidebar>
       </>
     );
   };

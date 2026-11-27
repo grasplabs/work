@@ -194,6 +194,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // Spend is recorded by ID: a person's usage is keyed by their user ID,
   // never their name or address.
   "core.model_usage": { kept: "accounting, by ID" },
+  // A turn's times and counts, by its chat's ID: no person's ID, name or
+  // words, swept with the usage rows (model-usage.ts).
+  "core.chat_turns": { kept: "accounting of a chat's turns, by ID" },
   "core.provider_health": noPerson,
   "core.run_mail_stamps": { company: "mail a run sent (D3)" },
   "core.run_inboxes": noPerson,
@@ -665,6 +668,8 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // The audit log: IDs only, never rewritten, archived for 7 years (D2).
   "auditLog.events": { kept: "the audit log (D2)" },
   "auditLog.archives": noPerson,
+  // Who was active in which week, for the admin's summary counts.
+  "auditLog.active_weeks": { erased: "identity" },
   // The new Brain's shared store (@grasp-os/brain-next): what a team, the
   // company, an App's users or a staff-list team may read, or nobody.
   // Erasing a member removes what the Brain derived about them and what is
@@ -830,6 +835,7 @@ export const reviewedPersonColumns: Readonly<
   "brainStore.removed_sources": ["subject"],
   "brainStore.source_subjects": ["group_subject", "subject"],
   "core.access_revocations": ["user_ids"],
+  "auditLog.active_weeks": ["user_id"],
   "core.accounts": ["user_id", "verified_email", "verified_email_at"],
   "core.source_reader_tokens": ["person"],
   "core.source_reader_pairs": ["principal"],

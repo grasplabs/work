@@ -1734,6 +1734,11 @@ msgstr "{triggers, plural, one {# trigger, en met de hand starten.} other {# tri
 msgid "{uninterviewed} of {total} not interviewed yet"
 msgstr "{uninterviewed} van {total} nog niet geïnterviewd"
 
+#. Connections a step read from that the page has no name for, as the last item of the list in “Read from {sources}”.
+#: src/chat/answer-steps.tsx
+msgid "{unknown, plural, one {a connection} other {# connections}}"
+msgstr "{unknown, plural, one {een verbinding} other {# verbindingen}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{unnamed} of {total} seen in use, never named"
 msgstr "{unnamed} van {total} in gebruik gezien, nooit genoemd"
@@ -3184,7 +3189,7 @@ msgstr "Beantwoord: {question}"
 msgid "Answered: {title}"
 msgstr "Beantwoord: {title}"
 
-#: src/chat/sidebar-chats.tsx
+#: src/frame/ui-words.tsx
 msgid "Answering"
 msgstr "Bezig met antwoorden"
 
@@ -4862,7 +4867,6 @@ msgstr "Kliffen"
 #: src/connections/connected-dialog.tsx
 #: src/connections/connection-list.tsx
 #: src/connections/request-app-dialog.tsx
-#: src/frame/app-sidebar.tsx
 #: src/frame/panels/head.tsx
 #: src/frame/top-error.tsx
 #: src/frame/ui-words.tsx
@@ -5023,10 +5027,6 @@ msgstr "Voltooid"
 #: src/connections/connect-dialog.tsx
 msgid "Composio keeps the key in its cloud. Grasp uses it only for what you allow."
 msgstr "Composio bewaart de sleutel in zijn cloud. Grasp gebruikt hem alleen voor wat je toestaat."
-
-#: src/connections/permissions/action-list.tsx
-msgid "Composio says this changes things. As Read, it would do so without asking."
-msgstr "Volgens Composio wijzigt dit dingen. Als Lezen doet het dat zonder te vragen."
 
 #: src/routes/_shell.connectors.index.tsx
 msgid "Composio's toolkits can't be listed right now. Try again shortly."
@@ -6206,6 +6206,11 @@ msgctxt "a failed run's error code, folded away"
 msgid "Details"
 msgstr "Details"
 
+#: src/frame/ui-words.tsx
+msgctxt "a page's side panel"
+msgid "Details"
+msgstr "Details"
+
 #: src/inbox/decision-confirmation.tsx
 msgctxt "what else an answer to a decision says"
 msgid "Details"
@@ -6559,8 +6564,8 @@ msgstr "Deur"
 msgid "Dots"
 msgstr "Stippen"
 
-#: src/chat/sidebar-chats.tsx
 #: src/frame/panels/rename.tsx
+#: src/frame/ui-words.tsx
 msgid "Double-click or press F2 to rename"
 msgstr "Dubbelklik of druk op F2 om de naam te wijzigen"
 
@@ -10586,6 +10591,7 @@ msgstr "De waarde wordt geladen"
 #: src/activity/audit-log.tsx
 #: src/apps/app-workspace.tsx
 #: src/frame/page-states.tsx
+#: src/frame/ui-words.tsx
 #: src/settings/erasures.tsx
 #: src/settings/section.tsx
 msgid "Loading…"
@@ -10599,6 +10605,11 @@ msgstr "Locatie"
 #: src/frame/sign-in/sign-in.tsx
 msgid "Log in"
 msgstr "Inloggen"
+
+#: src/chat/answer-steps.tsx
+msgctxt "what a code step logged"
+msgid "Logged"
+msgstr "Gelogd"
 
 #: src/settings/org-card.tsx
 msgid "Logo"
@@ -11134,11 +11145,11 @@ msgstr "Meer voor {label}"
 #: src/agents/agent-overview.tsx
 #: src/agents/agent-page.tsx
 #: src/apps/app-page.tsx
+#: src/frame/ui-words.tsx
 #: src/settings/event-sources.tsx
 msgid "More for {name}"
 msgstr "Meer voor {name}"
 
-#: src/chat/sidebar-chats.tsx
 #: src/projects/project-view.tsx
 msgid "More for {title}"
 msgstr "Meer voor {title}"
@@ -13611,6 +13622,10 @@ msgstr "Parijs"
 msgid "Part of the brain not found"
 msgstr "Onderdeel van de brain niet gevonden"
 
+#: src/chat/answer-steps.tsx
+msgid "Part of what came back was left out, to fit what the model reads."
+msgstr "Een deel van wat terugkwam is weggelaten, zodat het past in wat het model leest."
+
 #: src/inbox/outcome-details.tsx
 msgid "Part of what was sent is cut short above. Show it all, or exactly what was sent, before you say it didn't happen."
 msgstr "Een deel van wat is verstuurd is hierboven ingekort. Toon alles, of precies wat is verstuurd, voordat je zegt dat het niet is gebeurd."
@@ -14260,6 +14275,10 @@ msgstr "Vraag"
 msgid "Question {current} of {total}"
 msgstr "Vraag {current} van {total}"
 
+#: src/chat/thread.tsx
+msgid "Queued"
+msgstr "In de wachtrij"
+
 #: src/agents/setup/thinking-step.tsx
 msgid "Quick and careful. Good for most jobs."
 msgstr "Snel en zorgvuldig. Goed voor de meeste taken."
@@ -14366,6 +14385,11 @@ msgstr "Gelezen uit"
 #: src/brain/sources-page.tsx
 msgid "Read from {name} on {readOn}"
 msgstr "Gelezen uit {name} op {readOn}"
+
+#. The outside systems a step of the answer read from; {sources} is their names, as a list.
+#: src/chat/answer-steps.tsx
+msgid "Read from {sources}"
+msgstr "Gelezen uit {sources}"
 
 #: src/brain/sources-page.tsx
 msgctxt "a source of the Brain"
@@ -14580,6 +14604,10 @@ msgstr "Opnieuw verbinden"
 #: src/projects/project-view.tsx
 msgid "Reconnect it so the Apps and workflows that use it work again."
 msgstr "Verbind het opnieuw, zodat de Apps en workflows die het gebruiken weer werken."
+
+#: src/chat/composer.tsx
+msgid "Reconnecting to Grasp…"
+msgstr "Opnieuw verbinden met Grasp…"
 
 #: src/apps/app-data.tsx
 msgid "record"
@@ -14904,13 +14932,14 @@ msgstr "Bezig met verwijderen"
 #: src/chat/sidebar-chats.tsx
 #: src/frame/panels/head.tsx
 #: src/frame/panels/rename.tsx
+#: src/frame/ui-words.tsx
 #: src/settings/teams.tsx
 msgid "Rename"
 msgstr "Hernoemen"
 
-#: src/chat/sidebar-chats.tsx
-msgid "Rename {title}"
-msgstr "{title} hernoemen"
+#: src/frame/ui-words.tsx
+msgid "Rename {name}"
+msgstr "{name} hernoemen"
 
 #: src/chat/chat-window.tsx
 msgid "Rename chat"
@@ -15065,6 +15094,10 @@ msgstr "Formaat wijzigen"
 #: src/frame/panels/chat-panels-beside.tsx
 msgid "Resize the chat"
 msgstr "Breedte van de chat aanpassen"
+
+#: src/frame/ui-words.tsx
+msgid "Resize the panel"
+msgstr "Grootte van het paneel aanpassen"
 
 #: src/frame/panels/float-window.tsx
 msgid "Resize the panel's height"
@@ -15831,7 +15864,7 @@ msgid "Search by name, team or email"
 msgstr "Zoek op naam, team of e-mail"
 
 #: src/chat/chat-window.tsx
-#: src/frame/app-sidebar.tsx
+#: src/frame/ui-words.tsx
 msgid "Search chats"
 msgstr "Chats doorzoeken"
 
@@ -16057,6 +16090,10 @@ msgstr "Uitnodigingen sturen"
 #: src/apps/app-webhooks.tsx
 msgid "Send it when"
 msgstr "Versturen als"
+
+#: src/chat/thread.tsx
+msgid "Send now"
+msgstr "Nu verzenden"
 
 #: src/settings/event-sources.tsx
 msgid "Send one event"
@@ -16486,9 +16523,10 @@ msgstr "Oudere versies tonen"
 msgid "Show or hide the chat"
 msgstr "Chat tonen of verbergen"
 
-#: src/frame/app-frame.tsx
-#: src/frame/app-sidebar.tsx
-#: src/frame/site-header.tsx
+#: src/frame/ui-words.tsx
+msgid "Show or hide the panel"
+msgstr "Paneel tonen of verbergen"
+
 #: src/frame/ui-words.tsx
 msgid "Show or hide the sidebar"
 msgstr "Zijbalk tonen of verbergen"
@@ -16553,7 +16591,6 @@ msgstr "Het eerste deel van deze run wordt getoond"
 msgid "Shown with the App. It opens the App to nobody: who may use it is who it is shared with."
 msgstr "Wordt bij de app getoond. Het opent de app voor niemand: wie hem mag gebruiken, is met wie hij gedeeld is."
 
-#: src/frame/app-sidebar.tsx
 #: src/frame/ui-words.tsx
 msgid "Sidebar"
 msgstr "Zijbalk"
@@ -17256,6 +17293,7 @@ msgctxt "stop a workflow's run"
 msgid "Stop"
 msgstr "Stoppen"
 
+#: src/chat/composer.tsx
 #: src/frame/ui-words.tsx
 msgctxt "stop an answer"
 msgid "Stop"
@@ -19698,7 +19736,7 @@ msgstr "Dempen opheffen"
 msgid "Unpin"
 msgstr "Losmaken"
 
-#: src/chat/sidebar-chats.tsx
+#: src/frame/ui-words.tsx
 msgid "Unread"
 msgstr "Ongelezen"
 

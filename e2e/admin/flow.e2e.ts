@@ -58,6 +58,26 @@ test("staff set a company's flow from a preset, are told why one can't work, sav
   await expect(save).toBeDisabled();
   await main.getByRole("switch", { name: "Who’s who" }).click();
 
+  // Moved by hand from the keyboard: picked up by its handle, one place
+  // up, put down. Each step keeps whether it is on.
+  // The admin's steps in their order, by their handles' names.
+  const order = async () =>
+    await main
+      .getByRole("button", { name: /^Move /u })
+      .evaluateAll((handles) =>
+        handles.map((handle) => handle.getAttribute("aria-label"))
+      );
+  const before = await order();
+  const moved = before.indexOf("Move Team leads");
+  const handle = main.getByRole("button", { name: "Move Team leads" });
+  await handle.focus();
+  await page.keyboard.press("Space");
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("Space");
+  const after = [...before];
+  after.splice(moved - 1, 0, ...after.splice(moved, 1));
+  await expect.poll(order).toStrictEqual(after);
+
   // Saved, it is what the company's Grasp keeps, and can be taken back.
   await save.click();
   await expect(
@@ -67,6 +87,10 @@ test("staff set a company's flow from a preset, are told why one can't work, sav
   await expect(
     main.getByRole("switch", { name: "Interviews" })
   ).not.toBeChecked();
+  // Read back from its Grasp: the order as moved.
+  await page.reload({ waitUntil: "networkidle" });
+  await expect.poll(order).toStrictEqual(after);
+  await expect(main.getByRole("switch", { name: "Team leads" })).toBeChecked();
 
   await main
     .getByRole("button", { name: "Take the whole onboarding back" })

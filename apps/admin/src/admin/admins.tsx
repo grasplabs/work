@@ -1,10 +1,10 @@
 /**
  * Every organization as its core answered, for a page that shows them
- * all (the overview, Stephen Lab, Ask Grasp, Integrations to build):
- * the frame reads them without waiting (src/routes/__root.tsx), so the
- * page shows at once and this part of it once they are in, a skeleton
- * until then. When they couldn't be read at all, it says so, with Try
- * again, in its place.
+ * all (the overview, Stephen Lab, Ask Grasp, Apps asked for): its loader
+ * reads them without waiting (`loadEveryAdmin`, src/admin/org-loads.ts),
+ * so the page shows at once and this part of it once they are in, a
+ * skeleton until then. When they couldn't be read at all, it says so,
+ * with Try again, in its place.
  */
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -18,15 +18,13 @@ import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import { visuallyHidden } from "@grasp-os/ui/lib/styles";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
-import { getRouteApi, rootRouteId, useRouter } from "@tanstack/react-router";
+import { useRouter } from "@tanstack/react-router";
 import { Suspense } from "react";
 import type { ReactElement } from "react";
 
 import type { ClientAdmin } from "../clients/admin.ts";
 import { useSettled } from "./settled.tsx";
 import type { Deferred } from "./settled.tsx";
-
-const adminRoute = getRouteApi(rootRouteId);
 
 const styles = stylex.create({
   loading: { display: "flex", flexDirection: "column", gap: space["4"] },
@@ -47,7 +45,7 @@ export const AdminsLoading = () => (
 );
 
 /** The organizations couldn't be read: said, with Try again. */
-const AdminsUnread = () => {
+export const AdminsUnread = () => {
   const router = useRouter();
   return (
     <Empty variant="destructive">
@@ -60,9 +58,7 @@ const AdminsUnread = () => {
       <EmptyContent>
         <Button
           onClick={() => {
-            void router.invalidate({
-              filter: (match) => match.routeId === rootRouteId,
-            });
+            void router.invalidate();
           }}
           size="sm"
           variant="outline"
@@ -87,16 +83,21 @@ const Settled = ({
 
 /** `children` with every organization, once they are in. */
 export const WithAdmins = ({
+  admins,
   children,
   fallback,
 }: {
+  /** The page's read of them; none while only preloaded, which reads nothing. */
+  admins: Deferred<ClientAdmin[] | null> | undefined;
   children: ShowAdmins;
   /** What shows until they are in: a skeleton unless given. */
   fallback?: ReactElement;
 }) => {
-  const { admins } = adminRoute.useLoaderData();
-  return (
-    <Suspense fallback={fallback ?? <AdminsLoading />}>
+  const loading = fallback ?? <AdminsLoading />;
+  return admins === undefined ? (
+    loading
+  ) : (
+    <Suspense fallback={loading}>
       <Settled admins={admins}>{children}</Settled>
     </Suspense>
   );

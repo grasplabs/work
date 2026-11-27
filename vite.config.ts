@@ -107,9 +107,8 @@ const brainModuleImports = {
     "Only the modules the Brain's permission harness probes import src/brain-next.ts: add this one to apps/core/test/brain-next-modules.ts, with its surface in brainSurfaces (test/brain-next-surfaces.ts).",
 };
 
-// apps/web draws with Damsko alone (AGENTS.md, Design): nothing of the old
-// kit, Lucide or Tailwind. Its tests of the kit's App page parts
-// (src/app-kit) are tests, which may import anything.
+// apps/web and apps/admin draw with Damsko alone (AGENTS.md, Design):
+// nothing of the old kit, Lucide or Tailwind, in their tests either.
 const oldDesignImports = {
   group: [
     "@grasp-os/app-kit",
@@ -121,7 +120,7 @@ const oldDesignImports = {
     "@tailwindcss/**",
   ],
   message:
-    "apps/web draws with Damsko: components from @grasp-os/ui/components, icons from @grasp-os/ui/lib/icons, styles in StyleX with Damsko's tokens.",
+    "apps/web and apps/admin draw with Damsko: components from @grasp-os/ui/components, icons from @grasp-os/ui/lib/icons, styles in StyleX with Damsko's tokens.",
 };
 
 // Test through real interfaces; mock only outside systems, at their
@@ -170,20 +169,7 @@ export default defineConfig({
     },
     rules: {
       // Controls are closed: a page places them (layout) and nothing else.
-      // A painted field is a container, open for composition: it lays out
-      // what stands on it, with its own room and corners (AGENTS.md, Design).
-      "shadcn/no-restyle": [
-        "error",
-        {
-          allow: ["layout"],
-          contracts: [
-            {
-              pattern: "^PaintedField$",
-              allow: ["layout", "spacing", "shape", "typography"],
-            },
-          ],
-        },
-      ],
+      "shadcn/no-restyle": ["error", { allow: ["layout"] }],
       // Refuses inline style objects as the rule it replaces did, and lets
       // StyleX styles through to a component's `style`, whose type
       // (Damsko's LayoutStyle) holds them to layout
@@ -235,9 +221,7 @@ export default defineConfig({
       },
       {
         // Seen once per person, so they may take longer to delight: the
-        // onboarding, the interview and setup. And rare: an
-        // app connected, a few times per company, whose drawn mark is the
-        // delight of it (success-mark.tsx).
+        // onboarding, the interview and setup.
         files: [
           "apps/web/src/onboarding/**",
           "apps/web/src/interview/**",
@@ -245,7 +229,6 @@ export default defineConfig({
           "apps/web/src/routes/interview*",
           "apps/web/src/routes/setup*",
           "apps/web/src/frame/onboarding-frame.tsx",
-          "packages/app-kit/src/components/success-mark.tsx",
           // Base UI's drawer leaves as fast as it was swiped: up to 400 ms
           // for a gentle swipe, which follows the finger, not a wait.
           "packages/app-kit/src/components/drawer.tsx",
@@ -443,6 +426,18 @@ export default defineConfig({
         },
       },
       {
+        // The admin draws with Damsko alone too: the old design's imports
+        // refused, and no class list written out.
+        files: ["apps/admin/src/**"],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            { patterns: [brainStoreImports, oldDesignImports] },
+          ],
+          "grasp/no-class-strings": "error",
+        },
+      },
+      {
         // The modules that reach the Brain through core's module, each
         // probed by the permission harness (its list,
         // apps/core/test/brain-next-modules.ts).
@@ -548,14 +543,13 @@ export default defineConfig({
         },
       },
       {
-        // A test's stand-ins are called by the test alone, and a test of
-        // the kit's App page parts (src/app-kit) hands them the kit's
-        // classes.
+        // A test's stand-ins are called by the test alone. Its imports
+        // reach what the frontend's own may not, apart from the old
+        // design's: the frontend's tests draw with Damsko too.
         files: ["apps/web/src/**/*.test.ts", "apps/web/src/**/*.test.tsx"],
         rules: {
-          "no-restricted-imports": "off",
+          "no-restricted-imports": ["error", { patterns: [oldDesignImports] }],
           "grasp/no-unbounded-rpc-target": "off",
-          "grasp/no-class-strings": "off",
         },
       },
       {
@@ -563,13 +557,6 @@ export default defineConfig({
         // React's DOM: a card's `style` is a word ("primary", "muted").
         files: ["apps/core/src/**/*.tsx"],
         rules: { "react/style-prop-object": "off" },
-      },
-      {
-        // RecordGrid draws through TanStack Virtual, which the React
-        // Compiler lists as incompatible: the one component is opted out
-        // with "use no memo" (AGENTS.md, Architecture rules).
-        files: ["packages/app-kit/src/components/record-grid.tsx"],
-        rules: { "react/incompatible-library": "off" },
       },
       {
         // Schema files start as comment-only placeholders until their first table.

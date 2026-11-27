@@ -274,6 +274,23 @@ describe("connecting a Composio toolkit", () => {
     await expect(events()).resolves.toStrictEqual([]);
   });
 
+  it("refuses a tool Composio doesn't tag read-only allowed as a read, connecting and changing tools, and makes nothing", async () => {
+    const admin = someone("admin");
+    const untaggedRead = [
+      "HUBSPOT_LIST_CONTACTS",
+      { name: "HUBSPOT_CREATE_CONTACT", read: true },
+    ];
+    const started = await outcome(start(admin, { tools: untaggedRead }));
+    const writes = composioWrites();
+    const connectionId = await connectHubSpot(admin);
+    const changed = await outcome(change(admin, connectionId, untaggedRead));
+    expect({ started, writes, changed }).toStrictEqual({
+      started: "connection.invalid",
+      writes: [],
+      changed: "connection.invalid",
+    });
+  });
+
   it("is refused for a toolkit Composio holds no app for, recorded, and makes nothing at Composio", async () => {
     const admin = someone("admin");
     await expect(
@@ -474,8 +491,11 @@ describe("connecting a Composio toolkit", () => {
 
   it("says why each refusal ended, from a fixed set, to the admin and in the audit log", async () => {
     const admin = someone("admin");
+    const refused = "connection.provider_refused";
+    const forbidden = "connection.provider_forbidden";
     const cases: {
       why: string;
+      ended?: string;
       send?: { status?: "ACTIVE" | "FAILED"; says?: string };
       before?: (account: FakeAccount) => void;
     }[] = [
@@ -497,13 +517,27 @@ describe("connecting a Composio toolkit", () => {
           };
         },
       },
+      // A key without Composio's MCP permission: no use starting again,
+      // and Composio's number for it, never its message, names why.
       {
-        why: "server:http_403",
+        why: "server:http_403:1001",
+        ended: forbidden,
         before: () => {
           composio.state.failingFor = {
             prefix: "POST /mcp/servers",
             times: 1,
             status: 403,
+          };
+        },
+      },
+      {
+        why: "url:http_401",
+        ended: forbidden,
+        before: () => {
+          composio.state.failingFor = {
+            prefix: "POST /mcp/servers/generate",
+            times: 1,
+            status: 401,
           };
         },
       },
@@ -540,7 +574,7 @@ describe("connecting a Composio toolkit", () => {
       .filter(({ action }) => action === "connection.connect")
       .map(({ detail }) => detail.why);
     expect({ endings, audited, held: heldAtComposio() }).toStrictEqual({
-      endings: cases.map(({ why }) => ["connection.provider_refused", why]),
+      endings: cases.map(({ why, ended = refused }) => [ended, why]),
       audited: cases.map(({ why }) => why),
       held: nothingHeld,
     });
@@ -549,16 +583,12 @@ describe("connecting a Composio toolkit", () => {
   it("says why a start was refused when Composio refuses to make its auth config or link", async () => {
     const admin = someone("admin");
     const failing = [
-      ["POST /auth_configs", "auth_config:http_403"],
-      ["POST /connected_accounts/link", "link:http_503"],
+      ["POST /auth_configs", "auth_config:http_403:1001", 403],
+      ["POST /connected_accounts/link", "link:http_503", 503],
     ] as const;
     const endings = [];
-    for (const [prefix, why] of failing) {
-      composio.state.failingFor = {
-        prefix,
-        times: 1,
-        status: Number(why.slice(-3)),
-      };
+    for (const [prefix, , status] of failing) {
+      composio.state.failingFor = { prefix, times: 1, status };
       // oxlint-disable-next-line no-await-in-loop -- one start at a time
       endings.push(await endingOf(start(admin)));
     }
@@ -570,7 +600,10 @@ describe("connecting a Composio toolkit", () => {
         .map(({ detail }) => detail.why),
       held: heldAtComposio(),
     }).toStrictEqual({
-      endings: failing.map(([, why]) => ["connection.provider_refused", why]),
+      endings: [
+        ["connection.provider_forbidden", "auth_config:http_403:1001"],
+        ["connection.provider_refused", "link:http_503"],
+      ],
       audited: failing.map(([, why]) => why),
       held: nothingHeld,
     });
@@ -1129,15 +1162,6 @@ describe("changing what a connected Composio toolkit may do", () => {
       event: event?.detail,
       came: namesIn(recorded, "connection.tools.added"),
       went: namesIn(recorded, "connection.tools.removed"),
-      // Marked a read on the admin's word alone: named.
-      named: recorded
-        .filter(({ action }) => action === "connection.tools.read_tools")
-        .map(
-          ({ detail }) =>
-            Object.values(detail).filter(
-              (value) => value === "HUBSPOT_LIST_CONTACTS"
-            ).length
-        ),
     }).toMatchObject({
       changed: { tools: ["HUBSPOT_LIST_CONTACTS", "HUBSPOT_UPDATE_CONTACT"] },
       stored: [
@@ -1155,7 +1179,6 @@ describe("changing what a connected Composio toolkit may do", () => {
         added: 1,
         removed: 1,
       },
-      named: [1],
       // Who allowed which tool, and took which away, by name.
       came: ["HUBSPOT_UPDATE_CONTACT"],
       went: ["HUBSPOT_CREATE_CONTACT"],

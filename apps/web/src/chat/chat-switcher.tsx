@@ -12,8 +12,13 @@ import type { ReactNode } from "react";
 import { isShortcut } from "../shortcuts.ts";
 
 // The way to the person's chats window (chat-window.tsx) on every page: ⌘K
-// anywhere, and the sidebar's search. The window itself, with
-// its command list, loads the first time it opens.
+// anywhere, the chat's box too, and the sidebar's search. The window
+// itself, with its command list, loads the first time it opens. The keys
+// are the product's, not the sidebar's (AppShellSidebar's
+// `listenToSearchShortcut`): they close the window again, where Damsko's,
+// as every page shortcut, pause while a modal is open, and Damsko's leave
+// rich text alone, where no editor of the product's binds them (registry
+// gap of 27 Nov 2026).
 
 const ChatWindow = lazy(async () => {
   const { ChatWindow: window } = await import("./chat-window.tsx");

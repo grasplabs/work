@@ -57,6 +57,7 @@ import { useActiveChat } from "./active-chat.ts";
 import { groupChats, whenShort } from "./chat-history.ts";
 import type { ChatPeriod } from "./chat-history.ts";
 import { useGoToChat } from "./chat-link.ts";
+import { useChatList } from "./chat-list.ts";
 import { DeleteChatDialog } from "./delete-chat-dialog.tsx";
 import { FailureLine } from "./failure-line.tsx";
 
@@ -136,52 +137,28 @@ const useSaidSearch = () => {
 };
 
 /**
- * Reads the person's chats from core, the archived ones or the rest, again
- * on each `read`: the latest read only, so an answer that comes late for
- * an earlier one is dropped, and kept with which list it is. With the
- * rest, how many they archived, as #2503 counts them for the Archived row,
- * read beside the list and never holding it up.
+ * The person's chats: the rest as core pushes them (chat-list.ts), with
+ * how many they archived, as #2503 counts them for the Archived row; the
+ * archived ones read from core on each `readArchived`, the latest read
+ * only, so an answer that comes late for an earlier one is dropped.
  */
 const useListed = () => {
   const core = useCore();
-  const [listed, setListed] = useState<{
-    archived: boolean;
-    chats: ChatSummary[];
-  }>();
-  const [archivedCount, setArchivedCount] = useState(0);
+  const live = useChatList();
+  const [archivedChats, setArchivedChats] = useState<ChatSummary[]>();
   const [failure, setFailure] = useState<string>();
   const latest = useRef(0);
-  const count = (asked: number): void => {
-    void (async () => {
-      try {
-        const put = await core.withSession(
-          async (session) => await session.chats.list({ archived: true })
-        );
-        if (asked === latest.current) {
-          setArchivedCount(put.length);
-        }
-      } catch {
-        // Uncounted, the Archived row waits for the next read.
-      }
-    })();
-  };
-  const read = (archived: boolean): void => {
+  const readArchived = (): void => {
     latest.current += 1;
     const asked = latest.current;
-    if (!archived) {
-      count(asked);
-    }
     void (async () => {
       try {
         const chats = await core.withSession(
-          async (session) => await session.chats.list({ archived })
+          async (session) => await session.chats.list({ archived: true })
         );
         if (asked === latest.current) {
-          setListed({ archived, chats });
+          setArchivedChats(chats);
           setFailure(undefined);
-          if (archived) {
-            setArchivedCount(chats.length);
-          }
         }
       } catch (error) {
         if (asked === latest.current) {
@@ -190,7 +167,18 @@ const useListed = () => {
       }
     })();
   };
-  return { listed, archivedCount, failure, read };
+  return { live, archivedChats, failure, readArchived };
+};
+
+/** The chats of the list asked for, once there: the archived ones or the rest. */
+const listedOf = (
+  listing: ReturnType<typeof useListed>,
+  archived: boolean
+): ChatSummary[] | undefined => {
+  if (archived) {
+    return listing.archivedChats;
+  }
+  return listing.live.loaded ? listing.live.chats : undefined;
 };
 
 /**
@@ -473,7 +461,7 @@ const useChatItems = ({
   const listing = useListed();
   const { failure, run } = useCoreAction();
   const [readWhenShown, setReadWhenShown] = useState(false);
-  // Read again each time it shows, so it shows what changed elsewhere.
+  // Each time it shows: no search, and the chats in the list, not the archived.
   if (shown !== readWhenShown) {
     setReadWhenShown(shown);
     if (shown) {
@@ -484,18 +472,17 @@ const useChatItems = ({
       setRenamed(false);
     }
   }
-  const read = useEffectEvent((which: boolean) => {
-    listing.read(which);
+  const readArchived = useEffectEvent(() => {
+    listing.readArchived();
   });
   useEffect(() => {
-    if (shown) {
-      read(archived);
+    if (shown && archived) {
+      readArchived();
     }
   }, [shown, archived]);
 
   // Only the list asked for: the other's rows would take this one's actions.
-  const listed =
-    listing.listed?.archived === archived ? listing.listed.chats : undefined;
+  const listed = listedOf(listing, archived);
   const chats = listed ?? [];
   const query = search.trim();
   const searching = query !== "";
@@ -516,7 +503,7 @@ const useChatItems = ({
   const items = useListItems({
     groups,
     archived,
-    archivedCount: listing.archivedCount,
+    archivedCount: listing.live.archived,
     searching,
     offersNew: onNew !== undefined,
     searchFailure: searching ? said.failure : undefined,
@@ -554,7 +541,10 @@ const useChatItems = ({
         return true;
       });
       if (done === true) {
-        listing.read(archived);
+        // The rest are pushed as they change; the archived ones read again.
+        if (archived) {
+          listing.readArchived();
+        }
         await router.invalidate();
       }
     }
@@ -585,7 +575,9 @@ const useChatItems = ({
           onOpenChange={(next) => {
             if (!next) {
               setDeleting(undefined);
-              listing.read(archived);
+              if (archived) {
+                listing.readArchived();
+              }
             }
           }}
           open
@@ -614,7 +606,7 @@ const useChatItems = ({
   return {
     command,
     empty,
-    failure: listing.failure ?? failure,
+    failure: (archived ? listing.failure : listing.live.failure) ?? failure,
     dialogs,
     label,
   };

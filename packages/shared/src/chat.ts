@@ -928,6 +928,11 @@ export type ChatMessage =
        * built from here on.
        */
       built?: ChatBuilt & { plan: string };
+      /**
+       * The key the page sent it with (`ChatQuestion.key`): the page drew
+       * it under that key the moment it was sent, and knows it by it.
+       */
+      key?: string;
       at: string;
     }
   | {
@@ -1158,6 +1163,24 @@ export interface ChatToolEvent {
 /** Most calls a chat keeps the events of: its latest. */
 export const chatToolEventsKept = 200;
 
+/** A stop of the agent's work (`ChatsApi.cancel`). */
+export interface ChatStopped {
+  /** The words of the questions queued meanwhile that it dropped, oldest first. */
+  dropped: string[];
+}
+
+/**
+ * A question the person sent while the agent worked, waiting for it: the
+ * agent takes it once its current step ends, in the order sent, and it is
+ * then stored as a question like any other (`ChatsApi.send`).
+ */
+export interface ChatQueued {
+  /** Stable while it waits. */
+  id: string;
+  /** The person's own words. */
+  text: string;
+}
+
 /**
  * What changed in a chat since the last update: the messages stored since,
  * and the chat as it is now. The first update of a `watch` catches up: the
@@ -1186,6 +1209,18 @@ export interface ChatUpdate {
   tools?: ChatToolEvent[];
   /** Whether the agent is working on a question. */
   running: boolean;
+  /**
+   * The questions sent while the agent worked that it hasn't taken yet,
+   * oldest first: whole in each update, left out while there are none.
+   */
+  queued?: ChatQueued[];
+  /**
+   * In a watch's first update only: the last message the person had seen
+   * as they began to follow the chat, as `markRead` answers it (0 for
+   * none, null for a chat made before chats kept it), so the page draws
+   * its New line at once, without asking.
+   */
+  seenUpTo?: number | null;
   /** The chat's provenance: in the first update, and whenever it changes. */
   provenance?: ChatProvenance;
   /**
@@ -1210,8 +1245,8 @@ export interface ChatUpdate {
   worked: number;
   /**
    * Whether the turn checks the drafts it wrote now, past its answer
-   * (core's agent-builds.ts, `turnCheck`): the chat takes no question
-   * until it ends. Left out by an earlier release.
+   * (core's agent-builds.ts, `turnCheck`): a question sent meanwhile
+   * joins the turn (`ChatsApi.send`). Left out by an earlier release.
    */
   checking?: boolean;
   /**
@@ -1288,6 +1323,24 @@ export interface ChatQuestion {
    * workflow they have a role in, a member of the organization.
    */
   mentions?: ChatMention[];
+}
+
+/**
+ * What changed in the person's list of chats (`ChatsApi.watchList`) since
+ * the last update: each chat whose summary changed, whole (made, renamed,
+ * asked in, answered, read, back from the archive), and the IDs of those
+ * no longer in it (deleted, archived, or past the newest that `list`
+ * gives). The first update holds the whole list, `full`: the page
+ * replaces what it had. The list is in `lastAt` order, the most recent
+ * first.
+ */
+export interface ChatListUpdate {
+  chats: ChatSummary[];
+  removed: string[];
+  /** Whether `chats` is the whole list, which replaces any the page had. */
+  full: boolean;
+  /** How many chats the person archived. */
+  archived: number;
 }
 
 /**
@@ -1398,15 +1451,18 @@ export interface ChatsApi {
   /** Renames one of the person's chats. */
   rename: (chatId: string, title: string) => Promise<void>;
   /**
-   * Marks one of the person's chats seen up to its latest message, while
-   * it is open in front of them: no answer in it is `unread` then. Answers
-   * the last message they had seen before, which the page draws its New
-   * line after: 0 when they had seen none, null for a chat made before
-   * chats kept it, which counts as read. It only moves forward, so a
-   * device that shows less never takes it back. Not audited: it changes
-   * nothing but where the person has read to.
+   * Marks one of the person's chats seen up to its latest message, or up
+   * to message `upTo`, the newest the page shows, where that is older:
+   * what came since, the page hasn't shown yet (it is following the chat
+   * again after a dropped connection). While it is open in front of them:
+   * no answer it showed is `unread` then. Answers the last message they
+   * had seen before, which the page draws its New line after: 0 when they
+   * had seen none, null for a chat made before chats kept it, which counts
+   * as read. It only moves forward, so a device that shows less never
+   * takes it back. Not audited: it changes nothing but where the person
+   * has read to.
    */
-  markRead: (chatId: string) => Promise<number | null>;
+  markRead: (chatId: string, upTo?: number) => Promise<number | null>;
   /**
    * Archives one of the person's chats: out of `list`, kept whole, opened
    * and asked in as ever. Nothing where it is archived already.
@@ -1433,9 +1489,16 @@ export interface ChatsApi {
    * most {@link chatPictureMaxBytes} and {@link chatPictureMaxPixels} a
    * side, up to {@link chatFilesMax} a chat. Resolves once its text is
    * read, or the picture kept, and is refused with why when it can't be.
-   * Audited.
+   * Audited. With `key`, a UUID the page makes for this file in this
+   * chat, a repeat within a day, as a page sends when its connection
+   * broke before it heard the answer, answers the file the first call
+   * attached and attaches none.
    */
-  attachFile: (chatId: string, file: ChatFileInput) => Promise<ChatFile>;
+  attachFile: (
+    chatId: string,
+    file: ChatFileInput,
+    key?: string
+  ) => Promise<ChatFile>;
   /**
    * Removes a file attached to the chat that no question carries yet,
    * freeing its place among the chat's {@link chatFilesMax}. A file a
@@ -1447,9 +1510,17 @@ export interface ChatsApi {
   /**
    * Asks the chat's agent a question. Resolves once the agent has taken
    * it; the answer streams to `watch`, and goes on without anyone
-   * watching.
+   * watching. One sent while the agent works on another is queued
+   * (`ChatUpdate.queued`): the agent takes it once its current step ends,
+   * in the same turn and with the same model, and answers both in order.
+   * Not one that addresses another agent (`mentions`): `agent.busy`.
    */
   send: (chatId: string, question: ChatQuestion) => Promise<void>;
+  /**
+   * Stops the answer being written and has the agent take the questions
+   * queued meanwhile at once (`ChatUpdate.queued`); nothing when none is.
+   */
+  sendNow: (chatId: string) => Promise<void>;
   /**
    * Rates an answer of the person's own chat, by its message's `id`, or
    * takes the rating back (`null`). Kept with the chat, where only its
@@ -1502,8 +1573,13 @@ export interface ChatsApi {
    * App or workflow whose draft it wrote (`ChatWork`).
    */
   worked: (chatId: string) => Promise<ChatWork[]>;
-  /** Stops the agent's work on the chat; `false` when there was none. */
-  cancel: (chatId: string) => Promise<boolean>;
+  /**
+   * Stops the agent's work on the chat; `false` when there was none. The
+   * questions queued meanwhile (`ChatUpdate.queued`) are dropped,
+   * unanswered: their words, oldest first, in `dropped`, for the page to
+   * hand back. Not one the agent took just before the stop.
+   */
+  cancel: (chatId: string) => Promise<ChatStopped | false>;
   /** The npm packages the chat's agent asked for that wait, oldest first. */
   packageRequests: (chatId: string) => Promise<DependencyRequest[]>;
   /** The connections the chat's agent asked for that wait, oldest first. */
@@ -1548,5 +1624,14 @@ export interface ChatsApi {
     chatId: string,
     after: number | null,
     onUpdate: (update: ChatUpdate) => void
+  ) => Promise<ChatSubscriptionApi>;
+  /**
+   * Follows the person's list of chats, as `list` gives it: `onUpdate`
+   * gets the whole list, then what changes in it, as it changes, from
+   * this tab, another one or another device. Watching again after a lost
+   * connection starts with the whole list again.
+   */
+  watchList: (
+    onUpdate: (update: ChatListUpdate) => void
   ) => Promise<ChatSubscriptionApi>;
 }

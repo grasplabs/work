@@ -15,10 +15,6 @@
   "dependencies": {
     "@cfworker/json-schema": "catalog:",
     "@earendil-works/pi-ai": "catalog:",
-    "@fontsource-variable/geist": "catalog:",
-    "@fontsource-variable/jetbrains-mono": "catalog:",
-    "@fontsource-variable/newsreader": "catalog:",
-    "@grasp-os/app-kit": "workspace:*",
     "@grasp-os/shared": "workspace:*",
     "@grasp-os/ui": "workspace:*",
     "@grasp-os/workerflow": "workspace:*",
@@ -32,7 +28,6 @@
     "fflate": "catalog:",
     "jose": "catalog:",
     "livekit-client": "catalog:",
-    "lucide-react": "catalog:",
     "mime": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
@@ -45,7 +40,6 @@
     "@cloudflare/workers-types": "catalog:",
     "@rolldown/plugin-babel": "catalog:",
     "@stylexjs/unplugin": "catalog:",
-    "@tailwindcss/vite": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
@@ -55,7 +49,6 @@
     "happy-dom": "catalog:",
     "lightningcss": "catalog:",
     "seroval": "catalog:",
-    "tailwindcss": "catalog:",
     "vite-plus": "catalog:",
     "wrangler": "catalog:"
   }

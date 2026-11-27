@@ -73,9 +73,14 @@ const stringsIn = (value: unknown): string[] => {
   return [];
 };
 
+/** A question's recall part, as chat-agent.ts `questionContent` writes it. */
+const recallPart = /^<recall run="[^"\s]+">\n(?<text>[\s\S]*)\n<\/recall>$/u;
+
 /** What the latest question's recall in `body` (a request to the provider) handed over. */
 const latestRecallIn = (body: unknown): string =>
-  stringsIn(body).findLast((text) => text.startsWith("[Recall ")) ?? "";
+  recallPart.exec(
+    stringsIn(body).findLast((text) => recallPart.test(text)) ?? ""
+  )?.groups?.text ?? "";
 
 /** What a recall handed over, as far as these tests read it. */
 const handedSchema = z.object({ evidence: z.array(z.unknown()) });
@@ -229,9 +234,7 @@ describe("the profile a chat starts with", setUpTime, () => {
           // oxlint-disable-next-line no-await-in-loop -- one turn at a time
           await ask(question);
           const recall = latestRecallIn(chats.provider.requests.at(-1)?.body);
-          const { evidence } = handedSchema.parse(
-            returnedOf(recall.slice(recall.indexOf("{")))
-          );
+          const { evidence } = handedSchema.parse(returnedOf(recall));
           handed.push(evidence);
         }
         return handed;

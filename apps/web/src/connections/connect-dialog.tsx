@@ -764,7 +764,8 @@ const useKeyEntry = (id: string, key: boolean) => {
 /**
  * Where a toolkit's choice starts: what `from`, a connection that stopped
  * working, allowed of what the toolkit still lists, each tool keeping the
- * resource it was held to; otherwise every tool that only looks.
+ * resource it was held to, and a read only where Composio tags the tool
+ * read-only; otherwise every tool that only looks.
  */
 const startOf = (
   sorted: readonly SortedTool[],
@@ -773,8 +774,19 @@ const startOf = (
   if (from === undefined) {
     return startingChoice(sorted);
   }
-  const listed = new Set(sorted.map(({ tool }) => tool.name));
-  return allowedOf(from).filter(({ name }) => listed.has(name));
+  const readOnly = new Map(
+    sorted.map(({ tool }) => [tool.name, tool.readOnly] as const)
+  );
+  // A read only where Composio tags the tool read-only: connect refuses
+  // any other, so one the stopped connection held as a read starts as
+  // a write.
+  return allowedOf(from)
+    .filter(({ name }) => readOnly.has(name))
+    .map((tool) =>
+      tool.read && readOnly.get(tool.name) !== true
+        ? { ...tool, read: false }
+        : tool
+    );
 };
 
 /**
