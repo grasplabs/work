@@ -309,7 +309,7 @@ export const useAsk = (
   const owner = useBoxOwner();
   const pendingHere = pendingKey(chatId, slot);
   const here = usePending(pendingHere);
-  const { messages, loaded, queued, running } = useFollowedChat(chatId).view;
+  const { messages, queued, running } = useFollowedChat(chatId).view;
   const reconnecting = useReconnecting(busy || running);
   // A question from the box that failed to send comes back into it, which
   // says why: the box that sent it, or, once that one is gone (Chat's
@@ -444,8 +444,6 @@ export const useAsk = (
       text: question,
       mentions: mentioned,
       files: carried,
-      after:
-        chatId === undefined || loaded ? (messages.at(-1)?.id ?? 0) : undefined,
       at: new Date().toISOString(),
       queues: running,
       alreadyQueued: queued.filter((each) => each.text === question).length,

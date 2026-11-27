@@ -28,12 +28,6 @@ export interface PendingQuestion {
   text: string;
   mentions: readonly BoxMention[];
   files: readonly PendingFile[];
-  /**
-   * The chat's last message when it was sent: the first question after it
-   * is core's copy of this one. Unknown (the chat's messages not read yet
-   * as it went): its copy is the last question, in its words.
-   */
-  after: number | undefined;
   /** When it was sent, as this browser's clock says. */
   at: string;
   /**
@@ -149,35 +143,23 @@ export const takesBack = (
  * Whether core has its own copy of `question`: queued behind the answer
  * being written, in its words, or in `messages`, with the key it went with
  * (`ChatMessage.key`), never another question that came meanwhile (an
- * older one queued, now taken). One kept without its key (its chat's
- * object restarted before keeping it) is a question in its words, without
- * a key, after where it went (where that isn't known, the last one).
+ * older one queued, now taken). Core keeps the key in the question's own
+ * entry, so its copy has it whatever restarted on the way.
  */
 export const taken = (
   question: PendingQuestion,
   messages: readonly ChatMessage[],
   queued: readonly ChatQueued[] = []
 ): boolean => {
-  const { after, key, text } = question;
+  const { key, text } = question;
   if (
     queued.filter((each) => each.text === text).length > question.alreadyQueued
   ) {
     return true;
   }
-  const asked = messages.filter(
-    (message): message is Extract<ChatMessage, { role: "user" }> =>
-      message.role === "user"
+  return messages.some(
+    (message) => message.role === "user" && message.key === key
   );
-  if (asked.some((message) => message.key === key)) {
-    return true;
-  }
-  // Without its key: in its words, after where it went (where that isn't
-  // known, the last question).
-  const unkeyed = (message: { key?: string; text: string } | undefined) =>
-    message !== undefined && message.key === undefined && message.text === text;
-  return after === undefined
-    ? unkeyed(asked.at(-1))
-    : asked.some((message) => message.id > after && unkeyed(message));
 };
 
 /**

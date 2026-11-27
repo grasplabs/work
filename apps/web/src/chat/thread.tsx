@@ -720,10 +720,21 @@ const sameAgent = (
 /**
  * A question's row ID: the key the page sent it with, where it has one,
  * so the question drawn as it was sent (`pendingRowId`) and core's copy
- * are one row, never drawn twice nor moved.
+ * are one row, never drawn twice nor moved. A key a question before it
+ * took already (`used`: core forgets a key after a day, and the page may
+ * send it again) gives way to its ID, so no two rows share one.
  */
-const questionRowId = (key: string | undefined, id: number): string =>
-  key === undefined ? `q${id}` : `q:${key}`;
+const questionRowId = (
+  key: string | undefined,
+  id: number,
+  used: Set<string>
+): string => {
+  if (key === undefined || used.has(key)) {
+    return `q${id}`;
+  }
+  used.add(key);
+  return `q:${key}`;
+};
 
 /** The row ID of the question on its way: the one core's copy takes. */
 const pendingRowId = (question: PendingQuestion): string => `q:${question.key}`;
@@ -816,6 +827,7 @@ const rowsOf = (
   // Asked again: its answer starts a row of its own, never joined to the
   // answer that stopped.
   let again = false;
+  const keys = new Set<string>();
   for (const message of messages) {
     if (message.role === "user" && asksAgain(rows, message)) {
       again = true;
@@ -824,7 +836,7 @@ const rowsOf = (
       const before = rows.at(-1);
       rows.push({
         kind: "question",
-        id: questionRowId(message.key, message.id),
+        id: questionRowId(message.key, message.id, keys),
         at: message.at,
         message,
         asked:

@@ -158,6 +158,12 @@ export interface TurnRequest {
      * it (workspace.ts, `send`): for the model, never shown as a question.
      */
     followUp?: true;
+    /**
+     * The key its page sent it with (`ChatQuestion.key`): kept in its
+     * entry's data, never in what the model reads, and shown with it
+     * (`TurnMessage.key`), so the page knows its question by it.
+     */
+    key?: string;
   };
   /** A chat others share, which reads only what they all may. */
   shared: boolean;
@@ -228,6 +234,8 @@ export interface QueuedQuestion {
   subject?: QuestionSubject;
   mentions?: QuestionMention[];
   built?: QuestionBuilt;
+  /** The key its page sent it with, kept as its turn's own question's is. */
+  key?: string;
 }
 
 /** A message for the Workspace to show, with the files a question carries. */
@@ -242,6 +250,8 @@ export interface TurnMessage {
   thinkingMs?: number;
   /** A question queued into its turn (`ChatHarness.queueQuestion`). */
   queued?: true;
+  /** The key a question's page sent it with (`TurnRequest["question"].key`). */
+  key?: string;
 }
 
 const context = BACKGROUND_CONTEXT;
@@ -541,7 +551,14 @@ const shownBuilt = ({ plan, app, workflow }: QuestionBuilt): ShownBuilt => ({
 const questionInput = (
   question: Pick<
     TurnRequest["question"],
-    "text" | "files" | "subject" | "mentions" | "make" | "built" | "followUp"
+    | "text"
+    | "files"
+    | "subject"
+    | "mentions"
+    | "make"
+    | "built"
+    | "followUp"
+    | "key"
   >,
   recall?: TurnRecall
 ) => ({
@@ -557,6 +574,8 @@ const questionInput = (
     data: {
       files: question.files.map(({ id }) => id),
       ...(question.followUp === true ? { followUp: true } : {}),
+      // Its page's key: with the question, never in its content.
+      ...(question.key === undefined ? {} : { key: question.key }),
       // Shown with the person's Build it, as what it built.
       ...(question.built === undefined
         ? {}
@@ -586,11 +605,14 @@ type QuestionRecall = z.infer<typeof questionRecallSchema>;
 
 const questionFilesSchema = z.array(z.string());
 
+const questionKeySchema = z.string();
+
 /**
  * What a question's entry keeps besides its message: the files it carries,
  * what its Build it built, its recall's call, so the chat shows the recall
  * as a step of its own, and that it is a question again for the next
- * agent addressed (`followUp`), which isn't shown. Each read on its own: one that doesn't
+ * agent addressed (`followUp`), which isn't shown, and the key its page
+ * sent it with (`key`). Each read on its own: one that doesn't
  * parse is left out alone, never the others with it. Only the shape this
  * code writes: nothing is released, so no older one is read.
  */
@@ -602,6 +624,7 @@ export const questionDataOf = (
   recall?: QuestionRecall;
   followUp?: true;
   queued?: true;
+  key?: string;
 } => {
   const field = (key: string): unknown =>
     typeof data === "object" && data !== null
@@ -610,12 +633,14 @@ export const questionDataOf = (
   const files = questionFilesSchema.safeParse(field("files"));
   const built = shownBuiltSchema.safeParse(field("built"));
   const recall = questionRecallSchema.safeParse(field("recall"));
+  const key = questionKeySchema.safeParse(field("key"));
   return {
     files: files.success ? files.data : [],
     ...(built.success ? { built: built.data } : {}),
     ...(recall.success ? { recall: recall.data } : {}),
     ...(field("followUp") === true ? { followUp: true as const } : {}),
     ...(field("queued") === true ? { queued: true as const } : {}),
+    ...(key.success ? { key: key.data } : {}),
   };
 };
 
@@ -834,7 +859,7 @@ const shownOf = (entry: EntryRecord): TurnMessage[] => {
     return [];
   }
   if (entry.kind === questionKind && message.role === "user") {
-    const { files, built, recall, followUp, queued } = questionDataOf(
+    const { files, built, recall, followUp, queued, key } = questionDataOf(
       entry.data
     );
     // The question again for the next agent addressed in it: the person
@@ -849,6 +874,7 @@ const shownOf = (entry: EntryRecord): TurnMessage[] => {
         files,
         ...(built === undefined ? {} : { built }),
         ...(queued === undefined ? {} : { queued }),
+        ...(key === undefined ? {} : { key }),
       },
       ...(recall === undefined || recalled === undefined
         ? []

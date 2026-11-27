@@ -51,7 +51,6 @@ const sent: PendingQuestion = {
   text: "Question 3",
   mentions: [],
   files: [],
-  after: 2,
   at,
   queues: false,
   alreadyQueued: 0,
@@ -184,6 +183,27 @@ describe("the thread's rows as a question is sent and answered", () => {
       sameQuestion: true,
       sameAnswer: true,
       answer: true,
+    });
+  });
+
+  it("draws a question sent again under a key core had forgotten as a row of its own, never one sharing an earlier row's", async () => {
+    // A day later core took the same key again as a new question.
+    await opened({
+      messages: [question(1, key), answer(2), question(3, key), answer(4)],
+      pending: undefined,
+      partial: null,
+      running: false,
+    });
+    const ids = rows().map((row) => row.dataset.messageId);
+
+    expect({
+      rows: rows().map(
+        (row) => /(?:Question|Answer) \d/u.exec(row.textContent)?.[0]
+      ),
+      distinct: new Set(ids).size,
+    }).toStrictEqual({
+      rows: ["Question 1", "Answer 2", "Question 3", "Answer 4"],
+      distinct: 4,
     });
   });
 });

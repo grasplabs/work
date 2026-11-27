@@ -259,13 +259,6 @@ interface LiveTurn {
   /** Tells a chat platform's asker the answer's text so far. */
   onText?: (text: string) => unknown;
   /**
-   * The page's keys for the turn's questions (`send`), in the order they
-   * are kept: its own question's, then each one queued into it. Each goes
-   * with its question as its object copies it here (`keepTurnMessages`):
-   * the page knows its question by it. None for a question sent without.
-   */
-  keys: { key: string | undefined }[];
-  /**
    * Whether it got under way (`started`), told once: true as it goes to
    * its ChatSession, false when it was refused before. What a question
    * queued into it (`send`) waits for first.
@@ -506,14 +499,6 @@ const keptWith = (
 });
 
 /**
- * The page's key for the next question of the turn kept (`LiveTurn.keys`):
- * its own question first, then those queued into it, in the order pi
- * places them.
- */
-const keyOfQuestion = (live: LiveTurn | undefined): string | undefined =>
-  live?.keys.shift()?.key;
-
-/**
  * What the next agent the person addressed in a question reads, after the
  * answers before it: core's words, with its name as the chat lists it.
  */
@@ -521,8 +506,19 @@ const followUpText = (name: string): string =>
   `The person addressed you too, ${JSON.stringify(name)}, in their question above. Answer it now as yourself, from what you know and may do. Don't repeat what another agent already said: add to it, or say where you differ.`;
 
 /**
+ * How a question sent while its chat's turn runs goes into that turn
+ * (`ChatHarness.queueQuestion`): its own ID there, and the page's key for
+ * it (`send`), which its entry keeps with it.
+ */
+interface QueuedAs {
+  id: string;
+  key: string | undefined;
+}
+
+/**
  * The turn's question (`TurnRequest`): as asked, with the files it carries,
- * and what the chat was started to make (`make`), if anything.
+ * what the chat was started to make (`make`), if anything, and the page's
+ * key for it (`key`), which its entry keeps with it.
  */
 const turnQuestion = (
   {
@@ -535,9 +531,11 @@ const turnQuestion = (
     followUp,
   }: z.output<typeof questionSchema>,
   files: { id: string; type: string }[],
-  make: ChatMake | null
+  make: ChatMake | null,
+  key: string | undefined
 ): TurnRequest["question"] => ({
   ...(followUp === undefined ? {} : { followUp }),
+  ...(key === undefined ? {} : { key }),
   text,
   model,
   ...(effort === undefined ? {} : { effort }),
@@ -2774,7 +2772,7 @@ export class Workspace extends DurableObject<Env> {
       onText?: (text: string) => unknown;
       calls?: ToolCall[];
       remembered?: ChatSavedMemory[];
-      /** The page's key for the question, kept with it (`LiveTurn.key`). */
+      /** The page's key for the question, kept with it in its turn. */
       key?: string;
     } = {}
   ): Promise<Answer> {
@@ -2806,7 +2804,6 @@ export class Workspace extends DurableObject<Env> {
       reads: [],
       calls,
       remembered,
-      keys: [{ key }],
       underWay: Promise.withResolvers(),
       ended: Promise.withResolvers(),
     };
@@ -2921,7 +2918,8 @@ export class Workspace extends DurableObject<Env> {
         question: turnQuestion(
           { ...parsed.data, model: asked },
           files,
-          makeOf(chat)
+          makeOf(chat),
+          key
         ),
         shared,
         audience,
@@ -3212,7 +3210,7 @@ export class Workspace extends DurableObject<Env> {
         if (live === undefined && !askedLeft && this.#isRunning(chat.id)) {
           askedLeft = true;
           // oxlint-disable-next-line no-await-in-loop -- once, see above
-          if (await this.#queueIntoLeft(chat, id, question)) {
+          if (await this.#queueIntoLeft(chat, { id, key }, question)) {
             started.resolve(true);
             return;
           }
@@ -3225,31 +3223,19 @@ export class Workspace extends DurableObject<Env> {
           void this.#forget(ended);
           return;
         }
-        // Its key in line before it is queued, after those before it: the
-        // agent may take it, and its object copy it here, before the call
-        // queueing it answers. Out of line again if it isn't queued.
-        const inLine = { key };
-        live.keys.push(inLine);
-        let queued = false;
-        try {
+        if (
           // oxlint-disable-next-line no-await-in-loop -- once more only when that turn ended meanwhile
-          queued = await this.#queueInto(
+          await this.#queueInto(
             chat,
             {
               id: live.id,
               agentId: live.agentId,
               underWay: live.underWay.promise,
             },
-            id,
+            { id, key },
             question
-          );
-        } finally {
-          const at = live.keys.indexOf(inLine);
-          if (!queued && at !== -1) {
-            live.keys.splice(at, 1);
-          }
-        }
-        if (queued) {
+          )
+        ) {
           started.resolve(true);
           return;
         }
@@ -3278,7 +3264,8 @@ export class Workspace extends DurableObject<Env> {
   async #queueInto(
     chat: Chat,
     live: Pick<LiveTurn, "id" | "agentId"> & { underWay: Promise<boolean> },
-    id: string,
+    /** Its own ID in the turn, and the page's key, which goes with it. */
+    { id, key }: QueuedAs,
     question: Question
   ): Promise<boolean> {
     const parsed = questionSchema.safeParse(question);
@@ -3314,6 +3301,7 @@ export class Workspace extends DurableObject<Env> {
     const carried = this.#unsentFiles(chat.id, files);
     const queued: QueuedQuestion = {
       id,
+      ...(key === undefined ? {} : { key }),
       text,
       files: carried.map(({ id: fileId, type }) => ({ id: fileId, type })),
       ...(subject === undefined ? {} : { subject }),
@@ -3337,7 +3325,7 @@ export class Workspace extends DurableObject<Env> {
    */
   async #queueIntoLeft(
     chat: Chat,
-    id: string,
+    as: QueuedAs,
     question: Question
   ): Promise<boolean> {
     const turnId = await this.#activeTurn(chat.id);
@@ -3351,7 +3339,7 @@ export class Workspace extends DurableObject<Env> {
         agentId: this.#chat(chat.id).agentId,
         underWay: Promise.resolve(true),
       },
-      id,
+      as,
       question
     );
   }
@@ -3978,6 +3966,7 @@ export class Workspace extends DurableObject<Env> {
       files = [],
       thinkingMs,
       built,
+      key,
     } of messages) {
       answered ||= message.role === "assistant";
       if (entryId <= before.through) {
@@ -3987,7 +3976,8 @@ export class Workspace extends DurableObject<Env> {
       if (message.role === "assistant") {
         this.#partials.delete(chatId);
       }
-      const key = message.role === "user" ? keyOfQuestion(live) : undefined;
+      // A question with the key its page sent it with, which its entry
+      // keeps (`TurnMessage.key`).
       const id = this.#keep(chatId, message, {
         ...keptWith(message, turnAgentId, { files, thinkingMs, built }),
         ...(key === undefined ? {} : { key }),

@@ -10,6 +10,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { ChatSession } from "../src/chat-session.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { chatSession, workspace } from "../src/durable-objects.ts";
 import { chatOf, model, pausedReply, says } from "./agent-chat.ts";
@@ -78,6 +79,10 @@ const follow = async (person: Person, chatId: string) => {
   };
 };
 type Follower = Awaited<ReturnType<typeof follow>>;
+
+/** The questions a follower shows, by their words. */
+const asked = (follower: Follower): string[] =>
+  follower.shown().flatMap(({ role, text }) => (role === "user" ? [text] : []));
 
 /** Waits until the follower's chat has ended its turn with an answer. */
 const settled = async (follower: Follower) => {
@@ -208,6 +213,99 @@ describe("a question sent while the agent answers", slow, () => {
       );
     } finally {
       first.release();
+    }
+  });
+
+  it("keeps its own key when a question sent after it is queued first", async () => {
+    const ann = await signedInApi(idp, "user");
+    const first = pausedReply(says("Paris."), 2);
+    const provider = await fakeProvider(
+      first.reply,
+      says("Madrid."),
+      says("Berlin.")
+    );
+    const chat = await ann.api.chats.create("Overtaken");
+    const tab = await follow(ann, chat.id);
+    // Germany's call to the chat's object is held on its way, so Spain,
+    // sent after it from another tab, reaches the agent first. Told by
+    // flags, never a promise: the chat's object runs in its own context.
+    const germanyCall = { reached: false, held: true };
+    // oxlint-disable-next-line typescript/unbound-method -- called with its object below
+    const queueing = ChatSession.prototype.queueQuestion;
+    const queueQuestion = vi
+      .spyOn(ChatSession.prototype, "queueQuestion")
+      .mockImplementation(async function queueQuestion(
+        this: ChatSession,
+        turnId,
+        question
+      ) {
+        if (question.text === "Germany?") {
+          germanyCall.reached = true;
+          while (germanyCall.held) {
+            // oxlint-disable-next-line no-await-in-loop -- until let go
+            await scheduler.wait(10);
+          }
+        }
+        return await queueing.call(this, turnId, question);
+      });
+    try {
+      const [france, germany, spain] = [
+        crypto.randomUUID(),
+        crypto.randomUUID(),
+        crypto.randomUUID(),
+      ];
+      await ann.api.chats.send(chat.id, {
+        key: france,
+        text: "France?",
+        model,
+      });
+      await vi.waitFor(
+        () => {
+          expect(provider.requests).toHaveLength(1);
+        },
+        { timeout: 10_000 }
+      );
+      const second = ann.api.chats.send(chat.id, {
+        key: germany,
+        text: "Germany?",
+        model,
+      });
+      await vi.waitFor(() => {
+        expect(germanyCall.reached).toBeTruthy();
+      });
+      await ann.api.chats.send(chat.id, { key: spain, text: "Spain?", model });
+      await vi.waitFor(() => {
+        expect(tab.queued()).toStrictEqual(["Spain?"]);
+      });
+      germanyCall.held = false;
+      await second;
+      await vi.waitFor(() => {
+        expect(tab.queued()).toStrictEqual(["Spain?", "Germany?"]);
+      });
+      first.release();
+      await settled(tab);
+      // Read again from what the chat keeps, as a reload does.
+      const reloaded = await follow(ann, chat.id);
+      await vi.waitFor(() => {
+        expect(asked(reloaded)).toHaveLength(3);
+      });
+      expect({
+        tab: { asked: asked(tab), keys: tab.ids().asked },
+        reloaded: { asked: asked(reloaded), keys: reloaded.ids().asked },
+      }).toStrictEqual({
+        tab: {
+          asked: ["France?", "Spain?", "Germany?"],
+          keys: [france, spain, germany],
+        },
+        reloaded: {
+          asked: ["France?", "Spain?", "Germany?"],
+          keys: [france, spain, germany],
+        },
+      });
+    } finally {
+      germanyCall.held = false;
+      first.release();
+      queueQuestion.mockRestore();
     }
   });
 
