@@ -4,7 +4,8 @@
  * written (its event notification, through the admin's queue), and on the
  * admin's cron every minute, which catches whatever the queue doesn't
  * bring (src/server.ts). Each run is the same import, and reads what the
- * bucket holds, never what told it to run.
+ * bucket holds, never what told it to run. One runs at a time: the admin
+ * holds the `releases` lease around it (src/db/lease.ts).
  *
  * CI writes a release's blobs first and its manifest,
  * `releases/<id>/manifest.json`, last, so a release is listed only once its
@@ -38,18 +39,20 @@
  * the bucket: a release that's consistent with its own manifest imports.
  *
  * A request R2 fails is tried again, after a short wait, a few times. A run
- * makes at most {@link MAX_REQUESTS_PER_RUN} requests; a release it doesn't
- * finish, or one that fails, goes on from the blobs it checked: how many
- * of them, in its manifest's order, are checked, for that manifest's
- * sha256 (`releaseImportProgress`).
+ * makes at most {@link MAX_REQUESTS_PER_RUN} requests and tries at most
+ * {@link MAX_RELEASES_PER_RUN} releases. How many of a release's blobs, in
+ * its manifest's order, are checked is recorded a batch at a time, for
+ * that manifest's sha256 (`releaseImportProgress`), so a release a run
+ * doesn't finish, fails, or dies in goes on from there.
  *
- * A release that doesn't verify is recorded as failed, audited, and tried
- * again after a wait that doubles with each attempt, so a broken release
- * costs a few reads a day and never holds up the releases after or before
- * it.
+ * Each attempt at a release is counted as it starts, and the next waits
+ * for a time that doubles with each one, so a release that doesn't verify,
+ * or that a run dies in, costs a few reads a day and never holds up the
+ * releases after or before it. One that doesn't verify is audited.
  *
  * Idempotent: an imported release is skipped, and one imported by a run
- * that overlapped this one is recorded, and audited, once.
+ * that overlapped this one is recorded, and audited, once, with nothing
+ * of the other run's attempt left behind.
  */
 
 import "@tanstack/react-start/server-only";
@@ -76,7 +79,7 @@ import {
   compareReleaseIds,
   releaseIdSchema,
 } from "@grasp-os/shared/release-id";
-import { desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 
 import { actIfChanged } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
@@ -102,11 +105,15 @@ export type ImportStore = ReleaseStore & Pick<R2Bucket, "head">;
 const RELEASES_PREFIX = "releases/";
 
 /**
- * Most releases one run imports. Every merge is a release, so a run
- * normally finds one or none; this bounds the first run, or one after an
- * outage, and the rest follow on the next runs.
+ * Most releases one run tries, imported, failed or deferred alike. Every
+ * merge is a release, so a run normally finds one or none; this bounds the
+ * first run, or one after an outage, and however many broken releases are
+ * due at once: each costs at most about 15 D1 statements (its attempt, its
+ * blobs on record, its progress a batch at a time, its record or its
+ * failure), so a run makes at most about 150 besides its R2 requests.
+ * The rest follow on the next runs.
  */
-export const MAX_IMPORTS_PER_RUN = 5;
+export const MAX_RELEASES_PER_RUN = 10;
 
 /**
  * Most requests to R2 a run makes, heads, reads and their retries alike.
@@ -114,9 +121,10 @@ export const MAX_IMPORTS_PER_RUN = 5;
  * 10,000 an invocation by default, which the admin keeps (no `limits` of
  * subrequests in its wrangler.jsonc; "Subrequests" at
  * developers.cloudflare.com/workers/platform/limits/, read 27 Nov 2026).
- * The import takes half: the rest is for its D1 statements, its listing
- * (a page per 1,000 releases), and, on the cron, the retention and
- * reconciling that share the invocation. A release built from main today
+ * The import takes half: the rest is for its D1 statements (bounded by
+ * {@link MAX_RELEASES_PER_RUN}), its listing (a page per 1,000 releases),
+ * and, on the cron, the retention, reconciling and provisioning that
+ * share the invocation. A release built from main today
  * (1,163 blobs and 3 model files) costs 1,167, so a run imports four; a
  * release it doesn't finish goes on next run from where it got.
  */
@@ -137,11 +145,26 @@ export const MAX_BLOBS_PER_RELEASE = 2000;
 const REQUESTS_AT_ONCE = 6;
 
 /**
- * Blobs read whole at once. A release's largest are about 14 MB (the
- * compiler's WebAssembly), and hashing a static file holds its base64
- * too: two at a time stay well inside the Worker's 128 MB.
+ * Largest blob a release may name: Cloudflare's limit on a static file,
+ * 25 MiB ("Static Assets" at developers.cloudflare.com/workers/platform/
+ * limits/); today's largest is about 14 MB (the compiler's WebAssembly).
+ * A release naming a larger one fails before anything is read.
  */
-const READS_AT_ONCE = 2;
+export const MAX_BLOB_BYTES = 25 * 1024 * 1024;
+
+/**
+ * Bytes of blobs read whole at once, a blob larger than this read alone:
+ * hashing a static file holds its base64 too (a third more), so what's
+ * read stays well inside the Worker's 128 MB.
+ */
+const READ_BYTES_AT_ONCE = MAX_BLOB_BYTES;
+
+/**
+ * Blobs checked a batch at a time, in the manifest's order: each batch's
+ * progress is recorded as it checks out, so a run that dies goes on from
+ * the last batch.
+ */
+const BATCH = 250;
 
 /**
  * The waits before each retry of a request R2 failed (threw at): about
@@ -154,9 +177,9 @@ const RETRY_DELAYS_MS = [250, 1000, 2000] as const;
 export const MAX_MANIFEST_BYTES = 1_000_000;
 
 /**
- * The wait after a release's first failed attempt: the next cron run, a
- * minute later, a little under so that a run starting a moment early
- * still tries.
+ * The wait after a release's first attempt that didn't import it: the
+ * next cron run, a minute later, a little under so that a run starting a
+ * moment early still tries.
  */
 const FIRST_RETRY_MS = 50 * 1000;
 /** The longest wait between attempts. */
@@ -301,31 +324,38 @@ const asError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error));
 
 /**
- * Runs the tasks it's given at most `slots` at a time, the others as slots
- * free up, in the order they came.
+ * Runs the tasks it's given while those running weigh at most `capacity`
+ * together, the others in the order they came as weight frees up; a task
+ * heavier than that alone.
  */
-const gate = (slots: number) => {
-  let free = slots;
-  const waiting: (() => void)[] = [];
-  return async <T>(task: () => Promise<T>): Promise<T> => {
-    if (free > 0) {
-      free -= 1;
+const gate = (capacity: number) => {
+  let free = capacity;
+  const waiting: { weight: number; wake: () => void }[] = [];
+  return async <T>(bytes: number, task: () => Promise<T>): Promise<T> => {
+    const weight = Math.min(bytes, capacity);
+    if (waiting.length === 0 && weight <= free) {
+      free -= weight;
     } else {
       const { promise, resolve } = Promise.withResolvers<boolean>();
-      waiting.push(() => {
-        resolve(true);
+      waiting.push({
+        weight,
+        wake: () => {
+          resolve(true);
+        },
       });
       await promise;
     }
     try {
       return await task();
     } finally {
-      // A slot freed goes to the next task waiting, if any.
-      const wake = waiting.shift();
-      if (wake === undefined) {
-        free += 1;
-      } else {
-        wake();
+      free += weight;
+      // The tasks waiting go in turn, as long as the next one fits.
+      let [next] = waiting;
+      while (next !== undefined && next.weight <= free) {
+        waiting.shift();
+        free -= next.weight;
+        next.wake();
+        [next] = waiting;
       }
     }
   };
@@ -397,7 +427,7 @@ const checkBlobs = async (
   const started: Promise<void>[] = [];
   // Set once one fails: a read still waiting for its turn isn't made.
   let stopped = false;
-  const whole = gate(READS_AT_ONCE);
+  const whole = gate(READ_BYTES_AT_ONCE);
   const checkOne = async ([index, blob]: [number, ReleaseBlob]) => {
     const checked = before.get(blob.key);
     if (checksOf(blob).every((check) => checked?.has(check) === true)) {
@@ -407,7 +437,7 @@ const checkBlobs = async (
       }
     } else {
       const size = blobSize(blob);
-      await whole(async () => {
+      await whole(size, async () => {
         if (stopped) {
           throw new Error(`${blob.key} wasn't read: another blob failed`);
         }
@@ -474,7 +504,14 @@ const resumeAt = async (
     : 0;
 };
 
-/** Records that the first `verifiedBlobs` of release `id`'s blobs checked out. */
+/** SQL: release `id` isn't imported, so nothing of its import is left once it is. */
+const notImported = (id: string) =>
+  sql`NOT EXISTS (SELECT 1 FROM ${releases} WHERE ${releases.id} = ${id})`;
+
+/**
+ * Records that the first `verifiedBlobs` of release `id`'s blobs checked
+ * out, unless it's imported (by a run that overlapped this one).
+ */
 const recordChecked = async (
   db: AdminDatabase,
   id: string,
@@ -484,7 +521,9 @@ const recordChecked = async (
   const updatedAt = new Date();
   await db
     .insert(releaseImportProgress)
-    .values({ releaseId: id, manifestSha256, verifiedBlobs, updatedAt })
+    .select(
+      sql`SELECT ${id}, ${manifestSha256}, ${verifiedBlobs}, ${updatedAt.getTime()} WHERE ${notImported(id)}`
+    )
     .onConflictDoUpdate({
       target: releaseImportProgress.releaseId,
       set: { manifestSha256, verifiedBlobs, updatedAt },
@@ -518,18 +557,36 @@ const importRelease = async (
       `Release ${id} names ${blobs.length} blobs; at most ${MAX_BLOBS_PER_RELEASE} are read`
     );
   }
+  const oversized = blobs.find((blob) => blobSize(blob) > MAX_BLOB_BYTES);
+  if (oversized !== undefined) {
+    throw new Error(
+      `${oversized.key} is ${blobSize(oversized)} bytes; at most ${MAX_BLOB_BYTES} are read`
+    );
+  }
   // Before anything is checked: retention keeps the blobs of a release
   // that's still being imported, over however many runs it takes, as the
   // manifest it has now names them.
   await recordBlobs(db, id, manifest);
   const manifestSha256 = await sha256OfBytes(manifestBytes);
-  const from = Math.min(await resumeAt(db, id, manifestSha256), blobs.length);
-  const { checked, error } = await checkBlobs(
-    reader,
-    blobs.slice(from),
-    await checkedBefore(db)
-  );
-  let failure = error;
+  const before = await checkedBefore(db);
+  let failure: Error | undefined;
+  for (
+    let at = Math.min(await resumeAt(db, id, manifestSha256), blobs.length);
+    at < blobs.length && failure === undefined;
+    at += BATCH
+  ) {
+    // oxlint-disable-next-line no-await-in-loop -- a batch at a time
+    const { checked, error } = await checkBlobs(
+      reader,
+      blobs.slice(at, at + BATCH),
+      before
+    );
+    if (checked > 0) {
+      // oxlint-disable-next-line no-await-in-loop -- a batch at a time
+      await recordChecked(db, id, manifestSha256, at + checked);
+    }
+    failure = error;
+  }
   if (failure === undefined) {
     try {
       await checkModelFiles(reader, manifest);
@@ -537,13 +594,10 @@ const importRelease = async (
       failure = asError(modelError);
     }
   }
+  if (failure instanceof RequestsSpentError) {
+    return "deferred";
+  }
   if (failure !== undefined) {
-    if (checked > 0) {
-      await recordChecked(db, id, manifestSha256, from + checked);
-    }
-    if (failure instanceof RequestsSpentError) {
-      return "deferred";
-    }
     throw failure;
   }
   await actIfChanged(
@@ -588,27 +642,26 @@ const importRelease = async (
 const MAX_DOUBLINGS = 20;
 
 /**
- * Records a failed attempt at `id` and when to try again, and audits it,
- * in one batch. The count goes up in SQL, and the audit event reads it
- * back from the row, so runs that fail the same release at once each count.
+ * Counts an attempt at release `id` and when the next is due, and returns
+ * its number; undefined when it's imported. Before the attempt's heavy
+ * work, so one a run dies in counts too. Gone once it's imported. The
+ * count goes up in SQL, so runs that try the same release at once each
+ * count.
  */
-const recordFailure = async (
+const recordAttempt = async (
   db: AdminDatabase,
   id: string,
   now: Date
-): Promise<void> => {
+): Promise<number | undefined> => {
   const at = now.getTime();
   const { attempts } = releaseImportFailures;
   // The wait after the nth attempt is FIRST_RETRY_MS * 2^(n - 1): in the
   // update, `attempts` is still the count before this one.
-  const record = db
+  const [attempt] = await db
     .insert(releaseImportFailures)
-    .values({
-      releaseId: id,
-      attempts: 1,
-      failedAt: now,
-      nextAttemptAt: new Date(at + FIRST_RETRY_MS),
-    })
+    .select(
+      sql`SELECT ${id}, 1, ${at}, ${at + FIRST_RETRY_MS} WHERE ${notImported(id)}`
+    )
     .onConflictDoUpdate({
       target: releaseImportFailures.releaseId,
       set: {
@@ -616,21 +669,54 @@ const recordFailure = async (
         failedAt: now,
         nextAttemptAt: sql`${at} + min(${FIRST_RETRY_MS} * (1 << min(${attempts}, ${MAX_DOUBLINGS})), ${MAX_RETRY_MS})`,
       },
-    });
-  const audit = db
+    })
+    .returning({ attempts });
+  return attempt?.attempts;
+};
+
+/**
+ * Takes back the attempt at release `id` a run's requests ran out in, as
+ * it didn't fail: due again at once, and no wait added.
+ */
+const takeBackAttempt = async (
+  db: AdminDatabase,
+  id: string,
+  now: Date
+): Promise<void> => {
+  const { attempts, releaseId } = releaseImportFailures;
+  await db.batch([
+    db
+      .update(releaseImportFailures)
+      .set({ attempts: sql`${attempts} - 1`, nextAttemptAt: now })
+      .where(eq(releaseId, id)),
+    db
+      .delete(releaseImportFailures)
+      .where(and(eq(releaseId, id), eq(attempts, 0))),
+  ]);
+};
+
+/** Audits attempt `attempt` at release `id` as failed, unless it's imported. */
+const recordFailure = async (
+  db: AdminDatabase,
+  id: string,
+  attempt: number,
+  now: Date
+): Promise<void> => {
+  await db
     .insert(auditEvents)
     .select(
-      sql`SELECT ${crypto.randomUUID()}, ${at}, 'system', 'release.import_failed', NULL, ${id}, json_object('attempts', ${attempts}) FROM ${releaseImportFailures} WHERE ${releaseImportFailures.releaseId} = ${id}`
+      sql`SELECT ${crypto.randomUUID()}, ${now.getTime()}, 'system', 'release.import_failed', NULL, ${id}, json_object('attempts', CAST(${attempt} AS INTEGER)) WHERE ${notImported(id)}`
     );
-  await db.batch([record, audit]);
 };
 
 /**
  * Imports the releases published to `store` that `db` doesn't hold yet,
- * newest first: until {@link MAX_IMPORTS_PER_RUN} are imported or
+ * newest first: until {@link MAX_RELEASES_PER_RUN} are tried or
  * {@link MAX_REQUESTS_PER_RUN} are spent, a release the requests ran out in
- * going on from there next run. A release that failed is
- * passed over until its next attempt is due.
+ * going on from there next run. A release tried before is passed over
+ * until its next attempt is due. One run at a time (src/server.ts holds
+ * the `releases` lease), though overlapping runs still record and audit a
+ * release once.
  */
 export const importReleases = async (
   store: ImportStore,
@@ -654,10 +740,18 @@ export const importReleases = async (
   let read = 0;
   // One release at a time, to bound the blobs read at once.
   for (const id of pending) {
-    if (result.imported.length >= MAX_IMPORTS_PER_RUN || reader.spent()) {
+    if (read >= MAX_RELEASES_PER_RUN || reader.spent()) {
       break;
     }
     read += 1;
+    // Counted before anything heavy, so a run that dies in it still makes
+    // the next attempt wait.
+    // oxlint-disable-next-line no-await-in-loop -- one release at a time
+    const attempt = await recordAttempt(db, id, now);
+    if (attempt === undefined) {
+      // Imported since this run listed it.
+      continue;
+    }
     let outcome: Awaited<ReturnType<typeof importRelease>>;
     try {
       // oxlint-disable-next-line no-await-in-loop -- one release at a time
@@ -666,6 +760,8 @@ export const importReleases = async (
       if (error instanceof RequestsSpentError) {
         // Spent at its manifest: nothing of it checked yet.
         read -= 1;
+        // oxlint-disable-next-line no-await-in-loop -- once, as the run stops
+        await takeBackAttempt(db, id, now);
         break;
       }
       result.failed.push(id);
@@ -674,11 +770,13 @@ export const importReleases = async (
         ...errorFields(error),
       });
       // oxlint-disable-next-line no-await-in-loop -- one release at a time
-      await recordFailure(db, id, now);
+      await recordFailure(db, id, attempt, now);
       continue;
     }
     if (outcome === "deferred") {
       // The requests ran out in its blobs: the next run goes on from there.
+      // oxlint-disable-next-line no-await-in-loop -- once, as the run stops
+      await takeBackAttempt(db, id, now);
       break;
     }
     if (outcome === "imported") {

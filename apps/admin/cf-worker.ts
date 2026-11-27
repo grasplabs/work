@@ -201,6 +201,9 @@ const queueTriggers = (
         ...(consumer.max_concurrency === undefined
           ? {}
           : { maxConcurrency: Number(consumer.max_concurrency) }),
+        ...(consumer.max_retries === undefined
+          ? {}
+          : { maxRetries: Number(consumer.max_retries) }),
       })
     );
 };

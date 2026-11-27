@@ -65,7 +65,13 @@ const consumers = (worker: ReturnType<typeof cfWorker>) =>
 
 /** The admin's consumer of queue `name`, as cf takes it. */
 const consumer = (name: string) => [
-  { type: "queue", name, maxBatchTimeout: 0, maxConcurrency: 1 },
+  {
+    type: "queue",
+    name,
+    maxBatchTimeout: 0,
+    maxConcurrency: 1,
+    maxRetries: 0,
+  },
 ];
 
 describe("the admin's Worker for cf", () => {

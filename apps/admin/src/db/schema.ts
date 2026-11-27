@@ -61,14 +61,16 @@ export const releaseBlobs = sqliteTable(
 );
 
 /**
- * A published release that didn't verify, and when the import tries it
- * again (src/releases/import.ts). Gone once it's imported.
+ * A published release the import has tried and not imported yet, and when
+ * it tries it again (src/releases/import.ts): each attempt is counted as
+ * it starts, so one a run died in counts too. Gone once it's imported.
  */
 export const releaseImportFailures = sqliteTable("release_import_failures", {
   /** The release's id, as its R2 prefix names it. */
   releaseId: text("release_id").primaryKey(),
-  /** Failed attempts so far: the wait before the next one doubles each time. */
+  /** Attempts so far: the wait before the next one doubles each time. */
   attempts: integer().notNull(),
+  /** When the last attempt started. */
   failedAt: timestamp("failed_at").notNull(),
   nextAttemptAt: timestamp("next_attempt_at").notNull(),
 });
@@ -110,15 +112,16 @@ export const channels = sqliteTable("channels", {
 });
 
 /**
- * Who runs the reconciler's tick now (src/rollout/reconciler.ts): one
- * row while a tick runs, taken with a compare-and-set, so ticks that
- * overlap never act side by side. Taken over only once it expired, from
- * a tick that died before giving it back.
+ * Who runs a piece of the admin's background work now (src/db/lease.ts):
+ * one row a lease while it's held, taken with a compare-and-set, so runs
+ * that overlap never act side by side. Taken over only once it expired,
+ * from a run that died before giving it back. Named for its first lease,
+ * the reconciler's.
  */
-export const reconcilerLease = sqliteTable("reconciler_lease", {
-  /** Always `reconciler`: the one lease. */
+export const leases = sqliteTable("reconciler_lease", {
+  /** The lease: `reconciler` (src/rollout/reconciler.ts) or `releases` (src/releases/import.ts). */
   id: text().primaryKey(),
-  /** The tick holding it: a random id of its own. */
+  /** The run holding it: a random id of its own. */
   holder: text().notNull(),
   expiresAt: timestamp("expires_at").notNull(),
 });

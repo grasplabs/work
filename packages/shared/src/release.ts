@@ -379,7 +379,7 @@ type Expectation =
   | { kind: "asset"; size: number }
   | { kind: "served"; path: string; hash: string; size: number };
 
-/** Blobs read at once while verifying. */
+/** Blobs read at once while verifying, unless the caller says otherwise. */
 const VERIFY_CONCURRENCY = 8;
 
 /**
@@ -613,16 +613,17 @@ export const storedBlobProblem = (
 
 /**
  * Checks a release's blobs against its manifest (`blobsOf`): each one is
- * read once, through `read`, a few at a time, and checked for every place
- * the manifest names it (`checkBlob`); a reader that keeps what it
- * returns holds exactly the bytes that were checked. Throws on the first
- * mismatch.
+ * read once, through `read`, at most `concurrency` at a time, and checked
+ * for every place the manifest names it (`checkBlob`); a reader that keeps
+ * what it returns holds exactly the bytes that were checked. Throws on the
+ * first mismatch.
  */
 export const verifyReleaseBlobs = async (
   manifest: ReleaseManifest,
-  read: ReadBlob
+  read: ReadBlob,
+  { concurrency = VERIFY_CONCURRENCY }: { concurrency?: number } = {}
 ): Promise<void> => {
-  await mapConcurrently(blobsOf(manifest), VERIFY_CONCURRENCY, async (blob) => {
+  await mapConcurrently(blobsOf(manifest), concurrency, async (blob) => {
     await checkBlob(blob, await read(blob.key, blobSize(blob)));
   });
 };

@@ -6,12 +6,7 @@ import {
   sha256OfBytes,
 } from "@grasp-os/shared/release";
 import { nextReleaseId as nextPublishedId } from "@grasp-os/shared/release-id";
-import {
-  createExecutionContext,
-  createMessageBatch,
-  createScheduledController,
-  getQueueResult,
-} from "cloudflare:test";
+import { createScheduledController } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -21,11 +16,12 @@ import {
   auditEvents,
   channels,
   releaseImportFailures,
+  releaseImportProgress,
   releases,
 } from "../src/db/schema.ts";
 import {
   importReleases,
-  MAX_IMPORTS_PER_RUN,
+  MAX_RELEASES_PER_RUN,
   MAX_MANIFEST_BYTES,
   MAX_BLOBS_PER_RELEASE,
   MAX_REQUESTS_PER_RUN,
@@ -63,6 +59,14 @@ const failureRow = async (id: string) => {
     .select()
     .from(releaseImportFailures)
     .where(eq(releaseImportFailures.releaseId, id));
+  return row;
+};
+
+const progressRow = async (id: string) => {
+  const [row] = await db
+    .select()
+    .from(releaseImportProgress)
+    .where(eq(releaseImportProgress.releaseId, id));
   return row;
 };
 
@@ -156,23 +160,6 @@ const cronAt = (minute: number) =>
     cron: "* * * * *",
     scheduledTime: Date.UTC(2026, 10, 27, 12, minute),
   });
-
-/** What R2 says on the admin's queue when a manifest is written. */
-const manifestWritten = (key: string) =>
-  createMessageBatch("grasp-release-manifests", [
-    {
-      id: crypto.randomUUID(),
-      timestamp: new Date(),
-      attempts: 1,
-      body: {
-        account: "account",
-        action: "PutObject",
-        bucket: "grasp-releases",
-        object: { key, size: 1, eTag: "etag" },
-        eventTime: new Date().toISOString(),
-      },
-    },
-  ]);
 
 /** Every read `reads` counted, the manifests' included. */
 const allReads = (reads: ReadonlyMap<string, number>): number =>
@@ -446,9 +433,9 @@ CREATE TABLE t (id TEXT);`,
     ]);
   });
 
-  it("imports an older release past newer ones that are broken", async () => {
+  it("tries a bounded number of releases a run, broken ones too, and reaches an older good one while they wait", async () => {
     const good = await publishRelease({ notes: "feat(core): older and good" });
-    const broken = Array.from({ length: MAX_IMPORTS_PER_RUN + 1 }, () =>
+    const broken = Array.from({ length: MAX_RELEASES_PER_RUN + 1 }, () =>
       nextReleaseId()
     );
     await Promise.all(
@@ -457,10 +444,22 @@ CREATE TABLE t (id TEXT);`,
       )
     );
 
-    const result = await runImport();
+    const first = await runImport();
+    const second = await runImport();
 
-    expect(result.failed).toStrictEqual(expect.arrayContaining(broken));
-    expect(result.imported).toContain(good.id);
+    expect({
+      // The newest first, as many as a run tries.
+      firstFailed: first.failed,
+      firstImported: first.imported.includes(good.id),
+      // Those wait for their next attempt: the rest go on.
+      secondFailed: second.failed,
+      secondImported: second.imported.includes(good.id),
+    }).toStrictEqual({
+      firstFailed: broken.slice(1).toReversed(),
+      firstImported: false,
+      secondFailed: broken.slice(0, 1),
+      secondImported: true,
+    });
   });
 
   it("refuses a manifest that names another release, or isn't a manifest", async () => {
@@ -493,7 +492,7 @@ CREATE TABLE t (id TEXT);`,
 
   it("imports the newest releases first, the rest on the next run", async () => {
     const published = [];
-    for (let count = 0; count <= MAX_IMPORTS_PER_RUN; count += 1) {
+    for (let count = 0; count <= MAX_RELEASES_PER_RUN; count += 1) {
       // oxlint-disable-next-line no-await-in-loop -- in order, oldest first
       published.push(await publishRelease({ notes: `feat(core): ${count}` }));
     }
@@ -829,6 +828,103 @@ CREATE TABLE t (id TEXT);`,
     });
   });
 
+  it("leaves nothing of an attempt behind once a run beside it imported the release", async () => {
+    const release = await largeRelease("feat(core): imported beside");
+    // In its second batch, so the first batch's progress is on record.
+    const key = blobsOf(release.manifest).map((blob) => blob.key)[300] ?? "";
+    const { promise: reached, resolve: reach } =
+      Promise.withResolvers<boolean>();
+    const { promise: importedBeside, resolve: imported } =
+      Promise.withResolvers<boolean>();
+    // R2 fails the slow run at that blob, each time, once the other run
+    // imported the release.
+    const slow: ImportStore = {
+      list: async (options) => await env.RELEASES.list(options),
+      head: async (blob: string) => await env.RELEASES.head(blob),
+      get: async (blob: string) => {
+        if (blob.startsWith("blobs/")) {
+          reach(true);
+        }
+        if (blob === key) {
+          await importedBeside;
+          throw new Error(
+            "We encountered an internal error. Please try again."
+          );
+        }
+        return await env.RELEASES.get(blob);
+      },
+    };
+
+    const slowRun = runImport(slow);
+    await reached;
+    // Past the slow run's attempt, which makes the next wait.
+    const besideRun = await runImport(env.RELEASES, { now: inMinutes(2) });
+    imported(true);
+    const slowResult = await slowRun;
+    const [failure, progress, failedEvents, imports] = await Promise.all([
+      failureRow(release.id),
+      progressRow(release.id),
+      eventsFor("release.import_failed", release.id),
+      importEvents(release.id),
+    ]);
+
+    expect({
+      beside: besideRun.imported.includes(release.id),
+      slowFailed: slowResult.failed.includes(release.id),
+      failure,
+      progress,
+      failedEvents: failedEvents.length,
+      imports: imports.length,
+    }).toStrictEqual({
+      beside: true,
+      slowFailed: true,
+      failure: undefined,
+      progress: undefined,
+      failedEvents: 0,
+      imports: 1,
+    });
+  });
+
+  it("goes on from the batches a run that died recorded, once its attempt's wait is over", async () => {
+    const release = await largeRelease("feat(core): a run dies");
+    const order = blobsOf(release.manifest).map((blob) => blob.key);
+    const key = order[600] ?? "";
+    const { store, reads } = countingStore();
+    // The run dies at that blob, never answered: nothing after it runs.
+    const { promise: never } = Promise.withResolvers<never>();
+    const dying: ImportStore = {
+      ...store,
+      get: async (blob: string) =>
+        blob === key ? await never : await store.get(blob),
+    };
+
+    void runImport(dying);
+    await vi.waitFor(
+      async () => {
+        const progress = await progressRow(release.id);
+        expect(progress?.verifiedBlobs).toBe(500);
+      },
+      { timeout: 20_000, interval: 50 }
+    );
+    const atOnce = await runImport(store);
+    const waiting = await failureRow(release.id);
+    const later = await runImport(store, { now: inMinutes(2) });
+
+    expect({
+      // Its attempt counted before the run died: the next waits.
+      triedAtOnce: atOnce.imported.includes(release.id),
+      attempts: waiting?.attempts,
+      imported: later.imported.includes(release.id),
+      // The two batches on record aren't read again.
+      recordedOnce: order.slice(0, 500).every((each) => reads.get(each) === 1),
+    }).toStrictEqual({
+      triedAtOnce: false,
+      attempts: 1,
+      imported: true,
+      recordedOnce: true,
+    });
+  });
+
   it("checks a release from its first blob again once its manifest was replaced after a failed attempt", async () => {
     const assets = largeAssets(crypto.randomUUID());
     const release = await publishRelease({
@@ -986,46 +1082,5 @@ CREATE TABLE t (id TEXT);`,
 
     await expect(releaseRow(minute.id)).resolves.toBeDefined();
     await expect(releaseRow(tick.id)).resolves.toBeDefined();
-  });
-
-  it("imports what the bucket holds when R2 says a manifest was written, whatever its message names", async () => {
-    const release = await publishRelease({ notes: "feat(core): told" });
-    const unpublished = nextReleaseId();
-    const batch = manifestWritten(manifestKey(unpublished));
-
-    await worker.queue(batch, env);
-    const { outcome, retryBatch } = await getQueueResult(
-      batch,
-      createExecutionContext()
-    );
-
-    expect({
-      imported: (await releaseRow(release.id)) !== undefined,
-      named: await releaseRow(unpublished),
-      // Acknowledged: nothing of it is retried.
-      outcome,
-      retried: retryBatch.retry,
-    }).toStrictEqual({
-      imported: true,
-      named: undefined,
-      outcome: "ok",
-      retried: false,
-    });
-  });
-
-  it("imports and audits a release once when R2's word of it and two cron runs come at once", async () => {
-    const release = await publishRelease({ notes: "feat(core): both" });
-
-    await Promise.all([
-      worker.queue(manifestWritten(manifestKey(release.id)), env),
-      worker.scheduled(cronAt(5), env),
-      worker.scheduled(cronAt(5), env),
-    ]);
-
-    await expect(releaseRow(release.id)).resolves.toBeDefined();
-    await expect(importEvents(release.id)).resolves.toHaveLength(1);
-    await expect(
-      eventsFor("channel.promote", release.id)
-    ).resolves.toHaveLength(1);
   });
 });

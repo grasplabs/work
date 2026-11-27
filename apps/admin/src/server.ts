@@ -12,11 +12,12 @@
  * Newly published releases are imported (src/releases/import.ts), each
  * taken to Edge as it's saved (src/rollout/channels.ts), as soon as R2
  * says a manifest was written, through the admin's queue, and by the cron
- * every minute besides. Every fifth minute the cron then deletes the
- * bundles of releases never promoted past Edge after 14 days
- * (src/releases/retention.ts), deploys each client whose Workers run
- * something other than its target (src/rollout/reconciler.ts), then
- * resumes provisioning that isn't getting anywhere
+ * every minute besides, one import at a time. Every fifth minute the cron
+ * also deletes the bundles of releases never promoted past Edge after 14
+ * days (src/releases/retention.ts), under the import's lease, then
+ * deploys each client whose Workers run something other than its target
+ * (src/rollout/reconciler.ts), then resumes provisioning that isn't
+ * getting anywhere
  * (src/hosting/reconcile.ts); the watch's own cron reads how Stephen fares
  * at every client every hour (src/clients/watch.ts).
  * `AdminRuns` holds the admin's runs on Workerflow (src/workflow-runs.ts):
@@ -39,6 +40,7 @@ import { adminHostRedirect } from "./admin-host.ts";
 import { adminMcp, adminMcpPath } from "./admin/mcp.ts";
 import { watchCron, watchStephen } from "./clients/watch.ts";
 import { adminDatabase } from "./db/act.ts";
+import { withLease } from "./db/lease.ts";
 import { errorCode } from "./deploy/errors.ts";
 import { reconcileProvisioning } from "./hosting/reconcile.ts";
 import { importReleases } from "./releases/import.ts";
@@ -63,13 +65,43 @@ const withStaff = withAccess(async (request, staff) =>
 /** Every this many minutes, the admin's cron runs the rest of its tick after the import. */
 const TICK_MINUTES = 5;
 
-/** The import, its failure logged by its code: nothing imported then. */
-const importNow = async (env: Env): Promise<ImportResult> => {
+/** What an import that didn't run did. */
+const nothingImported: ImportResult = {
+  imported: [],
+  failed: [],
+  caughtUp: false,
+};
+
+/**
+ * The import, one run at a time (the `releases` lease, src/db/lease.ts):
+ * nothing, at once, while another runs. With `retentionAt` (the tick's),
+ * retention runs after it under the same lease, once the import read
+ * every release published, so it never deletes a blob an import running
+ * beside it relies on. A failure of either is logged by its code.
+ */
+const importNow = async (
+  env: Env,
+  retentionAt?: Date
+): Promise<ImportResult> => {
+  const db = adminDatabase(env.DB);
   try {
-    return await importReleases(env.RELEASES, adminDatabase(env.DB));
+    const result = await withLease(db, "releases", async () => {
+      const done = await importReleases(env.RELEASES, db);
+      // Bundles of releases never promoted past Edge go after 14 days:
+      // only once each published release's blobs are on record and kept.
+      if (retentionAt !== undefined && done.caughtUp) {
+        try {
+          await deleteExpiredBundles(db, env.RELEASES, retentionAt);
+        } catch (error) {
+          log.error("releases.retention_failed", { error: errorCode(error) });
+        }
+      }
+      return done;
+    });
+    return result ?? nothingImported;
   } catch (error) {
     log.error("releases.import_failed", { error: errorCode(error) });
-    return { imported: [], failed: [], caughtUp: false };
+    return nothingImported;
   }
 };
 
@@ -98,22 +130,12 @@ export default {
       await watchStephen(env, at);
       return;
     }
-    // Every minute, the import; every fifth, the rest of the tick after
-    // it, in the same invocation, so retention never runs beside the
-    // cron's import. An import that fails never keeps stuck provisioning
-    // from resuming: logged by its code, and the rest runs all the same.
-    const { imported, caughtUp } = await importNow(env);
+    // Every minute, the import; every fifth, retention with it, then the
+    // rest of the tick. An import that fails, or that another run holds,
+    // never keeps stuck provisioning from resuming: the rest runs all the
+    // same.
     const tick = at.getUTCMinutes() % TICK_MINUTES === 0;
-    // Bundles of releases never promoted past Edge go after 14 days: only
-    // once the import read every release published, so each one's blobs
-    // are on record and kept.
-    try {
-      if (tick && caughtUp) {
-        await deleteExpiredBundles(adminDatabase(env.DB), env.RELEASES, at);
-      }
-    } catch (error) {
-      log.error("releases.retention_failed", { error: errorCode(error) });
-    }
+    const { imported } = await importNow(env, tick ? at : undefined);
     if (tick || imported.length > 0) {
       await reconcileNow(env);
     }
@@ -126,7 +148,8 @@ export default {
   // (apps/admin/wrangler.jsonc): each batch, whatever it holds, runs the
   // import once, which reads the bucket, never the message, and is
   // acknowledged, as the import logs its own failures and the cron tries
-  // again. The import records and audits a release once beside the cron's.
+  // again; nothing while the cron's import runs, which the next minute's
+  // follows.
   queue: async (_batch, env) => {
     const { imported } = await importNow(env);
     if (imported.length > 0) {
