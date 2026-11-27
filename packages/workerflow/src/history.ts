@@ -195,8 +195,10 @@ export const createHistory = (sql: SqlStorage): void => {
         FROM steps WHERE ordinal = new.ordinal;
     END;
 
-    -- An attempt's outcome, journaled once. One whose answer was ignored
-    -- ('superseded') has none yet, and may still be ended as cut off. A
+    -- An attempt's outcome, journaled once. One cut off ('superseded') has
+    -- none: the next attempt's start is what follows it, so a step's
+    -- cut-offs add one event each, at most maxCutOffs (config.ts), and one
+    -- later judged timed out tells it then. A
     -- failure's error and retry delay are copied: a resume moves the
     -- retry on, and a delay function's answer, which comes after this
     -- write, replaces the provisional one, so that delay isn't told.

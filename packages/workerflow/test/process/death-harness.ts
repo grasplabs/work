@@ -229,6 +229,7 @@ export interface AttemptView {
   attempt: number;
   deadline: number;
   started_at: number;
+  ended_at: number | null;
   ended: string | null;
   retry_at: number | null;
 }
@@ -240,6 +241,7 @@ export const isAttemptView = (value: unknown): value is AttemptView =>
   "deadline" in value &&
   typeof value.deadline === "number" &&
   "started_at" in value &&
+  "ended_at" in value &&
   "ended" in value &&
   "retry_at" in value;
 

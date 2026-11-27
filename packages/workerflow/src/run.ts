@@ -61,10 +61,9 @@
 //   go of the run, `paused`, with no alarm. A run asleep or waiting has no
 //   activation, and is `paused` at once. A paused run's deadlines don't
 //   come due: `resume` moves each one on by as long as the run was paused,
-//   as the reference engine does, and sets the alarm to run it now. That
-//   counts for an attempt left open by an activation that died before the
-//   pause, too: its deadline moves on, so paused time doesn't make it a
-//   timed-out attempt, and it is retried at once, as one cut off in time.
+//   as the reference engine does, and sets the alarm to run it now. An
+//   attempt left open by an activation that died before the pause is
+//   found cut off, and retried at once, however long the pause.
 // - `terminate` ends the run as `terminated` and takes a new generation in
 //   the same write: an activation still out is fenced, so whatever its
 //   steps answer later is ignored, and it starts nothing more.
@@ -194,6 +193,9 @@ export type { RunNotification } from "./notifications.ts";
 
 /** What `WorkflowRun.journal()` returns. */
 export type { Journal } from "./journal.ts";
+
+/** How many times a step's attempts may be cut off before it fails (config.ts). */
+export { maxCutOffs } from "./config.ts";
 
 /** A journaled step's type, as a pending wait names it. */
 const pendingTypes: Readonly<Record<string, PendingWait["type"]>> = {
@@ -653,31 +655,19 @@ const pauseIn = (sql: SqlStorage, now: number): void => {
 
 /**
  * Moves each of the run's pending deadlines on by `ms`, the time it was
- * paused: a sleep's or a wait's, a retry's (unless the resume keeps them,
- * `waits` false), and that of an attempt cut off, its step's latest with
- * no outcome journaled: one still open (its activation died before the
- * pause) or one whose answer came back superseded, which the next
- * activation ends as cut off by its deadline (activation.ts). Paused time
- * doesn't count against them, as on the reference engine; an attempt's
- * always moves, so paused time never makes it one that timed out.
+ * paused: a sleep's or a wait's, and a retry's. Paused time doesn't count
+ * against them, as on the reference engine. An attempt left without an
+ * outcome by an activation that died before the pause has nothing to
+ * move: the next activation finds it cut off, whenever it comes
+ * (activation.ts).
  */
-const shiftDeadlinesIn = (
-  sql: SqlStorage,
-  ms: number,
-  waits: boolean
-): void => {
-  if (waits) {
-    sql.exec(
-      "UPDATE steps SET deadline = deadline + ? WHERE state = 'waiting' AND deadline IS NOT NULL",
-      ms
-    );
-    sql.exec(
-      "UPDATE attempts SET retry_at = retry_at + ? WHERE retry_at IS NOT NULL AND EXISTS (SELECT 1 FROM steps WHERE steps.ordinal = attempts.ordinal AND steps.attempt = attempts.attempt AND steps.state = 'retrying')",
-      ms
-    );
-  }
+const shiftDeadlinesIn = (sql: SqlStorage, ms: number): void => {
   sql.exec(
-    "UPDATE attempts SET deadline = deadline + ? WHERE ended_at IS NULL OR (ended = 'superseded' AND EXISTS (SELECT 1 FROM steps WHERE steps.ordinal = attempts.ordinal AND steps.attempt = attempts.attempt AND steps.state = 'running'))",
+    "UPDATE steps SET deadline = deadline + ? WHERE state = 'waiting' AND deadline IS NOT NULL",
+    ms
+  );
+  sql.exec(
+    "UPDATE attempts SET retry_at = retry_at + ? WHERE retry_at IS NOT NULL AND EXISTS (SELECT 1 FROM steps WHERE steps.ordinal = attempts.ordinal AND steps.attempt = attempts.attempt AND steps.state = 'retrying')",
     ms
   );
 };
@@ -2571,7 +2561,9 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
         if (run.paused_at === null) {
           throw new Error("The journal holds a paused run with no pause time");
         }
-        shiftDeadlinesIn(sql, Math.max(0, now - run.paused_at), !keepDeadlines);
+        if (!keepDeadlines) {
+          shiftDeadlinesIn(sql, Math.max(0, now - run.paused_at));
+        }
         sql.exec(
           "UPDATE run SET status = 'running', paused_at = NULL, wake_at = ?",
           now

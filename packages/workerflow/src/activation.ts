@@ -21,6 +21,13 @@
 // parked, the activation suspends until the earliest of them, as a wait
 // does. Nothing of the run stays in memory between attempts.
 //
+// An attempt the runtime cut off before its outcome was journaled (its
+// object restarted or evicted, its activation taken over) failed nothing
+// of its own: it spends none of the step's retries, adds nothing to its
+// backoff, and is tried again at once. Only `maxCutOffs` (config.ts) such
+// cut-offs are tried again; at the last, the step fails, not to be
+// retried (`#endCutOffIn`).
+//
 // Gone quiet means only that every sibling the definition reaches through
 // microtasks (in the same turn, or after a step returns) has registered.
 // A sibling it reaches only after a timer or I/O of its own (say `await
@@ -114,6 +121,7 @@ import type { StreamResult } from "./codec.ts";
 import {
   defaultRetryDelayMs,
   delayFunctionTimeoutMs,
+  maxCutOffs,
   readCall,
   retryDelayMs,
 } from "./config.ts";
@@ -145,6 +153,7 @@ import {
 } from "./identity.ts";
 import {
   readAttempt,
+  readAttemptEnds,
   readConsumedEvent,
   readMatchingEvent,
   readNextEvent,
@@ -278,6 +287,8 @@ interface Asking {
   claim: Claim;
   /** The attempt's error, which the function is told. */
   error: string;
+  /** The step's failed attempts, this one included: its backoff's count. */
+  failures: number;
 }
 
 /**
@@ -446,11 +457,15 @@ const attempts = new AsyncLocalStorage<AttemptScope>();
 const hasEnded = (scope: AttemptScope | undefined): boolean =>
   scope?.live === false;
 
-/** What an attempt cut off before its outcome was journaled failed with. */
-const cutOff = (): Error =>
+/**
+ * What a step fails with at its `maxCutOffs`th cut-off: Cloudflare's name
+ * for an attempt lost to the engine, with a code of its own.
+ */
+const cutOffTooOften = (): Error =>
   namedError(
     "WorkflowInternalError",
-    "Attempt failed due to internal workflows error"
+    `The step's attempts were cut off ${maxCutOffs} times before their outcome was journaled (the object running them was restarted or evicted), so it is not tried again`,
+    "workflow.attempts_cut_off"
   );
 
 /** A delay function's failure, as Cloudflare words it. */
@@ -1129,8 +1144,9 @@ export class Activation {
    * next for its step: a retry (its absolute time journaled here), a
    * delay function to ask (a provisional retry journaled here, so the
    * attempt is fenced now and recovery finds one consistent state), or
-   * the step's failure once its retries are spent. Called inside the
-   * transaction that found the attempt failed.
+   * the step's failure once its retries are spent. Its retries and its
+   * backoff count the step's failed attempts, never one cut off. Called
+   * inside the transaction that found the attempt failed.
    */
   // oxlint-disable-next-line class-methods-use-this -- one of the step's journal writes, beside the others
   #endFailedIn(
@@ -1140,7 +1156,9 @@ export class Activation {
     config: StepConfig,
     failure: AttemptFailure
   ): Landing {
-    const retrying = failure.retryable && claim.attempt <= config.limit;
+    const failures =
+      readAttemptEnds(sql, claim.ordinal, claim.attempt).failed + 1;
+    const retrying = failure.retryable && failures <= config.limit;
     let retryAt: number | null = null;
     let landing: Landing = { failed: failure.error };
     if (retrying && typeof config.delay === "function") {
@@ -1149,9 +1167,9 @@ export class Activation {
       // retry comes, and the function is never asked again for this
       // attempt.
       retryAt = now + defaultRetryDelayMs;
-      landing = { ask: { claim, error: failure.error } };
+      landing = { ask: { claim, error: failure.error, failures } };
     } else if (retrying && typeof config.delay === "number") {
-      retryAt = now + retryDelayMs(config.backoff, config.delay, claim.attempt);
+      retryAt = now + retryDelayMs(config.backoff, config.delay, failures);
       landing = "retry";
     }
     assertTime(retryAt);
@@ -1183,12 +1201,10 @@ export class Activation {
    * it, so what was read is what the write is for.
    *
    * An attempt cut off (the process died, the object was evicted or taken
-   * over) counts against the step's retries like any other. One cut off
-   * past its deadline timed out, as far as the step can tell: it is ended
-   * as one that timed out, and retried after its backoff. One cut off
-   * before is retried at once, as on Cloudflare. Either way the attempts
-   * a step gets are bounded by its limit, however often its activations
-   * die or are taken over.
+   * over) spends none of the step's retries, and is retried at once
+   * (`#endCutOffIn`): the attempts a step gets are bounded by its limit of
+   * failures and by `maxCutOffs`, however often its activations die or
+   * are taken over.
    */
   #nextAttempt(identity: StepIdentity, config: StepConfig): Next {
     return this.#storage.transactionSync((): Next => {
@@ -1241,8 +1257,8 @@ export class Activation {
         if (!this.#fits(now, config)) {
           return { park: now };
         }
-        // A retry that is due, or an attempt cut off before its deadline
-        // with retries left. The next goes out under the step's one key
+        // A retry that is due, or an attempt cut off with cut-offs left.
+        // The next goes out under the step's one key
         // (contracts.ts): an attempt that timed out or was cut off may
         // still have had its effect, and a receiver that deduplicates by
         // the key applies it once. Effect receipts stay stable across
@@ -1250,6 +1266,15 @@ export class Activation {
         ({ ordinal } = step);
         attempt = step.attempt + 1;
         key = step.idempotency_key;
+        // One cut off with no end is ended in the write that claims the
+        // next (`#endCutOffIn`), never in one that parks: found again
+        // later, its end would read as a timeout.
+        sql.exec(
+          "UPDATE attempts SET ended_at = ?, ended = 'superseded' WHERE ordinal = ? AND attempt = ? AND ended_at IS NULL",
+          now,
+          ordinal,
+          step.attempt
+        );
         sql.exec(
           "UPDATE steps SET attempt = ?, state = 'running' WHERE ordinal = ?",
           attempt,
@@ -1310,20 +1335,32 @@ export class Activation {
   }
 
   /**
-   * Ends the step's latest attempt if it was cut off before its outcome
-   * was journaled and counts as a failure now: past its deadline (it timed
-   * out, as far as the step can tell), or the last its retries allow.
-   * Returns what comes of it, unless that is a retry: then undefined, as
-   * for an attempt cut off before its deadline with retries left, which
-   * is retried at once.
+   * Judges the step's latest attempt if it has no outcome of its own while
+   * this activation reaches the step: its activation is older, and was
+   * over before the attempt journaled one. Returns what comes of it,
+   * unless that is the next attempt: then undefined.
    *
-   * An attempt whose answer came back to its activation after a later one
-   * took over was ended `superseded`, its answer dropped, while the step
-   * still runs: it was cut off all the same, and is judged as one with no
-   * end. Whether its answer came first or this activation reached the
-   * step first changes nothing: the same end is journaled either way,
-   * over the `superseded` one when it is the last allowed or past its
-   * deadline.
+   * - No end: its activation died or was taken over while it was out. An
+   *   activation that lives to an attempt's deadline journals its timeout
+   *   then (or `superseded`, below), so one with no end was cut off, at a
+   *   time the journal doesn't hold: when it is found, whether before or
+   *   after its deadline, tells nothing (a dead object's watchdog comes a
+   *   lease after its last write, past a short deadline). The write
+   *   that claims the next attempt ends it `superseded`, so a late answer
+   *   or timeout from its activation, should that still run, writes
+   *   nothing over it.
+   * - `superseded` before its deadline: its answer came back in time to
+   *   an activation that was over. Cut off as well.
+   * - `superseded` at or past its deadline: its own activation saw it run
+   *   out (its timer, or an answer too late), when it was no longer
+   *   current to journal the timeout. It timed out: ended so, it counts
+   *   against the step's retries, and the retry waits its backoff.
+   *
+   * A cut-off spends none of the step's retries and is retried at once:
+   * the next activation came only when the runtime brought the object
+   * back, so a step that kills its object is paced a lease per attempt,
+   * and a backoff would only hold up a run cut off by a deploy. The step's
+   * `maxCutOffs`th cut-off fails it instead, not to be retried.
    */
   #endCutOffIn(
     sql: SqlStorage,
@@ -1332,32 +1369,39 @@ export class Activation {
     latest: AttemptRow,
     config: StepConfig
   ): Exclude<Landing, "retry"> | undefined {
-    const cutOffAttempt =
+    const unanswered =
       latest.ended_at === null || latest.ended === "superseded";
-    if (step.state !== "running" || !cutOffAttempt) {
+    if (step.state !== "running" || !unanswered) {
       return undefined;
     }
-    const timedOut = now >= latest.deadline;
-    if (!timedOut && step.attempt <= config.limit) {
+    const timedOut =
+      latest.ended_at !== null && latest.ended_at >= latest.deadline;
+    const cutOffs = readAttemptEnds(sql, step.ordinal, step.attempt).cutOff + 1;
+    if (!timedOut && cutOffs < maxCutOffs) {
       return undefined;
     }
+    const claim: Claim = {
+      ordinal: step.ordinal,
+      attempt: step.attempt,
+      key: step.idempotency_key,
+      deadline: latest.deadline,
+    };
     const landing = this.#endFailedIn(
       sql,
       now,
-      {
-        ordinal: step.ordinal,
-        attempt: step.attempt,
-        key: step.idempotency_key,
-        deadline: latest.deadline,
-      },
+      claim,
       config,
-      {
-        error: JSON.stringify(
-          errorRecord(timedOut ? waitTimedOut(config.timeoutMs) : cutOff())
-        ),
-        ended: timedOut ? "timed_out" : "failed",
-        retryable: true,
-      }
+      timedOut
+        ? {
+            error: JSON.stringify(errorRecord(waitTimedOut(config.timeoutMs))),
+            ended: "timed_out",
+            retryable: true,
+          }
+        : {
+            error: JSON.stringify(errorRecord(cutOffTooOften())),
+            ended: "failed",
+            retryable: false,
+          }
     );
     this.#renewLease(now);
     return landing === "retry" ? undefined : landing;
@@ -1724,7 +1768,7 @@ export class Activation {
     } else if (answer.ok) {
       try {
         const base = parseDuration(answer.value, "A retry delay");
-        said = { ms: retryDelayMs(config.backoff, base, claim.attempt) };
+        said = { ms: retryDelayMs(config.backoff, base, asking.failures) };
       } catch {
         said = delayFailure(
           identity,
@@ -2816,7 +2860,8 @@ export class Activation {
     // A replay that got the rollbacks back: the count starts again. A run
     // whose replays alternate between done and not never reaches the
     // limit so, but each done replay runs a rollback attempt, and those
-    // are bounded by each rollback's own retries: such a run still ends.
+    // are bounded by each rollback's own retries and by `maxCutOffs`:
+    // such a run still ends.
     const reset = this.#write(() =>
       this.#storage.transactionSync(() => {
         if (!this.#current()) {

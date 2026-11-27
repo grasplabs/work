@@ -161,7 +161,7 @@ describe("a run on disk-backed workerd", () => {
       ],
       attempts: [
         { ordinal: 1, attempt: 1, generation: 1, ended: "succeeded" },
-        { ordinal: 2, attempt: 1, generation: 1, ended: null },
+        { ordinal: 2, attempt: 1, generation: 1, ended: "superseded" },
         { ordinal: 2, attempt: 2, generation: 2, ended: "succeeded" },
       ],
     });

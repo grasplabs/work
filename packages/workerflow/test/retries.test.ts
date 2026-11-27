@@ -154,6 +154,49 @@ describe("a step that fails", () => {
     }
   );
 
+  it("spends none of its retries or its backoff on an attempt cut off before it fails", async () => {
+    const id = newId();
+    const first = hold(id, "flaky", 1);
+    await workflow("retrying").create({
+      id,
+      params: {
+        fails: 99,
+        config: { retries: { limit: 2, delay: 300, backoff: "exponential" } },
+      },
+    });
+    await first.held;
+    // Cut off: another activation takes the run over, as after a restart.
+    await deliverAlarm("retrying", id);
+    // The first answers late, ignored, and its alarm handler returns: the
+    // object gets no alarm (the retries') while one still runs.
+    first.release();
+    const status = await ended("retrying", id);
+    await until("the first activation to end", async () => {
+      const journal = await journalOf("retrying", id);
+      return journal.activations[0]?.ended === null ? undefined : journal;
+    });
+
+    const journal = await journalOf("retrying", id);
+    // Its two retries and their backoff, as with no cut-off before them.
+    expect(status).toStrictEqual({
+      status: "complete",
+      output: { caught: { name: "FlakyError", message: "attempt 4 failed" } },
+    });
+    expect(
+      effectsOf(id, "flaky").map((effect) => effect.attempt)
+    ).toStrictEqual([1, 2, 3, 4]);
+    expect(journal.attempts.map((attempt) => attempt.ended)).toStrictEqual([
+      "superseded",
+      "failed",
+      "failed",
+      "failed",
+    ]);
+    expect(delaysIn(journal)).toStrictEqual([null, 300, 600, null]);
+    expect(journal.steps).toMatchObject([
+      { state: "failed", attempt: 4, error: flakyError(4) },
+    ]);
+  });
+
   it.each([
     ["a NonRetryableError", "non-retryable", "NonRetryableError"],
     [

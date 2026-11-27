@@ -5,7 +5,9 @@
 //
 //   retries   { limit: 5, delay: 10000, backoff: "exponential" }: five
 //             retries after the first attempt, the first 10 seconds after
-//             it failed, each one twice as long after the one before
+//             it failed, each one twice as long after the one before. An
+//             attempt the runtime cut off is no failure: it spends none
+//             (`maxCutOffs`)
 //   timeout   "10 minutes", each attempt
 //   sensitive none: observers see the step's result
 //
@@ -84,6 +86,24 @@ export const rollbackReplayCapMs = (budgetMs: number): number =>
 export const defaultRollbackReplays = 10;
 
 /**
+ * How many times a step's attempts may be cut off before the step fails.
+ * An attempt is cut off when the runtime takes it away before its outcome
+ * is journaled: the object running it was restarted or evicted (a deploy
+ * of the Worker that hosts the run, Cloudflare's own restarts), or another
+ * activation took the run over. That says nothing of the step, so a cut
+ * off attempt spends none of its retries and is tried again at once
+ * (activation.ts). This bound, apart from the retries, is what stops a
+ * step that takes its object down itself (past its memory or CPU, a crash
+ * loop) from being tried for ever: at the last cut-off the step fails,
+ * not to be retried, with a WorkflowInternalError (code
+ * `workflow.attempts_cut_off`). The runtime restarts an object far less
+ * often than this within one step's attempts, and a step that kills its
+ * object is paced by the watchdog, a lease (a minute) per attempt, so it
+ * stops within minutes. A fixed choice: no step config changes it.
+ */
+export const maxCutOffs = 10;
+
+/**
  * The longest an attempt may be given: all of a fresh handler's budget. A
  * longer timeout would never fire, and the attempt would be cut off by
  * the host instead. A config asking for more is refused, not run with
@@ -98,7 +118,7 @@ export type StepWork = (context: AnyWorkflowStepContext) => unknown;
 
 /** A step's config as the engine runs it. */
 export interface StepConfig {
-  /** Retries after the first attempt. */
+  /** Retries after the first attempt, for attempts that fail or time out. */
   readonly limit: number;
   /** The delay before backoff, in ms; a function says it per failure. */
   readonly delay: number | WorkflowDelayFunction;
