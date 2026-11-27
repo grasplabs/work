@@ -20,7 +20,7 @@ import { useHoldAlive, useHoldHeartbeat } from "../use-core-reach.ts";
 import { useCore } from "../use-core.ts";
 import { activeChat, setActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
-import { chatMade, startOf, starting } from "./chat-starts.ts";
+import { chatMade, startOf, startTried, starting } from "./chat-starts.ts";
 import { useFollowedChat } from "./chat-watch.ts";
 import type { Problem, StopNote } from "./dictation.ts";
 import { emptyDraft, moveNewDraft, useDraft } from "./drafts.ts";
@@ -593,13 +593,17 @@ export const useAsk = (
       // From the box, the question leaves the thread and goes back into a
       // box, which says why it wasn't sent; asked for the person, it only
       // leaves the thread, and this box says why. A new chat it started
-      // goes with the same start when asked again.
+      // goes with the same start when asked again, and opens now if it
+      // failed before its first call went: the question comes back into
+      // its box there.
       if (why === undefined) {
         clearPending(askedIn, asked);
       } else {
         setPending(askedIn, { ...asked, state: { failed: why } });
       }
       unsent.current = { key, question, asked: askedAs, chatId: askedIn };
+      going();
+      startTried(askedIn);
       return false;
     }
     unsent.current = null;

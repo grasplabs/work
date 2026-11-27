@@ -341,7 +341,7 @@ describe("a person's list of chats", () => {
     });
     // The session store fails as a chat made on another device goes out.
     follower.fail(1);
-    await ann.api.chats.create("Made meanwhile");
+    await startedChat(ann, "Made meanwhile");
     await until(() => {
       expect(follower.titles()).toContain("Made meanwhile");
     });
@@ -355,7 +355,7 @@ describe("a person's list of chats", () => {
     ).catch(() => {
       // Aborting fails the call that aborted: that is the reset.
     });
-    await ann.api.chats.create("Made after the reset");
+    await startedChat(ann, "Made after the reset");
     await vi.waitFor(
       () => {
         expect(follower.titles()).toContain("Made after the reset");

@@ -14,7 +14,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { chatMade, starting } from "./chat-starts.ts";
+import { starting, startTried } from "./chat-starts.ts";
 import { useFollowedChat } from "./chat-watch.ts";
 import { useNewLine } from "./unread.ts";
 
@@ -274,7 +274,7 @@ describe("a chat shown twice from one watch", () => {
     }).toStrictEqual({ shown: true, marks: 1 });
   });
 
-  it("follows a chat the tab is starting once its question made it, never not found while it isn't yet", async () => {
+  it("follows a chat the tab is starting once its question is done, even one that failed here though core made the chat, never not found meanwhile", async () => {
     shownChat = crypto.randomUUID();
     const followed: { gone: boolean | undefined; messages: number }[] = [];
     const Starting = () => {
@@ -328,8 +328,9 @@ describe("a chat shown twice from one watch", () => {
       expect(watches).toBe(1);
     });
     const meanwhile = followed.at(-1);
+    // Its question failed here, its answer lost on the way: core made it.
     await act(async () => {
-      chatMade(shownChat);
+      startTried(shownChat);
       await Promise.resolve();
     });
     await vi.waitFor(() => {

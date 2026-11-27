@@ -23,9 +23,12 @@ export const starting = (chatId: string, start: ChatStart): void => {
   starts.set(chatId, start);
 };
 
-/** Chat `chatId` is made: whoever waited for it is told, once. */
-export const chatMade = (chatId: string): void => {
-  starts.delete(chatId);
+/**
+ * A question that starts chat `chatId` is done, taken or not: whoever
+ * waited is told, once, to look for it again, as one that failed here may
+ * have made it all the same (its answer lost on the way).
+ */
+export const startTried = (chatId: string): void => {
   const told = waiting.get(chatId);
   waiting.delete(chatId);
   for (const listener of told ?? []) {
@@ -33,8 +36,17 @@ export const chatMade = (chatId: string): void => {
   }
 };
 
-/** Has `listener` told once chat `chatId` is made; answers what stops waiting. */
-export const whenMade = (
+/** Chat `chatId` is made: the tab starts it no more, and whoever waited is told. */
+export const chatMade = (chatId: string): void => {
+  starts.delete(chatId);
+  startTried(chatId);
+};
+
+/**
+ * Has `listener` told once a question that starts chat `chatId` is done
+ * (`startTried`, `chatMade`); answers what stops waiting.
+ */
+export const whenTried = (
   chatId: string,
   listener: () => void
 ): (() => void) => {

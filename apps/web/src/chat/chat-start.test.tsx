@@ -26,6 +26,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { CoreTimeoutError, timeoutMs } from "../core.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { examplesFor } from "../make/examples.ts";
 import { activeChat, forgetActiveChats } from "./active-chat.ts";
@@ -140,6 +141,8 @@ const shown = async (
   } = {}
 ) => {
   const asked: string[] = [];
+  /** Whether the tab has lost its connection: every call fails before it goes. */
+  let offline = false;
   /** The page names each new chat: by the order they were named here. */
   const names = new Map<string, string>();
   const nameOf = (chatId: string): string => {
@@ -192,7 +195,13 @@ const shown = async (
   const core = {
     withSession: async <T,>(
       action: (session: { chats: typeof chats }) => Promise<T>
-    ): Promise<T> => await action({ chats }),
+    ): Promise<T> => {
+      // No connection came in time: what the tab's connection says then.
+      if (offline) {
+        throw new CoreTimeoutError(timeoutMs);
+      }
+      return await action({ chats });
+    },
     get reach() {
       return reached.reach;
     },
@@ -277,7 +286,10 @@ const shown = async (
   };
   /** Where the tab is now. */
   const path = () => router.state.location.pathname;
-  return { asked, keys, reach, kept, nameOf, path };
+  const goOffline = () => {
+    offline = true;
+  };
+  return { asked, keys, reach, kept, nameOf, path, goOffline };
 };
 
 const box = (): HTMLElement => {
@@ -669,6 +681,35 @@ describe("Chat's page from Make something", () => {
       // answers with the chat the first made, and sent it with the same.
       sent: ["send chat-1 What waits on me today?"],
       sameKey: 1,
+    });
+  });
+
+  it("opens the chat a question starts, and puts the question back into its box, when it fails before any call goes", async () => {
+    const { keys, path, goOffline } = await shown();
+    await act(async () => {
+      typeInPrompt(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+    goOffline();
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({
+      page: path().startsWith("/chats/"),
+      box: box().textContent,
+      notes: notes(),
+      calls: keys,
+    }).toStrictEqual({
+      page: true,
+      box: "What waits on me today?",
+      notes: [
+        "Could not send. Your message is kept.",
+        "Grasp can't be reached right now. Try again in a moment.",
+      ],
+      calls: [],
     });
   });
 

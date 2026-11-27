@@ -217,6 +217,38 @@ describe("a chat a page starts", () => {
     }).toStrictEqual({ title: true, listed: [title, "Own"].toSorted() });
   });
 
+  it("makes one chat for a start's key, however many IDs it is sent with at once", async () => {
+    const ann = await person();
+    const tab = await tabOf(ann);
+    const start = startOf("One key");
+    const outcomes = await Promise.all([
+      outcome(
+        ann.api.chats.attachFile(
+          crypto.randomUUID(),
+          { name: "a.txt", bytes: new TextEncoder().encode("A") },
+          crypto.randomUUID(),
+          start
+        )
+      ),
+      outcome(
+        tab.attachFile(
+          crypto.randomUUID(),
+          { name: "b.txt", bytes: new TextEncoder().encode("B") },
+          crypto.randomUUID(),
+          start
+        )
+      ),
+    ]);
+
+    expect({
+      outcomes: outcomes.toSorted(),
+      listed: await titlesOf(ann.api.chats),
+    }).toStrictEqual({
+      outcomes: ["agent.chat_not_found", "ok"],
+      listed: ["One key"],
+    });
+  });
+
   it("refuses an ID someone else's chat has as it refuses one that isn't an ID, saying nothing of theirs and leaving it be", async () => {
     const ann = await person();
     const ben = await person();

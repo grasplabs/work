@@ -3,7 +3,7 @@ import { useSyncExternalStore } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { useCore } from "../use-core.ts";
-import { chatMade, startOf, whenMade } from "./chat-starts.ts";
+import { chatMade, startOf, whenTried } from "./chat-starts.ts";
 import { applyUpdate, emptyView, followChat } from "./follow-chat.ts";
 import type { ChatView } from "./follow-chat.ts";
 
@@ -150,9 +150,10 @@ const subscribe = (
           });
         },
         (failure, gone) => {
-          // A chat this tab is starting isn't made yet: followed once it is.
+          // A chat this tab is starting isn't made yet: looked for again
+          // once its question is done, taken or not.
           if (gone && startOf(chatId) !== undefined) {
-            started.stop = whenMade(chatId, begin);
+            started.stop = whenTried(chatId, begin);
             return;
           }
           changed(started, { ...started.state, failure, gone });

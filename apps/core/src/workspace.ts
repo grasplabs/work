@@ -1572,6 +1572,13 @@ export class Workspace extends DurableObject<Env> {
       if (channel === "web") {
         this.requireRoomForChat(personId);
       }
+      // A start's key makes one chat: another start of another chat under
+      // it (made meanwhile) is refused.
+      const keyed =
+        named === undefined ? undefined : this.#requested("create", named.key);
+      if (keyed !== undefined && keyed.chatId !== id) {
+        throw agentErrors.create("agent.chat_not_found");
+      }
       if (by !== undefined) {
         this.#outboxed(by, "chat.created", id, {});
       }
