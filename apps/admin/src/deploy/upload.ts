@@ -158,6 +158,20 @@ export const durableObjectCodeUpdate = {
 } as const;
 
 /**
+ * The subrequests one invocation of a client's Worker may make. A tab's
+ * connection to core (`/rpc`) is one invocation for as long as the tab is
+ * open, and every D1 query and object call its calls and pushes make
+ * counts towards it. Cloudflare's default is 10,000: a tab in steady use
+ * (a call every 2 s at about 5 subrequests each, and a session reading of
+ * 4 queries every 5 s while it is in use, about 3.3 a second) reaches it
+ * in under an hour, after which every call it makes fails. At 1,000,000 a
+ * tab in that use lasts about 84 hours of it, more than a working week;
+ * Workers Paid allows up to 10,000,000. One limit for every Worker of the
+ * client: an invocation of connect's never comes near it.
+ */
+export const workerLimits = { subrequests: 1_000_000 } as const;
+
+/**
  * What `worker` of `manifest` is uploaded as, `bindings` rendered already:
  * a placed client's, mapped onto its inventory (src/hosting/inventory.ts),
  * its mail locked (`lockMailSender`). Its metadata on the release's
@@ -203,6 +217,7 @@ export const renderedWorkerUpload = (
     ],
     observability: worker.observability,
     code_update_strategy: durableObjectCodeUpdate,
+    limits: workerLimits,
     ...(worker.assets === undefined
       ? {}
       : { assets: { config: worker.assets.config } }),
