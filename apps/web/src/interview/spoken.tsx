@@ -133,13 +133,60 @@ export const SpokenText = ({
   </>
 );
 
-/** A line as it is shown: all of it large; or, when it is long, its first sentence large and the rest under it. */
+/** A first sentence shorter than this is a word of thanks before the question: they stand large together. */
+const titleAtLeast = 32;
+
+/**
+ * A line as it is shown: its first sentence large and the rest under it,
+ * from where the rest starts in the line; a short first sentence ("Got
+ * it.") stays large with the one after it, which carries the question.
+ * The cut is where a sentence ends, decided by what comes before it alone,
+ * so it never moves while the line grows as he says it: a word once shown
+ * stays where it stands, never taken from the title into the text under it.
+ */
 export const shownAs = (
-  line: string,
-  long = 140
-): { title: string; rest: string } => {
-  const cut = line.length > long ? line.search(/(?<=[.?!…])\s/u) : -1;
-  return cut < 0
-    ? { title: line, rest: "" }
-    : { title: line.slice(0, cut), rest: line.slice(cut + 1) };
+  line: string
+): { title: string; rest: string; restAt: number } => {
+  for (const end of line.matchAll(/(?<=[.?!…])\s+(?=\S)/gu)) {
+    if (end.index >= titleAtLeast) {
+      const restAt = end.index + end[0].length;
+      return {
+        title: line.slice(0, end.index),
+        rest: line.slice(restAt),
+        restAt,
+      };
+    }
+  }
+  return { title: line, rest: "", restAt: line.length };
+};
+
+/**
+ * The question a line of his ends in, as their screen shows it while he
+ * talks around it out loud: its last sentence that asks, and where it
+ * starts in the line; null when it asks nothing (yet). A sentence ends
+ * where `shownAs` cuts one, so a Spanish "¿" and a French " ?" stay in it.
+ */
+export const questionOf = (
+  line: string
+): { question: string; at: number } | null => {
+  let found: { question: string; at: number } | null = null;
+  let start = 0;
+  const ends = [
+    ...Array.from(line.matchAll(/(?<=[.?!…])\s+(?=\S)/gu), (end) => ({
+      at: end.index,
+      next: end.index + end[0].length,
+    })),
+    { at: line.trimEnd().length, next: line.length },
+  ];
+  for (const { at, next } of ends) {
+    const sentence = line.slice(start, at).trim();
+    if (/[?？]$/u.test(sentence)) {
+      found = {
+        question: sentence,
+        at: start + line.slice(start).search(/\S/u),
+      };
+    }
+    start = next;
+  }
+  return found;
 };

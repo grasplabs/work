@@ -12,6 +12,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { recordResponse } from "../src/model-usage.ts";
 import { models } from "../src/models.ts";
+import { platformAi } from "../src/platform-ai.ts";
 import { platformSpeech } from "../src/speech.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -64,8 +65,8 @@ const ask = async (
   });
 };
 
-/** What a line of `characters` costs at Voxtral's $13 a million: 13 micros each. */
-const lineMicros = (characters: number): number => characters * 13;
+/** What a line of `characters` costs at Eleven v4's $0.08 a thousand: 80 micros each. */
+const lineMicros = (characters: number): number => characters * 80;
 
 /** What GPT-4o Transcribe costs for `seconds`, at $0.60 an hour, in micros. */
 const heardMicros = (seconds: number): number =>
@@ -98,7 +99,7 @@ const said = async (month: string): Promise<number> => {
     purpose: "onboarding.speech",
     trigger: newPerson(),
     work: { onboarding: true },
-  }).speak({ text, voice: "voice_485", language: "en" });
+  }).speak({ text, voice: platformAi.speech.voices.stephen, language: "en" });
   return lineMicros(text.length);
 };
 
@@ -289,7 +290,7 @@ describe("the organization's AI, for the admin", () => {
           },
           {
             feature: "speech",
-            model: "mistral/voxtral-mini-tts-3-0",
+            model: "elevenlabs/eleven_v4",
             micros: spoken,
           },
           {
@@ -304,7 +305,7 @@ describe("the organization's AI, for the admin", () => {
         rows: [
           {
             feature: "speech",
-            model: "mistral/voxtral-mini-tts-3-0",
+            model: "elevenlabs/eleven_v4",
             micros: spokenBefore,
           },
         ],

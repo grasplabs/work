@@ -16,6 +16,8 @@ import { Features } from "lightningcss";
 import { defineConfig } from "vite-plus";
 import type { Plugin } from "vite-plus";
 
+import { bootPreload } from "./boot-preload.ts";
+import { leanParts } from "./lean-parts.ts";
 import { localePreload } from "./locale-preload.ts";
 
 // Lingui looks for its config from the working directory, which is the repo
@@ -142,7 +144,10 @@ export default defineConfig(({ command }) => ({
     }),
     // Compiles a `.po` catalog when the page imports it.
     lingui({ configPath: linguiConfigPath }),
+    // The lean pages' own part of the stylesheet and of each catalog.
+    leanParts({ linguiConfig }),
     localePreload(),
+    bootPreload(),
     devServerPolicy,
   ],
   css: { lightningcss: keepLightDark },
@@ -156,8 +161,13 @@ export default defineConfig(({ command }) => ({
   build: {
     // Fonts are always files of their own: Vite would inline one under
     // 4 KiB as a `data:` URL, which the page's CSP refuses (font-src is
-    // default-src, 'self'; core's security-headers.ts).
-    assetsInlineLimit: (file) => (file.endsWith(".woff2") ? false : undefined),
+    // default-src, 'self'; core's security-headers.ts). The ElevenLabs
+    // SDK's audio worklets too (interview/live.ts): a worklet is a script,
+    // and script-src takes none from `data:`.
+    assetsInlineLimit: (file) =>
+      file.endsWith(".woff2") || file.includes("/@elevenlabs/client/worklets/")
+        ? false
+        : undefined,
   },
   test: {
     setupFiles: ["./src/test-setup.ts"],
@@ -165,7 +175,9 @@ export default defineConfig(({ command }) => ({
   server: {
     // Core (wrangler dev) serves the API and Cap'n Web.
     proxy: {
-      "/api": "http://localhost:8787",
+      // With its WebSockets: the interview's live line to the transcriber
+      // (/api/transcription) is one, and without `ws` it never opens here.
+      "/api": { target: "http://localhost:8787", ws: true },
       "/rpc": { target: "ws://localhost:8787", ws: true },
       // The document pages run in, with its own policy, and the modules
       // it runs (core's page-frame.ts).

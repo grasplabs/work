@@ -1,0 +1,266 @@
+import { isThemeMode, ThemeToggle } from "@grasp-os/ui/components/theme-toggle";
+import { Icon } from "@grasp-os/ui/lib/icons";
+import { fadeIn } from "@grasp-os/ui/lib/styles";
+import {
+  colors,
+  duration,
+  font,
+  media,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
+import { iconVars, pixel } from "@grasp-os/ui/lib/vars.stylex";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import type { ReactNode } from "react";
+
+import { GraspLogo } from "../connections/brand-logos.ts";
+import {
+  applyTheme,
+  chooseTheme,
+  onThemeChange,
+  readTheme,
+} from "../frame/theme.ts";
+import { TopErrorBar, useAlarmed } from "../frame/top-error.tsx";
+import type { Pose } from "../onboarding/field/engine.ts";
+import { aside } from "../onboarding/field/poses.ts";
+import { StephenField } from "../onboarding/field/stephen-field.tsx";
+import { LanguagePicker } from "../onboarding/language-picker.tsx";
+import { StartOver } from "../onboarding/start-over.tsx";
+
+// The frame every screen of someone's interview link stands in, full
+// screen, outside the app, as the sign-in page before it: Grasp's mark at
+// the window's top start, at its top end the language, light or dark and what the
+// screen adds (as the setup's bar has them), Damsko's calm dither behind the header, and the page.
+// A calm screen with nothing of its own to draw (the sign-in, a notice)
+// stands on Stephen's living field instead, as the setup's screens do.
+
+const styles = stylex.create({
+  frame: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    gridTemplateRows: "auto auto 1fr",
+    boxSizing: "border-box",
+    height: "100svh",
+    overflow: "hidden",
+    // Stephen's field lies under the page, inside the frame.
+    isolation: "isolate",
+    backgroundColor: colors.background,
+    color: colors.bodyForeground,
+  },
+  header: {
+    position: "relative",
+    zIndex: 1,
+    gridColumn: "1 / -1",
+    gridRow: "2",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: space["3"],
+    height: { default: "4rem", [media.sm]: "5rem" },
+    paddingInline: { default: space["4"], [media.sm]: space["10"] },
+  },
+  // The header's controls: one quiet family, one gap.
+  end: { display: "flex", alignItems: "center", gap: space["1"] },
+  tool: { display: "inline-flex" },
+  // The website's mark, as the sign-in page has it.
+  brand: {
+    display: "inline-flex",
+    alignItems: "center",
+    [iconVars.size]: "21px",
+    color: colors.foreground,
+    fontFamily: font.sans,
+  },
+  // The texture's room: the page's own ground, the texture over it.
+  field: {
+    position: "relative",
+    isolation: "isolate",
+    overflow: "hidden",
+  },
+  // The texture behind the header, across the window, at every width.
+  strip: {
+    gridColumn: "1 / -1",
+    gridRow: "2",
+    height: { default: "6rem", [media.sm]: "8rem" },
+  },
+  // Damsko's calm dither, as the page header's banner draws it: mint light from the top, seen
+  // through the system's one pixel (a 2px square in every 3px), at the banner's faint strength, on
+  // the page's own ground. Decoration: hidden from assistive tech, never moves, not drawn in forced
+  // colours.
+  texture: {
+    position: "absolute",
+    inset: 0,
+    zIndex: -1,
+    pointerEvents: "none",
+    opacity: size.textureStrength,
+    maskImage: pixel.mask,
+    maskSize: "3px 3px",
+    display: { default: "block", [media.forcedColors]: "none" },
+    backgroundImage: `linear-gradient(to bottom, ${colors.mint}, transparent 95%)`,
+  },
+  // The same texture in the system's red, over it while an error shows in the bar at the top.
+  alarm: {
+    backgroundImage: `linear-gradient(to bottom, ${colors.destructive}, transparent 95%)`,
+    opacity: 0,
+    transitionProperty: { default: "opacity", [media.reducedMotion]: "none" },
+    transitionDuration: duration.ui,
+    transitionTimingFunction: duration.ease,
+  },
+  alarmOn: { opacity: size.textureStrength },
+  // The mint goes as the red comes, so the two never mix into a third colour.
+  calmGoing: {
+    transitionProperty: { default: "opacity", [media.reducedMotion]: "none" },
+    transitionDuration: duration.ui,
+    transitionTimingFunction: duration.ease,
+  },
+  calmGone: { opacity: 0 },
+  // The bar every error is said in, at the very top, above the header.
+  errors: {
+    gridColumn: "1 / -1",
+    gridRow: "1",
+    position: "relative",
+    zIndex: 2,
+  },
+  // Over a surface rather than behind it: above its fill, never catching a press.
+  over: { zIndex: 1 },
+  main: {
+    position: "relative",
+    display: "flex",
+    flexDirection: "column",
+    gridColumn: "1 / -1",
+    gridRow: "3",
+    minHeight: 0,
+  },
+});
+
+/**
+ * The size of every tool in the header, all Damsko's `sm` (32), as the
+ * setup's bar has them (onboarding/calm-frame.tsx): the language, light or
+ * dark, and what a screen adds (`actions`). Every tool takes its size from
+ * here, never its own, so they can't drift apart.
+ */
+export const tool = {
+  button: "icon-sm",
+  select: "sm",
+  toggle: "sm",
+} as const;
+
+/**
+ * Whose light or dark the header keeps: the link opens outside the app,
+ * before and after signing in, without the account's id, so the choice
+ * made here is this browser's for the interview.
+ */
+const themeOwner = "interview";
+
+/** Light, dark or the system's, as one quiet icon that steps through them, as the setup's bar has it. */
+const Appearance = () => {
+  const { t } = useLingui();
+  // Read where it is kept, so a choice made in another tab shows here too.
+  const mode = useSyncExternalStore(onThemeChange, () => readTheme(themeOwner));
+  useEffect(() => {
+    applyTheme(readTheme(themeOwner));
+  }, []);
+  return (
+    <ThemeToggle
+      aria-label={t`Appearance`}
+      mode={mode}
+      onModeChange={(next) => {
+        if (isThemeMode(next)) {
+          chooseTheme(themeOwner, next);
+        }
+      }}
+      size={tool.toggle}
+      tooltip={t`Light or dark`}
+      variant="icon"
+    />
+  );
+};
+
+/** The calm dither laid over a surface (the suggested reminder time): the header's touch, nothing new. */
+export const DitherOver = () => (
+  <span aria-hidden="true" {...stylex.props(styles.texture, styles.over)} />
+);
+
+/**
+ * The frame: the header across the window, the calm dither behind it on
+ * every screen but the read-back, and the screen; on Stephen's field
+ * instead, resting where `pose` says, for a calm screen.
+ */
+export const Frame = ({
+  strip = true,
+  pose,
+  actions,
+  scene,
+  children,
+}: {
+  /** Which screen this is, as far as a change of it should be seen: once it changes, each screen fades in. */
+  scene?: string;
+  /** The texture behind the header. */
+  strip?: boolean;
+  /** Where Stephen's field rests behind the screen; left out, he keeps out of the way and the header has its texture. */
+  pose?: Pose;
+  /** More at the header's end, after the language and light or dark, as the setup's bar ends with its way out. */
+  actions?: ReactNode;
+  children: ReactNode;
+}) => {
+  // The screen it opened on is there at once; after a change (a pause, back from it), each fades in.
+  const [seen, setSeen] = useState({ scene, moved: false });
+  const alarmed = useAlarmed();
+  if (seen.scene !== scene) {
+    setSeen({ scene, moved: true });
+  }
+  const screen = (
+    <>
+      <div {...stylex.props(styles.errors)}>
+        <TopErrorBar />
+      </div>
+      <header {...stylex.props(styles.header)}>
+        {/* Grasp's mark alone: "Grasp" is its name. */}
+        <span {...stylex.props(styles.brand)}>
+          <Icon icon={GraspLogo} label="Grasp" />
+        </span>
+        <div {...stylex.props(styles.end)}>
+          {/* Its own box, so the guide's light can find it (guide.tsx). */}
+          <span data-guide="language" {...stylex.props(styles.tool)}>
+            <LanguagePicker />
+          </span>
+          <Appearance />
+          <StartOver size="icon-sm" />
+          {actions}
+        </div>
+      </header>
+      {strip && pose === undefined ? (
+        <div
+          aria-hidden="true"
+          {...stylex.props(styles.field, styles.strip, seen.moved && fadeIn)}
+        >
+          <span
+            {...stylex.props(
+              styles.texture,
+              styles.calmGoing,
+              alarmed && styles.calmGone
+            )}
+          />
+          <span
+            {...stylex.props(
+              styles.texture,
+              styles.alarm,
+              alarmed && styles.alarmOn
+            )}
+          />
+        </div>
+      ) : null}
+      <main key={scene} {...stylex.props(styles.main, seen.moved && fadeIn)}>
+        {children}
+      </main>
+    </>
+  );
+  // Always on his field, so a screen that changes to or from the conversation never takes the
+  // page out from under him (React lost track of it when it did).
+  return (
+    <div {...stylex.props(styles.frame)}>
+      <StephenField pose={pose ?? aside}>{screen}</StephenField>
+    </div>
+  );
+};

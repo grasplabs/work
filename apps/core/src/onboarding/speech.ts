@@ -10,19 +10,26 @@ import {
   speechErrors,
   speechRequestMaxBytes,
   speechRequestSchema,
+  speechStreamMime,
 } from "@grasp-os/shared/voice";
-import type { SpeechAnswer, SpokenWord } from "@grasp-os/shared/voice";
+import type {
+  SpeechAnswer,
+  SpeechStreamEvent,
+  SpokenWord,
+} from "@grasp-os/shared/voice";
 import { z } from "zod";
 
+import { signInConfig } from "../auth/config.ts";
 import { identify } from "../auth/identity.ts";
 import { errorResponse } from "../errors.ts";
+import { models } from "../models.ts";
 import { platformAi } from "../platform-ai.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { keepLine, keptLine, storedKeyOf } from "../speech-cache.ts";
 import type { SpokenKey } from "../speech-cache.ts";
-import { platformSpeech, speechModelOf } from "../speech.ts";
+import { platformSpeech, speechModelOf, speechOf } from "../speech.ts";
 import { auditStaffRoute } from "../staff-audit.ts";
-import { interviewCaller } from "./interview-caller.ts";
+import { fromOwnSite, interviewCaller } from "./interview-caller.ts";
 import { linkHeaders, linkRefusal, noCallerRefusal } from "./links.ts";
 import { spokenOf } from "./spoken-lines.ts";
 import { adminWho, onboardingStore } from "./store.ts";
@@ -34,7 +41,8 @@ import type { Took } from "./store.ts";
 // prototype, packages/grasp: worker/speech.ts).
 //
 // Said through speech synthesis behind its interface (speech.ts): the
-// Mistral voices fixed in src/platform-ai.ts, through the model
+// voices fixed in src/platform-ai.ts, ElevenLabs's for an interview and
+// for an admin's onboarding, through the model
 // gateway: the deployment's rules judge every line, its
 // budgets are charged, and the audit log records it, never the line.
 //
@@ -65,9 +73,6 @@ const purpose = "onboarding.speech";
  * pages over and over. A line said before costs none of them.
  */
 export const voiceBudgets = { link: 30 * 60, admin: 60 * 60 } as const;
-
-/** `Sec-Fetch-Site` values of a request this site's own pages made. */
-const sameSiteFetches = new Set(["same-origin", "none"]);
 
 /** Whom a line is said for: the key its voice counts under, and how it is counted. */
 interface Listener {
@@ -195,8 +200,7 @@ const forAdmin = async (
   stored: string,
   requestId: string
 ): Promise<Listener | Response> => {
-  const fetchSite = request.headers.get("sec-fetch-site");
-  if (fetchSite !== null && !sameSiteFetches.has(fetchSite)) {
+  if (!fromOwnSite(request.headers, signInConfig(env)?.origin)) {
     return refused(403, requestErrors.create("request.forbidden"), requestId);
   }
   // Grasp's staff, who may reach the onboarding alone, among them.
@@ -310,17 +314,56 @@ const keptAnswer = async (
   }
 };
 
+const encoder = new TextEncoder();
+
+/** An event of a line answered as it is made: a line of JSON. */
+const eventLine = (event: SpeechStreamEvent): Uint8Array =>
+  encoder.encode(`${JSON.stringify(event)}\n`);
+
+/** What an answer made as it is said is sent with. */
+const streamHeaders = { ...linkHeaders, "content-type": speechStreamMime };
+
+/** A line kept before, answered as one made now would be: all its audio at once, then its words. */
+const keptStreamed = (kept: string): Response => {
+  const { audio, words } = keptAnswerSchema.parse(jsonOf(kept));
+  const body = new Blob([eventLine({ audio }), eventLine({ words })]);
+  return new Response(body, { headers: streamHeaders });
+};
+
+/** What saying a line needs: who asked, and for whom. */
+interface Said {
+  env: Env;
+  asked: Asked;
+  listener: Listener;
+  stored: string;
+  requestId: string;
+}
+
 /** Says the page's line for `listener`, from the cache when it was said before. */
-const say = async (
-  env: Env,
-  asked: Asked,
-  listener: Listener,
-  stored: string,
-  requestId: string
-): Promise<Response> => {
-  const model = speechModelOf();
-  const voice = platformAi.speech.voices[asked.speaker];
-  const spoken = spokenOf(asked.text, asked.tone);
+const say = async ({
+  env,
+  asked,
+  listener,
+  stored,
+  requestId,
+}: Said): Promise<Response> => {
+  // Each audience has its own voices (platform-ai.ts).
+  const audience = asked.link === undefined ? "onboarding" : "interview";
+  const speech = speechOf(audience);
+  const model = speechModelOf(audience);
+  // Stephen speaks as the agent does, in an interview and to the admin alike, its voice as its
+  // dashboard sets it now (read from the agent); the voice fixed in code when it can't be read.
+  const agentVoice =
+    asked.speaker === "stephen"
+      ? await models(env).agentVoice(
+          `${platformAi.agent.provider}/${platformAi.agent.id}`
+        )
+      : undefined;
+  const voice = agentVoice ?? speech.voices[asked.speaker];
+  // An interview's page reads its lines as a stream: a line is made
+  // whole, then sent as that stream's one piece and its words.
+  const streamed = asked.stream && audience === "interview";
+  const spoken = spokenOf(asked.text);
   const key: SpokenKey = {
     text: asked.text,
     spoken,
@@ -330,16 +373,16 @@ const say = async (
   };
   const kept = await keptAnswer(env, key, requestId);
   if (kept !== undefined) {
-    return answered(kept);
+    return streamed ? keptStreamed(kept) : answered(kept);
   }
   // Only a new line costs anything, so only a new line counts against a
   // budget.
   if (listener.said >= listener.budget) {
     return refused(429, speechErrors.create("speech.limited"), requestId);
   }
-  let speech: Awaited<ReturnType<ReturnType<typeof platformSpeech>["speak"]>>;
+  let said: Awaited<ReturnType<ReturnType<typeof platformSpeech>["speak"]>>;
   try {
-    speech = await platformSpeech(env, {
+    said = await platformSpeech(env, {
       purpose,
       trigger: listener.trigger,
       work: { onboarding: true },
@@ -349,16 +392,16 @@ const say = async (
     return failed(error, requestId);
   }
   const answer: SpeechAnswer = {
-    audio: toBase64(speech.audio),
-    mime: speech.mime,
-    words: speech.words,
+    audio: toBase64(said.audio),
+    mime: said.mime,
+    words: said.words,
   };
   const body = JSON.stringify(answer);
   await Promise.all([
     keepUnlessErased(env, listener.who, stored, key, body, requestId),
-    countSaid(env, listener, secondsOf(speech.words), requestId),
+    countSaid(env, listener, secondsOf(said.words), requestId),
   ]);
-  return answered(body);
+  return streamed ? keptStreamed(body) : answered(body);
 };
 
 /** `POST /api/speech`: a line said, for someone's interview link or an admin. */
@@ -390,5 +433,5 @@ export const speechResponse = async (
   if (listener instanceof Response) {
     return listener;
   }
-  return await say(env, asked, listener, stored, requestId);
+  return await say({ env, asked, listener, stored, requestId });
 };

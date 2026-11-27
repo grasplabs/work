@@ -275,7 +275,7 @@ describe("the kickoff", { timeout: 60_000 }, () => {
     });
   });
 
-  it("gives the company's admin the suites and places the company named, and Stephen's words about its work, only as far as the kickoff said it", async () => {
+  it("gives the company's admin the suites, places and HR platform the company named, and Stephen's words about its work, only as far as the kickoff said it", async () => {
     const staff = adminKickoff();
     const { api: admin } = await signedInApi(idp, "admin");
     const example = {
@@ -320,7 +320,7 @@ describe("the kickoff", { timeout: 60_000 }, () => {
     const namedBy = async (said: string) => {
       await staff.answerKickoff("systems", said);
       const { context: named } = await admin.onboarding.view();
-      return [named.suites, named.sources];
+      return [named.suites, named.sources, named.hr];
     };
     expect({
       before: [before.suites, before.sources],
@@ -329,14 +329,18 @@ describe("the kickoff", { timeout: 60_000 }, () => {
       mixed: await namedBy("Microsoft 365 for mail, our files in gdrive."),
       // "Google" alone names no suite.
       analytics: await namedBy("Google Analytics and Microsoft 365."),
+      // Of two HR platforms, the one said first.
+      hr: await namedBy("Salaries run in Loket, leave in AFAS Profit."),
     }).toStrictEqual({
       // Salesforce and Excel name no suite and no place.
       before: [[], []],
-      mixed: [["microsoft", "google"], ["drive"]],
-      analytics: [["microsoft"], []],
+      mixed: [["microsoft", "google"], ["drive"], null],
+      analytics: [["microsoft"], [], null],
+      hr: [[], [], "Loket"],
       context: {
         suites: ["google"],
         sources: ["notion"],
+        hr: null,
         words: {
           en: {
             business: "",

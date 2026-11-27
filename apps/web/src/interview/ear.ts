@@ -35,6 +35,17 @@ export interface EarOptions {
   link: { secret: string };
   /** How long a silence ends a stretch, in ms, asked every moment: it can change while they talk. `pauseMs` without it. */
   pause?: () => number;
+  /**
+   * Whether Stephen speaks right now, asked every moment: then only a
+   * voice that stays is a stretch (`steadyLeastMs`), as it stops him.
+   */
+  wary?: () => boolean;
+  /**
+   * Whether a stretch whose words didn't come over the live line is written
+   * down from its recording. Not for an ear that only shows what is said.
+   * @default true
+   */
+  recordings?: boolean;
 }
 
 /** What an ear hears, in the order it hears it: for each stretch `stretch-start`, `partial`s, `stretch-end`, then `final` or `unheard`. */
@@ -55,7 +66,13 @@ export type EarEvent =
   /** A closed stretch couldn't be written down: it failed, or the link heard all it may today. */
   | { type: "unheard"; stretch: number; reason: "failed" | "limited" }
   /** The live line came up or went down; meanwhile stretches are written down from their recordings. */
-  | { type: "line"; live: boolean };
+  | { type: "line"; live: boolean }
+  /**
+   * Words as the live line sends them, whatever stretch they are of: all
+   * heard since the last settled words, or those settled now (`settled`),
+   * after which the next start afresh. Nothing is lost between stretches.
+   */
+  | { type: "words"; text: string; settled: boolean };
 
 /** Listening, until closed. */
 export interface Ear {
@@ -80,6 +97,13 @@ const longestMs = 30_000;
 const silenceMs = 12_000;
 /** How long there must be a voice before it is a stretch, in ms: less is a click or a cough. */
 const voicedLeastMs = 200;
+/**
+ * How long a voice must stay, more than it falls silent, before it is a
+ * stretch while Stephen speaks, in ms: a click, a cough or what is left of
+ * his own voice in the microphone doesn't stop him, someone who talks
+ * over him does, within half a second.
+ */
+const steadyLeastMs = 450;
 /** The shortest a stretch is from its first voice to its end, in ms. */
 const stretchLeastMs = 400;
 /** How much sound is kept while nobody speaks, in seconds: once someone is known to speak, the start of it is in there. */
@@ -150,6 +174,26 @@ const fresh = (number: number): Stretch => ({
 });
 
 /**
+ * One more look at the microphone, noted in the stretch: whether there
+ * has been a voice in it for long enough by now to be someone speaking.
+ * While Stephen speaks (`wary`), a voice has to stay: its silences count
+ * against it, and it takes longer (`steadyLeastMs`).
+ */
+const looked = (
+  at: Stretch,
+  { speaks, wary, now }: { speaks: boolean; wary: boolean; now: number }
+): boolean => {
+  if (speaks) {
+    at.voiced += Math.min(now - at.before, 100);
+    at.lastLoud = now;
+  } else if (wary) {
+    at.voiced = Math.max(0, at.voiced - (now - at.before));
+  }
+  at.before = now;
+  return at.spokeAt !== 0 && at.voiced > (wary ? steadyLeastMs : voicedLeastMs);
+};
+
+/**
  * Listens until closed: the microphone is asked for first. Nothing when it
  * isn't given; `micProblem` then says why.
  */
@@ -185,12 +229,18 @@ export const openEar = async (options: EarOptions): Promise<Ear | null> => {
     onLive: (live) => {
       tell({ type: "line", live });
     },
+    onWords: (text, settled) => {
+      if (!deaf) {
+        tell({ type: "words", text, settled });
+      }
+    },
   });
+  const recordings = options.recordings !== false;
 
   /** A new recording, through the microphone as it is now. */
   const restart = (): void => {
     stopRecording(recording);
-    const from = micStream();
+    const from = recordings ? micStream() : null;
     recording = from === null ? null : record(from);
   };
 
@@ -292,6 +342,8 @@ export const openEar = async (options: EarOptions): Promise<Ear | null> => {
     });
   };
 
+  const wary = (): boolean => options.wary?.() === true;
+
   /** One look at the microphone. */
   const tick = (speaks: boolean): void => {
     if (closed || deaf) {
@@ -299,7 +351,7 @@ export const openEar = async (options: EarOptions): Promise<Ear | null> => {
     }
     const now = performance.now();
     // The microphone changed: a recording through the old one is no use.
-    if (recording?.from !== micStream()) {
+    if (recordings && recording?.from !== micStream()) {
       restart();
     }
     const at = stretch;
@@ -308,12 +360,8 @@ export const openEar = async (options: EarOptions): Promise<Ear | null> => {
     if (at.loud >= 3 && at.spokeAt === 0) {
       at.spokeAt = now;
     }
-    if (speaks) {
-      at.voiced += Math.min(now - at.before, 100);
-      at.lastLoud = now;
-    }
-    at.before = now;
-    if (at.spokeAt !== 0 && at.voiced > voicedLeastMs && !at.talking) {
+    const steady = looked(at, { speaks, wary: !at.talking && wary(), now });
+    if (steady && !at.talking) {
       begin(now);
     }
     const pause = options.pause?.() ?? pauseMs;

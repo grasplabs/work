@@ -1498,7 +1498,11 @@ describe("erasing a person", () => {
       await sayForAdmin(person.session, theirs),
       await sayForAdmin(admin.session, other),
     ];
-    const before = [await stillKept(theirs), await stillKept(other)];
+    // An admin's lines are kept in the admin's own voice (ElevenLabs).
+    const before = [
+      await stillKept(theirs, "onboarding"),
+      await stillKept(other, "onboarding"),
+    ];
     await admin.api.members.remove(person.userId);
 
     await admin.api.members.erase(person.userId, String(person.person.name));
@@ -1516,8 +1520,8 @@ describe("erasing a person", () => {
     expect({
       said,
       before,
-      theirs: await stillKept(theirs),
-      other: await stillKept(other),
+      theirs: await stillKept(theirs, "onboarding"),
+      other: await stillKept(other, "onboarding"),
       noted,
     }).toStrictEqual({
       said: [200, 200],

@@ -6,11 +6,32 @@ import { useEffect, useRef, useState } from "react";
 import type { FigureState } from "./body.ts";
 import { mountAura, mountFigure } from "./live.ts";
 import type { LiveFigure } from "./live.ts";
-import { paletteColours, restingColours } from "./palettes.ts";
-import type { AgentFigureLook } from "./palettes.ts";
+import { paletteColours, restingColours } from "./look.ts";
+import type { AgentFigureLook } from "./look.ts";
 
-/** icon 16 in a row's icon box, xs 24 and sm 48 for a list, md 72, lg 128, xl 200 pixels. */
-export type AgentFigureSize = "icon" | "xs" | "sm" | "md" | "lg" | "xl";
+// An agent's figure: lit and dithered, in a shape and a palette of its own
+// (look.ts), in one of five poses: asleep, idle, listening, thinking, done.
+// Stephen's look (`stephensLook`) has one eye in its orb's middle, alive
+// (eye.ts): it follows the pointer on a spring, glances, blinks, and takes
+// each state as a mood. It paints cells on a small 2D canvas, scaled up
+// crisp: no WebGL, so a page of any number holds no GPU context. Every
+// figure on the page shares one frame loop, steps only while it is in view
+// and the tab is shown, and repaints only when a cell changed. With reduced
+// motion, or `still` (the default at list sizes), one picture of its pose.
+// In forced colours: a plain ring. Decorative by default: the agent's name
+// is its host's; `aria-label` makes it an image with a name. Moved here
+// from the old library, a product part of the agents (it draws Grasp's own
+// figures, which no other product has).
+
+/** icon 16 in a row's icon box, xs 24 and sm 48 for a list, md 72, lg 128, xl 200, hero 360 pixels. */
+export type AgentFigureSize =
+  | "icon"
+  | "xs"
+  | "sm"
+  | "md"
+  | "lg"
+  | "xl"
+  | "hero";
 
 const pixels: Record<AgentFigureSize, number> = {
   icon: 16,
@@ -19,6 +40,7 @@ const pixels: Record<AgentFigureSize, number> = {
   md: 72,
   lg: 128,
   xl: 200,
+  hero: 360,
 };
 
 const styles = stylex.create({
@@ -45,6 +67,11 @@ const styles = stylex.create({
   md: { width: "72px", height: "72px" },
   lg: { width: "128px", height: "128px" },
   xl: { width: "200px", height: "200px" },
+  // The one figure a whole screen is about, such as Stephen while he interviews.
+  hero: {
+    width: "min(360px, 62vw, 42vh)",
+    height: "min(360px, 62vw, 42vh)",
+  },
   // The aura fills the positioned box it stands in.
   aura: {
     position: "absolute",
@@ -112,6 +139,15 @@ export interface AgentFigureProps {
    * @default true at icon, xs and sm, false above
    */
   still?: boolean;
+  /**
+   * Stephen alive in a conversation, without his eye: his orb turns, faster as he listens, thinks
+   * and speaks, a thought goes round it while he thinks, his light follows `voiceOf`, and he
+   * eases into each pose, slowest into sleep. Set once, as it mounts.
+   * @default false
+   */
+  alive?: boolean;
+  /** How loud the voice an alive figure follows is now, 0 to 1: asked every frame. Set once, as it mounts. */
+  voiceOf?: () => number;
   /** Its name, when nothing beside it says it: then an image with that name. Left out, it is decoration. */
   "aria-label"?: string;
   /** Where it sits. */
@@ -125,6 +161,8 @@ export const AgentFigure = ({
   state = "idle",
   follow: followGiven,
   still: stillGiven,
+  alive = false,
+  voiceOf,
   "aria-label": label,
   style,
 }: AgentFigureProps) => {
@@ -133,7 +171,7 @@ export const AgentFigure = ({
   const canvas = useRef<HTMLCanvasElement>(null);
   const [live, setLive] = useState<LiveFigure | null>(null);
   // Mounted once per size; a new look or pose reaches the live figure without mounting it again.
-  const firstSeen = useRef({ look, state });
+  const firstSeen = useRef({ look, state, alive, voiceOf });
   useEffect(() => {
     const element = canvas.current;
     const first = firstSeen.current;
@@ -149,6 +187,8 @@ export const AgentFigure = ({
       seed: seedOf(first.look),
       still,
       eye: first.look.eye === true,
+      alive: first.alive,
+      ...(first.voiceOf === undefined ? {} : { voiceOf: first.voiceOf }),
     });
     setLive(made);
     return () => {

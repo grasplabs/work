@@ -379,6 +379,7 @@ const chatCompletionEvents = (
         {
           index: 0,
           delta: {},
+          // A refusal, as chat completions end one: its content filtered.
           finish_reason:
             answer.refused === true
               ? "content_filter"

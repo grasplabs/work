@@ -50,7 +50,7 @@ const SettingsLayout = () => {
             <Outlet />
           </>
         ) : (
-          <Container size="sm">
+          <Container size={current?.roomy === true ? "lg" : "sm"}>
             {header}
             <Outlet />
           </Container>

@@ -763,6 +763,8 @@ export interface I18nCatalog {
       mute: string;
       /** Said once as the product writes down what it heard, after Done. */
       settling: string;
+      /** Turns the microphone back on after Mute. */
+      unmute: string;
     };
     /** Submit's name while the answer comes. */
     stop: string;
@@ -1512,12 +1514,13 @@ const english: I18nCatalog = {
       listening: "Listening",
       mute: "Mute",
       settling: "Writing it down",
+      unmute: "Unmute",
     },
     stop: "Stop",
     submit: "Send",
     succeeded: "Done",
     voice: {
-      close: "Close voice",
+      close: "Type instead",
       label: "Voice conversation",
       listening: "Listening",
       speaking: "Speaking",

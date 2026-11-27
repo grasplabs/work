@@ -8,8 +8,7 @@ import { uploadMaxBytes, uploadNameSchema } from "./uploads.ts";
 // onboarding/documents.ts): each is read at once for what it is about, the
 // tools and teams it names, and what it leaves open about the work, which
 // Stephen asks the people who do it. The reading is the onboarding's; the
-// file is kept in the Brain for the admin who shared it alone. He asks
-// the admin only what nobody else can say, with answers to pick from.
+// file is kept in the Brain for the admin who shared it alone.
 // From the prototype's `lib/document-reading.ts`.
 
 /**
@@ -28,19 +27,11 @@ export const documentReadingMost = {
   tools: 12,
   teams: 8,
   unclear: 3,
-  options: 3,
   word: 60,
   /** A team's name, as long as the staff list lets one be. */
   team: 80,
-  question: 160,
   line: 200,
 } as const;
-
-/** One question to the admin who shared a document, with answers to pick from. */
-export interface DocumentQuestion {
-  question: string;
-  options: string[];
-}
 
 /** What Stephen took from a document. */
 export interface DocumentReading {
@@ -52,8 +43,6 @@ export interface DocumentReading {
   teams: string[];
   /** What it leaves open about the work, for the people who do it. */
   unclear: string[];
-  /** What only the admin can say, when it can't be used without; none otherwise. */
-  ask: DocumentQuestion | null;
 }
 
 /** A document shared in the onboarding. */
@@ -64,8 +53,6 @@ export interface OnboardingDocument {
   /** ISO 8601. */
   at: string;
   reading: DocumentReading;
-  /** The admin's answer to its question, once given. */
-  answer: string | null;
 }
 
 /** A document shared: its file, and the language it is read in. */
@@ -81,9 +68,6 @@ export const shareDocumentSchema = z.strictObject({
 });
 export type ShareDocumentInput = z.input<typeof shareDocumentSchema>;
 
-/** The longest answer kept to a document's question. */
-export const documentAnswerMaxLength = 200;
-
 /** What the company's admin does with documents in the onboarding. */
 export interface OnboardingDocumentsApi {
   documents: () => Promise<OnboardingDocument[]>;
@@ -97,8 +81,6 @@ export interface OnboardingDocumentsApi {
    * its file when the admin removing it shared it. Can't be undone.
    */
   removeDocument: (id: string) => Promise<void>;
-  /** Keeps the admin's answer to a document's question. */
-  answerDocument: (id: string, answer: string) => Promise<OnboardingDocument>;
 }
 
 /** Why a shared document was refused. */

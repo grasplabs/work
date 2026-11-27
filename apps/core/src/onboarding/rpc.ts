@@ -4,6 +4,7 @@ import type {
   DirectoryPeople,
   DirectorySuite,
   OnboardingDirectory,
+  OnboardingDirectoryAccount,
 } from "@grasp-os/shared/directory";
 import type {
   DocumentPlace,
@@ -37,13 +38,17 @@ import type {
   RosterInput,
   SettleChoice,
 } from "@grasp-os/shared/onboarding";
+import {
+  correctAddressSchema,
+  nudgeSchema,
+} from "@grasp-os/shared/onboarding-campaign";
+import type { Campaign, Nudged } from "@grasp-os/shared/onboarding-campaign";
 import { setupChoicesSchema } from "@grasp-os/shared/onboarding-choices";
 import type {
   SetupChoices,
   SetupChoicesInput,
 } from "@grasp-os/shared/onboarding-choices";
 import {
-  documentAnswerMaxLength,
   documentErrors,
   shareDocumentSchema,
 } from "@grasp-os/shared/onboarding-documents";
@@ -60,14 +65,14 @@ import type {
   SetupPlace,
   SetupStepId,
 } from "@grasp-os/shared/onboarding-flow";
-import { requireAdmin } from "@grasp-os/shared/roles";
+import { isMemberAdmin, requireAdmin } from "@grasp-os/shared/roles";
 import { uploadMaxBytes } from "@grasp-os/shared/uploads";
 import { waitUntil } from "cloudflare:workers";
 import { z } from "zod";
 
 import { readDirectoriesNow } from "../directory-people.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
-import { withPerson } from "../session-check.ts";
+import { reachesWorkspace, withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import { intoMembersTeams, syncTeams } from "../staff-list-teams.ts";
 import {
@@ -79,6 +84,9 @@ import {
 } from "./cadence.ts";
 import {
   connectDirectory,
+  connectOtherDirectory,
+  onboardingDirectoryAccounts,
+  readDirectoryAccount,
   onboardingDirectory,
   readOnboardingDirectory,
 } from "./directory.ts";
@@ -122,11 +130,22 @@ import { summaryOf } from "./summary.ts";
 // they live, picked in the admin's browser (document-places.ts); and who
 // leads which team from its HR platform, the same way (hr.ts).
 
-/** The admin's answer to a document's question. */
-const answerSchema = z.strictObject({
-  id: z.string().min(1).max(64),
-  answer: z.string().trim().min(1).max(documentAnswerMaxLength),
-});
+/** Why a team takes no nudge, as the admin is told. */
+const nudgeRefusals = {
+  no_team: "onboarding.no_team",
+  not_now: "onboarding.not_now",
+  too_small: "onboarding.team_too_small",
+  nudged_today: "onboarding.nudged_today",
+  nobody: "onboarding.nobody_to_nudge",
+} as const;
+
+/** Why someone's address isn't corrected, as the admin is told. */
+const addressRefusals = {
+  not_found: "onboarding.not_found",
+  none_failed: "onboarding.no_failed_mail",
+  // An erased person's address: refused as any address the list can't take.
+  kept_out: "onboarding.invalid",
+} as const;
 
 /** The onboarding, for the client's admin. */
 export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
@@ -140,14 +159,16 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
   }
 
   async behind(): Promise<boolean> {
-    return await withPerson(this.#check, async () => {
+    return await withPerson(this.#check, async (person) => {
       const store = onboardingStore(this.#env);
       const [{ flow }, place, open] = await Promise.all([
         store.flow(),
         store.place(),
         gateOpen(this.#env),
       ]);
-      return onboardingBehind({ flow, done: place.done, open });
+      // An admin who finished the screens goes on into the platform; everyone else waits for the go.
+      const admin = isMemberAdmin(person) && reachesWorkspace(person);
+      return onboardingBehind({ flow, done: place.done, open, admin });
     });
   }
 
@@ -237,6 +258,37 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
     return await withPerson(
       this.#check,
       async (person) => await onboardingDirectory(this.#env, person)
+    );
+  }
+
+  async directoryAccounts(): Promise<OnboardingDirectoryAccount[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await onboardingDirectoryAccounts(this.#env, person)
+    );
+  }
+
+  async connectOtherDirectory(
+    suite: DirectorySuite,
+    domain: string | null,
+    returnTo: string
+  ): Promise<{ url: string }> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await connectOtherDirectory(this.#env, person, {
+          suite,
+          domain,
+          returnTo,
+        })
+    );
+  }
+
+  async readDirectoryAccount(connectionId: unknown): Promise<DirectoryPeople> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await readDirectoryAccount(this.#env, person, connectionId)
     );
   }
 
@@ -395,6 +447,63 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
     });
   }
 
+  async campaign(): Promise<Campaign | null> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const now = new Date().toISOString();
+      const store = onboardingStore(this.#env);
+      const campaign = await store.campaign(now);
+      if (campaign === null) {
+        return null;
+      }
+      // How much Grasp knows, as the gate counts it: the same numbers staff give the go by.
+      const { known, threshold, ready } = await gateView(
+        this.#env,
+        await store.view(now),
+        now
+      );
+      return { ...campaign, known, threshold, ready };
+    });
+  }
+
+  async nudge(team: string): Promise<Nudged> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const parsed = onboardingErrors.parse(
+        "onboarding.invalid",
+        nudgeSchema,
+        team
+      );
+      const nudged = await onboardingStore(this.#env).nudge(
+        parsed,
+        actorOf(person)
+      );
+      if (typeof nudged === "string") {
+        throw onboardingErrors.create(nudgeRefusals[nudged]);
+      }
+      return nudged;
+    });
+  }
+
+  async correctAddress(person: string, email: string): Promise<void> {
+    await withPerson(this.#check, async (admin) => {
+      requireAdmin(admin);
+      const parsed = onboardingErrors.parse(
+        "onboarding.invalid",
+        correctAddressSchema,
+        { person, email }
+      );
+      const corrected = await onboardingStore(this.#env).correctAddress(
+        parsed.person,
+        parsed.email,
+        actorOf(admin)
+      );
+      if (corrected !== "sent") {
+        throw onboardingErrors.create(addressRefusals[corrected]);
+      }
+    });
+  }
+
   async deleteKickoff(): Promise<void> {
     await withPerson(this.#check, async (person) => {
       requireAdmin(person);
@@ -506,28 +615,6 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
       requireAdmin(person);
       const parsed = documentErrors.parse("document.invalid", z.string(), id);
       await removeDocument(this.#env, person, parsed);
-    });
-  }
-
-  async answerDocument(
-    id: string,
-    answer: string
-  ): Promise<OnboardingDocument> {
-    return await withPerson(this.#check, async (person) => {
-      requireAdmin(person);
-      const parsed = documentErrors.parse("document.invalid", answerSchema, {
-        id,
-        answer,
-      });
-      const answered = await onboardingStore(this.#env).answerDocument(
-        parsed.id,
-        parsed.answer,
-        actorOf(person)
-      );
-      if (answered === null) {
-        throw documentErrors.create("document.not_found");
-      }
-      return answered;
     });
   }
 }

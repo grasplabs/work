@@ -4,6 +4,7 @@ import type { OnboardingDirectoryApi } from "./directory.ts";
 import type { OnboardingPlacesApi } from "./document-places.ts";
 import { defineErrorFamily } from "./errors.ts";
 import type { OnboardingHrApi } from "./hr.ts";
+import type { Campaign, Nudged } from "./onboarding-campaign.ts";
 import type { OnboardingChoicesApi } from "./onboarding-choices.ts";
 import type { OnboardingContext } from "./onboarding-context.ts";
 import type { OnboardingDocumentsApi } from "./onboarding-documents.ts";
@@ -125,8 +126,17 @@ export const rosterTeamSchema = z.strictObject({
    */
   id: idSchema,
   name: nameSchema,
-  /** Its lead, by person: someone in the team. */
+  /**
+   * Its lead, by person: someone in the team. With several leads, the first
+   * marked: the one the team's map is drawn from and its links wait for.
+   */
   lead: idSchema.nullable(),
+  /**
+   * Who else leads it, by person: each in the team, none its `lead`, and
+   * none without a `lead`. They talk with Stephen about the whole team, as
+   * the lead does, at the team's moment, waiting for no one. Left out, none.
+   */
+  coLeads: z.array(idSchema).max(20).optional(),
   /**
    * What it does, in the admin's own words: every member reads it once the
    * admin confirms the list. Never what a lead's map says (GRA-1748).
@@ -136,6 +146,13 @@ export const rosterTeamSchema = z.strictObject({
   off: z.boolean().default(false),
 });
 export type RosterTeam = z.output<typeof rosterTeamSchema>;
+
+/** Everyone who leads `team`: its lead first, then who else leads it. */
+export const leadsOfTeam = (team: {
+  lead: string | null;
+  coLeads?: readonly string[] | undefined;
+}): string[] =>
+  team.lead === null ? [] : [team.lead, ...(team.coLeads ?? [])];
 
 /** Someone who works there. */
 export const rosterPersonSchema = z.strictObject({
@@ -203,6 +220,23 @@ export const rosterSchema = z
           path: ["teams", index, "lead"],
           message: "The lead is not in the team",
         });
+      }
+      const seen = new Set<string>(team.lead === null ? [] : [team.lead]);
+      for (const [at, coLead] of (team.coLeads ?? []).entries()) {
+        if (team.lead === null || seen.has(coLead)) {
+          context.addIssue({
+            code: "custom",
+            path: ["teams", index, "coLeads", at],
+            message: "A second lead needs a first, and leads once",
+          });
+        } else if (teamOf.get(coLead) !== team.id) {
+          context.addIssue({
+            code: "custom",
+            path: ["teams", index, "coLeads", at],
+            message: "The lead is not in the team",
+          });
+        }
+        seen.add(coLead);
       }
     }
   });
@@ -517,6 +551,23 @@ export interface OnboardingApi
   /** The admin took these people's links to send: they are new no more. */
   linksTaken: (people: string[]) => Promise<void>;
   /**
+   * How the interviews are going, for the page the admin watches them on:
+   * numbers per team and per day, what needs them, and how much Grasp
+   * knows against its go. Null before who works where and the plan are in.
+   */
+  campaign: () => Promise<Campaign | null>;
+  /**
+   * Sends Grasp's reminder to everyone in `team` who was asked and hasn't
+   * finished: the admin's own doing, beside the one reminder Grasp sends
+   * by itself, and at most once a day for a team.
+   */
+  nudge: (team: string) => Promise<Nudged>;
+  /**
+   * Puts `person`'s address right on the staff list, theirs alone, and
+   * sends their link mail again.
+   */
+  correctAddress: (person: string, email: string) => Promise<void>;
+  /**
    * Deletes the kickoff for good, and everything drawn from it: what the
    * admin's onboarding, Stephen and the brain knew of it. Asked again, it
    * finishes what a failed delete left.
@@ -551,6 +602,12 @@ export const onboardingErrors = defineErrorFamily({
   "onboarding.no_map":
     "The team's lead hasn't agreed to anything to draw its map from yet.",
   "onboarding.no_failed_mail": "That person has no mail that failed.",
+  "onboarding.nudged_today":
+    "That team got your reminder today already. You can remind it again tomorrow.",
+  "onboarding.nobody_to_nudge":
+    "Nobody in that team is waiting for a reminder: nobody was asked yet, or everyone has finished.",
+  "onboarding.team_too_small":
+    "A team shows its numbers, and takes a reminder, only once five people in it were asked.",
   "onboarding.no_address":
     "That person has no email address now to send it to.",
   "onboarding.reminder_not_owed":

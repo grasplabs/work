@@ -10,8 +10,10 @@ import { z } from "zod";
 
 import { voiceBudgets } from "../src/onboarding/speech.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { platformAi } from "../src/platform-ai.ts";
 import { storedKeyOf } from "../src/speech-cache.ts";
 import { secondsPerCharacter } from "./ai-providers-fake.ts";
+import { platformElevenLabsKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import {
   onLink,
@@ -19,13 +21,13 @@ import {
   participate,
   signedInAs,
 } from "./interview-link.ts";
-import { carrying } from "./platform-providers.ts";
+import { carrying, plan } from "./platform-providers.ts";
 import { routed, signedInWithRole, unique, uniqueLetters } from "./sign-in.ts";
 
 // The onboarding's lines said out loud (src/onboarding/speech.ts), over
 // the endpoint, as the page asks for them: on someone's interview link, or
-// for an admin signed in. Mistral, Grasp's own speech feature's
-// provider (@grasp-os/shared/platform-ai), is the outside system: a fake
+// for an admin signed in. ElevenLabs, Grasp's own speech feature's
+// provider (src/platform-ai.ts), is the outside system: a fake
 // behind connect's fetch, which says each character in 30 ms. Connect, the
 // store, the cache, the gateway's rules and its ledger are real. The ways
 // it can fail, tried here:
@@ -36,8 +38,8 @@ import { routed, signedInWithRole, unique, uniqueLetters } from "./sign-in.ts";
 //   own.
 // - A line said twice paid twice, or the voice running on past its budget.
 
-/** Stephen's voice, by its Mistral ID. */
-const stephen = "voice_485";
+/** Stephen's voice in an interview: the agent's, by its ElevenLabs ID. */
+const { stephen } = platformAi.speech.voices;
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -52,12 +54,28 @@ const answerSchema = z.object({
   ),
 });
 
-/** What Mistral was asked, as far as these tests read it. */
-const askedSchema = z.object({
-  input: z.string(),
-  model: z.string(),
-  voice_id: z.string(),
-});
+/** What ElevenLabs was asked, as far as these tests read it. */
+const askedSchema = z.object({ text: z.string(), model_id: z.string() });
+
+/** An event of a line answered as it is made. */
+const streamEventSchema = z.union([
+  z.object({ audio: z.string() }),
+  z.object({ words: answerSchema.shape.words }),
+]);
+
+/** Every event of a line answered as it is made, a line of JSON each. */
+const eventsOf = (body: string) =>
+  body
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => streamEventSchema.parse(JSON.parse(line)));
+
+/** The audio of a line's events, each piece as its bytes. */
+const audioOf = (events: ReturnType<typeof eventsOf>): string[] =>
+  events.flatMap((event) => ("audio" in event ? [atob(event.audio)] : []));
+
+/** The voice turning a line away for a moment. */
+const busy = { status: 429, headers: { "retry-after": "1" } };
 
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
@@ -135,10 +153,15 @@ const codeOf = async (response: Response) => {
   return [response.status, parsed.success ? parsed.data.code : null];
 };
 
-/** What Mistral was asked for the lines carrying `text`. */
+/** What ElevenLabs was asked for the lines carrying `text`: the line, its model, and the voice in its path. */
 const askedFor = async (text: string) => {
   const carried = await carrying(text);
-  return carried.map(({ body }) => askedSchema.parse(JSON.parse(body)));
+  return carried.map(({ path, body }) => {
+    const { text: input, model_id: model } = askedSchema.parse(
+      JSON.parse(body)
+    );
+    return { input, model, voice: path.split("/")[3] };
+  });
 };
 
 /** Seconds of voice the onboarding counted for `purpose`. */
@@ -171,7 +194,7 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
       ends: answer.words.at(-1)?.endMs,
     }).toStrictEqual({
       status: 200,
-      mime: "audio/wav",
+      mime: "audio/mpeg",
       words: text.split(" "),
       ends: said,
     });
@@ -181,6 +204,55 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     await expect(voiceCounted("interviews")).resolves.toBeCloseTo(
       before + text.length * secondsPerCharacter
     );
+  });
+
+  it("answers a line asked for streamed as a stream: its audio, then its words, and keeps it whole for the next to ask", async () => {
+    const { link } = await opened();
+    const text = newLine();
+    const before = await voiceCounted("interviews");
+
+    const streamed = await speak({ text, language: "en", link, stream: true });
+    const events = eventsOf(await streamed.text());
+    const asWhole = await speak({ text, language: "en", link });
+    const whole = answerSchema.parse(await asWhole.json());
+    const again = await speak({ text, language: "en", link, stream: true });
+    const kept = eventsOf(await again.text());
+
+    const said = Math.round(text.length * secondsPerCharacter * 1000);
+    expect({
+      status: streamed.status,
+      type: streamed.headers.get("content-type"),
+      audio: audioOf(events).join("") === atob(whole.audio),
+      last: events.at(-1),
+      keptAudio: audioOf(kept).join("") === atob(whole.audio),
+      keptLast: kept.at(-1),
+    }).toStrictEqual({
+      status: 200,
+      type: "application/x-ndjson",
+      audio: true,
+      last: { words: whole.words },
+      keptAudio: true,
+      keptLast: { words: whole.words },
+    });
+    expect(whole.words.at(-1)?.endMs).toBe(said);
+    // Said once, and counted once, however often and however it was asked.
+    await expect(carrying(text)).resolves.toHaveLength(1);
+    await expect(voiceCounted("interviews")).resolves.toBeCloseTo(
+      before + text.length * secondsPerCharacter
+    );
+  });
+
+  it("refuses a line asked for streamed when the voice is busy, as one asked for whole", async () => {
+    const { link } = await opened();
+    const text = newLine();
+    // Busy, and busy again when asked once more.
+    await plan(platformElevenLabsKey, [busy, busy]);
+
+    const result = await codeOf(
+      await speak({ text, language: "en", link, stream: true })
+    );
+
+    expect(result).toStrictEqual([429, "speech.busy"]);
   });
 
   it.each([
@@ -219,7 +291,7 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     }
   );
 
-  it("leads a line with its tone as an emotion the voice doesn't say, in any language, and times only the line's words", async () => {
+  it("says a line bare whatever its tone, in any language, and times only the line's words", async () => {
     const { link } = await opened();
     const text = newLine();
 
@@ -232,7 +304,7 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     const dutch = await speak({
       text,
       language: "nl",
-      tone: "neutral, light",
+      tone: "warm, relaxed",
       link,
     });
     const said = [
@@ -241,18 +313,15 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     ];
 
     const asked = await askedFor(text);
-    // A tone that is the voice as it is leads the line with nothing.
-    expect(asked.map(({ input }) => input)).toStrictEqual([
-      `[emotion=warm]${text}`,
-      text,
-    ]);
+    // No tone leads a line: a tag changed his delivery line by line.
+    expect(asked.map(({ input }) => input)).toStrictEqual([text, text]);
     expect(
       said.map((words) => words.map(({ text: word }) => word))
     ).toStrictEqual([text.split(" "), text.split(" ")]);
     expect(said.map((words) => words[0]?.startMs)).toStrictEqual([0, 0]);
   });
 
-  it("says a line as long as one may be, with its tone in front", async () => {
+  it("says a line as long as one may be, with no tone in front", async () => {
     const { link } = await opened();
     const start = newLine();
     const text = `${start}${"a".repeat(600 - start.length)}`;
@@ -266,9 +335,7 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     await response.body?.cancel();
 
     expect(response.status).toBe(200);
-    await expect(askedFor(start)).resolves.toMatchObject([
-      { input: `[emotion=grateful]${text}` },
-    ]);
+    await expect(askedFor(start)).resolves.toMatchObject([{ input: text }]);
   });
 
   it.each([
@@ -301,7 +368,7 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     await response.body?.cancel();
 
     await expect(askedFor(text)).resolves.toStrictEqual([
-      { input: text, model: "voxtral-mini-tts-3-0", voice_id: stephen },
+      { input: text, model: platformAi.speech.model, voice: stephen },
     ]);
   });
 
@@ -349,7 +416,7 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     await expect(carrying(after)).resolves.toStrictEqual([]);
   });
 
-  it("says a line for an admin signed in, counted as their own onboarding's", async () => {
+  it("says a line for an admin signed in with ElevenLabs, counted as their own onboarding's", async () => {
     const { session } = await signedInWithRole(idp, "admin");
     const before = await voiceCounted("reading");
     const text = newLine();
@@ -361,9 +428,17 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     const result = { status: response.status, body: await response.json() };
 
     expect(result.status).toBe(200);
-    expect(answerSchema.parse(result.body).words).toHaveLength(3);
-    await expect(askedFor(text)).resolves.toMatchObject([
-      { voice_id: "voice_1788" },
+    expect(answerSchema.parse(result.body)).toMatchObject({
+      mime: "audio/mpeg",
+      words: text.split(" ").map((word) => ({ text: word })),
+    });
+    // An admin's onboarding is said with ElevenLabs, in its own voices.
+    const carried = await carrying(text);
+    expect(carried.map(({ host, path }) => ({ host, path }))).toStrictEqual([
+      {
+        host: "api.eu.residency.elevenlabs.io",
+        path: `/v1/text-to-speech/${platformAi.onboardingSpeech.voices.mark}/with-timestamps?enable_logging=false&output_format=mp3_44100_128`,
+      },
     ]);
     await expect(voiceCounted("reading")).resolves.toBeCloseTo(
       before + text.length * secondsPerCharacter

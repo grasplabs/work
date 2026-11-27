@@ -24,6 +24,20 @@ import type {
 // own, or Grasp's for platform features.
 
 /**
+ * What Mistral's chat completions take of OpenAI's: it refuses (422) any
+ * field it doesn't know, and pi, which can't tell Mistral from OpenAI by
+ * its URL, would send OpenAI's own: `store`, `max_completion_tokens`,
+ * `stream_options` and the `developer` role. Mistral sends a stream's
+ * usage in its last chunk unasked, which pi reads all the same.
+ */
+const mistralCompat: Model<"openai-completions">["compat"] = {
+  supportsStore: false,
+  maxTokensField: "max_tokens",
+  supportsUsageInStreaming: false,
+  supportsDeveloperRole: false,
+};
+
+/**
  * pi's Mistral catalog, pointed at Mistral's OpenAI-compatible chat
  * completions (@grasp-os/shared/ai-providers): pi's own Mistral adapter
  * takes no custom fetch, and every request must go through the gateway's.
@@ -36,6 +50,7 @@ const mistralModels: Readonly<Record<string, Model<"openai-completions">>> =
         ...model,
         api: "openai-completions",
         baseUrl: aiProviders.mistral.baseUrls["openai-completions"] ?? "",
+        compat: mistralCompat,
       },
     ])
   );
@@ -169,8 +184,8 @@ export const smallModelFor = (model: string): string => {
  * OpenAI-compatible endpoint, whose models the organization names.
  */
 export const catalogModelsOf = (provider: AiProviderId): AiProviderModel[] => {
-  // A custom endpoint names its own.
-  if (provider === "openai-compatible") {
+  // A custom endpoint names its own; ElevenLabs only says Grasp's lines.
+  if (provider === "openai-compatible" || provider === "elevenlabs") {
     return [];
   }
   const catalog: Readonly<Record<string, Model<Api>>> = providers[provider];

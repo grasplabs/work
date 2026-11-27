@@ -149,6 +149,8 @@ export const interviewLineSchema = z.strictObject({
   file: z.string().max(interviewLimits.file).optional(),
   /** How Stephen said his line. */
   tone: z.enum(voiceTags).optional(),
+  /** When it was said, in ms since the epoch: the read-back shows it with the words it comes from. */
+  at: z.number().nonnegative().optional(),
   /**
    * Removed by the person whose interview it is (GRA-1897): its words, its
    * marks and its file's name are gone, and it keeps only its place, so
@@ -309,6 +311,9 @@ export const nextFactId = (facts: readonly InterviewFact[]): string => {
 export const isErased = (fact: InterviewFact): boolean =>
   fact.out === true && fact.text === "";
 
+/** How long what they write with their rating may be, in characters. */
+export const interviewFeedbackLimit = 2000;
+
 /**
  * Where someone's interview is, as their page keeps it and sends it to be
  * kept. Checked item by item: a save with anything else in it, or more of
@@ -349,6 +354,8 @@ export const interviewProgressSchema = z.strictObject({
   addedAt: z.number().nonnegative(),
   /** How they found it, from 1 to 5, when they said so. */
   rating: z.int().min(1).max(5).optional(),
+  /** What they wrote with their rating, in their own words, when they did. */
+  feedback: z.string().max(interviewFeedbackLimit).optional(),
   interviewer: interviewerSchema.optional(),
 });
 export type InterviewProgress = z.output<typeof interviewProgressSchema>;
@@ -460,6 +467,15 @@ export const interviewRequestSchema = z.discriminatedUnion("action", [
     action: z.literal("withdraw"),
     secret: interviewSecretSchema,
   }),
+  /**
+   * Not now: they ask for a reminder at `at`, a moment the page picked on
+   * their own clock (a morning is theirs, not core's).
+   */
+  z.strictObject({
+    action: z.literal("later"),
+    secret: interviewSecretSchema,
+    at: z.iso.datetime(),
+  }),
 ]);
 export type InterviewRequest = z.input<typeof interviewRequestSchema>;
 
@@ -471,10 +487,17 @@ export interface InterviewSession {
   team: string;
   lead: string | null;
   kind: InterviewKind;
+  /** The company's name, as its Grasp has it; missing or empty when it has none yet. */
+  company?: string;
   /** The last day the link takes anything, as an ISO day. */
   closes: string;
   /** The interviews are over: what was said can be read and deleted, no more. */
   closed: boolean;
+  /**
+   * The 7 days (DELETE_DAYS) after they first approved what was read back
+   * are over: the link only reads, and nothing is added or deleted through it.
+   */
+  readOnly: boolean;
   /**
    * What was said, none before anything was saved. Whether they read what
    * this is (`told`) and which facts they agreed to (`agreed`) are core's,
@@ -523,6 +546,14 @@ export interface InterviewWithdrawal {
   removing?: true;
 }
 
+/**
+ * What asking for a reminder answers: when it goes, as core keeps it. The
+ * one asked for before, while that hasn't gone yet.
+ */
+export interface InterviewLater {
+  at: string;
+}
+
 /** Why an interview link refused something. */
 export const interviewErrors = defineErrorFamily({
   "interview.link_invalid":
@@ -543,4 +574,8 @@ export const interviewErrors = defineErrorFamily({
     "What this interview is for has changed. Read it again before you go on.",
   "interview.withdrawn":
     "You withdrew from this interview. Nothing more is taken from it.",
+  "interview.finished":
+    "You talked with Stephen already. There is nothing to remind you of.",
+  "interview.no_address":
+    "We have no email address to remind you at. This link stays open: come back when it suits you.",
 });

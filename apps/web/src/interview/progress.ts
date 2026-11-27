@@ -1,5 +1,6 @@
 import {
   erasedFact,
+  interviewFeedbackLimit,
   interviewLimits,
   nextFactId,
   readBackOrder,
@@ -60,10 +61,6 @@ export const chose = (
   progress.interviewer === interviewer
     ? progress
     : { ...progress, interviewer };
-
-/** They read what this is: back on the link, they go straight to the sound check. */
-export const toldWhat = (progress: InterviewProgress): InterviewProgress =>
-  progress.told ? progress : { ...progress, told: true };
 
 /**
  * They pressed start, to talk or by typing: they have read what this is.
@@ -150,6 +147,36 @@ export const withLine = (
     ? progress
     : { ...progress, lines: [...progress.lines, line] };
 
+/**
+ * A line heard in a live session (live.ts): the agent hears an answer in
+ * stretches, and says a line of his in stretches too. A stretch after one
+ * of the same speaker is the same line, its words after the others; after
+ * the other's, it is a line of its own.
+ */
+export const withSpoken = (
+  progress: InterviewProgress,
+  line: InterviewLine
+): InterviewProgress => {
+  const last = progress.lines.at(-1);
+  const joined = `${last?.text ?? ""} ${line.text}`.trim();
+  if (
+    last === undefined ||
+    joined.length > interviewLimits.line ||
+    last.from !== line.from ||
+    last.removed === true ||
+    last.typed === true ||
+    last.file !== undefined
+  ) {
+    return withLine(progress, line);
+  }
+  return {
+    ...progress,
+    lines: progress.lines.map((each, at) =>
+      at === progress.lines.length - 1 ? { ...each, text: joined } : each
+    ),
+  };
+};
+
 /** Where the interview goes, known with his line, before what he wrote down. */
 export const steered = (
   progress: InterviewProgress,
@@ -181,15 +208,15 @@ const withoutEmpty = (fact: InterviewFact): InterviewFact => {
 };
 
 /**
- * What a turn of Stephen's brought: what he marked in what was just said,
- * what he wrote down, what he put right, and where the interview is now.
+ * What the notes brought after an answer: what he marked in what was just
+ * said, what he wrote down, what he put right, and where the interview is now.
  * `answered` is the line his marks go on: the last thing the person said,
  * as it stands in the conversation. In the read-back, what is new is
  * pinned to the part on screen (`pin`).
  */
 export const afterTurn = (
   progress: InterviewProgress,
-  turn: StephenTurn,
+  turn: Pick<StephenTurn, "facts" | "changes" | "phase" | "wants">,
   {
     answered,
     pin,
@@ -274,6 +301,28 @@ export const withoutLine = (
   lines: progress.lines.map((line, each) =>
     each === at ? removedLine(line) : line
   ),
+});
+
+/**
+ * A line of theirs, put right by them in the transcript: their words now,
+ * keeping only what he marked that is still in them, word for word.
+ */
+export const withLineText = (
+  progress: InterviewProgress,
+  at: number,
+  text: string
+): InterviewProgress => ({
+  ...progress,
+  lines: progress.lines.map((line, each) => {
+    if (each !== at || line.from !== "person" || line.removed === true) {
+      return line;
+    }
+    const { marks, ...rest } = line;
+    const kept = (marks ?? []).filter(
+      ({ quote }) => spanOf(text, quote) !== null
+    );
+    return kept.length > 0 ? { ...rest, text, marks: kept } : { ...rest, text };
+  }),
 });
 
 /** A line of the read-back, put right by them: their words, at once, also for the record until Stephen has heard of it. */
@@ -383,6 +432,22 @@ export const rated = (
   progress.person === "completed"
     ? { ...progress, rating: Math.min(Math.max(Math.round(rating), 1), 5) }
     : progress;
+
+/** What they wrote with their rating, trimmed; empty takes it away. */
+export const feedbackGiven = (
+  progress: InterviewProgress,
+  feedback: string
+): InterviewProgress => {
+  if (progress.person !== "completed") {
+    return progress;
+  }
+  const words = feedback.trim().slice(0, interviewFeedbackLimit);
+  if (words === "") {
+    const { feedback: _gone, ...rest } = progress;
+    return rest;
+  }
+  return { ...progress, feedback: words };
+};
 
 /** The event a conversation starts with, by where it stands: the first line, back to add something, an answer never answered, or coming back. */
 export const openingEvent = (progress: InterviewProgress): InterviewEvent => {

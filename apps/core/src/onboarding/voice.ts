@@ -1,19 +1,15 @@
+import { platformRouteOf } from "@grasp-os/shared/ai-providers";
 import {
   fromBase64Url,
   sha256Hex,
   toBase64Url,
 } from "@grasp-os/shared/encoding";
 import { requestErrors } from "@grasp-os/shared/errors";
-import {
-  interviewLimits,
-  interviewPhases,
-} from "@grasp-os/shared/interview-links";
 import { checkedTurn } from "@grasp-os/shared/interview-turn";
-import type { InterviewPhase } from "@grasp-os/shared/interview-turn";
+import type { SaidAnswer } from "@grasp-os/shared/interview-turn";
 import {
   interviewVoiceMaxBytes,
   interviewVoiceRequestSchema,
-  partFunction,
 } from "@grasp-os/shared/interview-voice";
 import type {
   InterviewVoiceRequest,
@@ -21,66 +17,67 @@ import type {
   VoiceLine,
   VoiceSessionJoin,
 } from "@grasp-os/shared/interview-voice";
+import { NAMED } from "@grasp-os/shared/interviewers/stephen";
 import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
-import type {
-  InterviewKind,
-  InterviewLocale,
-} from "@grasp-os/shared/onboarding";
+import type { InterviewKind } from "@grasp-os/shared/onboarding";
 import { z } from "zod";
 
 import { derivedHmacKey } from "../derived-keys.ts";
 import { errorResponse } from "../errors.ts";
-import { modelForRole, modelSettings, models } from "../models.ts";
+import { models } from "../models.ts";
 import { platformAi } from "../platform-ai.ts";
+import { usualHostsOf } from "../platform-hosts.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { interviewCaller } from "./interview-caller.ts";
-import {
-  briefOf,
-  companyOf,
-  situationOf,
-  TurnFailedError,
-  write,
-} from "./interview.ts";
-import type { Situation, TurnAsked } from "./interview.ts";
-import { interviewerText, voiceText } from "./interviewer-text.ts";
-import { voiceVersion } from "./lab-marks.ts";
+import { briefOf, companyOf, TurnFailedError, write } from "./interview.ts";
+import type { TurnAsked } from "./interview.ts";
+import { interviewerText } from "./interviewer-text.ts";
 import { linkHeaders, linkRefusal, noCallerRefusal } from "./links.ts";
 import { onboardingStore } from "./store.ts";
 import type { TurnContext } from "./store.ts";
 import { heardBudgets } from "./transcription.ts";
 
-// An interview held as one live voice session at Mistral (its voice
-// agents), as the page asks for it at /api/interview/voice
-// (@grasp-os/shared/interview-voice). Mistral listens, Stephen answers and
-// speaks there, and the person can talk over him; core decides what he is
-// told and writes down what was said.
+// An interview held as one live conversation with Grasp's ElevenLabs
+// agent (`platformAi.agent`), as the page asks for it at
+// /api/interview/voice (@grasp-os/shared/interview-voice). ElevenLabs
+// listens, Stephen answers and speaks there, and the person can talk over
+// him, or types to him in a conversation without sound; core opens the
+// conversation and writes down what was said.
 //
-// - Open: who they are comes from the store, on their own link, as for a
-//   turn (`turnContext`). Core opens the session through the model gateway
-//   with Grasp's key, which connect holds, and answers the page only the
-//   room's token and address, and a pass that ties the session to the
-//   link and the account it was opened for.
-// - Answer: once one more answer of theirs stands in Mistral's transcript,
-//   core reads it through connect and has the notes' model write down what
-//   was said, as a turn does; every fact is checked against the last three
-//   answers of that transcript (`checkedTurn`), never against anything the
-//   page sends. Core answers what Stephen is told from then on: what he
-//   wrote down, what is still open, the time, which the page hands the
-//   session. A pass from another link or account opens nothing: nobody
-//   reads someone else's session.
-// - Close: the session ends at Mistral.
+// - Open: who they are comes from the store, on their own link
+//   (`turnContext`). Core asks ElevenLabs for a conversation token
+//   through the model gateway, with Grasp's key, which connect holds, and
+//   answers the page the token, who the agent talks with, which the page
+//   tells it as context, and a pass that ties the conversation to the link
+//   and the account it was opened for. The page starts the conversation
+//   with ElevenLabs's own SDK. Each one opened is counted against the
+//   link's listening for the day at what it is expected to last.
+// - Answer: core doesn't read the conversation at ElevenLabs. Once one
+//   more answer of theirs is heard, the page sends the conversation as it
+//   heard it (`said`), and core has the notes' model write down what was
+//   said; every fact is checked against their last three answers in it
+//   (`checkedTurn`), a typed one's words as they stand. A pass from
+//   another link or account writes nothing down.
+// - Answer, in the read-back (`reading`): what they put right after the
+//   conversation, typed, said, or changed on their screen (`edit`), is
+//   written down the same way, with the lines read back told to the notes'
+//   model. No conversation is open then, so it takes no pass: the link and
+//   its account are checked, as for every request here.
+// - Close: the page left the conversation, which it ends at ElevenLabs
+//   itself. Core has nothing open there to close.
 //
-// Its audio goes between the browser and Mistral, never through connect:
-// a Worker can't relay a live call. That exception to "every external
-// call goes through connect" is the owner's decision, made for this. His
-// lines are no longer checked in code (one question, no praise): the
-// instructions alone hold him to them.
+// Its audio goes between the browser and ElevenLabs, never through
+// connect: a Worker can't relay a live call. That exception to "every
+// external call goes through connect" is the owner's decision, made for
+// this. The agent's prompt, first line, voice and flow are its own, as its
+// dashboard sets them: it takes no overrides, and his lines are not
+// checked in code.
 
-/** What the gateway is told the session and its notes are for. */
+/** What the gateway is told the conversation and its notes are for. */
 const purpose = "onboarding.interview";
 
-/** How long an interview's session is expected to last, as its cost is estimated: an employee's, a lead's. */
+/** How long an interview's conversation is expected to last, as its cost is estimated: an employee's, a lead's. */
 const expectedSeconds: Record<InterviewKind, number> = {
   own: 15 * 60,
   lead: 25 * 60,
@@ -93,135 +90,25 @@ const passMs = 5 * 60 * 60_000;
 const passPurpose = "grasp-os onboarding voice session";
 
 /**
- * When Mistral hears someone start and stop talking: its own detection, at
- * its defaults. Once the thresholds were set here (a start of 0.3, below
- * the end's 0.33), no session opened any more, most likely refused for
- * them; how talking over him is heard is Mistral's until its docs say
- * which values it takes.
+ * Which Stephen holds a conversation, as the interview keeps it
+ * (`turnRan`): the agent, by its ID. Its prompt is its dashboard's, which
+ * core can't mark: a change there keeps this name.
  */
-const turnDetection = {} as const;
-
-/**
- * What Stephen says as the session connects, said for him so the first
- * words come at once: the first question of the interview (`partsOf`,
- * `leadPartsOf`), where they left off, or what they came back to add.
- */
-const welcome: Record<
-  InterviewLocale,
-  Record<"own" | "lead" | "resume" | "add", string>
-> = {
-  en: {
-    own: "First your work as a whole, then one part of it up close. What do you do here, in a sentence or two?",
-    lead: "First the work of your team as a whole, then who does what. What does your team take care of, in a few words?",
-    resume: "Welcome back. Let's go on where we left off.",
-    add: "Welcome back. What would you like to add or put right?",
-  },
-  nl: {
-    own: "Eerst je werk als geheel, daarna één onderdeel ervan van dichtbij. Wat doe je hier, in een of twee zinnen?",
-    lead: "Eerst het werk van je team als geheel, daarna wie wat doet. Waar zorgt je team voor, in een paar woorden?",
-    resume: "Welkom terug. Laten we verdergaan waar we gebleven waren.",
-    add: "Welkom terug. Wat wil je toevoegen of rechtzetten?",
-  },
-  de: {
-    own: "Zuerst Ihre Arbeit als Ganzes, dann ein Teil davon aus der Nähe. Was machen Sie hier, in ein oder zwei Sätzen?",
-    lead: "Zuerst die Arbeit Ihres Teams als Ganzes, dann wer was macht. Worum kümmert sich Ihr Team, in ein paar Worten?",
-    resume: "Willkommen zurück. Machen wir da weiter, wo wir aufgehört haben.",
-    add: "Willkommen zurück. Was möchten Sie ergänzen oder richtigstellen?",
-  },
-  fr: {
-    own: "D’abord votre travail dans son ensemble, puis une partie de plus près. Que faites-vous ici, en une ou deux phrases ?",
-    lead: "D’abord le travail de votre équipe dans son ensemble, puis qui fait quoi. De quoi votre équipe s’occupe-t-elle, en quelques mots ?",
-    resume: "Bon retour. Reprenons là où nous nous étions arrêtés.",
-    add: "Bon retour. Que souhaitez-vous ajouter ou corriger ?",
-  },
-  es: {
-    own: "Primero tu trabajo en conjunto, luego una parte de cerca. ¿Qué haces aquí, en una o dos frases?",
-    lead: "Primero el trabajo de tu equipo en conjunto, luego quién hace qué. ¿De qué se encarga tu equipo, en pocas palabras?",
-    resume: "Bienvenido de nuevo. Sigamos donde lo dejamos.",
-    add: "Bienvenido de nuevo. ¿Qué te gustaría añadir o corregir?",
-  },
-};
-
-/** What he asks after a minute of silence. */
-const stillThere: Record<InterviewLocale, string> = {
-  en: "Are you still there?",
-  nl: "Ben je er nog?",
-  de: "Sind Sie noch da?",
-  fr: "Vous êtes toujours là ?",
-  es: "¿Sigues ahí?",
-};
-
-/**
- * A session nobody talks in ends by itself: after a minute of silence
- * Stephen asks once whether they are still there, and after another the
- * session ends. A tab left open bills nothing for long; resuming opens a
- * new one.
- */
-const inactivityOf = (locale: InterviewLocale) => ({
-  timeout_ms: 60_000,
-  max_reminders: 1,
-  messages: [stillThere[locale]],
-});
-
-/** The function Stephen calls as he goes to another part (`partFunction`). */
-const partTool = {
-  type: "function",
-  function: {
-    name: partFunction,
-    description:
-      "Call this when you go to another part of the interview, with that part's name, before your first line of it.",
-    strict: true,
-    parameters: {
-      type: "object",
-      properties: { part: { type: "string", enum: interviewPhases } },
-      required: ["part"],
-      additionalProperties: false,
-    },
-  },
-} as const;
-
-/**
- * What Stephen is told: who he is and how the interview goes, then where
- * it stands now, and on a new session after a resume, the conversation
- * so far, which that session doesn't know.
- */
-const instructionsOf = (
-  text: string,
-  situation: string[],
-  before: readonly VoiceLine[],
-  name: string
-): string =>
-  [
-    text,
-    "",
-    ...situation,
-    ...(before.length === 0
-      ? []
-      : [
-          "",
-          "The conversation before this session:",
-          before
-            .map(
-              (line) =>
-                `${line.from === "stephen" ? "Stephen" : name}: ${line.text}`
-            )
-            .join("\n"),
-        ]),
-  ].join("\n");
+const agentVersion = `agent-${platformAi.agent.id}`;
 
 // ---- The pass ----------------------------------------------------------
 
 const passClaimsSchema = z.strictObject({
-  /** The session's ID at Mistral. */
-  session: z.string().regex(/^[\w-]{1,128}$/u),
-  /** The link's secret mark: the session belongs to that link. */
+  /** The link's secret mark: the conversation belongs to that link. */
   link: z.string().min(1),
   /** The account it was opened for. */
   account: z.string().min(1),
+  /** The conversation's own hold on the day's listening (store `reserveListening`). */
+  hold: z.string().min(1),
   /** When it stops holding, in ms since the epoch. */
   until: z.int().positive(),
 });
-type PassClaims = z.infer<typeof passClaimsSchema>;
+type PassClaims = z.input<typeof passClaimsSchema>;
 
 const passKey = async (env: Env, usage: "sign" | "verify") =>
   await derivedHmacKey(env, passPurpose, [usage]);
@@ -238,10 +125,10 @@ const passOf = async (env: Env, claims: PassClaims): Promise<string> => {
 };
 
 /**
- * The session a pass names, when core made it for this link and account
- * and it still holds; null for any other.
+ * The conversation `pass` is for, when core made it for this link and
+ * account and it still holds; null otherwise.
  */
-const sessionOfPass = async (
+const heldByPass = async (
   env: Env,
   pass: string,
   link: string,
@@ -268,120 +155,45 @@ const sessionOfPass = async (
       claims.data.link === link &&
       claims.data.account === account &&
       Date.now() < claims.data.until
-      ? claims.data.session
+      ? claims.data.hold
       : null;
   } catch {
     return null;
   }
 };
 
-// ---- What Mistral answers ------------------------------------------------
+// ---- What was said ------------------------------------------------------
 
-/** A session's ID at Mistral: nothing that reads as more of a path. */
-const sessionIdSchema = z.string().regex(/^[\w-]{1,128}$/u);
+/** The conversation as the page heard it (`said`), without its empty lines. */
+const heardOf = (said: readonly VoiceLine[]): VoiceLine[] =>
+  said
+    .map(({ from, text, typed }) => ({
+      from,
+      text: text.trim(),
+      ...(typed === true ? { typed } : {}),
+    }))
+    .filter(({ text }) => text !== "");
 
-/** Whatever else came with it, the ID of a session Mistral opened. */
-const openedIdSchema = z.object({ id: sessionIdSchema });
-
-const openedSchema = z.object({
-  id: sessionIdSchema,
-  participant_token: z.string().min(1),
-  server_url: z.url({ protocol: /^wss$/u }),
-  expires_at: z.iso.datetime({ offset: true }),
-});
-
-/** A function Stephen called, as the transcript has it. */
-const toolCallSchema = z.object({
-  name: z.string(),
-  arguments: z.string().nullish(),
-});
-
-/** One turn of a session's transcript: theirs, his, or a tool's, which tells nothing here. */
-const transcriptTurnSchema = z.object({
-  role: z.string(),
-  content: z.string().nullish(),
-  tool_calls: z.array(toolCallSchema).nullish(),
-});
-
-/** What Mistral kept of a session: its transcript, none while it has written none down yet. */
-const keptSchema = z.object({
-  transcripts: z.array(transcriptTurnSchema).nullish(),
-});
-
-/** The part `call` names, when it is a call of `partFunction` naming one. */
-const partOf = (call: {
-  name: string;
-  arguments?: string | null | undefined;
-}): InterviewPhase | null => {
-  if (
-    call.name !== partFunction ||
-    call.arguments === null ||
-    call.arguments === undefined
-  ) {
-    return null;
-  }
-  try {
-    const named: unknown = JSON.parse(call.arguments);
-    const part =
-      typeof named === "object" && named !== null && "part" in named
-        ? named.part
-        : null;
-    return interviewPhases.find((phase) => phase === part) ?? null;
-  } catch {
-    return null;
-  }
-};
-
-/** A session as Mistral wrote it down: the conversation, and the part Stephen last went to. */
-interface Heard {
-  lines: VoiceLine[];
-  /** The part he went to last. */
-  phase: InterviewPhase | null;
-  /** The part their last answer was given in: before he went on from it. */
-  answeredIn: InterviewPhase | null;
-}
-
-/** What Mistral's answer says of a session; null when it isn't one. */
-const heardOf = (answer: unknown): Heard | null => {
-  const kept = keptSchema.safeParse(answer);
-  if (!kept.success) {
-    return null;
-  }
-  const lines: VoiceLine[] = [];
-  let phase: InterviewPhase | null = null;
-  let answeredIn: InterviewPhase | null = null;
-  for (const turn of kept.data.transcripts ?? []) {
-    const text = turn.content?.trim() ?? "";
-    if (turn.role === "user" && text !== "") {
-      lines.push({ from: "person", text });
-      answeredIn = phase;
-    }
-    if (turn.role === "assistant") {
-      for (const call of turn.tool_calls ?? []) {
-        phase = partOf(call) ?? phase;
-      }
-      // What was played: cut off where they talked over him.
-      if (text !== "") {
-        lines.push({ from: "stephen", text });
-      }
-    }
-  }
-  return { lines, phase, answeredIn };
-};
+/** What ElevenLabs answers for a conversation token. */
+const agentTokenSchema = z.object({ token: z.string().min(1).max(8192) });
 
 /**
  * Their answers in `lines` as the notes are checked against them: what
  * they said since the first `noted` answers as one answer, with the ones
  * just before it that nothing of Stephen's came between, so a quote
- * across a pause Mistral split an answer at stands, also where part of it
- * was written down before. Quotes stand in it or in the two before.
+ * across a pause the agent split an answer at stands, also where part of it
+ * was written down before. Quotes stand in it or in the two before. An
+ * answer counts as typed, its words as they stand, only when every part
+ * of it was.
  */
 const joinedSince = (
   lines: readonly VoiceLine[],
   noted: number
-): { text: string }[] => {
+): SaidAnswer[] => {
   const theirs = lines.flatMap((line, at) =>
-    line.from === "person" ? [{ text: line.text, at }] : []
+    line.from === "person"
+      ? [{ text: line.text, typed: line.typed === true, at }]
+      : []
   );
   let start = Math.min(noted, theirs.length);
   while (
@@ -391,13 +203,12 @@ const joinedSince = (
   ) {
     start -= 1;
   }
+  const last = theirs.slice(start);
   return [
-    ...theirs.slice(0, start).map(({ text }) => ({ text })),
+    ...theirs.slice(0, start).map(({ text, typed }) => ({ text, typed })),
     {
-      text: theirs
-        .slice(start)
-        .map(({ text }) => text)
-        .join(" "),
+      text: last.map(({ text }) => text).join(" "),
+      typed: last.every(({ typed }) => typed),
     },
   ];
 };
@@ -418,37 +229,9 @@ const jsonOrNothing = async (answered: Response): Promise<unknown> => {
   }
 };
 
-/** Closes `session` at Mistral; one that won't close ends by itself when it expires. */
-const closeQuietly = async (
-  env: Env,
-  session: string,
-  requestId: string
-): Promise<void> => {
-  try {
-    const answered = await models(env).closeConversation(session);
-    await answered.body?.cancel();
-    if (!answered.ok && answered.status !== 404) {
-      log.warn("interview.voice_not_closed", {
-        requestId,
-        status: answered.status,
-      });
-    }
-  } catch {
-    log.warn("interview.voice_not_closed", { requestId, status: 0 });
-  }
-};
-
 /** Why a request went wrong, as the page is told it. */
 const failed = (message: string, status: number): Response =>
   Response.json({ error: message, status }, { status, headers: linkHeaders });
-
-/** The models it runs on: the notes' model, the organization's careful one. */
-const notesModelOf = async (env: Env): Promise<string | undefined> => {
-  const settings = await modelSettings(env);
-  return settings.models.length > 0
-    ? modelForRole(settings, "careful")
-    : undefined;
-};
 
 interface Asked {
   env: Env;
@@ -459,19 +242,85 @@ interface Asked {
   ctx: Pick<ExecutionContext, "waitUntil">;
 }
 
-/** Opens the session, and answers the page what it joins it with. */
+/**
+ * What Grasp's ElevenLabs agent is told as a conversation begins, as a
+ * contextual update: who it talks with, the language they chose and, on
+ * a resume, what was said before. Its prompt, its first line and its flow
+ * are the agent's own, as its dashboard sets them, which takes no
+ * overrides: this is context, never an instruction to it.
+ */
+const agentContextOf = (
+  context: TurnContext,
+  company: string,
+  asked: Extract<InterviewVoiceRequest, { action: "open" }>,
+  before: readonly VoiceLine[]
+): string =>
+  [
+    context.kind === "lead"
+      ? `You are talking with ${context.name}, who leads ${context.team === "" ? "a team" : context.team}${company === "" ? "" : ` at ${company}`}.`
+      : `You are talking with ${context.name}${context.team === "" ? "" : `, from ${context.team}`}${company === "" ? "" : ` at ${company}`}.`,
+    `They chose to talk in ${NAMED[asked.locale]}.`,
+    ...(before.length === 0
+      ? []
+      : [
+          asked.event === "add"
+            ? "They agreed to the summary before and came back to add or correct something."
+            : "They are back to an interview they left. Go on where it stood; don't start over.",
+          "The conversation before:",
+          ...before
+            .slice(-40)
+            .map(
+              (line) =>
+                `${line.from === "stephen" ? "You" : context.name}: ${line.text}`
+            ),
+        ]),
+  ].join("\n");
+
+/**
+ * The agent's dynamic variables core knows, filled into its prompt: who
+ * it talks with, what kind of interview, what to look at first, and the
+ * language. Each has a placeholder in the agent's dashboard; these are
+ * the real values. Words for its prompt, in English, as the prompt is.
+ */
+const agentVariablesOf = (
+  context: TurnContext,
+  company: string,
+  asked: Extract<InterviewVoiceRequest, { action: "open" }>
+): Record<string, string> => {
+  const lead = context.kind === "lead";
+  const team = context.team.trim();
+  const work = context.work.trim();
+  let teamPhrase = team === "" ? "from their team" : `from ${team}`;
+  if (lead) {
+    teamPhrase = team === "" ? "who leads a team" : `who leads ${team}`;
+  }
+  return {
+    company: company === "" ? "your company" : company,
+    team_phrase: teamPhrase,
+    interview_kind_phrase: lead
+      ? "an interview with a team lead about the work of their whole team"
+      : "an interview with an employee about their own work",
+    work_phrase:
+      work !== "" && context.lead !== null && context.lead.trim() !== ""
+        ? `${context.lead.trim()} told you they handle ${work}: check that first.`
+        : "Take the piece that repeats most and costs them most time.",
+    language: NAMED[asked.locale],
+  };
+};
+
+/**
+ * Opens a conversation with Grasp's ElevenLabs agent, and answers the
+ * page what it starts it with: a token for it, asked with Grasp's key
+ * through the gateway, and what the agent is told as it begins
+ * (`agentContextOf`).
+ */
 const open = async (
-  { env, context, secretMark, account, requestId }: Asked,
+  { env, context, secretMark, account, requestId }: Omit<Asked, "ctx">,
   asked: Extract<InterviewVoiceRequest, { action: "open" }>
 ): Promise<Response> => {
-  // Nothing said could be written down: no session is opened, nor paid for.
-  if ((await notesModelOf(env)) === undefined) {
-    log.error("interview.no_model", { requestId });
-    return failed("The interview is not set up yet.", 503);
-  }
-  // A session listens as live transcription does, and from the same budget
-  // a day: each one opened is counted at what it is expected to last, so a
-  // link can't open them without end.
+  // A conversation listens as live transcription does, and from the same
+  // budget a day: each one opened is counted at what it is expected to
+  // last, so a link can't open them without end.
   const listening = await onboardingStore(env).transcriptionOnLink(
     secretMark,
     account
@@ -481,226 +330,139 @@ const open = async (
   }
   const { who } = listening.value;
   const seconds = expectedSeconds[context.kind];
-  // What he is told is ready before anything is held: nothing fails
-  // between holding the listening and asking Mistral.
-  const [voice, company] = await Promise.all([
-    voiceText(context.kind, asked.locale),
-    companyOf(env),
-  ]);
-  // Held before Mistral is asked, in one write with the check, so sessions
-  // opened side by side can't each find the budget unspent; given back
-  // when none opens.
-  const heldOn = await onboardingStore(env).reserveListening(
+  // What the agent is told is ready before anything is held: nothing
+  // fails between holding the listening and asking ElevenLabs.
+  const company = await companyOf(env);
+  // Held before ElevenLabs is asked, in one write with the check, so
+  // conversations opened side by side can't each find the budget unspent;
+  // given back when none opens.
+  // Its own name, in its pass: only its own close gives back what it held.
+  const hold = crypto.randomUUID();
+  const held = await onboardingStore(env).reserveListening(
     who,
     seconds,
-    heardBudgets.link
+    heardBudgets.link,
+    hold
   );
-  if (heldOn === null) {
+  if (held === null) {
     log.warn("interview.voice_budget_spent", { requestId });
     return failed(
       "That is as long as the interview can run today. Come back tomorrow to go on.",
       429
     );
   }
-  // The session they left, when they come back with its pass: closed, so
-  // only one runs for a link.
-  const earlier =
-    asked.previous === undefined
-      ? null
-      : await sessionOfPass(env, asked.previous, secretMark, account);
-  if (earlier !== null) {
-    await closeQuietly(env, earlier, requestId);
-  }
-  const before = asked.event === "start" ? [] : asked.before;
-  const said = asked.event === "start" ? context.kind : asked.event;
-  const { conversation } = platformAi;
+  const notOpened = async (
+    why: { code: string } | { status: number }
+  ): Promise<Response> => {
+    log.warn("interview.voice_not_opened", { requestId, ...why });
+    await onboardingStore(env).releaseListening(who, hold);
+    return failed("The interview could not start. Try again.", 503);
+  };
+  const { agent } = platformAi;
   let answered: Response;
   try {
-    answered = await models(env).converse({
-      model: `${conversation.provider}/${conversation.model}`,
-      purpose,
-      trigger: { type: "system" },
-      work: { onboarding: true },
-      requestId,
-      seconds,
-      session: {
-        instructions: instructionsOf(
-          voice.text,
-          // Back to add something is what the event says, whatever else came.
-          situationOf(
-            { ...asked, adding: asked.event === "add" },
-            context,
-            company
-          ),
-          before,
-          context.name
-        ),
-        stt: {
-          model: conversation.listening,
-          language: asked.locale,
-          turn_detection: turnDetection,
-        },
-        tts: { model: conversation.speaking, voice_id: conversation.voice },
-        welcome_message: welcome[asked.locale][said],
-        turn: {
-          allow_interruptions: true,
-          inactivity: inactivityOf(asked.locale),
-        },
-        tools: [partTool],
+    answered = await models(env).converse(
+      {
+        model: `${agent.provider}/${agent.id}`,
+        purpose,
+        trigger: { type: "system" },
+        work: { onboarding: true },
+        requestId,
+        seconds,
       },
-    });
+      AbortSignal.timeout(10_000)
+    );
   } catch (error) {
-    const code = modelErrors.codeOf(error);
-    log.warn("interview.voice_not_opened", {
-      requestId,
-      ...(code === undefined ? {} : { code }),
-    });
-    await onboardingStore(env).releaseListening(who, seconds, heldOn);
-    return failed("The interview could not start. Try again.", 503);
+    return await notOpened({ code: modelErrors.codeOf(error) ?? "unknown" });
   }
-  const raw = await jsonOrNothing(answered);
-  const opened = openedSchema.safeParse(raw);
-  if (!opened.success) {
-    // The status alone: Mistral's answer may repeat what it was sent.
-    log.warn("interview.voice_not_opened", {
-      requestId,
-      status: answered.status,
-    });
-    // Opened, but with nothing to join it by: closed, as nobody else can.
-    const unusable = openedIdSchema.safeParse(raw);
-    if (answered.ok && unusable.success) {
-      await closeQuietly(env, unusable.data.id, requestId);
-    }
-    await onboardingStore(env).releaseListening(who, seconds, heldOn);
-    return failed("The interview could not start. Try again.", 503);
+  // ElevenLabs's answer is read for its token alone: a refusal's status is
+  // all the log keeps of it.
+  const token = agentTokenSchema.safeParse(await jsonOrNothing(answered));
+  if (!token.success) {
+    return await notOpened({ status: answered.status });
   }
-  const { id, participant_token, server_url, expires_at } = opened.data;
-  let pass: string;
-  try {
-    // In the onboarding's use, as a line said is.
-    await onboardingStore(env).meter({
-      purpose: "interviews",
-      // Its own kind, never Stephen's voice alone: the session listens,
-      // answers and speaks.
-      model: "conversation",
-      seconds,
-    });
-    await onboardingStore(env).turnRan(secretMark, {
-      mark: voice.mark,
-      interviewer: "stephen",
-      locale: asked.locale,
-      version: voiceVersion,
-    });
-    pass = await passOf(env, {
-      session: id,
+  // In the onboarding's use, as a line said is.
+  await onboardingStore(env).meter({
+    purpose: "interviews",
+    // Its own kind, never Stephen's voice alone: the agent listens,
+    // answers and speaks.
+    model: "conversation",
+    seconds,
+  });
+  await onboardingStore(env).turnRan(secretMark, {
+    mark: agent.id,
+    interviewer: "stephen",
+    locale: asked.locale,
+    version: agentVersion,
+  });
+  const join: VoiceSessionJoin = {
+    conversationToken: token.data.token,
+    location:
+      platformRouteOf(agent.provider, usualHostsOf(env))?.region === "eu"
+        ? "eu-residency"
+        : "us",
+    context: agentContextOf(
+      context,
+      company,
+      asked,
+      asked.event === "start" ? [] : asked.before
+    ),
+    variables: agentVariablesOf(context, company, asked),
+    pass: await passOf(env, {
       link: secretMark,
       account,
+      hold,
       until: Date.now() + passMs,
-    });
-  } catch (error) {
-    // Open at Mistral, with no pass the page could close it by.
-    await closeQuietly(env, id, requestId);
-    throw error;
-  }
-  const join: VoiceSessionJoin = {
-    id,
-    participantToken: participant_token,
-    serverUrl: server_url,
-    expiresAt: expires_at,
-    pass,
+    }),
   };
   return Response.json(join, { headers: linkHeaders });
 };
 
-/** Reads what Mistral wrote down of `session`; null when it couldn't be read. */
-const heardIn = async (
-  env: Env,
-  session: string,
-  requestId: string
-): Promise<Heard | null> => {
-  try {
-    const answered = await models(env).readConversation(session);
-    if (!answered.ok) {
-      await answered.body?.cancel();
-      log.warn("interview.voice_not_read", {
-        requestId,
-        status: answered.status,
-      });
-      return null;
-    }
-    return heardOf(await answered.json());
-  } catch {
-    log.warn("interview.voice_not_read", { requestId, status: 0 });
-    return null;
-  }
-};
-
-/** Writes down what was said since the answers already noted, and answers what Stephen is told now. */
+/**
+ * Writes down what was said since the answers already noted; in the
+ * read-back, what they put right in the lines read back.
+ */
 const answer = async (
   { env, context, requestId, ctx }: Asked,
-  asked: Extract<InterviewVoiceRequest, { action: "answer" }>,
-  session: string
+  asked: Extract<InterviewVoiceRequest, { action: "answer" }>
 ): Promise<Response> => {
-  const notesModel = await notesModelOf(env);
-  if (notesModel === undefined) {
-    log.error("interview.no_model", { requestId });
-    return failed("The interview is not set up yet.", 503);
-  }
-  const [heard, company] = await Promise.all([
-    heardIn(env, session, requestId),
-    companyOf(env),
-  ]);
-  if (heard === null) {
-    return failed("What was said could not be read. Try again.", 502);
-  }
-  const answers = heard.lines.filter(({ from }) => from === "person");
-  const phase = heard.phase ?? asked.phase;
-  const voice = await voiceText(context.kind, asked.locale);
-  const answeredNow = (
-    turn: VoiceAnswered["turn"],
-    situation: Situation
-  ): Response =>
+  // Grasp's own notes' model (`platformAi.interview`), whatever models
+  // the organization set up.
+  const notesModel = platformAi.interview.notes;
+  const lines = heardOf(asked.said);
+  const answers = lines.filter(({ from }) => from === "person");
+  const answeredNow = (turn: VoiceAnswered["turn"]): Response =>
     Response.json(
       {
         noted: Math.max(asked.noted, answers.length),
-        // As the page may send them back (`before`): each line and their
-        // number within what a request takes.
-        lines: heard.lines
-          .slice(-interviewLimits.lines)
-          .map(({ from, text }) => ({
-            from,
-            text: text.slice(0, interviewLimits.line),
-          })),
         turn,
-        instructions: instructionsOf(
-          voice.text,
-          situationOf(situation, context, company),
-          asked.before,
-          context.name
-        ),
       } satisfies VoiceAnswered,
       { headers: linkHeaders }
     );
-  // Nothing new of theirs in the transcript yet: nothing to write down.
+  // Nothing new of theirs was heard yet: nothing to write down.
   if (answers.length <= asked.noted) {
-    return answeredNow(null, { ...asked, phase });
+    return answeredNow(null);
   }
-  const { text: system } = await interviewerText(context.kind, asked.locale);
-  // Up to their last words, as a turn's brief ends: what Stephen said after
+  const [{ text: system }, company] = await Promise.all([
+    interviewerText(context.kind, asked.locale),
+    companyOf(env),
+  ]);
+  // Up to their last words, where the brief ends: what Stephen said after
   // them is his, not what was just said.
-  const lastAnswer = heard.lines.findLastIndex(({ from }) => from === "person");
+  const lastAnswer = lines.findLastIndex(({ from }) => from === "person");
   const turn: TurnAsked = {
     // An answer, also when they came back to add something: `adding` says
-    // that, and "add" is only the event that opens it.
-    event: "answer",
+    // that, and "add" is only the event that opens it. In the read-back,
+    // their answer to the lines read back.
+    event: asked.reading === undefined ? "answer" : "readback",
     locale: asked.locale,
-    // The whole conversation, as a turn's brief has it: before this
-    // session too, on a resume. Quotes are checked in this session's alone.
-    lines: [...asked.before, ...heard.lines.slice(0, lastAnswer + 1)],
+    // The whole conversation: before this one too, on a resume and in the
+    // read-back. Quotes are checked in this one's alone.
+    lines: [...asked.before, ...lines.slice(0, lastAnswer + 1)],
     facts: asked.facts,
-    // The part they answered in, as a turn's brief has it.
-    phase: heard.answeredIn ?? asked.phase,
+    phase: asked.phase,
     minutes: asked.minutes,
+    ...(asked.reading === undefined ? {} : { reading: asked.reading }),
     adding: asked.adding,
   };
   const counting: Promise<void>[] = [];
@@ -733,7 +495,7 @@ const answer = async (
     ctx.waitUntil(Promise.allSettled(counting));
   }
   const { turn: checked, dropped } = checkedTurn(
-    // Never waiting for the rest: Mistral decided their turn ended, and
+    // Never waiting for the rest: the agent decided their turn ended, and
     // Stephen answered it already. What the notes' model answers holds
     // facts and changes alone (`notesSchema`).
     {
@@ -741,37 +503,34 @@ const answer = async (
       more: false,
     },
     {
-      answers: joinedSince(heard.lines, asked.noted),
+      answers: joinedSince(lines, asked.noted),
       known: asked.facts.map(({ id }) => id),
-      phase,
+      phase: asked.phase,
     }
   );
   if (dropped.unknownTag + dropped.noText + dropped.notSaid > 0) {
     log.info("interview.notes_dropped", { requestId, ...dropped });
   }
-  // What he is told next counts what was just written down, as the page
-  // will hold it.
-  const written = [
-    ...asked.facts.flatMap((fact) => {
-      const change = checked.changes.find(({ id }) => id === fact.id);
-      if (change === undefined) {
-        return [fact];
-      }
-      return change.text === null ? [] : [{ ...fact, text: change.text }];
-    }),
-    ...checked.facts.map((fact, at) => ({
-      id: `new-${at + 1}`,
-      tag: fact.tag,
-      text: fact.text,
-    })),
-  ];
-  return answeredNow(
-    { facts: checked.facts, changes: checked.changes, phase },
-    { ...asked, phase, facts: written }
-  );
+  const { edit } = asked;
+  if (edit !== undefined) {
+    // They changed the line on their screen themselves: exactly that
+    // change, their words as they stand, whatever the notes' model made of
+    // it. Only the line for the record is the model's, in English.
+    const record = checked.changes.find(({ id }) => id === edit.id)?.record;
+    return answeredNow({
+      facts: [],
+      changes: [{ id: edit.id, text: edit.text, record: record ?? edit.text }],
+      phase: asked.phase,
+    });
+  }
+  return answeredNow({
+    facts: checked.facts,
+    changes: checked.changes,
+    phase: asked.phase,
+  });
 };
 
-/** Someone's live voice session, as the page asks for it: open, after an answer, or close. */
+/** Someone's live conversation, as the page asks for it: open, after an answer, or close. */
 export const interviewVoiceResponse = async (
   request: Request,
   env: Env,
@@ -803,21 +562,23 @@ export const interviewVoiceResponse = async (
   }
   const asked = parsed.data;
   const secretMark = await sha256Hex(asked.secret);
-  // A session is closed on its pass alone, signed for this link and this
-  // account: also once they withdrew or the interviews were paused, so
-  // nothing of theirs stays open at Mistral.
+  // A close is taken on its pass alone, signed for this link and this
+  // account: also once they withdrew or the interviews were paused. The
+  // page ended the conversation at ElevenLabs itself.
   if (asked.action === "close") {
-    const session = await sessionOfPass(
+    const closing = await heldByPass(
       env,
       asked.pass,
       secretMark,
       caller.account
     );
-    if (session === null) {
+    if (closing === null) {
       log.warn("interview.voice_pass_refused", { requestId });
       return linkRefusal("interview.invalid", requestId);
     }
-    await closeQuietly(env, session, requestId);
+    // What this conversation held of the day's listening and didn't use
+    // is given back, once; nothing of one opened after it.
+    await onboardingStore(env).settleListeningOnLink(secretMark, closing);
     return new Response(null, { status: 204, headers: linkHeaders });
   }
   const found = await onboardingStore(env).turnContext(
@@ -841,15 +602,22 @@ export const interviewVoiceResponse = async (
   if (asked.action === "open") {
     return await open(held, asked);
   }
-  const session = await sessionOfPass(
-    env,
-    asked.pass,
-    secretMark,
-    caller.account
-  );
-  if (session === null) {
+  const { edit, reading } = asked;
+  // A line changed on screen is one of the lines read back to them.
+  const editFits =
+    edit === undefined ||
+    (reading !== undefined && asked.facts.some(({ id }) => id === edit.id));
+  if (!editFits) {
+    return linkRefusal("interview.invalid", requestId);
+  }
+  // An answer of a conversation comes with the pass core opened it with.
+  if (
+    reading === undefined &&
+    (asked.pass === undefined ||
+      (await heldByPass(env, asked.pass, secretMark, caller.account)) === null)
+  ) {
     log.warn("interview.voice_pass_refused", { requestId });
     return linkRefusal("interview.invalid", requestId);
   }
-  return await answer(held, asked, session);
+  return await answer(held, asked);
 };

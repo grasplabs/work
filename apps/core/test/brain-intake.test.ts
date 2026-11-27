@@ -352,23 +352,39 @@ describe(
       await agree(ids.ada, [fact("a1", "step", "Answers the chat.")]);
       // Six finished in the week of 5 October, the other three the week
       // after.
-      await runInDurableObject(store, (_instance, state) => {
-        state.storage.sql.exec(
-          "UPDATE interview_states SET completed_at = CASE WHEN person IN (?, ?, ?) THEN '2026-10-13T09:00:00.000Z' ELSE '2026-10-06T09:00:00.000Z' END WHERE completed_at IS NOT NULL",
-          ids.rik,
-          ids.sam,
-          ids.ada
-        );
-      });
+      const dated = async () => {
+        await runInDurableObject(store, (_instance, state) => {
+          state.storage.sql.exec(
+            "UPDATE interview_states SET completed_at = CASE WHEN person IN (?, ?, ?) THEN '2026-10-13T09:00:00.000Z' ELSE '2026-10-06T09:00:00.000Z' END WHERE completed_at IS NOT NULL",
+            ids.rik,
+            ids.sam,
+            ids.ada
+          );
+        });
+      };
+      await dated();
       const member = await signedInApi(idp, "user");
       const weeks = async () => {
         const brain = await member.api.brain.read();
         return brain.interviewWeeks;
       };
       const before = await weeks();
-      await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
+      // Withdrawn within the 7 days a link still takes it (DELETE_DAYS):
+      // finished just now as they go, then back in their week.
+      const withdrawn = async (person: string) => {
+        await runInDurableObject(store, (_instance, state) => {
+          state.storage.sql.exec(
+            "UPDATE interview_states SET completed_at = ? WHERE person = ?",
+            new Date().toISOString(),
+            person
+          );
+        });
+        await onLink({ action: "withdraw", ...(await openLink(person)) });
+        await dated();
+      };
+      await withdrawn(ids.pim);
       const oneWithdrew = await weeks();
-      await onLink({ action: "withdraw", ...(await openLink(ids.lea)) });
+      await withdrawn(ids.lea);
       const twoWithdrew = await weeks();
       expect({ before, oneWithdrew, twoWithdrew }).toStrictEqual({
         before: [{ week: "2026-10-05", interviews: 6 }],

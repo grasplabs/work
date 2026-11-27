@@ -1,14 +1,16 @@
 import { oauthProviderSchema } from "@grasp-os/shared/connect-names";
 import { directorySuiteSchema } from "@grasp-os/shared/directory";
-import type { OnboardingDirectory } from "@grasp-os/shared/directory";
+import type {
+  OnboardingDirectory,
+  OnboardingDirectoryAccount,
+} from "@grasp-os/shared/directory";
 import type { OnboardingPlaces } from "@grasp-os/shared/document-places";
-import type { OnboardingHr } from "@grasp-os/shared/hr";
 import type {
   LinkToSend,
   OnboardingReview,
   OnboardingView,
 } from "@grasp-os/shared/onboarding";
-import { noChoices } from "@grasp-os/shared/onboarding-choices";
+import type { Campaign } from "@grasp-os/shared/onboarding-campaign";
 import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
 import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
 import { flowScreens } from "@grasp-os/shared/onboarding-flow";
@@ -17,52 +19,43 @@ import type {
   SetupPlace,
 } from "@grasp-os/shared/onboarding-flow";
 import type { GateView } from "@grasp-os/shared/onboarding-gate";
+import { companyNameOf } from "@grasp-os/shared/organization";
 import type { Organization } from "@grasp-os/shared/organization";
 import { isAdmin } from "@grasp-os/shared/roles";
-import { duration, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
 import {
   createFileRoute,
   Navigate,
   redirect,
   useNavigate,
 } from "@tanstack/react-router";
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useEffect, useState } from "react";
 
-import { DotBrain } from "../brain/dot-brain.tsx";
-import type { BrainScene } from "../brain/dot-brain.tsx";
 import { loadCoreStatus } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { PageError } from "../frame/page-states.tsx";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
-import { motion } from "../onboarding/motion.ts";
-import { useReveal } from "../onboarding/reveal-state.ts";
+import { CalmFrame } from "../onboarding/calm-frame.tsx";
+import type { Ways } from "../onboarding/calm-frame.tsx";
+import { CampaignFrame } from "../onboarding/campaign/campaign-page.tsx";
+import { poses } from "../onboarding/field/poses.ts";
+import { keptKey } from "../onboarding/kept.ts";
 import { todayInUtc } from "../onboarding/send-plan.ts";
-import { Arriving, SetupFrame } from "../onboarding/setup-frame.tsx";
 import { SetupStepBody } from "../onboarding/setup-steps.tsx";
 import {
-  brainScene,
+  finishedAt,
+  waysFrom,
   isReviewItem,
   isStep,
-  finishedAt,
-  heldAt,
   keptAt,
-  listeningOf,
   reachedByPlace,
   reachedOf,
   settledAs,
   stepIndex,
-  steps,
+  partOf,
   stepShown,
+  steps,
   suitesFor,
-  waysFrom,
 } from "../onboarding/setup.ts";
 import type {
   AiReadiness,
@@ -71,113 +64,22 @@ import type {
   SetupPath,
   SetupStep,
 } from "../onboarding/setup.ts";
-import { wasHeard } from "../onboarding/visit.ts";
+import { smoothly } from "../onboarding/smoothly.ts";
+import { StepVoice } from "../onboarding/step-voice.tsx";
 import { signInErrorSearch } from "../sign-in-errors.ts";
 import { useCore } from "../use-core.ts";
-import { resumeVoice, stopSpeaking, voiceLevel } from "../voice/voice.ts";
-
-// The client onboarding (prototype `routes/onboarding.tsx`): what a
-// company's admin goes through until Grasp opens, full screen and outside
-// the app. The brain on top, taking a new figure for each step, and one
-// step at a time below it, each fading in; the step is in the address, so
-// the browser's back and forward work too. Stephen says each step as it
-// arrives (setup-parts.tsx). Admins only: core refuses
-// everyone else, and anyone else is taken home. Grasp's staff are sent to
-// /staff: they steer the onboarding from the admin dashboard.
 
 /** The suites whose directory the company step offers, in order. */
 const directorySuites = directorySuiteSchema.options;
 
-/** How large the brain is by step, in pixels: larger where there is less to read. */
-const brainWanted: Record<SetupStep, number> = {
-  welcome: 400,
-  ai: 260,
-  about: 340,
-  company: 420,
-  sources: 260,
-  documents: 260,
-  pulse: 240,
-  leads: 260,
-  team: 270,
-  listening: 300,
-  review: 330,
-  open: 450,
-};
-
-/** Where the team and listening steps' columns open up beside each other. */
-const WIDE = "@media (min-width: 64rem)";
-
-const styles = stylex.create({
-  column: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: space[6],
-    width: "100%",
-    textAlign: "center",
-    transitionProperty: "max-width",
-    transitionDuration: duration.arrive,
-    transitionTimingFunction: duration.ease,
-  },
-  brain: { display: "flex", flexDirection: "column", alignItems: "center" },
-  // The brain folds up as it makes way.
-  brainBox: { display: "block", overflow: "hidden" },
-  brainSize: (size: number) => ({
-    width: `${size}px`,
-    maxWidth: "100%",
-    transitionProperty: "width",
-    transitionDuration: duration.arrive,
-    transitionTimingFunction: duration.ease,
-  }),
-  step: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    width: "100%",
-    transitionProperty: "opacity, filter",
-    transitionDuration: duration.arrive,
-    transitionTimingFunction: duration.ease,
-  },
-  clearing: { opacity: 0, filter: "blur(4px)" },
-});
-
-/** How wide the column is by step: roomier where there is more to read. */
-const widths = stylex.create({
-  welcome: { maxWidth: "30rem" },
-  ai: { maxWidth: "27.5rem" },
-  about: { maxWidth: "35rem" },
-  company: { maxWidth: "27.5rem" },
-  sources: { maxWidth: "37.5rem" },
-  documents: { maxWidth: "37.5rem" },
-  pulse: { maxWidth: "35rem" },
-  leads: { maxWidth: "35rem" },
-  team: { maxWidth: { default: "32.5rem", [WIDE]: "60rem" } },
-  listening: { maxWidth: { default: "35rem", [WIDE]: "60rem" } },
-  review: { maxWidth: "27.5rem" },
-  open: { maxWidth: "27.5rem" },
-});
-
-/** What stands around the brain and a step, in pixels: the frame's top and bottom, its own margins, and the room between the brain and the step. */
-const around = 190;
-/** The smallest the brain gets to make room, and the steps it gives way in, so it does not flutter as a line comes and goes. */
-const brainLeast = 120;
-const brainStep = 20;
-
-const onResize = (listener: () => void): (() => void) => {
-  window.addEventListener("resize", listener);
-  return () => {
-    window.removeEventListener("resize", listener);
-  };
-};
-
-/** Where this browser keeps how far its admin went, the message they wrote and what they settled: a convenience of this browser alone. */
-const keptKey = (userId: string): string => `grasp.setup.${userId}`;
-
 /**
- * Which list of steps a kept place counts in: 2 since the AI step came
- * second; 3 since core keeps the place by the screens' names, and this
- * browser's own number is only how far it went on this visit.
+ * Where the admin watches the interviews run, the path's last screen where
+ * the company's people are interviewed: no step on the way, as nothing on
+ * it is theirs to finish.
  */
+const watching: SetupStep = "listening";
+
+/** Which list of steps a kept place counts in: core keeps the place by the screens' names, this browser only the message and what was settled. */
 const keptSteps = 3;
 
 const readKept = (userId: string): Kept => {
@@ -188,24 +90,13 @@ const readKept = (userId: string): Kept => {
     if (typeof raw !== "object" || raw === null) {
       return { reached: 0, message: null, settled: [] };
     }
-    const stored =
-      "reached" in raw && typeof raw.reached === "number" ? raw.reached : 0;
-    // A place core has by now counts for nothing here. One kept before
-    // the AI step came second counts one further: every step after the
-    // welcome moved up.
-    let reached = stored;
-    if ("steps" in raw && raw.steps === keptSteps) {
-      reached = 0;
-    } else if (!("steps" in raw) && stored > 0) {
-      reached = stored + 1;
-    }
     const message =
       "message" in raw && typeof raw.message === "string" ? raw.message : null;
     const settled =
       "settled" in raw && Array.isArray(raw.settled)
         ? raw.settled.filter(isReviewItem)
         : [];
-    return { reached, message, settled };
+    return { reached: 0, message, settled };
   } catch {
     return { reached: 0, message: null, settled: [] };
   }
@@ -223,9 +114,9 @@ const writeKept = (userId: string, kept: Kept): void => {
 };
 
 /**
- * Tells core the screens the admin `finished`.
- * Not heard this once, core hears it with the next screen: nothing is
- * lost, and nothing holds the admin up.
+ * Tells core the screens the admin `finished`. Not heard this once, core
+ * hears it with the next screen: nothing is lost, and nothing holds the
+ * admin up.
  */
 const notePlace = async (
   core: ReturnType<typeof useCore>,
@@ -241,20 +132,17 @@ const notePlace = async (
 };
 
 /**
- * How far this browser's admin went, the message they wrote and what they
- * settled: the furthest step is remembered as they go, so the dots and the
- * arrow keys go on as far as they went.
+ * How far the admin went on this path, the message they wrote and what
+ * they settled: the furthest step is remembered as they go, so going back
+ * never lowers it and StepperNav's Next goes on as far as they went.
  */
 const useKept = (userId: string, index: number, path: SetupPath) => {
-  // How far they went is counted on this company's path, from where core says they are.
-  const [kept, setKept] = useState(() => ({ ...readKept(userId), reached: 0 }));
-  // A place counted on another path means nothing on this one: where the
-  // flow changed while they were here, they start from where core says.
+  const [kept, setKept] = useState(() => readKept(userId));
+  // A place counted on another path means nothing on this one.
   const [counted, setCounted] = useState(path);
   if (counted !== path) {
     setCounted(path);
   }
-  // The furthest step is kept as they go, so going back never lowers it.
   const now = keptAt(counted === path ? kept : { ...kept, reached: 0 }, index);
   if (now !== kept) {
     setKept(now);
@@ -275,160 +163,53 @@ const useKept = (userId: string, index: number, path: SetupPath) => {
   };
 };
 
-/** The arrow keys go back, and forward as far as you have been, unless you are typing. */
-const useArrowKeys = (
+/** The frame's arrows on a step: back a step, and on as far as they went. */
+const waysOf = (
   index: number,
   reached: number,
   path: SetupPath,
   go: (step: SetupStep) => void
-): void => {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      const { target } = event;
-      const typing =
-        target instanceof Element &&
-        target.closest(
-          'input, textarea, [contenteditable="true"], [role="radiogroup"], [role="group"]'
-        ) !== null;
-      if (typing || event.metaKey || event.ctrlKey || event.altKey) {
-        return;
-      }
-      const { back, on } = waysFrom(index, reached, path);
-      if (event.key === "ArrowLeft" && back !== undefined) {
-        go(back);
-      }
-      if (event.key === "ArrowRight" && on !== undefined) {
-        go(on);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [index, reached, path, go]);
-};
-
-/**
- * A step never needs scrolling: the brain takes what the window leaves
- * once the step itself has its room, down to a small one, in steps, so it
- * does not flutter as a line comes and goes; where not even the small one
- * fits, it makes way. On a phone a step that does
- * not fit even beside the smallest brain is cramped: its sentence makes way
- * once read, and where that frees too little, the brain makes way with it,
- * until the next step.
- */
-const useBrainRoom = (step: SetupStep) => {
-  const body = useRef<HTMLDivElement>(null);
-  const [bodyHeight, setBodyHeight] = useState(0);
-  useEffect(() => {
-    const element = body.current;
-    const observer = new ResizeObserver(([entry]) => {
-      setBodyHeight(entry?.contentRect.height ?? 0);
-    });
-    if (element !== null) {
-      observer.observe(element);
-    }
-    return () => {
-      observer.disconnect();
-    };
-  }, []);
-  const windowHeight = useSyncExternalStore(
-    onResize,
-    () => window.innerHeight,
-    () => 1000
-  );
-  const phone = useSyncExternalStore(
-    onResize,
-    () => !window.matchMedia("(min-width: 40rem)").matches,
-    () => false
-  );
-  const [brainAway, setBrainAway] = useState<SetupStep | null>(null);
-  if (brainAway !== null && brainAway !== step) {
-    setBrainAway(null);
-  }
-  /** The room the brain has beside a step this high. */
-  const roomBeside = (height: number) => windowHeight - around - height;
-  const room = Math.floor(roomBeside(bodyHeight) / brainStep) * brainStep;
-  const measured = bodyHeight > 0;
-  const wanted = brainWanted[step];
-  let brain = wanted;
-  if (brainAway === step) {
-    brain = 0;
-  } else if (measured && !phone && room < brainLeast) {
-    // Where even the smallest brain leaves the step too little room, it makes way, so the page never scrolls.
-    brain = 0;
-  } else if (measured) {
-    brain = Math.max(brainLeast, Math.min(wanted, room));
-  }
+): Ways => {
+  const { back, on } = waysFrom(index, reached, path);
   return {
-    body,
-    cramped: phone && measured && roomBeside(bodyHeight) < brainLeast,
-    brainSize: brain === 0 ? undefined : Math.round(brain / 10) * 10,
-    onMadeWay: (freed: number) => {
-      if (roomBeside(bodyHeight - freed) < brainLeast) {
-        setBrainAway(step);
-      }
-    },
+    onBack:
+      back === undefined
+        ? undefined
+        : () => {
+            go(back);
+          },
+    onNext:
+      on === undefined
+        ? undefined
+        : () => {
+            go(on);
+          },
   };
 };
 
-/**
- * Leaving the onboarding, Stephen stops mid-sentence rather than talk over
- * the app; every step that follows is a new start, so he stops what he was
- * saying on the last one (a step he finished before says nothing to cut it), and
- * a pause from it lets go.
- */
-const useVoiceBetweenSteps = (step: SetupStep): void => {
-  useEffect(
-    () => () => {
-      stopSpeaking();
-      resumeVoice();
-    },
-    []
-  );
-  const last = useRef(step);
-  useEffect(() => {
-    if (last.current !== step) {
-      last.current = step;
-      stopSpeaking();
-      resumeVoice();
-    }
-  }, [step]);
-};
-
-/**
- * On the way into the platform the brain fills up and charges, and
- * everything around it fades: the scene the brain takes then, whether the
- * way in is on, and whether the rest is fading.
- */
-const useWayIn = (figure: BrainScene) => {
-  const { phase } = useReveal();
-  const revealing = phase !== "idle";
-  return {
-    scene: revealing ? { ...figure, fill: 1, charge: true } : figure,
-    revealing,
-    clearing: phase === "clearing" || phase === "building",
-  };
-};
-
-/** What the steps read of what was loaded, or nothing while it could not be. */
-const readOf = (data: Loaded | null) => ({
-  roster: data?.view.roster ?? null,
-  plan: data?.view.plan ?? null,
-  progress: data?.view.progress ?? null,
-  percent: data?.gate.known ?? 0,
-  parts: data?.gate.parts ?? [],
-  choices: data?.choices ?? noChoices,
-});
+/** The track's progress on a screen: its part, named; none on a screen in no part. */
+const progressOf = (
+  part: ReturnType<typeof partOf>,
+  names: readonly string[]
+) =>
+  part === null
+    ? undefined
+    : {
+        at: part.at,
+        of: part.of,
+        name: names[part.part] ?? "",
+        share: part.share,
+      };
 
 const Setup = () => {
-  const { t, i18n } = useLingui();
+  const { i18n, t } = useLingui();
+  // The parts the setup is told in, named on the track along the page's foot.
+  const partNames = [t`Getting started`, t`Your company`, t`Your team`];
   const navigate = useNavigate();
   const { identity, signIn, suites } = Route.useRouteContext();
   const loaded = Route.useLoaderData();
   const { step: asked } = Route.useSearch();
   const data = loaded.state === "ready" ? loaded.data : null;
-  const { roster, plan, progress, percent, parts, choices } = readOf(data);
   // The screens this company's flow has, in its order; all of them where core can't say.
   // The same list while the flow is the same, so what goes by it runs once per change.
   const screens: SetupPath = data === null ? steps : flowScreens(data.flow);
@@ -436,63 +217,53 @@ const Setup = () => {
   if (path.join(",") !== screens.join(",")) {
     setPath(screens);
   }
-  // How far they went: as core says, on whatever device, or as this browser
-  // kept it before core did, read once: it is written over as they go.
-  const legacy = useMemo(
-    () => finishedAt(readKept(identity.userId).reached),
-    [identity.userId]
-  );
-  const told = reachedByPlace(data?.place ?? null, path);
-  const placed = reachedByPlace(
-    { done: [...(data?.place.done ?? []), ...legacy] },
-    path
-  );
+  const plan = data?.view.plan ?? null;
+  const placed = reachedByPlace(data?.place ?? null, path);
   const ai = data?.ai ?? null;
   // Opened without a step, it goes on where they were; never past the AI step while no model is ready for calls.
   const step = stepShown(asked, reachedOf(placed, { plan }, path), ai, path);
-  const index = Math.max(stepIndex(step, path), 0);
+  const at = stepIndex(step, path);
+  // Off the path (it can't be, once shown): the first screen.
+  const index = Math.max(0, at);
   const kept = useKept(identity.userId, Math.max(index, placed), path);
   // Core hears of every screen they finished, so they go on from it anywhere, and Grasp sees how far they are.
   const core = useCore();
   useEffect(() => {
-    if (kept.reached > told) {
+    if (kept.reached > placed) {
       void notePlace(core, finishedAt(kept.reached, path));
     }
-  }, [core, kept.reached, told, path]);
-  // How far they went, and how far they can go now.
+  }, [core, kept.reached, placed, path]);
   const furthest = reachedOf(kept.reached, { plan }, path);
-  const reached = heldAt(furthest, ai, path);
-  const now = todayInUtc();
-  const listening = listeningOf({ roster, plan, progress }, now);
-  // "How this works" tells its story in the brain's figures, so the figure follows the story there.
-  const [story, setStory] = useState<BrainScene | null>(null);
-  const shown = brainScene(step, {
-    roster,
-    listening,
-    known: percent,
-    choices,
-  });
-  const { scene, revealing, clearing } = useWayIn(
-    step === "about" && story !== null ? story : shown
+  // Where they were going: past this screen when the setup held them here on the way.
+  const askedFor = Math.max(
+    index,
+    asked === undefined ? -1 : stepIndex(asked, path)
   );
-  const go = (next: SetupStep) => {
-    void navigate({ to: "/setup", search: { step: next } });
+  // Every screen settles into the next in one quiet fade; over once the screen is there.
+  const turnTo = async (next: SetupStep): Promise<void> => {
+    await smoothly(async () => {
+      await navigate({ to: "/setup", search: { step: next } });
+    });
   };
-  // The screen after this one; past the last, every screen is finished and the admin is in the platform.
-  const next = path[index + 1];
-  const onward = () => {
-    if (next !== undefined) {
-      go(next);
+  const go = (next: SetupStep) => {
+    void turnTo(next);
+  };
+  // The screen after this one; past the last on the way, every screen is
+  // finished and the admin is in the platform. The page the interviews are
+  // watched on is where they come back to, never the next step: the story
+  // before it leads into the platform (plan-story.tsx).
+  const onward = async (): Promise<void> => {
+    const next = path[index + 1];
+    if (next !== undefined && next !== watching) {
+      await turnTo(next);
       return;
     }
-    void (async () => {
-      await notePlace(core, [...path]);
-      await navigate({ to: "/" });
-    })();
+    await notePlace(
+      core,
+      path.filter((screen) => screen !== watching)
+    );
+    await navigate({ to: "/" });
   };
-  useArrowKeys(index, reached, path, go);
-  useVoiceBetweenSteps(step);
-  const { body, cramped, brainSize, onMadeWay } = useBrainRoom(step);
 
   if (data === null) {
     return <PageError reason={notLoadedText(loaded, i18n) ?? ""} />;
@@ -501,97 +272,80 @@ const Setup = () => {
   if (path.length === 0) {
     return <Navigate replace to="/" />;
   }
-  const admin = identity.name.split(" ")[0] ?? identity.name;
-  const sendingDomain = data.view.mailDomain;
+  // Screens no flow has any more, named only so places kept with them still read: never on the path.
+  if (step === "review" || step === "open") {
+    return <Navigate replace to="/" />;
+  }
+  // The interviews, watched: its own frame. Core tells no campaign before
+  // the plan is in; whoever got this far without one finished every screen.
+  if (step === "listening") {
+    return data.campaign === null ? (
+      <Navigate replace to="/" />
+    ) : (
+      <CampaignFrame campaign={data.campaign} />
+    );
+  }
   return (
-    <SetupFrame
-      knowledge={{ parts, percent, threshold: data.gate.threshold }}
-      onExit={() => {
-        if (!revealing) {
-          void navigate({ to: "/" });
-        }
-      }}
-      onGo={go}
-      path={path}
-      reached={reached}
-      step={step}
+    <CalmFrame
+      userId={identity.userId}
+      ways={waysOf(index, furthest, path, go)}
+      progress={progressOf(partOf(step, path), partNames)}
+      screen={step}
+      // The story covers the frame and has its own bar.
+      covered={step === "about"}
+      language={step !== "welcome"}
+      pose={poses[step]}
     >
-      <div {...stylex.props(styles.column, widths[step])}>
-        <div {...stylex.props(styles.brain)}>
-          {/* The brain fades with the step it belongs to, or is there at once on one finished before; making way, it folds up as it fades. */}
-          {brainSize === undefined ? null : (
-            <Arriving
-              layout={styles.brainBox}
-              motion={[motion.fade, motion.late]}
-              settled={wasHeard(step)}
-            >
-              <span
-                {...stylex.props(styles.brainBox, styles.brainSize(brainSize))}
-              >
-                <DotBrain
-                  label={t`The company brain: ${percent}% known. Dark dots are what I know, grey dots what I still need to learn.`}
-                  scene={scene}
-                  voice={voiceLevel}
-                />
-              </span>
-            </Arriving>
-          )}
-        </div>
-        {/* One step fades out, the next fades in, or is there at once if finished before: nothing slides. On the way in, the step fades and only the brain stays. */}
-        <div
-          inert={revealing}
-          ref={body}
-          {...stylex.props(styles.step, clearing && styles.clearing)}
-        >
-          {/* Each step drawn anew, fading in unless it is one finished before (setup-steps.tsx). */}
-          <SetupStepBody
-            cramped={cramped}
-            data={{
-              ...data,
-              admin,
-              sendingDomain,
-              signIn,
-              // The sign-ins the kickoff named, where it named any.
-              suites: suitesFor(suites, data.view.context),
-              identity,
-            }}
-            furthest={furthest}
-            go={go}
-            onward={onward}
-            path={path}
-            listening={listening}
-            message={kept.message}
-            onMadeWay={onMadeWay}
-            onMessage={(message) => {
-              kept.onMessage(message);
-            }}
-            onSettle={(item, settled) => {
-              kept.onSettle(item, settled);
-            }}
-            onStory={setStory}
-            parts={parts}
-            percent={percent}
-            settled={kept.settled}
-            key={step}
-            step={step}
-            today={now}
-          />
-        </div>
-      </div>
-    </SetupFrame>
+      {/* The next step's lines fetched ahead, this one's remembered for the next time through, and Stephen answering what was done. */}
+      <StepVoice
+        key={step}
+        next={path[index + 1]}
+        previous={index > 0 ? path[index - 1] : undefined}
+        step={step}
+        userId={identity.userId}
+      >
+        <SetupStepBody
+          data={{
+            ...data,
+            admin: identity.name.trim().split(/\s+/u)[0] ?? "",
+            sendingDomain: data.view.mailDomain,
+            signIn,
+            // The sign-ins the kickoff named, where it named any.
+            suites: suitesFor(suites, data.view.context),
+            identity,
+          }}
+          askedFor={askedFor}
+          go={go}
+          key={step}
+          message={kept.message}
+          onMessage={(message) => {
+            kept.onMessage(message);
+          }}
+          onSettle={(item, settled) => {
+            kept.onSettle(item, settled);
+          }}
+          onward={onward}
+          path={path}
+          settled={kept.settled}
+          step={step}
+          today={todayInUtc()}
+        />
+      </StepVoice>
+    </CalmFrame>
   );
 };
 
 /**
- * The organization's name, for the message to the team; none when it has
- * none or core can't say, which leaves the rest of the onboarding as it is.
+ * The company's name, for the message to the team: never the placeholder
+ * core made the organization with (`companyNameOf`); none when nothing
+ * gives one or core can't say, which leaves the rest as it is.
  */
 const companyOf = async (
   organization: () => Promise<Organization>
 ): Promise<string | null> => {
   try {
-    const { name } = await organization();
-    return name.trim() === "" ? null : name;
+    const { name, signInDomains } = await organization();
+    return companyNameOf(name, signInDomains);
   } catch {
     return null;
   }
@@ -632,20 +386,31 @@ interface Loaded {
   /** The organization's name, as the message to the team is addressed; null when it has none. */
   company: string | null;
   directory: OnboardingDirectory | null;
+  /** Every account's directory connected for the roster, the company's own first. */
+  directoryAccounts: OnboardingDirectoryAccount[];
   places: OnboardingPlaces | null;
-  hr: OnboardingHr | null;
   /** What Grasp's AI has to call; null when core can't say. */
   ai: AiReadiness | null;
+  /** How the interviews are going; null before the plan is in. */
+  campaign: Campaign | null;
 }
 
 export const Route = createFileRoute("/setup")({
   // `connection`: a connection's flow, started on a step, came back to it.
   validateSearch: (
     search: Record<string, unknown>
-  ): { step?: SetupStep; connection?: string } => ({
+  ): {
+    step?: SetupStep;
+    connection?: string;
+    connectionError?: string;
+  } => ({
     ...(isStep(search.step) && { step: search.step }),
     ...(typeof search.connection === "string" && {
       connection: search.connection,
+    }),
+    // Why a sign-in a step started didn't finish (onboarding/connection-return.ts).
+    ...(typeof search.connectionError === "string" && {
+      connectionError: search.connectionError,
     }),
   }),
   beforeLoad: async ({ context: { core }, location }) => {
@@ -694,12 +459,13 @@ export const Route = createFileRoute("/setup")({
         choices,
         company,
         directory,
+        directoryAccounts,
         places,
         review,
-        hr,
         ai,
         place,
         flow,
+        campaign,
       ] = await Promise.all([
         session.onboarding.view(),
         session.onboarding.links(),
@@ -708,12 +474,13 @@ export const Route = createFileRoute("/setup")({
         session.onboarding.choices(),
         companyOf(async () => await session.organization.get()),
         session.onboarding.directory(),
+        session.onboarding.directoryAccounts(),
         session.onboarding.documentPlaces(),
         session.onboarding.review(),
-        session.onboarding.hrPlatform(),
         aiReadinessOf(session),
         session.onboarding.place(),
         session.onboarding.flow(),
+        session.onboarding.campaign(),
       ]);
       return {
         view,
@@ -723,12 +490,13 @@ export const Route = createFileRoute("/setup")({
         choices,
         company,
         directory,
+        directoryAccounts,
         places,
         review,
-        hr,
         ai,
         place,
         flow,
+        campaign,
       };
     }),
   component: Setup,

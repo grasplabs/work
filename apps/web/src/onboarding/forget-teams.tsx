@@ -17,10 +17,11 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
-import { ErrorText } from "../error-text.tsx";
+import { TopError } from "../frame/top-error.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
 const styles = stylex.create({
+  // On the column's middle, under the centred words.
   forget: {
     display: "flex",
     flexDirection: "column",
@@ -74,7 +75,7 @@ export const ForgetTeams = ({
   if (erased && teamsInBrain === null) {
     return (
       <output aria-live="polite">
-        <Text as="span" size="sm" color="muted">
+        <Text as="span">
           {t`Erased. Your Brain keeps nothing of your teams until you confirm them again.`}
         </Text>
       </output>
@@ -83,7 +84,7 @@ export const ForgetTeams = ({
   if (teamsInBrain === "erasing") {
     return (
       <output aria-live="polite">
-        <Text as="span" size="sm" color="muted">
+        <Text as="span">
           {t`I’m erasing your teams from your Brain. It isn’t finished yet, and I finish it by myself.`}
         </Text>
       </output>
@@ -99,12 +100,12 @@ export const ForgetTeams = ({
         onClick={() => {
           setOpen(true);
         }}
-        size="sm"
-        variant="ghost"
+        size="lg"
+        variant="link"
       >
         {t`Erase your teams from your Brain`}
       </Button>
-      <ErrorText>{failure}</ErrorText>
+      <TopError>{failure}</TopError>
       <AlertDialog onOpenChange={setOpen} open={open}>
         <AlertDialogContent>
           <AlertDialogHeader>

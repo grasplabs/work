@@ -200,6 +200,8 @@ const modelWords: Record<Model, string> = {
   opus: MODEL_NAMES.opus,
   sonnet: MODEL_NAMES.sonnet,
   haiku: MODEL_NAMES.haiku,
+  mistralMedium: MODEL_NAMES.mistralMedium,
+  mistralSmall: MODEL_NAMES.mistralSmall,
   voice: "Stephen’s voice",
   ears: "Stephen’s ears",
   conversation: "Stephen’s live interviews",

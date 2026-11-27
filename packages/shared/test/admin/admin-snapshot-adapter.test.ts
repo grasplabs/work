@@ -90,7 +90,6 @@ describe("an organization from core's admin snapshot", () => {
         "company",
         "sources",
         "documents",
-        "pulse",
         "leads",
         "team",
         "listening",
@@ -189,6 +188,30 @@ describe("an organization from core's admin snapshot", () => {
     expect(
       Object.fromEntries(view.interviews.map((each) => [each.id, each.kind]))
     ).toStrictEqual({ lisa: "lead", tom: "employee" });
+  });
+
+  it("shows someone core names as a team's second lead as a lead, as core's snapshot sends them", () => {
+    const answered = adminSnapshotSchema.parse({
+      ...answer,
+      roster: {
+        ...answer.roster,
+        teams: answer.roster.teams.map((team) =>
+          team.id === "sales" ? { ...team, coLeads: ["tom"] } : team
+        ),
+      },
+    });
+    const { org, state } = adminOrgOf(answered, client);
+    const view = adminViewOf(org, state, "2026-10-14");
+
+    expect(
+      view.people
+        .filter(({ person }) => person.team === "sales")
+        .map(({ person }) => [person.id, person.lead])
+    ).toStrictEqual([
+      ["lisa", true],
+      ["tom", true],
+      ["ann", false],
+    ]);
   });
 
   it("knows what core knows, against core's threshold, and stays closed without Grasp's go", () => {
@@ -434,7 +457,7 @@ describe("an organization from core's admin snapshot", () => {
       sonnet: euros((40 * 8000 * 3 + 40 * 120 * 15) / 1e6),
       opus: euros((40 * 8000 * 5 + 40 * 200 * 25 + 5000 * 5 + 1400 * 25) / 1e6),
       // He speaks a fifth of the time and listens to the rest.
-      voice: euros(40 * 0.2 * 0.012),
+      voice: euros(40 * 0.2 * 0.072),
       ears: euros(40 * 0.8 * 0.006),
     });
     // Tom's day is core's count alone: nothing worked out on top of it.

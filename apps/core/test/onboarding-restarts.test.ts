@@ -4,7 +4,11 @@ import type {
   InterviewProgress,
   InterviewSaved,
 } from "@grasp-os/shared/interview-links";
-import { interviewTurnPath, turnEvents } from "@grasp-os/shared/interview-turn";
+import { interviewVoicePath } from "@grasp-os/shared/interview-voice";
+import type {
+  VoiceAnswered,
+  VoiceSessionJoin,
+} from "@grasp-os/shared/interview-voice";
 import type { Roster } from "@grasp-os/shared/onboarding";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -19,25 +23,25 @@ import {
   openLinkAs,
   participate,
   postedOnLink,
-  quick,
   signedInAs,
 } from "./interview-link.ts";
 import type { Device } from "./interview-link.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import { unique } from "./sign-in.ts";
 
-// The onboarding's durability (GRA-339): its Worker restarted in the middle
-// of an interview's turn, and in the middle of a team's drawing, as a
-// deploy restarts it. Everything kept lives in the Onboarding object, so
-// that is what restarts here, the turn's request cut off with it; the
-// model provider, the outside system, is faked behind connect. The
+// The onboarding's durability (GRA-339): its Worker restarted while what
+// someone just said in their interview is being written down, and in the
+// middle of a team's drawing, as a deploy restarts it. Everything kept
+// lives in the Onboarding object, so that is what restarts here, with the
+// notes' request under way; the model provider, the outside system, is
+// faked behind connect. The
 // end-to-end journeys (e2e/*-journey.e2e.ts) can't do this: one local
 // server serves every Playwright test, and it can't be restarted under
 // them. What must not happen:
 //
 // - What was said before the restart lost, or kept twice once the page
 //   asks again and saves again.
-// - The turn the restart cut off going uncounted: its line's model was
+// - The notes the restart cut across going uncounted: their model was
 //   asked, and what it took is on the bill.
 // - A drawing cut off by the restart never drawn, or drawn twice: the
 //   team's pieces of work doubled, or its links sent twice.
@@ -77,18 +81,17 @@ const restart = async (): Promise<void> => {
   await until(() => done.aborted);
 };
 
-/** What his line's model answers: six named lines. */
-const line = (say: string): ProviderReply => ({
-  text: `TONE: none\nSAY: ${say}\nPART: steps\nWANTS: answer\nMORE: no\nAGREED: no\n`,
-  inputTokens: 1500,
-  outputTokens: 40,
-});
-
-/** What the notes' model answers: nothing new written down. */
-const noNotes: ProviderReply = {
-  text: JSON.stringify({ facts: [], changes: [] }),
+/** What the notes' model answers: the one thing they said. */
+const checked = {
+  tag: "step",
+  text: "You check it in Exact.",
+  record: "Check it in Exact.",
+  quote: "I check it in Exact",
+};
+const notes: ProviderReply = {
+  text: JSON.stringify({ facts: [checked], changes: [] }),
   inputTokens: 1600,
-  outputTokens: 20,
+  outputTokens: 60,
 };
 
 /** Saves the page's progress on the link, from the version it holds. */
@@ -122,37 +125,38 @@ const progressOf = (
   addedAt: 0,
 });
 
-/** A turn asked for, as the page asks it after `lines`. */
-const askTurn = async (
+/** Has core write down what was said in the conversation `pass` opened, as the page asks after an answer. */
+const askNotes = async (
   link: Device,
-  lines: InterviewLine[]
+  pass: string,
+  said: InterviewLine[]
 ): Promise<Response> =>
-  await postedOnLink(interviewTurnPath, {
+  await postedOnLink(interviewVoicePath, {
     ...link,
-    event: "answer",
+    action: "answer",
     locale: "en",
-    lines,
     facts: [],
     phase: "steps",
     minutes: 4,
+    pass,
+    noted: 0,
+    said: said.map(({ from, text }) => ({ from, text })),
   });
 
-/** Stephen's line in a whole turn's answer. */
-const sayOf = async (response: Response): Promise<string | undefined> =>
-  turnEvents(`${await response.text()}\n`)
-    .events.flatMap((event) => ("turn" in event ? [event.turn.say] : []))
-    .at(0);
-
-/** Calls the onboarding counted for `purpose` on `model`. */
-const callsFor = async (purpose: string, model: string): Promise<number> => {
+/**
+ * Calls the onboarding counted for `purpose`, on whichever model: an
+ * interview's notes run on Grasp's own (src/platform-ai.ts), a team's map
+ * on the organization's.
+ */
+const callsFor = async (purpose: string): Promise<number> => {
   const rows = await onboardingStore(env).usage();
   return rows
-    .filter((row) => row.purpose === purpose && row.model === model)
+    .filter((row) => row.purpose === purpose)
     .reduce((sum, { calls }) => sum + calls, 0);
 };
 
 describe("the onboarding after a restart", { timeout: 60_000 }, () => {
-  it("loses nothing of an interview whose turn a restart cut off, and keeps nothing twice once the page asks again", async () => {
+  it("loses nothing of an interview whose notes a restart cut across, and keeps nothing twice once the page asks again", async () => {
     const { link, person } = await openedFor();
     const asked: InterviewLine = {
       from: "stephen",
@@ -161,18 +165,28 @@ describe("the onboarding after a restart", { timeout: 60_000 }, () => {
     const answer: InterviewLine = {
       from: "person",
       text: "I check it in Exact.",
-      typed: true,
     };
     const before = await save(link, 0, progressOf([asked, answer]));
-    const counted = await callsFor("interviews", quick);
+    const opening = await postedOnLink(interviewVoicePath, {
+      ...link,
+      action: "open",
+      event: "resume",
+      locale: "en",
+      facts: [],
+      phase: "steps",
+      minutes: 4,
+    });
+    const { pass }: VoiceSessionJoin = await opening.json();
+    // Counted from here: after the conversation itself, which is counted as it opens.
+    const counted = await callsFor("interviews");
 
-    // The turn is under way, his line half written, when the object restarts.
+    // What they said is being written down, the notes half written, when the object restarts.
     const reached = Promise.withResolvers<null>();
     const held = Promise.withResolvers<null>();
     await answering(
       [
         {
-          ...line("And who gets it after you?"),
+          ...notes,
           pause: {
             at: 12,
             until: held.promise,
@@ -183,49 +197,62 @@ describe("the onboarding after a restart", { timeout: 60_000 }, () => {
         },
       ],
       async () => {
-        const cut = await askTurn(link, [asked, answer]);
+        const cut = askNotes(link, pass, [asked, answer]);
         await reached.promise;
         await restart();
-        // The restart ends the turn's request: the page sees it break off.
-        await cut.body?.cancel();
         held.resolve(null);
+        // The page never keeps what this one answers: it left the request for lost.
+        const lost = await cut;
+        await lost.body?.cancel();
         return null;
       }
     );
 
-    // The page asks for the same turn again, and saves what came of it.
-    const next = "And who gets it after you?";
-    const { result: again } = await answering(
-      [line(next), noNotes],
-      async () => await sayOf(await askTurn(link, [asked, answer]))
-    );
-    const said: InterviewLine = { from: "stephen", text: next };
+    // The page asks for the same notes again, and saves what came of them.
+    const { result: again } = await answering([notes], async () => {
+      const answered = await askNotes(link, pass, [asked, answer]);
+      const written: VoiceAnswered = await answered.json();
+      return written;
+    });
+    const fact: InterviewFact = {
+      id: "f1",
+      tag: "step",
+      text: checked.text,
+      record: checked.record,
+    };
     const after = await save(
       link,
       before.version,
-      progressOf([asked, answer, said])
+      progressOf([asked, answer], [fact])
     );
     // A page that never heard back saves it once more: refused, as stale.
     const twice = await save(
       link,
       before.version,
-      progressOf([asked, answer, said])
+      progressOf([asked, answer], [fact])
     );
     const kept = await onboardingStore(env).practiceInterviewOf(person);
+    // The notes the restart cut across are counted for what they took, once their model answered.
+    await vi.waitFor(
+      async () => {
+        if ((await callsFor("interviews")) - counted < 2) {
+          throw new Error("Not counted yet");
+        }
+      },
+      { timeout: 10_000, interval: 100 }
+    );
     expect({
-      again,
+      again: { noted: again.noted, facts: again.turn?.facts },
       saved: [before.saved, after.saved, twice.saved],
       lines: kept?.progress?.lines.map(({ text }) => text),
-      // The turn cut off is counted for what it took (his line, and the
-      // line asked once more, which the cut stopped before it was sent),
-      // and the one asked again (his line and his notes): one model, the
-      // organization's, for both.
-      calls: (await callsFor("interviews", quick)) - counted,
+      facts: kept?.progress?.facts.map(({ text }) => text),
+      calls: (await callsFor("interviews")) - counted,
     }).toStrictEqual({
-      again: next,
+      again: { noted: 1, facts: [checked] },
       saved: [true, true, false],
-      lines: [asked.text, answer.text, next],
-      calls: 4,
+      lines: [asked.text, answer.text],
+      facts: [checked.text],
+      calls: 2,
     });
   });
 
@@ -317,7 +344,7 @@ describe("the onboarding after a restart", { timeout: 60_000 }, () => {
       inputTokens: 2000,
       outputTokens: 300,
     };
-    const counted = await callsFor("drawing", quick);
+    const counted = await callsFor("drawing");
 
     // The map is half written when the object restarts.
     // Noted as a flag, not a promise: what the object resolves goes on in
@@ -372,7 +399,7 @@ describe("the onboarding after a restart", { timeout: 60_000 }, () => {
       works: works.map(({ name }) => name),
       opened,
       openedAgain,
-      calls: (await callsFor("drawing", quick)) - counted,
+      calls: (await callsFor("drawing")) - counted,
     }).toStrictEqual({
       first: [ids.lea],
       dueAfterRestart: true,

@@ -21,16 +21,18 @@ import {
 const idp = mockIdp();
 
 describe("the organization", () => {
+  // A new organization is named after its first sign-in domain: acme.test
+  // gives Acme, never the placeholder "Organization".
   afterEach(async () => {
     await env.DB.prepare(
-      "UPDATE organizations SET name = 'Organization', time_zone = NULL"
+      "UPDATE organizations SET name = 'Acme', time_zone = NULL"
     ).run();
   });
 
   it("reads the same for everyone: its name, UTC until set, its region and sign-in domains", async () => {
     const person = await signedInApi(idp, "user");
     await expect(person.api.organization.get()).resolves.toStrictEqual({
-      name: "Organization",
+      name: "Acme",
       timeZone: "UTC",
       dataRegion: "eu",
       signInDomains: signInConfig.domains,
@@ -73,7 +75,7 @@ describe("the organization", () => {
     ).resolves.toBe("role.forbidden");
 
     await expect(builder.api.organization.get()).resolves.toMatchObject({
-      name: "Organization",
+      name: "Acme",
       timeZone: "UTC",
     });
   });
@@ -99,7 +101,7 @@ describe("the organization", () => {
       "organization.time_zone_invalid",
     ]);
     await expect(admin.api.organization.get()).resolves.toMatchObject({
-      name: "Organization",
+      name: "Acme",
       timeZone: "UTC",
     });
   });
@@ -140,7 +142,7 @@ describe("the organization", () => {
       new Set(["organization.changes_invalid"])
     );
     await expect(api.update({})).resolves.toMatchObject({
-      name: "Organization",
+      name: "Acme",
     });
   });
 

@@ -18,6 +18,7 @@ import type {
 import { signModelGrant } from "@grasp-os/shared/capability";
 import { sha256HexOfBytes } from "@grasp-os/shared/encoding";
 
+import { withOpenAiContent } from "./mistral-stream.ts";
 import { isRouteApi } from "./model-catalog.ts";
 import type { ModelRef } from "./model-catalog.ts";
 import type { TransportRoute } from "./model-transport.ts";
@@ -93,6 +94,7 @@ const placeholderHeaders = (provider: AiProviderId): ProviderHeaders => {
   const none: ProviderHeaders = {
     Authorization: null,
     "x-api-key": null,
+    "xi-api-key": null,
   };
   return keyHeader === "authorization"
     ? { ...none, Authorization: `Bearer ${aiCredentialPlaceholder}` }
@@ -252,7 +254,7 @@ const sendThroughConnect = async (
   host: string,
   request: Request,
   { providerRequest, endsAt, signal }: SentBy,
-  method?: "GET" | "DELETE"
+  method?: "GET"
 ): Promise<Response> => {
   const grant = await signModelGrant(env.CAPABILITY_SIGNING_KEY, {
     credential: target.credential,
@@ -310,10 +312,10 @@ const platformUrl = (target: ConnectTarget, path: string): URL | undefined => {
 
 /**
  * Sends one request of a platform feature (speech, a recording written
- * down, a voice session) to `path` at `target`'s provider through connect,
- * as `sentBy` names it: the placeholder where the key goes, which connect
- * replaces with Grasp's key, and only the headers given. A POST with its
- * body, or a voice session read (GET) or closed (DELETE), with none.
+ * down, an agent's conversation token) to `path` at `target`'s provider
+ * through connect, as `sentBy` names it: the placeholder where the key
+ * goes, which connect replaces with Grasp's key, and only the headers
+ * given. A POST with its body, or the GET for an agent's token, with none.
  */
 export const connectRequest = async (
   env: ConnectEnv,
@@ -321,7 +323,7 @@ export const connectRequest = async (
   path: string,
   init:
     | { method?: "POST"; headers: Record<string, string>; body: BodyInit }
-    | { method: "GET" | "DELETE"; headers: Record<string, string> },
+    | { method: "GET"; headers: Record<string, string> },
   sentBy: SentBy
 ): Promise<Response> => {
   const url = platformUrl(target, path);
@@ -482,7 +484,11 @@ export const connectRoute = (
     api,
     host: host.toLowerCase(),
     headers: placeholderHeaders(target.provider),
-    fetch: connectFetch(env, target, host.toLowerCase()),
+    // Mistral's reasoning answers stream their content as a list (mistral-stream.ts).
+    fetch:
+      target.provider === "mistral"
+        ? withOpenAiContent(connectFetch(env, target, host.toLowerCase()))
+        : connectFetch(env, target, host.toLowerCase()),
     // The chat's shared prompt cached apart from what differs between chats.
     ...(api === "anthropic-messages"
       ? { onPayload: withSharedPrefixCached }

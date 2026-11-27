@@ -352,15 +352,40 @@ export const answeringProvider = async (
   respond: (
     requests: readonly SentRequest[]
   ) => ProviderReply | undefined | Promise<ProviderReply | undefined>,
-  { models = [testModel] }: { models?: readonly string[] } = {}
+  {
+    models = [testModel],
+    platformKeys = [],
+  }: {
+    models?: readonly string[];
+    /**
+     * Keys of Grasp's own (test/connect-providers.ts) whose text requests
+     * it answers too, in the same script: the onboarding interview runs
+     * on Grasp's Mistral key whatever the organization connected.
+     */
+    platformKeys?: readonly string[];
+  } = {}
 ): Promise<FakeProvider> => {
   stopModelProviders();
   const key = `test-model-key-${crypto.randomUUID()}`;
-  const bridged = await internet().fetch(bridgeUrl, {
-    method: "POST",
-    body: JSON.stringify({ key }),
-  });
-  await bridged.body?.cancel();
+  for (const each of [key, ...platformKeys]) {
+    // oxlint-disable-next-line no-await-in-loop -- one key at a time
+    const bridged = await internet().fetch(bridgeUrl, {
+      method: "POST",
+      body: JSON.stringify({ key: each }),
+    });
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    await bridged.body?.cancel();
+  }
+  // A key of Grasp's is every test's: a request an earlier test left
+  // unanswered is taken here, and answered by no script.
+  for (const each of platformKeys) {
+    // oxlint-disable-next-line no-await-in-loop -- one key at a time
+    const left = await internet().fetch(
+      `${bridgeUrl}?key=${encodeURIComponent(each)}`
+    );
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    await left.body?.cancel();
+  }
   await connectModels(key, models);
   const requests: SentRequest[] = [];
   const analysisReplies: ProviderReply[] = [];
@@ -464,11 +489,11 @@ export const answeringProvider = async (
       }
     }
   };
-  const look = async (): Promise<void> => {
+  const look = async (looked: string): Promise<void> => {
     while (!state.stopped) {
       // oxlint-disable-next-line no-await-in-loop -- one look at a time
       const response = await internet().fetch(
-        `${bridgeUrl}?key=${encodeURIComponent(key)}`
+        `${bridgeUrl}?key=${encodeURIComponent(looked)}`
       );
       const { requests: fresh, gone } = lookSchema.parse(
         // oxlint-disable-next-line no-await-in-loop -- one look at a time
@@ -486,7 +511,9 @@ export const answeringProvider = async (
       await scheduler.wait(pollMs);
     }
   };
-  void look();
+  for (const each of [key, ...platformKeys]) {
+    void look(each);
+  }
   return {
     key,
     models,

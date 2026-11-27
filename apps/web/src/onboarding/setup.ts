@@ -5,24 +5,18 @@ import type {
   Plan,
   Roster,
 } from "@grasp-os/shared/onboarding";
-import type {
-  DocumentSourceId,
-  SetupChoices,
-} from "@grasp-os/shared/onboarding-choices";
+import type { DocumentSourceId } from "@grasp-os/shared/onboarding-choices";
 import type { OnboardingContext } from "@grasp-os/shared/onboarding-context";
 import { setupSteps } from "@grasp-os/shared/onboarding-flow";
 import type { SetupPlace } from "@grasp-os/shared/onboarding-flow";
-import type { KnownPart } from "@grasp-os/shared/onboarding-gate";
 
-import type { ShapeKey } from "../brain/dot-shapes.ts";
 import { lengthOf, readingTiming } from "../voice/timing.ts";
 import { addDays } from "./send-plan.ts";
 
-// The client onboarding a company's admin goes through until Grasp opens
-// (routes/setup.tsx), from the prototype's `lib/onboarding.ts`: the steps,
-// the figure the brain takes on each, and how far the interviews are, read
-// from what core keeps (the roster, the plan, numbers per team, and how
-// much Grasp knows by source). Pure.
+// The setup a company's admin goes through until Grasp opens
+// (routes/setup.tsx): the steps, where the admin is on them, and how far
+// the interviews are, read from what core keeps (the roster, the plan and
+// numbers per team). Pure.
 
 /** The onboarding's screens, in order: core keeps which of them the admin finished, by these names. */
 export const steps = setupSteps;
@@ -34,17 +28,6 @@ export type SetupStep = (typeof steps)[number];
  * onboarding. Every place below is a place on it, from 0.
  */
 export type SetupPath = readonly SetupStep[];
-
-/** The screens after the wizard, where the bottom of the screen says where things stand in a word. */
-const afterWizard: ReadonlySet<SetupStep> = new Set([
-  "listening",
-  "review",
-  "open",
-]);
-
-/** The wizard's screens on `path`, which the dots stand for: every one before the team is listened to. */
-export const wizardOf = (path: SetupPath): SetupStep[] =>
-  path.filter((step) => !afterWizard.has(step));
 
 export const isStep = (value: unknown): value is SetupStep =>
   steps.some((step) => step === value);
@@ -151,14 +134,14 @@ export const sourcesFor = (
 /** How long the interviews run unless planned otherwise, in days. */
 const listenDays = 14;
 
-/** One team as the brain lays it out: its name and head count. */
+/** One team that takes part: its name and head count. */
 interface SetupTeam {
   id: string;
   name: string;
   people: number;
 }
 
-/** The teams that take part, largest first, the way the brain lays them out. */
+/** The teams that take part, largest first. */
 export const teamsOf = (roster: Roster | null): SetupTeam[] =>
   (roster?.teams ?? [])
     .filter((team) => !team.off)
@@ -232,103 +215,6 @@ export const listeningOf = (
 export const closesOn = (plan: Pick<Plan, "start" | "days">): string =>
   addDays(plan.start, plan.days - 1);
 
-/** What the brain is drawn from on a step. */
-interface SetupFacts {
-  roster: Roster | null;
-  listening: Listening;
-  /** How much Grasp knows, in percent. */
-  known: number;
-  /** What the admin chose about what Grasp may connect. */
-  choices: SetupChoices;
-}
-
-/**
- * The figure the brain takes on each step, and how full it is: the step's
- * context, in dots. Where who is who is known, the figure is the company
- * brain itself with a nerve to each team; where the documents live, a
- * nerve to each place, drawn once the place is noted and in dashes until
- * then. What was known on another step (who is who, the tools, the HR
- * platform) stays on the brain as a nerve that runs on beyond the picture.
- */
-export const brainScene = (
-  step: SetupStep,
-  { roster, listening, known, choices }: SetupFacts
-): { shape: ShapeKey; fill: number; teams: number[] } => {
-  const teams = teamsOf(roster);
-  const hr = choices.hr?.kind === "platform";
-  const leads =
-    hr || (roster?.teams ?? []).some((team) => !team.off && team.lead !== null);
-  const documents = choices.sources.length > 0 ? 1 : 0;
-  const tools = choices.pulse === "wanted" ? 1 : 0;
-  const org = (withLeads: boolean): ShapeKey => ({
-    kind: "org",
-    teams: teams.map((team) => team.people),
-    leads: withLeads,
-    beyond: documents + tools + (hr ? 1 : 0),
-  });
-  const shapes: Record<SetupStep, ShapeKey> = {
-    welcome: { kind: "head" },
-    ai: { kind: "head" },
-    about: { kind: "head" },
-    company: org(false),
-    sources: {
-      kind: "hub",
-      linked: documentSources.map(({ id }) => choices.sources.includes(id)),
-      beyond: (roster === null ? 0 : 1) + tools,
-    },
-    documents: { kind: "sheets" },
-    pulse: { kind: "laptop" },
-    leads: org(leads),
-    team: { kind: "crowd" },
-    listening: { kind: "listen" },
-    review: { kind: "pair" },
-    open: { kind: "brain" },
-  };
-  return {
-    shape: shapes[step],
-    fill: Math.min(Math.max(known, 0), 100) / 100,
-    teams: listening.heard.map((heard, index) => {
-      const people = teams[index]?.people ?? 0;
-      return people === 0 ? 0 : heard / people;
-    }),
-  };
-};
-
-/** One dot of the bar of what Grasp knows. */
-export interface KnownDot {
-  filled: boolean;
-  /** The next to fill: it breathes. */
-  next: boolean;
-  /** A new source starts with it. */
-  first: boolean;
-}
-
-/** Each dot of the bar, in order: whether it is in, whether it is the next to fill, and whether a new source starts with it. */
-export const dotsOf = (
-  parts: readonly Pick<KnownPart, "weight" | "known">[],
-  count: number
-): KnownDot[] => {
-  const total = parts.reduce((sum, part) => sum + part.weight, 0) || 1;
-  const dots: KnownDot[] = [];
-  for (const part of parts) {
-    const own = Math.round((part.weight / total) * count);
-    const filled = Math.round(part.known * own);
-    for (let at = 0; at < own; at += 1) {
-      dots.push({
-        filled: at < filled,
-        next: false,
-        first: at === 0 && dots.length > 0,
-      });
-    }
-  }
-  const next = dots.findIndex((dot) => !dot.filled);
-  const dot = dots[next];
-  if (dot !== undefined) {
-    dot.next = true;
-  }
-  return dots;
-};
-
 /**
  * How long a line takes to say at the pace of speech, in seconds: a steady
  * pace per character, a breath after a comma and a longer one after a full
@@ -337,6 +223,12 @@ export const dotsOf = (
 export const readingSeconds = (line: string): number =>
   lengthOf(readingTiming(line));
 
+/** The screen after the team step, where the flow has one; 0 where it has no team step. */
+const afterTeam = (path: SetupPath): number => {
+  const team = stepIndex("team", path);
+  return team === -1 ? 0 : team + 1;
+};
+
 /** How far the admin went before: the furthest step, as far as core says they are. */
 export const reachedOf = (
   stored: number,
@@ -344,8 +236,8 @@ export const reachedOf = (
   path: SetupPath = steps
 ): number =>
   Math.min(
-    // A plan saved means the team is being listened to, where the flow has that.
-    Math.max(stored, plan === null ? 0 : stepIndex("listening", path), 0),
+    // A plan saved means the team was told: on past the team step, where the flow has it.
+    Math.max(stored, plan === null ? 0 : afterTeam(path), 0),
     Math.max(path.length - 1, 0)
   );
 
@@ -374,8 +266,7 @@ export const finishedAt = (
 /**
  * Where the admin can go from step `index`, having been as far as
  * `reached`: back a step always, and on a step only as far as they have
- * been. The way back, the way on and the arrow keys go by it; the dots go
- * to any step up to there by the Stepper's own `reached`.
+ * been. The frame's two arrows go by it.
  */
 export const waysFrom = (
   index: number,
@@ -412,8 +303,8 @@ export interface AiReadiness {
  * How far an admin can be, having been as far as `reached`: no further
  * than the AI step while no model is ready for calls, since every step
  * after it has Grasp's AI read or talk (`ai`; null when core can't say,
- * which holds nothing up). The dots, the arrow keys and the address all
- * go by it, so the step can't be passed without a model.
+ * which holds nothing up). StepperNav and the address go by it, so the
+ * step can't be passed without a model.
  */
 export const heldAt = (
   reached: number,
@@ -446,16 +337,17 @@ export const stepShown = (
 };
 
 /**
- * Where the AI step goes on to: the screen after it, or for an admin who
- * was sent back to it, the furthest step they `reached` before; none
- * where it is the flow's last screen.
+ * Where the AI step goes on to: the screen after it, or for an admin the
+ * setup held there on the way to a later step, the step they `asked` for;
+ * none where it is the flow's last screen. Never the furthest step they
+ * once reached: an admin walking the setup again goes through each screen.
  */
 export const afterAi = (
-  reached: number,
+  asked: number,
   path: SetupPath = steps
 ): SetupStep | undefined => {
   const next = stepIndex("ai", path) + 1;
-  return path[Math.max(reached, next)] ?? path[next];
+  return path[Math.max(asked, next)] ?? path[next];
 };
 
 /**
@@ -519,4 +411,47 @@ export const teamNumbersOf = (team: {
   return team.talked === null
     ? { shown: "asked", asked: team.asked }
     : { shown: "both", talked: team.talked, asked: team.asked };
+};
+
+/**
+ * The few parts the setup is told in, so it feels like a few steps, not a
+ * dozen screens: getting to know each other, the company, the team. The
+ * story of what happens next closes the team's part, and the setup.
+ */
+export const setupParts = [
+  ["welcome", "ai"],
+  ["company", "sources", "documents"],
+  ["leads", "team", "about"],
+] as const satisfies readonly (readonly SetupStep[])[];
+
+/**
+ * Where `step` is in the parts this `path` has: which part of how many,
+ * and how much of the whole is behind them (each part an equal share,
+ * the screens within it filling it); null for a screen in no part.
+ */
+export const partOf = (
+  step: SetupStep,
+  path: SetupPath = steps
+): { at: number; of: number; part: number; share: number } | null => {
+  const parts = setupParts
+    .map((screens, part) => ({
+      part,
+      screens: screens.filter((screen) => path.includes(screen)),
+    }))
+    .filter(({ screens }) => screens.length > 0);
+  const at = parts.findIndex(({ screens }) =>
+    screens.some((screen) => screen === step)
+  );
+  const found = parts[at];
+  if (found === undefined) {
+    return null;
+  }
+  const screens: readonly SetupStep[] = found.screens;
+  const within = screens.indexOf(step) + 1;
+  return {
+    at,
+    of: parts.length,
+    part: found.part,
+    share: (at + within / found.screens.length) / parts.length,
+  };
 };

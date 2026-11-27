@@ -43,6 +43,7 @@ import type {
   RevocationsByHand,
   ErasePersonal,
   FinishConnection,
+  FlowReturn,
   HeldCall,
   HeldIn,
   HeldOutcome,
@@ -170,6 +171,7 @@ import {
 } from "./npm.ts";
 import {
   abandonFlow,
+  flowReturn,
   connectWithKey,
   disconnect,
   disconnectPersonal,
@@ -519,6 +521,10 @@ export default class Connect
 
   async abandonFlow(state: string): Promise<void> {
     await abandonFlow(this.env, state);
+  }
+
+  async flowReturn(request: FlowReturn): Promise<string | undefined> {
+    return await flowReturn(this.env, request);
   }
 
   // Connecting a Composio toolkit (src/composio-connections.ts), for an

@@ -1,18 +1,16 @@
+import { devInterviewLinkPath } from "@grasp-os/shared/dev-reset";
 import { interviewPagePath } from "@grasp-os/shared/interview-links";
 import type { SignInOption } from "@grasp-os/shared/rpc";
 import { Button } from "@grasp-os/ui/components/button";
 import { Heading } from "@grasp-os/ui/components/heading";
-import { Text } from "@grasp-os/ui/components/text";
-import { colors, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 import { loadCoreStatus, signOut } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
-import { ErrorText } from "../error-text.tsx";
+import { TopError } from "../frame/top-error.tsx";
 import {
   isRefused,
   keepWhileSigningIn,
@@ -20,10 +18,13 @@ import {
   openSession,
 } from "../interview/api.ts";
 import type { OpenSession } from "../interview/api.ts";
+import { Actions, Page as Calm, Words } from "../interview/calm.tsx";
+import { jumpOnOpen } from "../interview/dev-jump.tsx";
+import { Frame } from "../interview/frame.tsx";
 import { holdInterview, releaseInterview } from "../interview/kept.ts";
-import { Mark } from "../interview/mark.tsx";
 import { InterviewPage } from "../interview/page.tsx";
 import { resumed } from "../interview/progress.ts";
+import { fromTheTop, gathering } from "../onboarding/field/poses.ts";
 import { signInErrorMessage, signInErrorSearch } from "../sign-in-errors.ts";
 import { SignInOptions } from "../sign-in-options.tsx";
 
@@ -53,8 +54,92 @@ type Page =
   | { state: "sign_in"; secret: string; options: SignInOption[] }
   | { state: "open"; secret: string; session: OpenSession };
 
+/**
+ * Asks to sign in, keeping `secret` in this tab while they are away; or
+ * says the link opens nothing when core can't say how to sign in.
+ */
+const askToSignIn = async (
+  secret: string,
+  core: CoreConnection
+): Promise<Page> => {
+  const { connected, signInOptions } = await loadCoreStatus(core);
+  if (!connected) {
+    return { state: "refused", secret, message: "", signedIn: false };
+  }
+  // Kept in this tab while they are away signing in, and taken back as
+  // the page opens again (`linkSecret`).
+  keepWhileSigningIn(secret);
+  // Grasp's staff open nobody's interview: only the company's sign-in.
+  return {
+    state: "sign_in",
+    secret,
+    options: signInOptions.filter(({ staff }) => !staff),
+  };
+};
+
+/**
+ * On a local stack only (`vp run dev`): `/interview#dev` opens the link
+ * of whoever is signed in, or else noor@acme.test's, as it is now, so one
+ * address keeps working however often the onboarding starts over (core's
+ * onboarding/dev-reset.ts). The address takes that link's secret, which
+ * opens the page again; `?jump=` stays. A build for anywhere else has no
+ * such alias: Vite leaves it out, and core has no such route there.
+ */
+const devAlias = "dev";
+
+/**
+ * The secret the alias last led to, in this tab: if even that one is
+ * refused, the page says why instead of going round again.
+ */
+let devGiven: string | null = null;
+
+/**
+ * On a local stack, whether a refusal of `secret` goes to the alias
+ * instead: a link from before the onboarding started over, one made up,
+ * none at all, or one paused, closed or not yet open, all open the
+ * interview that works now. Never the alias's own, nor in a build.
+ */
+const fallsBackToDev = (secret: string): boolean =>
+  import.meta.env.DEV &&
+  // Tests hold the page to how it is for everyone else.
+  import.meta.env.MODE !== "test" &&
+  secret !== devAlias &&
+  secret !== devGiven;
+
+const openDevAlias = async (core: CoreConnection): Promise<Page> => {
+  const response = await fetch(devInterviewLinkPath, { method: "POST" });
+  if (response.status === 401) {
+    return await askToSignIn(devAlias, core);
+  }
+  const found: unknown = response.ok ? await response.json() : null;
+  const path =
+    typeof found === "object" && found !== null && "path" in found
+      ? String(found.path)
+      : "";
+  const [, secret = ""] = path.split("#");
+  if (secret === "") {
+    return {
+      state: "refused",
+      secret: devAlias,
+      message: "No interview link could be made on this local stack.",
+      signedIn: false,
+    };
+  }
+  devGiven = secret;
+  window.location.replace(
+    `${window.location.pathname}${window.location.search}#${secret}`
+  );
+  return { state: "loading", secret: devAlias };
+};
+
 /** Opens the link for whoever is signed in, or asks them to sign in. */
 const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
+  if (import.meta.env.DEV && secret === devAlias) {
+    return await openDevAlias(core);
+  }
+  if (secret === "" && fallsBackToDev(secret)) {
+    return await openDevAlias(core);
+  }
   if (secret === "") {
     return {
       state: "refused",
@@ -65,6 +150,9 @@ const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
   }
   const answer = await openSession(secret);
   if (isRefused(answer)) {
+    if (answer.code !== "interview.sign_in" && fallsBackToDev(secret)) {
+      return await openDevAlias(core);
+    }
     if (answer.code !== "interview.sign_in") {
       return {
         state: "refused",
@@ -73,19 +161,7 @@ const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
         signedIn: answer.code === "interview.link_invalid",
       };
     }
-    const { connected, signInOptions } = await loadCoreStatus(core);
-    if (!connected) {
-      return { state: "refused", secret, message: "", signedIn: false };
-    }
-    // Kept in this tab while they are away signing in, and taken back as
-    // the page opens again (`linkSecret`).
-    keepWhileSigningIn(secret);
-    // Grasp's staff open nobody's interview: only the company's sign-in.
-    return {
-      state: "sign_in",
-      secret,
-      options: signInOptions.filter(({ staff }) => !staff),
-    };
+    return await askToSignIn(secret, core);
   }
   // Back on the link after stopping, it carries on where it was.
   holdInterview({
@@ -94,43 +170,14 @@ const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
     version: answer.version,
     progress: answer.progress === null ? null : resumed(answer.progress),
   });
+  // On a local stack, `?jump=` puts the interview where it asks first.
+  await jumpOnOpen(secret);
   return { state: "open", secret, session: answer };
 };
 
-const styles = stylex.create({
-  page: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: space["6"],
-    boxSizing: "border-box",
-    minHeight: "100svh",
-    paddingInline: space["4"],
-    textAlign: "center",
-    backgroundColor: colors.background,
-  },
-  words: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: space["3"],
-    maxWidth: "24rem",
-  },
-  // The way in, under what there is to say.
-  signIn: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: space["4"],
-    width: "100%",
-    maxWidth: "24rem",
-  },
-});
-
 /**
- * Why the link opens no interview here, laid out as calm as the prototype's
- * (`routes/i/$code.tsx`): the mark, and what there is to say.
+ * Why the link opens no interview here, in the interview's own calm frame:
+ * the serif title, one line under it, and what they can do about it.
  */
 const Notice = ({
   title,
@@ -145,33 +192,29 @@ const Notice = ({
   /** What they can do about it, under what there is to say. */
   children?: ReactNode;
 }) => (
-  <main {...stylex.props(styles.page)}>
-    <Mark size="lg" />
-    <div {...stylex.props(styles.words)}>
-      <Heading level={1} size="default">
-        {title}
-      </Heading>
-      {failed ? (
-        <ErrorText>{message}</ErrorText>
-      ) : (
-        <Text color="muted">{message}</Text>
-      )}
-    </div>
-    {children}
-  </main>
+  <Frame pose={fromTheTop}>
+    <Calm>
+      {/* A refusal is said in the bar at the top, as every error is; the page keeps its title. */}
+      <Words line={failed ? undefined : message} title={title} />
+      {failed ? <TopError>{message}</TopError> : null}
+      {children === undefined ? null : <Actions>{children}</Actions>}
+    </Calm>
+  </Frame>
 );
 
+/** While the link opens: Stephen gathered round the words, in his serif, until the screen it opens takes him on. */
 const Loading = () => {
   const { t } = useLingui();
   return (
-    <main {...stylex.props(styles.page)}>
-      <Mark size="lg" />
-      <output>
-        <Text as="span" color="muted">
-          {t`Opening your interview…`}
-        </Text>
-      </output>
-    </main>
+    <Frame pose={gathering}>
+      <Calm>
+        <output>
+          <Heading level={1} size="lg">
+            {t`Opening your conversation…`}
+          </Heading>
+        </output>
+      </Calm>
+    </Frame>
   );
 };
 
@@ -211,7 +254,7 @@ const signInRefusal = (error: string, wrongAccount: string): string =>
 
 /**
  * Before the interview: the company's sign-in, and that it is recorded
- * there, said before the button (GRA-1790).
+ * there, said before the button (GRA-1790), in the line under the title.
  */
 const SignIn = ({
   options,
@@ -222,29 +265,37 @@ const SignIn = ({
 }) => {
   const { t } = useLingui();
   return (
-    <Notice
-      message={t`Use your work account, the one your link was sent to.`}
-      title={t`Sign in to open your interview`}
-    >
-      <div {...stylex.props(styles.signIn)}>
-        <Text color="muted">
-          {t`Signing in is recorded by your company's sign-in, as every sign-in is.`}
-        </Text>
-        <ErrorText>
-          {error === undefined
-            ? undefined
-            : signInRefusal(
-                error,
-                t`That account can't open this interview. Sign in with the work account your link was sent to.`
-              )}
-        </ErrorText>
-        <SignInOptions
-          error={undefined}
-          options={options}
-          returnTo={interviewPagePath}
+    <Frame pose={fromTheTop}>
+      <Calm>
+        <Words
+          line={
+            // One sentence a line: which account, then that it is recorded.
+            <>
+              {t`Use the work account your link was sent to.`}
+              <br />
+              {t`Your company’s sign-in records it, like every sign-in.`}
+            </>
+          }
+          title={t`Sign in to open your conversation`}
         />
-      </div>
-    </Notice>
+        <Actions>
+          <TopError>
+            {error === undefined
+              ? undefined
+              : signInRefusal(
+                  error,
+                  t`That account can't open this interview. Sign in with the work account your link was sent to.`
+                )}
+          </TopError>
+          <SignInOptions
+            error={undefined}
+            fit
+            options={options}
+            returnTo={interviewPagePath}
+          />
+        </Actions>
+      </Calm>
+    </Frame>
   );
 };
 

@@ -7,7 +7,7 @@
 //
 // Each goes to the provider and model the platform's settings name
 // (@grasp-os/shared/platform-ai), with Grasp's own key, which connect
-// holds: Mistral says lines, OpenAI writes down what is heard.
+// holds: ElevenLabs says lines, OpenAI and Mistral write down what is heard.
 //
 // Speech is core's src/speech.ts, said for the onboarding's pages at
 // `POST /api/speech` (core's src/onboarding/speech.ts). Live transcription
@@ -156,6 +156,12 @@ export const speechRequestSchema = z.strictObject({
   tone: z.enum(voiceTags).optional(),
   /** Someone's interview link: its secret (the session says whose it is). */
   link: z.strictObject({ secret: interviewSecretSchema }).optional(),
+  /**
+   * Answered as the line is made ({@link SpeechStreamEvent}), so the page
+   * plays its start while the rest is still coming: for a line someone
+   * waits to hear, as in an interview.
+   */
+  stream: z.boolean().default(false),
 });
 export type SpeechRequestBody = z.input<typeof speechRequestSchema>;
 
@@ -168,6 +174,20 @@ export interface SpeechAnswer {
   /** The words of the line as written, and when each is said. */
   words: SpokenWord[];
 }
+
+/** The media type of a line answered as it is made: a line of JSON for each {@link SpeechStreamEvent}. */
+export const speechStreamMime = "application/x-ndjson";
+
+/**
+ * A line as `POST /api/speech` answers it with `stream`, an event at a
+ * time: its audio, base64, in order when it comes in more than one piece
+ * (together they are one file); then the words of the line and when each
+ * is said; or that it broke off, after which nothing comes.
+ */
+export type SpeechStreamEvent =
+  | { audio: string }
+  | { words: SpokenWord[] }
+  | { failed: true };
 
 /** Why a line wasn't said. */
 export const speechErrors = defineErrorFamily({

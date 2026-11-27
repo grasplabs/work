@@ -218,7 +218,6 @@ const SOURCE: Record<KnowledgeSource, string> = {
   directory: "who works where, from the sign-in",
   sources: "where the documents live",
   documents: "documents dropped in",
-  pulse: "Pulse",
   leadsKnown: "team leads named",
   leadsHeard: "team leads interviewed",
   everyoneHeard: "everyone else interviewed",

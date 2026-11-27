@@ -1,1 +1,74 @@
-[]
+[
+  {
+    "path": "src/blocks/connect-api-key-01/connect-api-key-01.tsx",
+    "reason": "A columns prop, the most tiles in a row, so four providers stand two and two and not three and one; and bare, without its card, for a page whose own title says what the card's would. And formId, so a page's own button (a setup's Continue) sends the key form too; Connect sits inside the key's field at its end, not in a row under it; and Change always goes back to every provider, also while a key is replaced. And onRefused, for a page that says every error in one place of its own: a refused key goes there, not under the field.",
+    "since": "2026-11-26"
+  },
+  {
+    "path": "src/components/collapsible.tsx",
+    "reason": "A plain variant with no fill, and a trigger that takes Text's size and weight, so a page keeps one body style; with fitContent it no longer wraps in a box that shrinks to fit.",
+    "since": "2026-11-24",
+    "pullRequest": "https://github.com/grasplabs/damsko/pull/66"
+  },
+  {
+    "path": "src/components/command.tsx",
+    "reason": "CommandDialog takes size=\"large\": wider, on the window's middle, its list one height whatever it shows, so the panel holds still while someone types. The onboarding's app search is the step's one question, not a quick jump.",
+    "since": "2026-11-26"
+  },
+  {
+    "path": "src/components/file-upload.tsx",
+    "reason": "In the dropzone, Choose files is underlined words in its line, as a link in a sentence, not an outline button: the dropzone is already the place to act. Made taller by a minHeight on the upload, its icon and line stay together in its middle.",
+    "since": "2026-11-25"
+  },
+  {
+    "path": "src/components/item.tsx",
+    "reason": "A one-line description is cut at the row's edge: in Connect API key a long region ran out of its tile. And ItemGrid's columns, so many tiles a row from a small window up: seven places stand three, three and one.",
+    "since": "2026-11-24"
+  },
+  {
+    "path": "src/components/prompt-input-heard.tsx",
+    "reason": "New: what a dictation hears is written in the prompt input's text as it is heard, each word flown up from the voice's field in the bar and faded in where it lands.",
+    "since": "2026-11-25"
+  },
+  {
+    "path": "src/components/prompt-input-voice-field.ts",
+    "reason": "Its grade and the other voice's are exported: the voice's hill is drawn in the same light.",
+    "since": "2026-11-25"
+  },
+  {
+    "path": "src/components/prompt-input-voice-hill.ts",
+    "reason": "New: the voice drawn as the system's dither rising from the card's foot, a hill with drifting humps, in the field's place.",
+    "since": "2026-11-25"
+  },
+  {
+    "path": "src/components/prompt-input.tsx",
+    "reason": "A voice is drawn as the hill (prompt-input-voice-hill.ts) in the field's place, on a canvas that reaches from the bar's foot to its top (in a compact card, from the card's foot). And timed={false} on PromptInputVoice leaves the running time out, where the page keeps its own. And what a dictation hears is drawn in the text word by word (prompt-input-heard.tsx), in place of the lighter words after it. A voice's mute shows the microphone struck through while it is off, named Unmute, with no held fill; and its close is the words Type instead, not an X.",
+    "since": "2026-11-25"
+  },
+  {
+    "path": "src/components/select.tsx",
+    "reason": "A tooltip prop on the trigger, drawn as Button's, for a select among a bar's tools: a Tooltip wrapped round it never opened.",
+    "since": "2026-11-24"
+  },
+  {
+    "path": "src/components/theme-toggle.tsx",
+    "reason": "The icon button's sizes under Button's names and at Button's heights (its sm was Button's xs), and a tooltip as Button's, its name by default.",
+    "since": "2026-11-24"
+  },
+  {
+    "path": "src/lib/i18n.tsx",
+    "reason": "speechButton.unmute, the name of a voice's mute while it is off; and voice.close as Type instead, for the words button that gives the text back.",
+    "since": "2026-11-26"
+  },
+  {
+    "path": "src/lib/icons.ts",
+    "reason": "The filled forms of the message and pause icons, for a header whose icons are filled.",
+    "since": "2026-11-24",
+    "pullRequest": "https://github.com/grasplabs/damsko/pull/66"
+  },
+  {
+    "path": "src/lib/word-flight.ts",
+    "reason": "New: the small squares that carry a heard word from the voice's field to its place in the text, for the prompt input's dictation and the interview's composer.",
+    "since": "2026-11-25"
+  }
+]

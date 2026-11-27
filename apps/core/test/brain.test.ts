@@ -291,7 +291,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
         ({ status }) => status === "available"
       ),
     }).toStrictEqual({
-      company: { name: "Organization", sector: "", people: 0 },
+      company: { name: "Acme", sector: "", people: 0 },
       vision: {
         ambition: "",
         whyNow: "",
@@ -341,7 +341,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
         .every(({ status }) => status === "available"),
     }).toStrictEqual({
       company: {
-        name: "Organization",
+        name: "Acme",
         sector: "An accounting firm in Utrecht.",
         people: 4,
       },
@@ -440,7 +440,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       sources: asMember.sources,
       mail: asMember.connections.filter(({ name }) => name === "mail"),
     }).toStrictEqual({
-      company: { name: "Organization", sector: "", people: 0 },
+      company: { name: "Acme", sector: "", people: 0 },
       vision: { ...workspace.vision, inviteTeamIds: [] },
       teams: [
         {

@@ -14,6 +14,11 @@ import {
   connectionCallbackPath,
   connectorClientMetadataPath,
 } from "@grasp-os/shared/connect";
+import {
+  devInterviewLinkPath,
+  devResetPath,
+  devVoiceBudgetPath,
+} from "@grasp-os/shared/dev-reset";
 import { errorReportPath } from "@grasp-os/shared/error-reports";
 import { internalErrors, requestErrors } from "@grasp-os/shared/errors";
 import { requestIdHeader } from "@grasp-os/shared/http";
@@ -23,7 +28,6 @@ import {
   interviewPagePath,
 } from "@grasp-os/shared/interview-links";
 import { interviewStoryPath } from "@grasp-os/shared/interview-story";
-import { interviewTurnPath } from "@grasp-os/shared/interview-turn";
 import { interviewVoicePath } from "@grasp-os/shared/interview-voice";
 import { labPath } from "@grasp-os/shared/lab";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -75,8 +79,12 @@ import { docsResponse } from "./docs.ts";
 import { errorReportResponse } from "./error-reports.ts";
 import { errorResponse } from "./errors.ts";
 import { mailIngressResponse } from "./mail-ingress.ts";
+import {
+  devInterviewLinkResponse,
+  devResetResponse,
+  devVoiceBudgetResponse,
+} from "./onboarding/dev-reset.ts";
 import { hearResponse } from "./onboarding/hear.ts";
-import { interviewTurnResponse } from "./onboarding/interview.ts";
 import { labResponse } from "./onboarding/lab.ts";
 import { interviewResponse } from "./onboarding/links.ts";
 import { speechResponse } from "./onboarding/speech.ts";
@@ -231,9 +239,6 @@ const linkResponse = async (
   if (pathname === interviewApiPath) {
     return await interviewResponse(request, env, requestId);
   }
-  if (pathname === interviewTurnPath) {
-    return await interviewTurnResponse(request, env, requestId, ctx);
-  }
   if (pathname === interviewVoicePath) {
     return await interviewVoiceResponse(request, env, requestId, ctx);
   }
@@ -358,6 +363,9 @@ const pathHandlers: ReadonlyMap<
   [auditExportPath, auditExportResponse],
   [errorReportPath, errorReportResponse],
   [onboardingSummaryPath, onboardingSummaryResponse],
+  [devResetPath, devResetResponse],
+  [devInterviewLinkPath, devInterviewLinkResponse],
+  [devVoiceBudgetPath, devVoiceBudgetResponse],
   [adminSummaryPath, adminSummaryResponse],
   [aiStatusReportPath, aiStatusReportResponse],
   [brainReportPath, brainReportResponse],

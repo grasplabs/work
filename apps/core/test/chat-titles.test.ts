@@ -378,7 +378,7 @@ describe("a new chat's title", () => {
         period: spendMonth(env),
         personId: "grasp-ai-limit-test",
         triggerType: "person",
-        model: graspAi.model,
+        model: graspAi.models[0].model,
         credential: "platform",
         feature: "organization",
         inputTokens: 0,
@@ -393,7 +393,10 @@ describe("a new chat's title", () => {
       const question = "What changed in the supplier contract?";
       const chat = await startedChat(ann, seedTitleOf(question));
       const refused = await outcome(
-        ann.api.chats.send(chat.id, { text: question, model: graspAi.model })
+        ann.api.chats.send(chat.id, {
+          text: question,
+          model: graspAi.models[0].model,
+        })
       );
       expect({
         refused,

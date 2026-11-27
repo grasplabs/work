@@ -47,6 +47,7 @@ import { Route as ShellSettingsAppearanceRouteImport } from './routes/_shell.set
 import { Route as ShellSettingsAuditRouteImport } from './routes/_shell.settings.audit'
 import { Route as ShellSettingsBillingRouteImport } from './routes/_shell.settings.billing'
 import { Route as ShellSettingsInstructionsRouteImport } from './routes/_shell.settings.instructions'
+import { Route as ShellSettingsInterviewsRouteImport } from './routes/_shell.settings.interviews'
 import { Route as ShellSettingsMembersRouteImport } from './routes/_shell.settings.members'
 import { Route as ShellSettingsOnboardingRouteImport } from './routes/_shell.settings.onboarding'
 import { Route as ShellSettingsProfileRouteImport } from './routes/_shell.settings.profile'
@@ -258,6 +259,11 @@ const ShellSettingsInstructionsRoute =
     path: '/instructions',
     getParentRoute: () => ShellSettingsRoute,
   } as any)
+const ShellSettingsInterviewsRoute = ShellSettingsInterviewsRouteImport.update({
+  id: '/interviews',
+  path: '/interviews',
+  getParentRoute: () => ShellSettingsRoute,
+} as any)
 const ShellSettingsMembersRoute = ShellSettingsMembersRouteImport.update({
   id: '/members',
   path: '/members',
@@ -383,6 +389,7 @@ export interface FileRoutesByFullPath {
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/billing': typeof ShellSettingsBillingRoute
   '/settings/instructions': typeof ShellSettingsInstructionsRoute
+  '/settings/interviews': typeof ShellSettingsInterviewsRoute
   '/settings/members': typeof ShellSettingsMembersRoute
   '/settings/onboarding': typeof ShellSettingsOnboardingRoute
   '/settings/profile': typeof ShellSettingsProfileRoute
@@ -438,6 +445,7 @@ export interface FileRoutesByTo {
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/billing': typeof ShellSettingsBillingRoute
   '/settings/instructions': typeof ShellSettingsInstructionsRoute
+  '/settings/interviews': typeof ShellSettingsInterviewsRoute
   '/settings/members': typeof ShellSettingsMembersRoute
   '/settings/onboarding': typeof ShellSettingsOnboardingRoute
   '/settings/profile': typeof ShellSettingsProfileRoute
@@ -497,6 +505,7 @@ export interface FileRoutesById {
   '/_shell/settings/audit': typeof ShellSettingsAuditRoute
   '/_shell/settings/billing': typeof ShellSettingsBillingRoute
   '/_shell/settings/instructions': typeof ShellSettingsInstructionsRoute
+  '/_shell/settings/interviews': typeof ShellSettingsInterviewsRoute
   '/_shell/settings/members': typeof ShellSettingsMembersRoute
   '/_shell/settings/onboarding': typeof ShellSettingsOnboardingRoute
   '/_shell/settings/profile': typeof ShellSettingsProfileRoute
@@ -556,6 +565,7 @@ export interface FileRouteTypes {
     | '/settings/audit'
     | '/settings/billing'
     | '/settings/instructions'
+    | '/settings/interviews'
     | '/settings/members'
     | '/settings/onboarding'
     | '/settings/profile'
@@ -611,6 +621,7 @@ export interface FileRouteTypes {
     | '/settings/audit'
     | '/settings/billing'
     | '/settings/instructions'
+    | '/settings/interviews'
     | '/settings/members'
     | '/settings/onboarding'
     | '/settings/profile'
@@ -669,6 +680,7 @@ export interface FileRouteTypes {
     | '/_shell/settings/audit'
     | '/_shell/settings/billing'
     | '/_shell/settings/instructions'
+    | '/_shell/settings/interviews'
     | '/_shell/settings/members'
     | '/_shell/settings/onboarding'
     | '/_shell/settings/profile'
@@ -977,6 +989,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellSettingsInstructionsRouteImport
       parentRoute: typeof ShellSettingsRoute
     }
+    '/_shell/settings/interviews': {
+      id: '/_shell/settings/interviews'
+      path: '/interviews'
+      fullPath: '/settings/interviews'
+      preLoaderRoute: typeof ShellSettingsInterviewsRouteImport
+      parentRoute: typeof ShellSettingsRoute
+    }
     '/_shell/settings/members': {
       id: '/_shell/settings/members'
       path: '/members'
@@ -1138,6 +1157,7 @@ interface ShellSettingsRouteChildren {
   ShellSettingsAuditRoute: typeof ShellSettingsAuditRoute
   ShellSettingsBillingRoute: typeof ShellSettingsBillingRoute
   ShellSettingsInstructionsRoute: typeof ShellSettingsInstructionsRoute
+  ShellSettingsInterviewsRoute: typeof ShellSettingsInterviewsRoute
   ShellSettingsMembersRoute: typeof ShellSettingsMembersRoute
   ShellSettingsOnboardingRoute: typeof ShellSettingsOnboardingRoute
   ShellSettingsProfileRoute: typeof ShellSettingsProfileRoute
@@ -1154,6 +1174,7 @@ const ShellSettingsRouteChildren: ShellSettingsRouteChildren = {
   ShellSettingsAuditRoute: ShellSettingsAuditRoute,
   ShellSettingsBillingRoute: ShellSettingsBillingRoute,
   ShellSettingsInstructionsRoute: ShellSettingsInstructionsRoute,
+  ShellSettingsInterviewsRoute: ShellSettingsInterviewsRoute,
   ShellSettingsMembersRoute: ShellSettingsMembersRoute,
   ShellSettingsOnboardingRoute: ShellSettingsOnboardingRoute,
   ShellSettingsProfileRoute: ShellSettingsProfileRoute,

@@ -226,6 +226,58 @@ describe("connecting an account", () => {
     );
   });
 
+  it("returns a sign-in the setup started, and the provider refused, to that step with why", async () => {
+    const anna = await person();
+    const { url } = await anna.connections.start({
+      provider: "microsoft",
+      scope: "personal",
+      returnTo: "/setup?step=company",
+    });
+    const authorization = new URL(url);
+    const refused = await backFromProvider(anna.session, {
+      error: "access_denied",
+      state: authorization.searchParams.get("state") ?? "",
+    });
+    expect(refused.headers.get("location")).toBe(
+      `${clientOrigin}/setup?step=company&connectionError=connection.provider_refused`
+    );
+  });
+
+  it("returns a failed sign-in to where it started only for the person who started it", async () => {
+    const anna = await person();
+    const mallory = await person();
+    const { url } = await mallory.connections.start({
+      provider: "microsoft",
+      scope: "personal",
+      returnTo: "/setup?step=sources",
+    });
+    const authorization = new URL(url);
+    const swapped = await backFromProvider(anna.session, {
+      error: "access_denied",
+      state: authorization.searchParams.get("state") ?? "",
+    });
+    expect(swapped.headers.get("location")).toBe(
+      `${clientOrigin}/connectors?connectionError=connection.flow_invalid`
+    );
+  });
+
+  it("returns a failed sign-in started elsewhere to the Integrations page", async () => {
+    const anna = await person();
+    const { url } = await anna.connections.start({
+      provider: "microsoft",
+      scope: "personal",
+      returnTo: "/connectors/microsoft",
+    });
+    const authorization = new URL(url);
+    const refused = await backFromProvider(anna.session, {
+      error: "access_denied",
+      state: authorization.searchParams.get("state") ?? "",
+    });
+    expect(refused.headers.get("location")).toBe(
+      `${clientOrigin}/connectors?connectionError=connection.provider_refused`
+    );
+  });
+
   it("sends the browser back only to a path on this origin", async () => {
     const anna = await person();
     const elsewhere = [

@@ -1,4 +1,6 @@
 import {
+  agentConfigPath,
+  agentTokenQuery,
   aiCredentialPlaceholder,
   aiGrantHeader,
   aiKeyErrors,
@@ -100,11 +102,10 @@ import { resealBatchSize, vaultFor } from "./vault.ts";
 //   both ends and passes each message on as it comes, keeping and logging
 //   none; when either end closes, so does the other, and both close at the
 //   grant's deadline.
-// - A voice session (`sessions`, Mistral's voice agents for Grasp's
-//   interviews): opened by a POST to the provider's sessions path, read
-//   or closed by the GET or DELETE its grant names, only at that path and
-//   a session's ID below it, and only on Grasp's own key. The browser then
-//   joins the session's room itself: its audio never passes connect.
+// - An agent's conversation token (`agentTokens`, ElevenLabs's agents for
+//   Grasp's interviews): a GET its grant names, at that one path with the
+//   agent's ID as its one query, and only on Grasp's own key. The browser
+//   joins the conversation with the token alone.
 // - A relay that sends the keys somewhere else (`AI_PROVIDER_ORIGIN`, where
 //   an on-prem deployment's fixed-provider requests go instead of the
 //   provider's own host): taken only on-prem, only at a private host the
@@ -521,6 +522,22 @@ const carriesPlaceholder = (
     : request.headers.get(keyHeader) === aiCredentialPlaceholder;
 };
 
+/** One ID a `*` path segment stands for: letters and digits, nothing else. */
+const idSegment = /^[A-Za-z0-9]{1,64}$/u;
+
+/** Whether `pathname` is `path`, each `*` segment of it one ID. */
+const matchesPath = (pathname: string, path: string): boolean => {
+  const asked = pathname.split("/");
+  const allowed = path.split("/");
+  return (
+    asked.length === allowed.length &&
+    allowed.every((segment, index) => {
+      const given = asked[index] ?? "";
+      return segment === "*" ? idSegment.test(given) : segment === given;
+    })
+  );
+};
+
 /** Whether `url` is one of the provider's model endpoints, at `base`. */
 const isModelEndpoint = (
   url: URL,
@@ -531,39 +548,38 @@ const isModelEndpoint = (
   // A fixed provider's paths are whole; a custom endpoint's sit below its
   // base URL's own path.
   const custom = provider === "openai-compatible";
-  return aiProviders[provider].paths.some(
-    (path) => url.pathname === (custom ? `${prefix}${path}` : path)
+  return aiProviders[provider].paths.some((path) =>
+    matchesPath(url.pathname, custom ? `${prefix}${path}` : path)
   );
 };
-
-/** A voice session's ID in a path: nothing that reads as more of one. */
-const sessionIdPattern = /^[\w-]{1,128}$/u;
 
 /**
- * Whether `url` is the provider's live voice sessions (`sessions`), to
- * open one (POST), or one of them by its ID, to read or close it (GET,
- * DELETE): on Grasp's own key alone.
+ * Whether `url` asks for a conversation token of one of the provider's
+ * agents (`agentTokens`), with the agent's ID as its one query, or reads
+ * how one of them is set up (`agentConfigPath`, no query): a GET, on
+ * Grasp's own key alone.
  */
-const isSessionEndpoint = (
+const isAgentTokenEndpoint = (
   url: URL,
-  claims: ModelGrantClaims,
+  claims: Pick<ModelGrantClaims, "provider" | "credential">,
   method: string
 ): boolean => {
-  const { sessions } = aiProviders[claims.provider];
-  if (sessions === undefined || claims.credential !== "platform") {
+  const { agentTokens } = aiProviders[claims.provider];
+  if (
+    agentTokens === undefined ||
+    claims.credential !== "platform" ||
+    method !== "GET"
+  ) {
     return false;
   }
-  if (method === "POST") {
-    return url.pathname === sessions;
-  }
-  const prefix = `${sessions}/`;
+  // Its conversation token, or how the agent is set up (its voice): one path each, nothing more.
   return (
-    url.pathname.startsWith(prefix) &&
-    sessionIdPattern.test(url.pathname.slice(prefix.length))
+    (url.pathname === agentTokens && agentTokenQuery.test(url.search)) ||
+    (agentConfigPath.test(url.pathname) && url.search === "")
   );
 };
 
-/** Whether `url` is a model endpoint a POST goes to, or a voice session's. */
+/** Whether `url` is a model endpoint a POST goes to, or an agent's token. */
 const isEndpoint = (
   url: URL,
   claims: ModelGrantClaims,
@@ -571,7 +587,7 @@ const isEndpoint = (
   method: string
 ): boolean =>
   (method === "POST" && isModelEndpoint(url, claims.provider, base)) ||
-  isSessionEndpoint(url, claims, method);
+  isAgentTokenEndpoint(url, claims, method);
 
 /** Where the credential for `claims` may be sent, and the key. */
 interface Destination {
@@ -627,13 +643,18 @@ const socketOpenMs = 10_000;
 const sendsToBase = (
   url: URL,
   base: URL,
-  provider: AiProviderId,
+  claims: ModelGrantClaims,
   policy: EndpointPolicy
 ): boolean => {
+  const { provider } = claims;
   const checked = checkEndpoint(url.href, policy);
   // The query a model request may carry: exactly one its provider names
-  // (`queries`), none only where it names `""`.
-  const query = aiProviders[provider].queries.includes(url.search);
+  // (`queries`), none only where it names `""`. ElevenLabs's must be its
+  // own, so a line is never sent with logging left on. An agent's token is
+  // asked with the agent's ID alone (`agentTokenQuery`).
+  const query =
+    aiProviders[provider].queries.includes(url.search) ||
+    isAgentTokenEndpoint(url, claims, claims.method ?? "POST");
   return (
     !("refused" in checked) &&
     url.origin === base.origin &&
@@ -809,7 +830,7 @@ export const modelFetch = async (
   const url = new URL(request.url);
   if (
     url.hostname !== claims.host ||
-    !sendsToBase(url, base, claims.provider, policyOf(env))
+    !sendsToBase(url, base, claims, policyOf(env))
   ) {
     return refused("endpoint", claims);
   }
@@ -839,8 +860,8 @@ export const modelFetch = async (
     answered = await aiRoute(env).fetch(sending.to, {
       method,
       headers,
-      // Reading or closing a session sends no body; its grant's hash is
-      // of none, so none came.
+      // Asking for an agent's token sends no body; its grant's hash is of
+      // none, so none came.
       body: method === "POST" ? body : undefined,
       redirect: "manual",
       signal: AbortSignal.any([

@@ -108,7 +108,7 @@ describe("an onboarding flow", () => {
   it("reads a kept flow back, and one that can't be read as all of it", () => {
     const short: OnboardingFlow = {
       ...defaultFlow,
-      steps: stepsOf(flowSteps, ["pulse"]),
+      steps: stepsOf(flowSteps, ["documents"]),
     };
     expect({
       kept: storedFlowOf(JSON.stringify(short)),
@@ -151,7 +151,7 @@ describe("an onboarding flow", () => {
   it("asks for the sources its steps give, so what Grasp knows is a share of what is asked", () => {
     const short: OnboardingFlow = {
       ...defaultFlow,
-      steps: stepsOf(flowSteps, ["documents", "pulse", "interviews"]),
+      steps: stepsOf(flowSteps, ["documents", "interviews"]),
       grasp: { ...defaultFlow.grasp, kickoff: false },
     };
     expect({
@@ -167,7 +167,6 @@ describe("an onboarding flow", () => {
         "people",
         "sources",
         "documents",
-        "tools",
         "leads",
         "conversations",
         "review",
@@ -189,20 +188,16 @@ describe("an onboarding flow", () => {
         flowOpening(flow),
       ])
     ).toStrictEqual([
-      ["full", true, [...setupSteps], "go"],
+      [
+        "full",
+        true,
+        setupSteps.filter((step) => !["review", "open"].includes(step)),
+        "go",
+      ],
       [
         "short",
         true,
-        [
-          "welcome",
-          "ai",
-          "company",
-          "leads",
-          "team",
-          "listening",
-          "review",
-          "open",
-        ],
+        ["welcome", "ai", "company", "leads", "team", "listening"],
         "go",
       ],
       [
@@ -236,17 +231,26 @@ describe("an onboarding flow", () => {
     });
   });
 
-  it("puts the interviews' screens last, wherever the flow has the step", () => {
+  it("puts the interviews' screens last, the story of what comes next after telling the team, and the page the interviews are watched on at the end, wherever the flow has the steps", () => {
     const early = {
       ...defaultFlow,
-      steps: stepsOf(moved("interviews", "sources")),
+      steps: stepsOf([
+        "about",
+        "welcome",
+        "ai",
+        "company",
+        "interviews",
+        "sources",
+        "documents",
+        "leads",
+      ]),
     };
     expect({
       step: order(early)[4],
-      screens: flowScreens(early).slice(-5),
+      screens: flowScreens(early).slice(-4),
     }).toStrictEqual({
       step: "interviews",
-      screens: ["leads", "team", "listening", "review", "open"],
+      screens: ["leads", "team", "about", "listening"],
     });
   });
 

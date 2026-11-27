@@ -17,18 +17,18 @@ export const labMarks: Record<
   Record<InterviewLocale, string>
 > = {
   own: {
-    en: "dde21eba640bbc929bce25640cff8b7c8c6bd7db414e0882c58ce2848cc318ad",
-    nl: "340011328024b7f6f55c2aa66617cb66e93a694497d55d28185844c3a3c2233f",
-    de: "d971f7b29ca96360bd797f01c85397d5762de38887cf1e101832f47e32789572",
-    fr: "4ca136d91dab319fdaf710bcc224bd014880a8c0bff2731a2c5c6aa177149ba3",
-    es: "4910b8b55df5f335724e71db96216c78fe99d189bd00f61bce82eac07fe48e84",
+    en: "7f1d7d0430c88c9673900ce8b272ee267f1762c4d2c0f85601777721be525486",
+    nl: "a40a1589a3801560139382f64607d097180262deb8bd793253ceb7804b53ab7b",
+    de: "5e42a604d0755cd34668776763d7a7507bafc2ab1e75332e16e7db0a73910ac0",
+    fr: "ef02280b849fce1c95099f89967436e0e27c7eb0ae643a0f0ade6078d4cbc7b8",
+    es: "739a4b5662710a2ac1b0328b739cb234e6b1e81d6c3c6c3245884d8088147b59",
   },
   lead: {
-    en: "200760d265c2bcf280abd478457ea36c49532846f295dda59125614d7e86735f",
-    nl: "b57c685b5ffe89f5586a71ba8f7bd014b479539ea0d1f31afff7ad00a7db95bf",
-    de: "1cfa326a1129e2b18e21345bb89b492e9d59617d5ed8b33d05b994fcca5fddd3",
-    fr: "be2167b95e372312456ce338cd8d08f5e1b663de68340a270b5a0a375e339a59",
-    es: "e4f17ed9362162067e5d752670f2bf939466b5212a83036dd431a9d2c5cb3777",
+    en: "a7b3fc29df6aa73dd2ad8c915368da1bce3cfd4fdcd6160964b54a5602a802f2",
+    nl: "94f105be5d83558ef3981baf633fcae2e484a8348256423e1e99377ca675428c",
+    de: "50ccf3d6a616db8bde5b3c3ceba045a709e77636802d87cec4e3219e4bc82b5b",
+    fr: "51b722722cc6e9a222b497b4966fcc8c15398212f5d938c9d923b1ce3402df48",
+    es: "1c4c8c4054dd290cca468674aecb34e3c44bfbc00fcda6caae4fa8f186355013",
   },
 };
 
@@ -36,7 +36,7 @@ export const labMarks: Record<
 // every mark, in the order they stand here, one to a line. A test holds it
 // to the marks, so no text changes under a version's name: whoever changes
 // a mark changes this.
-export const marksDigest = "c10677a67f74";
+export const marksDigest = "97d081995c13";
 
 // Which Stephen this is, as one name for all of the marks above: an
 // interview that keeps it says which texts held it, in whatever language
@@ -49,38 +49,3 @@ export const stephenVersion = marksDigest;
 /** Every mark above, in the order they stand: what `marksDigest` is taken over. */
 export const everyLabMark = (): string[] =>
   Object.values(labMarks).flatMap((locales) => Object.values(locales));
-
-// The marks of the texts that hold an interview as one live voice session
-// (`voiceText` in interviewer-text.ts), kept as the turn texts' are, and
-// named by their own version: a voice interview is never set beside a turn
-// interview of the same name. The Stephen Lab has not measured these.
-export const voiceMarks: Record<
-  InterviewKind,
-  Record<InterviewLocale, string>
-> = {
-  own: {
-    en: "37c60b8eca0c8477c937715e9b1023a7143fb5568ea442d5985bda5a6b9b841c",
-    nl: "0a78ad8c94ad03ff6c25dd4d808ca72b6c9aa30ad5e0b204e610008cb11494c6",
-    de: "ebf4ec8c83725e82131e1fd2bd1cb552d318669ae4f6b254c8c13f6ea3eda6b4",
-    fr: "ab72adcd4708f69f066a2c86c85455031155ffa9d964c604dc83446aa2103d9c",
-    es: "2ba3014e143ef773754ee7b165cfe3421fbf6cc2f3f1de6b37d4bc187a87fdaf",
-  },
-  lead: {
-    en: "6292c7de4c7381c657ac4d3f00a35f719333e716cd0731c426535929da67ce82",
-    nl: "e3428fd05747999c9527dd1cf0490df5570553cd5a67df1d22b2bb5ce90143cf",
-    de: "233fafac2ba05ce93ee00a1b5a4de2914f3c13e6e7ddb825c45a11b47fa9ebc9",
-    fr: "d9a9e782c5176f0c6d58976d51b5d410955c3c46abc88a0909d58cc0a52fd58c",
-    es: "072e41e92ba2bd6d3e0cbf0e7090b9cb0dda6dcbf232507b28ef63a44dc29c0e",
-  },
-};
-
-/** Every voice mark above, in the order they stand: what `voiceMarksDigest` is taken over. */
-export const everyVoiceMark = (): string[] =>
-  Object.values(voiceMarks).flatMap((locales) => Object.values(locales));
-
-// The voice marks as one, as `marksDigest` is taken over the turn marks.
-export const voiceMarksDigest = "b34596b204bd";
-
-// Which Stephen holds a voice interview: its own name, so the admin's lab
-// sets voice interviews apart from turn interviews.
-export const voiceVersion = `voice-${voiceMarksDigest}`;

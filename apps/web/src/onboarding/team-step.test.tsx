@@ -17,13 +17,13 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { TopErrorBar } from "../frame/top-error.tsx";
 import { dateLocale } from "./date-locale.ts";
 import { firstChoice, todayInUtc } from "./send-plan.ts";
 import { SetupStepBody } from "./setup-steps.tsx";
-import type { SetupData } from "./setup-steps.tsx";
-import { listeningOf, steps } from "./setup.ts";
-import type { SetupStep } from "./setup.ts";
-import { noteHeard, planDraft } from "./visit.ts";
+import type { SetupData, ShownStep } from "./setup-steps.tsx";
+import { steps } from "./setup.ts";
+import { planDraft } from "./visit.ts";
 
 // The team step's plan, as a person in a region of their own types its
 // day: read in their order, or refused in words, and what "What happens
@@ -96,7 +96,6 @@ const data: SetupData = {
   },
   review: { differences: [], mapped: 0 },
   directory: null,
-  hr: null,
   suites: [],
   places: null,
   choices: noChoices,
@@ -149,7 +148,7 @@ const shown = async (
     reread,
     on = today,
   }: {
-    step?: SetupStep;
+    step?: ShownStep;
     given?: SetupData;
     reread?: Promise<unknown>;
     on?: string;
@@ -157,7 +156,6 @@ const shown = async (
 ): Promise<{ saved: PlanInput[]; confirmed: () => number }> => {
   i18n.loadAndActivate({ locale: language, messages: {} });
   browserIn(browser);
-  noteHeard(step);
   const saved: PlanInput[] = [];
   let confirms = 0;
   let loads = 0;
@@ -193,23 +191,14 @@ const shown = async (
       },
       component: () => (
         <SetupStepBody
-          cramped={false}
           data={given}
-          furthest={0}
+          askedFor={0}
           go={() => {}}
-          listening={listeningOf(
-            { roster: null, plan: null, progress: null },
-            on
-          )}
           message={null}
-          onMadeWay={() => {}}
           onMessage={() => {}}
           onSettle={() => {}}
-          onStory={() => {}}
-          onward={() => {}}
-          parts={[]}
+          onward={async () => {}}
           path={steps}
-          percent={10}
           settled={[]}
           step={step}
           today={on}
@@ -226,6 +215,7 @@ const shown = async (
     root.render(
       <I18nProvider i18n={i18n}>
         <RouterProvider router={router} />
+        <TopErrorBar />
       </I18nProvider>
     );
     await router.load();
@@ -243,9 +233,25 @@ const field = (name: string): HTMLInputElement => {
   return found;
 };
 
+/** Presses "Other day" under the day's tiles, so the field to type a day in shows. */
+const otherDay = async (): Promise<void> => {
+  if (document.querySelector('input[aria-label="Other day"]') !== null) {
+    return;
+  }
+  const button = [...document.querySelectorAll("button")].find(
+    (each) => each.textContent?.trim() === "Other day"
+  );
+  await act(async () => {
+    button?.click();
+    await Promise.resolve();
+  });
+  await settled();
+};
+
 /** Types `typed` into the first day's field and leaves it, as a person does. */
 const typeDay = async (typed: string): Promise<void> => {
-  const day = field("Another day");
+  await otherDay();
+  const day = field("Other day");
   await act(async () => {
     day.focus();
     Reflect.getOwnPropertyDescriptor(
@@ -265,20 +271,21 @@ const typeDay = async (typed: string): Promise<void> => {
 
 const sendButton = (): HTMLButtonElement => {
   const found = [...document.querySelectorAll("button")].find(
-    (each) => each.textContent?.trim() === "I sent it"
+    (each) => each.textContent?.trim() === "Continue"
   );
   if (found === undefined) {
-    throw new TypeError("No I sent it");
+    throw new TypeError("No Continue");
   }
   return found;
 };
 
-/** What "What happens next" says. */
+/** What the step says happens next, under the plan. */
 const nextSaid = (): string =>
-  [...document.querySelectorAll('[role="status"]')]
+  [...document.querySelectorAll("output")]
     .map((each) => each.textContent ?? "")
-    .find((each) => each.startsWith("What happens next"))
-    ?.replace(/^What happens next/u, "") ?? "";
+    .find(
+      (each) => each.startsWith("Leads get") || each.startsWith("The lead")
+    ) ?? "";
 
 const send = async (): Promise<void> => {
   await act(async () => {
@@ -288,9 +295,13 @@ const send = async (): Promise<void> => {
   await settled();
 };
 
-/** The text of the error under the first day's field, if it shows one. */
+/** The text of the error the bar at the top says, if it says one: every error in the setup is said there. */
 const error = (): string | undefined =>
-  document.querySelector('[data-slot="field-error"]')?.textContent?.trim();
+  document
+    .querySelector(
+      '[data-slot="top-error"]:not([inert]) [data-slot="alert-description"]'
+    )
+    ?.textContent?.trim();
 
 // Browsers whose first language counts in another calendar. Safari writes
 // "en-SA" in the Islamic one ("22/07/1448 AH"), which the picker reads as no day.
@@ -425,13 +436,15 @@ describe("the team step's day, typed", () => {
     "reads $browser's order, says the format, and saves what it says",
     async (region) => {
       const { saved } = await shown(region.language, [region.browser]);
-      expect(document.body.textContent).toContain(region.hint);
+      // Typed in a form it can't read, it says the form it reads.
+      await typeDay("soon");
+      expect(error()).toContain(region.hint.replace(/^For example /u, ""));
       // 12 January 2027 in this region's order; the other order is 1 December.
       await typeDay(region[region.reads]);
       const said = nextSaid();
       await send();
       expect({
-        field: field("Another day").value,
+        field: field("Other day").value,
         saved: saved.map((plan) => plan.start),
         said: said.includes(region.said),
       }).toStrictEqual({
@@ -462,7 +475,7 @@ describe("the team step's day, typed", () => {
     await typeDay("31/12/2026");
     expect({
       error: error(),
-      marked: field("Another day").getAttribute("aria-invalid"),
+      marked: field("Other day").getAttribute("aria-invalid"),
       disabled: sendButton().disabled,
       // What it would have said is still the day before, so it can't be sent with it.
       next: nextSaid().includes("on 24 Nov at 9:00"),
@@ -472,17 +485,10 @@ describe("the team step's day, typed", () => {
       disabled: true,
       next: true,
     });
-    // Said too, by the page's one announcer, a moment after it shows.
-    await act(async () => {
-      const { promise, resolve } = Promise.withResolvers<boolean>();
-      setTimeout(() => {
-        resolve(true);
-      }, 150);
-      await promise;
-    });
+    // Said too: the bar at the top is an alert, which a screen reader says as it appears.
     expect(
-      document.querySelector('[data-ui-sdk-announcer=""]')?.textContent
-    ).toBe(error());
+      document.querySelector('[data-slot="alert"]')?.getAttribute("role")
+    ).toBe("alert");
     await send();
     expect(saved).toStrictEqual([]);
 
@@ -499,9 +505,9 @@ describe("the team step's day, typed", () => {
     "with %s first, shows an example that is taken as typed",
     async (first) => {
       const { saved } = await shown("en", [first]);
-      const hint = document
-        .querySelector('[data-slot="field-description"]')
-        ?.textContent?.replace(/^For example /u, "");
+      await typeDay("soon");
+      const hint = /like (?<example>\S+),/u.exec(error() ?? "")?.groups
+        ?.example;
       await typeDay(hint ?? "");
       expect(error()).toBeUndefined();
       await send();
@@ -566,26 +572,22 @@ describe("the leads step's confirmation", () => {
       Promise.withResolvers<boolean>();
     const { confirmed } = await shown("en", ["en-GB"], {
       step: "leads",
-      // The HR platform was answered: the step shows the teams and their leads.
-      given: { ...data, choices: { ...noChoices, hr: { kind: "none" } } },
+      given: data,
       reread,
     });
-    await press("This is right");
+    await press("Continue");
     expect({
-      busy: button("This is right")?.getAttribute("aria-busy"),
+      busy: button("Continue")?.getAttribute("aria-busy"),
       confirmed: confirmed(),
     }).toStrictEqual({ busy: "true", confirmed: 1 });
-    await press("This is right");
+    await press("Continue");
     expect(confirmed()).toBe(1);
     await act(async () => {
       answered(true);
       await Promise.resolve();
     });
     await settled();
-    expect({
-      next: button("Continue") === undefined,
-      confirmed: confirmed(),
-    }).toStrictEqual({ next: false, confirmed: 1 });
+    expect(confirmed()).toBe(1);
   });
 });
 
@@ -603,12 +605,12 @@ describe("the team step's confirmation", () => {
     const { promise: reread, resolve: answered } =
       Promise.withResolvers<boolean>();
     const { saved } = await shown("en", ["en-GB"], { reread });
-    await press("I sent it");
+    await press("Continue");
     expect({
-      busy: button("I sent it")?.getAttribute("aria-busy"),
+      busy: button("Continue")?.getAttribute("aria-busy"),
       saved: saved.length,
     }).toStrictEqual({ busy: "true", saved: 1 });
-    await press("I sent it");
+    await press("Continue");
     expect(saved).toHaveLength(1);
     await act(async () => {
       answered(true);
@@ -616,7 +618,7 @@ describe("the team step's confirmation", () => {
     });
     await settled();
     expect({
-      busy: button("I sent it")?.getAttribute("aria-busy") ?? null,
+      busy: button("Continue")?.getAttribute("aria-busy") ?? null,
       saved: saved.length,
     }).toStrictEqual({ busy: null, saved: 1 });
   });
@@ -740,7 +742,7 @@ describe("the team step's first day, on the device's clock", () => {
       expect({
         on,
         error: error(),
-        marked: field("Another day").getAttribute("aria-invalid"),
+        marked: field("Other day").getAttribute("aria-invalid"),
         said: said.includes("on 24 Nov at 9:00"),
         saved: saved.map((plan) => plan.start),
       }).toStrictEqual({

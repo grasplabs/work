@@ -1,8 +1,5 @@
 import { colors, media } from "@grasp-os/ui/lib/tokens.stylex";
-import {
-  BAYER_MATRIX as BAYER,
-  DITHER_LEVELS as LEVELS,
-} from "@grasp-os/ui/lib/utils";
+import { BAYER_MATRIX, DITHER_LEVELS } from "@grasp-os/ui/lib/utils";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 
@@ -13,9 +10,6 @@ import { useEffect, useRef } from "react";
 // the theme's own tokens, so it reads on a light page and a dark one.
 // Only while in view; with reduced motion one still, part written. In
 // forced colours it is left out: the card's words say what it is.
-//
-// BUILDER: a picture of its own for the library to take over (logged in
-// .context/library-changes.md), beside the agent figure it is drawn like.
 
 /** One cell's side, in CSS pixels. */
 const PITCH = 2;
@@ -86,7 +80,7 @@ const lineAt = (
 
 /** Whether the threshold at a cell lets a level's fraction through. */
 const lit = (fraction: number, column: number, row: number): boolean =>
-  fraction * LEVELS > (BAYER[row % 4]?.[column % 4] ?? 0);
+  fraction * DITHER_LEVELS > (BAYER_MATRIX[row % 4]?.[column % 4] ?? 0);
 
 /** Picks between a ramp's two lights round `level` (0 to 1), by the cell's threshold. */
 const ramp = (
@@ -263,24 +257,17 @@ const mountPen = (canvas: HTMLCanvasElement): (() => void) => {
     play();
   });
   resized.observe(canvas);
-  // The theme's lights again when the scheme changes, or the person picks
-  // Light or Dark in the product, as the other figures watch it (live.ts).
+  // The theme's lights again when the scheme changes.
+  const scheme = matchMedia("(prefers-color-scheme: dark)");
   const rescheme = () => {
     colours = resolve(host);
     play();
   };
-  const themeWatch = new MutationObserver(rescheme);
-  themeWatch.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ["data-theme", "class", "style"],
-  });
-  const scheme = matchMedia("(prefers-color-scheme: dark)");
   scheme.addEventListener("change", rescheme);
   return () => {
     cancelAnimationFrame(frame);
     seen.disconnect();
     resized.disconnect();
-    themeWatch.disconnect();
     scheme.removeEventListener("change", rescheme);
   };
 };

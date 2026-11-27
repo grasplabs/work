@@ -1,39 +1,46 @@
 import { createRootRouteWithContext, Outlet } from "@tanstack/react-router";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useSyncExternalStore } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
-import { useReveal } from "../onboarding/reveal-state.ts";
+import { entryNow, subscribeEntry } from "../onboarding/entry-store.ts";
+import { loadPartsFor } from "../page-parts.ts";
+
+// The way from the setup into the platform, which outlives both pages:
+// loaded only once the setup's last screen asks for it.
+const PlatformEntry = lazy(async () => {
+  const entry = await import("../onboarding/platform-entry.tsx");
+  return { default: entry.PlatformEntry };
+});
+
+const Root = () => {
+  const entering = useSyncExternalStore(
+    subscribeEntry,
+    () => entryNow() !== null,
+    () => false
+  );
+  return (
+    <>
+      <Outlet />
+      {entering ? (
+        <Suspense fallback={null}>
+          <PlatformEntry />
+        </Suspense>
+      ) : null}
+    </>
+  );
+};
 
 /** What every route gets from the router: the tab's connection to core. */
 interface RouterContext {
   core: CoreConnection;
 }
 
-// Loaded once the way in begins, which it does only at the end of the
-// onboarding: from the brain filling up, so it's there by the time the
-// platform is built.
-const PlatformReveal = lazy(async () => {
-  const { PlatformReveal: layer } =
-    await import("../onboarding/platform-reveal.tsx");
-  return { default: layer };
-});
-
-// Above every page, the layer that carries the onboarding's brain into the
-// platform: it outlives the onboarding's page as the platform opens.
-const RootLayout = () => {
-  const { phase } = useReveal();
-  return (
-    <>
-      <Outlet />
-      {phase === "idle" ? null : (
-        <Suspense fallback={null}>
-          <PlatformReveal />
-        </Suspense>
-      )}
-    </>
-  );
-};
-
 export const Route = createRootRouteWithContext<RouterContext>()({
-  component: RootLayout,
+  // The lean page the tab started on (lean-pages.ts) has what it needs
+  // from the start; any other needs the whole stylesheet and catalog
+  // first, once.
+  beforeLoad: async ({ location }) => {
+    await loadPartsFor(location.pathname);
+  },
+  component: Root,
 });

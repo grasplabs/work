@@ -20,6 +20,7 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminCommands } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInAs } from "./interview-link.ts";
+import { clientOrigin } from "./sign-in-config.ts";
 import {
   auditedDuring,
   routed,
@@ -538,6 +539,45 @@ describe("someone's own link", () => {
     });
   });
 
+  it("opens nothing, and breaks nothing, for an account another listed person's interview already belongs to (L3)", async () => {
+    const { ids, roster, store, secrets, me } = await running();
+    await opened(secrets.oli, me);
+    // Oli's address moves to a new entry, Oli keeping another.
+    const pia = `pia-${unique()}`;
+    await store.saveRoster(
+      {
+        ...roster,
+        people: [
+          ...roster.people.map((person) =>
+            person.id === ids.oli
+              ? { ...person, email: `oli-new-${unique()}@acme.test` }
+              : person
+          ),
+          {
+            id: pia,
+            name: "Pia Holm",
+            email: emailOf(ids.oli),
+            team: "ops",
+            title: "",
+            away: false,
+          },
+        ],
+      },
+      { type: "system" }
+    );
+    await store.releaseDue();
+    const link = await store.linkOf(pia);
+    const theirs = await session(link?.split("#")[1] ?? "", me);
+    const mine = await session(secrets.oli, me);
+    expect({
+      theirs: [theirs.status, await codeOf(theirs)],
+      mine: mine.status,
+    }).toStrictEqual({
+      theirs: [404, "interview.link_invalid"],
+      mine: 200,
+    });
+  });
+
   it("opens for the address it went to though the list changed since, and never for the new one (L3)", async () => {
     const { ids, roster, store, secrets, me } = await running();
     const theirs = `taker-${unique()}@acme.test`;
@@ -642,6 +682,29 @@ describe("someone's own link", () => {
     ]).toStrictEqual([
       [403, "request.forbidden"],
       [401, "interview.sign_in"],
+    ]);
+  });
+
+  it("drives nothing for a request that says neither where it comes from nor that it is from this site", async () => {
+    const { secrets, me } = await running();
+    /** The page's call, as a browser that sends no `Sec-Fetch-Site` makes it. */
+    const unmarked = async (headers: Record<string, string>) =>
+      await routed(interviewApiPath, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: me, ...headers },
+        body: JSON.stringify({ action: "session", secret: secrets.oli }),
+      });
+    const bare = await unmarked({});
+    const elsewhere = await unmarked({ origin: "https://elsewhere.example" });
+    const own = await unmarked({ origin: clientOrigin });
+    expect([
+      [bare.status, await codeOf(bare)],
+      [elsewhere.status, await codeOf(elsewhere)],
+      own.status,
+    ]).toStrictEqual([
+      [403, "request.forbidden"],
+      [403, "request.forbidden"],
+      200,
     ]);
   });
 
@@ -832,6 +895,50 @@ describe("when a link opens", () => {
       late: await codeOf(late),
       deleted: deleted.status,
     }).toStrictEqual({ closed: true, late: "interview.closed", deleted: 200 });
+  });
+
+  it("adds and deletes for 7 days after they first approved, then only reads", async () => {
+    const { ids, secrets, me } = await running();
+    await opened(secrets.oli, me);
+    await takePart(secrets.oli, me);
+    await save(secrets.oli, me, 0, { ...progress(), person: "completed" });
+    /** As if they first approved `days` days ago. */
+    const approvedAgo = async (days: number): Promise<void> => {
+      await runInDurableObject(onboardingStore(env), (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE interview_states SET completed_at = ? WHERE person = ?",
+          new Date(Date.now() - days * dayMs).toISOString(),
+          ids.oli
+        );
+      });
+    };
+    await approvedAgo(7);
+    const lastDay = await opened(secrets.oli, me);
+    const added = await save(secrets.oli, me, lastDay.version);
+    await approvedAgo(8);
+    const after = await opened(secrets.oli, me);
+    const late = await save(secrets.oli, me, after.version);
+    const deleted = await remove(secrets.oli, me);
+    expect({
+      lastDay: { readOnly: lastDay.readOnly, added: added.status },
+      after: {
+        readOnly: after.readOnly,
+        closed: after.closed,
+        read: (after.progress?.lines.length ?? 0) > 0,
+        late: await codeOf(late),
+        deleted: await codeOf(deleted),
+      },
+    }).toStrictEqual({
+      lastDay: { readOnly: false, added: 200 },
+      after: {
+        readOnly: true,
+        closed: false,
+        read: true,
+        late: "interview.closed",
+        deleted: "interview.closed",
+      },
+    });
+    await expect(storeText()).resolves.toContain(sentinel);
   });
 
   it("answers for someone taken off the list as for a link that never was, and forgets what they said (L7, L10)", async () => {

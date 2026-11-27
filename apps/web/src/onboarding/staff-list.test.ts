@@ -9,6 +9,7 @@ import type { Roster } from "@grasp-os/shared/onboarding";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  addedTo,
   csvRows,
   directoryListOf,
   exampleList,
@@ -139,6 +140,25 @@ describe("the teams and people in a staff list", () => {
     );
     expect(leadName(list)).toBe("Daan Bakker");
     expect(list.leadsFrom).toBe("column");
+  });
+
+  it("takes every lead the list marks in a team, the first first", () => {
+    const list = staffListOf(
+      [
+        ["Name", "Email", "Team", "Team lead"],
+        ["Lisa Jansen", "lisa@x.com", "Service", "yes"],
+        ["Sem de Vries", "sem@x.com", "Service", ""],
+        ["Daan Bakker", "daan@x.com", "Service", "yes"],
+      ],
+      "Other"
+    );
+    const [team] = list.roster.teams;
+    const nameOf = (id: string | null | undefined) =>
+      list.roster.people.find((person) => person.id === id)?.name;
+    expect({
+      lead: nameOf(team?.lead),
+      others: team?.coLeads?.map(nameOf),
+    }).toStrictEqual({ lead: "Lisa Jansen", others: ["Daan Bakker"] });
   });
 
   it("takes the one most of a team reports to, by name or email", () => {
@@ -650,5 +670,130 @@ describe("the leads from the HR platform", () => {
       away: ["Lisa Jansen"],
       taken: true,
     });
+  });
+});
+
+/** `count` people of Sales, numbered from `from`, as CSV rows. */
+const many = (from: number, count: number): string =>
+  Array.from(
+    { length: count },
+    (_, index) =>
+      `Person ${String(from + index)},p${String(from + index)}@acme.test,Sales`
+  ).join("\n");
+
+describe("a list added to the roster", () => {
+  it("joins the one before instead of replacing it: someone in both once, as the new list has them, and whoever only the roster had kept in their team", () => {
+    const saved = rosterSchema.parse(
+      staffListOf(
+        csvRows(
+          "name,email,team\nDaan Bakker,daan@acme.test,Sales\nLisa Jansen,lisa@acme.test,Support"
+        ),
+        "Other"
+      ).roster
+    );
+    const added = addedTo(
+      staffListOf(
+        csvRows(
+          "name,email,team,title\nDaan Bakker,DAAN@acme.test,Sales,Team lead\nNoor de Vries,noor@acme.de,Finance,"
+        ),
+        "Other"
+      ).roster,
+      saved
+    );
+    expect({
+      core: rosterSchema.safeParse(added).success,
+      people: added.people
+        .map(({ name, email, title }) => `${name} <${email}> ${title}`)
+        .toSorted(),
+      teams: added.teams.map(({ name }) => name).toSorted(),
+      first: addedTo(saved, null),
+    }).toStrictEqual({
+      core: true,
+      people: [
+        "Daan Bakker <daan@acme.test> Team lead",
+        "Lisa Jansen <lisa@acme.test> ",
+        "Noor de Vries <noor@acme.de> ",
+      ],
+      teams: ["Finance", "Sales", "Support"],
+      first: saved,
+    });
+  });
+
+  it("knows someone already on the roster by their address, whatever id they had, and puts them in the team the new list gives", () => {
+    const saved = rosterSchema.parse({
+      teams: [
+        {
+          id: "dev-service",
+          name: "Customer service",
+          lead: "dev-noor",
+          does: "",
+          off: false,
+        },
+        { id: "t-sales", name: "Sales", lead: null, does: "", off: false },
+      ],
+      people: [
+        {
+          id: "dev-noor",
+          name: "Noor de Vries",
+          email: "noor@acme.test",
+          team: "dev-service",
+          title: "",
+          away: false,
+        },
+        {
+          id: "p-sem",
+          name: "Sem Bakker",
+          email: "sem@acme.test",
+          team: "t-sales",
+          title: "",
+          away: false,
+        },
+      ],
+    });
+    const added = addedTo(
+      staffListOf(
+        csvRows(
+          "name,email,team,title\nNoor de Vries,Noor@Acme.test,Finance,Team lead\nLotte Jansen,lotte@acme.test,Finance,"
+        ),
+        "Other"
+      ).roster,
+      saved
+    );
+    expect({
+      core: rosterSchema.safeParse(added).success,
+      people: added.people
+        .map(({ id, email, team }) => {
+          const named = added.teams.find((one) => one.id === team)?.name;
+          return `${email} ${named} ${id.startsWith("p-") ? "p-…" : id}`;
+        })
+        .toSorted(),
+      teams: added.teams.map(({ name }) => name).toSorted(),
+    }).toStrictEqual({
+      core: true,
+      people: [
+        "lotte@acme.test Finance p-…",
+        "noor@acme.test Finance dev-noor",
+        "sem@acme.test Sales p-…",
+      ],
+      teams: ["Finance", "Sales"],
+    });
+  });
+
+  it("is refused when the two together hold more people than an onboarding takes", () => {
+    const saved = rosterSchema.parse(
+      staffListOf(
+        csvRows(`name,email,team\n${many(0, onboardingPeopleMax)}`),
+        "Other"
+      ).roster
+    );
+    expect(() =>
+      addedTo(
+        staffListOf(
+          csvRows(`name,email,team\n${many(onboardingPeopleMax, 1)}`),
+          "Other"
+        ).roster,
+        saved
+      )
+    ).toThrow(StaffListError);
   });
 });

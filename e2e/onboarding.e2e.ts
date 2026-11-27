@@ -453,7 +453,7 @@ test("the company's admin goes through their onboarding: the staff list, the org
   await page.getByRole("button", { name: "Skip for now" }).click();
   await expect(
     page.getByRole("heading", {
-      name: "Do you have anything that explains how you work?",
+      name: "Share documents that explain how you work",
     })
   ).toBeVisible();
   await readOn(page, page.getByRole("button", { name: "Skip for now" }));
@@ -486,23 +486,27 @@ test("the company's admin goes through their onboarding: the staff list, the org
   ).toBeVisible();
   await page.getByRole("button", { name: "Continue" }).click();
 
-  // The message to send, the day the first links go out, and Ops later.
+  // The message to send, the day the first links go out, and Ops held back.
   await expect(
     page.getByRole("heading", {
       name: "Before I reach out, let your team know",
     })
   ).toBeVisible();
-  await page.getByRole("button", { name: "The day after" }).click();
-  const start = isoOf(await page.getByLabel("Another day").inputValue());
-  // Only the teams that take part are there to hold back.
-  await expect(page.getByRole("checkbox", { name: /^Legal/u })).toHaveCount(0);
-  await page.getByRole("checkbox", { name: /^Ops/u }).click();
-  await page.getByRole("button", { name: "On a later day" }).click();
-  const later = isoOf(
-    await page
-      .getByLabel("The day the other teams get their links")
-      .inputValue()
+  // The second of the day's tiles, then its date in the field "Other day" shows.
+  await page
+    .getByRole("group", { name: "Day" })
+    .getByRole("button")
+    .nth(1)
+    .click();
+  await page.getByRole("button", { name: "Other day" }).click();
+  const start = isoOf(
+    await page.locator('input[aria-label="Other day"]').inputValue()
   );
+  // Only the teams that take part are there to hold back.
+  await expect(page.getByRole("button", { name: /^Legal/u })).toHaveCount(0);
+  await page.getByRole("button", { name: /^Ops/u }).click();
+  // Taken out, Ops waits, unplanned, and the summary says so.
+  await expect(page.getByText("Ops gets no link yet.")).toBeVisible();
   const next = page
     .getByRole("status")
     .filter({ hasText: "What happens next" })
@@ -540,7 +544,7 @@ test("the company's admin goes through their onboarding: the staff list, the org
   ).toBeVisible();
 
   // Core keeps what was set: the leads, Legal off, the plan from that day
-  // with Ops on its own later day, and links for the three who take part,
+  // with Ops held back, unplanned, and links for the three who take part,
   // none out before the start.
   const { core, api } = apiOf(admin);
   try {
@@ -559,19 +563,15 @@ test("the company's admin goes through their onboarding: the staff list, the org
       off: roster?.teams.filter((team) => team.off).map(({ name }) => name),
       start: plan?.start,
       held: Object.keys(plan?.later ?? {}),
-      // Its own moment, on the later day, after the first links.
-      opsLater:
-        later > start &&
-        typeof opsAt === "string" &&
-        plan?.at !== undefined &&
-        opsAt > plan.at,
+      // No moment of its own yet.
+      opsLater: opsAt ?? null,
       waiting,
     }).toStrictEqual({
       leads: ["Lea Bakker", "Ona Smit"],
       off: ["Legal"],
       start,
       held: [ops],
-      opsLater: true,
+      opsLater: null,
       waiting: 3,
     });
   } finally {
@@ -735,9 +735,9 @@ test("while Stephen talks to the team, the admin sees the numbers, no team under
     page.getByRole("button", { name: "Links to send" })
   ).toBeVisible();
 
-  // Settings no longer lists the interviews. Here Grasp has already opened
-  // the gate, so an old link to Settings, Onboarding leads to the inbox.
+  // The interviews stand under Settings, Interviews: an old link to
+  // Settings, Onboarding leads there.
   await page.goto("/settings/onboarding");
-  await expect(page).toHaveURL(/\/inbox$/u);
+  await expect(page).toHaveURL(/\/settings\/interviews$/u);
   expect(cspViolations).toStrictEqual([]);
 });

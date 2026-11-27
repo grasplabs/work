@@ -78,6 +78,12 @@ export const connectCallSchema = z.strictObject({
 });
 export type ConnectCall = z.infer<typeof connectCallSchema>;
 
+/**
+ * The tenant a directory's connection starts with to be connected for any
+ * organization: the one the admin signs in to, which its ID token names.
+ */
+export const anyTenant = "any";
+
 /** What an action returns. */
 export interface ConnectResult {
   /**
@@ -398,7 +404,9 @@ export const startConnectionSchema = z.strictObject({
   /**
    * The organization at the provider, from the deployment's sign-in config:
    * its Entra tenant ID, or its Google Workspace domain. Only accounts in
-   * it can be connected. Required for those suites; an app has none.
+   * it can be connected. Required for those suites; an app has none. For a
+   * directory's connection only, `anyTenant`: whichever organization the
+   * admin signs in to, read from the sign-in itself.
    */
   tenant: identifierSchema.optional(),
   /** A path on the deployment's origin; core checks it. */
@@ -449,6 +457,12 @@ export const finishConnectionSchema = z.strictObject({
 });
 export type FinishConnection = z.input<typeof finishConnectionSchema>;
 
+/** Which flow's start page to ask for, as `flowReturn` takes it: the person and the flow's state. */
+export const flowReturnSchema = finishConnectionSchema.pick({
+  person: true,
+  state: true,
+});
+export type FlowReturn = z.input<typeof flowReturnSchema>;
 /**
  * Why a Composio connection didn't start or finish, for support: one word of a
  * fixed set, never Composio's text, an ID or anything from the browser.
@@ -2614,6 +2628,13 @@ export interface ConnectApi
    * code can't be brought back to finish it later.
    */
   abandonFlow: (state: string) => Promise<void>;
+  /**
+   * Where a live flow the same person started was going back to (its
+   * `returnTo`), read before finishing it: a flow that then fails still
+   * returns them to the page they started from, with why. Nothing for a
+   * flow that isn't theirs, isn't live, or isn't one; it is only read.
+   */
+  flowReturn: (request: FlowReturn) => Promise<string | undefined>;
   /**
    * The catalog: the native providers, the connectors admins made from a
    * URL, then Composio's toolkits if connect has a Composio key. Composio

@@ -83,13 +83,11 @@ describe("what an employee's interview still misses", () => {
         "how many in a normal week, and how long one takes",
         "how they know it is done right",
         "when they would stop and ask someone",
-        "one real example to share",
         "whether they use AI for any of this (one short question)",
       ],
       atResult: [
         "how they know it is done right",
         "when they would stop and ask someone",
-        "one real example to share",
         "whether they use AI for any of this (one short question)",
       ],
       afterAi: [],

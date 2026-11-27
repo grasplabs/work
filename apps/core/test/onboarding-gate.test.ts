@@ -8,12 +8,14 @@ import {
   setupSteps,
 } from "@grasp-os/shared/onboarding-flow";
 import type { GateThreshold } from "@grasp-os/shared/onboarding-gate";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { signInConfig } from "../src/auth/config.ts";
 import { memberFromDirectory } from "../src/auth/directory-members.ts";
 import { gateView, mayComeIn, memberMayBeIn } from "../src/onboarding/gate.ts";
+import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminCommands, adminSnapshot } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
 import { acmeTenant } from "./sign-in-config.ts";
@@ -177,6 +179,22 @@ describe("while the company is onboarding", () => {
       waiting: false,
       afterTheGo: true,
       nothingElse: "role.forbidden",
+    });
+  });
+
+  it("tells an admin who finished every screen that it is behind them, while it waits for Grasp's go for everyone else", async () => {
+    const admin = await signedInApi(idp, "admin");
+    await adminCommands().close();
+    const halfWay = await admin.api.onboarding.behind();
+    await admin.api.onboarding.finishSteps([...setupSteps]);
+    const finished = await admin.api.onboarding.behind();
+    // Every screen unfinished again: a later flow's screens start undone.
+    await runInDurableObject(onboardingStore(env), (_instance, state) => {
+      state.storage.sql.exec("UPDATE onboarding SET place = NULL");
+    });
+    expect({ halfWay, finished }).toStrictEqual({
+      halfWay: false,
+      finished: true,
     });
   });
 
@@ -369,13 +387,12 @@ describe("Grasp's go", () => {
       lastDay: [lastDay.ready, lastDay.over],
       over: [over.ready, over.over],
     }).toStrictEqual({
-      known: 48,
+      known: 50,
       parts: [
         ["kickoff", 0],
         ["people", 1],
         ["sources", 0],
         ["documents", 0],
-        ["tools", 0],
         ["leads", 1],
         ["conversations", 0.75],
         ["review", 0],
@@ -413,13 +430,11 @@ describe("Grasp's go", () => {
       },
     };
     const whole = await gateView(env, view, now);
-    // No kickoff, no documents and no tools asked of this company.
+    // No kickoff and no documents asked of this company.
     await adminCommands().setFlow({
       ...defaultFlow,
       steps: defaultFlow.steps.map((step) =>
-        step.id === "documents" || step.id === "pulse"
-          ? { ...step, on: false }
-          : step
+        step.id === "documents" ? { ...step, on: false } : step
       ),
       grasp: { ...defaultFlow.grasp, kickoff: false },
     });
@@ -430,7 +445,7 @@ describe("Grasp's go", () => {
     await adminCommands().setFlow(null);
     const back = await gateView(env, view, now);
     expect({
-      // The people (15), every team led (10) and three quarters of the conversations (22.5), of 100.
+      // The people (15), every team led (10) and three quarters of the conversations (22.5), of the 95 there is to know.
       whole: whole.known,
       // The same 47.5, of the 70 its flow asks for.
       asked: asked.known,
@@ -438,11 +453,11 @@ describe("Grasp's go", () => {
       none: [none.known, none.parts],
       back: back.known,
     }).toStrictEqual({
-      whole: 48,
+      whole: 50,
       asked: 68,
       sources: ["people", "sources", "leads", "conversations", "review"],
       none: [100, []],
-      back: 48,
+      back: 50,
     });
   });
 
@@ -549,7 +564,7 @@ describe("a company's Grasp opening by its flow", { timeout: 60_000 }, () => {
       await admin.onboarding.finishSteps([]);
       await admin.onboarding.finishSteps(flowScreens(flowPresets.setup));
       // A screen its flow doesn't have, finished now: still staff's to open.
-      await admin.onboarding.finishSteps(["pulse"]);
+      await admin.onboarding.finishSteps(["team"]);
     });
     const closed = await gateNow();
     const member = await signIn(idp, "microsoft", entraPerson(acmeTenant));

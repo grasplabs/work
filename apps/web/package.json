@@ -11,6 +11,7 @@
     "i18n:extract": "lingui extract --clean"
   },
   "dependencies": {
+    "@elevenlabs/client": "catalog:",
     "@grasp-os/runtime": "workspace:*",
     "@grasp-os/shared": "workspace:*",
     "@grasp-os/ui": "workspace:*",

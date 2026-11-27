@@ -18,11 +18,11 @@ import {
   aloneInTheStore,
   answering,
   approveAgreed,
+  interviewModels,
   modelOf,
   onLink,
   openLinkAs,
   participate,
-  quick,
   signedInAs,
 } from "./interview-link.ts";
 import type { Device } from "./interview-link.ts";
@@ -377,7 +377,9 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
       saidByMo: after.includes("Salesforce"),
       due: [ids.max, ids.mia, ids.mo].filter((id) => due.includes(id)),
       counted: usage.some(
-        ({ purpose, model }) => purpose === "drawing" && model === quick
+        ({ purpose, model }) =>
+          // Drawn by the organization's model, never the interview's.
+          purpose === "drawing" && model === interviewModels[0]
       ),
     }).toMatchObject({
       drew: `work:${tickets}`,

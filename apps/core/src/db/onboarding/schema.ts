@@ -75,8 +75,13 @@ export const teams = sqliteTable("teams", {
   id: text().primaryKey(),
   position: integer().notNull(),
   name: text().notNull(),
-  /** Its lead, by person. */
+  /** Its lead, by person: with several, the first, whom its map is drawn from. */
   lead: text(),
+  /** Who else leads it, by person, as JSON (`rosterTeamSchema.coLeads`). */
+  coLeads: text("co_leads", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default(sql`'[]'`),
   /**
    * What it does, as the admin described it on the roster they saved: only
    * ever the admin's own words, which every member reads once confirmed
@@ -120,6 +125,11 @@ export const teams = sqliteTable("teams", {
    * an edit or a withdrawal since keeps them out until it is drawn again.
    */
   mappedFrom: text("mapped_from"),
+  /**
+   * The day (ISO, UTC) the company's admin last nudged it (`nudge`): a team
+   * takes one nudge a day. None before the first.
+   */
+  nudgedOn: text("nudged_on"),
 });
 
 /** The people, in the order the admin gave them. */
@@ -205,6 +215,12 @@ export const links = sqliteTable("links", {
    * None before it ever was.
    */
   brainMark: text("brain_mark"),
+  /**
+   * When the reminder they asked for themselves goes (ISO 8601), while it
+   * hasn't: "not now" on their link (`remindLater`). None otherwise, and
+   * again once it went or was no longer owed.
+   */
+  laterAt: text("later_at"),
 });
 
 /**
@@ -420,6 +436,11 @@ export const documents = sqliteTable("documents", {
   at: text().notNull(),
   by: text().notNull(),
   reading: text().notNull(),
+  /**
+   * No longer written or read: the admin's answer to a document's question,
+   * when documents still asked one. Dropped in a later release: expand,
+   * then contract.
+   */
   answer: text(),
   /**
    * No longer written or read since GRA-1889 (a reading waited here to be
@@ -657,6 +678,25 @@ export const voiceUse = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.who, table.day] })]
 );
+
+/**
+ * The live conversation open on someone's link (onboarding/voice.ts), one
+ * at most: the seconds held for it against their listening that day
+ * (`voiceUse`), and when it opened, so what it didn't use is given back
+ * once it ends or the next one opens. Nothing that was said.
+ */
+export const voiceHolds = sqliteTable("voice_holds", {
+  who: text().primaryKey(),
+  day: text().notNull(),
+  seconds: real().notNull(),
+  /** ISO 8601. */
+  at: text().notNull(),
+  /**
+   * Which conversation it is held for, as its pass names it: only that
+   * conversation's close or failed start gives it back.
+   */
+  hold: text(),
+});
 
 /**
  * The text each interview ran on (onboarding/interviewer-text.ts), as its

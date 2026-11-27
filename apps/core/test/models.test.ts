@@ -213,6 +213,15 @@ describe("model gateway", { timeout: 30_000 }, () => {
     });
   });
 
+  it("sends Mistral only the fields its chat completions take, or it refuses the request", async () => {
+    const body = await sentAt(mistralSmall, "high");
+    expect(body).toHaveProperty("max_tokens");
+    expect(body).not.toHaveProperty("store");
+    expect(body).not.toHaveProperty("max_completion_tokens");
+    expect(body).not.toHaveProperty("stream_options");
+    expect(JSON.stringify(body)).not.toContain('"developer"');
+  });
+
   it("asks a model that lacks the effort asked for the next one up it takes, or its highest", async () => {
     // The next level up it has, or its highest when it has none above.
     expect({

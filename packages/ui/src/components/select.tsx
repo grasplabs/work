@@ -38,7 +38,7 @@ import type {
   SelectValueState,
 } from "@ui-sdk/react/select";
 import { createContext, use, useEffect, useRef } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 
 import { CheckIcon, ChevronDownIcon, Icon } from "../lib/icons";
 import {
@@ -65,6 +65,7 @@ import { className, isInvalid, warnUnnamed } from "../lib/utils";
 import type { LayoutStyle } from "../lib/utils";
 import { iconVars, motionVars } from "../lib/vars.stylex";
 import { selectPopupMarker } from "./select.stylex";
+import { ControlTooltip } from "./tooltip";
 
 const SCROLLS = "@supports (animation-timeline: scroll())";
 
@@ -175,6 +176,11 @@ export interface SelectTriggerProps {
   "aria-label"?: string;
   /** The `id` of the control, for a Label outside a Field (`htmlFor`). */
   id?: string;
+  /**
+   * Its tooltip, under a resting pointer and on keyboard focus, as Button's: what it chooses, for
+   * a select among a bar's tools that shows only its value. Left out, none.
+   */
+  tooltip?: ReactNode;
   /** The `id` of the words that describe it, when no FieldDescription does. */
   "aria-describedby"?: string;
   /** Layout only: margins, alignment and width. Colours, heights and corners belong to the select. */
@@ -625,7 +631,7 @@ const ItemsContext = createContext<SelectItems | undefined>(undefined);
 const Truncated = createContext(false);
 
 /** The closed control: a field's box (or words, for `variant="ghost"`) with the chevron at its end. */
-export const SelectTrigger = ({
+const Closed = ({
   children,
   size: scale = "default",
   variant = "default",
@@ -634,15 +640,30 @@ export const SelectTrigger = ({
   id,
   style,
   truncate = false,
-}: SelectTriggerProps) => {
+  tooltip: _tooltip,
+  ref,
+  ...rest
+}: SelectTriggerProps & {
+  // What its tooltip puts on it: the tooltip trigger's ref and handlers.
+  ref?: Ref<HTMLElement>;
+} & Record<string, unknown>) => {
   const trigger = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
     warnUnnamed("Select", trigger.current);
   }, []);
+  const both = (element: HTMLButtonElement | null) => {
+    trigger.current = element;
+    if (typeof ref === "function") {
+      ref(element);
+    } else if (ref) {
+      ref.current = element;
+    }
+  };
 
   return (
     <TriggerPrimitive
-      ref={trigger}
+      {...rest}
+      ref={both}
       id={id}
       aria-label={ariaLabel}
       aria-describedby={describedBy}
@@ -683,6 +704,13 @@ export const SelectTrigger = ({
     </TriggerPrimitive>
   );
 };
+
+/** The closed control, in its tooltip when it has one. */
+export const SelectTrigger = (props: SelectTriggerProps) => (
+  <ControlTooltip tooltip={props.tooltip} iconOnly={false}>
+    <Closed {...props} />
+  </ControlTooltip>
+);
 
 /** The chosen value's words, or the placeholder while nothing is chosen. */
 export const SelectValue = ({ placeholder }: SelectValueProps) => {

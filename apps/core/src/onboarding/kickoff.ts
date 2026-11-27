@@ -357,11 +357,31 @@ const sources: Record<
 };
 
 /**
+ * The HR platforms a kickoff may name, by their product names, and how the
+ * company says them: the admin's onboarding offers the one named first.
+ */
+const hrNames: readonly (readonly [string, readonly string[]])[] = [
+  ["Personio", ["personio"]],
+  ["AFAS", ["afas", "afas profit", "afas insite"]],
+  ["HiBob", ["hibob", "hi bob"]],
+  ["Nmbrs", ["nmbrs"]],
+  ["Loket", ["loket", "loket nl"]],
+  ["Workday", ["workday"]],
+  ["BambooHR", ["bamboohr", "bamboo hr"]],
+  ["Visma Youforce", ["youforce", "visma youforce", "visma raet", "raet"]],
+  ["Factorial", ["factorial", "factorialhr"]],
+  ["Employes", ["employes"]],
+  ["SAP SuccessFactors", ["successfactors", "success factors"]],
+  ["Rippling", ["rippling"]],
+];
+
+/**
  * What the admin's onboarding knows of the company from the kickoff:
  * the suites and places named where it says which tools they use (or in
  * the sponsor's answer to that), and Stephen's words about it. A place
  * named counts for its suite too, so a company on Microsoft 365 and Google
- * Drive is offered both. Before the kickoff is in, nothing.
+ * Drive is offered both. The HR platform is the one said first, where more
+ * are. Before the kickoff is in, nothing.
  */
 export const contextOf = (
   reading: KickoffReading | null,
@@ -384,7 +404,21 @@ export const contextOf = (
       names(suiteNames[suite]) ||
       named.some((source) => sources[source].suite === suite)
   );
-  return { suites, sources: named, words: reading?.words ?? {} };
+  const spaced = ` ${systems} `;
+  const hr =
+    hrNames
+      .map(([name, said]) => ({
+        name,
+        at: Math.min(
+          ...said.map((each) => {
+            const at = spaced.indexOf(` ${each} `);
+            return at === -1 ? Infinity : at;
+          })
+        ),
+      }))
+      .filter(({ at }) => at !== Infinity)
+      .toSorted((one, other) => one.at - other.at)[0]?.name ?? null;
+  return { suites, sources: named, hr, words: reading?.words ?? {} };
 };
 
 /** A header or note line, or a cue's timing line, in a `.vtt` or `.srt` file. */

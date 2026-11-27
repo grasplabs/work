@@ -100,6 +100,13 @@ export interface ItemProps {
    * @default false
    */
   active?: boolean;
+  /**
+   * A choice taken, or a thing done: its edge in the success colour with a soft glow round it.
+   * Say what it means in its words too (a visually hidden "noted" in the title): the glow is
+   * not read out.
+   * @default false
+   */
+  done?: boolean;
   /** Where the whole row leads: it is one link, with a chevron at its end. */
   href?: string;
   /**
@@ -176,6 +183,11 @@ export interface ItemGridProps {
   "aria-label"?: string;
   /** The id of a heading that names it, in place of `aria-label`. */
   "aria-labelledby"?: string;
+  /**
+   * So many tiles in a row from a small window up, whatever their room ("3": seven places stand
+   * three, three and one); on a phone, as many as fit. Left out, as many as fit at every width.
+   */
+  columns?: 2 | 3 | 4;
   /** Layout only: margins, alignment and width. */
   style?: LayoutStyle;
 }
@@ -335,6 +347,13 @@ const styles = stylex.create({
     outlineStyle: { default: "none", [FORCED]: "solid" },
     outlineWidth: { default: null, [FORCED]: sizes.hairline },
   },
+  // A choice taken: the success edge, and its glow round it; a thicker edge in forced colours.
+  done: {
+    borderColor: colors.success,
+    boxShadow: `0 0 0 ${sizes.hairline} ${colors.success}, 0 0 ${space["4"]} ${colors.successGlow}`,
+    outlineStyle: { default: "none", [FORCED]: "solid" },
+    outlineWidth: { default: null, [FORCED]: sizes.ringWidth },
+  },
   // A row that holds a stretched press: the press's target covers it.
   stretched: { position: "relative" },
   // Out of use: dimmed as a disabled Button is, with no light under a pointer.
@@ -372,6 +391,9 @@ const styles = stylex.create({
   // The words take the room, but never under 10rem: past that the actions wrap under them.
   content: {
     display: "grid",
+    // One column that may be narrower than its longest line: a line that is cut with an ellipsis
+    // (a `nowrap` description) is cut at the row's edge, where an `auto` column grew to hold it.
+    gridTemplateColumns: "minmax(0, 1fr)",
     flexGrow: 1,
     flexBasis: "10rem",
     minWidth: 0,
@@ -701,6 +723,28 @@ const styles = stylex.create({
     margin: 0,
     padding: 0,
     listStyle: "none",
+  },
+});
+
+// A fixed number of tiles a row from a small window up; on a phone the grid's own, as many as fit.
+const gridColumns = stylex.create({
+  2: {
+    gridTemplateColumns: {
+      default: `repeat(auto-fill, minmax(min(100%, ${sizes.itemGridTile}), 1fr))`,
+      [media.sm]: "repeat(2, minmax(0, 1fr))",
+    },
+  },
+  3: {
+    gridTemplateColumns: {
+      default: `repeat(auto-fill, minmax(min(100%, ${sizes.itemGridTile}), 1fr))`,
+      [media.sm]: "repeat(3, minmax(0, 1fr))",
+    },
+  },
+  4: {
+    gridTemplateColumns: {
+      default: `repeat(auto-fill, minmax(min(100%, ${sizes.itemGridTile}), 1fr))`,
+      [media.sm]: "repeat(4, minmax(0, 1fr))",
+    },
   },
 });
 
@@ -1047,6 +1091,7 @@ const lookOf = (
     variant = "default",
     size = "default",
     active = false,
+    done = false,
     disabled = false,
     wraps,
     style,
@@ -1063,6 +1108,7 @@ const lookOf = (
     pressed && disabled && styles.disabled,
     wraps && styles.wraps,
     active && styles.active,
+    done && styles.done,
     style
   );
 
@@ -1218,6 +1264,7 @@ export const ItemGrid = ({
   children,
   "aria-label": label,
   "aria-labelledby": labelledBy,
+  columns,
   style,
 }: ItemGridProps) => (
   <InList value>
@@ -1227,7 +1274,11 @@ export const ItemGrid = ({
       aria-label={label}
       aria-labelledby={labelledBy}
       data-slot="item-grid"
-      {...stylex.props(styles.grid, style)}
+      {...stylex.props(
+        styles.grid,
+        columns !== undefined && gridColumns[columns],
+        style
+      )}
     >
       {children}
     </ul>

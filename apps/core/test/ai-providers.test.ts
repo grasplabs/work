@@ -1408,8 +1408,9 @@ describe("AI providers", { timeout: 60_000 }, () => {
         )
       ).toStrictEqual([
         "transcription: OpenAI, European Union",
-        "speech: Mistral AI, European Union (France)",
-        "conversation: Mistral AI, European Union (France)",
+        "speech: ElevenLabs, European Union",
+        "interview: Mistral AI, European Union (France)",
+        "conversation: ElevenLabs, European Union",
       ]);
     });
   });
@@ -1449,15 +1450,17 @@ describe("AI providers", { timeout: 60_000 }, () => {
 
       const listing = await by.api.aiProviders.list();
       const noProvider = await outcome(
-        models(env).call(await callOf(graspAi.model))
+        models(env).call(await callOf(graspAi.models[0].model))
       );
       // Its own Anthropic key, which Anthropic refuses.
       const key = newKey();
       await added(anthropicCase, key);
-      await by.api.aiProviders.setModels({ defaultModel: graspAi.model });
+      await by.api.aiProviders.setModels({
+        defaultModel: graspAi.models[0].model,
+      });
       await plan(key, [{ status: 401 }]);
       const refusedKey = await outcome(
-        models(env).call(await callOf(graspAi.model))
+        models(env).call(await callOf(graspAi.models[0].model))
       );
 
       expect({
@@ -1470,7 +1473,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
         source: "own",
         offered: {
           available: true,
-          model: { model: graspAi.model, name: "Claude Sonnet 5.5" },
+          model: { model: graspAi.models[0].model, name: "Claude Sonnet 5.5" },
           whereItRuns: "Anthropic, United States",
           month: {
             spentUsd: 0,
@@ -1499,9 +1502,11 @@ describe("AI providers", { timeout: 60_000 }, () => {
       ]);
 
       const refused = await outcome(
-        models(env).call(await callOf(graspAi.model))
+        models(env).call(await callOf(graspAi.models[0].model))
       );
-      const down = await outcome(models(env).call(await callOf(graspAi.model)));
+      const down = await outcome(
+        models(env).call(await callOf(graspAi.models[0].model))
+      );
 
       expect({ refused, down }).toStrictEqual({
         refused: "model.request_refused",
@@ -1519,7 +1524,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
       const before = await monthSpend(env, spendMonth(env));
 
       const answer = await models(env).call(
-        await callOf(graspAi.model, { trigger })
+        await callOf(graspAi.models[0].model, { trigger })
       );
 
       const [event] = await auditedFor(trigger.userId, 1);
@@ -1538,7 +1543,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
         counted: spent.total > before.total,
       }).toStrictEqual({
         text: "Hello, Ada.",
-        usable: [graspAi.model],
+        usable: [graspAi.models[0].model],
         source: "grasp",
         counted: true,
       });
@@ -1552,7 +1557,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
       });
       expect(rows).toMatchObject([
         {
-          model: graspAi.model,
+          model: graspAi.models[0].model,
           credential: "platform",
           feature: "organization",
           inputTokens: 1000,
@@ -1598,7 +1603,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
 
       const answer = await models(env).call(await callOf(openaiCase.model));
       const onGrasp = await outcome(
-        models(env).call(await callOf(graspAi.model))
+        models(env).call(await callOf(graspAi.models[0].model))
       );
 
       expect({
@@ -1659,7 +1664,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
           period: spendMonth(env),
           personId: graspSpender,
           triggerType: "person",
-          model: graspAi.model,
+          model: graspAi.models[0].model,
           credential: "platform",
           feature: "organization",
           inputTokens: 0,
@@ -1681,17 +1686,19 @@ describe("AI providers", { timeout: 60_000 }, () => {
       await plan(platformAnthropicKey, [
         answered("anthropic-messages", "Still here."),
       ]);
-      const under = await models(env).call(await callOf(graspAi.model));
+      const under = await models(env).call(
+        await callOf(graspAi.models[0].model)
+      );
       const beforeLimit = await by.api.aiProviders.list();
 
       await spentOnGraspAi(0.01);
       const before = await onGraspKey();
       const trigger = newPerson();
       const atLimit = await outcome(
-        models(env).call(await callOf(graspAi.model, { trigger }))
+        models(env).call(await callOf(graspAi.models[0].model, { trigger }))
       );
       const again = await outcome(
-        models(env).call(await callOf(graspAi.model))
+        models(env).call(await callOf(graspAi.models[0].model))
       );
       const listing = await by.api.aiProviders.list();
       const [refused] = await auditedFor(trigger.userId, 1);
@@ -1735,25 +1742,34 @@ describe("AI providers", { timeout: 60_000 }, () => {
       await plan(platformAnthropicKey, [
         answered("anthropic-messages", "The last one."),
       ]);
-      const last = await models(env).call(await callOf(graspAi.model));
-      const next = await outcome(models(env).call(await callOf(graspAi.model)));
+      const last = await models(env).call(
+        await callOf(graspAi.models[0].model)
+      );
+      const next = await outcome(
+        models(env).call(await callOf(graspAi.models[0].model))
+      );
       expect({ last: last.text, next }).toStrictEqual({
         last: "The last one.",
         next: "model.grasp_limit_reached",
       });
     });
 
-    it("has no model to use where the deployment has no key of Grasp's for it, never the organization's own instead", () => {
+    it("runs on its first model Grasp has a key for here, OpenAI where that is the only one, and none without one, never the organization's own instead", () => {
       const choice = { defaultModel: openaiCase.model, fallbacks: [] };
       const own = { provider: "openai" as const, baseUrl: null };
       expect({
         noKey: usableModels(
-          { organization: [own], platform: ["openai"] },
+          { organization: [own], platform: ["mistral"] },
           choice,
           "grasp"
         ),
         keyed: usableModels(
-          { organization: [own], platform: ["anthropic"] },
+          { organization: [own], platform: ["openai", "anthropic"] },
+          choice,
+          "grasp"
+        ),
+        openaiOnly: usableModels(
+          { organization: [own], platform: ["openai"] },
           choice,
           "grasp"
         ),
@@ -1764,7 +1780,8 @@ describe("AI providers", { timeout: 60_000 }, () => {
         ),
       }).toStrictEqual({
         noKey: [],
-        keyed: [graspAi.model],
+        keyed: [graspAi.models[0].model],
+        openaiOnly: [graspAi.models[1].model],
         own: [openaiCase.model],
       });
     });

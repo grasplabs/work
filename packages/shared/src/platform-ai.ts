@@ -13,7 +13,9 @@ export const platformAiFeatures = [
   "conversion",
   "transcription",
   "speech",
-  /** An interview held as one live voice session (Mistral's voice agents). */
+  /** The onboarding interview's own turns: its lines, and what it writes down. */
+  "interview",
+  /** An interview held as one live conversation with Grasp's ElevenLabs agent. */
   "conversation",
   /**
    * Not a feature of Grasp's: the organization's own AI, where it runs on

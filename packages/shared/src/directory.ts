@@ -318,6 +318,30 @@ export interface OnboardingDirectory {
   status: "active" | "needs_reauth";
 }
 
+/**
+ * One account's directory connected for the onboarding's roster: the
+ * company's own, or another of its accounts (a second Microsoft tenant, a
+ * Google domain of a daughter company), read into the same roster only;
+ * signing in stays the company's own account's.
+ */
+export interface OnboardingDirectoryAccount {
+  id: string;
+  suite: DirectorySuite;
+  /** The tenant's id at Microsoft, or the domain at Google. */
+  tenant: string;
+  /** The company's own account, the one people sign in with. */
+  own: boolean;
+  status: "active" | "needs_reauth";
+}
+
+/** A domain as the admin names another account by: `acme.de`. */
+export const accountDomainSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(253)
+  .regex(/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/u);
+
 /** Everyone in the onboarding's directory, read just now. */
 export interface DirectoryPeople {
   suite: DirectorySuite;
@@ -328,6 +352,19 @@ export interface DirectoryPeople {
 export interface OnboardingDirectoryApi {
   /** The directory connected for the onboarding; null before one is. */
   directory: () => Promise<OnboardingDirectory | null>;
+  /** Every account's directory connected for the onboarding's roster, the company's own first. */
+  directoryAccounts: () => Promise<OnboardingDirectoryAccount[]>;
+  /**
+   * Starts connecting another account's directory of `suite`, for the
+   * roster only: where to send the browser. With `domain` null, whichever
+   * organization the admin signs in to; else the one connected before
+   * under that tenant, signed in to again.
+   */
+  connectOtherDirectory: (
+    suite: DirectorySuite,
+    domain: string | null,
+    returnTo: string
+  ) => Promise<{ url: string }>;
   /**
    * Starts connecting the directory of `suite`: where to send the browser,
    * which comes back to `returnTo` once the admin consented.
@@ -338,6 +375,8 @@ export interface OnboardingDirectoryApi {
   ) => Promise<{ url: string }>;
   /** Reads everyone in the connected directory, on the record. */
   readDirectory: () => Promise<DirectoryPeople>;
+  /** Reads everyone in the directory of connection `connectionId`, one of `directoryAccounts`, on the record. */
+  readDirectoryAccount: (connectionId: string) => Promise<DirectoryPeople>;
 }
 
 /** Why a directory couldn't be read. */
@@ -376,6 +415,8 @@ export const directoryErrors = defineErrorFamily({
   "directory.group_not_mappable":
     "That group can't be a team's: anyone can join it, its members can't all be read, or Microsoft didn't say which.",
   "directory.team_not_found": "There's no such team.",
+  "directory.unknown_domain":
+    "No account answers for that domain: check how it is spelled.",
 });
 
 /** A code of the directory's errors (`directoryErrors`). */

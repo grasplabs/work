@@ -50,6 +50,28 @@
   }
 }
 
+/*
+ * The keyboard's ring on anything no component draws a ring for: Damsko's
+ * own (2px of --damsko-ring, off the edge), never the browser's. The
+ * browser's is drawn in the system's accent colour (a thick mint square on
+ * a Mac set to green), which neither follows the part's shape nor belongs
+ * in the design. An outline follows the element's own corners, so this one
+ * takes each part's shape. In the base layer: every component's StyleX
+ * ring, which is in no layer, wins over it. A mouse's focus draws none, nor
+ * does focus a page sets on a container it holds (tabindex -1).
+ */
+@layer base {
+  :where(:focus-visible) {
+    outline: var(--damsko-ring-width) solid var(--damsko-ring);
+    outline-offset: var(--damsko-ring-offset);
+  }
+
+  :where(:focus:not(:focus-visible)),
+  :where([tabindex="-1"]:focus) {
+    outline: none;
+  }
+}
+
 /**
  * The page an export prints as a PDF (export/export-file.tsx): A4 with the
  * prototype's margins.

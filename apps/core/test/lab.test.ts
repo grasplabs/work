@@ -16,7 +16,7 @@ import type { LabWho } from "@grasp-os/shared/lab";
 import type { Roster } from "@grasp-os/shared/onboarding";
 import { createExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import worker from "../src/index.ts";
@@ -26,7 +26,9 @@ import {
   answering,
   approveAgreed,
   countedFor,
+  careful,
   holdAlarm,
+  interviewModels,
   modelOf,
   onLink,
   openLinkAs,
@@ -45,6 +47,9 @@ import {
   unique,
 } from "./sign-in.ts";
 
+/** The organization's default model: what the lab's own calls are sent to, whatever their role. */
+const [chosen] = interviewModels;
+
 // The Stephen Lab's way into a local core (src/onboarding/lab.ts): its
 // model calls through the gateway, and the practice people's links. The
 // model provider is the outside system, faked behind connect. The ways it
@@ -57,6 +62,10 @@ import {
 //   audit log.
 // - A turn or a drawing on the benches' fixed input (GRA-338) counted as
 //   someone's interview, or kept as the company's drawing.
+// - A turn of Stephen's, which only the lab holds now (lab-turn.ts),
+//   letting a line out that breaks his rules or a fact whose words weren't
+//   said, giving up on a line the model declined, writing down while he
+//   waits for more, or running on once the lab gave it up.
 
 const idp = mockIdp();
 
@@ -160,6 +169,56 @@ const agree = async (person: string, facts: InterviewFact[]): Promise<void> => {
   await onLink({ action: "save", ...device, version: 0, progress });
   await approveAgreed(device, facts);
 };
+
+/** Who a turn on fixed input is with. */
+const withKarin: LabWho = {
+  company: "Noordzee Vis B.V.",
+  name: "Karin",
+  team: "Order desk",
+  lead: "Wim",
+  work: "entering orders",
+  known: "",
+};
+
+/** What his line's model answers: six named lines. */
+const stephenLine = (say: string, more = "no"): ProviderReply => ({
+  text: `TONE: none\nSAY: ${say}\nPART: steps\nWANTS: answer\nMORE: ${more}\nAGREED: no\n`,
+  inputTokens: 1500,
+  outputTokens: 40,
+});
+
+/** The notes' model with nothing to write down. */
+const noNotes: ProviderReply = {
+  text: JSON.stringify({ facts: [], changes: [] }),
+  inputTokens: 1600,
+  outputTokens: 120,
+};
+
+/** A turn as the interview starts. */
+const started = {
+  event: "start",
+  locale: "en",
+  lines: [],
+  facts: [],
+  phase: "open",
+  minutes: 0,
+};
+
+/** A turn after they typed `said`. */
+const answered = (said: string) => ({
+  event: "answer",
+  locale: "en",
+  lines: [{ from: "person", text: said, typed: true }],
+  facts: [],
+  phase: "steps",
+  minutes: 5,
+});
+
+/** The whole turn a lab's request was answered, once its events are in. */
+const turnOf = async (response: Response) =>
+  turnEvents(`${await response.text()}\n`).events.flatMap((event) =>
+    "turn" in event ? [event.turn] : []
+  )[0];
 
 /** What the model answers for the team's map: entering orders, Karin's. */
 const mapOf = (karin: string): ProviderReply => ({
@@ -273,10 +332,10 @@ describe("the Stephen Lab's way into a local core", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       // Both roles resolve to the organization's default.
       output: { say: "by email" },
-      model: quick,
+      model: chosen,
       sentTo: [
-        quick.slice(quick.indexOf("/") + 1),
-        quick.slice(quick.indexOf("/") + 1),
+        chosen.slice(chosen.indexOf("/") + 1),
+        chosen.slice(chosen.indexOf("/") + 1),
       ],
       calls: [
         { actor: "staff", purpose: "onboarding.lab" },
@@ -307,7 +366,7 @@ describe("the Stephen Lab's way into a local core", { timeout: 60_000 }, () => {
       labViaSchema.parse(await answerTo({ action: "via" }, { session }))
     );
     // Both roles resolve to the organization's default.
-    expect(result).toStrictEqual({ quick, careful: quick });
+    expect(result).toStrictEqual({ quick: chosen, careful: chosen });
   });
 
   it("gives the practice people's links, which open their interviews", async () => {
@@ -357,16 +416,9 @@ describe("the Stephen Lab's way into a local core", { timeout: 60_000 }, () => {
     ).toStrictEqual({ state: "open", name: "Sanne" });
   });
 
-  it("holds one of Stephen's turns on fixed input, with who it is with given, as a link's turn, and the onboarding counts none of it", async () => {
+  it("holds one of Stephen's turns on fixed input, with who it is with given, and the onboarding counts none of it", async () => {
     const session = await staffSession();
-    const who: LabWho = {
-      company: "Noordzee Vis B.V.",
-      name: "Karin",
-      team: "Order desk",
-      lead: "Wim",
-      work: "entering orders",
-      known: "",
-    };
+    const who = withKarin;
     const { requests, result } = await answering(
       [
         {
@@ -441,14 +493,192 @@ describe("the Stephen Lab's way into a local core", { timeout: 60_000 }, () => {
       say: "Who releases it?",
       facts: ["The order gets released."],
       lineFirst: true,
-      // His line and what he wrote down: both from the organization's default.
+      // His line and what he wrote down: from the interview's own models,
+      // whatever the organization chose.
       models: [
         quick.slice(quick.indexOf("/") + 1),
-        quick.slice(quick.indexOf("/") + 1),
+        careful.slice(careful.indexOf("/") + 1),
       ],
       told: [true, true, true, true],
       counted: 0,
     });
+  });
+
+  it("holds a turn with someone on the roster as the store knows them, a lead as a lead, and none with someone not on it", async () => {
+    const session = await staffSession();
+    const store = onboardingStore(env);
+    const id = unique();
+    await store.saveRoster(
+      {
+        teams: [
+          {
+            id: `desk-${id}`,
+            name: "Order desk",
+            lead: `wim-${id}`,
+            does: "",
+            off: false,
+          },
+        ],
+        people: [
+          {
+            id: `wim-${id}`,
+            name: "Wim Wouters",
+            team: `desk-${id}`,
+            email: `wim-${id}@acme.test`,
+            title: "Team lead",
+            away: false,
+          },
+        ],
+      },
+      { type: "system" }
+    );
+    const { requests, result } = await answering(
+      [stephenLine("What does your team do?"), noNotes],
+      async () => {
+        const held = await fromLab(
+          { action: "turn", who: { person: `wim-${id}` }, turn: started },
+          { session }
+        );
+        await held.text();
+        return await refusedWith(
+          { action: "turn", who: { person: `nobody-${id}` }, turn: started },
+          { session }
+        );
+      }
+    );
+    expect({
+      told: JSON.stringify(requests[0]?.body).includes(
+        "You talk with: Wim, who leads Order desk. This is the interview about the work of the whole team."
+      ),
+      nobody: result,
+    }).toStrictEqual({ told: true, nobody: [404, "request.not_found"] });
+  });
+
+  it("puts a line right that breaks his rules, and leaves out a fact whose words weren't said", async () => {
+    const session = await staffSession();
+    const { result } = await answering(
+      [
+        stephenLine(
+          "Great answer! Who gets it after you, and why does it wait? Then we go on."
+        ),
+        {
+          text: JSON.stringify({
+            facts: [
+              {
+                tag: "number",
+                text: "You handle 40 a week.",
+                record: "About 40 a week.",
+                quote: "forty a week",
+              },
+            ],
+            changes: [{ id: "f9", text: "Unknown.", record: "Unknown." }],
+          }),
+          inputTokens: 1600,
+          outputTokens: 120,
+        },
+      ],
+      async () =>
+        await turnOf(
+          await fromLab(
+            { action: "turn", who: withKarin, turn: answered("I send it on.") },
+            { session }
+          )
+        )
+    );
+    expect({
+      say: result?.say,
+      facts: result?.facts,
+      changes: result?.changes,
+    }).toStrictEqual({ say: "Who gets it after you?", facts: [], changes: [] });
+  });
+
+  it("asks a line the model declines once more, of the careful model", async () => {
+    const session = await staffSession();
+    const { requests, result } = await answering(
+      [
+        { text: "", inputTokens: 1500, outputTokens: 1, refused: true },
+        stephenLine("Which part of it takes longest?"),
+        noNotes,
+      ],
+      async () =>
+        await turnOf(
+          await fromLab(
+            { action: "turn", who: withKarin, turn: answered("It is a lot.") },
+            { session }
+          )
+        )
+    );
+    expect({
+      say: result?.say,
+      models: requests.map(modelOf),
+    }).toStrictEqual({
+      say: "Which part of it takes longest?",
+      models: [
+        quick.slice(quick.indexOf("/") + 1),
+        careful.slice(careful.indexOf("/") + 1),
+        careful.slice(careful.indexOf("/") + 1),
+      ],
+    });
+  });
+
+  it("writes nothing down while he waits for the rest of what they say", async () => {
+    const session = await staffSession();
+    const { requests, result } = await answering(
+      [stephenLine("", "yes")],
+      async () =>
+        await turnOf(
+          await fromLab(
+            { action: "turn", who: withKarin, turn: answered("And then I") },
+            { session }
+          )
+        )
+    );
+    expect({ turn: result, sent: requests.length }).toMatchObject({
+      turn: { say: "", more: true, facts: [] },
+      sent: 1,
+    });
+  });
+
+  it("cuts a turn the lab gave up halfway off at once", async () => {
+    const session = await staffSession();
+    const reached = Promise.withResolvers<null>();
+    const held = Promise.withResolvers<null>();
+    const { requests } = await answering(
+      [
+        {
+          ...stephenLine("Okay. And who checks it after you?"),
+          pause: {
+            at: 18,
+            until: held.promise,
+            reached: () => {
+              reached.resolve(null);
+            },
+          },
+        },
+      ],
+      async () => {
+        const response = await fromLab(
+          { action: "turn", who: withKarin, turn: answered("I check it.") },
+          { session }
+        );
+        await reached.promise;
+        // The played person talked on: the lab gives the turn up.
+        await response.body?.cancel();
+        return null;
+      }
+    );
+    await vi.waitFor(
+      () => {
+        if (requests[0]?.signal.aborted !== true) {
+          throw new Error("Not cut off yet");
+        }
+      },
+      { timeout: 10_000, interval: 100 }
+    );
+    expect({
+      cutOff: requests[0]?.signal.aborted,
+      sent: requests.length,
+    }).toStrictEqual({ cutOff: true, sent: 1 });
   });
 
   it("says who someone on the roster is, as their turns would know it, and nobody for someone not on it", async () => {

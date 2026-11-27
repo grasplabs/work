@@ -4,7 +4,7 @@
  * onboarding, as a demo of what the company's admin and Grasp's staff see
  * while Stephen talks to the team: day 8 of 14, the kickoff read, the
  * staff list confirmed with a lead for every team, where the documents
- * live, Pulse and the HR platform chosen, the agreements in, every link
+ * live, the HR platform chosen, the agreements in, every link
  * out, five of six leads heard, Customer service still quiet, and the
  * gate closed, with Grasp knowing about 75% of the company: short of the
  * 80% at which staff give their go.
@@ -199,7 +199,7 @@ const main = async (): Promise<void> => {
     }
 
     // What the admin did in their setup: the staff list, confirmed with
-    // its leads; the documents in SharePoint and Teams, Pulse wanted, AFAS
+    // its leads; the documents in SharePoint and Teams, AFAS
     // for HR; the plan.
     const given = roster();
     const { roster: company } = await onboarding.confirmRoster(given);
@@ -214,7 +214,6 @@ const main = async (): Promise<void> => {
     await onboarding.saveChoices({
       sources: ["sharepoint", "teams"],
       sourcesWanted: [],
-      pulse: "wanted",
       hr: { kind: "platform", name: "AFAS" },
     });
     await onboarding.savePlan({ start: daysFromToday(0) });

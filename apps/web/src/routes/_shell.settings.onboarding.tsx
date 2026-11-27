@@ -1,37 +1,12 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { loadFromCore } from "../load-from-core.tsx";
-
-// Settings, Onboarding, as it was: Settings no longer lists the
-// onboarding's interviews. While they run, from the moment who works where
-// is in until Grasp opens the gate, an old link here leads to where they
-// stand and the links to send, the onboarding's own step (`/setup`, as
-// onboarding/setup-steps.tsx shows them); once they are over, or for anyone
-// they aren't for, to the inbox. The reference sends to the inbox's
-// Interviews item, which the inbox here doesn't have.
+// Settings, Onboarding, as it was: the interviews now stand under
+// Settings › Interviews (settings/interviews.tsx), and an old link here
+// leads there. That section sends on anyone it isn't for.
 
 export const Route = createFileRoute("/_shell/settings/onboarding")({
-  loader: async ({ context: { core } }) => {
-    const read = await loadFromCore(core, async (session) => {
-      const [view, programme] = await Promise.all([
-        session.onboarding.view(),
-        session.onboarding.programme(),
-      ]);
-      return { view, stage: programme?.stage ?? null };
-    });
-    const running =
-      read.state === "ready" &&
-      read.data.stage !== "open" &&
-      (read.data.view.plan !== null || read.data.view.roster !== null);
-    if (running) {
-      // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
-      throw redirect({
-        to: "/setup",
-        search: { step: read.data.view.plan === null ? "team" : "listening" },
-        replace: true,
-      });
-    }
+  beforeLoad: () => {
     // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
-    throw redirect({ to: "/inbox", replace: true });
+    throw redirect({ to: "/settings/interviews", replace: true });
   },
 });

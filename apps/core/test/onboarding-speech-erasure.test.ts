@@ -9,8 +9,12 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { platformAi } from "../src/platform-ai.ts";
 import { keepLine, storedKeyOf } from "../src/speech-cache.ts";
 import { speechModelOf } from "../src/speech.ts";
+import type { SpeechAudience } from "../src/speech.ts";
 import { adminCommands } from "./admin-command.ts";
-import { platformMistralKey } from "./connect-providers.ts";
+import {
+  platformElevenLabsKey,
+  platformMistralKey,
+} from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { onLink, openedFor } from "./interview-link.ts";
 import type { Device } from "./interview-link.ts";
@@ -44,10 +48,12 @@ const lineOf = (): string => `So ${uniqueLetters()} comes first.`;
 const sayingWhile = async (
   text: string,
   ask: () => Promise<number>,
-  erase: () => Promise<unknown>
+  erase: () => Promise<unknown>,
+  // An admin's lines are said by ElevenLabs, an interview's by Mistral.
+  key: string = platformMistralKey
 ): Promise<{ status: number; reached: number }> => {
   const held = `voice-${unique()}`;
-  await plan(platformMistralKey, [{ release: held }]);
+  await plan(key, [{ release: held }]);
   const saying = ask();
   await expect
     .poll(async () => await carrying(text), { timeout: 10_000 })
@@ -60,7 +66,7 @@ const sayingWhile = async (
 };
 
 /** Whatever could still find `text`: its audio, a note of it, a key waiting to go. */
-const leftOf = async (text: string) => {
+const leftOf = async (text: string, audience?: SpeechAudience) => {
   const key = await storedKeyOf(text);
   const rows = await runInDurableObject(
     onboardingStore(env),
@@ -73,7 +79,7 @@ const leftOf = async (text: string) => {
         .toArray().length,
     })
   );
-  return { cached: await stillKept(text), ...rows };
+  return { cached: await stillKept(text, audience), ...rows };
 };
 
 const savedSchema = z.object({ version: z.number() });
@@ -186,10 +192,11 @@ describe(
       const said = await sayingWhile(
         text,
         async () => await sayForAdmin(admin.session, text),
-        async () => await store.deleteKickoff({ type: "system" })
+        async () => await store.deleteKickoff({ type: "system" }),
+        platformElevenLabsKey
       );
 
-      expect({ ...said, ...(await leftOf(text)) }).toStrictEqual({
+      expect({ ...said, ...(await leftOf(text, "onboarding")) }).toStrictEqual({
         status: 200,
         reached: 1,
         cached: false,
@@ -227,9 +234,10 @@ const cacheDownOnce = () =>
  */
 const erasedWithCacheDown = async (
   text: string,
-  erase: () => Promise<unknown>
+  erase: () => Promise<unknown>,
+  audience?: SpeechAudience
 ) => {
-  await expect(stillKept(text)).resolves.toBeTruthy();
+  await expect(stillKept(text, audience)).resolves.toBeTruthy();
   await noAlarm();
   const down = cacheDownOnce();
   try {
@@ -237,10 +245,10 @@ const erasedWithCacheDown = async (
   } finally {
     down.mockRestore();
   }
-  const stuck = await leftOf(text);
+  const stuck = await leftOf(text, audience);
   const armed = (await alarmSet()) !== null;
   const ran = await runDurableObjectAlarm(onboardingStore(env));
-  return { stuck, armed, ran, after: await leftOf(text) };
+  return { stuck, armed, ran, after: await leftOf(text, audience) };
 };
 
 /** Nothing left of a line, once the alarm took it out: what each case ends on. */
@@ -295,7 +303,8 @@ describe("a line whose take-out fails", { timeout: 60_000 }, () => {
 
     const result = await erasedWithCacheDown(
       text,
-      async () => await store.deleteKickoff({ type: "system" })
+      async () => await store.deleteKickoff({ type: "system" }),
+      "onboarding"
     );
 
     expect(result).toStrictEqual(takenOutByTheAlarm);
@@ -311,7 +320,11 @@ describe("a line whose take-out fails", { timeout: 60_000 }, () => {
     const result = await erasedWithCacheDown(
       text,
       async () =>
-        await admin.api.members.erase(person.userId, String(person.person.name))
+        await admin.api.members.erase(
+          person.userId,
+          String(person.person.name)
+        ),
+      "onboarding"
     );
 
     expect(result).toStrictEqual(takenOutByTheAlarm);
@@ -500,7 +513,9 @@ describe("a line whose take-out fails", { timeout: 60_000 }, () => {
           .one().n
     );
     const kept = await Promise.all(
-      [texts[0] ?? "", texts.at(-1) ?? ""].map(stillKept)
+      [texts[0] ?? "", texts.at(-1) ?? ""].map(
+        async (text) => await stillKept(text)
+      )
     );
 
     expect({ gone, armed, waiting, kept }).toStrictEqual({

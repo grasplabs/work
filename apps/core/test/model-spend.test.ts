@@ -10,6 +10,7 @@ import { monthSpend } from "../src/model-spend.ts";
 import { recordResponse } from "../src/model-usage.ts";
 import { models } from "../src/models.ts";
 import type { ModelCall } from "../src/models.ts";
+import { platformAi } from "../src/platform-ai.ts";
 import { platformSpeech } from "../src/speech.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -243,7 +244,7 @@ describe("model spend", { timeout: 60_000 }, () => {
       work: { onboarding: true },
     }).speak({
       text: "Hello there.",
-      voice: "voice_485",
+      voice: platformAi.speech.voices.stephen,
       language: "en",
     });
     const [grasp] = await recordedUsage(month, 1, { credential: "platform" });
@@ -256,7 +257,7 @@ describe("model spend", { timeout: 60_000 }, () => {
       // The organization's spend is what its own key cost: the call.
       user: pricedMicros,
       organization: pricedMicros,
-      grasp: ["speech", "mistral/voxtral-mini-tts-3-0", true],
+      grasp: ["speech", "elevenlabs/eleven_v4", true],
     });
   });
 

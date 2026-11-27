@@ -58,6 +58,9 @@ catalogs:
     '@earendil-works/pi-schema':
       specifier: 1.6.1
       version: 1.6.1
+    '@elevenlabs/client':
+      specifier: 1.37.1
+      version: 1.37.1
     '@fontsource-variable/geist':
       specifier: 5.2.8
       version: 5.2.8
@@ -962,6 +965,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@elevenlabs/client':
+        specifier: 'catalog:'
+        version: 1.37.1(@types/dom-mediacapture-record@1.0.22)
       '@grasp-os/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
@@ -2480,6 +2486,12 @@ packages:
   '@earendil-works/pi-telemetry@1.6.1':
     resolution: {integrity: sha512-3gyjVQlVrPwEq7ZCea8++prMwUkuNXM3v/mzTJ9knJAhqrYLxSVAjYzA1iC3KLq8ismmSQIcnFp++qTwQwNToA==}
     engines: {node: '>=22.19.0'}
+
+  '@elevenlabs/client@1.37.1':
+    resolution: {integrity: sha512-4WvfsriJq9pj+nedoseL/bivAhgeXqE1aqvujbNH2+uz04Qi1+oGetsr+49shNSupcauN1nIUdEa21+wg+U/Og==}
+
+  '@elevenlabs/types@0.30.0':
+    resolution: {integrity: sha512-fOfe5aXbLemU59YnHiDBQ7sq5u7OuQXW/YtZizk8U+RHLFcaHIrPERFlM6qIKzLu7bG/01MW7YemSH1M2zWk2g==}
 
   '@emmetio/abbreviation@2.3.3':
     resolution: {integrity: sha512-mgv58UrU3rh4YgbE/TzgLQwJ3pFsHHhCLqY20aJq+9comytTXUDNGG/SMtSeMJdkpxgXSXunBGLD8Boka3JyVA==}
@@ -12396,6 +12408,15 @@ snapshots:
   '@earendil-works/pi-schema@1.6.1': {}
 
   '@earendil-works/pi-telemetry@1.6.1': {}
+
+  '@elevenlabs/client@1.37.1(@types/dom-mediacapture-record@1.0.22)':
+    dependencies:
+      '@elevenlabs/types': 0.30.0
+      livekit-client: 2.25.0(@types/dom-mediacapture-record@1.0.22)
+    transitivePeerDependencies:
+      - '@types/dom-mediacapture-record'
+
+  '@elevenlabs/types@0.30.0': {}
 
   '@emmetio/abbreviation@2.3.3':
     dependencies:

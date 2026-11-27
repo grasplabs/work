@@ -1,89 +1,61 @@
-import type {
-  AssistantMessage,
-  AssistantMessageEventStream,
-} from "@earendil-works/pi-ai";
-import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
-import { sha256Hex } from "@grasp-os/shared/encoding";
-import { requestErrors } from "@grasp-os/shared/errors";
 import {
   answerOf,
-  checkedTurn,
-  earlyNext,
-  earlyOpening,
-  earlyPlainLine,
   fileCalled,
-  interviewTurnMaxBytes,
-  interviewTurnRequestSchema,
   notesSchema,
-  onlyLine,
   onlyNotes,
-  plainLine,
   turnLinesMax,
-  waitsForMore,
 } from "@grasp-os/shared/interview-turn";
 import type {
   InterviewEvent,
   InterviewTurnRequest,
-  TurnEvent,
 } from "@grasp-os/shared/interview-turn";
 import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import { interviewerNames } from "@grasp-os/shared/onboarding";
+import { companyNameOf } from "@grasp-os/shared/organization";
 
-import { errorResponse } from "../errors.ts";
-import { modelSettings, modelForRole, models } from "../models.ts";
+import { models } from "../models.ts";
 import type { ModelCall } from "../models.ts";
 import { readOrganization } from "../organization.ts";
-import { boundedText, jsonOf } from "../request-body.ts";
-import { interviewCaller } from "./interview-caller.ts";
-import { interviewerText } from "./interviewer-text.ts";
-import { stephenVersion } from "./lab-marks.ts";
-import { linkHeaders, linkRefusal, noCallerRefusal } from "./links.ts";
 import { stillOpen } from "./still-open.ts";
-import { onboardingStore } from "./store.ts";
 import type { Took, TurnContext } from "./store.ts";
 
-// One turn of someone's interview, `POST /api/interview/turn`, on their own
-// link: Stephen's next line as soon as it is written, and what he writes
-// down from what was just said. Two models through the model gateway, side
-// by side: the deployment's quick one says his line, in plain named lines,
-// because whoever he talks to is waiting for it; its careful one writes
-// down what was said, as checked JSON, once his line is out, because
-// nobody waits for that and it is what the interview is for. Ported from
-// the prototype (grasplabs/prototype, packages/grasp: worker/interview.ts).
+// What Stephen is told about an interview, and what he writes down from
+// it. Every interview is one live conversation with Grasp's ElevenLabs
+// agent (voice.ts), which says his lines; after each answer core's notes'
+// model, Mistral's on Grasp's own key (src/platform-ai.ts) whatever
+// provider the organization connected, writes down what was said, as
+// checked JSON, from the brief made here. Ported from the prototype
+// (grasplabs/prototype, packages/grasp: worker/interview.ts).
 //
 // What it must not do, from the threat model (GRA-307), and what stops it:
 //
-// - Let the page say who it is or what Stephen knows: the link's secret
-//   and the session of the account it belongs to are checked
-//   (interview-caller.ts, the store), and who they are, their
-//   team, their lead and what Stephen knows come from it (`turnContext`).
-//   The page sends only the conversation, which it holds.
+// - Let the page say who it is or what Stephen knows: who they are, their
+//   team, their lead and what Stephen knows come from the store
+//   (`turnContext`), on their own link and account. The page sends only
+//   the conversation, which it holds.
 // - Tell the company who talked, and when: every gateway call is made by
 //   the system for `onboarding.interview`, never in anyone's name, and
 //   onboarding calls always count as carrying sensitive data
 //   (model-rules.ts), so only models the rules allow for that are used.
-// - Let a line out that breaks his rules: it is put right before it goes
-//   (`asStephenSays`), and a fact whose words weren't said is left out
-//   (`checkedTurn`), and counted in the log, never with its words.
-// - Run up the bill: the body is bounded, the store limits calls per link,
-//   the conversation sent is its last lines, and a turn given up halfway
-//   is cut off at once, and still counted for what it took.
+// - Write down what wasn't said: a fact whose words weren't said is left
+//   out (`checkedTurn`), and counted in the log, never with its words.
+//
+// The Stephen Lab still holds turns of its own from the same brief, his
+// line written by a model (lab-turn.ts): a local stack's alone.
 
 /** What the gateway is told every call of an interview is for. */
 const purpose = "onboarding.interview";
 
-/** The most the line's model writes: six short lines. */
-const lineTokens = 400;
 /** The most the notes' model writes: the facts of one answer. */
 const notesTokens = 4000;
 
 /**
- * A turn as Stephen is asked for it: the page's request, without the link
- * it came on, and without the interviewer it names. The onboarding's pages
- * still send one until they drop the choice; Stephen holds every interview.
+ * What Stephen is told a brief from: the conversation, what he wrote down
+ * and what just happened. The notes step fills it from a live
+ * conversation (voice.ts), the lab's turns from fixed input (lab-turn.ts).
  */
-export type TurnAsked = Omit<InterviewTurnRequest, "secret" | "interviewer">;
+export type TurnAsked = InterviewTurnRequest;
 
 /** What happened, as Stephen is told it, for someone called `name`. */
 const happenedOf = (
@@ -107,6 +79,9 @@ const happenedOf = (
 
 /** Their work as a whole takes 4 minutes at most: a talker can fill the whole interview with it. */
 const weekPartMinutes = 4;
+
+/** What of a turn tells where the interview stands, without its conversation. */
+type Situation = Pick<TurnAsked, "phase" | "minutes" | "adding" | "facts">;
 
 /**
  * What the record still misses, as Stephen is told it each turn
@@ -133,20 +108,13 @@ const openOf = (turn: Situation, kind: TurnContext["kind"]): string[] => {
   ];
 };
 
-/** What of a turn tells where the interview stands, without its conversation. */
-export type Situation = Pick<
-  TurnAsked,
-  "phase" | "minutes" | "adding" | "facts"
->;
-
 /**
  * Where the interview stands, as Stephen is told it: who he talks to and
  * about what, what Grasp knows already, how long it has run, what he
  * wrote down and what is still open. Who they are comes from the store.
- * The first part of every turn's brief (`briefOf`), and what a live voice
- * session is told, and told again after each answer (voice.ts).
+ * The first part of every turn's brief (`briefOf`).
  */
-export const situationOf = (
+const situationOf = (
   turn: Situation,
   context: TurnContext,
   company: string
@@ -194,10 +162,10 @@ export const situationOf = (
 };
 
 /**
- * What Stephen is told for one turn: where the interview stands
- * (`situationOf`), the conversation, and what just happened. The
- * conversation comes from the page, or, in a live voice session, from
- * what Mistral wrote down of it.
+ * What Stephen is told: where the interview stands (`situationOf`), the
+ * conversation, and what just happened. The conversation comes from the
+ * page, as it heard a live conversation with the agent (voice.ts), or
+ * from the lab (lab-turn.ts).
  */
 export const briefOf = (
   turn: TurnAsked,
@@ -234,71 +202,30 @@ export class TurnFailedError extends Error {
   }
 }
 
-const lostThread = () =>
+export const lostThread = (): TurnFailedError =>
   new TurnFailedError("Stephen lost his thread. Say it once more.", 502);
 
-/** The gateway's own refusals, as the stream ends with them (models.ts). */
-const gatewayRefusal = /^The model call was refused \((?<code>[a-z_.]+)\)/u;
+/** Grasp has no key for the interview's provider here, or it has no host. */
+const notSetUp = new Set(["model.not_allowed", "model.unconfigured"]);
 
-/** What a gateway refusal tells the page: busy is worth a retry, the rest isn't. */
-const refusalOf = (code: string | undefined): TurnFailedError =>
-  code === "model.rate_limited"
-    ? new TurnFailedError("Stephen is busy. Try again in a minute.", 429)
+/**
+ * What a gateway refusal tells the page: busy is worth a retry; an
+ * interview that isn't set up (Grasp's key is missing) is not, and the
+ * rest may be.
+ */
+export const refusalOf = (code: string | undefined): TurnFailedError => {
+  // Which refusal it was is kept for whoever looks into it; the person is told only what to do.
+  log.warn("interview.model_refused", { code: code ?? "unknown" });
+  if (code === "model.rate_limited") {
+    return new TurnFailedError("Stephen is busy. Try again in a minute.", 429);
+  }
+  return notSetUp.has(code ?? "")
+    ? new TurnFailedError("The interview is not set up yet.", 503)
     : new TurnFailedError("Stephen could not be reached. Try again.", 502);
-
-/** The text a finished answer holds; it throws when there is none to use. */
-const textOfAnswer = (answer: AssistantMessage): string => {
-  const text = answer.content
-    .flatMap((block) => (block.type === "text" ? [block.text] : []))
-    .join("");
-  if (answer.stopReason === "error" || answer.stopReason === "aborted") {
-    const code = gatewayRefusal.exec(answer.errorMessage ?? "")?.groups?.code;
-    throw code === undefined
-      ? new TurnFailedError(
-          "Stephen could not answer that. Say it another way.",
-          502,
-          {
-            cause: "declined",
-          }
-        )
-      : refusalOf(code);
-  }
-  if (text.trim() === "" || answer.stopReason === "length") {
-    throw lostThread();
-  }
-  return text;
 };
 
-/** What one call took, as the onboarding counts it. */
-const tookOf = (
-  model: string,
-  usage: AssistantMessage["usage"] | undefined
-): Took | null =>
-  usage === undefined
-    ? null
-    : {
-        purpose: "interviews",
-        model,
-        tokensIn: usage.input + usage.cacheRead + usage.cacheWrite,
-        tokensCached: usage.cacheRead,
-        tokensOut: usage.output,
-      };
-
-interface Turn {
-  env: Env;
-  turn: TurnAsked;
-  context: TurnContext;
-  requestId: string;
-  system: string;
-  brief: string;
-  quick: string;
-  careful: string;
-  signal: AbortSignal;
-  send: (event: TurnEvent) => void;
-  count: (took: Took | null) => void;
-}
-
-const session = (model: string) =>
+/** What every call of an interview tells the gateway. */
+export const session = (model: string) =>
   ({
     model,
     purpose,
@@ -307,54 +234,22 @@ const session = (model: string) =>
     effort: "low",
   }) as const;
 
-/** Streams the line's model; `onText` sees everything written so far. */
-const speak = async (
-  { env, system, brief, signal, count }: Turn,
-  model: string,
-  onText: (written: string) => void
-): Promise<string> => {
-  const agent = await models(env).agent({
-    ...session(model),
-    maxTokens: lineTokens,
-  });
-  const stream: AssistantMessageEventStream = agent.stream(
-    agent.model,
-    normalizeContext({
-      systemPrompt: system,
-      messages: [
-        {
-          role: "user",
-          content: `${brief}\n\n${onlyLine}`,
-          timestamp: Date.now(),
-        },
-      ],
-    }),
-    { signal }
-  );
-  let written = "";
-  for await (const event of stream) {
-    if (event.type === "text_delta") {
-      written += event.delta;
-      onText(written);
-    }
-  }
-  const answer = await stream.result();
-  count(tookOf(model, answer.usage));
-  return textOfAnswer(answer);
-};
+/** What the notes' model is asked with. */
+export interface Writing {
+  env: Env;
+  system: string;
+  brief: string;
+  signal: AbortSignal;
+  count: (took: Took | null) => void;
+}
 
 /**
- * Asks the notes' model what to write down from what was just said: in a
- * turn, and after each answer in a live voice session (voice.ts).
+ * Asks the notes' model what to write down from what was just said: after
+ * each answer of a live conversation (voice.ts), and in a turn of the
+ * lab's (lab-turn.ts).
  */
 export const write = async (
-  {
-    env,
-    system,
-    brief,
-    signal,
-    count,
-  }: Pick<Turn, "env" | "system" | "brief" | "signal" | "count">,
+  { env, system, brief, signal, count }: Writing,
   model: string
 ): Promise<unknown> => {
   const call: ModelCall<unknown> = {
@@ -366,7 +261,7 @@ export const write = async (
     signal,
   };
   try {
-    const { output, usage } = await models(env).call(call);
+    const { output, usage } = await models(env).interview.call(call);
     count({
       purpose: "interviews",
       model,
@@ -377,295 +272,20 @@ export const write = async (
     return output;
   } catch (error) {
     const code = modelErrors.codeOf(error);
+    if (code === undefined) {
+      log.warn("interview.notes_lost", {
+        error: error instanceof Error ? error.name : typeof error,
+      });
+    }
     throw code === undefined ? lostThread() : refusalOf(code);
   }
 };
 
-/** A promise's outcome, kept to be looked at later: started early, it never goes unhandled. */
-type Settled = { ok: true; value: unknown } | { ok: false; error: unknown };
-
-const settled = async (promise: Promise<unknown>): Promise<Settled> => {
-  try {
-    return { ok: true, value: await promise };
-  } catch (error) {
-    return { ok: false, error };
-  }
-};
-
-/** For a line nobody hears as it is written: the one asked again. */
-const unheard = (): void => undefined;
-
 /**
- * One turn: the line as soon as it is written (its first short sentence
- * even sooner, then where the interview goes), what was written down once
- * the line is out, then the whole turn checked. A line the model declines
- * is asked once more of the careful one; anything else that fails is the
- * page's to try again.
+ * The company's name, as Stephen is told it: never the placeholder core
+ * made the organization with (`companyNameOf`); empty when nothing names it.
  */
-const holdTurn = async (held: Turn): Promise<void> => {
-  const { turn, quick, careful, send, requestId } = held;
-  let opened = false;
-  let early = false;
-  let steered = false;
-  let notes: Promise<Settled> | null = null;
-  const writeNotes = async (): Promise<Settled> => {
-    notes ??= settled(write(held, careful));
-    return await notes;
-  };
-  const onText = (written: string) => {
-    if (!(opened || early)) {
-      const opening = earlyOpening(written);
-      opened = opening !== null;
-      if (opening !== null) {
-        send({ opening });
-      }
-    }
-    if (!early) {
-      const line = earlyPlainLine(written);
-      early = line !== null;
-      if (line !== null && line !== false) {
-        send({ line });
-      }
-      // His line is out: what was said is written down from now on,
-      // unless he waits for the rest of it.
-      if (early && !waitsForMore(written)) {
-        void writeNotes();
-      }
-    }
-    if (early && !steered) {
-      const next = earlyNext(written);
-      steered = next !== null;
-      if (next !== null) {
-        send({ next });
-      }
-    }
-  };
-  let said: string;
-  try {
-    said = await speak(held, quick, onText);
-  } catch (error) {
-    if (!(error instanceof TurnFailedError && error.cause === "declined")) {
-      throw error;
-    }
-    // Declined: asked once more, of the careful model. His line then
-    // comes with the whole turn.
-    said = await speak(held, careful, unheard);
-  }
-  const line = plainLine(said);
-  const written = line.more === true ? null : await writeNotes();
-  if (written?.ok === false) {
-    throw written.error;
-  }
-  const noted = written?.value ?? {};
-  const { turn: checked, dropped } = checkedTurn(
-    { ...line, ...(typeof noted === "object" ? noted : {}) },
-    {
-      answers: turn.lines.filter(({ from }) => from === "person"),
-      known: turn.facts.map(({ id }) => id),
-      phase: turn.phase,
-    }
-  );
-  // What he wrote down and was left out used to go unseen: how many and
-  // why, so a model that quotes badly shows. Never the words.
-  if (dropped.unknownTag + dropped.noText + dropped.notSaid > 0) {
-    log.info("interview.notes_dropped", { requestId, ...dropped });
-  }
-  send({ turn: checked });
-};
-
-const encoder = new TextEncoder();
-
-/** The organization's name, as Stephen is told it. */
 export const companyOf = async (env: Env): Promise<string> => {
-  const { name } = await readOrganization(env);
-  return name;
-};
-
-/** One turn to hold, from what is known of who it is with. */
-export interface TurnInput {
-  env: Env;
-  turn: TurnAsked;
-  context: TurnContext;
-  /** The company's name, while it is read. */
-  company: Promise<string>;
-  requestId: string;
-  ctx: Pick<ExecutionContext, "waitUntil">;
-  /** Counts what each call took. */
-  meter: (took: Took) => Promise<void>;
-  /**
-   * Keeps what the turn ran on, for the staff's numbers: the mark of the
-   * text that speaks. A link's turn has one; the Stephen Lab's has none.
-   */
-  ran?: (mark: string) => Promise<void>;
-}
-
-/**
- * Holds one turn: the events, a line of JSON at a time, as the page reads
- * them. Someone's own link comes here once the store said who they are;
- * so does the Stephen Lab's fixed input (lab.ts), with who they are given.
- */
-export const turnStream = async ({
-  env,
-  turn,
-  context,
-  company,
-  requestId,
-  ctx,
-  meter,
-  ran,
-}: TurnInput): Promise<Response> => {
-  const settings = await modelSettings(env);
-  // No provider connected yet: the interview isn't set up, as the person
-  // with the link is told; the log says why (`model.no_provider`).
-  const connected = settings.models.length > 0;
-  const quick = connected ? modelForRole(settings, "quick") : undefined;
-  const careful = connected ? modelForRole(settings, "careful") : undefined;
-  if (quick === undefined || careful === undefined) {
-    log.error("interview.no_model", {
-      requestId,
-      ...(connected ? {} : { code: "model.no_provider" }),
-    });
-    return Response.json(
-      { error: "The interview is not set up yet.", status: 503 },
-      { status: 503, headers: linkHeaders }
-    );
-  }
-  const [{ text: system, mark }, name] = await Promise.all([
-    interviewerText(context.kind, turn.locale),
-    company,
-  ]);
-  const cut = new AbortController();
-  const counting: Promise<void>[] = ran === undefined ? [] : [ran(mark)];
-  const count = (took: Took | null) => {
-    if (took !== null) {
-      counting.push(meter(took));
-    }
-  };
-  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
-  const writer = writable.getWriter();
-  const deliver = async (event: TurnEvent): Promise<void> => {
-    try {
-      await writer.write(encoder.encode(`${JSON.stringify(event)}\n`));
-    } catch {
-      // The page went away: the turn is given up (below).
-      cut.abort();
-    }
-  };
-  const send = (event: TurnEvent) => {
-    if (!cut.signal.aborted) {
-      void deliver(event);
-    }
-  };
-  // Given up because they talked on, the page closes its end: both models
-  // are cut off at once, and what they took is still counted, as the turn
-  // runs on until it is (`waitUntil`).
-  const given = async (): Promise<void> => {
-    try {
-      await writer.closed;
-    } catch {
-      cut.abort();
-    }
-  };
-  void given();
-  const held = (async () => {
-    try {
-      await holdTurn({
-        env,
-        turn,
-        context,
-        requestId,
-        system,
-        brief: briefOf(turn, context, name),
-        quick,
-        careful,
-        signal: cut.signal,
-        send,
-        count,
-      });
-    } catch (error) {
-      const failed =
-        error instanceof TurnFailedError
-          ? error
-          : refusalOf(modelErrors.codeOf(error));
-      if (!(error instanceof TurnFailedError || cut.signal.aborted)) {
-        log.error("interview.turn_failed", { requestId });
-      }
-      send({ error: failed.message, status: failed.status });
-    }
-    await Promise.allSettled(counting);
-    await writer.close().catch(() => null);
-  })();
-  ctx.waitUntil(held);
-  return new Response(readable, {
-    headers: {
-      ...linkHeaders,
-      "content-type": "application/x-ndjson; charset=utf-8",
-    },
-  });
-};
-
-/** Someone's turn, as the page asks for it: the events, a line of JSON at a time. */
-export const interviewTurnResponse = async (
-  request: Request,
-  env: Env,
-  requestId: string,
-  ctx: Pick<ExecutionContext, "waitUntil">
-): Promise<Response> => {
-  if (request.method !== "POST") {
-    return errorResponse(
-      405,
-      requestErrors.create("request.not_found"),
-      requestId
-    );
-  }
-  // Who asks, before anything they sent is read (interview-caller.ts).
-  const caller = await interviewCaller(env, request.headers);
-  if (typeof caller === "string") {
-    return noCallerRefusal(caller, requestId);
-  }
-  const length = Number(request.headers.get("content-length") ?? 0);
-  const raw =
-    length > interviewTurnMaxBytes
-      ? undefined
-      : await boundedText(request.body, interviewTurnMaxBytes);
-  const parsed = interviewTurnRequestSchema.safeParse(
-    raw === undefined ? undefined : jsonOf(raw)
-  );
-  if (!parsed.success) {
-    return linkRefusal("interview.invalid", requestId);
-  }
-  const turn = parsed.data;
-  const secretMark = await sha256Hex(turn.secret);
-  const found = await onboardingStore(env).turnContext(
-    secretMark,
-    caller.account
-  );
-  if (!found.ok) {
-    if (found.code === "interview.link_invalid") {
-      log.warn("interview.link_invalid", { requestId });
-    }
-    return linkRefusal(found.code, requestId);
-  }
-  const store = onboardingStore(env);
-  return await turnStream({
-    env,
-    turn,
-    context: found.value,
-    company: companyOf(env),
-    requestId,
-    ctx,
-    // Counted through a stub of its own: the store may have restarted while
-    // the turn ran, and a stub from before the restart reaches nothing.
-    meter: async (took) => {
-      await onboardingStore(env).meter(took);
-    },
-    ran: async (mark) => {
-      await store.turnRan(secretMark, {
-        mark,
-        interviewer: "stephen",
-        locale: turn.locale,
-        version: stephenVersion,
-      });
-    },
-  });
+  const { name, signInDomains } = await readOrganization(env);
+  return companyNameOf(name, signInDomains) ?? "";
 };

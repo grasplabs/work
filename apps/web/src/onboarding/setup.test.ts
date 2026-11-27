@@ -1,14 +1,10 @@
 import type { OnboardingProgress, Roster } from "@grasp-os/shared/onboarding";
-import { noChoices } from "@grasp-os/shared/onboarding-choices";
-import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  partOf,
   afterAi,
-  brainScene,
   closesOn,
-  documentSources,
-  dotsOf,
   finishedAt,
   heldAt,
   keptAt,
@@ -20,12 +16,11 @@ import {
   sourcesFor,
   stepIndex,
   stepShown,
+  waysFrom,
   suitesFor,
   steps,
   teamNumbersOf,
   teamsOf,
-  waysFrom,
-  wizardOf,
 } from "./setup.ts";
 import type { Kept, SetupPath } from "./setup.ts";
 
@@ -126,68 +121,7 @@ describe("the interviews", () => {
   });
 });
 
-describe("the brain on each step", () => {
-  const listening = listeningOf({ roster, plan, progress }, "2026-10-06");
-
-  it("is the company brain with a nerve to each team once who is who is known", () => {
-    expect(
-      brainScene("company", {
-        roster: null,
-        listening,
-        known: 20,
-        choices: noChoices,
-      }).shape
-    ).toStrictEqual({ kind: "org", teams: [], leads: false, beyond: 0 });
-    expect(
-      brainScene("company", {
-        roster,
-        listening,
-        known: 35,
-        choices: noChoices,
-      }).shape
-    ).toStrictEqual({ kind: "org", teams: [2, 1], leads: false, beyond: 0 });
-    expect(
-      brainScene("leads", { roster, listening, known: 35, choices: noChoices })
-        .shape
-    ).toMatchObject({ leads: true });
-  });
-
-  it("keeps who is who as a nerve beyond the places where documents live", () => {
-    expect(
-      brainScene("sources", {
-        roster,
-        listening,
-        known: 35,
-        choices: noChoices,
-      }).shape
-    ).toStrictEqual({
-      kind: "hub",
-      linked: documentSources.map(() => false),
-      beyond: 1,
-    });
-  });
-
-  it("draws a nerve to each place noted, and keeps the tools and the HR platform as nerves beyond", () => {
-    const choices: SetupChoices = {
-      sources: ["notion", "sharepoint"],
-      sourcesWanted: ["Dropbox"],
-      pulse: "wanted",
-      hr: { kind: "platform", name: "Personio" },
-    };
-    const facts = { roster, listening, known: 35, choices };
-    expect({
-      sources: brainScene("sources", facts).shape,
-      leads: brainScene("leads", { ...facts, roster: null }).shape,
-    }).toStrictEqual({
-      sources: {
-        kind: "hub",
-        linked: [true, false, false, false, false, true],
-        beyond: 2,
-      },
-      leads: { kind: "org", teams: [], leads: true, beyond: 3 },
-    });
-  });
-
+describe("the places and sign-ins offered", () => {
   it("offers the places of the company's sign-in first", () => {
     expect(sourcesFor(["google"]).map(({ id }) => id)).toStrictEqual([
       "drive",
@@ -224,44 +158,13 @@ describe("the brain on each step", () => {
       ).toStrictEqual(offered);
     }
   );
-
-  it("has a figure for every step, as full as Grasp knows", () => {
-    for (const step of steps) {
-      const scene = brainScene(step, {
-        roster,
-        listening,
-        known: 35,
-        choices: noChoices,
-      });
-      expect(scene.shape.kind).toBeTruthy();
-      expect(scene.fill).toBe(0.35);
-      expect(scene.teams).toStrictEqual([0.5, 0]);
-    }
-  });
-});
-
-describe("the bar of what Grasp knows", () => {
-  it("gives each source its share of the dots, filled as far as it is known", () => {
-    const dots = dotsOf(
-      [
-        { weight: 20, known: 1 },
-        { weight: 15, known: 0 },
-        { weight: 65, known: 0.5 },
-      ],
-      20
-    );
-    expect(dots).toHaveLength(20);
-    expect(dots.filter((dot) => dot.filled)).toHaveLength(4 + 0 + 7);
-    expect(dots.findIndex((dot) => dot.next)).toBe(4);
-    expect(dots.filter((dot) => dot.first)).toHaveLength(2);
-  });
 });
 
 describe("how far the admin went", () => {
-  it("is at least the interviews once they are planned", () => {
+  it("is past the team step once the interviews are planned", () => {
     expect(reachedOf(2, { plan: null })).toBe(2);
     expect(reachedOf(2, { plan: { ...plan, start: "2026-10-06" } })).toBe(
-      stepIndex("listening")
+      stepIndex("about")
     );
     expect(reachedOf(99, { plan: null })).toBe(steps.length - 1);
   });
@@ -274,7 +177,7 @@ describe("what this browser keeps of how far the admin went", () => {
       "company",
       "documents",
       "leads",
-      "about",
+      "sources",
       "company",
     ] as const) {
       kept = keptAt(kept, stepIndex(step));
@@ -342,11 +245,11 @@ describe("the AI step", () => {
     });
   });
 
-  it("goes on to how this works, or back to where an admin sent back to it was", () => {
+  it("goes on to the company, or to the step an admin held on it asked for", () => {
     expect({
       first: afterAi(stepIndex("ai")),
       sentBack: afterAi(listening),
-    }).toStrictEqual({ first: "about", sentBack: "listening" });
+    }).toStrictEqual({ first: "company", sentBack: "listening" });
   });
 });
 
@@ -388,22 +291,13 @@ describe("how far the admin went, as core keeps it", () => {
     expect({
       start: finishedAt(0),
       company: finishedAt(stepIndex("company")),
-    }).toStrictEqual({ start: [], company: ["welcome", "ai", "about"] });
+    }).toStrictEqual({ start: [], company: ["welcome", "ai"] });
   });
 });
 
 describe("a company's own path of screens", () => {
   // A short flow: no story, nowhere documents live, no documents, no tools.
-  const short: SetupPath = [
-    "welcome",
-    "ai",
-    "company",
-    "leads",
-    "team",
-    "listening",
-    "review",
-    "open",
-  ];
+  const short: SetupPath = ["welcome", "ai", "company", "leads", "team"];
   // Setting up only: nobody is interviewed, and the AI is set in Settings.
   const setup: SetupPath = ["welcome", "company", "documents"];
 
@@ -414,19 +308,17 @@ describe("a company's own path of screens", () => {
       // A screen finished that the flow no longer has counts for nothing.
       reached: reachedByPlace({ done: ["welcome", "ai", "about"] }, short),
       finished: finishedAt(3, short),
-      // A plan saved: the team is being listened to, where the flow has that.
+      // A plan saved: the team was told, so on past the team step, where the flow has one.
       planned: [
         reachedOf(0, { plan: { start: "2026-10-12", days: 14 } }, short),
         reachedOf(1, { plan: { start: "2026-10-12", days: 14 } }, setup),
       ],
-      dots: [wizardOf(short), wizardOf(setup)],
     }).toStrictEqual({
       at: 3,
       notOnIt: -1,
       reached: 2,
       finished: ["welcome", "ai", "company"],
-      planned: [5, 1],
-      dots: [["welcome", "ai", "company", "leads", "team"], [...setup]],
+      planned: [4, 1],
     });
   });
 
@@ -454,14 +346,14 @@ describe("a company's own path of screens", () => {
       // No AI step in this flow: its admin sets it in Settings, and nothing holds them.
       notAsked: heldAt(2, { ready: false }, setup),
       next: afterAi(1, short),
-      sentBack: afterAi(5, short),
+      sentBack: afterAi(4, short),
       // The AI step as the last screen: nothing after it.
       last: afterAi(1, ["welcome", "ai"]),
     }).toStrictEqual({
       held: 1,
       notAsked: 2,
       next: "company",
-      sentBack: "listening",
+      sentBack: "team",
       last: undefined,
     });
   });
@@ -484,5 +376,41 @@ describe("a team's numbers", () => {
     expect(teamNumbersOf({ asked: null, talked: null })).toStrictEqual({
       shown: "none",
     });
+  });
+});
+
+describe("the parts the setup is told in", () => {
+  it("counts parts, not screens, and fills the line within one", () => {
+    expect(partOf("welcome")).toStrictEqual({
+      at: 0,
+      of: 3,
+      part: 0,
+      share: 1 / 6,
+    });
+    expect(partOf("documents")).toMatchObject({ at: 1, of: 3, part: 1 });
+    expect(partOf("team")).toMatchObject({ at: 2, of: 3, part: 2 });
+    // The story of what comes next closes the setup.
+    expect(partOf("about")).toStrictEqual({ at: 2, of: 3, part: 2, share: 1 });
+  });
+
+  it("leaves out a part the company's path has none of", () => {
+    const path: SetupPath = ["company", "documents", "team"];
+    expect(partOf("company", path)).toStrictEqual({
+      at: 0,
+      of: 2,
+      part: 1,
+      share: 1 / 4,
+    });
+    expect(partOf("team", path)).toStrictEqual({
+      at: 1,
+      of: 2,
+      part: 2,
+      share: 1,
+    });
+  });
+
+  it("puts the screens after the interviews in no part", () => {
+    expect(partOf("review")).toBeNull();
+    expect(partOf("open")).toBeNull();
   });
 });

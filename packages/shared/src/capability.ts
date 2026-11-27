@@ -487,6 +487,7 @@ export const modelGrantClaimsSchema = z.strictObject({
     "mistral",
     "openrouter",
     "openai-compatible",
+    "elevenlabs",
   ]),
   /** The host the request goes to, lowercase. */
   host: z.string().min(1).max(253),
@@ -499,11 +500,11 @@ export const modelGrantClaimsSchema = z.strictObject({
    */
   body: z.string().regex(/^[\da-f]{64}$/u),
   /**
-   * The request's method where it isn't POST: reading (GET) or closing
-   * (DELETE) a live voice session, whose body is empty. Absent for every
+   * The request's method where it isn't POST: the GET that asks for an
+   * agent's conversation token, whose body is empty. Absent for every
    * other request, which is a POST.
    */
-  method: z.enum(["GET", "DELETE"]).optional(),
+  method: z.literal("GET").optional(),
 });
 export type ModelGrantClaims = z.infer<typeof modelGrantClaimsSchema>;
 

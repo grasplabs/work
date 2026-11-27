@@ -511,6 +511,10 @@ export const MapPinIcon: IconData = Location01Icon;
 export const Maximize2Icon: IconData = ArrowExpand01Icon;
 /** A conversation, or open in a chat. BubbleChatIcon. */
 export const MessageCircleIcon: IconData = BubbleChatIcon;
+/** A conversation shown, its panel open: MessageSquare's own shape filled in the ink, for a choice that stays on. Message01Icon. */
+export const MessageSquareFilledIcon: IconData =
+  /* @__PURE__ */
+  solidForm(Message01Icon);
 /** A conversation: the frame's Chat row (the pick). Message01Icon. */
 export const MessageSquareIcon: IconData = Message01Icon;
 /** Speak instead of typing. Mic01Icon. */
@@ -542,6 +546,10 @@ export const PanelRightIcon: IconData =
   directional(SidebarRightIcon);
 /** Attach a file. Attachment01Icon. */
 export const PaperclipIcon: IconData = Attachment01Icon;
+/** Pause, its bars filled in the ink: the heavier form, beside other filled marks. PauseIcon. */
+export const PauseFilledIcon: IconData =
+  /* @__PURE__ */
+  solidForm(HugePauseIcon);
 /** A call: start one, or call someone. Call02Icon. */
 export const PhoneIcon: IconData = Call02Icon;
 /** End a call: hang up. CallEnd01Icon. */

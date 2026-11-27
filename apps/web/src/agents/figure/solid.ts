@@ -47,6 +47,8 @@ export interface Sphere {
   r: number;
   /** Silk drifting over it: Stephen's own. */
   silk: boolean;
+  /** How far its silk has turned round it, an angle; left out, the silk only drifts. */
+  spin?: number;
 }
 
 /**
@@ -103,9 +105,15 @@ export const sphereHit = (
   const nz = Math.sqrt(1 - Math.min(q, 0.999));
   let grain = 0.5;
   if (part.silk) {
-    const warp = noise(dx * 1.4 + 7, dy * 2.2 + seconds * 0.03);
+    // Turning, its silk is read by longitude, so it goes round the sphere instead of sliding across it.
+    const across =
+      part.spin === undefined
+        ? dx
+        : Math.atan2(dx, Math.sqrt(Math.max(0, 1 - Math.min(q, 0.999)))) +
+          part.spin;
+    const warp = noise(across * 1.4 + 7, dy * 2.2 + seconds * 0.03);
     grain = noise(
-      dx * 1.3 + seconds * 0.06 + warp * 1.3 + 40,
+      across * 1.3 + seconds * 0.06 + warp * 1.3 + 40,
       dy * 4.2 + warp * 1.6 + 40
     );
   }

@@ -23,9 +23,9 @@ describe("someone signed in while the company onboards", () => {
       to: "/setup",
     },
     {
-      who: "an admin on the onboarding's own settings",
+      who: "an admin on the interviews' own settings",
       identity: admin,
-      path: "/settings/onboarding",
+      path: "/settings/interviews",
       to: null,
     },
     { who: "a member", identity: member, path: "/", to: "/waiting" },
@@ -71,16 +71,33 @@ describe("an admin's onboarding being behind them", () => {
     ]).toStrictEqual([true, true]);
   });
 
-  it("waits for Grasp's go where its people are interviewed, whatever the admin finished", () => {
-    const done = [...setupSteps];
-    expect([
-      onboardingBehind({ flow: defaultFlow, done, open: false }),
-      onboardingBehind({ flow: defaultFlow, done: [], open: true }),
-    ]).toStrictEqual([false, true]);
+  it("waits for Grasp's go where its people are interviewed, for everyone but an admin who finished every screen but the one the interviews are watched on", () => {
+    const done = setupSteps.filter((step) => step !== "listening");
+    expect({
+      member: onboardingBehind({ flow: defaultFlow, done, open: false }),
+      go: onboardingBehind({ flow: defaultFlow, done: [], open: true }),
+      adminDone: onboardingBehind({
+        flow: defaultFlow,
+        done,
+        open: false,
+        admin: true,
+      }),
+      adminHalfWay: onboardingBehind({
+        flow: defaultFlow,
+        done: ["welcome", "ai", "company"],
+        open: false,
+        admin: true,
+      }),
+    }).toStrictEqual({
+      member: false,
+      go: true,
+      adminDone: true,
+      adminHalfWay: false,
+    });
   });
 
   it("is so once they finished every screen where nobody is interviewed, open or not", () => {
-    const flow = flowWithout(["about", "pulse", "leads", "interviews"]);
+    const flow = flowWithout(["about", "leads", "interviews"]);
     expect([
       onboardingBehind({
         flow,

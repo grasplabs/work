@@ -1,0 +1,728 @@
+import { Button } from "@grasp-os/ui/components/button";
+import { Heading } from "@grasp-os/ui/components/heading";
+import { Text } from "@grasp-os/ui/components/text";
+import { isThemeMode, ThemeToggle } from "@grasp-os/ui/components/theme-toggle";
+import {
+  ArrowLeftIcon,
+  Icon,
+  LogOutIcon,
+  VolumeIcon,
+  VolumeOffIcon,
+} from "@grasp-os/ui/lib/icons";
+import { fadeIn } from "@grasp-os/ui/lib/styles";
+import { colors, media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import type { ReactNode, RefObject } from "react";
+import { createPortal } from "react-dom";
+
+import { GraspLogo } from "../connections/brand-logos.ts";
+import { signOut } from "../core-connection.ts";
+import {
+  applyTheme,
+  chooseTheme,
+  onThemeChange,
+  readTheme,
+} from "../frame/theme.ts";
+import { TopErrorBar } from "../frame/top-error.tsx";
+import { useCore } from "../use-core.ts";
+import {
+  allowSound,
+  prepare,
+  setVoiceOn,
+  speak,
+  useVoice,
+} from "../voice/voice.ts";
+import type { Pose } from "./field/engine.ts";
+import { fromTheTop } from "./field/poses.ts";
+import { StephenField } from "./field/stephen-field.tsx";
+import { LanguagePicker } from "./language-picker.tsx";
+import { StartOver } from "./start-over.tsx";
+import {
+  answeredLately,
+  useRememberLines,
+  useStepTalk,
+} from "./step-voice.tsx";
+
+// The frame of the setup and of the page a member waits on: full screen,
+// outside the app. One quiet bar on top, Grasp's mark at its start, the
+// language, his voice, light or dark, and the way out at its end; then the step in one
+// centred column, its words on the start edge, the page scrolling. Behind
+// it all, Stephen: the light of the page, alive, in another place on every
+// screen (field/stephen-field.tsx). Leaving signs out: the admin can't use
+// Grasp before the setup is done, so a way "home" would only lead back
+// here; everything finished is kept, and signing in again goes on there.
+
+const styles = stylex.create({
+  window: {
+    position: "relative",
+    isolation: "isolate",
+    display: "flex",
+    flexDirection: "column",
+    minHeight: "100svh",
+  },
+  bar: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: space[3],
+    paddingBlock: space[4],
+    paddingInline: { default: space[8], [media.maxSm]: space[4] },
+  },
+  mark: { display: "flex", [iconVars.size]: size.iconDefault },
+  tools: { display: "flex", alignItems: "center", gap: space[1] },
+  // No line in the setup ends on a word or two alone: every paragraph wraps so its last line has company.
+  main: {
+    textWrap: "pretty",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    flexGrow: 1,
+    paddingInline: space[4],
+    paddingBlockStart: { default: space[16], [media.maxSm]: space[8] },
+    paddingBlockEnd: { default: space[20], [media.maxSm]: space[12] },
+  },
+  // One column for every step, the welcome too: centred on the page, its words on the start edge.
+  column: { width: "100%", maxWidth: "40rem" },
+  // How far the column stands down the room, so it sits in its middle (useMiddle).
+  lowered: (top: number) => ({ marginBlockStart: `${top}px` }),
+  // One track as wide as the column: a part that stands out past it (the team step's, side by side) leaves the rest at its width.
+  step: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    gap: space[10],
+  },
+  // A page with little on it: Stephen over the title, all of it on the column's middle.
+  stepCentred: { justifyItems: "center", textAlign: "center", gap: space[8] },
+  // A step's title and its line wrap into even lines (Ruben: "a linebreak with 2 words… should never be possible").
+  head: { display: "grid", gap: space[4], textWrap: "balance" },
+  // A welcome: its title and line on the column's middle, what it asks below at full width.
+  headCentred: { justifyItems: "center", textAlign: "center" },
+  // A step's way on stands on the column's middle, under its centred words (Ruben: "just center
+  // Continue… the rhythm here doesn't match"): its main button last in the row, a lesser one before it;
+  // the step names them main first, so the row runs from the end.
+  end: {
+    display: "flex",
+    flexDirection: "row-reverse",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: space[3],
+  },
+  // The track: the page's foot, kept in sight while the step scrolls under it. No ground of its
+  // own, the page fading out under it: back and the part they're in at its start, the step's way
+  // on at its end, and how far along as one line filling along the window's bottom edge.
+  foot: {
+    position: "sticky",
+    insetBlockEnd: 0,
+    zIndex: 1,
+    display: "grid",
+    gridTemplateColumns: "1fr auto",
+    alignItems: "center",
+    gap: space[3],
+    paddingBlockStart: space[10],
+    paddingBlockEnd: { default: space[6], [media.maxSm]: space[4] },
+    paddingInline: { default: space[8], [media.maxSm]: space[4] },
+    backgroundImage: `linear-gradient(to top, ${colors.background} 55%, transparent)`,
+  },
+  footStart: {
+    display: "flex",
+    alignItems: "center",
+    gap: space[2],
+    whiteSpace: "nowrap",
+  },
+  footEnd: {
+    display: "flex",
+    flexDirection: "row-reverse",
+    alignItems: "center",
+    justifySelf: "end",
+    gap: space[3],
+    whiteSpace: "nowrap",
+  },
+  // On a phone the line along the edge says how far along alone.
+  part: { display: { default: "inline", [media.maxSm]: "none" } },
+  track: {
+    display: "block",
+    position: "absolute",
+    insetInline: 0,
+    insetBlockEnd: 0,
+    height: "3px",
+    backgroundColor: colors.border,
+  },
+  trackFill: {
+    display: "block",
+    height: "100%",
+    backgroundColor: colors.mintDeep,
+    transitionProperty: "width",
+    transitionDuration: "600ms",
+    transitionTimingFunction: "cubic-bezier(0.2, 0.8, 0.2, 1)",
+  },
+  trackWidth: (share: string) => ({ width: share }),
+  slot: {
+    display: "flex",
+    flexDirection: "row-reverse",
+    alignItems: "center",
+    gap: space[3],
+  },
+  // A third way, a link, on its own line under the buttons, never beside them.
+  also: { display: "flex", justifyContent: "center" },
+});
+
+/**
+ * The size of every tool in the frame, all Damsko's `sm` (32): the
+ * language, light or dark, the way out and the arrows. Every tool takes its
+ * size from here, never its own, so they can't drift apart.
+ */
+const tool = {
+  button: "icon-sm",
+  select: "sm",
+  toggle: "sm",
+} as const;
+
+/**
+ * Light, dark or the system's, as one quiet icon that steps through them:
+ * the person's own choice, the one their menu in the platform makes too.
+ */
+const Appearance = ({ userId }: { userId: string }) => {
+  const { t } = useLingui();
+  // Read where it is kept, so a choice made in another tab shows here too.
+  const mode = useSyncExternalStore(onThemeChange, () => readTheme(userId));
+  // What theme.js painted first was whoever was here last; this is theirs.
+  useEffect(() => {
+    applyTheme(readTheme(userId));
+  }, [userId]);
+  return (
+    <ThemeToggle
+      aria-label={t`Appearance`}
+      mode={mode}
+      onModeChange={(next) => {
+        if (isThemeMode(next)) {
+          chooseTheme(userId, next);
+        }
+      }}
+      size={tool.toggle}
+      // Named on a pause, as the bar's other tools are.
+      tooltip={t`Light or dark`}
+      variant="icon"
+    />
+  );
+};
+
+/** Where the arrows lead: back a step, and on as far as they went before. */
+export interface Ways {
+  onBack?: (() => void) | undefined;
+  onNext?: (() => void) | undefined;
+}
+
+/**
+ * Stephen's voice, on or off, remembered in this browser. While the browser
+ * still holds sound back (until the page is first pressed), a press lets
+ * him be heard and says the line he is on again.
+ */
+export const Sound = () => {
+  const { t } = useLingui();
+  const { on, blocked } = useVoice();
+  const heard = on && !blocked;
+  const name = heard ? t`Turn my voice off` : t`Turn my voice on`;
+  return (
+    <Button
+      // Its name says on or off; marked as pressed, Damsko would fill it like a chosen tool.
+      aria-label={name}
+      onClick={() => {
+        if (on && blocked) {
+          void allowSound();
+          return;
+        }
+        setVoiceOn(!on);
+      }}
+      size={tool.button}
+      tooltip={name}
+      variant="ghost"
+    >
+      <Icon icon={heard ? VolumeIcon : VolumeOffIcon} />
+    </Button>
+  );
+};
+
+/** Leaving signs out; nothing is lost. Where signing out didn't work, they stay. */
+const Leave = () => {
+  const { t } = useLingui();
+  const core = useCore();
+  return (
+    <Button
+      aria-label={t`Leave for now`}
+      onClick={() => {
+        void (async () => {
+          try {
+            await signOut(core);
+          } catch {
+            // Still signed in: the page stays as it was.
+          }
+        })();
+      }}
+      size={tool.button}
+      tooltip={t`Leave for now`}
+      variant="ghost"
+    >
+      <Icon icon={LogOutIcon} />
+    </Button>
+  );
+};
+
+/** Where the frame keeps a step's way on: the track's end, on a page with steps. */
+const EndPlace = createContext<HTMLElement | null>(null);
+
+/** The frame's way back a step, for a step that covers the track with its own (the plan's story). */
+const BackWay = createContext<(() => void) | undefined>(undefined);
+
+/** The way back a step, where there is one. */
+export const useBackWay = (): (() => void) | undefined => useContext(BackWay);
+
+/** A key typed into a field, or pressed on a control, is that control's own. */
+const ownsEnter = (target: EventTarget | null): boolean =>
+  target instanceof HTMLElement &&
+  (target.isContentEditable ||
+    target.closest("input, textarea, select, button, a, [role=textbox]") !==
+      null);
+
+/**
+ * Enter goes on: it presses the step's main button (the first it names),
+ * unless a field or a control has the key, or a dialog is open over the step.
+ */
+export const useEnterGoesOn = (): RefObject<HTMLDivElement | null> => {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const press = (event: KeyboardEvent) => {
+      if (
+        event.key !== "Enter" ||
+        event.isComposing ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.shiftKey ||
+        ownsEnter(event.target) ||
+        document.querySelector("[role=dialog], [role=alertdialog]") !== null
+      ) {
+        return;
+      }
+      const main = ref.current?.querySelector("button");
+      if (main === null || main === undefined || main.disabled) {
+        return;
+      }
+      event.preventDefault();
+      main.click();
+    };
+    document.addEventListener("keydown", press);
+    return () => {
+      document.removeEventListener("keydown", press);
+    };
+  }, []);
+  return ref;
+};
+
+/**
+ * How far along, in the few parts the setup is told in (setup.ts
+ * `setupParts`): which part of how many, its name, and how much of the
+ * whole is behind them, the screens within a part filling the line too.
+ */
+export interface SetupProgress {
+  at: number;
+  of: number;
+  name: string;
+  /** How much of the whole is done, from 0 to 1. */
+  share: number;
+}
+
+/**
+ * The page's foot, as the setup has it: what is at its start (back, the
+ * part they're in), the step's way on at its end, its main button last,
+ * and how far along as one line along the window's bottom edge. The
+ * interview's read-back stands on the same foot.
+ */
+export const StepFoot = ({
+  label,
+  start,
+  end,
+  endRef,
+  share,
+}: {
+  /** What the start is named, so it is found as one. */
+  label: string;
+  start: ReactNode;
+  /** The way on, main button first; or a place for it (`endRef`). */
+  end?: ReactNode;
+  endRef?: (slot: HTMLElement | null) => void;
+  /** How much of the whole is done, from 0 to 1; no line without it. */
+  share?: number;
+}) => {
+  const enter = useEnterGoesOn();
+  return (
+    <footer {...stylex.props(styles.foot)}>
+      <nav aria-label={label} {...stylex.props(styles.footStart)}>
+        {start}
+      </nav>
+      <div ref={endRef} {...stylex.props(styles.footEnd)}>
+        {end === undefined ? null : (
+          <div ref={enter} {...stylex.props(styles.slot, fadeIn)}>
+            {end}
+          </div>
+        )}
+      </div>
+      {share === undefined ? null : (
+        <span aria-hidden="true" {...stylex.props(styles.track)}>
+          <span
+            {...stylex.props(
+              styles.trackFill,
+              styles.trackWidth(`${Math.round(share * 100)}%`)
+            )}
+          />
+        </span>
+      )}
+    </footer>
+  );
+};
+
+/** The track along the page's foot: back and the part they're in, the step's way on, the line. */
+const Track = ({
+  onBack,
+  progress,
+  setSlot,
+}: {
+  onBack: (() => void) | undefined;
+  progress: SetupProgress | undefined;
+  setSlot: (slot: HTMLElement | null) => void;
+}) => {
+  const { t } = useLingui();
+  const part = progress?.at ?? 0;
+  const step = part + 1;
+  const total = progress?.of ?? 0;
+  return (
+    <StepFoot
+      endRef={setSlot}
+      label={t`Steps`}
+      share={progress?.share}
+      start={
+        <>
+          {/* The way back, as the setup's steps are walked. */}
+          {onBack === undefined ? null : (
+            <Button
+              aria-label={t`Back`}
+              onClick={onBack}
+              size={tool.button}
+              tooltip={t`Back`}
+              variant="ghost"
+            >
+              <Icon icon={ArrowLeftIcon} />
+            </Button>
+          )}
+          {progress === undefined ? null : (
+            <span {...stylex.props(styles.part)}>
+              <Text as="span" color="muted" size="sm">
+                {t`Step ${step} of ${total}`} · {progress.name}
+              </Text>
+            </span>
+          )}
+        </>
+      }
+    />
+  );
+};
+
+/** Where in the room between the bar and the foot a step stands: a little above its middle, as the eye finds the middle. */
+const ABOVE_MIDDLE = 0.42;
+
+/** How long a step's room may still follow what arrives on it, before it settles where it is. */
+const SETTLING_MS = 1200;
+
+/**
+ * Every screen in the middle of the room between the bar and the foot, on a tall window too
+ * (Ruben, on a wide screen: "more centered in the middle"), a little above its centre. A step
+ * finds its place as it arrives, following what loads onto it in its first moment; from the
+ * first press or key on it (or that moment's end) it stays where it stands, so what opens on it
+ * (the AI step's cards, files, the list of leads) grows downward and nothing above it moves. A
+ * step taller than the room starts under the bar and the page scrolls. A new screen, or a
+ * resized window, finds its place again.
+ */
+const useMiddle = (): {
+  setRoom: (room: HTMLElement | null) => void;
+  setBlock: (block: HTMLDivElement | null) => void;
+  top: number;
+} => {
+  const [room, setRoom] = useState<HTMLElement | null>(null);
+  const [block, setBlock] = useState<HTMLDivElement | null>(null);
+  const [top, setTop] = useState(0);
+  // How far down the column stands as the page now has it, from one screen to the next.
+  const lowered = useRef(0);
+  useLayoutEffect(() => {
+    lowered.current = top;
+  }, [top]);
+  useLayoutEffect(() => {
+    if (room === null || block === null) {
+      return () => {
+        // Nothing to place.
+      };
+    }
+    let settled = false;
+    const place = (): void => {
+      const foot = room.nextElementSibling;
+      const footHeight =
+        foot instanceof HTMLElement && foot.tagName === "FOOTER"
+          ? foot.offsetHeight
+          : 0;
+      const roomTop = room.getBoundingClientRect().top;
+      // Where the column would start, not lowered: under the room's own room at its top.
+      const start = block.getBoundingClientRect().top - lowered.current;
+      const free =
+        window.innerHeight - footHeight - roomTop - block.offsetHeight;
+      const next = Math.max(
+        0,
+        Math.round(free * ABOVE_MIDDLE - (start - roomTop))
+      );
+      setTop(next);
+    };
+    const settle = (): void => {
+      settled = true;
+    };
+    place();
+    // Settled, what opens or closes on the step moves nothing above it.
+    const watch = new ResizeObserver(() => {
+      if (!settled) {
+        place();
+      }
+    });
+    watch.observe(block);
+    const timer = window.setTimeout(settle, SETTLING_MS);
+    // A resized window has another middle.
+    window.addEventListener("resize", place);
+    room.addEventListener("pointerdown", settle);
+    room.addEventListener("keydown", settle);
+    return () => {
+      watch.disconnect();
+      window.clearTimeout(timer);
+      window.removeEventListener("resize", place);
+      room.removeEventListener("pointerdown", settle);
+      room.removeEventListener("keydown", settle);
+    };
+  }, [room, block]);
+  return { setRoom, setBlock, top };
+};
+
+export const CalmFrame = ({
+  userId,
+  ways,
+  progress,
+  language = true,
+  pose = fromTheTop,
+  screen,
+  covered = false,
+  children,
+}: {
+  /** Whose light or dark the bar's icon keeps. */
+  userId: string;
+  /** Back, at the start of the track along the page's foot; no track on a page that has no steps. */
+  ways?: Ways;
+  /** How far along, as the track shows it. */
+  progress?: SetupProgress;
+  /** Which screen is shown: a new one finds its own place in the middle of the room. */
+  screen?: string;
+  /** The language in the bar: not on the step that asks for it. */
+  language?: boolean;
+  /**
+   * Under a screen of a step's own over the whole window (the story at the
+   * end), whose bar has the tools: this bar can't be reached then, so it
+   * isn't offered at all.
+   */
+  covered?: boolean;
+  /** Where Stephen's light rests on this screen and how it moves there. */
+  pose?: Pose;
+  children: ReactNode;
+}) => {
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
+  const { setRoom, setBlock, top } = useMiddle();
+  // A page without steps (the waiting page) keeps its buttons where they are.
+  const tracked = ways !== undefined || progress !== undefined;
+  return (
+    <EndPlace.Provider value={tracked ? slot : null}>
+      <BackWay.Provider value={ways?.onBack}>
+        <div {...stylex.props(styles.window)}>
+          <StephenField pose={pose}>
+            {/* Every error is said here, at the very top, above the bar: it never covers the page. */}
+            <TopErrorBar />
+            <header inert={covered} {...stylex.props(styles.bar)}>
+              <span {...stylex.props(styles.mark)}>
+                <Icon icon={GraspLogo} label="Grasp" />
+              </span>
+              <div {...stylex.props(styles.tools)}>
+                {language ? <LanguagePicker /> : null}
+                <Sound />
+                <Appearance userId={userId} />
+                <StartOver size={tool.button} />
+                <Leave />
+              </div>
+            </header>
+            <main key={screen} ref={setRoom} {...stylex.props(styles.main)}>
+              <div
+                ref={setBlock}
+                {...stylex.props(styles.column, styles.lowered(top))}
+              >
+                {children}
+              </div>
+            </main>
+            {tracked ? (
+              <Track
+                onBack={ways?.onBack}
+                progress={progress}
+                setSlot={setSlot}
+              />
+            ) : null}
+          </StephenField>
+        </div>
+      </BackWay.Provider>
+    </EndPlace.Provider>
+  );
+};
+
+/** A step's way on, at the track's end; it fades in as it arrives (the plan's, once the story ends). */
+export const StepEnd = ({ end }: { end: ReactNode }) => {
+  const slot = useContext(EndPlace);
+  const ref = useEnterGoesOn();
+  if (slot === null) {
+    return <div {...stylex.props(styles.end)}>{end}</div>;
+  }
+  return createPortal(
+    <div ref={ref} {...stylex.props(styles.slot, fadeIn)}>
+      {end}
+    </div>,
+    slot
+  );
+};
+
+/** A sentence ends before the next is said: a title without its own stop gets one. */
+const endsSentence = /[.!?…]$/u;
+
+/** What Stephen says on a step: its title, and its line when the line is words alone. */
+const spokenStep = (title: string, body: ReactNode): string => {
+  if (typeof body !== "string") {
+    return title;
+  }
+  return `${endsSentence.test(title.trim()) ? title : `${title.trim()}.`} ${body}`;
+};
+
+/**
+ * What Stephen has said as its step arrived, in this visit: back on a step, he doesn't say it
+ * again (Ruben: "he's not going to narrate that again"). Starting the onboarding over loads the
+ * page anew, and so forgets it.
+ */
+const saidOnArrival = new Set<string>();
+
+/**
+ * Stephen says `line` as its step arrives, after `delay` ms: once in a visit, not again on the way
+ * back, whatever its words are by then (step-voice.tsx keeps which steps he told). A line that
+ * changes while the admin is on the step, such as what he found once they connect, is said then.
+ * It is fetched from the moment the step opens (if the step before hasn't already), so he starts
+ * on time, and remembered as what the step says, to be fetched ahead the next time through. Come
+ * on from the step before, he first answers the choice made there, when that is fetched already;
+ * when he has just answered something on this step (something gone wrong), the line waits for him
+ * to finish it.
+ */
+const useSayOnce = (line: string, delay: number, when: boolean): void => {
+  const remember = useRememberLines();
+  const talk = useStepTalk();
+  // Back on a step he told: the line it opens with isn't said again.
+  const heldBack = useRef(talk?.toldBefore === true ? line : null);
+  useEffect(() => {
+    const due = when && !saidOnArrival.has(line) && line !== heldBack.current;
+    if (due) {
+      prepare(line);
+    }
+    const id = due
+      ? window.setTimeout(() => {
+          saidOnArrival.add(line);
+          talk?.tell();
+          if (talk !== null && answeredLately(talk.step)) {
+            speak(line, { after: true });
+          } else {
+            const first = talk?.arriving() ?? null;
+            if (first !== null) {
+              speak(first);
+            }
+            speak(line, { after: first !== null });
+          }
+          remember?.([line]);
+        }, delay)
+      : undefined;
+    return () => {
+      window.clearTimeout(id);
+    };
+  }, [line, delay, when, remember, talk]);
+};
+
+/**
+ * One step: the serif title in Stephen's voice (he says it, and its line,
+ * as the step first arrives), one line under it, what
+ * the step asks, and its end: its one `default` Button, an `outline` for a
+ * lesser way, a `link` for a third.
+ */
+export const CalmStep = ({
+  title,
+  body,
+  figure,
+  centred = true,
+  children,
+  end,
+  also,
+  silent = false,
+  spoken,
+}: {
+  /**
+   * What Stephen says as the step arrives, in his own words: a tutor walking
+   * the admin through it and on from the step before, not the page read out
+   * (Ruben: "like a human would explain what's going on"). Without it he
+   * says the title and its line.
+   */
+  spoken?: string;
+  /** Not said as it arrives: Stephen has just told it another way (the plan's story). */
+  silent?: boolean;
+  /** A third way (a `link`), on its own line under the buttons. */
+  also?: ReactNode;
+  /** The title and its line on the column's middle (every step's, Ruben: "every step"); what the step asks stays full width. */
+  centred?: boolean;
+  /** Stephen over the title, on a page with little else; then it all stands centred. */
+  figure?: ReactNode;
+  title: string;
+  body: ReactNode;
+  children?: ReactNode;
+  end?: ReactNode;
+}) => {
+  // Stephen says the step as it first arrives: his own words for it, else its title and its line.
+  useSayOnce(spoken ?? spokenStep(title, body), 250, !silent);
+  return (
+    <section
+      {...stylex.props(styles.step, figure !== undefined && styles.stepCentred)}
+    >
+      {figure}
+      <div {...stylex.props(styles.head, centred && styles.headCentred)}>
+        <Heading level={1} size="xl">
+          {title}
+        </Heading>
+        {/* The body's own size, a step below the large one: Ruben found the line too big. */}
+        {typeof body === "string" ? <Text>{body}</Text> : body}
+      </div>
+      {children}
+      {end === undefined || end === null ? null : <StepEnd end={end} />}
+      {also === undefined || also === null ? null : (
+        <div {...stylex.props(styles.also)}>{also}</div>
+      )}
+    </section>
+  );
+};

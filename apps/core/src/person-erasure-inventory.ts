@@ -582,6 +582,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "onboarding.documents": { company: "documents the admin shared" },
   "onboarding.kickoff": { company: "the kickoff, as staff brought it in" },
   "onboarding.voice_use": { kept: "today's voice seconds, gone tomorrow" },
+  "onboarding.voice_holds": {
+    kept: "today's open conversation's seconds, gone tomorrow",
+  },
   "onboarding.audit_outbox": {
     kept: "audit events on their way to the log (D2)",
   },

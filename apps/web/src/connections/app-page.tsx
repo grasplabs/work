@@ -75,10 +75,7 @@ export const IntegrationAppPage = ({
   const { actions, dialogs } = useAppActions({
     integration,
     identity,
-    app,
-    tools,
     uses: uses?.state === "ready" ? uses.data : undefined,
-    size: "sm",
     accountRows: true,
   });
   // Each account row's own Sign in again and Disconnect, so their dialogs

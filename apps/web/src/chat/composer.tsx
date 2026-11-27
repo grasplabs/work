@@ -70,8 +70,9 @@ import { isEffort } from "./model-choice.ts";
 
 // Where a question is written, on Damsko's PromptInput: a card that grows
 // with what is typed; at its foot, the add menu (files or photos, also
-// pasted or dropped), the model that answers and how hard it thinks in one
-// Model selector; by Send, the microphone (dictation.ts); then Send, which
+// pasted or dropped); on the right, the model that answers (its maker's
+// mark, its name) and how hard it thinks in one Model selector, then the
+// microphone (dictation.ts); then Send, quiet until something is typed, which
 // is Stop while Grasp answers (its status from the chat: chat-states.ts),
 // and what the page adds. While Grasp answers the box still takes a
 // question, which core queues for it (`ChatsApi.send`): once something is
@@ -114,9 +115,12 @@ const styles = stylex.create({
  */
 const maxQuestionLength = 100_000;
 
-/** How a model is named in the box: the last part of its ID. */
+/**
+ * How a model is named wherever the app shows one: the last part of its ID,
+ * with GPT in capitals as OpenAI writes it (`gpt-5.5` is GPT-5.5).
+ */
 export const modelName = (model: string): string =>
-  model.split("/").at(-1) ?? model;
+  (model.split("/").at(-1) ?? model).replace(/^gpt(?=-|$)/iu, "GPT");
 
 /** Who makes `model`: the first part of its ID (`anthropic/…`). */
 const makerOf = (model: string): string => model.split("/")[0] ?? "";
@@ -158,6 +162,7 @@ const ModelPicker = ({
   const makers = [...new Set(models.map(makerOf))];
   const level =
     thinks && effort !== undefined ? t(effortNames[effort]) : undefined;
+  const chosenMark = makerMark(makerOf(model));
   return (
     <ModelSelector
       onValueChange={onModel}
@@ -186,8 +191,10 @@ const ModelPicker = ({
             : t`Model: ${name}. Change model`
         }
       >
-        {/* The chosen model by its name alone, as #2503's chip: the makers'
-            marks stand in the list. */}
+        {/* The chosen model with its maker's mark, then its name. */}
+        {chosenMark === undefined ? null : (
+          <ModelSelectorLogo logo={chosenMark} />
+        )}
         <ModelSelectorName>
           {level === undefined ? name : `${name} · ${level}`}
         </ModelSelectorName>
@@ -324,12 +331,9 @@ const BoxTools = ({
   const folded = compact && phone && !typed;
   return (
     <>
-      <PromptInputTools>
-        {attaches ? <AddMenu /> : null}
-        {compact ? null : answerer}
-      </PromptInputTools>
+      <PromptInputTools>{attaches ? <AddMenu /> : null}</PromptInputTools>
       <PromptInputTools align="end">
-        {compact && !folded ? answerer : null}
+        {folded ? null : answerer}
         {speech === undefined ? null : <PromptInputSpeechButton {...speech} />}
         {running && typed && stop !== undefined ? (
           <Button

@@ -184,8 +184,20 @@ const row = (name: string): HTMLElement => {
   return found;
 };
 
-const switchOf = (name: string): Element | null =>
-  row(name).querySelector('[role="switch"]');
+/** The answers, in the order the dialog lists them. */
+const answers = ["View only", "View and change", "Everything", "Choose myself"];
+
+/** The radio of the answer labelled `label`. */
+const radio = (label: string): Element | undefined =>
+  document.querySelectorAll('[data-slot="radio-group-item"]')[
+    answers.indexOf(label)
+  ];
+
+/** The toggle `choice` (Off, Read or Write) in the row of the tool named `name`. */
+const toggle = (name: string, choice: string): Element | undefined =>
+  [...row(name).querySelectorAll("button")].find(
+    (each) => each.textContent?.trim() === choice
+  );
 
 const button = (text: string): HTMLButtonElement | undefined =>
   [...document.querySelectorAll("button")].find(
@@ -300,38 +312,13 @@ describe("choosing what Grasp may do in a toolkit", () => {
     document.body.innerHTML = "";
   });
 
-  it("says Never for a tool that is off, and starts one switched on as Composio's hint says", async () => {
-    await opened(hubspot);
-    expect(row("HUBSPOT_LIST_CONTACTS").textContent).toContain("Never");
-    expect(
-      switchOf("HUBSPOT_LIST_CONTACTS")?.getAttribute("aria-checked")
-    ).toBe("false");
-
-    await press(switchOf("HUBSPOT_LIST_CONTACTS"));
-    await press(switchOf("HUBSPOT_CREATE_NOTE"));
-    expect(row("HUBSPOT_LIST_CONTACTS").textContent).toContain("Read");
-    expect(row("HUBSPOT_CREATE_NOTE").textContent).toContain("Write");
-  });
-
-  it("sends a tool Composio says only reads as Read or Write, as its badge was last pressed, and offers any other only as Write", async () => {
+  it("starts with every tool that only views on, as Read, and nothing that changes things", async () => {
     const sent = await opened(hubspot);
-    await press(switchOf("HUBSPOT_LIST_CONTACTS"));
-    await press(switchOf("HUBSPOT_CREATE_NOTE"));
-    await press(
-      row("HUBSPOT_LIST_CONTACTS").querySelector(
-        "button[aria-label*='Change to']"
-      )
-    );
-    const noteRow = row("HUBSPOT_CREATE_NOTE");
-    const offered = {
-      toggle: noteRow.querySelector("button[aria-label*='Change to']"),
-      badge: noteRow.textContent.includes("Write"),
-    };
-    await press(button("Consent and connect"));
-    expect({ offered, sent }).toStrictEqual({
-      offered: { toggle: null, badge: true },
-      sent: [["HUBSPOT_LIST_CONTACTS", "HUBSPOT_CREATE_NOTE"]],
-    });
+    expect(document.body.textContent).toContain("1 actions, all view only");
+    await press(button("Allow and sign in"));
+    expect(sent).toStrictEqual([
+      [{ name: "HUBSPOT_LIST_CONTACTS", read: true }],
+    ]);
   });
 
   it("shows what a refused start names for support under its refusal, only in its form", async () => {
@@ -353,8 +340,7 @@ describe("choosing what Grasp may do in a toolkit", () => {
           )
         ),
     });
-    await press(switchOf("HUBSPOT_LIST_CONTACTS"));
-    await press(button("Consent and connect"));
+    await press(button("Allow and sign in"));
     expect(
       document.querySelector('[role="alert"] [data-reason]')?.textContent
     ).toBe(
@@ -362,14 +348,36 @@ describe("choosing what Grasp may do in a toolkit", () => {
     );
   });
 
-  it("sends nothing of a tool switched off again", async () => {
+  it("turns on what changes things, as Write, in one choice", async () => {
     const sent = await opened(hubspot);
-    await press(switchOf("HUBSPOT_LIST_CONTACTS"));
-    await press(switchOf("HUBSPOT_CREATE_NOTE"));
-    await press(switchOf("HUBSPOT_CREATE_NOTE"));
-    await press(button("Consent and connect"));
+    await press(radio("View and change"));
+    await press(button("Allow and sign in"));
     expect(sent).toStrictEqual([
-      [{ name: "HUBSPOT_LIST_CONTACTS", read: true }],
+      [{ name: "HUBSPOT_LIST_CONTACTS", read: true }, "HUBSPOT_CREATE_NOTE"],
     ]);
+  });
+
+  it("sends each tool as it was last set when choosing per action, and offers Read only where Composio says the tool only reads", async () => {
+    const sent = await opened(hubspot);
+    await press(radio("Choose myself"));
+    const offered = {
+      reads: toggle("HUBSPOT_LIST_CONTACTS", "Read") !== undefined,
+      changes: toggle("HUBSPOT_CREATE_NOTE", "Read") !== undefined,
+    };
+    await press(toggle("HUBSPOT_LIST_CONTACTS", "Off"));
+    await press(toggle("HUBSPOT_CREATE_NOTE", "Write"));
+    await press(button("Allow and sign in"));
+    expect({ offered, sent }).toStrictEqual({
+      offered: { reads: true, changes: false },
+      sent: [["HUBSPOT_CREATE_NOTE"]],
+    });
+  });
+
+  it("can't connect with every tool off", async () => {
+    await opened(hubspot);
+    await press(radio("Choose myself"));
+    await press(toggle("HUBSPOT_LIST_CONTACTS", "Off"));
+    expect(document.body.textContent).toContain("Nothing turned on yet");
+    expect(button("Allow and sign in")?.disabled).toBeTruthy();
   });
 });

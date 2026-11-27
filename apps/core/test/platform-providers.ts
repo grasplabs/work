@@ -80,21 +80,21 @@ export const keyPlaces = async (marker: string, key: string) => {
   };
 };
 
-/** The realtime sockets OpenAI's fake took, oldest first. */
+/** The realtime sockets Mistral's fake took, oldest first. */
 export const realtimeSockets = async (): Promise<RealtimeSocket[]> => {
   const response = await internet().fetch(realtimeControlUrl);
   return await response.json();
 };
 
-/** The newest realtime socket OpenAI's fake took, if any. */
+/** The newest realtime socket Mistral's fake took, if any. */
 export const newestSocket = async (): Promise<RealtimeSocket | undefined> => {
   const sockets = await realtimeSockets();
   return sockets.at(-1);
 };
 
-/** Has OpenAI's fake act on its open sockets: close them, send an error, or settle at a pause. */
+/** Has Mistral's fake act on its open sockets: close them, or send an error. */
 export const actOnRealtime = async (
-  act: { close: number } | { error: string } | { pause: true }
+  act: { close: number } | { error: number }
 ): Promise<void> => {
   await internet().fetch(realtimeControlUrl, {
     method: "POST",

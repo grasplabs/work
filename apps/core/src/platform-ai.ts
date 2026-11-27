@@ -10,37 +10,84 @@ import type { Speaker } from "@grasp-os/shared/voice";
 // feature unavailable, never served by another.
 
 /**
- * Each speaker's voice, by its Mistral ID: Voxtral 3's own preset voices,
- * each of which says any language the model does. Stephen's is "Rob"; the
- * sample speakers are three more, each clearly not Stephen.
+ * Each speaker's voice in the admin's onboarding, by its ElevenLabs ID.
+ * Stephen's is the interview agent's own voice, so he sounds the same to
+ * the admin as to whoever he interviews (the owner's ask, 2026-11-27);
+ * it is read from the agent when it can be (speech.ts), and this one is
+ * kept for when it can't. Claire's is "Jessica": playful, bright and
+ * warm. The sample speakers are ElevenLabs's own voices, each clearly
+ * not Stephen. As before Grasp moved its speech to KugelAudio, then
+ * Mistral.
  */
-const voices = {
-  stephen: "voice_485",
-  lisa: "voice_590",
-  mark: "voice_1788",
-  tim: "voice_591",
-} as const satisfies Record<Exclude<Speaker, "claire">, string>;
+const onboardingVoices = {
+  stephen: "3svOJAOhuPHXwQC2H5eq",
+  claire: "r1KmysJdVYZjJCm4mL3b",
+  lisa: "EXAVITQu4vr4xnSDxMaL",
+  mark: "cjVigY5qzO86Huf0OWal",
+  tim: "TX3LPaxmHKxFdv7VOQHJ",
+} as const satisfies Record<Speaker, string>;
+
+/**
+ * Stephen's voice in an interview held with the ElevenLabs agent: the
+ * agent's own voice, so the guide before it and anything said outside the
+ * conversation sound like the one who talks with them (the owner's ask,
+ * 2026-11-26). The sample speakers keep the admin's onboarding's.
+ */
+const agentVoices = {
+  ...onboardingVoices,
+  stephen: "3svOJAOhuPHXwQC2H5eq",
+} as const satisfies Record<Speaker, string>;
 
 /**
  * Each feature's provider and model: OpenAI's GPT-4o Transcribe writes
- * down speech, live and recorded, and Mistral's Voxtral TTS 3 says the
- * lines. An interview is held as one live voice session at Mistral (its
- * voice agents): Mistral Small answers, Voxtral's realtime transcription
- * listens and Voxtral TTS 3 speaks, in Stephen's voice, the models
- * Mistral names for a voice agent.
+ * down a recording, and Mistral's Voxtral realtime transcription speech as
+ * it is said, live (`liveTranscription`: a dictation, the words over the
+ * box in an interview); ElevenLabs's Eleven v4 says an interview's lines
+ * outside its conversation (`speech`) and the admin's onboarding
+ * (`onboardingSpeech`), each with its own voices; and Mistral's models
+ * write for an interview (`interview`). Its `notes` model writes down
+ * what was said, which nobody waits for and the interview is for: Mistral
+ * Medium. Its `line` model is the quick one, Mistral Small: it tells the
+ * read-back as a story while someone waits for it (onboarding/story.ts),
+ * and writes Stephen's line in a turn of the Stephen Lab's
+ * (onboarding/lab-turn.ts). A live interview is a conversation with
+ * Grasp's ElevenLabs agent (`agent`).
  */
 export const platformAi = {
   transcription: { provider: "openai", model: "gpt-4o-transcribe" },
-  speech: {
+  liveTranscription: {
     provider: "mistral",
-    model: "voxtral-mini-tts-3-0",
-    voices,
+    model: "voxtral-mini-transcribe-realtime-3",
   },
-  conversation: {
+  /** An interview's lines: in the voice of the agent that holds it live. */
+  speech: {
+    provider: "elevenlabs",
+    model: "eleven_v4",
+    voices: agentVoices,
+  },
+  onboardingSpeech: {
+    provider: "elevenlabs",
+    model: "eleven_v4",
+    voices: onboardingVoices,
+  },
+  interview: {
     provider: "mistral",
-    model: "mistral-small-latest",
-    listening: "voxtral-mini-transcribe-realtime-3",
-    speaking: "voxtral-mini-tts-3",
-    voice: voices.stephen,
+    line: "mistral/mistral-small-latest",
+    notes: "mistral/mistral-medium-latest",
+  },
+  /**
+   * The interview held as a live conversation with Grasp's ElevenLabs
+   * agent (core's onboarding/voice.ts): who Stephen is, what he says
+   * first, his voice, his ears and the model he answers with are the
+   * agent's, as its dashboard sets them. The agent is Grasp's own; the
+   * browser joins it with a token core asks for on Grasp's key.
+   */
+  agent: {
+    provider: "elevenlabs",
+    id: "agent_4601m8c6sznzezb9dms6fm6jp5vm",
   },
 } as const;
+
+/** Whether `model` is one the interview runs on, as the gateway names it. */
+export const isInterviewModel = (model: string): boolean =>
+  model === platformAi.interview.line || model === platformAi.interview.notes;

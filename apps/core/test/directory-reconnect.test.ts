@@ -437,12 +437,13 @@ describe("connecting the directory again from Settings", () => {
     }).toStrictEqual({
       outcomes: {
         notAdmin: {
-          page: "/connectors",
+          // Started on the setup's company step: back there, with why.
+          page: "/setup",
           connection: null,
           error: "connection.directory_unreadable",
         },
         throttled: {
-          page: "/connectors",
+          page: "/setup",
           connection: null,
           error: "connection.directory_unchecked",
         },

@@ -1,5 +1,6 @@
 import type { DirectoryPerson } from "@grasp-os/shared/directory";
 import {
+  leadsOfTeam,
   noTeamId,
   onboardingPeopleMax,
   onboardingTeamsMax,
@@ -370,9 +371,17 @@ const rosterOf = (
   }
   let leadsFrom: StaffList["leadsFrom"] = "none";
   for (const team of teams.values()) {
-    const lead = leadOf(said.filter((each) => each.person.team === team.id));
+    const mine = said.filter((each) => each.person.team === team.id);
+    const lead = leadOf(mine);
     if (lead !== null) {
       team.lead = lead.id;
+      // A list may mark more than one lead of a team: the first leads, the others with them.
+      const others = mine
+        .filter((each) => each.lead && each.person.id !== lead.id)
+        .map((each) => each.person.id);
+      if (others.length > 0) {
+        team.coLeads = others.slice(0, 20);
+      }
       if (rank[lead.from] > rank[leadsFrom]) {
         leadsFrom = lead.from;
       }
@@ -499,13 +508,38 @@ const underSavedIds = (
     }
     idOf.set(id, free);
   }
+  // Whoever is on the roster already keeps their id, matched on the address,
+  // so one person read again from another source is never listed twice.
+  const savedByEmail = new Map(
+    saved.people
+      .filter((person) => person.email !== "")
+      .map((person) => [person.email.trim().toLowerCase(), person.id])
+  );
+  const readIds = new Set(read.people.map((person) => person.id));
+  const personOf = new Map<string, string>();
+  for (const person of read.people) {
+    const savedId = savedByEmail.get(person.email.trim().toLowerCase());
+    if (
+      savedId !== undefined &&
+      savedId !== person.id &&
+      !readIds.has(savedId)
+    ) {
+      personOf.set(person.id, savedId);
+    }
+  }
+  const personId = (id: string) => personOf.get(id) ?? id;
   return {
     teams: read.teams.map((team) => ({
       ...team,
       id: idOf.get(team.id) ?? team.id,
+      lead: team.lead === null ? null : personId(team.lead),
+      ...(team.coLeads === undefined
+        ? {}
+        : { coLeads: team.coLeads.map(personId) }),
     })),
     people: read.people.map((person) => ({
       ...person,
+      id: personId(person.id),
       team: idOf.get(person.team) ?? person.team,
     })),
   };
@@ -538,13 +572,19 @@ export const withSaved = (
       if (before === undefined) {
         return team;
       }
-      const lead =
-        before.lead !== null && teamOf.get(before.lead) === team.id
-          ? before.lead
-          : team.lead;
+      const { coLeads: listed = [], ...rest } = team;
+      const kept = before.lead !== null && teamOf.get(before.lead) === team.id;
+      const lead = kept ? before.lead : team.lead;
+      // Who else led it stays with the lead kept, each still in the team; else the list's.
+      const coLeads = kept
+        ? (before.coLeads ?? []).filter(
+            (id) => id !== lead && teamOf.get(id) === team.id
+          )
+        : listed;
       return {
-        ...team,
+        ...rest,
         lead,
+        ...(coLeads.length > 0 ? { coLeads } : {}),
         off: before.off,
         does: team.does === "" ? before.does : team.does,
       };
@@ -554,6 +594,54 @@ export const withSaved = (
       return before === undefined ? person : { ...person, away: before.away };
     }),
   };
+};
+
+/**
+ * A list or directory read now, added to the roster saved before rather
+ * than put in its place: a company with Microsoft and Google both, or a
+ * staff list on top of a sign-in, ends up as one roster. Someone in both
+ * is one person (their id comes from their email), as the read has them;
+ * whoever only the saved roster has stays, in their team. Too many in
+ * all is too large, as one list would be.
+ */
+export const addedTo = (
+  read: StaffList["roster"],
+  saved: Roster | null
+): StaffList["roster"] => {
+  const kept = withSaved(read, saved);
+  if (saved === null) {
+    return kept;
+  }
+  const inRead = new Set(kept.people.map((person) => person.id));
+  const stay = saved.people.filter((person) => !inRead.has(person.id));
+  const people = [...kept.people, ...stay];
+  const teamOf = new Map(people.map((person) => [person.id, person.team]));
+  const keptTeams = new Set(kept.teams.map((team) => team.id));
+  const teams = [
+    ...kept.teams,
+    ...saved.teams
+      .filter(
+        (team) =>
+          !keptTeams.has(team.id) &&
+          stay.some((person) => person.team === team.id)
+      )
+      .map((team) => {
+        // A lead the read moved to another team leads this one no more.
+        const leads = leadsOfTeam(team).filter(
+          (id) => teamOf.get(id) === team.id
+        );
+        const [lead = null, ...coLeads] = leads;
+        const { coLeads: _before, ...rest } = team;
+        return { ...rest, lead, ...(coLeads.length > 0 ? { coLeads } : {}) };
+      }),
+  ];
+  if (
+    people.length > onboardingPeopleMax ||
+    teams.length > onboardingTeamsMax
+  ) {
+    throw new StaffListError("large");
+  }
+  return { teams, people };
 };
 
 /**
@@ -573,10 +661,14 @@ export const withLeadsFrom = (
   const named = new Map(read.teams.map((team) => [team.id, team.lead]));
   return {
     ...kept,
-    teams: kept.teams.map((team) => ({
-      ...team,
-      lead: named.get(team.id) ?? team.lead,
-    })),
+    teams: kept.teams.map((team) => {
+      const lead = named.get(team.id) ?? team.lead;
+      return {
+        ...team,
+        lead,
+        coLeads: (team.coLeads ?? []).filter((id) => id !== lead),
+      };
+    }),
   };
 };
 
@@ -586,3 +678,57 @@ export const exampleList = [
   "Daan Bakker,daan@example.com,Customer service,Team lead customer service,yes",
   "Lisa Jansen,lisa@example.com,Customer service,Customer service agent,",
 ].join("\n");
+
+/**
+ * A staff list added to the people there are, on the leads step: its
+ * teams under the ids the ones there have by name, and only the people
+ * not in yet, by id or address. Who is in keeps everything the admin set;
+ * a team keeps its lead, and one without takes the list's, when that one
+ * is new. Too many people or teams together is `large`.
+ */
+export const withListAdded = (
+  read: StaffList["roster"],
+  saved: Roster | null
+): StaffList["roster"] => {
+  if (saved === null) {
+    return read;
+  }
+  const roster = underSavedIds(read, saved);
+  const savedIds = new Set(saved.people.map(({ id }) => id));
+  const savedEmails = new Set(
+    saved.people.map(({ email }) => email.toLowerCase()).filter(Boolean)
+  );
+  const fresh = roster.people.filter(
+    (person) =>
+      !savedIds.has(person.id) &&
+      (person.email === "" || !savedEmails.has(person.email.toLowerCase()))
+  );
+  const freshIds = new Set(fresh.map(({ id }) => id));
+  const readTeams = new Map(roster.teams.map((team) => [team.id, team]));
+  const teams = [
+    ...saved.teams.map((team) => {
+      const lead = readTeams.get(team.id)?.lead ?? null;
+      return team.lead === null && lead !== null && freshIds.has(lead)
+        ? { ...team, lead }
+        : team;
+    }),
+    ...roster.teams.filter(
+      (team) =>
+        !saved.teams.some((each) => each.id === team.id) &&
+        fresh.some((person) => person.team === team.id)
+    ),
+  ].map((team) =>
+    team.lead !== null &&
+    !saved.people.some((person) => person.id === team.lead) &&
+    !freshIds.has(team.lead)
+      ? { ...team, lead: null }
+      : team
+  );
+  if (
+    saved.people.length + fresh.length > onboardingPeopleMax ||
+    teams.length > onboardingTeamsMax
+  ) {
+    throw new StaffListError("large");
+  }
+  return { teams, people: [...saved.people, ...fresh] };
+};

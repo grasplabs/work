@@ -17,16 +17,12 @@ import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
-import { InterviewsProgress } from "./interviews-progress.tsx";
-import { SetupFrame } from "./setup-frame.tsx";
 import { SetupStepBody, directoryProblemOf } from "./setup-steps.tsx";
-import type { SetupData } from "./setup-steps.tsx";
-import { listeningOf, stepIndex, steps } from "./setup.ts";
-import type { AiReadiness, SetupStep } from "./setup.ts";
-import { noteHeard } from "./visit.ts";
+import type { SetupData, ShownStep } from "./setup-steps.tsx";
+import { steps } from "./setup.ts";
+import type { AiReadiness } from "./setup.ts";
 
-// What the onboarding's step tells the company's admin while Stephen talks
-// to their people, from what it renders.
+// What the setup's steps tell the company's admin, from what they render.
 
 const today = "2026-10-14";
 
@@ -82,8 +78,6 @@ interface Shown {
   paused?: boolean;
   settled?: "mail"[];
   sponsor?: string | null;
-  /** Stephen finished this step before. */
-  seen?: boolean;
   choices?: SetupChoices;
   documents?: OnboardingDocument[];
   context?: OnboardingContext;
@@ -141,13 +135,12 @@ const aiOf = ({ ready }: { ready: boolean }): AiReadiness => {
 
 /** A step as it is drawn as it arrives, its markup and all. */
 const drawn = (
-  step: SetupStep,
+  step: ShownStep,
   {
     paused = false,
     settled = [],
     sponsor = null,
     context = noContext,
-    seen = false,
     choices = noChoices,
     documents = [],
     mailSends = true,
@@ -156,9 +149,6 @@ const drawn = (
     kickoff = sponsor === null ? null : "in",
   }: Shown
 ): string => {
-  if (seen) {
-    noteHeard(step);
-  }
   const data: SetupData = {
     admin: "Ada",
     company: null,
@@ -179,7 +169,6 @@ const drawn = (
     },
     review: { differences: [], mapped: 0 },
     directory: null,
-    hr: null,
     suites: [],
     places: null,
     choices,
@@ -197,23 +186,14 @@ const drawn = (
   };
   return page(
     <SetupStepBody
-      cramped={false}
       data={data}
-      furthest={0}
+      askedFor={0}
       go={() => {}}
-      onward={() => {}}
-      path={steps}
-      listening={listeningOf(
-        { roster: null, plan: data.view.plan, progress: null },
-        today
-      )}
       message={null}
-      onMadeWay={() => {}}
       onMessage={() => {}}
       onSettle={() => {}}
-      onStory={() => {}}
-      parts={[]}
-      percent={10}
+      onward={async () => {}}
+      path={steps}
       settled={settled}
       step={step}
       today={today}
@@ -222,143 +202,93 @@ const drawn = (
 };
 
 /** What a step says, as text without its markup. */
-const said = (step: SetupStep, shown: Shown): string =>
+const said = (step: ShownStep, shown: Shown): string =>
   drawn(step, shown)
     .replaceAll(/<[^>]+>/gu, " ")
     .replaceAll(/\s+/gu, " ");
 
-describe("the step while Stephen talks to the team", () => {
-  it("says the interviews are paused, while Grasp paused them", () => {
-    const paused = said("listening", { paused: true });
-    expect(paused).toContain(
-      "Paused: no link opens and none goes out. The links that are due go out once they run again."
-    );
-    expect(paused.indexOf("Paused:")).toBeLessThan(
-      paused.indexOf("Day 3 of 14")
-    );
-    expect(said("listening", {})).not.toContain("Paused:");
+describe("a setup without a staff list", () => {
+  it("asks who to talk to, by email or with a staff list, and lets the admin skip it for Grasp's staff", () => {
+    const leads = said("leads", {});
+    expect({
+      said: leads.includes("Nobody on the list yet"),
+      add: leads.includes("Add people"),
+      skip: leads.includes("Skip for now"),
+      hr: leads.includes("HR platform"),
+    }).toStrictEqual({ said: true, add: true, skip: true, hr: false });
   });
 
-  it("asks the admin to let Grasp's mail through, naming the sending domain, until they say it's done", () => {
-    const open = said("listening", {});
+  it("never holds the admin at the company step: they share a list, or skip it for Grasp's staff to sort out", () => {
+    const company = said("company", {});
     expect({
-      asked: open.includes("Let Grasp’s mail through"),
-      named: open.includes(
-        "Apply it if the sender’s domain is mail.example.test."
-      ),
-      done: said("listening", { settled: ["mail"] }).includes(
-        "Let Grasp’s mail through"
-      ),
-    }).toStrictEqual({ asked: true, named: true, done: false });
+      share: company.includes("Share a staff list"),
+      skip: company.includes("Skip for now"),
+      sortedOut: company.includes("we’ll sort it out with you"),
+    }).toStrictEqual({ share: true, skip: true, sortedOut: true });
+  });
+
+  it("asks for the message alone on the team step: Grasp's staff plan the day", () => {
+    const team = said("team", {});
+    expect({
+      plans: team.includes("Grasp’s staff plan the day I start with you."),
+      day: team.includes("Tomorrow"),
+      sent: team.includes("Continue"),
+    }).toStrictEqual({ plans: true, day: false, sent: true });
   });
 });
 
-describe("what needs the admin", () => {
-  it("counts letting Grasp's mail through, and lets them go on once it's done", () => {
-    const open = said("review", {});
-    const done = said("review", { settled: ["mail"] });
-    expect({
-      open: [
-        open.includes("Just one thing for you"),
-        open.includes("Continue"),
-      ],
-      done: [
-        done.includes("Nothing needs you"),
-        done.includes("Settled: It’s done"),
-        done.includes("Continue"),
-      ],
-    }).toStrictEqual({ open: [true, false], done: [true, true, true] });
-  });
-
-  it("asks for the AI provider, its key and a model right after the welcome, until a model is ready for calls", () => {
+describe("the AI step", () => {
+  it("asks for a key until a model is ready for calls, with Continue to send it, and goes on once one is or core can't say", () => {
     const asked = said("ai", { ai: aiOf({ ready: false }) });
     const ready = said("ai", {});
     const unknown = said("ai", { ai: null });
     expect({
-      asked: [
-        asked.includes("Which AI should I think with?"),
-        asked.includes("Provider"),
-        asked.includes("Key"),
-        asked.includes("Model"),
-        asked.includes("Connected:"),
-      ],
+      // Asked for a key: the step says so (the providers stand on the page, with no card titled for it).
+      asked: [asked.includes("Paste an API key"), asked.includes("Continue")],
       ready: [
-        ready.includes("Yours is ready."),
-        ready.includes("Connected: Anthropic"),
-        ready.includes("Provider"),
+        ready.includes("Your API key is connected"),
         ready.includes("Continue"),
       ],
-      // Core can't say: nothing is asked, and nothing holds them up.
-      unknown: [unknown.includes("Provider"), unknown.includes("Continue")],
+      unknown: [
+        unknown.includes("Paste an API key"),
+        unknown.includes("Continue"),
+      ],
     }).toStrictEqual({
-      asked: [true, true, true, true, false],
-      ready: [true, true, false, true],
+      asked: [true, true],
+      ready: [true, true],
       unknown: [false, true],
     });
-    // The key is typed into a password field.
-    expect(drawn("ai", { ai: aiOf({ ready: false }) })).toContain(
-      'type="password"'
-    );
   });
 
-  it("asks for no AI provider among what needs them: it was asked for before anything needed it", () => {
-    const review = said("review", {
-      settled: ["mail"],
-      ai: aiOf({ ready: false }),
-    });
+  it("offers our own system first where this deployment has it, so Continue goes on with no key", () => {
+    const own = aiOf({ ready: false });
+    const offered: AiReadiness = {
+      ...own,
+      listing: {
+        ...own.listing,
+        grasp: { ...own.listing.grasp, available: true },
+      },
+    };
+    const shown = said("ai", { ai: offered });
+    const notOffered = said("ai", { ai: own });
     expect({
-      asked: review.includes("AI provider"),
-      onward: review.includes("Continue"),
-    }).toStrictEqual({ asked: false, onward: true });
-  });
-
-  it("names no domain where core has no sender for Grasp's mail, says so, and leaves nothing to settle for it", () => {
-    const review = said("review", { mailDomain: null });
-    expect({
-      told: review.includes("Grasp has no sender for its mail yet"),
-      asked: review.includes("Let Grasp’s mail through"),
-      nothingOpen: review.includes("Nothing needs you"),
-    }).toStrictEqual({ told: true, asked: false, nothingOpen: true });
-  });
-
-  it("says mail isn't available where Grasp sends none, and leaves nothing to settle for it", () => {
-    const review = said("review", { mailSends: false });
-    expect({
-      told: review.includes("Mail isn’t available on this hosting yet"),
-      byHand: review.includes(
-        "Send each one their link by hand from Interviews."
-      ),
-      asked: review.includes("Let Grasp’s mail through"),
-      nothingOpen: review.includes("Nothing needs you"),
-      onward: review.includes("Continue"),
+      offered: [
+        shown.includes("Use our built-in system"),
+        shown.includes("Use your own API key"),
+        shown.includes("Continue"),
+      ],
+      notOffered: notOffered.includes("Use our built-in system"),
     }).toStrictEqual({
-      told: true,
-      byHand: true,
-      asked: false,
-      nothingOpen: true,
-      onward: true,
+      offered: [true, true, true],
+      notOffered: false,
     });
   });
 });
 
 describe("the welcome", () => {
-  it.each([
-    {
-      sponsor: "Anna",
-      says: "Anna told me a lot about your company in our first conversation. Before we start, which language do you prefer?",
-    },
-    // The kickoff named no one: no one is named.
-    { sponsor: null, says: "Ada, I’m Stephen Before we start, which language" },
-  ])(
-    "names the sponsor only when the kickoff gave a name ($sponsor)",
-    ({ sponsor, says }) => {
-      expect(said("welcome", { sponsor })).toContain(says);
-    }
-  );
-
   it("offers to forget the kickoff while it is in, and says when its erasure finishes by itself", () => {
     const offer = "Forget our first conversation";
-    const erasing = "I’m still erasing what I took from it";
+    const erasing = "I’m still clearing what I learned from it";
     const shown = (kickoff: OnboardingView["kickoff"]) => {
       const markup = drawn("welcome", { kickoff });
       return {
@@ -378,71 +308,16 @@ describe("the welcome", () => {
   });
 });
 
-describe("what Stephen says of the company", () => {
-  const context: OnboardingContext = {
-    suites: [],
-    sources: [],
-    words: {
-      en: {
-        business: "You build and renovate homes for housing associations.",
-        documents: ["calculations", "supplier invoices"],
-        example: null,
-      },
-    },
-  };
-
-  it("says what the company does as he says hello, before asking for the language", () => {
-    expect(said("welcome", { sponsor: "Anna", context })).toContain(
-      "Anna told me a lot about your company in our first conversation. You build and renovate homes for housing associations. Before we start, which language do you prefer?"
+describe("the documents and places the admin comes back to", () => {
+  it("shows the places chosen for the documents as noted", () => {
+    const sharePoint: SetupChoices = { ...noChoices, sources: ["sharepoint"] };
+    // Said after its name; the helper puts a space between the name and the words after it.
+    expect(said("sources", { choices: sharePoint })).toMatch(
+      /SharePoint ?, noted/u
     );
   });
-});
 
-/** Whether anything on a step comes in as it arrives: a fade, a slide, a check drawn. */
-const comesIn = (markup: string): boolean => /data-arrives/u.test(markup);
-
-describe("a step the admin comes back to", () => {
-  it("shows its way on at once, rather than after Stephen says it again", () => {
-    // Held back (inert) until explained on arrival; there at once when seen before.
-    expect({
-      first: drawn("review", { settled: ["mail"] }).includes("inert"),
-      again: drawn("review", { settled: ["mail"], seen: true }).includes(
-        "inert"
-      ),
-    }).toStrictEqual({ first: true, again: false });
-  });
-
-  it("keeps the language chosen on the welcome, with Stephen's answer in full", () => {
-    const answer = "English it is. This takes about 8 minutes. Ready to start?";
-    expect({
-      first: said("welcome", {}).includes(answer),
-      again: said("welcome", { seen: true }).includes(answer),
-    }).toStrictEqual({ first: false, again: true });
-    expect(comesIn(drawn("welcome", { seen: true }))).toBeFalsy();
-  });
-
-  it("shows the places chosen for the documents at once, rather than held back and coming in", () => {
-    const sharePoint: SetupChoices = { ...noChoices, sources: ["sharepoint"] };
-    const first = drawn("sources", { choices: sharePoint });
-    const again = drawn("sources", { choices: sharePoint, seen: true });
-    expect({
-      first: {
-        noted: first.includes("Noted"),
-        held: first.includes("inert"),
-        comesIn: comesIn(first),
-      },
-      again: {
-        noted: again.includes("Noted"),
-        held: again.includes("inert"),
-        comesIn: comesIn(again),
-      },
-    }).toStrictEqual({
-      first: { noted: true, held: true, comesIn: true },
-      again: { noted: true, held: false, comesIn: false },
-    });
-  });
-
-  it("shows the documents shared, read, as they were left, each one the admin can remove", () => {
+  it("lists the documents shared before, each one the admin can remove", () => {
     const handbook: OnboardingDocument = {
       id: "handbook",
       name: "Handbook.pdf",
@@ -452,66 +327,13 @@ describe("a step the admin comes back to", () => {
         tools: [],
         teams: [],
         unclear: [],
-        ask: null,
       },
-      answer: null,
     };
-    const again = drawn("documents", { documents: [handbook], seen: true });
+    const again = drawn("documents", { documents: [handbook] });
     expect({
       listed: again.includes("Handbook.pdf"),
-      read: again.includes("How claims are handled, start to end."),
       removable: again.includes('aria-label="Remove Handbook.pdf"'),
-      held: again.includes("inert"),
-      comesIn: comesIn(again),
-    }).toStrictEqual({
-      listed: true,
-      read: true,
-      removable: true,
-      held: false,
-      comesIn: false,
-    });
-  });
-
-  it("has the plan summed up at once on how this works", () => {
-    const again = drawn("about", { seen: true });
-    expect({
-      summed: again.includes("Your people, documents and tools first."),
-      comesIn: comesIn(again),
-    }).toStrictEqual({ summed: true, comesIn: false });
-  });
-});
-
-/** The ways back and forward the frame offers on `step`, the admin having been as far as `furthest`. */
-const waysOn = (step: SetupStep, furthest: SetupStep) => {
-  const markup = page(
-    <SetupFrame
-      knowledge={{ parts: [], percent: 10, threshold: 80 }}
-      onExit={() => {}}
-      onGo={() => {}}
-      path={steps}
-      reached={stepIndex(furthest)}
-      step={step}
-    >
-      {null}
-    </SetupFrame>
-  );
-  return {
-    back: markup.includes(">Back<"),
-    forward: markup.includes(">Forward<"),
-  };
-};
-
-describe("going back and forward", () => {
-  it("goes back a step, and forward only as far as the admin has been", () => {
-    expect({
-      furthest: waysOn("documents", "documents"),
-      behind: waysOn("company", "documents"),
-      first: waysOn("welcome", "about"),
-    }).toStrictEqual({
-      furthest: { back: true, forward: false },
-      behind: { back: true, forward: true },
-      first: { back: false, forward: true },
-    });
+    }).toStrictEqual({ listed: true, removable: true });
   });
 });
 
@@ -536,72 +358,5 @@ describe("a directory the company step couldn't read", () => {
       "directory.too_large": "large",
       "directory.provider_failed": "failed",
     });
-  });
-});
-
-describe("a team far behind, halfway through the interviews", () => {
-  /** What the page says of team Ops, quiet, its lead named `lead` on the list. */
-  const saidOfQuiet = (lead: string): string =>
-    page(
-      <InterviewsProgress
-        links={[]}
-        listening={{
-          progress: 0.5,
-          day: 7,
-          days: 14,
-          leadsHeard: 1,
-          colleaguesHeard: 0,
-          heard: [1],
-        }}
-        spoken={false}
-        today={today}
-        view={{
-          ...view(false, null, noContext, true, null, null),
-          roster: {
-            teams: [
-              { id: "ops", name: "Ops", lead: "lea", does: "", off: false },
-            ],
-            people: [
-              {
-                id: "lea",
-                name: lead,
-                email: "",
-                team: "ops",
-                title: "",
-                away: false,
-              },
-            ],
-          },
-          progress: {
-            teams: [
-              {
-                id: "ops",
-                name: "Ops",
-                people: 6,
-                off: false,
-                leadTalked: true,
-                talked: 0,
-                asked: 5,
-              },
-            ],
-            talked: 0,
-            asked: 5,
-            leadsTalked: 1,
-            leads: 1,
-            asOf: today,
-          },
-        }}
-      />
-    )
-      .replaceAll(/<[^>]+>/gu, " ")
-      .replaceAll(/\s+/gu, " ");
-
-  it("is named with its lead, and not at all once core erased the lead", () => {
-    expect({
-      named: saidOfQuiet("Lea Smit").includes(
-        "Ops has been quiet so far. A short message from Lea, their lead, usually helps."
-      ),
-      erased: saidOfQuiet("").includes("has been quiet"),
-    }).toStrictEqual({ named: true, erased: false });
   });
 });

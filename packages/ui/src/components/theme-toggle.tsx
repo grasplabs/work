@@ -41,6 +41,7 @@ import {
 } from "../lib/tokens.stylex";
 import type { LayoutStyle } from "../lib/utils";
 import { iconVars, motionVars, ringInsetMarker } from "../lib/vars.stylex";
+import { ControlTooltip } from "./tooltip";
 
 /** How a person chose to see it: light, dark, or whatever the system says. */
 export const themeModes = ["light", "dark", "system"] as const;
@@ -68,13 +69,23 @@ export const isThemeMode = (value: unknown): value is ThemeMode =>
 export const isThemeId = (value: unknown): value is ThemeId =>
   themeIds.some((id) => id === value);
 
+/** The icon button's sizes: Button's own. */
+type ThemeToggleSize = "xs" | "sm" | "default" | "lg";
+
 /** What every ThemeToggle takes, whatever its variant. */
 interface ThemeToggleBase {
   /**
-   * The icon button's size.
+   * The icon button's size, under Button's names and at Button's heights: `xs` 28px, `sm` 32px,
+   * `default` 36px, `lg` 44px. Beside a Button or a Select of the same size it is as tall.
    * @default "default"
    */
-  size?: "sm" | "default";
+  size?: ThemeToggleSize;
+  /**
+   * The icon button's tooltip, under a resting pointer and on keyboard focus, as Button's. Left
+   * out, it shows its name: where it is and where a press takes it. `false` shows none; words show
+   * those.
+   */
+  tooltip?: ReactNode;
   /** The chosen mode. */
   mode: ThemeMode;
   /** Called with the mode a person or an agent chose; the caller applies and keeps it. */
@@ -183,16 +194,28 @@ const styles = stylex.create({
     WebkitTapHighlightColor: "transparent",
   },
   // Button's corner at each size: the one corner, capped at half the height.
-  iconSm: {
+  iconXs: {
     width: size.controlXs,
     height: size.controlXs,
     borderRadius: `min(${radius.xl}, calc(${size.controlXs} / 2))`,
     cornerShape: radius.shape,
   },
-  iconDefault: {
+  iconSm: {
     width: size.controlSm,
     height: size.controlSm,
     borderRadius: `min(${radius.xl}, calc(${size.controlSm} / 2))`,
+    cornerShape: radius.shape,
+  },
+  iconDefault: {
+    width: size.controlDefault,
+    height: size.controlDefault,
+    borderRadius: `min(${radius.xl}, calc(${size.controlDefault} / 2))`,
+    cornerShape: radius.shape,
+  },
+  iconLg: {
+    width: size.controlLg,
+    height: size.controlLg,
+    borderRadius: `min(${radius.xl}, calc(${size.controlLg} / 2))`,
     cornerShape: radius.shape,
   },
   // The shown icon is sharp; the others blurred, a little small, and gone.
@@ -664,6 +687,13 @@ const Segmented = ({
   );
 };
 
+const iconSizes = {
+  xs: styles.iconXs,
+  sm: styles.iconSm,
+  default: styles.iconDefault,
+  lg: styles.iconLg,
+};
+
 /**
  * One icon button that cycles Light, Dark, System. The three icons stand in one cell and swap by
  * fading through a small blur; its name says where it is and where a press takes it.
@@ -671,43 +701,43 @@ const Segmented = ({
 const IconButton = ({
   mode,
   size: buttonSize,
+  tooltip,
   name,
   onChoose,
 }: {
   mode: ThemeMode;
-  size: "sm" | "default";
+  size: ThemeToggleSize;
+  tooltip: ReactNode;
   name: (current: ThemeMode, next: ThemeMode) => string;
   onChoose: (mode: ThemeMode) => void;
 }) => {
   const index = themeModes.indexOf(mode);
   const next = themeModes[(index + 1) % themeModes.length] ?? "light";
   return (
-    <button
-      type="button"
-      aria-label={name(mode, next)}
-      onClick={() => {
-        onChoose(next);
-      }}
-      {...stylex.props(
-        styles.icon,
-        buttonSize === "sm" ? styles.iconSm : styles.iconDefault,
-        focusRing
-      )}
-    >
-      <span aria-hidden="true" {...stylex.props(tapTarget)} />
-      {themeModes.map((each) => (
-        <span
-          key={each}
-          aria-hidden="true"
-          {...stylex.props(
-            styles.swap,
-            each === mode ? styles.swapIn : styles.swapOut
-          )}
-        >
-          <Icon icon={icons[each]} />
-        </span>
-      ))}
-    </button>
+    <ControlTooltip tooltip={tooltip} iconOnly>
+      <button
+        type="button"
+        aria-label={name(mode, next)}
+        onClick={() => {
+          onChoose(next);
+        }}
+        {...stylex.props(styles.icon, iconSizes[buttonSize], focusRing)}
+      >
+        <span aria-hidden="true" {...stylex.props(tapTarget)} />
+        {themeModes.map((each) => (
+          <span
+            key={each}
+            aria-hidden="true"
+            {...stylex.props(
+              styles.swap,
+              each === mode ? styles.swapIn : styles.swapOut
+            )}
+          >
+            <Icon icon={icons[each]} />
+          </span>
+        ))}
+      </button>
+    </ControlTooltip>
   );
 };
 
@@ -950,6 +980,7 @@ const Picker = ({
 export const ThemeToggle = ({
   variant = "segmented",
   size: buttonSize = "default",
+  tooltip,
   mode,
   onModeChange,
   theme,
@@ -990,6 +1021,7 @@ export const ThemeToggle = ({
         <IconButton
           mode={mode}
           size={buttonSize}
+          tooltip={tooltip}
           name={(current, next) =>
             words.icon(label, wordsOf(current).name, wordsOf(next).name)
           }

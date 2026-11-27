@@ -280,6 +280,18 @@ const hurry = (key: string): void => {
 };
 
 const clips = new Map<string, Promise<Clip>>();
+/** The lines fetched, by key: each starts the moment it is said. */
+const fetched = new Set<string>();
+
+/** A line's key: its language, voice and way of saying it, and its words. */
+const keyOf = (text: string, voicing: Voicing): string =>
+  [
+    languageNow(),
+    voicing.speaker ?? "stephen",
+    voicing.tone ?? "",
+    voicing.quick === true ? "quick" : "",
+    text,
+  ].join("|");
 
 /** A line fetched once per language, voice and way of saying it; one that could not be heard is asked for again next time. */
 const clip = async (
@@ -288,13 +300,7 @@ const clip = async (
   now: boolean
 ): Promise<Clip> => {
   const language = languageNow();
-  const key = [
-    language,
-    voicing.speaker ?? "stephen",
-    voicing.tone ?? "",
-    voicing.quick === true ? "quick" : "",
-    text,
-  ].join("|");
+  const key = keyOf(text, voicing);
   const found = clips.get(key);
   if (found !== undefined) {
     if (now) {
@@ -302,18 +308,24 @@ const clip = async (
     }
     return await found;
   }
-  const fetched = inTurn(
+  const asked = inTurn(
     key,
     async () => await fetchLine(text, language, voicing),
     now
   );
-  clips.set(key, fetched);
-  const got = await fetched;
+  clips.set(key, asked);
+  const got = await asked;
   if (got.audio === null) {
     clips.delete(key);
+  } else {
+    fetched.add(key);
   }
   return got;
 };
+
+/** Whether a line is fetched, so it starts the moment it is said; with the sound off, nothing is waited for. */
+export const isPrepared = (text: string, voicing: Voicing = {}): boolean =>
+  !state.on || fetched.has(keyOf(text, voicing));
 
 /** A line planned to be said; with `still`, only if that still holds when its turn comes. */
 interface Planned {
@@ -705,43 +717,4 @@ export const useSaid = (text: string): number => {
     };
   }, [saying]);
   return saying === null ? -1 : said;
-};
-
-/** Fetches a line ahead while it is on its way: on the step before, or as a step arrives. */
-export const usePrepare = (
-  text: string,
-  { speaker, tone, quick }: Voicing = {}
-): void => {
-  useEffect(() => {
-    prepare(text, { speaker, tone, quick });
-  }, [text, speaker, tone, quick]);
-};
-
-/**
- * Says a line once it is shown: after `delay`, after the line being said
- * when `after`, or as an answer at its next natural break when `soon`.
- * Said again when its words change, as they do with the language.
- */
-export const useSay = (
-  text: string,
-  {
-    delay = 0,
-    when = true,
-    after = false,
-    soon = false,
-    speaker,
-    tone,
-    quick = false,
-  }: SpeakOptions & { delay?: number; when?: boolean } = {}
-): void => {
-  useEffect(() => {
-    const id = when
-      ? window.setTimeout(() => {
-          speak(text, { after, soon, speaker, tone, quick });
-        }, delay)
-      : undefined;
-    return () => {
-      window.clearTimeout(id);
-    };
-  }, [text, delay, when, after, soon, speaker, tone, quick]);
 };

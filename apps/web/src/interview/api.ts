@@ -11,7 +11,9 @@ import {
 } from "@grasp-os/shared/interview-hear";
 import type { HearFields } from "@grasp-os/shared/interview-hear";
 import {
+  factTags,
   interviewApiPath,
+  interviewPhases,
   interviewProgressSchema,
   participationNotice,
 } from "@grasp-os/shared/interview-links";
@@ -25,18 +27,18 @@ import type {
   StoryLine,
   StorySentence,
 } from "@grasp-os/shared/interview-story";
-import { interviewTurnPath, turnEvents } from "@grasp-os/shared/interview-turn";
+import { interviewVoicePath } from "@grasp-os/shared/interview-voice";
 import type {
-  InterviewTurnRequest,
-  StephenTurn,
-  TurnEvent,
-} from "@grasp-os/shared/interview-turn";
+  InterviewVoiceRequest,
+  VoiceAnswered,
+  VoiceSessionJoin,
+} from "@grasp-os/shared/interview-voice";
 import { interviewKindSchema } from "@grasp-os/shared/onboarding";
 import { t } from "@lingui/core/macro";
 import { z } from "zod";
 
 // The interview's page talks to core over its link's endpoints only
-// (`/api/interview`, `/turn`, `/story`), with the link's secret in each
+// (`/api/interview`, `/voice`, `/story`), with the link's secret in each
 // body and the session of the company's sign-in in its cookie, which core
 // reads on these endpoints alone (GRA-1790): the interview opens only for
 // the account it belongs to. Nothing it is answered is taken on trust:
@@ -59,8 +61,10 @@ const sessionSchema = z.object({
   team: z.string(),
   lead: z.string().nullable(),
   kind: interviewKindSchema,
+  company: z.string().optional(),
   closes: z.string(),
   closed: z.boolean(),
+  readOnly: z.boolean(),
   progress: interviewProgressSchema.nullable(),
   version: z.int().min(0),
   withdrawn: z.boolean(),
@@ -115,8 +119,100 @@ const unreachable = (): Refused => ({
   refused: true,
   status: 0,
   code: null,
-  message: t`Grasp can't be reached right now. Try again in a moment.`,
+  message: t({
+    message: "Grasp can't be reached right now. Try again in a moment.",
+    context: "the interview",
+  }),
 });
+
+/**
+ * Core's words for why, in the language on screen: core says them in
+ * English (`interviewErrors`, and the live session's few without a code),
+ * so the page says each it knows in its own words, by code or by the
+ * English, and any other as core said it.
+ */
+const inLanguage = (code: string | null, message: string): string => {
+  // Built on each call, so each line is in the language on screen now.
+  const said = new Map<string, string>([
+    [
+      "interview.link_invalid",
+      t`This link doesn't work. Ask whoever sent it for a new one.`,
+    ],
+    [
+      "interview.not_yet",
+      t`Your interview isn't open yet. You'll get an email when it is.`,
+    ],
+    [
+      "interview.paused",
+      t`The interviews are paused for now. Try again a little later.`,
+    ],
+    ["interview.closed", t`The interviews are over. Thank you for your time.`],
+    [
+      "interview.sign_in",
+      t`Sign in with your work account to open your interview.`,
+    ],
+    [
+      "interview.deleted",
+      t`You deleted this interview. Start again to talk with Stephen.`,
+    ],
+    [
+      "interview.limited",
+      t`That was a lot at once. Wait a minute, then go on.`,
+    ],
+    ["interview.invalid", t`That isn't something an interview takes.`],
+    [
+      "interview.not_participating",
+      t`Read what this interview is for and agree to take part first.`,
+    ],
+    [
+      "interview.notice_changed",
+      t`What this interview is for has changed. Read it again before you go on.`,
+    ],
+    [
+      "interview.withdrawn",
+      t`You withdrew from this interview. Nothing more is taken from it.`,
+    ],
+    [
+      "interview.finished",
+      t`You talked with Stephen already. There is nothing to remind you of.`,
+    ],
+    [
+      "interview.no_address",
+      t`We have no email address to remind you at. This link stays open: come back when it suits you.`,
+    ],
+    [
+      "That is as long as the interview can run today. Come back tomorrow to go on.",
+      t`That is as long as the interview can run today. Come back tomorrow to go on.`,
+    ],
+    [
+      "The interview could not start. Try again.",
+      t`The interview could not start. Try again.`,
+    ],
+    [
+      "What was said could not be read. Try again.",
+      t`What was said could not be read. Try again.`,
+    ],
+    [
+      "Stephen lost his thread. Say it once more.",
+      t`Stephen lost his thread. Say it once more.`,
+    ],
+    [
+      "Stephen is busy. Try again in a minute.",
+      t`Stephen is busy. Try again in a minute.`,
+    ],
+    ["The interview is not set up yet.", t`The interview is not set up yet.`],
+    [
+      "Stephen could not be reached. Try again.",
+      t`Stephen could not be reached. Try again.`,
+    ],
+  ]);
+  return (
+    (code === null ? undefined : said.get(code)) ?? said.get(message) ?? message
+  );
+};
+
+/** Why a live conversation's request went wrong, as core says it without a code (core's onboarding/voice.ts). */
+const voiceFailureSchema = z.object({ error: z.string().min(1) });
 
 /** A refusal as core sent it, with its reference. */
 const refusalOf = async (response: Response): Promise<Refused> => {
@@ -127,14 +223,19 @@ const refusalOf = async (response: Response): Promise<Refused> => {
     // No body to read: the status says enough.
   }
   const parsed = errorPayloadSchema.safeParse(payload);
+  const voice = voiceFailureSchema.safeParse(payload);
+  let said = t`That didn't work. Try again in a moment.`;
+  if (parsed.success) {
+    said = inLanguage(parsed.data.code, parsed.data.message);
+  } else if (voice.success) {
+    said = inLanguage(null, voice.data.error);
+  }
   return {
     refused: true,
     status: response.status,
     code: parsed.success ? parsed.data.code : null,
     message: withReference(
-      parsed.success
-        ? parsed.data.message
-        : t`That didn't work. Try again in a moment.`,
+      said,
       requestIdOf(payload) ?? response.headers.get(requestIdHeader) ?? undefined
     ),
   };
@@ -238,6 +339,20 @@ export const approveFacts = async (
     approvalSchema
   );
 
+/** When core sends the reminder they asked for (ISO 8601). */
+const laterSchema = z.object({ at: z.iso.datetime() });
+
+/** Not now: core reminds them at `at`, and answers the moment it keeps. */
+export const remindLater = async (
+  secret: string,
+  at: string
+): Promise<z.output<typeof laterSchema> | Refused> =>
+  await posted(
+    interviewApiPath,
+    { action: "later", secret, at } satisfies InterviewRequest,
+    laterSchema
+  );
+
 /** They withdraw: nothing of their interview is used from now on. */
 export const withdrawInterview = async (
   secret: string
@@ -247,68 +362,6 @@ export const withdrawInterview = async (
     { action: "withdraw", secret } satisfies InterviewRequest,
     withdrawnSchema
   );
-
-/** A turn that could not be had: its status, 0 when nothing came back. */
-export interface TurnFailed {
-  failed: true;
-  status: number;
-}
-
-export const turnFailed = (value: unknown): value is TurnFailed =>
-  typeof value === "object" && value !== null && "failed" in value;
-
-/** What comes in of a turn before the whole of it: his line's start, his line, where the interview goes. */
-export type EarlyEvent = Exclude<
-  TurnEvent,
-  { turn: StephenTurn } | { error: string; status: number }
->;
-
-/**
- * One turn, as core answers it, a line of JSON at a time: `onEvent` gets
- * each event as it comes in, and `alive` is called whenever anything does.
- * What comes back is the whole turn, or that it failed.
- */
-export const askTurn = async (
-  request: InterviewTurnRequest,
-  signal: AbortSignal,
-  onEvent: (event: EarlyEvent) => void,
-  alive: () => void
-): Promise<StephenTurn | TurnFailed> => {
-  const response = await fetch(interviewTurnPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(request),
-    signal,
-  });
-  if (!response.ok || response.body === null) {
-    return { failed: true, status: response.status };
-  }
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let turn: StephenTurn | TurnFailed = { failed: true, status: 0 };
-  let arrived = "";
-  for (;;) {
-    // oxlint-disable-next-line no-await-in-loop -- a stream is read a piece at a time
-    const { done, value } = await reader.read();
-    alive();
-    // The last line counts too, whether or not it ends in a new line.
-    const text = `${arrived}${decoder.decode(value, { stream: !done })}${done ? "\n" : ""}`;
-    const { events, rest } = turnEvents(text);
-    arrived = rest;
-    for (const event of events) {
-      if ("turn" in event) {
-        ({ turn } = event);
-      } else if ("error" in event) {
-        turn = { failed: true, status: event.status };
-      } else {
-        onEvent(event);
-      }
-    }
-    if (done) {
-      return turn;
-    }
-  }
-};
 
 /** How long a story of a part is waited for at all. */
 const storyTimeoutMs = 8000;
@@ -336,6 +389,8 @@ export const askStory = async (
 
 /** Where this tab keeps a link's secret while it is away signing in. */
 const signingInSecret = "grasp.interview.signing-in";
+/** The address's query while it is away signing in (`?jump=`, `?readback=`), kept beside the secret. */
+const signingInSearch = "grasp.interview.signing-in-search";
 
 /**
  * The secret in the page's link: what follows its `#`; or, back from
@@ -345,16 +400,27 @@ const signingInSecret = "grasp.interview.signing-in";
 export const linkSecret = (): string => {
   const inLink = window.location.hash.slice(1);
   let kept: string | null = null;
+  let keptSearch = "";
   try {
     kept = sessionStorage.getItem(signingInSecret);
+    keptSearch = sessionStorage.getItem(signingInSearch) ?? "";
     sessionStorage.removeItem(signingInSecret);
+    sessionStorage.removeItem(signingInSearch);
   } catch {
     // Storage refused: the link's own address is all there is.
   }
   if (inLink !== "" || kept === null) {
     return inLink;
   }
-  window.history.replaceState(null, "", `${window.location.pathname}#${kept}`);
+  // What the address asked for besides the secret comes back with it, unless
+  // the way back brought its own (a sign-in's `?error=`).
+  const search =
+    window.location.search === "" ? keptSearch : window.location.search;
+  window.history.replaceState(
+    null,
+    "",
+    `${window.location.pathname}${search}#${kept}`
+  );
   return kept;
 };
 
@@ -366,26 +432,11 @@ export const linkSecret = (): string => {
 export const keepWhileSigningIn = (secret: string): void => {
   try {
     sessionStorage.setItem(signingInSecret, secret);
+    sessionStorage.setItem(signingInSearch, window.location.search);
   } catch {
     // Storage refused: they open their link again from their email.
   }
 };
-
-/** Where this browser keeps what belongs to a link: under a hash of its secret, never the secret itself. */
-const linkName = async (secret: string): Promise<string> => {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(secret)
-  );
-  const hex = Array.from(new Uint8Array(digest).slice(0, 12), (byte) =>
-    byte.toString(16).padStart(2, "0")
-  ).join("");
-  return `grasp.interview.${hex}`;
-};
-
-/** Where what they typed and did not send is kept, per link. */
-export const draftName = async (secret: string): Promise<string> =>
-  `${await linkName(secret)}.draft`;
 
 /** How long a recording may take to be written down. */
 const hearTimeoutMs = 20_000;
@@ -426,4 +477,60 @@ export const hearRecording = async ({
   } catch {
     return { reason: "failed" };
   }
+};
+
+const voiceJoinSchema = z.object({
+  conversationToken: z.string().min(1),
+  location: z.enum(["eu-residency", "us"]),
+  context: z.string(),
+  // An older core sends none: the agent's placeholders stand.
+  variables: z.record(z.string(), z.string()).default({}),
+  pass: z.string().min(1),
+}) satisfies z.ZodType<VoiceSessionJoin>;
+
+const voiceAnsweredSchema = z.object({
+  noted: z.int().min(0),
+  turn: z
+    .object({
+      facts: z.array(
+        z.object({
+          tag: z.enum(factTags),
+          text: z.string(),
+          record: z.string(),
+          quote: z.string(),
+        })
+      ),
+      changes: z.array(
+        z.object({
+          id: z.string(),
+          text: z.string().nullable(),
+          record: z.string().nullable(),
+        })
+      ),
+      phase: z.enum(interviewPhases),
+    })
+    .nullable(),
+}) satisfies z.ZodType<VoiceAnswered>;
+
+/**
+ * Opens the interview's live conversation, through core
+ * (`/api/interview/voice`): what the page starts it with (a conversation
+ * token for Grasp's ElevenLabs agent), never Grasp's key.
+ */
+export const openVoice = async (
+  request: Extract<InterviewVoiceRequest, { action: "open" }>
+): Promise<VoiceSessionJoin | Refused> =>
+  await posted(interviewVoicePath, request, voiceJoinSchema);
+
+/** Has core write down what was said in the conversation since `noted` of their answers, or what they put right in the read-back. */
+export const answerVoice = async (
+  request: Extract<InterviewVoiceRequest, { action: "answer" }>
+): Promise<VoiceAnswered | Refused> =>
+  await posted(interviewVoicePath, request, voiceAnsweredSchema);
+
+/** Tells core the page left the conversation: also as the page is left, so it outlives the page. */
+export const closeVoice = async (
+  request: Extract<InterviewVoiceRequest, { action: "close" }>
+): Promise<void> => {
+  await posted(interviewVoicePath, request, z.unknown(), { keepalive: true });
 };

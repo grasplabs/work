@@ -19,7 +19,7 @@
 
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { ClipboardEvent, ReactNode } from "react";
 
 import {
   AlertDialog,
@@ -45,8 +45,13 @@ import {
   FieldError,
   FieldLabel,
 } from "../../components/field";
-import { Form, FormFooter } from "../../components/form";
-import { Input, SecretInput } from "../../components/input";
+import { Form } from "../../components/form";
+import { Input } from "../../components/input";
+import {
+  InputGroup,
+  InputGroupButton,
+  InputGroupInput,
+} from "../../components/input-group";
 import {
   Item,
   ItemActions,
@@ -158,12 +163,24 @@ export interface ConnectApiKeyProvider {
 
 /** Every prop a ConnectApiKey takes. */
 export interface ConnectApiKeyProps {
-  /** The card's title ("AI provider"). */
+  /** The card's title ("AI provider"); without the card, still the name of the list of tiles. */
   title: string;
+  /**
+   * Without its card: the tiles, the form and the connected row stand on the page itself, for a
+   * page whose own title already says what the card's would (a step of a setup). In a list of
+   * settings it keeps its card, as every setting there has one.
+   * @default false
+   */
+  bare?: boolean;
   /** One line that opens the card, over the tiles, in the serif. */
   description?: ReactNode;
   /** The providers, as tiles, in order. */
   providers: readonly ConnectApiKeyProvider[];
+  /**
+   * The most tiles in a row, so four stand two and two and not three and one; fewer where they do
+   * not fit, one a row on a phone. Without it, as many as fit.
+   */
+  columns?: 2 | 3;
   /** The provider connected now, if any: never its key, only the key's last four characters. */
   connected?: { provider: string; last: string } | null;
   /**
@@ -175,8 +192,15 @@ export interface ConnectApiKeyProps {
     key: string;
     address?: string;
   }) => Promise<void>;
+  /**
+   * Where a refusal is said, for a page that says every error in one place of its own (a bar at
+   * the top): given, the reason goes here and nothing stands under the key, which is cleared still.
+   */
+  onRefused?: (reason: string) => void;
   /** Disconnects the connected provider, once asked and answered. Return a Promise to wait on it. */
   onDisconnect?: () => unknown;
+  /** Its form's id, for a page that also sends it with a button of its own (a setup's Continue, with `form` set to it). */
+  formId?: string;
   /** What disconnecting loses, in the question before it. */
   disconnectDetail?: ReactNode;
   /** Its words in the product's language; each one left out keeps its English. */
@@ -187,6 +211,9 @@ export interface ConnectApiKeyProps {
 
 const styles = stylex.create({
   form: { display: "grid", rowGap: space["5"] },
+  // Connect stands in from the field's end as Change stands in from its row's (Item sm's inline
+  // padding), so the two buttons line up one above the other.
+  keyAction: { marginInlineEnd: space["4"] },
   lead: { marginBlockEnd: space["4"] },
   // The tiles: equal, as many in a row as fit at their least width, one a row on a phone; every
   // tile in a row as tall as the tallest, a long name wrapping inside.
@@ -218,6 +245,17 @@ const styles = stylex.create({
   own: { display: "grid", justifyItems: "start", marginBlockStart: space["3"] },
 });
 
+// At most so many in a row: a tile is never narrower than its share of the row less a gap, so one
+// more never fits beside them, and still never narrower than its least width.
+const atMost = stylex.create({
+  2: {
+    gridTemplateColumns: `repeat(auto-fit, minmax(min(max(${size.connectTile}, calc(100% / 2 - ${space["3"]})), 100%), 1fr))`,
+  },
+  3: {
+    gridTemplateColumns: `repeat(auto-fit, minmax(min(max(${size.connectTile}, calc(100% / 3 - ${space["3"]})), 100%), 1fr))`,
+  },
+});
+
 /** A provider's mark: its logo, or its first letter. */
 const Logo = ({ provider }: { provider: ConnectApiKeyProvider }) => (
   <ItemMedia align="center">
@@ -225,15 +263,35 @@ const Logo = ({ provider }: { provider: ConnectApiKeyProvider }) => (
   </ItemMedia>
 );
 
+/** Pastes the clipboard's key whole, the spaces and line breaks round it taken off. */
+const pasteTrimmed = (event: ClipboardEvent<HTMLInputElement>) => {
+  const pasted = event.clipboardData.getData("text");
+  const trimmed = pasted.trim();
+  if (trimmed === pasted) {
+    return;
+  }
+  event.preventDefault();
+  const field = event.currentTarget;
+  const start = field.selectionStart ?? field.value.length;
+  const end = field.selectionEnd ?? field.value.length;
+  field.setRangeText(trimmed, start, end, "end");
+  // Told as typing is, so the form hears it.
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+};
+
 /** The form: the chosen provider with Change, its address when it asks, its key, and Connect. */
 const ConnectForm = ({
   provider,
   onConnect,
+  onRefused,
   onChange,
   words,
+  formId,
 }: {
+  formId: string | undefined;
   provider: ConnectApiKeyProvider;
   onConnect: ConnectApiKeyProps["onConnect"];
+  onRefused: ConnectApiKeyProps["onRefused"];
   onChange: () => void;
   words: ConnectApiKeyLabels;
 }) => {
@@ -257,11 +315,15 @@ const ConnectForm = ({
     if (!result.ok && !("busy" in result)) {
       // The service's own reason under the key, and the key cleared: a secret that did not work
       // is not kept in the page.
-      setRefused(
+      const reason =
         result.error instanceof Error && result.error.message !== ""
           ? result.error.message
-          : words.notConnected
-      );
+          : words.notConnected;
+      if (onRefused === undefined) {
+        setRefused(reason);
+      } else {
+        onRefused(reason);
+      }
       const field =
         form.current?.querySelector<HTMLInputElement>("[type=password]");
       if (field) {
@@ -273,6 +335,7 @@ const ConnectForm = ({
   return (
     <Form
       ref={form}
+      id={formId}
       aria-label={words.connectName(provider.name)}
       onSubmit={(event) => {
         event.preventDefault();
@@ -321,28 +384,38 @@ const ConnectForm = ({
         {/* Invalid only when refused: left out otherwise, so the browser's own check still says a missing key. */}
         <Field name="key" {...(refused === null ? {} : { invalid: true })}>
           <FieldLabel>{words.key}</FieldLabel>
-          <SecretInput
-            required
-            readOnly={connect.status === "loading"}
-            placeholder={provider.placeholder}
-            onValueChange={() => {
-              setRefused(null);
-            }}
-          />
+          {/* Connect inside the key's field, at its end: the form keeps no button row under it. */}
+          <InputGroup>
+            <InputGroupInput
+              type="password"
+              required
+              dir="ltr"
+              autoComplete="off"
+              spellCheck={false}
+              data-agent-secret=""
+              data-1p-ignore=""
+              data-lpignore="true"
+              readOnly={connect.status === "loading"}
+              placeholder={provider.placeholder}
+              onPaste={pasteTrimmed}
+              onValueChange={() => {
+                setRefused(null);
+              }}
+            />
+            {/* InputGroup's own button, as Damsko sets one in a field (ghost, its size and inset): only
+                its working state, no success or error words, whose widest would set its width. */}
+            <InputGroupButton
+              type="submit"
+              status={connect.status === "loading" ? "loading" : "idle"}
+              style={styles.keyAction}
+            >
+              {words.connect}
+            </InputGroupButton>
+          </InputGroup>
           <FieldDescription>{words.keyNote}</FieldDescription>
           <FieldError match="valueMissing">{words.keyMissing}</FieldError>
           {refused !== null && <FieldError match>{refused}</FieldError>}
         </Field>
-        <FormFooter align="start">
-          <Button
-            type="submit"
-            status={connect.status}
-            successText={words.connected}
-            errorText={words.notConnected}
-          >
-            {words.connect}
-          </Button>
-        </FormFooter>
       </div>
     </Form>
   );
@@ -449,12 +522,16 @@ const Connected = ({
 export const ConnectApiKey = ({
   title,
   description,
+  bare = false,
   providers,
+  columns,
   connected,
   onConnect,
+  onRefused,
   onDisconnect,
   disconnectDetail,
   labels,
+  formId,
   style,
 }: ConnectApiKeyProps) => {
   const words = { ...LABELS, ...labels };
@@ -484,18 +561,139 @@ export const ConnectApiKey = ({
       buttons?.[next]?.focus();
     }
   }, [view]);
-  // Change: back to the tile it came from; while a key is replaced, back to Replace key.
   // The tiles first, then the lines of those that run at an address of your own: the order the
   // buttons stand in.
   const tiles = providers.filter((provider) => provider.address !== true);
   const lines = providers.filter((provider) => provider.address === true);
   const placeOf = (id: string | null) =>
     [...tiles, ...lines].findIndex((provider) => provider.id === id);
+  // Change: back to every provider, also while a key is replaced, so another one can be chosen.
   const change = () => {
-    focusNext.current = replacing ? "replace" : placeOf(chosen);
-    setReplacing(false);
+    focusNext.current = placeOf(chosen);
     setChosen(null);
   };
+  const views = (
+    <>
+      {live !== undefined && connected !== undefined && connected !== null && (
+        <Connected
+          provider={live}
+          last={connected.last}
+          onReplace={() => {
+            setReplacing(true);
+            setChosen(connected.provider);
+          }}
+          onDisconnect={
+            onDisconnect === undefined
+              ? undefined
+              : async () => {
+                  // Once it is gone, the focus goes to its tile.
+                  focusNext.current = placeOf(connected.provider);
+                  try {
+                    await onDisconnect();
+                  } catch (error) {
+                    focusNext.current = null;
+                    throw error;
+                  }
+                }
+          }
+          disconnectDetail={disconnectDetail}
+          words={words}
+        />
+      )}
+      {live === undefined && form !== undefined && (
+        <ConnectForm
+          provider={form}
+          onConnect={async (choice) => {
+            // Once connected, the focus goes to Replace key, in the row that says so.
+            focusNext.current = "replace";
+            try {
+              await onConnect(choice);
+            } catch (error) {
+              focusNext.current = null;
+              throw error;
+            }
+            setReplacing(false);
+            setChosen(null);
+          }}
+          onRefused={onRefused}
+          onChange={change}
+          words={words}
+          formId={formId}
+        />
+      )}
+      {live === undefined && form === undefined && (
+        <>
+          {description !== undefined && (
+            <div {...stylex.props(styles.lead)}>
+              <Text variant="display" size="lg">
+                {description}
+              </Text>
+            </div>
+          )}
+          <ul
+            // oxlint-disable-next-line jsx-a11y/no-redundant-roles -- Safari drops a list's role once its markers are hidden
+            role="list"
+            aria-label={title}
+            {...stylex.props(
+              styles.tiles,
+              columns !== undefined && atMost[columns]
+            )}
+          >
+            {tiles.map((provider) => (
+              <li key={provider.id} {...stylex.props(styles.tile)}>
+                <Item
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setChosen(provider.id);
+                  }}
+                >
+                  <Logo provider={provider} />
+                  <ItemContent>
+                    <ItemTitle>{provider.name}</ItemTitle>
+                    {provider.region !== undefined && (
+                      <ItemDescription>
+                        <span {...stylex.props(styles.region)}>
+                          {provider.region.icon}
+                          <span {...stylex.props(styles.regionName)}>
+                            {provider.region.label}
+                          </span>
+                        </span>
+                      </ItemDescription>
+                    )}
+                  </ItemContent>
+                </Item>
+              </li>
+            ))}
+          </ul>
+          {lines.length > 0 && (
+            <div {...stylex.props(styles.own)}>
+              {lines.map((provider) => (
+                <Button
+                  key={provider.id}
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setChosen(provider.id);
+                  }}
+                >
+                  <Icon icon={PlusIcon} />
+                  {provider.addressLabel ?? provider.name}
+                </Button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </>
+  );
+  if (bare) {
+    return (
+      <div ref={body} data-slot="connect-api-key" {...stylex.props(style)}>
+        {views}
+      </div>
+    );
+  }
   return (
     <Card style={style}>
       <CardHeader>
@@ -503,114 +701,7 @@ export const ConnectApiKey = ({
       </CardHeader>
       <CardContent>
         <div ref={body} data-slot="connect-api-key">
-          {live !== undefined &&
-            connected !== undefined &&
-            connected !== null && (
-              <Connected
-                provider={live}
-                last={connected.last}
-                onReplace={() => {
-                  setReplacing(true);
-                  setChosen(connected.provider);
-                }}
-                onDisconnect={
-                  onDisconnect === undefined
-                    ? undefined
-                    : async () => {
-                        // Once it is gone, the focus goes to its tile.
-                        focusNext.current = placeOf(connected.provider);
-                        try {
-                          await onDisconnect();
-                        } catch (error) {
-                          focusNext.current = null;
-                          throw error;
-                        }
-                      }
-                }
-                disconnectDetail={disconnectDetail}
-                words={words}
-              />
-            )}
-          {live === undefined && form !== undefined && (
-            <ConnectForm
-              provider={form}
-              onConnect={async (choice) => {
-                // Once connected, the focus goes to Replace key, in the row that says so.
-                focusNext.current = "replace";
-                try {
-                  await onConnect(choice);
-                } catch (error) {
-                  focusNext.current = null;
-                  throw error;
-                }
-                setReplacing(false);
-                setChosen(null);
-              }}
-              onChange={change}
-              words={words}
-            />
-          )}
-          {live === undefined && form === undefined && (
-            <>
-              {description !== undefined && (
-                <div {...stylex.props(styles.lead)}>
-                  <Text variant="display" size="lg">
-                    {description}
-                  </Text>
-                </div>
-              )}
-              <ul
-                // oxlint-disable-next-line jsx-a11y/no-redundant-roles -- Safari drops a list's role once its markers are hidden
-                role="list"
-                aria-label={title}
-                {...stylex.props(styles.tiles)}
-              >
-                {tiles.map((provider) => (
-                  <li key={provider.id} {...stylex.props(styles.tile)}>
-                    <Item
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setChosen(provider.id);
-                      }}
-                    >
-                      <Logo provider={provider} />
-                      <ItemContent>
-                        <ItemTitle>{provider.name}</ItemTitle>
-                        {provider.region !== undefined && (
-                          <ItemDescription>
-                            <span {...stylex.props(styles.region)}>
-                              {provider.region.icon}
-                              <span {...stylex.props(styles.regionName)}>
-                                {provider.region.label}
-                              </span>
-                            </span>
-                          </ItemDescription>
-                        )}
-                      </ItemContent>
-                    </Item>
-                  </li>
-                ))}
-              </ul>
-              {lines.length > 0 && (
-                <div {...stylex.props(styles.own)}>
-                  {lines.map((provider) => (
-                    <Button
-                      key={provider.id}
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setChosen(provider.id);
-                      }}
-                    >
-                      <Icon icon={PlusIcon} />
-                      {provider.addressLabel ?? provider.name}
-                    </Button>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
+          {views}
         </div>
       </CardContent>
     </Card>

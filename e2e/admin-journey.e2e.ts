@@ -173,9 +173,13 @@ test("the admin signs in, gives the staff list, confirms and plans, and the link
   ).toBeVisible();
   await page.getByRole("button", { name: "Continue" }).click();
 
-  // The staff list: four people in three teams, Lea leading Sales.
+  // The staff list, dropped right on the step under any sign-in: four
+  // people in three teams, Lea leading Sales.
   await expect(
-    page.getByRole("heading", { name: "Who’s who at your company?" })
+    page.getByRole("heading", {
+      level: 1,
+      name: /^(?:Connect your .+ account|Share your staff list)$/u,
+    })
   ).toBeVisible();
   const run = crypto.randomUUID().slice(0, 8);
   const email = (name: string) => `${name}.${run}@acme.test`;
@@ -204,7 +208,7 @@ test("the admin signs in, gives the staff list, confirms and plans, and the link
   await page.getByRole("button", { name: "Skip for now" }).click();
   await expect(
     page.getByRole("heading", {
-      name: "Do you have anything that explains how you work?",
+      name: "Share documents that explain how you work",
     })
   ).toBeVisible();
   await readOn(page, page.getByRole("button", { name: "Skip for now" }));
@@ -246,12 +250,13 @@ test("the admin signs in, gives the staff list, confirms and plans, and the link
   ).toBeVisible();
   // Typed, the day counts once it is committed (Enter), as a person does:
   // day first, as the field shows.
-  const day = page.getByLabel("Another day");
+  await page.getByRole("button", { name: "Other day" }).click();
+  const day = page.locator('input[aria-label="Other day"]');
   const today = await pageToday(page);
   await day.fill(typed(today));
   await day.press("Enter");
   await expect(day).toHaveValue(typed(today));
-  await page.getByLabel("at", { exact: true }).fill("00:00");
+  await page.getByLabel("Time", { exact: true }).fill("00:00");
   // What it says is the day it saves: the links due today go out below.
   await expect(
     page

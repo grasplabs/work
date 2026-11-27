@@ -1438,6 +1438,13 @@ const errorCodeOf = (error: unknown): string => {
 };
 
 /**
+ * The pages besides the Integrations page that read `connectionError` and
+ * say why a flow didn't finish: a flow that fails and started on one of
+ * them goes back there.
+ */
+const saysWhy: ReadonlySet<string> = new Set(["/setup"]);
+
+/**
  * Sends the browser on, never caching the answer, and never passing the
  * callback's URL (it carries the code) on as a referrer.
  */
@@ -1511,20 +1518,32 @@ export const handleConnectionCallback = async (
     return undefined;
   }
   // A flow that fails returns to the Integrations page, where people start
-  // connecting and can read why: its own `returnTo` stays with connect,
-  // which may never have found the flow.
+  // connecting and can read why; one started on a page that says why too
+  // (`saysWhy`: the setup, so an onboarding step stays the onboarding)
+  // returns there. Only a live flow of the same person's says where it
+  // started, and only a path on this origin is followed (`onOrigin`).
   const integrationsPage = new URL("/connectors", config.origin);
+  let startedFrom: string | undefined;
   // What it names for support (`supportParams`) only once the person
   // signed in is known: anyone may open this URL, and the release a
   // deployment runs is not for anyone.
   const failed = (code: string, signedIn?: { error: unknown }): Response => {
-    integrationsPage.searchParams.set("connectionError", code);
+    const started =
+      startedFrom === undefined
+        ? undefined
+        : onOrigin(config.origin, startedFrom);
+    const back =
+      started !== undefined && saysWhy.has(started.pathname)
+        ? started
+        : integrationsPage;
+    back.searchParams.delete("connection");
+    back.searchParams.set("connectionError", code);
     const support =
       signedIn === undefined ? [] : supportParams(env, signedIn.error);
     for (const [name, value] of support) {
-      integrationsPage.searchParams.set(name, value);
+      back.searchParams.set(name, value);
     }
-    return redirect(integrationsPage);
+    return redirect(back);
   };
   const params = new URL(request.url).searchParams;
   const state = params.get("state");
@@ -1545,8 +1564,11 @@ export const handleConnectionCallback = async (
   }
   let finished: { connectionId: string; returnTo: string };
   try {
+    const person = await personOf(env, identity);
+    // Read before finishing, which spends the flow: where to go back to if it fails.
+    startedFrom = await env.CONNECT.flowReturn({ person, state });
     finished = await env.CONNECT.finishConnection({
-      person: await personOf(env, identity),
+      person,
       state,
       code: params.get("code") ?? undefined,
       // Only whether there is one matters; the provider's text isn't kept.

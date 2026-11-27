@@ -22,9 +22,9 @@ const calls = (tokensIn: number, tokensOut: number, seconds = 0) => ({
  * A company whose core counted, today: Stephen reading the first
  * conversation with the careful model (2 million tokens read, 200
  * thousand written: €15) and interviewing with the quick one (1 million
- * read, 200 thousand written: €6), his voice (20 minutes: €0.24), and
+ * read, 200 thousand written: €6), his voice (20 minutes: €1.44), and
  * core's own default model, which has no price (500 thousand read, 100
- * thousand written: its tokens count, not its cost). €21.24 in all, with
+ * thousand written: its tokens count, not its cost). €22.44 in all, with
  * its contract not known.
  */
 const usedSnapshot = (): AdminSnapshot => {
@@ -87,7 +87,7 @@ describe("an organization's AI use and hours", () => {
       ),
       month: has(`${monthName(snapshot.now)}</p>`),
       inAll: has("In all, so far"),
-      spend: html.split(">€21<").length - 1,
+      spend: html.split(">€22<").length - 1,
       // Core doesn't send the contract yet: unknown, not unsigned.
       contract: [
         has("the contract isn’t known yet"),
@@ -101,7 +101,7 @@ describe("an organization's AI use and hours", () => {
       // By use: reading and interviews cost; what took nothing, like chat, isn't listed.
       byUse: [
         has(">€15<"),
-        has(">€6.24<"),
+        has(">€7.44<"),
         has(">Chat<"),
         // The unpriced model's tokens are among the interviews'.
         has("1.5 million read, 300 thousand written"),
@@ -192,7 +192,7 @@ describe("an organization's AI use and hours", () => {
       thisMonth: html.includes(`>${monthName(snapshot.now)}</p>`),
       // This month took nothing; everything so far is the earlier month's.
       nothingYet: html.includes(">€0.00<"),
-      inAll: html.includes(">€21<"),
+      inAll: html.includes(">€22<"),
       since: html.includes(`since ${monthName(earlier)}`),
     }).toStrictEqual({
       thisMonth: true,

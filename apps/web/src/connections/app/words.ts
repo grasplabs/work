@@ -88,23 +88,6 @@ export interface AppIntegrationWords {
   offeredOff: string;
 }
 
-/** The connect dialog's own words, beside the app's. */
-export interface ConnectAppWords {
-  title: (app: string) => string;
-  titleAgain: (app: string) => string;
-  whoUses: string;
-  forYou: string;
-  forEveryone: string;
-  /** Where the sign-in happens, in one line. */
-  signInAt: (host: string) => string;
-  cancel: string;
-  signIn: (app: string) => string;
-  /** The consent's label, the choice for every tool at once, and its Connect. */
-  consent: string;
-  allTools: string;
-  connect: string;
-}
-
 /** The app's parts' words, in the page's language. */
 export const useAppIntegrationWords = (): AppIntegrationWords => {
   const { t } = useLingui();
@@ -221,28 +204,5 @@ export const useAppIntegrationWords = (): AppIntegrationWords => {
     offered: t`Available in your organization`,
     offeredOn: t`Members see it in Connectors.`,
     offeredOff: t`Hidden from members, and no one can connect it.`,
-  };
-};
-
-/** The connect dialog's words, in the page's language. */
-export const useConnectAppWords = (): ConnectAppWords => {
-  const { t } = useLingui();
-  return {
-    title: (app) => t`Connect ${app}`,
-    titleAgain: (app) => t`Connect ${app} again`,
-    whoUses: t`Who uses it`,
-    forYou: t`Just you`,
-    forEveryone: t`Everyone`,
-    signInAt: (host) =>
-      t({
-        message: `You’ll sign in at ${host}.`,
-        comment:
-          "{host} is the web address of the sign-in page, e.g. login.microsoftonline.com.",
-      }),
-    cancel: t`Cancel`,
-    signIn: (app) => t`Sign in to ${app}`,
-    consent: t`Consent`,
-    allTools: t`All tools`,
-    connect: t`Connect`,
   };
 };

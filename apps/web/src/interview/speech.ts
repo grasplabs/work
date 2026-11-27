@@ -16,7 +16,9 @@ import { scheduleOf, wordsOf } from "./spoken.tsx";
 // they are said. A line of the interview is said a sentence at a time,
 // each its own clip (`sayInPieces`): a short clip is ready much sooner
 // than a whole line, so he is heard sooner, and the rest is made while
-// the first is said. It can begin before the whole line is written, and
+// the first is said. Each clip comes as core's stream of it
+// (`streamedClip`): its audio, then when its words are said. A line can
+// begin before the whole of it is written, and
 // the line grows on screen as the rest comes. Where there is no sound (the
 // browser holds it back before a first press, the voice isn't set up, or
 // they chose to go without), the words light up at the pace of speech
@@ -63,20 +65,46 @@ export interface SaidLine {
   audible: boolean;
 }
 
-const answerSchema = z.object({
-  audio: z.string().min(1),
-  words: z.array(
-    z.object({ text: z.string(), startMs: z.number(), endMs: z.number() })
-  ),
-});
+/** An event of a line as core answers it while it is made (`SpeechStreamEvent` in `@grasp-os/shared/voice`). */
+const streamEventSchema = z.union([
+  z.object({ audio: z.string().min(1) }),
+  z.object({
+    words: z.array(
+      z.object({ text: z.string(), startMs: z.number(), endMs: z.number() })
+    ),
+  }),
+  z.object({ failed: z.literal(true) }),
+]);
+
+/**
+ * A line's sound as it comes: the pieces there so far, in order, and
+ * whether more may follow. Whoever plays it is told when it grows.
+ */
+interface Sound {
+  parts: AudioBuffer[];
+  /** No more comes. */
+  done: boolean;
+  /** Told when a piece came, or that no more will. */
+  heard: Set<() => void>;
+}
 
 /** A line as fetched: its sound, when there is any, and when each word is said. */
 interface Clip {
-  audio: AudioBuffer | null;
+  /** Playable from its first piece on, while the rest still comes. */
+  audio: Sound | null;
+  /** When each word is reached: at the pace of speech, until the voice's own is known (`timed`). */
   schedule: Schedule;
-  /** How long it lasts, in ms. */
+  /** How long it lasts read at the pace of speech, in ms. */
   length: number;
+  /** When each word is reached as the voice says it, once all of it was made; none when that never came. */
+  timed: Promise<Schedule | null>;
+  /** Whether all of it came: one that broke off is asked for again next time. */
+  whole: Promise<boolean>;
 }
+
+/** Nothing more is known of a clip without sound. */
+const untimed = Promise.resolve(null);
+const brokenOff = Promise.resolve(false);
 
 let saidNow: SaidLine | null = null;
 const listeners = new Set<() => void>();
@@ -147,6 +175,8 @@ const readingClip = (text: string): Clip => ({
   audio: null,
   schedule: scheduleOf(text, 0),
   length: readingMs(text),
+  timed: untimed,
+  whole: brokenOff,
 });
 
 /** When each word of `text` is reached, by when the voice says it; at the pace of speech where the words don't match. */
@@ -162,6 +192,99 @@ const scheduleBy = (
     after: startMs,
     reached: (words[at]?.start ?? text.length) + 1,
   }));
+};
+
+/** A line of JSON, read; `undefined` for one that isn't. */
+const jsonOf = (line: string): unknown => {
+  try {
+    return JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * What a line's stream holds, read a line of JSON at a time.
+ * @yields {SpeechStreamEvent} Each event as it comes in.
+ */
+const streamEvents = async function* streamEvents(
+  body: ReadableStream<Uint8Array>
+): AsyncGenerator<z.infer<typeof streamEventSchema>> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let unread = "";
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- a stream is read a piece at a time
+    const { done, value } = await reader.read();
+    // The last line counts too, whether or not it ends in a new line.
+    unread += `${decoder.decode(value, { stream: !done })}${done ? "\n" : ""}`;
+    const lines = unread.split("\n");
+    unread = lines.pop() ?? "";
+    for (const line of lines) {
+      const event = streamEventSchema.safeParse(jsonOf(line));
+      if (event.success) {
+        yield event.data;
+      }
+    }
+    if (done) {
+      return;
+    }
+  }
+};
+
+const joinedBytes = (pieces: Uint8Array[]): Uint8Array<ArrayBuffer> => {
+  const all = new Uint8Array(
+    pieces.reduce((sum, piece) => sum + piece.byteLength, 0)
+  );
+  let at = 0;
+  for (const piece of pieces) {
+    all.set(piece, at);
+    at += piece.byteLength;
+  }
+  return all;
+};
+
+/**
+ * A line as core's stream holds it: its audio, decoded once it is all
+ * here, with the voice's own timing of its words. None when no sound came
+ * at all, or the browser can't play it.
+ */
+const streamedClip = async (
+  text: string,
+  body: ReadableStream<Uint8Array>,
+  made: AudioContext
+): Promise<Clip | null> => {
+  const reading = readingClip(text);
+  const pieces: Uint8Array[] = [];
+  let timed: Schedule | null = null;
+  let all = false;
+  const sound: Sound = { parts: [], done: true, heard: new Set() };
+  try {
+    for await (const event of streamEvents(body)) {
+      if ("audio" in event) {
+        pieces.push(bytesOf(event.audio));
+      } else if ("words" in event) {
+        all = true;
+        timed = scheduleBy(text, event.words);
+      }
+    }
+    if (pieces.length > 0) {
+      sound.parts.push(await made.decodeAudioData(joinedBytes(pieces).buffer));
+    }
+  } catch {
+    // It broke off, or the browser can't play it: what came is said.
+    all = false;
+  }
+  if (sound.parts.length === 0) {
+    return null;
+  }
+  return {
+    audio: sound,
+    schedule: reading.schedule,
+    length: reading.length,
+    timed: Promise.resolve(timed),
+    whole: Promise.resolve(all),
+  };
 };
 
 /** Has core say a line; without an answer to play, it is read at the pace of speech. */
@@ -182,24 +305,16 @@ const fetchClip = async (text: string, voicing: Voicing): Promise<Clip> => {
         speaker: voicing.speaker,
         ...(voicing.tone === null ? {} : { tone: voicing.tone }),
         link: { secret: link.secret },
+        stream: true,
       }),
       signal: AbortSignal.timeout(fetchTimeoutMs),
     });
-    if (!response.ok) {
+    if (!response.ok || response.body === null) {
       return reading;
     }
-    const answer = answerSchema.safeParse(await response.json());
-    if (!answer.success) {
-      return reading;
-    }
-    const sound = await made.decodeAudioData(bytesOf(answer.data.audio).buffer);
-    return {
-      audio: sound,
-      schedule: scheduleBy(text, answer.data.words) ?? reading.schedule,
-      length: sound.duration * 1000,
-    };
+    return (await streamedClip(text, response.body, made)) ?? reading;
   } catch {
-    // No connection, or audio the browser can't play: the words still light up.
+    // No connection: the words still light up.
     return reading;
   }
 };
@@ -275,9 +390,12 @@ const clipOf = async (
   const fetched = inTurn(key, async () => await fetchClip(text, voicing), now);
   clips.set(key, fetched);
   const got = await fetched;
-  if (got.audio === null) {
-    clips.delete(key);
-  }
+  // One that could not be heard, or broke off, is asked for again next time.
+  void (async () => {
+    if (!(await got.whole) && clips.get(key) === fetched) {
+      clips.delete(key);
+    }
+  })();
   return got;
 };
 
@@ -327,7 +445,85 @@ interface Line {
 }
 
 let lineId = 0;
-let source: AudioBufferSourceNode | null = null;
+
+/** A sound being played: how to stop it. */
+interface Sounding {
+  stop: () => void;
+}
+let sounding: Sounding | null = null;
+
+/** How far ahead of the clock a piece is set to start, in seconds: enough for the browser to have it ready. */
+const leadSeconds = 0.03;
+
+/**
+ * Plays a sound through `out` from its start, each piece set right after
+ * the one before, and on as more of it comes; `over` once all of it is
+ * played. Played from its very start, never from where its first word is
+ * said: nothing is skipped. When the next piece is late, it goes on the
+ * moment that comes.
+ */
+const playSound = (
+  sound: Sound,
+  made: AudioContext,
+  out: AudioNode,
+  over: (mine: Sounding) => void
+): Sounding => {
+  const nodes = new Set<AudioBufferSourceNode>();
+  let set = 0;
+  let next = 0;
+  let stopped = false;
+  const mine: Sounding = {
+    stop: () => {
+      stopped = true;
+      // oxlint-disable-next-line no-use-before-define -- it stops being told of more
+      sound.heard.delete(more);
+      for (const node of nodes) {
+        try {
+          node.stop();
+        } catch {
+          // Already stopped.
+        }
+      }
+      nodes.clear();
+    },
+  };
+  const settle = (): void => {
+    const all = sound.done && set === sound.parts.length && nodes.size === 0;
+    if (!stopped && all) {
+      stopped = true;
+      // oxlint-disable-next-line no-use-before-define -- as above
+      sound.heard.delete(more);
+      over(mine);
+    }
+  };
+  const more = (): void => {
+    if (stopped) {
+      return;
+    }
+    for (const part of sound.parts.slice(set)) {
+      const node = made.createBufferSource();
+      node.buffer = part;
+      node.connect(out);
+      node.addEventListener(
+        "ended",
+        () => {
+          nodes.delete(node);
+          settle();
+        },
+        { once: true }
+      );
+      const at = Math.max(next, made.currentTime + leadSeconds);
+      node.start(at);
+      next = at + part.duration;
+      nodes.add(node);
+      set += 1;
+    }
+    settle();
+  };
+  sound.heard.add(more);
+  more();
+  return mine;
+};
 
 /** Who wants to know when a line is first heard: how fast he answers is measured to it. */
 const soundListeners = new Set<(at: number) => void>();
@@ -343,13 +539,9 @@ export const onFirstSound = (listener: (at: number) => void): (() => void) => {
 let ending: (() => void) | null = null;
 
 const stopSound = (): void => {
-  const playing = source;
-  source = null;
-  try {
-    playing?.stop();
-  } catch {
-    // Already stopped.
-  }
+  const playing = sounding;
+  sounding = null;
+  playing?.stop();
 };
 
 /** The line ends, or is cut: its sound stops and whoever waits for it goes on. */
@@ -465,10 +657,22 @@ const playHeard = (
       return;
     }
     const since = performance.now() - began;
-    for (const { after, reached } of own.schedule) {
-      schedule.push({ after: since + after, reached: piece.from + reached });
-    }
+    const placed = (timing: Schedule): Schedule =>
+      timing.map(({ after, reached }) => ({
+        after: since + after,
+        reached: piece.from + reached,
+      }));
+    const from = schedule.length;
+    schedule.push(...placed(own.schedule));
     shown();
+    // Its words light up at the pace of speech until the voice's own timing is known: usually well before it is all said.
+    void (async () => {
+      const timing = await own.timed;
+      if (timing !== null && id === lineId) {
+        schedule.splice(from, own.schedule.length, ...placed(timing));
+        shown();
+      }
+    })();
     if (own.audio === null) {
       // This piece could not be had: its words light up at the pace of speech, and the next follows.
       void (async () => {
@@ -480,23 +684,25 @@ const playHeard = (
       })();
       return;
     }
-    // Played from its very start, never from where its first word is said: nothing is skipped.
-    const node = made.createBufferSource();
-    node.buffer = own.audio;
-    node.connect(out);
-    node.addEventListener(
-      "ended",
-      () => {
-        if (source === node) {
-          source = null;
-          // oxlint-disable-next-line no-use-before-define -- a piece ends, and the next begins
-          void onward(at + 1);
+    const startedAt = performance.now();
+    sounding = playSound(own.audio, made, out, (mine) => {
+      if (sounding !== mine) {
+        return;
+      }
+      sounding = null;
+      void (async () => {
+        // Its sound broke off before the end: the words it didn't say
+        // still light up at the pace of speech before the next begins.
+        const left = own.length - (performance.now() - startedAt);
+        if (!(await own.whole) && left > 0) {
+          await wait(left);
         }
-      },
-      { once: true }
-    );
-    source = node;
-    node.start();
+        if (id === lineId) {
+          // oxlint-disable-next-line no-use-before-define -- a piece ends, and the next begins
+          await onward(at + 1);
+        }
+      })();
+    });
     if (at === 0) {
       const heardAt = performance.now();
       for (const listener of soundListeners) {
@@ -656,7 +862,7 @@ export const say = async (text: string, voicing: Voicing): Promise<void> => {
 
 /** How loud the voice is right now, 0 to 1: nothing while no line is heard. */
 export const voiceLevel = (): number => {
-  if (source === null || analyser === null) {
+  if (sounding === null || analyser === null) {
     return 0;
   }
   analyser.getByteTimeDomainData(samples);
@@ -665,6 +871,26 @@ export const voiceLevel = (): number => {
     sum += ((sample - 128) / 128) ** 2;
   }
   return Math.min(1, Math.sqrt(sum / Math.max(1, samples.length)) * 6);
+};
+
+/**
+ * How many characters of the line being said are reached at `now` (on
+ * the page's clock), from its words' own timings: -1 when `text` isn't
+ * the line being said.
+ */
+export const reachedNow = (text: string, now: number): number => {
+  const being = lineNow();
+  if (being === null || being.text !== text) {
+    return -1;
+  }
+  const since = now - being.began;
+  let reached = 0;
+  for (const { after, reached: at } of being.schedule) {
+    if (after <= since && at > reached) {
+      reached = at;
+    }
+  }
+  return reached;
 };
 
 /** The line being said, if any. */

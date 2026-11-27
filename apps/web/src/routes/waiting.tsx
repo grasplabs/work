@@ -1,26 +1,25 @@
-import { Button } from "@grasp-os/ui/components/button";
-import { Heading } from "@grasp-os/ui/components/heading";
-import { Text } from "@grasp-os/ui/components/text";
-import { Trans } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
-import { shellStatus, signOut } from "../core-connection.ts";
-import { OnboardingFrame } from "../frame/onboarding-frame.tsx";
+import { shellStatus } from "../core-connection.ts";
 import { heldWhileOnboarding, onboardingIsBehind } from "../landing.ts";
+import { CalmFrame, CalmStep } from "../onboarding/calm-frame.tsx";
 
 // Where a member waits while their company's admins set Grasp up
-// (landing.ts): nothing of the platform opens until the onboarding is
-// behind the company, and nothing here is theirs to do. The page looks
-// again by itself, and takes them in once it is ready.
+// (landing.ts), in the setup's calm frame: nothing of the platform opens
+// until the onboarding is behind the company, and nothing here is theirs
+// to do. The page looks again by itself, and takes them in once it is
+// ready; the frame's way out signs them out. Stephen is the field behind
+// it, as on every setup page, never a figure.
 
 /** How often the page asks whether the onboarding is behind the company. */
 const lookAgainMs = 30_000;
 
 const WaitingPage = () => {
-  const { core } = Route.useRouteContext();
+  const { t } = useLingui();
   const router = useRouter();
-  const [busy, setBusy] = useState(false);
+  const { identity } = Route.useRouteContext();
   useEffect(() => {
     // The route's own check runs again, and sends them on once it may.
     const id = window.setInterval(() => {
@@ -30,38 +29,14 @@ const WaitingPage = () => {
       window.clearInterval(id);
     };
   }, [router]);
-  const leave = async (): Promise<void> => {
-    setBusy(true);
-    try {
-      // Signed out, the page loads again (`onSessionEnded`).
-      await signOut(core);
-    } catch {
-      // Still signed in: the button can be pressed again.
-      setBusy(false);
-    }
-  };
   return (
-    <OnboardingFrame>
-      <Heading level={1}>
-        <Trans>Grasp is almost ready for you</Trans>
-      </Heading>
-      <Text color="muted">
-        <Trans>
-          Your company’s admins are still setting Grasp up. There is nothing you
-          need to do: this page opens Grasp for you as soon as they have
-          finished.
-        </Trans>
-      </Text>
-      <Button
-        disabled={busy}
-        onClick={() => {
-          void leave();
-        }}
-        variant="outline"
-      >
-        <Trans>Sign out</Trans>
-      </Button>
-    </OnboardingFrame>
+    <CalmFrame userId={identity.userId}>
+      <CalmStep
+        body={t`Your admins are setting up Grasp. This page opens it for you once they’re done.`}
+        spoken={t`Hi, I’m Stephen. Your admins are still setting things up for you. As soon as they’re done, this page opens Grasp by itself, so you can just leave it open.`}
+        title={t`I’m almost ready for you`}
+      />
+    </CalmFrame>
   );
 };
 
@@ -69,8 +44,12 @@ export const Route = createFileRoute("/waiting")({
   // Only for someone held here: anyone else goes where they would anyway.
   beforeLoad: async ({ context: { core } }) => {
     const { identity } = await shellStatus(core);
+    if (identity === undefined) {
+      // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
+      throw redirect({ to: "/", replace: true });
+    }
     const held =
-      identity === undefined || identity.staff || identity.guest === true
+      identity.staff || identity.guest === true
         ? null
         : heldWhileOnboarding({
             path: "/waiting",
@@ -81,6 +60,7 @@ export const Route = createFileRoute("/waiting")({
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ to: held ?? "/", replace: true });
     }
+    return { identity };
   },
   component: WaitingPage,
 });

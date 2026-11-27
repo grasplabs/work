@@ -62,13 +62,24 @@ const frontendTheme = "/theme.js";
  * the policy names none of its scripts; sign-in and RPC already work only
  * on `SIGN_IN.origin`.
  */
+/**
+ * Where the interview's live conversation is held (core's
+ * onboarding/voice.ts hands the page a token for Grasp's ElevenLabs agent,
+ * whose SDK joins ElevenLabs's own LiveKit, at
+ * livekit.rtc.eu.residency.elevenlabs.io, or livekit.rtc.elevenlabs.io on
+ * a staging deployment set up for testing): the room's socket, and the
+ * check LiveKit makes on the same host when it can't join. Sound itself
+ * goes over WebRTC, which this policy doesn't govern.
+ */
+export const voiceRoomSources = "wss://*.elevenlabs.io https://*.elevenlabs.io";
+
 export const frontendDirectives = (origin: string): Record<string, string> => ({
   "default-src": "'self'",
   "script-src": `${origin}${frontendAssets} ${origin}${frontendTheme} 'wasm-unsafe-eval'`,
   "style-src": `${origin}${frontendAssets} 'unsafe-inline'`,
   "worker-src": "'none'",
   "img-src": "'self' data:",
-  "connect-src": "'self'",
+  "connect-src": `'self' ${voiceRoomSources}`,
   "object-src": "'none'",
   "base-uri": "'none'",
   "form-action": "'self'",

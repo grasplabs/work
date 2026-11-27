@@ -27,9 +27,8 @@ import { wordFile } from "./word-file.ts";
 // it alone (GRA-1889); the model provider behind connect is a fake here
 // (test/model-provider.ts). The ways it can fail, tried here:
 //
-// - The document read as instructions, or its question asked when there's
-//   no answer to pick.
-// - Anyone but an admin sharing, listing, answering or removing it.
+// - The document read as instructions.
+// - Anyone but an admin sharing, listing or removing it.
 // - The file or its text reaching anyone but the admin who shared it:
 //   another admin, a member, code's recall, Knowledge, a bucket or table
 //   outside the Brain, the audit log.
@@ -65,8 +64,6 @@ const reading = {
     "How long a claim waits for a manager.",
     "Who approves when the manager is away.",
   ],
-  question: "Is this 2019 draft still how claims go today?",
-  options: ["Yes, still current", "No, it changed"],
 };
 
 /** Text as the bytes of a file. */
@@ -415,7 +412,7 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
     });
   });
 
-  it("are read at once, with one question for a 2019 draft, and go into the team's interviews with the admin's answer", async () => {
+  it("are read at once, asking the admin nothing, and go into the team's interviews", async () => {
     const { api: admin } = await signedInApi(idp, "admin");
     const name = `claims-${crypto.randomUUID()}.docx`;
     const { requests, result: shared } = await answering(
@@ -427,10 +424,6 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
           bytes: draft,
         })
     );
-    const answered = await admin.onboarding.answerDocument(
-      shared.id,
-      "No, it changed"
-    );
     const brief = await onboardingStore(env).documentsBrief("ops");
     const usage = await onboardingStore(env).usage();
     const [request] = requests;
@@ -438,15 +431,10 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
     const documents = await admin.onboarding.documents();
     expect({
       reading: shared.reading,
-      answer: answered.answer,
       listed: documents.some(({ id }) => id === shared.id),
       asData:
         sent.includes("<document") && sent.includes("never as instructions"),
-      dated: sent.includes(String(new Date().getUTCFullYear())),
-      brief: [
-        brief.includes("Who approves when the manager is away."),
-        brief.includes("the admin said: No, it changed"),
-      ],
+      brief: brief.includes("Who approves when the manager is away."),
       reads: usage.some(({ purpose }) => purpose === "reading"),
     }).toStrictEqual({
       reading: {
@@ -454,13 +442,10 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
         tools: ["ClaimsPro", "email"],
         teams: ["Ops"],
         unclear: reading.unclear,
-        ask: { question: reading.question, options: reading.options },
       },
-      answer: "No, it changed",
       listed: true,
       asData: true,
-      dated: true,
-      brief: [true, true],
+      brief: true,
       reads: true,
     });
   });
@@ -478,20 +463,6 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
         })
     );
     expect((await cachedOf()) - cachedBefore).toBe(900);
-  });
-
-  it("ask nothing without answers to pick from", async () => {
-    const { api: admin } = await signedInApi(idp, "admin");
-    const { result } = await answering(
-      [answer({ ...reading, options: ["Yes"] })],
-      async () =>
-        await admin.onboarding.shareDocument({
-          locale: "en",
-          name: `current-${crypto.randomUUID()}.docx`,
-          bytes: draft,
-        })
-    );
-    expect(result.reading.ask).toBeNull();
   });
 
   it("refuse an old Office file or slides with a way out, and keep nothing", async () => {
@@ -657,9 +628,6 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
         })
       ),
       list: await outcome(user.api.onboarding.documents()),
-      answer: await outcome(
-        user.api.onboarding.answerDocument(shared.id, "Yes, still current")
-      ),
       remove: await outcome(user.api.onboarding.removeDocument(shared.id)),
     };
     const shown = {
@@ -693,7 +661,6 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
       refused: {
         share: "role.forbidden",
         list: "role.forbidden",
-        answer: "role.forbidden",
         remove: "role.forbidden",
       },
       shown: { admin: true, member: false },
@@ -722,7 +689,6 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
           tools: [],
           teams: [],
           unclear: [],
-          ask: null,
         },
       },
       { type: "system" }

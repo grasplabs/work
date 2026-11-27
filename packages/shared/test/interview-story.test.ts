@@ -3,7 +3,6 @@ import { describe, expect, it } from "vite-plus/test";
 import type { InterviewFact } from "../src/interview-links.ts";
 import {
   interviewStoryRequestSchema,
-  readBackMost,
   readBackParts,
   storyKey,
   storyOf,
@@ -157,103 +156,56 @@ describe("a part of the read-back, told as a story", () => {
 });
 
 describe("the read-back", () => {
-  it("comes in parts of a few lines: the steps, what goes differently, then the numbers and the result", () => {
+  it("is one summary, in the order of the interview: their week, the steps, what goes differently, the numbers, then AI", () => {
     const parts = readBackParts([
       ...ids("n", 4).map((id) => fact(id, "number")),
+      fact("a", "ai"),
       ...ids("s", 5).map((id) => fact(id, "step")),
       ...ids("e", 4).map((id) => fact(id, "exception")),
-    ]);
-    expect({
-      groups: parts.map(({ group }) => group),
-      ids: idsOf(parts),
-    }).toStrictEqual({
-      groups: ["steps", "differently", "result"],
-      ids: [ids("s", 5), ids("e", 4), ids("n", 4)],
-    });
-  });
-
-  it("reads small parts together: five short answers are one page, not five", () => {
-    const parts = readBackParts([
-      fact("a", "number"),
-      fact("b", "step"),
-      fact("c", "exception"),
-      fact("d", "system"),
-      fact("e", "ai"),
+      fact("t", "task"),
     ]);
     expect({
       groups: parts.map(({ group }) => group),
       ids: idsOf(parts),
     }).toStrictEqual({
       groups: ["together"],
-      ids: [["b", "d", "c", "a", "e"]],
+      ids: [["t", ...ids("s", 5), ...ids("e", 4), ...ids("n", 4), "a"]],
     });
+  });
+
+  it("is never split, however much was written down", () => {
+    const parts = readBackParts(
+      Array.from({ length: 30 }, (_, index) => fact(`s${index}`, "step"))
+    );
+    expect({
+      count: parts.length,
+      group: parts[0]?.group,
+      lines: parts[0]?.facts.length,
+    }).toStrictEqual({ count: 1, group: "steps", lines: 30 });
   });
 
   it("reads a wish with their recurring work, and with what they said about AI when they named none", () => {
-    const groupsOf = (tags: InterviewFact["tag"][]) =>
+    const tagsOf = (tags: InterviewFact["tag"][]) =>
       readBackParts([
+        fact("s", "step"),
         ...tags.map((tag, index) => fact(`f${index}`, tag)),
-        // Enough steps that no part joins another.
-        ...Array.from({ length: 10 }, (_, index) => fact(`s${index}`, "step")),
-      ]).map(({ group, facts }) => [group, facts.map(({ tag }) => tag).length]);
+      ])[0]?.facts.map(({ tag }) => tag);
     expect({
-      own: groupsOf(["task", "task", "task", "wish", "ai", "ai", "ai"]),
-      lead: groupsOf(["wish", "ai", "ai", "ai"]),
+      own: tagsOf(["ai", "wish", "task"]),
+      lead: tagsOf(["wish", "ai"]),
     }).toStrictEqual({
-      own: [
-        ["tasks", 4],
-        ["steps", 5],
-        ["steps", 5],
-        ["you", 3],
-      ],
-      lead: [
-        ["steps", 5],
-        ["steps", 5],
-        ["you", 4],
-      ],
+      own: ["wish", "task", "step", "ai"],
+      lead: ["step", "wish", "ai"],
     });
   });
 
-  it("never reads more than a few lines at once", () => {
-    const steps = readBackParts(
-      Array.from({ length: 12 }, (_, index) => fact(`s${index}`, "step"))
-    );
-    const many = readBackParts(
-      Array.from({ length: 30 }, (_, index) =>
-        fact(`m${index}`, index % 2 === 1 ? "step" : "number")
-      )
-    );
-    expect({
-      first: steps.map(({ first }) => first),
-      longest: Math.max(
-        ...[...steps, ...many].map(({ facts }) => facts.length)
-      ),
-    }).toStrictEqual({ first: [true, false], longest: readBackMost });
-  });
-
-  it("keeps what the person added in the part they added it to", () => {
+  it("reads what the person added while reading back after the rest", () => {
     const parts = readBackParts([
-      ...["a", "b", "c", "d", "e"].map((id) => fact(id, "step")),
-      ...["f", "g", "h", "i"].map((id) => fact(id, "number")),
-      fact("j", "number", { pin: 0 }),
+      fact("j", "step", { pin: 0 }),
+      ...["a", "b"].map((id) => fact(id, "step")),
+      fact("f", "number"),
     ]);
-    expect(idsOf(parts)).toStrictEqual([
-      ["a", "b", "c", "d", "e", "j"],
-      ["f", "g", "h", "i"],
-    ]);
-  });
-
-  it("makes two pages of a short interview, not five", () => {
-    const parts = readBackParts([
-      fact("a", "ai"),
-      fact("b", "wish"),
-      ...["c", "d", "e", "f", "g", "h"].map((id) => fact(id, "step")),
-      fact("i", "exception"),
-      fact("j", "exception"),
-      fact("k", "number"),
-      fact("l", "done"),
-    ]);
-    expect(parts.map(({ facts }) => facts.length)).toStrictEqual([6, 6]);
+    expect(idsOf(parts)).toStrictEqual([["a", "b", "f", "j"]]);
   });
 
   it("has nothing to read when nothing was written down", () => {

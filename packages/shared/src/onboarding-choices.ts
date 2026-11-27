@@ -2,7 +2,7 @@ import { z } from "zod";
 
 // What the company's admin chose in the onboarding about what Grasp may
 // connect (core's onboarding store keeps it): where the documents live,
-// whether Pulse goes on the work laptops, and which HR platform they use.
+// and which HR platform they use.
 // Grasp connects what it can through Integrations; the rest is noted, for
 // Grasp to set up with them. Each choice counts in how much Grasp knows
 // (core's onboarding/gate.ts). From the prototype's `ClientRecord`.
@@ -20,7 +20,13 @@ export const documentSourceIdSchema = z.enum(documentSourceIds);
 export type DocumentSourceId = z.infer<typeof documentSourceIdSchema>;
 
 /** The HR platforms the onboarding offers by name. */
-export const hrPlatforms = ["Personio", "AFAS", "HiBob", "Nmbrs"] as const;
+export const hrPlatforms = [
+  "Personio",
+  "AFAS",
+  "HiBob",
+  "Nmbrs",
+  "Loket",
+] as const;
 export const hrPlatformSchema = z.enum(hrPlatforms);
 export type HrPlatform = z.infer<typeof hrPlatformSchema>;
 
@@ -51,8 +57,6 @@ export const setupChoicesSchema = z.strictObject({
     }),
   /** Places Grasp can't connect to yet, asked for by name. */
   sourcesWanted: z.array(wantedSchema).max(sourcesWantedMax),
-  /** Pulse: set up with Grasp, or skipped; null before either. */
-  pulse: z.enum(["wanted", "skipped"]).nullable(),
   /** Null before the admin said. */
   hr: hrChoiceSchema.nullable(),
 });
@@ -63,7 +67,6 @@ export type SetupChoicesInput = z.input<typeof setupChoicesSchema>;
 export const noChoices: SetupChoices = {
   sources: [],
   sourcesWanted: [],
-  pulse: null,
   hr: null,
 };
 

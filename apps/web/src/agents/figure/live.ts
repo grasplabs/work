@@ -248,6 +248,11 @@ const watchTheme = (recolour: () => void) => {
   };
 };
 
+/** How long a live figure takes to ease into new colours, as into sleep, in ms. */
+const FADE_MS = 1400;
+/** Falling asleep goes slower still: the colour drains away where it stands, in ms. */
+const SLEEP_FADE_MS = 2600;
+
 const reducedMotion = () =>
   matchMedia("(prefers-reduced-motion: reduce)").matches;
 const ratioOf = () => Math.max(1, Math.round(window.devicePixelRatio || 1));
@@ -255,6 +260,7 @@ const ratioOf = () => Math.max(1, Math.round(window.devicePixelRatio || 1));
 /** A figure, live on `canvas`. */
 export interface LiveFigure {
   pose: (state: FigureState, shape: FigureShape, eye?: boolean) => void;
+  /** New colours: a live figure eases into them (`FADE_MS`), a still one takes them at once. */
   recolour: (colours: readonly string[]) => void;
   stop: () => void;
 }
@@ -272,6 +278,10 @@ export const mountFigure = (
     still?: boolean;
     /** The main agent's eye, on its orb. */
     eye?: boolean;
+    /** Stephen alive in a conversation (`Body.alive`). */
+    alive?: boolean;
+    /** How loud the voice an alive figure follows is now, 0 to 1: asked every frame. */
+    voiceOf?: () => number;
   }
 ): LiveFigure => {
   const { n, pitch } = gridFor(options.size);
@@ -301,8 +311,34 @@ export const mountFigure = (
     options.state,
     options.shape,
     options.seed,
-    options.eye === true
+    options.eye === true,
+    options.alive === true
   );
+  /** A change of colours under way: from what, to what, and since when. */
+  let fade: {
+    from: Uint8ClampedArray;
+    to: Uint8ClampedArray;
+    at: number;
+    ms: number;
+  } | null = null;
+  const fading = (now: number): void => {
+    if (fade === null) {
+      return;
+    }
+    const t = Math.min(1, (now - fade.at) / fade.ms);
+    // Eased in and out: it leaves gently and settles gently.
+    const eased = t * t * (3 - 2 * t);
+    const mixed = new Uint8ClampedArray(fade.to.length);
+    for (let index = 0; index < mixed.length; index += 1) {
+      const from = fade.from[index] ?? 0;
+      mixed[index] = from + ((fade.to[index] ?? 0) - from) * eased;
+    }
+    colours = mixed;
+    cells.forget();
+    if (t >= 1) {
+      fade = null;
+    }
+  };
   const draw = () => {
     if (reduced) {
       paintStill(body.state, body.shape, n, out, body.eye);
@@ -331,19 +367,44 @@ export const mountFigure = (
         lean.x += (seen.x * give - lean.x) * ease;
         lean.y += (seen.y * give - lean.y) * ease;
       }
+      if (options.voiceOf !== undefined) {
+        body.voiceGoal = Math.max(0, Math.min(1, options.voiceOf()));
+      }
       stepBody(body, dt);
+      fading(performance.now());
       draw();
     },
   };
   const repaint = () => {
+    fade = null;
     colours = resolve(host, given);
     cells.forget();
     draw();
   };
+  /**
+   * The page's root changed (a theme, but also any class or style set on
+   * it): repainted only when the colours did change, and a fade under way
+   * goes on to them, so a pause doesn't snap to grey.
+   */
+  const themed = () => {
+    const now = resolve(host, given);
+    const was = fade === null ? colours : fade.to;
+    if (
+      now.length === was.length &&
+      now.every((value, at) => value === was[at])
+    ) {
+      return;
+    }
+    if (fade === null || reduced) {
+      repaint();
+      return;
+    }
+    fade = { ...fade, to: now };
+  };
   const stopRun =
     options.still === true
       ? watchTheme(repaint)
-      : run(canvas, instance, repaint);
+      : run(canvas, instance, themed);
   const stop = () => {
     window.removeEventListener("scroll", measure, { capture: true });
     window.removeEventListener("resize", measure);
@@ -360,7 +421,16 @@ export const mountFigure = (
     },
     recolour: (next) => {
       given = next;
-      repaint();
+      if (reduced) {
+        repaint();
+        return;
+      }
+      fade = {
+        from: colours,
+        to: resolve(host, given),
+        at: performance.now(),
+        ms: body.state === "asleep" ? SLEEP_FADE_MS : FADE_MS,
+      };
     },
     stop,
   };

@@ -57,6 +57,7 @@ const session: OpenSession = {
   kind: "own",
   closes: "2026-12-31",
   closed: false,
+  readOnly: false,
   progress: finished,
   version: 1,
   withdrawn: false,
@@ -81,9 +82,15 @@ const until = async (ready: () => boolean, what: string): Promise<void> => {
   );
 };
 
+/** The button with `label` as its words, or as the end of its name when it is an icon alone ("Hold to delete my interview"). */
 const buttonNamed = (label: string): HTMLButtonElement | undefined =>
   [...document.querySelectorAll("button")].find(
-    (each) => each.textContent === label
+    (each) =>
+      each.textContent === label ||
+      (each.textContent === "" &&
+        (each.getAttribute("aria-label") ?? "")
+          .toLowerCase()
+          .endsWith(label.toLowerCase()))
   );
 
 const text = (): string => document.body.textContent ?? "";
@@ -99,11 +106,13 @@ const asked: unknown[] = [];
 
 /**
  * The page, on a faked core whose delete or withdrawal answers `removed`,
- * opened as `opened` says (the link's session, as core answered it).
+ * opened as `opened` says (the link's session, as core answered it), once
+ * `ready` says it stands.
  */
 const shown = async (
   removed: object,
-  opened: OpenSession = session
+  opened: OpenSession = session,
+  ready: () => boolean = () => buttonNamed("Delete my interview") !== undefined
 ): Promise<void> => {
   vi.stubGlobal(
     "fetch",
@@ -150,10 +159,7 @@ const shown = async (
     );
     await router.load();
   });
-  await until(
-    () => buttonNamed("Delete my interview") !== undefined,
-    "the delete button"
-  );
+  await until(ready, "the page");
 };
 
 /** Opened again, as a reload does, after they withdrew: as core says now. */
@@ -301,5 +307,27 @@ describe("deleting and withdrawing on the interview page", () => {
         "You withdrew. Nothing you said is used from now on."
       ),
     }).toStrictEqual({ removing: false, nothingUsed: true });
+  });
+
+  it("only reads once its 7 days are over: nothing to add, rate or delete, and a calm note saying so", async () => {
+    await shown({}, { ...session, readOnly: true }, () =>
+      text().includes("The 7 days to add something or delete it have passed.")
+    );
+    expect({
+      add: buttonNamed("Add something") !== undefined,
+      delete: buttonNamed("Delete my interview") !== undefined,
+      asked,
+    }).toStrictEqual({ add: false, delete: false, asked: [] });
+  });
+
+  it("no longer offers deleting after a withdrawal once its 7 days are over", async () => {
+    await shown({}, { ...session, withdrawn: true, readOnly: true }, () =>
+      text().includes("You withdrew.")
+    );
+    expect({
+      read: text().includes("It stays here for you to read."),
+      offered: text().includes("You can still delete it."),
+      delete: buttonNamed("Delete my interview") !== undefined,
+    }).toStrictEqual({ read: true, offered: false, delete: false });
   });
 });

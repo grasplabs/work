@@ -10,7 +10,8 @@ import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 
 import { errorResponse } from "../errors.ts";
-import { modelSettings, modelForRole, models } from "../models.ts";
+import { models } from "../models.ts";
+import { platformAi } from "../platform-ai.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { interviewCaller } from "./interview-caller.ts";
 import { tellingText } from "./interviewer-text.ts";
@@ -25,14 +26,14 @@ import { onboardingStore } from "./store.ts";
 // here. Ported from the prototype (grasplabs/prototype, packages/grasp:
 // worker/story.ts).
 //
-// Like a turn (interview.ts): the link's secret and the session of the
+// As for the live conversation (voice.ts): the link's secret and the session of the
 // account it belongs to are checked (interview-caller.ts, the store), which also limits calls per link; the gateway call
 // is made by the system for `onboarding.interview`, never in anyone's
 // name, and counts as carrying sensitive data; and what it took is counted
 // in the onboarding's AI use.
 
-/** The most a story takes to write: a part is a few short sentences. */
-const storyTokens = 1000;
+/** The most a story takes to write: the whole summary, a few short sentences per handful of lines. */
+const storyTokens = 3000;
 
 /** What the page does when there is no story: it reads the lines as they stand. */
 const asTheyStand = (status: number): Response =>
@@ -83,27 +84,19 @@ export const interviewStoryResponse = async (
     }
     return linkRefusal(found.code, requestId);
   }
-  // The model that says his lines tells it: someone is waiting for it.
-  const settings = await modelSettings(env);
-  const connected = settings.models.length > 0;
-  const model = connected ? modelForRole(settings, "quick") : undefined;
-  if (model === undefined) {
-    log.error("interview.no_model", {
-      requestId,
-      ...(connected ? {} : { code: "model.no_provider" }),
-    });
-    return asTheyStand(503);
-  }
+  // The model that says his lines tells it, on Grasp's own key
+  // (src/platform-ai.ts): someone is waiting for it.
+  const model = platformAi.interview.line;
   const { text: system } = await tellingText(asked.locale);
   try {
-    const { output, usage } = await models(env).call({
+    const { output, usage } = await models(env).interview.call({
       model,
       purpose: "onboarding.interview",
       trigger: { type: "system" },
       work: { onboarding: true },
       effort: "low",
       system,
-      input: `The lines of this part:\n${asked.lines.map(({ id, text }) => `- [${id}] ${text}`).join("\n")}\n\nTell them back.`,
+      input: `The lines of the summary:\n${asked.lines.map(({ id, text }) => `- [${id}] ${text}`).join("\n")}\n\nTell them back.`,
       schema: storySchema,
       maxTokens: storyTokens,
       signal: request.signal,

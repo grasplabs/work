@@ -656,7 +656,7 @@ describe("the Connectors pages, back from a sign-in", () => {
     expect(
       document
         .querySelector('[role="dialog"]')
-        ?.textContent.includes("You’ll sign in at mcp.linear.app.")
+        ?.textContent.includes("You sign in at mcp.linear.app.")
     ).toBeTruthy();
   });
 });

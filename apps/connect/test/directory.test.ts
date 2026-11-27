@@ -1,4 +1,4 @@
-import { connectionCallbackPath } from "@grasp-os/shared/connect";
+import { anyTenant, connectionCallbackPath } from "@grasp-os/shared/connect";
 import type { ConnectionPerson } from "@grasp-os/shared/connect";
 import { directoryErrors, directoryLimits } from "@grasp-os/shared/directory";
 import type { DirectoryProvider } from "@grasp-os/shared/directory";
@@ -208,6 +208,10 @@ const connectDirectory = async (
   return connectionId;
 };
 
+/** A Google account of no Workspace: a personal one, with no hosted domain. */
+const withoutTenant = ({ tenant: _none, ...account }: Account): Account =>
+  account;
+
 const read = async (connectionId: string, cursor: string | null = null) =>
   await exports.default.readDirectory({ connectionId, cursor });
 
@@ -368,6 +372,62 @@ describe("the directory's connection", () => {
         unsaid: "connection.scopes_refused",
         kept: 1,
         grew: 1,
+      });
+    }
+  );
+
+  it.each(providerCases)(
+    "of %s for any organization signs in where the provider offers them all, is kept for the one the sign-in names beside the company's own, and refuses a guest or an account of none",
+    async (provider) => {
+      const admin = someone("admin");
+      const own = await connectDirectory(admin, provider);
+      const other =
+        provider === "microsoft-directory" ? guid() : `${guid()}.test`;
+      const open = { provider, scope: "shared", tenant: anyTenant } as const;
+      const url = await startAs(admin, open);
+      const elsewhere = await connectAccount(
+        providers,
+        admin,
+        { ...directoryAccount(admin, provider), tenant: other },
+        open
+      );
+      const listed = await exports.default.directoryConnections();
+      const statusOf = (id: string) =>
+        listed.find((each) => each.id === id)?.status;
+      expect({
+        at:
+          provider === "microsoft-directory"
+            ? url.pathname.startsWith("/organizations/")
+            : url.searchParams.has("hd"),
+        notADirectory: await outcome(
+          startAs(admin, {
+            provider: suiteOf[provider],
+            scope: "shared",
+            tenant: anyTenant,
+          })
+        ),
+        kept: listed.find((each) => each.id === elsewhere)?.tenant,
+        ownStill: statusOf(own),
+        none: await outcome(
+          connectAccount(
+            providers,
+            admin,
+            provider === "microsoft-directory"
+              ? {
+                  ...directoryAccount(admin, provider),
+                  tenant: other,
+                  guestFrom: "https://sts.windows.net/someone-else/",
+                }
+              : withoutTenant(directoryAccount(admin, provider)),
+            open
+          )
+        ),
+      }).toStrictEqual({
+        at: provider === "microsoft-directory",
+        notADirectory: "connection.provider_unavailable",
+        kept: other,
+        ownStill: "active",
+        none: "connection.wrong_account",
       });
     }
   );

@@ -21,13 +21,17 @@ import type {
 
 /**
  * What does the work: the three models that read and write (the careful one, the quick one and
- * the small one), Stephen's voice, and his ears; and any other model a deployment calls (an
- * organization's own, say), counted with no price, for the admin has none for it.
+ * the small one), the two an interview's turns are written with (`mistralMedium` writes down what
+ * was said, `mistralSmall` says his line), Stephen's voice, his ears, and his live interviews;
+ * and any other model a deployment calls (an organization's own, say), counted with no price, for
+ * the admin has none for it.
  */
 export const MODELS = [
   "opus",
   "sonnet",
   "haiku",
+  "mistralMedium",
+  "mistralSmall",
   "voice",
   "ears",
   "conversation",
@@ -40,15 +44,18 @@ export const MODEL_NAMES: Record<Model, string> = {
   opus: "Claude Opus 5.5",
   sonnet: "Claude Sonnet 5.5",
   haiku: "Claude Haiku 4.5",
-  voice: "Mistral Voxtral TTS 3",
+  mistralMedium: "Mistral Medium",
+  mistralSmall: "Mistral Small",
+  voice: "ElevenLabs Eleven v4",
   ears: "OpenAI GPT-4o Transcribe",
-  conversation: "Mistral voice agent (Mistral Small, Voxtral)",
+  conversation: "ElevenLabs agent",
   other: "Other models (not priced)",
 };
 
 /**
  * What Grasp pays, in euros: a model per million tokens it reads and writes, the voice per minute
- * Stephen speaks, the ears per minute he listens. Sample prices.
+ * Stephen speaks, the ears per minute he listens, a live interview per minute it runs. Sample
+ * prices.
  */
 export const PRICES: Record<
   Model,
@@ -57,17 +64,22 @@ export const PRICES: Record<
   opus: { tokensIn: 5, tokensOut: 25, minute: 0 },
   sonnet: { tokensIn: 3, tokensOut: 15, minute: 0 },
   haiku: { tokensIn: 1, tokensOut: 5, minute: 0 },
-  // Mistral's list price for Voxtral TTS 3 (docs.mistral.ai/models/voxtral-mini-tts-3-0, November
-  // 2026): $13 a million characters, about 900 characters a spoken minute.
-  voice: { tokensIn: 0, tokensOut: 0, minute: 0.012 },
+  // Mistral's list prices as of November 2026 (mistral.ai/pricing): Mistral Medium $0.40 a million
+  // tokens in and $2 out, Mistral Small $0.10 in and $0.30 out. Sample prices, as the others.
+  mistralMedium: { tokensIn: 0.4, tokensOut: 2, minute: 0 },
+  mistralSmall: { tokensIn: 0.1, tokensOut: 0.3, minute: 0 },
+  // ElevenLabs's list price for Eleven v4 (elevenlabs.io/pricing/api, October 2026): $0.08 a
+  // thousand characters, about 900 characters a spoken minute.
+  voice: { tokensIn: 0, tokensOut: 0, minute: 0.072 },
   // OpenAI's list price (developers.openai.com/api/docs/pricing, October 2026). gpt-4o-transcribe:
   // $6 a million audio tokens in ($2.50 a million text tokens in), $10 a million text tokens out,
   // estimated on that page at $0.006 a minute.
   ears: { tokensIn: 0, tokensOut: 0, minute: 0.006 },
-  // An interview held as one live voice session: Mistral's voice agents bill the session by the
-  // minute, $0.04 with Mistral Small (as reported at its launch, October 2026), listening,
-  // answering and speaking together.
-  conversation: { tokensIn: 0, tokensOut: 0, minute: 0.037 },
+  // An interview held as one live conversation with Grasp's ElevenLabs agent, billed by the
+  // minute, listening, answering and speaking together: $0.10 on ElevenLabs's Creator and Pro
+  // plans, $0.08 on Business (elevenlabs.io/pricing, November 2026). The gateway's rate (core's
+  // voice-models.ts), $0.10, in euros: an estimate until Grasp's own contract's rate is known.
+  conversation: { tokensIn: 0, tokensOut: 0, minute: 0.0925 },
   // Not known: its tokens count, its spend stays out of the total.
   other: { tokensIn: 0, tokensOut: 0, minute: 0 },
 };
@@ -149,6 +161,8 @@ const byModel = (): Record<Model, Use> => ({
   opus: nothing(),
   sonnet: nothing(),
   haiku: nothing(),
+  mistralMedium: nothing(),
+  mistralSmall: nothing(),
   voice: nothing(),
   ears: nothing(),
   conversation: nothing(),
@@ -159,6 +173,8 @@ const forModels = <T>(make: (model: Model) => T): Record<Model, T> => ({
   opus: make("opus"),
   sonnet: make("sonnet"),
   haiku: make("haiku"),
+  mistralMedium: make("mistralMedium"),
+  mistralSmall: make("mistralSmall"),
   voice: make("voice"),
   ears: make("ears"),
   conversation: make("conversation"),

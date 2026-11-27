@@ -15,9 +15,6 @@ import type { QueuedMail } from "../mail-outbox.ts";
 // outbox's `{{link}}` slot, filled in only as the mail is sent; the
 // admin's update holds numbers only, never a name or a word anyone said.
 
-/** Who signs every mail: a name, the same in every language. */
-const signature = "Stephen at Grasp";
-
 /** Someone's link, and what it is for. */
 interface LinkWords {
   subject: string;
@@ -29,6 +26,8 @@ interface LinkWords {
   yours: string;
   until: string;
   reply: string;
+  /** Who signs the mail, in its language. */
+  signed: string;
 }
 
 /** The one reminder. */
@@ -51,102 +50,115 @@ interface UpdateWords {
 
 const LINK: Record<Locale, LinkWords> = {
   en: {
-    subject: "{company} would like to hear how your work goes",
-    hello: "Hello {name},",
-    own: "{company} asked Grasp to learn how the work really goes, so the dull parts can be taken off people's hands. Stephen, Grasp's AI interviewer, would like to talk with you for 12 to 15 minutes about one piece of your work.",
-    lead: "{company} asked Grasp to learn how the work really goes, so the dull parts can be taken off people's hands. Stephen, Grasp's AI interviewer, would like to talk with you for 12 to 15 minutes about the work of your team.",
+    subject: "{company} x Grasp: Your personal link to talk with Stephen",
+    hello: "Hi {name},",
+    own: "{company} has partnered with Grasp to see where repetitive work slows teams down—so we can take the manual admin off your plate. Stephen, Grasp’s AI interviewer, would like to have a short conversation with you (20 minutes at most) about your day-to-day work.",
+    lead: "{company} has partnered with Grasp to see where repetitive work slows teams down—so we can take the manual admin off your team’s plate. Stephen, Grasp’s AI interviewer, would like to have a short conversation with you (20 minutes at most) about how your team works.",
     private:
-      "What you choose to share is shown as how your team works. Everything else reaches your company only when five or more people said it, put together. You can stop at any time, and delete everything for 7 days afterwards.",
-    button: "Talk with Stephen",
+      "You stay in full control: nothing is shared until you review and approve it. Process details are shared as how your team works (never under your name), and opinions are only shown anonymously once at least five people mention the same thing. You can pause anytime, and delete everything up to 7 days afterwards.",
+    button: "Start conversation",
     yours:
-      "This link is yours alone, so please don't pass it on. You sign in with your work account to open it.",
-    until: "The interviews run until {closes}.",
+      "This link is personal—please don’t forward it. Sign in with your work account to open it.",
+    until: "Interviews are open until {closes}.",
     reply:
-      "Questions? Reply to this email, and it reaches the person at {company} who runs the interviews.",
+      "Questions? Just reply to this email—it goes straight to the person organizing this at {company}.",
+    signed: "Stephen at Grasp",
   },
   nl: {
-    subject: "{company} hoort graag hoe je werk gaat",
-    hello: "Hallo {name},",
-    own: "{company} heeft Grasp gevraagd te leren hoe het werk echt gaat, zodat de saaie delen je uit handen genomen kunnen worden. Stephen, de AI-interviewer van Grasp, praat graag 12 tot 15 minuten met je over een stuk van je werk.",
-    lead: "{company} heeft Grasp gevraagd te leren hoe het werk echt gaat, zodat de saaie delen je uit handen genomen kunnen worden. Stephen, de AI-interviewer van Grasp, praat graag 12 tot 15 minuten met je over het werk van je team.",
+    subject:
+      "{company} x Grasp: Je persoonlijke link voor het gesprek met Stephen",
+    hello: "Hoi {name},",
+    own: "{company} werkt samen met Grasp om te kijken waar herhalend regelwerk tijd kost—zodat we dat straks voor je kunnen verlichten. Stephen, de AI-interviewer van Grasp, gaat graag kort met je in gesprek (maximaal 20 minuten) over je dagelijkse werk.",
+    lead: "{company} werkt samen met Grasp om te kijken waar herhalend regelwerk tijd kost—zodat we dat voor je team kunnen verlichten. Stephen, de AI-interviewer van Grasp, gaat graag kort met je in gesprek (maximaal 20 minuten) over hoe je team werkt.",
     private:
-      "Wat je kiest om te delen, wordt getoond als hoe je team werkt. Al het andere komt pas bij je bedrijf als vijf of meer mensen het zeiden, samengenomen. Je kunt altijd stoppen, en daarna nog 7 dagen alles verwijderen.",
-    button: "Praat met Stephen",
+      "Jij houdt de volledige controle: er wordt niets gedeeld voordat je het hebt nagelezen en goedgekeurd. Hoe het werk loopt wordt gedeeld als werkwijze van je team (nooit onder jouw naam), en meningen worden alleen anoniem meegenomen zodra minstens vijf mensen hetzelfde aangeven. Je kunt altijd pauzeren en tot 7 dagen na afloop alles verwijderen.",
+    button: "Start het gesprek",
     yours:
-      "Deze link is alleen van jou, dus geef hem niet door. Je logt in met je werkaccount om hem te openen.",
-    until: "De interviews lopen tot en met {closes}.",
+      "Deze link is persoonlijk—stuur hem niet door. Log in met je werkaccount om te starten.",
+    until: "De interviews staan open tot en met {closes}.",
     reply:
-      "Vragen? Beantwoord deze e-mail, dan komt hij bij de persoon bij {company} die de interviews regelt.",
+      "Vragen? Beantwoord gewoon deze mail, dan kom je direct bij de organisator binnen {company} terecht.",
+    signed: "Stephen van Grasp",
   },
   de: {
-    subject: "{company} möchte wissen, wie Ihre Arbeit läuft",
+    subject:
+      "{company} x Grasp: Dein persönlicher Link für das Gespräch mit Stephen",
     hello: "Hallo {name},",
-    own: "{company} hat Grasp gebeten herauszufinden, wie die Arbeit wirklich läuft, damit Ihnen die lästigen Teile abgenommen werden können. Stephen, der KI-Interviewer von Grasp, möchte 12 bis 15 Minuten mit Ihnen über einen Teil Ihrer Arbeit sprechen.",
-    lead: "{company} hat Grasp gebeten herauszufinden, wie die Arbeit wirklich läuft, damit Ihnen die lästigen Teile abgenommen werden können. Stephen, der KI-Interviewer von Grasp, möchte 12 bis 15 Minuten mit Ihnen über die Arbeit Ihres Teams sprechen.",
+    own: "{company} arbeitet mit Grasp zusammen, um herauszufinden, wo wiederkehrende Routinearbeit Zeit frisst – damit wir dir das künftig abnehmen können. Stephen, der KI-Interviewer von Grasp, möchte ein kurzes Gespräch (höchstens 20 Minuten) mit dir über deinen Arbeitsalltag führen.",
+    lead: "{company} arbeitet mit Grasp zusammen, um herauszufinden, wo wiederkehrende Routinearbeit Zeit frisst – damit wir dein Team entlasten können. Stephen, der KI-Interviewer von Grasp, möchte ein kurzes Gespräch (höchstens 20 Minuten) mit dir über die Arbeit deines Teams führen.",
     private:
-      "Was Sie teilen möchten, wird als Arbeitsweise Ihres Teams gezeigt. Alles andere erreicht Ihr Unternehmen nur, wenn fünf oder mehr Personen es gesagt haben, zusammengefasst. Sie können jederzeit aufhören und danach noch 7 Tage lang alles löschen.",
-    button: "Mit Stephen sprechen",
+      "Du behältst die volle Kontrolle: Nichts wird geteilt, bevor du es geprüft und freigegeben hast. Abläufe werden als Arbeitsweise deines Teams geteilt (nie unter deinem Namen), und Meinungen fließen nur anonym ein, wenn mindestens fünf Personen dasselbe sagen. Du kannst jederzeit pausieren und bis zu 7 Tage danach alles löschen.",
+    button: "Gespräch starten",
     yours:
-      "Dieser Link gehört nur Ihnen, bitte geben Sie ihn nicht weiter. Sie melden sich mit Ihrem Arbeitskonto an, um ihn zu öffnen.",
-    until: "Die Interviews laufen bis zum {closes}.",
+      "Dieser Link ist persönlich – bitte nicht weiterleiten. Melde dich mit deinem Arbeitskonto an, um ihn zu öffnen.",
+    until: "Die Interviews sind bis zum {closes} geöffnet.",
     reply:
-      "Fragen? Antworten Sie auf diese E-Mail, dann erreicht sie die Person bei {company}, die die Interviews betreut.",
+      "Fragen? Antworte einfach auf diese E-Mail – sie geht direkt an deine Ansprechperson bei {company}.",
+    signed: "Stephen von Grasp",
   },
   fr: {
-    subject: "{company} aimerait savoir comment se passe votre travail",
+    subject:
+      "{company} x Grasp : Votre lien personnel pour échanger avec Stephen",
     hello: "Bonjour {name},",
-    own: "{company} a demandé à Grasp de comprendre comment le travail se passe vraiment, afin de vous décharger des tâches les plus fastidieuses. Stephen, l’intervieweur IA de Grasp, aimerait parler avec vous pendant 12 à 15 minutes d’une partie de votre travail.",
-    lead: "{company} a demandé à Grasp de comprendre comment le travail se passe vraiment, afin de vous décharger des tâches les plus fastidieuses. Stephen, l’intervieweur IA de Grasp, aimerait parler avec vous pendant 12 à 15 minutes du travail de votre équipe.",
+    own: "{company} s’est associé à Grasp pour identifier les tâches répétitives qui font perdre du temps, afin de vous en décharger. Stephen, l’intervieweur IA de Grasp, aimerait échanger brièvement avec vous (20 minutes maximum) sur votre travail au quotidien.",
+    lead: "{company} s’est associé à Grasp pour identifier les tâches répétitives qui ralentissent les équipes, afin d’alléger la charge de votre équipe. Stephen, l’intervieweur IA de Grasp, aimerait échanger brièvement avec vous (20 minutes maximum) sur le fonctionnement de votre équipe.",
     private:
-      "Ce que vous choisissez de partager est montré comme la façon dont votre équipe travaille. Tout le reste n’atteint votre entreprise que lorsque cinq personnes ou plus l’ont dit, mis ensemble. Vous pouvez arrêter à tout moment, et tout supprimer pendant les 7 jours qui suivent.",
-    button: "Parler avec Stephen",
+      "Vous gardez le contrôle total : rien n’est partagé avant votre relecture et validation. Les étapes de travail sont partagées comme la façon de travailler de votre équipe (jamais sous votre nom), et vos avis restent anonymes et n’apparaissent que si au moins cinq personnes mentionnent la même chose. Vous pouvez mettre en pause à tout moment et tout supprimer jusqu’à 7 jours après.",
+    button: "Démarrer l’échange",
     yours:
-      "Ce lien n’est qu’à vous, merci de ne pas le transmettre. Vous vous connectez avec votre compte professionnel pour l’ouvrir.",
+      "Ce lien est personnel, merci de ne pas le transférer. Connectez-vous avec votre compte professionnel pour l’ouvrir.",
     until: "Les entretiens sont ouverts jusqu’au {closes}.",
     reply:
-      "Des questions ? Répondez à cet e-mail : il parviendra à la personne de {company} qui organise les entretiens.",
+      "Des questions ? Répondez simplement à cet e-mail pour joindre la personne en charge chez {company}.",
+    signed: "Stephen chez Grasp",
   },
   es: {
-    subject: "{company} quiere saber cómo va tu trabajo",
-    hello: "Hola, {name}:",
-    own: "{company} ha pedido a Grasp que conozca cómo funciona de verdad el trabajo, para quitarte de encima las partes más pesadas. Stephen, el entrevistador de IA de Grasp, quiere hablar contigo de 12 a 15 minutos sobre una parte de tu trabajo.",
-    lead: "{company} ha pedido a Grasp que conozca cómo funciona de verdad el trabajo, para quitarte de encima las partes más pesadas. Stephen, el entrevistador de IA de Grasp, quiere hablar contigo de 12 a 15 minutos sobre el trabajo de tu equipo.",
+    subject: "{company} x Grasp: Tu enlace personal para hablar con Stephen",
+    hello: "Hola {name},",
+    own: "{company} colabora con Grasp para ver dónde las tareas repetitivas quitan tiempo, y así poder quitarte esa carga de encima. Stephen, el entrevistador de IA de Grasp, quiere tener una breve conversación contigo (máximo 20 minutos) sobre tu trabajo diario.",
+    lead: "{company} colabora con Grasp para ver dónde las tareas repetitivas frenan a los equipos, y así aliviar la carga del tuyo. Stephen, el entrevistador de IA de Grasp, quiere tener una breve conversación contigo (máximo 20 minutos) sobre cómo trabaja tu equipo.",
     private:
-      "Lo que eliges compartir se muestra como la forma de trabajar de tu equipo. Todo lo demás solo llega a tu empresa cuando cinco o más personas lo han dicho, en conjunto. Puedes parar cuando quieras, y borrarlo todo durante los 7 días siguientes.",
-    button: "Hablar con Stephen",
+      "Tú mantienes el control total: no se comparte nada hasta que lo revises y apruebes. Los pasos del trabajo se comparten como la forma de trabajar de tu equipo (nunca con tu nombre), y tus opiniones solo se muestran de forma anónima cuando al menos cinco personas dicen lo mismo. Puedes pausar cuando quieras y borrarlo todo hasta 7 días después.",
+    button: "Empezar conversación",
     yours:
-      "Este enlace es solo tuyo, así que no lo compartas. Inicias sesión con tu cuenta del trabajo para abrirlo.",
+      "Este enlace es personal, por favor no lo reenvíes. Inicia sesión con tu cuenta de trabajo para abrirlo.",
     until: "Las entrevistas están abiertas hasta el {closes}.",
     reply:
-      "¿Tienes preguntas? Responde a este correo y le llegará a la persona de {company} que organiza las entrevistas.",
+      "¿Preguntas? Responde a este correo y llegará directamente a quien organiza esto en {company}.",
+    signed: "Stephen de Grasp",
   },
 };
 
 const REMINDER: Record<Locale, ReminderWords> = {
   en: {
-    subject: "A reminder: your interview with Stephen",
-    body: "A few days ago you got a link to talk with Stephen about your work. If you haven't found the time yet: it takes 12 to 15 minutes, and if you stop, you carry on later where you left off.",
-    last: "This is the only reminder you'll get.",
+    subject:
+      "Reminder — {company} x Grasp: Your personal link to talk with Stephen",
+    body: "A few days ago we sent you a link for a short conversation with Stephen about your work. If you haven’t had a chance yet, it takes 20 minutes at most—and you can pause and pick up where you left off anytime.",
+    last: "This is the only reminder we’ll send.",
   },
   nl: {
-    subject: "Een herinnering: je interview met Stephen",
-    body: "Een paar dagen geleden kreeg je een link om met Stephen over je werk te praten. Had je er nog geen tijd voor? Het duurt 12 tot 15 minuten, en als je stopt, ga je later verder waar je was.",
-    last: "Dit is de enige herinnering die je krijgt.",
+    subject:
+      "Herinnering — {company} x Grasp: Je persoonlijke link voor het gesprek met Stephen",
+    body: "Een paar dagen geleden kreeg je een link voor een kort gesprek met Stephen over je werk. Nog geen tijd gehad? Het duurt maximaal 20 minuten—en je kunt altijd pauzeren en later verdergaan waar je gebleven was.",
+    last: "Dit is de enige herinnering die we sturen.",
   },
   de: {
-    subject: "Zur Erinnerung: Ihr Interview mit Stephen",
-    body: "Vor ein paar Tagen haben Sie einen Link bekommen, um mit Stephen über Ihre Arbeit zu sprechen. Falls Sie noch keine Zeit dafür gefunden haben: Es dauert 12 bis 15 Minuten, und wenn Sie aufhören, machen Sie später dort weiter, wo Sie waren.",
-    last: "Dies ist die einzige Erinnerung, die Sie bekommen.",
+    subject:
+      "Erinnerung — {company} x Grasp: Dein persönlicher Link für das Gespräch mit Stephen",
+    body: "Vor ein paar Tagen haben wir dir einen Link für ein kurzes Gespräch mit Stephen über deine Arbeit geschickt. Falls du noch keine Zeit hattest: Es dauert höchstens 20 Minuten – und du kannst jederzeit pausieren und später weitermachen.",
+    last: "Das ist die einzige Erinnerung, die wir schicken.",
   },
   fr: {
-    subject: "Un rappel : votre entretien avec Stephen",
-    body: "Il y a quelques jours, vous avez reçu un lien pour parler de votre travail avec Stephen. Si vous n’avez pas encore trouvé le temps : cela prend 12 à 15 minutes, et si vous vous arrêtez, vous reprenez plus tard là où vous en étiez.",
-    last: "C’est le seul rappel que vous recevrez.",
+    subject:
+      "Rappel — {company} x Grasp : Votre lien personnel pour échanger avec Stephen",
+    body: "Il y a quelques jours, nous vous avons envoyé un lien pour un court échange avec Stephen sur votre travail. Si vous n’avez pas encore eu le temps, cela prend 20 minutes maximum — et vous pouvez mettre en pause et reprendre plus tard.",
+    last: "C’est le seul rappel que nous vous enverrons.",
   },
   es: {
-    subject: "Un recordatorio: tu entrevista con Stephen",
-    body: "Hace unos días recibiste un enlace para hablar con Stephen sobre tu trabajo. Si aún no has encontrado el momento: son de 12 a 15 minutos, y si paras, sigues más tarde donde lo dejaste.",
-    last: "Este es el único recordatorio que recibirás.",
+    subject:
+      "Recordatorio — {company} x Grasp: Tu enlace personal para hablar con Stephen",
+    body: "Hace unos días te enviamos un enlace para una breve conversación con Stephen sobre tu trabajo. Si aún no has tenido tiempo, dura 20 minutos como máximo y puedes pausar y seguir más tarde donde lo dejaste.",
+    last: "Este es el único recordatorio que te enviaremos.",
   },
 };
 
@@ -230,7 +242,7 @@ const mailOf = (
 ): QueuedMail => {
   const text = [
     ...parts.map((part) => (typeof part === "string" ? part : linkSlot)),
-    signature,
+    LINK[locale].signed,
   ].join("\n\n");
   const html = [
     ...parts.map((part) =>
@@ -238,7 +250,7 @@ const mailOf = (
         ? `<p>${escapeHtml(part)}</p>`
         : `<p><a href="${linkSlot}">${escapeHtml(part.button)}</a></p><p>${linkSlot}</p>`
     ),
-    `<p>${escapeHtml(signature)}</p>`,
+    `<p>${escapeHtml(LINK[locale].signed)}</p>`,
   ].join("\n");
   return {
     subject,
@@ -306,7 +318,7 @@ export const reminderMail = (mail: PersonMail): QueuedMail => {
   };
   return mailOf(
     mail.locale,
-    words.subject,
+    fill(words.subject, values),
     [
       fill(link.hello, values),
       words.body,

@@ -1,5 +1,7 @@
 import { actorOf } from "@grasp-os/shared/audit";
+import { anyTenant } from "@grasp-os/shared/connect";
 import {
+  accountDomainSchema,
   directoryErrors,
   directoryLimits,
   directoryProviders,
@@ -8,6 +10,7 @@ import {
 } from "@grasp-os/shared/directory";
 import type {
   DirectoryConnection,
+  OnboardingDirectoryAccount,
   DirectoryPeople,
   DirectoryPerson,
   OnboardingDirectory,
@@ -15,6 +18,7 @@ import type {
 import { onboardingPeopleMax } from "@grasp-os/shared/onboarding";
 import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { z } from "zod";
 
 import { appendAuditEvent } from "../audit-outbox.ts";
 import { signInConfig } from "../auth/config.ts";
@@ -103,28 +107,12 @@ export const connectDirectory = async (
   });
 };
 
-/**
- * Everyone in the onboarding's directory, read just now, page by page: on
- * the record before anything is read. Refused when it holds more than an
- * onboarding takes, rather than cut short: a roster of part of the
- * company would leave the rest out unseen.
- */
-export const readOnboardingDirectory = async (
+/** Everyone in `connection`'s directory, page by page, on the record first. */
+const readEveryone = async (
   env: Env,
-  identity: Identity
+  identity: Identity,
+  connection: DirectoryConnection
 ): Promise<DirectoryPeople> => {
-  requireAdmin(identity);
-  // The client's people are the client's: not Grasp staff's to read.
-  if (identity.staff) {
-    throw roleErrors.create("role.forbidden");
-  }
-  const connection = await connectionOf(env);
-  if (connection === undefined) {
-    throw directoryErrors.create("directory.not_connected");
-  }
-  if (connection.status !== "active") {
-    throw directoryErrors.create("directory.inactive");
-  }
   await appendAuditEvent(env, {
     actor: actorOf(identity),
     action: "onboarding.directory_read",
@@ -152,4 +140,202 @@ export const readOnboardingDirectory = async (
     }
   }
   throw directoryErrors.create("directory.too_large");
+};
+
+/**
+ * Everyone in the onboarding's directory, read just now, page by page: on
+ * the record before anything is read. Refused when it holds more than an
+ * onboarding takes, rather than cut short: a roster of part of the
+ * company would leave the rest out unseen.
+ */
+export const readOnboardingDirectory = async (
+  env: Env,
+  identity: Identity
+): Promise<DirectoryPeople> => {
+  requireAdmin(identity);
+  // The client's people are the client's: not Grasp staff's to read.
+  if (identity.staff) {
+    throw roleErrors.create("role.forbidden");
+  }
+  const connection = await connectionOf(env);
+  if (connection === undefined) {
+    throw directoryErrors.create("directory.not_connected");
+  }
+  if (connection.status !== "active") {
+    throw directoryErrors.create("directory.inactive");
+  }
+  return await readEveryone(env, identity, connection);
+};
+
+/** The company's own tenant at `provider`'s suite, as its sign-in names it, lower case. */
+const ownTenantOf = (
+  env: Env,
+  provider: DirectoryConnection["provider"]
+): string | undefined => {
+  const config = signInConfig(env);
+  return config === undefined
+    ? undefined
+    : tenantOf(config, directorySuiteOf(provider))?.toLowerCase();
+};
+
+/**
+ * Every account's directory connected for the roster: the company's own
+ * and its others (a second Microsoft tenant, another Google domain), one
+ * per account, a working one before one that needs reconnecting, the
+ * newest first; the company's own first.
+ */
+export const onboardingDirectoryAccounts = async (
+  env: Env,
+  identity: Identity
+): Promise<OnboardingDirectoryAccount[]> => {
+  requireAdmin(identity);
+  if (signInConfig(env) === undefined) {
+    return [];
+  }
+  const connections = await env.CONNECT.directoryConnections();
+  const listed = connections.toSorted(
+    (one, other) =>
+      Number(one.status !== "active") - Number(other.status !== "active") ||
+      other.connectedAt.localeCompare(one.connectedAt)
+  );
+  const seen = new Set<string>();
+  const accounts: OnboardingDirectoryAccount[] = [];
+  for (const connection of listed) {
+    const tenant = connection.tenant.toLowerCase();
+    const key = `${connection.provider}|${tenant}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      accounts.push({
+        id: connection.id,
+        suite: directorySuiteOf(connection.provider),
+        tenant,
+        own: tenant === ownTenantOf(env, connection.provider),
+        status: connection.status,
+      });
+    }
+  }
+  return accounts.toSorted(
+    (one, other) =>
+      Number(other.own) - Number(one.own) ||
+      one.suite.localeCompare(other.suite)
+  );
+};
+
+/** What Microsoft's discovery names as a tenant's issuer: its id in the path. */
+const issuerSchema = z.object({ issuer: z.string() });
+const microsoftIssuer =
+  /^https:\/\/login\.microsoftonline\.com\/(?<tenant>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/v2\.0$/u;
+
+/** An Entra tenant's id. */
+const tenantIdPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+
+/** How long Microsoft may take to say which tenant a domain is. */
+const discoveryTimeoutMs = 10_000;
+
+/**
+ * The Entra tenant `domain` belongs to, by Microsoft's public OpenID
+ * discovery for it: what a flow is pinned to, as the company's own is.
+ */
+const microsoftTenantOf = async (domain: string): Promise<string> => {
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://login.microsoftonline.com/${domain}/v2.0/.well-known/openid-configuration`,
+      { redirect: "manual", signal: AbortSignal.timeout(discoveryTimeoutMs) }
+    );
+  } catch {
+    throw directoryErrors.create("directory.provider_failed");
+  }
+  if (!response.ok) {
+    throw directoryErrors.create("directory.unknown_domain");
+  }
+  const issuer = issuerSchema.safeParse(await response.json()).data?.issuer;
+  const tenant = microsoftIssuer.exec(issuer ?? "")?.groups?.tenant;
+  if (tenant === undefined) {
+    throw directoryErrors.create("directory.unknown_domain");
+  }
+  return tenant;
+};
+
+/**
+ * Starts connecting another account at `suite` for the roster only: with
+ * no `domain`, through the provider's sign-in for any organization, the
+ * connection then held to the one the admin signed in to (connect's
+ * `openTenant`); with one, a tenant connected before, pinned to it. Nobody
+ * signs in to Grasp through it (sign-in stays the company's own tenant's).
+ */
+export const connectOtherDirectory = async (
+  env: Env,
+  identity: Identity,
+  {
+    suite,
+    domain,
+    returnTo,
+  }: { suite: unknown; domain: unknown; returnTo: unknown }
+): Promise<{ url: string }> => {
+  const parsedSuite = directorySuiteSchema.safeParse(suite);
+  // None named: whichever organization the admin signs in to, as the sign-in says.
+  if (domain === undefined || domain === null || domain === "") {
+    if (!parsedSuite.success) {
+      throw directoryErrors.create("directory.invalid");
+    }
+    return await startOnboardingConnection(env, identity, {
+      provider: directoryProviders[parsedSuite.data],
+      suite: parsedSuite.data,
+      returnTo,
+      otherTenant: anyTenant,
+    });
+  }
+  // A Microsoft account connected before comes back by its tenant's id, which needs no lookup.
+  const tenantId =
+    typeof domain === "string" ? domain.trim().toLowerCase() : "";
+  const byId =
+    parsedSuite.data === "microsoft" && tenantIdPattern.test(tenantId);
+  const parsedDomain = accountDomainSchema.safeParse(domain);
+  if (!parsedSuite.success || (!byId && !parsedDomain.success)) {
+    throw directoryErrors.create("directory.invalid");
+  }
+  let tenant = tenantId;
+  if (!byId && parsedDomain.success) {
+    tenant =
+      parsedSuite.data === "microsoft"
+        ? await microsoftTenantOf(parsedDomain.data)
+        : parsedDomain.data;
+  }
+  return await startOnboardingConnection(env, identity, {
+    provider: directoryProviders[parsedSuite.data],
+    suite: parsedSuite.data,
+    returnTo,
+    otherTenant: tenant,
+  });
+};
+
+/**
+ * Everyone in one account's directory, `connectionId` among
+ * `onboardingDirectoryAccounts`, read just now for the roster: the same
+ * read, and the same refusals, as the company's own.
+ */
+export const readDirectoryAccount = async (
+  env: Env,
+  identity: Identity,
+  connectionId: unknown
+): Promise<DirectoryPeople> => {
+  requireAdmin(identity);
+  // The client's people are the client's: not Grasp staff's to read.
+  if (identity.staff) {
+    throw roleErrors.create("role.forbidden");
+  }
+  if (typeof connectionId !== "string" || signInConfig(env) === undefined) {
+    throw directoryErrors.create("directory.invalid");
+  }
+  const connections = await env.CONNECT.directoryConnections();
+  const connection = connections.find(({ id }) => id === connectionId);
+  if (connection === undefined) {
+    throw directoryErrors.create("directory.not_connected");
+  }
+  if (connection.status !== "active") {
+    throw directoryErrors.create("directory.inactive");
+  }
+  return await readEveryone(env, identity, connection);
 };

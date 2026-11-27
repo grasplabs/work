@@ -79,7 +79,6 @@ const stepWords: Record<FlowStep, string> = {
   company: "Who’s who",
   sources: "Where the work is written down",
   documents: "Documents",
-  pulse: "The tools people use",
   leads: "Team leads",
   interviews: "Interviews",
 };

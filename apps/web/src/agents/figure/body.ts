@@ -1,6 +1,13 @@
-import { BAYER_MATRIX as BAYER } from "@grasp-os/ui/lib/utils";
+import { BAYER_MATRIX } from "@grasp-os/ui/lib/utils";
 
-import { breathOf, eyeLifeOf, shutOf, stepEye, twitchOf } from "./eye.ts";
+import {
+  breathOf,
+  eyeLifeOf,
+  shutOf,
+  stepEye,
+  twitchOf,
+  warmthOf,
+} from "./eye.ts";
 import type { EyeLife } from "./eye.ts";
 import { laterParts } from "./figures.ts";
 import type { Drawn, Hit, Sphere } from "./solid.ts";
@@ -15,6 +22,7 @@ export const figureStates = [
   "listening",
   "thinking",
   "done",
+  "speaking",
 ] as const;
 export type FigureState = (typeof figureStates)[number];
 
@@ -135,13 +143,29 @@ const poses: Record<FigureState, Pose> = {
     size: 1.06,
     wander: 0.1,
     open: 1,
-    pupil: 1.05,
+    pupil: 1.2,
+  },
+  // Telling: the light comes round toward you and its surface turns quicker; the voice does the rest (`Body.voice`).
+  speaking: {
+    key: 1.02,
+    az: -0.5,
+    el: 0.5,
+    wrap: 0.25,
+    gloss: 0.65,
+    rim: 0.24,
+    glow: 0.3,
+    speed: 2,
+    spread: 1.04,
+    size: 1.02,
+    wander: 0.12,
+    open: 1.1,
+    pupil: 1.1,
   },
 };
 
 /** A cell's Bayer threshold, 0 to 1. */
 export const thresholdAt = (column: number, row: number): number =>
-  ((BAYER[row % 4]?.[column % 4] ?? 8) + 0.5) / 16;
+  ((BAYER_MATRIX[row % 4]?.[column % 4] ?? 8) + 0.5) / 16;
 
 /** The codes a cell can hold: nothing, the ground, or one of five lights (2 to 6). */
 export const CODES = 7;
@@ -150,6 +174,12 @@ export const CODES = 7;
 // A pose eases in two stages, each with this time constant: a new state stands within 300ms (the
 // library's motion rule), from wherever the numbers were.
 const TAU_MORPH = 0.05;
+/** Alive, a pose comes on unhurried; sleep comes slower still, its turning running down. */
+const TAU_ALIVE = 0.16;
+const TAU_SLEEP = 0.9;
+/** How fast an alive orb's surface turns at a pose's speed of 1, in radians a second, and how much faster his voice makes it. */
+const SPIN = 0.3;
+const SPIN_VOICE = 2.4;
 const nearestAngle = (from: number, to: number) =>
   to + Math.round((from - to) / TAU) * TAU;
 
@@ -173,13 +203,58 @@ export interface Body {
   look: Lean;
   /** The eye's life (eye.ts). */
   life: EyeLife;
+  /** How far into thinking it is, 0 to 1, eased: the main agent's thought comes and goes with it. */
+  thinking: number;
+  /** Where that thought is on its way round, an angle. */
+  orbit: number;
+  /**
+   * Stephen alive without his eye, as he holds a conversation (the interview's orb): his surface
+   * turns, a thought goes round him while he thinks, his light follows his voice, and he eases
+   * into a pose rather than taking it.
+   */
+  alive: boolean;
+  /** How far his surface has turned, an angle: faster as he attends, thinks and speaks, still asleep. */
+  spin: number;
+  /** How loud the voice he follows is now, 0 to 1, eased; `voiceGoal` is what it is told. */
+  voice: number;
+  voiceGoal: number;
+  /** How quickly the pose changes, the time constant of each of its two stages, in seconds. */
+  morph: number;
 }
+
+/**
+ * The main agent thinking: a thought, a small light of its own, goes round its orb on a tilted
+ * way, in front and behind, and its eye follows it. Looking away alone (as the other figures
+ * think) was too little to see.
+ */
+const THOUGHT_SECONDS = 2.6;
+const THOUGHT_WAY = 0.86;
+const THOUGHT_SIZE = 0.14;
+/** The orb is this much smaller while it thinks, so the thought has room to go round. */
+const THOUGHT_ROOM = 0.14;
+
+const thoughtOf = (body: Body): Sphere => {
+  const tilt = 1.2;
+  const lean = 0.32;
+  const across = Math.cos(body.orbit) * THOUGHT_WAY;
+  const deep = Math.sin(body.orbit) * THOUGHT_WAY;
+  const z = deep * Math.sin(tilt);
+  return {
+    kind: "sphere",
+    x: across * Math.cos(lean) - deep * Math.cos(tilt) * Math.sin(lean),
+    y: across * Math.sin(lean) + deep * Math.cos(tilt) * Math.cos(lean),
+    z,
+    r: THOUGHT_SIZE * (1 + 0.22 * z) * body.thinking,
+    silk: false,
+  };
+};
 
 export const bodyOf = (
   state: FigureState,
   shape: FigureShape,
   seed = 1,
-  eye = false
+  eye = false,
+  alive = false
 ): Body => ({
   now: { ...poses[state] },
   stage: { ...poses[state] },
@@ -193,6 +268,14 @@ export const bodyOf = (
   since: 9,
   look: { x: 0, y: 0 },
   life: eyeLifeOf(seed),
+  thinking: state === "thinking" ? 1 : 0,
+  // A still picture has it up and to the side, where the eye looks.
+  orbit: 0.75,
+  alive,
+  spin: seed * 0.9,
+  voice: 0,
+  voiceGoal: 0,
+  morph: TAU_MORPH,
 });
 
 /** A new pose or shape, from wherever the numbers are now. */
@@ -204,6 +287,9 @@ export const setPose = (
   if (body.state !== state) {
     body.since = 0;
   }
+  if (body.alive) {
+    body.morph = state === "asleep" ? TAU_SLEEP : TAU_ALIVE;
+  }
   body.state = state;
   body.shape = shape;
   body.goal = poses[state];
@@ -211,7 +297,7 @@ export const setPose = (
 
 export const stepBody = (body: Body, dt: number): void => {
   const { now, stage, goal } = body;
-  const k = 1 - Math.exp(-dt / TAU_MORPH);
+  const k = 1 - Math.exp(-dt / body.morph);
   for (const key of PARAMS) {
     const target = key === "az" ? nearestAngle(stage.az, goal.az) : goal[key];
     stage[key] += (target - stage[key]) * k;
@@ -221,8 +307,25 @@ export const stepBody = (body: Body, dt: number): void => {
   body.seconds += dt * Math.min(1, now.speed);
   body.travel += dt * 0.32 * now.speed;
   body.since += dt;
+  const busy = body.state === "thinking";
+  body.thinking += ((busy ? 1 : 0) - body.thinking) * (1 - Math.exp(-dt / 0.1));
+  body.orbit += (dt * TAU) / THOUGHT_SECONDS;
+  if (body.alive) {
+    // His voice rises quickly and falls back slower, as a light that follows it should.
+    const toward = body.voiceGoal > body.voice ? 0.06 : 0.22;
+    body.voice += (body.voiceGoal - body.voice) * (1 - Math.exp(-dt / toward));
+    body.spin += dt * (SPIN * now.speed + SPIN_VOICE * body.voice);
+  }
   if (body.eye && body.blinks) {
-    stepEye(body.life, body.state, dt, body.look, body.since);
+    const thought = busy && body.shape === "orb" ? thoughtOf(body) : undefined;
+    stepEye(
+      body.life,
+      body.state,
+      dt,
+      body.look,
+      body.since,
+      thought && { x: thought.x * 1.25, y: thought.y * 1.25 + 0.12 }
+    );
   }
 };
 
@@ -370,16 +473,36 @@ const ringHit = (part: Ring, x: number, y: number, reach: number): Hit => {
   };
 };
 
+/** The orb, and round the main agent's while it thinks, its thought. */
+const orbParts = (body: Body, size: number): Part[] => {
+  const orb: Sphere = {
+    kind: "sphere",
+    x: 0,
+    y: 0,
+    z: 0,
+    // Alive, his size stays: the thought goes round him, in front and behind.
+    r: 0.74 * size * (body.eye ? 1 - THOUGHT_ROOM * body.thinking : 1),
+    silk: true,
+    ...(body.alive ? { spin: body.spin } : {}),
+  };
+  return (body.eye || body.alive) && body.thinking > 0.03
+    ? [orb, thoughtOf(body)]
+    : [orb];
+};
+
+/** How large its pose makes it: alive, his size stays, whatever the pose. */
+const sizeOf = (body: Body): number => (body.alive ? 1 : body.now.size);
+
 /** The scene a shape is now, in the unit square (-1 to 1, y up). */
 const partsOf = (body: Body): Part[] => {
   const { now, travel } = body;
   // Every scene a little over the unit, so it fills its square as Stephen fills his.
-  const size = now.size * 1.12;
+  const size = sizeOf(body) * 1.12;
   const { spread } = now;
   const turn = travel * TAU;
   switch (body.shape) {
     case "orb": {
-      return [{ kind: "sphere", x: 0, y: 0, z: 0, r: 0.74 * size, silk: true }];
+      return orbParts(body, size);
     }
     case "trio": {
       return circling(3, 0.48 * spread, 0.32 * size, turn, 1.05, 0.12);
@@ -514,7 +637,7 @@ const gazeOf = (body: Body): Gaze => {
       x: 0,
       y: 0,
       pupil: now.pupil,
-      squint: 0,
+      squint: warmthOf(body.state),
       twitch: 0,
     };
   }
@@ -533,11 +656,19 @@ const gazeOf = (body: Body): Gaze => {
 };
 
 /** The eye's half width and its open half height, in the orb's radius. */
-const EYE_WIDE = 0.4;
-const EYE_HIGH = 0.21;
-const IRIS = 0.19;
-const PUPIL = 0.085;
-const SPARK = 0.04;
+// Round, not a person's almond eye: with a full pupil and a clear glint it reads as friendly,
+// where the narrow one stared.
+const EYE_WIDE = 0.33;
+const EYE_HIGH = 0.28;
+const IRIS = 0.21;
+const PUPIL = 0.11;
+const SPARK = 0.055;
+
+/**
+ * A fine line round the opening, in cells, in the orb's own shadow: on a bright orb (listening,
+ * done) the white of the eye is as light as what is round it, and without the line it was lost.
+ */
+const RIM = 0.6;
 
 /** How far round the opening the lids' shading reaches, in the orb's radius. */
 const LID = 0.1;
@@ -589,7 +720,7 @@ const lidLight = (
     return undefined;
   }
   return upper
-    ? light * (0.3 + 0.7 * fade ** 1.5)
+    ? light * (0.8 + 0.2 * fade ** 1.5)
     : light * (0.8 + 0.2 * fade) + 0.06 * (1 - fade);
 };
 
@@ -628,17 +759,25 @@ const eyeLight = (
       ? light * (0.6 + 0.4 * ramp(below, 0, LID * across))
       : undefined;
   }
-  // Done, the lower lid rises like a smile in the eyes.
-  const half =
-    EYE_HIGH * gaze.open * across * (v < 0 ? 1 - 0.6 * gaze.squint : 1);
-  const inside = half - Math.abs(v);
+  // Glad, the lower lid rises and arcs up in the middle, as a cheek pushes it: the opening
+  // narrows toward a crescent, the way eyes smile.
+  const reach = EYE_HIGH * gaze.open * across;
+  const lower = -reach * (1 - gaze.squint) + reach * 0.5 * gaze.squint;
+  const inside = Math.min(reach - v, v - lower);
   if (inside <= 0) {
-    return lidLight(-inside / Math.max(0.3, across), v > 0, light);
+    return lidLight(
+      -inside / Math.max(0.3, across),
+      v > (reach + lower) / 2,
+      light
+    );
+  }
+  if (inside < cell * RIM) {
+    return Math.min(light, 1) * 0.22;
   }
   // The upper lid's shadow falls on the top of the opening.
   const shade =
     v > 0
-      ? 0.6 + 0.4 * ramp(inside, 0, 0.07)
+      ? 0.9 + 0.1 * ramp(inside, 0, 0.07)
       : 0.85 + 0.15 * ramp(inside, 0, 0.05);
   const ix = gaze.x * (EYE_WIDE - IRIS) * 0.75;
   const iy = gaze.y * Math.max(0, EYE_HIGH * gaze.open - IRIS) * 0.75;
@@ -653,9 +792,39 @@ const eyeLight = (
     return 0;
   }
   if (fromIris < IRIS) {
-    return (0.12 + 0.4 * light) * shade;
+    // Kept dark on a bright orb, so the pupil and the glint stay clear.
+    return (0.12 + 0.22 * Math.min(light, 1)) * shade;
   }
   return (0.32 + 0.8 * light) * shade;
+};
+
+/**
+ * The light of a cell of the main agent: on its orb the eye's, where the eye is; on its thought a
+ * light of its own, bright at the middle whatever side the orb is lit from, with a dark edge that
+ * keeps it apart from the orb where it passes in front of the lit side.
+ */
+const mainLight = (
+  orb: Sphere,
+  onOrb: boolean,
+  front: Hit,
+  gaze: Gaze,
+  x: number,
+  y: number,
+  shone: number,
+  cell: number
+): number => {
+  if (!onOrb) {
+    return front.nz < 0.42 ? 0.12 : 0.3 + 0.8 * front.nz ** 1.6;
+  }
+  return (
+    eyeLight(
+      gaze,
+      (x - orb.x) / orb.r,
+      (y - orb.y) / orb.r,
+      shone,
+      cell / orb.r
+    ) ?? shone
+  );
 };
 
 /** The glow round a figure: how fast it fades (figure units), its gain, and the floor a lit dot clears. */
@@ -776,6 +945,29 @@ const frontAt = (
   return seen;
 };
 
+/**
+ * An alive orb's light this frame: brighter, with more of a rim and a glow, as loud as the voice it
+ * follows; asleep, it breathes slowly, its light rising and falling.
+ */
+const aliveNow = (body: Body): Pose => {
+  if (!body.alive) {
+    return body.now;
+  }
+  const { now, voice } = body;
+  const sleep = body.state === "asleep" ? 1 : 0;
+  const breath = sleep * 0.07 * Math.sin((body.since * TAU) / 5.5);
+  return {
+    ...now,
+    // His voice shows plainly: the light swells with each word and the rim and glow come up
+    // with it, while his size stays as it is (the owner's asks, 2026-11-27).
+    key: now.key * (1 + 0.5 * voice + breath),
+    gloss: now.gloss + 0.35 * voice,
+    rim: now.rim + 0.32 * voice,
+    glow: now.glow + 0.42 * voice,
+    az: now.az + 0.35 * voice,
+  };
+};
+
 /** Writes the codes of rows `from` to `to` for `parts` in this body's pose: any scene, in the figures' light. */
 const paintScene = (
   body: Body,
@@ -790,7 +982,7 @@ const paintScene = (
   const breathing = body.eye && body.blinks && body.state === "asleep";
   const now = breathing
     ? { ...body.now, key: body.now.key * (1 + 0.1 * breathOf(body.life)) }
-    : body.now;
+    : aliveNow(body);
   const drift = 0.04 + 0.5 * now.wander;
   const az = now.az + drift * Math.sin(body.seconds * 0.55) + lean.x * 0.45;
   const el =
@@ -819,7 +1011,8 @@ const paintScene = (
   );
   const sight: Seen = { front: undefined, part: undefined, nearest: 9 };
   const gaze = gazeOf(body);
-  const orb = body.eye && body.shape === "orb" ? parts[0] : undefined;
+  const orb =
+    (body.eye || body.alive) && body.shape === "orb" ? parts[0] : undefined;
   for (let row = from; row < to; row += 1) {
     if ((row - from) % TILE === 0) {
       markBand(
@@ -869,16 +1062,19 @@ const paintScene = (
       front.surface?.();
       // Its outline catches the rim light too, so a solid lit from behind still has an edge.
       const outline = now.rim * clamp(1 + front.edge / (cell * 2));
-      let value = lit(now, light, front) * (front.tone ?? 1) + outline;
-      if (orb?.kind === "sphere" && frontPart === orb) {
-        const seen = eyeLight(
+      const shone = lit(now, light, front) * (front.tone ?? 1) + outline;
+      let value = shone;
+      if (orb?.kind === "sphere" && (body.eye || frontPart !== orb)) {
+        value = mainLight(
+          orb,
+          frontPart === orb,
+          front,
           gaze,
-          (x - orb.x) / orb.r,
-          (y - orb.y) / orb.r,
-          value,
-          cell / orb.r
+          x,
+          y,
+          shone,
+          cell
         );
-        value = seen ?? value;
       }
       const level = clamp(Math.floor(value * 5 + threshold - 0.15), 0, 5);
       out[at] = level + 1;

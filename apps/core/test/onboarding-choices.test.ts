@@ -24,7 +24,6 @@ const sentinel = "Quillfeather Vault";
 const chosen: SetupChoicesInput = {
   sources: ["sharepoint", "confluence"],
   sourcesWanted: [sentinel],
-  pulse: "skipped",
   hr: { kind: "platform", name: "Personio" },
 };
 
@@ -33,42 +32,40 @@ const knownOf = (parts: { source: string; known: number }[]) =>
   Object.fromEntries(parts.map(({ source, known }) => [source, known]));
 
 describe("what the admin chose", () => {
-  it("is kept, read back, and counted by its weights: places and an HR platform named, Pulse skipped", async () => {
+  it("is kept, read back, and counted by its weights: places and an HR platform named", async () => {
     const { api } = await signedInApi(idp, "admin");
     await api.onboarding.saveChoices({
       sources: [],
       sourcesWanted: [],
-      pulse: null,
       hr: null,
     });
     const before = await api.onboardingGate.view();
     const saved = await api.onboarding.saveChoices(chosen);
     const after = await api.onboardingGate.view();
-    const { sources, tools, leads } = knownOf(after.parts);
+    const { sources, leads } = knownOf(after.parts);
     expect({
       saved,
       read: await api.onboarding.choices(),
       moved: after.known - before.known,
-      parts: { sources, tools, leads },
+      parts: { sources, leads },
     }).toStrictEqual({
       saved: chosen,
       read: chosen,
-      // Where the documents live (5) and the leads (10); Pulse skipped counts nothing.
-      moved: 15,
-      parts: { sources: 1, tools: 0, leads: 1 },
+      // Where the documents live (5) and the leads (10), of the 95 there is to know.
+      moved: 16,
+      parts: { sources: 1, leads: 1 },
     });
   });
 
-  it("counts Pulse once it is to be set up, and neither a place nor a platform only asked for", async () => {
+  it("counts neither a place nor a platform only asked for", async () => {
     const { api } = await signedInApi(idp, "admin");
     await api.onboarding.saveChoices({
       sources: [],
       sourcesWanted: ["Dropbox"],
-      pulse: "wanted",
       hr: { kind: "asked", name: "Workday" },
     });
     const { parts } = await api.onboardingGate.view();
-    expect(knownOf(parts)).toMatchObject({ sources: 0, tools: 1, leads: 0 });
+    expect(knownOf(parts)).toMatchObject({ sources: 0, leads: 0 });
   });
 
   it.each([
@@ -78,7 +75,7 @@ describe("what the admin chose", () => {
       "an HR platform made up",
       { ...chosen, hr: { kind: "platform", name: "Workday" } },
     ],
-    ["Pulse half-chosen", { ...chosen, pulse: "maybe" }],
+    ["a choice the setup doesn't have", { ...chosen, pulse: "wanted" }],
     ["a name asked for that is empty", { ...chosen, sourcesWanted: ["  "] }],
   ])("refuses %s", async (_, choices) => {
     const { api } = await signedInApi(idp, "admin");
@@ -116,7 +113,6 @@ describe("what the admin chose", () => {
           detail: {
             sources: "sharepoint confluence",
             asked: 1,
-            pulse: "skipped",
             hr: "platform",
           },
         },

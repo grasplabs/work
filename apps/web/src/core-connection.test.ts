@@ -22,6 +22,7 @@ import {
 } from "./core-connection.ts";
 import type { HostCheck, SessionEnded } from "./core-connection.ts";
 import { CoreTimeoutError } from "./core.ts";
+import { keptKey } from "./onboarding/kept.ts";
 import { tabLink } from "./pages/tab-link.ts";
 import { keepChatLink, pendingChatLink } from "./settings/chat-link.ts";
 
@@ -403,6 +404,29 @@ describe("the tab's one connection to core", () => {
     await expect(refusal(frame.link.session())).resolves.toBe(
       "auth.unauthenticated"
     );
+  });
+
+  it("forgets the setup an admin left half done, with the message they wrote to their employees, when they sign out", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => await Promise.resolve(new Response("{}")))
+    );
+    const { core } = tab([one]);
+    await core.session();
+    const draft = JSON.stringify({ reached: 3, message: "Hi all, ..." });
+    localStorage.setItem(keptKey("their-account"), draft);
+    localStorage.setItem(keptKey("an-earlier-account"), draft);
+    localStorage.setItem("grasp.voice.on", "off");
+
+    await signOut(core);
+
+    expect({
+      theirs: localStorage.getItem(keptKey("their-account")),
+      earlier: localStorage.getItem(keptKey("an-earlier-account")),
+      // What isn't anyone's words stays.
+      voice: localStorage.getItem("grasp.voice.on"),
+    }).toStrictEqual({ theirs: null, earlier: null, voice: "off" });
+    localStorage.clear();
   });
 
   it("tells every frame, and still reloads, when stopping one of them throws", async () => {

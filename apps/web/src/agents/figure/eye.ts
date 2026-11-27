@@ -61,7 +61,8 @@ const moods: Record<FigureState, Mood> = {
   idle: { glance: 0.07, every: [1, 2], blink: 0.22 },
   // Paying attention: it locks on and hardly wanders.
   listening: { glance: 0.02, every: [1.4, 2.4], blink: 0.2 },
-  // Looking away, up and to the side, searching in small quick glances; slower blinks.
+  // Looking away, up and to the side, searching in small quick glances; slower blinks. The main
+  // agent watches its thought go round instead (body.ts).
   thinking: {
     away: [0.62, 0.5],
     glance: 0.22,
@@ -69,14 +70,34 @@ const moods: Record<FigureState, Mood> = {
     blink: 0.32,
   },
   done: { glance: 0.05, every: [1, 2], blink: 0.22 },
+  // Telling: at you, with the small glances of someone talking.
+  speaking: { glance: 0.05, every: [0.8, 1.6], blink: 0.2 },
 };
 
 /** The spring the gaze rides on: it settles in about 300ms, overshooting a little. */
 const STIFF = 420;
 const DAMP = 24.6;
 
-/** How long the squint of a job done holds before it eases back to calm. */
+/** How long the full smile of a job done holds before it eases back to calm. */
 const SQUINT_HOLDS = 1.1;
+
+/**
+ * How much he smiles with his eye in each state, 0 to 1, as people do when they are glad: the
+ * lower lid rises and the eye narrows toward an arc. A little while calm, hardly while he
+ * attends, none while he thinks (wide open is his interest), and a trace once a job is done,
+ * after the full smile of the moment it ends.
+ */
+const warmth: Record<FigureState, number> = {
+  asleep: 0,
+  idle: 0.22,
+  listening: 0.06,
+  thinking: 0,
+  done: 0.1,
+  speaking: 0.14,
+};
+
+/** The smile a state rests at, for a still picture. */
+export const warmthOf = (state: FigureState): number => warmth[state];
 
 const draw = (life: EyeLife): number => {
   life.draws += 1;
@@ -89,18 +110,21 @@ export const stepEye = (
   state: FigureState,
   dt: number,
   look: { x: number; y: number },
-  since: number
+  since: number,
+  toward?: { x: number; y: number }
 ): void => {
   life.clock += dt;
   const mood = moods[state];
   if (life.clock >= life.nextGlance) {
-    life.sx = (draw(life) - 0.5) * 2 * mood.glance;
-    life.sy = (draw(life) - 0.5) * 1.4 * mood.glance;
+    // Following something (his thought going round) he hardly glances off it.
+    const glance = toward === undefined ? mood.glance : mood.glance * 0.25;
+    life.sx = (draw(life) - 0.5) * 2 * glance;
+    life.sy = (draw(life) - 0.5) * 1.4 * glance;
     life.nextGlance =
       life.clock + mood.every[0] + draw(life) * (mood.every[1] - mood.every[0]);
   }
-  const tx = (mood.away?.[0] ?? look.x) + life.sx;
-  const ty = (mood.away?.[1] ?? look.y) + life.sy;
+  const tx = (toward?.x ?? mood.away?.[0] ?? look.x) + life.sx;
+  const ty = (toward?.y ?? mood.away?.[1] ?? look.y) + life.sy;
   // The spring, in steps of at most 1/120s so a slow frame never throws it.
   for (let left = dt; left > 0; left -= 1 / 120) {
     const h = Math.min(left, 1 / 120);
@@ -120,7 +144,8 @@ export const stepEye = (
     life.twitchStart = life.clock;
     life.nextTwitch = life.clock + 4 + draw(life) * 6;
   }
-  const squinting = state === "done" && since < SQUINT_HOLDS ? 1 : 0;
+  const glad = state === "done" && since < SQUINT_HOLDS ? 1 : 0;
+  const squinting = Math.max(glad, warmth[state]);
   life.squint += (squinting - life.squint) * (1 - Math.exp(-dt / 0.12));
 };
 
