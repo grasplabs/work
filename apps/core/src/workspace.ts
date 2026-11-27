@@ -1171,6 +1171,16 @@ export class Workspace extends DurableObject<Env> {
   /** Who follows each chat (`watch`), by chat and watch ID. */
   readonly #watchers = new Map<ChatId, Map<string, ChatWatch>>();
 
+  /**
+   * Where each chat stood before the questions sent in it still being
+   * taken moved it up (`#askedIn`), when those are, and every time such a
+   * question moved it to.
+   */
+  readonly #asking = new Map<
+    ChatId,
+    { stood: Date; taking: Set<number>; moves: Set<number> }
+  >();
+
   /** Who follows their list of chats (`watchChats`), by watch ID. */
   readonly #listWatchers = new Map<string, ChatListWatch>();
 
@@ -3026,19 +3036,16 @@ export class Workspace extends DurableObject<Env> {
     // Asked: first in its person's list now, as Send was pressed, not once
     // the question is shown (`#store`), which waits on the chat's object
     // and may take seconds; back where it was if it is refused.
-    // Where it stood just now: another question may have moved it while
-    // the key was looked up.
-    const { lastAt: stood } = this.#graspChat(chatId, personId);
-    const asked = new Date();
-    this.#movedTo(chat.id, asked);
+    const asked = this.#askedIn(chat.id);
     void this.#takeQuestion(chat, question, started);
     try {
       await started.promise;
       if (key !== undefined) {
         this.#keepRequest("send", key, chat.id);
       }
+      this.#settledAsk(chat.id, asked, true);
     } catch (error) {
-      this.#movedTo(chat.id, stood, asked);
+      this.#settledAsk(chat.id, asked, false);
       throw error;
     } finally {
       if (key !== undefined) {
@@ -3047,6 +3054,55 @@ export class Workspace extends DurableObject<Env> {
     }
     // The alarm keeps the object up until the turn ends (`alarm`).
     await this.#alarmBy(Date.now());
+  }
+
+  /**
+   * Moves chat `chatId` up its person's list as a question is sent in it
+   * (`send`), keeping where it stood before the first of those still
+   * being taken: what a refused one puts it back to. Answers when.
+   */
+  #askedIn(chatId: ChatId): Date {
+    const asked = new Date();
+    const asking = this.#asking.get(chatId) ?? {
+      stood: this.#chat(chatId).lastAt,
+      taking: new Set<number>(),
+      moves: new Set<number>(),
+    };
+    asking.taking.add(asked.getTime());
+    asking.moves.add(asked.getTime());
+    this.#asking.set(chatId, asking);
+    this.#movedTo(chatId, asked);
+    return asked;
+  }
+
+  /**
+   * The question sent in chat `chatId` at `asked` was taken, or refused.
+   * Taken, the chat was asked in then: where it stands from now on. Once
+   * none is still being taken, a chat no question since moved (its last
+   * activity still one of theirs) goes back to where it stood.
+   */
+  #settledAsk(chatId: ChatId, asked: Date, taken: boolean): void {
+    const asking = this.#asking.get(chatId);
+    if (asking === undefined) {
+      return;
+    }
+    asking.taking.delete(asked.getTime());
+    if (taken) {
+      asking.stood = asked;
+    }
+    if (asking.taking.size > 0) {
+      return;
+    }
+    this.#asking.delete(chatId);
+    const { lastAt } = this.#chat(chatId);
+    // Last moved by a refused question: back where it stood. One a
+    // message or a note moved since stays where that put it.
+    if (
+      asking.moves.has(lastAt.getTime()) &&
+      lastAt.getTime() !== asking.stood.getTime()
+    ) {
+      this.#movedTo(chatId, asking.stood, lastAt);
+    }
   }
 
   /**
