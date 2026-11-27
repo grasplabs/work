@@ -4,7 +4,7 @@ import type { PreviewAt, PreviewBundle } from "@grasp-os/shared/chat";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { AppVersionPush } from "@grasp-os/shared/pages";
-import { evictDurableObject } from "cloudflare:test";
+import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -397,6 +397,12 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
         heard.push(revision);
       }
     );
+    // Nothing was told of the draft yet, so the page heard nothing as it
+    // followed: whatever it hears is the rollback's.
+    const toldBefore = await runInDurableObject(
+      draftWatch(env, { kind: "app", id: app }),
+      (_instance, state) => state.storage.kv.get("told")
+    );
     const before = await builder.api.drafts.get({ kind: "app", id: app });
 
     // Back to the first: the draft, changing nothing, is over it then.
@@ -405,10 +411,12 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
 
     await vi.waitFor(() => {
       expect({
+        toldBefore,
         told: heard.length > 0,
         draft: { changed: before.changed, base: after.base },
       }).toStrictEqual({
         told: true,
+        toldBefore: undefined,
         draft: { changed: [], base: version },
       });
     });
