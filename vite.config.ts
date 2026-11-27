@@ -169,20 +169,7 @@ export default defineConfig({
     },
     rules: {
       // Controls are closed: a page places them (layout) and nothing else.
-      // A painted field is a container, open for composition: it lays out
-      // what stands on it, with its own room and corners (AGENTS.md, Design).
-      "shadcn/no-restyle": [
-        "error",
-        {
-          allow: ["layout"],
-          contracts: [
-            {
-              pattern: "^PaintedField$",
-              allow: ["layout", "spacing", "shape", "typography"],
-            },
-          ],
-        },
-      ],
+      "shadcn/no-restyle": ["error", { allow: ["layout"] }],
       // Refuses inline style objects as the rule it replaces did, and lets
       // StyleX styles through to a component's `style`, whose type
       // (Damsko's LayoutStyle) holds them to layout
@@ -234,9 +221,7 @@ export default defineConfig({
       },
       {
         // Seen once per person, so they may take longer to delight: the
-        // onboarding, the interview and setup. And rare: an
-        // app connected, a few times per company, whose drawn mark is the
-        // delight of it (success-mark.tsx).
+        // onboarding, the interview and setup.
         files: [
           "apps/web/src/onboarding/**",
           "apps/web/src/interview/**",
@@ -244,7 +229,6 @@ export default defineConfig({
           "apps/web/src/routes/interview*",
           "apps/web/src/routes/setup*",
           "apps/web/src/frame/onboarding-frame.tsx",
-          "packages/app-kit/src/components/success-mark.tsx",
           // Base UI's drawer leaves as fast as it was swiped: up to 400 ms
           // for a gentle swipe, which follows the finger, not a wait.
           "packages/app-kit/src/components/drawer.tsx",
@@ -573,13 +557,6 @@ export default defineConfig({
         // React's DOM: a card's `style` is a word ("primary", "muted").
         files: ["apps/core/src/**/*.tsx"],
         rules: { "react/style-prop-object": "off" },
-      },
-      {
-        // RecordGrid draws through TanStack Virtual, which the React
-        // Compiler lists as incompatible: the one component is opted out
-        // with "use no memo" (AGENTS.md, Architecture rules).
-        files: ["packages/app-kit/src/components/record-grid.tsx"],
-        rules: { "react/incompatible-library": "off" },
       },
       {
         // Schema files start as comment-only placeholders until their first table.

@@ -7,5 +7,5 @@
       "@grasp-os/app-kit/*": ["./src/*"]
     }
   },
-  "include": ["src", "catalog"]
+  "include": ["src"]
 }

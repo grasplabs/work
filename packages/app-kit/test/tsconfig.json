@@ -5,5 +5,5 @@
     // import the kit's stylesheet (kit.browser.test.tsx).
     "types": ["node", "vite-plus/client"]
   },
-  "include": [".", "../src", "../catalog"]
+  "include": [".", "../src"]
 }

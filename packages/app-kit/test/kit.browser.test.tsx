@@ -1,5 +1,5 @@
-// The kit as the gallery shows it: its theme, the fonts and the utilities
-// its demos use, so layouts measure as the gallery's.
+// The kit's theme, the fonts and the utilities its demos use, so layouts
+// measure as on a page.
 import "./kit.css";
 import { CSPProvider } from "@base-ui/react/csp-provider";
 import type { ComponentType } from "react";
@@ -11,28 +11,25 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 import type { Locator } from "vite-plus/test/browser";
 
-import { demos } from "../catalog/demos.ts";
-import { loadExample } from "../catalog/examples.ts";
-import type { ExampleName } from "../catalog/examples.ts";
+import { PageHeaderTitle } from "../src/components/page-header.tsx";
+import { demos } from "./catalog/demos.ts";
+import { loadExample } from "./catalog/examples.ts";
+import type { ExampleName } from "./catalog/examples.ts";
 import {
   componentOverlays,
   desktop,
   exampleOverlays,
   phone,
-} from "../catalog/overlays.ts";
-import type { Overlay, Target } from "../catalog/overlays.ts";
-import { PageHeaderTitle } from "../src/components/page-header.tsx";
-import { TraceLine, TraceTitle } from "../src/components/trace.tsx";
+} from "./catalog/overlays.ts";
+import type { Overlay, Target } from "./catalog/overlays.ts";
 
-// Every component in the UI kit, and every example for agents, rendered as
-// the local gallery shows it (apps/web/src/routes/kit_.*), in a real
-// Chromium: each has names for its controls, a visible focus from the
-// keyboard, no sideways scroll on a phone, overlays that open from the
-// keyboard and close with Escape, and a dark theme. The list is the kit's
-// demos and examples, which test/catalog.test.ts holds to the components
-// directory, so a component added to the kit is checked without touching
-// this file. Core's Content Security Policy over the gallery's pages is
-// held on the e2e stack (e2e/catalog.e2e.ts).
+// Every component in the UI kit, and every example of composing them,
+// rendered under a page heading in a real Chromium: each has names for its
+// controls, a visible focus from the keyboard, no sideways scroll on a
+// phone, overlays that open from the keyboard and close with Escape, and a
+// dark theme. The list is the kit's demos and examples, which
+// test/catalog.test.ts holds to the components directory, so a component
+// added to the kit is checked without touching this file.
 
 /**
  * The theme's dark side, through its `dark` class. Following the system's
@@ -66,7 +63,7 @@ const pages: {
 
 let mounted: Root | undefined;
 
-/** Renders `Content` as the gallery's page does, in the app's providers. */
+/** Renders `Content` under a page heading, in the app's providers. */
 const render = (heading: string, Content: ComponentType): void => {
   const container = document.createElement("div");
   document.body.append(container);
@@ -88,7 +85,7 @@ const render = (heading: string, Content: ComponentType): void => {
   });
 };
 
-/** The element `target` names (catalog/overlays.ts). */
+/** The element `target` names (test/catalog/overlays.ts). */
 const locate = (target: Target): Locator => {
   if ("text" in target) {
     return page.getByText(target.text);
@@ -292,58 +289,8 @@ const focus = (locator: Locator): void => {
   }
 };
 
-/**
- * Once an item is picked up from the keyboard, the arrows move it: dnd-kit
- * listens for them a task after the pick-up, which a person never beats
- * but a test's next key can.
- */
-const pickedUp = async (): Promise<void> => {
-  const { promise, resolve } = Promise.withResolvers<boolean>();
-  requestAnimationFrame(() => {
-    setTimeout(() => {
-      resolve(true);
-    }, 0);
-  });
-  await promise;
-};
-
-/** A line said to screen readers, as the page shows it. */
-const said = (text: string): Locator => page.getByText(text, { exact: true });
-
 /** Keyboard behaviour particular to a component, checked on its page. */
 const keyboardChecks: Record<string, () => Promise<void>> = {
-  // An item moves from the keyboard, each step said to screen readers:
-  // Space picks it up, an arrow moves it, Space puts it down; Escape puts
-  // it back.
-  "sortable-list": async () => {
-    const options = page.getByRole("list", { name: "Options" });
-    const second = options.getByRole("listitem").nth(1);
-    focus(options.getByRole("button", { name: "Move Done" }));
-    await userEvent.keyboard(" ");
-    await expect.element(said("Done is now at place 3.")).toBeInTheDocument();
-    await pickedUp();
-    await userEvent.keyboard("{ArrowUp}");
-    await expect.element(said("Done is now at place 2.")).toBeInTheDocument();
-    await userEvent.keyboard(" ");
-    await expect.element(said("Put Done down at place 2.")).toBeInTheDocument();
-    await expect
-      .element(second.getByRole("textbox"))
-      .toHaveAccessibleName("Done");
-
-    focus(options.getByRole("button", { name: "Move Open" }));
-    await userEvent.keyboard(" ");
-    await expect.element(said("Open is now at place 1.")).toBeInTheDocument();
-    await pickedUp();
-    await userEvent.keyboard("{ArrowDown}");
-    await expect.element(said("Open is now at place 2.")).toBeInTheDocument();
-    await userEvent.keyboard("{Escape}");
-    await expect
-      .element(said("Put Open back where it was."))
-      .toBeInTheDocument();
-    await expect
-      .element(second.getByRole("textbox"))
-      .toHaveAccessibleName("Done");
-  },
   // A vertical group moves with the up and down arrows, which only works
   // when the orientation reaches Base UI, not just the styles.
   "toggle-group": async () => {
@@ -435,26 +382,6 @@ describe("the UI kit", () => {
       await expectNoSidewaysScroll();
     }
   );
-
-  it("trace breaks a long unbroken value onto more lines in a line that wraps, never cutting it off", async () => {
-    await page.viewport(phone.width, phone.height);
-    // No hyphen or slash in its long part: nowhere a line breaks by itself.
-    const url = `https://example.com/${"averylongpathsegment".repeat(12)}`;
-    render("Trace", () => (
-      <TraceLine wrap>
-        <TraceTitle data-testid="title">Grasp will remember: {url}</TraceTitle>
-      </TraceLine>
-    ));
-    const title = page.getByTestId("title").element();
-    const main = page.getByRole("main").element();
-
-    expect({
-      clipped: title.scrollWidth > title.clientWidth,
-      past:
-        title.getBoundingClientRect().right >
-        main.getBoundingClientRect().right,
-    }).toStrictEqual({ clipped: false, past: false });
-  });
 
   it("data-grid narrows its rows by the search and the team filter, as its query is asked", async () => {
     await page.viewport(desktop.width, desktop.height);

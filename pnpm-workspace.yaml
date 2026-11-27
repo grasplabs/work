@@ -236,41 +236,18 @@ catalog:
   "@lingui/vite-plugin": 6.8.0
   "@messageformat/parser": 5.1.1
   "@rolldown/plugin-babel": 0.2.4
-  # The kit's chat components (message-scroller): shadcn's own headless
-  # primitives.
-  "@shadcn/react": 0.3.1
   # Damsko's styles (packages/ui): StyleX and its bundler plugin, which
   # each app that renders a Damsko component runs. They move together, at
   # the version Damsko pins.
   "@stylexjs/stylex": 0.19.2
   "@stylexjs/unplugin": 0.19.2
-  # The kit's PromptEditor: the box to ask in, with its mentions as chips in
-  # the text and the dropdown that picks them (\`@\`, later \`/\`). TipTap's
-  # MIT core on ProseMirror, lean: no StarterKit, no formatting, none of its
-  # paid Pro extensions.
-  "@tiptap/core": 3.33.0
-  "@tiptap/extension-document": 3.33.0
-  "@tiptap/extension-hard-break": 3.33.0
-  "@tiptap/extension-mention": 3.33.0
-  "@tiptap/extension-paragraph": 3.33.0
-  "@tiptap/extension-text": 3.33.0
-  "@tiptap/extensions": 3.33.0
-  "@tiptap/pm": 3.33.0
-  "@tiptap/react": 3.33.0
-  "@tiptap/suggestion": 3.33.0
-  # The kit's SortableList: drag, with a keyboard and a screen reader too.
-  "@dnd-kit/core": 6.3.1
-  "@dnd-kit/sortable": 10.0.0
-  "@dnd-kit/utilities": 3.2.2
   "@tailwindcss/vite": 4.3.3
   # The state, subscriptions and lifecycle under the SDK's forms (useForm,
   # @grasp-os/sdk/react) and their fields (@grasp-os/app-kit/form).
   "@tanstack/react-form": 1.33.5
   "@tanstack/react-router": 1.170.46
-  # The columns and rows under the kit's RecordGrid.
+  # The columns and rows under Damsko's DataTable (packages/ui).
   "@tanstack/react-table": 9.3.1
-  # Which of RecordGrid's rows and columns are drawn.
-  "@tanstack/react-virtual": 3.14.25
   "@tanstack/react-start": 1.169.4
   "@tanstack/router-plugin": 1.168.48
   # The route tree of an App's pages, made in the compiler's isolate
@@ -312,8 +289,6 @@ catalog:
   # as Vite and Tailwind already resolve it.
   lightningcss: 1.33.0
   lucide-react: 1.47.0
-  # The kit's motion, as the prototype animates (components/shimmer).
-  motion: 14.3.0
   react: 19.3.0
   # The kit's calendar.
   react-day-picker: 10.0.2

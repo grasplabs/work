@@ -41,13 +41,6 @@ import {
   DropdownMenuTrigger,
 } from "@grasp-os/app-kit/components/dropdown-menu";
 import {
-  EditableTitle,
-  EditableTitleField,
-  EditableTitleMenuContent,
-  EditableTitleRenameItem,
-  EditableTitleTrigger,
-} from "@grasp-os/app-kit/components/editable-title";
-import {
   HoverCard,
   HoverCardContent,
   HoverCardTrigger,
@@ -82,7 +75,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@grasp-os/app-kit/components/tooltip";
-import { useState } from "react";
 
 const AlertDialogDemo = () => (
   <AlertDialog>
@@ -154,23 +146,6 @@ const DropdownMenuDemo = () => (
     </DropdownMenuContent>
   </DropdownMenu>
 );
-
-/** A title renamed where it stands, its menu joined to it. */
-const EditableTitleDemo = () => {
-  const [title, setTitle] = useState("Quarterly planning");
-  return (
-    <EditableTitle label="Name" onValueChange={setTitle} value={title}>
-      <EditableTitleField />
-      <DropdownMenu>
-        <EditableTitleTrigger aria-label="More for this page" />
-        <EditableTitleMenuContent>
-          <EditableTitleRenameItem>Rename</EditableTitleRenameItem>
-          <DropdownMenuItem variant="destructive">Delete</DropdownMenuItem>
-        </EditableTitleMenuContent>
-      </DropdownMenu>
-    </EditableTitle>
-  );
-};
 
 const HoverCardDemo = () => (
   <HoverCard>
@@ -256,7 +231,6 @@ export const overlayDemos = {
   dialog: DialogDemo,
   drawer: DrawerDemo,
   "dropdown-menu": DropdownMenuDemo,
-  "editable-title": EditableTitleDemo,
   "hover-card": HoverCardDemo,
   menubar: MenubarDemo,
   popover: PopoverDemo,

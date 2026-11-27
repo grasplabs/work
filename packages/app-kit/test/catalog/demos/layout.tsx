@@ -1,12 +1,5 @@
 // Demos of the kit's layout primitives and the direction provider. One per
-// component, for the dev-only gallery and its accessibility checks
-// (test/kit.browser.test.tsx).
-import {
-  AppShell,
-  AppShellContent,
-  AppShellDock,
-  AppShellMain,
-} from "@grasp-os/app-kit/components/app-shell";
+// component, for the kit's accessibility checks (test/kit.browser.test.tsx).
 import { Badge } from "@grasp-os/app-kit/components/badge";
 import { Button } from "@grasp-os/app-kit/components/button";
 import {
@@ -16,11 +9,6 @@ import {
   CardTitle,
 } from "@grasp-os/app-kit/components/card";
 import { DirectionProvider } from "@grasp-os/app-kit/components/direction";
-import {
-  DockablePanel,
-  DockablePanelHandle,
-  DockablePanelHeader,
-} from "@grasp-os/app-kit/components/dockable-panel";
 import { Grid } from "@grasp-os/app-kit/components/grid";
 import { Inline } from "@grasp-os/app-kit/components/inline";
 import {
@@ -30,71 +18,10 @@ import {
   PageHeaderDescription,
   PageHeaderTitle,
 } from "@grasp-os/app-kit/components/page-header";
-import { PaintedField } from "@grasp-os/app-kit/components/painted-field";
 import { Panel } from "@grasp-os/app-kit/components/panel";
 import type { PanelSide } from "@grasp-os/app-kit/components/panel";
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarGroup,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-} from "@grasp-os/app-kit/components/sidebar";
-import {
-  SplitPane,
-  SplitPaneAside,
-  SplitPaneMain,
-} from "@grasp-os/app-kit/components/split-pane";
 import { Stack } from "@grasp-os/app-kit/components/stack";
 import { useState } from "react";
-
-const AppShellDemo = () => {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="h-96 overflow-hidden rounded-lg border">
-      <AppShell className="h-full min-h-0">
-        <Sidebar collapsible="none" variant="inset">
-          <SidebarContent>
-            <SidebarGroup>
-              <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton isActive>Home</SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton>Projects</SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
-            </SidebarGroup>
-          </SidebarContent>
-        </Sidebar>
-        <AppShellMain>
-          {/* The catalog's own page is the document's main already. */}
-          <AppShellContent render={<div />}>
-            <div className="p-6">
-              <p>The page, in its card.</p>
-            </div>
-          </AppShellContent>
-          <AppShellDock>
-            <Button
-              onClick={() => {
-                setOpen(!open);
-              }}
-              variant="outline"
-            >
-              {open ? "Close the panel" : "Open the panel"}
-            </Button>
-          </AppShellDock>
-        </AppShellMain>
-        <Panel open={open} side="right" size={240}>
-          <div className="w-60 p-6">
-            <p>Beside the page.</p>
-          </div>
-        </Panel>
-      </AppShell>
-    </div>
-  );
-};
 
 /** A panel on each edge of a box, each opened and collapsed on its own. */
 const PanelDemo = () => {
@@ -157,31 +84,6 @@ const PanelDemo = () => {
   );
 };
 
-const DockablePanelDemo = () => {
-  const [shown, setShown] = useState(false);
-  return (
-    <>
-      <Button
-        onClick={() => {
-          setShown(!shown);
-        }}
-        variant="outline"
-      >
-        {shown ? "Hide the floating panel" : "Show the floating panel"}
-      </Button>
-      <DockablePanel label="Notes" open={shown} placement="floating">
-        <DockablePanelHeader>
-          <DockablePanelHandle label="Move the notes" />
-          <span className="font-medium">Notes</span>
-        </DockablePanelHeader>
-        <div className="p-4">
-          <p>Drag the header to move it anywhere.</p>
-        </div>
-      </DockablePanel>
-    </>
-  );
-};
-
 const DirectionDemo = () => (
   <DirectionProvider direction="rtl">
     <div dir="rtl" lang="ar">
@@ -235,25 +137,6 @@ const PageHeaderDemo = () => (
   </PageHeader>
 );
 
-const SplitPaneDemo = () => (
-  <SplitPane>
-    <SplitPaneMain>
-      <Card>
-        <CardContent>
-          <p className="text-sm">The order.</p>
-        </CardContent>
-      </Card>
-    </SplitPaneMain>
-    <SplitPaneAside aria-label="Customer">
-      <Card>
-        <CardContent>
-          <p className="text-sm">Who ordered it.</p>
-        </CardContent>
-      </Card>
-    </SplitPaneAside>
-  </SplitPane>
-);
-
 const StackDemo = () => (
   <Stack>
     <Card>
@@ -269,26 +152,11 @@ const StackDemo = () => (
   </Stack>
 );
 
-const PaintedFieldDemo = () => (
-  <PaintedField className="h-40" painting="dawn" pattern="columns">
-    <div className="flex h-full flex-col justify-end gap-1 p-5">
-      <p className="type-display">Three invoices wait on you</p>
-      <p className="text-muted-foreground text-sm">
-        The oldest came in on Monday.
-      </p>
-    </div>
-  </PaintedField>
-);
-
 export const layoutDemos = {
-  "app-shell": AppShellDemo,
-  "painted-field": PaintedFieldDemo,
   panel: PanelDemo,
   direction: DirectionDemo,
-  "dockable-panel": DockablePanelDemo,
   grid: GridDemo,
   inline: InlineDemo,
   "page-header": PageHeaderDemo,
-  "split-pane": SplitPaneDemo,
   stack: StackDemo,
 };

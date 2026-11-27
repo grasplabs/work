@@ -1,6 +1,6 @@
 // Demos of the kit's components that show content: status, media, data and
-// structure. One per component, for the dev-only gallery and its
-// accessibility checks (test/kit.browser.test.tsx).
+// structure. One per component, for the kit's accessibility checks
+// (test/kit.browser.test.tsx).
 import {
   Accordion,
   AccordionContent,
@@ -13,7 +13,6 @@ import {
   AlertTitle,
 } from "@grasp-os/app-kit/components/alert";
 import { AspectRatio } from "@grasp-os/app-kit/components/aspect-ratio";
-import { AutoHeight, FadeIn } from "@grasp-os/app-kit/components/auto-height";
 import {
   Avatar,
   AvatarFallback,
@@ -61,7 +60,6 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "@grasp-os/app-kit/components/empty";
-import { GraspMark } from "@grasp-os/app-kit/components/grasp-mark";
 import { Input } from "@grasp-os/app-kit/components/input";
 import {
   Item,
@@ -89,7 +87,6 @@ import { Separator } from "@grasp-os/app-kit/components/separator";
 import { Skeleton } from "@grasp-os/app-kit/components/skeleton";
 import { Spinner } from "@grasp-os/app-kit/components/spinner";
 import { Stat } from "@grasp-os/app-kit/components/stat";
-import { SuccessMark } from "@grasp-os/app-kit/components/success-mark";
 import {
   Table,
   TableBody,
@@ -99,22 +96,7 @@ import {
   TableHeader,
   TableRow,
 } from "@grasp-os/app-kit/components/table";
-import {
-  Tile,
-  TileContent,
-  TileDescription,
-  TileField,
-  TileMeta,
-  TileSheet,
-  TileSheetBar,
-  TileTitle,
-} from "@grasp-os/app-kit/components/tile";
-import {
-  ChevronRightIcon,
-  CogIcon,
-  InfoIcon,
-  LayoutGridIcon,
-} from "lucide-react";
+import { ChevronRightIcon, InfoIcon, LayoutGridIcon } from "lucide-react";
 
 const AccordionDemo = () => (
   <Accordion defaultValue={["shipping"]}>
@@ -357,27 +339,6 @@ const ItemDemo = () => (
   </div>
 );
 
-const TileDemo = () => (
-  <Tile className="max-w-sm">
-    <TileField painting="dawn" pattern="columns">
-      <Badge variant="passed">Published</Badge>
-      <TileSheet>
-        <TileSheetBar icon={<LayoutGridIcon />}>Board</TileSheetBar>
-      </TileSheet>
-    </TileField>
-    <TileContent>
-      <TileTitle href="#board">Board</TileTitle>
-      <TileDescription>
-        Every open lead, from first call to contract.
-      </TileDescription>
-      <TileMeta>
-        <CogIcon aria-hidden="true" />
-        Sales pipeline
-      </TileMeta>
-    </TileContent>
-  </Tile>
-);
-
 const KbdDemo = () => (
   <p className="text-sm">
     Search with{" "}
@@ -458,26 +419,6 @@ const TableDemo = () => (
   </Table>
 );
 
-const AutoHeightDemo = () => (
-  <AutoHeight>
-    <FadeIn>
-      <div className="flex flex-col gap-1">
-        <p className="font-medium">Sign in</p>
-        <p className="text-muted-foreground">
-          Signing in happens at Microsoft 365. It takes about a minute.
-        </p>
-      </div>
-    </FadeIn>
-  </AutoHeight>
-);
-
-const SuccessMarkDemo = () => (
-  <div className="flex flex-col items-center gap-4 text-center">
-    <SuccessMark />
-    <p className="font-medium">Microsoft 365 is connected</p>
-  </div>
-);
-
 const StatDemo = () => (
   <dl className="flex gap-8">
     <div className="flex flex-col gap-0.5">
@@ -493,13 +434,6 @@ const StatDemo = () => (
   </dl>
 );
 
-const GraspMarkDemo = () => (
-  <div className="flex items-center gap-2">
-    <GraspMark className="size-6" />
-    <span className="font-medium">Grasp</span>
-  </div>
-);
-
 const RichTextDemo = () => (
   <RichText
     value={
@@ -512,7 +446,6 @@ export const displayDemos = {
   accordion: AccordionDemo,
   alert: AlertDemo,
   "aspect-ratio": AspectRatioDemo,
-  "auto-height": AutoHeightDemo,
   avatar: AvatarDemo,
   badge: BadgeDemo,
   card: CardDemo,
@@ -520,18 +453,15 @@ export const displayDemos = {
   chart: ChartDemo,
   collapsible: CollapsibleDemo,
   empty: EmptyDemo,
-  "grasp-mark": GraspMarkDemo,
   stat: StatDemo,
   item: ItemDemo,
   kbd: KbdDemo,
   progress: ProgressDemo,
   resizable: ResizableDemo,
   "scroll-area": ScrollAreaDemo,
-  "success-mark": SuccessMarkDemo,
   separator: SeparatorDemo,
   skeleton: SkeletonDemo,
   spinner: SpinnerDemo,
   table: TableDemo,
-  tile: TileDemo,
   "rich-text": RichTextDemo,
 };
