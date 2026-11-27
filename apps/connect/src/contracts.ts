@@ -31,6 +31,7 @@ import { nativeConnector, nativeConnectors } from "./bundled-connectors.ts";
 import {
   composioContract,
   composioContractPrefix,
+  composioDescribedTools,
 } from "./composio-contracts.ts";
 import { allowedToolNow } from "./connections.ts";
 import type { Connection } from "./connections.ts";
@@ -255,7 +256,8 @@ const outlineOf = (schema: unknown, levels: number): unknown => {
 /**
  * A connection's tools with their descriptions and schemas: a native
  * connection's from its connector's manifest, a connector's from its
- * server's list; none of any other.
+ * server's list, a Composio one's from its session's list
+ * (`composioDescribedTools`); none of any other.
  */
 const describedTools = async (
   env: Env,
@@ -264,6 +266,9 @@ const describedTools = async (
 ): Promise<
   { name: string; description: string; input: unknown; output: unknown }[]
 > => {
+  if (connection.serverKind === "composio") {
+    return await composioDescribedTools(env, connection);
+  }
   if (connection.serverKind === "connector") {
     const listed =
       searched === undefined
@@ -300,9 +305,10 @@ const describedTools = async (
  * full for the `actions` named, as its server lists them now
  * (`offeredTools`), else every one as a search reads it, as kept and at
  * once, a stale list read again after (`later`); never one an admin
- * blocked on its connector. None for any other
- * connection, or one that is gone. Throws `connect.server_unavailable`
- * when a connector's list can't be read for the `actions` named.
+ * blocked on its connector. A Composio connection's as its session lists
+ * them now, of those connect offers. None for any other connection, or one
+ * that is gone. Throws `connect.server_unavailable` when a connector's or
+ * a Composio session's list can't be read.
  */
 export const connectionTools = async (
   env: Env,

@@ -43,8 +43,8 @@ const toolsPerConnection = 1000;
 
 /**
  * A `bulk` connection, `owner`'s own or else shared, allowing `tools` as
- * reads, whose server takes an invoice for each. A Composio connection's
- * tools are searched by their names alone, so the tests find them by name.
+ * reads, whose server takes an invoice for each, as its session lists
+ * them. The tests find them by name.
  */
 const bulkConnection = async (tools: readonly string[], owner?: string) => {
   const connection = await mailConnection(
@@ -123,7 +123,8 @@ describe("a chat's tool search", setUpTime, () => {
         action: needle,
         summary: "",
         class: "read-own",
-        input: "unknown",
+        // Its input as the session lists it, for the agent to call with.
+        input: "{ invoice: string }",
       },
       matches: 1,
       output: { shipment: "SHP-7" },

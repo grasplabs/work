@@ -3,8 +3,16 @@ import type {
   ConnectorContract,
   ConnectorContractAction,
 } from "@grasp-os/shared/connect";
+import { log } from "@grasp-os/shared/log";
 
-import { allowedTool, readOnlyNow, composioServer } from "./connections.ts";
+import { composioTools } from "./catalog.ts";
+import { composioKey } from "./composio.ts";
+import {
+  allowedTool,
+  composioServer,
+  offeredToolNames,
+  readOnlyNow,
+} from "./connections.ts";
 import type { Connection } from "./connections.ts";
 import { McpError } from "./mcp.ts";
 import type { McpListedTool } from "./mcp.ts";
@@ -76,6 +84,104 @@ const listedOnce = (tools: readonly McpListedTool[]): McpListedTool[] => {
 };
 
 /**
+ * The tools `connection`'s session lists now, each named once
+ * (`listedOnce`): `connect.server_unavailable` when its list can't be read.
+ */
+const listedNow = async (
+  env: Env,
+  connection: Connection
+): Promise<McpListedTool[]> => {
+  try {
+    return listedOnce(
+      await composioServer(env, connection).tools(maxListedTools)
+    );
+  } catch (error) {
+    throw error instanceof McpError
+      ? connectErrors.create("connect.server_unavailable")
+      : error;
+  }
+};
+
+/**
+ * Each tool's description in Composio's catalog of `toolkit`, by name:
+ * none while the catalog can't be read, as a tool is still described by
+ * its schema then.
+ */
+const catalogDescriptions = async (
+  env: Env,
+  toolkit: string
+): Promise<ReadonlyMap<string, string>> => {
+  const key = composioKey(env);
+  if (key === undefined) {
+    return new Map();
+  }
+  try {
+    const tools = await composioTools(key, toolkit);
+    return new Map(
+      tools.flatMap(({ name, description }) =>
+        description === null ? [] : [[name, description] as const]
+      )
+    );
+  } catch {
+    return new Map();
+  }
+};
+
+/**
+ * The tools a chat's agent may call through `connection`, as its search
+ * and `describe` hand them to the model (contracts.ts `connectionTools`):
+ * those connect offers (`offeredToolNames`: what the admin allowed, but
+ * for what Grasp never runs), each with the input and output schemas its
+ * session lists now, which is what a call is checked against there, and
+ * Composio's description of it from the catalog. Throws
+ * `connect.server_unavailable` when the session's list can't be read.
+ * Logged by counts and names alone, so one attempt shows a session that
+ * lists its tools by other names, or without schemas.
+ */
+export const composioDescribedTools = async (
+  env: Env,
+  connection: Connection
+): Promise<
+  { name: string; description: string; input: unknown; output: unknown }[]
+> => {
+  const offered = new Set(offeredToolNames(connection));
+  const [listed, descriptions] = await Promise.all([
+    listedNow(env, connection),
+    catalogDescriptions(env, connection.provider),
+  ]);
+  const described = listed.flatMap(({ name, inputSchema, outputSchema }) =>
+    offered.has(name)
+      ? [
+          {
+            name,
+            description: descriptions.get(name) ?? "",
+            input: inputSchema,
+            output: outputSchema,
+          },
+        ]
+      : []
+  );
+  log.info("composio.tools_described", {
+    toolkit: connection.provider,
+    listed: listed.length,
+    offered: offered.size,
+    described: described.length,
+    withInput: described.filter(
+      ({ input }) =>
+        typeof input === "object" &&
+        input !== null &&
+        Object.keys(input).length > 0
+    ).length,
+    // Names alone, a few: tool names are Composio's, never anyone's data.
+    listedSample: listed
+      .slice(0, 5)
+      .map(({ name }) => name.slice(0, 80))
+      .join(","),
+  });
+  return described;
+};
+
+/**
  * The contract `contract` (`composio.<toolkit>@1`, the connection's own
  * toolkit) as `connection`'s server serves it now. Throws
  * `connect.contract_not_found` when none of its allowed tools can be
@@ -87,17 +193,10 @@ export const composioContract = async (
   connection: Connection,
   contract: string
 ): Promise<ConnectorContract> => {
-  let listed: McpListedTool[];
-  try {
-    listed = await composioServer(env, connection).tools(maxListedTools);
-  } catch (error) {
-    throw error instanceof McpError
-      ? connectErrors.create("connect.server_unavailable")
-      : error;
-  }
+  const listed = await listedNow(env, connection);
   const actions: Record<string, ConnectorContractAction> = {};
   const taggedRead = await readOnlyNow(env, connection.provider);
-  for (const { name, inputSchema, outputSchema } of listedOnce(listed)) {
+  for (const { name, inputSchema, outputSchema } of listed) {
     // The admin's word and the name first: nothing else of a tool that
     // can't be served is read.
     const rule = actionNamePattern.test(name)
