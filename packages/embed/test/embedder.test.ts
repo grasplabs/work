@@ -878,7 +878,9 @@ describe("embedder, several texts a call", () => {
         expect(outcomes(results)).toStrictEqual(turned(bits, by));
       }
     }
-  });
+    // Two models and every text at sixteen places: more than the default
+    // five seconds on a loaded runner.
+  }, 30_000);
 
   it("names the same model and build for each text as for one text alone", async () => {
     await upload(int8Model, int8Files);

@@ -337,9 +337,6 @@ catalogs:
     mdast-util-math:
       specifier: 3.0.0
       version: 3.0.0
-    mermaid:
-      specifier: 12.2.0
-      version: 12.2.0
     micromark-extension-gfm:
       specifier: 3.0.0
       version: 3.0.0
@@ -367,6 +364,9 @@ catalogs:
     parse5:
       specifier: 8.1.0
       version: 8.1.0
+    pele:
+      specifier: 1.13.0
+      version: 1.13.0
     playwright:
       specifier: 1.63.0
       version: 1.63.0
@@ -1657,15 +1657,15 @@ importers:
       mdast-util-math:
         specifier: 'catalog:'
         version: 3.0.0(supports-color@10.2.2)
-      mermaid:
-        specifier: 'catalog:'
-        version: 12.2.0
       micromark-extension-gfm:
         specifier: 'catalog:'
         version: 3.0.0
       micromark-extension-math:
         specifier: 'catalog:'
         version: 3.1.0
+      pele:
+        specifier: 'catalog:'
+        version: 1.13.0
       react-is:
         specifier: 'catalog:'
         version: 19.3.0
@@ -9830,6 +9830,10 @@ packages:
 
   pathe@2.0.3:
     resolution: {integrity: sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==}
+
+  pele@1.13.0:
+    resolution: {integrity: sha512-Ie8UKY9x00MsuR3jO6AzUwzK2Z6MIV3Tf4EDdITiuk8Uaz8K7g0R082WqsqNaSU8DdgkrRvZThzhit83mi/uiw==}
+    engines: {node: '>=20'}
 
   perfect-debounce@2.1.0:
     resolution: {integrity: sha512-LjgdTytVFXeUgtHZr9WYViYSM/g8MkcTPYDlPa3cDqMirHjKiSZPYd6DoL7pK8AJQr+uWkQvCjHNdiMqsrJs+g==}
@@ -19665,6 +19669,8 @@ snapshots:
   path-to-regexp@8.4.2: {}
 
   pathe@2.0.3: {}
+
+  pele@1.13.0: {}
 
   perfect-debounce@2.1.0: {}
 

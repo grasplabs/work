@@ -572,15 +572,25 @@ const spanOf = (code: string) => {
   const pad = /^[` ]|[` ]$/u.test(code) ? " " : "";
   return `${fence}${pad}${code}${pad}${fence}`.replaceAll("|", "\\|");
 };
+/** Words as Markdown that reads back as the same words: every active mark escaped, on one line. */
+const wordsOf = (value: string) =>
+  value.replaceAll(ACTIVE, "\\$&").replaceAll(/\s*\n\s*/gu, " ");
 /**
  * A table cell (or anything in one) as Markdown that reads back as the same cell: code as a code
- * span, emphasis, strike-through, links and maths as written, every other active mark escaped,
- * a tag dropped (as it is drawn), a line break a space.
+ * span, emphasis, strike-through, links, pictures (their alt text the words), notes' marks and
+ * maths as written, every other active mark escaped, a tag dropped (as it is drawn), a line break
+ * a space. The table is copied without the answer's definitions, so a link or a picture by
+ * reference is written with its address from `definitions`.
  */
-export const markdownOfCell = (node: RootContent): string => {
+export const markdownOfCell = (
+  node: RootContent,
+  definitions: readonly Extract<RootContent, { type: "definition" }>[]
+): string => {
   const kids = () =>
     "children" in node
-      ? node.children.map((child) => markdownOfCell(child)).join("")
+      ? node.children
+          .map((child) => markdownOfCell(child, definitions))
+          .join("")
       : "";
   if (node.type === "inlineCode") {
     return spanOf(node.value);
@@ -588,8 +598,24 @@ export const markdownOfCell = (node: RootContent): string => {
   if (node.type === "inlineMath") {
     return `$$${node.value.replaceAll("|", "\\|")}$$`;
   }
-  if (node.type === "link") {
-    return `[${kids()}](<${node.url.replaceAll(/[<>|\\]/gu, "\\$&")}>)`;
+  if (
+    node.type === "link" ||
+    node.type === "linkReference" ||
+    node.type === "image" ||
+    node.type === "imageReference"
+  ) {
+    const url =
+      "url" in node
+        ? node.url
+        : definitions.find((each) => each.identifier === node.identifier)?.url;
+    const picture = "alt" in node;
+    const words = picture ? wordsOf(node.alt ?? "") : kids();
+    return url === undefined
+      ? words
+      : `${picture ? "!" : ""}[${words}](<${url.replaceAll(/[<>|\\]/gu, "\\$&")}>)`;
+  }
+  if (node.type === "footnoteReference") {
+    return `[^${(node.label ?? node.identifier).replaceAll("|", "\\|")}]`;
   }
   if (node.type === "html") {
     return BREAK.test(node.value) ? " " : "";
@@ -601,7 +627,5 @@ export const markdownOfCell = (node: RootContent): string => {
   if (around !== undefined) {
     return `${around}${kids()}${around}`;
   }
-  return "value" in node
-    ? node.value.replaceAll(ACTIVE, "\\$&").replaceAll(/\s*\n\s*/gu, " ")
-    : kids();
+  return "value" in node ? wordsOf(node.value) : kids();
 };
