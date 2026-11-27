@@ -264,7 +264,7 @@ interface LiveTurn {
    * with its question as its object copies it here (`keepTurnMessages`):
    * the page knows its question by it. None for a question sent without.
    */
-  keys: (string | undefined)[];
+  keys: { key: string | undefined }[];
   /**
    * Whether it got under way (`started`), told once: true as it goes to
    * its ChatSession, false when it was refused before. What a question
@@ -511,7 +511,7 @@ const keptWith = (
  * places them.
  */
 const keyOfQuestion = (live: LiveTurn | undefined): string | undefined =>
-  live?.keys.shift();
+  live?.keys.shift()?.key;
 
 /**
  * What the next agent the person addressed in a question reads, after the
@@ -2806,7 +2806,7 @@ export class Workspace extends DurableObject<Env> {
       reads: [],
       calls,
       remembered,
-      keys: [key],
+      keys: [{ key }],
       underWay: Promise.withResolvers(),
       ended: Promise.withResolvers(),
     };
@@ -3225,9 +3225,15 @@ export class Workspace extends DurableObject<Env> {
           void this.#forget(ended);
           return;
         }
-        if (
+        // Its key in line before it is queued, after those before it: the
+        // agent may take it, and its object copy it here, before the call
+        // queueing it answers. Out of line again if it isn't queued.
+        const inLine = { key };
+        live.keys.push(inLine);
+        let queued = false;
+        try {
           // oxlint-disable-next-line no-await-in-loop -- once more only when that turn ended meanwhile
-          await this.#queueInto(
+          queued = await this.#queueInto(
             chat,
             {
               id: live.id,
@@ -3236,10 +3242,14 @@ export class Workspace extends DurableObject<Env> {
             },
             id,
             question
-          )
-        ) {
-          // Kept with it once the agent takes it, after those before it.
-          live.keys.push(key);
+          );
+        } finally {
+          const at = live.keys.indexOf(inLine);
+          if (!queued && at !== -1) {
+            live.keys.splice(at, 1);
+          }
+        }
+        if (queued) {
           started.resolve(true);
           return;
         }
