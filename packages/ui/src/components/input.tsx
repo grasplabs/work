@@ -37,7 +37,14 @@ import { useRunsLong } from "../hooks/use-runs-long";
 import { useI18n } from "../lib/i18n";
 import { EyeIcon, EyeOffIcon, Icon } from "../lib/icons";
 import type { IconData } from "../lib/icons";
-import { focusField, focusRing, inputStyles, tapTarget } from "../lib/styles";
+import {
+  focusField,
+  focusRing,
+  inputStyles,
+  tapTarget,
+  valueFade,
+  valueFits,
+} from "../lib/styles";
 import {
   colors,
   duration,
@@ -133,19 +140,10 @@ export interface InputProps extends Omit<
 
 // ---- The look --------------------------------------------------------------------------------------
 
-const FORCED = media.forcedColors;
 const HOVER = media.hover;
 const TYPING = media.maxSmOrCoarse;
 // Focus from the keys, never after a press (lib/styles marks a pointer's focus).
 const KEYBOARD = ":focus-visible:not([data-focus-pointer])";
-// Where the words can be painted through a gradient, a long value fades at its end (below).
-// Not in Firefox: it passes the test, but a form control's words are not clipped there, so the
-// gradient filled the whole box and every value drew as a dark bar. There a long value is cut by
-// the box's edge as it scrolls.
-const CLIP_TEXT =
-  "@supports (background-clip: text) and (not (-moz-appearance: none))";
-const FADE_END = `linear-gradient(to right, currentColor calc(100% - ${space[5]}), transparent), linear-gradient(transparent, transparent)`;
-const FADE_END_RTL = `linear-gradient(to left, currentColor calc(100% - ${space[5]}), transparent), linear-gradient(transparent, transparent)`;
 
 const styles = stylex.create({
   // An icon at the start: it stands over the input, in muted, and lets presses through to it.
@@ -176,31 +174,7 @@ const styles = stylex.create({
     // typed value fades instead (below).
     textOverflow: { default: "clip", ":placeholder-shown": "ellipsis" },
     paddingInline: space[3],
-    // A value longer than the field fades out at its end, never a cut through a letter. The words
-    // are painted through a gradient (clipped to the text) that ends in transparent over the last
-    // space-5 of the content box. While the field has focus the words are plain ink, so the
-    // caret's end of the value always shows. The second, empty layer keeps the fill on the whole
-    // box. Drawn only while the value is longer than the field (fits, below).
-    WebkitTextFillColor: {
-      default: null,
-      [CLIP_TEXT]: {
-        default: "transparent",
-        ":focus": "currentColor",
-        [FORCED]: "currentColor",
-      },
-    },
-    // In forced colours the background is dropped, so the words keep their own colour there.
-    backgroundImage: {
-      default: null,
-      [CLIP_TEXT]: { default: FADE_END, ":dir(rtl)": FADE_END_RTL },
-    },
-    backgroundOrigin: {
-      default: null,
-      [CLIP_TEXT]: "content-box, padding-box",
-    },
-    backgroundClip: { default: null, [CLIP_TEXT]: "text, padding-box" },
-    // One tile: words past the content box (in the end padding) take no paint, so stay unseen.
-    backgroundRepeat: { default: null, [CLIP_TEXT]: "no-repeat" },
+    // A value longer than the field fades out at its end (valueFade, lib/styles).
     // One look for clearing a field in the library: InputGroupClear. A search field shows no cross
     // of the browser's; Escape still empties it where the browser does that. display: none, not
     // appearance: none: WebKit draws its own cross with appearance none too.
@@ -222,14 +196,7 @@ const styles = stylex.create({
       textOverflow: "ellipsis",
     },
   },
-  // A value that fits the field: no fade, every letter at full ink.
-  fits: {
-    WebkitTextFillColor: null,
-    backgroundImage: null,
-    backgroundOrigin: null,
-    backgroundClip: null,
-    backgroundRepeat: null,
-  },
+
   // Words a machine reads: the mono face a step smaller, on the same line.
   mono: {
     fontFamily: font.mono,
@@ -303,7 +270,8 @@ const TextInput = ({
             {...stylex.props(
               inputStyles.control,
               styles.input,
-              !long && styles.fits,
+              valueFade,
+              !long && valueFits,
               sizeStyles[size],
               mono && styles.mono,
               icon && styles.iconStart,
@@ -454,6 +422,7 @@ export const PasswordInput = ({
             {...stylex.props(
               inputStyles.control,
               styles.input,
+              valueFade,
               sizeStyles[size],
               roomStyles[size],
               !(state.disabled || state.readOnly) && inputStyles.enabled,

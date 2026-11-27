@@ -1191,8 +1191,13 @@ const useRename = (row: AppShellNavRow) => {
       row.onRename?.(name);
     }
     if (byKey) {
+      // Back to the row once it is drawn again, only where the focus was lost with the field: never
+      // over a place the person has moved on to meanwhile (another row, its own rename).
       requestAnimationFrame(() => {
-        linkOfRow()?.focus();
+        const now = document.activeElement;
+        if (now === null || now === document.body) {
+          linkOfRow()?.focus();
+        }
       });
     }
   };
