@@ -44,15 +44,16 @@ export default defineProject({
     testTimeout: 30_000,
     // The pool inlines every dependency, and the module runner loads each
     // module with its own round trip to Vite, one import after another.
-    // lucide-react's entry re-exports about 1,850 icon modules, so a page
-    // with an icon (a page's Selects) took several times as long
-    // as the rest of the app: past 30 s under CI's load. Pre-bundled, it is
-    // one module. React stays out of the bundle, so there is one React.
+    // An icon set's entry re-exports thousands of icon modules (Damsko's,
+    // @hugeicons/core-free-icons), so a page with an icon took several
+    // times as long as the rest of the app: past 30 s under CI's load.
+    // Pre-bundled, it is one module. React stays out of the bundle, so
+    // there is one React.
     deps: {
       optimizer: {
         ssr: {
           enabled: true,
-          include: ["@grasp-os/app-kit > lucide-react"],
+          include: ["@grasp-os/ui > @hugeicons/core-free-icons"],
         },
       },
     },

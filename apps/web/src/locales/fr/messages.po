@@ -1679,6 +1679,11 @@ msgstr "{triggers, plural, one {# déclencheur, et lancer à la main.} other {# 
 msgid "{uninterviewed} of {total} not interviewed yet"
 msgstr "{uninterviewed} sur {total} pas encore interviewées"
 
+#. Connections a step read from that the page has no name for, as the last item of the list in “Read from {sources}”.
+#: src/chat/answer-steps.tsx
+msgid "{unknown, plural, one {a connection} other {# connections}}"
+msgstr "{unknown, plural, one {une connexion} other {# connexions}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{unnamed} of {total} seen in use, never named"
 msgstr "{unnamed} sur {total} vues en usage, jamais citées"
@@ -10289,6 +10294,11 @@ msgstr "Lieu"
 msgid "Log in"
 msgstr "Se connecter"
 
+#: src/chat/answer-steps.tsx
+msgctxt "what a code step logged"
+msgid "Logged"
+msgstr "Journalisé"
+
 #: src/settings/org-card.tsx
 msgid "Logo"
 msgstr "Logo"
@@ -13267,6 +13277,10 @@ msgstr "Partie {n} sur {parts} : {label}"
 msgid "Part of the brain not found"
 msgstr "Partie du brain introuvable"
 
+#: src/chat/answer-steps.tsx
+msgid "Part of what came back was left out, to fit what the model reads."
+msgstr "Une partie de ce qui a été renvoyé a été omise, pour tenir dans ce que lit le modèle."
+
 #: src/inbox/outcome-details.tsx
 msgid "Part of what was sent is cut short above. Show it all, or exactly what was sent, before you say it didn't happen."
 msgstr "Une partie de ce qui a été envoyé est tronquée ci-dessus. Affichez tout, ou exactement ce qui a été envoyé, avant de dire que ce n'est pas arrivé."
@@ -14033,6 +14047,11 @@ msgstr "Lu dans"
 msgid "Read from {name} on {readOn}"
 msgstr "Lu depuis {name} le {readOn}"
 
+#. The outside systems a step of the answer read from; {sources} is their names, as a list.
+#: src/chat/answer-steps.tsx
+msgid "Read from {sources}"
+msgstr "Lu depuis {sources}"
+
 #: src/brain/sources-page.tsx
 msgctxt "a source of the Brain"
 msgid "Read from a shared connection"
@@ -14244,6 +14263,10 @@ msgstr "Reconnecter"
 #: src/projects/project-view.tsx
 msgid "Reconnect it so the Apps and workflows that use it work again."
 msgstr "Reconnectez-le pour que les Apps et les workflows qui l’utilisent fonctionnent à nouveau."
+
+#: src/chat/composer.tsx
+msgid "Reconnecting to Grasp…"
+msgstr "Reconnexion à Grasp…"
 
 #: src/apps/app-data.tsx
 msgid "record"

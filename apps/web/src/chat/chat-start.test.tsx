@@ -24,7 +24,7 @@ import {
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type { Loaded } from "../load-from-core.tsx";
 import { examplesFor } from "../make/examples.ts";
@@ -119,6 +119,9 @@ const shown = async (
     from,
     models = Promise.resolve(["openai/gpt-5"]),
     modelsAgain = models,
+    sends = [],
+    creates = [],
+    taking = Promise.resolve(true),
   }: {
     agents?: ChatAgent[];
     named?: string;
@@ -127,9 +130,21 @@ const shown = async (
     models?: Promise<string[]>;
     /** What it says when the page asks again (Try again). */
     modelsAgain?: Promise<string[]>;
+    /** How each send goes, in turn, before they all go through: a failure throws. */
+    sends?: (Error | undefined)[];
+    /** How each making of a chat goes, in turn, before they all go through. */
+    creates?: (Error | undefined)[];
+    /** When core takes a question sent: at once by default. */
+    taking?: Promise<boolean>;
   } = {}
 ) => {
   const asked: string[] = [];
+  /** The key each create and send went with. */
+  const keys: string[] = [];
+  /** How many hold the connection checked now (`keepAlive`). */
+  const kept = { alive: 0 };
+  /** How core is reached now, as the tab's connection finds it. */
+  const reached = { reach: "reachable", watchers: new Set<() => void>() };
   let modelReads = 0;
   const chats = {
     models: async () => {
@@ -139,12 +154,28 @@ const shown = async (
     efforts: async () => await Promise.resolve({}),
     list: async () => await Promise.resolve([]),
     agents: async () => await Promise.resolve(agents),
-    create: async (title: string, agentId?: string, made?: ChatMake) => {
+    create: async (
+      title: string,
+      agentId?: string,
+      made?: ChatMake,
+      key?: string
+    ) => {
+      keys.push(`create ${key}`);
+      const failure = creates.shift();
+      if (failure !== undefined) {
+        throw failure;
+      }
       const by = agentId === undefined ? "" : ` with ${agentId}`;
       asked.push(`create ${title} ${JSON.stringify(made ?? null)}${by}`);
       return await Promise.resolve({ id: "chat-1", title });
     },
     send: async (chatId: string, question: ChatQuestion) => {
+      keys.push(`send ${question.key}`);
+      const failure = sends.shift();
+      if (failure !== undefined) {
+        throw failure;
+      }
+      await taking;
       asked.push(
         `send ${chatId} ${question.text}${question.mentions === undefined ? "" : ` ${JSON.stringify(question.mentions)}`}`
       );
@@ -157,6 +188,21 @@ const shown = async (
     withSession: async <T,>(
       action: (session: { chats: typeof chats }) => Promise<T>
     ): Promise<T> => await action({ chats }),
+    get reach() {
+      return reached.reach;
+    },
+    watchReach: (changed: () => void) => {
+      reached.watchers.add(changed);
+      return () => {
+        reached.watchers.delete(changed);
+      };
+    },
+    keepAlive: () => {
+      kept.alive += 1;
+      return () => {
+        kept.alive -= 1;
+      };
+    },
   };
   const rootRoute = createRootRoute({ component: Outlet });
   const shell = createRoute({
@@ -209,7 +255,14 @@ const shown = async (
     await router.load();
   });
   await settled();
-  return { asked };
+  /** Core reached so, as the tab's connection finds it. */
+  const reach = (now: "reachable" | "unreachable") => {
+    reached.reach = now;
+    for (const changed of reached.watchers) {
+      changed();
+    }
+  };
+  return { asked, keys, reach, kept };
 };
 
 const box = (): HTMLElement => {
@@ -276,6 +329,7 @@ describe("Chat's page from Make something", () => {
     root = undefined;
     document.body.replaceChildren();
     localStorage.clear();
+    vi.useRealTimers();
   });
 
   it("offers an App's blueprints, each filling the box with a sentence naming it, and makes nothing", async () => {
@@ -497,6 +551,172 @@ describe("Chat's page from Make something", () => {
         "send chat-1 What waits on me today?",
       ],
       kept: [],
+    });
+  });
+
+  it("says under the box that it reconnects once Grasp has been out of reach for two seconds, never for a blip", async () => {
+    const { reach } = await shown();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const reconnecting = "Reconnecting to Grasp…";
+
+    await act(async () => {
+      reach("unreachable");
+      await vi.advanceTimersByTimeAsync(1500);
+      reach("reachable");
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    const blip = notes();
+    await act(async () => {
+      reach("unreachable");
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    const gone = notes();
+    await act(async () => {
+      reach("reachable");
+      await Promise.resolve();
+    });
+
+    expect({ blip, gone, back: notes() }).toStrictEqual({
+      blip: [],
+      gone: [reconnecting],
+      back: [],
+    });
+  });
+
+  it("asks again on the next connection when the one a question went on broke, saying nothing, and core takes it once", async () => {
+    const { asked, keys } = await shown(undefined, undefined, {
+      // Let go of as dead (maybe wrongly) while it went.
+      sends: [new Error("Peer closed WebSocket: 1006")],
+    });
+
+    await act(async () => {
+      typeInPrompt(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({
+      notes: notes(),
+      sent: asked.filter((each) => each.startsWith("send ")),
+      sameKey: new Set(keys.map((each) => each.split(" ")[1])).size,
+    }).toStrictEqual({
+      notes: [],
+      sent: ["send chat-1 What waits on me today?"],
+      sameKey: 1,
+    });
+  });
+
+  it("keeps a question that couldn't reach Grasp, says so, and sends it again as the same question, which core takes once", async () => {
+    const { asked, keys } = await shown(undefined, undefined, {
+      // The socket broke on the way, and again on the next: its own words
+      // are nobody's to read.
+      // Before the chat is made, so the box stays.
+      creates: [
+        new Error("Peer closed WebSocket: 1006"),
+        new Error("Peer closed WebSocket: 1006"),
+      ],
+    });
+
+    await act(async () => {
+      typeInPrompt(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+    const failed = { box: box().textContent, notes: notes() };
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({
+      failed,
+      sent: asked.filter((each) => each.startsWith("send ")),
+      sameKey: new Set(keys.map((each) => each.split(" ")[1])).size,
+    }).toStrictEqual({
+      failed: {
+        box: "What waits on me today?",
+        notes: [
+          "Could not send. Your message is kept.",
+          "Grasp can't be reached right now. Try again in a moment.",
+        ],
+      },
+      // Each try made the chat again with the same key, which core
+      // answers with the chat the first made, and sent it with the same.
+      sent: ["send chat-1 What waits on me today?"],
+      sameKey: 1,
+    });
+  });
+
+  it("sends a question that failed as a new one once its words were changed, even back to the same words", async () => {
+    const { keys } = await shown(undefined, undefined, {
+      creates: [
+        new Error("Peer closed WebSocket: 1006"),
+        new Error("Peer closed WebSocket: 1006"),
+      ],
+    });
+    // The box's words, each time all of them anew.
+    const write = async (words: string) => {
+      await act(async () => {
+        box().replaceChildren();
+        typeInPrompt(box(), words);
+        await Promise.resolve();
+      });
+    };
+    const ask = async (words: string) => {
+      await write(words);
+      await act(async () => {
+        box().closest("form")?.requestSubmit();
+        await Promise.resolve();
+      });
+      await settled();
+    };
+
+    await ask("Yes");
+    await write("Yes, go on");
+    await ask("Yes");
+
+    const made = keys.filter((each) => each.startsWith("create "));
+    // Two tries of the first, one of the second.
+    expect(new Set(made).size).toBe(2);
+  });
+
+  it("keeps the connection checked while a question is on its way, after Chat's start went as its chat opened", async () => {
+    const taken = Promise.withResolvers<boolean>();
+    const { kept } = await shown(undefined, undefined, {
+      taking: taken.promise,
+    });
+    await act(async () => {
+      typeInPrompt(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+    // The chat's page opened: Chat's start, and its box, are gone.
+    const meanwhile = {
+      startGone: document.querySelector('[role="textbox"]') === null,
+      alive: kept.alive,
+    };
+    await act(async () => {
+      taken.resolve(true);
+      await taken.promise;
+    });
+    await settled();
+
+    expect({ meanwhile, after: kept.alive }).toStrictEqual({
+      meanwhile: { startGone: true, alive: 1 },
+      after: 0,
     });
   });
 

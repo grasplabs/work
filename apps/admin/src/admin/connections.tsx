@@ -11,9 +11,24 @@ import type {
   AdminIntegrations,
   AdminNeeded,
 } from "@grasp-os/shared/admin-snapshot";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 
-import { Attention } from "./parts.tsx";
+import { Attention } from "./marks.tsx";
+import { PartNote } from "./page-part.tsx";
 import { plural } from "./words.ts";
+
+const styles = stylex.create({
+  // Each binding it waits on, a line each.
+  needs: { display: "flex", flexDirection: "column", gap: space["1"] },
+});
 
 /** The native connectors, by name. */
 const nativeNames: Record<string, string> = {
@@ -150,27 +165,24 @@ export const WaitingOnConnectionsRows = ({
 }) => {
   const workflows = waitingWorkflows(integrations.needed);
   if (workflows.length === 0) {
-    return (
-      <p className="text-muted-foreground border-t px-5 py-4">
-        No workflow waits on a connection.
-      </p>
-    );
+    return <PartNote>No workflow waits on a connection.</PartNote>;
   }
   return (
-    <ul className="flex flex-col">
+    <ItemGroup aria-label="Workflows waiting on a connection" separated>
       {workflows.map((workflow) => (
-        <li
-          className="flex flex-wrap items-start justify-between gap-x-6 gap-y-1 border-t px-5 py-3"
-          key={workflow.id}
-        >
-          <span className="min-w-0">{workflow.name}</span>
-          <span className="flex flex-col text-xs lg:items-end">
-            {workflow.needs.map((need) => (
-              <Attention key={need.alias}>{needLine(need)}</Attention>
-            ))}
-          </span>
-        </li>
+        <Item key={workflow.id} size="sm">
+          <ItemContent>
+            <ItemTitle>{workflow.name}</ItemTitle>
+            <ItemDescription>
+              <span {...stylex.props(styles.needs)}>
+                {workflow.needs.map((need) => (
+                  <Attention key={need.alias}>{needLine(need)}</Attention>
+                ))}
+              </span>
+            </ItemDescription>
+          </ItemContent>
+        </Item>
       ))}
-    </ul>
+    </ItemGroup>
   );
 };

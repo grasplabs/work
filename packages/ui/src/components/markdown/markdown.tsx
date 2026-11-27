@@ -498,10 +498,13 @@ const At = createContext("");
 const kidsOf = (node: Node) =>
   ("children" in node ? node.children : []) as Node[];
 const BLOCKY = /^(?:blockquote|list|listItem|table|tableRow|section)$/u;
-// A tag is dropped as it is drawn; `<br>` is a break between words.
+// A tag is dropped as it is drawn; `<br>` is a break between words; a picture is its alt text.
 const textOf = (node: Node): string => {
   if (node.type === "html") {
     return /^<br\s*\/?>$/iu.test(node.value) ? " " : "";
+  }
+  if ("alt" in node) {
+    return node.alt ?? "";
   }
   return "value" in node
     ? node.value
@@ -931,10 +934,11 @@ const TableBlock = ({ node, shared, kids, name }: Part<Of<"table">>) => {
   const drawnRows = [head, ...rows.slice(0, MOST_ROWS)].flatMap((each) =>
     each === undefined ? [] : [each.children.slice(0, align.length)]
   );
+  const definitions = use(Definitions);
   const cells = {
     words: drawnRows.map((line) => line.map((cell) => textOf(cell))),
     source: drawnRows.map((line) =>
-      line.map((cell) => parse.markdownOfCell(cell))
+      line.map((cell) => parse.markdownOfCell(cell, definitions))
     ),
   };
   const own = (

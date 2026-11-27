@@ -12,6 +12,7 @@ import {
   isTransient,
   reconnectDelay,
   retrying,
+  timeoutMs,
   unlessAborted,
   withTimeout,
 } from "./core.ts";
@@ -81,16 +82,29 @@ const answered = async (api: RpcStub<CoreApi>): Promise<Connected> => {
 /**
  * Listens for the page coming back (to the tab, or online), when a socket
  * may have died without saying so and a reconnect wait is worth cutting
- * short.
+ * short, and for the browser going offline, when no socket can work.
  */
-const onPageBack = (back: () => void): void => {
+const onPageBack = (back: () => void, offline: () => void): void => {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
       back();
     }
   });
   window.addEventListener("online", back);
+  window.addEventListener("offline", offline);
 };
+
+/**
+ * How often the open connection is asked whether it still answers while
+ * something depends on hearing from core (`keepAlive`).
+ */
+export const heartbeatMs = 2500;
+
+/**
+ * How long a ping may wait behind a large message going out
+ * (`holdHeartbeat`): a file's 13 MB at 1 Mbit/s and more.
+ */
+export const heldPingMs = 120_000;
 
 /**
  * Whether core answers, as the connection last found: trying to reach it,
@@ -118,9 +132,60 @@ export interface CoreConnectionOptions {
   onSessionEnded: () => void;
   /** Opens a connection to core: a stand-in in tests. */
   connect?: () => RpcStub<CoreApi>;
-  /** Calls `back` when the page comes back: never in tests. */
-  watchPage?: (back: () => void) => void;
+  /**
+   * Calls `back` when the page comes back, and `offline` when the browser
+   * goes offline: never in tests.
+   */
+  watchPage?: (back: () => void, offline: () => void) => void;
+  /**
+   * Whether the page's clock runs for the heartbeat now: its time, and
+   * whether the tab is in front. A stand-in in tests.
+   */
+  clock?: PageClock;
+  /** Asks core over a fresh request whether it answers: a stand-in in tests. */
+  checkHost?: () => Promise<HostCheck>;
 }
+
+/** The page's time, and whether the tab is in front, for the heartbeat. */
+export interface PageClock {
+  now: () => number;
+  visible: () => boolean;
+}
+
+/**
+ * What a fresh request to core says while the socket says nothing: it
+ * answers (the socket alone is dead), the network fails it (nothing can
+ * reach core), or it waits too (core is busy, as a stalled machine is,
+ * which says nothing of the socket).
+ */
+export type HostCheck = "answers" | "unreachable" | "busy";
+
+const pageClock: PageClock = {
+  now: () => performance.now(),
+  visible: () => document.visibilityState === "visible",
+};
+
+/**
+ * Asks core over plain HTTP, beside the socket: `/rpc` answers a request
+ * that isn't a socket's at once, with a refusal, which is all it needs.
+ */
+const fetchHost = async (): Promise<HostCheck> => {
+  try {
+    await withTimeout(fetch("/rpc", { cache: "no-store" }));
+    return "answers";
+  } catch (error) {
+    return error instanceof CoreTimeoutError ? "busy" : "unreachable";
+  }
+};
+
+/**
+ * How often the heartbeat looks at its clock while a ping waits; a gap
+ * between two looks longer than {@link stallMs} is time the page stood
+ * still (a tab the browser froze or throttled, a machine too busy to run
+ * it), which never counts towards a ping's wait.
+ */
+const tickMs = 250;
+const stallMs = 1000;
 
 /**
  * The tab's one connection to core (spec 11.2), which everything the page
@@ -163,7 +228,9 @@ export interface CoreConnectionOptions {
 export class CoreConnection {
   readonly #onSessionEnded: () => void;
   readonly #connectCore: () => RpcStub<CoreApi>;
-  readonly #watchPage: (back: () => void) => void;
+  readonly #watchPage: (back: () => void, offline: () => void) => void;
+  readonly #clock: PageClock;
+  readonly #checkHost: () => Promise<HostCheck>;
   #closed = false;
   /** Refuses whoever waits for a connection once the connection closed. */
   readonly #closing = new AbortController();
@@ -183,15 +250,26 @@ export class CoreConnection {
   readonly #reachWatchers = new Set<() => void>();
   /** Told each time a connection answers. */
   readonly #answered = new Set<() => void>();
+  /** How many depend on hearing from core now (`keepAlive`). */
+  #keptAlive = 0;
+  /** How many large messages go out now (`holdHeartbeat`). */
+  #held = 0;
+  /** How many have gone out since the page opened, held or let go of. */
+  #holds = 0;
+  #heartbeat: ReturnType<typeof setInterval> | undefined;
 
   constructor({
     onSessionEnded,
     connect = connectCore,
     watchPage = onPageBack,
+    clock = pageClock,
+    checkHost = fetchHost,
   }: CoreConnectionOptions) {
     this.#onSessionEnded = onSessionEnded;
     this.#connectCore = connect;
     this.#watchPage = watchPage;
+    this.#clock = clock;
+    this.#checkHost = checkHost;
   }
 
   /** Whether core answers, as the connection last found ({@link CoreReach}). */
@@ -283,6 +361,62 @@ export class CoreConnection {
     };
   }
 
+  /**
+   * Asks the open connection whether it still answers, at once and every
+   * {@link heartbeatMs} after, for as long as something depends on hearing
+   * from core (an answer coming in, a question on its way). A socket can
+   * die without saying so, the network gone under it, and a call on it
+   * then waits for good; one that doesn't answer a ping in a few seconds
+   * (`timeoutMs`) is let go of, as a dropped one is, so whoever waits on
+   * it fails, the page connects again and says so, and a followed chat
+   * picks up where it was. Noticed within 7.5 s at most. Returns what lets
+   * go of it; once nothing holds it, it asks no more.
+   */
+  keepAlive(): () => void {
+    this.#keptAlive += 1;
+    if (this.#keptAlive === 1) {
+      void this.#probe();
+      // Only while the tab is in front: one in the back is checked as it
+      // comes back (`#back`).
+      this.#heartbeat = setInterval(() => {
+        if (this.#clock.visible()) {
+          void this.#probe();
+        }
+      }, heartbeatMs);
+    }
+    let held = true;
+    return () => {
+      if (!held) {
+        return;
+      }
+      held = false;
+      this.#keptAlive -= 1;
+      if (this.#keptAlive === 0) {
+        clearInterval(this.#heartbeat);
+        this.#heartbeat = undefined;
+      }
+    };
+  }
+
+  /**
+   * Holds off the heartbeat while a large message goes out, such as a
+   * file: a ping waits behind it on the socket, and a slow upload would
+   * read as a dead connection. Meanwhile a ping waits as long as a slow
+   * upload may take ({@link heldPingMs}), and one sent before it that
+   * fails lets nothing go. Returns what lets go.
+   */
+  holdHeartbeat(): () => void {
+    this.#held += 1;
+    this.#holds += 1;
+    let held = true;
+    return () => {
+      if (held) {
+        held = false;
+        this.#held -= 1;
+      }
+    };
+  }
+
   /** Whether a connection is open now, one that answered and hasn't dropped. */
   get connected(): boolean {
     return !this.#closed && this.#live !== undefined;
@@ -351,6 +485,7 @@ export class CoreConnection {
     this.#closed = true;
     this.#closing.abort(reason);
     this.#wake?.();
+    clearInterval(this.#heartbeat);
     if (this.#live !== undefined) {
       disposeQuietly(this.#live);
       this.#live = undefined;
@@ -402,9 +537,14 @@ export class CoreConnection {
   async #opened(): Promise<Connected> {
     if (this.#connected === undefined) {
       this.#connected = this.#connect();
-      this.#watchPage(() => {
-        this.#back();
-      });
+      this.#watchPage(
+        () => {
+          this.#back();
+        },
+        () => {
+          this.#offline();
+        }
+      );
     }
     return await this.#connected;
   }
@@ -513,17 +653,94 @@ export class CoreConnection {
     void this.#probe();
   }
 
+  /**
+   * Asks the open connection whether it still answers, and lets it go only
+   * when it is dead, never when the page or core merely stood still, as
+   * T3 Code checks a silent socket: its ping unanswered for `timeoutMs` of
+   * the page running in front ({@link answersWithin}), and then a fresh
+   * request to core answered, or failed by the network, while the socket
+   * still says nothing. Core too busy to answer either leaves it be.
+   */
   async #probe(): Promise<void> {
     const api = this.#live;
     if (api === undefined) {
       return;
     }
-    try {
-      await withTimeout(api.ping());
-    } catch {
-      this.#lost(api);
-      disposeQuietly(api);
+    const holds = this.#holds;
+    const ping = api.ping();
+    // Its answer, however late: one that comes while core is asked over
+    // HTTP still says the socket works.
+    let heard = false;
+    const hear = async (): Promise<void> => {
+      await settled(ping);
+      heard = true;
+    };
+    void hear();
+    if (
+      // Behind a large message, a ping waits as long as a slow upload may
+      // take, so a socket that died while one went is still let go of.
+      (await this.#answersWithin(
+        ping,
+        this.#held > 0 ? heldPingMs : timeoutMs
+      )) ||
+      // Behind a large message that went out meanwhile, a ping is late,
+      // not lost.
+      this.#holds !== holds ||
+      this.#live !== api ||
+      (await this.#checkHost()) === "busy" ||
+      heard
+    ) {
+      return;
     }
+    this.#drop(api);
+  }
+
+  /**
+   * Whether `asked` settles before `ms` of the page running in front have
+   * passed: time in the back, and time the page stood still, don't count.
+   */
+  async #answersWithin(asked: Promise<unknown>, ms: number): Promise<boolean> {
+    const answer = Promise.withResolvers<boolean>();
+    const hear = async (): Promise<void> => {
+      await settled(asked);
+      answer.resolve(true);
+    };
+    void hear();
+    let waited = 0;
+    let last = this.#clock.now();
+    const looking = setInterval(() => {
+      const now = this.#clock.now();
+      const gap = now - last;
+      last = now;
+      if (this.#clock.visible() && gap <= stallMs) {
+        waited += gap;
+      }
+      if (waited >= ms) {
+        answer.resolve(false);
+      }
+    }, tickMs);
+    try {
+      return await answer.promise;
+    } finally {
+      clearInterval(looking);
+    }
+  }
+
+  /**
+   * The browser went offline: no socket works now, though one may not say
+   * so, so the open one is let go of at once, and the page reconnects as
+   * the browser comes back online.
+   */
+  #offline(): void {
+    if (this.#live !== undefined) {
+      this.#drop(this.#live);
+    }
+  }
+
+  /** Lets go of `api`, which answers no more, as a connection that broke. */
+  #drop(api: RpcStub<CoreApi>): void {
+    this.#lost(api);
+    disposeQuietly(api);
   }
 }
 

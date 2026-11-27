@@ -15,10 +15,12 @@ import { slotOf } from "./chat/chat-subject.ts";
 import {
   CoreConnection,
   frameReadMs,
+  heartbeatMs,
+  heldPingMs,
   shellStatus,
   signOut,
 } from "./core-connection.ts";
-import type { SessionEnded } from "./core-connection.ts";
+import type { HostCheck, SessionEnded } from "./core-connection.ts";
 import { CoreTimeoutError } from "./core.ts";
 import { tabLink } from "./pages/tab-link.ts";
 import { keepChatLink, pendingChatLink } from "./settings/chat-link.ts";
@@ -55,6 +57,10 @@ interface Fake {
   disposed: boolean;
   /** Breaks it, as a dropped socket does. */
   break: () => void;
+  /** Stops it answering anything, without saying so, as a socket the network died under. */
+  silence: () => void;
+  /** Answers every ping it held back since, as a socket that recovers. */
+  speak: () => void;
   readonly session: object;
 }
 
@@ -63,11 +69,21 @@ interface Fake {
  * signed in, in turn, the last for every connection after.
  */
 const tab = (answers: Answer[]) => {
+  /**
+   * Whether the tab is in front, what a fresh request to core finds, and
+   * how long core takes to say it.
+   */
+  const page: { visible: boolean; host: HostCheck; hostTakesMs: number } = {
+    visible: true,
+    host: "answers",
+    hostTakesMs: 0,
+  };
   const opened: Fake[] = [];
   const ended: string[] = [];
   /** What the tab asked core, by name, on any connection. */
   const asked: string[] = [];
   let back: (() => void) | undefined;
+  let offline: (() => void) | undefined;
   const core = new CoreConnection({
     onSessionEnded: () => {
       ended.push("page reloads");
@@ -78,6 +94,8 @@ const tab = (answers: Answer[]) => {
         throw new Error("No answer scripted.");
       }
       let broken: (() => void) | undefined;
+      let silent = false;
+      const held: (() => void)[] = [];
       const session = {
         whoami: async () => {
           asked.push("whoami");
@@ -100,6 +118,15 @@ const tab = (answers: Answer[]) => {
         break: () => {
           broken?.();
         },
+        silence: () => {
+          silent = true;
+        },
+        speak: () => {
+          silent = false;
+          for (const pong of held.splice(0)) {
+            pong();
+          }
+        },
         session,
       };
       opened.push(fake);
@@ -116,6 +143,13 @@ const tab = (answers: Answer[]) => {
         },
         ping: async () => {
           asked.push("ping");
+          if (silent) {
+            const later = Promise.withResolvers<string>();
+            held.push(() => {
+              later.resolve("pong");
+            });
+            return await later.promise;
+          }
           return await Promise.resolve("pong");
         },
         signInOptions: async () => {
@@ -133,17 +167,30 @@ const tab = (answers: Answer[]) => {
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
       return stub as never;
     },
-    watchPage: (onBack) => {
+    watchPage: (onBack, onOffline) => {
       back = onBack;
+      offline = onOffline;
+    },
+    clock: { now: () => Date.now(), visible: () => page.visible },
+    checkHost: async () => {
+      const said = Promise.withResolvers<HostCheck>();
+      setTimeout(() => {
+        said.resolve(page.host);
+      }, page.hostTakesMs);
+      return await said.promise;
     },
   });
   return {
     core,
+    page,
     opened,
     ended,
     asked,
     comeBack: () => {
       back?.();
+    },
+    goOffline: () => {
+      offline?.();
     },
   };
 };
@@ -459,6 +506,143 @@ describe("the tab's one connection to core", () => {
       "checking",
       "reachable",
     ]);
+  });
+
+  it("finds a connection that died without saying so within seconds while something depends on it, and asks nothing once nothing does", async () => {
+    const { core, opened, asked } = tab([one, one]);
+    await core.session();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const pings = () => asked.filter((name) => name === "ping").length;
+    const letGo = core.keepAlive();
+    // Asked at once, then every 2.5 s, while it answers.
+    await vi.advanceTimersByTimeAsync(5000);
+    const answering = { pings: pings(), reach: core.reach };
+
+    // The network dies under it: nothing answers, nothing closes.
+    opened[0]?.silence();
+    await vi.advanceTimersByTimeAsync(heartbeatMs + 5000 + 250);
+    const noticed = opened[0]?.disposed;
+    await vi.advanceTimersByTimeAsync(1);
+    // Connected again, and still kept alive on the new connection.
+    const again = { opened: opened.length, reach: core.reach };
+
+    letGo();
+    const before = pings();
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect({
+      answering,
+      noticed,
+      again,
+      afterLettingGo: pings() - before,
+    }).toStrictEqual({
+      answering: { pings: 3, reach: "reachable" },
+      noticed: true,
+      again: { opened: 2, reach: "reachable" },
+      afterLettingGo: 0,
+    });
+  });
+
+  it("lets no frozen or hidden tab, nor core too busy to answer, look like a dead socket, and lets go of one that is", async () => {
+    const { core, page, opened } = tab([one, one]);
+    await core.session();
+    const letGo = core.keepAlive();
+    await vi.advanceTimersByTimeAsync(0);
+    opened[0]?.silence();
+    // The page stands still for a minute (a frozen tab, a stalled
+    // machine): no time passes for it, however long the clock jumps.
+    for (let stall = 0; stall < 10; stall += 1) {
+      vi.setSystemTime(Date.now() + 60_000);
+      // oxlint-disable-next-line no-await-in-loop -- one stall after another
+      await vi.advanceTimersByTimeAsync(250);
+    }
+    const frozen = opened[0]?.disposed;
+    // In the back: nothing counts.
+    page.visible = false;
+    await vi.advanceTimersByTimeAsync(60_000);
+    const hidden = opened[0]?.disposed;
+    // In front, its ping unanswered, but core doesn't answer a fresh
+    // request either: busy, not dead.
+    page.visible = true;
+    page.host = "busy";
+    await vi.advanceTimersByTimeAsync(20_000);
+    const busy = opened[0]?.disposed;
+    // Core answers a fresh request while the socket says nothing: dead.
+    page.host = "answers";
+    await vi.advanceTimersByTimeAsync(heartbeatMs + 5000 + 250);
+    letGo();
+
+    expect({ frozen, hidden, busy, dead: opened[0]?.disposed }).toStrictEqual({
+      frozen: false,
+      hidden: false,
+      busy: false,
+      dead: true,
+    });
+  });
+
+  it("keeps a socket whose ping answers late, while core is asked over HTTP", async () => {
+    const { core, page, opened } = tab([one, one]);
+    await core.session();
+    const letGo = core.keepAlive();
+    await vi.advanceTimersByTimeAsync(0);
+    opened[0]?.silence();
+    page.hostTakesMs = 3000;
+    // The next ping (at 2.5 s) waits out its 5 s; core is asked, and takes
+    // 3 s; the socket recovers meanwhile.
+    await vi.advanceTimersByTimeAsync(heartbeatMs + 5000 + 250 + 1000);
+    opened[0]?.speak();
+    await vi.advanceTimersByTimeAsync(3000);
+    const kept = opened[0]?.disposed;
+    letGo();
+
+    expect({ kept, opened: opened.length }).toStrictEqual({
+      kept: false,
+      opened: 1,
+    });
+  });
+
+  it("lets no ping that waits behind a large message let a working connection go, yet lets go of one that died under it", async () => {
+    const { core, opened } = tab([one, one]);
+    await core.session();
+    const letGo = core.keepAlive();
+    await vi.advanceTimersByTimeAsync(0);
+    // A file goes out: the socket answers nothing until it has.
+    const uploading = core.holdHeartbeat();
+    opened[0]?.silence();
+    await vi.advanceTimersByTimeAsync(60_000);
+    const slowUpload = opened[0]?.disposed;
+    // It never answers: the socket died under the upload.
+    await vi.advanceTimersByTimeAsync(heldPingMs);
+    const died = opened[0]?.disposed;
+    uploading();
+    letGo();
+
+    expect({ slowUpload, died }).toStrictEqual({
+      slowUpload: false,
+      died: true,
+    });
+  });
+
+  it("lets go of the connection at once when the browser goes offline, and connects again as it comes back online", async () => {
+    const { core, opened, goOffline, comeBack } = tab([one, "down", one]);
+    await core.session();
+    vi.spyOn(Math, "random").mockReturnValue(1);
+
+    goOffline();
+    // The first try after it fails, as nothing connects offline.
+    await vi.advanceTimersByTimeAsync(1000);
+    const offline = { disposed: opened[0]?.disposed, reach: core.reach };
+    // Online again: it tries at once, not after its next pause.
+    comeBack();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect({ offline, opened: opened.length, reach: core.reach }).toStrictEqual(
+      {
+        offline: { disposed: true, reach: "unreachable" },
+        opened: 3,
+        reach: "reachable",
+      }
+    );
   });
 
   it("tries at once when the page comes back, once per pause however often it does", async () => {

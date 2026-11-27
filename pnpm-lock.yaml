@@ -337,9 +337,6 @@ catalogs:
     mdast-util-math:
       specifier: 3.0.0
       version: 3.0.0
-    mermaid:
-      specifier: 12.2.0
-      version: 12.2.0
     micromark-extension-gfm:
       specifier: 3.0.0
       version: 3.0.0
@@ -367,6 +364,9 @@ catalogs:
     parse5:
       specifier: 8.1.0
       version: 8.1.0
+    pele:
+      specifier: 1.13.0
+      version: 1.13.0
     playwright:
       specifier: 1.63.0
       version: 1.63.0
@@ -597,18 +597,6 @@ importers:
       '@earendil-works/pi-ai':
         specifier: 'catalog:'
         version: 1.6.1(@modelcontextprotocol/sdk@1.32.2(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.6.7))(@smithy/signature-v4@5.7.3)(google-auth-library@10.9.1(supports-color@10.2.2))(supports-color@10.2.2)(undici@8.13.1)(ws@8.21.3)(zod@4.6.7)
-      '@fontsource-variable/geist':
-        specifier: 'catalog:'
-        version: 5.2.8
-      '@fontsource-variable/jetbrains-mono':
-        specifier: 'catalog:'
-        version: 5.3.0
-      '@fontsource-variable/newsreader':
-        specifier: 'catalog:'
-        version: 5.3.0
-      '@grasp-os/app-kit':
-        specifier: workspace:*
-        version: link:../../packages/app-kit
       '@grasp-os/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -648,9 +636,6 @@ importers:
       livekit-client:
         specifier: 'catalog:'
         version: 2.25.0(@types/dom-mediacapture-record@1.0.22)
-      lucide-react:
-        specifier: 'catalog:'
-        version: 1.47.0(react@19.3.0)
       mime:
         specifier: 'catalog:'
         version: 4.1.2
@@ -682,9 +667,6 @@ importers:
       '@stylexjs/unplugin':
         specifier: 'catalog:'
         version: 0.19.2(supports-color@10.2.2)(unplugin@2.3.11)
-      '@tailwindcss/vite':
-        specifier: 'catalog:'
-        version: 4.3.3(@voidzero-dev/vite-plus-core@0.3.3(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))
       '@types/react':
         specifier: 'catalog:'
         version: 19.3.0
@@ -712,9 +694,6 @@ importers:
       seroval:
         specifier: 'catalog:'
         version: 1.7.5
-      tailwindcss:
-        specifier: 'catalog:'
-        version: 4.3.3
       vite-plus:
         specifier: 'catalog:'
         version: 0.3.3(@opentelemetry/api@1.9.1)(@types/node@26.6.2)(@vitest/browser-playwright@4.1.11)(esbuild@0.28.2)(happy-dom@21.0.4)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1)
@@ -1657,15 +1636,15 @@ importers:
       mdast-util-math:
         specifier: 'catalog:'
         version: 3.0.0(supports-color@10.2.2)
-      mermaid:
-        specifier: 'catalog:'
-        version: 12.2.0
       micromark-extension-gfm:
         specifier: 'catalog:'
         version: 3.0.0
       micromark-extension-math:
         specifier: 'catalog:'
         version: 3.1.0
+      pele:
+        specifier: 'catalog:'
+        version: 1.13.0
       react-is:
         specifier: 'catalog:'
         version: 19.3.0
@@ -9830,6 +9809,10 @@ packages:
 
   pathe@2.0.3:
     resolution: {integrity: sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==}
+
+  pele@1.13.0:
+    resolution: {integrity: sha512-Ie8UKY9x00MsuR3jO6AzUwzK2Z6MIV3Tf4EDdITiuk8Uaz8K7g0R082WqsqNaSU8DdgkrRvZThzhit83mi/uiw==}
+    engines: {node: '>=20'}
 
   perfect-debounce@2.1.0:
     resolution: {integrity: sha512-LjgdTytVFXeUgtHZr9WYViYSM/g8MkcTPYDlPa3cDqMirHjKiSZPYd6DoL7pK8AJQr+uWkQvCjHNdiMqsrJs+g==}
@@ -19665,6 +19648,8 @@ snapshots:
   path-to-regexp@8.4.2: {}
 
   pathe@2.0.3: {}
+
+  pele@1.13.0: {}
 
   perfect-debounce@2.1.0: {}
 

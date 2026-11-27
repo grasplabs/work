@@ -183,6 +183,7 @@ const thread = async (
   const page = createRootRoute({
     component: () => (
       <ChatThread
+        sourceNames={new Map()}
         build={{
           model: "openai/gpt-5",
           effort: undefined,
