@@ -1,10 +1,8 @@
 /**
- * The overlays on the gallery's pages (apps/web, `/kit/…`), by page: how
- * each opens and what then shows. The kit's component tests open every one
- * and close it with Escape (test/kit.browser.test.tsx), and so does the
- * check of core's Content Security Policy over the gallery
- * (e2e/catalog.e2e.ts), as a popup may load something only once open.
- * Data only, so both the browser and Node read it.
+ * The overlays on the demos' and examples' pages, by page: how each opens
+ * and what then shows. The kit's component tests open every one and close
+ * it with Escape (test/kit.browser.test.tsx). Data only, so both the
+ * browser and Node (test/catalog.test.ts) read it.
  */
 
 /** An element found by its role and accessible name, or by its text. */
@@ -33,7 +31,7 @@ export interface Overlay {
   viewport?: { width: number; height: number };
 }
 
-/** A phone's viewport, where the gallery is first checked. */
+/** A phone's viewport, where each page is first checked. */
 export const phone = { width: 390, height: 844 };
 
 /** A desktop's viewport. */

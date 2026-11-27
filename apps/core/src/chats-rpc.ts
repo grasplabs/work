@@ -628,18 +628,38 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   /**
    * Reads the file's text (chat-files.ts), outside the person's Workspace
    * object, or takes it whole when its bytes are a picture, then attaches
-   * it to their chat there, audited.
+   * it to their chat there, audited. With `key`, a repeat answers the file
+   * the first call attached.
    */
-  async attachFile(chatId: string, file: ChatFileInput): Promise<ChatFile> {
+  async attachFile(
+    chatId: string,
+    file: ChatFileInput,
+    key?: string
+  ): Promise<ChatFile> {
     return await withPerson(this.#check, async (person) => {
       const id = chatIdOf(chatId);
+      const keyed = requestKeySchema.optional().safeParse(key);
+      if (!keyed.success) {
+        throw agentErrors.create("agent.invalid_request");
+      }
+      const chats = this.#chatsOf(person.userId);
+      // A repeat is answered before its bytes are read again: a page sends
+      // one when the connection broke before it heard the first.
+      const repeated =
+        keyed.data === undefined
+          ? undefined
+          : await chats.fileAttachedWith(id, person.userId, keyed.data);
+      if (repeated !== undefined) {
+        return repeated;
+      }
       const read =
         readChatPicture(file) ?? (await readChatFile(this.#env, file));
-      return await this.#chatsOf(person.userId).attachFile(
+      return await chats.attachFile(
         id,
         person.userId,
         read,
-        actorOf(person)
+        actorOf(person),
+        keyed.data
       );
     });
   }

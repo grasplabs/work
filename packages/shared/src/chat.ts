@@ -1489,9 +1489,16 @@ export interface ChatsApi {
    * most {@link chatPictureMaxBytes} and {@link chatPictureMaxPixels} a
    * side, up to {@link chatFilesMax} a chat. Resolves once its text is
    * read, or the picture kept, and is refused with why when it can't be.
-   * Audited.
+   * Audited. With `key`, a UUID the page makes for this file in this
+   * chat, a repeat within a day, as a page sends when its connection
+   * broke before it heard the answer, answers the file the first call
+   * attached and attaches none.
    */
-  attachFile: (chatId: string, file: ChatFileInput) => Promise<ChatFile>;
+  attachFile: (
+    chatId: string,
+    file: ChatFileInput,
+    key?: string
+  ) => Promise<ChatFile>;
   /**
    * Removes a file attached to the chat that no question carries yet,
    * freeing its place among the chat's {@link chatFilesMax}. A file a

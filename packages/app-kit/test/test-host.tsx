@@ -1,7 +1,6 @@
 import type { FunctionReference, ValueSchema } from "@grasp-os/runtime/app";
 import { GraspClient } from "@grasp-os/runtime/page";
 import { GraspProvider } from "@grasp-os/runtime/react";
-import { isRecord } from "@grasp-os/shared/json";
 import { act } from "react";
 import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
@@ -45,6 +44,10 @@ type Transport = Extract<
   ConstructorParameters<typeof GraspClient>[0],
   { readonly watch: unknown }
 >;
+
+/** Whether `value` is an object and not an array: a record of its keys. */
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** The field `key` of `value`, if it is a record. */
 const read = (value: unknown, key: string): unknown =>

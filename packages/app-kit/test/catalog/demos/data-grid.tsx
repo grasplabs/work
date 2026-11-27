@@ -1,10 +1,4 @@
 import { DataGrid } from "@grasp-os/app-kit/components/data-grid";
-import {
-  RecordGrid,
-  RecordGridHeader,
-  RecordGridValue,
-} from "@grasp-os/app-kit/components/record-grid";
-import type { RecordGridColumn } from "@grasp-os/app-kit/components/record-grid";
 import { Skeleton } from "@grasp-os/app-kit/components/skeleton";
 import {
   paginationOptionsValidator,
@@ -18,13 +12,12 @@ import type {
 } from "@grasp-os/runtime/app";
 import { GraspClient } from "@grasp-os/runtime/page";
 import { GraspProvider } from "@grasp-os/runtime/react";
-import { HashIcon, TypeIcon } from "lucide-react";
 import { useState, useSyncExternalStore } from "react";
 import type { ComponentType } from "react";
 
 // The data grid over a stand-in App: its query answers a fixed list of
 // people from memory, searched and filtered as an App's query would, so
-// the gallery shows the grid working without a host behind it.
+// the kit's tests see the grid working without a host behind it.
 
 const person = v.object({
   _id: v.string(),
@@ -127,7 +120,7 @@ const DataGridDemo = () => {
   // oxlint-disable-next-line react/hook-use-state -- see above
   const [client] = useState(demoClient);
   // A live list follows its query in the browser; rendered on a server
-  // (the gallery's smoke test), it shows a placeholder.
+  // (the demos' smoke test, test/catalog.test.ts), it shows a placeholder.
   const inBrowser = useSyncExternalStore(
     noChange,
     () => true,
@@ -156,44 +149,6 @@ const DataGridDemo = () => {
   );
 };
 
-/** A hundred thousand orders: only those in view are drawn. */
-const orders = Array.from({ length: 100_000 }, (_, index) => ({
-  id: `order-${index + 1}`,
-  customer: ["Ada", "Grace", "Alan", "Edsger"][index % 4] ?? "",
-  amount: (index * 37) % 1000,
-}));
-
-/** The orders' columns: a required customer, and an amount. */
-const orderColumns: RecordGridColumn<(typeof orders)[number]>[] = [
-  {
-    id: "customer",
-    header: (
-      <RecordGridHeader icon={<TypeIcon />} required requiredLabel="Required">
-        customer
-      </RecordGridHeader>
-    ),
-    cell: (order) => <RecordGridValue>{order.customer}</RecordGridValue>,
-  },
-  {
-    id: "amount",
-    width: 140,
-    header: <RecordGridHeader icon={<HashIcon />}>amount</RecordGridHeader>,
-    cell: (order) => <RecordGridValue>{order.amount}</RecordGridValue>,
-  },
-];
-
-const RecordGridDemo = () => (
-  <div className="flex h-80 flex-col border">
-    <RecordGrid
-      columns={orderColumns}
-      label="Orders"
-      rowKey={(order) => order.id}
-      rows={orders}
-    />
-  </div>
-);
-
 export const dataGridDemos: Record<string, ComponentType> = {
   "data-grid": DataGridDemo,
-  "record-grid": RecordGridDemo,
 };

@@ -77,11 +77,17 @@ const problemOf = (file: File): string | undefined => {
 };
 
 /**
- * Where each of the page's box files went, by its ID in the box: a send
- * that failed after core took one names it again in the same chat, from
- * whichever box asks again.
+ * Where each of the page's box files went, by its ID in the box: the
+ * chat, the key it is attached there with (`ChatsApi.attachFile`), and
+ * its ID there once core answered. A send that failed after core took
+ * one names it again in the same chat, from whichever box asks again;
+ * one whose answer was lost goes again with the same key, which core
+ * attaches once.
  */
-const attachedFiles = new Map<string, { chatId: string; fileId: string }>();
+const attachedFiles = new Map<
+  string,
+  { chatId: string; key: string; fileId?: string }
+>();
 
 /** Whether `error` is the connection breaking, not core's answer nor the browser's. */
 const broke = (error: unknown): boolean =>
@@ -123,9 +129,11 @@ type Attached = typeof attachedFiles;
  * Attaches the box's files `carried` to `chatId`, one at a time in the
  * order they were added, and answers their IDs there; one core took for
  * that chat already (a send that failed after it) is named again, not
- * sent twice. Each file is one large message, which a ping waits behind:
- * the heartbeat holds off while they go (`hold`), or a slow upload would
- * read as a dead connection.
+ * sent twice, and one whose answer was lost with the connection goes
+ * again with the key it went with, so core attaches it once. Each file
+ * is one large message, which a ping waits behind: the heartbeat holds
+ * off while they go (`hold`), or a slow upload would read as a dead
+ * connection.
  */
 const attachAll = async (
   session: Session,
@@ -139,18 +147,21 @@ const attachAll = async (
   try {
     for (const { id: boxId, file } of carried) {
       const known = attached.get(boxId);
-      if (known?.chatId === chatId) {
+      if (known?.chatId === chatId && known.fileId !== undefined) {
         fileIds.push(known.fileId);
         continue;
       }
+      const key = known?.chatId === chatId ? known.key : crypto.randomUUID();
+      attached.set(boxId, { chatId, key });
       // oxlint-disable-next-line no-await-in-loop -- one at a time, in the order they were added
       const bytes = new Uint8Array(await file.arrayBuffer());
       // oxlint-disable-next-line no-await-in-loop -- one at a time, in the order they were added
-      const { id: fileId } = await session.chats.attachFile(chatId, {
-        name: file.name,
-        bytes,
-      });
-      attached.set(boxId, { chatId, fileId });
+      const { id: fileId } = await session.chats.attachFile(
+        chatId,
+        { name: file.name, bytes },
+        key
+      );
+      attached.set(boxId, { chatId, key, fileId });
       fileIds.push(fileId);
     }
   } finally {
@@ -402,9 +413,10 @@ export const useAsk = (
     const known = attached.get(id);
     attached.delete(id);
     setFileProblem(undefined);
-    if (known !== undefined) {
+    const fileId = known?.fileId;
+    if (known !== undefined && fileId !== undefined) {
       void run(async (session) => {
-        await session.chats.removeFile(known.chatId, known.fileId);
+        await session.chats.removeFile(known.chatId, fileId);
       });
     }
   };
