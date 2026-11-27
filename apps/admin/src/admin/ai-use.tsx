@@ -621,7 +621,7 @@ const Used = () => {
             the US dollars its core records for Grasp's own AI features. */}
         <Text color="muted" style={styles.note}>
           {usage.counted
-            ? "The admin’s estimate, in euros at its sample prices, of what the Worker counted."
+            ? "The admin’s estimate, in euros at its sample prices: what the Worker counted, and what is worked out for the time before it counted."
             : "The admin’s estimate, in euros at its sample prices, worked out from what happened: every interview, who is in, and each workflow that runs."}
         </Text>
         <MonthSelect
