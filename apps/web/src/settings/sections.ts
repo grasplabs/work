@@ -69,6 +69,11 @@ interface SettingsSection {
    * every other section stands in one centred column.
    */
   wide?: true;
+  /**
+   * The page's column is the wider one, for a section of tables that a
+   * form's width would cut off (Interviews); a form's width otherwise.
+   */
+  roomy?: true;
 }
 
 const settingsGroups: readonly SettingsGroup[] = [
@@ -150,6 +155,7 @@ const settingsSections: readonly SettingsSection[] = [
     group: "workspace",
     icon: MessageCircleIcon,
     audience: "own-admins",
+    roomy: true,
   },
   {
     id: "ai-providers",
