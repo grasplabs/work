@@ -88,7 +88,7 @@ import {
 import { parseModelRef } from "./model-catalog.ts";
 import { modelSettings, modelEffortsOf } from "./models.ts";
 import { chatPackageRequests } from "./packages/requests.ts";
-import { callbackFor, isStub } from "./page-callbacks.ts";
+import { callbackFor, isStub, stillOpenWhile } from "./page-callbacks.ts";
 import type { StillOpen } from "./page-callbacks.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { requireProjectRole } from "./project-access.ts";
@@ -334,14 +334,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     super();
     this.#env = env;
     this.#check = check;
-    this.#stillOpen = async () => {
-      try {
-        await check();
-        return true;
-      } catch {
-        return false;
-      }
-    };
+    this.#stillOpen = stillOpenWhile(check);
   }
 
   /** The object that holds `userId`'s chats. */
@@ -1504,13 +1497,17 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
           await scheduler.wait(
             rewatchMs[Math.min(attempt, rewatchMs.length - 1)] ?? 0
           );
-          // Signed out since: let go of, never taken up again.
-          // oxlint-disable-next-line no-await-in-loop -- see above
-          if (!following() || !(await this.#stillOpen())) {
-            page[Symbol.dispose]();
+          if (!following()) {
             return;
           }
           try {
+            // Signed out since: let go of, never taken up again. A
+            // session that couldn't be read is read again next time.
+            // oxlint-disable-next-line no-await-in-loop -- see above
+            if (!(await this.#stillOpen())) {
+              page[Symbol.dispose]();
+              return;
+            }
             // oxlint-disable-next-line no-await-in-loop -- see above
             watchId = await start(listener);
             return;
