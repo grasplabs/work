@@ -564,6 +564,11 @@ interface AnswerTurn {
   partial: ChatPartial | null;
   /** Grasp works on this answer now. */
   live: boolean;
+  /**
+   * It answers a question asked again (`asksAgain`), which has no row of
+   * its own: it is where the thread goes, as a question's row is.
+   */
+  again?: true;
 }
 
 /** One row of the thread. */
@@ -743,26 +748,79 @@ const lastAsked = (rows: readonly Row[]): { id: string; answers: number } => {
   };
 };
 
-/** The thread's rows: each question, then its replies as one answer per agent, the reply being written joined to it. */
+/**
+ * Whether `message` asks again what was asked last, after it was stopped
+ * or failed (Try again, Ask again, or the same words sent again): the
+ * question it repeats is the last one, nothing after it was answered to
+ * the end, and it carries nothing of its own to show (files, a Build it).
+ * Until core marks a retry itself, the words say it. The one rule for a
+ * question core has and one on its way (`withLast`), so a retry never
+ * shows a second bubble, not even for a moment.
+ */
+const asksAgain = (
+  rows: readonly Row[],
+  message: Pick<Asked, "text" | "built"> & { files?: readonly unknown[] }
+): boolean => {
+  const at = rows.findLastIndex(({ kind }) => kind === "question");
+  const asked = rows[at];
+  return (
+    asked?.kind === "question" &&
+    asked.message.text === message.text &&
+    (message.files ?? []).length === 0 &&
+    message.built === undefined &&
+    rows
+      .slice(at + 1)
+      .every(
+        (row) =>
+          row.kind === "day" ||
+          row.kind === "new" ||
+          (row.kind === "answer" &&
+            ["cancelled", "failed"].includes(row.replies.at(-1)?.end ?? ""))
+      )
+  );
+};
+
+/**
+ * An answer's row: live for the one Grasp works on now, and marked when
+ * it answers a question asked again.
+ */
+const answerRow = (
+  id: string,
+  at: string | undefined,
+  replies: Answer[],
+  partial: ChatPartial | null,
+  again: boolean,
+  live = false
+): AnswerTurn => ({
+  kind: "answer",
+  id,
+  at,
+  replies,
+  partial,
+  live,
+  ...(again ? { again: true as const } : {}),
+});
+
+/**
+ * The thread's rows: each question, then its replies as one answer per
+ * agent, the reply being written joined to it. A question asked again
+ * after it was stopped or failed is drawn once, as the references draw a
+ * retry: its new answer follows the one that stopped, under it.
+ */
 const rowsOf = (
   messages: readonly ChatMessage[],
   partial: ChatPartial | null,
   live: boolean
 ): Row[] => {
   const rows: Row[] = [];
-  const answerRow = (at: string | undefined): AnswerTurn => {
-    const asked = lastAsked(rows);
-    return {
-      kind: "answer",
-      id: answerRowId(asked.id, asked.answers),
-      at,
-      replies: [],
-      partial: null,
-      live: false,
-    };
-  };
+  // Asked again: its answer starts a row of its own, never joined to the
+  // answer that stopped.
+  let again = false;
   for (const message of messages) {
-    if (message.role === "user") {
+    if (message.role === "user" && asksAgain(rows, message)) {
+      again = true;
+    } else if (message.role === "user") {
+      again = false;
       const before = rows.at(-1);
       rows.push({
         kind: "question",
@@ -774,13 +832,23 @@ const rowsOf = (
       });
     } else if (message.role === "assistant") {
       const last = rows.at(-1);
-      if (last?.kind === "answer" && sameAgent(last, message.agentId)) {
+      const joins =
+        !again && last?.kind === "answer" && sameAgent(last, message.agentId);
+      if (joins) {
         last.replies.push(message);
       } else {
-        const row = answerRow(message.at);
-        row.replies.push(message);
-        rows.push(row);
+        const asked = lastAsked(rows);
+        rows.push(
+          answerRow(
+            answerRowId(asked.id, asked.answers),
+            message.at,
+            [message],
+            null,
+            again
+          )
+        );
       }
+      again = false;
     }
   }
   if (!live) {
@@ -788,14 +856,21 @@ const rowsOf = (
   }
   // Grasp works on the last question: its answer goes on, or begins.
   const last = rows.at(-1);
-  if (last?.kind === "answer" && sameAgent(last, partial?.agentId)) {
+  if (!again && last?.kind === "answer" && sameAgent(last, partial?.agentId)) {
     last.partial = partial;
     last.live = true;
   } else {
-    const row = answerRow(last?.at);
-    row.partial = partial;
-    row.live = true;
-    rows.push(row);
+    const asked = lastAsked(rows);
+    rows.push(
+      answerRow(
+        answerRowId(asked.id, asked.answers),
+        last?.at,
+        [],
+        partial,
+        again,
+        true
+      )
+    );
   }
   return rows;
 };
@@ -1512,25 +1587,22 @@ const withLast = (
     };
     return [...rows, ...queuedRows, waiting, ...ending];
   }
-  // Under the question core's copy of it takes the place of, as one row.
-  const asked: Row = {
-    kind: "pending",
-    id: pendingRowId(pending),
-    question: pending,
-  };
-  const answering: Row[] = live.running
-    ? [
-        {
-          kind: "answer",
-          id: answerRowId(pendingRowId(pending), 0),
-          at: undefined,
-          replies: [],
-          partial: live.partial,
-          live: true,
-        },
-      ]
-    : [];
-  return [...rows, asked, ...answering, ...queuedRows, ...ending];
+  // Asked again after it stopped: no second bubble, its answer under the
+  // one that stopped (`asksAgain`). Else under the question core's copy
+  // of it takes the place of, as one row.
+  const again = asksAgain(rows, pending);
+  const asked: Row[] = again
+    ? []
+    : [{ kind: "pending", id: pendingRowId(pending), question: pending }];
+  const last = lastAsked(rows);
+  const answerId = again
+    ? answerRowId(last.id, last.answers)
+    : answerRowId(pendingRowId(pending), 0);
+  const answering: Row[] =
+    live.running || again
+      ? [answerRow(answerId, undefined, [], live.partial, again, true)]
+      : [];
+  return [...rows, ...asked, ...answering, ...queuedRows, ...ending];
 };
 
 /** The question on its way as the person's bubble shows it. */
@@ -1783,7 +1855,9 @@ export const ChatThread = ({
                         key={row.id}
                         messageId={row.id}
                         scrollAnchor={
-                          row.kind === "question" || row.kind === "pending"
+                          row.kind === "question" ||
+                          row.kind === "pending" ||
+                          (row.kind === "answer" && row.again === true)
                         }
                         {...column}
                       >
