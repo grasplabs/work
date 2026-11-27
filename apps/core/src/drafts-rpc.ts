@@ -9,7 +9,6 @@ import type {
   LiveVersion,
 } from "@grasp-os/shared/drafts";
 import { isExpectedError } from "@grasp-os/shared/errors";
-import { errorFields, log } from "@grasp-os/shared/log";
 import { pageErrors } from "@grasp-os/shared/pages";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -291,10 +290,8 @@ export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
   }
 
   /**
-   * Has `page` hear `found`'s draft for `by`: over a socket to the draft's
-   * object (draft-watch.ts), or, while that object still runs the code of
-   * the release before (no socket), the old way, its callback kept there.
-   * Answers what stops it.
+   * Has `page` hear `found`'s draft for `by`, over a socket to the draft's
+   * object (draft-watch.ts). Answers what stops it.
    */
   async #follow(
     by: Identity,
@@ -303,51 +300,29 @@ export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
     /** Told why core let go of the follow by itself (`Subscription.endedBy`). */
     ended: { by: "displaced" | null }
   ): Promise<Disposable> {
-    const object = draftWatch(this.#env, found);
     /** The last telling the page took (draft-watch.ts): where a socket opened again starts. */
     let after = 0;
-    try {
-      return await followObject({
-        open: async () =>
-          await object.fetch(
-            `https://draft-watch/?${new URLSearchParams({ person: by.userId, after: String(after) }).toString()}`,
-            { headers: { Upgrade: "websocket" } }
-          ),
-        parse: (frame) => draftToldSchema.parse(frame),
-        deliver: async (told) => {
-          await page(told.revision);
-          after = told.seq;
-        },
-        maxQueued: maxQueuedTellings,
-        ended: (code) => {
-          // The page's callback ends with it, which the page hears, and
-          // follows again (follow-chat.ts `follow`): only on its next look
-          // when it was displaced.
-          ended.by = code === watchEnds.displaced ? "displaced" : null;
-          page[Symbol.dispose]();
-        },
-        logged: { ...found },
-      });
-    } catch (error) {
-      log.warn("draft.socket_unopened", { ...found, ...errorFields(error) });
-    }
-    // The object's code is the release's before: the old way, until the
-    // release after removes it.
-    const watchId = await object.watch(by.userId, page);
-    return {
-      [Symbol.dispose]: () => {
-        void (async () => {
-          try {
-            await object.unwatch(watchId);
-          } catch (error) {
-            log.warn("draft.unwatch_failed", {
-              ...found,
-              ...errorFields(error),
-            });
-          }
-        })();
+    return await followObject({
+      open: async () =>
+        await draftWatch(this.#env, found).fetch(
+          `https://draft-watch/?${new URLSearchParams({ person: by.userId, after: String(after) }).toString()}`,
+          { headers: { Upgrade: "websocket" } }
+        ),
+      parse: (frame) => draftToldSchema.parse(frame),
+      deliver: async (told) => {
+        await page(told.revision);
+        after = told.seq;
       },
-    };
+      maxQueued: maxQueuedTellings,
+      ended: (code) => {
+        // The page's callback ends with it, which the page hears, and
+        // follows again (follow-chat.ts `follow`): only on its next look
+        // when it was displaced.
+        ended.by = code === watchEnds.displaced ? "displaced" : null;
+        page[Symbol.dispose]();
+      },
+      logged: { ...found },
+    });
   }
 
   /** The draft checked as publishing checks it (publish.ts, `check`). */

@@ -1550,22 +1550,8 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
           logged: { purpose: "chat list" },
         });
       } catch (error) {
-        log.warn("chat.list_socket_unopened", errorFields(error));
         page[Symbol.dispose]();
-        // The person's object still runs the code of the release before,
-        // which takes no socket: followed the old way, until the release
-        // after removes it.
-        return await this.#follow(
-          onUpdate,
-          {
-            start: async (listener) =>
-              await this.#chatsOf(userId).watchChats(userId, listener),
-            stop: async (watchId) => {
-              await this.#chatsOf(userId).unwatchChats(watchId);
-            },
-          },
-          {}
-        );
+        throw error;
       }
       // Let go of while it opened: its socket goes with it.
       if (!this.#watches.has(page)) {

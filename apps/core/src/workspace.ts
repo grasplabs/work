@@ -231,8 +231,6 @@ import { instructionFilesFor } from "./instruction-files.ts";
 import type { InstructionContext } from "./instruction-files.ts";
 import { chatTurnPurpose } from "./model-spend.ts";
 import { modelSettings, models } from "./models.ts";
-import { OldWayListWatch } from "./old-way-list-watch.ts";
-import type { ChatListListener } from "./old-way-list-watch.ts";
 import type { OutsideTextNote } from "./outside-text.ts";
 import {
   acceptPersonSocket,
@@ -1303,13 +1301,6 @@ export class Workspace extends DurableObject<Env> {
     ChatId,
     { stood: Date; taking: Set<number>; moves: Set<number> }
   >();
-
-  /**
-   * Who follows the list the old way (`watchChats`), by watch ID: core's
-   * Worker of the release before this one, during a deploy. Removed in
-   * the release after.
-   */
-  readonly #oldWayList = new Map<string, OldWayListWatch>();
 
   /** Whether the list's followers are told already this tick (`#listChanged`). */
   #listTold = false;
@@ -6729,10 +6720,6 @@ export class Workspace extends DurableObject<Env> {
     }
     this.#watchers.clear();
     endListFollows(this.ctx);
-    for (const watch of this.#oldWayList.values()) {
-      watch[Symbol.dispose]();
-    }
-    this.#oldWayList.clear();
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     // Its tables went with its storage: they are made again, empty, as for
@@ -6977,47 +6964,14 @@ export class Workspace extends DurableObject<Env> {
    * (person-connections.ts `pushList`).
    */
   #listChanged(): void {
-    if (
-      this.#listTold ||
-      (!listFollowed(this.ctx) && this.#oldWayList.size === 0)
-    ) {
+    if (this.#listTold || !listFollowed(this.ctx)) {
       return;
     }
     this.#listTold = true;
     queueMicrotask(() => {
       this.#listTold = false;
       pushList(this.ctx, (personId) => this.#listOf(personId));
-      const personId = personOfWorkspace(this.ctx.id.name);
-      if (this.#oldWayList.size > 0 && personId !== undefined) {
-        const list = this.#listOf(personId);
-        for (const watch of this.#oldWayList.values()) {
-          watch.push(list);
-        }
-      }
     });
-  }
-
-  /**
-   * Follows `personId`'s list the old way, `listener` kept in memory: for
-   * core's Worker of the release before this one, during a deploy.
-   * Returns the ID `unwatchChats` drops it by. Removed in the release
-   * after, with `unwatchChats`.
-   */
-  watchChats(personId: string, listener: ChatListListener): string {
-    const watchId = crypto.randomUUID();
-    const watch = new OldWayListWatch(listener.dup(), () => {
-      this.unwatchChats(watchId);
-    });
-    this.#oldWayList.set(watchId, watch);
-    watch.push(this.#listOf(personId));
-    return watchId;
-  }
-
-  /** Drops the old way's follower `watchChats` kept as `watchId`. Removed in the release after. */
-  unwatchChats(watchId: string): void {
-    const watch = this.#oldWayList.get(watchId);
-    this.#oldWayList.delete(watchId);
-    watch?.[Symbol.dispose]();
   }
 
   /** `personId`'s list as its watchers follow it: what `chats` gives, and how many they archived. */
