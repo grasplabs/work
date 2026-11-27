@@ -528,6 +528,90 @@ describe("what a chat shows of what it read from the Brain", () => {
   );
 
   it(
+    "replaces a recall's passage once its source is erased on a page read back too, not only on the page the chat opens on",
+    slow,
+    async () => {
+      const depot = word();
+      const marker = word();
+      const chats = await recallingChats(says("Noted."));
+      const source = await added(
+        `Depot ${depot} keeps code ${marker} at the gate`,
+        owner(chats.person.userId)
+      );
+      await chats.ask(`Where does depot ${depot} keep its code?`);
+      // More than a page of later turns, kept as the object keeps them,
+      // and read as they came.
+      await runInDurableObject(chats.stub, (_instance, state) => {
+        for (let turn = 0; turn < 30; turn += 1) {
+          for (const role of ["user", "assistant"] as const) {
+            state.storage.sql.exec(
+              "INSERT INTO chat_messages (chat_id, message, created_at) VALUES (?, ?, ?)",
+              chats.chat.id,
+              JSON.stringify({
+                role,
+                content: [{ type: "text", text: `${role} ${turn}` }],
+                ...(role === "assistant"
+                  ? {
+                      api: "grasp",
+                      provider: "grasp",
+                      model: "grasp",
+                      usage: {
+                        input: 0,
+                        output: 0,
+                        cacheRead: 0,
+                        cacheWrite: 0,
+                        totalTokens: 0,
+                        cost: {
+                          input: 0,
+                          output: 0,
+                          cacheRead: 0,
+                          cacheWrite: 0,
+                          total: 0,
+                        },
+                      },
+                      stopReason: "stop",
+                    }
+                  : {}),
+                timestamp: Date.now(),
+              }),
+              Date.now()
+            );
+          }
+        }
+      });
+      await chats.person.api.chats.markRead(chats.chat.id);
+      await eraseSource(env, {
+        source,
+        readers: owner(chats.person.userId),
+        reason: "deleted",
+      });
+      const first = await opened(chats.person, chats.chat.id);
+      const pages: ChatMessage[] = [];
+      for (
+        let page = { messages: first, older: true };
+        page.older && page.messages[0] !== undefined;
+      ) {
+        // oxlint-disable-next-line no-await-in-loop -- a page at a time, as the page reads them
+        page = await chats.person.api.chats.history(
+          chats.chat.id,
+          page.messages[0].id
+        );
+        pages.unshift(...page.messages);
+      }
+
+      expect({
+        onFirstPage: resultsOf(first),
+        readBack: resultsOf(pages),
+        shown: JSON.stringify(pages).includes(marker),
+      }).toStrictEqual({
+        onFirstPage: [],
+        readBack: [withheldResult],
+        shown: false,
+      });
+    }
+  );
+
+  it(
     "replaces a code step's output once a source its code recalled is erased, as the chat is opened, and never sends it again",
     slow,
     async () => {

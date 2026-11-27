@@ -2271,11 +2271,12 @@ describe(AppWorkspace, () => {
     });
   });
 
-  it("shows a new App once Grasp's turn is over, however it is opened, and asks again in the chat when its preview failed", async () => {
+  it("shows a new App once Grasp's turn is over, however it is opened, and asks again in the chat when its preview failed, its Build it on an earlier page too", async () => {
     const seen: Record<string, unknown> = {};
     for (const [state, refusal] of [
       ["runs", undefined],
       ["fails", "page.build_failed"],
+      ["failsEarlier", "page.build_failed"],
     ] as const) {
       const core = new PreviewingCore(refusal);
       socketsTo(core);
@@ -2286,34 +2287,65 @@ describe(AppWorkspace, () => {
         `chat-${state}`,
         // Grasp's turn after the Build it that made the App, over.
         async (_chat, _after, received) => {
-          received({
-            messages: [
-              {
-                id: 1,
-                role: "user",
-                text: "Build it",
-                built: {
-                  app: { id: "invoice-desk", name: "Invoices" },
-                  plan: "plan-1",
-                },
-                at: "2026-10-20T08:00:00.000Z",
-              },
-              {
-                id: 2,
-                role: "assistant",
-                text: "Invoices is set up.",
-                code: [],
-                tools: [],
-                end: "done",
-                at: "2026-10-20T08:01:00.000Z",
-              },
-            ],
-            partial: null,
-            running: false,
-            stopped: null,
-            held: 0,
-            worked: 1,
-          });
+          received(
+            state === "failsEarlier"
+              ? {
+                  // A page of later turns: the Build it lies on an earlier
+                  // one, and core says it was answered.
+                  messages: [
+                    {
+                      id: 41,
+                      role: "user",
+                      text: "And the totals?",
+                      at: "2026-10-20T09:00:00.000Z",
+                    },
+                    {
+                      id: 42,
+                      role: "assistant",
+                      text: "Here they are.",
+                      code: [],
+                      tools: [],
+                      end: "done",
+                      at: "2026-10-20T09:01:00.000Z",
+                    },
+                  ],
+                  older: true,
+                  answeredBuilds: [{ kind: "app", id: "invoice-desk" }],
+                  partial: null,
+                  running: false,
+                  stopped: null,
+                  held: 0,
+                  worked: 1,
+                }
+              : {
+                  messages: [
+                    {
+                      id: 1,
+                      role: "user",
+                      text: "Build it",
+                      built: {
+                        app: { id: "invoice-desk", name: "Invoices" },
+                        plan: "plan-1",
+                      },
+                      at: "2026-10-20T08:00:00.000Z",
+                    },
+                    {
+                      id: 2,
+                      role: "assistant",
+                      text: "Invoices is set up.",
+                      code: [],
+                      tools: [],
+                      end: "done",
+                      at: "2026-10-20T08:01:00.000Z",
+                    },
+                  ],
+                  partial: null,
+                  running: false,
+                  stopped: null,
+                  held: 0,
+                  worked: 1,
+                }
+          );
           return await Promise.resolve(watching());
         },
         undefined,
@@ -2347,6 +2379,12 @@ describe(AppWorkspace, () => {
     expect(seen).toStrictEqual({
       runs: { settingUp: false, notReady: false, controls: true, asked: [] },
       fails: {
+        settingUp: false,
+        notReady: true,
+        controls: false,
+        asked: ["Try again to set up Invoices."],
+      },
+      failsEarlier: {
         settingUp: false,
         notReady: true,
         controls: false,

@@ -222,6 +222,14 @@ export const modelScripts = {
     opener: "Walk me through the month-end close, step by step.",
     replies: [says(monthEndClose)],
   },
+  /**
+   * A long chat: each question answered at once, as many as a test asks
+   * (each step of a turn is a reply of its own).
+   */
+  answersEveryQuestion: {
+    opener: "Let's go through the backlog, one item at a time.",
+    replies: Array.from({ length: 400 }, () => says("Noted, next one.")),
+  },
   /** An answer in blocks: a table, a formula, code and a diagram. */
   answersInBlocks: {
     opener: "Show me the quarter in a table, a formula, code and a diagram.",

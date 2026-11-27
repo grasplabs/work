@@ -509,6 +509,102 @@ test("a person comes back to a chat that answered while they were away, sees its
   ).toHaveCSS("font-weight", "400");
 });
 
+test("a person opens a long chat on its newest messages, and scrolls back to its first, each earlier page coming in with nothing on the screen moving", async ({
+  pageOf,
+}) => {
+  test.setTimeout(150_000);
+  const { user } = peopleIn("chat");
+  const turns = 30;
+  const { core, api } = apiOf(user);
+  let chatId = "";
+  try {
+    // Each question once the last is answered, as a person asks them.
+    const answered = async (): Promise<void> => {
+      await expect
+        .poll(async () => await api.chats.summary(chatId), { timeout: 30_000 })
+        .toMatchObject({ running: false });
+    };
+    chatId = await askInNewChat(api, "Backlog", {
+      text: modelScripts.answersEveryQuestion.opener,
+      model: e2eModel,
+    });
+    await answered();
+    for (let item = 2; item <= turns; item += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one question at a time, as a person asks
+      await api.chats.send(chatId, { text: `Item ${item}`, model: e2eModel });
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await answered();
+    }
+    // Asked by them, each answer read as it came.
+    await api.chats.markRead(chatId);
+  } finally {
+    core[Symbol.dispose]();
+  }
+  const page = await pageOf(user);
+  await page.goto(`/chats/${chatId}`);
+  const messages = page.getByRole("log", { name: "Messages" });
+  const questions = messages.locator('[data-slot="bubble"]');
+  // Its newest page: the last question, and a way to earlier ones.
+  await expect(
+    messages.getByText(`Item ${turns}`, { exact: true })
+  ).toBeVisible();
+  await expect(
+    messages.getByRole("button", { name: "Earlier messages" })
+  ).toBeAttached();
+  const opened = await questions.count();
+  expect(opened).toBeLessThan(turns);
+
+  // Back to the first question, as a reader scrolls: each page comes in
+  // over the rows there, which stay where they are on the screen.
+  const box = await messages.boundingBox();
+  await page.mouse.move(
+    (box?.x ?? 0) + (box?.width ?? 0) / 2,
+    (box?.y ?? 0) + (box?.height ?? 0) / 2
+  );
+  const first = messages.getByText(modelScripts.answersEveryQuestion.opener);
+  let moved = 0;
+  // oxlint-disable-next-line no-await-in-loop -- until the first question shows, a step at a time
+  for (let step = 0; step < 200 && !(await first.isVisible()); step += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- a wheel step at a time, as a reader scrolls
+    const before = await messages.evaluate((log) => {
+      const { top } = log.getBoundingClientRect();
+      const row = [
+        ...log.querySelectorAll<HTMLElement>("[data-message-id]"),
+      ].find((each) => each.getBoundingClientRect().bottom > top + 40);
+      return {
+        id: row?.dataset.messageId ?? "",
+        y: row?.getBoundingClientRect().top ?? 0,
+        rows: log.querySelectorAll("[data-message-id]").length,
+      };
+    });
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    await page.mouse.wheel(0, -300);
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    await page.waitForTimeout(50);
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    const after = await messages.evaluate(
+      (log, id) => ({
+        y:
+          log
+            .querySelector(`[data-message-id="${CSS.escape(id)}"]`)
+            ?.getBoundingClientRect().top ?? 0,
+        rows: log.querySelectorAll("[data-message-id]").length,
+      }),
+      before.id
+    );
+    if (after.rows > before.rows) {
+      // Moved by the wheel alone, never by the rows that came in above.
+      moved = Math.max(moved, Math.abs(after.y - before.y - 300));
+    }
+  }
+  await expect(first).toBeVisible();
+  await expect(
+    messages.getByRole("button", { name: "Earlier messages" })
+  ).toHaveCount(0);
+  expect(await questions.count()).toBe(turns);
+  expect(moved).toBeLessThan(2);
+});
+
 test("a person's list follows what happens elsewhere: a chat answered in the background gets its dot, and a question from another tab moves its chat up, with no page change", async ({
   pageOf,
 }) => {

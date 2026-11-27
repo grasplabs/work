@@ -6583,6 +6583,14 @@ msgstr "Les courriels précédents du même fil."
 msgid "Earlier mail, notes and files about the people and the topic."
 msgstr "Les courriels, notes et fichiers antérieurs sur les participants et le sujet."
 
+#: src/chat/thread.tsx
+msgid "Earlier messages"
+msgstr "Messages précédents"
+
+#: src/chat/thread.tsx
+msgid "Earlier messages didn't load. Try again"
+msgstr "Les messages précédents ne se sont pas chargés. Réessayer"
+
 #: src/agents/agent-templates.ts
 msgid "Earlier reminders and replies from the client in the mailbox."
 msgstr "Les rappels précédents et les réponses du client dans la boîte mail."
@@ -10244,6 +10252,10 @@ msgstr "Chargement des {many}"
 #: src/connections/integrations-skeleton.tsx
 msgid "Loading connectors"
 msgstr "Chargement des connecteurs"
+
+#: src/chat/thread.tsx
+msgid "Loading earlier messages…"
+msgstr "Chargement des messages précédents…"
 
 #: src/frame/ui-words.tsx
 msgid "Loading more {many}"

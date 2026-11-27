@@ -13,6 +13,9 @@ import { followObject } from "../src/upstream.ts";
 // the object asleep or reset under it, a person's pages filling the
 // object, and a watch let go of.
 
+/** How long a test waits for what a socket carries, a slow machine too. */
+const carried = { timeout: 10_000 };
+
 /** Takes a telling and does nothing with it. */
 const quiet = async (): Promise<void> => {
   await Promise.resolve();
@@ -66,12 +69,12 @@ describe("a page's watch of an object", () => {
     await draftWatch(env, subject).revised(4);
     await vi.waitFor(() => {
       expect(taken).toStrictEqual([4]);
-    });
+    }, carried);
     await draftWatch(env, subject).revised(5);
 
     await vi.waitFor(() => {
       expect(taken).toStrictEqual([4, 5]);
-    });
+    }, carried);
   });
 
   it("hears the object after it slept, and after it reset, each telling once", async () => {
@@ -86,23 +89,23 @@ describe("a page's watch of an object", () => {
     await object.revised(1);
     await vi.waitFor(() => {
       expect(taken).toStrictEqual([1]);
-    });
+    }, carried);
 
     await evictDurableObject(object);
     await object.revised(2);
     await vi.waitFor(() => {
       expect(taken).toStrictEqual([1, 2]);
-    });
+    }, carried);
     await evictDurableObject(object, { webSockets: "close" });
     await object.revised(3);
     await vi.waitFor(() => {
       expect(taken).toStrictEqual([1, 2, 3]);
-    });
+    }, carried);
     await object.revised(4);
 
     await vi.waitFor(() => {
       expect(taken).toStrictEqual([1, 2, 3, 4]);
-    });
+    }, carried);
   });
 
   it("ends the oldest of a person's watches past the object's bound, and nobody else's", async () => {
@@ -124,7 +127,7 @@ describe("a page's watch of an object", () => {
 
     await vi.waitFor(() => {
       expect(ended).toStrictEqual([`0:${watchEnds.displaced}`]);
-    });
+    }, carried);
     for (const watch of watches) {
       watch[Symbol.dispose]();
     }
@@ -140,7 +143,7 @@ describe("a page's watch of an object", () => {
     await draftWatch(env, subject).revised(1);
     await vi.waitFor(() => {
       expect(taken).toStrictEqual([1]);
-    });
+    }, carried);
 
     watch[Symbol.dispose]();
     await draftWatch(env, subject).revised(2);
