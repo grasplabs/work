@@ -603,11 +603,11 @@ export const onboardingErrors = defineErrorFamily({
     "The team's lead hasn't agreed to anything to draw its map from yet.",
   "onboarding.no_failed_mail": "That person has no mail that failed.",
   "onboarding.nudged_today":
-    "That team got your nudge today already. You can nudge it again tomorrow.",
+    "That team got your reminder today already. You can remind it again tomorrow.",
   "onboarding.nobody_to_nudge":
-    "Nobody in that team is waiting for a nudge: nobody was asked yet, or everyone has finished.",
+    "Nobody in that team is waiting for a reminder: nobody was asked yet, or everyone has finished.",
   "onboarding.team_too_small":
-    "A team shows its numbers, and takes a nudge, only once five people in it were asked.",
+    "A team shows its numbers, and takes a reminder, only once five people in it were asked.",
   "onboarding.no_address":
     "That person has no email address now to send it to.",
   "onboarding.reminder_not_owed":

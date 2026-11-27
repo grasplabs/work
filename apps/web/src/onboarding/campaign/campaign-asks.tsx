@@ -1,5 +1,5 @@
 // What the admin can do on the campaign page, each done with one press:
-// nudge a quiet team (Grasp's reminder goes out in the admin's name to
+// remind a quiet team (Grasp's reminder goes out in the admin's name to
 // those still to talk, whom the admin never sees), or correct an address
 // an invitation bounced from. Core does both (`onboarding.nudge`,
 // `onboarding.correctAddress`) and says what needs the admin next. The
@@ -85,7 +85,7 @@ const AskLine = ({ ask, first }: { ask: CampaignAsk; first: boolean }) => {
   } else {
     const { name: team, waiting } = ask;
     words = ask.nudged
-      ? t`${team} got your nudge.`
+      ? t`${team} got your reminder.`
       : t`${team} is quiet. ${plural(waiting, {
           one: "# person is still to talk.",
           other: "# people are still to talk.",
@@ -123,7 +123,7 @@ const Nudge = ({
         successText={t`Sent`}
         variant={first ? "default" : "link"}
       >
-        {t`Nudge ${team}`}
+        {t`Remind ${team}`}
       </Button>
       <TopError>{failure}</TopError>
     </>

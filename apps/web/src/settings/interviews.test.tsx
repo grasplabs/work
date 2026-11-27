@@ -24,8 +24,9 @@ import { InterviewsPanel } from "./interviews.tsx";
 // Settings › Interviews, on what core answers the company's admin
 // (`onboarding.campaign`, `links` and `view`): where the interviews stand,
 // what stays hidden of a small team, and what the admin does from here: a
-// nudge, a corrected address, a link marked as sent. Core is a fake that
-// keeps what it was asked and answers as the real one would.
+// reminder to the teams ticked, a corrected address, a link marked as
+// sent. Core is a fake that keeps what it was asked and answers as the
+// real one would.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -144,8 +145,8 @@ interface Fake {
   campaign: Campaign | null;
   view: OnboardingView;
   links: LinkToSend[];
-  /** How core answers a nudge: how many it mailed, or the refusal it throws. */
-  nudge: () => number;
+  /** How core answers a reminder for a team: how many it mailed, or the refusal it throws. */
+  nudge: (team: string) => number;
   /** How core answers a corrected address: nothing, or the refusal it throws. */
   correct?: () => void;
   asked: string[];
@@ -180,7 +181,7 @@ const shown = async (fake: Fake): Promise<void> => {
       links: async () => await Promise.resolve(fake.links),
       nudge: async (id: string) => {
         fake.asked.push(`nudge ${id}`);
-        return await Promise.resolve({ mailed: fake.nudge() });
+        return await Promise.resolve({ mailed: fake.nudge(id) });
       },
       correctAddress: async (person: string, email: string) => {
         fake.asked.push(`correct ${person} ${email}`);
@@ -285,22 +286,71 @@ const groupText = (name: string): string => {
 /** The whole page's words. */
 const pageText = (): string => wordsOf(document.body);
 
-/** An address typed into the one open address form. */
-const typedAddress = async (address: string): Promise<void> => {
-  const input = document.querySelector<HTMLInputElement>(
-    'form input[type="email"]'
-  );
+/** Words typed into the one field matching `selector`. */
+const typed = async (selector: string, words: string): Promise<void> => {
+  const input = document.querySelector<HTMLInputElement>(selector);
   await act(async () => {
     if (input !== null) {
       Reflect.getOwnPropertyDescriptor(
         HTMLInputElement.prototype,
         "value"
-      )?.set?.call(input, address);
+      )?.set?.call(input, words);
       input.dispatchEvent(new Event("input", { bubbles: true }));
     }
     await Promise.resolve();
   });
+  await settled();
 };
+
+/** The table of this name. */
+const tableOf = (name: string): HTMLElement => found("table", name);
+
+/** What each row of a table's body says, in order. */
+const rowsOf = (name: string): string[] =>
+  [...tableOf(name).querySelectorAll("tbody tr")].map((row) => wordsOf(row));
+
+/** The first cell's words of each row of a table's body: who the rows are, in order. */
+const namesOf = (name: string, column = 0): string[] =>
+  [...tableOf(name).querySelectorAll("tbody tr")].map((row) =>
+    wordsOf(row.querySelectorAll("th, td")[column] ?? row)
+  );
+
+/** The checkbox its label names, in the links' table. */
+const tickOf = (name: string): HTMLElement => {
+  const tick = found("label", name)
+    .closest("td")
+    ?.querySelector<HTMLElement>('[role="checkbox"]');
+  if (tick === null || tick === undefined) {
+    throw new TypeError(`No checkbox ${name}`);
+  }
+  return tick;
+};
+
+/** A row's menu, opened, and the item of these words pressed. */
+const chosen = async (person: string, item: string): Promise<void> => {
+  await click(found("button", `Actions for ${person}`));
+  await click(found('[role="menuitem"]', item));
+};
+
+/** What the open menu offers. */
+const menuItems = (): string[] =>
+  [...document.querySelectorAll('[role="menuitem"]')].map((item) =>
+    wordsOf(item)
+  );
+
+/** Forty people whose links are out, to send by hand. */
+const manyLinks = (count: number): LinkToSend[] =>
+  Array.from({ length: count }, (_, index) =>
+    link(`p${index}`, `Person ${String(index).padStart(2, "0")}`)
+  );
+
+/** A company that sends its links by hand, with nothing failed. */
+const byHand = (links: LinkToSend[]): Fake =>
+  fakeOf({
+    campaign: { ...campaign, asks: [] },
+    view: { ...view, mailSends: false, mailDomain: null },
+    links,
+  });
 
 describe("Settings › Interviews", () => {
   afterEach(() => {
@@ -322,9 +372,11 @@ describe("Settings › Interviews", () => {
       closes: text.includes("Closes Nov 27, 2026"),
       known: text.includes("Grasp knows75%"),
       go: text.includes("Grasp opens from 80%"),
-      sales: groupText("By team").includes(
-        "6 of 10 talked, 1 in progress, 3 not started."
-      ),
+      bars: [...document.querySelectorAll('[role="progressbar"]')]
+        .map((bar) => bar.getAttribute("aria-label"))
+        .filter(
+          (name) => name === "Colleagues talked" || name === "Grasp knows"
+        ),
     }).toStrictEqual({
       colleagues: true,
       leads: true,
@@ -332,91 +384,265 @@ describe("Settings › Interviews", () => {
       closes: true,
       known: true,
       go: true,
-      sales: true,
+      bars: ["Colleagues talked", "Grasp knows"],
     });
   });
 
-  it("shows no numbers of a team too small, or where too few talked, and offers the small one no nudge", async () => {
+  it("says in one line what needs the admin, each part a way to its table", async () => {
     await shown(fakeOf());
-    const teams = groupText("By team");
+    const parts = [...found("ul", "What needs you").querySelectorAll("a")].map(
+      (part) => `${wordsOf(part)} ${part.getAttribute("href")}`
+    );
+
+    expect(parts).toStrictEqual([
+      "1 email didn’t arrive #interview-links",
+      "1 team lead hasn’t talked #interview-teams",
+      "1 quiet team #interview-teams",
+    ]);
+  });
+
+  it("says calmly that nothing needs the admin when nothing does", async () => {
+    await shown(
+      fakeOf({
+        campaign: {
+          ...campaign,
+          teams: [team("sales", "Sales")],
+          asks: [],
+        },
+      })
+    );
 
     expect({
-      small: teams.includes(
-        "Fewer than 5 people were asked: too few to show numbers."
-      ),
-      few: teams.includes(
-        "6 asked. Fewer than 3 have talked: too few to show more."
-      ),
-      nudgeSmall: hasButton("Nudge Legal"),
-      nudgeQuiet: hasButton("Nudge Ops"),
-      waiting: groupText("Still to talk").includes(
-        "One team is too small to show how many of it are still to talk."
-      ),
+      calm: pageText().includes("Nothing needs you right now."),
+      line: document.querySelector('ul[aria-label="What needs you"]'),
+    }).toStrictEqual({ calm: true, line: null });
+  });
+
+  it("shows the links that need the admin again when the line's part is followed", async () => {
+    const fake = fakeOf({ links: [link("ada", "Ada Lund")] });
+    await shown(fake);
+    await click(found("button", "All"));
+    const all = namesOf("Links");
+
+    await click(found("a", "1 email didn’t arrive"));
+
+    expect({ all, after: namesOf("Links") }).toStrictEqual({
+      all: ["Ben Bos", "Ada Lund"],
+      after: ["Ben Bos"],
+    });
+  });
+
+  it("lists every team once with its lead, its numbers and one status", async () => {
+    await shown(fakeOf());
+
+    expect(rowsOf("Teams")).toStrictEqual([
+      "Sales1064",
+      "OpsLea SmitHasn’t talked yet6Too few to showQuiet",
+      "Fewer than 5 people were asked in this team, so no reminder goes to it.LegalToo few to show",
+    ]);
+  });
+
+  it("shows no numbers of a team too small, and lets nobody tick it, with why", async () => {
+    await shown(fakeOf());
+    const tick = found('[role="checkbox"]', "Select Legal");
+    const why = tick.getAttribute("aria-describedby");
+
+    expect({
+      row: rowsOf("Teams").at(-1)?.endsWith("LegalToo few to show"),
+      off:
+        tick.hasAttribute("disabled") ||
+        tick.getAttribute("aria-disabled") === "true",
+      why:
+        why === null
+          ? null
+          : document.querySelector(`#${CSS.escape(why)}`)?.textContent,
     }).toStrictEqual({
-      small: true,
-      few: true,
-      nudgeSmall: false,
-      nudgeQuiet: true,
-      waiting: true,
+      row: true,
+      off: true,
+      why: "Fewer than 5 people were asked in this team, so no reminder goes to it.",
     });
   });
 
-  it("names a lead still to talk, and everyone else only as a number per team", async () => {
-    await shown(fakeOf());
-    const waiting = groupText("Still to talk");
+  it("sends the reminder to the teams ticked, one after the other, and says how many were mailed", async () => {
+    const fake = fakeOf({ nudge: (id) => (id === "sales" ? 4 : 6) });
+    await shown(fake);
+    const before = hasButton("Send reminder");
+
+    await click(found('[role="checkbox"]', "Select Sales"));
+    await click(found('[role="checkbox"]', "Select Ops"));
+    await click(found("button", "Send reminder to 2 teams"));
 
     expect({
-      lead: waiting.includes("Lea Smit, its lead, hasn’t talked yet."),
-      sales: waiting.includes(
-        "4 people are still to talk; 3 of them haven’t started."
+      before,
+      asked: fake.asked,
+      said: groupText("Teams").includes(
+        "Your reminder went to 10 people in 2 teams."
       ),
-      ops: waiting.includes("Fewer than 3 of its 6 have talked so far."),
-    }).toStrictEqual({ lead: true, sales: true, ops: true });
+      cleared: hasButton("Send reminder"),
+      reminded: rowsOf("Teams").filter((row) => row.includes("Reminded today"))
+        .length,
+    }).toStrictEqual({
+      before: true,
+      asked: ["nudge sales", "nudge ops"],
+      said: true,
+      cleared: true,
+      reminded: 2,
+    });
   });
 
-  it("nudges a team and says how many were mailed", async () => {
-    const fake = fakeOf();
+  it("says per team why core sent it no reminder, beside the teams it did mail", async () => {
+    const fake = fakeOf({
+      nudge: (id) => {
+        if (id === "ops") {
+          throw onboardingErrors.create("onboarding.nudged_today");
+        }
+        return 4;
+      },
+    });
     await shown(fake);
 
-    await click(found("button", "Nudge Ops"));
+    await click(
+      found('[role="checkbox"]', "Select every team a reminder can go to")
+    );
+    await click(found("button", "Send reminder to 2 teams"));
+    const teams = groupText("Teams");
 
     expect({
       asked: fake.asked,
-      said: groupText("By team").includes("Your nudge went to 4 people."),
-      again: hasButton("Nudge Ops"),
-    }).toStrictEqual({ asked: ["nudge ops"], said: true, again: false });
+      mailed: teams.includes("Your reminder went to 4 people in 1 team."),
+      refused: teams.includes(
+        "Ops got no reminder. That team got your reminder today already. You can remind it again tomorrow."
+      ),
+    }).toStrictEqual({
+      asked: ["nudge sales", "nudge ops"],
+      mailed: true,
+      refused: true,
+    });
   });
 
-  it("says why core refused a nudge: a team too small, or one nudged today already", async () => {
-    const small = fakeOf({
-      nudge: () => {
-        throw onboardingErrors.create("onboarding.team_too_small");
-      },
-    });
-    await shown(small);
-    await click(found("button", "Nudge Sales"));
-    const tooSmall = groupText("By team");
+  it("lets no reminder go to a team reminded today, where everyone talked, or outside the plan's days", async () => {
+    const reasonOf = (name: string): string | null | undefined => {
+      const why = found('[role="checkbox"]', `Select ${name}`).getAttribute(
+        "aria-describedby"
+      );
+      return why === null
+        ? null
+        : document.querySelector(`#${CSS.escape(why)}`)?.textContent;
+    };
+    await shown(
+      fakeOf({
+        campaign: {
+          ...campaign,
+          teams: [
+            team("sales", "Sales", {
+              talked: 10,
+              inProgress: 0,
+              notStarted: 0,
+            }),
+            team("ops", "Ops", { quiet: true }),
+          ],
+          asks: [
+            {
+              kind: "quiet",
+              team: "ops",
+              name: "Ops",
+              waiting: 4,
+              nudged: true,
+            },
+          ],
+        },
+      })
+    );
+    const running = { sales: reasonOf("Sales"), ops: reasonOf("Ops") };
+    const statuses = rowsOf("Teams");
     act(() => {
       root?.unmount();
     });
     document.body.innerHTML = "";
 
-    const today = fakeOf({
-      nudge: () => {
-        throw onboardingErrors.create("onboarding.nudged_today");
-      },
-    });
-    await shown(today);
-    await click(found("button", "Nudge Sales"));
+    await shown(fakeOf({ campaign: { ...campaign, today: "2026-11-30" } }));
 
     expect({
-      tooSmall: tooSmall.includes(
-        "A team shows its numbers, and takes a nudge, only once five people in it were asked."
-      ),
-      today: groupText("By team").includes(
-        "That team got your nudge today already. You can nudge it again tomorrow."
-      ),
-    }).toStrictEqual({ tooSmall: true, today: true });
+      running,
+      statuses,
+      over: reasonOf("Sales"),
+    }).toStrictEqual({
+      running: {
+        sales: "Everyone in this team has talked.",
+        ops: "This team got your reminder today. The next one can go tomorrow.",
+      },
+      statuses: [
+        "This team got your reminder today. The next one can go tomorrow.OpsLea Smit1064Reminded today",
+        "Everyone in this team has talked.Sales10100Everyone talked",
+      ],
+      over: "A reminder goes only on the days the interviews run.",
+    });
+  });
+
+  it("starts with the team with most still to talk, what core hides last, and sorts by a column pressed", async () => {
+    const fake = fakeOf({
+      campaign: {
+        ...campaign,
+        teams: [
+          team("legal", "Legal", {
+            asked: null,
+            talked: null,
+            inProgress: null,
+            notStarted: null,
+            byDay: null,
+          }),
+          team("sales", "Sales"),
+          team("finance", "Finance", { asked: 20, talked: 5 }),
+        ],
+      },
+    });
+    await shown(fake);
+    const first = namesOf("Teams", 1);
+    const sortedBy = (): string[] =>
+      [...tableOf("Teams").querySelectorAll("th[aria-sort]")]
+        .filter((head) => head.getAttribute("aria-sort") !== "none")
+        .map((head) => `${wordsOf(head)} ${head.getAttribute("aria-sort")}`);
+    const firstSort = sortedBy();
+
+    await click(found("table th button", "Team"));
+
+    expect({
+      first,
+      firstSort,
+      byName: namesOf("Teams", 1),
+      nameSort: sortedBy(),
+    }).toStrictEqual({
+      first: ["Finance", "Sales", "Legal"],
+      firstSort: ["Still to talk descending"],
+      byName: ["Finance", "Legal", "Sales"],
+      nameSort: ["Team ascending"],
+    });
+  });
+
+  it("shows the links that need the admin first, every link that is out on All, and narrows them by a search", async () => {
+    const fake = fakeOf({
+      links: [
+        link("ada", "Ada Lund", { team: "Ops" }),
+        link("cas", "Cas Visser"),
+        link("eli", "Eli Maas", { path: null, fresh: false }),
+      ],
+    });
+    await shown(fake);
+    const first = rowsOf("Links");
+
+    await click(found("button", "All"));
+    const all = rowsOf("Links");
+    await typed('input[aria-label="Search links"]', "ops");
+
+    expect({ first, all, found: namesOf("Links") }).toStrictEqual({
+      first: ["Ben BosSalesben@acme.tsetDidn’t arrive"],
+      all: [
+        "Ben BosSalesben@acme.tsetDidn’t arrive",
+        "Ada LundOpsada@acme.testSent",
+        "Cas VisserSalescas@acme.testSent",
+      ],
+      found: ["Ada Lund"],
+    });
   });
 
   it("says core's refusal at the address being corrected, and keeps the mail on the list", async () => {
@@ -427,92 +653,173 @@ describe("Settings › Interviews", () => {
     });
     await shown(fake);
 
-    await click(found("button", "Correct the address of Ben Bos"));
-    await typedAddress("ben@acme.test");
+    await chosen("Ben Bos", "Correct the address");
+    await typed('form input[type="email"]', "ben@acme.test");
+    await click(found("button", "Send again"));
+
+    expect({
+      asked: fake.asked,
+      refused: wordsOf(
+        found("form", "Correct the address of Ben Bos")
+      ).includes("That isn't something the onboarding takes."),
+      listed: namesOf("Links"),
+    }).toStrictEqual({
+      asked: ["correct ben ben@acme.test"],
+      refused: true,
+      listed: ["Ben Bos"],
+    });
+  });
+
+  it("sends a corrected address, and the mail leaves what needs the admin", async () => {
+    const fake = fakeOf();
+    await shown(fake);
+    const before = namesOf("Links");
+
+    await chosen("Ben Bos", "Correct the address");
+    await typed('form input[type="email"]', "ben@acme.test");
     await click(found("button", "Send again"));
     const links = groupText("Links");
 
     expect({
+      before,
       asked: fake.asked,
-      refused: links.includes("That isn't something the onboarding takes."),
-      listed: links.includes("Ben Bos"),
+      table: document.querySelector('table[aria-label="Links"]'),
+      calm: links.includes("Every invitation was delivered."),
+      form: document.querySelector('form input[type="email"]'),
     }).toStrictEqual({
+      before: ["Ben Bos"],
       asked: ["correct ben ben@acme.test"],
-      refused: true,
-      listed: true,
+      table: null,
+      calm: true,
+      form: null,
     });
   });
 
-  it("sends a corrected address, and the mail leaves the list", async () => {
-    const fake = fakeOf();
+  it("offers each link only what can be done with it", async () => {
+    const fake = byHand([
+      link("ada", "Ada Lund"),
+      link("dee", "Dee Koch", { fresh: false }),
+    ]);
     await shown(fake);
-    const before = groupText("Links").includes(
-      "Our email to ben@acme.tset didn’t arrive."
-    );
+    await click(found("button", "All"));
+    await click(found("button", "Actions for Ada Lund"));
+    const toSend = menuItems();
+    await click(found('[role="menuitem"]', "Copy link"));
+    await click(found("button", "Actions for Dee Koch"));
 
-    await click(found("button", "Correct the address of Ben Bos"));
-    await typedAddress("ben@acme.test");
-    await click(found("button", "Send again"));
-
-    expect({
-      before,
-      asked: fake.asked,
-      after: groupText("Links").includes("Ben Bos"),
-    }).toStrictEqual({
-      before: true,
-      asked: ["correct ben ben@acme.test"],
-      after: false,
+    expect({ toSend, sent: menuItems() }).toStrictEqual({
+      toSend: ["Copy link", "Mark as sent"],
+      sent: ["Copy link"],
     });
   });
 
   it("lists the links to send by hand where Grasp sends no mail, and takes one off once marked as sent", async () => {
-    const fake = fakeOf({
-      campaign: { ...campaign, asks: [] },
-      view: { ...view, mailSends: false, mailDomain: null },
-      links: [
-        link("ada", "Ada Lund"),
-        link("cas", "Cas Visser"),
-        link("dee", "Dee Koch", { fresh: false }),
-        link("eli", "Eli Maas", { path: null, fresh: false }),
-      ],
-    });
+    const fake = byHand([
+      link("ada", "Ada Lund"),
+      link("cas", "Cas Visser"),
+      link("dee", "Dee Koch", { fresh: false }),
+      link("eli", "Eli Maas", { path: null, fresh: false }),
+    ]);
     await shown(fake);
-    const before = groupText("Links");
+    const before = namesOf("Links", 1);
 
-    await click(found("button", "Mark the link for Ada Lund as sent"));
-    const after = groupText("Links");
+    await chosen("Ada Lund", "Mark as sent");
 
     expect({
-      listed: before.includes("Ada Lund") && before.includes("Cas Visser"),
-      sentBefore: before.includes("Dee Koch"),
-      notOut: before.includes("Eli Maas"),
-      out: before.includes("3 of 4 links are out."),
+      before,
+      out: groupText("Links").includes("3 of 4 links are out."),
+      needs: wordsOf(found("ul", "What needs you")).includes("2 links to send"),
       asked: fake.asked,
-      ada: after.includes("Ada Lund"),
-      cas: after.includes("Cas Visser"),
+      after: namesOf("Links", 1),
     }).toStrictEqual({
-      listed: true,
-      sentBefore: false,
-      notOut: false,
+      before: ["Ada Lund", "Cas Visser"],
       out: true,
+      needs: false,
       asked: ["taken ada"],
-      ada: false,
-      cas: true,
+      after: ["Cas Visser"],
     });
   });
 
-  it("lists no link to send where Grasp emails them itself", async () => {
+  it("marks the links ticked as sent in one press", async () => {
+    const fake = byHand([
+      link("ada", "Ada Lund"),
+      link("cas", "Cas Visser"),
+      link("fay", "Fay Smit"),
+    ]);
+    await shown(fake);
+    const before = hasButton("Mark selected as sent");
+
+    await click(tickOf("Choose Ada Lund"));
+    await click(tickOf("Choose Fay Smit"));
+    await click(found("button", "Mark selected as sent"));
+
+    expect({
+      before,
+      asked: fake.asked,
+      after: namesOf("Links", 1),
+    }).toStrictEqual({
+      before: false,
+      asked: ["taken ada,fay"],
+      after: ["Cas Visser"],
+    });
+  });
+
+  it("pages the links past 25 of them", async () => {
+    await shown(byHand(manyLinks(40)));
+    const first = namesOf("Links", 1);
+    const pages = document.querySelector('nav[aria-label="Pages of links"]');
+
+    expect({
+      first: first.length,
+      last: first.at(-1),
+      pages: pages !== null,
+    }).toStrictEqual({ first: 25, last: "Person 24", pages: true });
+  });
+
+  it("shows no pages for a short list of links", async () => {
+    await shown(byHand(manyLinks(3)));
+
+    expect({
+      rows: namesOf("Links", 1).length,
+      pages: document.querySelector('nav[aria-label="Pages of links"]'),
+    }).toStrictEqual({ rows: 3, pages: null });
+  });
+
+  it("says that every invitation was delivered, in place of an empty table, where Grasp emails the links and none failed", async () => {
     await shown(
       fakeOf({
         campaign: { ...campaign, asks: [] },
         links: [link("ada", "Ada Lund")],
       })
     );
+    const all = namesOf("Links");
+
+    await click(found("button", "Needs attention"));
 
     expect({
-      listed: groupText("Links").includes("Ada Lund"),
-      said: groupText("Links").includes("Nothing to do: no email failed."),
-    }).toStrictEqual({ listed: false, said: true });
+      all,
+      calm: groupText("Links").includes("Every invitation was delivered."),
+      table: document.querySelector('table[aria-label="Links"]'),
+    }).toStrictEqual({ all: ["Ada Lund"], calm: true, table: null });
+  });
+
+  it("shows the plan's facts and the way to the campaign page", async () => {
+    await shown(fakeOf());
+    const activity = groupText("Activity");
+
+    expect({
+      first: activity.includes("First dayNov 23, 2026"),
+      last: activity.includes("Last dayNov 27, 2026"),
+      links: activity.includes("LinksEmailed by Grasp, from mail.grasp.test"),
+      reminder: activity.includes("Grasp’s reminderOnce, after 3 working days"),
+      way: found("a", "Open the campaign page").getAttribute("href"),
+    }).toStrictEqual({
+      first: true,
+      last: true,
+      links: true,
+      reminder: true,
+      way: "/setup?step=listening",
+    });
   });
 
   it("says what keeps the links in: the interviews paused, the agreements not in place", async () => {
