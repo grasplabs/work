@@ -670,8 +670,8 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
   useWordsOnScreen();
   // He says goodbye by the name they are greeted by.
   useEffect(() => {
-    setLoopName(session.name);
-  }, [session.name]);
+    setLoopName(session.name, session.kind === "lead");
+  }, [session.name, session.kind]);
   // The conversation runs while it is on screen; a moment after, so a screen that only flashes by asks nothing.
   const running = talking && !timeUp && !guiding;
   useEffect(() => (running ? runLoop() : undefined), [running]);

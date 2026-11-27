@@ -19,6 +19,7 @@ import {
 } from "../onboarding/pixel-cursor.tsx";
 import type { Point } from "../onboarding/pixel-cursor.tsx";
 import { startLight } from "./guide-light.ts";
+import { guideForgotten, guideSays } from "./guide-said.ts";
 import { keepNow, linkNow, update, useInterviewer } from "./kept.ts";
 import { prepare, say, stopSpeaking } from "./speech.ts";
 
@@ -364,6 +365,10 @@ const Walk = ({
     );
     const voicing = { speaker, tone: "warm, relaxed" } as const;
     const walk = async (): Promise<void> => {
+      if (atNow.current === 0) {
+        // From the top: what he said of it before goes.
+        guideForgotten();
+      }
       for (let place = atNow.current; place < spots.length; place += 1) {
         const spot = spots[place] ?? "ready";
         const target = targetOn(spot);
@@ -377,6 +382,8 @@ const Walk = ({
         if (next !== undefined) {
           prepare(wordsNow.current[next].spoken, voicing);
         }
+        // Into the transcript as he says it.
+        guideSays(place, spoken);
         // Said, or as long as it may take at most: a voice that never ends never holds the walk.
         const said = Promise.race([
           say(spoken, voicing),

@@ -176,7 +176,7 @@ export const CODES = 7;
 const TAU_MORPH = 0.05;
 /** Alive, a pose comes on unhurried; sleep comes slower still, its turning running down. */
 const TAU_ALIVE = 0.16;
-const TAU_SLEEP = 0.42;
+const TAU_SLEEP = 0.9;
 /** How fast an alive orb's surface turns at a pose's speed of 1, in radians a second, and how much faster his voice makes it. */
 const SPIN = 0.3;
 const SPIN_VOICE = 1.1;

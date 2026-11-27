@@ -15,6 +15,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
 import { Marked } from "./marked.tsx";
+import { useSmoothWords } from "./smooth-words.ts";
 import { lineRow } from "./transcript-looks.stylex.ts";
 import { useInterviewWords } from "./words.ts";
 
@@ -50,6 +51,8 @@ export interface Placed {
   starts: boolean;
   /** His line as far as he has said it, while he says it: not to be removed yet. */
   saying?: boolean;
+  /** One of his quick guide's lines: kept on this page only, not to be removed. */
+  guide?: boolean;
 }
 
 /** A screen without a resting pointer: the bin can't wait for one, so it stays, quietly. */
@@ -274,11 +277,15 @@ const startOf = (text: string): string => {
 const Words = ({
   line,
   extra,
+  streaming = false,
 }: {
   line: InterviewLine;
   extra?: stylex.StyleXStyles;
+  /** His line as he says it: its words come in smoothly. */
+  streaming?: boolean;
 }) => {
   const { t } = useLingui();
+  const smooth = useSmoothWords(line.text, streaming);
   const names = useInterviewWords().tag;
   const stephen = line.from === "stephen";
   if (line.removed === true) {
@@ -297,7 +304,7 @@ const Words = ({
       )}
     >
       {stephen ? (
-        line.text
+        smooth
       ) : (
         <Marked marks={line.marks ?? []} names={names} text={line.text} />
       )}
@@ -357,8 +364,8 @@ export const ScriptLine = ({
   return (
     <div {...stylex.props(styles.scriptRow, lineRow)}>
       <span>{placed.starts ? <Who stephen={stephen} who={who} /> : null}</span>
-      <Words line={placed.line} />
-      {placed.saying === true ? null : (
+      <Words line={placed.line} streaming={placed.saying === true} />
+      {placed.saying === true || placed.guide === true ? null : (
         <BinFor line={placed.line} onRemove={onRemove} who={who} />
       )}
     </div>
@@ -518,8 +525,12 @@ export const ChatLine = ({
             <Who stephen who={who} />
           </div>
         ) : null}
-        <Words extra={styles.chatHisText} line={placed.line} />
-        {placed.saying === true ? null : (
+        <Words
+          extra={styles.chatHisText}
+          line={placed.line}
+          streaming={placed.saying === true}
+        />
+        {placed.saying === true || placed.guide === true ? null : (
           <BinFor line={placed.line} onRemove={onRemove} who={who} />
         )}
       </div>
@@ -593,8 +604,9 @@ export const QaExchange = ({
           <Words
             extra={stephen ? styles.question : styles.answer}
             line={placed.line}
+            streaming={placed.saying === true}
           />
-          {placed.saying === true ? null : (
+          {placed.saying === true || placed.guide === true ? null : (
             <BinFor
               line={placed.line}
               onRemove={() => {

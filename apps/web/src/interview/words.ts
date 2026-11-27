@@ -28,6 +28,15 @@ export interface LoopWords {
   added: string;
   /** His goodbye once they agreed to it, by their first name when there is one. */
   farewell: (name: string) => string;
+  /**
+   * His first line of a conversation (the agent's `{{opening}}`): new, for
+   * someone about their own work or a lead about their team's, by name;
+   * or back after a pause or a reload.
+   */
+  opening: (name: string, lead: boolean) => string;
+  welcomeBack: string;
+  /** Told to the agent as it comes back, after the conversation before: where it is, and what not to do. */
+  backNote: string;
   /** A plain yes, in their words: then nobody has to think about it. */
   agrees: RegExp;
   /** What they say when they put a line of the read-back right themselves. */
@@ -75,6 +84,13 @@ export const useLoopWords = (locale: Locale): LoopWords => {
     changed: (was, now) => t`Change “${was}” to “${now}”.`,
     unheard: t`I could not hear that. Say it once more, or type it.`,
     notStarted: t`The interview could not start. Try again.`,
+    opening: (name, lead) =>
+      lead
+        ? t`Hi ${name}, I'm Stephen. Let's start with what your team handles overall, then who takes care of what. In a few words, what does your team do?`
+        : t`Hi ${name}, I'm Stephen. Let's start with your work as a whole, then zoom in on one part of it. In a sentence or two, what do you do here?`,
+    welcomeBack: t`Welcome back. Ready to continue?`,
+    backNote:
+      "They paused and just came back. You already asked if they are ready. When they say yes, ask your last open question again in a few words. Do not greet them and do not start over.",
     dropped: t`The conversation with Stephen was cut off. What you said is kept. Try again to go on.`,
     notNoted: t`What you said could not be written down yet. It is kept. Try again in a moment.`,
     voiceSpent: t`You have talked as long as you can today. Type your answers to go on, or come back tomorrow to talk.`,

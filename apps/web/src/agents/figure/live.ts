@@ -249,7 +249,9 @@ const watchTheme = (recolour: () => void) => {
 };
 
 /** How long a live figure takes to ease into new colours, as into sleep, in ms. */
-const FADE_MS = 1100;
+const FADE_MS = 1400;
+/** Falling asleep goes slower still: the colour drains away where it stands, in ms. */
+const SLEEP_FADE_MS = 2600;
 
 const reducedMotion = () =>
   matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -317,12 +319,13 @@ export const mountFigure = (
     from: Uint8ClampedArray;
     to: Uint8ClampedArray;
     at: number;
+    ms: number;
   } | null = null;
   const fading = (now: number): void => {
     if (fade === null) {
       return;
     }
-    const t = Math.min(1, (now - fade.at) / FADE_MS);
+    const t = Math.min(1, (now - fade.at) / fade.ms);
     // Eased in and out: it leaves gently and settles gently.
     const eased = t * t * (3 - 2 * t);
     const mixed = new Uint8ClampedArray(fade.to.length);
@@ -378,10 +381,30 @@ export const mountFigure = (
     cells.forget();
     draw();
   };
+  /**
+   * The page's root changed (a theme, but also any class or style set on
+   * it): repainted only when the colours did change, and a fade under way
+   * goes on to them, so a pause doesn't snap to grey.
+   */
+  const themed = () => {
+    const now = resolve(host, given);
+    const was = fade === null ? colours : fade.to;
+    if (
+      now.length === was.length &&
+      now.every((value, at) => value === was[at])
+    ) {
+      return;
+    }
+    if (fade === null || reduced) {
+      repaint();
+      return;
+    }
+    fade = { ...fade, to: now };
+  };
   const stopRun =
     options.still === true
       ? watchTheme(repaint)
-      : run(canvas, instance, repaint);
+      : run(canvas, instance, themed);
   const stop = () => {
     window.removeEventListener("scroll", measure, { capture: true });
     window.removeEventListener("resize", measure);
@@ -402,7 +425,12 @@ export const mountFigure = (
         repaint();
         return;
       }
-      fade = { from: colours, to: resolve(host, given), at: performance.now() };
+      fade = {
+        from: colours,
+        to: resolve(host, given),
+        at: performance.now(),
+        ms: body.state === "asleep" ? SLEEP_FADE_MS : FADE_MS,
+      };
     },
     stop,
   };

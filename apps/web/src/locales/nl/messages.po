@@ -8751,6 +8751,14 @@ msgid "Hi {name}, got a few minutes\n"
 msgstr "Hoi {name}, heb je even tijd\n"
 "om over je werk te praten?"
 
+#: src/interview/words.ts
+msgid "Hi {name}, I'm Stephen. Let's start with what your team handles overall, then who takes care of what. In a few words, what does your team do?"
+msgstr "Hoi {name}, ik ben Stephen. We beginnen met wat je team in grote lijnen doet, en daarna wie wat oppakt. Waar houdt je team zich mee bezig?"
+
+#: src/interview/words.ts
+msgid "Hi {name}, I'm Stephen. Let's start with your work as a whole, then zoom in on one part of it. In a sentence or two, what do you do here?"
+msgstr "Hoi {name}, ik ben Stephen. We beginnen met je werk in grote lijnen, en daarna zoomen we in op één onderdeel. Wat doe je hier, in een paar zinnen?"
+
 #: src/onboarding/team-step.tsx
 msgid "Hi everyone,"
 msgstr "Hoi allemaal,"
@@ -20447,6 +20455,10 @@ msgstr "Week in review"
 #: src/agents/agent-templates.ts
 msgid "Weekly reporter"
 msgstr "Weekverslaggever"
+
+#: src/interview/words.ts
+msgid "Welcome back. Ready to continue?"
+msgstr "Welkom terug. Zullen we verdergaan?"
 
 #: src/activity/audit-words.ts
 msgid "Went back to an earlier version"

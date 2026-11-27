@@ -35,7 +35,7 @@ import {
   update,
 } from "./kept.ts";
 import { joinLive } from "./live.ts";
-import type { Live, LiveDoing, LiveSegment } from "./live.ts";
+import type { AgentOpening, Live, LiveDoing, LiveSegment } from "./live.ts";
 import {
   hangUp,
   lastHeard,
@@ -517,9 +517,39 @@ let firstName = "";
 /** His goodbye is being said: it goes on while the page moves to the thanks. */
 let farewell = false;
 
-/** Who he talks to, by the name the page knows them by. */
-export const setLoopName = (name: string): void => {
+/** Whether they lead a team and tell about its work, not their own. */
+let leads = false;
+
+/** Who he talks to, by the name the page knows them by, and whether they lead their team. */
+export const setLoopName = (name: string, lead = false): void => {
   firstName = name.trim();
+  leads = lead;
+};
+
+/**
+ * What the agent's first line and prompt are filled in with (its dynamic
+ * variables): his opening, new or coming back, and their name. Without
+ * a name the agent's own opening stands.
+ */
+const openingFor = (told: LoopWords, back: boolean): AgentOpening => {
+  if (back) {
+    return {
+      variables: {
+        opening: told.welcomeBack,
+        ...(firstName === "" ? {} : { first_name: firstName }),
+      },
+      note: told.backNote,
+      firstLine: told.welcomeBack,
+    };
+  }
+  return {
+    variables:
+      firstName === ""
+        ? {}
+        : { opening: told.opening(firstName, leads), first_name: firstName },
+    note: null,
+    firstLine: null,
+  };
 };
 
 /**
@@ -1454,9 +1484,12 @@ const liveSegment = ({ id, from, text, final }: LiveSegment): void => {
   }
   asked = heardText.endsWith("?");
   hisWords = heardText;
-  if (hisVoiced || liveTextOnly) {
+  if (liveTextOnly || (hisVoiced && liveSpokeAt === null)) {
     // Without sound his line stands whole at once, to be read.
     set({ line: heardText, from: heardText.length });
+  } else if (hisVoiced) {
+    // While his voice goes on, his words keep following it: never the whole line at once, for a frame.
+    set({ line: heardText, from: Math.min(state.from, heardText.length) });
   } else {
     // Told ahead of his voice: it comes on the stage as he starts to say it.
     hisUnseen = heardText;
@@ -1861,19 +1894,21 @@ const converse = async (): Promise<void> => {
       // Only the level: the session hears them.
     });
   }
+  const before = now.lines.filter(({ removed }) => removed !== true);
   const joined = await joinLive(
     {
       action: "open",
       event: eventOf(openingEvent(now), standing.locale),
       ...standing,
       // What a new session doesn't know: the conversation before.
-      before: now.lines
-        .filter(({ removed }) => removed !== true)
+      before: before
         .map(({ from, text }) => ({ from, text }))
         .slice(-interviewLimits.lines),
     },
     handlersFor(count),
-    liveTextOnly
+    liveTextOnly,
+    // Back after a pause or a reload: no new hello, just whether they're ready to go on.
+    openingFor(told, before.length > 0)
   );
   if (!on || liveCount !== count) {
     if (joined !== null && !isRefused(joined)) {

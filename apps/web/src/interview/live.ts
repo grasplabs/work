@@ -179,11 +179,28 @@ const loadAgentSdk = async (): Promise<StartAgent> => {
  * Joins the conversation core opened with the agent, started by `start`;
  * null when it can't be. With `textOnly`, without sound: they type.
  */
+/**
+ * How the page opens the agent's conversation: its dynamic variables (his
+ * `{{opening}}`, their name), and a note told after the conversation
+ * before, on a resume.
+ */
+export interface AgentOpening {
+  variables: Record<string, string>;
+  note: string | null;
+  /**
+   * On a resume, his first line in place of the agent's own opener: the one
+   * override the agent allows (Security, Overrides, First message).
+   */
+  firstLine: string | null;
+}
+const noOpening: AgentOpening = { variables: {}, note: null, firstLine: null };
+
 export const joinAgent = async (
   join: VoiceSessionJoin,
   on: LiveHandlers,
   textOnly: boolean,
-  start?: StartAgent
+  start?: StartAgent,
+  opening: AgentOpening = noOpening
 ): Promise<Live | null> => {
   let closed = false;
   /** The conversation as heard here: what core writes down from. */
@@ -247,8 +264,13 @@ export const joinAgent = async (
       textOnly,
       // The token is of the host core asked it at: joined in the EU, the audio stays there.
       ...(join.location === "eu-residency" ? euResidency : {}),
-      // The agent takes no overrides: its own prompt and first line stand; who they are comes as context.
+      // The agent's own prompt stands; its first line too, but on a resume. Who they are comes as context.
       stripAudioTags: true,
+      // Not overrides: slots the agent's own first line and prompt leave open, each with its placeholder there.
+      dynamicVariables: opening.variables,
+      ...(opening.firstLine === null
+        ? {}
+        : { overrides: { agent: { firstMessage: opening.firstLine } } }),
       clientTools: {
         // He goes to another part: the page follows; the notes hear of it from the page.
         [partFunction]: (parameters: unknown) => {
@@ -386,8 +408,11 @@ export const joinAgent = async (
       }
     };
     // Who they are, and where they left off: the agent's own prompt does the rest.
-    if (join.context !== "") {
-      conversation.sendContextualUpdate(join.context);
+    const context = [join.context, opening.note ?? ""]
+      .filter((part) => part !== "")
+      .join("\n\n");
+    if (context !== "") {
+      conversation.sendContextualUpdate(context);
     }
     // Begun, but without his first line, it is no conversation: closed, and the page goes on without it.
     fail = (why) => {
@@ -483,7 +508,8 @@ export const joinAgent = async (
 export const joinLive = async (
   request: Extract<InterviewVoiceRequest, { action: "open" }>,
   on: LiveHandlers,
-  textOnly: boolean
+  textOnly: boolean,
+  opening: AgentOpening = noOpening
 ): Promise<Live | Refused | null> => {
   if (typeof RTCPeerConnection === "undefined") {
     return null;
@@ -505,7 +531,7 @@ export const joinLive = async (
       // Core holds nothing open for it: nothing is lost.
     }
   };
-  const live = await joinAgent(opened, on, textOnly);
+  const live = await joinAgent(opened, on, textOnly, undefined, opening);
   if (live === null) {
     await tellClosed();
     return null;

@@ -2,10 +2,10 @@ import { Button } from "@grasp-os/ui/components/button";
 import { Heading } from "@grasp-os/ui/components/heading";
 import { Text } from "@grasp-os/ui/components/text";
 import { fadeIn, visuallyHidden } from "@grasp-os/ui/lib/styles";
-import { duration, media, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { duration, media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { TopError } from "../frame/top-error.tsx";
@@ -127,6 +127,14 @@ const styles = stylex.create({
     // No word left alone on a line of its own.
     textWrap: "balance",
   },
+  /** The orb's room while paused: the word under it takes no room, so the orb stays where it stood. */
+  held: { position: "relative" },
+  pausedNote: {
+    position: "absolute",
+    insetInline: 0,
+    insetBlockStart: "100%",
+    paddingBlockStart: space["3"],
+  },
   next: {
     display: "flex",
     justifyContent: "center",
@@ -134,8 +142,26 @@ const styles = stylex.create({
   },
   composer: { flexShrink: 0, paddingBlockStart: space["2"] },
   // Paused, the box's place: as wide as the box, quiet.
-  resume: { width: "100%" },
+  resume: { width: "100%", maxWidth: size.promptInputWidth },
+  resumeRow: { display: "flex", justifyContent: "center" },
+  // Paused, the box's place keeps the box's height: the orb above it stays where it stood.
+  slot: { flexShrink: 0 },
+  slotHeld: (height: number) => ({ minHeight: height }),
 });
+
+/** Watches `element`'s height, telling it each time it changes; returns what stops it. */
+const watchHeight = (
+  element: HTMLElement,
+  tell: (height: number) => void
+): (() => void) => {
+  const watch = new ResizeObserver(() => {
+    tell(element.offsetHeight);
+  });
+  watch.observe(element);
+  return () => {
+    watch.disconnect();
+  };
+};
 
 /**
  * `text` as it stands in a line being said: it starts at `from` in that
@@ -217,16 +243,16 @@ const Asking = ({ paused = false }: { paused?: boolean }) => {
   if (paused) {
     // Paused where it stood: the same orb falls asleep, and one word under it says so.
     return (
-      <div aria-live="polite" {...stylex.props(styles.question)}>
+      <div aria-live="polite" {...stylex.props(styles.question, styles.held)}>
         <StephenOrb asleep />
-        <div {...stylex.props(fadeIn)}>
+        <div {...stylex.props(styles.pausedNote, fadeIn)}>
           <Text color="muted" size="sm">{t`Paused`}</Text>
         </div>
       </div>
     );
   }
   return (
-    <div {...stylex.props(styles.question)}>
+    <div {...stylex.props(styles.question, styles.held)}>
       <StephenOrb />
       {talking || loop.line === "" || shown === null ? null : (
         <div
@@ -381,6 +407,15 @@ export const Conversation = ({
   const answer = reading ? `reading-${partAt(progress).at}-${sent}` : "asking";
   // The box comes back in the read-back once they want to change something there.
   const [changingAt, setChangingAt] = useState<string | null>(null);
+  const slot = useRef<HTMLDivElement>(null);
+  /** How tall the box stood before the pause, so the Resume button holds its place. */
+  const [boxHeight, setBoxHeight] = useState(0);
+  useEffect(() => {
+    const element = slot.current;
+    return paused || element === null
+      ? undefined
+      : watchHeight(element, setBoxHeight);
+  }, [paused]);
   const footed = reading && !paused && changingAt !== answer;
   return (
     <>
@@ -396,27 +431,32 @@ export const Conversation = ({
             </>
           )}
         </div>
-        {paused ? (
-          <div {...stylex.props(styles.composer, fadeIn)}>
-            <Button
-              onClick={onResume}
-              size="lg"
-              style={styles.resume}
-              variant="secondary"
-            >
-              {t`Resume`}
-            </Button>
-          </div>
-        ) : null}
-        {footed || paused ? null : (
-          <AnswerBox
-            guiding={guiding}
-            // Afresh once the guide is done, with the cursor in the box for whoever types.
-            key={guiding ? "guide" : answer}
-            onTalk={onTalk}
-            reading={reading}
-          />
-        )}
+        <div
+          ref={slot}
+          {...stylex.props(styles.slot, paused && styles.slotHeld(boxHeight))}
+        >
+          {paused ? (
+            <div {...stylex.props(styles.composer, styles.resumeRow, fadeIn)}>
+              <Button
+                onClick={onResume}
+                size="lg"
+                style={styles.resume}
+                variant="secondary"
+              >
+                {t`Resume`}
+              </Button>
+            </div>
+          ) : null}
+          {footed || paused ? null : (
+            <AnswerBox
+              guiding={guiding}
+              // Afresh once the guide is done, with the cursor in the box for whoever types.
+              key={guiding ? "guide" : answer}
+              onTalk={onTalk}
+              reading={reading}
+            />
+          )}
+        </div>
       </Room>
       {/* The setup's own foot, across the window, as the admin's onboarding has it. */}
       {footed ? (

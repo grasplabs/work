@@ -25,6 +25,7 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
 
+import { useGuideSaid } from "./guide-said.ts";
 import { useInterviewer } from "./kept.ts";
 import { useLoop } from "./loop.ts";
 import type { LoopState } from "./loop.ts";
@@ -108,13 +109,30 @@ const RemoveLine = ({
 };
 
 /** The lines where they stand, each told whether it starts a turn; `saying` is the place of his line as he says it. */
-const placedOf = (lines: InterviewLine[], saying: number | null): Placed[] =>
+const placedOf = (
+  lines: InterviewLine[],
+  saying: number | null,
+  guided: number
+): Placed[] =>
   lines.map((line, place) => ({
     line,
     place,
     starts: place === 0 || lines[place - 1]?.from !== line.from,
     saying: place === saying,
+    guide: place < guided,
   }));
+
+/** Which line he is saying now, guide first: the last of his guide while it comes in, else his line after it. */
+const sayingAt = (
+  his: number | null,
+  guided: number,
+  guiding: boolean
+): number | null => {
+  if (his !== null) {
+    return his + guided;
+  }
+  return guiding && guided > 0 ? guided - 1 : null;
+};
 
 /** As much of a line as is said, `count` characters, to the end of its last whole word. */
 const saidOf = (text: string, count: number): string => {
@@ -185,17 +203,20 @@ const Rows = ({
   look,
   lines,
   saying,
+  guided,
   onRemove,
   onEdit,
 }: {
   look: TranscriptLook;
   lines: InterviewLine[];
   saying: number | null;
+  /** How many lines at the top are his guide's: they can't be removed. */
+  guided: number;
   onRemove: (place: number) => void;
   onEdit: (place: number, text: string) => void;
 }) => {
   const who = interviewerNames[useInterviewer()];
-  const placed = placedOf(lines, saying);
+  const placed = placedOf(lines, saying, guided);
   if (look === "c") {
     return exchangesOf(placed).map((exchange, index) => {
       const first = exchange.lines[0]?.place ?? index;
@@ -280,10 +301,21 @@ export const Transcript = ({
   const interviewer = useInterviewer();
   useHisNewLinesSaid(alone, lines);
   const loop = useLoop();
+  const guide = useGuideSaid();
   if (!open) {
     return null;
   }
-  const shown = saidSoFar(lines, loop);
+  const said = saidSoFar(lines, loop);
+  // His guide stands first, on this page only: the conversation's places start after it.
+  const before = guide.lines.length;
+  const shown = {
+    lines: [
+      ...guide.lines.map((text): InterviewLine => ({ from: "stephen", text })),
+      ...said.lines,
+    ],
+    saying: sayingAt(said.saying, before, guide.saying),
+    guided: before,
+  };
   return (
     <aside
       aria-label={t`Transcript`}
@@ -302,11 +334,14 @@ export const Transcript = ({
               <MessageScrollerViewport aria-label={t`Transcript`}>
                 <MessageScrollerContent>
                   <Rows
+                    guided={shown.guided}
                     lines={shown.lines}
                     look={look}
-                    onEdit={onEdit}
+                    onEdit={(place, text) => {
+                      onEdit(place - shown.guided, text);
+                    }}
                     onRemove={(place) => {
-                      setRemoving(place);
+                      setRemoving(place - shown.guided);
                     }}
                     saying={shown.saying}
                   />
