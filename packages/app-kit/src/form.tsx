@@ -1,7 +1,6 @@
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox";
 import { Alert, AlertDescription } from "@grasp-os/app-kit/components/alert";
 import { Button } from "@grasp-os/app-kit/components/button";
-import { ButtonGroup } from "@grasp-os/app-kit/components/button-group";
 import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
 import {
   Combobox,
@@ -54,27 +53,18 @@ import type {
   TextFieldName,
 } from "@grasp-os/runtime/react";
 import type { DeepKeys, DeepValue } from "@tanstack/react-form";
-import {
-  BoldIcon,
-  ItalicIcon,
-  ListIcon,
-  ListOrderedIcon,
-  PaperclipIcon,
-  XIcon,
-} from "lucide-react";
-import { useId, useRef, useState, useSyncExternalStore } from "react";
+import { PaperclipIcon, XIcon } from "lucide-react";
+import { useId, useState, useSyncExternalStore } from "react";
 import type * as React from "react";
 
 import { pageText } from "./internal/language.ts";
 import type { Texts } from "./internal/language.ts";
 import { QueryBoundary } from "./internal/query-boundary.tsx";
-import { applyMark, marks } from "./internal/rich-text-marks.ts";
-import type { Mark } from "./internal/rich-text-marks.ts";
 
 // The fields and parts of a form the SDK's `useForm` made (spec 10.2.2):
 // one semantic form, a field for every kind of value (text, a choice or
-// several, a number, a day or a moment, a yes or no, a record, a file,
-// formatted text) with its label, description and error,
+// several, a number, a day or a moment, a yes or no, a record, a file)
+// with its label, description and error,
 // the form's own error, and the submit button. They own what every form
 // would otherwise write again: error IDs and `aria-invalid`, showing an
 // error only once a field was left or a submit tried, the lock while a
@@ -208,12 +198,6 @@ interface FieldText {
   /** A file the field held before the page opened. */
   readonly attached: string;
   readonly uploading: string;
-  /** The rich text toolbar, and its buttons. */
-  readonly formatting: string;
-  readonly bold: string;
-  readonly italic: string;
-  readonly bullets: string;
-  readonly numbers: string;
   /** Stops a file's upload that is taking too long. */
   readonly cancelUpload: string;
 }
@@ -230,11 +214,6 @@ const fieldTexts: Texts<FieldText> = {
     remove: "Remove",
     attached: "Attached file",
     uploading: "Uploading…",
-    formatting: "Formatting",
-    bold: "Bold",
-    italic: "Italic",
-    bullets: "Bulleted list",
-    numbers: "Numbered list",
     cancelUpload: "Cancel upload",
   },
   de: {
@@ -248,11 +227,6 @@ const fieldTexts: Texts<FieldText> = {
     remove: "Entfernen",
     attached: "Angehängte Datei",
     uploading: "Wird hochgeladen…",
-    formatting: "Formatierung",
-    bold: "Fett",
-    italic: "Kursiv",
-    bullets: "Aufzählung",
-    numbers: "Nummerierte Liste",
     cancelUpload: "Hochladen abbrechen",
   },
   nl: {
@@ -266,11 +240,6 @@ const fieldTexts: Texts<FieldText> = {
     remove: "Verwijderen",
     attached: "Bijgevoegd bestand",
     uploading: "Uploaden…",
-    formatting: "Opmaak",
-    bold: "Vet",
-    italic: "Cursief",
-    bullets: "Opsomming",
-    numbers: "Genummerde lijst",
     cancelUpload: "Upload annuleren",
   },
   es: {
@@ -284,11 +253,6 @@ const fieldTexts: Texts<FieldText> = {
     remove: "Quitar",
     attached: "Archivo adjunto",
     uploading: "Subiendo…",
-    formatting: "Formato",
-    bold: "Negrita",
-    italic: "Cursiva",
-    bullets: "Lista con viñetas",
-    numbers: "Lista numerada",
     cancelUpload: "Cancelar subida",
   },
   fr: {
@@ -302,11 +266,6 @@ const fieldTexts: Texts<FieldText> = {
     remove: "Retirer",
     attached: "Fichier joint",
     uploading: "Envoi en cours…",
-    formatting: "Mise en forme",
-    bold: "Gras",
-    italic: "Italique",
-    bullets: "Liste à puces",
-    numbers: "Liste numérotée",
     cancelUpload: "Annuler l’envoi",
   },
 };
@@ -1461,100 +1420,6 @@ const FileField = <Values, Reference extends FilesReference>({
   />
 );
 
-const markIcons: Readonly<Record<Mark, React.ComponentType>> = {
-  bold: BoldIcon,
-  italic: ItalicIcon,
-  bullets: ListIcon,
-  numbers: ListOrderedIcon,
-};
-
-/**
- * A field of `form` that holds formatted text, as Markdown: bold, italic
- * and lists, which its toolbar puts around what is selected (a link the
- * person types in Markdown is kept). It
- * holds text alone, never HTML: show it with `RichText`
- * (`@grasp-os/app-kit/components/rich-text`), which renders the Markdown and
- * drops any HTML in it.
- */
-const RichTextField = <Values,>({
-  form,
-  name,
-  label,
-  description,
-  text,
-  ...props
-}: FieldProps<Values, TextFieldName<Values>> &
-  ControlProps<"textarea"> & {
-    /** What it says, in the page's language. */
-    text?: Partial<FieldText>;
-  }): React.JSX.Element => {
-  const editor = useRef<HTMLTextAreaElement>(null);
-  const said = { ...pageText(fieldTexts), ...text };
-  return (
-    <FieldShell
-      description={description}
-      form={form}
-      label={label}
-      name={name}
-      render={(control) => (
-        <div className="flex flex-col gap-2">
-          <ButtonGroup aria-label={said.formatting}>
-            {marks.map((mark) => {
-              const Icon = markIcons[mark];
-              return (
-                <Button
-                  aria-controls={control.id}
-                  aria-label={said[mark]}
-                  disabled={control.disabled}
-                  key={mark}
-                  onClick={() => {
-                    const element = editor.current;
-                    if (element === null) {
-                      return;
-                    }
-                    const marked = applyMark(
-                      element.value,
-                      element.selectionStart,
-                      element.selectionEnd,
-                      mark
-                    );
-                    control.handleChange(marked.text);
-                    requestAnimationFrame(() => {
-                      element.focus();
-                      element.setSelectionRange(marked.start, marked.end);
-                    });
-                  }}
-                  size="icon-sm"
-                  title={said[mark]}
-                  type="button"
-                  variant="outline"
-                >
-                  <Icon />
-                </Button>
-              );
-            })}
-          </ButtonGroup>
-          <Textarea
-            {...props}
-            aria-describedby={control.describedBy}
-            aria-invalid={control.invalid}
-            aria-required={control.required}
-            disabled={control.disabled || props.disabled}
-            id={control.id}
-            name={control.name}
-            onBlur={control.handleBlur}
-            onChange={(event) => {
-              control.handleChange(event.target.value);
-            }}
-            ref={editor}
-            value={textOf(control.value)}
-          />
-        </div>
-      )}
-    />
-  );
-};
-
 /**
  * A submission whose outcome is unknown: what is known of it, and a way to
  * give it up that asks first, since whether it ran stays unknown.
@@ -1730,7 +1595,6 @@ export {
   MultiSelectField,
   NumberField,
   RelationField,
-  RichTextField,
   SelectField,
   SubmitButton,
   SwitchField,

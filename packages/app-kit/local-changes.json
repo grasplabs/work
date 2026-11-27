@@ -22,7 +22,7 @@
   {
     "path": "src/components/toast.tsx",
     "reason": "ToastAction's and ToastClose's default element is chosen in the body, not as the parameter's default: the React Compiler can't compile a JSX default.",
-    "test": "packages/app-kit/vite.browser.config.ts"
+    "test": "packages/compiler/build-unshipped-sources.test.ts"
   },
   {
     "path": "src/components/menubar.tsx",
@@ -37,6 +37,11 @@
   {
     "path": "src/components/toggle-group.tsx",
     "reason": "The orientation reaches Base UI, not only the styles, so a vertical group moves with the up and down arrows.",
+    "test": "packages/app-kit/test/kit.browser.test.tsx"
+  },
+  {
+    "path": "src/components/questionnaire.tsx",
+    "reason": "Its last step completes in an App page's frame, which submits no form and fires no submit event: the form's requestSubmit() fires the submit event itself, and the submit button calls it on its click, so the questionnaire's checks and onSubmit run.",
     "test": "packages/app-kit/test/kit.browser.test.tsx"
   }
 ]

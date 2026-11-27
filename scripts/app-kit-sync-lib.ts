@@ -23,17 +23,6 @@ export const registryPinSchema = z.object({
    * and what they share), by path from packages/app-kit.
    */
   own: z.array(z.string().min(1)),
-  /**
-   * Components the registry installs that an App page's frame can't run,
-   * each with its files (removed after an install) and why.
-   */
-  excluded: z.array(
-    z.object({
-      name: z.string().min(1),
-      files: z.array(z.string().min(1)),
-      reason: z.string().min(1),
-    })
-  ),
 });
 
 export type RegistryPin = z.infer<typeof registryPinSchema>;

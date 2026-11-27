@@ -183,23 +183,14 @@ export const boardFiles = ({
   stages,
   money,
 }: Board): Record<string, string> => {
-  const columns = [
-    `{ field: "title", label: ${JSON.stringify(noun)} }`,
-    JSON.stringify(party),
-    ...(money ? ['"amount"'] : []),
-    `{
-            field: "stage",
-            cell: (row) => stages[row.stage],
-            edit: async (row, stage) => await setStage({ id: row._id, stage }),
-          }`,
-  ];
+  const headings = [noun, party.charAt(0).toUpperCase() + party.slice(1)];
   return {
     "server/board.ts": `import {
   paginationOptionsValidator,
   paginationResultValidator,
   v,
 } from "@grasp-os/sdk";
-import { doc, mutation, query } from "@server/_generated/server";
+import { doc, query } from "@server/_generated/server";
 
 const stage = v.enum(${JSON.stringify(Object.keys(stages))});
 
@@ -226,32 +217,42 @@ export const byStage = query({
     return groups.map(({ key, count }) => ({ stage: key.stage, count }));
   },
 });
-
-export const setStage = mutation({
-  args: { id: v.id("${table}"), stage },
-  returns: v.null(),
-  handler: async (ctx, args) => {
-    await ctx.db.patch("${table}", args.id, { stage: args.stage });
-    return null;
-  },
-});
 `,
-    "src/routes/index.tsx": `import { useMutation, useQuery } from "@grasp-os/sdk/react";
+    "src/routes/index.tsx": `import { usePaginatedQuery, useQuery } from "@grasp-os/sdk/react";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@grasp-os/app-kit/components/card";
-import { DataGrid } from "@grasp-os/app-kit/components/data-grid";
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@grasp-os/app-kit/components/table";
 import { api } from "@server/_generated/api";
 import { createFileRoute } from "@tanstack/react-router";
 
 const stages = ${JSON.stringify(stages)} as const;
-
+${
+  money
+    ? `
+const euros = (amount: { currency: string; minorUnits: number }): string =>
+  new Intl.NumberFormat("en", {
+    style: "currency",
+    currency: amount.currency,
+  }).format(amount.minorUnits / 100);
+`
+    : ""
+}
 const Board = () => {
   const counts = useQuery(api.board.byStage);
-  const setStage = useMutation(api.board.setStage);
+  const records = usePaginatedQuery(api.board.list, {}, { initialPageSize: 25 });
   return (
     <main className="flex flex-col gap-6 p-6">
       <header className="flex flex-col gap-1">
@@ -274,14 +275,49 @@ const Board = () => {
           </Card>
         ))}
       </div>
-      <DataGrid
-        args={() => ({})}
-        columns={[
-          ${columns.join(",\n          ")},
-        ]}
-        label="${title}"
-        query={api.board.list}
-      />
+      <Table>
+        <TableCaption>${jsxText(title)}</TableCaption>
+        <TableHeader>
+          <TableRow>
+            <TableHead>${headings[0]}</TableHead>
+            <TableHead>${headings[1]}</TableHead>${
+              money
+                ? `
+            <TableHead className="text-right">Amount</TableHead>`
+                : ""
+            }
+            <TableHead>Stage</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {records.items.map((record) => (
+            <TableRow key={record._id}>
+              <TableCell className="font-medium">{record.title}</TableCell>
+              <TableCell>{record.${party}}</TableCell>${
+                money
+                  ? `
+              <TableCell className="text-right tabular-nums">
+                {euros(record.amount)}
+              </TableCell>`
+                  : ""
+              }
+              <TableCell>{stages[record.stage]}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      {records.hasMore ? (
+        <Button
+          className="self-start"
+          disabled={records.isLoading}
+          onClick={() => {
+            void records.loadMore();
+          }}
+          variant="outline"
+        >
+          Load more
+        </Button>
+      ) : null}
     </main>
   );
 };

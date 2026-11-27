@@ -9,7 +9,6 @@ import {
   MultiSelectField,
   NumberField,
   RelationField,
-  RichTextField,
   SelectField,
   SubmitButton,
   SwitchField,
@@ -26,7 +25,6 @@ import {
   click,
   find,
   leave,
-  named,
   reference,
   rendered,
   settle,
@@ -41,8 +39,7 @@ import {
 // client: each says what the schema refuses (a value it needs, a bound,
 // a whole number), only once the person left it or tried to submit, and
 // hands the form the value the schema takes (an enum's value, a number, a
-// day as the moment it starts, a record's ID, a file's reference,
-// formatted text as Markdown).
+// day as the moment it starts, a record's ID, a file's reference, text).
 
 const task = v.object({
   title: v.string().trim().min(1),
@@ -133,7 +130,7 @@ const TaskForm = ({ saved }: { saved: unknown[] }) => {
         optionLabel={(person) => person.name}
         query={searchPeople}
       />
-      <RichTextField form={form} label="Notes" name="notes" />
+      <TextareaField form={form} label="Notes" name="notes" />
       <FileField form={form} label="Brief" name="brief" resource={briefs} />
       <SubmitButton form={form}>Save task</SubmitButton>
     </Form>
@@ -347,14 +344,12 @@ describe("the form fields", () => {
     await click(find('[role="option"]', "Grace"));
     expect(owner.value).toBe("Grace");
 
-    // Notes: typed, then made bold from the toolbar, as Markdown.
+    // Notes: typed.
     const notes = control("Notes");
     if (!(notes instanceof HTMLTextAreaElement)) {
       throw new TypeError("Notes aren't a text area.");
     }
     await typeInto(notes, "Ship it");
-    notes.setSelectionRange(0, "Ship it".length);
-    await click(named("Bold"));
 
     // The brief: uploaded through the App's files resource.
     const brief = control("Brief");
@@ -385,7 +380,7 @@ describe("the form fields", () => {
         urgent: true,
         notify: true,
         owner: grace,
-        notes: "**Ship it**",
+        notes: "Ship it",
         brief: { id: uploadedFileId },
       },
     ]);

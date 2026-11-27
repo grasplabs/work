@@ -1,26 +1,9 @@
-import type { ValueDescriptor } from "../common/value-descriptor.ts";
-// `@grasp-os/runtime/forms`: what `@grasp-os/app-kit`'s form field helpers and
-// grids read beside their TanStack state: a form's submission status, how
-// to subscribe to it, what its validator declares of each field, and what
-// a query declares it answers. Not an App's import: pages get `useForm`
-// from `@grasp-os/sdk/react` and the components from `@grasp-os/app-kit`.
-import { clientInternals } from "./client-core.ts";
-import type { GraspClient } from "./client-core.ts";
+// `@grasp-os/runtime/forms`: what `@grasp-os/app-kit`'s form field helpers
+// read beside their TanStack state: a form's submission status, how to
+// subscribe to it and what its validator declares of each field. Not an
+// App's import: pages get `useForm` from `@grasp-os/sdk/react` and the
+// components from `@grasp-os/app-kit`.
 
 export { bindingOf } from "./form-binding.ts";
 export type { FormBinding } from "./form-binding.ts";
 export type { ValueDescriptor } from "../common/value-descriptor.ts";
-
-/**
- * What the query `reference` names declares it answers, in the release
- * the page was built with (page-functions.ts): what a grid reads its
- * columns' kinds from. Null for a query that declares no `returns`, and
- * for a name the release has no public query at.
- */
-export const declaredReturns = (
-  client: GraspClient,
-  reference: unknown
-): ValueDescriptor | null => {
-  const fn = clientInternals(client).functionOf(reference);
-  return fn?.kind === "query" ? fn.returns : null;
-};

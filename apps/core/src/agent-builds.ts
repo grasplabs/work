@@ -1619,29 +1619,19 @@ const buildDeclaration = `/**
  * used as their docs show them (charts import recharts' parts from
  * \`recharts\`; \`message\`, \`bubble\`, \`attachment\`, \`trace\` and
  * \`message-scroller\` for a conversation; \`code-block\` for code, whose
- * copy button has no clipboard in a page's frame; no questionnaire, as
- * the frame submits no form), with their variants and sizes and the
+ * copy button has no clipboard in a page's frame; \`questionnaire\`, whose
+ * last step calls its \`onSubmit\` with the answers as \`FormData\`, as the
+ * frame submits no form itself), with their variants and sizes and the
  * neutral theme's tokens: no raw colours, arbitrary values or restyled
  * components (the lint names what to use instead). There are no layout components:
  * lay a page out with Tailwind's layout classes on plain elements
  * (\`flex\`, \`grid\`, \`gap-4\`), its title an \`<h1>\`.
- * Don't wire tables and forms by hand:
- * - A list of records is a \`DataGrid\` (\`@grasp-os/app-kit/components/data-grid\`)
- *   over a query that takes \`pagination\` and answers pages: it reads them
- *   page by page and hands the query what the person searched, sorted and
- *   filtered, so the query does it over every record. Each cell shows and
- *   edits its field as the query's \`returns\` declares it (a moment as a
- *   date and time, money in its currency, a yes or no); \`day: true\` on a
- *   \`v.timestamp()\` column that holds days (as a \`DateField\` saves them).
- *   Columns are field names or \`{ field, label?, sortable?, filter?:
- *   { value: label }, day?, cell?, edit?: async (row, value) => mutation }\`.
- *   Text, enums, numbers, moments, days and booleans are editable in place;
- *   IDs (typed \`never\`), files, money, durations, lists and objects are
- *   read-only. \`bulkActions\` (rows with an \`_id\`) make rows selectable,
- *   \`rowActions\` give each row a menu, and a failed action or edit is
- *   shown. It shows its own empty, loading and failed states.
- *   \`<DataGrid label="Tasks" query={api.tasks.list} args={({ search, sort, filters }) => ({ search, status: filters.status, titleOrder: sort?.field === "title" ? sort.direction : undefined })} columns={[{ field: "title", sortable: true, edit: async (task, title) => await rename({ id: task._id, title }) }, { field: "status", filter: { open: "Open", done: "Done" } }, { field: "due", day: true }, { field: "notes", cell: (task) => <RichText value={task.notes} /> }]} search="Search tasks" rowActions={[{ label: "Open", onSelect: async (task) => await navigate({ to: "/tasks/$taskId", params: { taskId: task._id } }) }]} />\`
- *   (\`navigate\` is \`useNavigate()\` from \`@tanstack/react-router\`)
+ * - A list of records is the registry's \`Table\` over a query that takes
+ *   \`pagination\` and answers pages, read with \`usePaginatedQuery(api.tasks.list,
+ *   args, { initialPageSize: 25 })\` from \`@grasp-os/sdk/react\`: its \`items\`
+ *   one \`TableRow\` each, and a "Load more" \`Button\` while \`hasMore\`. A
+ *   search or filter is the query's own argument, so the query does it over
+ *   every record.
  * - A form is \`useForm\` (a mutation's or action's arguments, or a
  *   \`v.object\`) with the fields of \`@grasp-os/app-kit/form\`, one per kind of
  *   value; each takes \`form\`, \`name\` and \`label\`, and its choices,
@@ -1653,17 +1643,12 @@ const buildDeclaration = `/**
  *   \`RelationField\` (\`v.id("table")\`: \`query\`, \`args={(search) => ({ search })}\`,
  *   \`optionLabel\`, and optionally \`lookup={{ query: api.people.get, args: (id) => ({ id }) }}\`,
  *   a query of one record that names the value it starts with, shown as
- *   its ID otherwise), \`FileField\` (\`v.file()\`: \`resource\`, the App's
+ *   its ID otherwise) and \`FileField\` (\`v.file()\`: \`resource\`, the App's
  *   files permission declaring \`upload\`, \`permissions.files\` from \`@server/_generated/api\`; the form doesn't submit while it
- *   uploads) and \`RichTextField\` (bold, italic and lists, kept as
- *   Markdown in a \`v.string()\`). Show Markdown with \`RichText\`
- *   (\`@grasp-os/app-kit/components/rich-text\`), which drops any HTML; given
- *   \`links={permissions.links}\` (the App's links permission, from \`@server/_generated/api\`), its
- *   links open through it; otherwise they show their address. Wrap the fields in \`Form\`, with
- *   \`FormError\` and \`SubmitButton\`.
- * - The grid's and the fields' own words follow the page's language
- *   (English, German, Dutch, Spanish, French); pass \`text\` to say them
- *   otherwise.
+ *   uploads). Wrap the fields in \`Form\`, with \`FormError\` and
+ *   \`SubmitButton\`: a page's frame submits no \`<form>\` itself.
+ * - The fields' own words follow the page's language (English, German,
+ *   Dutch, Spanish, French); pass \`text\` to say them otherwise.
  * What the App is, its definition (its name, its tables with their
  * fields, indexes, access and row rules, and its permissions: data Grasp
  * keeps with each version, no file), changes only through \`define\`

@@ -318,6 +318,52 @@ export const Route = createFileRoute("/")({ component: Charts });
     expect(built.css).toContain("url(data:font/woff2;base64,");
   });
 
+  it("builds a code block whose highlighter loads its language's grammar from the kit", async () => {
+    const built = await buildPages(
+      env,
+      {
+        "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+import { CodeBlock, CodeBlockContent, CodeBlockLine } from "@grasp-os/app-kit/components/code-block";
+import { useHighlightedCode } from "@grasp-os/app-kit/hooks/use-highlighted-code";
+
+const source = "const total = 1 + 2;";
+
+function Code() {
+  const lines = useHighlightedCode(source, "ts");
+  return (
+    <CodeBlock>
+      <CodeBlockContent>
+        {lines.map((line, index) => (
+          <CodeBlockLine key={index}>{line}</CodeBlockLine>
+        ))}
+      </CodeBlockContent>
+    </CodeBlock>
+  );
+}
+export const Route = createFileRoute("/")({ component: Code });
+`,
+      },
+      "app-test"
+    );
+    if (!built.ok) {
+      throw new Error(JSON.stringify(built.diagnostics, null, 2));
+    }
+    // The grammar is a module of the kit's that the highlighter imports when
+    // a block first shows the language: in the page's closure, so its frame
+    // can load it.
+    const modules = kitModulesOf(built);
+    expect(built.diagnostics).toStrictEqual([]);
+    expect(modules).toStrictEqual(
+      expect.arrayContaining([
+        "@grasp-os~app-kit~hooks~use-highlighted-code.js",
+      ])
+    );
+    const { modules: kit } = await kitModules(env.ASSETS);
+    expect(
+      modules.some((name) => (kit[name] ?? "").includes("TypeScript"))
+    ).toBeTruthy();
+  });
+
   it("has the classes of the kit modules an App loads in its CSS, not the catalog's", async () => {
     // The sidebar's width, a class only the sidebar has.
     const sidebarClass = "w-\\(--sidebar-width\\)";

@@ -130,7 +130,7 @@ export const usePaginatedQuery = <Reference extends QueryReference>(
 /**
  * Reads again every query of the page that failed and is still read: for
  * a part of a page that shows its own failure with a way to try again,
- * as `DataGrid` does. The page's error boundary does the same.
+ * as a relation field does. The page's error boundary does the same.
  */
 export const useRetryFailed = (): (() => void) => {
   const internals = clientInternals(useClient());

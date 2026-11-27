@@ -64,7 +64,7 @@ export default defineApp({
 
 ## Server functions
 
-Every module under `server/` exports server functions. Each one declares its arguments, and Grasp checks them on every call. `returns` is optional: when a function declares it, Grasp checks every answer against it, and a `DataGrid` takes each column's kind from it. Without `returns`, callers get the type of whatever the handler returns:
+Every module under `server/` exports server functions. Each one declares its arguments, and Grasp checks them on every call. `returns` is optional: when a function declares it, Grasp checks every answer against it. Without `returns`, callers get the type of whatever the handler returns:
 
 ```ts server/tasks.ts
 import { v } from "@grasp-os/sdk";

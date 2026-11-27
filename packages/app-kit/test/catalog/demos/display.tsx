@@ -73,7 +73,6 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@grasp-os/app-kit/components/resizable";
-import { RichText } from "@grasp-os/app-kit/components/rich-text";
 import { ScrollArea } from "@grasp-os/app-kit/components/scroll-area";
 import { Separator } from "@grasp-os/app-kit/components/separator";
 import { Skeleton } from "@grasp-os/app-kit/components/skeleton";
@@ -373,14 +372,6 @@ const TableDemo = () => (
   </Table>
 );
 
-const RichTextDemo = () => (
-  <RichText
-    value={
-      "**Ship** the *plan* this week:\n\n- Draft it\n- [Review it](https://example.com)\n\n<b>Raw HTML</b> is dropped."
-    }
-  />
-);
-
 export const displayDemos = {
   accordion: AccordionDemo,
   alert: AlertDemo,
@@ -401,5 +392,4 @@ export const displayDemos = {
   skeleton: SkeletonDemo,
   spinner: SpinnerDemo,
   table: TableDemo,
-  "rich-text": RichTextDemo,
 };

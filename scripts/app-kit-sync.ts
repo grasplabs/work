@@ -9,9 +9,7 @@
  *
  * `check` reads no network: the pin (`packages/app-kit/registry.json`)
  * holds the SHA-256 of every file the CLI wrote, and the kit's own files
- * where the CLI writes (`own`: the parts bound to the SDK) and the
- * components it leaves out because an App page's frame can't run them
- * (`excluded`, with the reason; `update` removes their files). It fails for
+ * where the CLI writes (`own`: what the form shares). It fails for
  * a file that differs and isn't listed, a listed one that no longer
  * differs, a pinned file that is gone and a file that is neither pinned
  * nor the kit's own.
@@ -135,9 +133,6 @@ const update = (): boolean => {
     // init points the `ui` alias at a folder of its own; the kit's are flat.
     writeFileSync(path.join(kit, "components.json"), outside[1]?.bytes ?? "");
     run(cli, ["add", "--all", "--overwrite", "--yes"]);
-    for (const file of pin.excluded.flatMap((item) => item.files)) {
-      rmSync(path.join(kit, file), { force: true });
-    }
     const files = Object.fromEntries(
       presentFiles()
         .filter((file) => !pin.own.includes(file))

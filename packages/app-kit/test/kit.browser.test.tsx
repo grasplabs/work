@@ -337,6 +337,17 @@ const cookieRefused = (): never => {
   );
 };
 
+/**
+ * What an App page's frame does with a submission the browser starts (a
+ * submit button's click, requestSubmit): it never fires its submit event.
+ */
+const submissionRefused = (event: Event): void => {
+  if (event.isTrusted) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+};
+
 /** Whether the sidebar is expanded or collapsed. */
 const sidebarState = (): string | undefined => {
   const sidebar = document.querySelector("[data-slot=sidebar][data-state]");
@@ -394,30 +405,6 @@ describe("the UI kit", () => {
       await expectNoSidewaysScroll();
     }
   );
-
-  it("data-grid narrows its rows by the search and the team filter, as its query is asked", async () => {
-    await page.viewport(desktop.width, desktop.height);
-    const { "data-grid": DataGrid } = demos;
-    if (DataGrid === undefined) {
-      throw new Error("No data-grid demo");
-    }
-    render("data-grid", DataGrid);
-    const main = page.getByRole("main");
-    const shown = (name: string) =>
-      main.getByRole("cell", { name, exact: true }).elements().length > 0;
-    await expect.poll(() => shown("Ada")).toBeTruthy();
-
-    await userEvent.fill(main.getByRole("searchbox"), "gr");
-    await expect
-      .poll(() => ({ ada: shown("Ada"), grace: shown("Grace") }))
-      .toStrictEqual({ ada: false, grace: true });
-
-    await userEvent.clear(main.getByRole("searchbox"));
-    await userEvent.selectOptions(main.getByRole("combobox"), "support");
-    await expect
-      .poll(() => ({ ada: shown("Ada"), grace: shown("Grace") }))
-      .toStrictEqual({ ada: false, grace: true });
-  });
 
   // What an App page's frame refuses (core's security-headers.ts,
   // pageFramePolicy): innerHTML, under Trusted Types with no policy, and
@@ -499,6 +486,25 @@ describe("the UI kit", () => {
       if (cookie !== undefined) {
         Object.defineProperty(Document.prototype, "cookie", cookie);
       }
+    }
+  });
+
+  it("questionnaire finishes with its onSubmit though nothing submits a form, as in an App's frame", async () => {
+    window.addEventListener("submit", submissionRefused, true);
+    try {
+      await page.viewport(desktop.width, desktop.height);
+      const { questionnaire: Questionnaire } = demos;
+      if (Questionnaire === undefined) {
+        throw new Error("No questionnaire demo");
+      }
+      render("questionnaire", Questionnaire);
+      await userEvent.click(page.getByRole("radio", { name: "Cost" }));
+      await userEvent.click(page.getByRole("button", { name: "Save answer" }));
+      await expect
+        .element(page.getByRole("status", { name: "Answer" }))
+        .toHaveTextContent("cost");
+    } finally {
+      window.removeEventListener("submit", submissionRefused, true);
     }
   });
 });

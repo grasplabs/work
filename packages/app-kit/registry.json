@@ -47,6 +47,7 @@
     "src/components/pagination.tsx": "24c24fd8dc04f904c67546001e62c3545790a49193d96c5192c5cecf3ae2019d",
     "src/components/popover.tsx": "5fecff622f4eecc06e8be32bface11c59d529be5c0a1484c78c9e40530b2b7d0",
     "src/components/progress.tsx": "2c104695a495968e9ee426039e291abc4fb2ff32f36b5faa4e8b450c2a4cc14c",
+    "src/components/questionnaire.tsx": "be0db4c77ce2be67fa1e0901f4b97c4ec7b4bb1bd5ed968c09d01f494cf98013",
     "src/components/radio-group.tsx": "62a1fa46c54ebbb71c84f09ebc5941dec41b0c75be3699b969eb5aae5820616d",
     "src/components/resizable.tsx": "c45c4e1a32aefb83d60406366e2368b9d8a6e772406f8b964154e7202d6304f7",
     "src/components/scroll-area.tsx": "6befabe60becf093bb0740e172e50447c2ae70d757abb08fa2d479b4f2a511ff",
@@ -72,16 +73,5 @@
     "src/lib/utils.ts": "14300d758170c270c75b057f38fedb3793a5920ea872f0477e29fb131185e8a7",
     "src/styles.css": "9bde270cb8d0493a24091df8ae292e3a2b3484f91d738fa70a037866fe206d48"
   },
-  "own": [
-    "src/components/data-grid.tsx",
-    "src/components/rich-text.tsx",
-    "src/hooks/use-settled.ts"
-  ],
-  "excluded": [
-    {
-      "name": "questionnaire",
-      "files": ["src/components/questionnaire.tsx"],
-      "reason": "It is a <form> that finishes with requestSubmit(), and an App page's frame is sandboxed without forms: the browser never submits it and its onSubmit never runs, so the last question can't be answered."
-    }
-  ]
+  "own": ["src/hooks/use-settled.ts"]
 }

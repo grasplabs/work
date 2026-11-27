@@ -15,8 +15,7 @@ const pin: RegistryPin = {
     "src/components/button.tsx": sha256(registry),
     "src/components/card.tsx": sha256(registry),
   },
-  own: ["src/components/data-grid.tsx"],
-  excluded: [],
+  own: ["src/hooks/use-settled.ts"],
 };
 
 const listed: LocalChange = {
@@ -46,7 +45,7 @@ describe("the App kit against the registry", () => {
       problems({
         "src/components/button.tsx": registry,
         "src/components/card.tsx": registry,
-        "src/components/data-grid.tsx": "own",
+        "src/hooks/use-settled.ts": "own",
       })
     ).toStrictEqual([]);
   });
