@@ -14,6 +14,8 @@ import { watchEnds } from "./socket-watchers.ts";
 //   and its sockets close: opened again at once, then less often, from
 //   where the page got to (`open` reads it each time), for as long as the
 //   page follows, so a reset loses nothing and the page never asks again.
+//   Each pause has full jitter, so the watches a deploy closed together
+//   don't all open again in the same instant.
 //   An answer that isn't a socket counts the same, but a 400 or 404,
 //   which says the object has no such watch (`watchEnds.gone`).
 // - The object ends the watch for good (`watchEnds`): opened no more, and
@@ -35,8 +37,18 @@ import { watchEnds } from "./socket-watchers.ts";
 //   from what the page took, after the same growing pause, so the frame
 //   comes again and nothing is skipped.
 
-/** The pauses before opening a closed watch again: at once, then up to every 5 s. */
-const reopenMs = [0, 500, 1000, 2000, 5000] as const;
+/**
+ * The ceilings of the pauses before opening a closed watch again, each
+ * waited with full jitter: so every watch a deploy or a reset closed at
+ * once doesn't open again in the same instant.
+ */
+const reopenMs = [1000, 2000, 4000, 8000, 15_000] as const;
+
+/**
+ * How long a watch must have kept up, with no catch-up or failed hand-over,
+ * before its pauses start over: a page that stays slow keeps backing off.
+ */
+const steadyMs = 30_000;
 
 /** What a page's watch of an object is made of. */
 export interface UpstreamWatch<T> {
@@ -93,6 +105,13 @@ export const followObject = async <T>(
    * as long as that many failed opens would.
    */
   let failures = 0;
+  /** When the watch last fell behind or failed a hand-over. */
+  let troubleAt = Number.NEGATIVE_INFINITY;
+  /** The watch fell behind or failed a hand-over: the next pause is longer. */
+  const trouble = (): void => {
+    failures += 1;
+    troubleAt = Date.now();
+  };
   /** The frames being handed to the page now, if they are. */
   let delivering: Promise<unknown> | undefined;
 
@@ -157,12 +176,14 @@ export const followObject = async <T>(
       try {
         // oxlint-disable-next-line no-await-in-loop -- one frame at a time, in order
         await watch.deliver(next.value);
-        failures = 0;
+        if (Date.now() - troubleAt >= steadyMs) {
+          failures = 0;
+        }
       } catch {
         // A page that is gone, or refused, let go of its watch already
         // (stopped). Anything else (a check that couldn't be read now) is
         // tried again from what the page took, so nothing is skipped.
-        failures += 1;
+        trouble();
         // oxlint-disable-next-line no-use-before-define -- each starts the other
         restart();
         return;
@@ -243,7 +264,7 @@ export const followObject = async <T>(
       ) {
         // The page took too little: what it took is where the next
         // socket starts, and its first frame carries the rest.
-        failures += 1;
+        trouble();
         restart();
         return;
       }
@@ -281,7 +302,7 @@ export const followObject = async <T>(
       }
       // oxlint-disable-next-line no-await-in-loop -- one try at a time, waiting longer each
       await scheduler.wait(
-        reopenMs[Math.min(attempt, reopenMs.length - 1)] ?? 0
+        Math.random() * (reopenMs[Math.min(attempt, reopenMs.length - 1)] ?? 0)
       );
       if (stopped) {
         return;

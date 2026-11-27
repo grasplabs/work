@@ -33,6 +33,7 @@ import { check as checkDraft, kinds, publish, subjectOf } from "./publish.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import { watchEnds } from "./socket-watchers.ts";
 import { Subscription } from "./subscription.ts";
 import { followObject } from "./upstream.ts";
 import { writeWorkflowDraft } from "./workflow-editor.ts";
@@ -267,8 +268,10 @@ export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
         following?.[Symbol.dispose]();
       });
       this.#watches.add(page);
+      /** Why core let go of it by itself, once it did. */
+      const ended: { by: "displaced" | null } = { by: null };
       try {
-        following = await this.#follow(by, found, page);
+        following = await this.#follow(by, found, page, ended);
       } catch (error) {
         page[Symbol.dispose]();
         throw error;
@@ -277,10 +280,13 @@ export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
       if (!this.#watches.has(page)) {
         following[Symbol.dispose]();
       }
-      return new Subscription(async () => {
-        page[Symbol.dispose]();
-        await Promise.resolve();
-      });
+      return new Subscription(
+        async () => {
+          page[Symbol.dispose]();
+          await Promise.resolve();
+        },
+        () => ended.by
+      );
     });
   }
 
@@ -293,7 +299,9 @@ export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
   async #follow(
     by: Identity,
     found: Subject,
-    page: ((revision: unknown) => Promise<void>) & Disposable
+    page: ((revision: unknown) => Promise<void>) & Disposable,
+    /** Told why core let go of the follow by itself (`Subscription.endedBy`). */
+    ended: { by: "displaced" | null }
   ): Promise<Disposable> {
     const object = draftWatch(this.#env, found);
     /** The last telling the page took (draft-watch.ts): where a socket opened again starts. */
@@ -311,9 +319,11 @@ export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
           after = told.seq;
         },
         maxQueued: maxQueuedTellings,
-        ended: () => {
+        ended: (code) => {
           // The page's callback ends with it, which the page hears, and
-          // follows again (use-draft.ts).
+          // follows again (follow-chat.ts `follow`): only on its next look
+          // when it was displaced.
+          ended.by = code === watchEnds.displaced ? "displaced" : null;
           page[Symbol.dispose]();
         },
         logged: { ...found },

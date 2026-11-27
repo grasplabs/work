@@ -446,6 +446,52 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
     });
   });
 
+  it("pushes out a person's oldest follow past the most of one draft, saying it was displaced, and nobody else's", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await notesApp(builder);
+    const subject = { kind: "app" as const, id: app };
+    // Ten follows a connection, as core allows: three tabs of theirs.
+    const tabs = [
+      builder,
+      await reconnected(builder),
+      await reconnected(builder),
+    ];
+    const released: boolean[] = [];
+    const holds: Awaited<ReturnType<Person["api"]["drafts"]["watch"]>>[] = [];
+    for (let follow = 0; follow < 21; follow += 1) {
+      const tab = tabs[Math.floor(follow / 10)] ?? builder;
+      const at = released.length;
+      released.push(false);
+      // oxlint-disable-next-line no-await-in-loop -- one after the other, the oldest first
+      const hold = await tab.api.drafts.watch(
+        subject,
+        Object.assign(
+          () => {
+            // Hears nothing here.
+          },
+          {
+            [Symbol.dispose]: () => {
+              released[at] = true;
+            },
+          }
+        )
+      );
+      holds.push(hold);
+    }
+
+    await vi.waitFor(() => {
+      expect(released.indexOf(true)).toBe(0);
+    });
+    expect({
+      released: released.filter(Boolean).length,
+      endedBy: await Promise.all(
+        [holds[0], holds[1], holds[20]].map(
+          async (hold) => await hold?.endedBy()
+        )
+      ),
+    }).toStrictEqual({ released: 1, endedBy: ["displaced", null, null] });
+  });
+
   it("lets go of a closed connection's follows: the draft's object holds none of its sockets", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await notesApp(builder);

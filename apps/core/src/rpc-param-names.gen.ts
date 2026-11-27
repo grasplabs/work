@@ -469,6 +469,7 @@ export const rpcParamNames: ParamNames = {
     "week": [],
   },
   "Subscription": {
+    "endedBy": [],
     "release": [],
   },
   "UnknownOutcomesRpc": {

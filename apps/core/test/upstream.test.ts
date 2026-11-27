@@ -1,9 +1,10 @@
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 
 import { draftToldSchema } from "../src/draft-watch.ts";
 import { draftWatch } from "../src/durable-objects.ts";
+import { isolateRpcHeld } from "../src/rpc-target.ts";
 import { watchEnds } from "../src/socket-watchers.ts";
 import { followObject } from "../src/upstream.ts";
 
@@ -308,5 +309,67 @@ describe("a page's watch of an object", () => {
     await vi.waitFor(() => {
       expect(taken).toStrictEqual([1]);
     }, carried);
+  });
+
+  it("ends a watch whose object answers 404 as it opens it again, and opens it again after a 503", async () => {
+    const subject = newSubject();
+    const endings: number[] = [];
+    const answers: number[] = [503];
+    let opens = 0;
+    using watch = await followObject({
+      open: async () => {
+        opens += 1;
+        const answer = opens === 1 ? undefined : (answers.shift() ?? 404);
+        return answer === undefined
+          ? await draftWatch(env, subject).fetch(
+              `https://draft-watch/?${new URLSearchParams({ person: "person", after: "0" }).toString()}`,
+              { headers: { Upgrade: "websocket" } }
+            )
+          : new Response(null, { status: answer });
+      },
+      parse: (frame) => draftToldSchema.parse(frame),
+      deliver: quiet,
+      maxQueued: 16 * 1024,
+      ended: (code) => {
+        endings.push(code);
+      },
+      logged: {},
+    });
+    void watch;
+
+    await closeAll(subject, 1011);
+
+    await vi.waitFor(() => {
+      expect({ endings, opens }).toStrictEqual({
+        endings: [watchEnds.gone],
+        opens: 3,
+      });
+    }, carried);
+  });
+
+  it("holds no frame past what the isolate's connections may hold together: the page catches up once there is room", async () => {
+    const subject = newSubject();
+    const taken: number[] = [];
+    using watch = await follow(subject, "person", async ({ revision }) => {
+      taken.push(revision);
+      await Promise.resolve();
+    });
+    void watch;
+    const { held } = isolateRpcHeld;
+    // The isolate's connections hold all they may.
+    isolateRpcHeld.held = isolateRpcHeld.limit;
+    onTestFinished(() => {
+      isolateRpcHeld.held = held;
+    });
+
+    await draftWatch(env, subject).revised(1);
+    await scheduler.wait(200);
+    const whileFull = [...taken];
+    isolateRpcHeld.held = held;
+
+    await vi.waitFor(() => {
+      expect(taken).toStrictEqual([1]);
+    }, carried);
+    expect(whileFull).toStrictEqual([]);
   });
 });

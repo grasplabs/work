@@ -1426,6 +1426,8 @@ export interface ChatListUpdate {
  */
 export interface ChatSubscriptionApi {
   release: () => Promise<void>;
+  /** Why core let go of it by itself, once it did (pages.ts `SubscriptionApi.endedBy`). */
+  endedBy: () => Promise<"displaced" | null>;
 }
 
 /** The most held App calls one page of `ChatsApi.heldCalls` lists. */

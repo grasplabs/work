@@ -1,10 +1,9 @@
 import type { Draft } from "@grasp-os/shared/drafts";
 import type { Subject } from "@grasp-os/shared/subject";
-import { RpcStub } from "capnweb";
 import { useEffect, useState } from "react";
 
+import { follow } from "../chat/follow-chat.ts";
 import type { CoreConnection } from "../core-connection.ts";
-import { isTransient, wait } from "../core.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 
@@ -22,96 +21,37 @@ import { useCore } from "../use-core.ts";
 export const hasChanges = (draft: Draft | undefined): boolean =>
   draft !== undefined && (draft.changed.length > 0 || draft.definitionChanged);
 
-/** Lets go of a watch; one whose connection is gone already is let go. */
-const releaseQuietly = async (subscription: {
-  release: () => Promise<void>;
-}): Promise<void> => {
-  try {
-    await subscription.release();
-  } catch {
-    // The connection is gone, and core drops the watch with it.
-  }
-};
-
-/** The pauses before following the draft again after a try that failed: longer each time, then the longest. */
-const followAgainMs = [1000, 2000, 4000, 8000, 15_000] as const;
-
 /**
  * Follows the draft of `subject` over `core`: `onWritten` hears of each
- * write. Followed again whenever following stops by itself: the tab's
- * connection dropped, core let go of the follow (its object reset for
- * good, or more pages of the person's followed it), or a try failed while
- * core was out of reach or failing, waiting longer each time it fails. A
- * refusal (no longer a builder of it) ends it, as the other reads still
- * come. Returns what stops it.
+ * write, and of what may have been written while it wasn't followed, as
+ * it is followed again (follow-chat.ts `follow`, which follows again as
+ * it says). A refusal (no longer a builder of it) ends it, as the other
+ * reads still come. Returns what stops it.
  */
 const followDraft = (
   core: CoreConnection,
   subject: Subject,
   onWritten: () => void
-): (() => void) => {
-  let closed = false;
-  let release: (() => void) | undefined;
-  let failures = 0;
-  const watch = async (again = false): Promise<void> => {
-    // Ends once: whichever of a dropped connection or core letting go of
-    // the callback comes first follows again, never both.
-    let current = true;
-    const followAgain = (): void => {
-      if (current && !closed) {
-        current = false;
-        void watch(true);
-      }
-    };
-    const heard = Object.assign(
-      () => {
-        onWritten();
-      },
-      { [Symbol.dispose]: followAgain }
-    );
-    try {
-      const subscription = await core.withSession(
-        async (session) => await session.drafts.watch(subject, heard)
-      );
-      failures = 0;
-      release = () => {
-        current = false;
-        void releaseQuietly(subscription);
-        subscription[Symbol.dispose]();
-      };
-      if (closed) {
-        release();
-        return;
-      }
-      // Followed again: whatever was written meanwhile is read now.
-      if (again) {
-        onWritten();
-      }
-      const stub: unknown = subscription;
-      if (stub instanceof RpcStub) {
-        stub.onRpcBroken(followAgain);
-      }
-    } catch (error) {
-      current = false;
-      if (closed || !isTransient(error)) {
-        // Refused: the chat's writes and the page's own still read it again.
-        return;
-      }
-      await wait(
-        followAgainMs[Math.min(failures, followAgainMs.length - 1)] ?? 0
-      );
-      failures += 1;
-      if (!closed) {
-        void watch(true);
-      }
-    }
-  };
-  void watch();
-  return () => {
-    closed = true;
-    release?.();
-  };
-};
+): (() => void) =>
+  follow(
+    core,
+    async (session, ended) =>
+      await session.drafts.watch(
+        subject,
+        Object.assign(
+          () => {
+            onWritten();
+          },
+          { [Symbol.dispose]: ended }
+        )
+      ),
+    () => {
+      // Refused or out of reach: the chat's writes and the page's own
+      // still read it again.
+    },
+    // Whatever was written while it wasn't followed is read again.
+    { onDropped: onWritten }
+  );
 
 /**
  * The subject's draft as read last; undefined until the first read lands,
