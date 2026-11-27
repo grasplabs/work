@@ -437,7 +437,11 @@ export const auditToolCall = async (
  */
 export const revokedSince = async (
   env: Env,
-  { agentId, chatId }: Pick<AgentScope, "agentId" | "chatId">,
+  {
+    agentId,
+    chatId,
+    personId,
+  }: Pick<AgentScope, "agentId" | "chatId" | "personId">,
   since: number
 ): Promise<boolean> => {
   const [revoked] = await drizzle(env.DB)
@@ -460,7 +464,15 @@ export const revokedSince = async (
         // decision in chat-connections.ts), so only a request declined
         // before anyone granted it is revoked without one.
         isNotNull(permissions.grantedAt),
-        or(isNull(permissions.chatId), eq(permissions.chatId, chatId))
+        // A chat's own permission is its person's alone, never another
+        // chat's under the same ID.
+        or(
+          isNull(permissions.chatId),
+          and(
+            eq(permissions.chatId, chatId),
+            eq(permissions.requestedBy, personId)
+          )
+        )
       )
     )
     .limit(1);

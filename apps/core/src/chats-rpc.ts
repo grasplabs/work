@@ -1312,7 +1312,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     return await withPerson(
       this.#check,
       async ({ userId }) =>
-        await chatWork(this.#env, await this.#ownChat(userId, chatId))
+        await chatWork(this.#env, userId, await this.#ownChat(userId, chatId))
     );
   }
 

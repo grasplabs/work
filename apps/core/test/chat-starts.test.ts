@@ -82,6 +82,16 @@ const titlesOf = async (chats: Person["api"]["chats"]): Promise<string[]> => {
   return listed.map(({ title }) => title).toSorted();
 };
 
+/** What `chat_ids` holds for each of `ids`: whose, and by which start. */
+const takenIds = async (...ids: string[]) => {
+  const { results } = await env.DB.prepare(
+    `SELECT id, person_id AS personId, request_key AS key FROM chat_ids WHERE id IN (${ids.map(() => "?").join(", ")}) ORDER BY id`
+  )
+    .bind(...ids)
+    .all<{ id: string; personId: string; key: string | null }>();
+  return results;
+};
+
 /** Waits until `check` holds. */
 const until = async (check: () => void | Promise<void>) => {
   await vi.waitFor(check, { timeout: 10_000 });
@@ -270,6 +280,7 @@ describe("a chat a page starts", () => {
     await until(() => {
       expect(said(benFollows.messages()).at(-1)?.text).toBe("Ben's answer.");
     });
+    const takenBefore = await takenIds(bens, deleted.id, corenamed.id);
     expect({
       taken: await outcome(
         ann.api.chats.send(bens, startingWith(startOf("Mine now")))
@@ -303,6 +314,10 @@ describe("a chat a page starts", () => {
       annListed: [],
       bensNow: ["Ben's"],
     });
+    // Nothing of Ann's is taken, nor is anything of Ben's changed.
+    await expect(
+      takenIds(bens, deleted.id, corenamed.id)
+    ).resolves.toStrictEqual(takenBefore);
     expect(said(benFollows.messages())).toStrictEqual([
       { role: "user", text: "Where are we?" },
       { role: "assistant", text: "Ben's answer." },
@@ -396,13 +411,163 @@ describe("a chat a page starts", () => {
         )
       );
     }
+    const oneMore = crypto.randomUUID();
     await expect(
-      outcome(
-        ann.api.chats.send(
-          crypto.randomUUID(),
-          startingWith(startOf("One more"))
-        )
-      )
+      outcome(ann.api.chats.send(oneMore, startingWith(startOf("One more"))))
     ).resolves.toBe("agent.too_many_chats");
+    // Refused before its ID is taken: it is free for the person later.
+    await expect(takenIds(oneMore)).resolves.toStrictEqual([]);
+  });
+
+  it("is named by a lower-case UUID of a version, never by the nil or the max UUID, nor another spelling of one", async () => {
+    const ann = await person();
+    const upper = crypto.randomUUID().toUpperCase();
+    const ids = [
+      upper,
+      "00000000-0000-0000-0000-000000000000",
+      "ffffffff-ffff-ffff-ffff-ffffffffffff",
+      `{${crypto.randomUUID()}}`,
+    ];
+    const outcomes = await Promise.all(
+      ids.map(
+        async (id) =>
+          await outcome(ann.api.chats.send(id, startingWith(startOf("Odd"))))
+      )
+    );
+
+    expect({
+      outcomes,
+      taken: await takenIds(...ids),
+      listed: await ann.api.chats.list(),
+    }).toStrictEqual({
+      outcomes: ids.map(() => "agent.chat_not_found"),
+      taken: [],
+      listed: [],
+    });
+  });
+
+  it("stays made when its first question is refused, and takes the same question again, sent right, in the same chat", async () => {
+    const ann = await person();
+    await fakeProvider(says("Now it goes."));
+    const chatId = crypto.randomUUID();
+    const start = startOf("Refused first");
+    // A model the company doesn't offer refuses the question, not the chat.
+    const refused = await outcome(
+      ann.api.chats.send(chatId, {
+        ...startingWith(start),
+        model: "openai/not-a-model",
+      })
+    );
+    const between = await titlesOf(ann.api.chats);
+    await ann.api.chats.send(chatId, startingWith(start));
+    const follower = await follow(ann.api.chats, chatId);
+    await until(() => {
+      expect(said(follower.messages()).at(-1)?.text).toBe("Now it goes.");
+    });
+
+    expect({
+      refused,
+      between,
+      said: said(follower.messages()),
+      listed: await titlesOf(ann.api.chats),
+    }).toStrictEqual({
+      refused: "model.not_allowed",
+      between: ["Refused first"],
+      said: [
+        { role: "user", text: "Where are we?" },
+        { role: "assistant", text: "Now it goes." },
+      ],
+      listed: ["Refused first"],
+    });
+  });
+
+  it("leaves another person's grants, held starts and requests alone when a chat under an ID of theirs that was never taken is deleted", async () => {
+    const ann = await person();
+    const ben = await person();
+    // Ann's chat from before chat IDs were taken company-wide: no row.
+    const anns = await startedChat(ann, "Ann's");
+    await env.DB.prepare("DELETE FROM chat_ids WHERE id = ?")
+      .bind(anns.id)
+      .run();
+    const now = Date.now();
+    const grant = (id: string, status: string, by: string) =>
+      env.DB.prepare(
+        `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at, granted_at, chat_id, personal)
+         VALUES (?, 'agent', ?, 'connection', 'mail-1', '["read"]', ?, ?, ?, ?, ?, ?, 1)`
+      ).bind(
+        id,
+        chatAgentId,
+        `mail_${id.slice(0, 6)}`,
+        status,
+        by,
+        now,
+        now,
+        anns.id
+      );
+    const workflow = crypto.randomUUID();
+    await env.DB.batch([
+      grant(crypto.randomUUID(), "active", ann.userId),
+      grant(crypto.randomUUID(), "requested", ann.userId),
+      env.DB.prepare(
+        "INSERT INTO workflow_resources (id, name, owner_id, created_at) VALUES (?, ?, ?, ?)"
+      ).bind(workflow, `held-${workflow.slice(0, 6)}`, ann.userId, now),
+      env.DB.prepare(
+        `INSERT INTO agent_held_starts (id, workspace_id, chat_id, agent_id, person_id, workflow_resource_id, input, input_hash, key, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, '{}', 'hash', 'start-1', ?, ?)`
+      ).bind(
+        crypto.randomUUID(),
+        personalWorkspaceId(ann.userId),
+        anns.id,
+        chatAgentId,
+        ann.userId,
+        workflow,
+        now,
+        now + 86_400_000
+      ),
+    ]);
+    const annsRows = async () => {
+      const [granted, held] = await Promise.all([
+        env.DB.prepare(
+          "SELECT status FROM permissions WHERE chat_id = ? AND requested_by = ? ORDER BY status"
+        )
+          .bind(anns.id, ann.userId)
+          .all<{ status: string }>(),
+        env.DB.prepare(
+          "SELECT key FROM agent_held_starts WHERE chat_id = ? AND person_id = ?"
+        )
+          .bind(anns.id, ann.userId)
+          .all<{ key: string }>(),
+      ]);
+      return { granted: granted.results, held: held.results };
+    };
+    const before = await annsRows();
+    // Ben names a chat of his own under that ID, which nobody had taken,
+    // then deletes it.
+    await ben.api.chats.attachFile(
+      anns.id,
+      { name: "b.txt", bytes: new TextEncoder().encode("B") },
+      crypto.randomUUID(),
+      startOf("Ben's under Ann's ID")
+    );
+    await ben.api.chats.remove(anns.id);
+
+    expect({
+      before,
+      after: await annsRows(),
+      // Ben's retired row; Ann's chat is still hers.
+      taken: await takenIds(anns.id),
+      annsChat: await ann.api.chats.summary(anns.id),
+    }).toMatchObject({
+      before: {
+        granted: [{ status: "active" }, { status: "requested" }],
+        held: [{ key: "start-1" }],
+      },
+      after: {
+        granted: [{ status: "active" }, { status: "requested" }],
+        held: [{ key: "start-1" }],
+      },
+      taken: [{ id: anns.id, personId: ben.userId, key: null }],
+      annsChat: { title: "Ann's" },
+    });
   });
 });

@@ -36,6 +36,16 @@ export const startTried = (chatId: string): void => {
   }
 };
 
+/**
+ * Core refused chat `chatId`'s start for good (`agent.chat_not_found`: its
+ * ID is no chat this person may make): the tab starts it no more, and
+ * whoever waited looks again, finding none.
+ */
+export const startRefused = (chatId: string): void => {
+  starts.delete(chatId);
+  startTried(chatId);
+};
+
 /** Chat `chatId` is made: the tab starts it no more, and whoever waited is told. */
 export const chatMade = (chatId: string): void => {
   starts.delete(chatId);

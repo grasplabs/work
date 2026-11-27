@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import { agentErrors } from "@grasp-os/shared/agent";
 import type { Blueprint } from "@grasp-os/shared/apps";
 import type {
   ChatAgent,
@@ -33,6 +34,7 @@ import { activeChat, forgetActiveChats } from "./active-chat.ts";
 import { ChatPage } from "./chat-page.tsx";
 import { ChatStart } from "./chat-start.tsx";
 import type { MakeIdeas } from "./chat-start.tsx";
+import { startOf } from "./chat-starts.ts";
 import { GlobalChatProvider } from "./global-chat.tsx";
 import { typeInPrompt } from "./test-typing.ts";
 
@@ -711,6 +713,37 @@ describe("Chat's page from Make something", () => {
       ],
       calls: [],
     });
+  });
+
+  it("lets go of a chat whose start core refused for good, and keeps one refused for now to start again", async () => {
+    const { path } = await shown(undefined, undefined, {
+      creates: [
+        agentErrors.create("agent.too_many_chats"),
+        agentErrors.create("agent.chat_not_found"),
+      ],
+    });
+    const ask = async (): Promise<string> => {
+      await act(async () => {
+        box().replaceChildren();
+        typeInPrompt(box(), "What waits on me today?");
+        await Promise.resolve();
+      });
+      await act(async () => {
+        box().closest("form")?.requestSubmit();
+        await Promise.resolve();
+      });
+      await settled();
+      return path().slice("/chats/".length);
+    };
+    const forNow = await ask();
+    const kept = startOf(forNow) !== undefined;
+    const forGood = await ask();
+
+    expect({
+      same: forGood === forNow,
+      kept,
+      after: startOf(forGood),
+    }).toStrictEqual({ same: true, kept: true, after: undefined });
   });
 
   it("sends a question that failed as a new one once its words were changed, even back to the same words", async () => {

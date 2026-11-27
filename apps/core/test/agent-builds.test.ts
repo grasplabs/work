@@ -101,7 +101,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     );
     // The chat's page lists what its agent worked on (drafts.test.ts
     // has who reads it).
-    const listed = await chatWork(env, chat.chat.id);
+    const listed = await chatWork(env, chat.personId, chat.chat.id);
     // The draft names the code step that wrote it, where the thread shows
     // its preview: the first, not the later one that only read it.
     const messages = await transcript(chat.stub, chat.chat.id);

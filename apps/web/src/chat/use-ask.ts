@@ -20,7 +20,13 @@ import { useHoldAlive, useHoldHeartbeat } from "../use-core-reach.ts";
 import { useCore } from "../use-core.ts";
 import { activeChat, setActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
-import { chatMade, startOf, startTried, starting } from "./chat-starts.ts";
+import {
+  chatMade,
+  startOf,
+  startRefused,
+  startTried,
+  starting,
+} from "./chat-starts.ts";
 import { useFollowedChat } from "./chat-watch.ts";
 import type { Problem, StopNote } from "./dictation.ts";
 import { emptyDraft, moveNewDraft, useDraft } from "./drafts.ts";
@@ -548,7 +554,7 @@ export const useAsk = (
       }
       onChat?.(askedIn);
     };
-    const asking = async (session: Session): Promise<void> => {
+    const askIn = async (session: Session): Promise<void> => {
       const fileIds = await attachAll(
         session,
         askedIn,
@@ -570,6 +576,22 @@ export const useAsk = (
       });
       going();
       await sent;
+    };
+    // Whether core refused the chat's start for good: its ID is no chat
+    // this person may make, whatever is sent again.
+    let refused = false;
+    const asking = async (session: Session): Promise<void> => {
+      try {
+        await askIn(session);
+      } catch (error) {
+        if (
+          start !== undefined &&
+          agentErrors.codeOf(error) === "agent.chat_not_found"
+        ) {
+          refused = true;
+        }
+        throw error;
+      }
     };
     // Why it failed, kept with the question for whichever box takes it back.
     let why: string | undefined;
@@ -603,7 +625,11 @@ export const useAsk = (
       }
       unsent.current = { key, question, asked: askedAs, chatId: askedIn };
       going();
-      startTried(askedIn);
+      if (refused) {
+        startRefused(askedIn);
+      } else {
+        startTried(askedIn);
+      }
       return false;
     }
     unsent.current = null;

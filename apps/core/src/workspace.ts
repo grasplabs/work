@@ -287,8 +287,17 @@ const textEveryMs = 300;
  */
 const requestKeyMs = 24 * 60 * 60 * 1000;
 
-/** The ID a page names a chat it starts by (`ChatStart`): a UUID. */
-const newChatIdSchema = z.uuid().pipe(chatIdSchema);
+/**
+ * The ID a page names a chat it starts by (`ChatStart`): a UUID as
+ * browsers make one, lower case, of a version (1 to 8) and RFC 9562's
+ * variant, so never the nil or the max UUID, nor two spellings of one.
+ */
+const newChatIdSchema = z
+  .string()
+  .regex(
+    /^[\da-f]{8}-[\da-f]{4}-[1-8][\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/u
+  )
+  .pipe(chatIdSchema);
 
 /**
  * `tell`, called with the latest text at most every {@link textEveryMs},
@@ -370,12 +379,12 @@ export type ChatPlace = z.infer<typeof chatPlaceSchema>;
  */
 const lastAppOf = async (
   env: Env,
-  { id, thread }: Pick<Chat, "id" | "thread">
+  { id, thread, personId }: Pick<Chat, "id" | "thread" | "personId">
 ): Promise<string | null> => {
   if (thread !== null) {
     return null;
   }
-  const [last] = await chatWork(env, id);
+  const [last] = await chatWork(env, personId, id);
   return last?.kind === "app" ? last.id : null;
 };
 
@@ -1567,22 +1576,24 @@ export class Workspace extends DurableObject<Env> {
           if (repeated !== undefined) {
             return { chat: repeated, made: false };
           }
+          // What this object refuses first, so a refused chat takes no ID:
+          // never one of the person's own chats made over (one made before
+          // chat IDs were taken company-wide has none taken), nor one past
+          // their most.
+          const there = this.#db
+            .select({ id: chats.id })
+            .from(chats)
+            .where(eq(chats.id, id))
+            .get();
+          if (there !== undefined) {
+            throw agentErrors.create("agent.chat_not_found");
+          }
+          if (channel === "web") {
+            this.requireRoomForChat(personId);
+          }
           await takeChatId(this.env, id, personId, named?.key ?? null);
           return {
             chat: this.ctx.storage.transactionSync(() => {
-              // Never one of the person's own chats made over: one made
-              // before chat IDs were taken company-wide has none taken.
-              const there = this.#db
-                .select({ id: chats.id })
-                .from(chats)
-                .where(eq(chats.id, id))
-                .get();
-              if (there !== undefined) {
-                throw agentErrors.create("agent.chat_not_found");
-              }
-              if (channel === "web") {
-                this.requireRoomForChat(personId);
-              }
               if (by !== undefined) {
                 this.#outboxed(by, "chat.created", id, {});
               }
@@ -4384,7 +4395,11 @@ export class Workspace extends DurableObject<Env> {
     try {
       revoked = await revokedSince(
         this.env,
-        { agentId: output.agentId, chatId },
+        {
+          agentId: output.agentId,
+          chatId,
+          personId: this.#chat(chatId).personId,
+        },
         admission.openedAt
       );
     } catch (error) {
@@ -5808,14 +5823,14 @@ export class Workspace extends DurableObject<Env> {
       // No connection granted in the chat outlives it (chat-connections.ts).
       await revokeChatPermissions(
         this.env,
-        { chatId: id },
+        { requestedBy: personId, chatId: id },
         { userId: personId, actor: by },
         "chat_deleted"
       );
       // Nor any workflow start its agent asked its person to confirm.
-      await dropHeldStarts(this.env, { chatId: id });
+      await dropHeldStarts(this.env, { workspaceId, chatId: id });
       // Its ID stays taken: no start makes a chat under it again.
-      await retireChatId(this.env, id);
+      await retireChatId(this.env, id, personId);
       // And what its agent kept, the transcript the model reads with it:
       // erased for good, so nothing told it meanwhile is kept.
       await this.#toSession(id, async (session) => {
@@ -5940,7 +5955,7 @@ export class Workspace extends DurableObject<Env> {
       // oxlint-disable-next-line no-await-in-loop -- one chat at a time
       await revokeChatPermissions(
         this.env,
-        { chatId: id },
+        { requestedBy: personId, chatId: id },
         { userId: null, actor: { type: "system" } },
         "person_removed"
       );

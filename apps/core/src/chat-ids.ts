@@ -1,6 +1,6 @@
 import { agentErrors } from "@grasp-os/shared/agent";
 import type { ChatId } from "@grasp-os/shared/ids";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { chatIds } from "./db/core/schema.ts";
@@ -43,13 +43,17 @@ export const takeChatId = async (
 };
 
 /**
- * Keeps deleted chat `id`'s ID taken for good: no start matches it any
- * more, so none makes a chat under it again, its person's no more than
- * anyone's.
+ * Keeps `personId`'s deleted chat `id`'s ID taken for good: no start
+ * matches it any more, so none makes a chat under it again, its person's
+ * no more than anyone's. Only their own ID's row: never another's.
  */
-export const retireChatId = async (env: Env, id: ChatId): Promise<void> => {
+export const retireChatId = async (
+  env: Env,
+  id: ChatId,
+  personId: string
+): Promise<void> => {
   await drizzle(env.DB)
     .update(chatIds)
     .set({ requestKey: null })
-    .where(eq(chatIds.id, id));
+    .where(and(eq(chatIds.id, id), eq(chatIds.personId, personId)));
 };
