@@ -95,7 +95,6 @@ export const poses: Record<SetupStep, Pose> = {
     tempo: 0.85,
     strength: 0.44,
   },
-  pulse: fromTheTop,
   leads: {
     at: [0.97, 0.6],
     reach: [0.38, 0.85],

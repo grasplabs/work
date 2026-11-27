@@ -1,18 +1,19 @@
-// Whose turn it is (prototype `data/interview-loop.ts`, `useLoop`, and
-// `ended` and `hanging` in `data/ear.ts`): Stephen speaks, listens and
-// thinks, and this decides when. Pure: it is told what happens, each with
-// when it happened on the page's clock, and answers with what it is now
-// and what to do (`Act`), so every rule is tested without a browser.
-// loop.ts does what it says: it opens and closes the ear, asks core for
-// a turn, gives one up, and sets the waits it names.
+// Whose turn it is in the read-back, where Stephen reads back here and
+// hears their answer with his own ears (prototype
+// `data/interview-loop.ts`, `useLoop`, and `ended` and `hanging` in
+// `data/ear.ts`); the conversation before it is the agent's, which takes
+// its turns itself (live.ts). Stephen speaks, listens and thinks, and this
+// decides when. Pure: it is told what happens, each with when it happened
+// on the page's clock, and answers with what it is now and what to do
+// (`Act`), so every rule is tested without a browser. loop.ts does what it
+// says: it opens and closes the ear, takes what they said, and sets the
+// waits it names.
 //
 // A breath ends a stretch of speech. Its words go to him at once where
 // they end a sentence; a little later where they don't (`restMs`), and
-// later still where they seem to break off (`patienceMs`). He keeps
-// listening while he thinks: when they talk on, the answer on its way is
-// dropped and he waits for the rest. When the model says they stopped in
-// the middle of a sentence, he waits for the rest, and after a silence
-// (`nudgeMs`) he answers with what there is. He listens while he speaks
+// later still where they seem to break off (`patienceMs`). When a stretch
+// couldn't be written down, he says so, and after a silence (`nudgeMs`)
+// takes what he did hear. He listens while he speaks a line of his own
 // too, as in any conversation: when they talk over him he stops at once
 // and hears them out (`interrupted`). A sound that turns out to be no
 // words has him say his line again; his own voice taken for theirs (the
@@ -53,9 +54,9 @@ export interface Floor {
   parts: Part[];
   /** When they were last heard: the end of their last word. */
   lastHeard: number;
-  /** The turn asked for that he hasn't begun to say yet. */
+  /** What they said that went to him and isn't taken yet, by its number. */
   asking: number | null;
-  /** How many turns were asked for. */
+  /** How many times what they said went to him. */
   turns: number;
 }
 
@@ -64,10 +65,8 @@ export type Wait = "settle" | "nudge" | "thinking";
 
 /** What happens. `at` is when, on the page's clock (`performance.now()`). */
 export type Happening =
-  /** He begins a line. `answers`: it answers what they said, which is then his. `readsBack`: it leads to the read-back. */
-  | { type: "speak"; at: number; answers?: boolean; readsBack?: boolean }
-  /** His line leads to the read-back, known while he says it. */
-  | { type: "reads-back"; at: number }
+  /** He begins a line. `readsBack`: he reads back, and doesn't listen until he asks whether it is right. */
+  | { type: "speak"; at: number; readsBack?: boolean }
   /**
    * He is done saying his line and waits for theirs. `asked`: in the
    * read-back, he asked whether it is right. `nudge`: what they said before
@@ -92,12 +91,6 @@ export type Happening =
   | { type: "typed"; at: number; text: string }
   /** A wait is over. */
   | { type: "waited"; at: number; wait: Wait }
-  /** The turn asked for came back: they stopped mid-sentence, so he waits for the rest. */
-  | { type: "more"; at: number; turn: number }
-  /** The turn asked for couldn't be had: what they said is kept. */
-  | { type: "failed"; at: number; turn: number }
-  /** A turn that couldn't be had is asked for again, with what they said since. */
-  | { type: "retry"; at: number }
   /** The interview stops. */
   | { type: "stop"; at: number };
 
@@ -106,10 +99,8 @@ export type Act =
   /** Open the ear, or close it (what is being said is dropped). */
   | { type: "hear" }
   | { type: "deaf" }
-  /** Ask core for a turn with what they said; `nudge` when they stayed quiet after breaking off. */
-  | { type: "ask"; turn: number; text: string; typed: boolean; nudge: boolean }
-  /** The turn on its way counts for nothing any more: they talked on. */
-  | { type: "drop"; turn: number }
+  /** What they said goes to him: their answer to what he read back. */
+  | { type: "ask"; turn: number; text: string; typed: boolean }
   /** Stop saying his line: they typed or talked over him. */
   | { type: "hush" }
   /** Say the line he was cut off in again: nothing was said after all. */
@@ -126,13 +117,11 @@ export type Act =
  * How long a silence ends a stretch whose words come live, in ms: a breath.
  * Where they end a sentence they go to him at once; else he waits until
  * they were quiet `restMs`, or `patienceMs` where they seem to break off.
- * His answer takes a while anyway, he listens all that time, and drops it
- * when they talk on: nobody waits longer than it takes, nobody is cut off.
  */
 export const breathMs = 350;
 export const restMs = 1100;
 export const patienceMs = 3400;
-/** How long he waits for the rest of a sentence the model was sure had more to come. */
+/** How long he waits for more once a stretch couldn't be written down, before he takes what he did hear. */
 export const nudgeMs = 5000;
 /**
  * How long he goes on looking as if he listens once their spoken answer
@@ -140,16 +129,6 @@ export const nudgeMs = 5000;
  * nothing on screen has moved.
  */
 export const looksThinkingMs = 600;
-/**
- * When his line is ready the moment they make a sound, they may be
- * starting to talk again: he holds his line while the sound is this fresh,
- * and this long at most, so a sound in the room doesn't keep him quiet.
- */
-export const stirringMs = 250;
-export const holdMs = 400;
-/** How often a held line looks again whether they are still. */
-export const stillTickMs = 50;
-
 export const quietFloor: Floor = {
   doing: "idle",
   voice: false,
@@ -232,26 +211,6 @@ export const restFor = (last: Part): number => {
   return hanging(last.words) ? patienceMs : restMs;
 };
 
-/**
- * Whether his line can begin now (0), or how long until it is looked at
- * again: not while a sound they made is so fresh they may be starting to
- * talk, unless it was held `holdMs` already.
- */
-export const stillIn = ({
-  now,
-  since,
-  lastHeard,
-  hearing,
-}: {
-  now: number;
-  since: number;
-  lastHeard: number;
-  hearing: boolean;
-}): number => {
-  const fresh = hearing && now - lastHeard < stirringMs;
-  return !fresh || now - since >= holdMs ? 0 : stillTickMs;
-};
-
 /** What a step of the floor comes to: the floor now, and what to do. */
 export interface Step {
   floor: Floor;
@@ -272,14 +231,14 @@ const unwaited: Act[] = [
 ];
 
 /** Everything they said since his last line goes to him. */
-const commit = (floor: Floor, nudge: boolean): Step => {
+const commit = (floor: Floor): Step => {
   const text = said(floor.parts);
   if (text === "") {
     return { floor, acts: [] };
   }
   const turn = floor.turns + 1;
   const typed = floor.parts.every((part) => part.typed);
-  const ask: Act = { type: "ask", turn, text, typed, nudge };
+  const ask: Act = { type: "ask", turn, text, typed };
   const asked = { ...floor, turns: turn, asking: turn, cut: false };
   // Spoken, he looks as if he listens a moment longer: they may only be taking a breath.
   if (!typed && floor.doing === "listening" && floor.hearing) {
@@ -311,13 +270,12 @@ const settle = (floor: Floor, at: number): Step => {
   if (wait > 0) {
     return { floor, acts: [{ type: "after", wait: "settle", ms: wait }] };
   }
-  return commit(floor, false);
+  return commit(floor);
 };
 
 /**
  * He listens: through the ear when they chose to talk and he isn't reading
- * back. What they said before stays until it is asked with again (a turn
- * that failed is asked for again by loop.ts, or when they say more).
+ * back. What they said before stays until it goes to him.
  */
 const listening = (floor: Floor): Step => {
   const hears = floor.voice && !floor.reading;
@@ -360,20 +318,16 @@ const deafened = (floor: Floor): Step => ({
 });
 
 /** They talk: what he was about to say waits until they stop again. */
-const talks = (floor: Floor, at: number): Step => {
-  const dropped: Act[] =
-    floor.asking === null ? [] : [{ type: "drop", turn: floor.asking }];
-  return {
-    floor: {
-      ...floor,
-      talking: true,
-      asking: null,
-      lastHeard: at,
-      doing: floor.doing === "thinking" ? "listening" : floor.doing,
-    },
-    acts: [...unwaited, ...dropped],
-  };
-};
+const talks = (floor: Floor, at: number): Step => ({
+  floor: {
+    ...floor,
+    talking: true,
+    asking: null,
+    lastHeard: at,
+    doing: floor.doing === "thinking" ? "listening" : floor.doing,
+  },
+  acts: unwaited,
+});
 
 /** They talk over him: he stops at once, and hears them out. */
 const interrupted = (floor: Floor, at: number): Step => {
@@ -471,8 +425,6 @@ const typedIn = (floor: Floor, text: string): Step => {
   if (words === "" || floor.doing === "idle") {
     return { floor, acts: [] };
   }
-  const dropped: Act[] =
-    floor.asking === null ? [] : [{ type: "drop", turn: floor.asking }];
   const next: Floor = {
     ...floor,
     asking: null,
@@ -482,11 +434,8 @@ const typedIn = (floor: Floor, text: string): Step => {
       { stretch: null, words, typed: true, waiting: false },
     ],
   };
-  const step = commit(next, false);
-  return {
-    floor: step.floor,
-    acts: [{ type: "hush" }, ...dropped, ...step.acts],
-  };
+  const step = commit(next);
+  return { floor: step.floor, acts: [{ type: "hush" }, ...step.acts] };
 };
 
 /** A wait is over. */
@@ -499,7 +448,7 @@ const waitOver = (floor: Floor, at: number, wait: Wait): Step => {
       !floor.talking &&
       floor.asking === null &&
       floor.parts.every((part) => !part.waiting);
-    return quiet ? commit(floor, true) : { floor, acts: [] };
+    return quiet ? commit(floor) : { floor, acts: [] };
   }
   // He has been looking as if he listens: now he thinks, unless they went on.
   const thinks = floor.asking !== null && !floor.talking;
@@ -510,18 +459,11 @@ const waitOver = (floor: Floor, at: number, wait: Wait): Step => {
 };
 
 /**
- * He begins a line: what is being said counts for nothing, and what he
- * answers is his now. He listens afresh while he says it, so they can
- * talk over him, unless it leads to the read-back or his own voice was
- * taken for theirs before.
+ * He begins a line: what is being said counts for nothing. He listens
+ * afresh while he says it, so they can talk over him, unless he reads
+ * back or his own voice was taken for theirs before.
  */
-const speaks = (
-  floor: Floor,
-  {
-    answers = false,
-    readsBack = false,
-  }: { answers?: boolean; readsBack?: boolean }
-): Step => {
+const speaks = (floor: Floor, readsBack = false): Step => {
   const deaf = deafened(floor);
   const reading = floor.reading || readsBack;
   const open = floor.voice && floor.interrupts && !reading;
@@ -532,8 +474,6 @@ const speaks = (
       reading,
       hearing: open,
       cut: false,
-      asking: answers ? null : floor.asking,
-      parts: answers ? [] : deaf.floor.parts,
     },
     acts: [
       ...unwaited,
@@ -619,50 +559,14 @@ const fromEar = (floor: Floor, happening: Heard): Step => {
   }
 };
 
-/** What comes back of a turn asked for. */
-type Answered = Extract<Happening, { type: "more" | "failed" | "retry" }>;
-
-const fromTurn = (floor: Floor, happening: Answered): Step => {
-  switch (happening.type) {
-    case "more": {
-      if (floor.asking !== happening.turn) {
-        return { floor, acts: [] };
-      }
-      const waits = listening({ ...floor, asking: null });
-      return {
-        floor: waits.floor,
-        acts: [...waits.acts, { type: "after", wait: "nudge", ms: nudgeMs }],
-      };
-    }
-    case "failed": {
-      return floor.asking === happening.turn
-        ? { floor: { ...floor, asking: null }, acts: [] }
-        : { floor, acts: [] };
-    }
-    case "retry": {
-      return floor.asking === null && !floor.talking
-        ? commit(floor, false)
-        : { floor, acts: [] };
-    }
-    default: {
-      return happening satisfies never;
-    }
-  }
-};
-
 /**
  * What happens to the floor, and what to do about it. Anything about a
- * turn that is no longer the one asked for, or a stretch the ear wasn't
- * open for, changes nothing.
+ * stretch the ear wasn't open for changes nothing.
  */
 export const step = (floor: Floor, happening: Happening): Step => {
   switch (happening.type) {
     case "speak": {
-      return speaks(floor, happening);
-    }
-    case "reads-back": {
-      const deaf = deafened(floor);
-      return { floor: { ...deaf.floor, reading: true }, acts: deaf.acts };
+      return speaks(floor, happening.readsBack);
     }
     case "listen": {
       return listensAgain(floor, happening);
@@ -695,11 +599,6 @@ export const step = (floor: Floor, happening: Happening): Step => {
         acts: [...unwaited, ...deaf.acts],
       };
     }
-    case "more":
-    case "failed":
-    case "retry": {
-      return fromTurn(floor, happening);
-    }
     case "stretch-start":
     case "partial":
     case "stretch-end":
@@ -720,46 +619,6 @@ export const unanswered = (floor: Floor): string =>
     ...floor.parts,
     { stretch: null, words: floor.live, typed: false, waiting: false },
   ]);
-
-/**
- * A turn that fails on the way is asked for again by itself, after each of
- * these waits, in ms: `reach` asks three times in all, and nobody notices
- * unless all three fail.
- */
-export const retryWaits = [800, 2000];
-/** Once he said it doesn't work, he asks again by himself after each of these; then he says they can come back later. */
-export const laterWaits = [5000, 10_000, 20_000, 30_000];
-
-/** A hiccup on the way is worth asking again; a refusal, a budget used up or a voice that isn't set up is not. */
-export const hiccup = (status: number): boolean =>
-  (status === 0 || status >= 500) && status !== 503;
-
-/** Which of his own lines says that something fails. */
-export type TroubleLine = "offline" | "trouble" | "stillTrouble";
-
-/**
- * What he does when a turn couldn't be had however often it was asked
- * for, the `tried`th time in a row: the first time he says so, as his own
- * line, their connection when nothing came back or the browser is
- * offline, else our side; once all his own tries are spent, that it still
- * doesn't work. In between he says nothing. `again`: when he asks by
- * himself next, none once he stopped trying by himself.
- */
-export const troubleOf = ({
-  tried,
-  status,
-  online,
-}: {
-  tried: number;
-  status: number;
-  online: boolean;
-}): { say: TroubleLine | null; again: number | null } => {
-  const again = laterWaits[tried] ?? null;
-  if (tried === 0) {
-    return { say: status === 0 || !online ? "offline" : "trouble", again };
-  }
-  return { say: tried === laterWaits.length ? "stillTrouble" : null, again };
-};
 
 const wordsOnly = /[^\p{L}\p{N}\s]/gu;
 

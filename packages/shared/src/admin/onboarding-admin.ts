@@ -441,8 +441,8 @@ export interface Org {
   library: string;
   /** What Stephen knows before he says hello, a sentence a line. */
   brief: string[];
-  /** What the company's admin skipped in its own onboarding: where the documents live, documents of its own, or Pulse on the laptops. */
-  skipped?: ("sources" | "documents" | "pulse")[];
+  /** What the company's admin skipped in its own onboarding: where the documents live, or documents of its own. */
+  skipped?: ("sources" | "documents")[];
   /**
    * The screen the company's admin is on in its own onboarding, by name,
    * or `done` once they finished them all; none before they started, or
@@ -511,6 +511,8 @@ export interface RealHappened {
       | "opus"
       | "sonnet"
       | "haiku"
+      | "mistralMedium"
+      | "mistralSmall"
       | "voice"
       | "ears"
       | "conversation"
@@ -1183,7 +1185,6 @@ export const KNOWLEDGE_SOURCES = [
   "directory",
   "sources",
   "documents",
-  "pulse",
   "leadsKnown",
   "leadsHeard",
   "everyoneHeard",
@@ -1550,7 +1551,6 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
     directory: whether(known),
     sources: whether(leadsKnown && !skipped.includes("sources")),
     documents: whether(leadsKnown && !skipped.includes("documents")),
-    pulse: whether(leadsKnown && !skipped.includes("pulse")),
     leadsKnown: whether(leadsKnown),
     leadsHeard: share(leads, taking.length),
     everyoneHeard: share(

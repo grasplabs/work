@@ -1,9 +1,12 @@
-// What the admin can do on the campaign page, at most two things at once,
-// each done with one press: nudge a quiet team (Grasp's reminder goes out
-// in the admin's name to those still to talk, whom the admin never sees),
-// or correct an address an invitation bounced from. The most important
-// stands first with the page's one filled button; a second is one quiet
-// line with its press as a link.
+// What the admin can do on the campaign page, each done with one press:
+// remind a quiet team (Grasp's reminder goes out in the admin's name to
+// those still to talk, whom the admin never sees), or correct an address
+// an invitation bounced from. Core does both (`onboarding.nudge`,
+// `onboarding.correctAddress`) and says what needs the admin next. The
+// most important stands first with the page's one filled button; every
+// other is one quiet line with its press as a link.
+import { failureText } from "@grasp-os/shared/errors";
+import type { CampaignAsk } from "@grasp-os/shared/onboarding-campaign";
 import { Button } from "@grasp-os/ui/components/button";
 import { Field, FieldLabel } from "@grasp-os/ui/components/field";
 import { Input } from "@grasp-os/ui/components/input";
@@ -23,7 +26,12 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useId, useState } from "react";
 
-import type { Ask } from "./fixtures.ts";
+import type { Session } from "../../core.ts";
+import { TopError } from "../../frame/top-error.tsx";
+import { useCore } from "../../use-core.ts";
+
+type QuietAsk = Extract<CampaignAsk, { kind: "quiet" }>;
+type MailAsk = Extract<CampaignAsk, { kind: "mail" }>;
 
 const styles = stylex.create({
   asks: {
@@ -45,35 +53,43 @@ const styles = stylex.create({
   askQuiet: { alignItems: "baseline", columnGap: space[6] },
 });
 
-/** What core would do to send: here, nothing (fixtures). */
-const sent = async (): Promise<void> => {
-  await Promise.resolve();
+/**
+ * One press sent to core: why it didn't go through is said in the bar at
+ * the top, and thrown on, so the button pressed shows that it failed.
+ */
+const useSend = (onChanged: () => Promise<void>) => {
+  const core = useCore();
+  const [failure, setFailure] = useState<string>();
+  const send = async (
+    action: (session: Session) => Promise<unknown>
+  ): Promise<void> => {
+    setFailure(undefined);
+    try {
+      await core.withSession(action);
+    } catch (error) {
+      setFailure(failureText(error));
+      throw error;
+    }
+    await onChanged();
+  };
+  return { failure, send };
 };
 
 /** The ask in one sentence, or what became of it. */
-const AskLine = ({
-  ask,
-  done,
-  first,
-}: {
-  ask: Ask;
-  done: boolean;
-  first: boolean;
-}) => {
+const AskLine = ({ ask, first }: { ask: CampaignAsk; first: boolean }) => {
   const { t } = useLingui();
-  const { team } = ask;
-  let words = t`The invitation went out again.`;
-  if (ask.kind === "quiet") {
-    const { waiting } = ask;
-    words = done
-      ? t`${team} got your nudge.`
+  let words = "";
+  if (ask.kind === "mail") {
+    const address = ask.email;
+    words = t`The invitation to ${address} bounced.`;
+  } else {
+    const { name: team, waiting } = ask;
+    words = ask.nudged
+      ? t`${team} got your reminder.`
       : t`${team} is quiet. ${plural(waiting, {
           one: "# person is still to talk.",
           other: "# people are still to talk.",
         })}`;
-  } else if (!done) {
-    const { address } = ask;
-    words = t`The invitation to ${address} bounced.`;
   }
   return (
     <Text as="span" color={first ? "default" : "muted"} size="lg">
@@ -82,45 +98,56 @@ const AskLine = ({
   );
 };
 
-/** The one press for a quiet team. */
+/** The one press for a quiet team: once a day, as core takes it. */
 const Nudge = ({
   ask,
-  onDone,
+  onChanged,
   first,
 }: {
-  ask: Ask;
-  onDone: () => void;
+  ask: QuietAsk;
+  onChanged: () => Promise<void>;
   first: boolean;
 }) => {
   const { t } = useLingui();
-  const { team } = ask;
+  const { failure, send } = useSend(onChanged);
+  const { name: team } = ask;
   return (
-    <Button
-      onClick={async () => {
-        await sent();
-        onDone();
-      }}
-      successText={t`Sent`}
-      variant={first ? "default" : "link"}
-    >
-      {t`Nudge ${team}`}
-    </Button>
+    <>
+      <Button
+        errorText={t`Not sent`}
+        onClick={async () => {
+          await send(
+            async (session) => await session.onboarding.nudge(ask.team)
+          );
+        }}
+        successText={t`Sent`}
+        variant={first ? "default" : "link"}
+      >
+        {t`Remind ${team}`}
+      </Button>
+      <TopError>{failure}</TopError>
+    </>
   );
 };
 
 /** The address to correct, in a small panel beside its button. */
 const Readdress = ({
   ask,
-  onDone,
+  onChanged,
   first,
 }: {
-  ask: Extract<Ask, { kind: "bounce" }>;
-  onDone: () => void;
+  ask: MailAsk;
+  onChanged: () => Promise<void>;
   first: boolean;
 }) => {
   const { t } = useLingui();
   const id = useId();
   const [open, setOpen] = useState(false);
+  const [address, setAddress] = useState(ask.email);
+  const { failure, send } = useSend(async () => {
+    setOpen(false);
+    await onChanged();
+  });
   return (
     <Popover onOpenChange={setOpen} open={open}>
       <PopoverTrigger asChild>
@@ -137,61 +164,69 @@ const Readdress = ({
         </PopoverHeader>
         <Field>
           <FieldLabel htmlFor={id}>{t`Email address`}</FieldLabel>
-          <Input defaultValue={ask.address} id={id} type="email" />
+          <Input
+            id={id}
+            onValueChange={setAddress}
+            type="email"
+            value={address}
+          />
         </Field>
         <PopoverFooter>
           <Button
+            errorText={t`Not sent`}
             onClick={async () => {
-              await sent();
-              setOpen(false);
-              onDone();
+              await send(async (session) => {
+                await session.onboarding.correctAddress(
+                  ask.person,
+                  address.trim()
+                );
+              });
             }}
             size="sm"
+            successText={t`Sent`}
           >
             {t`Send again`}
           </Button>
         </PopoverFooter>
       </PopoverContent>
+      <TopError>{failure}</TopError>
     </Popover>
   );
 };
 
-/** The asks, the most important first: a quiet team before a bounced address. */
-const asksInOrder = (asks: Ask[]): Ask[] =>
-  asks.toSorted(
-    (a, b) => Number(b.kind === "quiet") - Number(a.kind === "quiet")
-  );
+/** What tells one ask from another: its team, or its person. */
+const keyOf = (ask: CampaignAsk): string =>
+  ask.kind === "quiet" ? `quiet/${ask.team}` : `mail/${ask.person}`;
 
-/** What the admin must do, the most important first; nothing when there is nothing. */
-export const Asks = ({ asks }: { asks: Ask[] }) => {
+/** What the admin must do, as core orders it: a quiet team before a bounced address; nothing when there is nothing. */
+export const Asks = ({
+  asks,
+  onChanged,
+}: {
+  asks: readonly CampaignAsk[];
+  /** Called once core did what was asked: what needs the admin has changed. */
+  onChanged: () => Promise<void>;
+}) => {
   const { t } = useLingui();
-  const [done, setDone] = useState<string[]>([]);
   if (asks.length === 0) {
     return null;
   }
   return (
     <ul aria-label={t`For you`} {...stylex.props(styles.asks)}>
-      {asksInOrder(asks).map((ask, index) => {
-        const isDone = done.includes(ask.id);
+      {asks.map((ask, index) => {
         const first = index === 0;
-        const onDone = () => {
-          setDone((was) => [...was, ask.id]);
-        };
         let press = null;
-        if (!isDone) {
-          press =
-            ask.kind === "quiet" ? (
-              <Nudge ask={ask} first={first} onDone={onDone} />
-            ) : (
-              <Readdress ask={ask} first={first} onDone={onDone} />
-            );
+        if (ask.kind === "mail") {
+          press = <Readdress ask={ask} first={first} onChanged={onChanged} />;
+        } else if (!ask.nudged) {
+          press = <Nudge ask={ask} first={first} onChanged={onChanged} />;
         }
         return (
           <li
-            key={ask.id}
+            key={keyOf(ask)}
             {...stylex.props(styles.ask, !first && styles.askQuiet)}
           >
-            <AskLine ask={ask} done={isDone} first={first} />
+            <AskLine ask={ask} first={first} />
             {press}
           </li>
         );

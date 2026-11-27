@@ -42,11 +42,8 @@ import type { Moment, Signal } from "./moments.ts";
 import type { Asker, Said } from "./person.ts";
 import { notesAfter } from "./play.ts";
 
-/** A turn as Stephen is asked for it, without a link. */
-export type TurnAsked = Omit<
-  InterviewTurnRequest,
-  "secret" | "key" | "interviewer"
->;
+/** A turn as Stephen is asked for it. */
+export type TurnAsked = InterviewTurnRequest;
 
 /** What a bench runs on: the local core's turns, drawings and gateway, or fakes of them. */
 export interface Stand {

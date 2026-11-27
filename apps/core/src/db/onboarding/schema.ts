@@ -125,6 +125,11 @@ export const teams = sqliteTable("teams", {
    * an edit or a withdrawal since keeps them out until it is drawn again.
    */
   mappedFrom: text("mapped_from"),
+  /**
+   * The day (ISO, UTC) the company's admin last nudged it (`nudge`): a team
+   * takes one nudge a day. None before the first.
+   */
+  nudgedOn: text("nudged_on"),
 });
 
 /** The people, in the order the admin gave them. */
@@ -210,6 +215,12 @@ export const links = sqliteTable("links", {
    * None before it ever was.
    */
   brainMark: text("brain_mark"),
+  /**
+   * When the reminder they asked for themselves goes (ISO 8601), while it
+   * hasn't: "not now" on their link (`remindLater`). None otherwise, and
+   * again once it went or was no longer owed.
+   */
+  laterAt: text("later_at"),
 });
 
 /**
@@ -667,6 +678,20 @@ export const voiceUse = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.who, table.day] })]
 );
+
+/**
+ * The live conversation open on someone's link (onboarding/voice.ts), one
+ * at most: the seconds held for it against their listening that day
+ * (`voiceUse`), and when it opened, so what it didn't use is given back
+ * once it ends or the next one opens. Nothing that was said.
+ */
+export const voiceHolds = sqliteTable("voice_holds", {
+  who: text().primaryKey(),
+  day: text().notNull(),
+  seconds: real().notNull(),
+  /** ISO 8601. */
+  at: text().notNull(),
+});
 
 /**
  * The text each interview ran on (onboarding/interviewer-text.ts), as its

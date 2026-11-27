@@ -6,7 +6,6 @@ import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { msg, plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { formatList } from "../format.ts";
@@ -26,11 +25,11 @@ import { planDraft } from "./visit.ts";
 // themselves, as a new email Stephen writes for them the first time
 // (message-compose.tsx), theirs to change and copy; then the day, and
 // which teams, on one card of its own. The leads get their link that
-// morning; everyone else once their lead talked. Not ready yet, the admin
-// can do it later: the setup ends here for now, and Settings, Onboarding
-// keeps it as an open to-do. Letting Grasp's mail through is the review
-// step's, which comes next. Without a staff list there is no day to plan
-// yet: the letter alone, and Grasp's staff plan the day with the admin.
+// morning; everyone else once their lead talked. There is no doing it
+// later from here: until the team is told the setup isn't finished, and
+// every page leads back to this step. Without a staff list there is no day
+// to plan yet: the letter alone, and Grasp's staff plan the day with the
+// admin.
 
 /** Wide enough for the message and the plan side by side. */
 const wide = "@media (width >= 72rem)";
@@ -68,7 +67,6 @@ export const TeamStep = ({
   onward,
 }: StepProps) => {
   const { t, i18n } = useLingui();
-  const navigate = useNavigate();
   const { admin, company, view } = data;
   const { run, busy, failure } = useCoreAction();
   const refresh = useRefresh();
@@ -201,33 +199,20 @@ export const TeamStep = ({
           : t`People respond better when they know why I’m reaching out. Send them this message yourself. Grasp’s staff plan the day I start with you.`
       }
       end={
-        <>
-          <Button
-            disabled={planned && !holds}
-            onClick={() => {
-              if (planned) {
-                void send();
-              } else {
-                void onward();
-              }
-            }}
-            size="lg"
-            status={busy || refreshing ? "loading" : "idle"}
-          >
-            {t`Continue`}
-          </Button>
-          {view.plan === null ? (
-            <Button
-              onClick={() => {
-                void navigate({ to: "/settings/onboarding" });
-              }}
-              size="lg"
-              variant="outline"
-            >
-              {t`Do this later`}
-            </Button>
-          ) : null}
-        </>
+        <Button
+          disabled={planned && !holds}
+          onClick={() => {
+            if (planned) {
+              void send();
+            } else {
+              void onward();
+            }
+          }}
+          size="lg"
+          status={busy || refreshing ? "loading" : "idle"}
+        >
+          {t`Continue`}
+        </Button>
       }
       spoken={
         planned

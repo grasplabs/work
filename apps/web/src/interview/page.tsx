@@ -20,6 +20,7 @@ import {
   deleteInterview,
   isRefused,
   participate,
+  remindLater,
   withdrawInterview,
 } from "./api.ts";
 import type { OpenSession } from "./api.ts";
@@ -345,7 +346,10 @@ const BeforeTalk = ({
   const who = interviewerNames[useInterviewer()];
   const [before, setBefore] = useState<Before>({ at: "start" });
   const [refusal, setRefusal] = useState<string | null>(null);
+  // A second press while core is asked does nothing.
+  const [asking, setAsking] = useState(false);
   const toStart = (): void => {
+    setRefusal(null);
     setBefore({ at: "start" });
   };
   /** Core keeps that they take part, then they talk; or it says why not. */
@@ -364,6 +368,28 @@ const BeforeTalk = ({
     setSound(true);
     update((now) => begun(now, Date.now(), "talk"));
   };
+  // The times to be reminded at, while any is left before the interviews close.
+  const times = remindTimes(new Date(), session.closes);
+  /** Core keeps the time they picked and sends the reminder then; or it says why not. */
+  const remind = async (picked: RemindAt): Promise<void> => {
+    const link = linkNow();
+    if (link === null || asking) {
+      return;
+    }
+    setAsking(true);
+    const answer = await remindLater(link.secret, picked.at.toISOString());
+    setAsking(false);
+    if (isRefused(answer)) {
+      setRefusal(answer.message);
+      return;
+    }
+    setRefusal(null);
+    // The time as core keeps it, never this page's own.
+    setBefore({
+      at: "reminded",
+      picked: { id: picked.id, at: new Date(answer.at) },
+    });
+  };
   switch (before.at) {
     case "not-now": {
       return (
@@ -371,9 +397,10 @@ const BeforeTalk = ({
           closes={closes}
           onBack={toStart}
           onPick={(picked) => {
-            setBefore({ at: "reminded", picked });
+            void remind(picked);
           }}
-          times={remindTimes(new Date())}
+          refusal={refusal}
+          times={times}
         />
       );
     }
@@ -388,9 +415,14 @@ const BeforeTalk = ({
           onAgree={() => {
             void agree();
           }}
-          onNotNow={() => {
-            setBefore({ at: "not-now" });
-          }}
+          onNotNow={
+            times.length === 0
+              ? undefined
+              : () => {
+                  setRefusal(null);
+                  setBefore({ at: "not-now" });
+                }
+          }
           refusal={refusal}
           who={who}
         />

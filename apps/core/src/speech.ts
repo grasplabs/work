@@ -2,13 +2,13 @@ import type { SpeechSynthesis } from "@grasp-os/shared/voice";
 
 import { models } from "./models.ts";
 import type { SpeechCall } from "./models.ts";
-import { liveInterviewOf, platformAi } from "./platform-ai.ts";
+import { platformAi } from "./platform-ai.ts";
 
 // Speech synthesis as core implements it: Grasp's own speech feature,
-// Mistral's Voxtral for an interview and ElevenLabs for the admin's
-// onboarding (platform-ai.ts), through the model gateway
+// ElevenLabs for an interview's lines and for the admin's onboarding, each
+// with its own voices (platform-ai.ts), through the model gateway
 // (models.ts), which judges every line by the deployment's rules, meters
-// and audits it, and reaches Mistral, in the EU, through connect with
+// and audits it, and reaches ElevenLabs, in the EU, through connect with
 // Grasp's own key. Without that key, every line is refused (`model.not_allowed`).
 
 /** Who says lines, and why: the gateway's audit and rules go by it. */
@@ -22,27 +22,15 @@ export type SpeechAudience = "interview" | "onboarding";
 
 /**
  * The speech model and voices a line to `audience` is said with: an
- * interview held with the ElevenLabs agent is said in the agent's voice,
- * so Stephen sounds as one throughout.
+ * interview's in the voice of the agent that holds it live, so Stephen
+ * sounds as one throughout.
  */
-export const speechOf = (
-  audience: SpeechAudience = "interview",
-  env?: Pick<Env, "INTERVIEW_LIVE_VOICE">
-) => {
-  if (audience === "onboarding") {
-    return platformAi.onboardingSpeech;
-  }
-  return liveInterviewOf(env) === "elevenlabs"
-    ? platformAi.agentSpeech
-    : platformAi.speech;
-};
+export const speechOf = (audience: SpeechAudience = "interview") =>
+  audience === "onboarding" ? platformAi.onboardingSpeech : platformAi.speech;
 
 /** The speech model, as the gateway names it. */
-export const speechModelOf = (
-  audience?: SpeechAudience,
-  env?: Pick<Env, "INTERVIEW_LIVE_VOICE">
-): string => {
-  const { provider, model } = speechOf(audience, env);
+export const speechModelOf = (audience?: SpeechAudience): string => {
+  const { provider, model } = speechOf(audience);
   return `${provider}/${model}`;
 };
 
@@ -51,12 +39,11 @@ export const platformSpeech = (
   env: Env,
   caller: SpeechCaller
 ): SpeechSynthesis => ({
-  speak: async ({ text, voice, language, model }, signal, onAudio) => {
-    const named = model ?? speechModelOf("interview", env);
+  speak: async ({ text, voice, language, model }, signal) => {
+    const named = model ?? speechModelOf();
     return await models(env).speak(
       { ...caller, model: named, text, voice, language },
-      signal,
-      onAudio
+      signal
     );
   },
 });

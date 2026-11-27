@@ -3,24 +3,12 @@ import type { SpokenWord } from "@grasp-os/shared/voice";
 // The voice models the model gateway offers (models.ts) for Grasp's own
 // speech and listening (@grasp-os/shared/platform-ai), beside the text
 // models of pi's catalog: our own small catalog, as pi's has no voice
-// models. Each speech model is Mistral's or ElevenLabs's, priced per
-// character it is asked to say, which is how both bill speech. Each transcription
+// models. Each speech model is ElevenLabs's, priced per character it is
+// asked to say, which is how it bills speech. Each transcription
 // model is OpenAI's or Mistral's, priced per second it hears, at a price never below
-// what the provider bills for it. Grasp pays for these on its own keys:
+// what the provider bills for it. A conversation with Grasp's ElevenLabs
+// agent is priced per second it is expected to last. Grasp pays for these on its own keys:
 // what each cost is recorded for Grasp's spend overview (model-usage.ts).
-
-/**
- * Mistral's API prices for text to speech, in US dollars per 1,000
- * characters.
- *
- * Source: Mistral's model page for Voxtral TTS 3
- * (https://docs.mistral.ai/models/voxtral-mini-tts-3-0), read on
- * 2026-11-24: $13 per million characters.
- */
-const mistralDollarsPer1000Chars = {
-  /** Voxtral TTS 3, in which an interview's lines are said. */
-  "voxtral-mini-tts-3-0": 0.013,
-} as const;
 
 /**
  * ElevenLabs's API prices for text to speech, in US dollars per 1,000
@@ -38,64 +26,35 @@ const elevenLabsDollarsPer1000Chars = {
   eleven_flash_v2_5: 0.04,
 } as const;
 
-/** Each speech provider's models, with their prices (platform-ai.ts). */
-const dollarsPer1000Chars = {
-  mistral: mistralDollarsPer1000Chars,
-  elevenlabs: elevenLabsDollarsPer1000Chars,
-} as const;
-
-/** The providers that say a line: Mistral and ElevenLabs (platform-ai.ts). */
-const speechProviders = ["mistral", "elevenlabs"] as const;
-
 /** The providers that write down speech: OpenAI and Mistral (platform-ai.ts). */
 const transcriptionProviders = ["openai", "mistral"] as const;
 
-/** A speech model the gateway offers. */
-export type VoiceRef = {
-  [P in (typeof speechProviders)[number]]: {
-    provider: P;
-    id: keyof (typeof dollarsPer1000Chars)[P];
-  };
-}[(typeof speechProviders)[number]];
+/** A speech model the gateway offers: ElevenLabs says every line (platform-ai.ts). */
+export interface VoiceRef {
+  provider: "elevenlabs";
+  id: keyof typeof elevenLabsDollarsPer1000Chars;
+}
 
-const isMistralModel = (
-  id: string
-): id is keyof typeof mistralDollarsPer1000Chars =>
-  Object.hasOwn(mistralDollarsPer1000Chars, id);
-
-const isElevenLabsModel = (
-  id: string
-): id is keyof typeof elevenLabsDollarsPer1000Chars =>
+const isElevenLabsModel = (id: string): id is VoiceRef["id"] =>
   Object.hasOwn(elevenLabsDollarsPer1000Chars, id);
 
 /**
  * A speech model as the gateway names it, `<provider>/<model>`, such as
- * `mistral/voxtral-mini-tts-3-0` or `elevenlabs/eleven_v4`; `undefined`
- * for any other.
+ * `elevenlabs/eleven_v4`; `undefined` for any other.
  */
 export const parseVoiceRef = (ref: string): VoiceRef | undefined => {
   const [provider, id, ...rest] = ref.split("/");
-  if (id === undefined || rest.length > 0) {
-    return undefined;
-  }
-  if (provider === "mistral" && isMistralModel(id)) {
-    return { provider, id };
-  }
-  if (provider === "elevenlabs" && isElevenLabsModel(id)) {
-    return { provider, id };
-  }
-  return undefined;
+  return provider === "elevenlabs" &&
+    id !== undefined &&
+    rest.length === 0 &&
+    isElevenLabsModel(id)
+    ? { provider, id }
+    : undefined;
 };
-
-/** A model's price per 1,000 characters, in US dollars. */
-const priceOf = (ref: VoiceRef): number =>
-  ref.provider === "mistral"
-    ? dollarsPer1000Chars.mistral[ref.id]
-    : dollarsPer1000Chars.elevenlabs[ref.id];
 
 /** What saying `characters` characters costs on `ref`, in US dollars: per million, so whole micros stay whole. */
 export const speechCostOf = (ref: VoiceRef, characters: number): number =>
-  (characters * priceOf(ref) * 1000) / 1_000_000;
+  (characters * elevenLabsDollarsPer1000Chars[ref.id] * 1000) / 1_000_000;
 
 /**
  * OpenAI's prices for speech to text, in US dollars per hour of audio.
@@ -169,114 +128,50 @@ export const hearingCostOf = ({ id }: HearingRef, seconds: number): number =>
   (seconds * dollarsPerHour[id]) / 3600;
 
 /**
- * Mistral's prices for a voice agent's session (its voice agents:
- * listening, the model and the voice in one live session), in US dollars
- * per hour of the session, by the model that answers in it. The session
- * is named by that model.
+ * ElevenLabs's price for a conversation with one of its agents
+ * (listening, the model and the voice in one live conversation), in US
+ * dollars per hour of it.
  *
- * Source: Mistral's launch of its Voice Agents API, as reported on
- * 2026-10-26 (its own pricing page names no rate): $0.04 a minute with
- * Mistral Small, $0.08 with a larger model.
+ * Source: ElevenLabs's pricing page (https://elevenlabs.io/pricing), read
+ * in 2026-11: its agents at $0.10 a minute on the Creator and Pro plans,
+ * $0.08 on Business. Charged at $0.10: an estimate until the rate of
+ * Grasp's own contract is known.
  */
-const conversationDollarsPerHour = {
-  "mistral-small-latest": 2.4,
-} as const;
+const agentDollarsPerHour = 6;
 
-/** The providers that hold a live voice session: Mistral. */
-const conversationProviders = ["mistral"] as const;
+/** An agent's ID as ElevenLabs writes it. */
+const agentId = /^agent_[A-Za-z0-9]{1,64}$/u;
 
-/** A voice agent's model the gateway offers. */
-export interface ConversingRef {
-  provider: (typeof conversationProviders)[number];
-  id: keyof typeof conversationDollarsPerHour;
+/** A voice agent the gateway opens conversations with. */
+export interface AgentRef {
+  provider: "elevenlabs";
+  id: string;
 }
 
-const isConversingModel = (id: string): id is ConversingRef["id"] =>
-  Object.hasOwn(conversationDollarsPerHour, id);
-
-const isConversationProvider = (
-  provider: string
-): provider is ConversingRef["provider"] =>
-  conversationProviders.some((one) => one === provider);
-
 /**
- * A voice agent's model as the gateway names it, `<provider>/<model>`,
- * such as `mistral/mistral-small-latest`; `undefined` for any other.
+ * A voice agent as the gateway names it, `<provider>/<agent's ID>`, such
+ * as `elevenlabs/agent_4601m8c6`; `undefined` for any other.
  */
-export const parseConversingRef = (ref: string): ConversingRef | undefined => {
+export const parseAgentRef = (ref: string): AgentRef | undefined => {
   const [provider, id, ...rest] = ref.split("/");
-  return provider !== undefined &&
-    isConversationProvider(provider) &&
+  return provider === "elevenlabs" &&
     id !== undefined &&
     rest.length === 0 &&
-    isConversingModel(id)
+    agentId.test(id)
     ? { provider, id }
     : undefined;
 };
 
-/** What `seconds` of a voice session cost on `ref`, in US dollars. */
-export const conversationCostOf = (
-  { id }: ConversingRef,
-  seconds: number
-): number => (seconds * conversationDollarsPerHour[id]) / 3600;
+/** What `seconds` of a conversation with an agent cost, in US dollars. */
+export const conversationCostOf = (seconds: number): number =>
+  (seconds * agentDollarsPerHour) / 3600;
 
 /**
  * Characters a line is charged as: its UTF-16 length, never fewer than
- * the characters (code points) Mistral counts, so what is recorded is
- * never below what the line is billed.
+ * the characters (code points) its provider counts, so what is recorded
+ * is never below what the line is billed.
  */
 export const charactersOf = (text: string): number => text.length;
-
-/** A direction to the voice inside a line, which isn't said: `[emotion=warm]`. */
-const direction = /\[[^\]]*\]/gu;
-
-const spaces = /\s+/u;
-
-/** After these a voice waits a moment: counted as letters said. */
-const pauses: Readonly<Record<string, number>> = {
-  ",": 2,
-  ";": 3,
-  ":": 3,
-  ".": 5,
-  "!": 5,
-  "?": 5,
-  "\u2026": 5,
-};
-
-/** The wait a word's last mark asks for, in letters. */
-const pauseAfter = (word: string): number => pauses[word.at(-1) ?? ""] ?? 0;
-
-/**
- * The words of a line, each a run of characters between spaces, with when
- * it is said, in whole ms. Mistral's speech tells no word's time, so each
- * is worked out: the audio's length shared over the words by how many
- * letters each has, with a letter for the space after it and the wait its
- * last mark asks for; the last word ends with the audio. A direction in
- * brackets isn't said and is no word.
- */
-export const wordsOf = (line: string, seconds: number): SpokenWord[] => {
-  const written = line
-    .replaceAll(direction, " ")
-    .split(spaces)
-    .filter((word) => word !== "");
-  const letters = written.map((word) => word.length);
-  const after = written.map((word, at) =>
-    at === written.length - 1 ? 0 : 1 + pauseAfter(word)
-  );
-  const whole = [...letters, ...after].reduce((sum, part) => sum + part, 0);
-  const words: SpokenWord[] = [];
-  let before = 0;
-  for (const [at, text] of written.entries()) {
-    const said = letters[at] ?? 0;
-    words.push({
-      text,
-      startMs: Math.round((before / whole) * seconds * 1000),
-      endMs: Math.round(((before + said) / whole) * seconds * 1000),
-    });
-    before += said + (after[at] ?? 0);
-  }
-  return words;
-};
 
 /** When each character of a line is said, in seconds, as ElevenLabs aligns it. */
 export interface Alignment {

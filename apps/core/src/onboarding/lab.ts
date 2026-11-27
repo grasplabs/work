@@ -22,7 +22,7 @@ import { readOrganization } from "../organization.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { isLocalDevRequest } from "../router-secret.ts";
 import { auditStaffRoute } from "../staff-audit.ts";
-import { turnStream } from "./interview.ts";
+import { turnStream } from "./lab-turn.ts";
 import { onboardingStore } from "./store.ts";
 
 // The Stephen Lab's way into a local core, `POST /api/lab` (GRA-337): the
@@ -33,11 +33,13 @@ import { onboardingStore } from "./store.ts";
 // no bridge to anyone's subscription: what it measures is reached the way
 // the interviews themselves are.
 //
-// The benches (GRA-338) give Stephen fixed input: a turn here is the same
-// turn a link gets, with who it is with given instead of read from a link,
-// and a drawing is drawn again from what was agreed and kept nowhere.
-// Neither is counted by the onboarding: they are the lab's, not anyone's
-// interview.
+// Stephen's turns, turn by turn, are the lab's alone (lab-turn.ts): every
+// interview is a live conversation with Grasp's agent, and no link
+// reaches a turn. The benches (GRA-338) give a turn fixed input, with who
+// it is with given; an interview the lab plays names the practice person
+// it is with, known as the store knows them. A drawing is drawn again from
+// what was agreed and kept nowhere. Neither is counted by the onboarding:
+// they are the lab's, not anyone's interview.
 //
 // It answers on a local stack only (`vp run dev`, the same requests the
 // router-secret check lets through there), and only Grasp's staff: on a
@@ -146,18 +148,39 @@ const links = async (env: Env): Promise<Response> => {
   return Response.json(answered);
 };
 
-/** What a turn on fixed input took: the lab's, so the onboarding counts none of it. */
-const notCounted = async (): Promise<void> => {
-  await Promise.resolve();
-};
-
-/** One of Stephen's turns on fixed input: the events a link's turn has. */
+/**
+ * One of Stephen's turns: on fixed input, someone's own interview with
+ * who it is with given, or with someone on the roster the lab plays.
+ */
 const turn = async (
   env: Env,
   asked: Extract<LabRequest, { action: "turn" }>,
   requestId: string,
   ctx: Pick<ExecutionContext, "waitUntil">
 ): Promise<Response> => {
+  if ("person" in asked.who) {
+    const [found, organization] = await Promise.all([
+      onboardingStore(env).contextOf(asked.who.person),
+      readOrganization(env),
+    ]);
+    if (found === null) {
+      return errorResponse(
+        404,
+        requestErrors.create("request.not_found"),
+        requestId
+      );
+    }
+    return await turnStream({
+      env,
+      turn: asked.turn,
+      context: found,
+      company: Promise.resolve(
+        companyNameOf(organization.name, organization.signInDomains) ?? ""
+      ),
+      requestId,
+      ctx,
+    });
+  }
   const { company, ...who } = asked.who;
   return await turnStream({
     env,
@@ -166,7 +189,6 @@ const turn = async (
     company: Promise.resolve(company),
     requestId,
     ctx,
-    meter: notCounted,
   });
 };
 

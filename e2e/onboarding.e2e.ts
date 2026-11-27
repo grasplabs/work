@@ -735,9 +735,9 @@ test("while Stephen talks to the team, the admin sees the numbers, no team under
     page.getByRole("button", { name: "Links to send" })
   ).toBeVisible();
 
-  // Settings no longer lists the interviews. Here Grasp has already opened
-  // the gate, so an old link to Settings, Onboarding leads to the inbox.
+  // The interviews stand under Settings, Interviews: an old link to
+  // Settings, Onboarding leads there.
   await page.goto("/settings/onboarding");
-  await expect(page).toHaveURL(/\/inbox$/u);
+  await expect(page).toHaveURL(/\/settings\/interviews$/u);
   expect(cspViolations).toStrictEqual([]);
 });

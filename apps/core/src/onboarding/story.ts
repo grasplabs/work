@@ -26,7 +26,7 @@ import { onboardingStore } from "./store.ts";
 // here. Ported from the prototype (grasplabs/prototype, packages/grasp:
 // worker/story.ts).
 //
-// Like a turn (interview.ts): the link's secret and the session of the
+// As for the live conversation (voice.ts): the link's secret and the session of the
 // account it belongs to are checked (interview-caller.ts, the store), which also limits calls per link; the gateway call
 // is made by the system for `onboarding.interview`, never in anyone's
 // name, and counts as carrying sensitive data; and what it took is counted

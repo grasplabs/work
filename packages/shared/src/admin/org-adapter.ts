@@ -1,3 +1,4 @@
+import { leadsOfTeam } from "../onboarding.ts";
 import { addMonths } from "./admin-account.ts";
 import { KEPT_SHARE, PRICES } from "./admin-usage.ts";
 import type { Model } from "./admin-usage.ts";
@@ -123,7 +124,8 @@ export const workOf = (record: WorkRecord): Work => {
 /**
  * The model a call was made to, by the name its maker gives it: one the admin has no price for is
  * another. Core counts what Stephen hears, live or from a recording, as `transcription`: his ears;
- * an interview held as one live voice session as `conversation`.
+ * an interview held as one live conversation with the ElevenLabs agent as `conversation`; and an
+ * interview's turns by the gateway's names of their models (`mistral/mistral-medium-latest`).
  */
 const modelOf = (name: string): Model => {
   if (name === "voice") {
@@ -134,6 +136,12 @@ const modelOf = (name: string): Model => {
   }
   if (name === "conversation") {
     return "conversation";
+  }
+  if (name.includes("mistral-medium")) {
+    return "mistralMedium";
+  }
+  if (name.includes("mistral-small")) {
+    return "mistralSmall";
   }
   return (
     (["opus", "sonnet", "haiku"] as const).find((model) =>
@@ -244,18 +252,24 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
   const works = snapshot.works.map(workOf);
   const everyone: Person[] = (roster?.teams ?? []).flatMap((team) => {
     const mine = people.filter((person) => person.team === team.id);
+    // Everyone who leads it is a lead here, the first before the others:
+    // each talks about the whole team, and none is asked about one piece of work.
+    const leading = leadsOfTeam(team);
     const ordered = [
-      ...mine.filter((person) => person.id === team.lead),
-      ...mine.filter((person) => person.id !== team.lead),
+      ...leading.flatMap((id) => mine.filter((person) => person.id === id)),
+      ...mine.filter((person) => !leading.includes(person.id)),
     ];
-    return ordered.map((person): Person => ({
-      id: person.id,
-      name: person.name,
-      first: first(person.name),
-      team: team.id,
-      lead: person.id === team.lead,
-      work: person.id === team.lead ? null : person.work,
-    }));
+    return ordered.map((person): Person => {
+      const lead = leading.includes(person.id);
+      return {
+        id: person.id,
+        name: person.name,
+        first: first(person.name),
+        team: team.id,
+        lead,
+        work: lead ? null : person.work,
+      };
+    });
   });
   const held = new Map(
     snapshot.interviews.map((interview) => [interview.person, interview])
@@ -300,8 +314,9 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
   const sent = new Map<string, number>();
   for (const team of roster?.teams ?? []) {
     const lead = present(team.lead) ? held.get(team.lead) : undefined;
+    const leading = leadsOfTeam(team);
     const members = people.filter(
-      (person) => person.team === team.id && person.id !== team.lead
+      (person) => person.team === team.id && !leading.includes(person.id)
     );
     const out = members.flatMap((person) =>
       present(links.get(person.id)?.sent)
@@ -444,14 +459,11 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
     ...(snapshot.unknown === undefined ? {} : { unknown: snapshot.unknown }),
   };
 
-  const skipped: ("sources" | "documents" | "pulse")[] = [
+  const skipped: ("sources" | "documents")[] = [
     ...(client.sources.length === 0 && client.sourcesWanted.length === 0
       ? (["sources"] as const)
       : []),
     ...(client.documents.length === 0 ? (["documents"] as const) : []),
-    ...(client.pulse === null || client.pulse === "skipped"
-      ? (["pulse"] as const)
-      : []),
   ];
   const seed: OrgState = {
     conversation: "none",

@@ -1,11 +1,15 @@
 /**
- * Someone's interview as the e2e stack holds it (e2e/interview.e2e.ts and
- * the journeys): the local stack reaches no model, so Stephen's turns are
- * the browser's. What the page asks of `/api/interview/turn` is checked
- * against what core takes, and answered as core would, a line of JSON at a
- * time; what it asks of `/api/speech` is noted and refused, as a stack
- * without a voice does. Everything else, opening the link and keeping
- * what was said, is core's own.
+ * Someone's interview as the e2e stack held it (e2e/interview.e2e.ts and
+ * the journeys) while an interview was held turn by turn: Stephen's turns
+ * answered in the browser at `/api/interview/turn`, a line of JSON at a
+ * time; what the page asks of `/api/speech` is noted and refused, as a
+ * stack without a voice does.
+ *
+ * Core has no such endpoint any more and the page asks for no turn: every
+ * interview is a live conversation with Grasp's ElevenLabs agent
+ * (`/api/interview/voice`), typed too. The journeys that drive the
+ * conversation through these turns wait to be rewritten on a faked
+ * conversation; nothing the page does reaches the turns answered here.
  */
 import { interviewTurnRequestSchema } from "@grasp-os/shared/interview-turn";
 import type {
@@ -61,17 +65,9 @@ const turnOf = (more: Partial<StephenTurn>): StephenTurn => ({
   ...more,
 });
 
-/** The first sentence of a line, sent ahead while the rest is written, as core does (`earlyOpening`): never a question. */
-const openingOf = (say: string): string | undefined =>
-  /^(?<first>.*?[.!…])\s+\S/u.exec(say)?.groups?.first;
-
-/** A turn as core streams it: the first sentence of his line, his line, where it goes, then the whole turn. */
+/** A turn as it was streamed: his line, where it goes, then the whole turn. */
 export const streamed = (turn: StephenTurn): string => {
-  const opening = openingOf(turn.say);
   const events: TurnEvent[] = [
-    ...(opening === undefined
-      ? []
-      : [{ opening: { say: opening, tone: turn.tone } }]),
     { line: { say: turn.say, tone: turn.tone } },
     { next: { phase: turn.phase, wants: turn.wants } },
     { turn },
@@ -198,8 +194,8 @@ export const invited = async (
 export interface Asked {
   /** Turns core would refuse. */
   refused: unknown[];
-  /** Each turn's event, and who was asked to hold it. */
-  turns: { event: string; interviewer: string }[];
+  /** Each turn's event. */
+  turns: { event: string }[];
   /** Each line asked to be said, and in whose voice. */
   said: { text: string; speaker: unknown }[];
 }
@@ -216,10 +212,7 @@ export const answered = async (page: Page): Promise<Asked> => {
       await route.fulfill({ status: 400, body: "{}" });
       return;
     }
-    asked.turns.push({
-      event: turn.data.event,
-      interviewer: turn.data.interviewer,
-    });
+    asked.turns.push({ event: turn.data.event });
     await route.fulfill({
       status: 200,
       contentType: "application/x-ndjson",

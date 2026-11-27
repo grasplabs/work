@@ -189,8 +189,10 @@ export const NEW_CLIENT: ClientRecord = {
 export interface RosterTeam {
   id: string;
   name: string;
-  /** Its lead, by person. */
+  /** Its lead, by person: with several, the first. */
   lead: string | null;
+  /** Who else leads it, by person, where the organization names more than one lead, as Grasp OS's core does. */
+  coLeads?: string[];
   /** What it does, once its lead said so. */
   does: string;
   /** Not taking part: nobody in it gets a link. */

@@ -20,7 +20,7 @@ import type { ProviderReply, SentRequest } from "./model-provider.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { entraPerson, routed, signedIn, unique, whoami } from "./sign-in.ts";
 
-// What the tests of an interview's endpoints share (interview-turn.test.ts,
+// What the tests of an interview's endpoints share (interview-voice.test.ts,
 // interview-story.test.ts): someone's link, opened signed in with the
 // company's sign-in as the person it was sent to, and the organization's
 // provider with Stephen's two models, faked behind connect

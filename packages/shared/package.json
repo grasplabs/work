@@ -136,6 +136,7 @@
     "./opportunities": "./src/opportunities.ts",
     "./org-settings": "./src/org-settings.ts",
     "./organization": "./src/organization.ts",
+    "./onboarding-campaign": "./src/onboarding-campaign.ts",
     "./onboarding-choices": "./src/onboarding-choices.ts",
     "./onboarding-context": "./src/onboarding-context.ts",
     "./onboarding-documents": "./src/onboarding-documents.ts",

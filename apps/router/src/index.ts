@@ -10,7 +10,6 @@ import {
 import { interviewHearPath } from "@grasp-os/shared/interview-hear";
 import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import { interviewStoryPath } from "@grasp-os/shared/interview-story";
-import { interviewTurnPath } from "@grasp-os/shared/interview-turn";
 import { interviewVoicePath } from "@grasp-os/shared/interview-voice";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
@@ -246,16 +245,14 @@ const rateLimited = (url: URL, host: string): Response => {
 
 /**
  * An interview link's endpoints: core's src/onboarding/links.ts, its
- * turns (src/onboarding/interview.ts), its read-back
+ * live conversation (src/onboarding/voice.ts), its read-back
  * (src/onboarding/story.ts), where its lines are said
  * (src/onboarding/speech.ts), and where what is said is written down
  * (src/onboarding/transcription.ts, once per socket opened, or from a
- * recording, src/onboarding/hear.ts), and its live voice session
- * (src/onboarding/voice.ts).
+ * recording, src/onboarding/hear.ts).
  */
 const interviewLinkPaths: ReadonlySet<string> = new Set([
   interviewApiPath,
-  interviewTurnPath,
   interviewVoicePath,
   interviewStoryPath,
   speechPath,

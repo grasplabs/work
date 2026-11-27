@@ -7,7 +7,8 @@ import type {
 } from "@grasp-os/shared/interview-links";
 import { interviewStoryPath } from "@grasp-os/shared/interview-story";
 import type { StorySentence } from "@grasp-os/shared/interview-story";
-import { interviewTurnPath, turnEvents } from "@grasp-os/shared/interview-turn";
+import { interviewVoicePath } from "@grasp-os/shared/interview-voice";
+import type { VoiceAnswered } from "@grasp-os/shared/interview-voice";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
@@ -241,15 +242,10 @@ describe("what counts of an interview", { timeout: 60_000 }, () => {
     let version = await save(link, 0, progressOf("progress", [weigh, label]));
     const reading = await drawingOf(person);
 
-    // They change a line on screen: it reaches Stephen as if they had typed
-    // it, and what he writes down follows.
+    // They change a line on screen: it reaches the notes as if they had
+    // typed it, and what is written down is their words, with its record.
     const { result: changing } = await answering(
       [
-        {
-          text: "TONE: none\nSAY: Changed.\nPART: readback\nWANTS: readback\nMORE: no\nAGREED: no\n",
-          inputTokens: 1500,
-          outputTokens: 20,
-        },
         {
           text: JSON.stringify({
             facts: [],
@@ -266,17 +262,10 @@ describe("what counts of an interview", { timeout: 60_000 }, () => {
         },
       ],
       async () => {
-        const response = await postedOnLink(interviewTurnPath, {
+        const response = await postedOnLink(interviewVoicePath, {
           ...link,
-          event: "readback",
+          action: "answer",
           locale: "en",
-          lines: [
-            {
-              from: "person",
-              text: "Change “Write the weight on the label.” to “Write the weight on the parcel.”",
-              typed: true,
-            },
-          ],
           facts: [weigh, label].map(({ id, tag, text }) => ({
             id,
             tag,
@@ -284,11 +273,19 @@ describe("what counts of an interview", { timeout: 60_000 }, () => {
           })),
           phase: "readback",
           minutes: 12,
+          noted: 0,
+          said: [
+            {
+              from: "person",
+              text: "Change “Write the weight on the label.” to “Write the weight on the parcel.”",
+              typed: true,
+            },
+          ],
           reading: ["f1", "f2"],
+          edit: { id: "f2", text: "Write the weight on the parcel." },
         });
-        return turnEvents(`${await response.text()}\n`).events.flatMap(
-          (event) => ("turn" in event ? event.turn.changes : [])
-        );
+        const written: VoiceAnswered = await response.json();
+        return written.turn?.changes ?? [];
       }
     );
     const changed = fact("f2", "Write the weight on the parcel.");
@@ -330,10 +327,11 @@ describe("what counts of an interview", { timeout: 60_000 }, () => {
 
     expect({ reading, changing, agreed, drawn, adding, added }).toStrictEqual({
       reading: { due: false, records: [] },
+      // Their own words, not the notes' model's for them; its line for the record.
       changing: [
         {
           id: "f2",
-          text: "You write the weight on the parcel.",
+          text: "Write the weight on the parcel.",
           record: "Write the weight on the parcel.",
         },
       ],

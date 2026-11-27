@@ -18,7 +18,6 @@ export const flowSteps = [
   "company",
   "sources",
   "documents",
-  "pulse",
   "leads",
   "interviews",
   "about",
@@ -36,7 +35,6 @@ export const setupSteps = [
   "company",
   "sources",
   "documents",
-  "pulse",
   "leads",
   "team",
   "about",
@@ -195,12 +193,12 @@ export const flowPresets = {
   full: defaultFlow,
   short: {
     on: true,
-    steps: without(["about", "sources", "documents", "pulse"]),
+    steps: without(["about", "sources", "documents"]),
     grasp: defaultFlow.grasp,
   },
   setup: {
     on: true,
-    steps: without(["about", "pulse", "leads", "interviews"]),
+    steps: without(["about", "leads", "interviews"]),
     grasp: {
       kickoff: false,
       agreements: { processing: false, assessment: false, council: false },
@@ -241,20 +239,27 @@ export const withStepMoved = (
 };
 
 /**
- * The screens that come with the flow's `interviews` step: telling the
- * team and planning the day. The screens after it (Stephen listening,
- * what needs the admin, the way in) are no longer shown: once the team is
- * told, the admin goes into the platform. Their names stay in
+ * The screen that comes with the flow's `interviews` step: telling the
+ * team and planning the day. The screens after Stephen listening (what
+ * needs the admin, the way in) are no longer shown; their names stay in
  * `setupSteps` so places kept with them still read.
  */
 const interviewScreens: readonly SetupStepId[] = ["team"];
 
 /**
+ * Where the admin watches the interviews run, the flow's last screen
+ * wherever it has the `interviews` step. Nothing on it is the admin's to
+ * finish: it stands until Grasp's go, and holds nobody (`heldBy`).
+ */
+const watching: SetupStepId = "listening";
+
+/**
  * The screens the admin goes through in this flow, in order; none where
  * there is no onboarding. The interviews' screens come after the others
- * wherever the flow has the step, and the story of what happens next
- * (`about`) last of all, wherever staff put it: it tells what the admin
- * just chose, and leads into the platform.
+ * wherever the flow has the step, then the story of what happens next
+ * (`about`), wherever staff put it: it tells what the admin just chose.
+ * Last of all, where its people are interviewed, the page the admin
+ * watches the interviews on.
  */
 export const flowScreens = (flow: OnboardingFlow): SetupStepId[] => {
   if (!flow.on) {
@@ -267,16 +272,25 @@ export const flowScreens = (flow: OnboardingFlow): SetupStepId[] => {
     ),
     ...(on.includes("interviews") ? interviewScreens : []),
     ...(on.includes("about") ? (["about"] as const) : []),
+    ...(on.includes("interviews") ? [watching] : []),
   ];
 };
+
+/**
+ * The screens of this flow the admin has to finish before going on into
+ * the platform: all but the one they only watch the interviews on.
+ */
+const heldBy = (flow: OnboardingFlow): SetupStepId[] =>
+  flowScreens(flow).filter((screen) => screen !== watching);
 
 /**
  * Whether the company has its onboarding behind it, by its flow: at once
  * where it has no screens; once its admins finished every screen it has;
  * and where its people are interviewed, for everyone else only once
  * Grasp gave its go (`open`). So an admin who told the team goes on into
- * the platform while the interviews run, and everyone else waits for the
- * go, as the sign-in gate keeps them out until then anyway.
+ * the platform while the interviews run, the page they watch them on
+ * holding nobody, and everyone else waits for the go, as the sign-in gate
+ * keeps them out until then anyway.
  */
 export const onboardingBehind = ({
   flow,
@@ -291,7 +305,7 @@ export const onboardingBehind = ({
   /** Whether it is asked for one of the company's admins, who did the screens. */
   admin?: boolean;
 }): boolean => {
-  const screens = flowScreens(flow);
+  const screens = heldBy(flow);
   if (screens.length === 0) {
     return true;
   }

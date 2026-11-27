@@ -38,6 +38,11 @@ import type {
   RosterInput,
   SettleChoice,
 } from "@grasp-os/shared/onboarding";
+import {
+  correctAddressSchema,
+  nudgeSchema,
+} from "@grasp-os/shared/onboarding-campaign";
+import type { Campaign, Nudged } from "@grasp-os/shared/onboarding-campaign";
 import { setupChoicesSchema } from "@grasp-os/shared/onboarding-choices";
 import type {
   SetupChoices,
@@ -124,6 +129,23 @@ import { summaryOf } from "./summary.ts";
 // browser to make the roster of (directory.ts); documents from where
 // they live, picked in the admin's browser (document-places.ts); and who
 // leads which team from its HR platform, the same way (hr.ts).
+
+/** Why a team takes no nudge, as the admin is told. */
+const nudgeRefusals = {
+  no_team: "onboarding.no_team",
+  not_now: "onboarding.not_now",
+  too_small: "onboarding.team_too_small",
+  nudged_today: "onboarding.nudged_today",
+  nobody: "onboarding.nobody_to_nudge",
+} as const;
+
+/** Why someone's address isn't corrected, as the admin is told. */
+const addressRefusals = {
+  not_found: "onboarding.not_found",
+  none_failed: "onboarding.no_failed_mail",
+  // An erased person's address: refused as any address the list can't take.
+  kept_out: "onboarding.invalid",
+} as const;
 
 /** The onboarding, for the client's admin. */
 export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
@@ -422,6 +444,63 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         people
       );
       await onboardingStore(this.#env).linksTaken(parsed, actorOf(person));
+    });
+  }
+
+  async campaign(): Promise<Campaign | null> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const now = new Date().toISOString();
+      const store = onboardingStore(this.#env);
+      const campaign = await store.campaign(now);
+      if (campaign === null) {
+        return null;
+      }
+      // How much Grasp knows, as the gate counts it: the same numbers staff give the go by.
+      const { known, threshold, ready } = await gateView(
+        this.#env,
+        await store.view(now),
+        now
+      );
+      return { ...campaign, known, threshold, ready };
+    });
+  }
+
+  async nudge(team: string): Promise<Nudged> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const parsed = onboardingErrors.parse(
+        "onboarding.invalid",
+        nudgeSchema,
+        team
+      );
+      const nudged = await onboardingStore(this.#env).nudge(
+        parsed,
+        actorOf(person)
+      );
+      if (typeof nudged === "string") {
+        throw onboardingErrors.create(nudgeRefusals[nudged]);
+      }
+      return nudged;
+    });
+  }
+
+  async correctAddress(person: string, email: string): Promise<void> {
+    await withPerson(this.#check, async (admin) => {
+      requireAdmin(admin);
+      const parsed = onboardingErrors.parse(
+        "onboarding.invalid",
+        correctAddressSchema,
+        { person, email }
+      );
+      const corrected = await onboardingStore(this.#env).correctAddress(
+        parsed.person,
+        parsed.email,
+        actorOf(admin)
+      );
+      if (corrected !== "sent") {
+        throw onboardingErrors.create(addressRefusals[corrected]);
+      }
     });
   }
 

@@ -1055,9 +1055,6 @@ importers:
       '@lingui/react':
         specifier: 'catalog:'
         version: 6.8.0(@babel/core@7.29.7(supports-color@10.2.2))(react@19.3.0)
-      '@mistralai/mistralai':
-        specifier: 'catalog:'
-        version: 3.5.0(@cfworker/json-schema@4.1.1)(@opentelemetry/api@1.9.1)(livekit-client@2.25.0(@types/dom-mediacapture-record@1.0.22))(supports-color@10.2.2)
       '@stylexjs/stylex':
         specifier: 'catalog:'
         version: 0.19.2
@@ -1076,9 +1073,6 @@ importers:
       country-flag-icons:
         specifier: 'catalog:'
         version: 1.6.20
-      livekit-client:
-        specifier: 'catalog:'
-        version: 2.25.0(@types/dom-mediacapture-record@1.0.22)
       react:
         specifier: 'catalog:'
         version: 19.3.0

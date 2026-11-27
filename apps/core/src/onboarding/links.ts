@@ -89,6 +89,8 @@ const statusFor: Record<
   "interview.not_participating": 403,
   "interview.notice_changed": 409,
   "interview.withdrawn": 410,
+  "interview.finished": 409,
+  "interview.no_address": 409,
 };
 
 /** Every answer here: never a referrer, never kept by a cache. */
@@ -143,7 +145,7 @@ export const noCallerRefusal = (why: NoCaller, requestId: string): Response => {
   return response;
 };
 
-/** The interview page's calls: session, save, delete, and taking part, approving and withdrawing. */
+/** The interview page's calls: session, save, delete, taking part, approving and withdrawing, and a reminder for later. */
 export const interviewResponse = async (
   request: Request,
   env: Env,
@@ -250,6 +252,11 @@ export const interviewResponse = async (
       return answer(result, requestId, (value) =>
         json(removed ? value : { ...value, removing: true })
       );
+    }
+    case "later": {
+      const result = await store.remindLater(secretMark, account, body.at);
+      done(result);
+      return answer(result, requestId, (value) => json(value));
     }
     default: {
       return body satisfies never;

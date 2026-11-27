@@ -9,6 +9,7 @@ import {
   FileInvoiceIcon,
   LinkIcon,
   LockIcon,
+  MessageCircleIcon,
   StickyNoteIcon,
   UsersIcon,
   WorkflowIcon,
@@ -29,6 +30,7 @@ type SettingsHref =
   | "/settings/workspace"
   | "/settings/members"
   | "/settings/teams"
+  | "/settings/interviews"
   | "/settings/ai-providers"
   | "/settings/audit"
   | "/settings/webhooks"
@@ -67,6 +69,11 @@ interface SettingsSection {
    * every other section stands in one centred column.
    */
   wide?: true;
+  /**
+   * The page's column is the wider one, for a section of tables that a
+   * form's width would cut off (Interviews); a form's width otherwise.
+   */
+  roomy?: true;
 }
 
 const settingsGroups: readonly SettingsGroup[] = [
@@ -138,6 +145,17 @@ const settingsSections: readonly SettingsSection[] = [
     group: "workspace",
     icon: WorkflowIcon,
     audience: "own-admins",
+  },
+  {
+    // The onboarding's interviews, as core tells them to the company's own
+    // admins (settings/interviews.tsx): Grasp's staff watch them from the admin.
+    id: "interviews",
+    label: msg`Interviews`,
+    href: "/settings/interviews",
+    group: "workspace",
+    icon: MessageCircleIcon,
+    audience: "own-admins",
+    roomy: true,
   },
   {
     id: "ai-providers",

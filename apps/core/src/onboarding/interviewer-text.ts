@@ -1,5 +1,4 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { partFunction } from "@grasp-os/shared/interview-voice";
 import {
   inLanguage,
   leadPartsOf,
@@ -13,9 +12,12 @@ import type {
   InterviewLocale,
 } from "@grasp-os/shared/onboarding";
 
-// What the model that holds an interview is told, whole: who Stephen is
+// What Grasp's own models are told of an interview, whole: who Stephen is
 // and how he talks (@grasp-os/shared/interviewers/stephen), how the
-// interview goes, what he follows up on, and what he writes down. Ported
+// interview goes, what he follows up on, and what he writes down. The
+// notes' model reads it after each answer of a live conversation
+// (voice.ts), whose lines the ElevenLabs agent says from its own prompt;
+// a turn of the Stephen Lab's speaks from it too (lab-turn.ts). Ported
 // from the prototype (grasplabs/prototype, packages/grasp:
 // worker/stephen.ts, and WRITING and READ_BACK in worker/interview.ts),
 // and since changed here: the whole job first and AI last, a task as a
@@ -24,9 +26,8 @@ import type {
 // yet (lab-marks.ts).
 //
 // Each text has a mark: the SHA-256 of the text as the model gets it, in
-// its language. Every turn and every interview keeps the mark of the text
-// that spoke, so a measurement always names the Stephen it measured, and
-// the same text has the same mark here and in the lab.
+// its language, so a measurement of the lab's always names the Stephen it
+// measured, and the same text has the same mark here and in the lab.
 
 /**
  * What comes after who Stephen is (@grasp-os/shared/interviewers/stephen) when Grasp's own models
@@ -80,40 +81,6 @@ export const interviewerText = async (
   locale: InterviewLocale
 ): Promise<InterviewerText> => {
   const text = inLanguage(systems[kind], locale);
-  return { text, mark: await sha256Hex(text) };
-};
-
-/** What he does in the last part: the screen reads back what was written down. */
-const VOICE_READ_BACK = `Say one short, warm line that this gives you a good picture, and call ${partFunction} with readback. Do not say that you will read anything back: the screen brings in the summary, and you tell it back there.`;
-
-/** What a live session needs that a turn doesn't: everything he writes is said out loud. */
-const SPOKEN = `# This conversation
-You talk and they talk, live and out loud. Everything you write is said exactly as you write it: write only the words you say. No labels, no lists, no brackets, no notes to yourself.
-- They can talk over you. When they do, stop, take what they said, and go on from there. Do not repeat the line you were cut off in unless they ask.
-- What they say is written down for you by someone else, from what they said: you only talk.
-- Each time you go to another part of the interview, call ${partFunction} with the name of that part first, then say your line.
-- What follows is renewed after each of their answers: always go by the latest.
-
-# What they see while you talk
-Their screen shows only your question, never the rest of what you say. So talk around it the way people do, and end each turn that asks something with the question:
-- First take up what they just said, in a few spoken words of your own ("Ah, so the invoices pile up until Friday."). Add a little context when it helps them answer ("I'm asking because that's where time often hides."). At most two short sentences before the question, often one.
-- Then the question, last, as one plain sentence of at most 14 words that makes sense on its own when read without the rest: no "that" or "it" pointing back to what you said before it. Say it as you would ask it across a table, never as a form reads.
-- Short spoken sentences throughout, each under 15 words: they are easier to follow and quicker to hear.`;
-
-/**
- * The text for an interview held as one live voice session (voice.ts):
- * who he is and how the interview goes, without what he writes down,
- * which the notes' model is asked with the turn's own text, and with what
- * a spoken session needs. Where the interview stands comes after it, and
- * is renewed after each answer.
- */
-export const voiceText = async (
-  kind: InterviewKind,
-  locale: InterviewLocale
-): Promise<InterviewerText> => {
-  const parts =
-    kind === "lead" ? leadPartsOf(VOICE_READ_BACK) : partsOf(VOICE_READ_BACK);
-  const text = inLanguage([WHO, parts, LISTENING, SPOKEN].join("\n\n"), locale);
   return { text, mark: await sha256Hex(text) };
 };
 

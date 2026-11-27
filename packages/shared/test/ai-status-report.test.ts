@@ -17,13 +17,8 @@ const row = (provider: string) => ({
 describe("a core's AI status report, as the admin reads it", () => {
   it("leaves out a provider this release doesn't know, and keeps the rest of the report", () => {
     const parsed = aiStatusReportSchema.safeParse({
-      // A core from before speech moved names the provider it used then.
-      providers: [
-        row("openai"),
-        row("elevenlabs"),
-        row("kugelaudio"),
-        row("mistral"),
-      ],
+      // A core of another release names a provider this one has no row for.
+      providers: [row("openai"), row("kugelaudio"), row("mistral")],
     });
 
     expect({

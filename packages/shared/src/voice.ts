@@ -7,7 +7,7 @@
 //
 // Each goes to the provider and model the platform's settings name
 // (@grasp-os/shared/platform-ai), with Grasp's own key, which connect
-// holds: Mistral says lines, OpenAI writes down what is heard.
+// holds: ElevenLabs says lines, OpenAI and Mistral write down what is heard.
 //
 // Speech is core's src/speech.ts, said for the onboarding's pages at
 // `POST /api/speech` (core's src/onboarding/speech.ts). Live transcription
@@ -65,16 +65,8 @@ export interface Speech {
 
 /** Says lines in a voice. */
 export interface SpeechSynthesis {
-  /**
-   * Says `request`'s line; `signal` cancels it. With `onAudio`, each piece
-   * of the audio is handed over as it is made, in order, before the whole
-   * line comes back: together the pieces are `Speech.audio`.
-   */
-  speak: (
-    request: SpeechRequest,
-    signal?: AbortSignal,
-    onAudio?: (piece: Uint8Array) => void
-  ) => Promise<Speech>;
+  /** Says `request`'s line; `signal` cancels it. */
+  speak: (request: SpeechRequest, signal?: AbortSignal) => Promise<Speech>;
 }
 
 /** What a live transcription is opened with. */
@@ -188,10 +180,9 @@ export const speechStreamMime = "application/x-ndjson";
 
 /**
  * A line as `POST /api/speech` answers it with `stream`, an event at a
- * time: each piece of its audio as it is made, base64, in order (together
- * they are one file, a WAV of plain samples whose header says how they are
- * written); then the words of the line and when each is said, once the
- * whole of it is known; or that it broke off, after which nothing comes.
+ * time: its audio, base64, in order when it comes in more than one piece
+ * (together they are one file); then the words of the line and when each
+ * is said; or that it broke off, after which nothing comes.
  */
 export type SpeechStreamEvent =
   | { audio: string }

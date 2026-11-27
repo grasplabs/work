@@ -152,7 +152,7 @@ export const withLine = (
     : { ...progress, lines: [...progress.lines, line] };
 
 /**
- * A line heard in a live session (live.ts): Mistral hears an answer in
+ * A line heard in a live session (live.ts): the agent hears an answer in
  * stretches, and says a line of his in stretches too. A stretch after one
  * of the same speaker is the same line, its words after the others; after
  * the other's, it is a line of its own.
@@ -212,15 +212,15 @@ const withoutEmpty = (fact: InterviewFact): InterviewFact => {
 };
 
 /**
- * What a turn of Stephen's brought: what he marked in what was just said,
- * what he wrote down, what he put right, and where the interview is now.
+ * What the notes brought after an answer: what he marked in what was just
+ * said, what he wrote down, what he put right, and where the interview is now.
  * `answered` is the line his marks go on: the last thing the person said,
  * as it stands in the conversation. In the read-back, what is new is
  * pinned to the part on screen (`pin`).
  */
 export const afterTurn = (
   progress: InterviewProgress,
-  turn: StephenTurn,
+  turn: Pick<StephenTurn, "facts" | "changes" | "phase" | "wants">,
   {
     answered,
     pin,

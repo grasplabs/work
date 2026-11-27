@@ -27,7 +27,6 @@ import {
   interviewPagePath,
 } from "@grasp-os/shared/interview-links";
 import { interviewStoryPath } from "@grasp-os/shared/interview-story";
-import { interviewTurnPath } from "@grasp-os/shared/interview-turn";
 import { interviewVoicePath } from "@grasp-os/shared/interview-voice";
 import { labPath } from "@grasp-os/shared/lab";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -84,7 +83,6 @@ import {
   devVoiceBudgetResponse,
 } from "./onboarding/dev-reset.ts";
 import { hearResponse } from "./onboarding/hear.ts";
-import { interviewTurnResponse } from "./onboarding/interview.ts";
 import { labResponse } from "./onboarding/lab.ts";
 import { interviewResponse } from "./onboarding/links.ts";
 import { speechResponse } from "./onboarding/speech.ts";
@@ -239,9 +237,6 @@ const linkResponse = async (
   if (pathname === interviewApiPath) {
     return await interviewResponse(request, env, requestId);
   }
-  if (pathname === interviewTurnPath) {
-    return await interviewTurnResponse(request, env, requestId, ctx);
-  }
   if (pathname === interviewVoicePath) {
     return await interviewVoiceResponse(request, env, requestId, ctx);
   }
@@ -249,7 +244,7 @@ const linkResponse = async (
     return await interviewStoryResponse(request, env, requestId, ctx);
   }
   if (pathname === speechPath) {
-    return await speechResponse(request, env, requestId, ctx);
+    return await speechResponse(request, env, requestId);
   }
   if (pathname === transcriptionPath) {
     return transcriptionResponse(request, env, requestId, ctx);

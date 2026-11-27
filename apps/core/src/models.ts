@@ -98,19 +98,17 @@ import { recordResponse } from "./model-usage.ts";
 import type { ProviderNote, UsageRecord } from "./model-usage.ts";
 import { isInterviewModel, platformAi } from "./platform-ai.ts";
 import { usualHostsOf } from "./platform-hosts.ts";
-import { jsonOf } from "./request-body.ts";
 import {
   charactersOf,
   conversationCostOf,
   hearingCostOf,
-  parseConversingRef,
+  parseAgentRef,
   parseHearingRef,
   alignedWordsOf,
   parseVoiceRef,
   speechCostOf,
-  wordsOf,
 } from "./voice-models.ts";
-import type { ConversingRef, HearingRef, VoiceRef } from "./voice-models.ts";
+import type { AgentRef, HearingRef, VoiceRef } from "./voice-models.ts";
 
 // The model gateway: every model call in a deployment goes through here,
 // and from here through a model transport (model-transport.ts), never
@@ -2768,26 +2766,14 @@ export type SpeechCall = z.input<typeof speechSchema> & {
 const speechTimeoutMs = 60_000;
 
 /**
- * Retries for a line the provider refused for a moment (429 or 5xx):
- * Mistral says so many lines at a time and turns the rest away, which is
- * over in a moment.
+ * Retries for a line the provider refused for a moment (429 or 5xx): it
+ * says so many lines at a time and turns the rest away, which is over in
+ * a moment.
  */
 const speechRetries = 1;
 
 /** The wait before a line turned away is asked for again. */
 const speechRetryMs = 500;
-
-/**
- * The audio asked of Mistral: a WAV file, whose size says how long the
- * line takes to say, which Mistral's answer doesn't otherwise tell.
- */
-const speechFormat = { name: "wav", mime: "audio/wav" } as const;
-
-/** Where Mistral says a line: its speech endpoint, the whole file at once or in pieces as it is made. */
-const speechPath = "/v1/audio/speech";
-
-/** Mistral's answer: the audio. */
-const spokenSchema = z.object({ audio_data: z.string().min(1) });
 
 /** The audio asked of ElevenLabs: MP3 at 44.1 kHz, 128 kbit/s, its default. */
 const elevenLabsFormat = {
@@ -2815,28 +2801,14 @@ const elevenLabsSpokenSchema = z.object({
 });
 
 /**
- * A line's provider request: Mistral's speech endpoint with no language
- * named, as Voxtral says a line in the language it is written in; or
- * ElevenLabs's, which tells when each character is said, with the line's
- * language, and kept by neither side (`enable_logging=false`).
+ * A line's provider request: ElevenLabs's, which tells when each
+ * character is said, with the line's language, and kept by neither side
+ * (`enable_logging=false`).
  */
 const speechRequestOf = (
   call: SpeechSession,
-  ref: VoiceRef,
-  streamed: boolean
+  ref: VoiceRef
 ): { path: string; body: string } => {
-  if (ref.provider === "mistral") {
-    return {
-      path: speechPath,
-      body: JSON.stringify({
-        model: ref.id,
-        input: call.text,
-        voice_id: call.voice,
-        response_format: speechFormat.name,
-        ...(streamed ? { stream: true } : {}),
-      }),
-    };
-  }
   const query = new URLSearchParams({
     enable_logging: "false",
     output_format: elevenLabsFormat.query,
@@ -2983,8 +2955,7 @@ const platformTarget = async (
  */
 const admitSpeech = async (
   env: Env,
-  call: SpeechSession,
-  streamed: boolean
+  call: SpeechSession
 ): Promise<SpeechRoute> => {
   const ref = parseVoiceRef(call.model);
   if (ref === undefined) {
@@ -3001,9 +2972,7 @@ const admitSpeech = async (
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
   }
-  // Streamed, the same file comes in pieces as it is made: Mistral's alone.
-  const pieces = streamed && ref.provider === "mistral";
-  const { path, body } = speechRequestOf(call, ref, pieces);
+  const { path, body } = speechRequestOf(call, ref);
   return {
     env,
     call,
@@ -3017,7 +2986,7 @@ const admitSpeech = async (
         {
           headers: {
             "content-type": "application/json",
-            accept: pieces ? "text/event-stream" : "application/json",
+            accept: "application/json",
           },
           body,
         },
@@ -3092,193 +3061,33 @@ const sendSpeech = async (
   return sent;
 };
 
-/** The four letters at `at` of a file, such as a WAV chunk's name. */
-const tagAt = (bytes: Uint8Array, at: number): string =>
-  String.fromCodePoint(...bytes.subarray(at, at + 4));
-
 /**
- * How long a WAV file of plain samples takes to play, in seconds, from
- * its `fmt ` chunk's bytes a second and its `data` chunk's size;
- * `undefined` for bytes that aren't such a file. A file written as it was
- * made may name a size it didn't know yet: its samples then run to its end.
+ * What a line's answer holds, read; `undefined` when it isn't a line. Its
+ * words are timed as ElevenLabs aligned them.
  */
-const wavSeconds = (bytes: Uint8Array): number | undefined => {
-  if (tagAt(bytes, 0) !== "RIFF" || tagAt(bytes, 8) !== "WAVE") {
-    return undefined;
-  }
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  let bytesPerSecond: number | undefined = undefined;
-  for (let at = 12; at + 8 <= bytes.byteLength;) {
-    const size = view.getUint32(at + 4, true);
-    const tag = tagAt(bytes, at);
-    if (tag === "fmt " && at + 20 <= bytes.byteLength) {
-      bytesPerSecond = view.getUint32(at + 16, true);
-    }
-    if (tag === "data") {
-      const samples = Math.min(size, bytes.byteLength - at - 8);
-      return bytesPerSecond === undefined || bytesPerSecond === 0
-        ? undefined
-        : samples / bytesPerSecond;
-    }
-    // A chunk of an odd size is followed by one byte of padding.
-    at += 8 + size + (size % 2);
-  }
-  return undefined;
-};
-
-/**
- * What a line's answer holds, read; `undefined` when it isn't a line.
- * ElevenLabs's words are timed as it aligned them; Mistral's are those of
- * the `line` asked for, timed over the audio's length.
- */
-const readSpeech = async (
-  answered: Response,
-  line: string,
-  ref: VoiceRef
-): Promise<Speech | undefined> => {
+const readSpeech = async (answered: Response): Promise<Speech | undefined> => {
   const answer: unknown = await answered.json().catch(() => null);
-  if (ref.provider === "elevenlabs") {
-    const aligned = elevenLabsSpokenSchema.safeParse(answer);
-    if (!aligned.success) {
-      return undefined;
-    }
-    const audio = bytesOf(aligned.data.audio_base64);
-    const words = alignedWordsOf(aligned.data.alignment);
-    return audio === undefined || words === undefined
-      ? undefined
-      : { audio, mime: elevenLabsFormat.mime, words };
-  }
-  const parsed = spokenSchema.safeParse(answer);
-  if (!parsed.success) {
+  const aligned = elevenLabsSpokenSchema.safeParse(answer);
+  if (!aligned.success) {
     return undefined;
   }
-  const audio = bytesOf(parsed.data.audio_data);
-  const seconds = audio === undefined ? undefined : wavSeconds(audio);
-  return audio === undefined || seconds === undefined
+  const audio = bytesOf(aligned.data.audio_base64);
+  const words = alignedWordsOf(aligned.data.alignment);
+  return audio === undefined || words === undefined
     ? undefined
-    : { audio, mime: speechFormat.mime, words: wordsOf(line, seconds) };
-};
-
-/** What ends a line of an event stream: a line feed, a carriage return, or both. */
-const eventLineEnd = /\r\n|\n|\r/u;
-
-/** An event of Mistral's speech stream, as far as it is read: what it is, and its piece of the file. */
-const speechEventSchema = z.object({
-  type: z.string().optional(),
-  audio_data: z.string().min(1).optional(),
-});
-
-/** The event that ends a line's stream: every piece of the file came before it. */
-const speechDone = "speech.audio.done";
-
-/**
- * One event of Mistral's speech stream, by the lines of its `data` field
- * joined (the event stream format, HTML's "server-sent events"): the piece
- * of the file a `speech.audio.delta` carries, or that the line is done.
- * Nothing for any other event.
- */
-const speechEventOf = (
-  data: readonly string[]
-): { piece?: Uint8Array; done: boolean } => {
-  const parsed = speechEventSchema.safeParse(
-    data.length === 0 ? undefined : jsonOf(data.join("\n"))
-  );
-  if (!parsed.success) {
-    return { done: false };
-  }
-  const piece =
-    parsed.data.audio_data === undefined
-      ? undefined
-      : bytesOf(parsed.data.audio_data);
-  return {
-    ...(piece === undefined ? {} : { piece }),
-    done: parsed.data.type === speechDone,
-  };
-};
-
-/** Pieces of a file as one. */
-const joinedBytes = (pieces: readonly Uint8Array[]): Uint8Array => {
-  const whole = new Uint8Array(
-    pieces.reduce((sum, piece) => sum + piece.byteLength, 0)
-  );
-  let at = 0;
-  for (const piece of pieces) {
-    whole.set(piece, at);
-    at += piece.byteLength;
-  }
-  return whole;
-};
-
-/**
- * What a line's streamed answer holds, read as it comes: each piece of
- * the file goes to `onAudio` the moment it is there, so whoever listens
- * hears the start of the line while the rest is made; `undefined` when it
- * isn't a line. Put together, the pieces are the file a line asked for
- * whole would be. A stream that ends without saying the line is done broke
- * off: what came of it is no line to keep.
- */
-const readSpeechStream = async (
-  answered: Response,
-  line: string,
-  onAudio: (piece: Uint8Array) => void
-): Promise<Speech | undefined> => {
-  if (answered.body === null) {
-    return undefined;
-  }
-  const pieces: Uint8Array[] = [];
-  let data: string[] = [];
-  let unread = "";
-  let done = false;
-  const take = (written: string): void => {
-    // A blank line ends an event; a `data` line adds to the one underway.
-    if (written === "") {
-      const event = speechEventOf(data);
-      data = [];
-      done ||= event.done;
-      if (event.piece !== undefined) {
-        pieces.push(event.piece);
-        onAudio(event.piece);
-      }
-      return;
-    }
-    if (written.startsWith("data:")) {
-      const value = written.slice("data:".length);
-      data.push(value.startsWith(" ") ? value.slice(1) : value);
-    }
-  };
-  for await (const text of answered.body.pipeThrough(new TextDecoderStream())) {
-    unread += text;
-    // A carriage return at the very end may be half of a line's end.
-    const held = unread.endsWith("\r") ? "\r" : "";
-    const lines = unread
-      .slice(0, unread.length - held.length)
-      .split(eventLineEnd);
-    unread = (lines.pop() ?? "") + held;
-    for (const written of lines) {
-      take(written);
-    }
-  }
-  const audio = joinedBytes(pieces);
-  const seconds = done ? wavSeconds(audio) : undefined;
-  return seconds === undefined
-    ? undefined
-    : { audio, mime: speechFormat.mime, words: wordsOf(line, seconds) };
+    : { audio, mime: elevenLabsFormat.mime, words };
 };
 
 /** The line the provider answered with, read; none when it said nothing. */
-const heardSpeech = async (
-  { answered, answering }: SpeechSent,
-  line: string,
-  ref: VoiceRef,
-  onAudio: ((piece: Uint8Array) => void) | undefined
-): Promise<Speech | undefined> => {
+const heardSpeech = async ({
+  answered,
+  answering,
+}: SpeechSent): Promise<Speech | undefined> => {
   if (answered === undefined || answering === undefined) {
     return undefined;
   }
   try {
-    return onAudio === undefined || ref.provider !== "mistral"
-      ? await readSpeech(answered, line, ref)
-      : await readSpeechStream(answered, line, onAudio);
+    return await readSpeech(answered);
   } catch {
     // Cut off while its answer came in: said and billed all the same.
     return undefined;
@@ -3596,47 +3405,41 @@ const canListen = async (env: Env, model: string): Promise<boolean> => {
   return typeof platformTargetOf(env, routes, ref.provider) !== "string";
 };
 
-// A live voice session (Mistral's voice agents: listening, the model and
-// the voice in one session, which the browser joins itself): admitted,
-// judged and refused like a listening; once open, recorded as one model
-// call, with what the session is expected to last and cost, estimated, as
-// its length is known only to Mistral. Its audio never passes core or
-// connect; what core sends is the session's set-up, and later its reads
-// and its close (`voiceSessions`), never anything said.
+// A conversation with one of Grasp's own voice agents (ElevenLabs's
+// agents: listening, the model and the voice in one live conversation,
+// which the browser joins itself with a token): admitted, judged and
+// refused like a listening; once its token is asked, recorded as one model
+// call, with what the conversation is expected to last and cost,
+// estimated, as its length is known only to ElevenLabs. Its audio never
+// passes core or connect; what core sends is the agent's ID, never
+// anything said.
 
-/** The longest a voice session's cost is estimated at. */
+/** The longest a conversation's cost is estimated at. */
 const maxConversationSeconds = 60 * 60;
 
-/** Where Mistral opens its voice sessions, and reads and closes each by its ID. */
-const voiceSessionsPath = "/v1/audio/sessions";
-
-/** How long opening, reading or closing a voice session may take. */
-const voiceSessionRequestMs = 20_000;
+/** How long asking for a conversation's token may take. */
+const agentTokenRequestMs = 20_000;
 
 const conversingSchema = z.strictObject({
+  /** `<provider>/<agent's ID>`: one of Grasp's own agents (`parseAgentRef`). */
   model: sessionShape.model,
   purpose: sessionShape.purpose,
   trigger: sessionShape.trigger,
   provenance: sessionShape.provenance,
   work: sessionShape.work,
   requestId: sessionShape.requestId,
-  /** How long the session is expected to last: what its cost is estimated at. */
+  /** How long the conversation is expected to last: what its cost is estimated at. */
   seconds: z.int().positive().max(maxConversationSeconds),
-  /**
-   * The session as its provider's API takes it, but for its model, which
-   * the gateway names from `model`: its instructions, voices, turns.
-   */
-  session: z.record(z.string(), z.unknown()),
 });
 type ConversingSession = z.output<typeof conversingSchema>;
 
-/** A voice session asked to open. */
+/** A conversation with a voice agent asked to open. */
 export type ConversingCall = z.input<typeof conversingSchema> & {
   /** Where the call works: required, so no caller can leave it out. */
   work: NonNullable<z.input<typeof conversingSchema>["work"]>;
 };
 
-/** What the audit log records of one voice session as it opened. */
+/** What the audit log records of one conversation as it opened. */
 interface ConversedRecord {
   /** The seconds its cost is estimated at. */
   seconds: number;
@@ -3646,10 +3449,10 @@ interface ConversedRecord {
   status: number | undefined;
 }
 
-/** A voice session's audit entry: a `model.call`, as any model call's. */
+/** A conversation's audit entry: a `model.call`, as any model call's. */
 const conversingEntry = (
   call: ConversingSession,
-  ref: ConversingRef,
+  ref: AgentRef,
   recorded: ConversedRecord
 ): AuditEntry =>
   keepingProvenance(call.provenance, (provenance, dropped) => ({
@@ -3657,7 +3460,8 @@ const conversingEntry = (
     action: "model.call",
     requestId: call.requestId,
     provenance,
-    // A voice session is billed by the minute, not by tokens (`seconds`).
+    // A conversation is billed by the minute, not by tokens (`seconds`),
+    // and named by its agent, which holds its models.
     model: {
       provider: ref.provider,
       model: ref.id,
@@ -3681,7 +3485,7 @@ const conversingEntry = (
     },
   }));
 
-/** The most a voice session can add to its audit event (`largestRecord`). */
+/** The most a conversation can add to its audit event (`largestRecord`). */
 const largestConversed: ConversedRecord = {
   seconds: maxConversationSeconds,
   region: "custom",
@@ -3691,11 +3495,15 @@ const largestConversed: ConversedRecord = {
 };
 
 /**
- * Opens a voice session through the gateway: refused, and audited, before
- * anything is sent when the rules or Grasp's keys don't let it through, as
- * a listening is; otherwise asked of the provider once, and recorded as
- * one model call whatever came of it. Answers the provider's response,
- * which the caller reads; throws when none came.
+ * Opens a conversation with one of Grasp's own voice agents through the
+ * gateway: asks its provider for a conversation token with Grasp's key,
+ * through connect, which the browser joins the conversation with, never
+ * the key. Refused, and audited, before anything is sent when the rules or
+ * Grasp's keys don't let it through, as a listening is; otherwise asked
+ * once, and recorded as one model call whatever came of it. The agent is
+ * the caller's own, Grasp's (src/platform-ai.ts), never one a page names.
+ * Answers the provider's response, which the caller reads; throws when
+ * none came.
  */
 const openConversation = async (
   env: Env,
@@ -3703,8 +3511,16 @@ const openConversation = async (
   signal?: AbortSignal
 ): Promise<Response> => {
   const call = parseCall(conversingSchema, fields);
-  const ref = parseConversingRef(call.model);
-  if (ref === undefined) {
+  const ref = parseAgentRef(call.model);
+  const tokens =
+    ref === undefined ? undefined : aiProviders[ref.provider].agentTokens;
+  const query =
+    ref === undefined ? "" : `?agent_id=${encodeURIComponent(ref.id)}`;
+  if (
+    ref === undefined ||
+    tokens === undefined ||
+    !agentTokenQuery.test(query)
+  ) {
     return await refuse(env, call, { code: "model.not_allowed" });
   }
   try {
@@ -3718,33 +3534,25 @@ const openConversation = async (
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
   }
+  const way = platformWay(ref.provider, target.platform, "conversation");
   const id = crypto.randomUUID();
   let answered: Response | undefined = undefined;
   try {
     answered = await connectRequest(
       env,
       target,
-      voiceSessionsPath,
-      {
-        headers: {
-          "content-type": "application/json",
-          accept: "application/json",
-        },
-        body: JSON.stringify({
-          ...call.session,
-          llm: { model: ref.id },
-        }),
-      },
+      `${tokens}${query}`,
+      { method: "GET", headers: { accept: "application/json" } },
       {
         providerRequest: id,
-        endsAt: Date.now() + voiceSessionRequestMs,
+        endsAt: Date.now() + agentTokenRequestMs,
         ...(signal === undefined ? {} : { signal }),
       }
     );
     return answered;
   } finally {
     const opened = answered?.ok === true;
-    const cost = opened ? conversationCostOf(ref, call.seconds) : 0;
+    const cost = opened ? conversationCostOf(call.seconds) : 0;
     await recordResponse(
       env,
       {
@@ -3761,93 +3569,23 @@ const openConversation = async (
           id,
           model: call.model,
           purpose: call.purpose,
-          credential: "platform",
+          credential: way.credential,
           feature: "conversation",
           inputTokens: opened ? call.seconds : 0,
           outputTokens: 0,
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
           cost,
-          // Its length is Mistral's to know: the cost is what it is expected to last.
+          // Its length is ElevenLabs's to know: the cost is what it is expected to last.
           estimated: true,
         },
         ...(opened
-          ? { health: { provider: ref.provider, credential: "platform" } }
+          ? { health: { provider: way.provider, credential: way.credential } }
           : {}),
       },
       { awaited: true }
     );
   }
-};
-
-/**
- * A voice session the gateway opened, read or closed by its ID, with
- * Grasp's key for `provider`, through connect: what Mistral kept of it
- * (its transcript), or its end. Nothing billed and nothing new decided,
- * so neither is judged nor audited; the session's ID is the caller's to
- * have checked as one it opened for whoever asks.
- */
-const sessionRequest = async (
-  env: Env,
-  method: "GET" | "DELETE",
-  sessionId: string,
-  signal?: AbortSignal
-): Promise<Response> => {
-  const target = platformTargetOf(
-    env,
-    await routesOrFailed(env),
-    platformAi.conversation.provider
-  );
-  if (typeof target === "string") {
-    throw modelErrors.create(target);
-  }
-  return await connectRequest(
-    env,
-    target,
-    `${voiceSessionsPath}/${encodeURIComponent(sessionId)}`,
-    { method, headers: { accept: "application/json" } },
-    {
-      providerRequest: crypto.randomUUID(),
-      endsAt: Date.now() + voiceSessionRequestMs,
-      ...(signal === undefined ? {} : { signal }),
-    }
-  );
-};
-
-/**
- * A conversation token for one of Grasp's own voice agents (`agentTokens`,
- * ElevenLabs's agents, for Grasp's interviews), asked with Grasp's key
- * through connect: what the browser joins the conversation with, never
- * the key. The token itself bills nothing: the conversation is metered by
- * its caller, as a session is. The agent's ID is the caller's own,
- * Grasp's (src/platform-ai.ts), never one the page names.
- */
-const agentTokenRequest = async (
-  env: Env,
-  provider: ConnectTarget["provider"],
-  agentId: string,
-  signal?: AbortSignal
-): Promise<Response> => {
-  const { agentTokens } = aiProviders[provider];
-  const query = `?agent_id=${encodeURIComponent(agentId)}`;
-  if (agentTokens === undefined || !agentTokenQuery.test(query)) {
-    throw modelErrors.create("model.not_allowed");
-  }
-  const target = platformTargetOf(env, await routesOrFailed(env), provider);
-  if (typeof target === "string") {
-    throw modelErrors.create(target);
-  }
-  return await connectRequest(
-    env,
-    target,
-    `${agentTokens}${query}`,
-    { method: "GET", headers: { accept: "application/json" } },
-    {
-      providerRequest: crypto.randomUUID(),
-      endsAt: Date.now() + voiceSessionRequestMs,
-      ...(signal === undefined ? {} : { signal }),
-    }
-  );
 };
 
 /**
@@ -3858,15 +3596,14 @@ const agentTokenRequest = async (
 const speakLine = async (
   env: Env,
   fields: SpeechCall,
-  signal: AbortSignal | undefined,
-  onAudio: ((piece: Uint8Array) => void) | undefined
+  signal: AbortSignal | undefined
 ): Promise<Speech> => {
   const call = parseCall(speechSchema, fields);
-  const route = await admitSpeech(env, call, onAudio !== undefined);
+  const route = await admitSpeech(env, call);
   const limit = deadline(call.timeoutMs ?? speechTimeoutMs, signal);
   try {
     const sent = await sendSpeech(route, limit);
-    const speech = await heardSpeech(sent, route.call.text, route.ref, onAudio);
+    const speech = await heardSpeech(sent);
     const stopped = limit.stopped();
     const outcome = speechOutcome(
       speech,
@@ -4025,16 +3762,9 @@ export const models = (env: Env) => ({
     agent: async (session: AgentSession): Promise<AgentModel> =>
       await agentModel(env, session, () => [], undefined, interviewVia),
   },
-  /**
-   * Says a line. With `onAudio`, the line is asked for streamed: each
-   * piece of its file is handed over as the provider makes it, and the
-   * whole line is still what comes back.
-   */
-  speak: async (
-    call: SpeechCall,
-    signal?: AbortSignal,
-    onAudio?: (piece: Uint8Array) => void
-  ): Promise<Speech> => await speakLine(env, call, signal, onAudio),
+  /** Says a line. */
+  speak: async (call: SpeechCall, signal?: AbortSignal): Promise<Speech> =>
+    await speakLine(env, call, signal),
   listen: async (call: ListeningCall): Promise<Listening> =>
     await listenThrough(env, call),
   /**
@@ -4044,29 +3774,12 @@ export const models = (env: Env) => ({
   canListen: async (model: string): Promise<boolean> =>
     await canListen(env, model),
   /**
-   * Opens a live voice session (`openConversation`): judged, refused and
-   * audited like a listening; answers the provider's response.
+   * Opens a conversation with one of Grasp's own voice agents
+   * (`openConversation`): judged, refused and audited like a listening;
+   * answers the provider's response, which holds the token to join it with.
    */
   converse: async (
     call: ConversingCall,
     signal?: AbortSignal
   ): Promise<Response> => await openConversation(env, call, signal),
-  /** Reads what the provider kept of a voice session it opened (`sessionRequest`). */
-  readConversation: async (
-    sessionId: string,
-    signal?: AbortSignal
-  ): Promise<Response> => await sessionRequest(env, "GET", sessionId, signal),
-  /** A conversation token for one of Grasp's own voice agents (`agentTokenRequest`). */
-  agentToken: async (
-    provider: ConnectTarget["provider"],
-    agentId: string,
-    signal?: AbortSignal
-  ): Promise<Response> =>
-    await agentTokenRequest(env, provider, agentId, signal),
-  /** Closes a voice session it opened (`sessionRequest`). */
-  closeConversation: async (
-    sessionId: string,
-    signal?: AbortSignal
-  ): Promise<Response> =>
-    await sessionRequest(env, "DELETE", sessionId, signal),
 });

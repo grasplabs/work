@@ -109,7 +109,7 @@ describe("an onboarding flow", () => {
   it("reads a kept flow back, and one that can't be read as all of it", () => {
     const short: OnboardingFlow = {
       ...defaultFlow,
-      steps: stepsOf(flowSteps, ["pulse"]),
+      steps: stepsOf(flowSteps, ["documents"]),
     };
     expect({
       kept: storedFlowOf(JSON.stringify(short)),
@@ -152,7 +152,7 @@ describe("an onboarding flow", () => {
   it("asks for the sources its steps give, so what Grasp knows is a share of what is asked", () => {
     const short: OnboardingFlow = {
       ...defaultFlow,
-      steps: stepsOf(flowSteps, ["documents", "pulse", "interviews"]),
+      steps: stepsOf(flowSteps, ["documents", "interviews"]),
       grasp: { ...defaultFlow.grasp, kickoff: false },
     };
     expect({
@@ -168,7 +168,6 @@ describe("an onboarding flow", () => {
         "people",
         "sources",
         "documents",
-        "tools",
         "leads",
         "conversations",
         "review",
@@ -193,12 +192,15 @@ describe("an onboarding flow", () => {
       [
         "full",
         true,
-        setupSteps.filter(
-          (step) => !["listening", "review", "open"].includes(step)
-        ),
+        setupSteps.filter((step) => !["review", "open"].includes(step)),
         "go",
       ],
-      ["short", true, ["welcome", "ai", "company", "leads", "team"], "go"],
+      [
+        "short",
+        true,
+        ["welcome", "ai", "company", "leads", "team", "listening"],
+        "go",
+      ],
       [
         "setup",
         true,
@@ -230,7 +232,7 @@ describe("an onboarding flow", () => {
     });
   });
 
-  it("puts the interviews' screens last, and the story of what comes next after them, wherever the flow has the steps", () => {
+  it("puts the interviews' screens last, the story of what comes next after telling the team, and the page the interviews are watched on at the end, wherever the flow has the steps", () => {
     const early = withStepMoved(
       withStepMoved(defaultFlow, "about", 0),
       "interviews",
@@ -238,10 +240,10 @@ describe("an onboarding flow", () => {
     );
     expect({
       step: order(early)[4],
-      screens: flowScreens(early).slice(-3),
+      screens: flowScreens(early).slice(-4),
     }).toStrictEqual({
       step: "interviews",
-      screens: ["leads", "team", "about"],
+      screens: ["leads", "team", "about", "listening"],
     });
   });
 

@@ -7,6 +7,7 @@ import {
   addDays,
   addWorkingDays,
   dayOf,
+  daysBetween,
 } from "@grasp-os/shared/admin/org-record";
 import type {
   DrawnWork,
@@ -37,6 +38,7 @@ import type {
   InterviewLine,
   InterviewParticipation,
   InterviewProgress,
+  InterviewLater,
   InterviewSaved,
   InterviewSession,
   InterviewWithdrawal,
@@ -75,6 +77,11 @@ import type {
   Roster,
   SettleChoice,
 } from "@grasp-os/shared/onboarding";
+import type {
+  Campaign,
+  CampaignAsk,
+  CampaignTeam,
+} from "@grasp-os/shared/onboarding-campaign";
 import {
   noChoices,
   setupChoicesSchema,
@@ -184,6 +191,7 @@ import {
   checkedDifferences,
   settledWorks,
   usage,
+  voiceHolds,
   voiceUse,
   works,
 } from "../db/onboarding/schema.ts";
@@ -443,7 +451,10 @@ export type LinkRefusal =
   | "interview.limited"
   | "interview.not_participating"
   | "interview.notice_changed"
-  | "interview.withdrawn";
+  | "interview.withdrawn"
+  | "interview.finished"
+  | "interview.no_address"
+  | "interview.invalid";
 
 /**
  * Who opens a link (links.ts): the account their session is for, and the
@@ -715,6 +726,12 @@ export const adminWho = "admin:";
  * for them, in the same daily table.
  */
 const heardKey = (who: string): string => `${who}:heard`;
+
+/**
+ * The least a conversation counts when the next one opens before it was
+ * closed: a page that never says it left can't open them for nothing.
+ */
+const unclosedHoldSeconds = 120;
 
 /** What one interview turn knows of who it is with, from the store (`turnContext`). */
 /** What the drawing gets from one interview: only what its person agreed to. */
@@ -1428,6 +1445,7 @@ export class Onboarding extends DurableObject<Env> {
       return false;
     }
     this.#db.delete(voiceUse).run();
+    this.#db.delete(voiceHolds).run();
     return true;
   }
 
@@ -1795,6 +1813,14 @@ export class Onboarding extends DurableObject<Env> {
         .all()
         .map((row) => [row.id, row])
     );
+    // A save of the list gives nobody a second nudge the same day.
+    const nudged = new Map(
+      this.#db
+        .select({ id: teams.id, nudgedOn: teams.nudgedOn })
+        .from(teams)
+        .all()
+        .map(({ id, nudgedOn }) => [id, { nudgedOn }])
+    );
     this.#db.delete(teams).run();
     this.#db.delete(people).run();
     for (const [position, team] of roster.teams.entries()) {
@@ -1811,6 +1837,7 @@ export class Onboarding extends DurableObject<Env> {
           // A map stands on the lead it was drawn from, and no other.
           mappedFrom:
             was?.lead === team.lead ? (was?.mappedFrom ?? null) : null,
+          ...nudged.get(team.id),
         })
         .run();
     }
@@ -2632,6 +2659,60 @@ export class Onboarding extends DurableObject<Env> {
       this.#noted(person.id, "interview.participated", now);
     });
     return answered({ notice, at: now });
+  }
+
+  /**
+   * "Not now" on their own link: they ask to be reminded at `at`, a moment
+   * the page picked on their own clock, and Grasp's reminder goes to them
+   * then (`remindAsked`), once. One ask stands at a time: asking again
+   * moves it. Apart from the one reminder Grasp sends by itself, so
+   * neither leaves them without the other. Refused once they finished or
+   * withdrew, for a moment that isn't ahead or is past the interviews'
+   * last day, and for someone the list has no address for. Only the
+   * onboarding's own log has that they asked, as everything someone does
+   * on their link: the audit log, which their company reads, would say
+   * who hasn't talked yet.
+   */
+  remindLater(
+    secretMark: string,
+    account: string,
+    at: string,
+    now: string = new Date().toISOString()
+  ): LinkAnswer<InterviewLater> {
+    const found = this.#onLink(secretMark, { account }, now, "save");
+    if (!found.ok) {
+      return found;
+    }
+    const { person, plan } = found.value;
+    if (this.#withdrawnAt(person.id) !== null) {
+      return refused("interview.withdrawn");
+    }
+    const [state] = this.#db
+      .select({ completedAt: interviewStates.completedAt })
+      .from(interviewStates)
+      .where(eq(interviewStates.person, person.id))
+      .all();
+    if ((state?.completedAt ?? null) !== null) {
+      return refused("interview.finished");
+    }
+    if (person.email === "") {
+      return refused("interview.no_address");
+    }
+    // As core writes its own moments, so one compares with another as text.
+    const moment = new Date(at).toISOString();
+    if (moment <= now || dayOf(moment) > closesOn(plan)) {
+      return refused("interview.invalid");
+    }
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .update(links)
+        .set({ laterAt: moment })
+        .where(eq(links.person, person.id))
+        .run();
+      this.#noted(person.id, "interview.remind_asked", now);
+    });
+    this.ctx.waitUntil(this.#alarmBy(Date.parse(moment)));
+    return answered({ at: moment });
   }
 
   /**
@@ -4181,17 +4262,8 @@ export class Onboarding extends DurableObject<Env> {
     if (again.length === 0) {
       return "not_owed";
     }
-    const now = new Date().toISOString();
     this.ctx.storage.transactionSync(() => {
-      for (const { key } of again) {
-        const [kind = "mail"] = key.split("/");
-        if (kind === "link" || kind === "reminder") {
-          this.#linkWentTo(person, to);
-        }
-        // All due at once, so they go in the order they were first queued.
-        queueAgain(this.ctx.storage.sql, key, to, Date.parse(now));
-        this.#noted(person, `mail.${kind}.again`, now, whoIs(by));
-      }
+      this.#queueFailedAgain(person, again, to, by);
       this.#changed(by, "onboarding.mail.resent", {});
     });
     this.#deliverAudit();
@@ -4199,6 +4271,288 @@ export class Onboarding extends DurableObject<Env> {
     // A send-again to a second address ended a link: owed at once.
     this.#decideInterviews();
     return "sent";
+  }
+
+  /**
+   * Queues `person`'s `failed` mails again, from their first try, to `to`,
+   * in the caller's transaction: all due at once, so they go in the order
+   * they were first queued. The onboarding's own log has each.
+   */
+  #queueFailedAgain(
+    person: string,
+    failed: readonly { key: string }[],
+    to: string,
+    by: AuditActor
+  ): void {
+    const now = new Date().toISOString();
+    for (const { key } of failed) {
+      const [kind = "mail"] = key.split("/");
+      if (kind === "link" || kind === "reminder") {
+        this.#linkWentTo(person, to);
+      }
+      queueAgain(this.ctx.storage.sql, key, to, Date.parse(now));
+      this.#noted(person, `mail.${kind}.again`, now, whoIs(by));
+    }
+  }
+
+  /**
+   * The company's admin corrects the address of someone whose link mail
+   * failed for good (`LinkToSend.mailFailed`), theirs alone, and their
+   * mail goes again to it at once: what the admin otherwise does by saving
+   * the whole list and asking Grasp's staff to send again. Only for
+   * someone the admin is told of already: anyone else's address changes
+   * with the list. An address kept out (an erased person's, `#keptOff`)
+   * goes on no entry, here as in a save. The audit log has whose, never
+   * the address.
+   */
+  async correctAddress(
+    person: string,
+    email: string,
+    by: AuditActor
+  ): Promise<"sent" | "not_found" | "none_failed" | "kept_out"> {
+    // Hashed first: a transaction can't wait on one.
+    const hashes = await this.#hashesOf([email]);
+    const done = this.ctx.storage.transactionSync(() => {
+      if (!this.#onRoster(person) || this.#erased(person)) {
+        return "not_found";
+      }
+      if (!this.#linkMailFailed(person)) {
+        return "none_failed";
+      }
+      if (this.#keptOff([{ id: person, email }], hashes).has(person)) {
+        return "kept_out";
+      }
+      this.#db.update(people).set({ email }).where(eq(people.id, person)).run();
+      const owed = this.#reminderOwed(person);
+      this.#queueFailedAgain(
+        person,
+        mailAbout(this.ctx.storage.sql, person).filter(
+          ({ key, state }) =>
+            state === "failed" && (owed || !key.startsWith("reminder/"))
+        ),
+        email,
+        by
+      );
+      this.#changed(by, "onboarding.address.corrected", { person }, person);
+      return "sent";
+    });
+    if (done === "sent") {
+      this.#deliverAudit();
+      this.#deliverMailSoon();
+      // A mail to a second address ended a link: owed at once.
+      this.#decideInterviews();
+    }
+    return done;
+  }
+
+  /**
+   * The company's admin nudges a team: Grasp's reminder goes, now, to
+   * everyone in it who is owed one (`owesReminder`: asked, with an
+   * address, not finished, not withdrawn). The admin's own doing, apart
+   * from the one reminder Grasp sends by itself: it neither uses that up
+   * (`links.remindedAt`) nor waits for it. So nobody is mailed over and
+   * over, a team takes one nudge a day. Only a team whose numbers the
+   * admin sees (`minTeamShown`): how many a nudge mailed is in its answer
+   * and the audit log, which would otherwise say how many of a small team
+   * haven't finished. The audit log has the team and how many, never who.
+   */
+  async nudge(
+    team: string,
+    by: AuditActor,
+    now: string = new Date().toISOString()
+  ): Promise<
+    | { mailed: number }
+    | "no_team"
+    | "not_now"
+    | "too_small"
+    | "nudged_today"
+    | "nobody"
+  > {
+    const said = await this.#mailContext();
+    const roster = this.#roster();
+    const { plan } = this.#row();
+    if (roster?.teams.some(({ id, off }) => id === team && !off) !== true) {
+      return "no_team";
+    }
+    if (plan === null || !this.isOpen() || dayOf(now) > closesOn(plan)) {
+      return "not_now";
+    }
+    const shown = progressOf(roster, this.#interviews(), this.#counts(), now);
+    if (shown.teams.find(({ id }) => id === team)?.asked === null) {
+      return "too_small";
+    }
+    const day = dayOf(now);
+    const [row] = this.#db
+      .select({ nudgedOn: teams.nudgedOn })
+      .from(teams)
+      .where(eq(teams.id, team))
+      .all();
+    if (row?.nudgedOn === day) {
+      return "nudged_today";
+    }
+    const due = this.#owedReminders(roster).filter(
+      ({ person }) =>
+        roster.people.find(({ id }) => id === person)?.team === team
+    );
+    if (due.length === 0) {
+      return "nobody";
+    }
+    this.ctx.storage.transactionSync(() => {
+      for (const { person, sentAt } of due) {
+        this.#queuePersonMail(
+          { roster, plan, said, person, sentAt },
+          "reminder",
+          now,
+          `nudge-${day}`
+        );
+        this.#noted(person, "interview.nudged", now, whoIs(by));
+      }
+      this.#db
+        .update(teams)
+        .set({ nudgedOn: day })
+        .where(eq(teams.id, team))
+        .run();
+      this.#changed(by, "onboarding.team.nudged", {
+        team,
+        count: due.length,
+      });
+    });
+    this.#deliverAudit();
+    this.#deliverMailSoon();
+    // A reminder to a second address ended a link: owed at once.
+    this.#decideInterviews();
+    return { mailed: due.length };
+  }
+
+  /**
+   * How the interviews are going, for the page the company's admin watches
+   * them on: what `view()` tells them of each team that takes part
+   * (`progressOf`, by its rules: a team's numbers once `minTeamShown` were
+   * asked, how many talked once `minTalkedShown` did, all as of the start
+   * of today), and beside it, by the same rules, how many are under way,
+   * the talks finished day by day, which team is quiet, and whose link
+   * mail failed (`linksToSend`). Null before the list and the plan are in.
+   */
+  campaign(
+    now: string = new Date().toISOString()
+  ): Omit<Campaign, "known" | "threshold" | "ready"> | null {
+    const roster = this.#roster();
+    const { plan } = this.#row();
+    if (roster === null || plan === null) {
+      return null;
+    }
+    const today = dayOf(now);
+    const states = this.#interviews();
+    const counts = this.#counts();
+    const progress = progressOf(roster, states, counts, now);
+    const everAsked = this.#db.select().from(countedPeople).all();
+    const nudged = new Map(
+      this.#db
+        .select({ id: teams.id, nudgedOn: teams.nudgedOn })
+        .from(teams)
+        .all()
+        .map(({ id, nudgedOn }) => [id, nudgedOn])
+    );
+    const running = this.isOpen() && today <= closesOn(plan);
+    const led = new Set(
+      roster.teams.filter(({ lead }) => lead !== null).map(({ id }) => id)
+    );
+    const shown = progress.teams
+      .filter(({ off }) => !off)
+      .map((team): CampaignTeam => {
+        const before = counts.filter(
+          (count) => count.team === team.id && count.day < today
+        );
+        // Under way as the day began: started before today, and not finished before it.
+        const inProgress = everAsked.filter(({ person, team: asked }) => {
+          const state = states.get(person);
+          const started = state?.startedAt ?? null;
+          const completed = state?.completedAt ?? null;
+          return (
+            asked === team.id &&
+            started !== null &&
+            dayOf(started) < today &&
+            (completed === null || dayOf(completed) >= today)
+          );
+        }).length;
+        const finished = before.reduce((sum, { talked }) => sum + talked, 0);
+        const byDay = Array.from({ length: plan.days }, () => 0);
+        for (const { day, talked } of before) {
+          const at = Math.min(
+            Math.max(daysBetween(plan.start, day), 0),
+            plan.days - 1
+          );
+          byDay[at] = (byDay[at] ?? 0) + talked;
+        }
+        const [first] = before
+          .filter(({ asked }) => asked > 0)
+          .map(({ day }) => day)
+          .toSorted();
+        // Only beside how many talked: each would give that number away.
+        const told =
+          team.asked === null || team.talked === null
+            ? null
+            : {
+                inProgress,
+                notStarted: Math.max(team.asked - team.talked - inProgress, 0),
+                byDay,
+              };
+        return {
+          id: team.id,
+          name: team.name,
+          led: led.has(team.id),
+          leadTalked: team.leadTalked,
+          asked: team.asked,
+          talked: team.talked,
+          inProgress: told?.inProgress ?? null,
+          notStarted: told?.notStarted ?? null,
+          byDay: told?.byDay ?? null,
+          // The reminder's own wait: by then whoever meant to start has.
+          quiet:
+            running &&
+            team.asked !== null &&
+            first !== undefined &&
+            today >= addWorkingDays(first, remindAfterWorkingDays) &&
+            finished === 0 &&
+            inProgress === 0,
+        };
+      });
+    const teamName = new Map(roster.teams.map(({ id, name }) => [id, name]));
+    const erased = this.#erasedPeople();
+    return {
+      start: plan.start,
+      days: plan.days,
+      closes: closesOn(plan),
+      today,
+      asked: progress.asked,
+      talked: progress.talked,
+      leads: progress.leads,
+      leadsTalked: progress.leadsTalked,
+      teams: shown,
+      asks: [
+        ...shown
+          .filter(({ quiet }) => quiet)
+          .map((team): CampaignAsk => ({
+            kind: "quiet",
+            team: team.id,
+            name: team.name,
+            waiting: team.asked ?? 0,
+            nudged: nudged.get(team.id) === today,
+          })),
+        ...roster.people
+          .filter(
+            (person) =>
+              !erased.has(person.id) && this.#linkMailFailed(person.id)
+          )
+          .map((person): CampaignAsk => ({
+            kind: "mail",
+            person: person.id,
+            name: person.name,
+            team: teamName.get(person.team) ?? "",
+            email: person.email,
+          })),
+      ],
+    };
   }
 
   /**
@@ -4668,11 +5022,13 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Holds `seconds` of a live voice session (voice.ts) against `who`'s
+   * Holds `seconds` for a live conversation (voice.ts) against `who`'s
    * listening today, in one write, only when all of them fit `budget`:
-   * sessions opened side by side each find what the others held. The day
-   * they are held on, to give them back on; null, holding nothing, when
-   * they don't fit.
+   * conversations opened side by side each find what the others held. One
+   * is held for `who` at a time: the one before, never closed (a page
+   * reloaded, a line dropped), is settled first at how long it was open
+   * (`#settleHold`). The day they are held on; null, holding nothing new,
+   * when they don't fit.
    */
   reserveListening(
     who: string,
@@ -4681,11 +5037,13 @@ export class Onboarding extends DurableObject<Env> {
     now: string = new Date().toISOString()
   ): string | null {
     return this.ctx.storage.transactionSync(() => {
+      this.#settleHold(who, now, unclosedHoldSeconds);
       if (this.voiceSaid(who, now) + seconds > budget) {
         return null;
       }
       const day = now.slice(0, 10);
       this.#db.delete(voiceUse).where(lt(voiceUse.day, day)).run();
+      this.#db.delete(voiceHolds).where(lt(voiceHolds.day, day)).run();
       this.#db
         .insert(voiceUse)
         .values({ who, day, seconds })
@@ -4694,21 +5052,78 @@ export class Onboarding extends DurableObject<Env> {
           set: { seconds: sql`${voiceUse.seconds} + ${seconds}` },
         })
         .run();
+      this.#db.insert(voiceHolds).values({ who, day, seconds, at: now }).run();
       return day;
     });
   }
 
   /**
-   * Gives back what `reserveListening` held on `day` for a session that
-   * never opened: Mistral refused it, so nothing was listened to. On that
-   * day alone: one held before midnight never takes from the next.
+   * Gives back all of what `reserveListening` just held for a conversation
+   * that never opened: ElevenLabs refused it, so nothing was listened to.
    */
-  releaseListening(who: string, seconds: number, day: string): void {
+  releaseListening(who: string): void {
+    this.ctx.storage.transactionSync(() => {
+      const [hold] = this.#db
+        .select()
+        .from(voiceHolds)
+        .where(eq(voiceHolds.who, who))
+        .all();
+      if (hold !== undefined) {
+        this.#giveBack(hold, hold.seconds);
+      }
+    });
+  }
+
+  /**
+   * Settles the conversation open on the link `secretMark`, as the page
+   * closes it: what was held for it and it didn't use is given back, so a
+   * pause, a language switched or a short talk costs what it lasted, never
+   * the whole of what an interview may. Once: closing it again gives
+   * nothing more back. Whatever the link's state, as a close is taken.
+   */
+  settleListeningOnLink(
+    secretMark: string,
+    now: string = new Date().toISOString()
+  ): void {
+    this.ctx.storage.transactionSync(() => {
+      const [code] = this.#db
+        .select({ person: linkCodes.person })
+        .from(linkCodes)
+        .where(eq(linkCodes.mark, secretMark))
+        .all();
+      if (code !== undefined) {
+        this.#settleHold(heardKey(`${linkWho}${code.person}`), now, 0);
+      }
+    });
+  }
+
+  /**
+   * Settles `who`'s open conversation at how long it was open by `now`,
+   * at least `least` seconds and at most what was held, and gives the
+   * rest back on the day it was held.
+   */
+  #settleHold(who: string, now: string, least: number): void {
+    const [hold] = this.#db
+      .select()
+      .from(voiceHolds)
+      .where(eq(voiceHolds.who, who))
+      .all();
+    if (hold === undefined) {
+      return;
+    }
+    const open = Math.ceil((Date.parse(now) - Date.parse(hold.at)) / 1000);
+    const used = Math.min(hold.seconds, Math.max(least, open, 0));
+    this.#giveBack(hold, hold.seconds - used);
+  }
+
+  /** Takes `seconds` off what `hold` held on its day, and lets the hold go. */
+  #giveBack(hold: typeof voiceHolds.$inferSelect, seconds: number): void {
     this.#db
       .update(voiceUse)
       .set({ seconds: sql`max(0, ${voiceUse.seconds} - ${seconds})` })
-      .where(and(eq(voiceUse.who, who), eq(voiceUse.day, day)))
+      .where(and(eq(voiceUse.who, hold.who), eq(voiceUse.day, hold.day)))
       .run();
+    this.#db.delete(voiceHolds).where(eq(voiceHolds.who, hold.who)).run();
   }
 
   /**
@@ -4955,14 +5370,20 @@ export class Onboarding extends DurableObject<Env> {
       .where(eq(onboarding.id, 1))
       .all();
     const stored = row?.choices ?? null;
-    return stored === null
-      ? noChoices
-      : setupChoicesSchema.parse(JSON.parse(stored));
+    if (stored === null) {
+      return noChoices;
+    }
+    // Choices kept while the setup still asked about Pulse hold its
+    // answer too: read without it, as the setup no longer has that step.
+    const { pulse: _asked, ...kept } = z
+      .looseObject({})
+      .parse(JSON.parse(stored));
+    return setupChoicesSchema.parse(kept);
   }
 
   /**
    * Keeps what the admin chose. In the log and the audit log by which
-   * places and what of Pulse and the HR platform, never what they typed.
+   * places and what of the HR platform, never what they typed.
    */
   saveChoices(choices: SetupChoices, by: AuditActor): SetupChoices {
     this.ctx.storage.transactionSync(() => {
@@ -4974,7 +5395,6 @@ export class Onboarding extends DurableObject<Env> {
       this.#changed(by, "onboarding.choices.saved", {
         sources: choices.sources.join(" "),
         asked: choices.sourcesWanted.length,
-        pulse: choices.pulse ?? "",
         hr: choices.hr?.kind ?? "",
       });
     });
@@ -5002,7 +5422,10 @@ export class Onboarding extends DurableObject<Env> {
       name: kept.name,
       at: new Date().toISOString(),
       by: whoIs(by),
-      reading: JSON.stringify(kept.reading),
+      // With no question to the admin (`ask`), as the release before this
+      // one reads it: a deployment rolled back still reads these documents.
+      // Left out once that release is no longer rolled back to.
+      reading: JSON.stringify({ ...kept.reading, ask: null }),
     };
     this.ctx.storage.transactionSync(() => {
       this.#db.insert(documents).values(row).run();
@@ -6394,6 +6817,7 @@ export class Onboarding extends DurableObject<Env> {
       | "savedByPage"
       | "savedPageSave"
       | "savedVersion"
+      | "laterAt"
     >[];
     interviews: AdminInterviewFacts[];
   } {
@@ -6511,6 +6935,7 @@ export class Onboarding extends DurableObject<Env> {
         await this.releaseDue();
       }
       await this.remindDue();
+      await this.remindAsked();
       await this.sendUpdate();
       await this.deliverMail();
       // The Brain's teams into regions after a save of the staff list
@@ -6652,6 +7077,64 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
+   * Sends the reminder to everyone who asked for one themselves and whose
+   * moment has come (`remindLater`), while the interviews run: once for
+   * each ask. Apart from the one reminder Grasp sends by itself, which it
+   * neither uses up nor waits for (`links.remindedAt`). Someone no longer
+   * owed one (they finished or withdrew since) gets none, and their ask
+   * is over all the same. Returns whom it went to.
+   */
+  async remindAsked(now: string = new Date().toISOString()): Promise<string[]> {
+    const said = await this.#mailContext();
+    const roster = this.#roster();
+    const { plan } = this.#row();
+    if (
+      roster === null ||
+      plan === null ||
+      !this.isOpen() ||
+      dayOf(now) > closesOn(plan)
+    ) {
+      return [];
+    }
+    const due = this.#db
+      .select({ person: links.person, laterAt: links.laterAt })
+      .from(links)
+      .where(and(isNotNull(links.laterAt), lte(links.laterAt, now)))
+      .orderBy(asc(links.laterAt), asc(links.person))
+      .all();
+    if (due.length === 0) {
+      return [];
+    }
+    const owed = new Map(
+      this.#owedReminders(roster).map((link) => [link.person, link])
+    );
+    const sent: string[] = [];
+    this.ctx.storage.transactionSync(() => {
+      for (const { person, laterAt } of due) {
+        this.#db
+          .update(links)
+          .set({ laterAt: null })
+          .where(eq(links.person, person))
+          .run();
+        const link = owed.get(person);
+        if (link !== undefined) {
+          this.#queuePersonMail(
+            { roster, plan, said, person, sentAt: link.sentAt },
+            "reminder",
+            now,
+            `asked-${laterAt}`
+          );
+          sent.push(person);
+        }
+      }
+    });
+    this.#deliverMailSoon();
+    // A reminder to a second address ended a link: owed at once.
+    this.#decideInterviews();
+    return sent;
+  }
+
+  /**
    * Sends the company's onboarding admin their update, on a Monday or a
    * Thursday after the interviews started and until they close, once a
    * day: the numbers they see themselves (`view()`), nothing more. False
@@ -6721,16 +7204,33 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * Whose reminder is due by `now`: not reminded yet, still owed one
-   * (`#reminderOwed`: never someone who finished, withdrew or deleted
-   * their interview), and their link out the working days before. A link
-   * handed over on paper is the admin's to remind about.
+   * (`#owedReminders`), and their link out the working days before. A
+   * link handed over on paper is the admin's to remind about.
    */
   #remindable(now: string): { person: string; sentAt: string }[] {
-    // Each read once for everyone: the roster can be thousands of people.
     const roster = this.#roster();
     if (roster === null) {
       return [];
     }
+    return this.#owedReminders(roster)
+      .filter(
+        (link) =>
+          link.remindedAt === null &&
+          dayOf(now) >=
+            addWorkingDays(dayOf(link.sentAt), remindAfterWorkingDays)
+      )
+      .map(({ person, sentAt }) => ({ person, sentAt }));
+  }
+
+  /**
+   * Everyone owed a reminder now (`owesReminder`: never someone who
+   * finished, withdrew or deleted their interview, or has no address),
+   * with their link, in the order the links went out: for the reminder
+   * Grasp sends by itself (`#remindable`), the one someone asked for
+   * (`remindAsked`) and the admin's nudge (`nudge`).
+   */
+  #owedReminders(roster: Roster): (typeof links.$inferSelect)[] {
+    // Each read once for everyone: the roster can be thousands of people.
     const byId = new Map(roster.people.map((person) => [person.id, person]));
     const states = this.#interviews();
     const withdrawn = new Set(
@@ -6749,9 +7249,6 @@ export class Onboarding extends DurableObject<Env> {
       .filter((link) => {
         const one = byId.get(link.person);
         return (
-          link.remindedAt === null &&
-          dayOf(now) >=
-            addWorkingDays(dayOf(link.sentAt), remindAfterWorkingDays) &&
           one !== undefined &&
           owesReminder({
             takingPart: takingPart(roster, one),
@@ -6761,8 +7258,7 @@ export class Onboarding extends DurableObject<Env> {
             withdrawn: withdrawn.has(link.person),
           })
         );
-      })
-      .map(({ person, sentAt }) => ({ person, sentAt }));
+      });
   }
 
   /**
@@ -6785,7 +7281,13 @@ export class Onboarding extends DurableObject<Env> {
       sentAt: string;
     },
     kind: "link" | "reminder",
-    now: string = sentAt
+    now: string = sentAt,
+    /**
+     * What tells this mail from another of its kind to the same person:
+     * when their link went out, for the one link mail and the one reminder
+     * Grasp sends by itself.
+     */
+    mark: string = sentAt
   ): void {
     const person = roster.people.find((each) => each.id === id);
     if (person === undefined || person.email === "") {
@@ -6802,7 +7304,7 @@ export class Onboarding extends DurableObject<Env> {
     queueMail(
       this.ctx.storage.sql,
       {
-        key: `${kind}/${person.id}/${sentAt}`,
+        key: `${kind}/${person.id}/${mark}`,
         to: person.email,
         about: person.id,
         fill: person.id,
@@ -6949,8 +7451,17 @@ export class Onboarding extends DurableObject<Env> {
       return;
     }
     const now = Date.now();
-    const moments = waiting
-      .map((person) => sendsFrom(plan, person.team))
+    // A reminder someone asked for goes at its own moment, as a team's links do.
+    const asked = this.#db
+      .select({ laterAt: links.laterAt })
+      .from(links)
+      .where(isNotNull(links.laterAt))
+      .all()
+      .map(({ laterAt }) => laterAt);
+    const moments = [
+      ...waiting.map((person) => sendsFrom(plan, person.team)),
+      ...asked,
+    ]
       .filter((moment) => moment !== null)
       .map((moment) => Date.parse(moment))
       .filter((moment) => moment > now);
@@ -7124,8 +7635,9 @@ export class Onboarding extends DurableObject<Env> {
         );
         const tellers = told.map(([id]) => id);
         const agreed = Object.fromEntries(told);
+        const leading = leadsOfTeam(team);
         const leadsOwn =
-          doers.length > 0 && doers.every((id) => id === team.lead);
+          doers.length > 0 && doers.every((id) => leading.includes(id));
         const before = drawnFrom.get(row.id) ?? {};
         const since = tellers
           .filter((id) => before[id] !== agreed[id])
@@ -7138,7 +7650,7 @@ export class Onboarding extends DurableObject<Env> {
         const last = since.at(-1);
         if (
           first === undefined ||
-          (!leadsOwn && tellers.every((id) => id === team.lead))
+          (!leadsOwn && tellers.every((id) => leading.includes(id)))
         ) {
           return [];
         }
@@ -7232,7 +7744,9 @@ export class Onboarding extends DurableObject<Env> {
       const input = this.drawInput(person);
       return input === null ? [] : [input];
     });
-    const others = inputs.filter(({ person }) => person !== team.lead);
+    // What a lead tells is of the whole team, each of its leads alike.
+    const leading = leadsOfTeam(team);
+    const others = inputs.filter(({ person }) => !leading.includes(person));
     const telling = others.length > 0 ? others : inputs;
     const leadInput =
       team.lead !== null && telling.every(({ person }) => person !== team.lead)
@@ -7259,7 +7773,7 @@ export class Onboarding extends DurableObject<Env> {
       const who = roster.people.find(({ id }) => id === person);
       const of = asked.get(person);
       let about;
-      if (person === team.lead) {
+      if (leading.includes(person)) {
         about = "the work of the whole team";
       } else if (of !== undefined && of !== work.id) {
         about = names.get(of);
@@ -7549,9 +8063,9 @@ export class Onboarding extends DurableObject<Env> {
       return null;
     }
     const tellers = this.#tellers(teamId, roster);
-    const { lead } = team;
-    const leadAgreed =
-      lead !== null && this.#agreedAt(lead) !== null ? [lead] : [];
+    // Everyone who leads it: a co-lead's interview is a lead's too.
+    const leading = leadsOfTeam(team);
+    const leadAgreed = leading.filter((lead) => this.#agreedAt(lead) !== null);
     // The pieces of work are the lead's map: none reach the brain while
     // what it was drawn from no longer counts (`#mapBacked`).
     const mapped = this.#worksStanding(teamId);
@@ -7564,7 +8078,7 @@ export class Onboarding extends DurableObject<Env> {
         if (
           drawn === null ||
           drawn.from.length === 0 ||
-          drawn.from.every((person) => person === lead)
+          drawn.from.every((person) => leading.includes(person))
         ) {
           return [];
         }
@@ -7601,8 +8115,9 @@ export class Onboarding extends DurableObject<Env> {
       return [];
     }
     const toldHere = this.#toldHere(roster);
+    const leading = leadsOfTeam(team);
     return roster.people.flatMap(({ id }) => {
-      if (toldHere.get(id) !== teamId || id === team.lead) {
+      if (toldHere.get(id) !== teamId || leading.includes(id)) {
         return [];
       }
       const input = this.drawInput(id);
@@ -11066,7 +11581,7 @@ export class Onboarding extends DurableObject<Env> {
         state?.leadOf,
         link?.ledTeam,
         ...(this.#roster()
-          ?.teams.filter(({ lead }) => lead === person)
+          ?.teams.filter((team) => leadsOfTeam(team).includes(person))
           .map(({ id }) => id) ?? []),
       ].flatMap((team) => (team === undefined || team === null ? [] : [team]))
     );
@@ -11299,8 +11814,9 @@ export class Onboarding extends DurableObject<Env> {
             kind: state.kind,
             leadOf:
               state.kind === "lead"
-                ? (roster?.teams.find(({ lead }) => lead === state.person)
-                    ?.id ?? null)
+                ? (roster?.teams.find((team) =>
+                    leadsOfTeam(team).includes(state.person)
+                  )?.id ?? null)
                 : null,
             toldIn:
               state.completedAt === null

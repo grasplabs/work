@@ -254,7 +254,7 @@ const sendThroughConnect = async (
   host: string,
   request: Request,
   { providerRequest, endsAt, signal }: SentBy,
-  method?: "GET" | "DELETE"
+  method?: "GET"
 ): Promise<Response> => {
   const grant = await signModelGrant(env.CAPABILITY_SIGNING_KEY, {
     credential: target.credential,
@@ -312,10 +312,10 @@ const platformUrl = (target: ConnectTarget, path: string): URL | undefined => {
 
 /**
  * Sends one request of a platform feature (speech, a recording written
- * down, a voice session) to `path` at `target`'s provider through connect,
- * as `sentBy` names it: the placeholder where the key goes, which connect
- * replaces with Grasp's key, and only the headers given. A POST with its
- * body, or a voice session read (GET) or closed (DELETE), with none.
+ * down, an agent's conversation token) to `path` at `target`'s provider
+ * through connect, as `sentBy` names it: the placeholder where the key
+ * goes, which connect replaces with Grasp's key, and only the headers
+ * given. A POST with its body, or the GET for an agent's token, with none.
  */
 export const connectRequest = async (
   env: ConnectEnv,
@@ -323,7 +323,7 @@ export const connectRequest = async (
   path: string,
   init:
     | { method?: "POST"; headers: Record<string, string>; body: BodyInit }
-    | { method: "GET" | "DELETE"; headers: Record<string, string> },
+    | { method: "GET"; headers: Record<string, string> },
   sentBy: SentBy
 ): Promise<Response> => {
   const url = platformUrl(target, path);

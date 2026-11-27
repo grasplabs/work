@@ -5,7 +5,6 @@ import {
   asStephenSays,
   checkedTurn,
   earlyNext,
-  earlyOpening,
   earlyPlainLine,
   fileCalled,
   leftOut,
@@ -494,30 +493,6 @@ describe("his line, written in plain lines", () => {
     expect(earlyPlainLine("TONE: none\nSAY: \n")).toBeFalsy();
   });
 
-  it("gives its first sentence while the rest is still being written, so he can begin to say it", () => {
-    expect(
-      earlyOpening(whole.slice(0, whole.indexOf("That is clear.") + 15))
-    ).toBeNull();
-    expect(
-      earlyOpening(whole.slice(0, whole.indexOf("Who gets") + 1))
-    ).toStrictEqual({ say: "That is clear.", tone: "softly" });
-    // Once the line is whole, it is the whole line that counts.
-    expect(earlyOpening(whole.slice(0, whole.indexOf("PART")))).toBeNull();
-    expect(earlyOpening("TONE: none\nSAY: Okay. Then I wo")).toStrictEqual({
-      say: "Okay.",
-      tone: null,
-    });
-  });
-
-  it("gives no first sentence before it knows how he says it, nor one he may not say, nor his question", () => {
-    expect(earlyOpening("TONE: non")).toBeNull();
-    expect(earlyOpening("TONE: none\nSAY: Great answer! Who appr")).toBeNull();
-    expect(
-      earlyOpening("TONE: none\nSAY: Who approves it? And how lo")
-    ).toBeNull();
-    expect(earlyOpening("TONE: none\nSAY: Then the next one")).toBeNull();
-  });
-
   it("says where the interview goes once the part and what he waits for are written, before the rest of the turn", () => {
     expect(earlyNext(whole.slice(0, whole.indexOf("WANTS")))).toBeNull();
     expect(earlyNext(whole.slice(0, whole.indexOf("MORE")))).toStrictEqual({
@@ -617,13 +592,10 @@ describe("a turn as it comes in", () => {
     expect(
       turnEvents(`${JSON.stringify(line)}\n${JSON.stringify(turn)}\n`)
     ).toStrictEqual({ events: [line, turn], rest: "" });
-    const opening = { opening: { say: "Okay.", tone: null } };
     const next = { next: { phase: "steps", wants: "file" } };
     expect(
-      turnEvents(
-        `${JSON.stringify(opening)}\n${JSON.stringify(line)}\n${JSON.stringify(next)}\n`
-      ).events
-    ).toStrictEqual([opening, line, next]);
+      turnEvents(`${JSON.stringify(line)}\n${JSON.stringify(next)}\n`).events
+    ).toStrictEqual([line, next]);
   });
 
   it("keeps the start of a line that is not whole yet for what comes in next", () => {

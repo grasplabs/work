@@ -446,7 +446,7 @@ test("someone goes through the screens before the interview in Dutch, chooses Cl
       ?.speaker,
   }).toStrictEqual({
     refused: [],
-    turns: [{ event: "start", interviewer: "claire" }],
+    turns: [{ event: "start" }],
     claire: "claire",
   });
 });

@@ -100,13 +100,6 @@ const modelRequest = (
     body: method === "GET" ? null : body,
   });
 
-/** A voice session read or closed, with the placeholder and no body. */
-const bare = (url: string, method: "GET" | "DELETE"): Request =>
-  new Request(url, {
-    method,
-    headers: { authorization: `Bearer ${aiCredentialPlaceholder}` },
-  });
-
 /** A request to ElevenLabs with the placeholder in its key header, and no body. */
 const toElevenLabs = (url: string, method: "GET" | "DELETE" = "GET"): Request =>
   new Request(url, {
@@ -718,7 +711,7 @@ describe("AI providers in connect", () => {
       });
     });
 
-    it("sends a line to say to Mistral with Grasp's key, and nothing else of Mistral's audio", async () => {
+    it("sends nothing of Mistral's audio with Grasp's key: no line to say, no voices", async () => {
       const withKey = connect({ MISTRAL_API_KEY: mistralKey });
       const grant = async () =>
         await grantFor({
@@ -728,6 +721,7 @@ describe("AI providers in connect", () => {
         });
 
       const outcomes = {
+        // No feature says a line with Mistral: its lines are ElevenLabs's.
         speech: refusalOf(
           await withKey.modelFetch(modelRequest(speechUrl), await grant())
         ),
@@ -738,167 +732,11 @@ describe("AI providers in connect", () => {
             await grant()
           )
         ),
-        below: refusalOf(
-          await withKey.modelFetch(
-            modelRequest(`${speechUrl}/voices`),
-            await grant()
-          )
-        ),
-        query: refusalOf(
-          await withKey.modelFetch(
-            modelRequest(`${speechUrl}?stream=true`),
-            await grant()
-          )
-        ),
-        noKey: refusalOf(
-          await connect().modelFetch(modelRequest(speechUrl), await grant())
-        ),
       };
 
-      expect({
-        outcomes,
-        sent: sent.map(({ host, path, headers }) => ({
-          host,
-          path,
-          key: headers.authorization,
-        })),
-      }).toStrictEqual({
-        outcomes: {
-          speech: "sent",
-          voices: "path",
-          below: "path",
-          query: "endpoint",
-          noKey: "no_credential",
-        },
-        sent: [
-          {
-            host: "api.mistral.ai",
-            path: "/v1/audio/speech",
-            key: `Bearer ${mistralKey}`,
-          },
-        ],
-      });
-    });
-
-    it("opens, reads and closes a voice session at Mistral with Grasp's key alone, at its sessions and one session's ID, by the method the grant names", async () => {
-      const withKey = connect({ MISTRAL_API_KEY: mistralKey });
-      const sessionsUrl = "https://api.mistral.ai/v1/audio/sessions";
-      const empty = await sha256Hex("");
-      const grant = async (scope: Partial<ModelGrantScope> = {}) =>
-        await grantFor({
-          provider: "mistral",
-          host: "api.mistral.ai",
-          credential: "platform",
-          ...scope,
-        });
-      const one = `${sessionsUrl}/sess_1a2b`;
-
-      const outcomes = {
-        open: refusalOf(
-          await withKey.modelFetch(modelRequest(sessionsUrl), await grant())
-        ),
-        read: refusalOf(
-          await withKey.modelFetch(
-            bare(one, "GET"),
-            await grant({ method: "GET", body: empty })
-          )
-        ),
-        close: refusalOf(
-          await withKey.modelFetch(
-            bare(one, "DELETE"),
-            await grant({ method: "DELETE", body: empty })
-          )
-        ),
-        // A read's grant never closes one, nor a POST's reads one.
-        otherMethod: refusalOf(
-          await withKey.modelFetch(
-            bare(one, "DELETE"),
-            await grant({ method: "GET", body: empty })
-          )
-        ),
-        postGrantReads: refusalOf(
-          await withKey.modelFetch(bare(one, "GET"), await grant())
-        ),
-        // Every session there is, or anything else below the path.
-        list: refusalOf(
-          await withKey.modelFetch(
-            bare(sessionsUrl, "GET"),
-            await grant({ method: "GET", body: empty })
-          )
-        ),
-        deeper: refusalOf(
-          await withKey.modelFetch(
-            bare(`${one}/transcripts`, "GET"),
-            await grant({ method: "GET", body: empty })
-          )
-        ),
-        query: refusalOf(
-          await withKey.modelFetch(
-            bare(`${one}?include=audio`, "GET"),
-            await grant({ method: "GET", body: empty })
-          )
-        ),
-        escaped: refusalOf(
-          await withKey.modelFetch(
-            bare(`${sessionsUrl}/%2e%2e%2fagents`, "GET"),
-            await grant({ method: "GET", body: empty })
-          )
-        ),
-        // A session is opened only for Grasp's own features.
-        organization: refusalOf(
-          await withKey.modelFetch(
-            modelRequest(sessionsUrl),
-            await grant({ credential: "organization" })
-          )
-        ),
-        // OpenAI has no voice sessions.
-        openai: refusalOf(
-          await connect().modelFetch(
-            bare(
-              "https://eu.api.openai.com/v1/audio/sessions/sess_1a2b",
-              "GET"
-            ),
-            await grantFor({
-              provider: "openai",
-              host: "eu.api.openai.com",
-              credential: "platform",
-              method: "GET",
-              body: empty,
-            })
-          )
-        ),
-      };
-
-      expect({
-        outcomes,
-        sent: sent.map(({ method, host, path, headers }) => ({
-          method,
-          host,
-          path,
-          key: headers.authorization,
-        })),
-      }).toStrictEqual({
-        outcomes: {
-          open: "sent",
-          read: "sent",
-          close: "sent",
-          otherMethod: "method",
-          postGrantReads: "method",
-          list: "path",
-          deeper: "path",
-          // No query on any of a provider's paths (`queries`).
-          query: "endpoint",
-          escaped: "path",
-          organization: "no_credential",
-          openai: "path",
-        },
-        sent: ["POST", "GET", "DELETE"].map((method, at) => ({
-          method,
-          host: "api.mistral.ai",
-          path:
-            at === 0 ? "/v1/audio/sessions" : "/v1/audio/sessions/sess_1a2b",
-          key: `Bearer ${mistralKey}`,
-        })),
+      expect({ outcomes, sent }).toStrictEqual({
+        outcomes: { speech: "path", voices: "path" },
+        sent: [],
       });
     });
 
@@ -949,10 +787,22 @@ describe("AI providers in connect", () => {
             await grant()
           )
         ),
+        // Only the GET its grant names, and never on a grant for a POST.
         otherMethod: refusalOf(
           await withKey.modelFetch(
             toElevenLabs(`${tokenUrl}?agent_id=${agent}`, "DELETE"),
-            await grant({ method: "DELETE" })
+            await grant()
+          )
+        ),
+        postGrant: refusalOf(
+          await withKey.modelFetch(
+            toElevenLabs(`${tokenUrl}?agent_id=${agent}`),
+            await grantFor({
+              provider: "elevenlabs",
+              host,
+              credential: "platform",
+              body: empty,
+            })
           )
         ),
         // A token is asked only for Grasp's own features.
@@ -979,7 +829,8 @@ describe("AI providers in connect", () => {
           more: "endpoint",
           notAnAgent: "endpoint",
           elsewhere: "endpoint",
-          otherMethod: "endpoint",
+          otherMethod: "method",
+          postGrant: "method",
           organization: "no_credential",
         },
         sent: [
