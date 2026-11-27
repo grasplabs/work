@@ -74,7 +74,7 @@ describe("a chat shown twice from one watch", () => {
   });
 
   it("draws no New line in a second view over what the person read in the first", async () => {
-    const markRead = vi.fn<(chatId: string) => Promise<number>>(
+    const markRead = vi.fn<(chatId: string, upTo?: number) => Promise<number>>(
       async () => await Promise.resolve(0)
     );
     const chats = {
@@ -115,7 +115,7 @@ describe("a chat shown twice from one watch", () => {
       await router.load();
     });
     await vi.waitFor(() => {
-      expect(markRead).toHaveBeenCalledWith("chat-1");
+      expect(markRead).toHaveBeenCalledWith("chat-1", 2);
     });
     await act(async () => {
       await Promise.resolve();

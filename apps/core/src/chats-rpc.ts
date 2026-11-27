@@ -240,6 +240,21 @@ export { firstAgentId as chatAgentId } from "./agents.ts";
  */
 const maxWatches = 10;
 
+/**
+ * The pauses before taking up again a watch the person's object let go
+ * of (`#follow`): at once, then longer while it can't be (the object
+ * still resetting), at most a few seconds apart.
+ */
+const rewatchMs = [0, 500, 1000, 2000, 5000] as const;
+
+/** The last message an update carried, if it carried any. */
+const lastMessageOf = (update: unknown): number | undefined => {
+  const parsed = z
+    .object({ messages: z.array(z.object({ id: z.number() })) })
+    .safeParse(update);
+  return parsed.success ? parsed.data.messages.at(-1)?.id : undefined;
+};
+
 /** A chat's ID from the page: a string, or no chat at all. */
 const chatIdOf = (chatId: unknown): ChatId => {
   const parsed = chatIdSchema.safeParse(chatId);
@@ -516,14 +531,19 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     });
   }
 
-  async markRead(chatId: string): Promise<number | null> {
+  async markRead(chatId: string, upTo?: number): Promise<number | null> {
     // Only the signed-in person's own object, and only their chat in it:
     // nobody moves where another person has read to.
-    return await withPerson(
-      this.#check,
-      async ({ userId }) =>
-        await this.#chatsOf(userId).markChatRead(chatIdOf(chatId), userId)
-    );
+    return await withPerson(this.#check, async ({ userId }) => {
+      if (upTo !== undefined && !(Number.isSafeInteger(upTo) && upTo >= 0)) {
+        throw agentErrors.create("agent.invalid_request");
+      }
+      return await this.#chatsOf(userId).markChatRead(
+        chatIdOf(chatId),
+        userId,
+        upTo
+      );
+    });
   }
 
   async archive(chatId: string): Promise<void> {
@@ -1350,12 +1370,19 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   ): Promise<Subscription> {
     return await withPerson(this.#check, async ({ userId }) => {
       const id = chatIdOf(chatId);
-      const chats = this.#chatsOf(userId);
+      // Where the page got to: watched again from there.
+      let from = after;
       return await this.#follow(
         onUpdate,
-        async (listener) => await chats.watch(id, userId, after, listener),
-        async (watchId) => {
-          await chats.unwatch(id, watchId);
+        {
+          start: async (listener) =>
+            await this.#chatsOf(userId).watch(id, userId, from, listener),
+          stop: async (watchId) => {
+            await this.#chatsOf(userId).unwatch(id, watchId);
+          },
+          pushed: (update) => {
+            from = lastMessageOf(update) ?? from;
+          },
         },
         { chatId: id }
       );
@@ -1365,31 +1392,48 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   async watchList(
     onUpdate: (update: ChatListUpdate) => void
   ): Promise<Subscription> {
-    return await withPerson(this.#check, async ({ userId }) => {
-      // Only the signed-in person's own object, and only their list in it.
-      const chats = this.#chatsOf(userId);
-      return await this.#follow(
-        onUpdate,
-        async (listener) => await chats.watchChats(userId, listener),
-        async (watchId) => {
-          await chats.unwatchChats(watchId);
-        },
-        {}
-      );
-    });
+    return await withPerson(
+      this.#check,
+      async ({ userId }) =>
+        // Only the signed-in person's own object, and only their list in it.
+        await this.#follow(
+          onUpdate,
+          {
+            start: async (listener) =>
+              await this.#chatsOf(userId).watchChats(userId, listener),
+            stop: async (watchId) => {
+              await this.#chatsOf(userId).unwatchChats(watchId);
+            },
+          },
+          {}
+        )
+    );
   }
 
   /**
    * Has the person's object push to the page's `onUpdate` what `start`
    * follows, until the page releases it: one of this connection's few
    * watches (`maxWatches`), each push checked against the session first.
+   * A watch the object lets go of without the page asking (the object
+   * reset, as each deploy resets it, or dropped it after a push failed)
+   * is taken up again at once, from where the page got to (`pushed`):
+   * the runtime tells the listener so (its `Symbol.dispose`) once the
+   * object holds it no more. The page never stops hearing for it.
    */
   async #follow(
     onUpdate: unknown,
-    start: (
-      listener: Disposable & ((value: unknown) => Promise<void>)
-    ) => Promise<string>,
-    stop: (watchId: string) => Promise<void>,
+    {
+      start,
+      stop,
+      pushed,
+    }: {
+      start: (
+        listener: Disposable & ((value: unknown) => Promise<void>)
+      ) => Promise<string>;
+      stop: (watchId: string) => Promise<void>;
+      /** Told of each update the page took. */
+      pushed?: (value: unknown) => void;
+    },
     logged: Record<string, string>
   ): Promise<Subscription> {
     if (!isStub(onUpdate)) {
@@ -1398,22 +1442,82 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     if (this.#watches.size >= maxWatches) {
       throw agentErrors.create("agent.too_many_watches");
     }
-    const listener = callbackFor(onUpdate, this.#stillOpen, refusals, () => {
-      this.#watches.delete(listener);
+    const page = callbackFor(onUpdate, this.#stillOpen, refusals, () => {
+      this.#watches.delete(page);
     });
-    this.#watches.add(listener);
-    let watchId: string;
+    this.#watches.add(page);
+    let released = false;
+    let watchId = "";
+    let rewatching = false;
+    /** Whether the page still follows it: not released, and still heard. */
+    const following = (): boolean => !released && this.#watches.has(page);
+    // Takes the watch up again: set below, once the listener it hands
+    // the object is there.
+    const lost = {
+      rewatch: async (): Promise<void> => {
+        // Nothing to take up before the first watch is made.
+      },
+    };
+    const listener = Object.assign(
+      async (value: unknown): Promise<void> => {
+        await page(value);
+        pushed?.(value);
+      },
+      {
+        // The object holds it no more: let go of by the page, or else
+        // reset or dropped, and then taken up again.
+        [Symbol.dispose]: () => {
+          if (following()) {
+            void lost.rewatch();
+          }
+        },
+      }
+    );
+    lost.rewatch = async (): Promise<void> => {
+      if (rewatching) {
+        return;
+      }
+      rewatching = true;
+      try {
+        for (let attempt = 0; following(); attempt += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- one try at a time, waiting longer each
+          await scheduler.wait(
+            rewatchMs[Math.min(attempt, rewatchMs.length - 1)] ?? 0
+          );
+          // Signed out since: let go of, never taken up again.
+          // oxlint-disable-next-line no-await-in-loop -- see above
+          if (!following() || !(await this.#stillOpen())) {
+            page[Symbol.dispose]();
+            return;
+          }
+          try {
+            // oxlint-disable-next-line no-await-in-loop -- see above
+            watchId = await start(listener);
+            return;
+          } catch (error) {
+            log.warn("chat.rewatch_failed", {
+              ...logged,
+              ...errorFields(error),
+            });
+          }
+        }
+      } finally {
+        rewatching = false;
+      }
+    };
     try {
       watchId = await start(listener);
     } catch (error) {
-      listener[Symbol.dispose]();
+      released = true;
+      page[Symbol.dispose]();
       throw error;
     }
     return new Subscription(async () => {
+      released = true;
       // The slot is free at once, and the listener forwards nothing
       // more; the object drops it now, or at its next update if it
       // can't be reached.
-      listener[Symbol.dispose]();
+      page[Symbol.dispose]();
       try {
         await stop(watchId);
       } catch (error) {

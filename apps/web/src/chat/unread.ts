@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 
+import { isConnectionFailure } from "../core.ts";
 import { useCore } from "../use-core.ts";
 import { useTabShown } from "../use-tab-shown.ts";
 import { readTo } from "./chat-watch.ts";
@@ -63,10 +64,16 @@ const latestAnswer = (messages: readonly ChatMessage[]): number | undefined =>
  * loaded and core has answered.
  */
 const lineOf = (
-  view: { messages: readonly ChatMessage[]; running: boolean; loaded: boolean },
+  view: {
+    messages: readonly ChatMessage[];
+    running: boolean;
+    loaded: boolean;
+    resuming?: boolean;
+  },
   seenUpTo: number | null | false | undefined
 ): { before: number | null; read: number } | undefined => {
-  if (!view.loaded) {
+  // Behind after a dropped connection: decided once the chat is current.
+  if (!view.loaded || view.resuming === true) {
     return undefined;
   }
   if (view.running) {
@@ -107,6 +114,13 @@ const seenUpToFor = ({
   return decided ? undefined : view.seenUpTo;
 };
 
+/** The tab's watch of chat `id` is told it was read up to `upTo`. */
+const told = (id: string, upTo: number | undefined): void => {
+  if (upTo !== undefined) {
+    readTo(id, upTo);
+  }
+};
+
 /**
  * Marks `chatId` read while the person looks at it, and gives the New line
  * its thread draws: over the first answer they hadn't seen as it opened
@@ -136,6 +150,8 @@ export const useNewLine = (
     loaded: boolean;
     /** Where core's watch said they had read to as the tab began to follow it. */
     seenUpTo?: number | null;
+    /** Whether the tab follows it again after a dropped connection, not heard back yet. */
+    resuming?: boolean;
   },
   seen: boolean
 ): NewLine => {
@@ -177,21 +193,28 @@ export const useNewLine = (
   // an answer ended.
   const asked = useRef(-1);
   const marked = useRef(0);
-  const mark = useEffectEvent(async (id: string): Promise<number | null> => {
-    // Read up to the latest message the page has, at least: core marks its own latest.
-    const latest = view.messages.at(-1)?.id;
-    // Its row loses its dot, here and on every device, as core pushes it.
-    const before = await core.withSession(
-      async (session) => await session.chats.markRead(id)
-    );
-    if (latest !== undefined) {
-      readTo(id, latest);
+  // Read up to the newest message the page shows, never past it: its row
+  // loses its dot, here and on every device, as core pushes it. Answers
+  // where they had read to before, and what it read up to, which the
+  // tab's watch of the chat is told once the line is decided (`readTo`).
+  const mark = useEffectEvent(
+    async (
+      id: string
+    ): Promise<{ before: number | null; upTo: number | undefined }> => {
+      const upTo = view.messages.at(-1)?.id;
+      const before = await core.withSession(
+        async (session) => await session.chats.markRead(id, upTo)
+      );
+      return { before, upTo };
     }
-    return before;
-  });
-  // Only once the page has the chat's messages: a watch core refused
-  // (too many open, say) shows nothing, so nothing is read.
-  const { loaded } = view;
+  );
+  // Only once the page has the chat's messages, and has them as they are
+  // now (not following it again after a dropped connection, when what came
+  // meanwhile isn't there yet): a watch core refused (too many open, say)
+  // shows nothing, so nothing is read.
+  const loaded = view.loaded && view.resuming !== true;
+  /** Whether the chat is being followed again after a dropped connection now. */
+  const behind = useEffectEvent((): boolean => view.resuming === true);
   useEffect(() => {
     if (
       chatId === undefined ||
@@ -204,8 +227,17 @@ export const useNewLine = (
     asked.current = count;
     void (async () => {
       try {
-        setReply({ count, seenUpTo: await mark(chatId) });
-      } catch {
+        const { before, upTo } = await mark(chatId);
+        setReply({ count, seenUpTo: before });
+        told(chatId, upTo);
+      } catch (error) {
+        // The connection dropped on the way, and the chat is being
+        // followed again: asked again once it is. Else no line, and the
+        // chat stays unread.
+        if (isConnectionFailure(error) && behind()) {
+          asked.current = -1;
+          return;
+        }
         setReply({ count, seenUpTo: false });
       }
     })();
@@ -248,7 +280,8 @@ export const useNewLine = (
     marked.current = latest;
     void (async () => {
       try {
-        await mark(chatId);
+        const { upTo } = await mark(chatId);
+        told(chatId, upTo);
       } catch {
         // Still unread on core: marked again as the next answer ends, or
         // the next time the chat opens.

@@ -148,7 +148,7 @@ import type {
   TurnStop,
 } from "./chat-harness.ts";
 import { ChatListWatch } from "./chat-list-watch.ts";
-import type { ChatListListener } from "./chat-list-watch.ts";
+import type { ChatList, ChatListListener } from "./chat-list-watch.ts";
 import {
   chatMessageOf,
   partialOf,
@@ -1232,7 +1232,12 @@ export class Workspace extends DurableObject<Env> {
       .where(eq(chats.id, chatId))
       .run();
     this.#keepSaid(chatId, stored.id, message);
-    this.#listChanged();
+    // A step's result changes nothing the list shows that the answer
+    // around it won't: no title, read or working state, and its chat
+    // moved up as it was asked in.
+    if (message.role !== "toolResult") {
+      this.#listChanged();
+    }
     return stored;
   }
 
@@ -3021,6 +3026,9 @@ export class Workspace extends DurableObject<Env> {
     // Asked: first in its person's list now, as Send was pressed, not once
     // the question is shown (`#store`), which waits on the chat's object
     // and may take seconds; back where it was if it is refused.
+    // Where it stood just now: another question may have moved it while
+    // the key was looked up.
+    const { lastAt: stood } = this.#graspChat(chatId, personId);
     const asked = new Date();
     this.#movedTo(chat.id, asked);
     void this.#takeQuestion(chat, question, started);
@@ -3030,7 +3038,7 @@ export class Workspace extends DurableObject<Env> {
         this.#keepRequest("send", key, chat.id);
       }
     } catch (error) {
-      this.#movedTo(chat.id, chat.lastAt, asked);
+      this.#movedTo(chat.id, stood, asked);
       throw error;
     } finally {
       if (key !== undefined) {
@@ -4941,24 +4949,33 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Marks `personId`'s chat `chatId` seen up to its latest message
+   * Marks `personId`'s chat `chatId` seen up to its latest message, or
+   * to `upTo`, the newest the page shows, where that is older
    * (`ChatsApi.markRead`), never back: a page that shows less, on another
    * device, leaves it where a newer one put it. The last message they had
    * seen before: 0 for none, null for a chat made before chats kept it,
    * which counts as read. Only their own chat in Grasp
    * (`#graspChat`): anyone else's is refused as if there were none.
    */
-  markChatRead(chatId: unknown, personId: string): number | null {
+  markChatRead(
+    chatId: unknown,
+    personId: string,
+    upTo?: number
+  ): number | null {
     const chat = this.#graspChat(chatId, personId);
     const latest = this.#db
       .select({ id: sql<number | null>`max(${chatMessages.id})` })
       .from(chatMessages)
       .where(eq(chatMessages.chatId, chat.id))
       .get()?.id;
-    if (typeof latest === "number" && latest > (chat.readUpTo ?? 0)) {
+    const seen =
+      typeof latest === "number" && upTo !== undefined
+        ? Math.min(latest, upTo)
+        : latest;
+    if (typeof seen === "number" && seen > (chat.readUpTo ?? 0)) {
       this.#db
         .update(chats)
-        .set({ readUpTo: latest })
+        .set({ readUpTo: seen })
         .where(eq(chats.id, chat.id))
         .run();
       this.#listChanged();
@@ -5710,18 +5727,11 @@ export class Workspace extends DurableObject<Env> {
   watchChats(personId: string, listener: ChatListListener): string {
     this.#requireRoomToWatch();
     const watchId = crypto.randomUUID();
-    const watch = new ChatListWatch(
-      listener.dup(),
-      () => ({
-        chats: this.chats(personId),
-        archived: this.#archivedCount(personId),
-      }),
-      () => {
-        this.unwatchChats(watchId);
-      }
-    );
+    const watch = new ChatListWatch(listener.dup(), personId, () => {
+      this.unwatchChats(watchId);
+    });
     this.#listWatchers.set(watchId, watch);
-    watch.push();
+    watch.push(this.#listOf(personId));
     return watchId;
   }
 
@@ -5745,10 +5755,22 @@ export class Workspace extends DurableObject<Env> {
     this.#listTold = true;
     queueMicrotask(() => {
       this.#listTold = false;
+      // Read once for each person followed, whoever many follow it.
+      const lists = new Map<string, ChatList>();
       for (const watch of this.#listWatchers.values()) {
-        watch.push();
+        const list = lists.get(watch.personId) ?? this.#listOf(watch.personId);
+        lists.set(watch.personId, list);
+        watch.push(list);
       }
     });
+  }
+
+  /** `personId`'s list as its watchers follow it: what `chats` gives, and how many they archived. */
+  #listOf(personId: string): ChatList {
+    return {
+      chats: this.chats(personId),
+      archived: this.#archivedCount(personId),
+    };
   }
 
   /** How many chats `personId` archived. */

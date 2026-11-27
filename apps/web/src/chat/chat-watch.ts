@@ -88,6 +88,13 @@ const subscribe = (
       },
       (failure, gone) => {
         changed(started, { ...started.state, failure, gone });
+      },
+      // Behind until the watch answers again (`applyUpdate` clears it).
+      () => {
+        changed(started, {
+          ...started.state,
+          view: { ...started.state.view, resuming: true },
+        });
       }
     );
     watch = started;
