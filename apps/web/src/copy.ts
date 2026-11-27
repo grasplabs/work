@@ -27,13 +27,16 @@ export const copyText = async (text: string): Promise<boolean> => {
 export const copyTextLater = async (
   text: Promise<string>
 ): Promise<boolean> => {
+  const blob = (async () => new Blob([await text], { type: "text/plain" }))();
   try {
-    const blob = (async () => new Blob([await text], { type: "text/plain" }))();
     await navigator.clipboard.write([
       new ClipboardItem({ "text/plain": blob }),
     ]);
     return true;
   } catch {
+    // A text that failed as well is answered here, never left unhandled,
+    // whether or not the clipboard took it before it failed.
+    await Promise.allSettled([blob]);
     return false;
   }
 };
