@@ -38,7 +38,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAgentSection } from "../agents/agent-section.tsx";
 import { useAppSection } from "../apps/app-section.tsx";
 import { useBrainSection } from "../brain/brain-section.tsx";
-import { chatsKey, useChatsWindow } from "../chat/chat-switcher.tsx";
+import { useChatsSearch } from "../chat/chat-switcher.tsx";
 import { useRecentChats } from "../chat/sidebar-chats.tsx";
 import { useIntegrationsSection } from "../connections/integrations-sidebar.tsx";
 import type { CoreConnection } from "../core-connection.ts";
@@ -288,7 +288,7 @@ export const AppSidebar = ({
   const router = useRouter();
   const navigate = useNavigate();
   const { setOpenMobile } = useSidebar();
-  const openChats = useChatsWindow();
+  const chatsSearch = useChatsSearch();
   const [view, setView] = useState<SidebarView>("home");
   const searching = identity.onboardingOnly !== true;
   // What waits on the person: the Inbox view's list, and so the dot.
@@ -365,17 +365,9 @@ export const AppSidebar = ({
             <Icon icon={GraspMark} label="Grasp" />
           </Link>
         }
-        // The chats window. Its keys are the switcher's own, which close it
-        // again too (chat/chat-switcher.tsx): the button shows them.
-        listenToSearchShortcut={false}
-        searchShortcut={`mod+${chatsKey}`}
-        onSearch={
-          searching
-            ? () => {
-                openChats(true);
-              }
-            : undefined
-        }
+        // The chats window: the search and its keys open it, and the keys
+        // close it again (chat/chat-switcher.tsx).
+        {...(searching ? chatsSearch : {})}
       >
         <FrameLevels section={section}>
           {searching ? (

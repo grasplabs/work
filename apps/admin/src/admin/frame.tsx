@@ -808,9 +808,8 @@ export const AdminFrame = ({
           <Icon icon={GraspMark} label="Grasp admin" />
         </Link>
       }
-      onSearch={() => {
-        setSearching(true);
-      }}
+      onSearchOpenChange={setSearching}
+      searchOpen={searching}
       sidebar={
         <Suspense
           fallback={
@@ -847,7 +846,7 @@ const loadingEntries = 6;
 export const FrameLoading = () => (
   <AppShell
     mark={<Icon icon={GraspMark} label="Grasp admin" />}
-    onSearch={() => {
+    onSearchOpenChange={() => {
       // Nothing to search while the admin's records come.
     }}
     sidebar={

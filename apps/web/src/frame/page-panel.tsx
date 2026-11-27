@@ -147,6 +147,16 @@ const styles = stylex.create({
   // Room at the page bar's end for the chat's button, which the frame lays
   // over the card's end at the bar's height (app-frame.tsx).
   chatButtonRoom: { [appShellVars.barEndRoom]: size.sidebarIconButton },
+  // Room under a page that fills the card while the dock stands over its
+  // foot, as #2503's shell keeps it (its `roomForDock`): the page's foot is
+  // as tall as the dock, its inset from the card's foot and the gap above
+  // it, in place of the page's usual room (never less). Such a page (an
+  // App's workspace, a workflow) keeps that usual room inside itself
+  // (`space8`, the shell's room below), so the scroller (AppShellContent)
+  // adds only the rest.
+  roomForDock: (height: number) => ({
+    [appShellVars.contentRoomBelow]: `max(0px, calc(${height}px + ${space["4"]} + ${space["6"]} - ${space["8"]}))`,
+  }),
 
   // In the page's card, at its end, flush with its end and foot: a hairline
   // at its start, on the card's ground.
@@ -176,10 +186,16 @@ const styles = stylex.create({
  */
 export const PageWithPanel = ({
   chatButtonRoom = false,
+  dockHeight = null,
   children,
 }: {
   /** Whether the page's bar keeps room at its end for the chat's button. */
   chatButtonRoom?: boolean;
+  /**
+   * How tall the dock over the card's foot is, while a page that fills the
+   * card keeps room under it for the dock; null when it keeps none.
+   */
+  dockHeight?: number | null;
   children: ReactNode;
 }) => {
   const body = useRef<HTMLDivElement>(null);
@@ -207,7 +223,8 @@ export const PageWithPanel = ({
         <div
           {...stylex.props(
             styles.page,
-            chatButtonRoom && styles.chatButtonRoom
+            chatButtonRoom && styles.chatButtonRoom,
+            dockHeight !== null && styles.roomForDock(dockHeight)
           )}
         >
           {children}

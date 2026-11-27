@@ -8,7 +8,8 @@
 //   <AppShell
 //     storageKey="app.sidebar"
 //     mark={<a href="/" aria-label="Home"><Icon icon={Logo} /></a>}
-//     onSearch={() => setSearching(true)}
+//     searchOpen={searching}
+//     onSearchOpenChange={setSearching}
 //     sidebar={<SidebarContent>…</SidebarContent>}
 //     panel={<SidePanel aria-label="Details">…</SidePanel>}
 //   >
@@ -26,7 +27,9 @@
 // AppShell is the parts composed for a frame of its own. A product that lays more round the page
 // (a chat beside it, a dock over its foot) composes the same parts itself inside SidebarProvider:
 // AppShellSidebar, then its own wrapper round AppShellCard (`overlay` over the card, `covered`
-// under a panel that covers it), holding AppShellContent, the page's scroller.
+// under a panel that covers it), holding AppShellContent, the page's scroller. A dock laid over
+// the card's foot keeps its room under a page that fills the card with
+// `appShellVars.contentRoomBelow`, set on an element round the page.
 //
 // On a narrow window (under lg) the sidebar is Sidebar's own sheet from the start, and the panel a
 // Sheet from the end, opened by the bar's panel button; a plain link followed in the sidebar's sheet
@@ -182,6 +185,9 @@ const styles = stylex.create({
     boxSizing: "border-box",
     height: "100%",
     minHeight: 0,
+    // Room under the page for what a product lays over the card's foot (a dock), so the page's
+    // end scrolls clear of it. AppShellPage keeps its own room below as well.
+    paddingBlockEnd: appShellVars.contentRoomBelow,
     overflowX: "clip",
     overflowY: "auto",
     scrollbarWidth: "none",
@@ -446,12 +452,6 @@ const followsLink = (event: globalThis.MouseEvent): boolean => {
   return target === "" || target === "_self";
 };
 
-/** Whether focus is in rich text, where the same keys shape the text. */
-const inRichText = () => {
-  const active = document.activeElement;
-  return active instanceof HTMLElement && active.isContentEditable;
-};
-
 // ---- The sidebar ---------------------------------------------------------------------------------
 
 /** Every prop an AppShellSidebar takes. */
@@ -461,12 +461,19 @@ export interface AppShellSidebarProps {
   /** At the head's start: the product's mark, most often a link home. */
   mark?: ReactNode;
   /**
-   * Opens the product's own search: a search button in the head, and its keys (`searchShortcut`)
-   * from anywhere on the page but rich text. On a narrow window the sidebar's sheet closes first.
+   * Opens and closes the product's own search: a search button in the head opens it, and its keys
+   * (`searchShortcut`) open it from anywhere on the page, rich text too, and close it again while
+   * `searchOpen`. An editor that binds the same keys itself (and so marks the key handled,
+   * `preventDefault`) keeps them. On a narrow window the sidebar's sheet closes first.
    */
-  onSearch?: () => void;
+  onSearchOpenChange?: (open: boolean) => void;
   /**
-   * The keys that open the search: `mod` is Cmd on a Mac and Ctrl elsewhere. `false` turns them
+   * Whether the search is open, so its keys close it again, from inside its dialog too. Without
+   * it the keys only open it, and pause while any dialog is open.
+   */
+  searchOpen?: boolean;
+  /**
+   * The keys that open (and with `searchOpen`, close) the search: `mod` is Cmd on a Mac and Ctrl elsewhere. `false` turns them
    * off.
    * @default "mod+k"
    */
@@ -487,26 +494,43 @@ export interface AppShellSidebarProps {
 export const AppShellSidebar = ({
   children,
   mark,
-  onSearch,
+  onSearchOpenChange,
+  searchOpen = false,
   searchShortcut = SEARCH_SHORTCUT,
   listenToSearchShortcut = true,
 }: AppShellSidebarProps) => {
   const words = useI18n().appShell;
   const { isMobile, setOpenMobile } = useSidebar();
   const keys =
-    onSearch === undefined || searchShortcut === false ? "" : searchShortcut;
+    onSearchOpenChange === undefined || searchShortcut === false
+      ? ""
+      : searchShortcut;
   // The hint formats a real shortcut only: with none, the default's is read and never shown.
   const hint = useShortcutHint(keys === "" ? SEARCH_SHORTCUT : keys);
   // The search opens over the page: the sidebar's sheet goes first.
   const search = () => {
     setOpenMobile(false);
-    onSearch?.();
+    onSearchOpenChange?.(true);
   };
   // Here, not on the button: the button is in the sheet, which is not there while it is closed.
-  useShortcut(keys === "" || !listenToSearchShortcut ? null : keys, search, {
-    when: () => !inRichText(),
-    description: words.search,
-  });
+  // The keys open the search as a page shortcut, which pauses under any open dialog; while the
+  // search is open they belong to the layer that holds the focus (the search's own, as a dialog
+  // keeps the focus inside it), so the same keys close what they opened. In rich text they run
+  // unless the editor handled them itself: UI SDK passes over a key marked handled.
+  useShortcut(
+    keys === "" || !listenToSearchShortcut ? null : keys,
+    () => {
+      if (searchOpen) {
+        onSearchOpenChange?.(false);
+      } else {
+        search();
+      }
+    },
+    {
+      layer: () => (searchOpen ? document.activeElement : document.body),
+      description: words.search,
+    }
+  );
   // Heard on the way up from the links inside, which are the keyboard's stops themselves (Enter on
   // a link is a click too).
   const watch = (node: HTMLDivElement) => {
@@ -530,7 +554,7 @@ export const AppShellSidebar = ({
           >
             <span {...stylex.props(styles.mark)}>{mark}</span>
             <div {...stylex.props(styles.tools)}>
-              {onSearch === undefined ? null : (
+              {onSearchOpenChange === undefined ? null : (
                 <SidebarMenuButton
                   size="icon"
                   aria-label={words.search}
@@ -648,7 +672,8 @@ export interface AppShellContentProps {
 
 /**
  * The page's scroller in the card: its bar stays at the top as the page scrolls under it, up and
- * down only; what is wider than the card is cut at its edge.
+ * down only; what is wider than the card is cut at its edge. Under the page it keeps
+ * `appShellVars.contentRoomBelow`, for what a product lays over the card's foot (a dock).
  */
 export const AppShellContent = ({
   children,
@@ -789,7 +814,8 @@ const ShellPage = ({
 export const AppShell = ({
   sidebar,
   mark,
-  onSearch,
+  onSearchOpenChange,
+  searchOpen,
   searchShortcut,
   listenToSearchShortcut,
   storageKey,
@@ -814,7 +840,8 @@ export const AppShell = ({
   >
     <AppShellSidebar
       mark={mark}
-      onSearch={onSearch}
+      onSearchOpenChange={onSearchOpenChange}
+      searchOpen={searchOpen}
       searchShortcut={searchShortcut}
       listenToSearchShortcut={listenToSearchShortcut}
     >

@@ -46,7 +46,7 @@ import { msg, select } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 import type { ReactNode } from "react";
 
 import { makerMark } from "../frame/brands.ts";
@@ -655,31 +655,6 @@ const noteOf = (said: string | undefined, reconnecting: boolean): ReactNode => {
   return reconnecting ? <Reconnecting /> : undefined;
 };
 
-/**
- * `stop`, after which the text takes the focus where Stop had it: Stop
- * gives way to Send, which can't hold the focus with nothing typed, and
- * it would fall to the page. A stopgap: remove this hook (and the text's
- * `ref`) once Damsko's Submit focuses the text on a stop as it does on a
- * send.
- */
-const useFocusAfterStop = (stop: (() => void) | undefined) => {
-  const textBox = useRef<HTMLDivElement>(null);
-  const stopHere =
-    stop === undefined
-      ? undefined
-      : () => {
-          const here =
-            textBox.current
-              ?.closest("form")
-              ?.contains(document.activeElement) === true;
-          stop();
-          if (here) {
-            textBox.current?.focus();
-          }
-        };
-  return { textBox, stopHere };
-};
-
 /** The box to ask in. Controlled: the page keeps the text and the model. */
 export const Composer = ({
   text,
@@ -804,7 +779,6 @@ export const Composer = ({
     unavailable,
     onSend,
   });
-  const { textBox, stopHere } = useFocusAfterStop(held ? letGo : onStop);
   const failed = heldFailure ?? failure;
   const note = noteOf(dictation.problem ?? failed, reconnecting);
   const typed = text.trim() !== "";
@@ -862,7 +836,6 @@ export const Composer = ({
       )}
       <PromptInputBody>
         <PromptInputTextarea
-          ref={textBox}
           aria-label={label ?? t`Your question`}
           {...(placeholder === undefined ? {} : { placeholder })}
         />
@@ -875,7 +848,7 @@ export const Composer = ({
           compact={compact}
           speech={dictation.speech}
           // Stop lets a held question go; else it stops the answer, where one can be.
-          stop={stopHere}
+          stop={held ? letGo : onStop}
           running={running}
         >
           {children}

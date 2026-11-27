@@ -4,6 +4,8 @@ import type {
   ChatSearchHit,
   ChatSummary,
 } from "@grasp-os/shared/chat";
+import { AppShellSidebar } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
+import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -17,10 +19,11 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
-import { ChatSwitcherProvider } from "./chat-switcher.tsx";
+import { ChatSwitcherProvider, useChatsSearch } from "./chat-switcher.tsx";
 
 // The ⌘K window against core's chats as the page reaches them over RPC,
-// faked: it opens with the keys on any page, lists the person's chats by
+// faked, beside the frame's sidebar, whose search keys are the window's:
+// it opens with the keys on any page, the chat's box too, lists the person's chats by
 // when they were last used, narrows them by title at once as the person
 // types, then to what core found was said, showing where, each chat as
 // core lists it now; and the same keys close it again.
@@ -42,6 +45,15 @@ const chat = (id: string, title: string): ChatSummary => ({
   make: null,
   archived: false,
 });
+
+/** The frame's sidebar, its search the chats window, as app-sidebar.tsx wires it. */
+const Sidebar = () => (
+  <SidebarProvider>
+    <AppShellSidebar {...useChatsSearch()}>
+      <nav aria-label="Main" />
+    </AppShellSidebar>
+  </SidebarProvider>
+);
 
 const board = chat("board", "Board report");
 const lease = chat("lease", "Lease of the office");
@@ -92,6 +104,7 @@ const shown = async (
     routeTree: createRootRoute({
       component: () => (
         <ChatSwitcherProvider>
+          <Sidebar />
           <p>Any page</p>
         </ChatSwitcherProvider>
       ),
@@ -173,9 +186,12 @@ const settled = async (): Promise<void> => {
   });
 };
 
+/** Presses `init` where the focus is, as the keyboard does (Ctrl K for ⌘K: the test's window is no Mac). */
 const press = async (init: KeyboardEventInit): Promise<void> => {
   await act(async () => {
-    window.dispatchEvent(new KeyboardEvent("keydown", init));
+    (document.activeElement ?? document.body).dispatchEvent(
+      new KeyboardEvent("keydown", { ...init, bubbles: true })
+    );
     await Promise.resolve();
   });
 };
@@ -235,7 +251,7 @@ describe("the chats window", () => {
     const { asked } = await shown(async () => await answer.promise);
     expect(dialog()).toBeNull();
 
-    await openWindow({ key: "k", metaKey: true });
+    await openWindow({ key: "k", ctrlKey: true });
     expect(rows()).toStrictEqual([
       "Board report",
       "Lease of the office",
@@ -272,7 +288,7 @@ describe("the chats window", () => {
       async () => await Promise.resolve([{ chat: lease, said: null }]),
       [board, renamed, travel]
     );
-    await openWindow({ key: "k", metaKey: true });
+    await openWindow({ key: "k", ctrlKey: true });
     await type("office");
     await vi.waitFor(() => {
       expect(rows()).toStrictEqual(["Office lease 2027"]);
@@ -288,7 +304,7 @@ describe("the chats window", () => {
       async () => await late.promise,
       1
     );
-    await openWindow({ key: "k", metaKey: true });
+    await openWindow({ key: "k", ctrlKey: true });
 
     await choose("archived");
     const whileArchivedRead = rows();
@@ -317,7 +333,7 @@ describe("the chats window", () => {
       async () => await later.promise,
       1
     );
-    await openWindow({ key: "k", metaKey: true });
+    await openWindow({ key: "k", ctrlKey: true });
     const search = () =>
       dialog()?.querySelector('[role="combobox"]')?.getAttribute("aria-label");
 
@@ -335,25 +351,19 @@ describe("the chats window", () => {
     });
   });
 
-  it("opens with ⌘K from rich text such as the chat's box, which binds no ⌘K of its own", async () => {
+  it("opens with ⌘K from rich text such as the chat's box, which binds no ⌘K of its own, and closes again with the same keys", async () => {
     await shown(async () => await Promise.resolve([]));
     const editor = document.createElement("div");
     editor.contentEditable = "true";
     document.body.append(editor);
     editor.focus();
 
-    await act(async () => {
-      editor.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true })
-      );
-      await Promise.resolve();
+    await openWindow({ key: "k", ctrlKey: true });
+    // The same keys again, the focus now in the window, close it.
+    await press({ key: "k", ctrlKey: true });
+    await vi.waitFor(() => {
+      expect(dialog()).toBeNull();
     });
-    await vi.waitFor(
-      () => {
-        expect(rows().length).toBeGreaterThan(0);
-      },
-      { timeout: openMs }
-    );
   });
 
   it("closes again with the same keys", async () => {

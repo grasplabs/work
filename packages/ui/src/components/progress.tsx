@@ -1,7 +1,8 @@
 // Progress: how far a task has come, as a bar (Progress) or a ring (ProgressCircle), or that it is
 // under way when how far is unknown, in StyleX,
 // built on UI SDK's Progress: a round track in three
-// heights, the primary colour for what is done, and a ring in three sizes.
+// heights, the primary colour for what is done, and a ring in three sizes. Meter is the same bar
+// for a reading that stands still (storage used, seats taken), on UI SDK's Meter.
 //
 //   <Progress value={60}>
 //     <ProgressLabel>Exporting the report</ProgressLabel>
@@ -9,11 +10,24 @@
 //   </Progress>
 //   <Progress aria-label="Connecting" value={null} />             no words above it; how far unknown
 //   <ProgressCircle aria-label="Uploading" value={40} size="lg" />
+//   <Meter value={68}>
+//     <MeterLabel>Storage used</MeterLabel>
+//     <MeterValue />
+//   </Meter>
 //
-// A progress bar is for a task that will finish; a reading such as storage used is a meter.
+// A progress bar is for a task that will finish; a reading such as storage used is a Meter
+// (`meter`, as WAI-ARIA's Meter pattern has it): a value in a known range, never unknown, and a
+// colour that says something only with words that say it too.
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
+import {
+  Meter as MeterPrimitive,
+  MeterIndicator,
+  MeterLabel as MeterLabelPrimitive,
+  MeterTrack,
+  MeterValue as MeterValuePrimitive,
+} from "@ui-sdk/react/meter";
 import {
   Progress as ProgressPrimitive,
   ProgressIndicator,
@@ -120,6 +134,59 @@ export interface ProgressCircleProps {
   getAriaValueText?: (value: number | null) => string;
   /** Layout only: where it sits. */
   style?: LayoutStyle;
+}
+
+/** Every prop a Meter takes. */
+export interface MeterProps {
+  /** The reading, from `min` to `max` ("68" of 100 GB used). */
+  value: number;
+  /**
+   * The least the reading can be.
+   * @default 0
+   */
+  min?: number;
+  /**
+   * The most the reading can be.
+   * @default 100
+   */
+  max?: number;
+  /**
+   * What stands above the bar: a MeterLabel, which names it, and a MeterValue at the line's end.
+   * Left out where the words beside it already say it; `aria-label` names it then.
+   */
+  children?: ReactNode;
+  /** What is measured, in a few words ("Storage used"), when no MeterLabel names the bar. */
+  "aria-label"?: string;
+  /**
+   * The colour of the reading, when it says something: `warning` near a limit, `destructive` past
+   * it, `success` where it is good. The words say it too: colour alone never does.
+   * @default "default"
+   */
+  variant?: ProgressVariant;
+  /**
+   * The bar 4, 8 or 12px tall.
+   * @default "default"
+   */
+  size?: ProgressSize;
+  /** What a screen reader hears for the value, when the percentage says too little: "6 of 6 up to date". */
+  getAriaValueText?: (value: number) => string;
+  /** Layout only: where it sits and how wide it is. */
+  style?: LayoutStyle;
+}
+
+/** Every prop a MeterLabel takes. */
+export interface MeterLabelProps {
+  /** What is measured, in a few words ("Storage used"). It names the bar. */
+  children: ReactNode;
+}
+
+/** Every prop a MeterValue takes. */
+export interface MeterValueProps {
+  /**
+   * What it shows, from the formatted value ("68%") and the value itself ("68 of 100 GB"). Left
+   * out, the formatted value.
+   */
+  children?: (formatted: string, value: number) => ReactNode;
 }
 
 const REDUCED = media.reducedMotion;
@@ -430,4 +497,48 @@ export const ProgressCircle = ({
       />
     )}
   </ProgressPrimitive>
+);
+
+/** What is measured, above the bar: it names the meter. */
+export const MeterLabel = ({ children }: MeterLabelProps) => (
+  <MeterLabelPrimitive {...stylex.props(styles.label)}>
+    {children}
+  </MeterLabelPrimitive>
+);
+
+/** The reading, at the end of the label's line: unseen by a screen reader, which hears the meter's own value. */
+export const MeterValue = ({ children }: MeterValueProps) => (
+  <MeterValuePrimitive aria-hidden="true" {...stylex.props(styles.value)}>
+    {children === undefined
+      ? undefined
+      : (state): ReactNode => children(state.text, state.value)}
+  </MeterValuePrimitive>
+);
+
+/** A reading in a known range, as a bar: Progress's look, with the `meter` role. */
+export const Meter = ({
+  value,
+  min = 0,
+  max = 100,
+  children,
+  "aria-label": ariaLabel,
+  variant = "default",
+  size: sized = "default",
+  getAriaValueText,
+  style,
+}: MeterProps) => (
+  <MeterPrimitive
+    value={value}
+    min={min}
+    max={max}
+    aria-label={ariaLabel}
+    getValueLabel={getAriaValueText}
+    {...stylex.props(styles.root, variants[variant], style)}
+  >
+    {children}
+    <MeterTrack {...stylex.props(styles.track, bars[sized])}>
+      {/* The class only: UI SDK sets the indicator's width as its own inline style. */}
+      <MeterIndicator className={className(styles.indicator)} />
+    </MeterTrack>
+  </MeterPrimitive>
 );

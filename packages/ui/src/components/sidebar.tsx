@@ -1076,10 +1076,6 @@ const providers = new Set<HTMLElement>();
 /** Whether this provider answers the keys: the one holding focus, else the first on the page. */
 const answers = (element: HTMLElement | null) => {
   const active = document.activeElement;
-  if (active instanceof HTMLElement && active.isContentEditable) {
-    // In rich text the same keys make text bold.
-    return false;
-  }
   const all = [
     ...document.querySelectorAll<HTMLElement>('[data-slot="sidebar-wrapper"]'),
   ].filter((each) => providers.has(each));
@@ -1182,7 +1178,9 @@ export interface SidebarProviderProps {
   storageKey?: string;
   /**
    * The keys that fold and open it from anywhere on the page: `mod` is Cmd on a Mac and Ctrl
-   * elsewhere. `false` turns them off. Not in rich text, where the same keys make text bold.
+   * elsewhere. `false` turns them off. In rich text too, unless the editor handles the keys itself
+   * (it binds them for bold and marks them handled, `preventDefault`), as every shortcut of UI
+   * SDK's is passed over once handled.
    * @default "mod+b"
    */
   keyboardShortcut?: string | false;

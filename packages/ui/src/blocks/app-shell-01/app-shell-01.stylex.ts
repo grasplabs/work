@@ -8,6 +8,12 @@ export const appShellVars = stylex.defineVars({
    * end at the bar's height (a button of its own). Set it on an element round the page.
    */
   barEndRoom: "0px",
+  /**
+   * Room kept under the page in its scroller (AppShellContent), for what a product lays over the
+   * card's foot (a dock), so the page's end scrolls clear of it. For a page that fills the card:
+   * AppShellPage keeps room below of its own. Set it on an element round the page.
+   */
+  contentRoomBelow: "0px",
 });
 
 /** The switch's track, marked so its thumb and tabs follow whether the thumb stands (`data-thumb`). */

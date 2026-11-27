@@ -18,6 +18,10 @@
 // anywhere in the row stand above it as their own stops for the keyboard, never inside the link or
 // the button. `disabled` puts the press out of use, dimmed as a disabled Button is.
 //
+// The parts that hold others (ItemContent, ItemActions, ItemHeader, ItemFooter) are blocks, so a
+// form (a choice and its button) or a list stands in a row as it would anywhere; the title and the
+// lines of words are words.
+//
 // In an ItemGroup each Item is a list item; an ItemSeparator between two draws the page's hairline,
 // and `separated` draws it between every two.
 // An ItemGrid lays Items out as tiles. Before its data, `loading` keeps the row's boxes: a part
@@ -221,7 +225,10 @@ export type ItemFooterProps = ItemContentProps;
 
 /** Every prop an ItemActions takes. */
 export interface ItemActionsProps {
-  /** Its buttons, most used last ("Manage"): their own stops for the keyboard. */
+  /**
+   * Its buttons, most used last ("Manage"): their own stops for the keyboard. Or a small form (a
+   * choice and the button that sends it).
+   */
   children?: ReactNode;
   /**
    * The actions stand quiet until the row is pointed at or holds focus: always there for the
@@ -833,7 +840,7 @@ export const ItemMedia = ({
 
 /** The words: the title, and the line about it under it. */
 export const ItemContent = ({ children, style }: ItemContentProps) => (
-  <span
+  <div
     data-slot="item-content"
     {...stylex.props(
       styles.content,
@@ -842,7 +849,7 @@ export const ItemContent = ({ children, style }: ItemContentProps) => (
     )}
   >
     {children}
-  </span>
+  </div>
 );
 
 /** The title's words, as the row's stretched press when the row is a link or a button. */
@@ -997,26 +1004,26 @@ export const ItemActions = ({
   style,
 }: ItemActionsProps) =>
   isBlank(children) ? null : (
-    <span
+    <div
       data-slot="item-actions"
       {...stylex.props(styles.actions, showOnHover && styles.reveal, style)}
     >
       {children}
-    </span>
+    </div>
   );
 
 /** A line of its own above the row's parts: a label and a control at its ends. */
 export const ItemHeader = ({ children, style }: ItemHeaderProps) => (
-  <span data-slot="item-header" {...stylex.props(styles.band, style)}>
+  <div data-slot="item-header" {...stylex.props(styles.band, style)}>
     {children}
-  </span>
+  </div>
 );
 
 /** A line of its own under the row's parts: a note and a control at its ends. */
 export const ItemFooter = ({ children, style }: ItemFooterProps) => (
-  <span data-slot="item-footer" {...stylex.props(styles.band, style)}>
+  <div data-slot="item-footer" {...stylex.props(styles.band, style)}>
     {children}
-  </span>
+  </div>
 );
 
 /** The chevron at a link's end. */
