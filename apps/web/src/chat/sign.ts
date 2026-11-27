@@ -18,8 +18,9 @@ export type WorkState = "reading" | "thinking" | "writing" | "working";
  * to the question stored so far, oldest first; `ran` whether a code step
  * has its result. Code being written or run is work; an answer that shows
  * no words yet is thought; words are writing. Before any of that, Grasp
- * reads the workspace; between its answers, it thinks, or works while the
- * code of the last one runs.
+ * reads the workspace; between its answers, it thinks, or works while any
+ * step of the last one runs: the reads of one answer run together, so its
+ * last may end before the others.
  */
 export const signOf = ({
   partial,
@@ -37,8 +38,7 @@ export const signOf = ({
   if (latest === undefined) {
     return "reading";
   }
-  const steps = [latest.code.at(-1), latest.tools.at(-1)];
-  if (steps.some((step) => step !== undefined && !ran(step.callId))) {
+  if ([...latest.code, ...latest.tools].some((step) => !ran(step.callId))) {
     return "working";
   }
   return partial === null || partial.text.trim() === ""
