@@ -38,7 +38,11 @@ import {
   NativeSelect,
   NativeSelectOption,
 } from "@grasp-os/ui/components/native-select";
-import { Progress, ProgressLabel } from "@grasp-os/ui/components/progress";
+import {
+  Meter,
+  MeterLabel,
+  MeterValue,
+} from "@grasp-os/ui/components/progress";
 import { Section, SectionHeader } from "@grasp-os/ui/components/section-header";
 import { Separator } from "@grasp-os/ui/components/separator";
 import { visuallyHidden } from "@grasp-os/ui/lib/styles";
@@ -412,18 +416,24 @@ const ChannelPart = ({ channel }: { channel: ChannelProgress }) => {
         <PartNote>No company follows it.</PartNote>
       ) : (
         <div {...stylex.props(styles.channel)}>
-          {channel.releaseId === null ? null : (
-            <Progress
-              aria-label={`${name} companies up to date`}
-              value={
-                channel.following === 0
-                  ? 0
-                  : (channel.upToDate / channel.following) * 100
+          {channel.releaseId === null || channel.following === 0 ? null : (
+            // A reading, not a task: how many of the companies following
+            // it run its release (none to count while every one is pinned).
+            <Meter
+              getAriaValueText={() =>
+                `${channel.upToDate} of ${channel.following} up to date`
               }
+              max={channel.following}
+              value={channel.upToDate}
               variant={channel.failed ? "destructive" : "default"}
             >
-              <ProgressLabel>{`${channel.upToDate} of ${channel.following} up to date`}</ProgressLabel>
-            </Progress>
+              <MeterLabel>Companies up to date</MeterLabel>
+              <MeterValue>
+                {(_, value) =>
+                  `${String(value)} of ${String(channel.following)}`
+                }
+              </MeterValue>
+            </Meter>
           )}
           <ChannelClients channel={channel} />
         </div>

@@ -78,8 +78,16 @@ const settled = async (): Promise<void> => {
 
 /** The chat's name, renamed where it stands, as the chat panel's head draws it. */
 const Title = ({ of }: { of: ChatSummary }) => {
-  const rename = useRenameChat(of.id);
-  return <PanelTitle onRename={rename}>{of.title}</PanelTitle>;
+  const { onRename: handleRename, maxLength, errorText } = useRenameChat(of.id);
+  return (
+    <PanelTitle
+      onRename={handleRename}
+      renameErrorText={errorText}
+      renameMaxLength={maxLength}
+    >
+      {of.title}
+    </PanelTitle>
+  );
 };
 
 /**
@@ -89,7 +97,18 @@ const Title = ({ of }: { of: ChatSummary }) => {
  */
 const opened = async (
   chat: ChatSummary,
-  { others = [], slow = false }: { others?: ChatSummary[]; slow?: boolean } = {}
+  {
+    others = [],
+    slow = false,
+    rename = async () => {
+      await Promise.resolve();
+    },
+  }: {
+    others?: ChatSummary[];
+    slow?: boolean;
+    /** How core answers a rename, before it is written down. */
+    rename?: () => Promise<void>;
+  } = {}
 ) => {
   const writes: string[] = [];
   const answered = Promise.withResolvers<boolean>();
@@ -114,7 +133,7 @@ const opened = async (
       };
     },
     rename: async (id: string, name: string) => {
-      await Promise.resolve();
+      await rename();
       writes.push(`rename ${id} ${name}`);
     },
     remove: async (id: string) => {
@@ -246,7 +265,7 @@ const renameButton = (name: string): HTMLButtonElement => {
 /** The field the chat's new name is typed in. */
 const nameField = (): HTMLInputElement => {
   const found = document.querySelector<HTMLInputElement>(
-    'input[aria-label="Name"]'
+    'input[aria-label="Rename"]'
   );
   if (found === null) {
     throw new Error("No name field");
@@ -334,6 +353,72 @@ describe("the open chat's menu", () => {
     expect(titleButton().textContent).toBe("Leave");
   });
 
+  it("waits, read only, while core renames it, then closes; where core can't, stays open with the words typed and says so", async () => {
+    const core = Promise.withResolvers<boolean>();
+    let fails = false;
+    const { writes } = await opened(leave, {
+      rename: async () => {
+        await core.promise;
+        if (fails) {
+          throw new Error("Core refused");
+        }
+      },
+    });
+    await startRename();
+    await typeInto(nameField(), "Annual leave");
+    await press(renameButton("Save"));
+    const whileSaving = nameField().readOnly;
+    fails = true;
+    await act(async () => {
+      core.resolve(true);
+      await core.promise;
+    });
+    await settled();
+
+    expect({
+      whileSaving,
+      stillOpen: nameField().value,
+      said: (
+        document.querySelector('[role="dialog"]')?.textContent ?? ""
+      ).includes("The chat couldn't be renamed. Try again."),
+      writes,
+      most: nameField().maxLength,
+    }).toStrictEqual({
+      whileSaving: true,
+      stillOpen: "Annual leave",
+      said: true,
+      writes: [],
+      most: 200,
+    });
+  });
+
+  it("opens the rename from F2 and Enter on the name, never from a pointer's press, which moves a floating window", async () => {
+    await opened(leave);
+    const name = titleButton();
+    // A pointer's press on the name: down, then its click (one press).
+    await act(async () => {
+      name.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      name.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+      await Promise.resolve();
+    });
+    await settled();
+    const byPointer = document.querySelector('[role="dialog"]') !== null;
+    // Enter on the name's button: a click that counts no presses.
+    await act(async () => {
+      name.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true })
+      );
+      name.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 0 }));
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({
+      byPointer,
+      byEnter: document.querySelector('[role="dialog"]') !== null,
+    }).toStrictEqual({ byPointer: false, byEnter: true });
+  });
+
   it("deletes the chat only once the person confirms, and leaves it for a new chat", async () => {
     setActiveChat("chat-1");
     const { writes, router } = await opened(leave);
@@ -368,13 +453,13 @@ describe("the open chat's menu", () => {
     const other: ChatSummary = { ...leave, id: "chat-2", title: "Pay" };
     const { writes, router } = await opened(leave, { others: [other] });
     await startRename();
-    expect(document.querySelector('input[aria-label="Name"]')).not.toBeNull();
+    expect(document.querySelector('input[aria-label="Rename"]')).not.toBeNull();
 
     act(() => {
       router.history.push("/?chat=chat-2");
     });
     await settled();
-    expect(document.querySelector('input[aria-label="Name"]')).toBeNull();
+    expect(document.querySelector('input[aria-label="Rename"]')).toBeNull();
     expect(titleButton().textContent).toBe("Pay");
     expect(writes).toStrictEqual([]);
   });

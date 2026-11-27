@@ -3922,7 +3922,6 @@ msgstr "Gebunden an"
 msgid "Brain"
 msgstr "Gehirn"
 
-#: src/frame/site-header.tsx
 #: src/frame/ui-words.tsx
 msgid "Breadcrumb"
 msgstr "Brotkrümelnavigation"
@@ -4121,8 +4120,6 @@ msgstr "Ausführen nicht möglich: {unread}"
 #: src/connections/http-connections.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/drafts/share-with-team.tsx
-#: src/frame/panels/head.tsx
-#: src/frame/panels/rename.tsx
 #: src/frame/ui-words.tsx
 #: src/inbox/decision-confirmation.tsx
 #: src/interview/destination.tsx
@@ -6378,7 +6375,6 @@ msgstr "Tür"
 msgid "Dots"
 msgstr "Punkte"
 
-#: src/frame/panels/rename.tsx
 #: src/frame/ui-words.tsx
 msgid "Double-click or press F2 to rename"
 msgstr "Doppelklicken oder F2 drücken, um umzubenennen"
@@ -10985,8 +10981,6 @@ msgstr "Meine Version der App ist nicht gestartet. Finde heraus, warum, und behe
 #: src/apps/field-editor.tsx
 #: src/connections/add-connector.tsx
 #: src/connections/http-connections.tsx
-#: src/frame/panels/head.tsx
-#: src/frame/panels/rename.tsx
 #: src/onboarding/interviews-progress.tsx
 #: src/projects/project-dialog.tsx
 #: src/routes/_shell.settings.members.tsx
@@ -13710,10 +13704,6 @@ msgstr "Gedrückt halten: {words}"
 msgid "Press Enter to add it."
 msgstr "Drücken Sie die Eingabetaste, um es hinzuzufügen."
 
-#: src/frame/panels/head.tsx
-msgid "Press or press F2 to rename"
-msgstr "Drücken oder F2 drücken zum Umbenennen"
-
 #: src/frame/ui-words.tsx
 msgid "Press Space or Enter to pick it up, the arrow keys to move it, Space or Enter to put it down, or Escape to put it back."
 msgstr "Drücken Sie die Leertaste oder die Eingabetaste zum Aufnehmen, die Pfeiltasten zum Verschieben, die Leertaste oder die Eingabetaste zum Ablegen oder Esc zum Zurücklegen."
@@ -14584,7 +14574,6 @@ msgstr "Wird entfernt"
 #: src/chat/chat-window.tsx
 #: src/chat/sidebar-chats.tsx
 #: src/frame/panels/head.tsx
-#: src/frame/panels/rename.tsx
 #: src/frame/ui-words.tsx
 #: src/settings/teams.tsx
 msgid "Rename"
@@ -15307,8 +15296,7 @@ msgstr "Sand"
 #: src/apps/field-editor.tsx
 #: src/brain/goals-editor.tsx
 #: src/brain/skills-page.tsx
-#: src/frame/panels/head.tsx
-#: src/frame/panels/rename.tsx
+#: src/frame/ui-words.tsx
 #: src/projects/project-dialog.tsx
 #: src/settings/billing-card.tsx
 #: src/settings/instruction-file.tsx

@@ -112,7 +112,7 @@ import {
   space,
 } from "../../lib/tokens.stylex";
 import { durations, popup } from "../../lib/tokens.values";
-import { announce } from "../../lib/utils";
+import { announce, renamed } from "../../lib/utils";
 import { iconVars } from "../../lib/vars.stylex";
 import { switchMarker } from "./app-shell-01.stylex";
 
@@ -1186,9 +1186,9 @@ const useRename = (row: AppShellNavRow) => {
   }, [renames, renaming]);
   const done = (next: string | undefined, byKey: boolean): void => {
     setRenaming(false);
-    const trimmed = next?.trim();
-    if (trimmed !== undefined && trimmed !== "" && trimmed !== row.label) {
-      row.onRename?.(trimmed);
+    const name = next === undefined ? undefined : renamed(next, row.label);
+    if (name !== undefined) {
+      row.onRename?.(name);
     }
     if (byKey) {
       requestAnimationFrame(() => {

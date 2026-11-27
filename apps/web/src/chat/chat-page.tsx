@@ -120,7 +120,9 @@ export const ChatPage = ({
         crumbs={[
           {
             label: name,
-            onRename: rename,
+            onRename: rename.onRename,
+            renameMaxLength: rename.maxLength,
+            renameErrorText: rename.errorText,
             renaming,
             onRenamingChange: setRenaming,
           },

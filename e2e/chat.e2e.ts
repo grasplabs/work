@@ -164,10 +164,12 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
     "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
     { timeout: 30_000 }
   );
-  // It is the first chat in the window, named after the question.
+  // It is the first chat in the window, named after the question: ⌘K
+  // from the chat's box opens it, and the same keys close it again.
+  await chat.getByRole("textbox", { name: "Ask Grasp" }).click();
   let chats = await chatsWindow(page);
   await expect(rowOf(chats, question)).toBeVisible();
-  await page.keyboard.press("Escape");
+  await page.keyboard.press("ControlOrMeta+k");
   await expect(chats).toHaveCount(0);
 
   // Trying again asks the question again, in place: drawn once, its new

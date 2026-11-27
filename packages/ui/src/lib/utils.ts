@@ -137,6 +137,15 @@ export const listOf = (children: ReactNode): ReactNode[] =>
     );
 
 /**
+ * The new name a rename gives, trimmed, or nothing to keep the old: empty and unchanged names keep
+ * it. The one rule of every rename here (InlineEdit, its popup, a sidebar row's field).
+ */
+export const renamed = (draft: string, current: string): string | undefined => {
+  const next = draft.trim();
+  return next === "" || next === current ? undefined : next;
+};
+
+/**
  * Whether children draw nothing: none, null, false, empty words, or a list of only those. A number
  * is content, 0 too.
  */
