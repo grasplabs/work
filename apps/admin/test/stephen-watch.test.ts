@@ -173,7 +173,7 @@ describe("the watch of Stephen", () => {
     );
     expect({
       acme: acmeSetup?.watched?.signals,
-      unlisted: unlistedSetup?.watched?.signals.people,
+      unlisted: unlistedSetup?.watched?.signals,
       older: olderSetup?.watched,
     }).toStrictEqual({
       acme: {
@@ -190,7 +190,20 @@ describe("the watch of Stephen", () => {
         personalAgain: 0,
         people: 3,
       },
-      unlisted: undefined,
+      // Watched all the same, with no size.
+      unlisted: {
+        hours: 24,
+        answered: 40,
+        failed: 1,
+        refused: 2,
+        busy: 0,
+        sendFailed: 0,
+        uninstalled: 0,
+        p50Ms: 4000,
+        p90Ms: 8000,
+        companyAgain: 0,
+        personalAgain: 0,
+      },
       older: null,
     });
   });
