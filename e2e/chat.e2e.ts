@@ -478,10 +478,13 @@ test("a person comes back to a chat that answered while they were away, sees its
     core[Symbol.dispose]();
   }
 
-  // They come back: the chat's row has its dot, said as Unread.
+  // They come back: the chat's row has its dot, said as Unread, and its
+  // title in the bold weight.
   await page.goto("/");
   const sidebar = page.getByRole("navigation", { name: "Main" });
-  await sidebar.getByRole("link", { name: `${title} Unread` }).click();
+  const unread = sidebar.getByRole("link", { name: `${title} Unread` });
+  await expect(unread).toHaveCSS("font-weight", "600");
+  await unread.click();
 
   // The chat opens at the New line, near the top, with room over it: the
   // answer is longer than the window, so its end is below, to scroll to.
@@ -493,12 +496,13 @@ test("a person comes back to a chat that answered while they were away, sees its
     page.getByRole("button", { name: "Jump to latest" })
   ).toBeVisible();
 
-  // Read now, on core: back on Chat's start, the row has no dot.
+  // Read now, on core: back on Chat's start, the row has no dot, and its
+  // title is in the regular weight again.
   await sidebar.getByRole("link", { name: "Chat", exact: true }).click();
   await expect(page).toHaveURL(/\/$/u);
   await expect(
     sidebar.getByRole("link", { name: title, exact: true })
-  ).toBeVisible();
+  ).toHaveCSS("font-weight", "400");
 });
 
 test("a person's list follows what happens elsewhere: a chat answered in the background gets its dot, and a question from another tab moves its chat up, with no page change", async ({
