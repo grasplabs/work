@@ -160,12 +160,14 @@ describe("the admin summary", () => {
     }).toStrictEqual({
       status: 200,
       cache: "no-store",
-      // On the roster, the gate never closed: the company is in.
+      // On the roster, the gate never closed: the company is in. Who works
+      // where and who leads the team, 25 of the weights' 95 since the Pulse
+      // step left the onboarding.
       onboarding: {
         stage: "open",
         day: null,
         days: null,
-        known: 25,
+        known: 26,
         threshold: 80,
         told: false,
         paused: false,

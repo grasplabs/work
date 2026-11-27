@@ -6,7 +6,7 @@
 
 import type { FlowStep, OnboardingFlow } from "./onboarding-flow.ts";
 
-/** How much each source counts towards what Grasp knows, in percent. */
+/** How much each source counts towards what Grasp knows, against the others (`knownPercent`). */
 export const knownWeights = {
   /** The kickoff with the sponsor, and the website. */
   kickoff: 20,
