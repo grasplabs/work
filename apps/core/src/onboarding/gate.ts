@@ -307,6 +307,20 @@ const staffUntil = (
     : staff.until;
 };
 
+/**
+ * When a staff session's access ends by itself, by the deployment's
+ * config (`staffUntil`): the admin's window, or 7 days after Grasp's go
+ * for the onboarding scope. Undefined without staff access.
+ */
+export const staffEndsAt = async (env: Env): Promise<number | undefined> => {
+  const staff = signInConfig(env)?.staff;
+  if (staff === undefined) {
+    return undefined;
+  }
+  const { openedAt } = await stored(env);
+  return Date.parse(staffUntil(staff, openedAt));
+};
+
 /** The gate, with how much Grasp knows by `view` of the onboarding. */
 export const gateView = async (
   env: Env,

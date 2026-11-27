@@ -386,14 +386,16 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     const { lease, member } = await memberOf(opened);
     const follower = await followedList(opened, member.api.pages, lease);
 
+    const before = follower.received.length;
     await admin.api.members.remove(member.userId);
 
-    await expect(whenSignedOut(follower, member.closed)).resolves.toStrictEqual(
-      {
-        last: "auth.unauthenticated",
-        released: true,
-      }
-    );
+    await expect(
+      whenSignedOut(follower, member.closed, before)
+    ).resolves.toStrictEqual({
+      last: "auth.unauthenticated",
+      released: true,
+      dataAfter: 0,
+    });
   });
 
   it("clears what a query kept while it waits to follow again, once the person is only a user", async () => {

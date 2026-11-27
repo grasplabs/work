@@ -18,19 +18,13 @@ export type SessionCheck = (() => Promise<Identity>) & {
 /**
  * Runs `run` as the person behind the session: checks it first and hands
  * over the identity that check returned, so nothing reaches the person
- * without the check, or with an identity a method kept for itself; and
- * checks again before the answer goes back, so a call that ran longer than
- * a reading holds never answers someone whose session ended meanwhile
- * (free while the reading is still fresh, as every check shares it).
+ * without the check, or with an identity a method kept for itself. The
+ * call checks it again before its answer goes back (call-context.ts).
  */
 export const withPerson = async <T>(
   check: SessionCheck,
   run: (person: Identity) => T | Promise<T>
-): Promise<T> => {
-  const answer = await run(await check());
-  await check();
-  return answer;
-};
+): Promise<T> => await run(await check());
 
 /**
  * Whether `person` may act inside the client's workspace: a member, never

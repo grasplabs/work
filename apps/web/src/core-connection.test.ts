@@ -57,6 +57,8 @@ interface Fake {
   disposed: boolean;
   /** Breaks it, as a dropped socket does. */
   break: () => void;
+  /** Breaks it as core does once the session ended (close code 4401). */
+  endSession: () => void;
   /** Stops it answering anything, without saying so, as a socket the network died under. */
   silence: () => void;
   /** Answers every ping it held back since, as a socket that recovers. */
@@ -79,6 +81,8 @@ const tab = (answers: Answer[]) => {
     hostTakesMs: 0,
   };
   const opened: Fake[] = [];
+  /** The stand-in connections core closed as their session ended. */
+  const signedOut = new WeakSet<object>();
   const ended: string[] = [];
   /** What the tab asked core, by name, on any connection. */
   const asked: string[] = [];
@@ -116,6 +120,11 @@ const tab = (answers: Answer[]) => {
         answer,
         disposed: false,
         break: () => {
+          broken?.();
+        },
+        endSession: () => {
+          // oxlint-disable-next-line no-use-before-define -- set below, before anyone ends it
+          signedOut.add(stub);
           broken?.();
         },
         silence: () => {
@@ -172,6 +181,7 @@ const tab = (answers: Answer[]) => {
       offline = onOffline;
     },
     clock: { now: () => Date.now(), visible: () => page.visible },
+    signedOut: (api) => signedOut.has(api),
     checkHost: async () => {
       const said = Promise.withResolvers<HostCheck>();
       setTimeout(() => {
@@ -403,6 +413,21 @@ describe("the tab's one connection to core", () => {
     await expect(refusal(frame.link.session())).resolves.toBe(
       "auth.unauthenticated"
     );
+  });
+
+  it("stops every frame and ends the page the moment core closes the connection as signed out, connecting no more", async () => {
+    const { core, opened, ended } = tab([one]);
+    await core.session();
+    const frame = frameOn(core);
+
+    opened[0]?.endSession();
+
+    expect({ told: frame.told, ended, opened: opened.length }).toStrictEqual({
+      told: ["signed-out"],
+      ended: ["page reloads"],
+      opened: 1,
+    });
+    await expect(refusal(core.session())).resolves.toBe("auth.unauthenticated");
   });
 
   it("tells every frame, and still reloads, when stopping one of them throws", async () => {

@@ -9,6 +9,7 @@ import type {
   LiveVersion,
 } from "@grasp-os/shared/drafts";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { pageErrors } from "@grasp-os/shared/pages";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -51,6 +52,12 @@ import { writeWorkflowDraft } from "./workflow-editor.ts";
  */
 const maxWatches = 10;
 
+/**
+ * The most tellings a slow page's follow holds for it, as JSON: a few
+ * hundred, each a few dozen characters. Past it the follow catches up.
+ */
+const maxQueuedTellings = 16 * 1024;
+
 /** How a push to a page that follows a draft is refused. */
 const refusals = {
   invalid: () => agentErrors.create("agent.invalid_request"),
@@ -92,11 +99,17 @@ export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
    */
   readonly #stillOpen: StillOpen;
 
-  constructor(env: Env, check: SessionCheck) {
+  /** `closed`: aborted once the connection closes, which lets go of every follow of it. */
+  constructor(env: Env, check: SessionCheck, closed: AbortSignal) {
     super();
     this.#env = env;
     this.#check = check;
     this.#stillOpen = stillOpenWhile(check);
+    closed.addEventListener("abort", () => {
+      for (const watch of this.#watches) {
+        watch[Symbol.dispose]();
+      }
+    });
   }
 
   /** Whether `by` builds `subject` now. */
@@ -254,35 +267,77 @@ export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
         following?.[Symbol.dispose]();
       });
       this.#watches.add(page);
-      /** The last telling the page took (draft-watch.ts): where a socket opened again starts. */
-      let after = 0;
       try {
-        following = await followObject({
-          open: async () =>
-            await draftWatch(this.#env, found).fetch(
-              `https://draft-watch/?${new URLSearchParams({ person: by.userId, after: String(after) }).toString()}`,
-              { headers: { Upgrade: "websocket" } }
-            ),
-          deliver: async (frame) => {
-            const told = draftToldSchema.parse(frame);
-            await page(told.revision);
-            after = told.seq;
-          },
-          ended: () => {
-            page[Symbol.dispose]();
-          },
-          refused: () => agentErrors.create("agent.invalid_request"),
-          logged: { ...found },
-        });
+        following = await this.#follow(by, found, page);
       } catch (error) {
         page[Symbol.dispose]();
         throw error;
+      }
+      // Let go of while it opened: what it opened goes with it.
+      if (!this.#watches.has(page)) {
+        following[Symbol.dispose]();
       }
       return new Subscription(async () => {
         page[Symbol.dispose]();
         await Promise.resolve();
       });
     });
+  }
+
+  /**
+   * Has `page` hear `found`'s draft for `by`: over a socket to the draft's
+   * object (draft-watch.ts), or, while that object still runs the code of
+   * the release before (no socket), the old way, its callback kept there.
+   * Answers what stops it.
+   */
+  async #follow(
+    by: Identity,
+    found: Subject,
+    page: ((revision: unknown) => Promise<void>) & Disposable
+  ): Promise<Disposable> {
+    const object = draftWatch(this.#env, found);
+    /** The last telling the page took (draft-watch.ts): where a socket opened again starts. */
+    let after = 0;
+    try {
+      return await followObject({
+        open: async () =>
+          await object.fetch(
+            `https://draft-watch/?${new URLSearchParams({ person: by.userId, after: String(after) }).toString()}`,
+            { headers: { Upgrade: "websocket" } }
+          ),
+        parse: (frame) => draftToldSchema.parse(frame),
+        deliver: async (told) => {
+          await page(told.revision);
+          after = told.seq;
+        },
+        maxQueued: maxQueuedTellings,
+        ended: () => {
+          // The page's callback ends with it, which the page hears, and
+          // follows again (use-draft.ts).
+          page[Symbol.dispose]();
+        },
+        logged: { ...found },
+      });
+    } catch (error) {
+      log.warn("draft.socket_unopened", { ...found, ...errorFields(error) });
+    }
+    // The object's code is the release's before: the old way, until the
+    // release after removes it.
+    const watchId = await object.watch(by.userId, page);
+    return {
+      [Symbol.dispose]: () => {
+        void (async () => {
+          try {
+            await object.unwatch(watchId);
+          } catch (error) {
+            log.warn("draft.unwatch_failed", {
+              ...found,
+              ...errorFields(error),
+            });
+          }
+        })();
+      },
+    };
   }
 
   /** The draft checked as publishing checks it (publish.ts, `check`). */

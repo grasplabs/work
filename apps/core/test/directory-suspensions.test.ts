@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import { signedInSession } from "../src/auth/identity.ts";
 import { shareAudiencesAs } from "../src/brain-next.ts";
+import { sessionEndedCloseCode } from "../src/rpc.ts";
 import { personalChatsOf, says } from "./agent-chat.ts";
 import { grantReviewed } from "./apps.ts";
 import { consentCode } from "./connect-providers.ts";
@@ -43,6 +44,7 @@ import {
   signIn,
   signedIn,
   unique,
+  untilConnected,
   whoami,
   withSignIn,
 } from "./sign-in.ts";
@@ -869,6 +871,22 @@ describe("a member whose directory account was deleted", () => {
       },
       restored: { suspended: 0, suspendedBy: null },
     });
+  });
+
+  it("closes a suspended member's open connection as the read lands, told by their object", async () => {
+    await connectedDirectory(idp);
+    const ada = await memberWith(crypto.randomUUID());
+    const connection = await openRpc(ada.session);
+    await connection.core.authenticate().whoami();
+    await untilConnected(ada.userId, 1);
+    await directoryHolds(
+      [],
+      [{ id: ada.oid.toUpperCase(), userType: "Member" }]
+    );
+
+    await readAt(nextDay());
+
+    await expect(connection.closed).resolves.toBe(sessionEndedCloseCode);
   });
 
   it("keeps no row for the many deleted accounts nobody signed in with, and still suspends the one a member did", async () => {

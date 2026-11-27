@@ -9,6 +9,7 @@ import {
   connectCore,
   CoreTimeoutError,
   deadline,
+  endedBySignOut,
   isTransient,
   reconnectDelay,
   retrying,
@@ -144,6 +145,11 @@ export interface CoreConnectionOptions {
   clock?: PageClock;
   /** Asks core over a fresh request whether it answers: a stand-in in tests. */
   checkHost?: () => Promise<HostCheck>;
+  /**
+   * Whether core closed a connection because its session ended
+   * (`endedBySignOut`): a stand-in in tests.
+   */
+  signedOut?: (api: RpcStub<CoreApi>) => boolean;
 }
 
 /** The page's time, and whether the tab is in front, for the heartbeat. */
@@ -231,6 +237,7 @@ export class CoreConnection {
   readonly #watchPage: (back: () => void, offline: () => void) => void;
   readonly #clock: PageClock;
   readonly #checkHost: () => Promise<HostCheck>;
+  readonly #signedOut: (api: RpcStub<CoreApi>) => boolean;
   #closed = false;
   /** Refuses whoever waits for a connection once the connection closed. */
   readonly #closing = new AbortController();
@@ -264,12 +271,14 @@ export class CoreConnection {
     watchPage = onPageBack,
     clock = pageClock,
     checkHost = fetchHost,
+    signedOut = endedBySignOut,
   }: CoreConnectionOptions) {
     this.#onSessionEnded = onSessionEnded;
     this.#connectCore = connect;
     this.#watchPage = watchPage;
     this.#clock = clock;
     this.#checkHost = checkHost;
+    this.#signedOut = signedOut;
   }
 
   /** Whether core answers, as the connection last found ({@link CoreReach}). */
@@ -634,6 +643,13 @@ export class CoreConnection {
    */
   #lost(api: RpcStub<CoreApi>): void {
     if (this.#closed || this.#live !== api) {
+      return;
+    }
+    // Core closed it as the session ended: the page ends now, every App
+    // frame stopped and what it showed gone, never after a reconnect's
+    // pause and a look.
+    if (this.#signedOut(api)) {
+      this.end("signed-out");
       return;
     }
     this.#live = undefined;

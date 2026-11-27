@@ -288,13 +288,15 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
       coreEnv: { ...env, DB: promotedBeforeTheChange(removed.userId) },
     });
 
+    const before = follower.received.length;
     await core.authenticate().members.remove(removed.userId);
 
     await expect(
-      whenSignedOut(follower, removed.closed)
+      whenSignedOut(follower, removed.closed, before)
     ).resolves.toStrictEqual({
       last: "auth.unauthenticated",
       released: true,
+      dataAfter: 0,
     });
   });
 

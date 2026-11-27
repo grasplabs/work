@@ -2,7 +2,6 @@ import { z } from "zod";
 
 import {
   acceptWatcher,
-  closeWatcher,
   makeRoom,
   personWatcherSchema,
   sendFrame,
@@ -55,6 +54,7 @@ export const acceptConnection = (
 ): Response => {
   if (
     request.headers.get("Upgrade")?.toLowerCase() !== "websocket" ||
+    new URL(request.url).pathname !== "/connection" ||
     personId === ""
   ) {
     return new Response(null, { status: 400 });
@@ -77,14 +77,4 @@ export const recheckConnections = (ctx: DurableObjectState): void => {
   )) {
     sendFrame(socket, recheckFrame);
   }
-};
-
-/** A connection's socket closed: its close is answered. */
-export const connectionClosed = (socket: WebSocket, code: number): void => {
-  closeWatcher(socket, code, "Closed");
-};
-
-/** A connection sent something: no connection does, so it is let go of. */
-export const connectionSpoke = (socket: WebSocket): void => {
-  closeWatcher(socket, 1003, "Nothing is read here");
 };

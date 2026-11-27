@@ -1031,12 +1031,18 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       // The reads above may have outlasted the session reading this began
       // on: read it again if so, so nothing goes out on a reading older
       // than `sessionRecheckMs`, a telling of the session's end lost or
-      // not (free while it is fresh, as every check shares it).
+      // not (free while it is fresh, as every check shares it). A newer
+      // reading may hold narrower rights: the gate is passed again under
+      // it, never under the older one.
+      let fresh: By;
       try {
-        await this.#reads.check();
+        fresh = await this.#reads.check();
       } catch (error) {
         this.#cleared.delete(key);
         return { refusal: refusalResult(error) };
+      }
+      if (fresh !== by) {
+        return await this.#gate(evaluation);
       }
       this.#rolesSeen.set(app, roles);
       return { roles, by };

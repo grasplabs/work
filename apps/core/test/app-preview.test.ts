@@ -6,7 +6,7 @@ import type { AppId } from "@grasp-os/shared/ids";
 import type { AppVersionPush } from "@grasp-os/shared/pages";
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { appKind } from "../src/apps.ts";
@@ -47,6 +47,11 @@ const newApp = async (
   const { id } = await builder.api.apps.create({ name });
   await release(builder, id, files);
   return appIdSchema.parse(id);
+};
+
+/** Undoes nothing. */
+const nothingToUndo = (): void => {
+  // Nothing done yet.
 };
 
 /** `person` on a connection of its own: another page of theirs. */
@@ -380,6 +385,89 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
     });
     // Only the telling it heard as it followed.
     expect(left.length <= 1).toBeTruthy();
+  });
+
+  it("tells a page core's Worker of the release before follows the old way, its callback kept in the object, while a deploy runs both", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await notesApp(builder);
+    const heard: number[] = [];
+    await draftWatch(env, { kind: "app", id: app }).watch(
+      builder.userId,
+      async (revision: number) => {
+        heard.push(revision);
+        await Promise.resolve();
+      }
+    );
+
+    const written = await writeDraft(builder, app, {
+      "src/routes/index.tsx": deskSaying("Drafted"),
+    });
+
+    await vi.waitFor(() => {
+      expect(heard).toStrictEqual([written]);
+    });
+  });
+
+  it("follows a draft the old way while its object still runs the code of the release before, which takes no socket", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await notesApp(builder);
+    const subject = { kind: "app" as const, id: app };
+    const object = draftWatch(env, subject);
+    // As the code before had it: no `fetch`, so opening a socket throws.
+    const restore = { undo: nothingToUndo };
+    await runInDurableObject(object, (instance) => {
+      // SAFETY: an object's prototype holds its methods.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      const methods = Object.getPrototypeOf(instance) as {
+        fetch: (request: Request) => Response;
+      };
+      const original = methods.fetch;
+      methods.fetch = () => {
+        throw new TypeError("Handler does not export a fetch() function.");
+      };
+      restore.undo = () => {
+        methods.fetch = original;
+      };
+    });
+    onTestFinished(() => {
+      restore.undo();
+    });
+    const heard: number[] = [];
+
+    await builder.api.drafts.watch(subject, (revision: number) => {
+      heard.push(revision);
+    });
+    const written = await writeDraft(builder, app, {
+      "src/routes/index.tsx": deskSaying("Drafted"),
+    });
+
+    await vi.waitFor(() => {
+      expect(heard).toStrictEqual([written]);
+    });
+  });
+
+  it("lets go of a closed connection's follows: the draft's object holds none of its sockets", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await notesApp(builder);
+    const subject = { kind: "app" as const, id: app };
+    const tab = await openRpc(builder.session);
+    await tab.core.authenticate().drafts.watch(subject, () => {
+      // Hears nothing here.
+    });
+    const sockets = async (): Promise<number> =>
+      await runInDurableObject(
+        draftWatch(env, subject),
+        (_instance, state) => state.getWebSockets().length
+      );
+    await vi.waitFor(async () => {
+      await expect(sockets()).resolves.toBe(1);
+    });
+
+    tab.socket.close();
+
+    await vi.waitFor(async () => {
+      await expect(sockets()).resolves.toBe(0);
+    });
   });
 
   it("tells the builders' pages when a version goes live under a draft that changes nothing, so they show the App live", async () => {

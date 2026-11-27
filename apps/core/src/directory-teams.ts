@@ -417,7 +417,11 @@ export const placementStatements = (
   placement: Placement,
   scope: SQL,
   linking: SQL
-): { statements: BatchItem<"sqlite">[]; revocation: number } => {
+): {
+  statements: BatchItem<"sqlite">[];
+  revocation: number;
+  leaves: number;
+} => {
   const { candidates, links } = placement;
   const now = Date.now();
   const user = sql`value ->> 0`;
@@ -483,6 +487,12 @@ export const placementStatements = (
     null,
     sql`EXISTS (SELECT 1 FROM ${teamMembers} WHERE ${leavable})`
   );
+  // Who leaves a team: their open connections answer with their teams now
+  // (identity-changes.ts, told by the caller once the batch committed).
+  const leaving = db
+    .delete(teamMembers)
+    .where(leavable)
+    .returning({ userId: teamMembers.userId });
   const statements: BatchItem<"sqlite">[] = [
     ...links.flatMap((value) => [
       db.insert(auditOutbox).select(
@@ -526,7 +536,7 @@ export const placementStatements = (
         )`
     ),
     kept,
-    db.delete(teamMembers).where(leavable),
+    leaving,
     db
       .update(teams)
       .set({
@@ -534,12 +544,29 @@ export const placementStatements = (
       })
       .where(eq(teams.organizationId, organizationId)),
   ];
-  return { statements, revocation: statements.indexOf(kept) };
+  return {
+    statements,
+    revocation: statements.indexOf(kept),
+    leaves: statements.indexOf(leaving),
+  };
 };
 
 /** A row `revocationsOf` answers. */
 const isKept = (row: unknown): row is KeptRevocation =>
   typeof row === "object" && row !== null && "appId" in row && "userIds" in row;
+
+/** Whom the statement at `leaves` took out of a team. */
+export const leftIn = (result: unknown): string[] =>
+  Array.isArray(result)
+    ? result.flatMap((row: unknown) =>
+        typeof row === "object" &&
+        row !== null &&
+        "userId" in row &&
+        typeof row.userId === "string"
+          ? [row.userId]
+          : []
+      )
+    : [];
 
 /** The revocations the statement at `revocation` answered with. */
 export const keptIn = (result: unknown): KeptRevocation[] =>

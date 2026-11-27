@@ -17,7 +17,6 @@ import { describe, expect, it } from "vite-plus/test";
 
 import worker from "../src/index.ts";
 import { PageFrameRpc } from "../src/pages-rpc.ts";
-import { CoreRpcTarget } from "../src/rpc-target.ts";
 import { SessionRpc } from "../src/session-rpc.ts";
 import { staffAudited } from "../src/staff-audit.ts";
 import { mockIdp } from "./idp.ts";
@@ -32,6 +31,7 @@ import {
   staffPerson,
   whoami,
 } from "./sign-in.ts";
+import { callWaitMs, targetMethods } from "./target-methods.ts";
 
 // Every view and action of Grasp's staff is in the client's audit log
 // (GRA-1087, its threat model): each ask, over `/rpc` or a route, writes
@@ -61,62 +61,6 @@ const staffViews = (events: readonly AuditEvent[]): AuditEvent[] =>
 /** The surface each staff entry among `events` names. */
 const surfacesOf = (events: readonly AuditEvent[]): unknown[] =>
   staffViews(events).map(({ detail }) => detail.surface);
-
-/** How long the walk waits for one call before it goes on. */
-const callWaitMs = 3000;
-
-/**
- * Every method of `target` and of every target its getters hand out, by
- * path, with how many parameters it declares: what a browser can call.
- */
-const targetMethods = (
-  target: object,
-  path: string,
-  seen = new Set<object>()
-): { name: string; call: (...args: unknown[]) => unknown; arity: number }[] => {
-  if (seen.has(target)) {
-    return [];
-  }
-  seen.add(target);
-  const found: {
-    name: string;
-    call: (...args: unknown[]) => unknown;
-    arity: number;
-  }[] = [];
-  for (
-    let prototype: object | null = Reflect.getPrototypeOf(target);
-    prototype !== null && prototype !== CoreRpcTarget.prototype;
-    prototype = Reflect.getPrototypeOf(prototype)
-  ) {
-    for (const key of Reflect.ownKeys(prototype)) {
-      const property = Reflect.getOwnPropertyDescriptor(prototype, key);
-      if (typeof key !== "string" || key === "constructor" || !property) {
-        continue;
-      }
-      const name = `${path}.${key}`;
-      if (property.get !== undefined) {
-        const inner: unknown = Reflect.apply(property.get, target, []);
-        if (inner instanceof CoreRpcTarget) {
-          found.push(...targetMethods(inner, name, seen));
-        }
-      } else if (typeof property.value === "function") {
-        const method: unknown = property.value;
-        found.push({
-          name,
-          arity: typeof method === "function" ? Math.max(method.length, 1) : 0,
-          call: (...args: unknown[]): unknown => {
-            if (typeof method !== "function") {
-              return undefined;
-            }
-            const answer: unknown = Reflect.apply(method, target, args);
-            return answer;
-          },
-        });
-      }
-    }
-  }
-  return found;
-};
 
 /** A text that must never reach the log. */
 const secret = `Salary${crypto.randomUUID().slice(0, 8)}`;
@@ -455,7 +399,8 @@ describe("Grasp staff's views, audited", () => {
         new SessionRpc(
           env,
           async () => await Promise.resolve(staff),
-          crypto.randomUUID()
+          crypto.randomUUID(),
+          new AbortController().signal
         ),
         "session"
       );

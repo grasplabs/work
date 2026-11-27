@@ -224,14 +224,10 @@ import type { InstructionContext } from "./instruction-files.ts";
 import { chatTurnPurpose } from "./model-spend.ts";
 import { modelSettings, models } from "./models.ts";
 import type { OutsideTextNote } from "./outside-text.ts";
-import {
-  acceptConnection,
-  connectionClosed,
-  connectionSpoke,
-  recheckConnections,
-} from "./person-connections.ts";
+import { acceptConnection, recheckConnections } from "./person-connections.ts";
 import { personOfWorkspace } from "./personal-workspace.ts";
 import type { WorkContext } from "./restricted.ts";
+import { watcherHandlers } from "./socket-watchers.ts";
 import { outsideReadOf } from "./ungranted-reads.ts";
 import { retireUnseen } from "./unseen-memories.ts";
 
@@ -6725,12 +6721,17 @@ export class Workspace extends DurableObject<Env> {
 
   // oxlint-disable-next-line class-methods-use-this -- the Hibernation API's handler
   override webSocketMessage(socket: WebSocket): void {
-    connectionSpoke(socket);
+    watcherHandlers.message(socket);
   }
 
   // oxlint-disable-next-line class-methods-use-this -- the Hibernation API's handler
   override webSocketClose(socket: WebSocket, code: number): void {
-    connectionClosed(socket, code);
+    watcherHandlers.close(socket, code);
+  }
+
+  // oxlint-disable-next-line class-methods-use-this -- the Hibernation API's handler
+  override webSocketError(socket: WebSocket): void {
+    watcherHandlers.error(socket);
   }
 
   #transcript(chatId: ChatId): Message[] {

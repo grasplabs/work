@@ -372,19 +372,25 @@ export const whenLetGo = async (follower: Follower) => {
  */
 export const whenSignedOut = async (
   follower: Follower,
-  closed: Promise<number>
+  closed: Promise<number>,
+  /** How many pushes the page had when the person was removed. */
+  before: number
 ) => {
   const letGo = await whenLetGo(follower);
+  // Nothing of the App reached the page after the removal.
+  const dataAfter = follower.received
+    .slice(before)
+    .filter(({ result }) => result.ok).length;
   if (letGo.last === "auth.unauthenticated") {
-    return letGo;
+    return { ...letGo, dataAfter };
   }
   const code = await Promise.race([
     closed,
     scheduler.wait(deliveryWait.timeout).then(() => 0),
   ]);
   return code === sessionEndedCloseCode
-    ? { ...letGo, last: "auth.unauthenticated" }
-    : letGo;
+    ? { ...letGo, last: "auth.unauthenticated", dataAfter }
+    : { ...letGo, dataAfter };
 };
 
 /** How long `slowToFollow` holds each connection the App's host takes on. */

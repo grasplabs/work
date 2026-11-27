@@ -1,6 +1,5 @@
 import {
   authErrors,
-  internalErrors,
   isExpectedError,
   requestErrors,
   toOpaqueError,
@@ -13,9 +12,11 @@ import type { RpcAccountingLimits } from "@grasp-os/shared/rpc-accounting";
 import { RpcSession, WebSocketTransport } from "capnweb";
 
 import { oidcProviders, providerIds, signInConfig } from "./auth/config.ts";
+import { checkedInCall } from "./call-context.ts";
 import { workspace } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
 import { connectionSession } from "./guest-access.ts";
+import { staffEndsAt } from "./onboarding/gate.ts";
 import { recheckFrameSchema } from "./person-connections.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import {
@@ -25,7 +26,9 @@ import {
   signedOutRpcAccounting,
 } from "./rpc-target.ts";
 import { recheckedEvery, sessionRecheckMs } from "./session-check.ts";
+import type { SessionCheck } from "./session-check.ts";
 import { SessionRpc } from "./session-rpc.ts";
+import { watchEnds } from "./socket-watchers.ts";
 import { followObject } from "./upstream.ts";
 
 /** What the frontend reaches over `/rpc`, signed in or not. */
@@ -71,6 +74,19 @@ export const toClientError = (
 /** The close code a connection gets when its session ends. */
 export const sessionEndedCloseCode = 4401;
 
+/**
+ * The close code a connection gets when its session couldn't be read as a
+ * call answered (`verify`): the page connects again, and never makes the
+ * call twice.
+ */
+export const sessionUnverifiedCloseCode = 4503;
+
+/** The close code that asks the page to connect again at once. */
+export const reconnectCloseCode = 1012;
+
+/** The most tellings a connection's socket holds for it: a few, each a few characters. */
+const maxQueuedRechecks = 4096;
+
 const signInOptions = (env: Env): SignInOption[] => {
   const config = signInConfig(env);
   return config
@@ -110,16 +126,46 @@ interface ConnectionSession {
 
 /**
  * When a connection's session ends by itself: the session's end, or a
- * staff session's window closing first.
+ * staff session's access ending first (the admin's window, or 7 days after
+ * Grasp's go for the onboarding scope, gate.ts `staffEndsAt`).
  */
-const endsAt = (env: Env, person: Identity, expiresAt: Date): number => {
-  const until = person.staff
-    ? Date.parse(signInConfig(env)?.staff?.until ?? "")
-    : Number.NaN;
-  return Number.isNaN(until)
+const endsAt = async (
+  env: Env,
+  person: Identity,
+  expiresAt: Date
+): Promise<number> => {
+  const staffEnds = person.staff ? await staffEndsAt(env) : undefined;
+  return staffEnds === undefined || Number.isNaN(staffEnds)
     ? expiresAt.getTime()
-    : Math.min(until, expiresAt.getTime());
+    : Math.min(staffEnds, expiresAt.getTime());
 };
+
+/** The longest a timer waits in one go (2^31 - 1 ms, about 24.8 days). */
+const longestTimerMs = 2_147_483_647;
+
+/**
+ * Calls `then` at `at`, however far off: a timer past the longest one
+ * waits as long as it may, then again.
+ */
+const atTime = (at: number, then: () => void): { stop: () => void } => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const arm = (): void => {
+    const left = at - Date.now();
+    timer =
+      left > longestTimerMs
+        ? setTimeout(arm, longestTimerMs)
+        : setTimeout(then, Math.max(0, left));
+  };
+  arm();
+  return {
+    stop: () => {
+      clearTimeout(timer);
+    },
+  };
+};
+
+/** The pauses before trying to open a connection's socket to the person's object again. */
+const personSocketRetryMs = [1000, 2000, 5000, 15_000, 30_000] as const;
 
 /**
  * The signed-in API of one connection. Its check is the one place that
@@ -201,58 +247,118 @@ const sessionApi = (
       // is made again at the next call or push.
     }
   };
-  // The session's own end, which nothing tells.
-  const expiry = setTimeout(
-    close,
-    endsAt(env, connectedAs, expiresAt) - Date.now()
+  /**
+   * Checks the session again as a call answers (call-context.ts): a call
+   * that ran past its reading's window never answers someone whose session
+   * ended meanwhile. A reading that can't be made then (the database away
+   * a moment) closes the connection as unverified, and the answer goes
+   * nowhere: the page never makes a call twice that was on its way when
+   * the connection dropped (core-connection.ts), so a write the call made
+   * is never repeated by a retry, and the page, connected again, reads what
+   * it wrote. Answering it an error instead would invite that retry.
+   */
+  const verify = async (): Promise<void> => {
+    try {
+      await check();
+    } catch (error) {
+      if (!isExpectedError(error) && openHere()) {
+        server.close(sessionUnverifiedCloseCode, "Session unverified");
+      }
+      throw error;
+    }
+  };
+  /** The connection's check, which every call it carries checks again as it answers. */
+  const callCheck: SessionCheck = Object.assign(
+    async (): Promise<Identity> => {
+      checkedInCall(verify);
+      return await check();
+    },
+    { forget: check.forget }
   );
   let closed = false;
-  let following: Disposable | undefined;
-  const follow = async (): Promise<void> => {
+  // The session's own end, which nothing tells.
+  let expiry: { stop: () => void } | undefined;
+  void (async () => {
     try {
-      const followed = await followObject({
-        open: async () =>
-          await workspace(env, personalWorkspaceId(connectedAs.userId)).fetch(
-            "https://person/connection",
-            { headers: { Upgrade: "websocket" } }
-          ),
-        deliver: async (frame) => {
-          if (recheckFrameSchema.safeParse(frame).success) {
-            await readNow();
-          }
-        },
-        // A telling may have come before the socket was there: whatever was
-        // read until now is read again when it is next needed.
-        opened: () => {
-          check.forget();
-        },
-        ended: () => {
-          // Let go of past the object's bound: this connection reads its
-          // session as often as any, without the telling's speed.
-        },
-        refused: () => internalErrors.create("internal.unexpected"),
-        logged: { purpose: "connection" },
-      });
+      const at = await endsAt(env, connectedAs, expiresAt);
+      if (!closed) {
+        expiry = atTime(at, close);
+      }
+    } catch (error) {
+      // Its calls and pushes still read the session before they go.
+      log.warn("rpc.end_unknown", errorFields(error));
+    }
+  })();
+  let following: Disposable | undefined;
+  /**
+   * Opens the socket to the person's object that tells this connection to
+   * read its session again (person-connections.ts), trying again while it
+   * can't, for as long as the connection is open.
+   */
+  const follow = async (): Promise<void> => {
+    for (let attempt = 0; ; attempt += 1) {
       if (closed) {
-        followed[Symbol.dispose]();
         return;
       }
-      following = followed;
-    } catch (error) {
-      // Without it the connection still reads its session before every
-      // call and push; only the telling's speed is lost.
-      log.warn("rpc.person_unfollowed", errorFields(error));
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one try at a time
+        const followed = await followObject({
+          open: async () =>
+            await workspace(env, personalWorkspaceId(connectedAs.userId)).fetch(
+              "https://person/connection",
+              {
+                headers: { Upgrade: "websocket" },
+              }
+            ),
+          parse: (frame) => recheckFrameSchema.parse(frame),
+          deliver: readNow,
+          maxQueued: maxQueuedRechecks,
+          // A telling may have come before the socket was there: whatever
+          // was read until now is read again when it is next needed.
+          opened: () => {
+            check.forget();
+          },
+          ended: (code) => {
+            // Let go of for good (past the object's bound, say): the
+            // connection ends, and the page connects again, with a socket
+            // of its own again.
+            if (code !== watchEnds.sessionEnded && openHere()) {
+              server.close(reconnectCloseCode, "Connect again");
+            }
+          },
+          logged: { purpose: "connection" },
+        });
+        if (closed) {
+          followed[Symbol.dispose]();
+          return;
+        }
+        following = followed;
+        return;
+      } catch (error) {
+        // Meanwhile its calls and pushes still read the session before
+        // they go; only the telling's speed is missing.
+        log.warn("rpc.person_unfollowed", { attempt, ...errorFields(error) });
+      }
+      // oxlint-disable-next-line no-await-in-loop -- waiting longer each time
+      await scheduler.wait(
+        personSocketRetryMs[
+          Math.min(attempt, personSocketRetryMs.length - 1)
+        ] ?? 0
+      );
     }
   };
   void follow();
+  // What the connection follows ends with it (drafts-rpc.ts).
+  const ending = new AbortController();
   const end = (): void => {
     closed = true;
-    clearTimeout(expiry);
+    expiry?.stop();
     following?.[Symbol.dispose]();
+    ending.abort();
   };
   server.addEventListener("close", end);
   server.addEventListener("error", end);
-  return new SessionRpc(env, check, sessionId);
+  return new SessionRpc(env, callCheck, sessionId, ending.signal);
 };
 
 /**

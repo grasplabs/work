@@ -1,5 +1,4 @@
-import { authErrors } from "@grasp-os/shared/errors";
-import type { Identity, SessionApi } from "@grasp-os/shared/rpc";
+import type { SessionApi } from "@grasp-os/shared/rpc";
 import type { RpcStub } from "capnweb";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -8,11 +7,7 @@ import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 import { workspace } from "../src/durable-objects.ts";
 import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import { sessionEndedCloseCode } from "../src/rpc.ts";
-import {
-  recheckedEvery,
-  sessionRecheckMs,
-  withPerson,
-} from "../src/session-check.ts";
+import { recheckedEvery, sessionRecheckMs } from "../src/session-check.ts";
 import { mockIdp } from "./idp.ts";
 import { acmeTenant, clientOrigin } from "./sign-in-config.ts";
 import {
@@ -408,36 +403,6 @@ describe("sessions end", () => {
 // How a connection keeps its reading (`recheckedEvery`), as pure logic: a
 // reading that failed for a reason other than an ended session (a busy
 // database) must never keep refusing once the database is back.
-describe("a call as the person behind the session", () => {
-  it("answers nobody whose session ended while it ran, however fresh the reading it began on", async () => {
-    let ended = false;
-    const person: Identity = {
-      userId: "person-1",
-      email: "person@acme.test",
-      name: "Person",
-      role: "user",
-      teams: [],
-      staff: false,
-      expiresAt: new Date(Date.now() + hour).toISOString(),
-    };
-    const check = async (): Promise<Identity> => {
-      await Promise.resolve();
-      if (ended) {
-        throw authErrors.create("auth.unauthenticated");
-      }
-      return person;
-    };
-
-    const answered = withPerson(check, async () => {
-      // The session ends, with nothing told, while the call runs.
-      ended = true;
-      return await Promise.resolve("their data");
-    });
-
-    await expect(outcome(answered)).resolves.toBe("auth.unauthenticated");
-  });
-});
-
 describe("a reading of the session", () => {
   it("that failed isn't kept: the next ask reads again, in the same moment", async () => {
     let reads = 0;
