@@ -27,8 +27,8 @@ import {
 } from "@grasp-os/shared/release";
 import type { Bytes } from "@grasp-os/shared/release";
 import { releaseIdSchema } from "@grasp-os/shared/release-id";
-import { AwsClient } from "aws4fetch";
 
+import { REQUESTS_AT_ONCE, releasesBucketFromEnv } from "./bucket-lib.ts";
 import { assertReleaseDir, clearReleaseDir } from "./manifest-lib.ts";
 
 const HTTP_NOT_FOUND = 404;
@@ -48,26 +48,11 @@ const outDir = path.resolve(args.out);
 // is refused here, never emptied once the manifest arrives.
 assertReleaseDir(outDir);
 
-const requireEnv = (name: string): string => {
-  const value = process.env[name];
-  if (value === undefined || value === "") {
-    throw new Error(`${name} is required`);
-  }
-  return value;
-};
-
-const endpoint = requireEnv("R2_ENDPOINT").replace(/\/$/u, "");
-const bucket = requireEnv("R2_BUCKET");
-const client = new AwsClient({
-  accessKeyId: requireEnv("R2_ACCESS_KEY_ID"),
-  secretAccessKey: requireEnv("R2_SECRET_ACCESS_KEY"),
-  service: "s3",
-  region: "auto",
-});
+const bucket = releasesBucketFromEnv();
 
 /** The bytes at `key`, or undefined when the bucket holds nothing there. */
 const read = async (key: string): Promise<Bytes | undefined> => {
-  const response = await client.fetch(`${endpoint}/${bucket}/${key}`);
+  const response = await bucket.fetch(bucket.url(key));
   if (response.status === HTTP_NOT_FOUND) {
     return undefined;
   }
@@ -85,7 +70,7 @@ const write = (key: string, bytes: Uint8Array): void => {
 
 const manifestBytes = await read(manifestKey(releaseId));
 if (manifestBytes === undefined) {
-  throw new Error(`Release ${releaseId} isn't published in ${bucket}`);
+  throw new Error(`Release ${releaseId} isn't published in ${bucket.name}`);
 }
 const manifest = releaseManifestSchema.parse(
   JSON.parse(new TextDecoder().decode(manifestBytes))
@@ -102,13 +87,17 @@ clearReleaseDir(outDir);
 // Keys are content addresses under blobs/ by the time they're read:
 // `verifyReleaseBlobs` refuses any other, so none names a path outside the
 // release directory.
-await verifyReleaseBlobs(manifest, async (key) => {
-  const bytes = await read(key);
-  if (bytes !== undefined) {
-    write(key, bytes);
-  }
-  return bytes;
-});
+await verifyReleaseBlobs(
+  manifest,
+  async (key) => {
+    const bytes = await read(key);
+    if (bytes !== undefined) {
+      write(key, bytes);
+    }
+    return bytes;
+  },
+  { concurrency: REQUESTS_AT_ONCE }
+);
 for (const file of manifest.modelFiles) {
   // oxlint-disable-next-line no-await-in-loop -- a few large files, one at a time
   const bytes = await read(file.r2Key);
@@ -124,4 +113,4 @@ for (const file of manifest.modelFiles) {
   write(file.r2Key, bytes);
 }
 write("manifest.json", manifestBytes);
-console.info(`Release ${releaseId} fetched from ${bucket} and verified`);
+console.info(`Release ${releaseId} fetched from ${bucket.name} and verified`);

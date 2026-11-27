@@ -153,10 +153,15 @@ export const ChatPage = ({
   );
 };
 
-/** What `page` answers, once it has: nothing before. */
-const useAnswered = <T,>(page: Promise<T>): T | undefined => {
+/** What `page` answers, once it has: nothing before, or with no read. */
+const useAnswered = <T,>(page: Promise<T> | undefined): T | undefined => {
   const [answered, setAnswered] = useState<{ page: Promise<T>; value: T }>();
   useEffect(() => {
+    if (page === undefined) {
+      return () => {
+        // Nothing read.
+      };
+    }
     let current = true;
     void (async () => {
       const value = await page;
@@ -168,7 +173,9 @@ const useAnswered = <T,>(page: Promise<T>): T | undefined => {
       current = false;
     };
   }, [page]);
-  return answered?.page === page ? answered.value : undefined;
+  return answered !== undefined && answered.page === page
+    ? answered.value
+    : undefined;
 };
 
 /**
@@ -176,14 +183,15 @@ const useAnswered = <T,>(page: Promise<T>): T | undefined => {
  * summary (`page`) beside it: the chat, or, once the read says core has
  * none of it for the person, not found, and where the read failed
  * otherwise, why, with Try again; never a chat to ask in that core didn't
- * give.
+ * give, but one the tab is starting (chat-starts.ts), which is read not
+ * at all (`page` none): its first question makes it.
  */
 export const LoadedChatPage = ({
   chatId,
   page,
 }: {
   chatId: string;
-  page: Promise<Loaded<ChatSummary>>;
+  page: Promise<Loaded<ChatSummary>> | undefined;
 }) => {
   const { t } = useLingui();
   const read = useAnswered(page);

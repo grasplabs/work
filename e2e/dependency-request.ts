@@ -4,6 +4,7 @@ import { setTimeout as sleep } from "node:timers/promises";
  * A chat whose agent asked for an App's npm packages, for the e2e stack.
  */
 import { modelScripts } from "./model-scripts.ts";
+import { askInNewChat } from "./new-chats.ts";
 import type { apiOf } from "./people.ts";
 import { e2eModel } from "./stack.ts";
 
@@ -22,11 +23,12 @@ export const chatAskingForPackages = async (
   api: ReturnType<typeof apiOf>["api"],
   title: string
 ): Promise<{ id: string }> => {
-  const chat = await api.chats.create(title);
-  await api.chats.send(chat.id, {
-    text: modelScripts.asksPackages.opener,
-    model: e2eModel,
-  });
+  const chat = {
+    id: await askInNewChat(api, title, {
+      text: modelScripts.asksPackages.opener,
+      model: e2eModel,
+    }),
+  };
   const until = Date.now() + turnMs;
   let { running } = await api.chats.summary(chat.id);
   while (running) {

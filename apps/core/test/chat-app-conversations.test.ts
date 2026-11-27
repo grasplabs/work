@@ -25,6 +25,7 @@ import {
   staffPerson,
   unique,
 } from "./sign-in.ts";
+import { startedThrough } from "./started-chats.ts";
 import {
   member,
   memberAnsweredBy,
@@ -216,7 +217,7 @@ describe("a conversation with the agent in Teams", setUpTime, () => {
   it("is no chat in Grasp for its person: no list or search shows it, and every address answers as for a chat that doesn't exist", async () => {
     const word = `zebrafish${unique()}`;
     const { api, userId, teams } = await member(idp, says("Noted."));
-    await api.chats.create("Leave plans");
+    await startedThrough(api.chats, "Leave plans");
 
     await post(messageFrom(teams, { text: `Remember ${word}, please.` }));
 
@@ -290,7 +291,7 @@ describe("a conversation with the agent in Teams", setUpTime, () => {
       says(`It's ${badge}.`),
       says("I don't know it.")
     );
-    await api.chats.create("Leave plans");
+    await startedThrough(api.chats, "Leave plans");
 
     await post(messageFrom(teams, { text: `My badge is ${badge}.` }));
     await post(messageFrom(teams, { text: question }));
@@ -390,7 +391,7 @@ describe("a conversation with the agent in Teams", setUpTime, () => {
       }
     );
 
-    const started = await outcome(api.chats.create("Leave plans"));
+    const started = await outcome(startedThrough(api.chats, "Leave plans"));
     await post(messageFrom(teams, { text: "Are you there?" }));
 
     const { activities } = await reached(teams.conversation);
@@ -410,7 +411,7 @@ describe("a conversation with the agent in Teams", setUpTime, () => {
     await onGroupRoster(group, [{ person: teams }]);
     await post(messageFrom(teams, { text: "Hello." }));
     await post(mentionIn(teams, group, "Hello, group."));
-    await api.chats.create("Leave plans");
+    await startedThrough(api.chats, "Leave plans");
 
     const counts = [
       await api.channelAccounts.forgetConversations(),

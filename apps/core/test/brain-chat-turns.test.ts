@@ -41,6 +41,7 @@ import { fakeProvider } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import { refusingNotes } from "./refused-notes.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
+import { startedChat } from "./started-chats.ts";
 
 // A person's chat turns in the new Brain (GRA-1805), through the real
 // path: a turn answered in their Workspace, noted from its audit event as
@@ -464,7 +465,7 @@ const chatter = async (...replies: ProviderReply[]) => {
   const person = await signedInApi(idp, "user");
   const stub = workspace(env, personalWorkspaceId(person.userId));
   await fakeProvider(...replies);
-  const made = await person.api.chats.create("Questions");
+  const made = await startedChat(person, "Questions");
   const chatId: ChatId = chatIdSchema.parse(made.id);
   const ask = async (text: string) => await stub.ask(chatId, { text, model });
   return { person, stub, chatId, ask };
@@ -724,7 +725,7 @@ describe("a person's chat turn", () => {
         audience: { members: [person.userId], outsiders: false },
       }
     );
-    const restricted = await person.api.chats.create("Restricted");
+    const restricted = await startedChat(person, "Restricted");
     await stub.restrictChat(chatIdSchema.parse(restricted.id));
     await stub.ask(chatIdSchema.parse(restricted.id), {
       text: `Restricted ${marker}?`,

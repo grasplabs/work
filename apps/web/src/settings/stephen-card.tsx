@@ -162,13 +162,17 @@ const askGrasp = async (
     return null;
   }
   const { model, effort } = resolveChoice(models, efforts, readChoice(userId));
-  const chat = await session.chats.create(title);
-  await session.chats.send(chat.id, {
+  // A chat the page names, which the question makes (`ChatStart`).
+  const chatId = crypto.randomUUID();
+  const key = crypto.randomUUID();
+  await session.chats.send(chatId, {
     text: prompt,
     model,
     ...(effort === undefined ? {} : { effort }),
+    key,
+    start: { key, title },
   });
-  return chat.id;
+  return chatId;
 };
 
 /**

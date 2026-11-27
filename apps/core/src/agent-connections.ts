@@ -557,14 +557,19 @@ const accountsToldBy = (
   );
 
 /** The connections whose tools connect describes (`connectionTools`). */
-const describedSources: ReadonlySet<string> = new Set(["native", "connector"]);
+const describedSources: ReadonlySet<string> = new Set([
+  "native",
+  "connector",
+  "composio",
+]);
 
 /**
  * `tools` as search ranks and describes them, each with what connect
  * says of it (`connectionTools`): a native tool's description and
  * schemas from its connector's manifest, a connector's from its server's
- * list, asked once for each connection, in full for `actions`. Another
- * connection's tools have their names alone, and so does a search's of
+ * list, a Composio one's from its session's list, asked once for each
+ * connection, in full for `actions`. Another connection's tools (an HTTP
+ * one's) have their names alone, and so does a search's of
  * one connect can't answer for now; `describe` fails then, rather than
  * show a tool without its types, and leaves out one connect no longer
  * lists.
