@@ -535,6 +535,8 @@ test("a person opens a long chat on its newest messages, and scrolls back to its
       // oxlint-disable-next-line no-await-in-loop -- see above
       await answered();
     }
+    // Asked by them, each answer read as it came.
+    await api.chats.markRead(chatId);
   } finally {
     core[Symbol.dispose]();
   }
