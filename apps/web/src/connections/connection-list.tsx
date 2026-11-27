@@ -602,8 +602,12 @@ export const ConnectionsAccess = ({
       !canReconnect(connection, integration.offered, identity);
     const consented = connection.source === "composio";
     const chooses = choosesAudience(connection, identity);
-    // A connector's shared connection: an admin chooses for whom chats read in it.
-    const points = chooses && connection.source === "connector";
+    // A company app's shared connection, a connector's or a Composio
+    // toolkit's: an admin chooses for whom chats read in it, as core
+    // reads nothing there for anyone without (`connect.app_not_pointed`).
+    const points =
+      chooses &&
+      (connection.source === "connector" || connection.source === "composio");
     const holding =
       holders === undefined ? [] : holdingOf(holders, connection.id);
     if (!stuck && !consented && !chooses && holding.length === 0) {

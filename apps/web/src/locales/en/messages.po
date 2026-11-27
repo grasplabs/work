@@ -18197,6 +18197,10 @@ msgid "The workflows couldn't be read."
 msgstr "The workflows couldn't be read."
 
 #: src/connections/chat-reads.tsx
+msgid "Their assistant reads in {label} for them, within the parts it was pointed at. Anything it changes there waits for them to confirm it."
+msgstr "Their assistant reads in {label} for them, within the parts it was pointed at. Anything it changes there waits for them to confirm it."
+
+#: src/connections/chat-reads.tsx
 msgid "Their assistant reads in all of {label} for them. Anything it changes there waits for them to confirm it."
 msgstr "Their assistant reads in all of {label} for them. Anything it changes there waits for them to confirm it."
 

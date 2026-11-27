@@ -29,12 +29,14 @@ import { useCore } from "../use-core.ts";
 import { RowAlert } from "./app/rows.tsx";
 import { useChange } from "./use-change.ts";
 
-// For an admin, on a shared connection to a connector made from a URL:
-// for whom a chat's agent reads in it (Read company), everyone, one team
-// or nobody (core's app-pointers.ts, `connections.pointApp`). A
-// connector's tools name no resource, so the pointer is always the whole
-// app. Core decides who may change it and checks every choice; changes in
-// the app still wait for their person's press.
+// For an admin, on a company app's shared connection (a connector made
+// from a URL, or a Composio toolkit): for whom a chat's agent reads in it
+// (Read company), everyone, one team or nobody (core's app-pointers.ts,
+// `connections.pointApp`). Without it, nobody's chat reads there. A
+// connector's tools name no resource, so its pointer is always the whole
+// app; a Composio one keeps the resources its pointer names, if any. Core
+// decides who may change it and checks every choice; changes in the app
+// still wait for their person's press.
 
 const styles = stylex.create({
   // The section's name in the card's flush rows, on their inset, as the
@@ -46,9 +48,11 @@ const styles = stylex.create({
   },
 });
 
-/** What the card reads: the company's pointers and its teams. */
+/** What the card reads: the company's pointer at the app, and its teams. */
 interface Pointers {
   audience: ToolClassAudience;
+  /** The resources it is held to; none for the whole app. */
+  resources: string[];
   teams: { id: string; name: string }[];
 }
 
@@ -80,9 +84,12 @@ const readPointers = async (
         session.connections.appPointers(),
         session.organization.teams(),
       ]);
+      const pointer = pointers.find(
+        (each) => each.connectionId === connectionId
+      );
       return {
-        audience: pointers.find((each) => each.connectionId === connectionId)
-          ?.audience ?? { who: "nobody" },
+        audience: pointer?.audience ?? { who: "nobody" },
+        resources: pointer?.resources ?? [],
         teams,
       };
     },
@@ -129,7 +136,7 @@ export const ChatReads = ({
       </section>
     );
   }
-  const { audience, teams } = read.data;
+  const { audience, resources, teams } = read.data;
   const choices = [
     { value: "nobody", label: t`Nobody` },
     { value: "everyone", label: t`Everyone in the company` },
@@ -145,7 +152,11 @@ export const ChatReads = ({
         <Field orientation="responsive">
           <FieldContent>
             <FieldLabel>{t`Whose chats read in it`}</FieldLabel>
-            <FieldDescription>{t`Their assistant reads in all of ${label} for them. Anything it changes there waits for them to confirm it.`}</FieldDescription>
+            <FieldDescription>
+              {resources.length === 0
+                ? t`Their assistant reads in all of ${label} for them. Anything it changes there waits for them to confirm it.`
+                : t`Their assistant reads in ${label} for them, within the parts it was pointed at. Anything it changes there waits for them to confirm it.`}
+            </FieldDescription>
           </FieldContent>
           <Select
             disabled={busy}
@@ -158,7 +169,8 @@ export const ChatReads = ({
                 await change(async (session) => {
                   await session.connections.pointApp({
                     connectionId: id,
-                    resources: [],
+                    // Who changes, never where: the parts it is held to stay.
+                    resources,
                     audience: audienceOf(value),
                   });
                 });
