@@ -3,7 +3,9 @@ import type {
   ConnectorContract,
   ConnectorContractAction,
 } from "@grasp-os/shared/connect";
-import { log } from "@grasp-os/shared/log";
+import { errorFields, log } from "@grasp-os/shared/log";
+import { and, eq, isNull, lte, or, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 
 import { composioTools } from "./catalog.ts";
 import { composioKey } from "./composio.ts";
@@ -14,10 +16,12 @@ import {
   readOnlyNow,
 } from "./connections.ts";
 import type { Connection } from "./connections.ts";
+import { connections, connectionTools } from "./db/schema.ts";
 import { McpError } from "./mcp.ts";
 import type { McpListedTool } from "./mcp.ts";
 import {
   actionNamePattern,
+  isShallowJson,
   servedSchema,
   textAnswer,
 } from "./served-schemas.ts";
@@ -127,36 +131,54 @@ const catalogDescriptions = async (
   }
 };
 
+/** A Composio tool as the chat's search and `describe` hand it over. */
+interface DescribedTool {
+  name: string;
+  description: string;
+  input: unknown;
+  output: unknown;
+}
+
 /**
- * The tools a chat's agent may call through `connection`, as its search
- * and `describe` hand them to the model (contracts.ts `connectionTools`):
- * those connect offers (`offeredToolNames`: what the admin allowed, but
- * for what Grasp never runs), each with the input and output schemas its
- * session lists now, which is what a call is checked against there, and
- * Composio's description of it from the catalog. Throws
- * `connect.server_unavailable` when the session's list can't be read.
- * Logged by counts and names alone, so one attempt shows a session that
- * lists its tools by other names, or without schemas.
+ * How long a session's kept list stands before a search reads it again
+ * after answering, and how long after one such read the next may start.
  */
-export const composioDescribedTools = async (
+const keptListTtlMs = 10 * 60 * 1000;
+const laterReadGapMs = 5 * 60 * 1000;
+
+/** Tools kept in one insert: six values each, under D1's hundred. */
+const toolsPerInsert = 16;
+
+/**
+ * The tools a chat's agent may call through `connection`, as its session
+ * lists them now: those connect offers (`offeredToolNames`: what the admin
+ * allowed, but for what Grasp never runs), each with the input and output
+ * schemas its session lists, which is what a call is checked against
+ * there, and Composio's description of it from the catalog. A schema
+ * nesting deeper than any served one (`isShallowJson`, walked without
+ * recursion) is never read further: such a tool is left out, and such an
+ * output said nothing of. Throws `connect.server_unavailable` when the
+ * session's list can't be read. Logged by counts and names alone, so one
+ * attempt shows a session that lists its tools by other names, or without
+ * schemas.
+ */
+const describedNow = async (
   env: Env,
   connection: Connection
-): Promise<
-  { name: string; description: string; input: unknown; output: unknown }[]
-> => {
+): Promise<DescribedTool[]> => {
   const offered = new Set(offeredToolNames(connection));
   const [listed, descriptions] = await Promise.all([
     listedNow(env, connection),
     catalogDescriptions(env, connection.provider),
   ]);
   const described = listed.flatMap(({ name, inputSchema, outputSchema }) =>
-    offered.has(name)
+    offered.has(name) && isShallowJson(inputSchema)
       ? [
           {
             name,
             description: descriptions.get(name) ?? "",
             input: inputSchema,
-            output: outputSchema,
+            output: isShallowJson(outputSchema) ? outputSchema : undefined,
           },
         ]
       : []
@@ -179,6 +201,173 @@ export const composioDescribedTools = async (
       .join(","),
   });
   return described;
+};
+
+/**
+ * Keeps `described`, read of `connection`'s session at `now`, as its tool
+ * list (`connection_tools`) and marks it fresh: only while the connection
+ * is active and allows what it did when read, so a list read before a
+ * change of its tools, or a disconnect, is never kept after it.
+ */
+const keepDescribed = async (
+  env: Env,
+  connection: Connection,
+  described: readonly DescribedTool[],
+  now: number
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const asRead = sql`EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'active' AND ${connections.tools} IS ${connection.tools})`;
+  const rows = described.map(
+    (tool) =>
+      sql`(${connection.id}, ${tool.name}, ${tool.description}, ${JSON.stringify(tool.input ?? {})}, ${tool.output === undefined ? null : JSON.stringify(tool.output)}, ${"{}"})`
+  );
+  const inserts = [];
+  for (let start = 0; start < rows.length; start += toolsPerInsert) {
+    inserts.push(
+      db
+        .insert(connectionTools)
+        .select(
+          sql`SELECT * FROM (VALUES ${sql.join(rows.slice(start, start + toolsPerInsert), sql`, `)}) WHERE ${asRead}`
+        )
+    );
+  }
+  await db.batch([
+    db
+      .delete(connectionTools)
+      .where(and(eq(connectionTools.connectionId, connection.id), asRead)),
+    ...inserts,
+    db
+      .update(connections)
+      .set({
+        toolListReadAt: new Date(now),
+        toolListFreshUntil: new Date(now + keptListTtlMs),
+      })
+      .where(and(eq(connections.id, connection.id), asRead)),
+  ]);
+};
+
+/**
+ * The tools a chat's agent may call through `connection`, as `describe`
+ * hands them to the model (contracts.ts `connectionTools`): read of its
+ * session now (`describedNow`), which `describe` may wait for, as for a
+ * connector, and kept for searches (`keepDescribed`). Throws
+ * `connect.server_unavailable` when the session's list can't be read.
+ */
+export const composioDescribedTools = async (
+  env: Env,
+  connection: Connection
+): Promise<DescribedTool[]> => {
+  const now = Date.now();
+  const described = await describedNow(env, connection);
+  await keepDescribed(env, connection, described, now);
+  return described;
+};
+
+/**
+ * Reads and keeps `connection`'s tools of its session, if it can, as it
+ * is connected or its kept list goes stale: a failure is logged, and the
+ * list is read at the next need.
+ */
+export const keepComposioTools = async (
+  env: Env,
+  connection: Connection
+): Promise<void> => {
+  try {
+    await composioDescribedTools(env, connection);
+  } catch (error) {
+    log.warn("composio.tool_list_unread", {
+      connectionId: connection.id,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
+ * Reads and keeps `connection`'s tools after an answer (`keepComposioTools`),
+ * unless another read started within `laterReadGapMs`: marked as tried
+ * first, so one read runs at a time.
+ */
+const readOnceLater = async (
+  env: Env,
+  connection: Connection,
+  now: number
+): Promise<void> => {
+  try {
+    const started = await drizzle(env.DB)
+      .update(connections)
+      .set({ toolListTriedAt: new Date(now) })
+      .where(
+        and(
+          eq(connections.id, connection.id),
+          or(
+            isNull(connections.toolListTriedAt),
+            lte(connections.toolListTriedAt, new Date(now - laterReadGapMs))
+          )
+        )
+      )
+      .returning({ id: connections.id });
+    if (started.length > 0) {
+      await keepComposioTools(env, connection);
+    }
+  } catch (error) {
+    log.warn("composio.tool_list_unread", {
+      connectionId: connection.id,
+      ...errorFields(error),
+    });
+  }
+};
+
+/** A kept schema, or undefined for one that can't be read. */
+const keptSchema = (text: string): unknown => {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return parsed;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * `connection`'s tools as kept (`keepDescribed`), of those it offers now,
+ * answered at once, so no session holds up a search: none until a first
+ * read, and a search shows names alone then. A list stale or never read is
+ * read again after the answer (`later`): one read at a time, and none for
+ * a while after one.
+ */
+export const composioKeptTools = async (
+  env: Env,
+  connection: Connection,
+  later: (work: Promise<unknown>) => void
+): Promise<DescribedTool[]> => {
+  const now = Date.now();
+  if (
+    connection.status === "active" &&
+    (connection.toolListFreshUntil?.getTime() ?? 0) <= now &&
+    (connection.toolListTriedAt?.getTime() ?? 0) <= now - laterReadGapMs
+  ) {
+    later(readOnceLater(env, connection, now));
+  }
+  const offered = new Set(offeredToolNames(connection));
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(connectionTools)
+    .where(eq(connectionTools.connectionId, connection.id));
+  return rows.flatMap((row) => {
+    const input = keptSchema(row.inputSchema);
+    return offered.has(row.name) && input !== undefined
+      ? [
+          {
+            name: row.name,
+            description: row.description ?? "",
+            input,
+            output:
+              row.outputSchema === null
+                ? undefined
+                : keptSchema(row.outputSchema),
+          },
+        ]
+      : [];
+  });
 };
 
 /**

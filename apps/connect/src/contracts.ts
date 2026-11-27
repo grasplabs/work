@@ -32,6 +32,7 @@ import {
   composioContract,
   composioContractPrefix,
   composioDescribedTools,
+  composioKeptTools,
 } from "./composio-contracts.ts";
 import { allowedToolNow } from "./connections.ts";
 import type { Connection } from "./connections.ts";
@@ -267,7 +268,10 @@ const describedTools = async (
   { name: string; description: string; input: unknown; output: unknown }[]
 > => {
   if (connection.serverKind === "composio") {
-    return await composioDescribedTools(env, connection);
+    // A search reads the kept list, at once; `describe` the session now.
+    return searched === undefined
+      ? await composioDescribedTools(env, connection)
+      : await composioKeptTools(env, connection, searched);
   }
   if (connection.serverKind === "connector") {
     const listed =
@@ -305,10 +309,11 @@ const describedTools = async (
  * full for the `actions` named, as its server lists them now
  * (`offeredTools`), else every one as a search reads it, as kept and at
  * once, a stale list read again after (`later`); never one an admin
- * blocked on its connector. A Composio connection's as its session lists
- * them now, of those connect offers. None for any other connection, or one
- * that is gone. Throws `connect.server_unavailable` when a connector's or
- * a Composio session's list can't be read.
+ * blocked on its connector. A Composio connection's of those connect
+ * offers, as its session lists them now for the `actions` named, else as
+ * kept, at once (`composioKeptTools`). None for any other connection, or
+ * one that is gone. Throws `connect.server_unavailable` when a connector's
+ * or a Composio session's list can't be read for the `actions` named.
  */
 export const connectionTools = async (
   env: Env,

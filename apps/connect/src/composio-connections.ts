@@ -47,6 +47,7 @@ import { z } from "zod";
 
 import { guardedEvent, recordEvents, recordEventsIf } from "./audit.ts";
 import { composioEntry, composioTools, keyAuthOf } from "./catalog.ts";
+import { keepComposioTools } from "./composio-contracts.ts";
 import { ComposioError, composioKey, composioRequest } from "./composio.ts";
 import {
   auditRefusal,
@@ -1524,6 +1525,16 @@ const serveAndStore = async (
   if (replaced !== undefined) {
     await afterReplacing(env, person, replaced, replacedCleanup);
   }
+  // Its tools as its session lists them, kept for the chat's search from
+  // the start; a failure is logged, and a search reads them later.
+  const stored = await db
+    .select()
+    .from(connections)
+    .where(eq(connections.id, connectionId))
+    .get();
+  if (stored !== undefined) {
+    await keepComposioTools(env, stored);
+  }
   return connectionId;
 };
 
@@ -2617,6 +2628,9 @@ export const changeToolkitTools = async (
             .set({
               tools: stored,
               updatedAt,
+              // The kept list of its tools is stale: the next search
+              // reads its session again (composio-contracts.ts).
+              toolListFreshUntil: null,
               // Out of sync from the write on when nothing narrowed
               // Composio first (`narrowFirst`): a crash before the
               // reconcile below leaves it for the clock to send.
