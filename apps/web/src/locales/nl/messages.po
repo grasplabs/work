@@ -3076,6 +3076,10 @@ msgstr "en nog {more}"
 msgid "And more."
 msgstr "En meer."
 
+#: src/interview/guide.tsx
+msgid "And over here on the right, you’ll find the transcript. You can read everything back, tweak a word, or remove anything you’d rather leave out."
+msgstr "En hier aan de rechterkant vind je het transcript. Daar kun je alles rustig teruglezen, iets aanpassen of weghalen als je dat wilt."
+
 #: src/onboarding/people-add.tsx
 msgid "anna@company.com, tom@company.com"
 msgstr "anna@bedrijf.nl, tom@bedrijf.nl"
@@ -3929,10 +3933,6 @@ msgstr "Laat je team het weten voordat ik contact opneem"
 #: src/agents/agent-templates.ts
 msgid "Before meetings"
 msgstr "Voor vergaderingen"
-
-#: src/interview/guide.tsx
-msgid "Before we start, a quick look around. You can just talk to me like you would to a colleague."
-msgstr "Voordat we beginnen, even een korte rondleiding. Je kunt gewoon tegen me praten, zoals tegen een collega."
 
 #: src/apps/data-model-changes.tsx
 msgid "Before you make this change"
@@ -7446,8 +7446,8 @@ msgid "Everything the Brain kept from it is erased for good."
 msgstr "Alles wat het Brain ervan heeft bewaard, wordt voorgoed gewist."
 
 #: src/interview/guide.tsx
-msgid "Everything we say, written down."
-msgstr "Alles wat we zeggen, uitgeschreven."
+msgid "Everything we say, right here to read back."
+msgstr "Alles wat we zeggen, direct terug te lezen."
 
 #: src/interview/closed.tsx
 msgid "Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead."
@@ -8729,13 +8729,17 @@ msgstr "Helpdesk"
 msgid "Helsinki"
 msgstr "Helsinki"
 
-#: src/interview/guide.tsx
-msgid "Here you’ll find everything we say, written out. You can read it back, fix a word, or remove anything you want."
-msgstr "Hier vind je alles wat we zeggen, uitgeschreven. Je kunt het teruglezen, een woord verbeteren of weghalen wat je maar wilt."
-
 #: src/chat/plan-card.tsx
 msgid "Here's what Grasp will make"
 msgstr "Dit gaat Grasp maken"
+
+#: src/interview/guide.tsx
+msgid "Hey {name}, great to have you here. Before we start, let me quickly show you how everything works. You can just talk to me like you would to a colleague. Oh, and you can type too—whatever feels easiest, both work just as well."
+msgstr "Hey {name}, goed dat je er bent. Voordat we beginnen, laat ik je heel even zien hoe alles werkt. Je kunt gewoon tegen me praten, zoals je tegen een collega zou doen. Oh, en typen kan ook—net wat jij het fijnst vindt, het werkt allebei even goed."
+
+#: src/interview/guide.tsx
+msgid "Hey, great to have you here. Before we start, let me quickly show you how everything works. You can just talk to me like you would to a colleague. Oh, and you can type too—whatever feels easiest, both work just as well."
+msgstr "Hey, goed dat je er bent. Voordat we beginnen, laat ik je heel even zien hoe alles werkt. Je kunt gewoon tegen me praten, zoals je tegen een collega zou doen. Oh, en typen kan ook—net wat jij het fijnst vindt, het werkt allebei even goed."
 
 #: src/onboarding/setup-steps.tsx
 msgid "Hi {admin}, I’m Stephen"
@@ -9143,10 +9147,6 @@ msgstr "Is er niets te doen, zeg dat dan in één regel en stop."
 #: src/agents/agent-templates.ts
 msgid "If you can't find the answer, say so and say who might know."
 msgstr "Vind je het antwoord niet, zeg dat dan en zeg wie het misschien weet."
-
-#: src/interview/guide.tsx
-msgid "If you need a break, just hit Pause—we’ll pick up right where we left off."
-msgstr "Wil je even pauze? Druk dan op Pauze, dan gaan we verder waar we gebleven waren."
 
 #: src/guest-sign-in.tsx
 msgid "If you were invited, a code is on its way to you. It works for five minutes."
@@ -11341,8 +11341,12 @@ msgid "Names {title} under {under}"
 msgstr "Noemt {title} onder {under}"
 
 #: src/interview/guide.tsx
-msgid "Need a moment? Pause."
-msgstr "Even een moment nodig? Pauzeer."
+msgid "Need a break? Click here."
+msgstr "Even een pauze? Klik hier."
+
+#: src/interview/guide.tsx
+msgid "Need a quick break? Just hit this button—and we’ll pick up right where we left off."
+msgstr "Heb je even een pauze nodig? Klik dan op deze knop—dan pakken we het daarna gewoon weer op waar we gebleven waren."
 
 #: src/chat/plan-card.tsx
 msgid "Needs {name} connected"
@@ -14040,14 +14044,6 @@ msgstr "Positie"
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Prague"
 msgstr "Praag"
-
-#: src/interview/guide.tsx
-msgid "Prefer to type? It’s right here."
-msgstr "Liever typen? Dat kan hier."
-
-#: src/interview/guide.tsx
-msgid "Prefer to type? Just press here—that works just as well."
-msgstr "Typ je liever? Druk dan hier, dat werkt net zo goed."
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
@@ -16840,6 +16836,10 @@ msgctxt "the chat box's edge"
 msgid "Smooth"
 msgstr "Zacht"
 
+#: src/interview/guide.tsx
+msgid "So, that’s pretty much it in a nutshell. There really are no wrong answers—we’re just having a quick chat about what your day-to-day looks like, to see where things could be smarter or easier. Just let me know when you’re ready."
+msgstr "Nou, dat is het eigenlijk in een notendop. Er zijn echt geen foute antwoorden—we hebben gewoon even een kort gesprek over hoe jouw werkdag eruitziet, om samen te ontdekken waar dingen slimmer of makkelijker kunnen. Zeg het maar als je er klaar voor bent."
+
 #: src/agents/setup/words.ts
 #: src/connections/chat-reads.tsx
 msgid "Some teams"
@@ -17459,6 +17459,10 @@ msgstr "Terug naar praten"
 msgid "Switch between preview and code"
 msgstr "Wisselen tussen voorbeeld en code"
 
+#: src/interview/guide.tsx
+msgid "Switch languages anytime."
+msgstr "Wissel wanneer je wilt van taal."
+
 #: src/pages/page-frame.tsx
 msgid "Switch now"
 msgstr "Nu wisselen"
@@ -17583,8 +17587,8 @@ msgid "Talk"
 msgstr "Praten"
 
 #: src/interview/guide.tsx
-msgid "Talk to me, or type. Whichever feels easiest."
-msgstr "Praat met me, of typ. Wat voor jou het makkelijkst is."
+msgid "Talk or type—whatever feels easiest."
+msgstr "Praat of typ—wat jij het fijnst vindt."
 
 #: src/settings/interview-teams.tsx
 #: src/settings/interviews.tsx
@@ -17921,17 +17925,13 @@ msgstr "Dat was veel tegelijk. Wacht even een minuut en ga dan verder."
 msgid "That way of signing in isn't set up here."
 msgstr "Die manier van inloggen is hier niet ingesteld."
 
-#: src/interview/guide.tsx
-msgid "That’s all there is to it. There are no wrong answers here—I just want to hear how your day-to-day really works. Ready when you are."
-msgstr "Meer is het niet. Er bestaan hier geen foute antwoorden; ik wil gewoon horen hoe je dag er echt uitziet. Zeg het maar als je klaar bent."
-
-#: src/interview/guide.tsx
-msgid "That’s all. There are no wrong answers."
-msgstr "Dat was het. Er bestaan geen foute antwoorden."
-
 #: src/onboarding/plan-story.tsx
 msgid "That’s everything. Here’s a quick look at what happens next."
 msgstr "Dat was alles. Ik laat je nog kort zien wat er nu gaat gebeuren."
+
+#: src/interview/guide.tsx
+msgid "That’s it. No wrong answers."
+msgstr "Dat was het. Geen foute antwoorden."
 
 #: src/onboarding/people-add.tsx
 msgid "That’s more people than I can take: up to 2,000 in up to 120 teams."
@@ -19765,8 +19765,8 @@ msgid "Until Grasp support sets one, interview links can’t go out by email. Se
 msgstr "Tot Grasp-support er een instelt, kunnen interviewlinks niet per mail weg. Stuur iedereen zelf zijn link, vanuit Interviews."
 
 #: src/interview/guide.tsx
-msgid "Up here you can switch languages anytime—even halfway through. I’ll switch right along with you."
-msgstr "Hierboven kun je altijd van taal wisselen, zelfs halverwege. Ik schakel gewoon met je mee."
+msgid "Up here you’ll see a few buttons. With this one, you can switch languages anytime, even right in the middle of our conversation. Whatever’s easiest for you to speak in."
+msgstr "Hierboven zie je een paar knoppen. Met deze kun je van taal wisselen, ook gewoon midden in het gesprek. Net wat voor jou het makkelijkst praat."
 
 #: src/frame/ui-words.tsx
 msgid "Up to {maxSize}"
@@ -22000,10 +22000,6 @@ msgstr "Je interview is nog niet open. Je krijgt een e-mail zodra het zover is."
 #: src/onboarding/language-cards.tsx
 msgid "Your language"
 msgstr "Je taal"
-
-#: src/interview/guide.tsx
-msgid "Your language, whenever you like."
-msgstr "Jouw taal, wanneer je maar wilt."
 
 #: src/interview/transcript-looks.tsx
 msgid "Your message"

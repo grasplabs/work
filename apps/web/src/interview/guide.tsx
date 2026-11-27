@@ -21,6 +21,7 @@ import type { Point } from "../onboarding/pixel-cursor.tsx";
 import { startLight } from "./guide-light.ts";
 import { guideForgotten, guideSays } from "./guide-said.ts";
 import { keepNow, linkNow, update, useInterviewer } from "./kept.ts";
+import { loopFirstName } from "./loop.ts";
 import { prepare, say, stopSpeaking } from "./speech.ts";
 
 // The guide before the first question: a quick walk round for whoever has
@@ -38,20 +39,12 @@ import { prepare, say, stopSpeaking } from "./speech.ts";
 // never once anything is said.
 
 /** What the guide shows, in order: the control each step is about. */
-const spots = [
-  "answer",
-  "type",
-  "language",
-  "transcript",
-  "pause",
-  "ready",
-] as const;
+const spots = ["answer", "language", "transcript", "pause", "ready"] as const;
 type Spot = (typeof spots)[number];
 
 /** Where each step points; the last goes back to where they start. */
 const targetOf: Record<Spot, string> = {
   answer: '[data-guide="answer"] [data-slot="prompt-input"]',
-  type: '[data-guide="answer"] [data-slot="prompt-input-voice-close"]',
   language: '[data-guide="language"]',
   transcript: "[data-transcript-button]",
   pause: '[data-guide="pause"]',
@@ -185,33 +178,34 @@ export const useGuided = (): boolean =>
 
 // ---- Words -------------------------------------------------------------------------------
 
-/** Each step: the short line on screen, and what Stephen says round it. */
-const useGuideWords = (): Record<Spot, { shown: string; spoken: string }> => {
+/** Each step: the short line on screen, and what Stephen says round it, greeting them by name. */
+const useGuideWords = (
+  name: string
+): Record<Spot, { shown: string; spoken: string }> => {
   const { t } = useLingui();
   return {
     answer: {
-      shown: t`Talk to me, or type. Whichever feels easiest.`,
-      spoken: t`Before we start, a quick look around. You can just talk to me like you would to a colleague.`,
-    },
-    type: {
-      shown: t`Prefer to type? It’s right here.`,
-      spoken: t`Prefer to type? Just press here—that works just as well.`,
+      shown: t`Talk or type—whatever feels easiest.`,
+      spoken:
+        name === ""
+          ? t`Hey, great to have you here. Before we start, let me quickly show you how everything works. You can just talk to me like you would to a colleague. Oh, and you can type too—whatever feels easiest, both work just as well.`
+          : t`Hey ${name}, great to have you here. Before we start, let me quickly show you how everything works. You can just talk to me like you would to a colleague. Oh, and you can type too—whatever feels easiest, both work just as well.`,
     },
     language: {
-      shown: t`Your language, whenever you like.`,
-      spoken: t`Up here you can switch languages anytime—even halfway through. I’ll switch right along with you.`,
+      shown: t`Switch languages anytime.`,
+      spoken: t`Up here you’ll see a few buttons. With this one, you can switch languages anytime, even right in the middle of our conversation. Whatever’s easiest for you to speak in.`,
     },
     transcript: {
-      shown: t`Everything we say, written down.`,
-      spoken: t`Here you’ll find everything we say, written out. You can read it back, fix a word, or remove anything you want.`,
+      shown: t`Everything we say, right here to read back.`,
+      spoken: t`And over here on the right, you’ll find the transcript. You can read everything back, tweak a word, or remove anything you’d rather leave out.`,
     },
     pause: {
-      shown: t`Need a moment? Pause.`,
-      spoken: t`If you need a break, just hit Pause—we’ll pick up right where we left off.`,
+      shown: t`Need a break? Click here.`,
+      spoken: t`Need a quick break? Just hit this button—and we’ll pick up right where we left off.`,
     },
     ready: {
-      shown: t`That’s all. There are no wrong answers.`,
-      spoken: t`That’s all there is to it. There are no wrong answers here—I just want to hear how your day-to-day really works. Ready when you are.`,
+      shown: t`That’s it. No wrong answers.`,
+      spoken: t`So, that’s pretty much it in a nutshell. There really are no wrong answers—we’re just having a quick chat about what your day-to-day looks like, to see where things could be smarter or easier. Just let me know when you’re ready.`,
     },
   };
 };
@@ -449,7 +443,7 @@ const Walk = ({
  */
 export const Guide = () => {
   const { t, i18n } = useLingui();
-  const words = useGuideWords();
+  const words = useGuideWords(loopFirstName());
   const speaker = useInterviewer();
   const [at, setAt] = useState(() => reachedThisVisit);
   const [shownCursor, setShownCursor] = useState(false);

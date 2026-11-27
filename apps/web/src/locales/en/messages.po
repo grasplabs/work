@@ -3076,6 +3076,10 @@ msgstr "and {more} more"
 msgid "And more."
 msgstr "And more."
 
+#: src/interview/guide.tsx
+msgid "And over here on the right, you’ll find the transcript. You can read everything back, tweak a word, or remove anything you’d rather leave out."
+msgstr "And over here on the right, you’ll find the transcript. You can read everything back, tweak a word, or remove anything you’d rather leave out."
+
 #: src/onboarding/people-add.tsx
 msgid "anna@company.com, tom@company.com"
 msgstr "anna@company.com, tom@company.com"
@@ -3929,10 +3933,6 @@ msgstr "Before I reach out, let your team know"
 #: src/agents/agent-templates.ts
 msgid "Before meetings"
 msgstr "Before meetings"
-
-#: src/interview/guide.tsx
-msgid "Before we start, a quick look around. You can just talk to me like you would to a colleague."
-msgstr "Before we start, a quick look around. You can just talk to me like you would to a colleague."
 
 #: src/apps/data-model-changes.tsx
 msgid "Before you make this change"
@@ -7446,8 +7446,8 @@ msgid "Everything the Brain kept from it is erased for good."
 msgstr "Everything the Brain kept from it is erased for good."
 
 #: src/interview/guide.tsx
-msgid "Everything we say, written down."
-msgstr "Everything we say, written down."
+msgid "Everything we say, right here to read back."
+msgstr "Everything we say, right here to read back."
 
 #: src/interview/closed.tsx
 msgid "Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead."
@@ -8729,13 +8729,17 @@ msgstr "Help desk"
 msgid "Helsinki"
 msgstr "Helsinki"
 
-#: src/interview/guide.tsx
-msgid "Here you’ll find everything we say, written out. You can read it back, fix a word, or remove anything you want."
-msgstr "Here you’ll find everything we say, written out. You can read it back, fix a word, or remove anything you want."
-
 #: src/chat/plan-card.tsx
 msgid "Here's what Grasp will make"
 msgstr "Here's what Grasp will make"
+
+#: src/interview/guide.tsx
+msgid "Hey {name}, great to have you here. Before we start, let me quickly show you how everything works. You can just talk to me like you would to a colleague. Oh, and you can type too—whatever feels easiest, both work just as well."
+msgstr "Hey {name}, great to have you here. Before we start, let me quickly show you how everything works. You can just talk to me like you would to a colleague. Oh, and you can type too—whatever feels easiest, both work just as well."
+
+#: src/interview/guide.tsx
+msgid "Hey, great to have you here. Before we start, let me quickly show you how everything works. You can just talk to me like you would to a colleague. Oh, and you can type too—whatever feels easiest, both work just as well."
+msgstr "Hey, great to have you here. Before we start, let me quickly show you how everything works. You can just talk to me like you would to a colleague. Oh, and you can type too—whatever feels easiest, both work just as well."
 
 #: src/onboarding/setup-steps.tsx
 msgid "Hi {admin}, I’m Stephen"
@@ -9143,10 +9147,6 @@ msgstr "If there is nothing to do, say so in one line and stop."
 #: src/agents/agent-templates.ts
 msgid "If you can't find the answer, say so and say who might know."
 msgstr "If you can't find the answer, say so and say who might know."
-
-#: src/interview/guide.tsx
-msgid "If you need a break, just hit Pause—we’ll pick up right where we left off."
-msgstr "If you need a break, just hit Pause—we’ll pick up right where we left off."
 
 #: src/guest-sign-in.tsx
 msgid "If you were invited, a code is on its way to you. It works for five minutes."
@@ -11341,8 +11341,12 @@ msgid "Names {title} under {under}"
 msgstr "Names {title} under {under}"
 
 #: src/interview/guide.tsx
-msgid "Need a moment? Pause."
-msgstr "Need a moment? Pause."
+msgid "Need a break? Click here."
+msgstr "Need a break? Click here."
+
+#: src/interview/guide.tsx
+msgid "Need a quick break? Just hit this button—and we’ll pick up right where we left off."
+msgstr "Need a quick break? Just hit this button—and we’ll pick up right where we left off."
 
 #: src/chat/plan-card.tsx
 msgid "Needs {name} connected"
@@ -14040,14 +14044,6 @@ msgstr "Position"
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Prague"
 msgstr "Prague"
-
-#: src/interview/guide.tsx
-msgid "Prefer to type? It’s right here."
-msgstr "Prefer to type? It’s right here."
-
-#: src/interview/guide.tsx
-msgid "Prefer to type? Just press here—that works just as well."
-msgstr "Prefer to type? Just press here—that works just as well."
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
@@ -16840,6 +16836,10 @@ msgctxt "the chat box's edge"
 msgid "Smooth"
 msgstr "Smooth"
 
+#: src/interview/guide.tsx
+msgid "So, that’s pretty much it in a nutshell. There really are no wrong answers—we’re just having a quick chat about what your day-to-day looks like, to see where things could be smarter or easier. Just let me know when you’re ready."
+msgstr "So, that’s pretty much it in a nutshell. There really are no wrong answers—we’re just having a quick chat about what your day-to-day looks like, to see where things could be smarter or easier. Just let me know when you’re ready."
+
 #: src/agents/setup/words.ts
 #: src/connections/chat-reads.tsx
 msgid "Some teams"
@@ -17459,6 +17459,10 @@ msgstr "Switch back to voice"
 msgid "Switch between preview and code"
 msgstr "Switch between preview and code"
 
+#: src/interview/guide.tsx
+msgid "Switch languages anytime."
+msgstr "Switch languages anytime."
+
 #: src/pages/page-frame.tsx
 msgid "Switch now"
 msgstr "Switch now"
@@ -17583,8 +17587,8 @@ msgid "Talk"
 msgstr "Talk"
 
 #: src/interview/guide.tsx
-msgid "Talk to me, or type. Whichever feels easiest."
-msgstr "Talk to me, or type. Whichever feels easiest."
+msgid "Talk or type—whatever feels easiest."
+msgstr "Talk or type—whatever feels easiest."
 
 #: src/settings/interview-teams.tsx
 #: src/settings/interviews.tsx
@@ -17921,17 +17925,13 @@ msgstr "That was a lot at once. Wait a minute, then go on."
 msgid "That way of signing in isn't set up here."
 msgstr "That way of signing in isn't set up here."
 
-#: src/interview/guide.tsx
-msgid "That’s all there is to it. There are no wrong answers here—I just want to hear how your day-to-day really works. Ready when you are."
-msgstr "That’s all there is to it. There are no wrong answers here—I just want to hear how your day-to-day really works. Ready when you are."
-
-#: src/interview/guide.tsx
-msgid "That’s all. There are no wrong answers."
-msgstr "That’s all. There are no wrong answers."
-
 #: src/onboarding/plan-story.tsx
 msgid "That’s everything. Here’s a quick look at what happens next."
 msgstr "That’s everything. Here’s a quick look at what happens next."
+
+#: src/interview/guide.tsx
+msgid "That’s it. No wrong answers."
+msgstr "That’s it. No wrong answers."
 
 #: src/onboarding/people-add.tsx
 msgid "That’s more people than I can take: up to 2,000 in up to 120 teams."
@@ -19765,8 +19765,8 @@ msgid "Until Grasp support sets one, interview links can’t go out by email. Se
 msgstr "Until Grasp support sets one, interview links can’t go out by email. Send each one their link by hand from Interviews."
 
 #: src/interview/guide.tsx
-msgid "Up here you can switch languages anytime—even halfway through. I’ll switch right along with you."
-msgstr "Up here you can switch languages anytime—even halfway through. I’ll switch right along with you."
+msgid "Up here you’ll see a few buttons. With this one, you can switch languages anytime, even right in the middle of our conversation. Whatever’s easiest for you to speak in."
+msgstr "Up here you’ll see a few buttons. With this one, you can switch languages anytime, even right in the middle of our conversation. Whatever’s easiest for you to speak in."
 
 #: src/frame/ui-words.tsx
 msgid "Up to {maxSize}"
@@ -22000,10 +22000,6 @@ msgstr "Your interview isn't open yet. You'll get an email when it is."
 #: src/onboarding/language-cards.tsx
 msgid "Your language"
 msgstr "Your language"
-
-#: src/interview/guide.tsx
-msgid "Your language, whenever you like."
-msgstr "Your language, whenever you like."
 
 #: src/interview/transcript-looks.tsx
 msgid "Your message"

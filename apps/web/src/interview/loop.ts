@@ -517,6 +517,9 @@ let firstName = "";
 /** His goodbye is being said: it goes on while the page moves to the thanks. */
 let farewell = false;
 
+/** Their first name, as the page told it: the guide greets them by it. */
+export const loopFirstName = (): string => firstName;
+
 /** Whether they lead a team and tell about its work, not their own. */
 let leads = false;
 
