@@ -24,27 +24,30 @@ export interface ChatList {
  */
 export class ChatListWatch {
   readonly #pushes: Pushes<ChatListUpdate>;
-  readonly #list: () => ChatList;
+  /** The person whose list it follows. */
+  readonly personId: string;
+  /** The list as it was last told: what the next update goes out from. */
+  #list: ChatList = { chats: [], archived: 0 };
   /** Each chat as this watcher was sent it, by ID; none before the first update. */
   #sent: Map<string, string> | undefined;
   #archivedSent = 0;
 
-  constructor(
-    listener: ChatListListener,
-    list: () => ChatList,
-    drop: () => void
-  ) {
+  constructor(listener: ChatListListener, personId: string, drop: () => void) {
     this.#pushes = new Pushes(listener, () => this.#next(), drop);
-    this.#list = list;
+    this.personId = personId;
   }
 
-  /** The list may have changed: what did goes out. */
-  push(): void {
+  /**
+   * The list as it is now, read once for every watcher of it: what of it
+   * changed goes out, now or after the update on its way.
+   */
+  push(list: ChatList): void {
+    this.#list = list;
     this.#pushes.changed();
   }
 
   #next(): ChatListUpdate | undefined {
-    const { chats, archived } = this.#list();
+    const { chats, archived } = this.#list;
     const now = new Map(chats.map((chat) => [chat.id, JSON.stringify(chat)]));
     const sent = this.#sent;
     this.#sent = now;

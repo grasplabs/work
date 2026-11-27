@@ -148,7 +148,7 @@ import type {
   TurnStop,
 } from "./chat-harness.ts";
 import { ChatListWatch } from "./chat-list-watch.ts";
-import type { ChatListListener } from "./chat-list-watch.ts";
+import type { ChatList, ChatListListener } from "./chat-list-watch.ts";
 import {
   chatMessageOf,
   partialOf,
@@ -1232,7 +1232,12 @@ export class Workspace extends DurableObject<Env> {
       .where(eq(chats.id, chatId))
       .run();
     this.#keepSaid(chatId, stored.id, message);
-    this.#listChanged();
+    // A step's result changes nothing the list shows that the answer
+    // around it won't: no title, read or working state, and its chat
+    // moved up as it was asked in.
+    if (message.role !== "toolResult") {
+      this.#listChanged();
+    }
     return stored;
   }
 
@@ -5721,18 +5726,11 @@ export class Workspace extends DurableObject<Env> {
   watchChats(personId: string, listener: ChatListListener): string {
     this.#requireRoomToWatch();
     const watchId = crypto.randomUUID();
-    const watch = new ChatListWatch(
-      listener.dup(),
-      () => ({
-        chats: this.chats(personId),
-        archived: this.#archivedCount(personId),
-      }),
-      () => {
-        this.unwatchChats(watchId);
-      }
-    );
+    const watch = new ChatListWatch(listener.dup(), personId, () => {
+      this.unwatchChats(watchId);
+    });
     this.#listWatchers.set(watchId, watch);
-    watch.push();
+    watch.push(this.#listOf(personId));
     return watchId;
   }
 
@@ -5756,10 +5754,22 @@ export class Workspace extends DurableObject<Env> {
     this.#listTold = true;
     queueMicrotask(() => {
       this.#listTold = false;
+      // Read once for each person followed, whoever many follow it.
+      const lists = new Map<string, ChatList>();
       for (const watch of this.#listWatchers.values()) {
-        watch.push();
+        const list = lists.get(watch.personId) ?? this.#listOf(watch.personId);
+        lists.set(watch.personId, list);
+        watch.push(list);
       }
     });
+  }
+
+  /** `personId`'s list as its watchers follow it: what `chats` gives, and how many they archived. */
+  #listOf(personId: string): ChatList {
+    return {
+      chats: this.chats(personId),
+      archived: this.#archivedCount(personId),
+    };
   }
 
   /** How many chats `personId` archived. */
