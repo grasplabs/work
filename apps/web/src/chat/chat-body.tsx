@@ -25,7 +25,7 @@ import {
   ModelsUnavailableNotice,
   unavailableText,
 } from "./models-unavailable.tsx";
-import { pendingKey, shownPending, usePending } from "./pending-question.ts";
+import { shownPending, usePending } from "./pending-question.ts";
 import { ChatSources } from "./sources.tsx";
 import { useSubjectBar } from "./subject-bar.tsx";
 import type { ChatThread as ChatThreadType } from "./thread.tsx";
@@ -161,11 +161,7 @@ export const ChatConversation = ({
   // Read as it opens here; the New line over what the person hadn't seen.
   const newLine = useNewLine(chatId, view, seen);
   // The question on its way here, drawn at once.
-  const pending = shownPending(
-    usePending(pendingKey(chatId, chat.slot)),
-    view.messages,
-    view.queued
-  );
+  const pending = shownPending(usePending(chatId), view.messages, view.queued);
   // A subject's chat, while core finds it, or why it gave none.
   if (finding.searching || finding.failure !== undefined) {
     return finding.failure === undefined ? (

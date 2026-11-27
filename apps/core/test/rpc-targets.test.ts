@@ -9,6 +9,7 @@ import type { CoreRpc } from "../src/rpc.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInApi } from "./sign-in.ts";
+import { startedThrough } from "./started-chats.ts";
 
 // Every object a browser can call over core's connection, held to the
 // bounds every argument of a call gets (rpc-target.ts). How that could
@@ -209,7 +210,7 @@ const holding = <T extends Disposable>(held: Disposable[], value: T): T => {
 const calls = {
   authenticate: (core) => core.authenticate(),
   "authenticate.chats.watch": async (chats, { held }) => {
-    const { id } = await chats.create("Walked");
+    const { id } = await startedThrough(chats, "Walked");
     const page = pageStub();
     const subscription = holding(held, await chats.watch(id, null, page.stub));
     // The chat as it is now, pushed at once: let go of after that, as a

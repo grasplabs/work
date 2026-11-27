@@ -5,7 +5,7 @@ import {
   chatFileTypeOf,
   seedTitleOf,
 } from "@grasp-os/shared/chat";
-import type { ChatMake } from "@grasp-os/shared/chat";
+import type { ChatMake, ChatStart } from "@grasp-os/shared/chat";
 import { failureText } from "@grasp-os/shared/errors";
 import type { ModelEffort, ModelEfforts } from "@grasp-os/shared/models";
 import type { Subject } from "@grasp-os/shared/subject";
@@ -20,6 +20,7 @@ import { useHoldAlive, useHoldHeartbeat } from "../use-core-reach.ts";
 import { useCore } from "../use-core.ts";
 import { activeChat, setActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
+import { chatMade, startOf, starting } from "./chat-starts.ts";
 import { useFollowedChat } from "./chat-watch.ts";
 import type { Problem, StopNote } from "./dictation.ts";
 import { emptyDraft, moveNewDraft, useDraft } from "./drafts.ts";
@@ -35,11 +36,11 @@ import type { ModelChoice } from "./model-choice.ts";
 import {
   clearPending,
   pendingAt,
-  pendingKey,
   setPending,
   taken,
   takesBack,
   useBoxOwner,
+  useSenderHere,
   usePending,
 } from "./pending-question.ts";
 import type { PendingQuestion } from "./pending-question.ts";
@@ -47,8 +48,10 @@ import { useReconnecting } from "./reconnecting.ts";
 
 // Asking in a chat, from the chat page or the chat dock on any other page:
 // the box's text, model, effort and files, and asking in the open chat, or
-// in a new one named after the question. A question's files are attached to
-// its chat as it is sent, one at a time, then the question names them.
+// in a new one named after the question, which the page names itself and
+// the question makes (`ChatStart`, chat-starts.ts), so its page opens with
+// the question in it at once. A question's files are attached to its chat
+// as it is sent, one at a time, then the question names them.
 // What is typed belongs to the chat it was typed in, kept as its draft
 // (drafts.ts): once the box is another chat's, it holds that chat's draft,
 // never sending one chat's words or files to the next (the chat a
@@ -135,7 +138,11 @@ const attachAll = async (
   chatId: string,
   carried: readonly BoxFile[],
   attached: Attached,
-  hold: () => () => void
+  hold: () => () => void,
+  /** The chat the question starts, which its first file's call makes. */
+  start: ChatStart | undefined,
+  /** Told as each call goes, before its answer: the chat's page may open. */
+  going: () => void
 ): Promise<string[]> => {
   const fileIds: string[] = [];
   const letGo = carried.length > 0 ? hold() : undefined;
@@ -150,12 +157,15 @@ const attachAll = async (
       attached.set(boxId, { chatId, key });
       // oxlint-disable-next-line no-await-in-loop -- one at a time, in the order they were added
       const bytes = new Uint8Array(await file.arrayBuffer());
-      // oxlint-disable-next-line no-await-in-loop -- one at a time, in the order they were added
-      const { id: fileId } = await session.chats.attachFile(
+      const attaching = session.chats.attachFile(
         chatId,
         { name: file.name, bytes },
-        key
+        key,
+        start
       );
+      going();
+      // oxlint-disable-next-line no-await-in-loop -- one at a time, in the order they were added
+      const { id: fileId } = await attaching;
       attached.set(boxId, { chatId, key, fileId });
       fileIds.push(fileId);
     }
@@ -165,14 +175,33 @@ const attachAll = async (
   return fileIds;
 };
 
+/**
+ * The files a question taken back carries (`carried`), and the box's own
+ * (`own`), into the box: at most as many as a question carries, its own
+ * first; any over that stay out, and the box says so.
+ */
+const filesBack = (
+  carried: readonly BoxFile[],
+  own: readonly BoxFile[]
+): { files: readonly BoxFile[]; problem: string | undefined } => {
+  const back = [...carried, ...own];
+  return {
+    files: back.slice(0, chatFilesPerQuestionMax),
+    problem:
+      back.length > chatFilesPerQuestionMax
+        ? failureText(agentErrors.create("agent.too_many_files"))
+        : undefined,
+  };
+};
+
 /** No model takes an effort, as before core says which do. */
 const noModelEfforts: Readonly<Record<string, ModelEfforts>> = {};
 
 /** Where a question goes when there is no chat yet, and what follows it. */
 export interface AskOptions {
   /**
-   * Once the chat a question goes into is there, made for it or not, as
-   * the question goes on its way: its page may open at once, and shows it.
+   * The new chat a question starts, named by the page, as the question
+   * goes on its way: its page opens at once, and shows it.
    */
   onChat?: (chatId: string) => void;
   /**
@@ -211,6 +240,8 @@ export interface Unsent {
    * its words alone say it is the same question.
    */
   asked: string | undefined;
+  /** The chat it went to, which it may have started: asked again, there. */
+  chatId: string;
 }
 
 /**
@@ -249,6 +280,26 @@ export const questionKeyFor = (
     : unsent.asked === asked)
     ? unsent.key
     : crypto.randomUUID();
+
+/**
+ * The chat a question with `key` goes to, and the start it goes with: the
+ * box's chat, with its start while the tab is still starting it
+ * (chat-starts.ts); else a new chat the page names, the one a first try
+ * named when it is asked again with the same key, which the question
+ * starts under its own key (`ChatStart`).
+ */
+const chatFor = (
+  chatId: string | undefined,
+  unsent: Unsent | null,
+  key: string,
+  newChat: Omit<ChatStart, "key">
+): { chatId: string; start: ChatStart | undefined } =>
+  chatId === undefined
+    ? {
+        chatId: unsent?.key === key ? unsent.chatId : crypto.randomUUID(),
+        start: { key, ...newChat },
+      }
+    : { chatId, start: startOf(chatId) };
 
 /**
  * What the box to ask in needs: the text, model and effort, and asking in
@@ -313,8 +364,10 @@ export const useAsk = (
   // The question on its way here (pending-question.ts), and the box's own
   // ID, which only it takes back.
   const owner = useBoxOwner();
-  const pendingHere = pendingKey(chatId, slot);
-  const here = usePending(pendingHere);
+  const here = usePending(chatId);
+  // Whether the box that sent it is still on the page: once it goes, this
+  // one takes back what failed (`takesBack`).
+  const senderHere = useSenderHere(here);
   const { messages, queued, running } = useFollowedChat(chatId).view;
   const reconnecting = useReconnecting(busy || running);
   // A question from the box that failed to send comes back into it, which
@@ -322,28 +375,31 @@ export const useAsk = (
   // start, after it opened the chat's page), the one that shows its chat.
   // Before what was typed since, never in place of it.
   const [takenBack, setTakenBack] = useState<PendingQuestion>();
-  if (takesBack(here, owner) && here !== takenBack) {
+  if (takesBack(here, owner, senderHere) && here !== takenBack) {
     setTakenBack(here);
     setReturnedWhy(here.state.failed);
-    // At most as many as a question carries, its own first: any over that
-    // stay out, and the box says so.
     // The box's own: none when it just turned to this chat, its files
     // left with the chat it showed.
-    const back = [...here.files, ...(chatId === draftOf ? files : [])];
-    setFiles(back.slice(0, chatFilesPerQuestionMax));
-    if (back.length > chatFilesPerQuestionMax) {
-      setFileProblem(failureText(agentErrors.create("agent.too_many_files")));
+    const back = filesBack(here.files, chatId === draftOf ? files : []);
+    setFiles(back.files);
+    if (back.problem !== undefined) {
+      setFileProblem(back.problem);
     }
   }
   // Taken back, or core's copy in the thread: it is no longer on its way.
   // Taken back, its key is this box's to send it again with, so core
   // takes it once even if the first try reached it.
   useEffect(() => {
-    if (here === undefined) {
+    if (here === undefined || chatId === undefined) {
       return;
     }
-    if (takesBack(here, owner)) {
-      unsent.current = { key: here.key, question: here.text, asked: undefined };
+    if (takesBack(here, owner, senderHere)) {
+      unsent.current = {
+        key: here.key,
+        question: here.text,
+        asked: undefined,
+        chatId,
+      };
       // Its words and what they mention, into the draft.
       changeDraft((now) => ({
         text: now.text === "" ? here.text : `${here.text}\n\n${now.text}`,
@@ -357,11 +413,11 @@ export const useAsk = (
           ),
         ],
       }));
-      clearPending(pendingHere, here);
+      clearPending(chatId, here);
     } else if (here.state === "sent" && taken(here, messages, queued)) {
-      clearPending(pendingHere, here);
+      clearPending(chatId, here);
     }
-  }, [here, owner, messages, queued, pendingHere, changeDraft]);
+  }, [here, senderHere, owner, messages, queued, chatId, changeDraft]);
   // Another box's question on its way into this chat (Chat's start, which
   // opened it): this one waits for it, so the two never pass each other.
   const otherOnItsWay = here?.state === "sending" && here.owner !== owner;
@@ -446,6 +502,14 @@ export const useAsk = (
       subject,
     });
     const key = questionKeyFor(unsent.current, question, askedAs);
+    const { chatId: askedIn, start } = chatFor(chatId, unsent.current, key, {
+      title: seedTitleOf(question),
+      ...(startWith === undefined ? {} : { agentId: startWith }),
+      ...(make === undefined ? {} : { make }),
+    });
+    if (start !== undefined) {
+      starting(askedIn, start);
+    }
     // The thread shows the question at once, and the box lets go of it.
     const asked: PendingQuestion = {
       text: question,
@@ -459,58 +523,53 @@ export const useAsk = (
       fromBox,
       state: "sending",
     };
-    let pendingIn = pendingKey(chatId, slot);
-    setPending(pendingIn, asked);
+    setPending(askedIn, asked);
     if (fromBox) {
       // Clears the box only of what was sent from it: asking again sends
       // an earlier question, and a draft the person started stays.
       changeDraft((now) => (now.text === question ? emptyDraft : now));
       setFiles((now) => now.filter((each) => !carried.includes(each)));
     }
-    const asking = async (session: Session): Promise<string> => {
-      let id = chatId;
-      if (id === undefined) {
-        ({ id } = await session.chats.create(
-          seedTitleOf(question),
-          startWith,
-          make,
-          key
-        ));
+    // A new chat is the open one, unless another was opened meanwhile, and
+    // its page opens, once its first call is on its way: a read of it
+    // after that call waits on core for it to be made.
+    let opened = chatId !== undefined;
+    const going = (): void => {
+      if (opened) {
+        return;
       }
-      // The chat is there (asked again on a new connection, already so):
-      // the question shows in it as it goes on, and it is the open one,
-      // unless another was opened meanwhile.
-      if (chatId === undefined && pendingIn !== id) {
-        clearPending(pendingIn, asked);
-        pendingIn = id;
-        setPending(pendingIn, asked);
-        // The box is the chat's still once it opens.
-        setMade(id);
-        // It takes what was typed for the next chat while it went.
-        moveNewDraft(identity.userId, draftScope, id);
-        if (activeChat(slot) === undefined) {
-          setActiveChat(id, slot);
-        }
-        onChat?.(id);
+      opened = true;
+      // The box is the chat's still once it opens.
+      setMade(askedIn);
+      // It takes what was typed for the next chat while it went.
+      moveNewDraft(identity.userId, draftScope, askedIn);
+      if (activeChat(slot) === undefined) {
+        setActiveChat(askedIn, slot);
       }
-      const askedIn = id;
+      onChat?.(askedIn);
+    };
+    const asking = async (session: Session): Promise<void> => {
       const fileIds = await attachAll(
         session,
         askedIn,
         carried,
         attached,
-        holdHeartbeat
+        holdHeartbeat,
+        start,
+        going
       );
-      await session.chats.send(askedIn, {
+      const sent = session.chats.send(askedIn, {
         text: question,
         model,
         ...(effort === undefined ? {} : { effort }),
         ...(fileIds.length === 0 ? {} : { files: fileIds }),
         ...(subject === undefined ? {} : { subject }),
         ...(named.length === 0 ? {} : { mentions: named }),
+        ...(start === undefined ? {} : { start }),
         key,
       });
-      return askedIn;
+      going();
+      await sent;
     };
     // Why it failed, kept with the question for whichever box takes it back.
     let why: string | undefined;
@@ -518,7 +577,10 @@ export const useAsk = (
     // Chat's start goes as the chat's page opens.
     const letGo = holdAlive();
     const sent = await run(
-      reaching(core, asking),
+      reaching(core, async (session) => {
+        await asking(session);
+        return true;
+      }),
       fromBox
         ? (reason) => {
             why = reason;
@@ -530,23 +592,24 @@ export const useAsk = (
     if (sent === undefined) {
       // From the box, the question leaves the thread and goes back into a
       // box, which says why it wasn't sent; asked for the person, it only
-      // leaves the thread, and this box says why. A new chat made for it
-      // goes with the same key when asked again.
+      // leaves the thread, and this box says why. A new chat it started
+      // goes with the same start when asked again.
       if (why === undefined) {
-        clearPending(pendingIn, asked);
+        clearPending(askedIn, asked);
       } else {
-        setPending(pendingIn, { ...asked, state: { failed: why } });
+        setPending(askedIn, { ...asked, state: { failed: why } });
       }
-      unsent.current = { key, question, asked: askedAs };
+      unsent.current = { key, question, asked: askedAs, chatId: askedIn };
       return false;
     }
     unsent.current = null;
+    chatMade(askedIn);
     for (const { id } of carried) {
       attached.delete(id);
     }
     // Taken: drawn until core's copy is in the thread.
-    if (pendingAt(pendingIn) === asked) {
-      setPending(pendingIn, { ...asked, state: "sent" });
+    if (pendingAt(askedIn) === asked) {
+      setPending(askedIn, { ...asked, state: "sent" });
     }
     return true;
   };

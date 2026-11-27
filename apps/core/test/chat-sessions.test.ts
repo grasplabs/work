@@ -30,6 +30,7 @@ import { mockIdp } from "./idp.ts";
 import { fakeProvider, fakeProviderFor } from "./model-provider.ts";
 import { turnRecordsOf } from "./model-usage.ts";
 import { signedInApi, signedInWithRole } from "./sign-in.ts";
+import { startedThrough } from "./started-chats.ts";
 
 // A chat's own object (chat-session.ts), through its Workspace: pi-durable
 // keeps the chat's transcript there, on the object's SQLite in tables of
@@ -1015,8 +1016,8 @@ describe("a chat's ChatSession", () => {
     const stub = workspace(env, id);
     await fakeProvider(says("One."), says("Two."));
     const chats = [
-      await api.chats.create("One"),
-      await api.chats.create("Two"),
+      await startedThrough(api.chats, "One"),
+      await startedThrough(api.chats, "Two"),
     ];
     for (const chat of chats) {
       // oxlint-disable-next-line no-await-in-loop -- one chat after another

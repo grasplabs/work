@@ -20,6 +20,7 @@ import { loadFrame, servedAll } from "./page-frames.ts";
 import { deskFiles, notesApp, notesFiles } from "./preview-drafts.ts";
 import { outcome, previewCall, previewOf, refreshed } from "./previews.ts";
 import { followedVersion, signedInApi } from "./sign-in.ts";
+import { startedChat } from "./started-chats.ts";
 
 // The preview of an App's one shared draft: the draft's pages and server
 // code, run for whichever builder of the App calls, with no side effects.
@@ -76,7 +77,7 @@ const writeDraft = async (
   changes: TestSource,
   base: number | null = 1
 ): Promise<number> => {
-  const { id: chatId } = await person.api.chats.create("App changes");
+  const { id: chatId } = await startedChat(person, "App changes");
   const { files, definition } = sourceParts(changes);
   const now = await readDraft(env, { kind: "app", id: app });
   await saveDraft(

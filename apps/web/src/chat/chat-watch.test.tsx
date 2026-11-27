@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { setTimeout as sleep } from "node:timers/promises";
 
+import { agentErrors } from "@grasp-os/shared/agent";
 import type { ChatMessage, ChatUpdate } from "@grasp-os/shared/chat";
 import {
   createMemoryHistory,
@@ -13,6 +14,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { chatMade, starting } from "./chat-starts.ts";
 import { useFollowedChat } from "./chat-watch.ts";
 import { useNewLine } from "./unread.ts";
 
@@ -270,5 +272,78 @@ describe("a chat shown twice from one watch", () => {
       shown: lines.again?.length !== undefined,
       marks: markRead.mock.calls.length,
     }).toStrictEqual({ shown: true, marks: 1 });
+  });
+
+  it("follows a chat the tab is starting once its question made it, never not found while it isn't yet", async () => {
+    shownChat = crypto.randomUUID();
+    const followed: { gone: boolean | undefined; messages: number }[] = [];
+    const Starting = () => {
+      const { view, gone } = useFollowedChat(shownChat);
+      followed.push({ gone, messages: view.messages.length });
+      return null;
+    };
+    let watches = 0;
+    const chats = {
+      watch: async (
+        _chatId: string,
+        _after: number | null,
+        onUpdate: (update: ChatUpdate) => void
+      ) => {
+        watches += 1;
+        // Core has no such chat until its first question made it.
+        if (watches === 1) {
+          throw agentErrors.create("agent.chat_not_found");
+        }
+        onUpdate({
+          messages,
+          partial: null,
+          running: false,
+          stopped: null,
+          held: 0,
+          worked: 0,
+          seenUpTo: 2,
+        });
+        return await Promise.withResolvers<never>().promise;
+      },
+    };
+    starting(shownChat, { key: crypto.randomUUID(), title: "Question 1" });
+    const core = {
+      withSession: async <T,>(
+        run: (session: { chats: typeof chats }) => Promise<T>
+      ): Promise<T> => await run({ chats }),
+    };
+    const router = createRouter({
+      routeTree: createRootRoute({ component: Starting }),
+      history: createMemoryHistory(),
+      context: { core },
+    });
+    const host = document.createElement("div");
+    document.body.append(host);
+    await act(async () => {
+      root = createRoot(host);
+      root.render(<RouterProvider router={router} />);
+      await router.load();
+    });
+    await vi.waitFor(() => {
+      expect(watches).toBe(1);
+    });
+    const meanwhile = followed.at(-1);
+    await act(async () => {
+      chatMade(shownChat);
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(followed.at(-1)?.messages).toBe(2);
+    });
+
+    expect({
+      meanwhile,
+      everGone: followed.some(({ gone }) => gone === true),
+      watches,
+    }).toStrictEqual({
+      meanwhile: { gone: undefined, messages: 0 },
+      everGone: false,
+      watches: 2,
+    });
   });
 });

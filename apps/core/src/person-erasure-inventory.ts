@@ -104,6 +104,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.channel_links": { erased: "channels" },
   "core.channel_conversations": { erased: "channels" },
   "core.chat_workflow_offers": { erased: "channels" },
+  // Whose each chat's ID is, IDs only: kept, so no erasure frees an ID
+  // for someone else's chat to take (what core keeps by a chat's ID).
+  "core.chat_ids": { kept: "keeps each chat's ID taken, by IDs only" },
   // A shared chat's audience is the company's, but the rows of the chats
   // in their own workspace go with it.
   "core.chat_audiences": { erased: "workspace" },
@@ -881,6 +884,7 @@ export const reviewedPersonColumns: Readonly<
   "core.channel_conversations": ["user_id"],
   "core.channel_links": ["platform_user_id", "used_by"],
   "core.chat_audiences": ["members"],
+  "core.chat_ids": ["person_id"],
   "core.chat_workflow_offers": ["user_id"],
   "core.connection_brain_audiences": ["changed_by"],
   "core.connection_brain_erasures": ["actor"],

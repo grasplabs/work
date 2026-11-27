@@ -28,6 +28,7 @@ import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import type { FakeProvider } from "./model-provider.ts";
 import { signedInApi, unique } from "./sign-in.ts";
+import { startedChat } from "./started-chats.ts";
 
 // The agent remembers on its own (GRA-1814): in a person's own chat in
 // Grasp's app it keeps what they said that will matter later, as their
@@ -367,7 +368,7 @@ describe("the agent remembering in a person's own chat", () => {
         checked(true),
         says("Noted.")
       );
-      const chat = await member.api.chats.create("Renewals");
+      const chat = await startedChat(member, "Renewals");
       try {
         await member.api.chats.send(chat.id, {
           text: "Can you help me keep track of renewals?",

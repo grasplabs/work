@@ -14,6 +14,7 @@ import { allEvents } from "./audit-events.ts";
 import { agentWriting } from "./draft-writers.ts";
 import { mockIdp } from "./idp.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
+import { startedChat } from "./started-chats.ts";
 import { storedGrant } from "./stored-grants.ts";
 
 // An App's draft published by one of its builders
@@ -73,7 +74,7 @@ const writeDraft = async (
   app: AppId,
   changes: TestSource
 ): Promise<number> => {
-  const { id: chatId } = await person.api.chats.create("App changes");
+  const { id: chatId } = await startedChat(person, "App changes");
   const { files, definition } = sourceParts(changes);
   const written = await saveDraft(
     env,
@@ -564,7 +565,7 @@ describe("publishing an App's draft", { timeout: 180_000 }, () => {
     // and making it live.
     await publishing(builder, app, notesWithTests(aSecondsSuite));
     const revision = await writeDraft(builder, app, { "notes.md": "One\n" });
-    const { id: chatId } = await builder.api.chats.create("App changes");
+    const { id: chatId } = await startedChat(builder, "App changes");
     const writer = await agentWriting(builder, chatId);
 
     const going = builder.api.drafts.publish(
@@ -652,7 +653,7 @@ describe("publishing an App's draft", { timeout: 180_000 }, () => {
     );
     await publishing(builder, app, { "notes.md": "Three\n" });
     const { revision } = await builder.api.drafts.get({ kind: "app", id: app });
-    const { id: chatId } = await builder.api.chats.create("App changes");
+    const { id: chatId } = await startedChat(builder, "App changes");
     const writer = await agentWriting(builder, chatId);
     const before = await allEvents();
     const earlier = new Set(before.map(({ id }) => id));
