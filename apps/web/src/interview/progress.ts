@@ -62,10 +62,6 @@ export const chose = (
     ? progress
     : { ...progress, interviewer };
 
-/** They read what this is: back on the link, they go straight to the sound check. */
-export const toldWhat = (progress: InterviewProgress): InterviewProgress =>
-  progress.told ? progress : { ...progress, told: true };
-
 /**
  * They pressed start, to talk or by typing: they have read what this is.
  * An interview they agreed to stays agreed to: they read what it says now,

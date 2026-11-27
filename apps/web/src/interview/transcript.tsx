@@ -30,15 +30,8 @@ import { useInterviewer } from "./kept.ts";
 import { useLoop } from "./loop.ts";
 import type { LoopState } from "./loop.ts";
 import { soundIsOn } from "./speech.ts";
-import {
-  ChatLine,
-  exchangesOf,
-  QaExchange,
-  QaLegend,
-  ScriptLine,
-  useTranscriptLook,
-} from "./transcript-looks.tsx";
-import type { Placed, TranscriptLook } from "./transcript-looks.tsx";
+import { ChatLine } from "./transcript-looks.tsx";
+import type { Placed } from "./transcript-looks.tsx";
 
 // The transcript, from the button top right (prototype
 // `interview-view.tsx`, `Transcript`): the conversation as a normal chat,
@@ -198,16 +191,14 @@ const saidSoFar = (
   };
 };
 
-/** The rows of the transcript in its look, each scrolled to as it comes. */
+/** The rows of the transcript, each scrolled to as it comes. */
 const Rows = ({
-  look,
   lines,
   saying,
   guided,
   onRemove,
   onEdit,
 }: {
-  look: TranscriptLook;
   lines: InterviewLine[];
   saying: number | null;
   /** How many lines at the top are his guide's: they can't be removed. */
@@ -217,23 +208,6 @@ const Rows = ({
 }) => {
   const who = interviewerNames[useInterviewer()];
   const placed = placedOf(lines, saying, guided);
-  if (look === "c") {
-    return exchangesOf(placed).map((exchange, index) => {
-      const first = exchange.lines[0]?.place ?? index;
-      return (
-        // An exchange is known by its first line, whose place never changes.
-        <MessageScrollerItem key={first} messageId={String(first)}>
-          <QaExchange
-            exchange={exchange}
-            number={index + 1}
-            onRemove={onRemove}
-            who={who}
-          />
-        </MessageScrollerItem>
-      );
-    });
-  }
-  const Line = look === "b" ? ChatLine : ScriptLine;
   return placed.map((one) => (
     // The conversation only grows: a line's place is what it is, and core removes it by it.
     <MessageScrollerItem key={one.place} messageId={String(one.place)}>
@@ -242,7 +216,7 @@ const Rows = ({
         data-line-from={one.line.from}
         {...stylex.props(one.place > 0 && one.starts && styles.turn)}
       >
-        <Line
+        <ChatLine
           onEdit={(text) => {
             onEdit(one.place, text);
           }}
@@ -297,8 +271,6 @@ export const Transcript = ({
 }) => {
   const { t } = useLingui();
   const [removing, setRemoving] = useState<number | null>(null);
-  const look = useTranscriptLook();
-  const interviewer = useInterviewer();
   useHisNewLinesSaid(alone, lines);
   const loop = useLoop();
   const guide = useGuideSaid();
@@ -322,9 +294,6 @@ export const Transcript = ({
       id={transcriptId}
       {...stylex.props(styles.aside, fadeIn)}
     >
-      {look === "c" && shown.lines.length > 0 ? (
-        <QaLegend who={interviewerNames[interviewer]} />
-      ) : null}
       {shown.lines.length === 0 ? (
         <Text color="muted">{t`Nothing said yet.`}</Text>
       ) : (
@@ -336,7 +305,6 @@ export const Transcript = ({
                   <Rows
                     guided={shown.guided}
                     lines={shown.lines}
-                    look={look}
                     onEdit={(place, text) => {
                       onEdit(place - shown.guided, text);
                     }}

@@ -438,22 +438,6 @@ export const keepWhileSigningIn = (secret: string): void => {
   }
 };
 
-/** Where this browser keeps what belongs to a link: under a hash of its secret, never the secret itself. */
-const linkName = async (secret: string): Promise<string> => {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(secret)
-  );
-  const hex = Array.from(new Uint8Array(digest).slice(0, 12), (byte) =>
-    byte.toString(16).padStart(2, "0")
-  ).join("");
-  return `grasp.interview.${hex}`;
-};
-
-/** Where what they typed and did not send is kept, per link. */
-export const draftName = async (secret: string): Promise<string> =>
-  `${await linkName(secret)}.draft`;
-
 /** How long a recording may take to be written down. */
 const hearTimeoutMs = 20_000;
 

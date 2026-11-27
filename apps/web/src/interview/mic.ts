@@ -2,20 +2,14 @@ import { useSyncExternalStore } from "react";
 
 import tapUrl from "./tap.worklet.ts?worker&url";
 
-// The microphone (prototype `data/ear.ts`), for the check before the
-// interview and for Stephen's ears (ear.ts): asked for once, kept while
+// The microphone (prototype `data/ear.ts`), for Stephen's ears (ear.ts)
+// and a chat's dictation: asked for once, kept while
 // someone listens, and let go of after. Its level says when someone
 // speaks, clearly above the room's own noise. Beside that its sound itself
 // can be overheard as it comes (`overhear`), through a tap that runs
 // beside the page (tap.worklet.ts), served from this origin as the page's
-// policy wants. Nothing is kept here. The person's choice of microphone is
-// kept in this browser, and they can mute themselves for a moment.
-
-/** A microphone as the browser knows it: its own id for it, and its name. */
-export interface Microphone {
-  id: string;
-  name: string;
-}
+// policy wants. Nothing is kept here, and they can mute themselves for a
+// moment.
 
 /** Why the microphone could not be reached: the person or the browser said no, there is none, or this browser can't listen. */
 export type MicProblem = "blocked" | "missing" | "unsupported";
@@ -23,22 +17,10 @@ export type MicProblem = "blocked" | "missing" | "unsupported";
 /** Whoever takes the microphone's sound itself: a batch of numbers from -1 to 1, and how many of them make a second. */
 export type Overhearer = (sound: Float32Array, rate: number) => void;
 
-/** Where the person's own choice of microphone is kept in this browser. */
-const chosenKey = "grasp.microphone";
 /** How often the level is looked at, in ms. */
 export const tickMs = 40;
 /** How far back the room's own noise is looked for, in ms. */
 const roomMs = 1500;
-/** How long there must be a voice before it counts as someone speaking, in ms. */
-const voicedMs = 200;
-
-const readChosen = (): string | null => {
-  try {
-    return localStorage.getItem(chosenKey);
-  } catch {
-    return null;
-  }
-};
 
 interface Ears {
   context: AudioContext;
@@ -71,19 +53,15 @@ const problemOf = (caught: unknown): MicProblem => {
 };
 
 /**
- * What is asked of the microphone: the one the person chose, when they
- * chose one, cleaned of echo and noise. Also for a microphone held apart
- * from this one (a chat's dictation, chat/dictation-mic.ts).
+ * What is asked of the microphone: cleaned of echo and noise. Also for a
+ * microphone held apart from this one (a chat's dictation,
+ * chat/dictation-mic.ts).
  */
-export const micWanted = (): MediaTrackConstraints => {
-  const chosen = readChosen();
-  return {
-    echoCancellation: true,
-    noiseSuppression: true,
-    autoGainControl: true,
-    ...(chosen === null ? {} : { deviceId: { ideal: chosen } }),
-  };
-};
+export const micWanted = (): MediaTrackConstraints => ({
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+});
 
 /**
  * Puts the tap on the microphone. Where a browser can't, nobody overhears
@@ -158,30 +136,6 @@ export const reachMic = async (): Promise<boolean> => {
 /** Why the microphone wasn't given the last time it was asked for; nothing when it was. */
 export const micProblem = (): MicProblem | null => problem;
 
-/** The microphones to choose from. The browser names them only once listening is allowed, so ask after `reachMic`. */
-export const microphones = async (): Promise<Microphone[]> => {
-  if (!canHear()) {
-    return [];
-  }
-  try {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    return devices
-      .filter(
-        (device) =>
-          device.kind === "audioinput" &&
-          device.deviceId !== "" &&
-          device.label !== ""
-      )
-      .map((device) => ({ id: device.deviceId, name: device.label }));
-  } catch {
-    return [];
-  }
-};
-
-/** The microphone listened through right now, by its id; none while nobody listens. */
-export const microphone = (): string | null =>
-  stream?.getAudioTracks()[0]?.getSettings().deviceId ?? null;
-
 /** The microphone's stream while it is held, for recording a stretch (ear.ts). */
 export const micStream = (): MediaStream | null => stream;
 
@@ -206,21 +160,6 @@ export const hangUp = (): void => {
   for (const watcher of changeWatchers) {
     watcher();
   }
-};
-
-/**
- * Listens through another microphone from now on, and remembers it in
- * this browser. An ear that was listening goes on through the new one by
- * itself (`onMicChange`).
- */
-export const chooseMic = async (id: string): Promise<boolean> => {
-  try {
-    localStorage.setItem(chosenKey, id);
-  } catch {
-    // Without storage the choice lasts until the microphone is let go of.
-  }
-  hangUp();
-  return await reachMic();
 };
 
 /** Tells `watcher` each time the microphone is let go of or changed; gives back how to stop telling it. */
@@ -344,28 +283,4 @@ export const watchLevel = (onTick: (heard: Heard) => void): (() => void) => {
     window.clearInterval(timer);
     level = 0;
   };
-};
-
-/**
- * Listens until stopped, and tells `onVoice` once someone speaks: more
- * than a click or a cough, clearly above the room. Call `reachMic` first.
- */
-export const listenForVoice = (onVoice: () => void): (() => void) => {
-  let loud = 0;
-  let voiced = 0;
-  let told = false;
-  let before = performance.now();
-  return watchLevel(({ speaks }) => {
-    const now = performance.now();
-    // A voice dips between syllables: three loud moments close together are enough.
-    loud = speaks ? loud + 1 : Math.max(0, loud - 0.5);
-    if (speaks && loud >= 3) {
-      voiced += Math.min(now - before, 100);
-    }
-    before = now;
-    if (voiced > voicedMs && !told) {
-      told = true;
-      onVoice();
-    }
-  });
 };
