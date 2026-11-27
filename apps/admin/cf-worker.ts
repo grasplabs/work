@@ -25,6 +25,8 @@
  *   (`CF_ACCESS_AUD`, `CF_ACCESS_ISS`): every request would be refused.
  *
  * Pure: the deploy (deploy-platform) passes what it looked up in `inputs`.
+ * The alert mail (`ALERTS_MAIL`) is bound only once the deploy passes who
+ * it's from and the one staff mailbox it goes to, and to those alone.
  */
 import { bindings, exports, triggers } from "cf/config";
 import type { WorkerConfig } from "cf/config";
@@ -42,6 +44,13 @@ export interface DeployInputs {
   STORED_SECRETS?: string;
   /** The names of the account's queues, comma-separated. */
   QUEUES?: string;
+  /**
+   * Who the admin's alert mail is from (an address on a domain onboarded
+   * to Cloudflare's Email Sending) and the one staff mailbox it goes to,
+   * from the stage's 1Password Environment: kept out of this public repo.
+   */
+  ALERTS_MAIL_FROM?: string;
+  ALERTS_MAIL_TO?: string;
 }
 
 /** The vars without which the admin refuses every request (src/access.ts). */
@@ -246,6 +255,28 @@ const secretBindings = (config: Json, inputs: DeployInputs): Env => {
   return env;
 };
 
+/**
+ * The alert mail's binding (src/alerts/senders.ts), once the deploy passes
+ * who it's from and the one staff mailbox it goes to: it may send from
+ * that address and to that mailbox alone, which the Worker reads as
+ * `ALERTS_MAIL_FROM` and `ALERTS_MAIL_TO`. Without both, no binding: the
+ * mail channel says it isn't set up.
+ */
+const mailBindings = (inputs: DeployInputs): Env => {
+  const from = inputs.ALERTS_MAIL_FROM ?? "";
+  const to = inputs.ALERTS_MAIL_TO ?? "";
+  return from === "" || to === ""
+    ? {}
+    : {
+        ALERTS_MAIL: bindings.sendEmail({
+          destinationAddress: to,
+          allowedSenderAddresses: [from],
+        }),
+        ALERTS_MAIL_FROM: bindings.text(from),
+        ALERTS_MAIL_TO: bindings.text(to),
+      };
+};
+
 /** Where it answers: its Custom Domains, and its other routes. */
 const addresses = (
   config: Json
@@ -369,6 +400,7 @@ export const cfWorker = (
       ...textBindings(config),
       ...storageBindings(config, inputs),
       ...secretBindings(config, inputs),
+      ...mailBindings(inputs),
       ...classes.env,
     },
     exports: classes.exports,

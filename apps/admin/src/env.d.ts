@@ -4,6 +4,15 @@
 // worker-configuration.d.ts alone. Merged into the interface it generates.
 interface __BaseEnv_Env {
   /**
+   * The alert mail's sender (src/alerts/senders.ts), who it's from and the
+   * one staff mailbox it goes to: bound by a deploy only once the stage's
+   * 1Password Environment has both addresses, to send from and to them
+   * alone (cf-worker.ts). Unset in tests and local runs.
+   */
+  ALERTS_MAIL?: SendEmail;
+  ALERTS_MAIL_FROM?: string;
+  ALERTS_MAIL_TO?: string;
+  /**
    * `none` in tests and local runs, where workerd has no jurisdictions: the
    * admin's run objects are then got without one (src/workflow-runs.ts).
    * Never set in wrangler.jsonc; unset or anything else means the EU.

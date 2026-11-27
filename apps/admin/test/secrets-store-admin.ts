@@ -56,4 +56,6 @@ export const adminSecrets = (tokens: {
   [env.STRIPE_RESTRICTED_KEY, ""],
   // Attio's key likewise (test/admin-crm.test.ts).
   [env.ATTIO_READ_KEY, ""],
+  // The alerts' Discord webhook likewise (test/alerts.test.ts).
+  [env.DISCORD_ALERTS_WEBHOOK, ""],
 ];

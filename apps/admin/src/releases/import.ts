@@ -57,7 +57,7 @@
 
 import "@tanstack/react-start/server-only";
 import { toHex } from "@grasp-os/shared/encoding";
-import { errorFields, log } from "@grasp-os/shared/log";
+import { errorFields, errorName, log } from "@grasp-os/shared/log";
 import {
   blobSize,
   blobsOf,
@@ -81,6 +81,7 @@ import {
 } from "@grasp-os/shared/release-id";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 
+import { alert } from "../alerts/alert.ts";
 import { actIfChanged } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import {
@@ -626,6 +627,9 @@ const importRelease = async (
     // never leaves it saved, and so skipped from then on, but off Edge.
     toEdge(db, id)
   );
+  // Told only if its import was told as failing (src/alerts/alert.ts):
+  // right as it's saved, before the bookkeeping, which may fail.
+  await alert(db, { kind: "imported", releaseId: id });
   // Bookkeeping only: the import itself is what's audited.
   await db.batch([
     db
@@ -695,18 +699,20 @@ const takeBackAttempt = async (
   ]);
 };
 
-/** Audits attempt `attempt` at release `id` as failed, unless it's imported. */
+/** Audits attempt `attempt` at release `id` as failed, unless it's imported: whether it did. */
 const recordFailure = async (
   db: AdminDatabase,
   id: string,
   attempt: number,
   now: Date
-): Promise<void> => {
-  await db
+): Promise<boolean> => {
+  const audited = await db
     .insert(auditEvents)
     .select(
       sql`SELECT ${crypto.randomUUID()}, ${now.getTime()}, 'system', 'release.import_failed', NULL, ${id}, json_object('attempts', CAST(${attempt} AS INTEGER)) WHERE ${notImported(id)}`
-    );
+    )
+    .returning({ id: auditEvents.id });
+  return audited.length > 0;
 };
 
 /**
@@ -770,7 +776,18 @@ export const importReleases = async (
         ...errorFields(error),
       });
       // oxlint-disable-next-line no-await-in-loop -- one release at a time
-      await recordFailure(db, id, attempt, now);
+      const audited = await recordFailure(db, id, attempt, now);
+      // Told once, at its first failed attempt (src/alerts/alert.ts), and
+      // only as the failure is audited: never for one imported meanwhile.
+      if (audited) {
+        // oxlint-disable-next-line no-await-in-loop -- one release at a time
+        await alert(db, {
+          kind: "import_failed",
+          releaseId: id,
+          code: errorName(error),
+          attempt,
+        });
+      }
       continue;
     }
     if (outcome === "deferred") {
