@@ -5027,13 +5027,15 @@ export class Onboarding extends DurableObject<Env> {
    * conversations opened side by side each find what the others held. One
    * is held for `who` at a time: the one before, never closed (a page
    * reloaded, a line dropped), is settled first at how long it was open
-   * (`#settleHold`). The day they are held on; null, holding nothing new,
-   * when they don't fit.
+   * (`#settleHold`). `hold` names the conversation, as its pass does: only
+   * its own close or failed start gives it back. The day they are held on;
+   * null, holding nothing new, when they don't fit.
    */
   reserveListening(
     who: string,
     seconds: number,
     budget: number,
+    hold: string,
     now: string = new Date().toISOString()
   ): string | null {
     return this.ctx.storage.transactionSync(() => {
@@ -5052,37 +5054,43 @@ export class Onboarding extends DurableObject<Env> {
           set: { seconds: sql`${voiceUse.seconds} + ${seconds}` },
         })
         .run();
-      this.#db.insert(voiceHolds).values({ who, day, seconds, at: now }).run();
+      this.#db
+        .insert(voiceHolds)
+        .values({ who, day, seconds, at: now, hold })
+        .run();
       return day;
     });
   }
 
   /**
-   * Gives back all of what `reserveListening` just held for a conversation
-   * that never opened: ElevenLabs refused it, so nothing was listened to.
+   * Gives back all of what `reserveListening` just held for the
+   * conversation `hold` that never opened: ElevenLabs refused it, so
+   * nothing was listened to. Nothing when another conversation holds since.
    */
-  releaseListening(who: string): void {
+  releaseListening(who: string, hold: string): void {
     this.ctx.storage.transactionSync(() => {
-      const [hold] = this.#db
+      const [held] = this.#db
         .select()
         .from(voiceHolds)
-        .where(eq(voiceHolds.who, who))
+        .where(and(eq(voiceHolds.who, who), eq(voiceHolds.hold, hold)))
         .all();
-      if (hold !== undefined) {
-        this.#giveBack(hold, hold.seconds);
+      if (held !== undefined) {
+        this.#giveBack(held, held.seconds);
       }
     });
   }
 
   /**
-   * Settles the conversation open on the link `secretMark`, as the page
-   * closes it: what was held for it and it didn't use is given back, so a
+   * Settles the conversation `hold` open on the link `secretMark`, as the
+   * page closes it: what was held for it and it didn't use is given back, so a
    * pause, a language switched or a short talk costs what it lasted, never
    * the whole of what an interview may. Once: closing it again gives
-   * nothing more back. Whatever the link's state, as a close is taken.
+   * nothing more back, and so does an older conversation's close once
+   * another opened. Whatever the link's state, as a close is taken.
    */
   settleListeningOnLink(
     secretMark: string,
+    hold: string,
     now: string = new Date().toISOString()
   ): void {
     this.ctx.storage.transactionSync(() => {
@@ -5092,7 +5100,7 @@ export class Onboarding extends DurableObject<Env> {
         .where(eq(linkCodes.mark, secretMark))
         .all();
       if (code !== undefined) {
-        this.#settleHold(heardKey(`${linkWho}${code.person}`), now, 0);
+        this.#settleHold(heardKey(`${linkWho}${code.person}`), now, 0, hold);
       }
     });
   }
@@ -5100,15 +5108,16 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Settles `who`'s open conversation at how long it was open by `now`,
    * at least `least` seconds and at most what was held, and gives the
-   * rest back on the day it was held.
+   * rest back on the day it was held; only the conversation `only`, when
+   * named.
    */
-  #settleHold(who: string, now: string, least: number): void {
+  #settleHold(who: string, now: string, least: number, only?: string): void {
     const [hold] = this.#db
       .select()
       .from(voiceHolds)
       .where(eq(voiceHolds.who, who))
       .all();
-    if (hold === undefined) {
+    if (hold === undefined || (only !== undefined && hold.hold !== only)) {
       return;
     }
     const open = Math.ceil((Date.parse(now) - Date.parse(hold.at)) / 1000);

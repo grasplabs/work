@@ -691,6 +691,11 @@ export const voiceHolds = sqliteTable("voice_holds", {
   seconds: real().notNull(),
   /** ISO 8601. */
   at: text().notNull(),
+  /**
+   * Which conversation it is held for, as its pass names it: only that
+   * conversation's close or failed start gives it back.
+   */
+  hold: text(),
 });
 
 /**

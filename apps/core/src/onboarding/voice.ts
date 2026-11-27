@@ -103,6 +103,8 @@ const passClaimsSchema = z.strictObject({
   link: z.string().min(1),
   /** The account it was opened for. */
   account: z.string().min(1),
+  /** The conversation's own hold on the day's listening (store `reserveListening`). */
+  hold: z.string().min(1),
   /** When it stops holding, in ms since the epoch. */
   until: z.int().positive(),
 });
@@ -122,16 +124,19 @@ const passOf = async (env: Env, claims: PassClaims): Promise<string> => {
   return `${payload}.${toBase64Url(new Uint8Array(mac))}`;
 };
 
-/** Whether core made `pass` for this link and account, and it still holds. */
-const holdsPass = async (
+/**
+ * The conversation `pass` is for, when core made it for this link and
+ * account and it still holds; null otherwise.
+ */
+const heldByPass = async (
   env: Env,
   pass: string,
   link: string,
   account: string
-): Promise<boolean> => {
+): Promise<string | null> => {
   const [payload, mac, ...rest] = pass.split(".");
   if (payload === undefined || mac === undefined || rest.length > 0) {
-    return false;
+    return null;
   }
   try {
     const signed = await crypto.subtle.verify(
@@ -141,19 +146,19 @@ const holdsPass = async (
       new TextEncoder().encode(payload)
     );
     if (!signed) {
-      return false;
+      return null;
     }
     const claims = passClaimsSchema.safeParse(
       JSON.parse(new TextDecoder().decode(fromBase64Url(payload)))
     );
-    return (
-      claims.success &&
+    return claims.success &&
       claims.data.link === link &&
       claims.data.account === account &&
       Date.now() < claims.data.until
-    );
+      ? claims.data.hold
+      : null;
   } catch {
-    return false;
+    return null;
   }
 };
 
@@ -331,10 +336,13 @@ const open = async (
   // Held before ElevenLabs is asked, in one write with the check, so
   // conversations opened side by side can't each find the budget unspent;
   // given back when none opens.
+  // Its own name, in its pass: only its own close gives back what it held.
+  const hold = crypto.randomUUID();
   const held = await onboardingStore(env).reserveListening(
     who,
     seconds,
-    heardBudgets.link
+    heardBudgets.link,
+    hold
   );
   if (held === null) {
     log.warn("interview.voice_budget_spent", { requestId });
@@ -347,7 +355,7 @@ const open = async (
     why: { code: string } | { status: number }
   ): Promise<Response> => {
     log.warn("interview.voice_not_opened", { requestId, ...why });
-    await onboardingStore(env).releaseListening(who);
+    await onboardingStore(env).releaseListening(who, hold);
     return failed("The interview could not start. Try again.", 503);
   };
   const { agent } = platformAi;
@@ -403,6 +411,7 @@ const open = async (
     pass: await passOf(env, {
       link: secretMark,
       account,
+      hold,
       until: Date.now() + passMs,
     }),
   };
@@ -557,13 +566,19 @@ export const interviewVoiceResponse = async (
   // account: also once they withdrew or the interviews were paused. The
   // page ended the conversation at ElevenLabs itself.
   if (asked.action === "close") {
-    if (!(await holdsPass(env, asked.pass, secretMark, caller.account))) {
+    const closing = await heldByPass(
+      env,
+      asked.pass,
+      secretMark,
+      caller.account
+    );
+    if (closing === null) {
       log.warn("interview.voice_pass_refused", { requestId });
       return linkRefusal("interview.invalid", requestId);
     }
-    // What the conversation held of the day's listening and didn't use
-    // is given back, once.
-    await onboardingStore(env).settleListeningOnLink(secretMark);
+    // What this conversation held of the day's listening and didn't use
+    // is given back, once; nothing of one opened after it.
+    await onboardingStore(env).settleListeningOnLink(secretMark, closing);
     return new Response(null, { status: 204, headers: linkHeaders });
   }
   const found = await onboardingStore(env).turnContext(
@@ -599,7 +614,7 @@ export const interviewVoiceResponse = async (
   if (
     reading === undefined &&
     (asked.pass === undefined ||
-      !(await holdsPass(env, asked.pass, secretMark, caller.account)))
+      (await heldByPass(env, asked.pass, secretMark, caller.account)) === null)
   ) {
     log.warn("interview.voice_pass_refused", { requestId });
     return linkRefusal("interview.invalid", requestId);

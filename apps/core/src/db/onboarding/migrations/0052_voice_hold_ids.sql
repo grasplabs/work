@@ -1,0 +1,1 @@
+ALTER TABLE `voice_holds` ADD `hold` text;

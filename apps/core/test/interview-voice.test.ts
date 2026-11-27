@@ -511,19 +511,41 @@ describe("an interview as a live conversation", { timeout: 60_000 }, () => {
     const who = `link:hold-${unique()}:heard`;
     const hour = 60 * 60;
     // Opened and left without a close, as a page reloaded does.
-    await store.reserveListening(who, 900, hour, at(0));
+    await store.reserveListening(who, 900, hour, "first", at(0));
     // A minute later the next one: the first counts two minutes, not one.
-    await store.reserveListening(who, 900, hour, at(1));
+    await store.reserveListening(who, 900, hour, "second", at(1));
     const afterReload = await store.voiceSaid(who, at(1));
     // Ten minutes on, another: the second counts the ten it was open.
-    await store.reserveListening(who, 900, hour, at(11));
+    await store.reserveListening(who, 900, hour, "third", at(11));
     const afterTen = await store.voiceSaid(who, at(11));
     // One that would not fit is not held.
-    const tooMuch = await store.reserveListening(who, 3600, hour, at(12));
+    const tooMuch = await store.reserveListening(
+      who,
+      3600,
+      hour,
+      "fourth",
+      at(12)
+    );
     expect({ afterReload, afterTen, tooMuch }).toStrictEqual({
       afterReload: 120 + 900,
       afterTen: 120 + 600 + 900,
       tooMuch: null,
+    });
+  });
+
+  it("gives back only a conversation's own hold: an older pass's close leaves the newer one held", async () => {
+    const { link, person } = await openedFor();
+    const store = onboardingStore(env);
+    const who = `link:${person}:heard`;
+    const first = await join(link);
+    // Reopened: the first is settled at two minutes, the second held whole.
+    await join(link);
+    const held = await store.voiceSaid(who);
+    await ask(link, { action: "close", pass: first.pass });
+    const afterStaleClose = await store.voiceSaid(who);
+    expect({ held, afterStaleClose }).toStrictEqual({
+      held: 120 + 900,
+      afterStaleClose: 120 + 900,
     });
   });
 
