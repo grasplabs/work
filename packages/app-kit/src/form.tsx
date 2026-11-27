@@ -1164,7 +1164,7 @@ const RelationFailure = ({
 }): React.JSX.Element => {
   const retryFailed = useRetryFailed();
   return (
-    <Alert id={id} live="assertive" variant="destructive">
+    <Alert id={id} variant="destructive">
       <AlertDescription>
         <p>{error instanceof Error ? error.message : text.failed}</p>
         <p>
@@ -1546,7 +1546,9 @@ const UncertainSubmission = ({
 }): React.JSX.Element => {
   const [confirming, setConfirming] = useState(false);
   return (
-    <Alert className={className} data-code={code} live="polite">
+    // Where it stands, not what went wrong: read out politely, not as an alert.
+    // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- the kit's Alert, a div
+    <Alert className={className} data-code={code} role="status">
       <AlertDescription>
         <p>{message}</p>
         {confirming ? (
@@ -1637,7 +1639,6 @@ const FormError = ({
       <Alert
         className={className}
         data-code={status.failure.code}
-        live="assertive"
         variant="destructive"
       >
         <AlertDescription>{status.failure.message}</AlertDescription>

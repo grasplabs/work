@@ -2,7 +2,7 @@ import { cn } from "@grasp-os/app-kit/lib/utils";
 import { cva } from "class-variance-authority";
 import type { VariantProps } from "class-variance-authority";
 
-// shadcn takes any number and passes it in an inline style. Here the ratio
+// Upstream takes any number and passes it in an inline style. Here the ratio
 // is one of a set, each a static class, so the component needs no inline
 // style and Tailwind sees every class it uses.
 const aspectRatioVariants = cva("relative", {

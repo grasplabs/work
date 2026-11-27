@@ -210,12 +210,9 @@ export default defineConfig({
       },
       {
         // Every answer of the interface is over within 300 ms (AGENTS.md,
-        // Design), in the frontend, the admin and the kit alike.
-        files: [
-          "apps/web/src/**",
-          "apps/admin/src/**",
-          "packages/app-kit/src/**",
-        ],
+        // Design), in the frontend and the admin. The kit's components move
+        // as the stock default components do.
+        files: ["apps/web/src/**", "apps/admin/src/**"],
         excludeFiles: ["**/*.test.ts", "**/*.test.tsx"],
         rules: { "grasp/no-slow-motion": "error" },
       },
@@ -229,9 +226,6 @@ export default defineConfig({
           "apps/web/src/routes/interview*",
           "apps/web/src/routes/setup*",
           "apps/web/src/frame/onboarding-frame.tsx",
-          // Base UI's drawer leaves as fast as it was swiped: up to 400 ms
-          // for a gentle swipe, which follows the finger, not a wait.
-          "packages/app-kit/src/components/drawer.tsx",
         ],
         rules: { "grasp/no-slow-motion": "off" },
       },

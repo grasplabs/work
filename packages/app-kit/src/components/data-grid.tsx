@@ -761,10 +761,10 @@ const GridRows = <Reference extends AnyQuery>({
           />
         ))}
         {rowActions.length > 0 && id === undefined ? (
-          <TableCell variant="end" />
+          <TableCell className="w-0" />
         ) : null}
         {rowActions.length > 0 && id !== undefined ? (
-          <TableCell variant="end">
+          <TableCell className="w-0">
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={
@@ -801,7 +801,7 @@ const GridRows = <Reference extends AnyQuery>({
   return (
     <div className="flex flex-col gap-3">
       {failure === undefined ? null : (
-        <Alert live="assertive" variant="destructive">
+        <Alert variant="destructive">
           <AlertDescription>{failure}</AlertDescription>
         </Alert>
       )}
@@ -937,7 +937,7 @@ const GridFailure = ({
 }): React.JSX.Element => {
   const retryFailed = useRetryFailed();
   return (
-    <Alert live="assertive" variant="destructive">
+    <Alert variant="destructive">
       <AlertTitle>{text.failed}</AlertTitle>
       <AlertDescription>
         <p>{messageOf(error, text)}</p>
