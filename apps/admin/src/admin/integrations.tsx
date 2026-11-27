@@ -10,87 +10,90 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@grasp-os/app-kit/components/empty";
+} from "@grasp-os/ui/components/empty";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { Link } from "@grasp-os/ui/components/link";
 import {
   Sheet,
+  SheetBody,
   SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
-} from "@grasp-os/app-kit/components/sheet";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/app-kit/components/table";
-import { Link, useNavigate } from "@tanstack/react-router";
-import { BlocksIcon } from "lucide-react";
+} from "@grasp-os/ui/components/sheet";
+import { Text } from "@grasp-os/ui/components/text";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
+import { Link as RouterLink, useNavigate } from "@tanstack/react-router";
 
 import type { ClientAdmin } from "../clients/admin.ts";
 import { AdminsLoading, WithAdmins } from "./admins.tsx";
+import { DataRows } from "./data-rows.tsx";
+import type { DataColumn, RowLook } from "./data-rows.tsx";
 import { askedApps } from "./integrations-asked.ts";
 import type { AskedApp } from "./integrations-asked.ts";
 import { AdminPage } from "./page.tsx";
 import type { Deferred } from "./settled.tsx";
 import { formatDate, formatList } from "./words.ts";
 
+const styles = stylex.create({
+  cell: { display: "flex", flexDirection: "column", gap: space["1"] },
+});
+
 /** The companies that asked for an app, by name. */
 const askedByOf = (app: AskedApp): string =>
   formatList(app.asks.map((ask) => ask.orgName));
 
-/** One app on one row: its name, who asked for it, and when first. It opens the app. */
-const AppRow = ({ app }: { app: AskedApp }) => (
-  <TableRow className="relative">
-    <TableCell className="whitespace-normal" variant="card">
-      <Link
-        aria-label={`Open ${app.name}`}
-        className="focus-visible:ring-ring/50 flex w-full min-w-0 flex-col rounded-sm outline-none after:absolute after:inset-0 focus-visible:ring-3"
-        search={{ app: app.key }}
-        to="/connectors"
-      >
-        <span className="font-medium hover:underline">{app.name}</span>
-        {/* Where there is no room for its own column, who asked goes under the name. */}
-        <span className="text-muted-foreground text-xs @xl:hidden">
-          {askedByOf(app)}
-        </span>
-      </Link>
-    </TableCell>
-    <TableCell
-      className="hidden whitespace-normal @xl:table-cell"
-      variant="card"
-    >
-      <span className="flex flex-col">
-        <span>{askedByOf(app)}</span>
-        <span className="text-muted-foreground text-xs">
-          {`First asked on ${formatDate(app.asks[0]?.on ?? "")}`}
-        </span>
-      </span>
-    </TableCell>
-  </TableRow>
+/** Who asked for an app, over when it was first asked for. */
+const AskedBy = ({ app }: { app: AskedApp }) => (
+  <span {...stylex.props(styles.cell)}>
+    <span>{askedByOf(app)}</span>
+    <Text as="span" color="muted" size="xs">
+      {`First asked on ${formatDate(app.asks[0]?.on ?? "")}`}
+    </Text>
+  </span>
 );
 
-/** Every app asked for, one row each, the one most asked for first. */
+const appColumns: DataColumn<AskedApp>[] = [
+  {
+    id: "asked",
+    head: "Asked by",
+    cell: (app) => <AskedBy app={app} />,
+    wrap: true,
+  },
+];
+
+/** A row and a card open the app in its sheet. */
+const appLink = (app: AskedApp, look: RowLook) => (
+  <RouterLink
+    {...look}
+    aria-label={`Open ${app.name}`}
+    search={{ app: app.key }}
+    to="/connectors"
+  />
+);
+
+const appName = (app: AskedApp): string => app.name;
+
+const appKeyOf = (app: AskedApp): string => app.key;
+
+/** Every app asked for, one row each (a card on a phone), the one most asked for first. */
 const AppTable = ({ apps }: { apps: readonly AskedApp[] }) => (
-  <section className="bg-card @container overflow-hidden rounded-xl border">
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead variant="card">App</TableHead>
-          <TableHead className="hidden @xl:table-cell" variant="card">
-            Asked by
-          </TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {apps.map((app) => (
-          <AppRow app={app} key={app.key} />
-        ))}
-      </TableBody>
-    </Table>
-  </section>
+  <DataRows
+    columns={appColumns}
+    label="Apps asked for"
+    link={appLink}
+    name={appName}
+    nameHead="App"
+    rowKey={appKeyOf}
+    rows={apps}
+  />
 );
 
 /** The app open in its sheet, when `open` names one asked for: each company that asked. */
@@ -112,29 +115,34 @@ const AppSheet = ({
       }}
       open={shown !== undefined}
     >
-      <SheetContent className="overflow-y-auto" size="wide">
+      <SheetContent size="lg">
         {shown === undefined ? null : (
           <>
             <SheetHeader>
               <SheetTitle>{shown.name}</SheetTitle>
               <SheetDescription>Who asked for it, and when.</SheetDescription>
             </SheetHeader>
-            <ul className="flex flex-col gap-3 p-4 text-sm">
-              {shown.asks.map((ask) => (
-                <li className="flex flex-col gap-0.5" key={ask.org}>
-                  <Link
-                    className="w-fit font-medium underline-offset-4 hover:underline"
-                    params={{ clientId: ask.org }}
-                    to="/organizations/$clientId/connectors"
-                  >
-                    {ask.orgName}
-                  </Link>
-                  <span className="text-muted-foreground text-xs">
-                    {`Asked on ${formatDate(ask.on)}`}
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <SheetBody>
+              <ItemGroup>
+                {shown.asks.map((ask) => (
+                  <Item key={ask.org} size="sm">
+                    <ItemContent>
+                      <ItemTitle>
+                        <Link asChild variant="plain">
+                          <RouterLink
+                            params={{ clientId: ask.org }}
+                            to="/organizations/$clientId/connectors"
+                          >
+                            {ask.orgName}
+                          </RouterLink>
+                        </Link>
+                      </ItemTitle>
+                      <ItemDescription>{`Asked on ${formatDate(ask.on)}`}</ItemDescription>
+                    </ItemContent>
+                  </Item>
+                ))}
+              </ItemGroup>
+            </SheetBody>
           </>
         )}
       </SheetContent>
@@ -144,20 +152,16 @@ const AppSheet = ({
 
 /** Where the table goes, while nothing is asked for. */
 const NothingAsked = () => (
-  <section className="bg-card rounded-xl border">
-    <Empty>
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <BlocksIcon />
-        </EmptyMedia>
-        <EmptyTitle>Nothing asked for yet</EmptyTitle>
-        <EmptyDescription>
-          When a company asks for an app Composio does not have, it shows here,
-          with who asked for it.
-        </EmptyDescription>
-      </EmptyHeader>
-    </Empty>
-  </section>
+  <Empty>
+    <EmptyHeader>
+      <EmptyMedia illustration="nothing" />
+      <EmptyTitle>Nothing asked for yet</EmptyTitle>
+      <EmptyDescription>
+        When a company asks for an app Composio does not have, it shows here,
+        with who asked for it.
+      </EmptyDescription>
+    </EmptyHeader>
+  </Empty>
 );
 
 const appsTitle = "Apps asked for";
@@ -175,9 +179,7 @@ const AppsAskedPage = ({
   const apps = askedApps(admins);
   return (
     <AdminPage description={appsAbout} title={appsTitle}>
-      <div className="flex flex-col gap-6 text-sm">
-        {apps.length > 0 ? <AppTable apps={apps} /> : <NothingAsked />}
-      </div>
+      {apps.length > 0 ? <AppTable apps={apps} /> : <NothingAsked />}
       <AppSheet apps={apps} open={open} />
     </AdminPage>
   );

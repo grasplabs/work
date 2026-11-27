@@ -6,21 +6,18 @@
  * the company goes through after that is changed on its Flow page.
  */
 
+import { flowPresetNames } from "@grasp-os/shared/onboarding-flow";
+import type { FlowPreset } from "@grasp-os/shared/onboarding-flow";
 import {
   Field,
   FieldContent,
   FieldDescription,
   FieldLabel,
-  FieldLegend,
-  FieldSet,
-} from "@grasp-os/app-kit/components/field";
+} from "@grasp-os/ui/components/field";
 import {
   RadioGroup,
   RadioGroupItem,
-} from "@grasp-os/app-kit/components/radio-group";
-import { flowPresetNames } from "@grasp-os/shared/onboarding-flow";
-import type { FlowPreset } from "@grasp-os/shared/onboarding-flow";
-import { useId } from "react";
+} from "@grasp-os/ui/components/radio-group";
 
 /** Each flow staff start from, as staff read it, and what the company goes through in it. */
 const presetWords: Record<FlowPreset, { name: string; about: string }> = {
@@ -49,36 +46,31 @@ export const OnboardingChoice = ({
 }: {
   value: FlowPreset;
   onChange: (value: FlowPreset) => void;
-}) => {
-  const id = useId();
-  return (
-    <FieldSet>
-      <FieldLegend variant="label">Onboarding</FieldLegend>
-      <RadioGroup
-        name="onboarding"
-        onValueChange={(next) => {
-          const preset = flowPresetNames.find((name) => name === next);
-          if (preset !== undefined) {
-            onChange(preset);
-          }
-        }}
-        value={value}
-      >
-        {flowPresetNames.map((preset) => (
-          <Field key={preset} orientation="horizontal">
-            <RadioGroupItem id={`${id}-${preset}`} value={preset} />
-            <FieldContent>
-              <FieldLabel htmlFor={`${id}-${preset}`}>
-                {presetWords[preset].name}
-              </FieldLabel>
-              <FieldDescription>{presetWords[preset].about}</FieldDescription>
-            </FieldContent>
-          </Field>
-        ))}
-      </RadioGroup>
-      <FieldDescription>
-        In place before anyone signs in. Change it later on its Flow page.
-      </FieldDescription>
-    </FieldSet>
-  );
-};
+}) => (
+  <Field>
+    <FieldLabel>Onboarding</FieldLabel>
+    <RadioGroup
+      name="onboarding"
+      onValueChange={(next) => {
+        const preset = flowPresetNames.find((name) => name === next);
+        if (preset !== undefined) {
+          onChange(preset);
+        }
+      }}
+      value={value}
+    >
+      {flowPresetNames.map((preset) => (
+        <Field key={preset} orientation="horizontal">
+          <RadioGroupItem value={preset} />
+          <FieldContent>
+            <FieldLabel>{presetWords[preset].name}</FieldLabel>
+            <FieldDescription>{presetWords[preset].about}</FieldDescription>
+          </FieldContent>
+        </Field>
+      ))}
+    </RadioGroup>
+    <FieldDescription>
+      In place before anyone signs in. Change it later on its Flow page.
+    </FieldDescription>
+  </Field>
+);
