@@ -7,6 +7,7 @@
 
 import "@tanstack/react-start/server-only";
 import { flowPresetNames } from "@grasp-os/shared/onboarding-flow";
+import { sql } from "drizzle-orm";
 import {
   index,
   integer,
@@ -124,6 +125,73 @@ export const leases = sqliteTable("reconciler_lease", {
   /** The run holding it: a random id of its own. */
   holder: text().notNull(),
   expiresAt: timestamp("expires_at").notNull(),
+});
+
+/**
+ * One channel's rollout of one release: started by a promotion, a
+ * rollback or an import, it takes the channel's organizations to the
+ * release, our own first, then smallest to largest. It halts by itself
+ * when one of our own fails, or when 3 have failed since it started or
+ * was last resumed; only staff resume it. Done once every organization
+ * on the channel runs the release; superseded once the channel points at
+ * another. At most one per channel is running or halted.
+ */
+export const rollouts = sqliteTable(
+  "rollouts",
+  {
+    /** A random id of its own. */
+    id: text().primaryKey(),
+    channel: text({ enum: channelIds }).notNull(),
+    releaseId: text("release_id")
+      .notNull()
+      .references(() => releases.id),
+    status: text({
+      enum: ["running", "halted", "done", "superseded"],
+    }).notNull(),
+    /**
+     * Who approved it: the staff member who promoted or rolled back, or
+     * `system` for an import's Edge rollout.
+     */
+    startedBy: text("started_by").notNull(),
+    startedAt: timestamp("started_at").notNull(),
+    /** When it was done or superseded; null while it runs or is halted. */
+    endedAt: timestamp("ended_at"),
+    /**
+     * Why it halted: `own_failed`, one of our own organizations failed;
+     * `failed`, 3 failed. Null while it never halted.
+     */
+    haltedReason: text("halted_reason", { enum: ["own_failed", "failed"] }),
+    /** When staff last resumed it; null while they never did. */
+    resumedAt: timestamp("resumed_at"),
+    /** Organizations it took to the release. */
+    done: integer().notNull().default(0),
+    /** Organizations it failed on since it started or was last resumed. */
+    failed: integer().notNull().default(0),
+  },
+  (table) => [
+    uniqueIndex("rollouts_live_channel_idx")
+      .on(table.channel)
+      .where(sql`${table.status} in ('running', 'halted')`),
+    index("rollouts_release_channel_idx").on(table.releaseId, table.channel),
+  ]
+);
+
+/**
+ * What is left of the deployer token's Cloudflare API budget, as the
+ * API's last `Ratelimit` header said, and until when nothing may start
+ * after a 429. One row a token: every client of a stage is deployed with
+ * the one token, so one budget covers the whole fleet.
+ */
+export const apiBudget = sqliteTable("api_budget", {
+  /** The token, by its binding: `DEPLOYER_API_TOKEN`. */
+  token: text().primaryKey(),
+  /** Requests left in the window. */
+  remaining: integer().notNull(),
+  /** When the window resets. */
+  resetAt: timestamp("reset_at").notNull(),
+  /** Until when nothing may start, after a 429; null while not blocked. */
+  blockedUntil: timestamp("blocked_until"),
+  updatedAt: timestamp("updated_at").notNull(),
 });
 
 /**
@@ -246,6 +314,14 @@ export const clients = sqliteTable(
      * open, and for one that goes through no onboarding.
      */
     closedFrom: timestamp("closed_from"),
+    /**
+     * When a rollout reaches it: `own`, one of Grasp's own organizations,
+     * first, and nothing else until every one of them is done; `normal`,
+     * after them, smallest first; `late`, last.
+     */
+    rolloutGroup: text("rollout_group", { enum: ["own", "normal", "late"] })
+      .notNull()
+      .default("normal"),
     /** The release it stays on while pinned: promotions skip it. */
     pinnedReleaseId: text("pinned_release_id").references(() => releases.id),
     createdAt: timestamp("created_at").notNull(),
@@ -301,6 +377,13 @@ export const clientRuns = sqliteTable("client_runs", {
    * (src/runners.ts, `takeAttempt`). Null until one takes it.
    */
   attemptKey: text("attempt_key"),
+  /**
+   * The ordinal of the step that attempt is of, in its run: with
+   * `attempt`, the fence a later step of the same run passes too
+   * (src/runners.ts, `takeAttempt`). 0 for a runner that doesn't fence its
+   * steps.
+   */
+  step: integer().notNull().default(0),
 });
 
 /**
@@ -347,6 +430,12 @@ export const clientDeploys = sqliteTable("client_deploys", {
   startedAt: timestamp("started_at").notNull(),
   /** When it ended; null while it runs. */
   endedAt: timestamp("ended_at"),
+  /**
+   * The rollout it deploys for; null for a deploy that brings a client
+   * back to its target without a release change (settings, secrets, a
+   * pin), which never counts toward a rollout.
+   */
+  rolloutId: text("rollout_id").references(() => rollouts.id),
 });
 
 /**

@@ -283,11 +283,11 @@ const claim = async (
   const asRead = row.run?.runId;
   const deploy =
     asRead === undefined
-      ? db
-          .insert(clientDeploys)
-          .select(
-            sql`SELECT ${row.id}, ${releaseId}, ${runId}, 'deploying', NULL, ${now.getTime()}, NULL WHERE ${claimable} AND NOT EXISTS (SELECT 1 FROM ${clientDeploys} WHERE ${clientDeploys.clientId} = ${row.id})`
-          )
+      ? db.insert(clientDeploys).select(
+          // Every column, in the table's order: the last, `rollout_id`,
+          // none, as this deploy is no rollout's.
+          sql`SELECT ${row.id}, ${releaseId}, ${runId}, 'deploying', NULL, ${now.getTime()}, NULL, NULL WHERE ${claimable} AND NOT EXISTS (SELECT 1 FROM ${clientDeploys} WHERE ${clientDeploys.clientId} = ${row.id})`
+        )
       : db
           .update(clientDeploys)
           .set(values)
