@@ -79,11 +79,13 @@ const sha256Base64 = (bytes: Uint8Array): string =>
 /**
  * How the stand-in fails one request for a key instead of answering it:
  * `drop` closes the connection unanswered, as a reset does; `500` answers
- * 500. `after` does what was asked first (a PUT stores), so only the
- * answer is lost. `meanwhile` runs before the failure: another writer.
+ * 500; `cut` sends the answer's headers and half its body, then closes
+ * the connection (`after` implied). `after` does what was asked first (a
+ * PUT stores), so only the answer is lost. `meanwhile` runs before the
+ * failure: another writer.
  */
 interface Fault {
-  answer: "drop" | "500";
+  answer: "drop" | "500" | "cut";
   after?: boolean;
   meanwhile?: () => void;
 }
@@ -265,6 +267,30 @@ const serveObject = async (
   return { status: HTTP_OK };
 };
 
+/** Sends `answer`, or fails it as `fault` says. */
+const send = (
+  response: ServerResponse,
+  answer: Answer | undefined,
+  fault: Fault | undefined
+): void => {
+  if (fault?.answer === "drop") {
+    response.socket?.destroy();
+  } else if (fault?.answer === "500") {
+    response.writeHead(HTTP_SERVER_ERROR).end();
+  } else if (fault?.answer === "cut" && answer?.body !== undefined) {
+    const { body } = answer;
+    response.writeHead(answer.status, {
+      ...answer.headers,
+      "content-length": body.byteLength,
+    });
+    response.write(body.subarray(0, body.byteLength / 2), () => {
+      response.socket?.destroy();
+    });
+  } else if (answer !== undefined) {
+    response.writeHead(answer.status, answer.headers).end(answer.body);
+  }
+};
+
 const handle = async (
   bucket: Bucket,
   request: IncomingMessage,
@@ -283,20 +309,13 @@ const handle = async (
   bucket.requests.push(`${request.method ?? ""} ${key}`);
   const fault = bucket.faults.get(key)?.shift();
   fault?.meanwhile?.();
-  if (fault !== undefined && fault.after !== true) {
+  const served =
+    fault === undefined || fault.after === true || fault.answer === "cut";
+  if (!served) {
     await buffer(request);
   }
-  const answer =
-    fault === undefined || fault.after === true
-      ? await serveObject(bucket, key, request)
-      : undefined;
-  if (fault?.answer === "drop") {
-    response.socket?.destroy();
-  } else if (fault?.answer === "500") {
-    response.writeHead(HTTP_SERVER_ERROR).end();
-  } else if (answer !== undefined) {
-    response.writeHead(answer.status, answer.headers).end(answer.body);
-  }
+  const answer = served ? await serveObject(bucket, key, request) : undefined;
+  send(response, answer, fault);
 };
 
 /** The requests among `requests` that aren't a listing's page. */
@@ -752,6 +771,27 @@ describe("publishing a release", () => {
       blobStored: bucket.objects.has(key),
       faultsLeft: [...bucket.faults.values()].flat().length,
     }).toStrictEqual({ published: true, blobStored: true, faultsLeft: 0 });
+  });
+
+  it("reads an answer again when the connection drops halfway through its body", async () => {
+    const month = releaseMonthPrefix(new Date());
+    const commit = "1".repeat(40);
+    await publish(buildOf(commit));
+    bucket.faults.set(`releases/${month}1/manifest.json`, [
+      { answer: "cut" },
+      { answer: "cut" },
+    ]);
+    const rerun = await publish(buildOf(commit));
+
+    expect({
+      releases: publishedReleases().map(({ id }) => id),
+      publishedAgain: rerun.includes("Published"),
+      faultsLeft: [...bucket.faults.values()].flat().length,
+    }).toStrictEqual({
+      releases: [`${month}1`],
+      publishedAgain: false,
+      faultsLeft: 0,
+    });
   });
 
   it("gives up on a request after 5 tries, publishing nothing", async () => {
