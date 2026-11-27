@@ -87,7 +87,7 @@ const start = (core: CoreConnection): Watch => {
     (failure) => {
       changed(started, { ...started.list, failure });
     },
-    true
+    { untilSignedOut: true }
   );
   return started;
 };

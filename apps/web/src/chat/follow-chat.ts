@@ -52,6 +52,11 @@ export interface ChatView {
   waiting: ModelWait | null;
   /** Whether the first update has come. */
   loaded: boolean;
+  /**
+   * Whether the tab follows it again after a dropped connection and has
+   * heard nothing yet since: what it shows may be behind.
+   */
+  resuming?: boolean;
 }
 
 export const emptyView: ChatView = {
@@ -175,13 +180,20 @@ export const follow = (
     session: Session
   ) => Promise<{ release: () => Promise<void> } & Disposable>,
   onFailed: (reason: string, gone: boolean) => void,
-  /**
-   * Whether it is followed whatever fails, until the person's session
-   * ends (the list of chats, which nothing reads again): every failure
-   * tried again, ever less often, and a connection waited for as long as
-   * it takes.
-   */
-  untilSignedOut = false
+  {
+    untilSignedOut = false,
+    onDropped,
+  }: {
+    /**
+     * Whether it is followed whatever fails, until the person's session
+     * ends (the list of chats, which nothing reads again): every failure
+     * tried again, ever less often, and a connection waited for as long
+     * as it takes.
+     */
+    untilSignedOut?: boolean;
+    /** The connection dropped: what the page has may be behind until the next update. */
+    onDropped?: () => void;
+  } = {}
 ): (() => void) => {
   let closed = false;
   // Gives up waiting for a connection once following stops.
@@ -224,6 +236,7 @@ export const follow = (
       if (stub instanceof RpcStub) {
         stub.onRpcBroken(() => {
           if (!closed) {
+            onDropped?.();
             void start(true);
           }
         });
@@ -257,7 +270,9 @@ export const followChat = (
   core: CoreConnection,
   chatId: string,
   onUpdate: (update: ChatUpdate) => void,
-  onFailed: (reason: string, gone: boolean) => void
+  onFailed: (reason: string, gone: boolean) => void,
+  /** The connection dropped: watched again, from the next update on. */
+  onDropped?: () => void
 ): (() => void) => {
   let after: number | null = null;
   const received = (update: ChatUpdate): void => {
@@ -270,6 +285,7 @@ export const followChat = (
   return follow(
     core,
     async (session) => await session.chats.watch(chatId, after, received),
-    onFailed
+    onFailed,
+    onDropped === undefined ? {} : { onDropped }
   );
 };

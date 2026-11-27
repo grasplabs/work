@@ -4941,24 +4941,33 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Marks `personId`'s chat `chatId` seen up to its latest message
+   * Marks `personId`'s chat `chatId` seen up to its latest message, or
+   * to `upTo`, the newest the page shows, where that is older
    * (`ChatsApi.markRead`), never back: a page that shows less, on another
    * device, leaves it where a newer one put it. The last message they had
    * seen before: 0 for none, null for a chat made before chats kept it,
    * which counts as read. Only their own chat in Grasp
    * (`#graspChat`): anyone else's is refused as if there were none.
    */
-  markChatRead(chatId: unknown, personId: string): number | null {
+  markChatRead(
+    chatId: unknown,
+    personId: string,
+    upTo?: number
+  ): number | null {
     const chat = this.#graspChat(chatId, personId);
     const latest = this.#db
       .select({ id: sql<number | null>`max(${chatMessages.id})` })
       .from(chatMessages)
       .where(eq(chatMessages.chatId, chat.id))
       .get()?.id;
-    if (typeof latest === "number" && latest > (chat.readUpTo ?? 0)) {
+    const seen =
+      typeof latest === "number" && upTo !== undefined
+        ? Math.min(latest, upTo)
+        : latest;
+    if (typeof seen === "number" && seen > (chat.readUpTo ?? 0)) {
       this.#db
         .update(chats)
-        .set({ readUpTo: latest })
+        .set({ readUpTo: seen })
         .where(eq(chats.id, chat.id))
         .run();
       this.#listChanged();

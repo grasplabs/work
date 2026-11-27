@@ -230,7 +230,7 @@ const followedThrough = (
     (reason) => {
       failed.push(reason);
     },
-    true
+    { untilSignedOut: true }
   );
   return {
     stop,

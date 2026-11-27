@@ -531,14 +531,19 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     });
   }
 
-  async markRead(chatId: string): Promise<number | null> {
+  async markRead(chatId: string, upTo?: number): Promise<number | null> {
     // Only the signed-in person's own object, and only their chat in it:
     // nobody moves where another person has read to.
-    return await withPerson(
-      this.#check,
-      async ({ userId }) =>
-        await this.#chatsOf(userId).markChatRead(chatIdOf(chatId), userId)
-    );
+    return await withPerson(this.#check, async ({ userId }) => {
+      if (upTo !== undefined && !(Number.isSafeInteger(upTo) && upTo >= 0)) {
+        throw agentErrors.create("agent.invalid_request");
+      }
+      return await this.#chatsOf(userId).markChatRead(
+        chatIdOf(chatId),
+        userId,
+        upTo
+      );
+    });
   }
 
   async archive(chatId: string): Promise<void> {
