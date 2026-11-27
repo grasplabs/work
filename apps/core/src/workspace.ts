@@ -3021,6 +3021,9 @@ export class Workspace extends DurableObject<Env> {
     // Asked: first in its person's list now, as Send was pressed, not once
     // the question is shown (`#store`), which waits on the chat's object
     // and may take seconds; back where it was if it is refused.
+    // Where it stood just now: another question may have moved it while
+    // the key was looked up.
+    const { lastAt: stood } = this.#graspChat(chatId, personId);
     const asked = new Date();
     this.#movedTo(chat.id, asked);
     void this.#takeQuestion(chat, question, started);
@@ -3030,7 +3033,7 @@ export class Workspace extends DurableObject<Env> {
         this.#keepRequest("send", key, chat.id);
       }
     } catch (error) {
-      this.#movedTo(chat.id, chat.lastAt, asked);
+      this.#movedTo(chat.id, stood, asked);
       throw error;
     } finally {
       if (key !== undefined) {
