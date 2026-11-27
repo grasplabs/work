@@ -2,6 +2,7 @@ import { isRetryableAssistantError } from "@earendil-works/pi-ai";
 import { agentErrors } from "@grasp-os/shared/agent";
 import type { ChatUpdate } from "@grasp-os/shared/chat";
 import { chatIdSchema } from "@grasp-os/shared/ids";
+import type { WorkspaceId } from "@grasp-os/shared/ids";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -40,12 +41,9 @@ import { startedThrough } from "./started-chats.ts";
 const idp = mockIdp();
 
 /** The tables `chatId`'s object holds, by name. */
-const tablesOf = async (
-  id: Parameters<typeof chatSession>[1],
-  chatId: string
-): Promise<string[]> =>
+const tablesOf = async (id: WorkspaceId, chatId: string): Promise<string[]> =>
   await runInDurableObject(
-    chatSession(env, id, chatIdSchema.parse(chatId)),
+    chatSession(env, { workspaceId: id, chatId: chatIdSchema.parse(chatId) }),
     (_instance, state) =>
       state.storage.sql
         .exec<{ name: string }>(
@@ -104,7 +102,8 @@ const sessionOf = (
   { id, chat }: Awaited<ReturnType<typeof chatOf>>,
   personId: string
 ) => ({
-  session: () => chatSession(env, id, chatIdSchema.parse(chat.id)),
+  session: () =>
+    chatSession(env, { workspaceId: id, chatId: chatIdSchema.parse(chat.id) }),
   request: (turnId: string, text: string, asked = model) => ({
     turnId,
     sentAt: Date.now(),
@@ -194,7 +193,11 @@ describe("a chat's ChatSession", () => {
   it("takes the next question when both objects restarted before the chat's own object took the last", async () => {
     const { userId } = await signedInWithRole(idp, "user");
     const { id, stub, chat } = await chatOf(userId, says("Hi."));
-    const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
+    const session = () =>
+      chatSession(env, {
+        workspaceId: id,
+        chatId: chatIdSchema.parse(chat.id),
+      });
     // The chat's object takes nothing until the test says, then restarts.
     // Waited on by flags: workerd won't let one request wait on another's
     // promise.
@@ -408,7 +411,10 @@ describe("a chat's ChatSession", () => {
       binding: "MAIL",
       decision: "granted",
     });
-    const session = chatSession(env, id, chatIdSchema.parse(chat.id));
+    const session = chatSession(env, {
+      workspaceId: id,
+      chatId: chatIdSchema.parse(chat.id),
+    });
     const alarmOf = async () =>
       await runInDurableObject(
         session,
@@ -436,7 +442,11 @@ describe("a chat's ChatSession", () => {
       stuck
     );
     const { chat } = await newChat();
-    const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
+    const session = () =>
+      chatSession(env, {
+        workspaceId: id,
+        chatId: chatIdSchema.parse(chat.id),
+      });
     // pi parks a task a restart cut off this many times without progress.
     const restore = await setObjectEnv(stub, { CHAT_RESTART_LIMIT: "1" });
     try {
@@ -489,7 +499,11 @@ describe("a chat's ChatSession", () => {
       stuck
     );
     const { chat, ask } = await newChat();
-    const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
+    const session = () =>
+      chatSession(env, {
+        workspaceId: id,
+        chatId: chatIdSchema.parse(chat.id),
+      });
     const woken = workspace(env, id);
     let restore: (() => Promise<void>) | undefined;
     try {
@@ -680,7 +694,11 @@ describe("a chat's ChatSession", () => {
       says("Stored.")
     );
     const { chat, ask } = await newChat();
-    const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
+    const session = () =>
+      chatSession(env, {
+        workspaceId: id,
+        chatId: chatIdSchema.parse(chat.id),
+      });
     try {
       void ask("Stored?").catch(() => "cut short");
       await vi.waitFor(
@@ -758,7 +776,11 @@ describe("a chat's ChatSession", () => {
       says("Answered now.")
     );
     const { chat, ask } = await newChat();
-    const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
+    const session = () =>
+      chatSession(env, {
+        workspaceId: id,
+        chatId: chatIdSchema.parse(chat.id),
+      });
     try {
       void ask("Hello?").catch(() => "settled");
       await vi.waitFor(
@@ -844,7 +866,11 @@ describe("a chat's ChatSession", () => {
       says("Answered after all.")
     );
     const { chat, ask } = await newChat();
-    const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
+    const session = () =>
+      chatSession(env, {
+        workspaceId: id,
+        chatId: chatIdSchema.parse(chat.id),
+      });
     try {
       void ask("Hello?").catch(() => "settled");
       await vi.waitFor(
@@ -997,7 +1023,10 @@ describe("a chat's ChatSession", () => {
       stub.deleteChat(chat.id, userId, person, { type: "person", userId })
     );
     // Whatever still reaches the chat's object once it is erased.
-    const late = await chatSession(env, id, chatIdSchema.parse(chat.id))
+    const late = await chatSession(env, {
+      workspaceId: id,
+      chatId: chatIdSchema.parse(chat.id),
+    })
       .note("The connection you asked for was granted.")
       .then(
         () => "taken",
@@ -1313,10 +1342,17 @@ const restoreFixture = async (
   { id, chat, personId }: Awaited<ReturnType<typeof chatOf>>
 ): Promise<void> => {
   const { ids, objects } = piFixtureSchema.parse(fixture);
+  // The workspace and its agent by what names them first: a fixture may
+  // have one ID for both, as a test's workspace once was its agent's.
+  // (in JSON kept inside a JSON string, its quotes escaped).
+  const named: Record<string, string> = {
+    [String.raw`workspaceId\":\"${ids.workspaceId}`]: String.raw`workspaceId\":\"${id}`,
+    [String.raw`agentId\":\"${ids.agentId}`]: String.raw`agentId\":\"${chat.agentId}`,
+  };
   const now: Record<string, string> = {
-    [ids.workspaceId]: id,
     [ids.chatId]: chat.id,
     [ids.personId]: personId,
+    [ids.workspaceId]: id,
     [ids.agentId]: chat.agentId,
   };
   const swapped = (value: string | number | null) => {
@@ -1324,13 +1360,16 @@ const restoreFixture = async (
       return value;
     }
     let text = value;
-    for (const [was, is] of Object.entries(now)) {
+    for (const [was, is] of [
+      ...Object.entries(named),
+      ...Object.entries(now),
+    ]) {
       text = text.replaceAll(was, is);
     }
     return text;
   };
   await runInDurableObject(
-    chatSession(env, id, chatIdSchema.parse(chat.id)),
+    chatSession(env, { workspaceId: id, chatId: chatIdSchema.parse(chat.id) }),
     (_instance, state) => {
       for (const { sql } of objects) {
         state.storage.sql.exec(sql);
@@ -1374,11 +1413,10 @@ describe("a chat Pi 1.4 wrote", () => {
     const { userId } = await signedInWithRole(idp, "user");
     const asking = await chatOf(userId, says("Again, on this Pi."));
     await restoreFixture(settledOnPi14, asking);
-    const session = chatSession(
-      env,
-      asking.id,
-      chatIdSchema.parse(asking.chat.id)
-    );
+    const session = chatSession(env, {
+      workspaceId: asking.id,
+      chatId: chatIdSchema.parse(asking.chat.id),
+    });
     /** The newest version each of pi's own documents is stored at. */
     const versions = async () =>
       await runInDurableObject(session, (_instance, state) =>
@@ -1408,11 +1446,10 @@ describe("a chat Pi 1.4 wrote", () => {
     const { userId } = await signedInWithRole(idp, "user");
     const asking = await chatOf(userId, says("Answered on this Pi."));
     await restoreFixture(midRequestOnPi14, asking);
-    const session = chatSession(
-      env,
-      asking.id,
-      chatIdSchema.parse(asking.chat.id)
-    );
+    const session = chatSession(env, {
+      workspaceId: asking.id,
+      chatId: chatIdSchema.parse(asking.chat.id),
+    });
     // Opened as the object next serves a call: the turn its record holds
     // is the one under way, and goes on, its alarms waking it.
     const active = await session.activeTurn();

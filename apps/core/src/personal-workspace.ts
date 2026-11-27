@@ -1,6 +1,9 @@
 import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { WorkspaceId } from "@grasp-os/shared/ids";
 
+/** What every person's own Workspace object's ID starts with. */
+export const personalWorkspacePrefix = "person:";
+
 /**
  * The Workspace object that holds `userId`'s chats: each person's own, so
  * one person's chats, watches and turns never load, cap or restart
@@ -8,4 +11,4 @@ import type { WorkspaceId } from "@grasp-os/shared/ids";
  * still `chatAgentId` (chats-rpc.ts).
  */
 export const personalWorkspaceId = (userId: string): WorkspaceId =>
-  workspaceIdSchema.parse(`person:${userId}`);
+  workspaceIdSchema.parse(`${personalWorkspacePrefix}${userId}`);

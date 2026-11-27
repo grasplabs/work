@@ -65,9 +65,38 @@ export type RunId = z.infer<typeof runIdSchema>;
 export const workspaceIdSchema = idSchema<"WorkspaceId">();
 export type WorkspaceId = z.infer<typeof workspaceIdSchema>;
 
-/** A chat in a workspace. */
+/**
+ * A chat in a workspace: unique only within it, as each person's own
+ * Workspace object names its chats (a page may name a new one). Outside
+ * that object a chat is always its {@link ChatRef}.
+ */
 export const chatIdSchema = idSchema<"ChatId">();
 export type ChatId = z.infer<typeof chatIdSchema>;
+
+/**
+ * A chat as everything outside its Workspace object names it: the
+ * workspace and the chat's ID there, never the ID alone. Whatever is kept
+ * or found of a chat elsewhere (core's D1, another object, connect) is
+ * keyed by both, so one person's chat can never be taken for another's
+ * that has the same ID.
+ */
+export const chatRefSchema = z.strictObject({
+  workspaceId: workspaceIdSchema,
+  chatId: chatIdSchema,
+});
+export type ChatRef = z.infer<typeof chatRefSchema>;
+
+/**
+ * The one string a chat's {@link ChatRef} makes, for a name or key built
+ * from a chat (its ChatSession object's name, an idempotency key): `/`
+ * never occurs in a workspace's ID, so two refs never make one string.
+ */
+export const chatKeyOf = ({ workspaceId, chatId }: ChatRef): string =>
+  `${workspaceId}/${chatId}`;
+
+/** Whether `a` and `b` are one chat: the same workspace and ID there. */
+export const sameChat = (a: ChatRef, b: ChatRef): boolean =>
+  a.workspaceId === b.workspaceId && a.chatId === b.chatId;
 
 /** A connection to an outside system, held by connect. */
 export const connectionIdSchema = idSchema<"ConnectionId">();

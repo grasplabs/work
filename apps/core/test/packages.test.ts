@@ -19,6 +19,7 @@ import {
 } from "../src/packages/requests.ts";
 import { rescanPackages } from "../src/packages/rescan.ts";
 import { resolveDependencies } from "../src/packages/resolve.ts";
+import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import { SandboxUnavailableError } from "../src/sandboxed.ts";
 import { personalChatsOf, says } from "./agent-chat.ts";
 import {
@@ -137,7 +138,7 @@ const approvedPackage = async (name: string, entries?: string[]) => {
 const agentFor = (
   by: Acting,
   chatId: string,
-  workspaceId = `workspace-${unique()}`
+  workspaceId: string = personalWorkspaceId(by.userId)
 ): Acting => {
   const via: AgentProposer = {
     type: "agent",
@@ -271,7 +272,8 @@ describe("deciding packages", () => {
     const agent = agentFor(builder, chatId);
     const request = await asked(agent, app, { [name]: "1" });
 
-    const shown = await chatPackageRequests(env, builder.userId, chatId);
+    const chat = { workspaceId: personalWorkspaceId(builder.userId), chatId };
+    const shown = await chatPackageRequests(env, chat);
     const byAgent = await outcome(decided(agent, request));
     const byBuilder = await outcome(decided(builder, request));
 
@@ -279,7 +281,7 @@ describe("deciding packages", () => {
       shown: shown.map(({ id }) => id),
       byAgent,
       byBuilder,
-      left: await chatPackageRequests(env, builder.userId, chatId),
+      left: await chatPackageRequests(env, chat),
     }).toStrictEqual({
       shown: [request.id],
       byAgent: "dependency.forbidden",
@@ -314,11 +316,10 @@ describe("deciding packages", () => {
               ...args: Parameters<typeof target.npmAdvisories>
             ): Promise<NpmAdvisories> => {
               again ??= await asked(second.agent, app, { [name]: "1" });
-              const shown = await chatPackageRequests(
-                env,
-                builder.userId,
-                second.id
-              );
+              const shown = await chatPackageRequests(env, {
+                workspaceId: chats.id,
+                chatId: second.id,
+              });
               shownBefore = shown.map(({ id }) => id);
               const advisories: NpmAdvisories = await target.npmAdvisories(
                 ...args
@@ -344,7 +345,7 @@ describe("deciding packages", () => {
             body.includes("The npm packages you asked for were approved")
         );
     const cards = async (chatId: typeof first.id) =>
-      await chatPackageRequests(env, builder.userId, chatId);
+      await chatPackageRequests(env, { workspaceId: chats.id, chatId });
 
     expect({
       same: again?.id === request.id,

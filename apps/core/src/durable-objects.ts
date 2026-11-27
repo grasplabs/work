@@ -1,5 +1,6 @@
 import { isExpectedError } from "@grasp-os/shared/errors";
-import type { AppId, ChatId, WorkspaceId } from "@grasp-os/shared/ids";
+import { chatKeyOf } from "@grasp-os/shared/ids";
+import type { AppId, ChatRef, WorkspaceId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Subject } from "@grasp-os/shared/subject";
 
@@ -44,14 +45,13 @@ export const draftWatch = (
 ) => inJurisdiction(env, env.DRAFT_WATCHES).getByName(`${kind}:${id}`);
 
 /**
- * A chat's own object (chat-session.ts): its agent's turns, named by its
- * workspace and chat.
+ * A chat's own object (chat-session.ts): its agent's turns, named by the
+ * chat's ref (`chatKeyOf`), never its ID alone.
  */
 export const chatSession = (
   env: Pick<Env, "CHAT_SESSIONS" | "DURABLE_OBJECT_JURISDICTION">,
-  id: WorkspaceId,
-  chatId: ChatId
-) => inJurisdiction(env, env.CHAT_SESSIONS).getByName(`${id}/${chatId}`);
+  chat: ChatRef
+) => inJurisdiction(env, env.CHAT_SESSIONS).getByName(chatKeyOf(chat));
 
 /** A workspace's object (workspace.ts): its chats and their agent. */
 export const workspace = (

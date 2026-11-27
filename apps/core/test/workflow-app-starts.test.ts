@@ -21,7 +21,7 @@ import {
 } from "@grasp-os/shared/app-releases";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { FunctionResult } from "@grasp-os/shared/functions";
-import { appIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalText, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
@@ -57,6 +57,7 @@ import {
   requestPermission,
   revokePermission,
 } from "../src/permissions.ts";
+import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
@@ -1363,7 +1364,7 @@ const agentOf = async (
   permissionId: string;
 }> => {
   const agentId = `agent-${unique()}`;
-  const workspaceId = workspaceIdSchema.parse(crypto.randomUUID());
+  const workspaceId = personalWorkspaceId(fx.bob.userId);
   const chat = await workspace(env, workspaceId).createChat(
     "Questions",
     fx.bob.userId,
@@ -1422,7 +1423,72 @@ const chatThatRead = async (fx: Fixture) => {
   };
 };
 
+/**
+ * The most values one D1 statement may bind
+ * (https://developers.cloudflare.com/d1/platform/limits/): past it the
+ * statement fails whole.
+ */
+const d1BoundValuesMax = 100;
+
+/**
+ * Core's database, keeping how many values each statement `writes`
+ * matches binds.
+ */
+const countingDb = (writes: RegExp, bound: number[]): D1Database =>
+  new Proxy(env.DB, {
+    get: (target, property): unknown => {
+      if (property === "prepare") {
+        return (text: string) => {
+          const statement = target.prepare(text);
+          if (!writes.test(text)) {
+            return statement;
+          }
+          return new Proxy(statement, {
+            get: (prepared, key): unknown => {
+              const value: unknown = Reflect.get(prepared, key);
+              if (key === "bind" && typeof value === "function") {
+                return (...values: unknown[]): unknown => {
+                  bound.push(values.length);
+                  return Reflect.apply(value, prepared, values);
+                };
+              }
+              return typeof value === "function"
+                ? (...args: unknown[]): unknown =>
+                    Reflect.apply(value, prepared, args)
+                : value;
+            },
+          });
+        };
+      }
+      const value: unknown = Reflect.get(target, property);
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+
 describe("what a start rechecks, and records", () => {
+  it("admits the start an agent's call in its chat staged, the most a start's admission checks, in one statement within D1's bound values", async () => {
+    const fx = await fixture();
+    const { agent } = await agentOf(fx);
+    const bound: number[] = [];
+    const answer = await dispatched(
+      {
+        ...env,
+        DB: countingDb(/insert into "workflow_start_receipts"/iu, bound),
+      },
+      entryOf(fx, fx.bob, { agent })
+    );
+    expect({
+      answer,
+      bound: bound.map((count) =>
+        count <= d1BoundValuesMax
+          ? "within"
+          : `binds ${count} values, past D1's ${d1BoundValuesMax}: bind repeated values once`
+      ),
+    }).toStrictEqual({ answer: "delivered", bound: ["within"] });
+  });
+
   it("starts a restricted App's runs restricted, now and from its outbox, and its unrestricted starts not", async () => {
     const fx = await fixture();
     const before = await call(fx, fx.bob, "requests.kickOff", { who: "Bob" });

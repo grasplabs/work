@@ -1,6 +1,8 @@
+import type { ChatRef } from "@grasp-os/shared/ids";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
+import { chatRefOf, ofChat } from "./chat-ref.ts";
 import { chatAudiences } from "./db/core/schema.ts";
 import type { WorkContext } from "./restricted.ts";
 
@@ -33,31 +35,27 @@ export const audienceOf = async (
   }
   const [row] = await drizzle(env.DB)
     .select({
-      workspaceId: chatAudiences.workspaceId,
       members: chatAudiences.members,
       outsiders: chatAudiences.outsiders,
     })
     .from(chatAudiences)
-    .where(eq(chatAudiences.chatId, context.chatId))
+    .where(ofChat(chatAudiences, context))
     .limit(1);
-  if (row === undefined) {
-    return undefined;
-  }
-  // Kept by another Workspace object's chat of that id: read as nothing.
-  if (row.workspaceId !== context.workspaceId) {
-    return { members: [], outsiders: true };
-  }
-  return { members: row.members, outsiders: row.outsiders };
+  return row;
 };
 
 /**
- * Keeps who is in the chat `chatId`, held by the Workspace object
- * `workspaceId`, for its agent's reads from now on: the person who asked
- * always among them.
+ * Keeps who is in chat `chat` for its agent's reads from now on: the
+ * person who asked always among them. Never over another workspace's
+ * chat's: until the contract migration the table's key is the chat's ID
+ * alone, as the release before upserts on it, so a row of another
+ * workspace's under the same ID is left as it is, and this chat keeps
+ * none: its agent then reads nothing at all (history-access.ts). A chat
+ * that keeps an audience is a chat app's, whose ID core makes at random.
  */
 export const keepAudience = async (
   env: Env,
-  { workspaceId, chatId }: { workspaceId: string; chatId: string },
+  chat: ChatRef,
   asker: string,
   { members, outsiders }: Audience
 ): Promise<void> => {
@@ -68,6 +66,10 @@ export const keepAudience = async (
   };
   await drizzle(env.DB)
     .insert(chatAudiences)
-    .values({ chatId, workspaceId, ...kept })
-    .onConflictDoUpdate({ target: chatAudiences.chatId, set: kept });
+    .values({ ...chatRefOf(chat), ...kept })
+    .onConflictDoUpdate({
+      target: chatAudiences.chatId,
+      set: kept,
+      setWhere: eq(chatAudiences.workspaceId, chat.workspaceId),
+    });
 };
