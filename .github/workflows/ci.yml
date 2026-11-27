@@ -1072,10 +1072,12 @@ jobs:
   # only rewrites its body to the latest run, which notifies nobody, so a
   # red main says so once, not once a merge; and the first run that passes
   # closes it with a comment, which notifies whoever follows the issue.
-  # A push passes once it publishes its release. A push main had moved
-  # past publishes nothing and changes nothing here, nor does a cancelled
-  # run, in which this job doesn't run; a job cancelled in a run that
-  # wasn't, as one that ran out of time is, failed. Pushes run one at a
+  # A push passes once it publishes its release. Only a push that is
+  # still main's head, asked here, changes the issue: the newest push says
+  # how main is, and a re-run of one main has moved past, which may pass
+  # without publishing (release:upload, --head), says nothing. Nor does a
+  # cancelled run, in which this job doesn't run; a job cancelled in a run
+  # that wasn't, as one that ran out of time is, failed. Pushes run one at a
   # time (the run's concurrency group), so two never open an issue each.
   # The issues are listed without search, which can lag behind a new one,
   # and only this job's count: anyone may open an issue with its title.
@@ -1087,6 +1089,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       actions: read
+      contents: read
       issues: write
     steps:
       - run: |
@@ -1095,6 +1098,10 @@ jobs:
             push) title="CI on main failed" passing=publish-release ;;
             schedule) title="Nightly CI failed on main" passing=check ;;
           esac
+          if [ "$EVENT" = push ] && [ "$(gh api "repos/$GH_REPO/commits/main" --jq .sha)" != "$GITHUB_SHA" ]; then
+            echo "::notice::main has moved past $GITHUB_SHA: the newer push's run says how main is"
+            exit 0
+          fi
           run="$SERVER/$GH_REPO/actions/runs/$RUN_ID"
           failed=$(jq -r 'any(.[]; .result == "failure" or .result == "cancelled")' <<< "$NEEDS")
           passed=$(jq -r --arg job "$passing" '.[$job].result == "success"' <<< "$NEEDS")
