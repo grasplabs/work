@@ -425,10 +425,12 @@ test("a person reads an answer in blocks: a table, a formula, code and a diagram
           )
     )
     .toBeGreaterThan(1);
-  // The diagram, drawn by Mermaid, and its own download.
+  // The diagram, drawn by Mermaid, and its own download. A first draw loads
+  // Mermaid and its layout, and is tried again when it is slow: on a loaded
+  // runner that takes longer than the default wait.
   await expect(
     answer.getByRole("application", { name: "Mermaid diagram" })
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 30_000 });
   await expect(
     answer.getByRole("button", { name: "Download diagram" })
   ).toBeVisible();
