@@ -706,9 +706,9 @@ export interface ConnectionSummary {
    */
   tools?: string[];
   /**
-   * Those of `tools` on offer: the ones Grasp classed (connect's
-   * composio-classes.ts). A tool nobody classed is never offered or run,
-   * whatever the admin allowed. Absent for a native connection.
+   * Those of `tools` on offer: all the admin allowed, but for what Grasp
+   * never runs (by name, as for every connection). Absent for a native
+   * connection.
    */
   offeredTools?: string[];
   /**
@@ -3034,9 +3034,8 @@ export interface ActionShape {
   provider: string;
   /**
    * It reads or changes mail, which other people wrote: as a native
-   * connector's manifest says (`mail`), as Grasp's review of a Composio
-   * tool says (connect's composio-classes.ts), or, for a read of a server
-   * connected by its URL, by the rules (`readsMailByRules`).
+   * connector's manifest says (`mail`), or, for a read of a Composio tool
+   * or of a server connected by its URL, by the rules (`readsMailByRules`).
    */
   mail?: true;
 }
@@ -3051,11 +3050,10 @@ export interface ConnectorContractAction {
    */
   readOnly: boolean;
   /**
-   * The class Grasp gave a Composio tool (connect's composio-classes.ts),
-   * as reviewed: a call of it is a read only when `readOnly` says so too.
-   * In the contract, so a release that reclasses a tool is a changed
-   * contract an admin approves again, even where the admin's rule already
-   * made it a change. A native action's class is in its connector's
+   * The class connect takes a Composio tool to be, as its admin allowed
+   * it (a read or a change of what the connection holds). In the
+   * contract, so an admin's change of it is a changed contract an admin
+   * approves again. A native action's class is in its connector's
    * manifest, so its contract carries none: one more field would change
    * every native contract bound now.
    */

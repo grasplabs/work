@@ -1,26 +1,48 @@
 /**
  * An organization being set up, on its Setup (src/hosting/progress.ts):
- * one calm line per thing that happens, its state, and how long it has
- * taken. Once live it is one line, its steps and who is invited folded
- * under it. Codes and the technical part only under each line's Details.
+ * one calm row per thing that happens, its state, and how long it has
+ * taken. Once live its Setup says so in one fact, its steps and who is
+ * invited under it (src/admin/setup-status.tsx). Codes and the technical
+ * part only under each row's Details.
  */
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
+import { Badge } from "@grasp-os/ui/components/badge";
+import type { BadgeVariant } from "@grasp-os/ui/components/badge";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@grasp-os/app-kit/components/collapsible";
-import { Spinner } from "@grasp-os/app-kit/components/spinner";
-import { cn } from "@grasp-os/app-kit/lib/utils";
+} from "@grasp-os/ui/components/collapsible";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { Spinner } from "@grasp-os/ui/components/spinner";
+import { Text } from "@grasp-os/ui/components/text";
+import { font, space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
-import { Section } from "../admin/section.tsx";
+import { Group } from "../admin/setup-parts.tsx";
 import type {
   LineState,
   ProgressLine,
   ProvisioningProgress,
 } from "./progress.ts";
+
+const styles = stylex.create({
+  details: {
+    margin: 0,
+    paddingInlineStart: space["5"],
+    display: "grid",
+    rowGap: space["1"],
+  },
+  code: { fontFamily: font.mono, fontSize: font.textSm },
+  steps: { display: "flex", flexDirection: "column", gap: space["3"] },
+});
 
 const stateWords: Readonly<Record<LineState, string>> = {
   waiting: "Waiting",
@@ -41,59 +63,52 @@ const durationOf = (from: Date, to: Date): string => {
   return minutes === 0 ? `${seconds}s` : `${minutes}m ${seconds % 60}s`;
 };
 
-const badgeVariants: Readonly<
-  Record<LineState, "destructive" | "passed" | "outline">
-> = {
+const badgeVariants: Readonly<Record<LineState, BadgeVariant>> = {
   waiting: "outline",
   doing: "outline",
-  done: "passed",
+  done: "success",
   retrying: "outline",
   failed: "destructive",
   needs_attention: "destructive",
 };
 
-const StateMark = ({ state }: { state: LineState }) => {
-  if (state === "doing" || state === "retrying") {
-    return <Spinner aria-hidden />;
-  }
-  return <Badge variant={badgeVariants[state]}>{stateWords[state]}</Badge>;
-};
+/** Where a step stands: a spinner while it goes (its state in words for a screen reader), else its Badge. */
+const StateMark = ({ state }: { state: LineState }) =>
+  state === "doing" || state === "retrying" ? (
+    <Spinner aria-label={stateWords[state]} />
+  ) : (
+    <Badge variant={badgeVariants[state]}>{stateWords[state]}</Badge>
+  );
 
-/** One step on one line: where it stands, what it is, and at its end the way to its details, which open under it. */
+/** What a step or the whole run recorded, under its Details. */
+const Details = ({ children }: { children: ReactNode }) => (
+  <Collapsible fitContent>
+    <CollapsibleTrigger>Details</CollapsibleTrigger>
+    <CollapsibleContent>{children}</CollapsibleContent>
+  </Collapsible>
+);
+
+/** One step on one row: where it stands, what it is, and its details under it. */
 const Line = ({ line }: { line: ProgressLine }) => (
-  <li className="border-t py-2 first:border-t-0">
-    <Collapsible>
-      <div className="flex min-h-7 items-center gap-3 text-sm">
-        <StateMark state={line.state} />
-        <span
-          className={cn(
-            "min-w-0 flex-1",
-            line.state === "waiting" && "text-muted-foreground"
-          )}
-        >
-          {line.label}
-        </span>
-        {/* A spinner says nothing: its state in words for screen readers. */}
-        {line.state === "doing" || line.state === "retrying" ? (
-          <span className="sr-only">{stateWords[line.state]}</span>
-        ) : null}
-        {line.details.length === 0 ? null : (
-          <CollapsibleTrigger render={<Button size="xs" variant="outline" />}>
-            Details
-          </CollapsibleTrigger>
-        )}
-      </div>
+  <Item size="sm">
+    <ItemMedia>
+      <StateMark state={line.state} />
+    </ItemMedia>
+    <ItemContent>
+      <ItemTitle>{line.label}</ItemTitle>
       {line.details.length === 0 ? null : (
-        <CollapsibleContent>
-          <ul className="text-muted-foreground list-disc pt-1 pl-5 text-sm">
-            {line.details.map((detail) => (
-              <li key={detail}>{detail}</li>
-            ))}
-          </ul>
-        </CollapsibleContent>
+        <ItemDescription>
+          <Details>
+            <ul {...stylex.props(styles.details)}>
+              {line.details.map((detail) => (
+                <li key={detail}>{detail}</li>
+              ))}
+            </ul>
+          </Details>
+        </ItemDescription>
       )}
-    </Collapsible>
-  </li>
+    </ItemContent>
+  </Item>
 );
 
 /** What it all comes to while it isn't ready, in a sentence. */
@@ -110,41 +125,32 @@ const headline = (progress: ProvisioningProgress, now: Date): string => {
 };
 
 const Steps = ({ progress }: { progress: ProvisioningProgress }) => (
-  <ol className="flex flex-col" aria-label="Steps">
+  <ItemGroup aria-label="Steps" separated>
     {progress.lines.map((line) => (
       <Line key={line.id} line={line} />
     ))}
-  </ol>
+  </ItemGroup>
 );
 
-/** Set up and live: one line, its steps and who is invited under it for who opens them. */
-const Ready = ({ progress }: { progress: ProvisioningProgress }) => (
-  <Collapsible>
-    <Section
-      action={
-        <CollapsibleTrigger render={<Button size="sm" variant="outline" />}>
-          Show its steps
-        </CollapsibleTrigger>
-      }
-      title="Set up: every step is done"
-    >
-      <CollapsibleContent>
-        <div className="flex flex-col gap-3 border-t px-5 py-4">
-          {progress.admins.length === 0 ? null : (
-            <p className="text-muted-foreground text-sm">
-              {`Invited: ${progress.admins.join(", ")}. They become admins when they first sign in.`}
-            </p>
-          )}
-          <Steps progress={progress} />
-        </div>
-      </CollapsibleContent>
-    </Section>
-  </Collapsible>
+/** Its steps once every one is done, and who is invited: under its Setup's "Set up" fact. */
+export const ReadySteps = ({
+  progress,
+}: {
+  progress: ProvisioningProgress;
+}) => (
+  <div {...stylex.props(styles.steps)}>
+    {progress.admins.length === 0 ? null : (
+      <Text color="muted" size="sm">
+        {`Invited: ${progress.admins.join(", ")}. They become admins when they first sign in.`}
+      </Text>
+    )}
+    <Steps progress={progress} />
+  </div>
 );
 
 /**
- * Its progress; `children`, what staff do about it once it stopped (its
- * Retry), shown beside why.
+ * Its progress while it isn't ready; `children`, what staff do about it
+ * once it stopped (its Retry), shown beside why.
  */
 export const ProvisioningProgressView = ({
   progress,
@@ -152,31 +158,18 @@ export const ProvisioningProgressView = ({
 }: {
   progress: ProvisioningProgress;
   children?: ReactNode;
-}) => {
-  if (progress.state === "ready") {
-    return <Ready progress={progress} />;
-  }
-  return (
-    <Section
-      description={progress.notice ?? undefined}
-      title={headline(progress, new Date())}
-    >
-      <div className="flex flex-col gap-3 border-t px-5 py-4">
-        {progress.state === "needs_attention" ? children : null}
-        <Steps progress={progress} />
-        {progress.code === null ? null : (
-          <Collapsible>
-            <CollapsibleTrigger render={<Button size="xs" variant="outline" />}>
-              Details
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <p className="text-muted-foreground font-mono text-sm">
-                {progress.code}
-              </p>
-            </CollapsibleContent>
-          </Collapsible>
-        )}
-      </div>
-    </Section>
-  );
-};
+}) => (
+  <Group
+    description={progress.notice ?? undefined}
+    id="progress"
+    title={headline(progress, new Date())}
+  >
+    {progress.state === "needs_attention" ? children : null}
+    <Steps progress={progress} />
+    {progress.code === null ? null : (
+      <Details>
+        <p {...stylex.props(styles.code)}>{progress.code}</p>
+      </Details>
+    )}
+  </Group>
+);

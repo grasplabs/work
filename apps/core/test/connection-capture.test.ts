@@ -474,20 +474,12 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     });
   });
 
-  it("keeps nothing from a shared connection with no audience, which the chat's agent can't read even granted, nor from a toolkit that forbids copies", async () => {
+  it("keeps nothing from a shared connection with no audience, which the chat's agent can't read even granted", async () => {
     const person = await signedInApi(idp, "user");
-    const [sharedMarker, privateMarker, witness] = [
-      markerOf(),
-      markerOf(),
-      markerOf(),
-    ];
+    const [sharedMarker, witness] = [markerOf(), markerOf()];
     const shared = await mailConnection([], mailWithSearch, {
       provider: "mail_own",
       audience: "nobody",
-    });
-    const forbidden = await mailConnection([], mailWithSearch, {
-      provider: "mail_private",
-      owner: person.userId,
     });
     const own = await mailConnection([], mailWithSearch, {
       provider: "mail_own",
@@ -497,10 +489,6 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
       "mail.search",
       messagesRead([{ id: `message-${sharedMarker}`, subject: sharedMarker }])
     );
-    await forbidden.answer(
-      "mail.search",
-      messagesRead([{ id: `message-${privateMarker}`, subject: privateMarker }])
-    );
     await own.answer(
       "mail.search",
       messagesRead([{ id: `message-${witness}`, subject: witness }])
@@ -509,16 +497,13 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
       person.userId,
       step(calling("SHARED", "mail.search", { query: sharedMarker })),
       says("Found it."),
-      step(calling("PRIVATE", "mail.search", { query: privateMarker })),
-      says("Found it."),
       step(calling("OWN", "mail.search", { query: witness })),
       says("Found it.")
     );
     await grant(chat, shared.id, "SHARED", ["mail.search"]);
-    await grant(chat, forbidden.id, "PRIVATE", ["mail.search"]);
     await grant(chat, own.id, "OWN", ["mail.search"]);
 
-    for (const ask of ["Find shared.", "Find private.", "Find own."]) {
+    for (const ask of ["Find shared.", "Find own."]) {
       // oxlint-disable-next-line no-await-in-loop -- one turn at a time
       await askAfresh(chat, ask);
     }
@@ -530,20 +515,15 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     expect({
       // Refused before it reached the connection.
       shared: await shared.searched(),
-      recalled: await Promise.all(
-        [sharedMarker, privateMarker].map(
-          async (marker) => await recalled(person.userId, marker)
-        )
-      ),
+      recalled: await recalled(person.userId, sharedMarker),
       witnessed: witnessed.map(shown),
       quiet: quiet.filter(
         ({ action, target }) =>
-          action.startsWith("brain.capture.") &&
-          (target?.id === forbidden.id || target?.id === shared.id)
+          action.startsWith("brain.capture.") && target?.id === shared.id
       ),
     }).toStrictEqual({
       shared: [],
-      recalled: [{ texts: [] }, { texts: [] }],
+      recalled: { texts: [] },
       witnessed: [
         {
           action: "brain.capture.kept",

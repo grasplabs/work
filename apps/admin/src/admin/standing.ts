@@ -129,8 +129,9 @@ export const standingOf = (entry: ClientSummary): Standing => {
  * start (the summary's `day`); the admin's view counts from 0. Null once
  * they are over.
  */
-export const interviewDay = (view: AdminView): number | null =>
-  view.closed ? null : view.day + 1;
+export const interviewDay = (
+  view: Pick<AdminView, "closed" | "day">
+): number | null => (view.closed ? null : view.day + 1);
 
 /**
  * How an organization whose core answered stands, from the admin's view

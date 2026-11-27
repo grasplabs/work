@@ -6,8 +6,8 @@ import {
   Field,
   FieldDescription,
   FieldLabel,
-} from "@grasp-os/app-kit/components/field";
-import { Input } from "@grasp-os/app-kit/components/input";
+} from "@grasp-os/ui/components/field";
+import { Input } from "@grasp-os/ui/components/input";
 
 import { InvalidFieldError } from "../use-action.ts";
 import { signInProblem } from "./sign-in-schema.ts";
@@ -53,33 +53,24 @@ export const signInOf = (form: FormData): ClientSignInRecord => {
 
 /**
  * The sign-in fields, filled with `current` when there is one, as the
- * admin's forms lay fields out; `idPrefix` keeps their ids apart from
- * another form's on the same page.
+ * admin's forms lay fields out: each Field wires its label, words and
+ * control itself.
  */
 export const SignInFields = ({
   current,
-  idPrefix,
 }: {
   current: ClientSignInRecord | null;
-  idPrefix: string;
 }) => (
   <>
     <Field>
-      <FieldLabel htmlFor={`${idPrefix}-entra`}>Entra tenant id</FieldLabel>
-      <Input
-        defaultValue={current?.entraTenantId}
-        id={`${idPrefix}-entra`}
-        name="entraTenantId"
-      />
+      <FieldLabel>Entra tenant id</FieldLabel>
+      <Input defaultValue={current?.entraTenantId} mono name="entraTenantId" />
       <FieldDescription>If its people sign in with Microsoft.</FieldDescription>
     </Field>
     <Field>
-      <FieldLabel htmlFor={`${idPrefix}-google`}>
-        Google Workspace domain
-      </FieldLabel>
+      <FieldLabel>Google Workspace domain</FieldLabel>
       <Input
         defaultValue={current?.googleHostedDomain}
-        id={`${idPrefix}-google`}
         name="googleHostedDomain"
       />
       <FieldDescription>
@@ -87,10 +78,9 @@ export const SignInFields = ({
       </FieldDescription>
     </Field>
     <Field>
-      <FieldLabel htmlFor={`${idPrefix}-domains`}>Email domains</FieldLabel>
+      <FieldLabel>Email domains</FieldLabel>
       <Input
         defaultValue={current?.domains.join(", ")}
-        id={`${idPrefix}-domains`}
         name="domains"
         required
       />
@@ -99,13 +89,8 @@ export const SignInFields = ({
       </FieldDescription>
     </Field>
     <Field>
-      <FieldLabel htmlFor={`${idPrefix}-admins`}>First admins</FieldLabel>
-      <Input
-        defaultValue={current?.admins.join(", ")}
-        id={`${idPrefix}-admins`}
-        name="admins"
-        required
-      />
+      <FieldLabel>First admins</FieldLabel>
+      <Input defaultValue={current?.admins.join(", ")} name="admins" required />
       <FieldDescription>
         Emails that get the admin role when they first sign in, separated by
         commas: at least one, each in the email domains.

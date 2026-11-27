@@ -27,9 +27,9 @@ describe("a company's use of Grasp's AI, as its Setup says it", () => {
         })
       ),
     }).toStrictEqual({
-      under: "On Grasp’s AI: $12.34 of $100.00 this month.",
+      under: "$12.34 of $100.00",
       reached:
-        "On Grasp’s AI: $100.02 this month, at its limit of $100.00. Its AI is stopped until next month, or until its admin connects a key of its own.",
+        "$100.02, at its limit of $100.00: its AI is stopped until next month, or until its admin connects a key of its own.",
     });
   });
 
