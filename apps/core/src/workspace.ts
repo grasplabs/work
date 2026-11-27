@@ -187,6 +187,7 @@ import {
   brainCaptureIntents,
   chatBuildJobs,
   chatCodeRuns,
+  chatDeletes,
   chatDraftContents,
   chatDraftFiles,
   chatDraftVersionFiles,
@@ -760,6 +761,25 @@ const maxWatchers = 50;
  */
 const auditRetryMs = { first: 5000, most: 15 * 60 * 1000 };
 
+/**
+ * The pauses before a chat's deletion is tried again (`#tryDelete`): the
+ * first after `first`, doubling each time, never past `most`.
+ */
+const deleteRetryMs = { first: 5000, most: 15 * 60 * 1000 };
+
+/** The pause before trying a deletion again after `attempts` failed. */
+const deleteRetryAfter = (attempts: number): number =>
+  Math.min(deleteRetryMs.first * 2 ** (attempts - 1), deleteRetryMs.most);
+
+/**
+ * Tries of a deletion that fail before each further failure is logged as
+ * an error, not a warning: about an hour and a half of retries.
+ */
+const deleteAttemptsBeforeError = 10;
+
+/** Deletions one alarm finishes at most: each takes a few subrequests. */
+const deletesPerAlarm = 10;
+
 /** Most chats a person keeps: delete one to make another. */
 export const maxChatsPerPerson = 500;
 
@@ -1102,6 +1122,12 @@ const handsTurnsOver = ({
   answersAlone({ thread }, false) && !restricted;
 
 /**
+ * A chat not being deleted (`chatDeletes`): one that is is gone for every
+ * read of a person's surface and every chat app's thread, at once.
+ */
+const notDeleting = sql`not exists (select 1 from ${chatDeletes} where ${chatDeletes.chatId} = ${chats.id})`;
+
+/**
  * The one rule for which of `personId`'s chats Grasp's own surfaces show
  * (GRA-1919): only one that came through Grasp's own app. A conversation
  * with the agent in a chat app (Teams, Slack, any other) is never a chat
@@ -1109,11 +1135,12 @@ const handsTurnsOver = ({
  * by its ID it answers exactly as one that doesn't exist. It is kept here
  * all the same, for its agent and the Brain (`askThrough`,
  * `turnForBrain`), and its person deletes it from Settings
- * (`forgetChatApps`). Every read a person's surface makes has it in its
- * own statement, so a hidden chat takes no slot and leaves no trace.
+ * (`forgetChatApps`). Nor is one being deleted (`notDeleting`). Every
+ * read a person's surface makes has it in its own statement, so a hidden
+ * chat takes no slot and leaves no trace.
  */
 const shownInGrasp = (personId: string) =>
-  and(eq(chats.personId, personId), eq(chats.via, "web"));
+  and(eq(chats.personId, personId), eq(chats.via, "web"), notDeleting);
 
 /** A person's or team's workspace: chats and the Code Mode agent on Pi. */
 export class Workspace extends DurableObject<Env> {
@@ -1190,11 +1217,8 @@ export class Workspace extends DurableObject<Env> {
    */
   readonly #provenanceVersions = new Map<ChatId, number>();
 
-  /**
-   * Chats being deleted (`deleteChat`): they take no question meanwhile.
-   * In memory, for the one call that deletes: a restart ends that call.
-   */
-  readonly #deleting = new Set<ChatId>();
+  /** The deletions under way in this instance (`#finishDelete`), by chat. */
+  readonly #finishing = new Map<ChatId, Promise<void>>();
 
   /** How long the alarm waits before delivering audit events again. */
   #auditRetryMs = auditRetryMs.first;
@@ -1234,6 +1258,10 @@ export class Workspace extends DurableObject<Env> {
     super(ctx, env);
     migrateOnWake(ctx, migrations);
     this.#closeInterruptedRuns();
+    // A deletion marked before a restart that cut its wake-up short.
+    void ctx.blockConcurrencyWhile(async () => {
+      await this.#armDeletes();
+    });
   }
 
   /**
@@ -1855,7 +1883,7 @@ export class Workspace extends DurableObject<Env> {
     key?: string
   ): ChatFile {
     const { id } = this.#graspChat(chatId, personId);
-    if (this.#deleting.has(id)) {
+    if (this.#isDeleting(id)) {
       throw agentErrors.create("agent.chat_not_found");
     }
     const attached = this.ctx.storage.transactionSync(() => {
@@ -2066,7 +2094,7 @@ export class Workspace extends DurableObject<Env> {
     fileId: string
   ): { type: ChatPictureType; bytes: Uint8Array } | undefined {
     const id = chatIdSchema.safeParse(chatId);
-    if (!id.success || this.#deleting.has(id.data)) {
+    if (!id.success || this.#isDeleting(id.data)) {
       return undefined;
     }
     const chat = this.#db
@@ -2268,7 +2296,7 @@ export class Workspace extends DurableObject<Env> {
     if (
       chat?.personId !== personId ||
       answer === undefined ||
-      this.#deleting.has(chatId) ||
+      this.#isDeleting(chatId) ||
       !handsTurnsOver(chat)
     ) {
       return;
@@ -2323,7 +2351,7 @@ export class Workspace extends DurableObject<Env> {
       return deleted;
     }
     // Being deleted, which may yet fail: not gone, so not `deleted`.
-    if (this.#deleting.has(id.data)) {
+    if (this.#isDeleting(id.data)) {
       return { kind: "deleting" };
     }
     const chat = this.#db
@@ -2835,6 +2863,9 @@ export class Workspace extends DurableObject<Env> {
         and(
           eq(chats.personId, personId),
           eq(chats.via, platform),
+          // A conversation being deleted is gone: the next message there
+          // starts one anew.
+          notDeleting,
           where === undefined
             ? isNull(chats.thread)
             : eq(chats.thread, where.thread)
@@ -2972,7 +3003,7 @@ export class Workspace extends DurableObject<Env> {
     // never for whoever asks, and only while they are still a member.
     const { personId, via } = chat;
     // Being deleted: its writes are being rejected, and it takes no more.
-    if (this.#deleting.has(chat.id)) {
+    if (this.#isDeleting(chat.id)) {
       throw agentErrors.create("agent.chat_not_found");
     }
     // One asker here at a time, whose question this object prepares and
@@ -3525,7 +3556,7 @@ export class Workspace extends DurableObject<Env> {
     if (!(await live.underWay)) {
       return false;
     }
-    if (this.#deleting.has(chat.id)) {
+    if (this.#isDeleting(chat.id)) {
       throw agentErrors.create("agent.chat_not_found");
     }
     // Its person still a member, the chat with room, and the turn's agent
@@ -3712,6 +3743,7 @@ export class Workspace extends DurableObject<Env> {
    * short (`#closeInterruptedTurns`).
    */
   override async alarm(): Promise<void> {
+    await this.#finishDeletes();
     // Held App writes past their day end first, so the drain below takes
     // their records too.
     await this.#lapseDueHeldAppCalls(Date.now());
@@ -4111,7 +4143,7 @@ export class Workspace extends DurableObject<Env> {
    * with why, which the chat shows with a Try again.
    */
   turnLost(chatId: ChatId): void {
-    if (this.chatState(chatId) === undefined || this.#deleting.has(chatId)) {
+    if (this.chatState(chatId) === undefined || this.#isDeleting(chatId)) {
       return;
     }
     this.#stopped.set(chatId, agentErrors.create("agent.turn_lost").message);
@@ -4124,7 +4156,7 @@ export class Workspace extends DurableObject<Env> {
    * what the chat's lists and watchers show.
    */
   turnRunning(chatId: ChatId, running: boolean): void {
-    if (this.chatState(chatId) === undefined || this.#deleting.has(chatId)) {
+    if (this.chatState(chatId) === undefined || this.#isDeleting(chatId)) {
       return;
     }
     const key = `${runningKeyPrefix}${chatId}`;
@@ -4143,7 +4175,7 @@ export class Workspace extends DurableObject<Env> {
    * show, kept through a restart of this object.
    */
   turnQueued(chatId: ChatId, queued: readonly ChatQueued[]): void {
-    if (this.chatState(chatId) === undefined || this.#deleting.has(chatId)) {
+    if (this.chatState(chatId) === undefined || this.#isDeleting(chatId)) {
       return;
     }
     const key = `${queuedKeyPrefix}${chatId}`;
@@ -4186,7 +4218,7 @@ export class Workspace extends DurableObject<Env> {
     chatId: ChatId,
     messages: readonly TurnMessage[]
   ): number | undefined {
-    if (this.chatState(chatId) === undefined || this.#deleting.has(chatId)) {
+    if (this.chatState(chatId) === undefined || this.#isDeleting(chatId)) {
       return undefined;
     }
     const { agentId: chatAgent, personId, via } = this.#chat(chatId);
@@ -4261,7 +4293,7 @@ export class Workspace extends DurableObject<Env> {
 
   /** Shows the chat's watchers the answer streaming in, or none. */
   showPartial(chatId: ChatId, partial: AssistantMessage | null): void {
-    if (this.chatState(chatId) === undefined || this.#deleting.has(chatId)) {
+    if (this.chatState(chatId) === undefined || this.#isDeleting(chatId)) {
       return;
     }
     if (partial === null) {
@@ -4789,7 +4821,7 @@ export class Workspace extends DurableObject<Env> {
    */
   heldSourcesOf(chatId: unknown): string[] | null {
     const parsed = chatIdSchema.safeParse(chatId);
-    if (!parsed.success || this.#deleting.has(parsed.data)) {
+    if (!parsed.success || this.#isDeleting(parsed.data)) {
       return null;
     }
     const id = parsed.data;
@@ -5116,7 +5148,7 @@ export class Workspace extends DurableObject<Env> {
         )
       ),
     ];
-    if (runs.length > 0 && !this.#deleting.has(chatId)) {
+    if (runs.length > 0 && !this.#isDeleting(chatId)) {
       this.#replaceResults(chatId, runs);
     }
     return new Set();
@@ -5699,28 +5731,36 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Deletes `personId`'s own chat once its agent isn't working on it:
-   * rejects every write its agent holds for `person` (connect's
-   * `declineChatActions`, each recorded there) and revokes every
-   * connection granted or asked for in it, each audited, erases its turns
-   * from its person's own Brain (`eraseChat`), then deletes it with its
-   * messages and sources, audited as `by`'s. The Brain's part runs first. While it does, the chat is
-   * marked deleting and takes no question, so no write can be held after
-   * the rejecting; if rejecting or revoking fails, the mark goes and the
-   * chat stays.
-   * Its watchers get nothing more. How many writes it rejected.
+   * Deletes `personId`'s own chat once its agent isn't working on it
+   * (`agent.busy` while it is), audited as `by`'s. Marked first
+   * (`chatDeletes`), in one transaction: from then on the chat is gone
+   * from every surface, takes nothing more, and its watchers get nothing
+   * more. Then each step of the deletion runs (`#finishDelete`), now and,
+   * until all are through, again from the object's alarm, so it finishes
+   * by itself whatever fails meanwhile and whoever waits. Asked again for
+   * a chat being deleted, it does nothing more.
    */
   async deleteChat(
     chatId: unknown,
     personId: string,
     person: ConnectionPerson,
     by: AuditActor
-  ): Promise<number> {
-    const { id } = this.#graspChat(chatId, personId);
+  ): Promise<void> {
     if (person.userId !== personId) {
       throw agentErrors.create("agent.chat_not_found");
     }
-    return await this.#deleteChat(id, personId, person, by, true);
+    const id = chatIdSchema.safeParse(chatId);
+    if (
+      id.success &&
+      this.#isDeleting(id.data) &&
+      this.#chat(id.data).personId === personId
+    ) {
+      return;
+    }
+    const chat = this.#graspChat(chatId, personId);
+    this.#markDeleting([chat.id], person, by, true);
+    await this.#armDeletes();
+    await this.#tryDelete(chat.id);
   }
 
   /**
@@ -5730,13 +5770,14 @@ export class Workspace extends DurableObject<Env> {
    * Brain kept of it, the writes held in it, the connections granted in
    * it, the transcript its agent replays, its rows. Their next message
    * there starts a conversation anew. What the chat app itself keeps of
-   * it is the chat app's. Each goes on its own: one that can't go yet
-   * (its agent at work, `agent.conversation_answering`) or whose deletion
-   * failed part-way stays, and fails the call; asked again, it deletes
-   * what is left, as each step of a deletion is safe to repeat. Audited
-   * once for the action, after every deletion settled, as `by`'s, with
-   * how many went and how many didn't: never one event per conversation,
-   * nor anything they said. How many it deleted.
+   * it is the chat app's. One its agent is working in stays
+   * (`agent.conversation_answering`, once the others are marked); every
+   * other is marked at once and finishes by itself, as `deleteChat`'s
+   * does. Asked again while some are being deleted, refused
+   * (`agent.delete_under_way`): that call answers for them. Audited once
+   * for the action, as `by`'s, with how many went and how many didn't:
+   * never one event per conversation, nor anything they said. How many it
+   * deleted.
    */
   async forgetChatApps(
     personId: string,
@@ -5751,173 +5792,323 @@ export class Workspace extends DurableObject<Env> {
       .from(chats)
       .where(and(eq(chats.personId, personId), ne(chats.via, "web")))
       .all();
-    // A click while an earlier one deletes them: that one answers, and
-    // audits, for both.
-    if (conversations.some(({ id }) => this.#deleting.has(id))) {
+    if (conversations.some(({ id }) => this.#isDeleting(id))) {
       throw agentErrors.create("agent.delete_under_way");
     }
-    const settled = await Promise.allSettled(
-      conversations.map(
-        async ({ id }) =>
-          await this.#deleteChat(id, personId, person, by, false)
-      )
+    const answering = conversations.filter(({ id }) => this.#turns.has(id));
+    const going = conversations.flatMap(({ id }) =>
+      this.#turns.has(id) ? [] : [id]
     );
-    const failures: unknown[] = [];
-    for (const each of settled) {
-      if (each.status === "rejected") {
-        const reason: unknown = each.reason;
-        failures.push(reason);
-      }
-    }
-    const deleted = settled.length - failures.length;
+    this.#markDeleting(going, person, by, false);
     this.#outboxEntry({
       actor: by,
       action: "chat.apps_deleted",
       target: { type: "person", id: personId },
       detail: {
         workspace: this.ctx.id.name ?? null,
-        deleted,
-        failed: failures.length,
+        deleted: going.length,
+        failed: answering.length,
       },
     });
     this.#deliverAudit();
-    const [failure] = failures;
-    if (agentErrors.codeOf(failure) === "agent.busy") {
+    if (going.length > 0) {
+      await this.#armDeletes();
+      await Promise.all(
+        going.map(async (id) => {
+          await this.#tryDelete(id);
+        })
+      );
+    }
+    if (answering.length > 0) {
       throw agentErrors.create("agent.conversation_answering");
     }
-    if (failure instanceof Error) {
-      throw failure;
-    }
-    return deleted;
+    return going.length;
   }
 
   /**
-   * Deletes chat `id`, as `deleteChat` says; recorded as `chat.deleted`
-   * unless `audited` is false, for an action that records itself once
-   * (`forgetChatApps`).
+   * Marks chats `ids` deleted by `by` for `person` (`chatDeletes`), in one
+   * transaction, each tried first by the caller and then by the alarm
+   * (`#finishDeletes`); recorded each as `chat.deleted` unless `audited`
+   * is false, for an action that records itself once (`forgetChatApps`).
+   * Refused (`agent.busy`) while the agent of any works in it.
    */
-  async #deleteChat(
-    id: ChatId,
-    personId: string,
+  #markDeleting(
+    ids: readonly ChatId[],
     person: ConnectionPerson,
     by: AuditActor,
-    audited = true
-  ): Promise<number> {
-    if (this.#turns.has(id) || this.#deleting.has(id)) {
+    audited: boolean
+  ): void {
+    if (ids.some((id) => this.#turns.has(id))) {
       throw agentErrors.create("agent.busy");
     }
-    this.#deleting.add(id);
-    try {
-      // Its turns in its person's own Brain (GRA-1805), first: one call,
-      // which closes the chat there too, so a turn handed over after is
-      // refused. Should it fail, nothing of the chat was touched: it stays
-      // and works. Should a step after it fail, the chat stays and still
-      // answers, but its questions are no longer kept (each later one
-      // ends refused as erased), and deleting it again completes.
-      await eraseChat(this.env, personId, id);
-      const chat = this.#refOf(id);
-      const declined = await this.env.CONNECT.declineChatActions({
-        person,
-        ...chat,
-      });
-      // No connection granted in the chat outlives it (chat-connections.ts).
-      await revokeChatPermissions(
-        this.env,
-        { chat },
-        { userId: personId, actor: by },
-        "chat_deleted"
-      );
-      // Nor any workflow start its agent asked its person to confirm.
-      await dropHeldStarts(this.env, { chat });
-      // And what its agent kept, the transcript the model reads with it:
-      // erased for good, so nothing told it meanwhile is kept.
-      await this.#toSession(id, async (session) => {
-        await session.erase();
-      });
-      // Their rows go with it below.
-      this.ctx.storage.transactionSync(() => {
+    const nextAt = new Date(Date.now() + deleteRetryMs.first);
+    this.ctx.storage.transactionSync(() => {
+      for (const chatId of ids) {
         this.#db
-          .delete(brainCaptureIntents)
-          .where(eq(brainCaptureIntents.evidenceId, id))
-          .run();
-        this.#db.delete(heldAppCalls).where(eq(heldAppCalls.chatId, id)).run();
-        // A picture's parts before its file, and the files before its
-        // messages: a file names the question that carried it.
-        this.#db
-          .delete(chatFileParts)
-          .where(
-            inArray(
-              chatFileParts.fileId,
-              this.#db
-                .select({ id: chatFiles.id })
-                .from(chatFiles)
-                .where(eq(chatFiles.chatId, id))
-            )
-          )
-          .run();
-        this.#db.delete(chatFiles).where(eq(chatFiles.chatId, id)).run();
-        this.#db
-          .delete(chatSearchText)
-          .where(eq(chatSearchText.chatId, id))
-          .run();
-        this.#db.delete(chatMessages).where(eq(chatMessages.chatId, id)).run();
-        this.#db.delete(chatSources).where(eq(chatSources.chatId, id)).run();
-        this.#db
-          .delete(chatDocuments)
-          .where(eq(chatDocuments.chatId, id))
-          .run();
-        this.#db
-          .delete(chatRunSources)
-          .where(eq(chatRunSources.chatId, id))
-          .run();
-        this.#db.delete(chatCodeRuns).where(eq(chatCodeRuns.chatId, id)).run();
-        // An earlier release's build jobs of the chat (schema.ts).
-        this.#db
-          .delete(chatBuildJobs)
-          .where(eq(chatBuildJobs.chatId, id))
-          .run();
-        this.#db
-          .delete(chatToolEvents)
-          .where(eq(chatToolEvents.chatId, id))
-          .run();
-        // What an earlier release kept of the chat's own drafts (schema.ts):
-        // rows that name it, which go with it.
-        this.#dropChatDrafts(id);
-        this.#db
-          .delete(chatRequestKeys)
-          .where(eq(chatRequestKeys.chatId, id))
-          .run();
-        this.#db.delete(chats).where(eq(chats.id, id)).run();
-        // Its ID stays taken here for good (`createChat`).
-        this.#db
-          .insert(deletedChats)
-          .values({ id })
+          .insert(chatDeletes)
+          .values({ chatId, person, actor: by, audited, nextAt })
           .onConflictDoNothing()
           .run();
-        this.#listChanged();
-        this.ctx.storage.kv.delete(`${traceKeyPrefix}${id}`);
-        this.ctx.storage.kv.delete(`${builtKeyPrefix}${id}`);
-        this.ctx.storage.kv.delete(`${runningKeyPrefix}${id}`);
-        this.ctx.storage.kv.delete(`${queuedKeyPrefix}${id}`);
-        this.ctx.storage.kv.delete(`${copiedKeyPrefix}${id}`);
-        this.ctx.storage.kv.delete(`${draftMadeKeyPrefix}${id}`);
-        if (audited) {
-          this.#outboxed(by, "chat.deleted", id, { declined });
-        }
-      });
-      this.#deliverAudit();
-      this.#stopped.delete(id);
-      this.#provenanceVersions.delete(id);
-      this.#heldVersions.delete(id);
-      this.#worked.delete(id);
+      }
+    });
+    for (const id of ids) {
       for (const watch of this.#watchers.get(id)?.values() ?? []) {
         watch[Symbol.dispose]();
       }
       this.#watchers.delete(id);
-      return declined;
-    } finally {
-      this.#deleting.delete(id);
     }
+    this.#listChanged();
+  }
+
+  /** Whether chat `chatId` is being deleted (`chatDeletes`). */
+  #isDeleting(chatId: ChatId): boolean {
+    return (
+      this.#db
+        .select({ chatId: chatDeletes.chatId })
+        .from(chatDeletes)
+        .where(eq(chatDeletes.chatId, chatId))
+        .get() !== undefined
+    );
+  }
+
+  /**
+   * Wakes the object when the next deletion under way is due
+   * (`chatDeletes`). Called once deletions are marked, and as the object
+   * starts, so a mark kept is never left without a wake-up: a restart
+   * between the two arms it as the object starts again, and an alarm that
+   * can't be written resets the object, which does the same.
+   */
+  async #armDeletes(): Promise<void> {
+    const next = this.#db
+      .select({ nextAt: chatDeletes.nextAt })
+      .from(chatDeletes)
+      .orderBy(asc(chatDeletes.nextAt))
+      .limit(1)
+      .get();
+    if (next === undefined) {
+      return;
+    }
+    try {
+      await this.#alarmBy(Math.max(next.nextAt.getTime(), Date.now()));
+    } catch {
+      this.ctx.abort(
+        "The alarm that finishes a chat's deletion could not be set."
+      );
+    }
+  }
+
+  /**
+   * Finishes every deletion due (`chatDeletes`), at most
+   * {@link deletesPerAlarm} at a time, and wakes the object again for
+   * what is left: at once for more due, else when the next is.
+   */
+  async #finishDeletes(): Promise<void> {
+    if (this.#erasing) {
+      return;
+    }
+    const now = Date.now();
+    const due = this.#db
+      .select({ chatId: chatDeletes.chatId })
+      .from(chatDeletes)
+      .where(lte(chatDeletes.nextAt, new Date(now)))
+      .orderBy(asc(chatDeletes.nextAt))
+      .limit(deletesPerAlarm)
+      .all();
+    for (const { chatId } of due) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time, few subrequests each
+      await this.#tryDelete(chatId);
+    }
+    await this.#armDeletes();
+  }
+
+  /**
+   * Tries chat `id`'s deletion once (`#finishDelete`); one that fails is
+   * logged, and tried again by the alarm after a pause that doubles each
+   * time, at most {@link deleteRetryMs}`.most`.
+   */
+  async #tryDelete(id: ChatId): Promise<void> {
+    try {
+      await this.#finishDelete(id);
+    } catch (error) {
+      const row = this.#db
+        .select({ attempts: chatDeletes.attempts })
+        .from(chatDeletes)
+        .where(eq(chatDeletes.chatId, id))
+        .get();
+      if (row === undefined) {
+        return;
+      }
+      const attempts = row.attempts + 1;
+      const nextAt = Date.now() + deleteRetryAfter(attempts);
+      this.#db
+        .update(chatDeletes)
+        .set({ attempts, nextAt: new Date(nextAt) })
+        .where(eq(chatDeletes.chatId, id))
+        .run();
+      // Logged as an error once it keeps failing, for alerting; tried
+      // again all the same.
+      (attempts >= deleteAttemptsBeforeError ? log.error : log.warn)(
+        "chat.delete_failed",
+        {
+          workspace: this.ctx.id.name,
+          chatId: id,
+          attempts,
+          ...errorFields(error),
+        }
+      );
+      await this.#armDeletes();
+    }
+  }
+
+  /**
+   * Each step of deleting chat `id` (`chatDeletes`), every one safe to
+   * repeat: erases its turns from its person's own Brain (`eraseChat`,
+   * which also closes the chat there, so no turn is handed over after),
+   * rejects every write its agent holds (connect's `declineChatActions`,
+   * each recorded there), revokes every connection granted or asked for
+   * in it and every workflow start its agent asked to have confirmed,
+   * keeps its ID taken, erases what its agent kept, and then deletes its
+   * rows with its mark, in one transaction. One at a time for a chat.
+   */
+  async #finishDelete(id: ChatId): Promise<void> {
+    const under = this.#finishing.get(id);
+    if (under !== undefined) {
+      await under;
+      return;
+    }
+    const finishing = this.#deleteSteps(id);
+    this.#finishing.set(id, finishing);
+    try {
+      await finishing;
+    } finally {
+      this.#finishing.delete(id);
+    }
+  }
+
+  async #deleteSteps(id: ChatId): Promise<void> {
+    const marked = this.#db
+      .select()
+      .from(chatDeletes)
+      .where(eq(chatDeletes.chatId, id))
+      .get();
+    if (marked === undefined) {
+      return;
+    }
+    const { person, actor: by, audited } = marked;
+    // The chat's row may be gone already (a release before this one
+    // deleted it and left the mark): what lives outside goes all the same,
+    // for the person the mark names, and the mark with it.
+    const personId =
+      this.#db
+        .select({ personId: chats.personId })
+        .from(chats)
+        .where(eq(chats.id, id))
+        .get()?.personId ?? person.userId;
+    await eraseChat(this.env, personId, id);
+    const ref = this.#refOf(id);
+    const declined = await this.env.CONNECT.declineChatActions({
+      person,
+      ...ref,
+    });
+    // Counted as it goes: a repeat rejects only what is left.
+    this.#db
+      .update(chatDeletes)
+      .set({ declined: sql`${chatDeletes.declined} + ${declined}` })
+      .where(eq(chatDeletes.chatId, id))
+      .run();
+    // No connection granted in the chat outlives it (chat-connections.ts).
+    await revokeChatPermissions(
+      this.env,
+      { chat: ref },
+      { userId: personId, actor: by },
+      "chat_deleted"
+    );
+    // Nor any workflow start its agent asked its person to confirm.
+    await dropHeldStarts(this.env, { chat: ref });
+    // And what its agent kept, the transcript the model reads with it:
+    // erased for good, so nothing told it meanwhile is kept.
+    await this.#toSession(id, async (session) => {
+      await session.erase();
+    });
+    // Their rows go with it below.
+    const finished = this.ctx.storage.transactionSync(() => {
+      // Nothing more once the mark is gone: its person's erasure wiped the
+      // object meanwhile, and nothing of the chat may come back into it.
+      const { declined: total } = this.#db
+        .delete(chatDeletes)
+        .where(eq(chatDeletes.chatId, id))
+        .returning({ declined: chatDeletes.declined })
+        .get() ?? { declined: undefined };
+      if (total === undefined) {
+        return false;
+      }
+      this.#db
+        .delete(brainCaptureIntents)
+        .where(eq(brainCaptureIntents.evidenceId, id))
+        .run();
+      this.#db.delete(heldAppCalls).where(eq(heldAppCalls.chatId, id)).run();
+      // A picture's parts before its file, and the files before its
+      // messages: a file names the question that carried it.
+      this.#db
+        .delete(chatFileParts)
+        .where(
+          inArray(
+            chatFileParts.fileId,
+            this.#db
+              .select({ id: chatFiles.id })
+              .from(chatFiles)
+              .where(eq(chatFiles.chatId, id))
+          )
+        )
+        .run();
+      this.#db.delete(chatFiles).where(eq(chatFiles.chatId, id)).run();
+      this.#db
+        .delete(chatSearchText)
+        .where(eq(chatSearchText.chatId, id))
+        .run();
+      this.#db.delete(chatMessages).where(eq(chatMessages.chatId, id)).run();
+      this.#db.delete(chatSources).where(eq(chatSources.chatId, id)).run();
+      this.#db.delete(chatDocuments).where(eq(chatDocuments.chatId, id)).run();
+      this.#db
+        .delete(chatRunSources)
+        .where(eq(chatRunSources.chatId, id))
+        .run();
+      this.#db.delete(chatCodeRuns).where(eq(chatCodeRuns.chatId, id)).run();
+      // An earlier release's build jobs of the chat (schema.ts).
+      this.#db.delete(chatBuildJobs).where(eq(chatBuildJobs.chatId, id)).run();
+      this.#db
+        .delete(chatToolEvents)
+        .where(eq(chatToolEvents.chatId, id))
+        .run();
+      // What an earlier release kept of the chat's own drafts (schema.ts):
+      // rows that name it, which go with it.
+      this.#dropChatDrafts(id);
+      this.#db
+        .delete(chatRequestKeys)
+        .where(eq(chatRequestKeys.chatId, id))
+        .run();
+      this.#db.delete(chats).where(eq(chats.id, id)).run();
+      // Its ID stays taken here for good (`createChat`).
+      this.#db.insert(deletedChats).values({ id }).onConflictDoNothing().run();
+      this.ctx.storage.kv.delete(`${traceKeyPrefix}${id}`);
+      this.ctx.storage.kv.delete(`${builtKeyPrefix}${id}`);
+      this.ctx.storage.kv.delete(`${runningKeyPrefix}${id}`);
+      this.ctx.storage.kv.delete(`${queuedKeyPrefix}${id}`);
+      this.ctx.storage.kv.delete(`${copiedKeyPrefix}${id}`);
+      this.ctx.storage.kv.delete(`${draftMadeKeyPrefix}${id}`);
+      if (audited) {
+        this.#outboxed(by, "chat.deleted", id, { declined: total });
+      }
+      return true;
+    });
+    if (!finished) {
+      return;
+    }
+    this.#deliverAudit();
+    this.#stopped.delete(id);
+    this.#provenanceVersions.delete(id);
+    this.#heldVersions.delete(id);
+    this.#worked.delete(id);
   }
 
   /**
@@ -6338,7 +6529,7 @@ export class Workspace extends DurableObject<Env> {
    * the decision all the same.
    */
   async #note(chatId: ChatId, text: string): Promise<void> {
-    if (this.#deleting.has(chatId) || this.#erasing) {
+    if (this.#isDeleting(chatId) || this.#erasing) {
       throw agentErrors.create("agent.chat_not_found");
     }
     // Again on a stub of its own should the chat's object reset under the
@@ -6488,7 +6679,7 @@ export class Workspace extends DurableObject<Env> {
    * model gateway's `ModelWait`), or that it no longer waits.
    */
   turnWaiting(chatId: ChatId, waiting: ModelWait | null): void {
-    if (this.chatState(chatId) === undefined || this.#deleting.has(chatId)) {
+    if (this.chatState(chatId) === undefined || this.#isDeleting(chatId)) {
       return;
     }
     if (waiting === null) {

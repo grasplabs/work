@@ -36,6 +36,7 @@ import { brainHandOvers, teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import { codeStep, model, says } from "./agent-chat.ts";
 import { allEvents, loggedEvents } from "./audit-events.ts";
+import { deletesOf, finishDeletesNow } from "./chat-deletes.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
@@ -831,57 +832,48 @@ describe("a deleted chat", () => {
     await expect(recalled(person.userId, marker)).resolves.toStrictEqual([]);
   });
 
-  it("stays when its turns can't be erased from the Brain, and goes once they can", async () => {
+  it("is gone at once when its turns can't be erased from the Brain yet, takes no question, and finishes by itself once they can", async () => {
     const marker = word();
-    const { person, stub, chatId, ask } = await chatter(
-      says("Kept."),
-      says("Still here.")
-    );
+    const { person, stub, chatId, ask } = await chatter(says("Kept."));
     await ask(`Keep ${marker}?`);
     await handedTo(person.userId, marker);
     const putBack = await brainOutOfReach(stub);
 
-    const refused = await outcome(person.api.chats.remove(chatId));
+    const deleted = await outcome(person.api.chats.remove(chatId));
     const listed = await person.api.chats.list();
-    // Nothing of it was touched: it answers, and keeps its questions.
     const again = await outcome(ask(`Again ${marker}?`));
+    const failing = await deletesOf(stub);
     await putBack();
-    await handedTo(person.userId, `Again ${marker}`);
-    await person.api.chats.remove(chatId);
-    // The turn that answered without its instruction files says so.
-    const logged = await allEvents();
-    const withoutFiles = logged.filter(
-      ({ action, detail }) =>
-        action === "agent.call" &&
-        detail.method === "brain.instructions" &&
-        detail.chat === chatId
-    );
+    await finishDeletesNow(stub);
 
     expect({
-      refused: refused === "ok" ? "deleted" : "refused",
-      kept: listed.map(({ id }) => id),
+      deleted,
+      listed,
       again,
+      failing,
+      deletes: await deletesOf(stub),
       after: await recalled(person.userId, marker),
-      withoutFiles: withoutFiles.map(({ detail }) => detail.unavailable),
     }).toStrictEqual({
-      refused: "refused",
-      kept: [chatId],
-      again: "ok",
+      deleted: "ok",
+      listed: [],
+      again: "agent.chat_not_found",
+      failing: [{ chatId, attempts: 1 }],
+      deletes: [],
       after: [],
-      withoutFiles: [true],
     });
   });
 
   // Greptile, first paid review: a hand-over that meets the chat while its
   // deletion is under way is tried again, never recorded as deleted: it
-  // ends as the deletion does, either way exactly once.
+  // ends as the deletion does, exactly once, the deletion finishing by
+  // itself when its first try failed.
   it.each([
     {
       ending: "fail" as const,
       expected: {
-        deleted: "internal.unexpected",
-        ended: ["brain.source.handed_over"],
-        found: 1,
+        deleted: "ok",
+        ended: ["brain.source.handover_skipped:deleted"],
+        found: 0,
       },
     },
     {
@@ -914,6 +906,7 @@ describe("a deleted chat", () => {
       await held.end(ending);
       const deleted = await deleting;
       await held.putBack();
+      await finishDeletesNow(stub);
       await drainAuditOutboxes(env);
       await workBrain(env, later(pastBackoffMs), producersOf(env));
 
@@ -928,47 +921,33 @@ describe("a deleted chat", () => {
   );
 
   // The mirror (review round 3): the Brain's part done, a later step
-  // failing. The chat stays and answers; its questions are no longer kept,
-  // each ending refused as erased, never tried for ever; a second delete
-  // completes.
-  it("stays and answers when a step after the Brain's erasure fails, keeps none of its later questions, and goes when deleted again", async () => {
+  // failing. The chat is gone at once and takes no question; the alarm
+  // finishes the deletion once the step works, with no second delete.
+  it("is gone at once when a step after the Brain's erasure fails, takes no question, and finishes by itself once the step works", async () => {
     const marker = word();
-    const { person, stub, chatId, ask } = await chatter(
-      says("Kept."),
-      says("Still here.")
-    );
+    const { person, stub, chatId, ask } = await chatter(says("Kept."));
     await ask(`Keep ${marker}?`);
     await handedTo(person.userId, marker);
     const putBack = await connectOutOfReach(stub);
 
-    const refused = await outcome(person.api.chats.remove(chatId));
-    await putBack();
+    const deleted = await outcome(person.api.chats.remove(chatId));
     const again = await outcome(ask(`Again ${marker}?`));
-    await vi.waitFor(
-      async () => {
-        await handOverNow();
-        await expect(notedEvents(person.userId, chatId)).resolves.toHaveLength(
-          2
-        );
-      },
-      { timeout: 15_000, interval: 200 }
-    );
-    await handOverNow();
-    const [, laterNote] = await notedEvents(person.userId, chatId);
-    const ended = await endingsFor(laterNote?.target?.id ?? "");
-    await person.api.chats.remove(chatId);
-    const left = await person.api.chats.list();
+    const failing = await deletesOf(stub);
+    await putBack();
+    await finishDeletesNow(stub);
 
     expect({
-      refused: refused === "ok" ? "deleted" : "refused",
+      deleted,
       again,
-      ended,
+      failing,
+      deletes: await deletesOf(stub),
       found: await recalled(person.userId, marker),
-      listed: left.map(({ id }) => id),
+      listed: await person.api.chats.list(),
     }).toStrictEqual({
-      refused: "refused",
-      again: "ok",
-      ended: ["brain.source.handover_refused:erased"],
+      deleted: "ok",
+      again: "agent.chat_not_found",
+      failing: [{ chatId, attempts: 1 }],
+      deletes: [],
       found: [],
       listed: [],
     });
