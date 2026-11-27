@@ -18,6 +18,9 @@
  *   `DeployInputs`), leaving out bindings to optional secrets the store
  *   doesn't have yet, and stopping on a required one, and leaving out the
  *   consumer of a queue the account doesn't have yet;
+ * - passes the Durable Objects' `code_update_strategy` as upload metadata,
+ *   cf's `unsafe.metadata`, as cf's config has no field of its own for it
+ *   and its deploy takes the strategy from there;
  * - stops a deploy whose stage sets no Access application in its vars
  *   (`CF_ACCESS_AUD`, `CF_ACCESS_ISS`): every request would be refused.
  *
@@ -330,6 +333,7 @@ export const cfWorker = (
     );
   }
   const observability = objectOf(config.observability);
+  const codeUpdate = objectOf(config.durable_objects).code_update_strategy;
   const classes = classBindings(config, name);
   const { domains, routes } = addresses(config);
   return {
@@ -358,6 +362,9 @@ export const cfWorker = (
     ...(objectOf(config.limits).cpu_ms === undefined
       ? {}
       : { limits: { cpuMs: Number(objectOf(config.limits).cpu_ms) } }),
+    ...(codeUpdate === undefined
+      ? {}
+      : { unsafe: { metadata: { code_update_strategy: codeUpdate } } }),
     env: {
       ...textBindings(config),
       ...storageBindings(config, inputs),

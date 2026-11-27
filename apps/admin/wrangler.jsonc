@@ -81,8 +81,17 @@
   // The admin's workflow runs on Workerflow (src/workflow-runs.ts): one
   // SQLite object per run, in the EU. v3 deletes the Discord bot's Chat SDK
   // state, gone with the bot.
+  // `code_update_strategy`: a run busy in a step as the admin deploys
+  // keeps its code until it goes idle, and is reset onto the new code only
+  // if still busy 900 s later, longer than its longest step (14 minutes,
+  // src/workflow-steps.ts), so a merge no longer cuts a client's deploy
+  // midway. Best effort: Cloudflare's own restarts still reset it. A
+  // deployment's setting, not the Worker's, so it rides in every deploy
+  // (cf-worker.ts passes it as upload metadata); staging repeats it, as
+  // wrangler inherits no `durable_objects`.
   "durable_objects": {
     "bindings": [{ "name": "ADMIN_RUNS", "class_name": "AdminRuns" }],
+    "code_update_strategy": { "mode": "deferred", "max_delay": 900 },
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["ChatState"] },
@@ -332,6 +341,7 @@
             "class_name": "AdminRuns",
           },
         ],
+        "code_update_strategy": { "mode": "deferred", "max_delay": 900 },
       },
       "kv_namespaces": [
         {
