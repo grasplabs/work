@@ -1,12 +1,10 @@
-"use client";
+"use client"
 
-import { cn } from "@grasp-os/app-kit/lib/utils";
-import * as React from "react";
+import * as React from "react"
+import { cn } from "cn"
 
 function Label({ className, ...props }: React.ComponentProps<"label">) {
   return (
-    // The page associates it, with htmlFor or by wrapping the control.
-    // oxlint-disable-next-line jsx-a11y/label-has-associated-control -- the kit's label is generic
     <label
       data-slot="label"
       className={cn(
@@ -15,7 +13,7 @@ function Label({ className, ...props }: React.ComponentProps<"label">) {
       )}
       {...props}
     />
-  );
+  )
 }
 
-export { Label };
+export { Label }

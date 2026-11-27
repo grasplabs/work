@@ -6,6 +6,7 @@
   "type": "module",
   "exports": {
     "./components/*": "./src/components/*.tsx",
+    "./lib/highlighter": "./src/lib/highlighter.tsx",
     "./lib/*": "./src/lib/*.ts",
     "./hooks/*": "./src/hooks/*.ts",
     "./styles.css": "./src/styles.css",
@@ -13,11 +14,13 @@
   },
   "dependencies": {
     "@base-ui/react": "catalog:",
+    "@fontsource-variable/geist": "catalog:",
     "@grasp-os/runtime": "workspace:*",
+    "@shadcn/react": "catalog:",
     "@tanstack/react-form": "catalog:",
     "class-variance-authority": "catalog:",
-    "clsx": "catalog:",
     "cmdk": "catalog:",
+    "cn": "catalog:",
     "embla-carousel-react": "catalog:",
     "input-otp": "catalog:",
     "lucide-react": "catalog:",
@@ -27,7 +30,7 @@
     "react-resizable-panels": "catalog:",
     "recharts": "catalog:",
     "shadcn": "catalog:",
-    "tailwind-merge": "catalog:",
+    "shiki": "catalog:",
     "tw-animate-css": "catalog:"
   },
   "devDependencies": {

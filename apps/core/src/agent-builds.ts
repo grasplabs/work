@@ -1613,11 +1613,16 @@ const buildDeclaration = `/**
  * is \`/\`, \`tasks.$taskId.tsx\` is \`/tasks/$taskId\`), each
  * \`export const Route = createFileRoute("/tasks/$taskId")({ component })\`
  * and moving between them with TanStack's \`Link\` and \`useNavigate\`,
- * built on @grasp-os/app-kit: the stock default components on Base UI
- * (\`@grasp-os/app-kit/components/button\`, \`card\`, \`table\`, \`tabs\`,
- * \`dialog\`, …) with their default variants and sizes and the neutral
- * theme's tokens: no raw colours, arbitrary values or restyled components
- * (the lint names what to use instead). There are no layout components:
+ * built on @grasp-os/app-kit: every component of the registry's default
+ * style as its CLI installs them (\`@grasp-os/app-kit/components/button\`,
+ * \`card\`, \`table\`, \`tabs\`, \`dialog\`, \`chart\`, \`toast\`, …),
+ * used as their docs show them (charts import recharts' parts from
+ * \`recharts\`; \`message\`, \`bubble\`, \`attachment\`, \`trace\` and
+ * \`message-scroller\` for a conversation; \`code-block\` for code, whose
+ * copy button has no clipboard in a page's frame; no questionnaire, as
+ * the frame submits no form), with their variants and sizes and the
+ * neutral theme's tokens: no raw colours, arbitrary values or restyled
+ * components (the lint names what to use instead). There are no layout components:
  * lay a page out with Tailwind's layout classes on plain elements
  * (\`flex\`, \`grid\`, \`gap-4\`), its title an \`<h1>\`.
  * Don't wire tables and forms by hand:

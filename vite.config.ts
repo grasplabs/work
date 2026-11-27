@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import ultracite from "ultracite/oxfmt";
 import antiSlop from "ultracite/oxlint/anti-slop";
 import core from "ultracite/oxlint/core";
@@ -6,11 +8,32 @@ import shadcn from "ultracite/oxlint/shadcn";
 import tanstack from "ultracite/oxlint/tanstack";
 import vitest from "ultracite/oxlint/vitest";
 import { defineConfig } from "vite-plus";
+import { z } from "zod";
 
 import { brainModules } from "./apps/core/test/brain-next-modules.ts";
 import DurationSequencer from "./scripts/test-sequencer.ts";
 
+/**
+ * The App kit's files as the registry's CLI writes them, byte for byte but
+ * for the changes packages/app-kit/local-changes.json lists, which
+ * `vp run check:app-kit` holds (scripts/app-kit-sync.ts): kept from the
+ * formatter and the linter, as the CLI's code style is upstream's.
+ */
+const appKitRegistryFiles = Object.keys(
+  z
+    .object({ files: z.record(z.string(), z.string()) })
+    .parse(
+      JSON.parse(
+        readFileSync(
+          new URL("packages/app-kit/registry.json", import.meta.url),
+          "utf-8"
+        )
+      )
+    ).files
+).map((file) => `packages/app-kit/${file}`);
+
 const generated = [
+  ...appKitRegistryFiles,
   "**/routeTree.gen.ts",
   "**/worker-configuration.d.ts",
   "**/src/db/**/migrations/**",

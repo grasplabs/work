@@ -266,7 +266,8 @@ catalog:
   "@vitejs/plugin-react": 6.1.1
   babel-plugin-react-compiler: 1.0.0
   class-variance-authority: 0.7.1
-  clsx: 2.1.1
+  # The kit's class merging (lib/utils), as the stock components import it.
+  cn: 0.5.2
   # Flags beside the languages and a provider's region in Settings
   # (frame/flag.tsx), as the reference draws them.
   country-flag-icons: 1.6.20
@@ -310,8 +311,11 @@ catalog:
   # DiffViewer's diffs (packages/ui): jsdiff.
   diff: 9.0.0
   remark-gfm: 4.0.1
+  # The kit's message scroller and questionnaire, upstream's unstyled parts.
+  "@shadcn/react": 0.3.1
+  # The kit's code block: its highlighter, on the JavaScript regex engine.
+  shiki: 4.6.0
   shadcn: 4.23.0
-  tailwind-merge: 3.7.0
   tailwindcss: 4.3.3
   tw-animate-css: 1.4.0
 

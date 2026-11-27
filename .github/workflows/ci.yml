@@ -172,6 +172,9 @@ jobs:
       # packages/ui against Damsko at its pinned commit, fetched from
       # GitHub (scripts/ui-sync.ts).
       - run: vp run check:ui
+      # packages/app-kit against the registry's files it pins by hash, but
+      # for its listed changes; no network (scripts/app-kit-sync.ts).
+      - run: vp run check:app-kit
       - run: vp run -r typegen && vp run -r db:generate && vp run -r i18n:extract
       - run: git diff --exit-code && test -z "$(git status --porcelain)"
 

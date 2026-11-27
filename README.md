@@ -15,7 +15,7 @@ Built on Cloudflare Workers with TypeScript, React and Vite+.
 | `apps/router` | Routes each deployment's hostname |
 | `packages/sdk` | `@grasp-os/sdk`: the API for workflows and pages |
 | `packages/runtime` | `@grasp-os/runtime`: the platform's runtime under the SDK |
-| `packages/app-kit` | `@grasp-os/app-kit`: the component kit for App pages, the stock default components on Base UI in their neutral theme, with the parts bound to an App's data (form, data grid, rich text) |
+| `packages/app-kit` | `@grasp-os/app-kit`: the component kit for App pages: every component of the registry's default style, as its CLI installs them, in their neutral theme, with the parts bound to an App's data (form, data grid, rich text) |
 | `packages/compiler` | `@grasp-os/compiler`: builds App pages |
 | `packages/connectors/*` | Native connectors |
 | `packages/shared` | `@grasp-os/shared`: shared types and schemas |

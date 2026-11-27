@@ -114,7 +114,13 @@ const manifestSchema = z.object({
   exports: z
     .record(
       z.string(),
-      z.union([z.string(), z.object({ style: z.string().optional() })])
+      z.union([
+        z.string(),
+        z.object({
+          style: z.string().optional(),
+          default: z.string().optional(),
+        }),
+      ])
     )
     .optional(),
   module: z.string().optional(),
@@ -152,7 +158,11 @@ interface Entry {
  * the form helpers (`Form`, `TextField`, …) pages render the SDK's
  * forms with.
  */
-const appKitSingleExports: ReadonlySet<string> = new Set(["./form"]);
+const appKitSingleExports: ReadonlySet<string> = new Set([
+  "./form",
+  // The code block's highlighter: JSX, where the rest of lib/ is TypeScript.
+  "./lib/highlighter",
+]);
 
 /**
  * `@grasp-os/app-kit`: one module per file its exports (`./components/*`, …)
@@ -183,6 +193,25 @@ const appKitEntries = (): Entry[] =>
       id: path.join(dir, file),
     }));
   });
+
+/**
+ * recharts, which the kit's chart draws with: App code imports its charts
+ * and their parts from it as the chart's docs do (`import { Bar, BarChart }
+ * from "recharts"`), and gets the kit's own copy, the one the chart's
+ * tooltip and legend share their state with. A second copy of its own, as
+ * an approved package, would draw nothing inside the kit's ChartContainer.
+ */
+const chartsSpecifier = "recharts";
+
+/** recharts' ES module build, from the kit's dependencies. */
+const chartsEntry = (): Entry => {
+  const dir = realpathSync(path.join(appKit, "node_modules", chartsSpecifier));
+  const { module } = manifestOf(dir);
+  if (module === undefined) {
+    throw new Error("recharts has no ES module build");
+  }
+  return { specifier: chartsSpecifier, id: path.join(dir, module) };
+};
 
 /** A specifier of one of the platform's own packages: its name and subpath. */
 const ownSpecifier = /^(?<name>@grasp-os\/[^/]+)(?:\/(?<subpath>.+))?$/u;
@@ -670,7 +699,33 @@ const buildSdkModules = async (
   return flatModules(chunksOf(await build(config))).code;
 };
 
-/** The kit's stylesheet and the ones it imports, by their `style` export. */
+/** An `@font-face` rule, with the comment before it, as fontsource writes them. */
+const fontFace = /(?:\/\*[^*]*\*\/\s*)?@font-face\s*\{[^}]*\}/gu;
+
+/** The file an `@font-face`'s `src` names, relative to its stylesheet. */
+const fontFile = /url\((?<file>\.\/[^)]+\.woff2)\)/u;
+
+/**
+ * The theme's font (the stylesheet's `@import` of a fontsource package),
+ * as an App page's frame can load it: its policy takes fonts only as
+ * `data:` URLs (`font-src data:`, core's security-headers.ts), so each
+ * file goes into the CSS. Only the Latin face, the one variable file that
+ * covers the five languages Grasp speaks: every face would be in every
+ * page's CSS, whatever its text, where a site's browser fetches a face's
+ * file only for text in its range. Other scripts fall back to the system's
+ * sans, as `--font-sans` names it after the font.
+ */
+const withFontsInline = (css: string, dir: string): string =>
+  css.replaceAll(fontFace, (rule) => {
+    const file = fontFile.exec(rule)?.groups?.file;
+    if (file === undefined || !file.endsWith("-latin-wght-normal.woff2")) {
+      return "";
+    }
+    const bytes = readFileSync(path.join(dir, file)).toString("base64");
+    return rule.replace(fontFile, `url(data:font/woff2;base64,${bytes})`);
+  });
+
+/** The kit's stylesheet and the ones it imports, by their package's export. */
 const collectStylesheets = (): Record<string, string> => {
   const sheet = readText(path.join(appKit, "src/styles.css"));
   const stylesheets: Record<string, string> = { [kitStylesheet]: sheet };
@@ -684,11 +739,18 @@ const collectStylesheets = (): Record<string, string> => {
     );
     const subpath = segments.slice(nameLength).join("/");
     const entry = exportsOf(dir)[subpath === "" ? "." : `./${subpath}`];
-    const file = typeof entry === "string" ? entry : entry?.style;
+    // A stylesheet's own condition (`style`), or a CSS package's only
+    // export (fontsource's `default`).
+    const file =
+      typeof entry === "string" ? entry : (entry?.style ?? entry?.default);
     if (file === undefined) {
       throw new Error(`No stylesheet found for "${id}"`);
     }
-    stylesheets[id] = readText(path.join(dir, file));
+    const imported = path.join(dir, file);
+    stylesheets[id] = withFontsInline(
+      readText(imported),
+      path.dirname(imported)
+    );
   }
   return stylesheets;
 };
@@ -1712,6 +1774,7 @@ const buildAppCompiler = async (
     // Its ES module build, as the kit bundles every entry: its exports named.
     id: fileURLToPath(import.meta.resolve(routerSpecifier)),
   };
+  const charts = chartsEntry();
   const {
     code: kitCode,
     imports: moduleImports,
@@ -1719,6 +1782,7 @@ const buildAppCompiler = async (
   } = await buildKitModules([
     ...react,
     router,
+    charts,
     ...components,
     ...icons,
     ...sdkEntries(),
@@ -1730,6 +1794,7 @@ const buildAppCompiler = async (
       [
         ...react,
         router,
+        charts,
         ...components,
         ...icons,
         ...sdkEntries([previewRefresh, previewRuntime]),
@@ -1739,6 +1804,7 @@ const buildAppCompiler = async (
   const imports = [
     ...reactImports,
     routerSpecifier,
+    chartsSpecifier,
     ...components.map(({ specifier }) => specifier),
     pageSdk,
     sdkRoot,

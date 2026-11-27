@@ -1,3 +1,4 @@
+import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox";
 import { Alert, AlertDescription } from "@grasp-os/app-kit/components/alert";
 import { Button } from "@grasp-os/app-kit/components/button";
 import { ButtonGroup } from "@grasp-os/app-kit/components/button-group";
@@ -6,9 +7,9 @@ import {
   Combobox,
   ComboboxContent,
   ComboboxEmpty,
-  ComboboxInput,
   ComboboxItem,
   ComboboxList,
+  ComboboxTrigger,
 } from "@grasp-os/app-kit/components/combobox";
 import {
   Field,
@@ -21,6 +22,12 @@ import {
   FieldSet,
 } from "@grasp-os/app-kit/components/field";
 import { Input } from "@grasp-os/app-kit/components/input";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@grasp-os/app-kit/components/input-group";
 import {
   NativeSelect,
   NativeSelectOption,
@@ -53,6 +60,7 @@ import {
   ListIcon,
   ListOrderedIcon,
   PaperclipIcon,
+  XIcon,
 } from "lucide-react";
 import { useId, useRef, useState, useSyncExternalStore } from "react";
 import type * as React from "react";
@@ -1123,17 +1131,41 @@ const RelationPicker = <
       }}
       value={chosen}
     >
-      <ComboboxInput
-        aria-describedby={control.describedBy}
-        aria-invalid={control.invalid}
-        aria-required={control.required}
-        clearLabel={text.clear}
-        disabled={control.disabled}
-        id={control.id}
-        placeholder={placeholder}
-        showClear={!control.required}
-        triggerLabel={text.showOptions}
-      />
+      {/* The stock ComboboxInput, its two buttons named in the page's
+          language: its own have no name. */}
+      <InputGroup className="w-auto">
+        <ComboboxPrimitive.Input
+          aria-describedby={control.describedBy}
+          aria-invalid={control.invalid}
+          aria-required={control.required}
+          disabled={control.disabled}
+          id={control.id}
+          placeholder={placeholder}
+          render={<InputGroupInput disabled={control.disabled} />}
+        />
+        <InputGroupAddon align="inline-end">
+          <InputGroupButton
+            aria-label={text.showOptions}
+            // oxlint-disable-next-line shadcn/no-restyle -- the stock ComboboxInput's own classes on its trigger
+            className="group-has-data-[slot=combobox-clear]/input-group:hidden data-pressed:bg-transparent"
+            data-slot="input-group-button"
+            disabled={control.disabled}
+            render={<ComboboxTrigger />}
+            size="icon-xs"
+            variant="ghost"
+          />
+          {control.required ? null : (
+            <ComboboxPrimitive.Clear
+              aria-label={text.clear}
+              data-slot="combobox-clear"
+              disabled={control.disabled}
+              render={<InputGroupButton size="icon-xs" variant="ghost" />}
+            >
+              <XIcon className="pointer-events-none" />
+            </ComboboxPrimitive.Clear>
+          )}
+        </InputGroupAddon>
+      </InputGroup>
       <ComboboxContent>
         <ComboboxEmpty>
           {answer === undefined ? text.loading : text.noMatches}

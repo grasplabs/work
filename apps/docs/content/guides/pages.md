@@ -136,16 +136,16 @@ export const Route = createFileRoute("/settings")({ component: Settings });
 
 ## npm packages
 
-A Page can use any npm package the App's builder approved. Ask for it with `env.build.resolveDependencies(app, { purpose, dependencies: [{ name: "recharts", range: "^2.15.0" }] })`: the builder approves it on a card in the chat, and from your next write on you import it by name, as anywhere else. Packages add up: what is approved stays until you take it out with `remove`, which the builder approves the same way.
+A Page can use any npm package the App's builder approved. Ask for it with `env.build.resolveDependencies(app, { purpose, dependencies: [{ name: "date-fns", range: "^4.1.0" }] })`: the builder approves it on a card in the chat, and from your next write on you import it by name, as anywhere else. Packages add up: what is approved stays until you take it out with `remove`, which the builder approves the same way.
 
 ```text
-import { LineChart, Line } from "recharts";
+import { formatDistanceToNow } from "date-fns";
 ```
 
 It is bundled into the App's build and runs on the kit's React. An import of a package that isn't approved is refused when the Page compiles, saying to ask for it. A package reported as malware is refused, and one revoked later stops the App's Pages and server functions until it is removed.
 
 ## How Pages look
 
-Pages are built from `@grasp-os/app-kit`: the stock default components on Base UI, in their neutral theme, light and dark. Buttons, inputs, selects, tables, cards, tabs, dialogs, charts and more, each under `@grasp-os/app-kit/components/<name>` with its default variants and sizes. Beside them are the parts bound to your App's data: `DataGrid` (`@grasp-os/app-kit/components/data-grid`), the form and its fields (`@grasp-os/app-kit/form`) and `RichText` (`@grasp-os/app-kit/components/rich-text`).
+Pages are built from `@grasp-os/app-kit`: every component of the registry's default style (`base-nova`), as its CLI installs them, in their neutral theme, light and dark, set in Geist. Buttons, inputs, selects, tables, cards, tabs, dialogs, toasts, charts, messages and more, each under `@grasp-os/app-kit/components/<name>`, with their own variants, sizes and props, so the registry's docs and examples hold as written. Charts import recharts' parts from `recharts`, which the kit provides, and colour their series through the chart's config (`color: "var(--chart-1)"`, then `fill="var(--color-<key>)"`). Two things a Page's frame doesn't allow: there is no questionnaire (it is a form, and the frame submits none), and the code block's copy button can't reach the clipboard. Beside the components are the parts bound to your App's data: `DataGrid` (`@grasp-os/app-kit/components/data-grid`), the form and its fields (`@grasp-os/app-kit/form`) and `RichText` (`@grasp-os/app-kit/components/rich-text`).
 
 There are no layout components: lay a Page out with Tailwind's layout classes on plain elements (`flex`, `grid`, `gap-4`, `p-6`), and give it its title as a heading (`<h1 className="text-2xl font-semibold tracking-tight">`). Leave the components' look to them; Grasp's checks refuse raw colours, arbitrary values and restyled components, and name the variant or theme colour to use instead.
