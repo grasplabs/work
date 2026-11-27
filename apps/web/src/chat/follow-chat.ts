@@ -13,12 +13,12 @@ import type {
   ChatToolEvent,
   ChatUpdate,
 } from "@grasp-os/shared/chat";
-import { failureText } from "@grasp-os/shared/errors";
+import { authErrors, failureText } from "@grasp-os/shared/errors";
 import type { ModelWait } from "@grasp-os/shared/models";
 import { RpcStub } from "capnweb";
 
 import type { CoreConnection } from "../core-connection.ts";
-import { CoreTimeoutError, isTransient, retrying } from "../core.ts";
+import { CoreTimeoutError, isTransient, retrying, wait } from "../core.ts";
 import type { Session } from "../core.ts";
 
 // Following one chat as it streams (`chats.watch` in core), on the tab's
@@ -132,6 +132,36 @@ const releaseQuietly = async (subscription: {
   }
 };
 
+/** The pauses between tries to follow what is followed until sign-out: longer each time, then the longest. */
+const untilSignedOutMs = [1000, 2000, 4000, 8000, 15_000] as const;
+
+/**
+ * `attempt` until it succeeds, waiting longer between tries: given up only
+ * once the person's session ended (signed out) or following stopped.
+ */
+const retryingUntilSignedOut = async <T>(
+  attempt: () => Promise<T>,
+  stopped: AbortSignal
+): Promise<T> => {
+  for (let tries = 0; ; tries += 1) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one try at a time
+      return await attempt();
+    } catch (error) {
+      if (
+        stopped.aborted ||
+        authErrors.codeOf(error) === "auth.unauthenticated"
+      ) {
+        throw error;
+      }
+    }
+    // oxlint-disable-next-line no-await-in-loop -- waiting longer between tries
+    await wait(
+      untilSignedOutMs[Math.min(tries, untilSignedOutMs.length - 1)] ?? 0
+    );
+  }
+};
+
 /**
  * Follows what `watch` subscribes to over `core`, until stopped: again on
  * the next connection whenever the one it was on drops, as `watch` then
@@ -144,26 +174,42 @@ export const follow = (
   watch: (
     session: Session
   ) => Promise<{ release: () => Promise<void> } & Disposable>,
-  onFailed: (reason: string, gone: boolean) => void
+  onFailed: (reason: string, gone: boolean) => void,
+  /**
+   * Whether it is followed whatever fails, until the person's session
+   * ends (the list of chats, which nothing reads again): every failure
+   * tried again, ever less often, and a connection waited for as long as
+   * it takes.
+   */
+  untilSignedOut = false
 ): (() => void) => {
   let closed = false;
   // Gives up waiting for a connection once following stops.
   const stopping = new AbortController();
   let release: (() => void) | undefined;
+  const attempt = async (again: boolean) =>
+    await core.withSession(
+      watch,
+      again || untilSignedOut ? stopping.signal : undefined
+    );
   const start = async (again: boolean): Promise<void> => {
     try {
-      const subscription = await retrying(
-        async () =>
-          await core.withSession(watch, again ? stopping.signal : undefined),
-        startRetryMs,
-        // No connection came in its few seconds: say so, rather than wait
-        // on, as a page does when core is out of reach. Stopped: nothing
-        // more to try.
-        (failure) =>
-          !stopping.signal.aborted &&
-          isTransient(failure) &&
-          !(failure instanceof CoreTimeoutError)
-      );
+      const subscription = untilSignedOut
+        ? await retryingUntilSignedOut(
+            async () => await attempt(again),
+            stopping.signal
+          )
+        : await retrying(
+            async () => await attempt(again),
+            startRetryMs,
+            // No connection came in its few seconds: say so, rather than
+            // wait on, as a page does when core is out of reach. Stopped:
+            // nothing more to try.
+            (failure) =>
+              !stopping.signal.aborted &&
+              isTransient(failure) &&
+              !(failure instanceof CoreTimeoutError)
+          );
       release = () => {
         void releaseQuietly(subscription);
         subscription[Symbol.dispose]();

@@ -1,6 +1,8 @@
 import { setImmediate as nextTurn } from "node:timers/promises";
 
+import { agentErrors } from "@grasp-os/shared/agent";
 import type { ChatListUpdate, ChatSummary } from "@grasp-os/shared/chat";
+import { authErrors, internalErrors } from "@grasp-os/shared/errors";
 import { newMessagePortRpcSession, RpcTarget } from "capnweb";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -182,5 +184,112 @@ describe("following the person's list across a dropped connection", () => {
       ],
       failed: [],
     });
+  });
+});
+
+/**
+ * Following the list on a stand-in connection whose watch fails as
+ * `failures` say, in turn, then takes: how many tries it took, what the
+ * page heard, and why it stopped, if it did.
+ */
+const followedThrough = (
+  failures: (() => Error)[],
+  connected: Promise<boolean> = Promise.resolve(true)
+) => {
+  const updates: ChatListUpdate[] = [];
+  const failed: string[] = [];
+  let tries = 0;
+  const chats = {
+    watchList: async (onUpdate: (update: ChatListUpdate) => void) => {
+      const failure = failures[tries];
+      tries += 1;
+      if (failure !== undefined) {
+        throw failure();
+      }
+      onUpdate({ chats: [], removed: [], full: true, archived: 0 });
+      return await Promise.resolve(subscription().stub);
+    },
+  };
+  const core = {
+    withSession: async <T>(
+      run: (session: { chats: typeof chats }) => Promise<T>,
+      signal = deadline()
+    ): Promise<T> => {
+      await unlessAborted(connected, signal);
+      return await run({ chats });
+    },
+  };
+  const stop = follow(
+    // SAFETY: a stand-in for the parts of the connection following uses.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    core as never,
+    async (session) =>
+      await session.chats.watchList((update) => {
+        updates.push(update);
+      }),
+    (reason) => {
+      failed.push(reason);
+    },
+    true
+  );
+  return {
+    stop,
+    read: () => ({ tries, heard: updates.length, failed: failed.length }),
+  };
+};
+
+/** Core refusing another watch, and core mid-deploy. */
+const busy = () => agentErrors.create("agent.too_many_watches");
+const down = () => internalErrors.create("internal.unexpected");
+
+describe("following the person's list whatever fails, until they sign out", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps trying while core refuses another watch, and through a deploy's failures, and follows once it takes", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const refused = followedThrough([busy, busy]);
+    const deploying = followedThrough([down, down, down, down, down]);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await delivered();
+    refused.stop();
+    deploying.stop();
+
+    expect({
+      refused: refused.read(),
+      deploying: deploying.read(),
+    }).toStrictEqual({
+      refused: { tries: 3, heard: 1, failed: 0 },
+      deploying: { tries: 6, heard: 1, failed: 0 },
+    });
+  });
+
+  it("waits for a connection however long it takes, never past a few seconds' failure", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const connected = Promise.withResolvers<boolean>();
+    const followed = followedThrough([], connected.promise);
+    await vi.advanceTimersByTimeAsync(60_000);
+    const whileGone = followed.read();
+    connected.resolve(true);
+    await vi.advanceTimersByTimeAsync(0);
+    await delivered();
+    followed.stop();
+
+    expect({ whileGone, back: followed.read() }).toStrictEqual({
+      whileGone: { tries: 0, heard: 0, failed: 0 },
+      back: { tries: 1, heard: 1, failed: 0 },
+    });
+  });
+
+  it("stops once the person's session ended, and says so", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const followed = followedThrough([
+      () => authErrors.create("auth.unauthenticated"),
+    ]);
+    await vi.advanceTimersByTimeAsync(60_000);
+    followed.stop();
+
+    expect(followed.read()).toStrictEqual({ tries: 1, heard: 0, failed: 1 });
   });
 });
