@@ -15,7 +15,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { orgSettings } from "./db/core/schema.ts";
-import { parseModelRef } from "./model-catalog.ts";
+import { parseModelRef, smallModelFor } from "./model-catalog.ts";
 
 // The organization's own AI providers, as core's model gateway routes by
 // them (models.ts): which providers it connected, from connect, which holds
@@ -197,4 +197,19 @@ export const usableModels = (
     return graspAiAvailable(routes) ? [graspAi.model] : [];
   }
   return chosenModels(routes, choice);
+};
+
+/**
+ * The model a small call of core's own (a chat's title) goes to now: on
+ * the organization's own key, its default's small model (`smallModelFor`),
+ * which the gateway lets through beside the models its admins chose; on
+ * Grasp's AI, its one model. None while it has no model to use.
+ */
+export const smallModelOf = (
+  routes: AiProviderRoutes,
+  choice: AiModelChoiceNow | null,
+  source: AiSource
+): string | undefined => {
+  const [main] = usableModels(routes, choice, source);
+  return main === undefined || source === "grasp" ? main : smallModelFor(main);
 };

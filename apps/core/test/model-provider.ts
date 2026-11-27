@@ -304,6 +304,16 @@ const recallAnalysisOpening =
 const isRecallAnalysis = (body: unknown): boolean =>
   (JSON.stringify(body) ?? "").includes(recallAnalysisOpening);
 
+/** How a chat title's instructions begin: the provider sees no purpose. */
+const titleOpening = "You name a chat.";
+
+/** Whether a request's body is core asking for a chat's title. */
+const isTitle = (body: unknown): boolean =>
+  (JSON.stringify(body) ?? "").includes(titleOpening);
+
+/** No title: the chat keeps its seed (src/chat-titles.ts). */
+const noTitle: ProviderReply = { text: "", inputTokens: 10, outputTokens: 1 };
+
 /** A provider the tests answer for, and what reached it. */
 export interface FakeProvider {
   /** The key the organization connected it with. */
@@ -320,6 +330,15 @@ export interface FakeProvider {
   analysisReplies: ProviderReply[];
   /** Every request of a recall's analysis that reached it, oldest first. */
   analyses: SentRequest[];
+  /**
+   * Its replies to core asking for a new chat's title as its first turn
+   * begins (src/chat-titles.ts), in the order a test queues them, apart
+   * from its script; once none is left, no title, so the chat keeps its
+   * seed.
+   */
+  titleReplies: ProviderReply[];
+  /** Every request for a chat's title that reached it, oldest first. */
+  titles: SentRequest[];
 }
 
 /**
@@ -346,6 +365,8 @@ export const answeringProvider = async (
   const requests: SentRequest[] = [];
   const analysisReplies: ProviderReply[] = [];
   const analyses: SentRequest[] = [];
+  const titleReplies: ProviderReply[] = [];
+  const titles: SentRequest[] = [];
   const cutOff = new Map<string, AbortController>();
   // Cancelled before its answer began, as one look can report a request
   // both new and gone: its controller is aborted as it is made.
@@ -403,6 +424,17 @@ export const answeringProvider = async (
       );
       return;
     }
+    // A new chat's title too, as it is asked for beside the turn.
+    if (isTitle(body)) {
+      titles.push({
+        url: `https://${taken.host}${taken.path}`,
+        headers: new Headers(taken.headers),
+        body,
+        signal: controller.signal,
+      });
+      await answerWith(taken.id, taken.path, titleReplies.shift() ?? noTitle);
+      return;
+    }
     requests.push({
       url: `https://${taken.host}${taken.path}`,
       headers: new Headers(taken.headers),
@@ -455,7 +487,15 @@ export const answeringProvider = async (
     }
   };
   void look();
-  return { key, models, requests, analysisReplies, analyses };
+  return {
+    key,
+    models,
+    requests,
+    analysisReplies,
+    analyses,
+    titleReplies,
+    titles,
+  };
 };
 
 /**

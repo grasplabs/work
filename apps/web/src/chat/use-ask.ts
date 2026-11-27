@@ -3,6 +3,7 @@ import {
   chatFileMaxBytes,
   chatFilesPerQuestionMax,
   chatFileTypeOf,
+  seedTitleOf,
 } from "@grasp-os/shared/chat";
 import type { ChatMake } from "@grasp-os/shared/chat";
 import { failureText } from "@grasp-os/shared/errors";
@@ -52,12 +53,6 @@ import { useReconnecting } from "./reconnecting.ts";
 // (drafts.ts): once the box is another chat's, it holds that chat's draft,
 // never sending one chat's words or files to the next (the chat a
 // question here just made takes what was typed meanwhile).
-
-/** A new chat's title: the start of its first question. */
-export const titleOf = (question: string): string => {
-  const line = question.trim().split("\n")[0] ?? "";
-  return line.length > 80 ? `${line.slice(0, 79)}…` : line;
-};
 
 /** A file in the box, waiting for its question, by an ID of the page's own. */
 interface BoxFile {
@@ -476,7 +471,7 @@ export const useAsk = (
       let id = chatId;
       if (id === undefined) {
         ({ id } = await session.chats.create(
-          titleOf(question),
+          seedTitleOf(question),
           startWith,
           make,
           key

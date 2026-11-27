@@ -71,6 +71,7 @@ import {
   aiRoutesOf,
   readAiSource,
   readModelChoice,
+  smallModelOf,
   usableModels,
 } from "./ai-model-choice.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
@@ -237,6 +238,24 @@ export const modelSettings = async (env: Env): Promise<ModelsNow> => {
     readAiSource(env),
   ]);
   return { models: usableModels(routes, choice, source) };
+};
+
+/**
+ * The model a small call of core's own (a chat's title) goes to now
+ * (`smallModelOf`). Throws `model.no_provider` while the organization has
+ * no model to use, as every call would.
+ */
+export const smallModelNow = async (env: Env): Promise<string> => {
+  const [routes, choice, source] = await Promise.all([
+    aiRoutesOf(env),
+    readModelChoice(env),
+    readAiSource(env),
+  ]);
+  const model = smallModelOf(routes, choice, source);
+  if (model === undefined) {
+    throw modelErrors.create("model.no_provider");
+  }
+  return model;
 };
 
 /**
@@ -1882,7 +1901,12 @@ const routingOf = async (
     return await graspRouting(env, call, ref);
   }
   const at = chosen.indexOf(call.model);
-  if (at === -1 || ref === undefined || connected === undefined) {
+  // The default's small model (`smallModelOf`) goes too: of the default's
+  // maker, on the same key, and cheaper. It falls back to every model
+  // chosen.
+  const small =
+    at === -1 && call.model === smallModelOf(routes, choice, source);
+  if ((at === -1 && !small) || ref === undefined || connected === undefined) {
     return await refuse(env, call, { code: "model.not_allowed" });
   }
   const target = { credential: "organization" as const, ...connected };
