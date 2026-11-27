@@ -6,6 +6,7 @@ import {
 } from "@grasp-os/shared/chat";
 import type {
   ChatHistoryPage,
+  ChatMade,
   ChatMessage,
   ChatOutput,
   ChatPartial,
@@ -60,6 +61,12 @@ export interface ChatView {
    */
   older: boolean;
   /**
+   * What each Build it the chat's agent answered made, as core read it
+   * from the whole chat as the tab began to follow it
+   * (`ChatUpdate.answeredBuilds`), whichever page holds it.
+   */
+  answeredBuilds: readonly ChatMade[];
+  /**
    * Where the person had read the chat to as the tab began to follow it
    * (`ChatUpdate.seenUpTo`), from the first update; none before it.
    */
@@ -91,6 +98,7 @@ export const emptyView: ChatView = {
   waiting: null,
   loaded: false,
   older: false,
+  answeredBuilds: [],
 };
 
 /** `kept` with `added` merged by ID, oldest first, the latest core keeps. */
@@ -136,6 +144,9 @@ export const applyUpdate = (view: ChatView, update: ChatUpdate): ChatView => {
     // From the first update; a watch taken up again sends only what came
     // since, which leaves it as it was.
     older: view.loaded ? view.older : (update.older ?? false),
+    answeredBuilds: view.loaded
+      ? view.answeredBuilds
+      : (update.answeredBuilds ?? []),
   };
 };
 

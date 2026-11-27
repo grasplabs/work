@@ -124,12 +124,15 @@ const opened = async (
       await Promise.resolve();
     },
     paged = false,
+    historyFails = false,
   }: {
     others?: ChatSummary[];
     slow?: boolean;
     /** How core answers a rename, before it is written down. */
     rename?: () => Promise<void>;
     paged?: boolean;
+    /** Whether reading an earlier page fails. */
+    historyFails?: boolean;
   } = {}
 ) => {
   const writes: string[] = [];
@@ -159,6 +162,9 @@ const opened = async (
     history: async (_chatId: string, before: number) => {
       await Promise.resolve();
       writes.push(`history ${before}`);
+      if (historyFails) {
+        throw new Error("Grasp can't be reached right now.");
+      }
       return { messages: firstUpdate.messages, older: false };
     },
     rename: async (id: string, name: string) => {
@@ -357,9 +363,13 @@ describe("the open chat's menu", () => {
     const { writes } = await opened(leave, { paged: true });
     await choose("Copy as Markdown");
     await settled();
+    // Read for the copy, never into the view the thread draws: a second
+    // copy reads it again.
+    await choose("Copy as Markdown");
+    await settled();
     expect({ writes, copies: copied.length }).toStrictEqual({
-      writes: ["history 3"],
-      copies: 1,
+      writes: ["history 3", "history 3"],
+      copies: 2,
     });
     expect(copied[0]).toMatch(/^# Leave/u);
     for (const said of [
@@ -373,6 +383,45 @@ describe("the open chat's menu", () => {
     expect(copied[0]?.indexOf(question)).toBeLessThan(
       copied[0]?.indexOf("And next year?") ?? 0
     );
+  });
+
+  it("copies the whole chat where the browser has no ClipboardItem, its earlier pages read first, and copies nothing when they don't load", async () => {
+    const kept = Reflect.get(globalThis, "ClipboardItem");
+    Reflect.deleteProperty(globalThis, "ClipboardItem");
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          await Promise.resolve();
+          copied.push(text);
+        },
+      },
+    });
+    try {
+      await opened(leave, { paged: true });
+      await choose("Copy as Markdown");
+      await settled();
+      const whole = copied[0] ?? "";
+      act(() => {
+        root?.unmount();
+      });
+      document.body.replaceChildren();
+      await settled();
+      forgetActiveChats();
+      await opened(leave, { paged: true, historyFails: true });
+      await choose("Copy as Markdown");
+      await settled();
+
+      expect({
+        whole: [question, "And next year?"].every((said) =>
+          whole.includes(said)
+        ),
+        // Nothing copied of a chat whose earlier pages didn't load.
+        copies: copied.length,
+      }).toStrictEqual({ whole: true, copies: 1 });
+    } finally {
+      Reflect.set(globalThis, "ClipboardItem", kept);
+    }
   });
 
   it("renames the chat where its name stands, to the name typed", async () => {

@@ -37,6 +37,7 @@ import type {
   ChatFile,
   ChatFileType,
   ChatHistoryPage,
+  ChatMade,
   ChatMake,
   ChatPictureType,
   ChatMessage,
@@ -6041,7 +6042,8 @@ export class Workspace extends DurableObject<Env> {
         this.unwatch(id, watchId);
       },
       readUpTo,
-      page.older
+      page.older,
+      since.data === null ? this.#answeredBuilds(id) : undefined
     );
     const watchers = this.#watchers.get(id) ?? new Map<string, ChatWatch>();
     watchers.set(watchId, watch);
@@ -6146,6 +6148,55 @@ export class Workspace extends DurableObject<Env> {
       .limit(1)
       .get();
     return question?.id ?? id;
+  }
+
+  /**
+   * What each Build it of chat `chatId` made whose turn its agent answered:
+   * the last Build it of each, answered when an answer came after it. Read
+   * from the whole chat, as a page of it may hold neither (`ChatUpdate.answeredBuilds`).
+   */
+  #answeredBuilds(chatId: ChatId): ChatMade[] {
+    const builds = this.#db
+      .select({ id: chatMessages.id, built: chatMessages.built })
+      .from(chatMessages)
+      .where(
+        and(eq(chatMessages.chatId, chatId), isNotNull(chatMessages.built))
+      )
+      .orderBy(asc(chatMessages.id))
+      .all();
+    if (builds.length === 0) {
+      return [];
+    }
+    const answered =
+      this.#db
+        .select({ id: chatMessages.id })
+        .from(chatMessages)
+        .where(
+          and(
+            eq(chatMessages.chatId, chatId),
+            sql`json_extract(${chatMessages.message}, '$.role') = 'assistant'`
+          )
+        )
+        .orderBy(desc(chatMessages.id))
+        .limit(1)
+        .get()?.id ?? 0;
+    // The last Build it of each thing it made.
+    const last = new Map<string, { made: ChatMade; at: number }>();
+    for (const { id, built } of builds) {
+      const shown = builtOf(built);
+      for (const kind of ["app", "workflow"] as const) {
+        const made = shown?.[kind];
+        if (made !== undefined) {
+          last.set(`${kind}:${made.id}`, {
+            made: { kind, id: made.id },
+            at: id,
+          });
+        }
+      }
+    }
+    return [...last.values()].flatMap(({ made, at }) =>
+      answered > at ? [made] : []
+    );
   }
 
   /** Whether chat `chatId` has a message with an ID up to `upTo`. */

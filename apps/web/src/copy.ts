@@ -20,15 +20,24 @@ export const copyText = async (text: string): Promise<boolean> => {
 
 /**
  * Copies text still being put together (a whole chat, read first), and
- * says whether it worked: the clipboard is handed the text's promise at
- * once, within the press that asked for it, as a browser needs to let it
- * write once the text is ready.
+ * says whether it worked. The clipboard is handed the text's promise at
+ * once, within the press that asked for it (`ClipboardItem`), as a browser
+ * needs to let it write once the text is ready. `ClipboardItem` is in
+ * Chrome and Edge since 98 for a promise's value, Safari since 13.1 and
+ * Firefox only since 127 (MDN's browser compatibility data, November
+ * 2026), short of the browsers the build targets (Vite's "baseline widely
+ * available", Firefox 104 on): where it is missing, the text is waited
+ * for and written then, which a browser allows while the press is recent
+ * enough, and is said to have failed otherwise.
  */
 export const copyTextLater = async (
   text: Promise<string>
 ): Promise<boolean> => {
   const blob = (async () => new Blob([await text], { type: "text/plain" }))();
   try {
+    if (typeof ClipboardItem === "undefined") {
+      return await copyText(await text);
+    }
     await navigator.clipboard.write([
       new ClipboardItem({ "text/plain": blob }),
     ]);

@@ -448,4 +448,81 @@ describe("a chat shown twice from one watch", () => {
       after: [1, 2, 3, 4, 5, 6],
     });
   });
+
+  it("says an earlier page didn't load, keeps what it has, and reads it on the next try", async () => {
+    shownChat = crypto.randomUUID();
+    const seen: { ids: number[]; failed: boolean; reading: boolean }[] = [];
+    const Reader = () => {
+      const { view, olderFailed, readingOlder } = useFollowedChat(shownChat);
+      seen.push({
+        ids: view.messages.map(({ id }) => id),
+        failed: olderFailed === true,
+        reading: readingOlder === true,
+      });
+      return null;
+    };
+    let reads = 0;
+    const chats = {
+      watch: async (
+        _chatId: string,
+        _after: number | null,
+        onUpdate: (next: ChatUpdate) => void
+      ) => {
+        onUpdate({
+          messages: [message(3), message(4)],
+          older: true,
+          partial: null,
+          running: false,
+          stopped: null,
+          held: 0,
+          worked: 0,
+          seenUpTo: 4,
+        });
+        return await Promise.withResolvers<never>().promise;
+      },
+      history: async () => {
+        reads += 1;
+        if (reads === 1) {
+          throw new Error("Grasp can't be reached right now.");
+        }
+        return await Promise.resolve({
+          messages: [message(1), message(2)],
+          older: false,
+        });
+      },
+    };
+    const core = {
+      withSession: async <T,>(
+        run: (session: { chats: typeof chats }) => Promise<T>
+      ): Promise<T> => await run({ chats }),
+    };
+    const router = createRouter({
+      routeTree: createRootRoute({ component: Reader }),
+      history: createMemoryHistory(),
+      context: { core },
+    });
+    const host = document.createElement("div");
+    document.body.append(host);
+    await act(async () => {
+      root = createRoot(host);
+      root.render(<RouterProvider router={router} />);
+      await router.load();
+    });
+    await vi.waitFor(() => {
+      expect(seen.at(-1)?.ids).toStrictEqual([3, 4]);
+    });
+    await act(async () => {
+      await readOlder(shownChat);
+    });
+    const failed = seen.at(-1);
+    await act(async () => {
+      await readOlder(shownChat);
+    });
+
+    expect({ failed, after: seen.at(-1), reads }).toStrictEqual({
+      failed: { ids: [3, 4], failed: true, reading: false },
+      after: { ids: [1, 2, 3, 4], failed: false, reading: false },
+      reads: 2,
+    });
+  });
 });

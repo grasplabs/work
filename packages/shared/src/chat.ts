@@ -1216,6 +1216,12 @@ export interface ChatQueued {
   text: string;
 }
 
+/** What a Build it made: an App or a workflow, by ID. */
+export interface ChatMade {
+  kind: "app" | "workflow";
+  id: string;
+}
+
 /**
  * The most messages a page of a chat's history holds (`ChatsApi.watch`'s
  * first update, `ChatsApi.history`), give or take the rest of a turn: a
@@ -1240,6 +1246,13 @@ export interface ChatUpdate {
    * has messages before the first one it carries.
    */
   older?: boolean;
+  /**
+   * In the first update of a watch from the start only: what each Build it
+   * of the chat made whose turn its agent answered, the last Build it of
+   * each, read from the whole chat, whichever page holds it. After that,
+   * the page reads it from the messages that come.
+   */
+  answeredBuilds?: ChatMade[];
   /**
    * What the response being written gained (`applyPartial`); `null`
    * between responses.

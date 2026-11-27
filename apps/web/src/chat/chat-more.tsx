@@ -15,12 +15,12 @@ import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-import { copyTextLater } from "../copy.ts";
+import { copyText, copyTextLater } from "../copy.ts";
 import { exportAs } from "../export/export-file.tsx";
 import type { ExportFormat } from "../export/export-file.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { chatMarkdown } from "./chat-markdown.ts";
-import { readAll, useFollowedChat } from "./chat-watch.ts";
+import { readWhole, useFollowedChat } from "./chat-watch.ts";
 import { DeleteChatDialog } from "./delete-chat-dialog.tsx";
 import type { SourceName } from "./sources.tsx";
 
@@ -110,13 +110,10 @@ export const useChatMenu = ({
   };
   // Until the chat's first update is in, there is only its title to copy.
   const ready = view.loaded;
-  // The whole chat, its earlier pages read first (`readAll`).
-  const markdown = async (): Promise<string> => {
-    const whole = await readAll(chat.id);
-    if (whole === undefined) {
-      throw new Error("The chat's earlier messages didn't load");
-    }
-    return chatMarkdown({
+  // The chat as Markdown: whole, its earlier pages read first, where the
+  // tab hasn't them (`readWhole`), never drawn for it.
+  const markdownOf = (whole: typeof view): string =>
+    chatMarkdown({
       title: chat.title,
       messages: whole.messages,
       partial: whole.partial,
@@ -124,6 +121,12 @@ export const useChatMenu = ({
       names: sourceNames,
       i18n,
     });
+  const markdown = async (): Promise<string> => {
+    const whole = view.older ? await readWhole(chat.id) : view;
+    if (whole === undefined) {
+      throw new Error("The chat's earlier messages didn't load");
+    }
+    return markdownOf(whole);
   };
   const download = async (format: ExportFormat): Promise<void> => {
     try {
@@ -149,7 +152,10 @@ export const useChatMenu = ({
       // The menu closes as it is chosen: a short notice says it is copied.
       onSelect: () => {
         void (async () => {
-          if (await copyTextLater(markdown())) {
+          const copied = view.older
+            ? await copyTextLater(markdown())
+            : await copyText(markdownOf(view));
+          if (copied) {
             toast.success(t`Copied`);
           } else {
             toast.error(t`Copying didn't work`);

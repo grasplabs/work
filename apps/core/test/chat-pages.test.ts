@@ -305,4 +305,98 @@ describe("a long chat read newest page first", () => {
       bounds: Array.from({ length: 5 }, () => "agent.invalid_request"),
     });
   });
+
+  it("keeps a turn longer than a page whole on one page, from its question", async () => {
+    const ann = await person();
+    const chat = await startedChat(ann, "Long turn");
+    await kept(ann, chat.id, 5);
+    // One turn of 30 steps: 62 messages, more than a page.
+    await kept(ann, chat.id, 1, { steps: 30, from: 6 });
+    await kept(ann, chat.id, 2, { from: 7 });
+    await ann.api.chats.markRead(chat.id);
+    const opened = await follow(ann.api.chats, chat.id);
+    const pages = await readBack(ann.api.chats, chat.id, opened.messages());
+
+    expect({
+      startsAt: opened.messages()[0]?.role,
+      opened: said(opened.messages()),
+      readBack: said(pages.toReversed().flat()),
+    }).toStrictEqual({
+      startsAt: "user",
+      opened: turnsSaid(6, 8),
+      readBack: turnsSaid(1, 5),
+    });
+  });
+
+  it("reads nothing of another chat before a message of its, nor past the chat's last", async () => {
+    const ann = await person();
+    const mine = await startedChat(ann, "Mine");
+    const other = await startedChat(ann, "Other");
+    await kept(ann, mine.id, 3);
+    await kept(ann, other.id, 3);
+    const elsewhere = await follow(ann.api.chats, other.id);
+    const otherLast = elsewhere.messages().at(-1)?.id ?? 1;
+    const mineOpened = await follow(ann.api.chats, mine.id);
+    const saidBefore = async (before: number) => {
+      const page = await ann.api.chats.history(mine.id, before);
+      return said(page.messages);
+    };
+
+    expect({
+      // Another chat's message names a place, never what is there.
+      beforeOther: await saidBefore(otherLast),
+      // Past the chat's last message: its newest page, as the watch's.
+      aboveAll: await saidBefore(Number.MAX_SAFE_INTEGER),
+    }).toStrictEqual({
+      beforeOther: said(mineOpened.messages()),
+      aboveAll: said(mineOpened.messages()),
+    });
+  });
+
+  it("says what each answered Build it made as it opens, however far back that Build it lies", async () => {
+    const ann = await person();
+    const chat = await startedChat(ann, "Built");
+    await runInDurableObject(objectOf(ann), (_instance, state) => {
+      const insert = (message: object, built: object | null) => {
+        state.storage.sql.exec(
+          "INSERT INTO chat_messages (chat_id, message, created_at, built) VALUES (?, ?, ?, ?)",
+          chat.id,
+          JSON.stringify(message),
+          Date.now(),
+          built === null ? null : JSON.stringify(built)
+        );
+      };
+      insert(
+        {
+          role: "user",
+          content: [{ type: "text", text: "Build it" }],
+          timestamp: Date.now(),
+        },
+        { plan: "plan-1", workflow: { id: "late-reminder", name: "Reminder" } }
+      );
+      insert(
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "It didn't pass its test." }],
+          ...noModel,
+          timestamp: Date.now(),
+        },
+        null
+      );
+    });
+    // Then more than a page of other turns.
+    await kept(ann, chat.id, 30);
+    await ann.api.chats.markRead(chat.id);
+    const opened = await follow(ann.api.chats, chat.id);
+
+    expect({
+      older: opened.updates[0]?.older,
+      onPage: opened.messages().some(({ text }) => text === "Build it"),
+      answeredBuilds: opened.updates[0]?.answeredBuilds,
+    }).toStrictEqual({
+      older: true,
+      onPage: false,
+      answeredBuilds: [{ kind: "workflow", id: "late-reminder" }],
+    });
+  });
 });

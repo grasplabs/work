@@ -1,4 +1,5 @@
 import type {
+  ChatMade,
   ChatMessage,
   ChatOutput,
   ChatOutputUpdate,
@@ -137,6 +138,8 @@ export class ChatWatch {
    * a watcher from the start: sent once, first.
    */
   #older: boolean | undefined;
+  /** What the chat's answered Builds it made, for a watcher from the start: sent once, first. */
+  #answeredBuilds: ChatMade[] | undefined;
 
   constructor(
     listener: ChatListener,
@@ -144,13 +147,15 @@ export class ChatWatch {
     provenance: () => ChatProvenance,
     drop: () => void,
     seenUpTo: number | null,
-    older: boolean | undefined
+    older: boolean | undefined,
+    answeredBuilds: ChatMade[] | undefined
   ) {
     this.#pushes = new Pushes(listener, () => this.#next(), drop);
     this.#state = state;
     this.#provenance = provenance;
     this.#seenUpTo = seenUpTo;
     this.#older = older;
+    this.#answeredBuilds = answeredBuilds;
   }
 
   /**
@@ -184,10 +189,13 @@ export class ChatWatch {
     this.#seenUpTo = undefined;
     const older = this.#older;
     this.#older = undefined;
+    const answeredBuilds = this.#answeredBuilds;
+    this.#answeredBuilds = undefined;
     const update: ChatUpdate = {
       messages: this.#unsent.splice(0),
       ...(seenUpTo === undefined ? {} : { seenUpTo }),
       ...(older === undefined ? {} : { older }),
+      ...(answeredBuilds === undefined ? {} : { answeredBuilds }),
       partial: partialUpdate(this.#shown, partial),
       ...outputChange(this.#shownOutput, output),
       ...(tools.length === 0 ? {} : { tools }),
