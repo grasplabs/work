@@ -2066,9 +2066,10 @@ export const changeLine = (id: string, was: string, now: string): void => {
  */
 const readBackWhenWritten = async (): Promise<void> => {
   show("thinking");
+  const count = liveCount;
   await leaving;
   const done = await written();
-  if (!on) {
+  if (!on || liveCount !== count) {
     return;
   }
   if (!done) {
