@@ -283,15 +283,15 @@ describe("erasing a person in connect", () => {
       ownerUserIds: [person.userId],
     });
     const db = drizzle(env.DB);
-    const serverId = `server-${crypto.randomUUID()}`;
+    const sessionId = `trs_${crypto.randomUUID()}`;
     await db
       .update(connections)
-      .set({ composioServerId: serverId })
+      .set({ composioSessionId: sessionId })
       .where(eq(connections.id, connectionId));
     const cleanupId = crypto.randomUUID();
     await db.insert(composioCleanups).values({
       id: cleanupId,
-      serverId,
+      sessionId,
       attempts: 0,
       retryAt: new Date(),
       createdAt: new Date(),

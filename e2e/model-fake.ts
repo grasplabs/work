@@ -5,7 +5,8 @@
  * the provider's own host (its `AI_PROVIDER_ORIGIN`, set by
  * e2e/connect-config.ts), its path unchanged and the provider's host in
  * `x-forwarded-host`. It answers an agent's turn in a chat a script opens
- * (e2e/model-scripts.ts), streamed as the provider's API streams it, and
+ * (e2e/model-scripts.ts), and the chat's title where the script names one,
+ * streamed as the provider's API streams it, and
  * refuses every other request's key, as a provider refuses one it doesn't
  * know (401, in the provider's own error shape), which the chat tests show
  * as the model failing to answer (e2e/chat.e2e.ts). The global setup
@@ -21,7 +22,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import { streamParts } from "../apps/core/test/provider-streams.ts";
 import type { Answer } from "../apps/core/test/provider-streams.ts";
-import { scriptedAnswer } from "./model-scripts.ts";
+import { scriptedAnswer, scriptedTitle } from "./model-scripts.ts";
 import { modelFakeOrigin, modelFakePort } from "./stack.ts";
 
 /** Where the fake lists the requests it got: GET, as JSON. */
@@ -109,10 +110,11 @@ const serve = (): void => {
     });
     request.on("end", () => {
       const api = apiOf(path);
+      const body = parsed(Buffer.concat(chunks).toString("utf-8"));
       const scripted =
         api === undefined
           ? undefined
-          : scriptedAnswer(parsed(Buffer.concat(chunks).toString("utf-8")));
+          : (scriptedAnswer(body) ?? scriptedTitle(body));
       if (api !== undefined && scripted !== undefined) {
         response.writeHead(200, { "content-type": "text/event-stream" });
         void streamTo(response, api, scripted);

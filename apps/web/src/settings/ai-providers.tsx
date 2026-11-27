@@ -988,7 +988,7 @@ const Models = ({
   );
 };
 
-/** The model a test of `provider` asks: its own test model, or for a custom endpoint the first of its models chosen; null when it has none yet. */
+/** The model a test of `provider` asks: its small model, or for a custom endpoint the first of its models chosen; null when it has none yet. */
 const testModelOf = (
   provider: OrganizationProviderId,
   choice: AiModelChoiceNow | null

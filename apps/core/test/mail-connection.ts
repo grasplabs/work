@@ -152,7 +152,7 @@ export const mailConnection = async (
   const now = Date.now();
   await connectDb()
     .prepare(
-      "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tools, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', 'composio', ?, ?, ?, ?)"
+      "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, composio_session_id, tools, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', 'composio', ?, ?, ?, ?, ?)"
     )
     .bind(
       id,
@@ -160,6 +160,7 @@ export const mailConnection = async (
       owner === undefined ? "shared" : "personal",
       owner ?? null,
       mailServerUrl(name),
+      name,
       JSON.stringify(tools),
       now,
       now

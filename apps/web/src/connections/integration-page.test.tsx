@@ -486,7 +486,7 @@ describe("the Connectors pages, back from a sign-in", () => {
 
   it("shows an admin what core named for support under a refusal, only in its fixed form, and nobody else", async () => {
     const named =
-      "/connectors?connectionError=connection.provider_refused&connectionReason=server%3Ahttp_403&connectionRelease=26.11.900&connectionVersion=1a2b3c4d";
+      "/connectors?connectionError=connection.provider_refused&connectionReason=session%3Ahttp_403&connectionRelease=26.11.900&connectionVersion=1a2b3c4d";
     await shown(named, [stopped]);
     const admin = document.querySelector(
       '[role="alert"] [data-release]'
@@ -510,7 +510,7 @@ describe("the Connectors pages, back from a sign-in", () => {
 
     expect({ admin, crafted, user }).toStrictEqual({
       admin:
-        "Details for support: server:http_403 (release 26.11.900, connect 1a2b3c4d)",
+        "Details for support: session:http_403 (release 26.11.900, connect 1a2b3c4d)",
       crafted: { dashes: true, echoed: false },
       user: false,
     });

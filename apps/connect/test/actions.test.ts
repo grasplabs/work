@@ -267,17 +267,25 @@ describe("a call on a connection", () => {
     expect(server.requests).toBe(0);
   });
 
-  it("goes nowhere but Composio's MCP host, over HTTPS, without credentials", async () => {
+  it("goes nowhere but its own session's MCP endpoint on Composio's API host, over HTTPS, without credentials", async () => {
     const withCredentials = new URL(serverUrl);
     withCredentials.username = "user";
     withCredentials.password = "not-a-real-password";
+    const forUser = new URL(serverUrl);
+    forUser.searchParams.set("user_id", "someone-else");
+    const path = new URL(serverUrl).pathname;
     const servers = [
       serverUrl.replace("https:", "http:"),
       withCredentials.href,
-      "https://mcp.attacker.example/v3/mcp/server-mail",
-      "https://backend.composio.dev.attacker.example/v3/mcp/server-mail",
+      forUser.href,
+      `https://mcp.attacker.example${path}`,
+      `https://backend.composio.dev.attacker.example${path}`,
+      `https://127.0.0.1${path}`,
+      // Another session's endpoint than the one stored for it.
+      "https://backend.composio.dev/api/v3/tool_router/session/trs_other/mcp",
       "https://backend.composio.dev/api/v3/connected_accounts",
-      "https://127.0.0.1/v3/mcp/server-mail",
+      // Composio's legacy per-server MCP URL.
+      "https://backend.composio.dev/v3/mcp/server-mail?user_id=grasp",
     ];
     const ends = await Promise.all(
       servers.map(async (url) => {

@@ -119,10 +119,17 @@ export interface AiProviderSpec {
     | "ELEVENLABS_API_KEY"
     | undefined;
   /**
-   * The model a test of a newly added key asks, one of the cheapest of its
-   * catalog; none for an OpenAI-compatible endpoint, which names its own.
+   * Its small model: the cheapest text model of its newest generation, by
+   * `<provider>/<model>` in pi's catalog. A test of a newly added key asks
+   * it, and a small call of core's own (a chat's title, core's
+   * chat-titles.ts) goes to it for an organization whose default model is
+   * of the same maker and dearer (core's model-catalog.ts,
+   * `smallModelFor`). Never an older generation because it is cheaper, nor
+   * a model the provider deprecated: pi's catalog prices each model but
+   * says neither, so it is named here and moves with the provider's
+   * releases. None for an OpenAI-compatible endpoint, which names its own.
    */
-  testModel: string | undefined;
+  smallModel: string | undefined;
   /**
    * Where the provider says how its service is doing, to look at while it
    * isn't answering; none for an endpoint of the organization's own.
@@ -149,7 +156,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     whereItRuns: "Anthropic, United States",
     region: "us",
     platformSecret: "ANTHROPIC_API_KEY",
-    testModel: "anthropic/claude-haiku-4-5",
+    smallModel: "anthropic/claude-haiku-5-5",
     statusPage: "https://status.anthropic.com",
   },
   openai: {
@@ -173,7 +180,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     whereItRuns: "OpenAI, United States",
     region: "us",
     platformSecret: "OPENAI_API_KEY",
-    testModel: "openai/gpt-5-mini",
+    smallModel: "openai/gpt-6-luna",
     statusPage: "https://status.openai.com",
   },
   mistral: {
@@ -196,7 +203,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     whereItRuns: "Mistral AI, European Union (France)",
     region: "eu",
     platformSecret: "MISTRAL_API_KEY",
-    testModel: "mistral/mistral-small-latest",
+    smallModel: "mistral/mistral-small-latest",
     statusPage: "https://status.mistral.ai",
   },
   openrouter: {
@@ -215,7 +222,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
       "OpenRouter, United States, passing each call on to the model's provider",
     region: "us",
     platformSecret: "OPENROUTER_API_KEY",
-    testModel: "openrouter/openai/gpt-5-mini",
+    smallModel: "openrouter/openai/gpt-6-luna",
     statusPage: "https://status.openrouter.ai",
   },
   "openai-compatible": {
@@ -230,7 +237,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     whereItRuns: "Wherever your endpoint runs",
     region: "custom",
     platformSecret: undefined,
-    testModel: undefined,
+    smallModel: undefined,
     statusPage: undefined,
   },
   // Grasp's own speech feature only, never an organization's key: a line
@@ -249,7 +256,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     whereItRuns: "ElevenLabs, United States",
     region: "us",
     platformSecret: "ELEVENLABS_API_KEY",
-    testModel: undefined,
+    smallModel: undefined,
     statusPage: "https://status.elevenlabs.io",
   },
 };

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { fakeComposioServer } from "./composio-api.ts";
-import { addConnection, agentFor, callAs } from "./connect.ts";
+import { addConnection, agentFor, callAs, composioSession } from "./connect.ts";
 
 // What connect lets core keep of a call as sources in the Brain
 // (`ConnectResult.keep`, GRA-1730, GRA-1845). The ways it can fail, which
@@ -10,7 +10,8 @@ import { addConnection, agentFor, callAs } from "./connect.ts";
 // keeps its whole answer, keyed by the call. An error answer never comes back as one
 // (`connect.action_failed`).
 
-const url = "https://backend.composio.dev/v3/mcp/server-keep?user_id=grasp";
+const session = composioSession("trs_keep");
+const url = session.server;
 
 fakeComposioServer(
   url,
@@ -49,7 +50,7 @@ fakeComposioServer(
 const connection = async (provider = "mail") =>
   await addConnection({
     provider,
-    server: url,
+    ...session,
     tools: JSON.stringify([
       { name: "mail.read", read: true },
       { name: "mail.list", read: true },

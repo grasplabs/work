@@ -66,6 +66,7 @@ import {
   offeredToolNames,
   pastAddressesAfter,
   readToolNames,
+  statusOf,
   toolResourcesOf,
 } from "./connections.ts";
 import {
@@ -1772,7 +1773,7 @@ export const listConnections = async (
     provider: row.provider,
     name: http.get(row.id)?.name ?? reachedName({ ...row, connectorName }),
     scope: row.scope,
-    status: row.status,
+    status: statusOf(row),
     ownerUserId: row.ownerUserId,
     connectedBy: row.connectedBy,
     accountName: row.accountName,
@@ -1793,8 +1794,8 @@ export const listConnections = async (
  * Every connection that isn't disconnected, for core's staff-only admin
  * snapshot (`ConnectApi.organizationConnections`), with Composio's word on
  * each Composio account. What a staff member may read of each, and no
- * more: never a token, the server's URL (a Composio one names the
- * account), nor anything Composio knows it by; of a personal one, not
+ * more: never a token, the server's URL (a Composio one names its
+ * session), nor anything Composio knows it by; of a personal one, not
  * whose it is or which account, only that someone connected their own.
  */
 export const organizationConnections = async (
@@ -1822,7 +1823,7 @@ export const organizationConnections = async (
         source: row.serverKind,
         provider: row.provider,
         scope: row.scope,
-        status: row.status,
+        status: statusOf({ ...row, status: row.status }),
         composio: isComposio ? (composio.get(row.id) ?? "unread") : null,
         connectedBy: shared ? row.connectedBy : null,
         accountName: shared ? row.accountName : null,
