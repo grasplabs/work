@@ -4343,6 +4343,7 @@ msgstr "Project wijzigen"
 
 #: src/chat/agent-draft-card.tsx
 #: src/interview/read-back-story.tsx
+#: src/interview/summary.tsx
 msgid "Change something"
 msgstr "Iets wijzigen"
 
@@ -17411,6 +17412,7 @@ msgid "Summarise documents"
 msgstr "Documenten samenvatten"
 
 #: src/interview/read-back-story.tsx
+#: src/interview/summary.tsx
 #: src/interview/words.ts
 msgid "Summary"
 msgstr "Samenvatting"
@@ -21674,6 +21676,10 @@ msgstr "Ja, dat klopt"
 #: src/interview/words.ts
 msgid "Yes, that’s correct."
 msgstr "Ja, dat klopt."
+
+#: src/interview/summary.tsx
+msgid "Yes, that's right"
+msgstr "Ja, dat klopt"
 
 #: src/activity/audit-event.tsx
 msgid "Yes: it is unchanged and links to the event before it."

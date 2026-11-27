@@ -19,13 +19,14 @@ import { Composer, SaveTrouble } from "./composer.tsx";
 import { Countdown, budgetMinutes } from "./countdown.tsx";
 import { Guide } from "./guide.tsx";
 import { keepNow, update, useInterviewer, useProgress } from "./kept.ts";
-import { goOn, sendTyped, typingNow, useLoop } from "./loop.ts";
+import { changeSummary, goOn, sendTyped, typingNow, useLoop } from "./loop.ts";
 import { micProblem } from "./mic.ts";
 import { StephenOrb } from "./orb.tsx";
 import { partAt, withLineText, withoutLine } from "./progress.ts";
 import { ReadBack, ReadBackFoot } from "./read-back-story.tsx";
 import { say, stopSpeaking, useSaidOf } from "./speech.ts";
 import { questionOf, shownAs, wordsOf } from "./spoken.tsx";
+import { SpokenSummary } from "./summary.tsx";
 import { Transcript } from "./transcript.tsx";
 import { useInterviewWords } from "./words.ts";
 
@@ -135,6 +136,36 @@ const styles = stylex.create({
   },
   /** The orb's room while paused: the word under it takes no room, so the orb stays where it stood. */
   held: { position: "relative" },
+  // His orb and his summary share one place: as he begins the summary, the orb steps back where
+  // it stood and the summary comes up over it, so nothing jumps.
+  stack: {
+    display: "grid",
+    justifyItems: "center",
+    alignItems: "start",
+    width: "100%",
+  },
+  layer: {
+    gridArea: "1 / 1",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: space["5"],
+    width: "100%",
+    opacity: 1,
+    transform: "scale(1)",
+    transitionProperty: {
+      default: "opacity, transform, visibility",
+      [media.reducedMotion]: "opacity, visibility",
+    },
+    transitionDuration: "520ms",
+    transitionTimingFunction: duration.ease,
+  },
+  stepsBack: {
+    opacity: 0,
+    transform: "scale(0.92)",
+    visibility: "hidden",
+    pointerEvents: "none",
+  },
   pausedNote: {
     position: "absolute",
     insetInline: 0,
@@ -234,7 +265,16 @@ const AskedLine = ({ question }: { question: string }) => (
  * glance (the owner's ask, 2026-11-26). A line that asks nothing is shown
  * whole.
  */
-const Asking = ({ paused = false }: { paused?: boolean }) => {
+const Asking = ({
+  paused = false,
+  changing,
+  onChange,
+}: {
+  paused?: boolean;
+  /** They chose to change something in his summary. */
+  changing: boolean;
+  onChange: () => void;
+}) => {
   const { t } = useLingui();
   const loop = useLoop();
   const { mode } = useProgress();
@@ -263,22 +303,34 @@ const Asking = ({ paused = false }: { paused?: boolean }) => {
       </div>
     );
   }
+  // His summary, once he begins it: the one summary, what he says, big where his orb stood.
+  const summing = loop.summary !== null;
   return (
-    <div {...stylex.props(styles.question, styles.held)}>
-      <StephenOrb />
-      {talking || loop.line === "" || shown === null ? null : (
-        <div
-          aria-live="polite"
-          key={loop.saying}
-          {...stylex.props(styles.question)}
-        >
-          {shown}
-        </div>
-      )}
-      {talking && loop.line !== "" ? (
-        // What he says is still given to a screen reader, once it rests.
-        <div aria-live="polite" {...stylex.props(visuallyHidden)}>
-          {loop.doing === "speaking" ? "" : loop.line}
+    <div {...stylex.props(styles.stack)}>
+      <div
+        aria-hidden={summing}
+        {...stylex.props(styles.layer, summing && styles.stepsBack)}
+      >
+        <StephenOrb />
+        {talking || summing || loop.line === "" || shown === null ? null : (
+          <div
+            aria-live="polite"
+            key={loop.saying}
+            {...stylex.props(styles.question)}
+          >
+            {shown}
+          </div>
+        )}
+        {talking && !summing && loop.line !== "" ? (
+          // What he says is still given to a screen reader, once it rests.
+          <div aria-live="polite" {...stylex.props(visuallyHidden)}>
+            {loop.doing === "speaking" ? "" : loop.line}
+          </div>
+        ) : null}
+      </div>
+      {summing ? (
+        <div {...stylex.props(styles.layer)}>
+          <SpokenSummary changing={changing} onChange={onChange} />
         </div>
       ) : null}
     </div>
@@ -405,6 +457,27 @@ const Room = ({
   );
 };
 
+/**
+ * His summary on the stage: whether its answer stands in the box's place,
+ * and whether they chose to change something in it. Its answer stands under it, and the box only
+ * comes back once they want to change something; a new summary of his asks
+ * afresh.
+ */
+const useSummaryAnswer = (onStage: boolean) => {
+  const { summary } = useLoop();
+  const [changingOf, setChangingOf] = useState<string | null>(null);
+  const line = summary?.line ?? null;
+  const changing = line !== null && changingOf === line;
+  return {
+    answered: onStage && line !== null && !changing,
+    changing,
+    change: () => {
+      setChangingOf(line);
+      changeSummary();
+    },
+  };
+};
+
 /** The conversation, or its read-back: the stage, and the card at its foot. */
 export const Conversation = ({
   reading,
@@ -447,6 +520,10 @@ export const Conversation = ({
       : watchHeight(element, setBoxHeight);
   }, [paused]);
   const footed = reading && !paused && changingAt !== answer;
+  // Over his summary the box gives way to its answer, unless they change something in it.
+  const { answered, changing, change } = useSummaryAnswer(
+    !reading && !guiding && !paused
+  );
   return (
     <>
       <TurnTrouble />
@@ -457,7 +534,11 @@ export const Conversation = ({
           ) : (
             <>
               <div aria-hidden="true" {...stylex.props(styles.lead)} />
-              {guiding && !paused ? <Guide /> : <Asking paused={paused} />}
+              {guiding && !paused ? (
+                <Guide />
+              ) : (
+                <Asking changing={changing} onChange={change} paused={paused} />
+              )}
             </>
           )}
         </div>
@@ -480,7 +561,7 @@ export const Conversation = ({
               </Button>
             </div>
           ) : null}
-          {footed || paused ? null : (
+          {footed || paused || answered ? null : (
             <AnswerBox
               guiding={guiding}
               // Afresh once the guide is done, with the cursor in the box for whoever types.

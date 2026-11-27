@@ -146,6 +146,12 @@ export interface LoopState {
    * says it.
    */
   ahead: string | null;
+  /**
+   * The summary he gives in the conversation (the agent's own, its one
+   * summary): his line that sums it up, from the moment he begins it, and
+   * whether he asked if it is right. Shown big on the stage in his place.
+   */
+  summary: { line: string; asked: boolean } | null;
 }
 
 /** What happens in the conversation, as it is told on `window` (`loopEventName`). */
@@ -196,6 +202,7 @@ const idle: LoopState = {
   sign: null,
   trouble: null,
   ahead: null,
+  summary: null,
 };
 
 let state: LoopState = idle;
@@ -824,15 +831,6 @@ const readPart = async (): Promise<void> => {
   listen(true);
 };
 
-/** What he does once his line is said: the read-back, the end, or waiting for the answer. */
-const onward = (): void => {
-  if (isReading(progressNow())) {
-    void readPart();
-    return;
-  }
-  listen(true);
-};
-
 /** They say yes to the part of the read-back on screen: with the button, or in words. */
 export const agreeToPart = (inWords?: string): void => {
   if (!on || words === null || !isReading(progressNow())) {
@@ -1222,6 +1220,9 @@ let hisStretch: string | null = null;
 let hisWords = "";
 /** He said he will read back: the session is left once his line is said. */
 let liveReadsBack = false;
+/** A line of his this long, once he goes to the read-back, is the summary itself, not the words before it. */
+const summaryChars = 160;
+
 let liveMuting: (() => void) | null = null;
 /** Keeps the level of their voice for the hill in the box, while in a session. */
 let liveLevel: (() => void) | null = null;
@@ -1314,6 +1315,24 @@ const muteQuietly = async (session: Live, muted: boolean): Promise<void> => {
     await session.setMuted(muted);
   } catch {
     // As above.
+  }
+};
+
+/**
+ * His summary asks its answer, and the two buttons under it give it: their
+ * microphone and our own ear rest until they choose to change something, so
+ * talk around them never reaches him or the transcript.
+ */
+let summaryHeld = false;
+
+/** Their microphone in the session: muted while they mute it, or while his summary waits for its answer. */
+const micHeld = (): boolean => micMuted() || summaryHeld;
+
+/** The summary's answer is waited for, or no longer: the microphone follows. */
+const holdForSummary = (held: boolean): void => {
+  summaryHeld = held;
+  if (live !== null) {
+    void muteQuietly(live, micHeld());
   }
 };
 
@@ -1518,6 +1537,10 @@ const liveSegment = ({ id, from, text, final }: LiveSegment): void => {
   }
   asked = heardText.endsWith("?");
   hisWords = heardText;
+  if (liveReadsBack && heardText.length >= summaryChars) {
+    // His summary: it stands big on the stage as he says it, in his place.
+    set({ summary: { line: heardText, asked: false } });
+  }
   if (liveTextOnly || (hisVoiced && liveSpokeAt === null)) {
     // Without sound his line stands whole at once, to be read.
     set({ line: heardText, from: heardText.length });
@@ -1563,11 +1586,11 @@ const liveDoing = (doing: LiveDoing): void => {
     show("thinking");
     return;
   }
-  if (liveReadsBack) {
-    // He said he will read back, and his line is said: the read-back goes on here.
-    // oxlint-disable-next-line no-use-before-define -- the session is left for it
-    void toReadBack();
-    return;
+  if (state.summary !== null && !state.summary.asked) {
+    // His summary is said, and he asks whether it is right: they answer under it, with the
+    // buttons, and nothing more is listened to until they want to change something.
+    set({ summary: { ...state.summary, asked: true } });
+    holdForSummary(true);
   }
   show("listening");
 };
@@ -1575,13 +1598,11 @@ const liveDoing = (doing: LiveDoing): void => {
 /** He goes to another part: the screen follows, and the read-back waits for his line. */
 const livePart = (part: InterviewPhase): void => {
   if (part === "readback") {
+    // He sums it up himself, in the conversation: what he says is the one summary, shown on
+    // the stage as he says it, and their yes or change goes back to him (the owner's ask,
+    // 2026-11-27). He says goodbye and hangs up once they agree (`finished`).
     liveReadsBack = true;
     foretell();
-    if (liveTextOnly && state.doing === "listening") {
-      // Without sound his line stands already when he says where he goes: nothing more of it is waited for.
-      // oxlint-disable-next-line no-use-before-define -- the session is left for it
-      void toReadBack();
-    }
     return;
   }
   update((progress) => steered(progress, { phase: part, wants: "answer" }));
@@ -1619,7 +1640,8 @@ const left = async (quick: boolean): Promise<void> => {
   hisWords = "";
   hisVoiced = false;
   hisUnseen = null;
-  set({ ahead: null });
+  summaryHeld = false;
+  set({ ahead: null, summary: null });
   liveReadsBack = false;
   if (session === null) {
     return;
@@ -1707,47 +1729,6 @@ const endWritten = async (count: number): Promise<void> => {
   approveWhenKept();
 };
 
-/** The read-back, after his line that says so: the session is left, and he reads back here. */
-const toReadBack = async (): Promise<void> => {
-  const count = liveCount;
-  if (liveTextOnly) {
-    // Nobody hears his last line: it stands as long as it takes to read.
-    await pause(sayingMs(state.line));
-    if (!on || liveCount !== count) {
-      return;
-    }
-  }
-  show("thinking");
-  await leaveLive();
-  // oxlint-disable-next-line no-use-before-define -- the rest of it, also when tried again
-  await readBackWritten(count + 1);
-};
-
-/** The read-back, once what was said is written down: it never reads back a summary that misses an answer. */
-const readBackWritten = async (count: number): Promise<void> => {
-  const done = await written();
-  if (!on || liveCount !== count) {
-    return;
-  }
-  if (!done) {
-    notWritten(() => {
-      show("thinking");
-      void readBackWritten(count);
-    });
-    return;
-  }
-  update((progress) =>
-    steered(progress, { phase: "readback", wants: "readback" })
-  );
-  // From here they are heard as before: by his own ears, once he asks whether it is right.
-  happen({
-    type: "voice",
-    at: performance.now(),
-    on: progressNow().mode === "talk",
-  });
-  onward();
-};
-
 /** How a new session opens: as the interview stands, or in the language they just switched to. */
 const eventOf = (
   opening: ReturnType<typeof openingEvent>,
@@ -1803,7 +1784,8 @@ const overhearLive = async (session: Live, count: number): Promise<void> => {
   }
   liveEar = opened;
   opened.on((event) => {
-    if (liveEar !== opened) {
+    if (liveEar !== opened || summaryHeld) {
+      // Over his summary's buttons, what the room says is not theirs to show.
       return;
     }
     if (event.type === "words") {
@@ -1906,11 +1888,11 @@ const joinedLive = (joined: Live, count: number): void => {
   if (joined.textOnly) {
     return;
   }
-  if (micMuted()) {
+  if (micHeld()) {
     void muteQuietly(joined, true);
   }
   liveMuting = watchMute(() => {
-    void muteQuietly(joined, micMuted());
+    void muteQuietly(joined, micHeld());
   });
   void overhearLive(joined, count);
 };
@@ -2037,6 +2019,20 @@ export const sendTyped = (text: string): void => {
   }
   live.type(typed);
   void noteLive();
+};
+
+/** They agree with the summary he gave: their yes goes to him, as said. */
+export const agreeToSummary = (): void => {
+  if (!on || words === null || state.summary === null) {
+    return;
+  }
+  set({ sign: "check" });
+  sendTyped(words.yes);
+};
+
+/** They want to change something in his summary: he listens again, and they say or type it. */
+export const changeSummary = (): void => {
+  holdForSummary(false);
 };
 
 /** A line as it is quoted in a sentence: without its own full stop. */
