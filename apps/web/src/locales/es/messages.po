@@ -6218,6 +6218,10 @@ msgctxt "what else an answer to a decision says"
 msgid "Details"
 msgstr "Detalles"
 
+#: src/connections/support-details.tsx
+msgid "Details for support: {reason} (release {release}, connect {version})"
+msgstr "Detalles para soporte: {reason} (versión {release}, connect {version})"
+
 #: src/settings/event-sources.tsx
 msgid "Details of {name}"
 msgstr "Detalles de {name}"
@@ -8962,10 +8966,6 @@ msgstr "No encontré las columnas. La primera fila debe nombrarlas: nombre, corr
 #: src/interview/words.ts
 msgid "I could not hear that. Say it once more, or type it."
 msgstr "No lo he oído. Dilo otra vez o escríbelo."
-
-#: src/interview/words.ts
-msgid "You have talked as long as you can today. Type your answers to go on, or come back tomorrow to talk."
-msgstr "Ya has hablado todo lo posible por hoy. Escribe tus respuestas para seguir, o vuelve mañana para hablar."
 
 #: src/onboarding/company-step.tsx
 msgid "I could not keep it. Try again in a moment."
@@ -13650,6 +13650,7 @@ msgstr "¿Pausar a Stephen fuera de Grasp?"
 #: src/agents/agent-overview.tsx
 #: src/agents/agent-page.tsx
 #: src/agents/agents-overview.tsx
+#: src/interview/conversation.tsx
 #: src/interview/start.tsx
 #: src/projects/project-view.tsx
 #: src/settings/stephen-card.tsx
@@ -15099,6 +15100,7 @@ msgstr "Resultados"
 
 #: src/agents/agent-overview.tsx
 #: src/agents/agent-page.tsx
+#: src/interview/conversation.tsx
 #: src/workflows/workflow-status.tsx
 msgid "Resume"
 msgstr "Reanudar"
@@ -21693,6 +21695,10 @@ msgstr "No tienes ejecuciones recientes cuya entrada se conserve, así que no ha
 #: src/brain/skills-page.tsx
 msgid "You have no skills of your own yet."
 msgstr "Aún no tienes skills propias."
+
+#: src/interview/words.ts
+msgid "You have talked as long as you can today. Type your answers to go on, or come back tomorrow to talk."
+msgstr "Ya has hablado todo lo posible por hoy. Escribe tus respuestas para seguir, o vuelve mañana para hablar."
 
 #: src/workflows/workflow-rows.tsx
 msgid "You haven't run it yet"

@@ -9,11 +9,13 @@ import type {
   OwnAgentsUsage,
 } from "@grasp-os/shared/agents";
 import { actorOf } from "@grasp-os/shared/audit";
+import { deploymentConfig } from "@grasp-os/shared/config";
 import {
   addConnectorSchema,
   blockConnectorToolSchema,
   catalogLogoPath,
   catalogSourceSchema,
+  composioReasonSchema,
   composioToolkitSchema,
   connectErrors,
   connectionErrors,
@@ -23,7 +25,9 @@ import {
   connectorClientMetadataPath,
   connectorIdSchema,
   connectorToolsRequestSchema,
+  connectVersionSchema,
   oauthProviderSchema,
+  releaseNameSchema,
   returnPathMaxLength,
 } from "@grasp-os/shared/connect";
 import type {
@@ -57,6 +61,7 @@ import { httpConnectionSchema } from "@grasp-os/shared/http-connections";
 import { identifierMaxLength } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import { platformChangeSchema } from "@grasp-os/shared/platform-change";
 import {
   guestRole,
   isAdmin,
@@ -165,6 +170,66 @@ import {
 const connectToolkitRequestSchema = z.object({
   returnTo: z.string().default("/"),
 });
+/** The value of `key` in a coded error's `details`, as it crossed RPC. */
+const detailOfError = (error: unknown, key: string): unknown => {
+  if (typeof error !== "object" || error === null || !("details" in error)) {
+    return undefined;
+  }
+  const { details } = error;
+  return typeof details === "object" && details !== null && key in details
+    ? Reflect.get(details, key)
+    : undefined;
+};
+
+/**
+ * What a failed flow names for support, beside its code: the release
+ * this deployment runs (core's `PLATFORM_CHANGE`), and, from a Composio
+ * refusal, why it was refused and which version of connect refused it.
+ * Each only as its fixed form has it, never secret: a word of a set, a
+ * release's name, eight hex digits.
+ */
+const supportOf = (
+  env: Env,
+  error: unknown
+): { reason?: string; version?: string; release?: string } => {
+  const release = releaseNameSchema.safeParse(
+    deploymentConfig(
+      platformChangeSchema,
+      "PLATFORM_CHANGE",
+      env.PLATFORM_CHANGE
+    )?.release
+  );
+  const reason = composioReasonSchema.safeParse(detailOfError(error, "reason"));
+  const version = connectVersionSchema.safeParse(
+    detailOfError(error, "version")
+  );
+  return {
+    ...(reason.success ? { reason: reason.data } : {}),
+    ...(version.success ? { version: version.data } : {}),
+    ...(release.success ? { release: release.data } : {}),
+  };
+};
+
+/**
+ * Connect's refusal `error` of a start, with what it names for support
+ * (`supportOf`) as its details, for the page that started it to show:
+ * any other error as it is.
+ */
+const withSupport = (env: Env, error: unknown): unknown => {
+  const code = connectionErrors.codeOf(error);
+  if (code === undefined) {
+    return error;
+  }
+  const issues = detailOfError(error, "issues");
+  return connectionErrors.create(code, {
+    ...(Array.isArray(issues) &&
+    issues.every((issue) => typeof issue === "string")
+      ? { issues }
+      : {}),
+    ...supportOf(env, error),
+  });
+};
+
 type ConnectToolkitRequest = Parameters<ConnectionsApi["connectToolkit"]>[0];
 type ConnectToolkitWithKeyRequest = Parameters<
   ConnectionsApi["connectToolkitWithKey"]
@@ -609,14 +674,18 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
         scope: "shared",
       });
     }
-    return await this.#env.CONNECT.startToolkitConnection({
-      person,
-      toolkit,
-      tools,
-      consent,
-      origin: config.origin,
-      returnTo: `${back.pathname}${back.search}`,
-    });
+    try {
+      return await this.#env.CONNECT.startToolkitConnection({
+        person,
+        toolkit,
+        tools,
+        consent,
+        origin: config.origin,
+        returnTo: `${back.pathname}${back.search}`,
+      });
+    } catch (error) {
+      throw withSupport(this.#env, error);
+    }
   }
 
   /**
@@ -659,14 +728,19 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
         scope: "shared",
       });
     }
-    const { connectionId } = await this.#env.CONNECT.connectToolkitWithKey({
-      person,
-      toolkit,
-      tools,
-      consent,
-      values,
-      origin: config.origin,
-    });
+    let connectionId: string;
+    try {
+      ({ connectionId } = await this.#env.CONNECT.connectToolkitWithKey({
+        person,
+        toolkit,
+        tools,
+        consent,
+        values,
+        origin: config.origin,
+      }));
+    } catch (error) {
+      throw withSupport(this.#env, error);
+    }
     back.searchParams.set("connection", connectionId);
     return { url: back.href };
   }
@@ -1409,6 +1483,19 @@ export const clientMetadataResponse = (
   });
 };
 
+/** What a failed flow's redirect names for support, as its query has it. */
+const supportParams = (env: Env, error: unknown): [string, string][] => {
+  const { reason, version, release } = supportOf(env, error);
+  const named: [string, string | undefined][] = [
+    ["connectionReason", reason],
+    ["connectionVersion", version],
+    ["connectionRelease", release],
+  ];
+  return named.flatMap(([name, value]) =>
+    value === undefined ? [] : [[name, value]]
+  );
+};
+
 /** A hint on Composio's redirect, or `undefined` when empty or over `max`. */
 const composioHint = (value: string | null, max: number): string | undefined =>
   value === null || value === "" || value.length > max ? undefined : value;
@@ -1437,7 +1524,10 @@ export const handleConnectionCallback = async (
   // started, and only a path on this origin is followed (`onOrigin`).
   const integrationsPage = new URL("/connectors", config.origin);
   let startedFrom: string | undefined;
-  const failed = (code: string): Response => {
+  // What it names for support (`supportParams`) only once the person
+  // signed in is known: anyone may open this URL, and the release a
+  // deployment runs is not for anyone.
+  const failed = (code: string, signedIn?: { error: unknown }): Response => {
     const started =
       startedFrom === undefined
         ? undefined
@@ -1448,6 +1538,11 @@ export const handleConnectionCallback = async (
         : integrationsPage;
     back.searchParams.delete("connection");
     back.searchParams.set("connectionError", code);
+    const support =
+      signedIn === undefined ? [] : supportParams(env, signedIn.error);
+    for (const [name, value] of support) {
+      back.searchParams.set(name, value);
+    }
     return redirect(back);
   };
   const params = new URL(request.url).searchParams;
@@ -1499,7 +1594,7 @@ export const handleConnectionCallback = async (
       await env.CONNECT.personalAccounts(identity.userId)
     );
   } catch (error) {
-    return failed(errorCodeOf(error));
+    return failed(errorCodeOf(error), { error });
   }
   // A chat app may be waiting on it (channels/connect-own.ts).
   onConnected?.(identity.userId);

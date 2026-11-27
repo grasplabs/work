@@ -716,11 +716,11 @@ describe("grasp/no-inline-styles under the repository's config", () => {
     await expect(lint("alias-twice.tsx")).resolves.toStrictEqual([]);
   }, 60_000);
 
-  it("refuses a member of the feature's own component that is the kit's, here or in another module, and allows one of its own", async () => {
+  it("refuses a member of the feature's own component that is another package's, here or in another module, and allows one of its own", async () => {
     await expect(lint("member-of-own.tsx")).resolves.toStrictEqual([]);
   }, 60_000);
 
-  it("follows a .js path to its .ts module, refusing the kit's component it passes on and allowing the feature's own", async () => {
+  it("follows a .js path to its .ts module, refusing another package's component it passes on and allowing the feature's own", async () => {
     await expect(lint("js-path.tsx")).resolves.toStrictEqual([]);
   }, 60_000);
 });

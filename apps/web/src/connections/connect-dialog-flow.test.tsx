@@ -321,6 +321,33 @@ describe("choosing what Grasp may do in a toolkit", () => {
     ]);
   });
 
+  it("shows what a refused start names for support under its refusal, only in its form", async () => {
+    await opened(hubspot, {
+      connectToolkit: async (): Promise<{ url: string }> =>
+        await Promise.reject(
+          Object.assign(
+            new Error(
+              "The provider didn't complete the connection. Start again."
+            ),
+            {
+              code: "connection.provider_refused",
+              details: {
+                reason: "auth_config:http_403",
+                release: "26.11.900",
+                version: "evil.example",
+              },
+            }
+          )
+        ),
+    });
+    await press(button("Allow and sign in"));
+    expect(
+      document.querySelector('[role="alert"] [data-reason]')?.textContent
+    ).toBe(
+      "Details for support: auth_config:http_403 (release 26.11.900, connect –)"
+    );
+  });
+
   it("turns on what changes things, as Write, in one choice", async () => {
     const sent = await opened(hubspot);
     await press(radio("View and change"));

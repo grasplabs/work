@@ -49,12 +49,14 @@
  * writes `v.json()` only where the spec gives the value no shape `v` can
  * hold.
  *
- * icon-has-move: every Lucide icon the app imports moves in its own parts
- * when its control is pointed at (apps/web/src/icon-moves.css, the
- * `table` option, from the repository's root). It refuses an import of an
- * icon the table gives no move, one whose move names a part the icon
- * isn't drawn with (Lucide redrew it), and one whose move makes the whole
- * icon larger and smaller, which is no move.
+ * no-class-strings: apps/web has no Tailwind, so a class list written in
+ * its JSX styles nothing. It refuses a `className` (or `class`) that holds
+ * class names as text: a string, a template's own text or what it puts
+ * in, an array's element, either branch of a condition, or a call's
+ * argument or what it is called on (`cn("…")`, `["…"].join(" ")`), through
+ * TypeScript's wrappers. Spaces alone name nothing (a `join(" ")`), and a
+ * class name StyleX made (`stylex.props(…).className`) is no text, so both
+ * pass, as does `{...stylex.props(…)}`.
  *
  * no-inline-styles: refuses an inline style object (`style={{ … }}`) and
  * a `style` the lint can't read as a fixed one, with the component
@@ -73,11 +75,8 @@
  * (`div`, which takes `stylex.props`) or a component of another package
  * (the kit's, the router's `Link`), whose `style` is an inline style.
  */
-import path from "node:path";
-
 import shadcnLint from "@shadcn/lint";
 
-import { drawIcon, iconMovesAt } from "./icon-moves.ts";
 import {
   isPlacement,
   isStylesModule,
@@ -140,11 +139,6 @@ interface Context {
   }) => void;
 }
 
-interface IconContext extends Context {
-  filename: string;
-  options: ({ table?: string } | undefined)[];
-}
-
 interface RuleContext extends Context {
   options: ({ reexportsOnly?: boolean } | undefined)[];
 }
@@ -159,7 +153,7 @@ const noScrollbars = {
       component:
         "No scrollbars in the product: leave out <ScrollBar>. The area still scrolls without it.",
       className:
-        'No scrollbars in the product: "{{found}}" shows or styles a scrollbar. Use overflow-auto; styles.css hides every bar.',
+        'No scrollbars in the product: "{{found}}" shows or styles a scrollbar. Let it overflow with `auto`; styles.css hides every bar.',
     },
     schema: [],
   },
@@ -786,6 +780,67 @@ const motionUnit = (object: Node): MotionUnit | undefined => {
   return undefined;
 };
 
+/** Whether `text` names a class: anything but spaces, such as the one a join puts between names. */
+const namesClass = (text: string): boolean => text.trim() !== "";
+
+/** What each kind of expression makes its class list of. */
+const partsOf: Record<string, (node: Node) => unknown[]> = {
+  TemplateLiteral: (node) => node.expressions ?? [],
+  ArrayExpression: (node) => node.elements ?? [],
+  MemberExpression: (node) => [node.object],
+  JSXExpressionContainer: (node) => [node.expression],
+  ConditionalExpression: (node) => [node.consequent, node.alternate],
+  LogicalExpression: (node) => [node.left, node.right],
+  CallExpression: (node) => [node.callee, ...(node.arguments ?? [])],
+};
+
+/** Whether `node` holds class names as text: a string, a template's own text, or either in what it is made of. */
+const holdsText = (node: Node): boolean => {
+  if (valueWrappers.has(node.type)) {
+    return isNode(node.expression) && holdsText(node.expression);
+  }
+  if (node.type === "Literal") {
+    return typeof node.value === "string" && namesClass(node.value);
+  }
+  if (
+    node.type === "TemplateLiteral" &&
+    (node.quasis ?? []).some((quasi) => namesClass(quasi.value.raw))
+  ) {
+    return true;
+  }
+  return nodes(...(partsOf[node.type]?.(node) ?? [])).some((part) =>
+    holdsText(part)
+  );
+};
+
+const noClassStrings = {
+  meta: {
+    type: "problem",
+    docs: {
+      description:
+        "apps/web has no Tailwind: a class list styles nothing; style with StyleX.",
+    },
+    messages: {
+      found:
+        "apps/web has no Tailwind, so this class list styles nothing: place a Damsko component through its style prop, or style an element with {...stylex.props(…)} and Damsko's tokens.",
+    },
+    schema: [],
+  },
+  create: (context: Context) => ({
+    JSXAttribute: (node: Node): void => {
+      const name =
+        typeof node.name === "object" ? nameOf(node.name) : undefined;
+      if (
+        (name === "className" || name === "class") &&
+        isNode(node.value) &&
+        holdsText(node.value)
+      ) {
+        context.report({ node, messageId: "found" });
+      }
+    },
+  }),
+};
+
 const noSlowMotion = {
   meta: {
     type: "problem",
@@ -861,89 +916,6 @@ const noSlowMotion = {
             durationMs(value.value, unit) > LIMIT_MS
           ) {
             report(each, durationMs(value.value, unit));
-          }
-        }
-      },
-    };
-  },
-};
-
-/** The repository's root, which a rule's paths are from. */
-const root = path.join(import.meta.dirname, "../..");
-
-const iconHasMove = {
-  meta: {
-    type: "problem",
-    docs: {
-      description:
-        "Every icon of a control moves in its own parts when it is pointed at.",
-    },
-    messages: {
-      missing:
-        "{{name}} (.lucide-{{icon}}) has no move in {{table}}: give it one, saying which of its parts moves, and how.",
-      beyond:
-        ".lucide-{{icon}} is drawn in {{parts}} parts, but its move in {{table}} names part {{part}}: Lucide redrew it.",
-      sized:
-        "The move of .lucide-{{icon}} itself in {{table}} makes it larger and smaller, which is no move: move its parts, or turn or place it.",
-    },
-    schema: [
-      {
-        type: "object",
-        properties: { table: { type: "string" } },
-        required: ["table"],
-        additionalProperties: false,
-      },
-    ],
-  },
-  create: (context: IconContext) => {
-    const table = context.options[0]?.table ?? "";
-    return {
-      ImportDeclaration: (node: Node): void => {
-        if (
-          node.source?.value !== "lucide-react" ||
-          node.importKind === "type"
-        ) {
-          return;
-        }
-        const moves = iconMovesAt(path.join(root, table));
-        for (const specifier of node.specifiers ?? []) {
-          const name = nameOf(specifier.imported);
-          if (
-            specifier.type !== "ImportSpecifier" ||
-            specifier.importKind === "type" ||
-            typeof name !== "string"
-          ) {
-            continue;
-          }
-          const drawn = drawIcon(context.filename, name);
-          if (drawn === undefined) {
-            continue;
-          }
-          const { icon, parts } = drawn;
-          const move = moves.get(icon);
-          if (move === undefined || move.parts.size === 0) {
-            context.report({
-              node: specifier,
-              messageId: "missing",
-              data: { name, icon, table },
-            });
-            continue;
-          }
-          for (const part of move.parts) {
-            if (part > parts) {
-              context.report({
-                node: specifier,
-                messageId: "beyond",
-                data: { icon, parts: String(parts), part: String(part), table },
-              });
-            }
-          }
-          if (move.sized) {
-            context.report({
-              node: specifier,
-              messageId: "sized",
-              data: { icon, table },
-            });
           }
         }
       },
@@ -1036,7 +1008,7 @@ export default {
     "no-scrollbars": noScrollbars,
     "no-old-product-name": noOldProductName,
     "no-slow-motion": noSlowMotion,
-    "icon-has-move": iconHasMove,
+    "no-class-strings": noClassStrings,
     "no-unexplained-json": noUnexplainedJson,
   },
 };

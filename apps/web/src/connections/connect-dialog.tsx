@@ -57,6 +57,8 @@ import { sortTools, startingChoice } from "./permissions/model.ts";
 import type { SortedTool } from "./permissions/model.ts";
 import { TrustLine, useTallyWords } from "./permissions/parts.tsx";
 import { PermissionChoice } from "./permissions/permission-choice.tsx";
+import { SupportDetails, supportOfError } from "./support-details.tsx";
+import type { Support } from "./support-details.tsx";
 import { allowedOf, toolRules } from "./tool-choices.ts";
 import type { AllowedTool } from "./tool-choices.ts";
 
@@ -174,6 +176,7 @@ const useSignInStart = () => {
   const [attempt, setAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string>();
+  const [support, setSupport] = useState<Support>();
   const newest = useRef(0);
   // Closed, the dialog's attempts count no more: one that answers later
   // neither sends the browser away nor says it failed.
@@ -193,6 +196,7 @@ const useSignInStart = () => {
     setAttempt(mine);
     setBusy(true);
     setFailure(undefined);
+    setSupport(undefined);
     try {
       const started = await core.withSession(action);
       if (current()) {
@@ -202,11 +206,12 @@ const useSignInStart = () => {
     } catch (error) {
       if (current()) {
         setFailure(failureText(error));
+        setSupport(supportOfError(error));
         setBusy(false);
       }
     }
   };
-  return { attempt, begin, busy, failure };
+  return { attempt, begin, busy, failure, support };
 };
 
 /** How long a start may take before the dialog offers to try again. */
@@ -310,6 +315,7 @@ const Parts = ({
   description,
   children,
   failure,
+  support,
   trust,
   foot,
   action,
@@ -320,6 +326,8 @@ const Parts = ({
   children?: ReactNode;
   /** Why something failed, over the trust line. */
   failure: string | undefined;
+  /** What a refusal names for support, under why it failed. */
+  support?: Support | undefined;
   trust: ReactNode;
   /** A line beside the action, such as what the choice adds up to. */
   foot?: string;
@@ -339,6 +347,7 @@ const Parts = ({
         {failure === undefined ? null : (
           <Alert variant="destructive">
             <AlertTitle>{failure}</AlertTitle>
+            {support === undefined ? null : <SupportDetails {...support} />}
           </Alert>
         )}
         {trust}
@@ -481,7 +490,7 @@ const NativeConnect = ({
   again: ListedConnection | undefined;
   returnTo: string;
 }) => {
-  const { attempt, begin, busy, failure } = useSignInStart();
+  const { attempt, begin, busy, failure, support } = useSignInStart();
   const { t } = useLingui();
   const address = integration.companyNetwork;
   const [scope, setScope] = useState<ConnectionScope>(
@@ -554,6 +563,7 @@ const NativeConnect = ({
       }
       description={description()}
       failure={failure}
+      support={support}
       integration={integration}
       title={
         again === undefined ? t`Connect ${app}` : t`Sign in to ${app} again`
@@ -785,7 +795,7 @@ const ToolkitConnect = ({
   startFrom: ListedConnection | undefined;
   returnTo: string;
 }) => {
-  const { attempt, begin, busy, failure } = useSignInStart();
+  const { attempt, begin, busy, failure, support } = useSignInStart();
   const { t } = useLingui();
   const [chosen, setChosen] = useState<AllowedTool[]>();
   const app = integration.name;
@@ -838,6 +848,7 @@ const ToolkitConnect = ({
           : t`Choose what Grasp may do in ${app}, then sign in there.`
       }
       failure={failure ?? notListed ?? entry.failure}
+      support={failure === undefined ? undefined : support}
       foot={tally}
       integration={integration}
       title={

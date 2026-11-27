@@ -6218,6 +6218,10 @@ msgctxt "what else an answer to a decision says"
 msgid "Details"
 msgstr "Détails"
 
+#: src/connections/support-details.tsx
+msgid "Details for support: {reason} (release {release}, connect {version})"
+msgstr "Détails pour le support : {reason} (version {release}, connect {version})"
+
 #: src/settings/event-sources.tsx
 msgid "Details of {name}"
 msgstr "Détails de {name}"
@@ -8962,10 +8966,6 @@ msgstr "Je n’ai pas trouvé les colonnes. La première ligne doit les nommer�
 #: src/interview/words.ts
 msgid "I could not hear that. Say it once more, or type it."
 msgstr "Je n’ai pas entendu. Redites-le, ou écrivez-le."
-
-#: src/interview/words.ts
-msgid "You have talked as long as you can today. Type your answers to go on, or come back tomorrow to talk."
-msgstr "Vous avez parlé aussi longtemps que possible aujourd’hui. Tapez vos réponses pour continuer, ou revenez demain pour parler."
 
 #: src/onboarding/company-step.tsx
 msgid "I could not keep it. Try again in a moment."
@@ -13650,6 +13650,7 @@ msgstr "Mettre Stephen en pause en dehors de Grasp ?"
 #: src/agents/agent-overview.tsx
 #: src/agents/agent-page.tsx
 #: src/agents/agents-overview.tsx
+#: src/interview/conversation.tsx
 #: src/interview/start.tsx
 #: src/projects/project-view.tsx
 #: src/settings/stephen-card.tsx
@@ -15099,6 +15100,7 @@ msgstr "Résultats"
 
 #: src/agents/agent-overview.tsx
 #: src/agents/agent-page.tsx
+#: src/interview/conversation.tsx
 #: src/workflows/workflow-status.tsx
 msgid "Resume"
 msgstr "Reprendre"
@@ -21693,6 +21695,10 @@ msgstr "Vous n’avez aucune exécution récente dont l’entrée est encore con
 #: src/brain/skills-page.tsx
 msgid "You have no skills of your own yet."
 msgstr "Vous n'avez pas encore de skills à vous."
+
+#: src/interview/words.ts
+msgid "You have talked as long as you can today. Type your answers to go on, or come back tomorrow to talk."
+msgstr "Vous avez parlé aussi longtemps que possible aujourd’hui. Tapez vos réponses pour continuer, ou revenez demain pour parler."
 
 #: src/workflows/workflow-rows.tsx
 msgid "You haven't run it yet"

@@ -10,7 +10,6 @@ import { getConfig } from "@lingui/conf";
 import { lingui } from "@lingui/vite-plugin";
 import babel from "@rolldown/plugin-babel";
 import stylex from "@stylexjs/unplugin/vite";
-import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { Features } from "lightningcss";
@@ -38,7 +37,7 @@ const keepLightDark = { exclude: Features.LightDark };
 /**
  * Vite's dev server serves the app's code from paths of its own, not the
  * build's `/assets/`: its client (HMR), React Refresh's runtime, the app's
- * source, Damsko's and the kit's source outside this app (`/@fs/`),
+ * source, the workspace packages' source outside this app (`/@fs/`),
  * prebundled packages and virtual modules (StyleX's runtime). Not
  * `/page-modules/`, which core still keeps out.
  */
@@ -115,10 +114,10 @@ export default defineConfig(({ command }) => ({
     // app's files and the package's alike, and their CSS joins the build's
     // stylesheet. StyleX names a variable by its file's package and path,
     // so both sides of the package boundary agree with no alias here.
-    // Outside any cascade layer, where it holds over Tailwind's base
-    // layer whichever stylesheet the page loads first: in layers of its
-    // own it lost to it whenever its sheet came first, as after an edit
-    // in development.
+    // Outside any cascade layer, where it holds over Damsko's base layer
+    // (styles.css) whichever stylesheet the page loads first: in layers of
+    // its own it lost to it whenever its sheet came first, as after an
+    // edit in development.
     stylex({
       lightningcssOptions: {
         ...keepLightDark,
@@ -149,7 +148,6 @@ export default defineConfig(({ command }) => ({
     leanParts({ linguiConfig }),
     localePreload(),
     bootPreload(),
-    tailwindcss(),
     devServerPolicy,
   ],
   css: { lightningcss: keepLightDark },
@@ -161,11 +159,11 @@ export default defineConfig(({ command }) => ({
     ),
   },
   build: {
-    // Fonts are always files of their own: Vite would inline the smallest
-    // (a few of JetBrains Mono's subsets) as `data:` URLs, which the page's
-    // CSP refuses (font-src is default-src, 'self'; core's security-headers.ts).
-    // The ElevenLabs SDK's audio worklets too (interview/live.ts): a worklet
-    // is a script, and script-src takes none from `data:`.
+    // Fonts are always files of their own: Vite would inline one under
+    // 4 KiB as a `data:` URL, which the page's CSP refuses (font-src is
+    // default-src, 'self'; core's security-headers.ts). The ElevenLabs
+    // SDK's audio worklets too (interview/live.ts): a worklet is a script,
+    // and script-src takes none from `data:`.
     assetsInlineLimit: (file) =>
       file.endsWith(".woff2") || file.includes("/@elevenlabs/client/worklets/")
         ? false

@@ -463,6 +463,71 @@ export const flowReturnSchema = finishConnectionSchema.pick({
   state: true,
 });
 export type FlowReturn = z.input<typeof flowReturnSchema>;
+/**
+ * Why a Composio connection didn't start or finish, for support: one word of a
+ * fixed set, never Composio's text, an ID or anything from the browser.
+ * Connect gives it with the refusal (its `details.reason`) and in the
+ * audit log (`why`); core's callback passes it on as `connectionReason`,
+ * and the Connectors page shows it under the refusal.
+ *
+ * - `redirect_said_failed`: Composio's redirect said `status=failed`.
+ * - `pending`: Composio was still completing the account at the end of
+ *   the wait.
+ * - `status:<word>`: Composio holds the account in that status
+ *   (`other` for one not listed).
+ * - `mismatch:<part>`: the account Composio holds isn't the flow's: its
+ *   ID, toolkit or auth config differs.
+ * - `<step>:<how>`: a request failed. The step is making the auth config
+ *   (`auth_config`), the hosted link (`link`) or, with a key, the
+ *   connected account (`account`), all while starting; or, finishing,
+ *   reading the account (`read`), making its MCP server (`server`) or that
+ *   server's URL (`url`). How is `unanswered` (no answer in time),
+ *   `unreadable` (an answer connect can't read) or `http_<status>`.
+ * - `url:<problem>`: the server URL Composio made isn't one connect calls:
+ *   not exactly one (`count`), not Composio's MCP host (`host`), not this
+ *   server's path (`path`), not exactly this account (`account`), or for
+ *   a user (`user`).
+ */
+export const composioReasonSchema = z.union([
+  z.enum([
+    "redirect_said_failed",
+    "pending",
+    "status:FAILED",
+    "status:EXPIRED",
+    "status:INACTIVE",
+    "status:REVOKED",
+    "status:other",
+    "mismatch:id",
+    "mismatch:toolkit",
+    "mismatch:auth_config",
+    "url:count",
+    "url:host",
+    "url:path",
+    "url:account",
+    "url:user",
+  ]),
+  z
+    .string()
+    .regex(
+      /^(?:auth_config|link|account|read|server|url):(?:unanswered|unreadable|http_[1-5]\d\d)$/u
+    ),
+]);
+export type ComposioReason = z.infer<typeof composioReasonSchema>;
+
+/**
+ * The release a deployment runs, as core's callback names it beside a
+ * refusal (`connectionRelease`) to the person who started the flow: for
+ * support, to see which code answered. Only a release's own form,
+ * `YY.MM.N` (as CI publishes them, such as `26.11.827`), so a crafted link
+ * can put no words of its own on the page.
+ */
+export const releaseNameSchema = z.string().regex(/^\d{2}\.\d{2}\.\d{1,6}$/u);
+
+/**
+ * The first eight hex digits of connect's version ID, as core's callback
+ * names it beside a Composio refusal (`connectionVersion`).
+ */
+export const connectVersionSchema = z.string().regex(/^[0-9a-f]{8}$/u);
 
 /** Longest API key connect takes. */
 export const apiKeyMaxLength = 4096;

@@ -6218,6 +6218,10 @@ msgctxt "what else an answer to a decision says"
 msgid "Details"
 msgstr "Details"
 
+#: src/connections/support-details.tsx
+msgid "Details for support: {reason} (release {release}, connect {version})"
+msgstr "Details voor support: {reason} (release {release}, connect {version})"
+
 #: src/settings/event-sources.tsx
 msgid "Details of {name}"
 msgstr "Details van {name}"
@@ -8962,10 +8966,6 @@ msgstr "Ik kon de kolommen niet vinden. De eerste rij moet ze noemen: naam, e-ma
 #: src/interview/words.ts
 msgid "I could not hear that. Say it once more, or type it."
 msgstr "Ik kon dat niet horen. Zeg het nog een keer, of typ het."
-
-#: src/interview/words.ts
-msgid "You have talked as long as you can today. Type your answers to go on, or come back tomorrow to talk."
-msgstr "Je hebt vandaag zo lang gepraat als het kan. Typ je antwoorden om verder te gaan, of kom morgen terug om te praten."
 
 #: src/onboarding/company-step.tsx
 msgid "I could not keep it. Try again in a moment."
@@ -13650,6 +13650,7 @@ msgstr "Stephen buiten Grasp pauzeren?"
 #: src/agents/agent-overview.tsx
 #: src/agents/agent-page.tsx
 #: src/agents/agents-overview.tsx
+#: src/interview/conversation.tsx
 #: src/interview/start.tsx
 #: src/projects/project-view.tsx
 #: src/settings/stephen-card.tsx
@@ -15099,6 +15100,7 @@ msgstr "Resultaten"
 
 #: src/agents/agent-overview.tsx
 #: src/agents/agent-page.tsx
+#: src/interview/conversation.tsx
 #: src/workflows/workflow-status.tsx
 msgid "Resume"
 msgstr "Hervatten"
@@ -21693,6 +21695,10 @@ msgstr "Je hebt geen recente runs waarvan de invoer nog bewaard is, dus er was n
 #: src/brain/skills-page.tsx
 msgid "You have no skills of your own yet."
 msgstr "Je hebt nog geen eigen skills."
+
+#: src/interview/words.ts
+msgid "You have talked as long as you can today. Type your answers to go on, or come back tomorrow to talk."
+msgstr "Je hebt vandaag zo lang gepraat als het kan. Typ je antwoorden om verder te gaan, of kom morgen terug om te praten."
 
 #: src/workflows/workflow-rows.tsx
 msgid "You haven't run it yet"
