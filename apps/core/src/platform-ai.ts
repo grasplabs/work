@@ -33,7 +33,7 @@ const onboardingVoices = {
  */
 const agentVoices = {
   ...onboardingVoices,
-  stephen: "cjVigY5qzO86Huf0OWal",
+  stephen: "3svOJAOhuPHXwQC2H5eq",
 } as const satisfies Record<Speaker, string>;
 
 /**

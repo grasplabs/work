@@ -317,6 +317,7 @@ export const aiProvidersFake = () => {
       "r1KmysJdVYZjJCm4mL3b",
       "EXAVITQu4vr4xnSDxMaL",
       "cjVigY5qzO86Huf0OWal",
+      "3svOJAOhuPHXwQC2H5eq",
       "TX3LPaxmHKxFdv7VOQHJ",
     ];
     const voice =
