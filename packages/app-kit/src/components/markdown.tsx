@@ -27,13 +27,17 @@ import type { ExtraProps } from "streamdown";
 // packages/app-kit/local-changes.json:
 // - Raw HTML in the text shows as the text it is: Streamdown's own rehype
 //   plugins less rehype-raw, which would parse it into elements.
-// - A link is its words with its address beside them, to read: an App
+// - A link is its words with its address beside them, to read (one within
+//   the answer, a footnote's, its words alone): an App
 //   page's frame opens no window and goes nowhere (sandboxed without
 //   popups or navigation, it opens a URL only through a links permission
 //   of its App), so Streamdown's link, a button whose dialog opens or
 //   copies the address, would do nothing.
 // Upstream's `cn-markdown` class is left out: no style of the registry
-// gives it any CSS, and the lint refuses a class without any.
+// gives it any CSS, and the lint refuses a class without any. An image
+// from another server stays an <img>, as upstream's: the frame's policy
+// (`img-src data: blob:`) refuses to load it, and Streamdown shows that
+// it isn't available.
 
 const languageClass = /language-(?<language>\S+)/u;
 
@@ -97,16 +101,27 @@ function MarkdownCode({
   );
 }
 
+/** The scheme an autolink's words leave out (`www.example.com`, `a@b.c`). */
+const autolinkScheme = /^(?:https?:\/\/|mailto:)/u;
+
 function MarkdownLink({ href, children }: ComponentProps<"a"> & ExtraProps) {
-  // A link still being written, or one whose address the sanitizer
-  // dropped (`javascript:`): its words alone.
-  if (href === undefined || href === "" || href === incompleteLink) {
+  // A link still being written, one whose address the sanitizer dropped
+  // (`javascript:`), or one within the answer (a footnote's): its words
+  // alone.
+  if (
+    href === undefined ||
+    href === "" ||
+    href === incompleteLink ||
+    href.startsWith("#")
+  ) {
     return <span>{children}</span>;
   }
+  // An autolink's words are its address already.
+  const words = children === href.replace(autolinkScheme, "");
   return (
     <span className="wrap-anywhere">
-      {children === href ? (
-        href
+      {words || children === href ? (
+        children
       ) : (
         <>
           {children} ({href})

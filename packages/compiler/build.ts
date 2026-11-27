@@ -431,13 +431,11 @@ export default m;`;
 
 /**
  * Packages whose `browser` build touches the DOM, by the build without it.
- * A kit module must load without a document: wherever it is evaluated
- * before a page exists (a check in a worker, a page's module graph before
- * its frame renders), a module that reads `document` at load fails, and
- * every page that imports it with it. Markdown's entity decoder
- * (`decode-named-character-reference`, under the Markdown's Streamdown)
- * makes an element at load and decodes with `innerHTML`, which an App
- * page's frame refuses (Trusted Types with no policy); its own build
+ * Markdown's entity decoder (`decode-named-character-reference`, under
+ * the Markdown's Streamdown) makes an element as it loads, so its module
+ * fails wherever no document exists (core's pages tests load every kit
+ * module in workerd), and decodes each entity with `innerHTML`, which an
+ * App page's frame refuses (Trusted Types with no policy); its own build
  * decodes from a table instead.
  */
 const loadsWithoutDom: Readonly<Record<string, string>> = {

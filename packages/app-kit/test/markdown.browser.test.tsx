@@ -119,11 +119,15 @@ Two are **overdue** and one is *disputed* &mdash; Smit &amp; Zonen&#39;s.
 
 See [the policy](https://example.com/policy) or https://example.com/terms.
 
+Pay within the term[^1] at www.example.com/pay.
+
 ![Invoice scan](https://images.example.com/scan.png)
 
 \`\`\`ts
 const overdue = invoices.filter((invoice) => invoice.due < today);
 \`\`\`
+
+[^1]: Within 30 days.
 `;
 
 describe("the kit's Markdown, in an App page's frame", () => {
@@ -210,6 +214,10 @@ describe("the kit's Markdown, in an App page's frame", () => {
       // A link is its words and its address, to read: nothing to click.
       links: markdown().querySelectorAll("a").length,
       linkText: texts("p").find((text) => text.startsWith("See")),
+      // An autolink is its address once, and a footnote's links, within
+      // the answer, their words alone.
+      autolink: texts("p").find((text) => text.startsWith("Pay")),
+      footnote: texts("[data-footnotes] li"),
       image: texts("[data-streamdown=image-fallback]"),
       // Fenced code is the kit's code block, its copy button on.
       code: {
@@ -230,6 +238,8 @@ describe("the kit's Markdown, in an App page's frame", () => {
       links: 0,
       linkText:
         "See the policy (https://example.com/policy) or https://example.com/terms.",
+      autolink: "Pay within the term1 at www.example.com/pay.",
+      footnote: ["Within 30 days. ↩"],
       image: ["Image not available"],
       code: {
         title: ["ts"],

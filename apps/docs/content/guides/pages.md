@@ -196,7 +196,7 @@ const Ask = () => {
         <>
           <Message align="end">
             <MessageContent>
-              <Bubble variant="muted">
+              <Bubble>
                 <BubbleContent>{turn.question}</BubbleContent>
               </Bubble>
             </MessageContent>
