@@ -11,14 +11,16 @@ import type { Speaker } from "@grasp-os/shared/voice";
 
 /**
  * Each speaker's voice in the admin's onboarding, by its ElevenLabs ID.
- * Stephen's is "Adam", the voice Eleven v4 is shown with: young,
- * confident, conversational. Claire's is "Jessica": playful, bright and
+ * Stephen's is the interview agent's own voice, so he sounds the same to
+ * the admin as to whoever he interviews (the owner's ask, 2026-11-27);
+ * it is read from the agent when it can be (speech.ts), and this one is
+ * kept for when it can't. Claire's is "Jessica": playful, bright and
  * warm. The sample speakers are ElevenLabs's own voices, each clearly
  * not Stephen. As before Grasp moved its speech to KugelAudio, then
  * Mistral.
  */
 const onboardingVoices = {
-  stephen: "s3TPKV1kjDlVtZbl4Ksh",
+  stephen: "3svOJAOhuPHXwQC2H5eq",
   claire: "r1KmysJdVYZjJCm4mL3b",
   lisa: "EXAVITQu4vr4xnSDxMaL",
   mark: "cjVigY5qzO86Huf0OWal",

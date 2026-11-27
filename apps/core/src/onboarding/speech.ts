@@ -351,10 +351,10 @@ const say = async ({
   const audience = asked.link === undefined ? "onboarding" : "interview";
   const speech = speechOf(audience);
   const model = speechModelOf(audience);
-  // Stephen in an interview speaks as the agent does, its voice as its dashboard sets it now
-  // (read from the agent); the voice fixed in code when it can't be read.
+  // Stephen speaks as the agent does, in an interview and to the admin alike, its voice as its
+  // dashboard sets it now (read from the agent); the voice fixed in code when it can't be read.
   const agentVoice =
-    audience === "interview" && asked.speaker === "stephen"
+    asked.speaker === "stephen"
       ? await models(env).agentVoice(
           `${platformAi.agent.provider}/${platformAi.agent.id}`
         )
