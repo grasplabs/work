@@ -976,18 +976,18 @@ jobs:
   # Every push to main deploys staging's platform (the admin, router and
   # connect gateway) with the Deploy platform workflow, the same steps a
   # run by hand takes, in staging's GitHub and 1Password environments.
-  # Before publish-release: the staging admin imports a release from its
-  # bucket within 5 minutes of its publish (apps/admin/wrangler.jsonc), so
-  # the admin that imports and rolls out a release is always at least as
-  # new as the release, and a release that needs an admin change never
-  # meets the old admin. A deploy that fails holds the release back, and
-  # the run goes red. One staging platform deploy at a time, by hand or
-  # from here: the job's own concurrency group (deploy-platform-staging),
-  # apart from this run's, waits for one deploying and replaces one still
-  # waiting.
+  # Beside release, not after it: it uses nothing of the build, and each
+  # takes about 2 minutes (November 2026). Before publish-release, which
+  # waits for both: the staging admin imports a release from its bucket
+  # within 5 minutes of its publish (apps/admin/wrangler.jsonc), so the
+  # admin that imports and rolls out a release is always at least as new
+  # as the release, and a release that needs an admin change never meets
+  # the old admin. A deploy that fails holds the release back, and the run
+  # goes red. One staging platform deploy at a time, by hand or from here:
+  # the job's own concurrency group (deploy-platform-staging), apart from
+  # this run's, waits for one deploying and replaces one still waiting.
   deploy-platform:
     name: deploy-platform
-    needs: release
     if: github.event_name == 'push'
     uses: ./.github/workflows/deploy-platform.yml
     # A called workflow sees only the secrets its caller hands it, the
@@ -1049,8 +1049,17 @@ jobs:
           required: R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
       # Published under the month's next id (`YY.MM.N`, from the bucket;
       # @grasp-os/shared/release-id): only the manifest's id changes from
-      # the release job's bundle, never a blob.
-      - run: vp run release:upload --release release-out --assign-id
+      # the release job's bundle, never a blob. Only while the commit is
+      # still main's head, asked here, not taken from Deploy platform's
+      # `head`: "Re-run failed jobs" keeps the outputs of the jobs it
+      # doesn't re-run, so a re-run of a push main has moved past would
+      # publish an older commit under a newer id.
+      - run: |
+          set -euo pipefail
+          head=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          vp run release:upload --release release-out --assign-id --head "$head"
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   # When the nightly full run fails, an issue says so: nobody watches the
   # Actions tab at 02:17, and a merge an admin makes outside the queue
