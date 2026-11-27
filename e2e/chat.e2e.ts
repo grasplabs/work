@@ -22,9 +22,12 @@ import { e2eModel } from "./stack.ts";
 
 const quoted = (text: string): string => `'${text.replaceAll("'", "''")}'`;
 
-/** The window of the person's chats, ⌘K away on every page. */
+/**
+ * The window of the person's chats, from the sidebar's search on every page
+ * (⌘K too, but not from the chat's box, which is rich text).
+ */
 const chatsWindow = async (page: Page) => {
-  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByRole("button", { name: "Search chats" }).click();
   const window = page.getByRole("dialog", { name: "Chats" });
   await expect(window).toBeVisible();
   return window;

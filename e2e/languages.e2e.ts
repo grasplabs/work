@@ -20,7 +20,7 @@ test("follows the browser's language, then the one the person picks", async ({
 
   // The language is in Settings › Profile, which the person menu's
   // Settings opens.
-  await page.getByRole("button", { name: "Person", exact: true }).click();
+  await page.getByRole("button", { name: /^Person /u }).click();
   await page.getByRole("menuitem", { name: "Einstellungen" }).click();
   await expect(page).toHaveURL(/\/settings\/profile$/u);
   await page.getByRole("combobox", { name: "Sprache" }).click();
@@ -41,7 +41,7 @@ test("follows the browser's language, then the one the person picks", async ({
   await expect(page.locator("html")).toHaveAttribute("lang", "nl");
 
   // And back, in the same place.
-  await page.getByRole("button", { name: "Person", exact: true }).click();
+  await page.getByRole("button", { name: /^Person /u }).click();
   await page.getByRole("menuitem", { name: "Instellingen" }).click();
   await expect(page).toHaveURL(/\/settings\/profile$/u);
   await page.getByRole("combobox", { name: "Taal" }).click();
