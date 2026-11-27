@@ -27,7 +27,12 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxed, outboxedWhere } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
-import { ofChat, workspaceOf, workspaceOfRow } from "./chat-ref.ts";
+import {
+  ofChat,
+  workspaceOf,
+  workspaceOfColumns,
+  workspaceOfRow,
+} from "./chat-ref.ts";
 import {
   appVersions,
   draftBlobs,
@@ -39,7 +44,6 @@ import {
 } from "./db/core/schema.ts";
 import { notNullFailed } from "./db/d1.ts";
 import { draftWatch } from "./durable-objects.ts";
-import { personalWorkspacePrefix } from "./personal-workspace.ts";
 
 // The draft of an App or a workflow (GRA-1665): one per subject, in core's
 // database, shared by everyone who builds it and by their chats' agents
@@ -1369,7 +1373,7 @@ export const chatWork = async (
     .where(
       and(
         ofChat(draftCheckpoints, chat, draftCheckpoints.personId),
-        sql`${draftCheckpoints.number} = (SELECT MAX(number) FROM draft_checkpoints AS own WHERE own.subject_kind = ${draftCheckpoints.subjectKind} AND own.subject_id = ${draftCheckpoints.subjectId} AND own.chat_id = ${chat.chatId} AND COALESCE(own.workspace_id, ${personalWorkspacePrefix} || own.person_id) = ${chat.workspaceId})`
+        sql`${draftCheckpoints.number} = (SELECT MAX(number) FROM draft_checkpoints AS own WHERE own.subject_kind = ${draftCheckpoints.subjectKind} AND own.subject_id = ${draftCheckpoints.subjectId} AND own.chat_id = ${chat.chatId} AND ${workspaceOfColumns(sql`own.workspace_id`, sql`own.person_id`)} = ${chat.workspaceId})`
       )
     )
     .orderBy(desc(draftCheckpoints.createdAt))

@@ -252,14 +252,18 @@ export interface Where {
 
 /**
  * The permissions that hold `where`, as SQL: those that hold wherever
- * their subject works, and, in a chat, those of that chat alone
- * (chat-connections.ts), for the person who asked for them there.
- * Anywhere else, or with no chat and person, a chat's permission holds
- * nowhere: it fails closed.
+ * their subject works, and, in a chat, those of that chat alone, by its
+ * ref (chat-connections.ts): only its person's agent works there, and
+ * only they asked for it (its `requested_by`). Anywhere else, or with no
+ * chat and person, a chat's permission holds nowhere: it fails closed.
+ *
+ * Two bound values for a chat, as when it was the chat's ID and person:
+ * a start's admission inlines this once per grant it rechecks, in one
+ * statement already at D1's 100 bound values (workflow-starts.ts).
  */
 const holdsIn = ({ context, onBehalfOf }: Where = {}): SQL =>
   context?.type === "chat" && onBehalfOf !== undefined
-    ? sql`(${permissions.chatId} IS NULL OR (${ofChat(permissions, context, permissions.requestedBy)} AND ${permissions.requestedBy} = ${onBehalfOf}))`
+    ? sql`(${permissions.chatId} IS NULL OR ${ofChat(permissions, context, permissions.requestedBy)})`
     : isNull(permissions.chatId);
 
 /**
