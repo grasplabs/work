@@ -1,10 +1,10 @@
 import { chatAskLimits } from "@grasp-os/shared/chat";
 import type { ChatMessage, ChatUpdate } from "@grasp-os/shared/chat";
-import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { workspace } from "../src/durable-objects.ts";
+import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import { chatOf, model, says } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
@@ -200,12 +200,12 @@ describe(
 
     it("aren't offered in a chat app's chat, which can't show them, and its turn answers in words when its model asks anyway", async () => {
       const personId = await someone();
-      const id = workspaceIdSchema.parse(crypto.randomUUID());
-      const stub = workspace(env, id);
+      const agentId = crypto.randomUUID();
+      const stub = workspace(env, personalWorkspaceId(personId));
       const chat = await stub.createChat(
         "Questions",
         personId,
-        id,
+        agentId,
         undefined,
         "teams"
       );

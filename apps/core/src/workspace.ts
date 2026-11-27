@@ -224,6 +224,7 @@ import type { InstructionContext } from "./instruction-files.ts";
 import { chatTurnPurpose } from "./model-spend.ts";
 import { modelSettings, models } from "./models.ts";
 import type { OutsideTextNote } from "./outside-text.ts";
+import { personalWorkspaceId } from "./personal-workspace.ts";
 import type { WorkContext } from "./restricted.ts";
 import { outsideReadOf } from "./ungranted-reads.ts";
 import { retireUnseen } from "./unseen-memories.ts";
@@ -1568,6 +1569,12 @@ export class Workspace extends DurableObject<Env> {
     make?: ChatMake,
     named?: { id: ChatId; key: string }
   ): Chat {
+    // Only this object's own person's: every chat of theirs is here, and
+    // whatever is kept of it elsewhere takes this object's name as its
+    // workspace.
+    if (this.ctx.id.name !== personalWorkspaceId(personId)) {
+      throw agentErrors.create("agent.chat_not_found");
+    }
     const agent = workspaceAgentIdSchema.safeParse(agentId);
     if (!agent.success) {
       // No agent core names: nowhere an agent can work.

@@ -598,6 +598,38 @@ describe("a chat outside its Workspace object", () => {
   });
 });
 
+describe("a chat's Workspace object", () => {
+  it("makes a chat only for its own person, whose object it is", async () => {
+    const ann = await person();
+    const ben = await person();
+    const anns = workspace(env, personalWorkspaceId(ann.userId));
+    const by = actorOf({ userId: ben.userId, staff: false });
+
+    expect({
+      made: await anns.createChat("Ben's", ben.userId, chatAgentId).then(
+        () => "made",
+        (error: unknown) => (error instanceof Error ? error.message : "")
+      ),
+      started: await anns
+        .startChat(crypto.randomUUID(), ben.userId, {
+          key: crypto.randomUUID(),
+          title: "Ben's",
+          agentId: chatAgentId,
+          by,
+        })
+        .then(
+          () => "made",
+          (error: unknown) => (error instanceof Error ? error.message : "")
+        ),
+      annsChats: await ann.api.chats.list(),
+    }).toStrictEqual({
+      made: "There's no such chat.",
+      started: "There's no such chat.",
+      annsChats: [],
+    });
+  });
+});
+
 describe("a chat across the release before", () => {
   it("takes every write the release before makes on this schema", async () => {
     const ann = await person();

@@ -67,7 +67,11 @@ import { activeMember, organizationId } from "./auth/auth.ts";
 import { memberRole } from "./auth/identity.ts";
 import type { Acting } from "./auth/identity.ts";
 import { storedTeamsOf, unreadableTeam } from "./brain-grant-teams.ts";
-import { ofChat, workspaceOfRow } from "./chat-ref.ts";
+import {
+  personalWorkspaceSql,
+  workspaceOf,
+  workspaceOfRow,
+} from "./chat-ref.ts";
 import { madeSensitiveByGrant, widenedByGrant } from "./data-policy.ts";
 import type { Grantee } from "./data-policy.ts";
 import {
@@ -79,6 +83,7 @@ import {
 } from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
 import { appHost, callObject, workspace } from "./durable-objects.ts";
+import { personalWorkspaceId } from "./personal-workspace.ts";
 
 // Permission records and the one check every server path runs. A person
 // asks for a permission (it allows nothing yet), an admin grants it, their
@@ -252,18 +257,26 @@ export interface Where {
 
 /**
  * The permissions that hold `where`, as SQL: those that hold wherever
- * their subject works, and, in a chat, those of that chat alone, by its
- * ref (chat-connections.ts): only its person's agent works there, and
- * only they asked for it (its `requested_by`). Anywhere else, or with no
- * chat and person, a chat's permission holds nowhere: it fails closed.
+ * their subject works, and, in a chat, those of that chat alone
+ * (chat-connections.ts), for the person who asked for them there. In SQL
+ * that is: its chat's ID, its `requested_by` the person the check acts
+ * for, and its workspace that person's own (`personalWorkspaceId`; a row
+ * the release before wrote has none, and is its `requested_by`'s), which
+ * the context's workspace is, checked here first. Together that is the
+ * chat's ref and its person. Anywhere else (a workspace not the person's
+ * own included), or with no chat and person, a chat's permission holds
+ * nowhere: it fails closed.
  *
- * Two bound values for a chat, as when it was the chat's ID and person:
- * a start's admission inlines this once per grant it rechecks, in one
- * statement already at D1's 100 bound values (workflow-starts.ts).
+ * Two bound values for a chat, the chat's ID and the person, the
+ * workspace's prefix inlined: a start's admission inlines this once per
+ * grant it rechecks, in one statement already at D1's limit of bound
+ * values (workflow-starts.ts, `startBoundValuesMax`).
  */
 const holdsIn = ({ context, onBehalfOf }: Where = {}): SQL =>
-  context?.type === "chat" && onBehalfOf !== undefined
-    ? sql`(${permissions.chatId} IS NULL OR ${ofChat(permissions, context, permissions.requestedBy)})`
+  context?.type === "chat" &&
+  onBehalfOf !== undefined &&
+  context.workspaceId === personalWorkspaceId(onBehalfOf)
+    ? sql`(${permissions.chatId} IS NULL OR (${permissions.chatId} = ${context.chatId} AND ${permissions.requestedBy} = ${onBehalfOf} AND ${workspaceOf(permissions, permissions.requestedBy)} = ${personalWorkspaceSql(permissions.requestedBy)}))`
     : isNull(permissions.chatId);
 
 /**

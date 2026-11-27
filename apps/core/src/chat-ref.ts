@@ -29,10 +29,14 @@ interface ChatTable {
 
 /**
  * `personalWorkspacePrefix` as an SQL literal, not a bound value: a check
- * of a start's grants inlines `ofChat` once per guard, in one statement
- * that D1 allows 100 bound values in all (workflow-starts.ts).
+ * of a start's grants inlines a chat's once per grant, in one statement
+ * at D1's limit of bound values (permissions.ts, `holdsIn`).
  */
 const personalPrefixSql = sql.raw(`'${personalWorkspacePrefix}'`);
+
+/** As SQL, the own workspace of the person in column `person`. */
+export const personalWorkspaceSql = (person: AnyColumn): SQL =>
+  sql`${personalPrefixSql} || ${person}`;
 
 /** As SQL, the workspace of a row of `table` with owner `owner` (`ofChat`). */
 export const workspaceOf = (table: ChatTable, owner: AnyColumn): SQL =>

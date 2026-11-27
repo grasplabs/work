@@ -60,10 +60,11 @@ import {
 // never asked for: its one audience, which an admin chose, decides who
 // uses it in every chat, with no grant (ungranted-reads.ts, GRA-2322).
 // The grant is an ordinary permission of the chat's agent that holds
-// only in that chat (its ref, `workspace_id` and `chat_id`), whose
-// person alone asked for it (`requested_by`) and whose agent alone works
-// there (`holdsIn` in permissions.ts), so every call is checked, signed
-// and audited as any other, connect still refuses a personal connection to
+// only in that chat and only for that person: its `chat_id`, its
+// `requested_by` the person the call acts for, and its `workspace_id`
+// that person's own, which the call's chat's is (`holdsIn` in
+// permissions.ts), so every call is checked, signed and audited as any
+// other, connect still refuses a personal connection to
 // anyone but its owner, and every write from chat is still held for the
 // person to confirm.
 //

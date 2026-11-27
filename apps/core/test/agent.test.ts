@@ -1,7 +1,7 @@
 import { agentErrors } from "@grasp-os/shared/agent";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { WorkspaceId } from "@grasp-os/shared/ids";
-import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
+import { chatIdSchema } from "@grasp-os/shared/ids";
 import { modelErrors } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import {
@@ -14,6 +14,7 @@ import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { chatSession, workspace } from "../src/durable-objects.ts";
+import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import { analysisPurpose } from "../src/turn-recall.ts";
 import { endedRunsKept } from "../src/workspace.ts";
 import {
@@ -243,7 +244,7 @@ describe("chat agent", () => {
   });
 
   it("audits every model request as the workspace's agent, acting for the chat's person, in the chat", async () => {
-    const { id, chat, personId, ask } = await newChat(
+    const { agent, chat, personId, ask } = await newChat(
       codeStep("export default async () => 1 + 1;"),
       says("Two.")
     );
@@ -252,8 +253,8 @@ describe("chat agent", () => {
 
     const events = await modelCallsBy(personId, 2);
     expect(events.map(({ actor }) => actor)).toStrictEqual([
-      { type: "agent", agentId: id, onBehalfOf: personId },
-      { type: "agent", agentId: id, onBehalfOf: personId },
+      { type: "agent", agentId: agent.agentId, onBehalfOf: personId },
+      { type: "agent", agentId: agent.agentId, onBehalfOf: personId },
     ]);
     expect(events.map(({ detail }) => detail)).toStrictEqual([
       expect.objectContaining({
@@ -273,12 +274,12 @@ describe("chat agent", () => {
 
   it("names the chat platform a chat came through in the audit of its turns", async () => {
     const { userId } = await signedInWithRole(idp, "user");
-    const id = workspaceIdSchema.parse(crypto.randomUUID());
-    const stub = workspace(env, id);
+    const agentId = crypto.randomUUID();
+    const stub = workspace(env, personalWorkspaceId(userId));
     const chat = await stub.createChat(
       "Questions",
       userId,
-      id,
+      agentId,
       undefined,
       "teams"
     );
@@ -290,7 +291,7 @@ describe("chat agent", () => {
     expect(chat.via).toBe("teams");
     expect(event?.actor).toStrictEqual({
       type: "agent",
-      agentId: id,
+      agentId,
       onBehalfOf: userId,
       via: "teams",
     });
