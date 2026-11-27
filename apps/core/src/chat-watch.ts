@@ -11,6 +11,8 @@ import type {
 } from "@grasp-os/shared/chat";
 import type { ModelWait } from "@grasp-os/shared/models";
 
+import { Pushes } from "./pushes.ts";
+
 /** Where a watcher's updates go: the frontend's callback, through core. */
 export type ChatListener = Rpc.Stub<(update: ChatUpdate) => Promise<void>>;
 
@@ -107,20 +109,17 @@ const outputChange = (
 };
 
 /**
- * One watcher of a chat (the Workspace object's `watch`). Updates go out
- * one at a time: while one is on its way, whatever changes waits, and the
- * next update carries it all: every stored message in order, what the
- * response being written gained since (not all of it again), and the
- * chat's provenance only when it changed. So a response streaming in token
- * by token costs a slow connection a few small updates, and a message is
- * never lost or sent twice. An update that fails (the connection is gone,
- * the person may no longer follow the chat) drops the watcher.
+ * One watcher of a chat (the Workspace object's `watch`). Each update
+ * carries every stored message it hasn't had, in order, what the response
+ * being written gained since (not all of it again), and the chat's
+ * provenance only when it changed. So a response streaming in token by
+ * token costs a slow connection a few small updates, and a message is
+ * never lost or sent twice (`Pushes`).
  */
 export class ChatWatch {
-  readonly #listener: ChatListener;
+  readonly #pushes: Pushes<ChatUpdate>;
   readonly #state: () => ChatState;
   readonly #provenance: () => ChatProvenance;
-  readonly #drop: () => void;
   /** Stored messages this watcher hasn't had yet, oldest first. */
   readonly #unsent: ChatMessage[] = [];
   /** Calls of the chat's code this watcher hasn't had yet, oldest first. */
@@ -131,9 +130,6 @@ export class ChatWatch {
   #shownOutput: ChatOutput | null | undefined = undefined;
   /** The provenance version this watcher has; none at first. */
   #provenanceSent: number | undefined;
-  /** Something changed since the last update went out. */
-  #changed = false;
-  #sending = false;
 
   constructor(
     listener: ChatListener,
@@ -141,10 +137,9 @@ export class ChatWatch {
     provenance: () => ChatProvenance,
     drop: () => void
   ) {
-    this.#listener = listener;
+    this.#pushes = new Pushes(listener, () => this.#next(), drop);
     this.#state = state;
     this.#provenance = provenance;
-    this.#drop = drop;
   }
 
   /**
@@ -157,8 +152,7 @@ export class ChatWatch {
   ): void {
     this.#unsent.push(...messages);
     this.#unsentTools.push(...tools);
-    this.#changed = true;
-    void this.#flush();
+    this.#pushes.changed();
   }
 
   #next(): ChatUpdate {
@@ -197,28 +191,9 @@ export class ChatWatch {
     return update;
   }
 
-  async #flush(): Promise<void> {
-    if (this.#sending) {
-      return;
-    }
-    this.#sending = true;
-    try {
-      while (this.#changed) {
-        this.#changed = false;
-        // oxlint-disable-next-line no-await-in-loop -- one update at a time, in order
-        await this.#listener(this.#next());
-      }
-    } catch {
-      this.#drop();
-    } finally {
-      this.#sending = false;
-    }
-  }
-
   [Symbol.dispose](): void {
-    this.#changed = false;
     this.#unsent.length = 0;
     this.#unsentTools.length = 0;
-    this.#listener[Symbol.dispose]();
+    this.#pushes[Symbol.dispose]();
   }
 }

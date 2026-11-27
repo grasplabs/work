@@ -478,6 +478,57 @@ test("a person comes back to a chat that answered while they were away, sees its
   ).toBeVisible();
 });
 
+test("a person's list follows what happens elsewhere: a chat answered in the background gets its dot, and a question from another tab moves its chat up, with no page change", async ({
+  pageOf,
+}) => {
+  const { user } = peopleIn("chat");
+  const page = await pageOf(user);
+  const tag = crypto.randomUUID().slice(0, 8);
+  const older = `Invoices ${tag}`;
+  const newer = `Travel ${tag}`;
+  const { core, api } = apiOf(user);
+  try {
+    const first = await api.chats.create(older);
+    await api.chats.create(newer);
+    await page.goto("/apps");
+    const sidebar = page.getByRole("navigation", { name: "Main" });
+    const titles = sidebar
+      .getByRole("link")
+      .filter({ hasText: tag })
+      .filter({ hasNotText: "Answering" });
+    await expect(titles).toHaveText([newer, older]);
+
+    // Asked on another device, and answered there while this page stays
+    // on Apps: the row moves up and gets its dot, nothing read again.
+    await api.chats.send(first.id, {
+      text: `${modelScripts.answersAtLength.opener} (${older})`,
+      model: e2eModel,
+    });
+    await expect(
+      sidebar.getByRole("link", { name: `${older} Unread` })
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(titles).toHaveText([`${older}Unread`, newer]);
+  } finally {
+    core[Symbol.dispose]();
+  }
+
+  // A second tab asks in the other chat: the first tab's list reorders.
+  const other = await page.context().newPage();
+  await other.goto("/");
+  await other
+    .getByRole("navigation", { name: "Main" })
+    .getByRole("link", { name: newer, exact: true })
+    .click();
+  await other
+    .getByRole("textbox", { name: "Ask Grasp" })
+    .fill(`${modelScripts.answersAtLength.opener} (${newer})`);
+  await other.getByRole("button", { name: "Send", exact: true }).click();
+  const sidebar = page.getByRole("navigation", { name: "Main" });
+  await expect(
+    sidebar.getByRole("link").filter({ hasText: tag }).first()
+  ).toContainText(newer);
+});
+
 test("a person answers the agent's questions in the box's place, and sends the answers", async ({
   pageOf,
 }) => {
