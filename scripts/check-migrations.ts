@@ -12,10 +12,16 @@
  * base). A journal the branch changed is still held to main's tip, so new
  * migrations are rebased behind the ones main shipped since; the merge
  * queue tests every pull request on the latest main besides.
+ *
+ * Last, no migration may break the release before it, which still runs
+ * on the new schema for a while after a deploy and after a rollback
+ * (scripts/migration-safety.ts).
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import path from "node:path";
 
+import { checkDatabase, firstChecked } from "./migration-safety.ts";
 import { ofRemovedDatabase, storageOf } from "./removed-databases.ts";
 import type { BranchView } from "./removed-databases.ts";
 
@@ -208,6 +214,23 @@ for (const file of journals) {
         `${file}: migration ${entry.idx} is older than the one before it; rebase on main and generate it again.`
       );
     }
+  }
+  // And none breaks the release before it (scripts/migration-safety.ts).
+  // A database added since this check was is judged whole.
+  const dir = path.dirname(path.dirname(file));
+  const migrations = entries.map(({ idx, tag }) => ({
+    idx,
+    tag,
+    sql: readFileSync(`${dir}/${tag}.sql`, "utf-8"),
+  }));
+  errors.push(...checkDatabase(dir, migrations, firstChecked[dir] ?? 0));
+}
+
+for (const dir of Object.keys(firstChecked)) {
+  if (!journals.includes(`${dir}/meta/_journal.json`)) {
+    errors.push(
+      `scripts/migration-safety.ts names ${dir}, which has no journal: remove it from firstChecked.`
+    );
   }
 }
 
