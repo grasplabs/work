@@ -90,10 +90,30 @@ const Title = ({ of }: { of: ChatSummary }) => {
   );
 };
 
+/** A later turn of the chat, its newest page when it is `paged`. */
+const later: ChatUpdate["messages"] = [
+  {
+    id: 3,
+    role: "user",
+    text: "And next year?",
+    at: "2026-10-20T09:00:00.000Z",
+  },
+  {
+    id: 4,
+    role: "assistant",
+    text: "Twenty-five days.",
+    code: [],
+    tools: [],
+    end: "done",
+    at: "2026-10-20T09:00:05.000Z",
+  },
+];
+
 /**
  * The menu over the chat the address names (`?chat=`), `chat` first and
  * `others` to go to, against a core that records its writes; with `slow`,
- * core answers the chat's watch only once `answer` is called.
+ * core answers the chat's watch only once `answer` is called; `paged`, its
+ * watch sends only its later turn, the first one a page older.
  */
 const opened = async (
   chat: ChatSummary,
@@ -103,11 +123,13 @@ const opened = async (
     rename = async () => {
       await Promise.resolve();
     },
+    paged = false,
   }: {
     others?: ChatSummary[];
     slow?: boolean;
     /** How core answers a rename, before it is written down. */
     rename?: () => Promise<void>;
+    paged?: boolean;
   } = {}
 ) => {
   const writes: string[] = [];
@@ -122,7 +144,9 @@ const opened = async (
       onUpdate: (update: ChatUpdate) => void
     ) => {
       await answered.promise;
-      onUpdate(firstUpdate);
+      onUpdate(
+        paged ? { ...firstUpdate, messages: later, older: true } : firstUpdate
+      );
       return {
         release: async () => {
           await Promise.resolve();
@@ -131,6 +155,11 @@ const opened = async (
           // Nothing held open in the fake.
         },
       };
+    },
+    history: async (_chatId: string, before: number) => {
+      await Promise.resolve();
+      writes.push(`history ${before}`);
+      return { messages: firstUpdate.messages, older: false };
     },
     rename: async (id: string, name: string) => {
       await rename();
@@ -315,23 +344,35 @@ describe("the open chat's menu", () => {
     document.body.replaceChildren();
   });
 
-  it("copies the chat as Markdown, as the thread shows it", async () => {
+  it("copies the whole chat as Markdown, its earlier pages read first", async () => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: {
-        writeText: async (text: string) => {
-          await Promise.resolve();
-          copied.push(text);
+        write: async (items: ClipboardItem[]) => {
+          const blob = await items[0]?.getType("text/plain");
+          copied.push((await blob?.text()) ?? "");
         },
       },
     });
-    await opened(leave);
+    const { writes } = await opened(leave, { paged: true });
     await choose("Copy as Markdown");
     await settled();
-    expect(copied).toHaveLength(1);
+    expect({ writes, copies: copied.length }).toStrictEqual({
+      writes: ["history 3"],
+      copies: 1,
+    });
     expect(copied[0]).toMatch(/^# Leave/u);
-    expect(copied[0]).toContain(question);
-    expect(copied[0]).toContain(answer);
+    for (const said of [
+      question,
+      answer,
+      "And next year?",
+      "Twenty-five days.",
+    ]) {
+      expect(copied[0]).toContain(said);
+    }
+    expect(copied[0]?.indexOf(question)).toBeLessThan(
+      copied[0]?.indexOf("And next year?") ?? 0
+    );
   });
 
   it("renames the chat where its name stands, to the name typed", async () => {

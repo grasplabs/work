@@ -5,6 +5,7 @@ import {
   chatToolEventsKept,
 } from "@grasp-os/shared/chat";
 import type {
+  ChatHistoryPage,
   ChatMessage,
   ChatOutput,
   ChatPartial,
@@ -53,6 +54,12 @@ export interface ChatView {
   /** Whether the first update has come. */
   loaded: boolean;
   /**
+   * Whether the chat has messages before the first of `messages`: its
+   * watch sends the newest page (`ChatUpdate.older`), and older ones are
+   * read a page at a time as the person scrolls back (`withOlder`).
+   */
+  older: boolean;
+  /**
    * Where the person had read the chat to as the tab began to follow it
    * (`ChatUpdate.seenUpTo`), from the first update; none before it.
    */
@@ -83,6 +90,7 @@ export const emptyView: ChatView = {
   checking: false,
   waiting: null,
   loaded: false,
+  older: false,
 };
 
 /** `kept` with `added` merged by ID, oldest first, the latest core keeps. */
@@ -125,8 +133,32 @@ export const applyUpdate = (view: ChatView, update: ChatUpdate): ChatView => {
     loaded: true,
     // From the first update: a watch started again later says it again.
     seenUpTo: view.loaded ? view.seenUpTo : update.seenUpTo,
+    // From the first update; a watch taken up again sends only what came
+    // since, which leaves it as it was.
+    older: view.loaded ? view.older : (update.older ?? false),
   };
 };
+
+/**
+ * `view` with an older page of its chat (`ChatsApi.history`) put before
+ * its messages, when it was read before the first of them: one read for
+ * a view replaced since (its first update, over a kept view) is let go.
+ */
+export const withOlder = (
+  view: ChatView,
+  before: number,
+  page: ChatHistoryPage
+): ChatView =>
+  view.messages[0]?.id === before
+    ? {
+        ...view,
+        messages: [
+          ...page.messages.filter(({ id }) => id < before),
+          ...view.messages,
+        ],
+        older: page.older,
+      }
+    : view;
 
 /**
  * The pauses before trying again to start following while core fails: only

@@ -19,6 +19,26 @@ export const copyText = async (text: string): Promise<boolean> => {
 };
 
 /**
+ * Copies text still being put together (a whole chat, read first), and
+ * says whether it worked: the clipboard is handed the text's promise at
+ * once, within the press that asked for it, as a browser needs to let it
+ * write once the text is ready.
+ */
+export const copyTextLater = async (
+  text: Promise<string>
+): Promise<boolean> => {
+  try {
+    const blob = (async () => new Blob([await text], { type: "text/plain" }))();
+    await navigator.clipboard.write([
+      new ClipboardItem({ "text/plain": blob }),
+    ]);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
  * Copies text, and says so for a moment (`copied`); a refused clipboard
  * says that instead.
  */

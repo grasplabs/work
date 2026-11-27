@@ -59,7 +59,15 @@ import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link as RouterLink, useLocation } from "@tanstack/react-router";
-import { lazy, Suspense, useId, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useEffectEvent,
+  useId,
+  useRef,
+  useState,
+} from "react";
 import type { ReactElement, ReactNode } from "react";
 
 import type { ThinkingOf } from "../brain/thinking/play.ts";
@@ -159,6 +167,8 @@ const styles = stylex.create({
   dayRule: { flexGrow: 1, flexBasis: 0, alignSelf: "center" },
   // A loading pair: the person's question over Grasp's answer.
   pair: { display: "grid", gap: space["6"] },
+  // Earlier messages, over the first one the thread has: in the middle.
+  older: { display: "flex", justifyContent: "center" },
   // An answer's foot, as #2503's: its actions, then when it was given, on one line.
   foot: {
     display: "flex",
@@ -1628,6 +1638,112 @@ const pendingMessage = ({ text, files, at }: PendingQuestion) => ({
   })),
 });
 
+/** What the thread has of the chat's earlier messages (`ChatView.older`). */
+export interface ThreadOlder {
+  /** Whether a page of them is being read now. */
+  reading: boolean;
+  /** Whether the last read failed: pressed, it goes again. */
+  failed: boolean;
+  /** Reads the page before the first message the thread has. */
+  onRead: () => void;
+}
+
+/**
+ * How far before the view the earlier messages' row starts their read: a
+ * screen, so a page is there before the person reaches the top.
+ */
+const olderAhead = "100% 0px 0px 0px";
+
+/**
+ * The row over the thread's first message while the chat has earlier ones
+ * (`ChatView.older`), as T3 Code's "Load earlier": their page is read once
+ * the row comes within a screen of the view (`olderAhead`), so scrolling
+ * up goes on with no wait, and on its press, which a keyboard reaches.
+ * The rows read come in over the ones there, which stay where they were
+ * on the screen, and aren't said as news (MessageScroller).
+ */
+const EarlierMessages = ({
+  older,
+  first,
+}: {
+  older: ThreadOlder;
+  /** The first message the thread has: looked for again once it changes. */
+  first: string | undefined;
+}) => {
+  const { t } = useLingui();
+  const row = useRef<HTMLDivElement>(null);
+  const read = useEffectEvent(older.onRead);
+  useEffect(() => {
+    const element = row.current;
+    const log = element?.closest('[role="log"]');
+    // Nothing to read before while the thread has no row.
+    if (
+      first === undefined ||
+      element === null ||
+      log === null ||
+      log === undefined
+    ) {
+      return () => {
+        // Nothing watched.
+      };
+    }
+    // Watched afresh with each page: one that stays near the top after a
+    // short page is read on as well.
+    const near = new IntersectionObserver(
+      (entries) => {
+        if (entries.some(({ isIntersecting }) => isIntersecting)) {
+          read();
+        }
+      },
+      { root: log, rootMargin: olderAhead }
+    );
+    near.observe(element);
+    return () => {
+      near.disconnect();
+    };
+  }, [first]);
+  let label = t`Earlier messages`;
+  if (older.reading) {
+    label = t`Loading earlier messages…`;
+  } else if (older.failed) {
+    label = t`Earlier messages didn't load. Try again`;
+  }
+  return (
+    <div ref={row} {...stylex.props(styles.older)}>
+      <Button
+        aria-busy={older.reading || undefined}
+        disabled={older.reading}
+        onClick={() => {
+          older.onRead();
+        }}
+        size="sm"
+        variant="ghost"
+      >
+        {label}
+      </Button>
+    </div>
+  );
+};
+
+/**
+ * The earlier messages' row as the thread's first, while it has any it
+ * hasn't (`older`); nothing else.
+ */
+const OlderRow = ({
+  older,
+  rows,
+  style,
+}: {
+  older: ThreadOlder | undefined;
+  rows: readonly { id: string }[];
+  style?: LayoutStyle | undefined;
+}) =>
+  older === undefined ? null : (
+    <MessageScrollerItem style={style}>
+      <EarlierMessages first={rows[0]?.id} older={older} />
+    </MessageScrollerItem>
+  );
+
 /** The chat's messages, and the response being written, oldest first. */
 export const ChatThread = ({
   agents = noAgents,
@@ -1649,6 +1765,7 @@ export const ChatThread = ({
   sources,
   pending,
   sourceNames,
+  older,
   children,
 }: {
   /**
@@ -1708,6 +1825,8 @@ export const ChatThread = ({
   pending?: PendingQuestion | undefined;
   /** The connections' names, by ID, which name where a step read from. */
   sourceNames: ReadonlyMap<string, SourceName>;
+  /** The chat's earlier messages, while it has some the thread hasn't. */
+  older?: ThreadOlder | undefined;
   /** Shown after the messages, in the thread: what is held, why it stopped. */
   children?: ReactNode;
 }) => {
@@ -1861,6 +1980,12 @@ export const ChatThread = ({
           <MessageScroller>
             <MessageScrollerViewport aria-label={t`Messages`} id={logId}>
               <MessageScrollerContent aria-busy={running}>
+                <OlderRow
+                  key="older"
+                  older={loaded ? older : undefined}
+                  rows={items}
+                  {...column}
+                />
                 {loaded
                   ? items.map((row) => (
                       <MessageScrollerItem

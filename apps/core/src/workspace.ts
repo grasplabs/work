@@ -22,6 +22,7 @@ import {
   chatChannelSchema,
   chatFilesMax,
   chatFilesPerQuestionMax,
+  chatHistoryPage,
   chatPlatformName,
   isChatPictureType,
   chatMentionsMax,
@@ -35,6 +36,7 @@ import type {
   ChatChannel,
   ChatFile,
   ChatFileType,
+  ChatHistoryPage,
   ChatMake,
   ChatPictureType,
   ChatMessage,
@@ -650,6 +652,9 @@ const chatFileOf = ({
 
 /** The message a watcher saw last: none (`null`), or a stored one's ID. */
 const afterSchema = z.int().nonnegative().nullable();
+
+/** The message a page of history comes before (`history`). */
+const beforeSchema = z.int().positive();
 
 /**
  * Most characters a chat's transcript may hold: a chat past it takes no
@@ -6001,9 +6006,10 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Follows `personId`'s own chat: `listener` gets the messages stored
-   * after the one with ID `after` (all of them for `null`) and the chat as
-   * it is now, then an update on every change (chat-watch.ts). Returns the
-   * ID `unwatch` drops it by; one that can't be reached drops itself.
+   * after the one with ID `after` (for `null`, its first page, `#firstPage`)
+   * and the chat as it is now, then an update on every change
+   * (chat-watch.ts). Returns the ID `unwatch` drops it by; one that can't
+   * be reached drops itself.
    */
   async watch(
     chatId: unknown,
@@ -6022,6 +6028,10 @@ export class Workspace extends DurableObject<Env> {
     // Read again after the await: the chat may have gone meanwhile.
     const { id, readUpTo } = this.#graspChat(chatId, personId);
     this.#requireRoomToWatch();
+    const page =
+      since.data === null
+        ? this.#firstPage(id, readUpTo)
+        : { after: since.data, older: undefined };
     const watchId = crypto.randomUUID();
     const watch = new ChatWatch(
       listener.dup(),
@@ -6030,16 +6040,124 @@ export class Workspace extends DurableObject<Env> {
       () => {
         this.unwatch(id, watchId);
       },
-      readUpTo
+      readUpTo,
+      page.older
     );
     const watchers = this.#watchers.get(id) ?? new Map<string, ChatWatch>();
     watchers.set(watchId, watch);
     this.#watchers.set(id, watchers);
-    watch.push(
-      this.#shownAfter(id, since.data ?? 0, masked),
-      this.#toolEvents(id)
-    );
+    watch.push(this.#shownAfter(id, page.after, masked), this.#toolEvents(id));
     return watchId;
+  }
+
+  /**
+   * The page of `personId`'s chat before the message with ID `before`, as
+   * the watch sends messages (`history`): what an erasure took replaced,
+   * then read in one go, so a message stored meanwhile is never in it.
+   */
+  async history(
+    chatId: unknown,
+    personId: string,
+    before: unknown
+  ): Promise<ChatHistoryPage> {
+    const upTo = beforeSchema.safeParse(before);
+    if (!upTo.success) {
+      throw agentErrors.create("agent.invalid_request");
+    }
+    const masked = await this.#replaceErased(
+      this.#scopeOf(this.#graspChat(chatId, personId))
+    );
+    // Read again after the await: the chat may have gone meanwhile.
+    const { id } = this.#graspChat(chatId, personId);
+    const { after, older } = this.#pageBefore(id, upTo.data);
+    return {
+      messages: this.#shownAfter(id, after, masked, upTo.data),
+      older,
+    };
+  }
+
+  /**
+   * Where a watch from the start begins (after the message with ID
+   * `after`), and whether there is more before (`older`): its newest page
+   * (`#pageBefore`), or, when the person hadn't seen as far back
+   * (`readUpTo`), everything they hadn't seen, so the chat opens at its
+   * New line with nothing more to read. A chat made before chats kept
+   * where their person read to counts as read.
+   */
+  #firstPage(
+    chatId: ChatId,
+    readUpTo: number | null
+  ): { after: number; older: boolean } {
+    const page = this.#pageBefore(chatId);
+    if (readUpTo === null || readUpTo >= page.after) {
+      return page;
+    }
+    const after = this.#turnOf(chatId, readUpTo + 1) - 1;
+    return { after, older: this.#anyFrom(chatId, after) };
+  }
+
+  /**
+   * Where the page of chat `chatId` before message `before` (its newest,
+   * for none) begins: after the ID it answers, so it holds at most
+   * {@link chatHistoryPage} messages and the rest of the turn its first
+   * one is in (`#turnOf`); and whether anything is older. Read by the
+   * index on the chat's messages.
+   */
+  #pageBefore(
+    chatId: ChatId,
+    before?: number
+  ): { after: number; older: boolean } {
+    const ofChat = and(
+      eq(chatMessages.chatId, chatId),
+      before === undefined ? undefined : lt(chatMessages.id, before)
+    );
+    const oldest = this.#db
+      .select({ id: chatMessages.id })
+      .from(chatMessages)
+      .where(ofChat)
+      .orderBy(desc(chatMessages.id))
+      .limit(1)
+      .offset(chatHistoryPage - 1)
+      .get();
+    if (oldest === undefined) {
+      return { after: 0, older: false };
+    }
+    const after = this.#turnOf(chatId, oldest.id) - 1;
+    return { after, older: this.#anyFrom(chatId, after) };
+  }
+
+  /**
+   * Where the turn of chat `chatId`'s message with ID `id` begins: the ID
+   * of its question, the last at or before it, or `id` itself with none.
+   * A page starts there, never in the middle of an answer.
+   */
+  #turnOf(chatId: ChatId, id: number): number {
+    const question = this.#db
+      .select({ id: chatMessages.id })
+      .from(chatMessages)
+      .where(
+        and(
+          eq(chatMessages.chatId, chatId),
+          lte(chatMessages.id, id),
+          sql`json_extract(${chatMessages.message}, '$.role') = 'user'`
+        )
+      )
+      .orderBy(desc(chatMessages.id))
+      .limit(1)
+      .get();
+    return question?.id ?? id;
+  }
+
+  /** Whether chat `chatId` has a message with an ID up to `upTo`. */
+  #anyFrom(chatId: ChatId, upTo: number): boolean {
+    return (
+      this.#db
+        .select({ id: chatMessages.id })
+        .from(chatMessages)
+        .where(and(eq(chatMessages.chatId, chatId), lte(chatMessages.id, upTo)))
+        .limit(1)
+        .get() !== undefined
+    );
   }
 
   /** Refuses another watcher once the object holds its most (chats' and lists' together). */
@@ -6390,14 +6508,22 @@ export class Workspace extends DurableObject<Env> {
   #shownAfter(
     chatId: ChatId,
     after: number,
-    masked: ReadonlySet<string> = new Set()
+    masked: ReadonlySet<string> = new Set(),
+    /** Only those before the message with this ID, a page of history's. */
+    before?: number
   ): ChatMessage[] {
     const asking = this.#asksIn(chatId);
     const carried = this.#filesAfter(chatId, after);
     return this.#db
       .select()
       .from(chatMessages)
-      .where(and(eq(chatMessages.chatId, chatId), gt(chatMessages.id, after)))
+      .where(
+        and(
+          eq(chatMessages.chatId, chatId),
+          gt(chatMessages.id, after),
+          before === undefined ? undefined : lt(chatMessages.id, before)
+        )
+      )
       .orderBy(asc(chatMessages.id))
       .all()
       .flatMap((row) => {
