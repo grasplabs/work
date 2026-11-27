@@ -193,10 +193,12 @@ describe("a new chat's title", () => {
     await expect(listedTitle(ann, chat)).resolves.toBe("Contract");
   });
 
-  it("keeps the seed, and the turn answers, when the call fails or answers no title: several lines, a refusal, too long, nothing", async () => {
+  it("keeps the seed, and the turn answers, when the call fails or answers no title: several lines, a refusal, too long, nothing; never asked again of a dearer model", async () => {
     const ann = await person();
     const answers: ProviderReply[] = [
       { status: 500 },
+      // Refused for its key: no other model is asked for the title.
+      { status: 401, errorType: "authentication_error" },
       says("Sure! Here is a title:\nSupplier contract"),
       says("I'm sorry, I can't help with that"),
       says(
@@ -224,8 +226,9 @@ describe("a new chat's title", () => {
 
     // Each that answered is counted, though the chat keeps none of them.
     await until(async () => {
-      await expect(titleUsage(ann)).resolves.toHaveLength(answers.length - 1);
+      await expect(titleUsage(ann)).resolves.toHaveLength(answers.length - 2);
     });
+    expect(provider.titles).toHaveLength(answers.length);
     const listed = await ann.api.chats.list();
     expect(
       chats.map(({ id }) => listed.find((each) => each.id === id)?.title)
