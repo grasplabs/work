@@ -31,8 +31,9 @@ import {
   refusedAndLetGo,
   slowToFollow,
   whenLetGo,
+  whenSignedOut,
 } from "./page-revocation.ts";
-import { callAuth, openRpc, unique } from "./sign-in.ts";
+import { callAuth, openRpc, outcome, unique } from "./sign-in.ts";
 
 // Revocation (spec 11.4): when a write takes a person's role in an App
 // away, their open pages are cleared without waiting for anything to
@@ -322,20 +323,30 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     const undo = await slowToFollow(opened);
     try {
       const follower = pageFollower();
-      await frame.watchQuery(
-        requestOf(apiOf(opened.release).list, { pagination: {} }),
-        follower.callback
+      // Refused as it asks, once the role change told the tab's
+      // connection to read its session again (identity-changes.ts), or
+      // followed and then refused: either way, nothing of the App shows.
+      const asked = await outcome(
+        frame.watchQuery(
+          requestOf(apiOf(opened.release).list, { pagination: {} }),
+          follower.callback
+        )
       );
+      const letGo = async (): Promise<void> => {
+        await vi.waitFor(
+          () => {
+            expect(follower.state.released).toBeTruthy();
+          },
+          { ...deliveryWait, timeout: deliveryWait.timeout + followDelayMs }
+        );
+      };
+      if (asked !== "app.not_found") {
+        await letGo();
+      }
 
-      await vi.waitFor(
-        () => {
-          expect(follower.state.released).toBeTruthy();
-        },
-        { ...deliveryWait, timeout: deliveryWait.timeout + followDelayMs }
+      expect(follower.received.filter(({ result }) => result.ok)).toStrictEqual(
+        []
       );
-      expect(follower.received.map(({ result }) => result.ok)).toStrictEqual([
-        false,
-      ]);
     } finally {
       undo();
     }
@@ -377,10 +388,12 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
 
     await admin.api.members.remove(member.userId);
 
-    await expect(whenLetGo(follower)).resolves.toStrictEqual({
-      last: "auth.unauthenticated",
-      released: true,
-    });
+    await expect(whenSignedOut(follower, member.closed)).resolves.toStrictEqual(
+      {
+        last: "auth.unauthenticated",
+        released: true,
+      }
+    );
   });
 
   it("clears what a query kept while it waits to follow again, once the person is only a user", async () => {
