@@ -1,3 +1,4 @@
+import { maxCutOffs } from "@grasp-os/workerflow/run";
 import { env } from "cloudflare:workers";
 import { and, eq, inArray } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -393,7 +394,7 @@ describe("a client's deploy", () => {
     });
   });
 
-  it("records the step each attempt killed mid-step reached, and fails the deploy there once none is left, not with the engine's words", async () => {
+  it("records the step each attempt killed mid-step reached, and fails the deploy there at its last cut-off, not with the engine's words", async () => {
     const before = await placedRelease("feat(core): before");
     const client = await live(before);
     const release = await placedRelease("feat(core): too big to upload");
@@ -402,11 +403,9 @@ describe("a client's deploy", () => {
     // there its isolate dies, as one past its memory limit does.
     const coreRead = (call: ApiCall) =>
       call.method === "GET" && call.path.endsWith(`/scripts/${core}`);
-    const attempts = [
-      heldAfter(coreRead),
-      heldAfter(coreRead),
-      heldAfter(coreRead),
-    ];
+    const attempts = Array.from({ length: maxCutOffs }, () =>
+      heldAfter(coreRead)
+    );
     const takeovers: Promise<void>[] = [];
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     await using runs = followRuns();
@@ -450,10 +449,10 @@ describe("a client's deploy", () => {
           status: "failed",
           error: "attempt_lost: core",
         },
-        lost: [
-          { attempt: 1, step: "core" },
-          { attempt: 2, step: "core" },
-        ],
+        lost: Array.from({ length: maxCutOffs - 1 }, (_, index) => ({
+          attempt: index + 1,
+          step: "core",
+        })),
         releases: { connect: release, core: before },
       });
     } finally {
@@ -552,7 +551,7 @@ describe("a client's deploy", () => {
       if (runId === undefined || reads === undefined) {
         throw new Error("The deploy's run wasn't started");
       }
-      for (const attempt of [1, 2, 3]) {
+      for (let attempt = 1; attempt <= maxCutOffs; attempt += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one attempt at a time
         await reads.reached(attempt);
         takeovers.push(deliverAlarm(adminWorkflows.deploy, runId));

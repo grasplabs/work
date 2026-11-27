@@ -6,6 +6,7 @@
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vite-plus/test";
 
+import { maxCutOffs } from "../src/config.ts";
 import { defaultLeaseMs } from "../src/run.ts";
 import {
   alarmOf,
@@ -104,9 +105,15 @@ const failingPast = async (
   };
 };
 
-const cutOff = {
+const cutOffWithNoRetries = {
   name: "WorkflowInternalError",
-  message: "Attempt failed due to internal workflows error",
+  message:
+    "The step's attempt was cut off before its outcome was journaled (the object running it was restarted or evicted), and the step allows no retries, so it is not tried again",
+};
+
+const cutOffTooOften = {
+  name: "WorkflowInternalError",
+  message: `The step's attempts were cut off ${maxCutOffs} times before their outcome was journaled (the object running them was restarted or evicted), so it is not tried again`,
 };
 
 /** Waits until the journal shows generation 1's activation has ended. */
@@ -265,13 +272,13 @@ const takenOver = async (limit: number, order: string) => {
 
 describe("an attempt whose activation was taken over", () => {
   it.each([answerFirst, reachFirst])(
-    "fails a step with no retry left the same whichever comes first, its answer dropped: %s",
+    "fails a step with no retries without running it again, the same whichever comes first, its answer dropped: %s",
     async (order) => {
       const { status, journal, taken } = await takenOver(0, order);
 
       expect(status).toStrictEqual({
         status: "complete",
-        output: { caught: cutOff },
+        output: { caught: cutOffWithNoRetries },
       });
       expect(taken).toHaveLength(1);
       expect(journal).toMatchObject({
@@ -285,7 +292,10 @@ describe("an attempt whose activation was taken over", () => {
             attempt: 1,
             generation: 1,
             ended: "failed",
-            error: JSON.stringify(cutOff),
+            error: JSON.stringify({
+              ...cutOffWithNoRetries,
+              code: "workflow.attempts_cut_off",
+            }),
             retry_at: null,
           },
         ],
@@ -294,7 +304,7 @@ describe("an attempt whose activation was taken over", () => {
   );
 
   it.each([answerFirst, reachFirst])(
-    "retries a step with a retry left at once, under its key, the same whichever comes first, its answer dropped: %s",
+    "retries a step with a retry at once, under its key, spending none of its retries, the same whichever comes first, its answer dropped: %s",
     async (order) => {
       const { status, journal, taken } = await takenOver(1, order);
 
@@ -313,12 +323,140 @@ describe("an attempt whose activation was taken over", () => {
         ],
         steps: [{ state: "succeeded", attempt: 2 }],
         attempts: [
-          { attempt: 1, generation: 1, ended: "superseded" },
+          { attempt: 1, generation: 1, ended: "superseded", retry_at: null },
           { attempt: 2, generation: 2, ended: "succeeded" },
         ],
       });
     }
   );
+
+  it.each([
+    [
+      "is retried each time up to the last allowed, and succeeds",
+      maxCutOffs - 1,
+    ],
+    ["fails its step at the last allowed, not to be retried", maxCutOffs],
+  ])("cut off again and again %s", async (_, cuts) => {
+    const id = newId();
+    const holds = Array.from({ length: cuts }, (__, index) =>
+      hold(id, "taken", index + 1)
+    );
+    await workflow("taken-over").create({
+      id,
+      params: { config: { retries: { limit: 1, delay: 0 } } },
+    });
+    // Each attempt, once out, is cut off: another activation takes the
+    // run over, as one after a restart does, and finds it without an end.
+    const takeovers: Promise<void>[] = [];
+    for (const held of holds) {
+      // oxlint-disable-next-line no-await-in-loop -- one attempt at a time
+      await held.held;
+      takeovers.push(deliverAlarm("taken-over", id));
+    }
+    const status = await ended("taken-over", id);
+    for (const held of holds) {
+      held.release();
+    }
+    await Promise.all(takeovers);
+    const journal = await journalOf("taken-over", id);
+    const history = await runObject("taken-over", id).history({
+      after: 0,
+      limit: 500,
+    });
+    const taken = effectsOf(id, "taken");
+
+    const last = cuts === maxCutOffs ? cuts : cuts + 1;
+    expect(status).toStrictEqual({
+      status: "complete",
+      output:
+        cuts === maxCutOffs
+          ? { caught: cutOffTooOften }
+          : taken.at(-1)?.receipt,
+    });
+    expect({
+      attempts: taken.map((effect) => effect.attempt),
+      keys: new Set(taken.map((effect) => effect.key)).size,
+    }).toStrictEqual({
+      attempts: Array.from({ length: last }, (__, index) => index + 1),
+      keys: 1,
+    });
+    expect(journal.steps).toMatchObject([
+      { state: cuts === maxCutOffs ? "failed" : "succeeded", attempt: last },
+    ]);
+    expect(
+      journal.attempts.map(({ ended: end, error }) => ({ end, error }))
+    ).toStrictEqual([
+      ...Array.from({ length: Math.min(cuts, maxCutOffs - 1) }, () => ({
+        end: "superseded",
+        error: null,
+      })),
+      cuts === maxCutOffs
+        ? {
+            end: "failed",
+            error: JSON.stringify({
+              ...cutOffTooOften,
+              code: "workflow.attempts_cut_off",
+            }),
+          }
+        : { end: "succeeded", error: null },
+    ]);
+    // Each cut-off tells observers only that the next attempt started.
+    expect(
+      (history?.records ?? []).flatMap((record) =>
+        !record.unreadable && record.type.startsWith("attempt_")
+          ? [[record.type, record.attempt]]
+          : []
+      )
+    ).toStrictEqual([
+      ...Array.from({ length: last }, (__, index) => [
+        "attempt_started",
+        index + 1,
+      ]),
+      [cuts === maxCutOffs ? "attempt_errored" : "attempt_completed", last],
+    ]);
+  });
+
+  it("counts a timed-out attempt still running beside a newer one as failed, its answer fenced, and the newer one cut off as no failure", async () => {
+    const id = newId();
+    const first = hold(id, "taken", 1);
+    const second = hold(id, "taken", 2);
+    await workflow("taken-over").create({
+      id,
+      params: {
+        config: { retries: { limit: 1, delay: 0 }, timeout: "2 seconds" },
+      },
+    });
+    await first.held;
+    // The first runs out its timeout, and its retry goes out beside it.
+    await second.held;
+    // The second is cut off at once: another activation takes the run
+    // over, well within its timeout.
+    await deliverAlarm("taken-over", id);
+    const status = await ended("taken-over", id);
+    const before = await journalOf("taken-over", id);
+    // Both answer late, to an activation that is over.
+    first.release();
+    second.release();
+    const journal = await firstActivationEnded("taken-over", id);
+    const taken = effectsOf(id, "taken");
+
+    // Its one retry spent on the timeout, the step still gets an attempt
+    // after the cut-off.
+    expect(status).toStrictEqual({
+      status: "complete",
+      output: taken.find((effect) => effect.attempt === 3)?.receipt,
+    });
+    expect(journal).toMatchObject({
+      steps: [{ state: "succeeded", attempt: 3 }],
+      attempts: [
+        { attempt: 1, generation: 1, ended: "timed_out" },
+        { attempt: 2, generation: 1, ended: "superseded" },
+        { attempt: 3, generation: 2, ended: "succeeded" },
+      ],
+    });
+    // Their late answers wrote nothing over how they ended.
+    expect(journal.attempts).toStrictEqual(before.attempts);
+  });
 
   it("counts as timed out when its timeout ran out after it was taken over, and fails a step with no retry left", async () => {
     const id = newId();

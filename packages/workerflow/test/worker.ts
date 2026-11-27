@@ -540,7 +540,8 @@ export const definitions: Record<string, WorkflowDefinition> = {
     },
   },
   // A step whose retry delay a function says: what the params' `delay`
-  // holds, or a throw for "throw".
+  // holds, or a throw for "throw"; backed off as the params' `backoff`
+  // says ("exponential"), else constant.
   "dynamic-delay": {
     run: async (event, step) => {
       const { instanceId, payload } = event;
@@ -551,7 +552,10 @@ export const definitions: Record<string, WorkflowDefinition> = {
           {
             retries: {
               limit: 3,
-              backoff: "constant",
+              backoff:
+                paramOf(payload, "backoff") === "exponential"
+                  ? "exponential"
+                  : "constant",
               delay: async ({ ctx, error }) => {
                 witness(instanceId, `asked-${ctx.attempt}-${error.name}`);
                 if (said === "throw") {

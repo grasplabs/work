@@ -473,7 +473,7 @@ describe("pause", () => {
     await expect(alarmOf("retrying", id)).resolves.toBe(moved);
   });
 
-  it("moves on the deadline of an attempt left open by the activation it took for dead", async () => {
+  it("retries at once, as cut off, an attempt left open by the activation it took for dead, though the pause outlasted its deadline", async () => {
     const id = newId();
     const charge = hold(id, "charge");
     await workflow("orders").create({ id });
@@ -482,30 +482,32 @@ describe("pause", () => {
     await run.pause();
     // The pausing activation is taken for dead: its attempt stays open.
     await deliverAlarm("orders", id);
-    const before = await journalOf("orders", id);
-    const deadline = before.attempts[0]?.deadline ?? Number.NaN;
-    const pausedAt = before.run.paused_at ?? Number.NaN;
-    const pauseMs = 20;
-    await pastTime(pausedAt + pauseMs);
+    // Paused past the open attempt's deadline.
+    await runInDurableObject(runObject("orders", id), (_, state) => {
+      state.storage.sql.exec(
+        "UPDATE attempts SET deadline = ? WHERE ended_at IS NULL",
+        Date.now() - 1
+      );
+    });
 
     await run.resume();
-    const resumedBy = Date.now();
-    // Read before the held answer comes: the attempt is still open, and
-    // the resumed run's alarm waits for the held handler.
-    const { attempts } = await journalOf("orders", id);
-    const [open] = attempts;
+    // Delivered here: the resumed run's own alarm waits for the held
+    // handler. Its answer, once released, comes to no one.
+    await deliverAlarm("orders", id);
     charge.release();
-    const moved = open?.deadline ?? Number.NaN;
+    const status = await ended("orders", id);
+    const { attempts, steps } = await journalOf("orders", id);
+    const ordinal = steps.find((step) => step.name === "charge")?.ordinal;
 
-    expect(open?.ended).toBeNull();
-    expect(moved - deadline).toBeGreaterThanOrEqual(pauseMs);
-    expect(moved - deadline).toBeLessThanOrEqual(resumedBy - pausedAt);
-    await expect(ended("orders", id)).resolves.toMatchObject({
-      status: "complete",
-    });
+    expect(status).toMatchObject({ status: "complete" });
+    expect(
+      attempts
+        .filter((attempt) => attempt.ordinal === ordinal)
+        .map((attempt) => attempt.ended)
+    ).toStrictEqual(["superseded", "succeeded"]);
   });
 
-  it("moves on the deadline of an attempt whose answer came back superseded, the step's latest still", async () => {
+  it("retries at once, as cut off, an attempt whose answer came back superseded while the run was paused", async () => {
     const id = newId();
     const charge = hold(id, "charge");
     await workflow("orders").create({ id });
@@ -513,28 +515,25 @@ describe("pause", () => {
     const run = await instance("orders", id);
     await run.pause();
     // The pausing activation is taken for dead, and its step's answer then
-    // comes back to no one: the attempt is ended superseded, the step's
-    // latest still, its deadline what the next activation judges it by.
+    // comes back to no one: the attempt is ended superseded, in time.
     await deliverAlarm("orders", id);
     charge.release();
-    const before = await until("the late answer to be ignored", async () => {
+    await until("the late answer to be ignored", async () => {
       const journal = await journalOf("orders", id);
       return journal.attempts[0]?.ended === "superseded" ? journal : undefined;
     });
-    const deadline = before.attempts[0]?.deadline ?? Number.NaN;
-    const pausedAt = before.run.paused_at ?? Number.NaN;
-    const pauseMs = 20;
-    await pastTime(pausedAt + pauseMs);
 
     await run.resume();
-    const resumedBy = Date.now();
-    await ended("orders", id);
-    // What the resume moved it to: the attempt's row keeps it after.
-    const { attempts } = await journalOf("orders", id);
-    const moved = attempts[0]?.deadline ?? Number.NaN;
+    const status = await ended("orders", id);
+    const { attempts, steps } = await journalOf("orders", id);
+    const ordinal = steps.find((step) => step.name === "charge")?.ordinal;
 
-    expect(moved - deadline).toBeGreaterThanOrEqual(pauseMs);
-    expect(moved - deadline).toBeLessThanOrEqual(resumedBy - pausedAt);
+    expect(status).toMatchObject({ status: "complete" });
+    expect(
+      attempts
+        .filter((attempt) => attempt.ordinal === ordinal)
+        .map((attempt) => attempt.ended)
+    ).toStrictEqual(["superseded", "succeeded"]);
   });
 
   it("is reached by an alarm that can't write the pause, which leaves the run to its watchdog", async () => {
