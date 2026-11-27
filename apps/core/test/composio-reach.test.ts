@@ -1,4 +1,5 @@
 import { companyToolClasses, connectErrors } from "@grasp-os/shared/connect";
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -32,12 +33,27 @@ type Admin = Awaited<ReturnType<typeof signedInApi>>;
 const message = (code: Parameters<typeof connectErrors.create>[0]) =>
   connectErrors.create(code).message;
 
-/** Turns every one of the company's class switches off. */
-const everySwitchOff = async (admin: Admin): Promise<void> => {
+/**
+ * Turns every one of the company's class switches off, and takes away any
+ * pointer at the app `connectionId`: after the connection is made, as
+ * making one in these tests turns some on and points at it
+ * (mail-connection.ts `agentMayUse`).
+ */
+const nothingElseOn = async (
+  admin: Admin,
+  connectionId: string
+): Promise<void> => {
   for (const toolClass of companyToolClasses) {
     // oxlint-disable-next-line no-await-in-loop -- one setting at a time
     await admin.api.connections.setToolClass(toolClass, { who: "nobody" });
   }
+  await env.DB.prepare("DELETE FROM app_pointers WHERE connection_id = ?")
+    .bind(connectionId)
+    .run();
+  const pointers = await admin.api.connections.appPointers();
+  expect(
+    pointers.some((each) => each.connectionId === connectionId)
+  ).toBeFalsy();
 };
 
 /**
@@ -82,12 +98,12 @@ describe("a Composio app connected and allowed", setUpTime, () => {
   it("reads at once and asks before a change for someone it is open to, with every class switch off and no pointer", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "user");
-    await everySwitchOff(admin);
     const mail = await mailConnection(
       [],
       ["mail.send", { name: "mail.search", read: true }],
       { audience: "everyone" }
     );
+    await nothingElseOn(admin, mail.id);
 
     await expect(
       triedIn(person.userId, mail.id, { search, send })
@@ -142,10 +158,10 @@ describe("a Composio app connected and allowed", setUpTime, () => {
   it("asks before a tool Composio doesn't call read-only, even one stored as a read", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "user");
-    await everySwitchOff(admin);
     const mail = await mailConnection([], [{ name: "mail.send", read: true }], {
       audience: "everyone",
     });
+    await nothingElseOn(admin, mail.id);
 
     await expect(
       triedIn(person.userId, mail.id, { send })

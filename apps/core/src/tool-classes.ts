@@ -482,7 +482,8 @@ const offeredClassOf = (
  * there for never reaching others, and by an agent of the company's own
  * narrowing its classes (`requireAgentHasClass`). A pointer an admin set
  * at the app before (app-pointers.ts) still narrows its reads, to whom
- * and to what it names: never widened by this.
+ * and to what it names (`connect.app_reads_limited`): never widened by
+ * this.
  */
 const requireComposioToolOn = async (
   env: Env,
@@ -503,7 +504,7 @@ const requireComposioToolOn = async (
   }
   const pointer = await appPointerFor(env, owner.id, authority.onBehalfOf, row);
   if (pointer === undefined) {
-    throw connectErrors.create("connect.app_not_pointed");
+    throw connectErrors.create("connect.app_reads_limited");
   }
   return pointer.resources.length === 0
     ? { toolClass }
@@ -702,6 +703,7 @@ const gateRefusals: ReadonlySet<string> = new Set([
   "connect.class_off",
   "connect.class_unknown",
   "connect.app_not_pointed",
+  "connect.app_reads_limited",
   "connect.agent_app_off",
 ]);
 

@@ -140,7 +140,7 @@ const teamOf = async (...userIds: string[]): Promise<string> => {
 };
 
 describe("a company app", setUpTime, () => {
-  it("isn't read by the chat's agent until an admin points it there, and its sends wait for the person's press", async () => {
+  it("isn't read by the chat's agent while a pointer an admin set leaves its person out, and its sends wait for the person's press", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "user");
     const mail = await mailApp(admin);
@@ -148,8 +148,8 @@ describe("a company app", setUpTime, () => {
     const before = await chatUsing(admin, person.userId, mail.id);
     await expect(before()).resolves.toBe(
       answer({
-        invoice: message("connect.app_not_pointed"),
-        salary: message("connect.app_not_pointed"),
+        invoice: message("connect.app_reads_limited"),
+        salary: message("connect.app_reads_limited"),
         send: "held",
       })
     );
@@ -189,8 +189,8 @@ describe("a company app", setUpTime, () => {
     const others = await chatUsing(admin, outside.userId, mail.id);
     await expect(others()).resolves.toBe(
       answer({
-        invoice: message("connect.app_not_pointed"),
-        salary: message("connect.app_not_pointed"),
+        invoice: message("connect.app_reads_limited"),
+        salary: message("connect.app_reads_limited"),
         send: "held",
       })
     );
@@ -211,8 +211,8 @@ describe("a company app", setUpTime, () => {
     const chat = await chatUsing(admin, person.userId, mail.id);
     await expect(chat()).resolves.toBe(
       answer({
-        invoice: message("connect.app_not_pointed"),
-        salary: message("connect.app_not_pointed"),
+        invoice: message("connect.app_reads_limited"),
+        salary: message("connect.app_reads_limited"),
         send: "held",
       })
     );

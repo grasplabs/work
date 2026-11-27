@@ -616,11 +616,14 @@ describe("a chat's tool search", setUpTime, () => {
         `export default async (self, env) => {
           const listed = (await env.connections.list()).filter(({ name }) => name === ${JSON.stringify(mail.id)});
           const [found] = await env.connections.search({ queries: ["send mail", "search mail"] });
+          const declared = await env.connections.describe(${JSON.stringify(mail.id)}, ["mail.send", "mail.search"]);
           const native = await env.connections.describe(${JSON.stringify(outlook.id)}, ["mail.send"]);
           return {
             native,
             listed,
+            found: (await env.connections.search({ queries: ["send mail"], connection: ${JSON.stringify(mail.id)} }))[0].matches.map(({ action }) => action),
             sends: [...found.matches, ...found.related].filter(({ action }) => action === "mail.send").length,
+            declared: declared.split("\\n\\n").map((part) => part.split("\\n")[0]),
           };
         };`
       ),
@@ -648,7 +651,10 @@ describe("a chat's tool search", setUpTime, () => {
           tools: { "read-company": 1, "change-company": 1 },
         },
       ],
+      // The toolkit's send is found and described beside its search.
+      found: ["mail.send", "mail.search"],
       sends: 1,
+      declared: ["/**", "/**"],
     });
   });
 });
