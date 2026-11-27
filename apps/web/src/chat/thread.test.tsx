@@ -78,7 +78,9 @@ const thread = async (
   /** The questions queued behind the answer, as core says. */
   queued?: readonly ChatQueued[],
   /** The question on its way, as the page passes it. */
-  pending?: PendingQuestion
+  pending?: PendingQuestion,
+  /** The connections' names, by ID, as the page passes them. */
+  sourceNames?: ReadonlyMap<string, { name: string; provider: string }>
 ): Promise<void> => {
   const core = {
     withSession: async <T,>(
@@ -133,6 +135,7 @@ const thread = async (
         newLineBefore={newLineBefore}
         sources={sources}
         pending={pending}
+        sourceNames={sourceNames ?? new Map()}
       />
     ),
   });
@@ -841,7 +844,7 @@ describe(ChatThread, () => {
         id: 3,
         role: "result",
         callId: "write",
-        text: 'Returned:\n{"changed":["src/routes/index.tsx"]}',
+        text: '{"returned":{"changed":["src/routes/index.tsx"]}}',
         failed: false,
         at,
       },
@@ -861,7 +864,10 @@ describe(ChatThread, () => {
     expect({
       lines,
       given: opened?.includes('"src/routes/index.tsx": "export default"'),
-      came: opened?.includes('{"changed":["src/routes/index.tsx"]}'),
+      came:
+        opened?.includes('"changed": [') === true &&
+        opened.includes('"src/routes/index.tsx"') &&
+        !opened.includes("returned"),
       stopped: document
         .querySelectorAll('[role="listitem"]')[1]
         ?.textContent.includes(", Stopped"),
@@ -918,7 +924,7 @@ describe(ChatThread, () => {
         id: 4,
         role: "result",
         callId: "again",
-        text: "Returned:\n[]",
+        text: '{"returned":[]}',
         failed: false,
         at,
       },
@@ -943,24 +949,98 @@ describe(ChatThread, () => {
       failed?.querySelector<HTMLElement>("button[aria-expanded]")?.click();
       await Promise.resolve();
     });
-    const [input, error] = [...(failed?.querySelectorAll("pre") ?? [])].map(
-      (block) => ({
+    const input = failed
+      ?.querySelector('[aria-label="Input"]')
+      ?.textContent.includes('"question": "expense policy"');
+    const error = [...(failed?.querySelectorAll("pre") ?? [])]
+      .map((block) => ({
         label: block.previousElementSibling?.textContent,
         text: block.textContent,
-      })
-    );
+      }))
+      .at(-1);
 
     expect({ line, input, error }).toStrictEqual({
       // Both searches ran; the one that failed is counted again as failed.
       line: "Searched 2 times; 1 step failed 5.0s",
-      input: {
-        label: "Input",
-        text: JSON.stringify({ question: "expense policy" }, null, 2),
-      },
+      input: true,
       error: {
         label: "Why it failed",
         text: "The brain could not be searched.",
       },
+    });
+  });
+
+  it("opens a code step to where it read from, what it logged and what it returned, in words and data, never the JSON core gave the model", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    await thread(
+      [
+        asked,
+        {
+          id: 2,
+          role: "assistant",
+          text: "",
+          code: [{ callId: "run", code: "return await env.gmail.list();" }],
+          tools: [],
+          end: "done",
+          at,
+        },
+        {
+          id: 3,
+          role: "result",
+          callId: "run",
+          text: JSON.stringify({
+            readFrom: [
+              "connection conn-1 (messages.list)",
+              "connection conn-2",
+              "connection conn-3",
+            ],
+            logs: ["Reading the inbox", "Found 2"],
+            returned: { unread: 2, from: ["Acme", "Globex"] },
+            cut: true,
+          }),
+          failed: false,
+          at,
+        },
+      ],
+      null,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      new Map([["conn-1", { name: "Gmail", provider: "gmail" }]])
+    );
+    await openSteps();
+    await act(async () => {
+      document
+        .querySelector<HTMLElement>('[role="listitem"] button[aria-expanded]')
+        ?.click();
+      await Promise.resolve();
+    });
+    const opened =
+      document.querySelector('[role="listitem"]')?.textContent ?? "";
+
+    expect({
+      read: opened.includes("Read from Gmail and 2 connections"),
+      logged: opened.includes("Reading the inbox\nFound 2"),
+      returned:
+        document
+          .querySelector('[role="listitem"] [aria-label="Result"]')
+          ?.textContent.includes('"unread": 2') === true,
+      cut: opened.includes("Part of what came back was left out"),
+      raw: ["readFrom", "returned", "logs", "conn-1", '"cut"'].filter((word) =>
+        opened.includes(word)
+      ),
+    }).toStrictEqual({
+      read: true,
+      logged: true,
+      returned: true,
+      cut: true,
+      raw: [],
     });
   });
 
@@ -970,7 +1050,7 @@ describe(ChatThread, () => {
       id,
       role: "result",
       callId,
-      text: "Returned:\nnull",
+      text: '{"returned":null}',
       failed: false,
       at,
     });

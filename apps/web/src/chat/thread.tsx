@@ -90,6 +90,7 @@ import { recoveredSteps } from "./recovered.ts";
 import { SavedMemoryLine } from "./saved-memory.tsx";
 import { readingFileOf, signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
+import type { SourceName } from "./sources.tsx";
 import { shortTime, turnsOf, workedFor } from "./turns.ts";
 import { newLineRow, OpenAtNewLine } from "./unread.ts";
 
@@ -317,6 +318,8 @@ const stepsOf = (reply: Stepped): StepOf[] =>
 /** What the steps of a turn need to know of where the turn is. */
 interface StepContext {
   results: ReadonlyMap<string, Result>;
+  /** The connections' names, by ID, which name where a step read from. */
+  sourceNames: ReadonlyMap<string, SourceName>;
   recovered: ReadonlySet<string>;
   /** What the running code step has logged so far. */
   output: ChatOutput | null;
@@ -354,6 +357,7 @@ const useAnswerSteps = (): ((
             active: summary(step.call, false),
             status,
             input: JSON.stringify(step.call.input, null, 2),
+            from: "tool",
             result: result?.text,
           };
         }
@@ -369,7 +373,9 @@ const useAnswerSteps = (): ((
               : t`Running a code step`,
           status,
           input: step.code.code,
-          result: result?.text ?? logged,
+          from: "code",
+          result: result?.text,
+          ...(result === undefined && logged !== undefined ? { logged } : {}),
         };
       })
     );
@@ -1131,6 +1137,7 @@ const AnswerBody = ({
         <AnswerSteps
           line={line}
           live={live}
+          sourceNames={context.sourceNames}
           steps={steps}
           workingLabel={working}
         />
@@ -1519,6 +1526,7 @@ export const ChatThread = ({
   newLineBefore,
   sources,
   pending,
+  sourceNames,
   children,
 }: {
   /**
@@ -1576,6 +1584,8 @@ export const ChatThread = ({
   sources?: ReactNode;
   /** The question on its way, drawn as the person's own until core's copy comes. */
   pending?: PendingQuestion | undefined;
+  /** The connections' names, by ID, which name where a step read from. */
+  sourceNames: ReadonlyMap<string, SourceName>;
   /** Shown after the messages, in the thread: what is held, why it stopped. */
   children?: ReactNode;
 }) => {
@@ -1675,6 +1685,7 @@ export const ChatThread = ({
     return {
       chatId,
       results,
+      sourceNames,
       recovered,
       output,
       running,
