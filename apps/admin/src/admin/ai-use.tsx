@@ -617,11 +617,12 @@ const Used = () => {
   return (
     <>
       <div {...stylex.props(styles.top)}>
-        {/* Said only of figures that aren't counted: what they are instead. */}
+        {/* What these figures are: the admin's estimate in euros, apart from
+            the US dollars its core records for Grasp's own AI features. */}
         <Text color="muted" style={styles.note}>
           {usage.counted
-            ? ""
-            : "Worked out from what happened: every interview, who is in, and each workflow that runs."}
+            ? "The admin’s estimate, in euros at its sample prices, of what the Worker counted."
+            : "The admin’s estimate, in euros at its sample prices, worked out from what happened: every interview, who is in, and each workflow that runs."}
         </Text>
         <MonthSelect
           months={usage.months.map((each) => each.month)}
