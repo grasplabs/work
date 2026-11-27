@@ -1,3 +1,4 @@
+import { chatIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { and, eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -90,7 +91,7 @@ export const turnRecordsOf = async (chatId: string, count: number) =>
       const rows = await drizzle(env.DB)
         .select()
         .from(chatTurns)
-        .where(eq(chatTurns.chatId, chatId))
+        .where(eq(chatTurns.chatId, chatIdSchema.parse(chatId)))
         .orderBy(chatTurns.sentAt);
       if (rows.length < count) {
         throw new Error(`${String(rows.length)} of ${String(count)} recorded`);

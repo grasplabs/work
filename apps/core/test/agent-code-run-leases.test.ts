@@ -5,6 +5,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { codeRuntime, sourceHash } from "../src/code-mode.ts";
+import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import {
   codeResults,
   codeStatuses,
@@ -256,10 +257,14 @@ describe("chat agent code run leases", () => {
     );
     // As a person declining the chat's request stores it, and as a
     // revocation in another of the agent's chats does.
-    await revokedRow(agent.agentId, { granted: false, chatId: chat.id });
+    const workspaceId = personalWorkspaceId(chat.personId);
+    await revokedRow(agent.agentId, {
+      granted: false,
+      chat: { workspaceId, chatId: chat.id },
+    });
     await revokedRow(agent.agentId, {
       granted: true,
-      chatId: crypto.randomUUID(),
+      chat: { workspaceId, chatId: chatIdSchema.parse(crypto.randomUUID()) },
     });
     await reply;
 

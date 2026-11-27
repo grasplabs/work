@@ -1,3 +1,4 @@
+import { chatIdSchema } from "@grasp-os/shared/ids";
 import type { InstructionFileRef } from "@grasp-os/shared/instruction-files";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -181,7 +182,8 @@ describe("in a group chat", setUpTime, () => {
     /** Keeps chat `chatId` as having worked on the App last, as Build it does. */
     const workedOn = async (chatId: string) => {
       await keepMadeInChat(env, appKind, appId, ada.userId, {
-        chatId,
+        workspaceId: personalWorkspaceId(ada.userId),
+        chatId: chatIdSchema.parse(chatId),
         turnId: null,
         callId: null,
       });

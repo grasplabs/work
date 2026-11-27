@@ -6,11 +6,7 @@ import type {
 } from "@grasp-os/shared/audit";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import { connectorEventActions } from "@grasp-os/shared/connect";
-import {
-  appIdSchema,
-  permissionIdSchema,
-  workspaceIdSchema,
-} from "@grasp-os/shared/ids";
+import { appIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, PermissionId, TriggerId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
@@ -71,6 +67,11 @@ import { activeMember, organizationId } from "./auth/auth.ts";
 import { memberRole } from "./auth/identity.ts";
 import type { Acting } from "./auth/identity.ts";
 import { storedTeamsOf, unreadableTeam } from "./brain-grant-teams.ts";
+import {
+  personalWorkspaceSql,
+  workspaceOf,
+  workspaceOfRow,
+} from "./chat-ref.ts";
 import { madeSensitiveByGrant, widenedByGrant } from "./data-policy.ts";
 import type { Grantee } from "./data-policy.ts";
 import {
@@ -82,6 +83,7 @@ import {
 } from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
 import { appHost, callObject, workspace } from "./durable-objects.ts";
+import { personalWorkspaceId } from "./personal-workspace.ts";
 
 // Permission records and the one check every server path runs. A person
 // asks for a permission (it allows nothing yet), an admin grants it, their
@@ -238,7 +240,13 @@ export const toPermission = (row: Row): Permission => ({
   revokedBy: row.revokedBy,
   revokedAt: row.revokedAt?.toISOString() ?? null,
   requestedVia: row.requestedVia ?? null,
-  chat: row.chatId,
+  chat:
+    row.chatId === null
+      ? null
+      : {
+          workspaceId: workspaceOfRow(row.workspaceId, row.requestedBy),
+          chatId: row.chatId,
+        },
 });
 
 /** Where a check runs: the context, and the person it acts for. */
@@ -250,13 +258,25 @@ export interface Where {
 /**
  * The permissions that hold `where`, as SQL: those that hold wherever
  * their subject works, and, in a chat, those of that chat alone
- * (chat-connections.ts), for the person who asked for them there.
- * Anywhere else, or with no chat and person, a chat's permission holds
+ * (chat-connections.ts), for the person who asked for them there. In SQL
+ * that is: its chat's ID, its `requested_by` the person the check acts
+ * for, and its workspace that person's own (`personalWorkspaceId`; a row
+ * the release before wrote has none, and is its `requested_by`'s), which
+ * the context's workspace is, checked here first. Together that is the
+ * chat's ref and its person. Anywhere else (a workspace not the person's
+ * own included), or with no chat and person, a chat's permission holds
  * nowhere: it fails closed.
+ *
+ * Two bound values for a chat, the chat's ID and the person, the
+ * workspace's prefix inlined: a start's admission inlines this once per
+ * grant it rechecks, in one statement already at D1's limit of bound
+ * values (`d1BoundValuesMax`, workflow-app-starts.test.ts).
  */
 const holdsIn = ({ context, onBehalfOf }: Where = {}): SQL =>
-  context?.type === "chat" && onBehalfOf !== undefined
-    ? sql`(${permissions.chatId} IS NULL OR (${permissions.chatId} = ${context.chatId} AND ${permissions.requestedBy} = ${onBehalfOf}))`
+  context?.type === "chat" &&
+  onBehalfOf !== undefined &&
+  context.workspaceId === personalWorkspaceId(onBehalfOf)
+    ? sql`(${permissions.chatId} IS NULL OR (${permissions.chatId} = ${context.chatId} AND ${permissions.requestedBy} = ${onBehalfOf} AND ${workspaceOf(permissions, permissions.requestedBy)} = ${personalWorkspaceSql(permissions.requestedBy)}))`
     : isNull(permissions.chatId);
 
 /**
@@ -322,7 +342,9 @@ const auditDetail = ({
     binding,
     // A chat's own permission: which chat, as its person's other events
     // name it.
-    ...(chat === null ? {} : { chat }),
+    ...(chat === null
+      ? {}
+      : { workspace: chat.workspaceId, chat: chat.chatId }),
   };
 };
 
@@ -1016,6 +1038,7 @@ export const requestPermission = async (
     revokedAt: null,
     requestedVia: by.via ?? null,
     personal: false,
+    workspaceId: null,
     chatId: null,
     reason: null,
   };
@@ -1150,6 +1173,7 @@ const requestsOf = (
     revokedAt: null,
     requestedVia: by.via ?? null,
     personal: false,
+    workspaceId: null,
     chatId: null,
     reason: null,
   }));
@@ -1263,24 +1287,23 @@ export const tellChat = async (
   permission: Permission,
   decision: "granted" | "denied"
 ): Promise<void> => {
-  const { chat: chatId, requestedVia } = permission;
-  if (chatId === null || requestedVia === null) {
+  const { chat } = permission;
+  if (chat === null) {
     return;
   }
   try {
-    const workspaceId = workspaceIdSchema.parse(requestedVia.workspaceId);
     // Again on a stub of its own should the object reset under the call: a
     // second notice of the same decision tells the agent nothing new.
     await callObject(async () => {
-      await workspace(env, workspaceId).connectionDecided(
-        chatId,
+      await workspace(env, chat.workspaceId).connectionDecided(
+        chat.chatId,
         permission.requestedBy,
         { binding: permission.binding, decision }
       );
     });
   } catch (error) {
     log.warn("chat.connection_decided_failed", {
-      chatId,
+      ...chat,
       ...errorFields(error),
     });
   }

@@ -1,3 +1,5 @@
+import { chatIdSchema } from "@grasp-os/shared/ids";
+import type { WorkspaceId } from "@grasp-os/shared/ids";
 import type { InstructionFileRef } from "@grasp-os/shared/instruction-files";
 import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
@@ -44,12 +46,12 @@ const saveFile = async (
 ) => await saveInstructions(by.api, file, text);
 
 /**
- * Keeps chat `chatId` of `personId`'s as having worked on `subject` last,
- * as Build it does for what it made there (`keepMadeInChat`): the chat's
- * work, as its turns read it (`chatWork`).
+ * Keeps chat `chatId` of workspace `workspaceId`, `personId`'s, as having
+ * worked on `subject` last, as Build it does for what it made there
+ * (`keepMadeInChat`): the chat's work, as its turns read it (`chatWork`).
  */
 const workedOn = async (
-  chatId: string,
+  { workspaceId, chatId }: { workspaceId: WorkspaceId; chatId: string },
   personId: string,
   subject: { kind: "app" | "workflow"; id: string }
 ) => {
@@ -58,7 +60,12 @@ const workedOn = async (
     subject.kind === "app" ? appKind : workflowKind,
     subject.id,
     personId,
-    { chatId, turnId: null, callId: null }
+    {
+      workspaceId,
+      chatId: chatIdSchema.parse(chatId),
+      turnId: null,
+      callId: null,
+    }
   );
 };
 
@@ -146,7 +153,11 @@ describe("a chat's instructions", setUpTime, () => {
     const { id: appId } = await ada.api.apps.create({ name: `Desk ${u}` });
     await saveFile(ada, { scope: "app", appId }, `App ${u}`);
     const askIn = async (personId: string, onApp: boolean) => {
-      const { stub, provider } = await chatOf(personId, says("Hi."));
+      const {
+        id: workspaceId,
+        stub,
+        provider,
+      } = await chatOf(personId, says("Hi."));
       const chat = await stub.createChat(
         "About the App",
         personId,
@@ -155,7 +166,10 @@ describe("a chat's instructions", setUpTime, () => {
       if (onApp) {
         // Ben's too, though no write of his could name it: the turn checks
         // who builds it whatever the chat's work says.
-        await workedOn(chat.id, personId, { kind: "app", id: appId });
+        await workedOn({ workspaceId, chatId: chat.id }, personId, {
+          kind: "app",
+          id: appId,
+        });
       }
       await stub.ask(chat.id, { text: "Hi.", model });
       const system = systemOf(provider.requests.at(-1)?.body);
@@ -188,17 +202,20 @@ describe("a chat's instructions", setUpTime, () => {
     await saveFile(ada, { scope: "person", personId: ada.userId }, `Ada ${u}`);
     const { id: appId } = await ada.api.apps.create({ name: `Desk ${u}` });
     await saveFile(ada, { scope: "app", appId }, `App ${u}`);
-    const { stub, provider } = await chatOf(
-      ada.userId,
-      says("Woken."),
-      says("Asked.")
-    );
+    const {
+      id: workspaceId,
+      stub,
+      provider,
+    } = await chatOf(ada.userId, says("Woken."), says("Asked."));
     const chat = await stub.createChat(
       "About the App",
       ada.userId,
       crypto.randomUUID()
     );
-    await workedOn(chat.id, ada.userId, { kind: "app", id: appId });
+    await workedOn({ workspaceId, chatId: chat.id }, ada.userId, {
+      kind: "app",
+      id: appId,
+    });
     const held = () => {
       const system = systemOf(provider.requests.at(-1)?.body);
       return [rule, `App ${u}`, `Ada ${u}`].filter((marker) =>
@@ -238,7 +255,11 @@ describe("a chat's instructions", setUpTime, () => {
       throw new TypeError("Expected two Apps");
     }
     const workflow = await owner.api.workflowResources.create(`quotes-${u}`);
-    const { stub, provider } = await chatOf(
+    const {
+      id: workspaceId,
+      stub,
+      provider,
+    } = await chatOf(
       ada.userId,
       ...Array.from({ length: 6 }, () => says("Noted."))
     );
@@ -252,13 +273,25 @@ describe("a chat's instructions", setUpTime, () => {
     };
 
     const none = await held();
-    await workedOn(chat.id, ada.userId, { kind: "app", id: desk });
+    await workedOn({ workspaceId, chatId: chat.id }, ada.userId, {
+      kind: "app",
+      id: desk,
+    });
     const onDesk = await held();
-    await workedOn(chat.id, ada.userId, { kind: "app", id: ledger });
+    await workedOn({ workspaceId, chatId: chat.id }, ada.userId, {
+      kind: "app",
+      id: ledger,
+    });
     const onLedger = await held();
-    await workedOn(chat.id, ada.userId, { kind: "workflow", id: workflow.id });
+    await workedOn({ workspaceId, chatId: chat.id }, ada.userId, {
+      kind: "workflow",
+      id: workflow.id,
+    });
     const onWorkflow = await held();
-    await workedOn(chat.id, ada.userId, { kind: "app", id: desk });
+    await workedOn({ workspaceId, chatId: chat.id }, ada.userId, {
+      kind: "app",
+      id: desk,
+    });
     const backOnDesk = await held();
     // No longer one of its builders: from the next turn, no file.
     await owner.api.apps.members.remove(desk, {
@@ -290,17 +323,20 @@ describe("a chat's instructions", setUpTime, () => {
     const u = unique();
     const { id: appId } = await owner.api.apps.create({ name: `Desk ${u}` });
     await saveFile(owner, { scope: "app", appId }, `Desk ${u}`);
-    const { stub, provider } = await chatOf(
-      owner.userId,
-      says("Noted."),
-      says("Noted.")
-    );
+    const {
+      id: workspaceId,
+      stub,
+      provider,
+    } = await chatOf(owner.userId, says("Noted."), says("Noted."));
     const chat = await stub.createChat(
       "Work",
       owner.userId,
       crypto.randomUUID()
     );
-    await workedOn(chat.id, owner.userId, { kind: "app", id: appId });
+    await workedOn({ workspaceId, chatId: chat.id }, owner.userId, {
+      kind: "app",
+      id: appId,
+    });
     const asked = async () => {
       await stub.ask(chat.id, { text: "Hi.", model });
       return systemOf(provider.requests.at(-1)?.body).includes(`Desk ${u}`);

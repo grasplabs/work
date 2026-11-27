@@ -30,13 +30,13 @@ import { brainOf } from "@grasp-os/brain-next/contract";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { CompanyToolClass } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
+import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import { newTeam } from "./admin-teams.ts";
 import { model, setObjectEnv } from "./agent-chat.ts";
 import { grantReviewed } from "./apps.ts";
@@ -555,8 +555,10 @@ export const setUpStephenCompany = async (
       { scope: "person", personId: person.userId },
       stephenMemory(persona, mailbox, suite)
     );
-    const id = workspaceIdSchema.parse(crypto.randomUUID());
-    placed.set(persona, { stub: workspace(env, id), agentId: id });
+    placed.set(persona, {
+      stub: workspace(env, personalWorkspaceId(person.userId)),
+      agentId: crypto.randomUUID(),
+    });
   }
   const places: StephenCompany["places"] = {
     lisa: held(placed, "lisa"),
@@ -974,14 +976,13 @@ const judgeCase = async (
   seen: StephenObservation,
   checksHeld: boolean
 ): Promise<StephenScore["judge"]> => {
-  // The judge asks in its own object, the admin's, with no grants at all.
-  const id = workspaceIdSchema.parse(crypto.randomUUID());
-  const stub = workspace(env, id);
+  // The judge asks in the admin's object, as an agent with no grants.
+  const stub = workspace(env, personalWorkspaceId(company.admin.userId));
   await pointAt(stub);
   const chat = await stub.createChat(
     `Judge ${item.id}`,
     company.admin.userId,
-    id
+    crypto.randomUUID()
   );
   provider.setTurn({ phase: "judge", item, checksHeld });
   try {

@@ -550,7 +550,6 @@ describe("a request a card's press belongs to", setUpTime, () => {
       });
       // oxlint-disable-next-line no-await-in-loop -- in the order a turn runs
       await settleRequest(env, id, {
-        chatId: "chat-1",
         ended: "answered",
         calls,
         sorted: { topicId: null, questionId: null, answered: true },
@@ -568,7 +567,7 @@ describe("a request a card's press belongs to", setUpTime, () => {
     await env.DB.batch(
       ["teams:older", "teams:newer"].map((id) =>
         env.DB.prepare(
-          "INSERT INTO stephen_requests (id, day, place, person_id, kind, outcome, tools, missing, chat_id) VALUES (?, '2026-10-01', 'teams', 'person-ann', 'changed', 'done', ?, '[]', 'chat-1')"
+          "INSERT INTO stephen_requests (id, day, place, person_id, kind, outcome, tools, missing) VALUES (?, '2026-10-01', 'teams', 'person-ann', 'changed', 'done', ?, '[]')"
         ).bind(id, changes)
       )
     );
@@ -610,7 +609,7 @@ describe("a request a card's press belongs to", setUpTime, () => {
 
   it("is the one whose answer posted the card, however many cards that answer posted", async () => {
     await env.DB.prepare(
-      "INSERT INTO stephen_requests (id, day, place, person_id, kind, outcome, tools, missing, chat_id) VALUES ('teams:many', '2026-10-01', 'teams', 'person-ann', 'answered', 'done', '[]', '[]', 'chat-1')"
+      "INSERT INTO stephen_requests (id, day, place, person_id, kind, outcome, tools, missing) VALUES ('teams:many', '2026-10-01', 'teams', 'person-ann', 'answered', 'done', '[]', '[]')"
     ).run();
     // More cards than one statement of D1's 100 bound parameters keeps.
     const offers = Array.from({ length: 40 }, (_, at) => `offer-${at}`);

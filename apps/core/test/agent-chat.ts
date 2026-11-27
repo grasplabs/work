@@ -6,7 +6,7 @@ import type {
   ToolRegistration,
 } from "@earendil-works/pi-durable";
 import type { Schema, Static } from "@earendil-works/pi-schema";
-import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
+import { chatIdSchema } from "@grasp-os/shared/ids";
 import type { ChatId } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
@@ -107,17 +107,17 @@ export const pausedReply = (answer: Answer, at: number) => {
 export type WorkspaceStub = ReturnType<typeof workspace>;
 
 /**
- * A new chat of `personId`'s in a new workspace, answered by `replies`,
- * and the agent subject its permissions are granted to.
+ * A new chat of `personId`'s in their own workspace (`id`), answered by
+ * `replies`, with an agent of its own, the subject its permissions are
+ * granted to.
  */
 export const chatOf = async (personId: string, ...replies: ProviderReply[]) => {
-  const id = workspaceIdSchema.parse(crypto.randomUUID());
+  const id = personalWorkspaceId(personId);
   const stub = workspace(env, id);
-  const chat = await stub.createChat("Questions", personId, id);
+  const agent = { type: "agent" as const, agentId: crypto.randomUUID() };
+  const chat = await stub.createChat("Questions", personId, agent.agentId);
   const provider = await fakeProvider(...replies);
   const ask = async (text: string) => await stub.ask(chat.id, { text, model });
-  // The workspace's agent: its grants hold in all the workspace's chats.
-  const agent = { type: "agent" as const, agentId: id };
   return { id, stub, chat, personId, provider, ask, agent };
 };
 
@@ -132,7 +132,11 @@ export const askAfresh = async (
   chat: Awaited<ReturnType<typeof chatOf>>,
   text: string
 ): Promise<void> => {
-  const fresh = await chat.stub.createChat("Questions", chat.personId, chat.id);
+  const fresh = await chat.stub.createChat(
+    "Questions",
+    chat.personId,
+    chat.agent.agentId
+  );
   await chat.stub.ask(fresh.id, { text, model });
 };
 

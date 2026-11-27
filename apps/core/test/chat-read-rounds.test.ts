@@ -281,7 +281,7 @@ describe("a round of the chat's tool calls", () => {
         },
         { timeout: 10_000 }
       );
-      await revokedRow(agent.agentId, { granted: true, chatId: null });
+      await revokedRow(agent.agentId, { granted: true, chat: null });
     } finally {
       await releaseBrain();
     }

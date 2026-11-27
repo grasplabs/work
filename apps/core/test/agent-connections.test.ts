@@ -577,7 +577,11 @@ describe("a chat's connections", setUpTime, () => {
     );
     await chat.ask("What did it find?");
     // Another chat of the same person and agent, and another person's chat.
-    const other = await chat.stub.createChat("Other", person.userId, chat.id);
+    const other = await chat.stub.createChat(
+      "Other",
+      person.userId,
+      chat.agent.agentId
+    );
     await chat.stub.ask(other.id, { text: "What did it find?", model });
     const ben = await signedInApi(idp, "user");
     const bens = await chatOf(ben.userId, outcomeOf(id), says("No."));
@@ -925,7 +929,7 @@ describe("a chat's connections", setUpTime, () => {
     const teams = await chat.stub.createChat(
       "Questions",
       person.userId,
-      chat.id,
+      chat.agent.agentId,
       undefined,
       "teams"
     );

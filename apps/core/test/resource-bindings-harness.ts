@@ -1,5 +1,6 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { FunctionResult } from "@grasp-os/shared/functions";
+import { chatIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import type { ResourceBindingsReview } from "@grasp-os/shared/resource-bindings";
 import { env } from "cloudflare:workers";
@@ -14,6 +15,7 @@ import {
   permissions as permissionRows,
 } from "../src/db/core/schema.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
+import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import { rollback } from "../src/publish.ts";
 import { approveResourceBinding } from "../src/resource-bindings.ts";
 import { testApp } from "./app-definitions.ts";
@@ -437,9 +439,12 @@ export const chatScopedCopy = async (id: string): Promise<void> => {
   if (row === undefined) {
     throw new Error(`No permission ${id}`);
   }
-  await db
-    .insert(permissionRows)
-    .values({ ...row, id: crypto.randomUUID(), chatId: crypto.randomUUID() });
+  await db.insert(permissionRows).values({
+    ...row,
+    id: crypto.randomUUID(),
+    workspaceId: personalWorkspaceId(row.requestedBy),
+    chatId: chatIdSchema.parse(crypto.randomUUID()),
+  });
 };
 
 /** Each declared resource's state, by alias, as a review answers it. */

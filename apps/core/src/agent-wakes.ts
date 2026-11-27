@@ -209,6 +209,7 @@ export const makeAgentWake = async (
     state: "on",
     nextAt,
     retryAt: null,
+    workspaceId: null,
     chatId: null,
     lastAt: null,
     lastOutcome: null,
@@ -232,6 +233,7 @@ export const makeAgentWake = async (
           state: value(row.state, "state"),
           nextAt: value(nextAt.getTime(), "next_at"),
           retryAt: value(null, "retry_at"),
+          workspaceId: value(null, "workspace_id"),
           chatId: value(null, "chat_id"),
           lastAt: value(null, "last_at"),
           lastOutcome: value(null, "last_outcome"),
@@ -366,9 +368,12 @@ const startTurn = async (env: Env, row: WakeRow): Promise<void> => {
   // a turn that can't be taken.
   await turnAgent(env, row.agentId);
   await requireAgentReaches(env, row.agentId, row.personId, "web");
-  const chats = workspace(env, personalWorkspaceId(row.personId));
+  const workspaceId = personalWorkspaceId(row.personId);
+  const chats = workspace(env, workspaceId);
   const question = { text: row.opening, model };
-  if (row.chatId !== null) {
+  // Its chat in its person's own object: a wake-up the release before
+  // gave a chat to has no workspace, and is theirs all the same.
+  if (row.chatId !== null && (row.workspaceId ?? workspaceId) === workspaceId) {
     try {
       await chats.sendUnattended(row.chatId, question);
       return;
@@ -402,7 +407,7 @@ const startTurn = async (env: Env, row: WakeRow): Promise<void> => {
   );
   await drizzle(env.DB)
     .update(agentWakes)
-    .set({ chatId: chat.id })
+    .set({ workspaceId, chatId: chat.id })
     .where(eq(agentWakes.id, row.id));
   await chats.sendUnattended(chat.id, question);
 };

@@ -1066,12 +1066,7 @@ export const turnCheck = async (
   const chats = workspace(env, scope.workspaceId);
   let shown = false;
   try {
-    const subjects = await turnSubjects(
-      env,
-      scope.personId,
-      scope.chatId,
-      turnId
-    );
+    const subjects = await turnSubjects(env, scope, turnId);
     const written = subjects.flatMap(({ kind, id }) =>
       kind === "app" ? [id] : []
     );
@@ -1348,7 +1343,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
     const run = await chats.codeRunOf(chatId, runId);
     const { changed, revision } = await saveDraftChanges(
       env,
-      { by, chat: { chatId, ...run } },
+      { by, chat: { workspaceId, chatId, ...run } },
       found,
       {
         draft,

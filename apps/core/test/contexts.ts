@@ -1,4 +1,4 @@
-import { appIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import type {
   Authority,
@@ -9,6 +9,7 @@ import { env } from "cloudflare:workers";
 import { bindingsFor } from "../src/bindings.ts";
 import type { ConnectionBinding } from "../src/bindings.ts";
 import { workspace } from "../src/durable-objects.ts";
+import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import type { WorkContext } from "../src/restricted.ts";
 
 /**
@@ -19,10 +20,7 @@ export const newChat = async (
   of: PermissionSubjectInput | Authority
 ): Promise<Extract<WorkContext, { type: "chat" }>> => {
   const subject = "subject" in of ? of.subject : of;
-  // Anyone else's chat is in a workspace of its own, which no agent's is.
-  const workspaceId = workspaceIdSchema.parse(
-    subject.type === "agent" ? subject.agentId : crypto.randomUUID()
-  );
+  const workspaceId = personalWorkspaceId("person-1");
   const { id } = await workspace(env, workspaceId).createChat(
     "Chat",
     "person-1",

@@ -2,7 +2,7 @@ import { agentErrors } from "@grasp-os/shared/agent";
 import type { ChatChannel, HeldAppCall } from "@grasp-os/shared/chat";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
-import { appIdSchema, chatIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema, chatIdSchema, chatKeyOf } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
@@ -106,7 +106,7 @@ export const carryChatRestricted = async (
       appVersion: currentVersion ?? undefined,
     },
     { type: "app", appId: app },
-    [`chat:${scope.chatId}`]
+    [`chat:${chatKeyOf(scope)}`]
   );
 };
 

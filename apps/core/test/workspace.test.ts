@@ -1,4 +1,3 @@
-import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -7,9 +6,13 @@ import { migrateOnWake } from "../src/db/migrate.ts";
 import type { Migrations } from "../src/db/migrate.ts";
 import migrations from "../src/db/workspace/migrations/migrations.js";
 import { workspace } from "../src/durable-objects.ts";
+import { personalWorkspaceId } from "../src/personal-workspace.ts";
 
-const newWorkspace = () =>
-  workspace(env, workspaceIdSchema.parse(crypto.randomUUID()));
+/** A new person's own workspace, as `stub`, its chats to be theirs. */
+const newWorkspace = () => {
+  const person = `person-${crypto.randomUUID()}`;
+  return { stub: workspace(env, personalWorkspaceId(person)), person };
+};
 
 /** The migrations the previous release shipped: all but the newest. */
 const previousRelease: Migrations = {
@@ -38,7 +41,7 @@ const nextRelease = (): Migrations =>
 
 /** Replaces the object's storage with what `release` would have left. */
 const migrateTo = async (
-  stub: ReturnType<typeof newWorkspace>,
+  stub: ReturnType<typeof newWorkspace>["stub"],
   release: Migrations,
   { fromScratch }: { fromScratch: boolean }
 ) => {
@@ -53,24 +56,21 @@ const migrateTo = async (
 
 describe("Workspace schema", () => {
   it("migrates a fresh workspace before its first call", async () => {
-    const chat = await newWorkspace().createChat(
-      "Plans",
-      "person-1",
-      "agent-1"
-    );
+    const { stub, person } = newWorkspace();
+    const chat = await stub.createChat("Plans", person, "agent-1");
     expect(chat).toMatchObject({ title: "Plans" });
   });
 
   it("migrates a workspace on the previous release's schema when it wakes up", async () => {
-    const stub = newWorkspace();
+    const { stub, person } = newWorkspace();
     await migrateTo(stub, previousRelease, { fromScratch: true });
 
-    const chat = await stub.createChat("Plans", "person-1", "agent-1");
+    const chat = await stub.createChat("Plans", person, "agent-1");
     expect(chat).toMatchObject({ title: "Plans" });
   });
 
   it("reads a chat made before chats kept their channel as made in Grasp's own app", async () => {
-    const stub = newWorkspace();
+    const { stub, person } = newWorkspace();
     const before = migrations.journal.entries.findIndex(
       ({ tag }) => tag === "0017_chat_via"
     );
@@ -81,7 +81,7 @@ describe("Workspace schema", () => {
         migrations: migrations.migrations,
       });
       state.storage.sql.exec(
-        "INSERT INTO chats (id, title, created_at, restricted, person_id, agent_id) VALUES ('old', 'Old', 1, 0, 'person-1', 'agent-1')"
+        `INSERT INTO chats (id, title, created_at, restricted, person_id, agent_id) VALUES ('old', 'Old', 1, 0, '${person}', 'agent-1')`
       );
     });
     await evictDurableObject(stub);
@@ -89,12 +89,12 @@ describe("Workspace schema", () => {
     // Waking up on this release's code applies the migration.
     const teams = await stub.createChat(
       "From Teams",
-      "person-1",
+      person,
       "agent-1",
       undefined,
       "teams"
     );
-    const web = await stub.createChat("From Grasp", "person-1", "agent-1");
+    const web = await stub.createChat("From Grasp", person, "agent-1");
     await runInDurableObject(stub, (_instance, state) => {
       const rows = state.storage.sql
         .exec("SELECT id, via FROM chats ORDER BY rowid")
@@ -108,7 +108,7 @@ describe("Workspace schema", () => {
   });
 
   it("keeps chats that have a person and an agent, and drops those without, with their rows, when chats take both for good", async () => {
-    const stub = newWorkspace();
+    const { stub, person } = newWorkspace();
     // The schema as it was before chats had to have both.
     const before = migrations.journal.entries.findIndex(
       ({ tag }) => tag === "0007_chat_owner_required"
@@ -120,7 +120,7 @@ describe("Workspace schema", () => {
         migrations: migrations.migrations,
       });
       for (const statement of [
-        "INSERT INTO chats (id, title, created_at, restricted, person_id, agent_id) VALUES ('owned', 'Owned', 1, 1, 'person-1', 'agent-1'), ('nobodys', 'Nobody', 2, 0, NULL, NULL), ('no-agent', 'No agent', 3, 0, 'person-1', NULL)",
+        `INSERT INTO chats (id, title, created_at, restricted, person_id, agent_id) VALUES ('owned', 'Owned', 1, 1, '${person}', 'agent-1'), ('nobodys', 'Nobody', 2, 0, NULL, NULL), ('no-agent', 'No agent', 3, 0, '${person}', NULL)`,
         "INSERT INTO chat_messages (chat_id, message, created_at) VALUES ('owned', '{\"n\":1}', 1), ('nobodys', '{}', 2), ('owned', '{\"n\":2}', 3), ('no-agent', '{}', 4)",
         "INSERT INTO chat_sources (chat_id, source_id, created_at) VALUES ('owned', 'collection-1', 1), ('nobodys', 'collection-1', 1), ('no-agent', 'collection-2', 1)",
       ]) {
@@ -130,7 +130,7 @@ describe("Workspace schema", () => {
     await evictDurableObject(stub);
 
     // Waking up on this release's code applies the migration.
-    const added = await stub.createChat("After", "person-1", "agent-1");
+    const added = await stub.createChat("After", person, "agent-1");
     await runInDurableObject(stub, (_instance, state) => {
       const rows = (query: string, ...bindings: string[]) =>
         state.storage.sql.exec(query, ...bindings).toArray();
@@ -149,7 +149,7 @@ describe("Workspace schema", () => {
             id: "owned",
             title: "Owned",
             restricted: 1,
-            personId: "person-1",
+            personId: person,
             agentId: "agent-1",
           },
         ],
@@ -170,7 +170,7 @@ describe("Workspace schema", () => {
       expect(() => {
         state.storage.transactionSync(() => {
           state.storage.sql.exec(
-            "INSERT INTO chats (id, title, created_at, person_id) VALUES ('half', 'Half', 6, 'person-1')"
+            `INSERT INTO chats (id, title, created_at, person_id) VALUES ('half', 'Half', 6, '${person}')`
           );
         });
       }).toThrow(/NOT NULL/u);
@@ -178,10 +178,10 @@ describe("Workspace schema", () => {
   });
 
   it("keeps working when the code is rolled back after an additive migration", async () => {
-    const stub = newWorkspace();
+    const { stub, person } = newWorkspace();
     const before = await stub.createChat(
       "Before the release",
-      "person-1",
+      person,
       "agent-1"
     );
     await migrateTo(stub, nextRelease(), { fromScratch: false });
@@ -189,7 +189,7 @@ describe("Workspace schema", () => {
     // Waking up again on this release's code leaves the newer schema alone.
     const after = await stub.createChat(
       "After the rollback",
-      "person-1",
+      person,
       "agent-1"
     );
     expect(after).toMatchObject({ title: "After the rollback" });
@@ -205,8 +205,8 @@ describe("Workspace schema", () => {
   });
 
   it("rolls back a failing migration and reports its error", async () => {
-    const stub = newWorkspace();
-    await stub.createChat("Before the release", "person-1", "agent-1");
+    const { stub, person } = newWorkspace();
+    await stub.createChat("Before the release", person, "agent-1");
     const broken = withMigration(
       "broken",
       "ALTER TABLE `chats` ADD `pinned` integer;\n--> statement-breakpoint\nALTER TABLE `missing` ADD `x` integer;"
@@ -223,16 +223,12 @@ describe("Workspace schema", () => {
         .map(({ name }) => name);
       expect(columns).not.toContain("pinned");
     });
-    const after = await stub.createChat(
-      "After the failure",
-      "person-1",
-      "agent-1"
-    );
+    const after = await stub.createChat("After the failure", person, "agent-1");
     expect(after).toMatchObject({ title: "After the failure" });
   });
 
   it("refuses a migration history that doesn't match the code", async () => {
-    const stub = newWorkspace();
+    const { stub } = newWorkspace();
     await migrateTo(stub, withMigration("ours", "SELECT 1;"), {
       fromScratch: false,
     });
@@ -245,7 +241,7 @@ describe("Workspace schema", () => {
   });
 
   it("refuses a migration that comes before one already applied", async () => {
-    const stub = newWorkspace();
+    const { stub } = newWorkspace();
     const next = migrations.journal.entries.length;
     await migrateTo(stub, withMigration("later", "SELECT 1;", next + 1), {
       fromScratch: false,
