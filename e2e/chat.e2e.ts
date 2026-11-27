@@ -425,10 +425,22 @@ test("a person reads an answer in blocks: a table, a formula, code and a diagram
           )
     )
     .toBeGreaterThan(1);
-  // The diagram and its download are not asked for here until the product
-  // pins the Damsko release that draws diagrams with Pele: with Mermaid the
-  // drawing fails to appear in about one merge queue run in three, on every
-  // retry of that run, whatever the wait.
+  // The diagram, drawn by Pele, and its own download. A diagram is drawn
+  // once it comes near the screen, and this one ends a long answer that may
+  // open at its start, below the fold: read down to it, as a person does,
+  // then wait for its settled state, `data-diagram`, which names why when
+  // it is not drawn.
+  const diagram = answer.locator('[data-slot="markdown-diagram"]');
+  await diagram.scrollIntoViewIfNeeded();
+  await expect(diagram).toHaveAttribute("data-diagram", "drawn", {
+    timeout: 15_000,
+  });
+  await expect(
+    answer.getByRole("application", { name: "Mermaid diagram" })
+  ).toBeVisible();
+  await expect(
+    answer.getByRole("button", { name: "Download diagram" })
+  ).toBeVisible();
 });
 
 test("a person comes back to a chat that answered while they were away, sees its dot, opens it and lands at the New line", async ({
