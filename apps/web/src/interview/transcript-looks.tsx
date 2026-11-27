@@ -10,7 +10,6 @@ import {
   radius,
   space,
 } from "@grasp-os/ui/lib/tokens.stylex";
-import { pixel } from "@grasp-os/ui/lib/vars.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
@@ -21,29 +20,12 @@ import { useSmoothWords } from "./smooth-words.ts";
 import { lineRow } from "./transcript-looks.stylex.ts";
 import { useInterviewWords } from "./words.ts";
 
-// How a line of the transcript looks, three ways to choose from (a
-// concept, `?transcript=a|b|c`; `a` when none is asked for):
-//
-//   a  Script: who spoke stands in a narrow column at the start, once per
-//      turn, as in a play's script; Stephen's words and theirs both
-//      in the sans (his serif is the stage's).
-//   b  Chat: Stephen at the start under his small pixel mark, no bubble;
-//      theirs at the end in a soft bubble, as a message they sent.
-//   c  Q&A: the conversation as a printed interview, his question and
-//      their answer as one numbered exchange, their words on a mint rule.
-//
-// In each a line is removed from a small bin that shows under a pointer
-// resting on the line or with the keyboard on it, and always, quietly, on
-// a touch screen. Every line wraps evenly, so no word is left alone.
-
-export type TranscriptLook = "a" | "b" | "c";
-
-/** Which look the transcript has, from `?transcript=`. */
-export const useTranscriptLook = (): TranscriptLook => {
-  // Read from the address itself, not the router's: the switch is set by hand and read once per open.
-  const look = new URLSearchParams(window.location.search).get("transcript");
-  return look === "a" || look === "c" ? look : "b";
-};
+// How a line of the transcript looks: a chat. Stephen's lines at the
+// start, his name over each turn, no bubble; theirs at the end in a soft
+// bubble, as a message they sent. A line is removed from a small bin that
+// shows under a pointer resting on the line or with the keyboard on it,
+// and always, quietly, on a touch screen. Every line wraps evenly, so no
+// word is left alone.
 
 /** A line where it stands in the conversation: its place is how core removes it. */
 export interface Placed {
@@ -111,15 +93,6 @@ const styles = stylex.create({
   },
   whoThem: { color: colors.pine },
 
-  // a: Script.
-  scriptRow: {
-    display: "grid",
-    gridTemplateColumns: "4.5rem minmax(0, 1fr) auto",
-    columnGap: space["3"],
-    alignItems: "baseline",
-  },
-
-  // b: Chat.
   chatHis: {
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr) auto",
@@ -132,17 +105,6 @@ const styles = stylex.create({
     alignItems: "center",
     gap: space["3"],
     paddingBlockEnd: space["1"],
-  },
-  // His mark: a small square of his light, seen through the system's pixel.
-  mark: {
-    display: "block",
-    width: "1.25rem",
-    height: "1.25rem",
-    borderRadius: radius.xs,
-    backgroundColor: colors.muted,
-    backgroundImage: `linear-gradient(135deg, ${colors.mint}, ${colors.pine})`,
-    maskImage: pixel.mask,
-    maskSize: "3px 3px",
   },
   chatHisText: { gridColumn: "1" },
   // The bubble's tools, side by side, shown as the bin is: never squeezed by a long bubble, and
@@ -201,56 +163,6 @@ const styles = stylex.create({
     // The veil of ink on the page's own ground, so nothing behind shows through it.
     backgroundColor: colors.background,
     backgroundImage: `linear-gradient(${colors.secondary}, ${colors.secondary})`,
-  },
-
-  // c: Q&A.
-  exchange: {
-    display: "grid",
-    gridTemplateColumns: "1.75rem minmax(0, 1fr)",
-    columnGap: space["3"],
-    rowGap: space["3"],
-    paddingBlock: space["5"],
-    borderBlockStartWidth: "1px",
-    borderBlockStartStyle: "solid",
-    borderBlockStartColor: colors.border,
-  },
-  exchangeFirst: { borderBlockStartWidth: 0, paddingBlockStart: space["2"] },
-  number: {
-    fontFamily: font.mono,
-    fontSize: font.textXs,
-    lineHeight: 1.9,
-    color: colors.mutedForeground,
-  },
-  qa: {
-    gridColumn: "2",
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) auto",
-    columnGap: space["2"],
-    alignItems: "start",
-  },
-  question: { fontWeight: font.weightMedium },
-  answer: {
-    paddingInlineStart: space["3"],
-    borderInlineStartWidth: "2px",
-    borderInlineStartStyle: "solid",
-    borderInlineStartColor: colors.mint,
-  },
-  legend: {
-    display: "flex",
-    alignItems: "center",
-    gap: space["4"],
-    paddingBlockEnd: space["2"],
-  },
-  legendItem: { display: "inline-flex", alignItems: "center", gap: space["2"] },
-  legendHis: {
-    width: "0.75rem",
-    height: "2px",
-    backgroundColor: colors.foreground,
-  },
-  legendTheirs: {
-    width: "2px",
-    height: "0.9rem",
-    backgroundColor: colors.mint,
   },
 });
 
@@ -386,29 +298,6 @@ const Who = ({ stephen, who }: { stephen: boolean; who: string }) => {
   );
 };
 
-/** a: a line of the script, its speaker at the start of its turn. */
-export const ScriptLine = ({
-  placed,
-  who,
-  onRemove,
-}: {
-  placed: Placed;
-  who: string;
-  onRemove: () => void;
-  onEdit?: (text: string) => void;
-}) => {
-  const stephen = placed.line.from === "stephen";
-  return (
-    <div {...stylex.props(styles.scriptRow, lineRow)}>
-      <span>{placed.starts ? <Who stephen={stephen} who={who} /> : null}</span>
-      <Words line={placed.line} streaming={placed.saying === true} />
-      {placed.saying === true || placed.guide === true ? null : (
-        <BinFor line={placed.line} onRemove={onRemove} who={who} />
-      )}
-    </div>
-  );
-};
-
 /**
  * Their line, open to put right in its own bubble: the words as they
  * stand, Enter keeps them, Escape leaves them as they were. No ring: the
@@ -470,7 +359,7 @@ const LineEditor = ({
   );
 };
 
-/** b: a line of theirs, in a bubble at the end; under a resting pointer it can be put right or removed. */
+/** A line of theirs, in a bubble at the end; under a resting pointer it can be put right or removed. */
 const TheirChatLine = ({
   line,
   onRemove,
@@ -542,7 +431,7 @@ const TheirChatLine = ({
   );
 };
 
-/** b: a line of the chat, his at the start under his mark, theirs at the end in a bubble. */
+/** A line of the chat, his at the start, theirs at the end in a bubble. */
 export const ChatLine = ({
   placed,
   who,
@@ -577,83 +466,3 @@ export const ChatLine = ({
     <TheirChatLine line={placed.line} onEdit={onEdit} onRemove={onRemove} />
   );
 };
-
-/** One exchange of the Q&A: what he asked, then what they answered. */
-export interface Exchange {
-  lines: Placed[];
-}
-
-/** c: the lines grouped as exchanges, each opened by his line. */
-export const exchangesOf = (placed: Placed[]): Exchange[] => {
-  const exchanges: Exchange[] = [];
-  for (const one of placed) {
-    const last = exchanges.at(-1);
-    const opens =
-      last === undefined || (one.line.from === "stephen" && one.starts);
-    if (opens) {
-      exchanges.push({ lines: [one] });
-    } else {
-      last.lines.push(one);
-    }
-  }
-  return exchanges;
-};
-
-/** c: the key over the Q&A, so whose words are whose is never a guess. */
-export const QaLegend = ({ who }: { who: string }) => {
-  const { t } = useLingui();
-  return (
-    <div aria-hidden="true" {...stylex.props(styles.legend)}>
-      <span {...stylex.props(styles.legendItem)}>
-        <span {...stylex.props(styles.legendHis)} />
-        <span {...stylex.props(styles.who)}>{who}</span>
-      </span>
-      <span {...stylex.props(styles.legendItem)}>
-        <span {...stylex.props(styles.legendTheirs)} />
-        <span {...stylex.props(styles.who, styles.whoThem)}>
-          {t({ message: "You", context: "the person interviewed" })}
-        </span>
-      </span>
-    </div>
-  );
-};
-
-/** c: one numbered exchange. */
-export const QaExchange = ({
-  exchange,
-  number,
-  who,
-  onRemove,
-}: {
-  exchange: Exchange;
-  number: number;
-  who: string;
-  onRemove: (place: number) => void;
-}) => (
-  <div {...stylex.props(styles.exchange, number === 1 && styles.exchangeFirst)}>
-    <span aria-hidden="true" {...stylex.props(styles.number)}>
-      {String(number).padStart(2, "0")}
-    </span>
-    {exchange.lines.map((placed) => {
-      const stephen = placed.line.from === "stephen";
-      return (
-        <div key={placed.place} {...stylex.props(styles.qa, lineRow)}>
-          <Words
-            extra={stephen ? styles.question : styles.answer}
-            line={placed.line}
-            streaming={placed.saying === true}
-          />
-          {placed.saying === true || placed.guide === true ? null : (
-            <BinFor
-              line={placed.line}
-              onRemove={() => {
-                onRemove(placed.place);
-              }}
-              who={who}
-            />
-          )}
-        </div>
-      );
-    })}
-  </div>
-);

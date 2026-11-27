@@ -56,11 +56,6 @@ export const readTones = (element: Element): Record<Tone, string> => {
   return resolved;
 };
 
-/** The 4x4 Bayer matrix, as thresholds from 0 to 1: the brand's dither. */
-const bayer = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
-export const bayerAt = (x: number, y: number): number =>
-  ((bayer[(x % 4) + (y % 4) * 4] ?? 0) + 0.5) / 16;
-
 /** Paints one cell of the grid. */
 export type Put = (x: number, y: number, tone: Tone, alpha?: number) => void;
 

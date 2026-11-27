@@ -1,8 +1,8 @@
-import { BAYER_MATRIX, DITHER_LEVELS } from "@grasp-os/ui/lib/utils";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
+import { bayerAt, chance } from "./dither.ts";
 import { extensionOf } from "./document-files.ts";
 
 // The documents step's drop zone with the kinds of file Grasp reads lying
@@ -74,17 +74,6 @@ export const kindOfName = (name: string): Kind => {
     return "slides";
   }
   return "text";
-};
-
-/** A cell's threshold in the system's dither, 0 to 1. */
-const bayerAt = (x: number, y: number): number =>
-  ((BAYER_MATRIX[((y % 4) + 4) % 4]?.[((x % 4) + 4) % 4] ?? 0) + 0.5) /
-  DITHER_LEVELS;
-
-/** A number from 0 to 1, always the same for the same inputs: a little chance. */
-const chance = (x: number, y: number, seed: number): number => {
-  const value = Math.sin(x * 127.1 + y * 311.7 + seed * 74.7) * 43_758.5453;
-  return value - Math.floor(value);
 };
 
 const mix = (hex: string, toward: number, amount: number): string => {

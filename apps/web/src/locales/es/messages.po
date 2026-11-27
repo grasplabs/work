@@ -1649,10 +1649,6 @@ msgstr "{team}, versión {version}; se está retirando"
 msgid "{team}: “{words}”"
 msgstr "{team}: «{words}»"
 
-#: src/onboarding/review-parts.tsx
-msgid "{team}: some do a step another way, and nobody could say why. I keep both ways until you decide."
-msgstr "{team}: algunos hacen un paso de otra manera, y nadie supo decir por qué. Mantengo las dos maneras hasta que decidas."
-
 #: src/brain/brain-atlas.ts
 msgid "{teams, plural, one {# team} other {# teams}}"
 msgstr "{teams, plural, one {# equipo} other {# equipos}}"
@@ -3285,10 +3281,6 @@ msgstr "Aplicación"
 msgid "Applications"
 msgstr "Aplicaciones"
 
-#: src/onboarding/review-parts.tsx
-msgid "Apply it if the sender’s domain is {domain}."
-msgstr "Aplícala si el dominio del remitente es {domain}."
-
 #: src/apps/app-webhooks.tsx
 #: src/brain/skills-page.tsx
 #: src/chat/package-requests.tsx
@@ -3545,10 +3537,6 @@ msgstr "Como para Stephen"
 #: src/settings/stephen-settings.tsx
 msgid "As for the whole company"
 msgstr "Como para toda la empresa"
-
-#: src/onboarding/review-parts.tsx
-msgid "As its action, set the spam confidence level (SCL) to “Bypass spam filtering”, then save it."
-msgstr "Como acción, establece el nivel de confianza de correo no deseado (SCL) en «Omitir el filtrado de correo no deseado» y guárdala."
 
 #: src/apps/access-view.tsx
 msgid "As the App's code sets it"
@@ -4280,11 +4268,6 @@ msgctxt "button"
 msgid "Change"
 msgstr "Cambiar"
 
-#: src/onboarding/review-parts.tsx
-msgctxt "change how it was settled"
-msgid "Change"
-msgstr "Cambiar"
-
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
 msgid "Change"
@@ -4787,10 +4770,6 @@ msgstr "Elige qué puede hacer Grasp en {app} y luego inicia sesión allí."
 #: src/onboarding/setup-steps.tsx
 msgid "Choose your AI"
 msgstr "Elige tu IA"
-
-#: src/onboarding/language-choice.tsx
-msgid "Choose your language"
-msgstr "Elige tu idioma"
 
 #: src/workflows/start-run.tsx
 #: src/workflows/workflow-triggers.tsx
@@ -5454,7 +5433,6 @@ msgid "Copies"
 msgstr "Copias"
 
 #: src/frame/ui-words.tsx
-#: src/onboarding/review-parts.tsx
 msgid "Copy"
 msgstr "Copiar"
 
@@ -8381,10 +8359,6 @@ msgctxt "the interview"
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Ahora mismo no se puede acceder a Grasp. Vuelve a intentarlo en un momento."
 
-#: src/onboarding/review-parts.tsx
-msgid "Grasp can’t email your people their interview links for now. Send each one their link by hand from Interviews."
-msgstr "Por ahora Grasp no puede enviar por correo a tu gente sus enlaces de entrevista. Envía a cada uno su enlace a mano desde Entrevistas."
-
 #: src/settings/directory-reads.tsx
 msgid "Grasp can’t read the directory with the connection it has. Connect it again, signing in with an account that administers your directory."
 msgstr "Grasp no puede leer el directorio con la conexión que tiene. Vuelve a conectarlo iniciando sesión con una cuenta que administre tu directorio."
@@ -8433,10 +8407,6 @@ msgstr "Grasp no las usa"
 #: src/settings/interview-links.tsx
 msgid "Grasp emails everyone their own link. Here is what still needs you."
 msgstr "Grasp envía a cada persona su propio enlace. Esto es lo que aún depende de ti."
-
-#: src/onboarding/review-parts.tsx
-msgid "Grasp has no sender for its mail yet."
-msgstr "Grasp aún no tiene remitente para su correo."
 
 #: src/apps/app-workspace.tsx
 msgid "Grasp is building"
@@ -9228,14 +9198,6 @@ msgstr "en la zona horaria de la empresa"
 msgid "In the company's time zone"
 msgstr "En la zona horaria de la empresa"
 
-#: src/onboarding/review-parts.tsx
-msgid "In the Exchange admin center, go to Mail flow, then Rules, and add a rule."
-msgstr "En el Centro de administración de Exchange, ve a Flujo de correo y luego a Reglas, y agrega una regla."
-
-#: src/onboarding/review-parts.tsx
-msgid "In the Google Admin console, go to Apps, then Google Workspace, then Gmail, then Spam, phishing and malware."
-msgstr "En la Consola del administrador de Google, ve a Aplicaciones, luego a Google Workspace, luego a Gmail y luego a Spam, phishing y software malicioso."
-
 #: src/chat/connection-requests.tsx
 msgid "In this chat only, until you delete it. Anything it sends or changes still waits for you to confirm."
 msgstr "Solo en este chat, hasta que lo borres. Todo lo que envíe o cambie sigue esperando a que lo confirmes."
@@ -9697,10 +9659,6 @@ msgstr "Hoy no pasó por ningún otro flujo."
 msgid "It works in no app."
 msgstr "No trabaja en ninguna app."
 
-#: src/onboarding/review-parts.tsx
-msgid "It’s done"
-msgstr "Hecho"
-
 #: src/brain/memories-page.tsx
 msgid "It's wrong"
 msgstr "Es incorrecto"
@@ -9942,14 +9900,6 @@ msgstr "Solo para ti"
 #: src/agents/setup/words.ts
 msgid "Just me"
 msgstr "Solo yo"
-
-#: src/onboarding/review-parts.tsx
-msgid "Keep “Require sender authentication” on, then save."
-msgstr "Deja activada la opción «Requerir autenticación del remitente» y guarda."
-
-#: src/onboarding/review-parts.tsx
-msgid "Keep both"
-msgstr "Mantener las dos"
 
 #: src/agents/agent-templates.ts
 msgid "Keep each meeting to a few lines."
@@ -10301,10 +10251,6 @@ msgstr "Volvió a admitir la dirección antigua de un miembro borrado"
 #: src/connections/connector-tools.tsx
 msgid "Let Grasp use {name}"
 msgstr "Dejar que Grasp use {name}"
-
-#: src/onboarding/review-parts.tsx
-msgid "Let Grasp’s mail through."
-msgstr "Deja pasar el correo de Grasp."
 
 #: src/settings/erasures.tsx
 msgid "Let it in"
@@ -10745,10 +10691,6 @@ msgstr "Correos y mensajes a otras personas, después de pulsar una tarjeta con 
 #: src/agents/agent-templates.ts
 msgid "Mail desk"
 msgstr "Mesa de correo"
-
-#: src/onboarding/review-parts.tsx
-msgid "Mail isn’t available on this hosting yet."
-msgstr "El correo aún no está disponible en este alojamiento."
 
 #: src/agents/agent-templates.ts
 msgid "Mail that asks for something."
@@ -13067,10 +13009,6 @@ msgstr "Solo quienes construyen la App"
 msgid "Only the company's own admins see it. If that is you, load the page again."
 msgstr "Solo lo ven los administradores de la empresa. Si eres tú, vuelve a cargar la página."
 
-#: src/onboarding/review-parts.tsx
-msgid "Only the first way"
-msgstr "Solo la primera manera"
-
 #: src/workflows/resource-runs.tsx
 #: src/workflows/workflow-page.tsx
 msgid "Only the newest {newest} runs show here."
@@ -13091,10 +13029,6 @@ msgstr "Solo quien añadió cada registro"
 #: src/apps/access-view.tsx
 msgid "Only the person who added the record"
 msgstr "Solo quien añadió el registro"
-
-#: src/onboarding/review-parts.tsx
-msgid "Only the second way"
-msgstr "Solo la segunda manera"
 
 #: src/agents/setup/audience-step.tsx
 msgid "Only the teams you pick."
@@ -13720,7 +13654,6 @@ msgstr "Patrón"
 #: src/frame/ui-words.tsx
 #: src/interview/page.tsx
 #: src/settings/stephen-card.tsx
-#: src/voice/sound-controls.tsx
 #: src/workflows/workflow-status.tsx
 msgid "Pause"
 msgstr "Pausar"
@@ -13828,10 +13761,6 @@ msgstr "Personas"
 #: src/settings/stephen-settings.tsx
 msgid "People can start these by asking him. A workflow's owner opens it to asking on its page."
 msgstr "La gente puede iniciarlos pidiéndoselo. El propietario de un flujo de trabajo lo abre a peticiones en su página."
-
-#: src/onboarding/review-parts.tsx
-msgid "People do “{name}” in two ways."
-msgstr "La gente hace «{name}» de dos maneras."
 
 #: src/settings/teams.tsx
 msgid "People in {name}"
@@ -14026,7 +13955,6 @@ msgid "Platform update"
 msgstr "Actualización de la plataforma"
 
 #: src/frame/ui-words.tsx
-#: src/voice/sound-controls.tsx
 msgid "Play"
 msgstr "Reproducir"
 
@@ -16262,10 +16190,6 @@ msgstr "Ajustes de {appName}"
 msgid "Settings sections"
 msgstr "Secciones de los ajustes"
 
-#: src/onboarding/review-parts.tsx
-msgid "Settled: {choice}"
-msgstr "Resuelto: {choice}"
-
 #: src/settings/event-sources.tsx
 msgid "Setup"
 msgstr "Configuración"
@@ -18354,10 +18278,6 @@ msgstr "La exportación no ha funcionado. Inténtalo de nuevo."
 msgid "The fastest way is to use our built-in setup; it’s ready right away. If your company prefers its own provider, you can enter your API key here instead."
 msgstr "Lo más rápido es usar nuestro sistema integrado, que ya está listo. Si tu empresa prefiere su propio proveedor, puedes introducir aquí tu clave API."
 
-#: src/onboarding/review-parts.tsx
-msgid "The first way: {way}"
-msgstr "La primera forma: {way}"
-
 #: src/connections/add-connector.tsx
 msgid "The header is a name of letters, digits and dashes, and not one Grasp sets itself."
 msgstr "El encabezado es un nombre de letras, dígitos y guiones, y no uno que Grasp ponga por sí mismo."
@@ -18622,10 +18542,6 @@ msgstr "El mismo problema en otros equipos"
 #: src/inbox/items.ts
 msgid "The schedule of {workflowName} stopped"
 msgstr "La programación de {workflowName} se ha detenido"
-
-#: src/onboarding/review-parts.tsx
-msgid "The second way: {other}"
-msgstr "La segunda forma: {other}"
 
 #: src/settings/event-sources.tsx
 msgid "The secret is revoked: nothing this source sends starts a workflow until you make it a new one."
@@ -19565,12 +19481,10 @@ msgid "Turn on again"
 msgstr "Volver a activar"
 
 #: src/frame/ui-words.tsx
-#: src/voice/sound-controls.tsx
 msgid "Turn sound off"
 msgstr "Desactivar el sonido"
 
 #: src/frame/ui-words.tsx
-#: src/voice/sound-controls.tsx
 msgid "Turn sound on"
 msgstr "Activar el sonido"
 
@@ -19643,10 +19557,6 @@ msgstr "Desarchivar"
 msgctxt "inbox item kind"
 msgid "Unconfirmed change"
 msgstr "Cambio sin confirmar"
-
-#: src/onboarding/review-parts.tsx
-msgid "Under Spam, bypass spam filters for an approved senders list, and add {domain} to it."
-msgstr "En Spam, omite los filtros de spam para una lista de remitentes aprobados y añade {domain} a ella."
 
 #: src/onboarding/leads-step.tsx
 msgid "Understood, I’ll leave them out."
@@ -19769,10 +19679,6 @@ msgstr "Cambios sin guardar"
 #: src/settings/directory-reads.tsx
 msgid "Until a read succeeds, nobody joins, moves or is suspended through the directory."
 msgstr "Hasta que una lectura funcione, nadie se une, cambia de equipo ni es suspendido a través del directorio."
-
-#: src/onboarding/review-parts.tsx
-msgid "Until Grasp support sets one, interview links can’t go out by email. Send each one their link by hand from Interviews."
-msgstr "Hasta que el soporte de Grasp configure uno, los enlaces de entrevista no pueden enviarse por correo. Envía a cada uno su enlace a mano desde Entrevistas."
 
 #: src/interview/guide.tsx
 msgid "Up here you’ll see a few buttons. With this one, you can switch languages anytime, even right in the middle of our conversation. Whatever’s easiest for you to speak in."
@@ -20127,14 +20033,6 @@ msgstr "Página de visión confirmada"
 #: src/frame/ui-words.tsx
 msgid "Voice conversation"
 msgstr "Conversación por voz"
-
-#: src/voice/sound-controls.tsx
-msgid "Volume"
-msgstr "Volumen"
-
-#: src/voice/sound-controls.tsx
-msgid "Volume (sound off)"
-msgstr "Volumen (sonido desactivado)"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
@@ -22043,10 +21941,6 @@ msgstr "Tu propia clave está conectada y funciona. Puedes mantenerla o cambiarl
 #: src/brain/sources-page.tsx
 msgid "Your own word"
 msgstr "Tu propia palabra"
-
-#: src/onboarding/review-parts.tsx
-msgid "Your people’s interview links come by email from Grasp’s sending domain. Allow it in your mail filter before they go out, so they don’t land in spam."
-msgstr "Los enlaces de entrevista de tu gente llegan por correo desde el dominio de envío de Grasp. Permítelo en tu filtro de correo antes de que se envíen, para que no acaben en spam."
 
 #: src/chat/composer.tsx
 msgid "Your question"

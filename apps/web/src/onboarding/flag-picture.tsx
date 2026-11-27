@@ -1,8 +1,8 @@
-import { BAYER_MATRIX, DITHER_LEVELS } from "@grasp-os/ui/lib/utils";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 
 import type { Locale } from "../i18n.ts";
+import { bayerAt, chance } from "./dither.ts";
 import { colourAt, flags } from "./flags.ts";
 import type { Flag } from "./flags.ts";
 
@@ -31,10 +31,6 @@ const styles = stylex.create({
     imageRendering: "pixelated",
   },
 });
-
-/** A cell's threshold in the system's dither, 0 to 1. */
-const bayerAt = (x: number, y: number): number =>
-  ((BAYER_MATRIX[y % 4]?.[x % 4] ?? 0) + 0.5) / DITHER_LEVELS;
 
 /** A colour of the flag's own, a third of the way to black: its shade. */
 const shadeOf = (hex: string): string => {
@@ -88,12 +84,6 @@ interface Grid {
 /** Each language its own number, so each flag's fade is its own. */
 const seedOf = (locale: Locale): number =>
   ({ en: 11, de: 37, nl: 58, es: 73, fr: 89 })[locale];
-
-/** A number from 0 to 1 for a cell of a flag, always the same for the same cell: a little chance. */
-const chance = (x: number, y: number, seed: number): number => {
-  const value = Math.sin(x * 127.1 + y * 311.7 + seed * 74.7) * 43_758.5453;
-  return value - Math.floor(value);
-};
 
 /** From this much of the flag on, its cells are whole; below it they shrink and pale. */
 const whole = 0.78;

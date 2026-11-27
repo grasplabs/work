@@ -1,4 +1,4 @@
-import { BAYER_MATRIX, DITHER_LEVELS } from "@grasp-os/ui/lib/utils";
+import { bayerAt } from "../dither.ts";
 
 // What Stephen does with a component he holds: he takes its own picture,
 // the brand logo it carries (a provider's, a source's), and
@@ -23,9 +23,6 @@ const INSET = 0;
 
 /** The part of the picture, from its near side, that thins out toward the words as a flag does. */
 const THINNING = 0.4;
-
-const bayerAt = (x: number, y: number): number =>
-  ((BAYER_MATRIX[y % 4]?.[x % 4] ?? 0) + 0.5) / DITHER_LEVELS;
 
 /** The least free room beside a component's words, in CSS pixels, that a picture is drawn in. */
 const LEAST_ROOM = 72;

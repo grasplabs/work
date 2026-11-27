@@ -1,5 +1,4 @@
-import { BAYER_MATRIX, DITHER_LEVELS } from "@grasp-os/ui/lib/utils";
-
+import { bayerAt } from "./dither.ts";
 import type { Kind } from "./document-pages.tsx";
 import { colourOf } from "./document-pages.tsx";
 import { keysOf } from "./pixel-cursor.tsx";
@@ -87,10 +86,6 @@ export const mix = (hex: string, toward: number, amount: number): string => {
   return `rgb(${String(part(1))}, ${String(part(3))}, ${String(part(5))})`;
 };
 
-/** A cell's place in the dither, 0 to 1: the order the cells fill in. */
-const rankAt = (x: number, y: number): number =>
-  ((BAYER_MATRIX[y % 4]?.[x % 4] ?? 0) + 0.5) / DITHER_LEVELS;
-
 /**
  * A page of `kind`, `cell` CSS pixels to a cell, filled as far as `filled`
  * (0 to 1): the cells past it in the dither stay pale, so it fills in
@@ -126,7 +121,7 @@ export const PixelPage = ({
     >
       {cells.flatMap((row, y) =>
         keysOf(row).map((mark, x) => {
-          const due = rankAt(x, y) * 0.6 + (1 - y / high) * 0.4;
+          const due = bayerAt(x, y) * 0.6 + (1 - y / high) * 0.4;
           return (
             <rect
               fill={due < filled ? (fills[mark] ?? colour) : pale}
