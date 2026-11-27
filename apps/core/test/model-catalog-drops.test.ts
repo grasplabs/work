@@ -5,6 +5,7 @@ import { keptAnswersOf, says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProviderFor } from "./model-provider.ts";
 import { signedInApi } from "./sign-in.ts";
+import { startedThrough } from "./started-chats.ts";
 
 // A model an organization saved that pi's catalog no longer has, as a Pi
 // upgrade drops some (1.4 to 1.6: OpenAI's gpt-4, o1 and o3-mini,
@@ -59,7 +60,9 @@ describe(
       };
       // The model the chat offers first, as the composer asks it.
       const [first = ""] = settings.chat;
-      const chat = await member.api.chats.create("With Claire", agent.id);
+      const chat = await startedThrough(member.api.chats, "With Claire", {
+        agentId: agent.id,
+      });
       await member.api.chats.send(chat.id, { text: "Hi.", model: first });
       await vi.waitFor(
         async () => {

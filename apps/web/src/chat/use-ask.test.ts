@@ -24,6 +24,7 @@ const unsent = {
   key: "key-1",
   question: asked.question,
   asked: askedWith(asked),
+  chatId: "chat-1",
 };
 
 describe("asking again after a question failed to send", () => {
@@ -38,6 +39,7 @@ describe("asking again after a question failed to send", () => {
       key: "key-2",
       question: "Who owes us?",
       asked: undefined,
+      chatId: "chat-1",
     };
 
     expect({

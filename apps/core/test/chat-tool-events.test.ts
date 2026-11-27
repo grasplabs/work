@@ -10,6 +10,7 @@ import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import { signedInApi } from "./sign-in.ts";
+import { startedChat } from "./started-chats.ts";
 
 // The calls a chat's code makes to its agent's APIs, as the chat streams
 // them to the page that follows it (`ChatToolEvent`): one line per call,
@@ -94,7 +95,7 @@ describe("a chat's tool lines", () => {
   it("show each call of a code step as it ends, under that step, with identifiers and counts and never what it read", async () => {
     const ann = await person();
     await answering(ann, codeStep(stepCode), says("Nothing on that."));
-    const chat = await ann.chats.create("Leave");
+    const chat = await startedChat(ann, "Leave");
     const follower = await follow(ann.chats, chat.id);
 
     await ann.chats.send(chat.id, { text: "What is our leave policy?", model });
@@ -175,7 +176,7 @@ describe("a chat's tool lines", () => {
       ),
       says("None either.")
     );
-    const chat = await ann.chats.create("Kept");
+    const chat = await startedChat(ann, "Kept");
     const first = await follow(ann.chats, chat.id);
     await ann.chats.send(chat.id, { text: "Anything attached?", model });
     await answered(first);

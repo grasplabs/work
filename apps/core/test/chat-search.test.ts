@@ -12,6 +12,7 @@ import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import type { Answer } from "./model-provider.ts";
 import { signedInApi } from "./sign-in.ts";
+import { startedChat } from "./started-chats.ts";
 
 // Finding a chat by what was said in it, through `/rpc` as the ⌘K window
 // asks: every word searched for must be in the chat's title or what was
@@ -164,8 +165,8 @@ describe("what a search looks through", () => {
 describe("chats.search", () => {
   it("finds a person's chat by its title or what was said, the latest first", async () => {
     const ann = await person();
-    const lease = await ann.chats.create("Invoices");
-    const travel = await ann.chats.create("Moving office");
+    const lease = await startedChat(ann, "Invoices");
+    const travel = await startedChat(ann, "Moving office");
     await ask(
       ann,
       lease.id,
@@ -208,7 +209,7 @@ describe("chats.search", () => {
     const ann = await person();
     const ben = await person();
     const admin = await person("admin");
-    const chat = await ann.chats.create("Lease");
+    const chat = await startedChat(ann, "Lease");
     await ask(ann, chat.id, "Hoogvliet terms?", says("Hoogvliet renews."));
 
     expect({
@@ -227,7 +228,7 @@ describe("chats.search", () => {
 
   it("finds a chat kept before searches were by what was said in it, and keeps up with it after", async () => {
     const ann = await person();
-    const chat = await ann.chats.create("Older");
+    const chat = await startedChat(ann, "Older");
     await ask(ann, chat.id, "Who signs for Hoogvliet?", says("Mira does."));
     // As a chat kept before searches were: nothing kept of what it said.
     await runInDurableObject(objectOf(ann), (_instance, state) => {
@@ -248,7 +249,7 @@ describe("chats.search", () => {
 
   it("keeps finding what was said in a chat longer than one row holds", async () => {
     const ann = await person();
-    const chat = await ann.chats.create("Long");
+    const chat = await startedChat(ann, "Long");
     // Three answers of 600,000 characters: together, said and folded, far
     // past the 2 MB a Durable Object's SQLite keeps in one row.
     const long = `${"lease ".repeat(3000)}Hoogvliet signs ${"lease ".repeat(97_000)}`;

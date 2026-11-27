@@ -4,6 +4,7 @@ import { expect } from "@playwright/test";
 import { publishApp, testApp } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import { writeDraft } from "./draft-writes.ts";
+import { emptyChat } from "./new-chats.ts";
 import { apiOf, peopleIn } from "./people.ts";
 import { toastSaying } from "./said.ts";
 
@@ -81,7 +82,7 @@ test("a builder publishes the draft a chat built from the App's workspace, which
     });
     // The chat's agent adds the desk's invoices, a table and a mutation, to
     // the draft.
-    const chat = await api.chats.create(`Build ${tag}`);
+    const chat = { id: await emptyChat(api, `Build ${tag}`) };
     await writeDraft(
       builder.userId,
       chat.id,

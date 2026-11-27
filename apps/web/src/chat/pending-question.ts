@@ -9,10 +9,10 @@ import type { BoxMention } from "./mentions.tsx";
 // the question as its own until core's copy comes. A question from the box
 // that fails to send leaves the thread and goes back into the box, its
 // words, what they mention and its files, with why, as T3 Code puts a
-// failed message back into its composer. Kept for the page, by chat (or
-// the slot's next chat, before core made one), so the chat's page shows
-// the question Chat's start sent as it opened that page, and takes it back
-// if it fails once Chat's start is gone.
+// failed message back into its composer. Kept for the page, by chat (a
+// new one the page named, chat-starts.ts), so the chat's page shows the
+// question Chat's start sent as it opened that page, and takes it back if
+// it fails once Chat's start is gone.
 
 /** A file the question carries, as the box held it. */
 export interface PendingFile {
@@ -55,10 +55,6 @@ export interface PendingQuestion {
   /** On its way, taken by core, or refused, and why. */
   state: PendingState;
 }
-
-/** Where a chat's question is kept: by the chat, or the slot's next one. */
-export const pendingKey = (chatId: string | undefined, slot: string): string =>
-  chatId ?? `new.${slot}`;
 
 const pending = new Map<string, PendingQuestion>();
 
@@ -104,9 +100,13 @@ export const clearPending = (key: string, question: PendingQuestion): void => {
 export const pendingAt = (key: string): PendingQuestion | undefined =>
   pending.get(key);
 
-/** The question on its way in, or failed to send to, the chat at `key`. */
-export const usePending = (key: string): PendingQuestion | undefined =>
-  useSyncExternalStore(subscribe, () => pending.get(key));
+/** The question on its way in, or failed to send to, chat `chatId`; none without a chat. */
+export const usePending = (
+  chatId: string | undefined
+): PendingQuestion | undefined =>
+  useSyncExternalStore(subscribe, () =>
+    chatId === undefined ? undefined : pending.get(chatId)
+  );
 
 /**
  * The calling box's owner ID, known to be on the page while it is: once it
@@ -126,18 +126,30 @@ export const useBoxOwner = (): string => {
 };
 
 /**
+ * Whether the box that sent `question` is on the page now: whoever reads
+ * it renders again once that box goes, so the box showing its chat takes
+ * back what failed even when the sender went only after it failed.
+ */
+export const useSenderHere = (question: PendingQuestion | undefined): boolean =>
+  useSyncExternalStore(
+    subscribe,
+    () => question !== undefined && boxes.has(question.owner)
+  );
+
+/**
  * Whether the box `owner` takes `question` back: a failed one from a box,
  * by the box that sent it, or by any that shows its chat once that one is
- * gone.
+ * gone (`senderHere`, `useSenderHere`).
  */
 export const takesBack = (
   question: PendingQuestion | undefined,
-  owner: string
+  owner: string,
+  senderHere: boolean
 ): question is PendingQuestion & { state: { failed: string } } =>
   question !== undefined &&
   question.fromBox &&
   typeof question.state === "object" &&
-  (question.owner === owner || !boxes.has(question.owner));
+  (question.owner === owner || !senderHere);
 
 /**
  * Whether core has its own copy of `question`: queued behind the answer

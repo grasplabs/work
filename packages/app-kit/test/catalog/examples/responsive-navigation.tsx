@@ -2,7 +2,6 @@
 // button that opens them in a sheet on a phone. The links are the same list
 // in both places; the current page is marked for screen readers too.
 import { Button, buttonVariants } from "@grasp-os/app-kit/components/button";
-import { Inline } from "@grasp-os/app-kit/components/inline";
 import {
   Sheet,
   SheetContent,
@@ -10,7 +9,6 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@grasp-os/app-kit/components/sheet";
-import { Stack } from "@grasp-os/app-kit/components/stack";
 import { cn } from "@grasp-os/app-kit/lib/utils";
 import { MenuIcon } from "lucide-react";
 
@@ -43,7 +41,7 @@ const NavLinks = ({ className }: { className?: string }) => (
 
 export const ResponsiveNavigationExample = () => (
   <header className="border-b pb-3">
-    <Inline justify="between">
+    <div className="flex flex-wrap items-center justify-between gap-2">
       <span className="font-heading font-medium">Shop</span>
       <nav aria-label="Main" className="hidden md:block">
         <NavLinks />
@@ -66,14 +64,12 @@ export const ResponsiveNavigationExample = () => (
             <SheetTitle>Menu</SheetTitle>
           </SheetHeader>
           <div className="px-4">
-            <Stack>
-              <nav aria-label="Main">
-                <NavLinks className="flex-col" />
-              </nav>
-            </Stack>
+            <nav aria-label="Main">
+              <NavLinks className="flex-col" />
+            </nav>
           </div>
         </SheetContent>
       </Sheet>
-    </Inline>
+    </div>
   </header>
 );

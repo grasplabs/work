@@ -1,7 +1,6 @@
-// The kit's theme, the fonts and the utilities its demos use, so layouts
-// measure as on a page.
+// The kit's theme and the utilities its demos use, so layouts measure as
+// on a page.
 import "./kit.css";
-import { CSPProvider } from "@base-ui/react/csp-provider";
 import type { ComponentType } from "react";
 import { StrictMode } from "react";
 import { flushSync } from "react-dom";
@@ -11,7 +10,6 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 import type { Locator } from "vite-plus/test/browser";
 
-import { PageHeaderTitle } from "../src/components/page-header.tsx";
 import { demos } from "./catalog/demos.ts";
 import { loadExample } from "./catalog/examples.ts";
 import type { ExampleName } from "./catalog/examples.ts";
@@ -32,8 +30,8 @@ import type { Overlay, Target } from "./catalog/overlays.ts";
 // added to the kit is checked without touching this file.
 
 /**
- * The theme's dark side, through its `dark` class. Following the system's
- * colour scheme into that class is the frontend's apps/web/public/theme.js.
+ * The theme's dark side, through its `dark` class, which an App page's
+ * frame sets as the person's theme (@grasp-os/runtime's page-runtime.ts).
  */
 const setDark = (dark: boolean): void => {
   document.documentElement.classList.toggle("dark", dark);
@@ -71,15 +69,12 @@ const render = (heading: string, Content: ComponentType): void => {
   flushSync(() => {
     mounted?.render(
       <StrictMode>
-        {/* As the frontend renders: Base UI writes no <style> of its own. */}
-        <CSPProvider disableStyleElements>
-          <main className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
-            <PageHeaderTitle>{heading}</PageHeaderTitle>
-            <div data-catalog-content="" data-testid="catalog-content">
-              <Content />
-            </div>
-          </main>
-        </CSPProvider>
+        <main className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
+          <h1 className="text-2xl font-semibold tracking-tight">{heading}</h1>
+          <div data-catalog-content="" data-testid="catalog-content">
+            <Content />
+          </div>
+        </main>
       </StrictMode>
     );
   });

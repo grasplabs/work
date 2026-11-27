@@ -11,13 +11,23 @@
 //
 // `onSubmit` may return a promise: the field stays open and read only while it works, closes when
 // it is done, and says so; when it fails the field keeps the words typed and says that it could not
-// save. `validate` refuses a value before it is sent, in the words it returns. A screen reader
-// hears the result once (`inlineEdit.saved`, or `inlineEdit.error`).
+// save (`errorText`, or the catalogue's words). `validate` refuses a value before it is sent, in the
+// words it returns. A screen reader hears the result once (`inlineEdit.saved`, or the error).
+//
+// `variant="popup"` keeps the text where it stands and opens the field in a small Popover beside
+// it, titled by `aria-label`, with Cancel and Save (a page's or a panel's title, renamed without
+// the field taking the title's room). The same rules: Enter or Save saves, Escape or Cancel keeps
+// the value, a press outside keeps it too; it stays open while a save works or after one failed.
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useId, useRef, useState } from "react";
-import type { KeyboardEvent, ReactNode } from "react";
+import type {
+  ComponentProps,
+  FocusEvent,
+  KeyboardEvent,
+  ReactNode,
+} from "react";
 
 import { useAction } from "../hooks/use-action";
 import { useI18n } from "../lib/i18n";
@@ -31,9 +41,20 @@ import {
   size,
   space,
 } from "../lib/tokens.stylex";
-import { announce } from "../lib/utils";
+import { announce, renamed } from "../lib/utils";
 import type { LayoutStyle } from "../lib/utils";
+import { Button } from "./button";
 import { Input } from "./input";
+import {
+  Popover,
+  PopoverContent,
+  PopoverFooter,
+  PopoverTitle,
+  PopoverTrigger,
+} from "./popover";
+
+/** Where the field opens: in the text's place, or in a small popup beside it. */
+export type InlineEditVariant = "inline" | "popup";
 
 /** Every prop an InlineEdit takes. */
 export interface InlineEditProps {
@@ -45,7 +66,10 @@ export interface InlineEditProps {
    * words typed when it rejects.
    */
   onSubmit: (next: string) => unknown;
-  /** Runs when Escape closes the field and keeps the value as it was. */
+  /**
+   * Runs when the field closes and keeps the value as it was: Escape, and in the popup also Cancel,
+   * a press outside and Tab away. (Inline, leaving the field saves; in the popup it discards.)
+   */
   onCancel?: () => void;
   /**
    * Checks the new value before it is sent: the words that say why it is refused ("Up to 40
@@ -66,6 +90,19 @@ export interface InlineEditProps {
   "aria-label": string;
   /** The read view, when it is more than the value's words (a heading). @default value */
   children?: ReactNode;
+  /**
+   * `inline` opens the field in the text's place; `popup` opens it in a small Popover beside the
+   * text, titled by `aria-label`, with Cancel and Save.
+   * @default "inline"
+   */
+  variant?: InlineEditVariant;
+  /** The most the field takes, counted as the browser's `maxlength` counts (UTF-16 code units). */
+  maxLength?: number;
+  /**
+   * Said under the field, and to a screen reader, when a save fails ("Could not rename: that name
+   * is taken"), in place of the catalogue's `inlineEdit.error`.
+   */
+  errorText?: string;
   /** Layout only: where it sits and how wide it is. */
   style?: LayoutStyle;
 }
@@ -118,6 +155,12 @@ const styles = stylex.create({
       [media.pointerCoarse]: `min(0px, calc((100% - ${size.tapTarget}) / 2))`,
     },
   },
+  // The popup's form: its title, the field, what it says, and Cancel and Save.
+  form: {
+    display: "grid",
+    rowGap: space[3],
+    margin: 0,
+  },
   // The field and, under it, what it says while it saves or why it did not.
   editor: {
     display: "grid",
@@ -134,9 +177,156 @@ const styles = stylex.create({
   problem: { color: colors.destructive },
 });
 
-/** Whether onSubmit handed back work still running. */
-const isPromise = (result: unknown): result is Promise<unknown> =>
-  result instanceof Promise;
+/** Whether an input method is composing as the key comes: its Enter and Escape are the method's. */
+const composing = (event: KeyboardEvent<HTMLInputElement>): boolean =>
+  event.nativeEvent.isComposing;
+
+/**
+ * The field's words. Each time the field opens, from a press or from the host, they start from the
+ * value as it is (`onOpen` runs), and `opens` counts it, so a field open from the start takes no
+ * focus: nobody asked for it, and focus would scroll the page to it from wherever the reader is.
+ * Until the person types they follow the value, so a name the host changes meanwhile is never
+ * saved over by the old one.
+ */
+const useDraft = (value: string, editing: boolean, onOpen: () => void) => {
+  const [draft, setDraft] = useState(value);
+  const [typed, setTyped] = useState(false);
+  const [opened, setOpened] = useState(editing);
+  const [opens, setOpens] = useState(0);
+  if (opened !== editing) {
+    setOpened(editing);
+    if (editing) {
+      setDraft(value);
+      setTyped(false);
+      setOpens(opens + 1);
+      onOpen();
+    }
+  } else if (editing && !typed && draft !== value) {
+    setDraft(value);
+  }
+  const type = (next: string) => {
+    setDraft(next);
+    setTyped(true);
+  };
+  return { draft, opens, type };
+};
+
+/** What the popup form is drawn from: the text that opens it, the field, and how it ends. */
+interface PopupFieldProps {
+  open: boolean;
+  saving: boolean;
+  /** Its title, the field's name ("Rename"). */
+  title: string;
+  /** The text, the popup's trigger. */
+  children: ReactNode;
+  triggerProps: ComponentProps<"button">;
+  fieldProps: ComponentProps<typeof Input>;
+  /** The field took the focus: its words are chosen as it opens. */
+  onFocusField: (field: HTMLInputElement) => void;
+  message: ReactNode;
+  onOpen: () => void;
+  /** It closes and keeps the value; `byKey` when Escape or Cancel closed it. */
+  onDismiss: (byKey: boolean) => void;
+  onSave: () => void;
+}
+
+/** The popup form beside the text: its title, the field, Cancel and Save. */
+const PopupField = ({
+  open,
+  saving,
+  title,
+  children,
+  triggerProps,
+  fieldProps,
+  onFocusField,
+  message,
+  onOpen,
+  onDismiss,
+  onSave,
+}: PopupFieldProps) => {
+  const words = useI18n().inlineEdit;
+  return (
+    <Popover
+      open={open}
+      // While a save works it stays; Escape, a press outside, Tab away or a press on the text keep
+      // the value.
+      dismissible={!saving}
+      onOpenChange={(next, details) => {
+        if (next) {
+          onOpen();
+        } else if (saving) {
+          details.cancel();
+        } else {
+          onDismiss(details.reason === "escape-key");
+        }
+      }}
+    >
+      {/* The text is the popup's trigger: a press on it while it is open closes it, never closing
+        and opening it again over the words typed. */}
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          {...triggerProps}
+          onClick={undefined}
+          aria-haspopup="dialog"
+        >
+          <span aria-hidden="true" {...stylex.props(styles.target)} />
+          {children}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSave();
+          }}
+          {...stylex.props(styles.form)}
+        >
+          <PopoverTitle>{title}</PopoverTitle>
+          <span data-slot="inline-edit-input" {...stylex.props(styles.editor)}>
+            <Input
+              {...fieldProps}
+              // Enter and Escape while an input method composes pick its words: they neither save
+              // nor close.
+              onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
+                if (
+                  composing(event) &&
+                  (event.key === "Enter" || event.key === "Escape")
+                ) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }
+              }}
+              onFocus={(event: FocusEvent<HTMLInputElement>) => {
+                onFocusField(event.currentTarget);
+              }}
+            />
+            {message}
+          </span>
+          <PopoverFooter>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={saving}
+              onClick={() => {
+                onDismiss(true);
+              }}
+            >
+              {words.cancel}
+            </Button>
+            <Button
+              type="submit"
+              size="sm"
+              status={saving ? "loading" : "idle"}
+            >
+              {words.save}
+            </Button>
+          </PopoverFooter>
+        </form>
+      </PopoverContent>
+    </Popover>
+  );
+};
 
 /** A value read as text that becomes a field where it stands. */
 export const InlineEdit = ({
@@ -149,6 +339,9 @@ export const InlineEdit = ({
   onEditingChange,
   "aria-label": ariaLabel,
   children,
+  variant = "inline",
+  maxLength,
+  errorText,
   style,
 }: InlineEditProps) => {
   const words = useI18n().inlineEdit;
@@ -156,25 +349,18 @@ export const InlineEdit = ({
   const messageId = useId();
   const [own, setOwn] = useState(defaultEditing);
   const editing = given ?? own;
-  const [draft, setDraft] = useState(value);
   // Why the value was not saved: `validate`'s words, or the failure's.
   const [problem, setProblem] = useState("");
-  // Each time the field opens, from a press or from the host, it starts from the value as it is,
-  // and takes focus. Counted, so a field that is open from the start takes none: nobody asked for
-  // it, and focus would scroll the page to it from wherever the reader is.
-  const [opened, setOpened] = useState(editing);
-  const [opens, setOpens] = useState(0);
-  if (opened !== editing) {
-    setOpened(editing);
-    if (editing) {
-      setDraft(value);
-      setProblem("");
-      setOpens(opens + 1);
-    }
-  }
-  const save = useAction(async (work: Promise<unknown>) => await work, {
+  const { draft, opens, type } = useDraft(value, editing, () => {
+    setProblem("");
+  });
+  const failed = errorText ?? words.error;
+  // The host's work runs inside the action, so its guard comes first: nothing reaches the host
+  // while a save works. Each save is new work, so a rename may follow a rename at once.
+  const save = useAction(async (next: string) => await onSubmit(next), {
     successText: words.saved(draft.trim()),
-    errorText: words.error,
+    errorText: failed,
+    runWhileShown: true,
   });
   const saving = save.status === "loading";
 
@@ -184,9 +370,16 @@ export const InlineEdit = ({
   const backToText = useRef(false);
   // Set once the field is closing, so the blur that follows a key does not save a second time.
   const closing = useRef(false);
+  // Set as the popup opens, so the field's words are chosen as it takes the focus.
+  const choose = useRef(false);
   // Each close asked for, so the render after it can tell whether a host that keeps `editing`
   // closed the field or kept it open.
   const [asked, setAsked] = useState(0);
+  // Whether the field is open as last drawn, for work that ends after the host closed it.
+  const open = useRef(editing);
+  useEffect(() => {
+    open.current = editing;
+  });
 
   const setEditing = (next: boolean) => {
     if (given === undefined) {
@@ -195,6 +388,10 @@ export const InlineEdit = ({
     onEditingChange?.(next);
   };
   const close = (byKey: boolean) => {
+    // Already closed by the host (while a save worked): nothing to close, and no focus to move.
+    if (!open.current) {
+      return;
+    }
     closing.current = true;
     backToText.current = byKey;
     setEditing(false);
@@ -213,6 +410,7 @@ export const InlineEdit = ({
   useEffect(() => {
     if (editing) {
       closing.current = false;
+      backToText.current = false;
     } else if (backToText.current) {
       backToText.current = false;
       text.current?.focus();
@@ -221,6 +419,7 @@ export const InlineEdit = ({
 
   useEffect(() => {
     if (opens > 0) {
+      choose.current = true;
       field.current?.focus();
       field.current?.select();
     }
@@ -230,8 +429,8 @@ export const InlineEdit = ({
     if (closing.current || saving) {
       return;
     }
-    const next = draft.trim();
-    if (next === "" || next === value) {
+    const next = renamed(draft, value);
+    if (next === undefined) {
       close(byKey);
       return;
     }
@@ -241,22 +440,16 @@ export const InlineEdit = ({
       announce(refused);
       return;
     }
-    const result = onSubmit(next);
-    if (!isPromise(result)) {
-      announce(words.saved(next));
-      close(byKey);
-      return;
-    }
-    const outcome = await save.run(result);
+    const outcome = await save.run(next);
     if (outcome.ok) {
       close(byKey);
     } else if (!("busy" in outcome)) {
-      setProblem(words.error);
+      setProblem(failed);
     }
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.nativeEvent.isComposing) {
+    if (composing(event)) {
       return;
     }
     if (event.key === "Enter") {
@@ -272,64 +465,103 @@ export const InlineEdit = ({
   };
 
   const shown = saving ? (save.label ?? "") : problem;
+  const message =
+    shown === "" ? null : (
+      <span
+        id={messageId}
+        {...stylex.props(styles.message, problem !== "" && styles.problem)}
+      >
+        {shown}
+      </span>
+    );
+  const fieldProps = {
+    ref: field,
+    size: "sm" as const,
+    "aria-label": ariaLabel,
+    value: draft,
+    maxLength,
+    onValueChange: (next: string) => {
+      type(next);
+      setProblem("");
+    },
+    readOnly: saving,
+    "aria-busy": saving || undefined,
+    "aria-invalid": problem === "" ? undefined : true,
+    "aria-describedby": shown === "" ? undefined : messageId,
+  };
+  const textProps = {
+    ref: text,
+    "aria-label": value === "" ? ariaLabel : undefined,
+    "aria-describedby": hint,
+    onClick: () => {
+      setEditing(true);
+    },
+    onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => {
+      if (event.key === "F2") {
+        event.preventDefault();
+        setEditing(true);
+      }
+    },
+    ...stylex.props(styles.text, focusRing),
+  };
+  const hintText = (
+    <span id={hint} {...stylex.props(visuallyHidden)}>
+      {words.edit}
+    </span>
+  );
+  if (variant === "popup") {
+    return (
+      <span data-slot="inline-edit" {...stylex.props(styles.root, style)}>
+        <PopupField
+          open={editing}
+          saving={saving}
+          title={ariaLabel}
+          triggerProps={textProps}
+          fieldProps={fieldProps}
+          onFocusField={(input) => {
+            if (choose.current) {
+              choose.current = false;
+              input.select();
+            }
+          }}
+          message={message}
+          onOpen={() => {
+            setEditing(true);
+          }}
+          onDismiss={(byKey) => {
+            close(byKey);
+            onCancel?.();
+          }}
+          onSave={() => {
+            void submit(true);
+          }}
+        >
+          {children ?? value}
+        </PopupField>
+        {hintText}
+      </span>
+    );
+  }
   return (
     <span data-slot="inline-edit" {...stylex.props(styles.root, style)}>
       {editing ? (
         <span data-slot="inline-edit-input" {...stylex.props(styles.editor)}>
           <Input
-            ref={field}
-            size="sm"
-            aria-label={ariaLabel}
-            value={draft}
-            onValueChange={(next: string) => {
-              setDraft(next);
-              setProblem("");
-            }}
-            readOnly={saving}
-            aria-busy={saving || undefined}
-            aria-invalid={problem === "" ? undefined : true}
-            aria-describedby={shown === "" ? undefined : messageId}
+            {...fieldProps}
             onKeyDown={onKeyDown}
             onBlur={() => {
               void submit(false);
             }}
           />
-          {shown === "" ? null : (
-            <span
-              id={messageId}
-              {...stylex.props(
-                styles.message,
-                problem !== "" && styles.problem
-              )}
-            >
-              {shown}
-            </span>
-          )}
+          {message}
         </span>
       ) : (
         <>
-          <button
-            ref={text}
-            type="button"
-            aria-label={value === "" ? ariaLabel : undefined}
-            aria-describedby={hint}
-            onClick={() => {
-              setEditing(true);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "F2") {
-                event.preventDefault();
-                setEditing(true);
-              }
-            }}
-            {...stylex.props(styles.text, focusRing)}
-          >
+          <button type="button" {...textProps}>
             <span aria-hidden="true" {...stylex.props(styles.target)} />
             {children ?? value}
           </button>
-          <span id={hint} {...stylex.props(visuallyHidden)}>
-            {words.edit}
-          </span>
+          {hintText}
         </>
       )}
     </span>

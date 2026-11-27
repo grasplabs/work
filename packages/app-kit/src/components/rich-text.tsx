@@ -1,4 +1,3 @@
-import { Button } from "@grasp-os/app-kit/components/button";
 import { cn } from "@grasp-os/app-kit/lib/utils";
 import type { LinksReference } from "@grasp-os/runtime/app";
 import { useClient } from "@grasp-os/runtime/react";
@@ -34,8 +33,11 @@ const OpeningLink = ({
   children?: ReactNode;
 }): ReactNode => {
   const client = useClient();
+  // In the line of text, so a plain button that reads as the theme's link
+  // does, not a Button with a box of its own.
   return (
-    <Button
+    <button
+      className="text-primary font-medium underline underline-offset-4"
       onClick={() => {
         const open = async (): Promise<void> => {
           try {
@@ -47,12 +49,10 @@ const OpeningLink = ({
         };
         void open();
       }}
-      size="inline"
       type="button"
-      variant="link"
     >
       {children}
-    </Button>
+    </button>
   );
 };
 

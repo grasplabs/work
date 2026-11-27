@@ -9,6 +9,7 @@ import { newTeam } from "./admin-teams.ts";
 import { agentWriting } from "./draft-writers.ts";
 import { mockIdp } from "./idp.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
+import { startedChat } from "./started-chats.ts";
 
 // Share with your team, as the App's workspace does it (the web's
 // share sheet): the builder's changes published (`drafts.publish`),
@@ -43,7 +44,7 @@ const writeDraft = async (
   app: AppId,
   changes: Record<string, string>
 ): Promise<number> => {
-  const { id: chatId } = await person.api.chats.create("App changes");
+  const { id: chatId } = await startedChat(person, "App changes");
   const written = await saveDraft(
     env,
     appKind,

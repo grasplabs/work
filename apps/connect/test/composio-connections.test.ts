@@ -182,7 +182,7 @@ describe("connecting a Composio toolkit", () => {
       provider: "hubspot",
       scope: "shared",
       serverKind: "composio",
-      server: `https://backend.composio.dev/api/v3/tool_router/session/${sessionId}/mcp`,
+      server: `https://backend.composio.dev/tool_router/${sessionId}/mcp`,
       accountId,
       sessionId,
       tools: JSON.stringify(allowed),
@@ -1211,10 +1211,12 @@ describe("a Composio connection", () => {
 
   it("refuses a tool the admin didn't allow, without reaching Composio", async () => {
     const connectionId = await connectHubSpot(someone("admin"));
+    // Connecting read its tools of its session, for the chat's search.
+    const before = composio.state.mcp.requests;
     await expect(
       outcome(callAs(workflow, call(connectionId, "HUBSPOT_UPDATE_CONTACT")))
     ).resolves.toBe("connect.action_not_found");
-    expect(composio.state.mcp.requests).toBe(0);
+    expect(composio.state.mcp.requests).toBe(before);
     const recorded = await events();
     const refused = recorded.find(({ action }) => action === "connection.call");
     expect(refused?.detail).toMatchObject({
@@ -1394,6 +1396,7 @@ describe("a Composio connection", () => {
 
   it("takes no calls while connect has no Composio key", async () => {
     const connectionId = await connectHubSpot(someone("admin"));
+    const before = composio.state.mcp.requests;
     await expect(
       outcome(
         callAs(
@@ -1404,7 +1407,7 @@ describe("a Composio connection", () => {
         )
       )
     ).resolves.toBe("connect.server_unavailable");
-    expect(composio.state.mcp.requests).toBe(0);
+    expect(composio.state.mcp.requests).toBe(before);
   });
 });
 

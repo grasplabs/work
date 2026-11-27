@@ -1,5 +1,5 @@
 import type { ChatSummary } from "@grasp-os/shared/chat";
-import { chatTitleSchema } from "@grasp-os/shared/chat";
+import { chatTitleMaxLength, chatTitleSchema } from "@grasp-os/shared/chat";
 import { DropdownMenuMore } from "@grasp-os/ui/components/dropdown-menu";
 import type { DropdownMenuMoreItem } from "@grasp-os/ui/components/dropdown-menu";
 import { toast } from "@grasp-os/ui/components/toast";
@@ -41,19 +41,29 @@ const fileNameOf = (title: string): string =>
     .replaceAll(/^-+|-+$/gu, "")
     .slice(0, 80) || "grasp-chat";
 
+/** A chat's rename where its name stands: the change, the most a name holds, and what is said when it fails. */
+export interface ChatRename {
+  /** Renames it to `name`, trimmed; rejects where core can't, so the rename stays open. */
+  onRename: (name: string) => Promise<void>;
+  maxLength: number;
+  errorText: string;
+}
+
 /**
  * Renames chat `chatId` to a new name, trimmed, and reads the page again;
  * `onRenamed` shows the new name at once, for the chat it was given to.
- * Where core can't, it says so.
+ * Where core can't, the rename fails with `errorText`, which the field
+ * says under the words typed (InlineEdit).
  */
 export const useRenameChat = (
   chatId: string,
   onRenamed?: (renamed: string, title: string) => void
-): ((name: string) => void) => {
+): ChatRename => {
   const { t } = useLingui();
   const router = useRouter();
   const { run } = useCoreAction();
-  const rename = async (name: string): Promise<void> => {
+  const errorText = t`The chat couldn't be renamed. Try again.`;
+  const onRename = async (name: string): Promise<void> => {
     const parsed = chatTitleSchema.safeParse(name);
     const renamed =
       parsed.success &&
@@ -61,16 +71,13 @@ export const useRenameChat = (
         await session.chats.rename(chatId, parsed.data);
         return true;
       }));
-    if (renamed === true && parsed.success) {
-      onRenamed?.(chatId, parsed.data);
-      await router.invalidate();
-      return;
+    if (renamed !== true || !parsed.success) {
+      throw new Error(errorText);
     }
-    toast.error(t`The chat couldn't be renamed. Try again.`);
+    onRenamed?.(chatId, parsed.data);
+    await router.invalidate();
   };
-  return (name) => {
-    void rename(name);
-  };
+  return { onRename, maxLength: chatTitleMaxLength, errorText };
 };
 
 /**

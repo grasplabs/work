@@ -1,5 +1,3 @@
-"use client";
-
 import { Separator as SeparatorPrimitive } from "@base-ui/react/separator";
 import { cn } from "@grasp-os/app-kit/lib/utils";
 

@@ -72,6 +72,12 @@ const tools: FakeTool[] = [
     run: () => ({ output: { deleted: 0 } }),
   },
   {
+    // One Grasp never runs, by its name (`isNeverTool`).
+    name: "HUBSPOT_DELETE_CONTACT",
+    inputSchema: { type: "object", properties: {}, required: [] },
+    run: () => ({ output: { deleted: 1 } }),
+  },
+  {
     name: "HUBSPOT_HUGE",
     inputSchema: {
       type: "object",
@@ -177,7 +183,11 @@ const composio = fakeComposioApi(
       slug: "hubspot",
       name: "HubSpot",
       tools: [
-        { slug: "HUBSPOT_LIST_CONTACTS", tags: ["readOnlyHint"] },
+        {
+          slug: "HUBSPOT_LIST_CONTACTS",
+          tags: ["readOnlyHint"],
+          description: "Lists the contacts of the portal.",
+        },
         { slug: "HUBSPOT_SHADOWED", tags: ["readOnlyHint"] },
         { slug: "HUBSPOT_CREATE_CONTACT" },
       ],
@@ -550,13 +560,125 @@ describe("a Composio connection's generated contract", () => {
   });
 });
 
-describe("a Composio toolkit's tools, as the chat's tool search reads them", () => {
-  it("are none: core searches them by name alone", async () => {
-    const toolkit = await hubspot();
+/** What `describe` reads of `connectionId`'s tools named `actions`. */
+const described = async (connectionId: string, actions: string[]) =>
+  await exports.default.connectionTools({ connectionId, actions });
 
-    await expect(
-      exports.default.connectionTools({ connectionId: toolkit })
-    ).resolves.toStrictEqual([]);
+/** What a search reads of `connectionId`'s tools: names and outlines. */
+const searched = async (connectionId: string) =>
+  await exports.default.connectionTools({ connectionId });
+
+describe("a Composio toolkit's tools, as the chat's tool search and describe read them", () => {
+  it("are described in full of the session now, those connect offers, and searched as kept, in outline", async () => {
+    const toolkit = await hubspot([
+      { name: "HUBSPOT_LIST_CONTACTS", read: true },
+      "HUBSPOT_CREATE_CONTACT",
+    ]);
+
+    const named = await described(toolkit, [
+      "HUBSPOT_LIST_CONTACTS",
+      "HUBSPOT_UPDATE_CONTACTS",
+    ]);
+    // Kept by the describe, so a search reads it at once.
+    const outlined = await searched(toolkit);
+
+    expect({
+      named: named.map(({ name, description, input, output }) => ({
+        name,
+        description,
+        input: parsed(input),
+        output: parsed(output ?? undefined),
+      })),
+      outlined: outlined
+        .map(({ name, input }) => [name, parsed(input)])
+        .toSorted(([a], [b]) => String(b).localeCompare(String(a))),
+    }).toStrictEqual({
+      // In full for those named, and none the admin didn't allow.
+      named: [
+        {
+          name: "HUBSPOT_LIST_CONTACTS",
+          description: "Lists the contacts of the portal.",
+          input: listInput,
+          output: {
+            type: "object",
+            properties: {
+              contacts: { type: "array", items: { type: "string" } },
+            },
+            required: ["contacts"],
+          },
+        },
+      ],
+      // Every one connect offers, in outline, for a search to rank.
+      outlined: [
+        [
+          "HUBSPOT_LIST_CONTACTS",
+          {
+            type: "object",
+            properties: { limit: { type: "integer" } },
+            required: [],
+          },
+        ],
+        [
+          "HUBSPOT_CREATE_CONTACT",
+          {
+            type: "object",
+            properties: { email: { type: "string" } },
+            required: ["email"],
+          },
+        ],
+      ],
+    });
+  });
+
+  it("are searched at once while the session is slow or never read, by names alone then, and never wait on it", async () => {
+    const toolkit = await hubspot(["HUBSPOT_LIST_CONTACTS"]);
+    const held = Promise.withResolvers<boolean>();
+    composio.state.mcp.listGate = async () => {
+      await held.promise;
+    };
+    try {
+      // Answered while the session holds every list it is asked for.
+      await expect(searched(toolkit)).resolves.toStrictEqual([]);
+    } finally {
+      held.resolve(true);
+      composio.state.mcp.listGate = undefined;
+    }
+  });
+
+  it("leave out what Grasp never runs and a schema too deep to read, and can't be described while the session can't be read", async () => {
+    const toolkit = await hubspot([
+      "HUBSPOT_LIST_CONTACTS",
+      "HUBSPOT_DELETE_CONTACT",
+      "HUBSPOT_ABYSS",
+    ]);
+    const named = await described(toolkit, [
+      "HUBSPOT_LIST_CONTACTS",
+      "HUBSPOT_DELETE_CONTACT",
+      "HUBSPOT_ABYSS",
+    ]);
+    const kept = await searched(toolkit);
+    composio.state.mcp.refuseList = true;
+    const refused = await outcome(
+      described(toolkit, ["HUBSPOT_LIST_CONTACTS"])
+    );
+    const withoutKey = await outcome(
+      connectWith({ COMPOSIO_API_KEY: undefined }).connectionTools({
+        connectionId: toolkit,
+        actions: ["HUBSPOT_LIST_CONTACTS"],
+      })
+    );
+    expect({
+      named: named.map(({ name }) => name),
+      kept: kept.map(({ name }) => name),
+      refused,
+      withoutKey,
+    }).toStrictEqual({
+      // Deleting: refused by name, never described; the abyss, never read.
+      named: ["HUBSPOT_LIST_CONTACTS"],
+      kept: ["HUBSPOT_LIST_CONTACTS"],
+      refused: "connect.server_unavailable",
+      withoutKey: "connect.server_unavailable",
+    });
   });
 });
 

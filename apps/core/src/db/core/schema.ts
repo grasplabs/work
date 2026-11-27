@@ -513,6 +513,23 @@ export const channelSignals = sqliteTable(
 );
 
 /**
+ * Every chat's ID, and whose chat it is (workspace.ts, `createChat`): a
+ * page names a new chat itself (`ChatStart`), and an ID is taken once in
+ * the whole company, so a chat's ID stays unique across Workspace
+ * objects, as what core keeps of a chat by its ID alone needs (a
+ * permission held in one chat, a draft's checkpoint naming it). Kept once
+ * the chat is deleted, so its ID is never taken again: `request_key`, the
+ * key of the start that made it (`ChatStart.key`), is cleared then, and
+ * is null for a chat core made itself (a chat app's, a wake-up's).
+ */
+export const chatIds = sqliteTable("chat_ids", {
+  id: text().primaryKey(),
+  personId: text("person_id").notNull(),
+  requestKey: text("request_key"),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
  * Who is in a chat that others share, a group chat or channel on a chat
  * platform, as its agent reads for it (chat-audiences.ts): kept by the
  * Workspace object that holds the chat, before each turn, from the

@@ -71,8 +71,10 @@ const stableUpToDate = async (
     expect(ticked.status()).toBe(204);
     await visit(page, "/platform");
     await expect(
-      channel(page, "Stable").getByText("1 of 1 up to date")
-    ).toBeVisible({
+      channel(page, "Stable").getByRole("meter", {
+        name: "Companies up to date",
+      })
+    ).toHaveAttribute("aria-valuetext", "1 of 1 up to date", {
       timeout: 1000,
     });
   }).toPass({ timeout: deployMs });
