@@ -444,6 +444,69 @@ const edgeFadeStyles = stylex.create({
 /** The fade at the sides of a sideways row with more beyond them. */
 export const edgeFade = edgeFadeStyles.edges;
 
+// ---- A long value's fade -------------------------------------------------------------------------
+//
+// A value longer than its field fades out at the field's end, never a cut through a letter: Input,
+// Combobox's input and InputGroupInput, one style. The words are painted through a gradient
+// clipped to the text that ends in transparent over the last space-5 of the content box; the
+// second, empty layer keeps the field's fill on its whole box. While the field has focus the words
+// are plain ink and both layers are empty: the gradient is painted where the words stand unscrolled,
+// so on a value scrolled to the caret it drew a second copy over the ink. Autofilled, the words are
+// plain ink too: Chromium sets `background-image: none !important` there, which left a transparent
+// fill with nothing under it. In forced colours the background is dropped, so the words keep their
+// own colour. Not in Firefox: it passes the support test, but a form control's words are not
+// clipped there, so the gradient filled the whole box; there a long value is cut by the box's edge.
+
+const CLIP_TEXT =
+  "@supports (background-clip: text) and (not (-moz-appearance: none))";
+const FADE_END = `linear-gradient(to right, currentColor calc(100% - ${space[5]}), transparent), linear-gradient(transparent, transparent)`;
+const FADE_END_RTL = `linear-gradient(to left, currentColor calc(100% - ${space[5]}), transparent), linear-gradient(transparent, transparent)`;
+const NO_FADE =
+  "linear-gradient(transparent, transparent), linear-gradient(transparent, transparent)";
+
+const valueFadeStyles = stylex.create({
+  fade: {
+    WebkitTextFillColor: {
+      default: null,
+      [CLIP_TEXT]: {
+        default: "transparent",
+        ":focus": "currentColor",
+        ":autofill": "currentColor",
+        [FORCED]: "currentColor",
+      },
+    },
+    backgroundImage: {
+      default: null,
+      [CLIP_TEXT]: {
+        default: FADE_END,
+        ":dir(rtl)": FADE_END_RTL,
+        ":focus": NO_FADE,
+      },
+    },
+    backgroundOrigin: {
+      default: null,
+      [CLIP_TEXT]: "content-box, padding-box",
+    },
+    backgroundClip: { default: null, [CLIP_TEXT]: "text, padding-box" },
+    // One tile: words past the content box (in the end padding) take no paint, so stay unseen.
+    backgroundRepeat: { default: null, [CLIP_TEXT]: "no-repeat" },
+  },
+  // A value that fits its field: no fade, every letter at full ink.
+  fits: {
+    WebkitTextFillColor: null,
+    backgroundImage: null,
+    backgroundOrigin: null,
+    backgroundClip: null,
+    backgroundRepeat: null,
+  },
+});
+
+/** A long value fading out at its field's end; plain ink while the field has focus or is autofilled. */
+export const valueFade = valueFadeStyles.fade;
+
+/** A value that fits its field: every letter at full ink. After `valueFade`. */
+export const valueFits = valueFadeStyles.fits;
+
 // ---- Input --------------------------------------------------------------------------------------
 
 /**
