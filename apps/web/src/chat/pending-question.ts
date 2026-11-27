@@ -1,8 +1,4 @@
-import type {
-  ChatMessage,
-  ChatQueued,
-  ChatSummary,
-} from "@grasp-os/shared/chat";
+import type { ChatMessage, ChatQueued } from "@grasp-os/shared/chat";
 import { useEffect, useId, useSyncExternalStore } from "react";
 
 import type { BoxMention } from "./mentions.tsx";
@@ -185,21 +181,3 @@ export const shownPending = (
   taken(question, messages, queued)
     ? undefined
     : question;
-
-/** The chats a question here just made, until their page opens. */
-const made = new Map<string, ChatSummary>();
-
-/** Keeps `chat`, which a question just made, for its page to open with. */
-export const keepMade = (chat: ChatSummary): void => {
-  made.set(chat.id, chat);
-};
-
-/**
- * The chat a question just made, as core gave it, once: its page opens
- * with it at once rather than reading it again (routes/_shell.chats.$chatId.tsx).
- */
-export const takeMade = (chatId: string): ChatSummary | undefined => {
-  const chat = made.get(chatId);
-  made.delete(chatId);
-  return chat;
-};

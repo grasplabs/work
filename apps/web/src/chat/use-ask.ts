@@ -33,7 +33,6 @@ import {
 import type { ModelChoice } from "./model-choice.ts";
 import {
   clearPending,
-  keepMade,
   pendingAt,
   pendingKey,
   setPending,
@@ -466,17 +465,12 @@ export const useAsk = (
     const asking = async (session: Session): Promise<string> => {
       let id = chatId;
       if (id === undefined) {
-        const chat = await session.chats.create(
+        ({ id } = await session.chats.create(
           titleOf(question),
           startWith,
           make,
           key
-        );
-        // Its page, if it opens at once, opens with what core said.
-        if (onChat !== undefined) {
-          keepMade(chat);
-        }
-        ({ id } = chat);
+        ));
       }
       // The chat is there (asked again on a new connection, already so):
       // the question shows in it as it goes on, and it is the open one,

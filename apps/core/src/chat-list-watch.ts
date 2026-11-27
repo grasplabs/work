@@ -1,6 +1,7 @@
 import type { ChatListUpdate, ChatSummary } from "@grasp-os/shared/chat";
 
 import { Pushes } from "./pushes.ts";
+import type { Listener } from "./pushes.ts";
 
 /** Where a watcher of a person's list of chats gets its updates. */
 export type ChatListListener = Rpc.Stub<
@@ -32,7 +33,11 @@ export class ChatListWatch {
   #sent: Map<string, string> | undefined;
   #archivedSent = 0;
 
-  constructor(listener: ChatListListener, personId: string, drop: () => void) {
+  constructor(
+    listener: Listener<ChatListUpdate>,
+    personId: string,
+    drop: () => void
+  ) {
     this.#pushes = new Pushes(listener, () => this.#next(), drop);
     this.personId = personId;
   }

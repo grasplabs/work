@@ -11,6 +11,7 @@ import {
 import { isConnectionFailure } from "../core.ts";
 import { useCore } from "../use-core.ts";
 import { useTabShown } from "../use-tab-shown.ts";
+import { readTo } from "./chat-watch.ts";
 
 // Where the person has read a chat to, as Slack and Linear keep it: one
 // place per chat, on core (`ChatsApi.markRead`), so it holds on every
@@ -91,14 +92,46 @@ const lineOf = (
 };
 
 /**
+ * Where the person had read to, for opening `count`: core's answer to its
+ * mark; for the first line, until that answer comes, where core's watch
+ * said they had read to as it began (`seenUpTo`).
+ */
+const seenUpToFor = ({
+  reply,
+  count,
+  decided,
+  view,
+}: {
+  reply: { count: number; seenUpTo: number | null | false } | undefined;
+  count: number;
+  /** Whether a line was decided already. */
+  decided: boolean;
+  view: { seenUpTo?: number | null };
+}): number | null | false | undefined => {
+  if (reply?.count === count) {
+    return reply.seenUpTo;
+  }
+  return decided ? undefined : view.seenUpTo;
+};
+
+/** The tab's watch of chat `id` is told it was read up to `upTo`. */
+const told = (id: string, upTo: number | undefined): void => {
+  if (upTo !== undefined) {
+    readTo(id, upTo);
+  }
+};
+
+/**
  * Marks `chatId` read while the person looks at it, and gives the New line
  * its thread draws: over the first answer they hadn't seen as it opened
  * (`view`, once loaded), for as long as it stays open. They look at it
  * while it is `seen` (a chat's page; the dock while it is open, never
  * while it is closed to its bar) and the tab is shown.
  *
- * The first open waits for core's answer, and the thread stays loading
- * meanwhile, unseen, so it opens where the line is; a chat whose agent
+ * The first open is decided from where core's watch said they had read
+ * to as it began (`seenUpTo`, its first update), so the thread opens where
+ * the line is with nothing more to wait for; without it, the thread stays
+ * loading until the mark's answer, unseen. A chat whose agent
  * works as it opens draws no line and waits for nothing (the person
  * watches that answer come, and it is read as it ends). Closed (`seen`
  * false) and opened again, the thread stays as it was, its rows, scroll
@@ -115,6 +148,8 @@ export const useNewLine = (
     messages: readonly ChatMessage[];
     running: boolean;
     loaded: boolean;
+    /** Where core's watch said they had read to as the tab began to follow it. */
+    seenUpTo?: number | null;
     /** Whether the tab follows it again after a dropped connection, not heard back yet. */
     resuming?: boolean;
   },
@@ -159,13 +194,20 @@ export const useNewLine = (
   const asked = useRef(-1);
   const marked = useRef(0);
   // Read up to the newest message the page shows, never past it: its row
-  // loses its dot, here and on every device, as core pushes it.
-  const mark = useEffectEvent(async (id: string): Promise<number | null> => {
-    const upTo = view.messages.at(-1)?.id;
-    return await core.withSession(
-      async (session) => await session.chats.markRead(id, upTo)
-    );
-  });
+  // loses its dot, here and on every device, as core pushes it. Answers
+  // where they had read to before, and what it read up to, which the
+  // tab's watch of the chat is told once the line is decided (`readTo`).
+  const mark = useEffectEvent(
+    async (
+      id: string
+    ): Promise<{ before: number | null; upTo: number | undefined }> => {
+      const upTo = view.messages.at(-1)?.id;
+      const before = await core.withSession(
+        async (session) => await session.chats.markRead(id, upTo)
+      );
+      return { before, upTo };
+    }
+  );
   // Only once the page has the chat's messages, and has them as they are
   // now (not following it again after a dropped connection, when what came
   // meanwhile isn't there yet): a watch core refused (too many open, say)
@@ -185,7 +227,9 @@ export const useNewLine = (
     asked.current = count;
     void (async () => {
       try {
-        setReply({ count, seenUpTo: await mark(chatId) });
+        const { before, upTo } = await mark(chatId);
+        setReply({ count, seenUpTo: before });
+        told(chatId, upTo);
       } catch (error) {
         // The connection dropped on the way, and the chat is being
         // followed again: asked again once it is. Else no line, and the
@@ -198,10 +242,16 @@ export const useNewLine = (
       }
     })();
   }, [chatId, looking, loaded, count]);
-  const next =
-    line?.count === count
-      ? undefined
-      : lineOf(view, reply?.count === count ? reply.seenUpTo : undefined);
+  // The first line needs no mark's answer: core's watch said where they
+  // had read to as it began, and the thread shows at once. The mark still
+  // goes, and decides each later opening's line.
+  const known = seenUpToFor({
+    reply,
+    count,
+    decided: line !== undefined,
+    view,
+  });
+  const next = line?.count === count ? undefined : lineOf(view, known);
   if (next !== undefined) {
     // Back on the tab with nothing new: the line stays where it was.
     setLine({
@@ -230,7 +280,8 @@ export const useNewLine = (
     marked.current = latest;
     void (async () => {
       try {
-        await mark(chatId);
+        const { upTo } = await mark(chatId);
+        told(chatId, upTo);
       } catch {
         // Still unread on core: marked again as the next answer ends, or
         // the next time the chat opens.
