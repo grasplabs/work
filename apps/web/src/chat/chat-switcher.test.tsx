@@ -335,7 +335,7 @@ describe("the chats window", () => {
     });
   });
 
-  it("leaves ⌘K to rich text, where the keys shape the text", async () => {
+  it("opens with ⌘K from rich text such as the chat's box, which binds no ⌘K of its own", async () => {
     await shown(async () => await Promise.resolve([]));
     const editor = document.createElement("div");
     editor.contentEditable = "true";
@@ -348,9 +348,12 @@ describe("the chats window", () => {
       );
       await Promise.resolve();
     });
-    await settled();
-
-    expect(dialog()).toBeNull();
+    await vi.waitFor(
+      () => {
+        expect(rows().length).toBeGreaterThan(0);
+      },
+      { timeout: openMs }
+    );
   });
 
   it("closes again with the same keys", async () => {

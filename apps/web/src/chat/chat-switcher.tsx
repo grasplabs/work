@@ -12,11 +12,13 @@ import type { ReactNode } from "react";
 import { isShortcut } from "../shortcuts.ts";
 
 // The way to the person's chats window (chat-window.tsx) on every page: ⌘K
-// anywhere but rich text, and the sidebar's search. The window itself, with
-// its command list, loads the first time it opens. The keys are the
-// product's, not the sidebar's (AppShellSidebar's `listenToSearchShortcut`):
-// they close the window again, where Damsko's, as every page shortcut,
-// pause while a modal is open (registry gap of 27 Nov 2026).
+// anywhere, the chat's box too, and the sidebar's search. The window
+// itself, with its command list, loads the first time it opens. The keys
+// are the product's, not the sidebar's (AppShellSidebar's
+// `listenToSearchShortcut`): they close the window again, where Damsko's,
+// as every page shortcut, pause while a modal is open, and Damsko's leave
+// rich text alone, where no editor of the product's binds them (registry
+// gap of 27 Nov 2026).
 
 const ChatWindow = lazy(async () => {
   const { ChatWindow: window } = await import("./chat-window.tsx");
@@ -33,8 +35,7 @@ const OpenChats = createContext<(open: boolean) => void>(() => {
 
 /**
  * The frame's chats window, on every page: ⌘K or Ctrl K opens it (and
- * closes it again), as does the sidebar's search. Not in rich text, where
- * the same keys shape the text, as the sidebar's own keys do.
+ * closes it again), as does the sidebar's search.
  */
 export const ChatSwitcherProvider = ({ children }: { children: ReactNode }) => {
   const [open, setOpen] = useState(false);
@@ -48,11 +49,7 @@ export const ChatSwitcherProvider = ({ children }: { children: ReactNode }) => {
   });
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
-      const active = document.activeElement;
-      if (
-        !isShortcut(event, chatsKey) ||
-        (active instanceof HTMLElement && active.isContentEditable)
-      ) {
+      if (!isShortcut(event, chatsKey)) {
         return;
       }
       event.preventDefault();
