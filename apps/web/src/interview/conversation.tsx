@@ -307,7 +307,10 @@ const AnswerBox = ({
   onTalk,
 }: {
   reading: boolean;
-  /** Only shown, while the guide tells about it: as it will be, not yet to answer in. */
+  /**
+   * While the guide tells about it: drawn as it will be, and its switch to
+   * typing already works (what they type waits for the conversation).
+   */
   guiding: boolean;
   onTalk: () => void;
 }) => {
@@ -316,7 +319,7 @@ const AnswerBox = ({
   const words = useInterviewWords();
   const { mode } = useProgress();
   return (
-    <div data-guide="answer" inert={guiding} {...stylex.props(styles.composer)}>
+    <div data-guide="answer" {...stylex.props(styles.composer)}>
       <SaveTrouble />
       <Composer
         micTrouble={mode === "type" ? micProblem() : null}

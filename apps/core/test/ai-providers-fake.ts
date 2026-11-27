@@ -360,6 +360,21 @@ export const aiProvidersFake = () => {
       { headers: { "request-id": `req-speech-${seen.length}` } }
     );
   };
+  /** An agent's setup, read for the voice Stephen speaks with. */
+  const agentSetupPath = /^[/]v1[/]convai[/]agents[/]agent_[A-Za-z0-9]+$/u;
+  /**
+   * The reply a test planned for what `key` asks next, if any. Reading an
+   * agent's setup never takes one: a test plans for what is said.
+   */
+  const plannedFor = (
+    key: string | null,
+    request: Request,
+    url: URL
+  ): PlannedReply | undefined =>
+    key === null ||
+    (request.method === "GET" && agentSetupPath.test(url.pathname))
+      ? undefined
+      : plans.get(key)?.shift();
   /**
    * How ElevenLabs answers: a token for a conversation with one of the
    * account's agents, never the key it was asked with, or a line said.
@@ -369,6 +384,11 @@ export const aiProvidersFake = () => {
     url: URL,
     body: string
   ): Response | undefined => {
+    if (request.method === "GET" && agentSetupPath.test(url.pathname)) {
+      return Response.json({
+        conversation_config: { tts: { voice_id: "3svOJAOhuPHXwQC2H5eq" } },
+      });
+    }
     if (
       request.method === "GET" &&
       url.pathname === "/v1/convai/conversation/token"
@@ -757,7 +777,7 @@ export const aiProvidersFake = () => {
       if (key !== null && bridged.has(key) && !voiced) {
         return await answerBridged(request, url, key, body);
       }
-      const reply = key === null ? undefined : plans.get(key)?.shift();
+      const reply = plannedFor(key, request, url);
       if (reply !== undefined && "release" in reply) {
         // Waited for on a timer of this request's own: nothing of another
         // request's is touched.
