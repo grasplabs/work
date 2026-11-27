@@ -59,12 +59,12 @@ const styles = stylex.create({
   summary: {
     display: "flex",
     flexDirection: "column",
-    alignItems: "flex-start",
+    alignItems: "center",
     gap: space["5"],
     width: "100%",
     maxWidth: "40rem",
-    textAlign: "start",
-    textWrap: "pretty",
+    textAlign: "center",
+    textWrap: "balance",
   },
   word: {
     opacity: 1,
@@ -80,6 +80,7 @@ const styles = stylex.create({
   answer: {
     display: "flex",
     flexWrap: "wrap",
+    justifyContent: "center",
     gap: space["3"],
     paddingBlockStart: space["2"],
   },
