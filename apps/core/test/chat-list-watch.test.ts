@@ -8,6 +8,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { ChatListWatch } from "../src/chat-list-watch.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { sessionRecheckMs } from "../src/session-check.ts";
@@ -292,4 +293,30 @@ describe("a person's list of chats", () => {
       { timeout: 20_000 }
     );
   }, 30_000);
+
+  it("drops a watcher whose push failed and lets go of its listener, which core then watches again with (as after a reset)", async () => {
+    let calls = 0;
+    let letGo = 0;
+    const listener = Object.assign(
+      async (): Promise<void> => {
+        calls += 1;
+        await Promise.reject(new Error("The push didn't reach core"));
+      },
+      {
+        [Symbol.dispose]: () => {
+          letGo += 1;
+        },
+      }
+    );
+    const dropped = Promise.withResolvers<boolean>();
+    // As the Workspace object keeps it: dropped means let go of.
+    const watch: ChatListWatch = new ChatListWatch(listener, "person-1", () => {
+      watch[Symbol.dispose]();
+      dropped.resolve(true);
+    });
+    watch.push({ chats: [], archived: 0 });
+    await dropped.promise;
+
+    expect({ calls, letGo }).toStrictEqual({ calls: 1, letGo: 1 });
+  });
 });

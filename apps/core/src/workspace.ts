@@ -5741,7 +5741,7 @@ export class Workspace extends DurableObject<Env> {
       this.#scopeOf(this.#graspChat(chatId, personId))
     );
     // Read again after the await: the chat may have gone meanwhile.
-    const { id } = this.#graspChat(chatId, personId);
+    const { id, readUpTo } = this.#graspChat(chatId, personId);
     this.#requireRoomToWatch();
     const watchId = crypto.randomUUID();
     const watch = new ChatWatch(
@@ -5750,7 +5750,8 @@ export class Workspace extends DurableObject<Env> {
       () => this.#provenance(id),
       () => {
         this.unwatch(id, watchId);
-      }
+      },
+      readUpTo
     );
     const watchers = this.#watchers.get(id) ?? new Map<string, ChatWatch>();
     watchers.set(watchId, watch);
