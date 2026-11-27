@@ -6,7 +6,7 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import { chatAuthority, chatContext } from "./agent-scope.ts";
 import type { AgentScope } from "./agent-scope.ts";
 import { chatTitlePurpose } from "./model-spend.ts";
-import { models, smallModelNow } from "./models.ts";
+import { models } from "./models.ts";
 
 // A chat's title, as T3 Code and Vercel's chat template name a thread: the
 // page names a new chat after the start of its first question (its seed,
@@ -19,7 +19,8 @@ import { models, smallModelNow } from "./models.ts";
 //
 // The call goes through the gateway as the chat's agent, for the chat's
 // person, in the chat: on the organization's key, to its default's small
-// model (model-catalog.ts, `smallModelFor`), metered as `chat.title`, and
+// model (model-catalog.ts, `smallModelFor`) by the gateway's own route for
+// it (`models(env).small`), with no fallback, metered as `chat.title`, and
 // refused as any is (past Grasp's AI's limit, say). It reads the question's
 // text and nothing else: no files, nothing recalled, no other chat.
 
@@ -97,15 +98,13 @@ export const generatedTitle = async (
 ): Promise<string | undefined> => {
   try {
     const authority = chatAuthority(scope);
-    const { text, truncated } = await models(env).call({
-      model: await smallModelNow(env),
+    const { text, truncated } = await models(env).small({
       effort: "low",
       system: titleInstructions,
       input: question.slice(0, questionChars),
       maxTokens: titleAnswerTokens,
       timeoutMs: titleTimeoutMs,
-      // One request: a title that fails is skipped, never asked again of
-      // the organization's other, dearer models.
+      // One request: a title that fails is skipped, never sent again.
       providerRetries: false,
       purpose: chatTitlePurpose,
       trigger: delegateActorOf(authority, scope.via),

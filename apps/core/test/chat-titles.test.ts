@@ -259,6 +259,47 @@ describe("a new chat's title", () => {
     expect(provider.titles).toHaveLength(1);
   });
 
+  it("is asked for once, on the first question only: never again for a later one, after a title that failed or a rename to the same words", async () => {
+    const ann = await person();
+    const provider = await fakeProvider(says("Here it is."), says("Again."));
+    // No title queued: the first comes back empty, and the seed stays.
+    const list = await followList(ann);
+    const question = "What changed in the supplier contract?";
+
+    const chat = await askNew(ann, question);
+    await until(() => {
+      expect(list.answered(chat)).toBeTruthy();
+      expect(provider.titles).toHaveLength(1);
+    });
+    await ann.api.chats.markRead(chat.id);
+    await ann.api.chats.rename(chat.id, seedTitleOf(question));
+    await ann.api.chats.send(chat.id, { text: question, model });
+    await until(() => {
+      expect(provider.requests).toHaveLength(2);
+      expect(list.answered(chat)).toBeTruthy();
+    });
+
+    expect(provider.titles).toHaveLength(1);
+  });
+
+  it("is the only way the small model goes when the admins didn't choose it: a turn that names it is refused", async () => {
+    const ann = await person();
+    const provider = await fakeProvider(says("Here it is."));
+    const chat = await ann.api.chats.create("Questions");
+
+    const refused = await outcome(
+      ann.api.chats.send(chat.id, {
+        text: "Answer on the small model.",
+        model: "anthropic/claude-haiku-5-5",
+      })
+    );
+
+    expect({ refused, sent: provider.requests.length }).toStrictEqual({
+      refused: "model.not_allowed",
+      sent: 0,
+    });
+  });
+
   it("goes to OpenAI's newest generation's cheapest model, never a cheaper older one, and to the default itself where the provider has none cheaper or of its maker", async () => {
     const ann = await person();
     const cases = [

@@ -3028,13 +3028,14 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Names chat `chatId` from `question` in the background, as its turn
-   * begins, while it is still called after that question (`seedTitleOf`):
-   * a new chat's first question, never a chat its person or a plan named.
-   * Nothing waits on it: the title lands once the small model answers
-   * (chat-titles.ts), only if the chat is still called so then, checked in
-   * the same write, so a rename or a plan's name that came first stays.
-   * Kept with the turns the alarm waits for, so the object stays up for it.
+   * Names chat `chatId` from `question` in the background, as its first
+   * turn begins: asked once, when nothing was said in it yet and it is
+   * still called after that question (`seedTitleOf`), never for a later
+   * question, whether this one's title came or not. Nothing waits on it:
+   * the title lands once the small model answers (chat-titles.ts), only if
+   * the chat is still called so then, checked in the same write, so a
+   * rename or a plan's name that came first stays. Never rejects; kept
+   * with the turns the alarm waits for, so the object stays up for it.
    */
   #nameChat(
     chatId: ChatId,
@@ -3042,20 +3043,31 @@ export class Workspace extends DurableObject<Env> {
     scope: Omit<AgentScope, "runId">
   ): void {
     const seed = seedTitleOf(question);
-    if (this.#chat(chatId).title !== seed) {
+    const [said] = this.#db
+      .select({ id: chatMessages.id })
+      .from(chatMessages)
+      .where(eq(chatMessages.chatId, chatId))
+      .limit(1)
+      .all();
+    if (said !== undefined || this.#chat(chatId).title !== seed) {
       return;
     }
     const naming = (async () => {
-      const title = await generatedTitle(this.env, scope, question);
-      if (title === undefined || title === seed) {
-        return;
+      try {
+        const title = await generatedTitle(this.env, scope, question);
+        if (title === undefined || title === seed) {
+          return;
+        }
+        this.#db
+          .update(chats)
+          .set({ title })
+          .where(and(eq(chats.id, chatId), eq(chats.title, seed)))
+          .run();
+        this.#listChanged();
+      } catch (error) {
+        // Never expected: the chat keeps its seed.
+        log.error("chat.title_unsaved", errorFields(error));
       }
-      this.#db
-        .update(chats)
-        .set({ title })
-        .where(and(eq(chats.id, chatId), eq(chats.title, seed)))
-        .run();
-      this.#listChanged();
     })();
     this.#sent.add(naming);
     void this.#forget(naming);
