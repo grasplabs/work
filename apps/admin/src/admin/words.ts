@@ -121,6 +121,16 @@ export const dollars = (amount: number): string =>
     ? `under ${dollarCents.format(cent)}`
     : dollarCents.format(amount);
 
+const wholeDollars = new Intl.NumberFormat("en", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 0,
+});
+
+/** An amount in whole US dollars: what a month of AI costs, said at a glance. */
+export const dollarsWhole = (amount: number): string =>
+  wholeDollars.format(amount);
+
 /** Hours and the like, as whole numbers. */
 export const whole = (value: number): string => wholeNumber.format(value);
 

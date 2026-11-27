@@ -120,7 +120,8 @@ describe("the release channels on the Platform page", () => {
     expect({
       stable: text.includes("1 of 2 up to date"),
       edge: text.includes("0 of 1 up to date"),
-      beta: text.includes("0 of 0 up to date"),
+      // No company follows Beta: no count, a line that says so.
+      beta: text.includes("No company follows it."),
       // Each company of a channel, where it stands.
       states: [
         text.includes(`Acme ${current} Up to date`),

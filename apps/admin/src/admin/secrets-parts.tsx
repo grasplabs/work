@@ -6,7 +6,6 @@
  */
 import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
-import { CardContent } from "@grasp-os/ui/components/card";
 import { Text } from "@grasp-os/ui/components/text";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
@@ -17,7 +16,7 @@ import type {
   RevocationCheck,
   RevocationRefusal,
 } from "../rollout/shared-secrets.ts";
-import { Panel } from "./panel.tsx";
+import { PagePart } from "./page-part.tsx";
 
 const styles = stylex.create({
   lines: { display: "flex", flexDirection: "column", gap: space["1"] },
@@ -114,7 +113,7 @@ export const SharedSecrets = () => {
     setVerdict(verdictOf(result));
   };
   return (
-    <Panel
+    <PagePart
       action={
         <Button
           disabled={reading}
@@ -127,21 +126,11 @@ export const SharedSecrets = () => {
           Can the old ones go?
         </Button>
       }
+      description="Once Deploy platform copies a changed secret into Secrets Store, every company is deployed again with it by itself, as a release is. Check, live, whether the old values can be revoked."
+      id="shared-secrets"
       title="Shared secrets"
     >
-      {/* What it is for in the card's body, so the card keeps one look
-          before and after a check (a Card's header with nothing under
-          it is drawn as a plain title card). */}
-      <CardContent>
-        <div {...stylex.props(styles.lines)}>
-          <Text color="muted" size="sm">
-            Once Deploy platform copies a changed secret into Secrets Store,
-            every company is deployed again with it by itself, as a release is.
-            Check, live, whether the old values can be revoked.
-          </Text>
-          {verdict === null ? null : <Verdict verdict={verdict} />}
-        </div>
-      </CardContent>
-    </Panel>
+      {verdict === null ? null : <Verdict verdict={verdict} />}
+    </PagePart>
   );
 };

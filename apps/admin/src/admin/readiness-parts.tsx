@@ -1,11 +1,12 @@
 /**
- * Platform's Readiness checklist (src/admin/readiness.ts), and the
- * one-line banner across the frame while a required line isn't ready.
+ * Platform's Readiness (src/admin/readiness.ts): a figure that says at a
+ * glance whether anything stops onboarding, the lines that aren't ready
+ * while one isn't, and the one-line banner across the frame while a
+ * required line isn't ready.
  */
 import { Alert, AlertAction, AlertTitle } from "@grasp-os/ui/components/alert";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
-import { CardContent } from "@grasp-os/ui/components/card";
 import {
   Item,
   ItemActions,
@@ -15,9 +16,10 @@ import {
   ItemGroup,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
+import { Stat } from "@grasp-os/ui/components/stat";
 import { Link } from "@tanstack/react-router";
 
-import { Panel } from "./panel.tsx";
+import { PagePart } from "./page-part.tsx";
 import type {
   CheckLink,
   CheckStatus,
@@ -84,34 +86,68 @@ const CheckRow = ({ check }: { check: ReadinessCheck }) => (
   </Item>
 );
 
-/** Platform's checklist of what isn't ready: required lines first, then optional ones. */
-export const ReadinessPanel = ({ readiness }: { readiness: Readiness }) => {
-  // Only what isn't ready: a line that is has nothing to do next.
+/** The lines that aren't ready, required ones first: a line that is has nothing to do next. */
+const openChecks = (readiness: Readiness): ReadinessCheck[] => {
   const open = readiness.checks.filter(({ status }) => status !== "ready");
-  const ordered = [
+  return [
     ...open.filter(({ required }) => required),
     ...open.filter(({ required }) => !required),
   ];
+};
+
+/** Whether anything stops onboarding an organization, as a figure. */
+export const ReadinessFigure = ({ readiness }: { readiness: Readiness }) => {
+  const { blocking } = readiness;
+  const optional = openChecks(readiness).length - blocking;
+  if (blocking > 0) {
+    return (
+      <Stat
+        change={`${blocking} ${blocking === 1 ? "thing stops" : "things stop"} a new organization`}
+        label="Onboarding"
+        value="Blocked"
+        variant="warning"
+      />
+    );
+  }
   return (
-    <Panel
+    <Stat
+      change={
+        optional > 0
+          ? `${optional} optional ${optional === 1 ? "line" : "lines"} to set up`
+          : "Nothing stops a new organization"
+      }
+      label="Onboarding"
+      value="Ready"
+    />
+  );
+};
+
+/**
+ * What isn't ready, each line saying what to do next: required lines
+ * first, then optional ones. Nothing while every line is ready, which the
+ * figure says.
+ */
+export const ReadinessPart = ({ readiness }: { readiness: Readiness }) => {
+  const ordered = openChecks(readiness);
+  if (ordered.length === 0) {
+    return null;
+  }
+  return (
+    <PagePart
       description={
         readiness.blocking === 0
-          ? "Everything onboarding an organization needs is ready."
+          ? "Onboarding an organization needs nothing more. Each line says what to do next."
           : `${readiness.blocking} ${readiness.blocking === 1 ? "thing stops" : "things stop"} an organization being onboarded. Each line says what to do next.`
       }
       id={readinessId}
       title="Readiness"
     >
-      {ordered.length === 0 ? null : (
-        <CardContent flush>
-          <ItemGroup separated>
-            {ordered.map((check) => (
-              <CheckRow check={check} key={check.id} />
-            ))}
-          </ItemGroup>
-        </CardContent>
-      )}
-    </Panel>
+      <ItemGroup aria-labelledby={readinessId} separated>
+        {ordered.map((check) => (
+          <CheckRow check={check} key={check.id} />
+        ))}
+      </ItemGroup>
+    </PagePart>
   );
 };
 

@@ -1,24 +1,24 @@
-import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@grasp-os/ui/components/card";
 import { Checkbox } from "@grasp-os/ui/components/checkbox";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@grasp-os/ui/components/empty";
 import { Field, FieldLabel } from "@grasp-os/ui/components/field";
+import { SectionHeader } from "@grasp-os/ui/components/section-header";
 import { Text } from "@grasp-os/ui/components/text";
+import { ArchiveIcon } from "@grasp-os/ui/lib/icons";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { PageLoading } from "../../admin/failure.tsx";
-import { AdminPage } from "../../admin/page.tsx";
-import { EmptyPanel } from "../../admin/panel.tsx";
-import { PlatformNav, platformCrumb } from "../../admin/platform-nav.tsx";
+import { PlatformPage, platformCrumb } from "../../admin/platform-nav.tsx";
+import { Actions, Failure, FormStack } from "../../admin/setup-parts.tsx";
 import {
   deletePlacedClientFn,
   fetchOffboardedClients,
@@ -60,77 +60,71 @@ const DeleteResources = ({ client }: { client: OffboardedClient }) => {
       return result;
     });
   };
+  const heading = `offboarded-${client.clientId}`;
   return (
-    <Card asChild size="sm">
-      <li>
-        <CardHeader>
-          <CardTitle level={2}>{name}</CardTitle>
-          <CardDescription>
-            {`Offboarded on ${formatTime(client.offboardedAt)} UTC from ${client.destinationId}. Its resources are kept until ${formatTime(client.deletableFrom)} UTC; ${client.remaining} are still there.`}
-          </CardDescription>
-        </CardHeader>
-        {more ? (
-          <CardContent>
-            <div {...stylex.props(styles.stack)}>
-              {client.remaining === 0 ? null : (
-                <>
-                  <Field disabled={waits} orientation="horizontal">
-                    <Checkbox
-                      checked={noExport}
-                      onCheckedChange={(checked) => {
-                        setNoExport(checked === true);
-                      }}
-                    />
-                    <FieldLabel>
-                      No export of it was made, and I delete its resources
-                      without one
-                    </FieldLabel>
-                  </Field>
-                  <div {...stylex.props(styles.row)}>
-                    <Button
-                      disabled={busy || waits || !noExport}
-                      onClick={remove}
-                      size="sm"
-                      variant="destructive"
-                    >
-                      Delete its resources
-                    </Button>
-                    {waits ? (
-                      <Text color="muted" size="sm">
-                        {`It can be deleted from ${formatTime(client.deletableFrom)} UTC, once its 30 days are over.`}
-                      </Text>
-                    ) : null}
-                  </div>
-                  {failure === null ? null : (
-                    <Alert appearance="subtle" variant="destructive">
-                      <AlertDescription>{failure}</AlertDescription>
-                    </Alert>
-                  )}
-                </>
-              )}
-              {deleted === null ? null : (
-                <output>
-                  <Text as="span" size="sm">
-                    {`Deleted ${deleted.deleted} of its resources.`}
+    <li aria-labelledby={heading} {...stylex.props(styles.client)}>
+      <SectionHeader
+        description={`Offboarded on ${formatTime(client.offboardedAt)} UTC from ${client.destinationId}. Its resources are kept until ${formatTime(client.deletableFrom)} UTC; ${client.remaining} are still there.`}
+        id={heading}
+        size="sm"
+        title={name}
+        variant="group"
+      />
+      {more ? (
+        <FormStack>
+          {client.remaining === 0 ? null : (
+            <>
+              <Field disabled={waits} orientation="horizontal">
+                <Checkbox
+                  checked={noExport}
+                  onCheckedChange={(checked) => {
+                    setNoExport(checked === true);
+                  }}
+                />
+                <FieldLabel>
+                  No export of it was made, and I delete its resources without
+                  one
+                </FieldLabel>
+              </Field>
+              <Actions>
+                <Button
+                  disabled={busy || waits || !noExport}
+                  onClick={remove}
+                  size="sm"
+                  variant="destructive"
+                >
+                  Delete its resources
+                </Button>
+                {waits ? (
+                  <Text color="muted" size="sm">
+                    {`It can be deleted from ${formatTime(client.deletableFrom)} UTC, once its 30 days are over.`}
                   </Text>
-                </output>
-              )}
-              {client.emptying.length === 0 ? null : (
-                <ul {...stylex.props(styles.list)}>
-                  {client.emptying.map(({ physicalName, emptyBy }) => (
-                    <li key={physicalName}>
-                      <Text size="sm">
-                        {`${physicalName} still held objects, which expire by ${formatTime(emptyBy)} UTC: delete again after that to delete it.`}
-                      </Text>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </CardContent>
-        ) : null}
-      </li>
-    </Card>
+                ) : null}
+                <Failure failure={failure} />
+              </Actions>
+            </>
+          )}
+          {deleted === null ? null : (
+            <output>
+              <Text as="span" size="sm">
+                {`Deleted ${deleted.deleted} of its resources.`}
+              </Text>
+            </output>
+          )}
+          {client.emptying.length === 0 ? null : (
+            <ul {...stylex.props(styles.list)}>
+              {client.emptying.map(({ physicalName, emptyBy }) => (
+                <li key={physicalName}>
+                  <Text size="sm">
+                    {`${physicalName} still held objects, which expire by ${formatTime(emptyBy)} UTC: delete again after that to delete it.`}
+                  </Text>
+                </li>
+              ))}
+            </ul>
+          )}
+        </FormStack>
+      ) : null}
+    </li>
   );
 };
 
@@ -143,33 +137,34 @@ const DeleteResources = ({ client }: { client: OffboardedClient }) => {
 const OffboardedPage = () => {
   const offboarded = Route.useLoaderData();
   return (
-    <AdminPage
+    <PlatformPage
       description="Clients offboarded from a hosting destination. Their resources are kept for 30 days, then deleted here, one client at a time, by someone at Grasp."
       parents={[platformCrumb]}
       title="Offboarded"
     >
-      <PlatformNav />
       {offboarded.length === 0 ? (
-        <EmptyPanel>No client is offboarded.</EmptyPanel>
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia icon={ArchiveIcon} />
+            <EmptyTitle>No client is offboarded</EmptyTitle>
+            <EmptyDescription>
+              A client offboarded from its Setup shows here, until its resources
+              are deleted.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
-        <ul {...stylex.props(styles.list, styles.cards)}>
+        <ul {...stylex.props(styles.list, styles.clients)}>
           {offboarded.map((client) => (
             <DeleteResources client={client} key={client.clientId} />
           ))}
         </ul>
       )}
-    </AdminPage>
+    </PlatformPage>
   );
 };
 
 const styles = stylex.create({
-  stack: { display: "flex", flexDirection: "column", gap: space["3"] },
-  row: {
-    display: "flex",
-    flexWrap: "wrap",
-    alignItems: "center",
-    gap: space["4"],
-  },
   list: {
     display: "flex",
     flexDirection: "column",
@@ -178,7 +173,10 @@ const styles = stylex.create({
     padding: 0,
     listStyle: "none",
   },
-  cards: { gap: space["4"] },
+  // One client after another, a part's room apart.
+  clients: { gap: space["8"] },
+  // A client's name and facts, then deleting its resources.
+  client: { display: "flex", flexDirection: "column", gap: space["4"] },
 });
 
 export const Route = createFileRoute("/platform/offboarded")({

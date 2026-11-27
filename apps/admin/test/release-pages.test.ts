@@ -37,7 +37,7 @@ const textOf = (html: string): string =>
 /** The list's row for release `id`, as words: from its link to the next row. */
 const rowOf = (html: string, id: string): string => {
   const start = html.indexOf(`href="/platform/releases/${id}"`);
-  const end = html.indexOf("<tr", start);
+  const end = html.indexOf("<li", start);
   return textOf(html.slice(start, end === -1 ? undefined : end));
 };
 
@@ -129,7 +129,7 @@ describe("the release pages", () => {
 
     expect({
       holds: text.includes("feat(core): run by one"),
-      channel: text.includes("Edge, by system"),
+      channel: text.includes("Edge Grasp, by itself"),
       runs: html.includes(`href="/organizations/${clientId}/setup"`),
       runner: text.includes("Runnerco"),
       commit: text.includes(record?.commitSha ?? "no commit"),
@@ -173,6 +173,6 @@ describe("the release pages", () => {
 
     const html = await releasesPage();
 
-    expect(html).toContain(`The newest ${RELEASE_LIST_LIMIT} releases.`);
+    expect(html).toContain(`The newest ${RELEASE_LIST_LIMIT} releases,`);
   });
 });

@@ -35,7 +35,7 @@ const visit = async (page: Page, path: string): Promise<void> => {
   await page.goto(path, { waitUntil: "networkidle" });
 };
 
-/** A channel's panel on Platform. */
+/** A channel's part on Platform, named by its heading. */
 const channel = (page: Page, name: "Edge" | "Beta" | "Stable") =>
   page.getByRole("region", { name, exact: true });
 
@@ -105,7 +105,7 @@ test("staff promote a release from Edge to Beta to Stable, and its company takes
   await visit(page, "/platform");
   await expect(
     page
-      .getByRole("region", { name: "Promotions" })
+      .getByRole("region", { name: "Recent changes" })
       .getByRole("listitem")
       .first()
   ).toContainText(`Stable set to ${releaseId}`);

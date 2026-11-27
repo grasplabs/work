@@ -3,8 +3,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { act, gridRow, openAdmin, settle, until } from "../../test/app.tsx";
 import type { Answers } from "../../test/app.tsx";
+import type { LiveStatus } from "../clients/grid.ts";
 import type { OffboardedClient } from "../hosting/offboarding.ts";
 import type { ChannelProgress } from "../rollout/progress.ts";
+import type { PlatformSpend } from "./platform-spend-sums.ts";
 import type { Readiness } from "./readiness.ts";
 
 // Platform's pages and Home's banner as the browser shows them from what
@@ -34,6 +36,38 @@ const platformAnswers = (readiness: Readiness): Answers => ({
   fetchPlatform: { channels: [], history: [], events: [] },
   fetchPlatformSpend: null,
 });
+
+/** The figure labelled `label`, as its words read: label, value, then how it moved. */
+const figureOf = (root: Element, label: string): string =>
+  [...root.querySelectorAll('[data-slot="stat"]')]
+    .map((stat) => stat.textContent ?? "")
+    .find((words) => words.startsWith(label)) ?? "";
+
+/** The page's part headings, in order. */
+const headings = (root: Element): string[] =>
+  [...root.querySelectorAll("main h2")].map((each) => each.textContent ?? "");
+
+/** What an account answered live: its core reached and its version in sync, unless they say. */
+const liveOf = (
+  reach: LiveStatus["reach"] = "reachable",
+  drift: LiveStatus["drift"] = "in_sync"
+): LiveStatus => ({
+  drift,
+  sharedSecretsCurrent: true,
+  reach,
+  onboarding: null,
+});
+
+/** The rows of the list headed `id`, as their words read: its hairlines left out. */
+const rowsOf = (root: Element, id: string): string[] =>
+  [...root.querySelectorAll(`ul[aria-labelledby="${id}"] > li`)]
+    .map((row) => row.textContent ?? "")
+    .filter((words) => words !== "");
+
+/** An answer that never comes. */
+const never = async (): Promise<never> =>
+  // oxlint-disable-next-line promise/avoid-new -- a read that never answers
+  await new Promise(() => {});
 
 /** An offboarded client, `days` days ago, its 30 days kept. */
 const offboarded = (
@@ -87,6 +121,18 @@ describe("Home's banner and Platform's Readiness", () => {
     }).toStrictEqual({ banner: true, panel: true });
   });
 
+  it("says at a glance on Platform that onboarding is ready, with no Readiness lines once every one is", async () => {
+    const { container } = await openAdmin("/platform", platformAnswers(ready));
+
+    expect({
+      figure: figureOf(container, "Onboarding"),
+      lines: headings(container).includes("Readiness"),
+    }).toStrictEqual({
+      figure: "OnboardingReadyNothing stops a new organization",
+      lines: false,
+    });
+  });
+
   it("shows no banner once nothing required blocks", async () => {
     const { main } = await openAdmin("/", { fetchReadiness: ready });
 
@@ -109,6 +155,215 @@ describe("Home's banner and Platform's Readiness", () => {
     expect(
       container.querySelector('[data-slot="sidebar"]')?.textContent
     ).toContain("1 company needs a look");
+  });
+});
+
+describe("Platform's overview at a glance", () => {
+  it("counts the cores that answer and the companies that need a look, once their accounts are read", async () => {
+    const { container, main } = await openAdmin("/platform", {
+      ...platformAnswers(ready),
+      fetchClientGrid: [
+        gridRow({ id: "acme", name: "Acme" }),
+        gridRow({ id: "bolt", name: "Bolt" }),
+        gridRow({
+          id: "cork",
+          name: "Cork",
+          pinnedReleaseId: "39.01.10",
+          lastDeploy: {
+            releaseId: "39.01.10",
+            status: "failed",
+            at: new Date(),
+          },
+        }),
+        gridRow({ id: "dove", name: "Dove" }),
+      ],
+      fetchGridLive: {
+        acme: liveOf(),
+        // Its version read, its core not reached.
+        bolt: liveOf("unreachable"),
+        cork: liveOf(),
+        // Its core reached, its version not read.
+        dove: liveOf("reachable", "unknown"),
+      },
+    });
+    await until(() => figureOf(container, "Cores answering").includes(" of "));
+    const listed = rowsOf(container, "needs-a-look");
+
+    expect({
+      cores: figureOf(container, "Cores answering"),
+      look: figureOf(container, "Need a look"),
+      listed: listed.map((row) => row.slice(0, 4)),
+      bolt: listed[0]?.includes("Its core doesn't answer.") ?? false,
+      corkPinned: listed[1]?.includes("Stable · Pinned") ?? false,
+      failed: main().includes("Its last deploy failed (39.01.10)."),
+    }).toStrictEqual({
+      cores: "Cores answering3 of 41 not answering",
+      look: "Need a look31 deploy failed, 1 not answering, and 1 not read",
+      listed: ["Bolt", "Cork", "Dove"],
+      bolt: true,
+      corkPinned: true,
+      failed: true,
+    });
+  });
+
+  it("waits to say whether anything needs a look until the accounts answer, and never says all is well when they couldn't be read", async () => {
+    const answers = {
+      ...platformAnswers(ready),
+      fetchClientGrid: [gridRow({ id: "acme", name: "Acme" })],
+    };
+    const reading = await openAdmin(
+      "/platform",
+      // The accounts never answer while it is open.
+      { ...answers, fetchGridLive: never },
+      { rest: false }
+    );
+    await until(() => figureOf(reading.container, "Need a look") !== "");
+    const whileReading = {
+      look: figureOf(reading.container, "Need a look"),
+      allWell: reading.main().includes("Nothing needs a look"),
+    };
+    const failed = await openAdmin("/platform", answers);
+
+    expect({
+      whileReading,
+      look: figureOf(failed.container, "Need a look"),
+      allWell: failed.main().includes("Nothing needs a look"),
+    }).toStrictEqual({
+      whileReading: { look: "Need a look", allWell: false },
+      look: "Need a look0The accounts couldn’t be read",
+      allWell: false,
+    });
+  });
+
+  it("lists every recent change of a channel's release the admin keeps, set-backs too", async () => {
+    const history = Array.from({ length: 8 }, (_, at) => ({
+      channel: "stable" as const,
+      releaseId: `39.01.${String(10 - at)}`,
+      from: `39.01.${String(11 - at)}`,
+      back: at % 2 === 1,
+      actor: "staff@grasp.test",
+      at: new Date(Date.now() - at * 60_000),
+    }));
+    const { container } = await openAdmin("/platform", {
+      ...platformAnswers(ready),
+      fetchPlatform: { channels: [], history, events: [] },
+    });
+    const listed = rowsOf(container, "changes");
+
+    expect({
+      count: listed.length,
+      back: listed[1]?.startsWith("Stable set back to 39.01.9") ?? false,
+    }).toStrictEqual({ count: 8, back: true });
+  });
+
+  it("sums what Grasp's own AI costs, with this month's pace and the organizations near their limit", async () => {
+    const now = new Date();
+    const period = (back: number) =>
+      new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back, 1))
+        .toISOString()
+        .slice(0, 7);
+    const month = (back: number, micros: number) => ({
+      period: period(back),
+      micros,
+      byFeature: [{ feature: null, micros }],
+      byModel: [{ model: "anthropic/claude-sonnet-5-5", micros }],
+    });
+    const spend: PlatformSpend = {
+      thisMonth: month(0, 300_000_000),
+      lastMonth: month(1, 200_000_000),
+      byOrganization: [
+        {
+          clientId: "acme",
+          name: "Acme",
+          thisMonth: 190_000_000,
+          lastMonth: 150_000_000,
+          graspAi: { spent: 190_000_000, limit: 200_000_000 },
+        },
+        {
+          clientId: "bolt",
+          name: "Bolt",
+          thisMonth: 110_000_000,
+          lastMonth: 50_000_000,
+          graspAi: { spent: 110_000_000, limit: 400_000_000 },
+        },
+      ],
+      organizations: 3,
+      unread: [{ clientId: "cork", name: "Cork" }],
+      unreported: [],
+    };
+    const { container, main } = await openAdmin("/platform", {
+      ...platformAnswers(ready),
+      fetchPlatformSpend: spend,
+    });
+    await until(() => figureOf(container, "Near their limit") !== "");
+    // Before its third day a month's pace says too little, so it isn't said.
+    const paced = now.getUTCDate() > 3;
+
+    const acme = container.querySelector(
+      '[aria-labelledby="spend-by-organization"] a[href="/organizations/acme/ai-use"]'
+    );
+
+    expect({
+      acme: acme?.closest("li")?.textContent?.includes("Near its limit"),
+      thisMonth: main().includes("$300.00"),
+      pace: main().includes("on pace for $"),
+      lastMonth: main().includes("$200.00"),
+      near: figureOf(container, "Near their limit"),
+      leftOut: main().includes(
+        "Read from 2 of 3 active organizations. Not in these sums, as their core didn’t answer: Cork."
+      ),
+    }).toStrictEqual({
+      acme: true,
+      thisMonth: true,
+      pace: paced,
+      lastMonth: true,
+      near: "Near their limit1of 2 on a limit",
+      leftOut: true,
+    });
+  });
+});
+
+describe("Grasp's own AI on Platform when its features cost nothing", () => {
+  it("still says which organizations' own AI is near its limit", async () => {
+    const now = new Date();
+    const month = (back: number) => ({
+      period: new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back, 1)
+      )
+        .toISOString()
+        .slice(0, 7),
+      micros: 0,
+      byFeature: [],
+      byModel: [],
+    });
+    const { container, main } = await openAdmin("/platform", {
+      ...platformAnswers(ready),
+      fetchPlatformSpend: {
+        thisMonth: month(0),
+        lastMonth: month(1),
+        byOrganization: [
+          {
+            clientId: "acme",
+            name: "Acme",
+            thisMonth: 0,
+            lastMonth: 0,
+            graspAi: { spent: 190_000_000, limit: 200_000_000 },
+          },
+        ],
+        organizations: 1,
+        unread: [],
+        unreported: [],
+      } satisfies PlatformSpend,
+    });
+    await until(() => figureOf(container, "Near their limit") !== "");
+
+    expect({
+      near: figureOf(container, "Near their limit"),
+      nothing: main().includes("Nothing on Grasp’s keys this month or last."),
+    }).toStrictEqual({
+      near: "Near their limit1of 1 on a limit",
+      nothing: true,
+    });
   });
 });
 
@@ -154,7 +409,7 @@ describe("Platform's Offboarded and Releases", () => {
       fetchOffboardedClients: [],
     });
 
-    expect(main()).toContain("No client is offboarded.");
+    expect(main()).toContain("No client is offboarded");
   });
 
   it("says a release that isn't one isn't there, asking the Worker nothing", async () => {
@@ -237,9 +492,9 @@ const press = async (root: () => Element | Document, name: string) => {
 /** The question, while it stands. */
 const question = () => document.querySelector('[role="alertdialog"]');
 
-/** Beta's panel. */
+/** Beta's part of the channels, named by its heading. */
 const betaPanel = (root: Element) =>
-  root.querySelector('section[aria-label="Beta"]') ?? root;
+  root.querySelector('section[aria-labelledby="channel-beta"]') ?? root;
 
 /** Presses Escape where focus is. */
 const escape = async () => {
@@ -321,5 +576,44 @@ describe("moving a channel's companies", () => {
       promoted: [],
       retried: [],
     });
+  });
+});
+
+describe("Platform's figure of who is up to date", () => {
+  it("counts pinned companies apart from those up to date with their channel", async () => {
+    const stable: ChannelProgress = {
+      ...beta,
+      channel: "stable",
+      failed: false,
+      total: 2,
+      upToDate: 1,
+      following: 1,
+      clients: [
+        {
+          id: "c",
+          name: "Cork",
+          state: "up_to_date",
+          running: "39.01.09",
+          pinnedReleaseId: null,
+          error: null,
+        },
+        {
+          id: "d",
+          name: "Dock",
+          state: "pinned",
+          running: "39.01.08",
+          pinnedReleaseId: "39.01.08",
+          error: null,
+        },
+      ],
+    };
+    const { container } = await openAdmin("/platform", {
+      ...platformAnswers(ready),
+      fetchPlatform: { channels: [stable], history: [], events: [] },
+    });
+
+    expect(figureOf(container, "Up to date")).toBe(
+      "Up to date1 of 1On their channel’s release"
+    );
   });
 });
