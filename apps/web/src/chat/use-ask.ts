@@ -322,7 +322,9 @@ export const useAsk = (
     setReturnedWhy(here.state.failed);
     // At most as many as a question carries, its own first: any over that
     // stay out, and the box says so.
-    const back = [...here.files, ...files];
+    // The box's own: none when it just turned to this chat, its files
+    // left with the chat it showed.
+    const back = [...here.files, ...(chatId === draftOf ? files : [])];
     setFiles(back.slice(0, chatFilesPerQuestionMax));
     if (back.length > chatFilesPerQuestionMax) {
       setFileProblem(failureText(agentErrors.create("agent.too_many_files")));
@@ -447,6 +449,7 @@ export const useAsk = (
         chatId === undefined || loaded ? (messages.at(-1)?.id ?? 0) : undefined,
       at: new Date().toISOString(),
       queues: running,
+      alreadyQueued: queued.filter((each) => each.text === question).length,
       key,
       owner,
       fromBox,
