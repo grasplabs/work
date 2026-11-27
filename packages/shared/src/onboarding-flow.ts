@@ -225,21 +225,6 @@ export const startingFlowOf = (named: unknown): OnboardingFlow | null => {
   return preset === undefined || preset === "full" ? null : flowPresets[preset];
 };
 
-/** `flow` with step `id` moved to place `to`, from 0, the others keeping their order. */
-export const withStepMoved = (
-  flow: OnboardingFlow,
-  id: FlowStep,
-  to: number
-): OnboardingFlow => {
-  const moved = flow.steps.find((step) => step.id === id);
-  if (moved === undefined) {
-    return flow;
-  }
-  const rest = flow.steps.filter((step) => step.id !== id);
-  const at = Math.min(Math.max(to, 0), rest.length);
-  return { ...flow, steps: [...rest.slice(0, at), moved, ...rest.slice(at)] };
-};
-
 /** The screens that come with the flow's `interviews` step, in their own order. */
 const interviewScreens: readonly SetupStepId[] = [
   "team",
