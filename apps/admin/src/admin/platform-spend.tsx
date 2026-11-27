@@ -10,7 +10,16 @@
 import { aiProviderIdSchema, aiProviders } from "@grasp-os/shared/ai-providers";
 import type { AiStatusReport } from "@grasp-os/shared/ai-status-report";
 import type { PlatformAiFeature } from "@grasp-os/shared/platform-ai";
+import { Badge } from "@grasp-os/ui/components/badge";
 import { ChartBarList } from "@grasp-os/ui/components/chart";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
 import {
   Section as Part,
   SectionHeader,
@@ -18,7 +27,7 @@ import {
 import { Stat, StatGroup } from "@grasp-os/ui/components/stat";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
-import { Await } from "@tanstack/react-router";
+import { Await, Link } from "@tanstack/react-router";
 import { Suspense, use } from "react";
 
 import { LoadingLines } from "../frame/page.tsx";
@@ -314,19 +323,63 @@ const PlatformFigures = ({ all }: { all: PlatformSpend }) => {
   );
 };
 
-/** The organizations that cost the most, this month's over last month's: none that cost nothing. */
-const organizationRows = (all: PlatformSpend): SplitRow[] =>
-  all.byOrganization
+/**
+ * The organizations that cost the most, this month then last, each a row
+ * to its AI use: what it cost each month, and whether its own AI on
+ * Grasp's key is near its limit. None that cost nothing. Rows, not bars:
+ * a bar list's names can't lead anywhere.
+ */
+const OrganizationRows = ({ all }: { all: PlatformSpend }) => {
+  const top = all.byOrganization
     .filter(({ thisMonth, lastMonth }) => thisMonth + lastMonth > 0)
-    .slice(0, topOrganizationsMost)
-    .map(({ clientId, name, thisMonth, lastMonth }) => ({
-      key: clientId,
-      label: name,
-      thisMonth,
-      lastMonth,
-    }));
+    .slice(0, topOrganizationsMost);
+  if (top.length === 0) {
+    return null;
+  }
+  const [thisMonth, lastMonth] = [
+    formatMonth(all.thisMonth.period),
+    formatMonth(all.lastMonth.period),
+  ];
+  return (
+    <Part aria-labelledby="spend-by-organization">
+      <SectionHeader
+        headingLevel={3}
+        id="spend-by-organization"
+        size="sm"
+        title="By organization"
+        variant="group"
+      />
+      <ItemGroup aria-labelledby="spend-by-organization" separated>
+        {top.map((organization) => (
+          <Item asChild key={organization.clientId} size="sm">
+            <Link
+              params={{ clientId: organization.clientId }}
+              to="/organizations/$clientId/ai-use"
+            >
+              <ItemContent>
+                <ItemTitle>{organization.name}</ItemTitle>
+                <ItemDescription>
+                  {`${spent(organization.thisMonth)} in ${thisMonth} · ${spent(organization.lastMonth)} in ${lastMonth}`}
+                </ItemDescription>
+              </ItemContent>
+              {nearLimit(organization) ? (
+                <ItemActions>
+                  <Badge variant="warning">Near its limit</Badge>
+                </ItemActions>
+              ) : null}
+            </Link>
+          </Item>
+        ))}
+      </ItemGroup>
+    </Part>
+  );
+};
 
-/** Every active organization's, once each core answered: the figures, then the splits. */
+/**
+ * Every active organization's, once each core answered: the figures
+ * (who is near their limit too when Grasp's features cost nothing), then
+ * the organizations and the splits.
+ */
 const PlatformSpendBody = ({ all }: { all: PlatformSpend | null }) => {
   if (all === null) {
     return <EmptyPart>The organizations couldn’t be read now.</EmptyPart>;
@@ -334,17 +387,12 @@ const PlatformSpendBody = ({ all }: { all: PlatformSpend | null }) => {
   const leftOut = leftOutLines(all);
   return (
     <div {...stylex.props(styles.spend)}>
+      <PlatformFigures all={all} />
       {nothingSpent(all) ? (
         <EmptyPart>Nothing on Grasp’s keys this month or last.</EmptyPart>
       ) : (
         <>
-          <PlatformFigures all={all} />
-          <SplitBars
-            id="spend-by-organization"
-            label="By organization"
-            overview={all}
-            rows={organizationRows(all)}
-          />
+          <OrganizationRows all={all} />
           <div {...stylex.props(styles.splits)}>
             <SplitBars
               id="spend-by-feature"

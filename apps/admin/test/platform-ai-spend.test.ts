@@ -108,6 +108,25 @@ const barsText = (html: string, label: string): string[] => {
   return [words(figure.slice(0, figure.indexOf("</span>"))), ...rows];
 };
 
+/**
+ * The organizations that cost the most on a page, each row as where it
+ * leads, then its words.
+ */
+const organizationRows = (html: string): string[] => {
+  const at = html.search(/<ul[^>]*aria-labelledby="spend-by-organization"/u);
+  if (at === -1) {
+    return [];
+  }
+  return html
+    .slice(at, html.indexOf("</ul>", at))
+    .split("<li")
+    .slice(1)
+    .flatMap((row) => {
+      const href = /href="(?<href>[^"]+)"/u.exec(row)?.groups?.href;
+      return href === undefined ? [] : [`${href} ${words(`<li${row}`)}`];
+    });
+};
+
 /** "2026-10" as the pages say it: "Oct 2026". */
 const monthWords = (period: string): string =>
   new Date(`${period}-01T00:00:00Z`).toLocaleString("en", {
@@ -224,7 +243,7 @@ describe("what Grasp's own AI features cost", () => {
   it("sums every active organization's on Platform → AI, this month and last, with those that cost the most this month first and none that cost nothing", async () => {
     const thisPeriod = monthBack(0);
     const lastPeriod = monthBack(1);
-    await liveClient(
+    const acme = await liveClient(
       "Acme",
       {
         thisMonth: [
@@ -237,8 +256,12 @@ describe("what Grasp's own AI features cost", () => {
       { spentMicros: 3_000_000, limitMicros: 200_000_000, reached: false }
     );
     // Nothing this month: after every organization that spent this month.
-    await liveClient("Brightline", { lastMonth: [conversion(9_000_000)] });
-    await liveClient("Calder", { thisMonth: [transcription(5_000_000)] });
+    const brightline = await liveClient("Brightline", {
+      lastMonth: [conversion(9_000_000)],
+    });
+    const calder = await liveClient("Calder", {
+      thisMonth: [transcription(5_000_000)],
+    });
     // Nothing either month: last, and not in the table of those that cost the most.
     await liveClient("Dunmore", {});
 
@@ -263,7 +286,7 @@ describe("what Grasp's own AI features cost", () => {
       organizations: spend.organizations,
       unread: spend.unread.map(({ name }) => name),
       unreported: spend.unreported.map(({ name }) => name),
-      shown: barsText(html, "By organization"),
+      shown: organizationRows(html),
     }).toStrictEqual({
       thisMonth: {
         period: thisPeriod,
@@ -307,10 +330,9 @@ describe("what Grasp's own AI features cost", () => {
       unread: [],
       unreported: [],
       shown: [
-        `By organization, ${thisMonth} and ${lastMonth}`,
-        "Calder $5.00 $0.00",
-        "Acme $3.55 $0.50",
-        "Brightline $0.00 $9.00",
+        `/organizations/${calder}/ai-use Calder $5.00 in ${thisMonth} · $0.00 in ${lastMonth}`,
+        `/organizations/${acme}/ai-use Acme $3.55 in ${thisMonth} · $0.50 in ${lastMonth}`,
+        `/organizations/${brightline}/ai-use Brightline $0.00 in ${thisMonth} · $9.00 in ${lastMonth}`,
       ],
     });
   });

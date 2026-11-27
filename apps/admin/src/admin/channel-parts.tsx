@@ -513,29 +513,18 @@ export const Channels = ({
   </PagePart>
 );
 
-/** How many of the latest changes the overview shows: every release's own are on its page. */
-const changesShown = 6;
-
 /** The latest changes of a channel's release, the newest first, as the audit log keeps it. */
 export const RecentChanges = ({
   history,
 }: {
   history: readonly PromotionEvent[];
 }) => (
-  <PagePart
-    action={
-      <Button asChild size="xs" variant="ghost">
-        <RouterLink to="/platform/releases">Every release</RouterLink>
-      </Button>
-    }
-    id="changes"
-    title="Recent changes"
-  >
+  <PagePart id="changes" title="Recent changes">
     {history.length === 0 ? (
       <EmptyPart>No release has gone to a channel yet.</EmptyPart>
     ) : (
       <ItemGroup aria-labelledby="changes" separated>
-        {history.slice(0, changesShown).map((event) => (
+        {history.map((event) => (
           <Item
             key={`${event.at.getTime()}-${event.channel}-${event.releaseId}`}
             size="sm"

@@ -32,6 +32,7 @@ import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
 
 import type { GridRow, LiveStatus } from "../clients/grid.ts";
+import { LoadingLines } from "../frame/page.tsx";
 import { channelWords } from "../rollout/channel-words.ts";
 import type { PromotionEvent } from "../rollout/channels.ts";
 import type { ChannelProgress } from "../rollout/progress.ts";
@@ -80,8 +81,12 @@ const UpToDateFigure = ({
       change={
         following === 0
           ? "No company follows a channel yet"
-          : (openWords(channels.flatMap(({ clients }) => clients)) ??
-            "On their channel’s release")
+          : (openWords(
+              // Pinned ones aside, as the figure counts them.
+              channels
+                .flatMap(({ clients }) => clients)
+                .filter(({ pinnedReleaseId }) => pinnedReleaseId === null)
+            ) ?? "On their channel’s release")
       }
       label="Up to date"
       value={`${upToDate} of ${following}`}
@@ -133,6 +138,7 @@ const needKindWords: Readonly<Record<PlatformNeed["kind"], string>> = {
   setup_unread: "setup not read",
   failed: "deploy failed",
   drift: "runs another version",
+  unreachable: "not answering",
 };
 
 /** A company that needs a look, how it stands, and what it needs. */
@@ -157,8 +163,16 @@ const needingALook = (rows: readonly GridRow[], live: Live): Looked[] => {
   );
 };
 
-/** How many companies need a look, and for what, in a few words. */
-const NeedsFigure = ({ looked }: { looked: Looked[] }) => {
+/**
+ * How many companies need a look, and for what, in a few words: once the
+ * accounts are read. Until then it waits; when they couldn't be read it
+ * counts what the admin recorded and says the rest wasn't read, never
+ * that all is well.
+ */
+const NeedsFigure = ({ looked, live }: { looked: Looked[]; live: Live }) => {
+  if (live === null) {
+    return <LoadingFigure label="Need a look" />;
+  }
   const count = (kept: (each: Looked) => boolean, words: string) => {
     const many = looked.filter(kept).length;
     return many === 0 ? [] : [`${many} ${words}`];
@@ -167,8 +181,8 @@ const NeedsFigure = ({ looked }: { looked: Looked[] }) => {
     ...Object.entries(needKindWords).flatMap(([kind, words]) =>
       count(({ needs }) => needs.some((need) => need.kind === kind), words)
     ),
+    // Its version wasn't read (`standingOf` reads drift): its core may well answer.
     ...count(
-      // Its version wasn't read (`standingOf` reads drift): its core may well answer.
       ({ needs, standing }) => needs.length === 0 && standing === "unread",
       "not read"
     ),
@@ -177,16 +191,22 @@ const NeedsFigure = ({ looked }: { looked: Looked[] }) => {
       "being set up"
     ),
   ];
+  const recorded = parts.length === 0 ? null : formatList(parts);
+  let change = recorded ?? "Every company runs as it should";
+  if (live === "failed") {
+    change =
+      recorded === null
+        ? "The accounts couldn’t be read"
+        : `${recorded}; the accounts couldn’t be read`;
+  }
   return (
     <Stat
-      change={
-        looked.length === 0
-          ? "Every company runs as it should"
-          : formatList(parts)
-      }
+      change={change}
       label="Need a look"
       value={String(looked.length)}
-      {...(looked.length > 0 ? { variant: "warning" as const } : {})}
+      {...(looked.length > 0 || live === "failed"
+        ? { variant: "warning" as const }
+        : {})}
     />
   );
 };
@@ -212,20 +232,37 @@ const lookWords = ({ needs, standing }: Looked): string => {
   return needWords(first);
 };
 
+/**
+ * What the list shows with no company in it: that nothing needs a look,
+ * once the accounts answered; until then it waits, and when they couldn't
+ * be read its line (`lookLine`) says so and nothing more.
+ */
+const NoneNeedsALook = ({ live }: { live: Live }) => {
+  if (live === null) {
+    return <LoadingLines lines={2} />;
+  }
+  if (live === "failed") {
+    return null;
+  }
+  return (
+    <Empty>
+      <EmptyHeader>
+        <EmptyMedia icon={CircleCheckIcon} />
+        <EmptyTitle>Nothing needs a look</EmptyTitle>
+        <EmptyDescription>
+          A company whose deploy failed, whose setting up waits, whose core
+          doesn’t answer or whose account runs another version shows here.
+        </EmptyDescription>
+      </EmptyHeader>
+    </Empty>
+  );
+};
+
 /** The companies that need a look, each a row to its Setup: what it needs, its channel and how it stands. */
 const NeedsALook = ({ looked, live }: { looked: Looked[]; live: Live }) => (
   <PagePart description={lookLine(live)} id="needs-a-look" title="Needs a look">
     {looked.length === 0 ? (
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia icon={CircleCheckIcon} />
-          <EmptyTitle>Nothing needs a look</EmptyTitle>
-          <EmptyDescription>
-            A company whose deploy failed, whose setting up waits or whose
-            account runs another version shows here.
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+      <NoneNeedsALook live={live} />
     ) : (
       <ItemGroup aria-labelledby="needs-a-look" separated>
         {looked.map((each) => (
@@ -238,9 +275,13 @@ const NeedsALook = ({ looked, live }: { looked: Looked[]; live: Live }) => (
                 <ItemTitle>
                   {each.row.name}
                   <ItemDetail>
-                    {each.row.release === null
-                      ? channelWords[each.row.channel]
-                      : `${channelWords[each.row.channel]} · ${each.row.release}`}
+                    {[
+                      channelWords[each.row.channel],
+                      each.row.release,
+                      each.row.pinnedReleaseId === null ? null : "Pinned",
+                    ]
+                      .filter((part) => part !== null)
+                      .join(" · ")}
                   </ItemDetail>
                 </ItemTitle>
                 <ItemDescription>
@@ -285,7 +326,7 @@ export const PlatformOverview = ({
         <ReadinessFigure readiness={readiness} />
         <UpToDateFigure channels={channels} />
         <CoresFigure live={live} rows={rows} />
-        <NeedsFigure looked={looked} />
+        <NeedsFigure live={live} looked={looked} />
       </StatGroup>
       <ReadinessPart readiness={readiness} />
       <Channels channels={channels} id={channelsId} />
