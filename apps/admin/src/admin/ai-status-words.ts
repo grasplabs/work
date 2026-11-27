@@ -54,30 +54,30 @@ const troubleWords: Readonly<Record<ProviderTrouble, string>> = {
 };
 
 /**
- * The client's AI in one plain line, from what its core reported (`null`:
- * it couldn't be asked), by its organization's default provider:
- * "AI: OpenAI connected · working · last used 5 min ago", "AI: OpenAI
- * connected · refusing the key since 14:02 UTC" (or "not answering",
- * "limiting requests": what was seen, never a guess at why) from the
- * first such failure after the last call that worked, "AI: OpenAI
- * connected · not used yet", or "AI: not connected yet".
+ * The client's own AI in one plain line, from what its core reported
+ * (`null`: it couldn't be asked), by its organization's default provider:
+ * "OpenAI connected · working · last used 5 min ago", "OpenAI connected ·
+ * refusing the key since 14:02 UTC" (or "not answering", "limiting
+ * requests": what was seen, never a guess at why) from the first such
+ * failure after the last call that worked, "OpenAI connected · not used
+ * yet", or "not connected yet".
  */
 export const aiStatusLine = (
   report: AiStatusReport | null,
   now: number = Date.now()
 ): string => {
   if (report === null) {
-    return "AI: couldn’t be read just now.";
+    return "couldn’t be read just now.";
   }
   const [first, ...others] = report.providers.filter(
     ({ kind }) => kind === "organization"
   );
   if (first === undefined) {
-    return "AI: not connected yet";
+    return "not connected yet";
   }
   const more =
     others.length === 0 ? "" : ` (and ${String(others.length)} more)`;
-  const connected = `AI: ${aiProviders[first.provider].label}${more} connected`;
+  const connected = `${aiProviders[first.provider].label}${more} connected`;
   const { lastOkAt, failingSince, failingClass } = first;
   if (failingSince !== null && failingClass !== null) {
     return `${connected} · ${troubleWords[failingClass]} since ${sinceWords(failingSince, now)}`;
@@ -96,7 +96,7 @@ const dollars = (micros: number): string =>
   }).format(micros / 1_000_000);
 
 /**
- * The company's use of Grasp's AI this month in one plain line, while it
+ * The company's use of Grasp's AI this month in a few words, while it
  * runs its AI on Grasp's key: what it came to against its limit, and that
  * its AI is stopped once it reached it. None for a company on its own
  * key, one whose core reports none, or one that couldn't be asked.
@@ -109,6 +109,6 @@ export const graspAiLine = (report: AiStatusReport | null): string | null => {
   const spent = dollars(use.spentMicros);
   const limit = dollars(use.limitMicros);
   return use.reached
-    ? `On Grasp’s AI: ${spent} this month, at its limit of ${limit}. Its AI is stopped until next month, or until its admin connects a key of its own.`
-    : `On Grasp’s AI: ${spent} of ${limit} this month.`;
+    ? `${spent}, at its limit of ${limit}: its AI is stopped until next month, or until its admin connects a key of its own.`
+    : `${spent} of ${limit}`;
 };
