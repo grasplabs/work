@@ -922,6 +922,7 @@ describe(ChatThread, () => {
         after: 2,
         at,
         queues: false,
+        alreadyQueued: 0,
         key: "key-1",
         owner: "box",
         fromBox: false,
