@@ -99,6 +99,7 @@ const missingWhy: Readonly<Record<string, MissingReason>> = {
   "connect.class_unknown": "actionOff",
   "connect.tool_blocked": "actionOff",
   "connect.app_not_pointed": "actionOff",
+  "connect.app_reads_limited": "actionOff",
   "connect.resource_not_pointed": "actionOff",
   "connect.mailbox_not_pointed": "actionOff",
   "connect.never": "noAction",

@@ -1,7 +1,10 @@
 // The life of an action: it runs async work, says that it works, then how it went ("Saved",
 // "Could not save"), once to a screen reader, holds that result for duration-hold, then returns to
 // rest. Its own `loadingText` is said as the work starts; with none, the catalogue's word is said
-// only once the work has run for loading-delay, so quick work says only how it went. A second run while it works or shows its result does nothing.
+// only once the work has run for loading-delay, so quick work says only how it went. A second run
+// while it works does nothing; after a failure it runs again at once (the words corrected, the
+// connection back); while it shows that it worked it does nothing, so the same work never runs twice
+// by accident, unless `runWhileShown` says each run is new work.
 //
 // A Button runs it for a press whose `onClick` returns a Promise, and shows it; a page uses it for
 // work it runs itself, such as a form's submit, and gives the Button its `status`:
@@ -52,13 +55,22 @@ export interface Action<Args extends unknown[], Result> {
   labels: ActionStatusLabels;
   /** The error of the last run that failed, until the next run starts. */
   error: unknown;
-  /** Runs it, with the work's own arguments. Busy while it works or shows its result. */
+  /**
+   * Runs it, with the work's own arguments. Busy while it works, and while it shows that it worked
+   * (unless `runWhileShown`); after a failure it runs again at once.
+   */
   run: (...args: Args) => Promise<ActionResult<Result>>;
 }
 
 export interface ActionOptions extends ActionText {
   /** Called with the error when the work fails, after the button has said so. */
   onError?: (error: unknown) => void;
+  /**
+   * Each run is new work (a rename after a rename), so it may run again at once while it shows
+   * that it worked.
+   * @default false
+   */
+  runWhileShown?: boolean;
 }
 
 /** Clears the timer that brings the result back to rest, if one runs. */
@@ -88,9 +100,10 @@ export const useAction = <Args extends unknown[], Result>(
   const mounted = useRef(true);
   // The newest work, words and handler, so a press always runs what the page passed last.
   const own = options.loadingText !== undefined;
-  const latest = useRef({ work, labels, own, onError: options.onError });
+  const again = options.runWhileShown ?? false;
+  const latest = useRef({ work, labels, own, onError: options.onError, again });
   useEffect(() => {
-    latest.current = { work, labels, own, onError: options.onError };
+    latest.current = { work, labels, own, onError: options.onError, again };
   });
   useEffect(() => {
     mounted.current = true;
@@ -109,6 +122,11 @@ export const useAction = <Args extends unknown[], Result>(
       return;
     }
     setStatus(result);
+    // After a failure the work may be tried again at once (a field with its words corrected); after
+    // a success a second press waits out the tick, so the same work never runs twice by accident.
+    if (result === "error" || latest.current.again) {
+      running.current = false;
+    }
     timer.current = setTimeout(() => {
       running.current = false;
       if (mounted.current) {

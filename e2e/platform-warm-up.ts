@@ -1,6 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { modelScripts } from "./model-scripts.ts";
+import { askInNewChat } from "./new-chats.ts";
 import { apiOf } from "./people.ts";
 import type { Person } from "./people.ts";
 import { e2eModel } from "./stack.ts";
@@ -38,12 +39,13 @@ export const warmPlatform = async (builder: Person): Promise<void> => {
       description: "Loads the platform's code before the tests.",
     });
     // A chat about the App, as its workspace starts one.
-    const chat = await api.chats.create(app.name);
-    await api.chats.send(chat.id, {
-      text: modelScripts.buildsTally.opener,
-      model: e2eModel,
-      subject: { kind: "app", id: app.id },
-    });
+    const chat = {
+      id: await askInNewChat(api, app.name, {
+        text: modelScripts.buildsTally.opener,
+        model: e2eModel,
+        subject: { kind: "app", id: app.id },
+      }),
+    };
     const until = Date.now() + turnMs;
     let { running } = await api.chats.summary(chat.id);
     while (running) {

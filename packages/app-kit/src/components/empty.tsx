@@ -2,24 +2,12 @@ import { cn } from "@grasp-os/app-kit/lib/utils";
 import { cva } from "class-variance-authority";
 import type { VariantProps } from "class-variance-authority";
 
-/*
- * `size`: the room around it. A page's own empty state is roomy; `sm` and
- * `xs` sit inside a card's section, as on the prototype's app pages.
- */
-function Empty({
-  className,
-  size = "default",
-  ...props
-}: React.ComponentProps<"div"> & { size?: "default" | "sm" | "xs" }) {
+function Empty({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="empty"
-      data-size={size}
       className={cn(
-        "flex w-full min-w-0 flex-1 flex-col items-center justify-center gap-4 rounded-lg border-dashed text-center text-balance",
-        size === "default" && "p-12",
-        size === "sm" && "p-6",
-        size === "xs" && "p-4",
+        "flex w-full min-w-0 flex-1 flex-col items-center justify-center gap-4 rounded-lg border-dashed p-12 text-center text-balance",
         className
       )}
       {...props}
@@ -71,7 +59,10 @@ function EmptyTitle({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="empty-title"
-      className={cn("text-sm font-medium tracking-tight", className)}
+      className={cn(
+        "font-heading text-lg font-medium tracking-tight",
+        className
+      )}
       {...props}
     />
   );

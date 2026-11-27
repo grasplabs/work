@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
@@ -43,8 +44,9 @@ const toolsPerConnection = 1000;
 
 /**
  * A `bulk` connection, `owner`'s own or else shared, allowing `tools` as
- * reads, whose server takes an invoice for each. A Composio connection's
- * tools are searched by their names alone, so the tests find them by name.
+ * reads, whose server takes an invoice for each, as its session lists
+ * them, kept for search as connecting keeps them (a `describe` of one
+ * reads and keeps them all). The tests find them by name.
  */
 const bulkConnection = async (tools: readonly string[], owner?: string) => {
   const connection = await mailConnection(
@@ -62,6 +64,13 @@ const bulkConnection = async (tools: readonly string[], owner?: string) => {
       },
     }))
   );
+  const [first] = tools;
+  if (first !== undefined) {
+    await env.CONNECT.connectionTools({
+      connectionId: connection.id,
+      actions: [first],
+    });
+  }
   return connection;
 };
 
@@ -123,7 +132,8 @@ describe("a chat's tool search", setUpTime, () => {
         action: needle,
         summary: "",
         class: "read-own",
-        input: "unknown",
+        // Its input as the session lists it, for the agent to call with.
+        input: "{ invoice: string }",
       },
       matches: 1,
       output: { shipment: "SHP-7" },
@@ -600,7 +610,7 @@ describe("a chat's tool search", setUpTime, () => {
     });
   });
 
-  it("shows and counts only the tools whose class is on for the person", async () => {
+  it("shows and counts only the tools whose class is on for the person, and a toolkit's as its admin allowed them", async () => {
     const [person, admin] = await Promise.all([
       signedInApi(idp, "user"),
       signedInApi(idp, "admin"),
@@ -630,8 +640,9 @@ describe("a chat's tool search", setUpTime, () => {
       says("I can only search.")
     );
     // Reaching others is off for everyone, and so is changing the
-    // company's things: sending mail, through the native suite or a
-    // toolkit's tool allowed as a change, is off too.
+    // company's things: sending mail through the native suite is off. A
+    // toolkit's tool allowed as a change follows its admin's list, not
+    // the switches (composio-reach.test.ts): there, and held when called.
     await admin.api.connections.setToolClass("reach-others", { who: "nobody" });
     await admin.api.connections.setToolClass("change-company", {
       who: "nobody",
@@ -647,15 +658,13 @@ describe("a chat's tool search", setUpTime, () => {
           name: mail.id,
           account: null,
           resource: null,
-          tools: { "read-company": 1 },
+          tools: { "read-company": 1, "change-company": 1 },
         },
       ],
-      found: ["mail.search"],
-      sends: 0,
-      declared: [
-        `// ${JSON.stringify(mail.id)} has no action "mail.send" this chat may call or ask for.`,
-        "/**",
-      ],
+      // The toolkit's send is found and described beside its search.
+      found: ["mail.send", "mail.search"],
+      sends: 1,
+      declared: ["/**", "/**"],
     });
   });
 });

@@ -270,6 +270,8 @@ export const mcpServerWith = (
      * key the server refuses; back to `false` after it.
      */
     refuseList: boolean;
+    /** Awaited before each `tools/list` is answered: a slow server. */
+    listGate: (() => Promise<void>) | undefined;
     /** The `_meta` each tool call came with, in order. */
     callMeta: unknown[];
   } = {
@@ -278,7 +280,24 @@ export const mcpServerWith = (
     unkeyed: 0,
     network: "ok",
     refuseList: false,
+    listGate: undefined,
     callMeta: [],
+  };
+
+  /**
+   * What a `tools/list` waits for (`listGate`), and its 401 when it is to
+   * be turned away (`refuseList`); undefined for any other request.
+   */
+  const beforeList = async (body: unknown): Promise<Response | undefined> => {
+    if (!isToolList(body)) {
+      return undefined;
+    }
+    await state.listGate?.();
+    if (!state.refuseList) {
+      return undefined;
+    }
+    state.refuseList = false;
+    return new Response("Unauthorized", { status: 401 });
   };
 
   const answer = async (request: Request): Promise<Response> => {
@@ -300,9 +319,9 @@ export const mcpServerWith = (
           : undefined
       );
     }
-    if (isToolList(body) && state.refuseList) {
-      state.refuseList = false;
-      return new Response("Unauthorized", { status: 401 });
+    const listRefused = await beforeList(body);
+    if (listRefused !== undefined) {
+      return listRefused;
     }
     if (network === "unauthorised") {
       return new Response("Unauthorized", { status: 401 });
@@ -340,6 +359,7 @@ export const mcpServerWith = (
     state.unkeyed = 0;
     state.network = "ok";
     state.refuseList = false;
+    state.listGate = undefined;
     state.callMeta = [];
   };
 

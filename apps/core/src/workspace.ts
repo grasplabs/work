@@ -148,6 +148,7 @@ import type {
   TurnRequest,
   TurnStop,
 } from "./chat-harness.ts";
+import { retireChatId, takeChatId } from "./chat-ids.ts";
 import { ChatListWatch } from "./chat-list-watch.ts";
 import type { ChatList, ChatListListener } from "./chat-list-watch.ts";
 import {
@@ -287,6 +288,18 @@ const textEveryMs = 300;
 const requestKeyMs = 24 * 60 * 60 * 1000;
 
 /**
+ * The ID a page names a chat it starts by (`ChatStart`): a UUID as
+ * browsers make one, lower case, of a version (1 to 8) and RFC 9562's
+ * variant, so never the nil or the max UUID, nor two spellings of one.
+ */
+const newChatIdSchema = z
+  .string()
+  .regex(
+    /^[\da-f]{8}-[\da-f]{4}-[1-8][\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/u
+  )
+  .pipe(chatIdSchema);
+
+/**
  * `tell`, called with the latest text at most every {@link textEveryMs},
  * and once more at the end of a window that held more: text in between is
  * dropped, as the next call carries all of it.
@@ -366,12 +379,12 @@ export type ChatPlace = z.infer<typeof chatPlaceSchema>;
  */
 const lastAppOf = async (
   env: Env,
-  { id, thread }: Pick<Chat, "id" | "thread">
+  { id, thread, personId }: Pick<Chat, "id" | "thread" | "personId">
 ): Promise<string | null> => {
   if (thread !== null) {
     return null;
   }
-  const [last] = await chatWork(env, id);
+  const [last] = await chatWork(env, personId, id);
   return last?.kind === "app" ? last.id : null;
 };
 
@@ -460,7 +473,7 @@ export const questionSchema = z.strictObject({
 export type Question = z.input<typeof questionSchema>;
 
 /** What "Make something" started `chat` to make, as kept with it; null for any other chat. */
-export const makeOf = ({
+const makeOf = ({
   makeKind,
   makeProject,
 }: Pick<Chat, "makeKind" | "makeProject">): ChatMake | null =>
@@ -1524,8 +1537,14 @@ export class Workspace extends DurableObject<Env> {
    * platform's chat for good, and its agent's audit events name it; Grasp's
    * own app (`web`) otherwise. Started by "Make something" (`make`), it
    * keeps what it came to make, and the project Build it makes it in.
+   *
+   * Its ID is taken company-wide first (chat-ids.ts), so no two chats
+   * anywhere share one: a random one, or the one the person's page named
+   * (`named`, with the start's key, `startChat`), refused as if there were
+   * no such chat when it is anyone's already, and answered with the chat
+   * that start made before.
    */
-  createChat(
+  async createChat(
     title: string,
     personId: string,
     agentId: string,
@@ -1533,68 +1552,160 @@ export class Workspace extends DurableObject<Env> {
     via: ChatChannel = "web",
     thread?: string,
     make?: ChatMake,
-    /** The page's key for this chat: a repeat finds the chat it made. */
-    key?: string
-  ): Chat {
-    const repeated =
-      key === undefined ? undefined : this.chatMadeWith(personId, key);
-    if (repeated !== undefined) {
-      return repeated;
-    }
+    named?: { id: ChatId; key: string }
+  ): Promise<Chat> {
     const agent = workspaceAgentIdSchema.safeParse(agentId);
     if (!agent.success) {
       // No agent core names: nowhere an agent can work.
       throw permissionErrors.create("permission.context_invalid");
     }
     const channel = chatChannelSchema.parse(via);
-    if (channel === "web") {
-      this.requireRoomForChat(personId);
+    const id = named?.id ?? chatIdSchema.parse(crypto.randomUUID());
+    // Its ID taken company-wide, then the chat made, in one step that
+    // nothing else in this object runs during: two messages of a chat
+    // app's conversation at once make one chat, two starts of one chat at
+    // once make it once, and no chat is made, nor used, before its ID is
+    // taken. Nothing thrown inside: a refusal there would reset the object.
+    const made = await this.ctx.blockConcurrencyWhile(
+      async (): Promise<{ chat: Chat; made: boolean } | { error: unknown }> => {
+        try {
+          const repeated =
+            named === undefined
+              ? undefined
+              : this.#startedChat(id, personId, named.key);
+          if (repeated !== undefined) {
+            return { chat: repeated, made: false };
+          }
+          // What this object refuses first, so a refused chat takes no ID:
+          // never one of the person's own chats made over (one made before
+          // chat IDs were taken company-wide has none taken), nor one past
+          // their most.
+          const there = this.#db
+            .select({ id: chats.id })
+            .from(chats)
+            .where(eq(chats.id, id))
+            .get();
+          if (there !== undefined) {
+            throw agentErrors.create("agent.chat_not_found");
+          }
+          if (channel === "web") {
+            this.requireRoomForChat(personId);
+          }
+          await takeChatId(this.env, id, personId, named?.key ?? null);
+          return {
+            chat: this.ctx.storage.transactionSync(() => {
+              if (by !== undefined) {
+                this.#outboxed(by, "chat.created", id, {});
+              }
+              const now = new Date();
+              const chat = this.#db
+                .insert(chats)
+                .values({
+                  id,
+                  title,
+                  createdAt: now,
+                  lastAt: now,
+                  personId,
+                  agentId: agent.data,
+                  via: channel,
+                  thread: thread ?? null,
+                  makeKind: make?.kind ?? null,
+                  makeProject: make?.project ?? null,
+                  // Nothing seen yet: every answer is news until its person looks.
+                  readUpTo: 0,
+                })
+                .returning()
+                .get();
+              if (named !== undefined) {
+                this.#keepRequest("create", named.key, id);
+              }
+              return chat;
+            }),
+            made: true,
+          };
+        } catch (error) {
+          return { error };
+        }
+      }
+    );
+    if ("error" in made) {
+      throw made.error;
     }
-    const id = chatIdSchema.parse(crypto.randomUUID());
-    const chat = this.ctx.storage.transactionSync(() => {
-      if (by !== undefined) {
-        this.#outboxed(by, "chat.created", id, {});
-      }
-      const now = new Date();
-      const made = this.#db
-        .insert(chats)
-        .values({
-          id,
-          title,
-          createdAt: now,
-          lastAt: now,
-          personId,
-          agentId: agent.data,
-          via: channel,
-          thread: thread ?? null,
-          makeKind: make?.kind ?? null,
-          makeProject: make?.project ?? null,
-          // Nothing seen yet: every answer is news until its person looks.
-          readUpTo: 0,
-        })
-        .returning()
-        .get();
-      if (key !== undefined) {
-        this.#keepRequest("create", key, id);
-      }
-      return made;
-    });
-    this.#deliverAudit();
-    this.#listChanged();
-    return chat;
+    if (made.made) {
+      this.#deliverAudit();
+      this.#listChanged();
+    }
+    return made.chat;
   }
 
   /**
-   * The chat `personId` made with `key` within a day, as the first call
-   * made it, if they made one: what a repeat of `createChat` answers, and
-   * what its caller asks first, so a repeat is checked for nothing a new
-   * chat would be (chats-rpc.ts).
+   * Makes the chat `start` names, `personId`'s with ID `chatId`, as the
+   * question that starts it goes (`send`, `attachFile`), unless that start
+   * made it already: a repeat of it, from a page that never heard, or a
+   * second tab, finds it, and two at once make it once. Anything else is
+   * refused as if there were no such chat (`agent.chat_not_found`): an ID
+   * that isn't a UUID, a chat there already (the person's own too, which
+   * a start never takes over or makes over), a deleted one, a start key
+   * that made another chat, or anyone else's anywhere (chat-ids.ts).
    */
-  chatMadeWith(personId: string, key: string): Chat | undefined {
+  async startChat(
+    chatId: unknown,
+    personId: string,
+    start: {
+      key: string;
+      title: string;
+      agentId: string;
+      make?: ChatMake | undefined;
+      by: AuditActor;
+    }
+  ): Promise<void> {
+    const named = newChatIdSchema.safeParse(chatId);
+    if (!named.success) {
+      throw agentErrors.create("agent.chat_not_found");
+    }
+    await this.createChat(
+      start.title,
+      personId,
+      start.agentId,
+      start.by,
+      "web",
+      undefined,
+      start.make,
+      { id: named.data, key: start.key }
+    );
+  }
+
+  /**
+   * The chat the start with `key` made, `personId`'s chat `chatId`, within
+   * a day; none when it made none. Refused as no such chat once that chat
+   * is gone, or for a key that made another.
+   */
+  #startedChat(
+    chatId: ChatId,
+    personId: string,
+    key: string
+  ): Chat | undefined {
     const made = this.#requested("create", key);
-    return made === undefined
-      ? undefined
-      : this.#graspChat(made.chatId, personId);
+    if (made === undefined) {
+      return undefined;
+    }
+    if (made.chatId !== chatId) {
+      throw agentErrors.create("agent.chat_not_found");
+    }
+    return this.#graspChat(made.chatId, personId);
+  }
+
+  /**
+   * Whether the start with `key` made `personId`'s chat `chatId` within a
+   * day, as a repeat of it asks (`startChat`, chats-rpc.ts): refused as
+   * no such chat once that chat is gone, or for a key that made another.
+   */
+  chatStartedWith(chatId: unknown, personId: string, key: string): boolean {
+    const id = newChatIdSchema.safeParse(chatId);
+    if (!id.success) {
+      throw agentErrors.create("agent.chat_not_found");
+    }
+    return this.#startedChat(id.data, personId, key) !== undefined;
   }
 
   /**
@@ -2731,7 +2842,7 @@ export class Workspace extends DurableObject<Env> {
       .all();
     const chat =
       found ??
-      this.createChat(
+      (await this.createChat(
         where === undefined
           ? chatPlatformName(platform)
           : sharedTitle(platform, where.kind),
@@ -2740,7 +2851,7 @@ export class Workspace extends DurableObject<Env> {
         actorOf({ userId: personId, staff: false }, platform),
         platform,
         where?.thread
-      );
+      ));
     const {
       models: [model],
     } = await modelSettings(this.env);
@@ -4284,7 +4395,11 @@ export class Workspace extends DurableObject<Env> {
     try {
       revoked = await revokedSince(
         this.env,
-        { agentId: output.agentId, chatId },
+        {
+          agentId: output.agentId,
+          chatId,
+          personId: this.#chat(chatId).personId,
+        },
         admission.openedAt
       );
     } catch (error) {
@@ -5708,12 +5823,14 @@ export class Workspace extends DurableObject<Env> {
       // No connection granted in the chat outlives it (chat-connections.ts).
       await revokeChatPermissions(
         this.env,
-        { chatId: id },
+        { requestedBy: personId, chatId: id },
         { userId: personId, actor: by },
         "chat_deleted"
       );
       // Nor any workflow start its agent asked its person to confirm.
-      await dropHeldStarts(this.env, { chatId: id });
+      await dropHeldStarts(this.env, { workspaceId, chatId: id });
+      // Its ID stays taken: no start makes a chat under it again.
+      await retireChatId(this.env, id, personId);
       // And what its agent kept, the transcript the model reads with it:
       // erased for good, so nothing told it meanwhile is kept.
       await this.#toSession(id, async (session) => {
@@ -5838,7 +5955,7 @@ export class Workspace extends DurableObject<Env> {
       // oxlint-disable-next-line no-await-in-loop -- one chat at a time
       await revokeChatPermissions(
         this.env,
-        { chatId: id },
+        { requestedBy: personId, chatId: id },
         { userId: null, actor: { type: "system" } },
         "person_removed"
       );

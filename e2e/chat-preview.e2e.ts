@@ -5,6 +5,7 @@ import { publishApp } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import { writeDraft } from "./draft-writes.ts";
 import { modelScripts } from "./model-scripts.ts";
+import { emptyChat } from "./new-chats.ts";
 import { apiOf, peopleIn } from "./people.ts";
 import { tallyFiles } from "./tally-app.ts";
 
@@ -65,7 +66,7 @@ test("a chat building an App offers its workspace, whose preview changes none of
   try {
     const app = await api.apps.create({ name });
     const { version } = await publishApp(api, app.id, tallyFiles("in the App"));
-    const chat = await api.chats.create(`Build ${tag}`);
+    const chat = { id: await emptyChat(api, `Build ${tag}`) };
     const page = await pageOf(builder);
 
     // The App has data of its own: one added through its own page.

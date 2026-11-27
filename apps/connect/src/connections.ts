@@ -11,6 +11,7 @@ import type {
   PersonalAccount,
   ToolClass,
 } from "@grasp-os/shared/connect";
+import { log } from "@grasp-os/shared/log";
 import { sourceReaderProviders } from "@grasp-os/shared/source-readers";
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -30,13 +31,49 @@ import { keptToolClasses } from "./tool-rules.ts";
 export type Connection = typeof connections.$inferSelect;
 
 /**
- * Where Composio serves a session's MCP endpoint: on its API host, at the
- * session's own path (`POST /tool_router/session` answers
- * `https://backend.composio.dev/api/v3/tool_router/session/<id>/mcp`).
+ * Where Composio serves a session's MCP endpoint: on its API host, at a
+ * path naming the session's own ID. Composio's docs never write the URL
+ * out (`mcp.url`, "The URL of the MCP server"); these are the shapes
+ * Composio's own code and a real answer show:
+ * `/tool_router/<id>/mcp`, as a live `POST /tool_router/session` answers
+ * and Composio's end-to-end fake backend serves it, and
+ * `/api/v3(.1)/tool_router/session/<id>/mcp`, as its SDK's tests have it.
  */
 const composioMcpHost = "backend.composio.dev";
-const composioSessionPath =
-  /^\/api\/v3(?:\.1)?\/tool_router\/session\/(?<id>[^/]+)\/mcp$/u;
+const composioSessionPaths = [
+  /^\/tool_router\/(?<id>[^/]+)\/mcp$/u,
+  /^\/api\/v3(?:\.1)?\/tool_router\/session\/(?<id>[^/]+)\/mcp$/u,
+];
+
+/** Whether `pathname` is a session MCP path naming exactly `sessionId`. */
+const isSessionPath = (pathname: string, sessionId: string): boolean =>
+  composioSessionPaths.some(
+    (path) => path.exec(pathname)?.groups?.id === encodeURIComponent(sessionId)
+  );
+
+/**
+ * A URL Composio gave for a session, as it may be logged: its host, its
+ * path with every segment holding a digit (an ID) written `:id`, and the
+ * names of its query parameters, never their values. Enough to see the
+ * shape of one connect refused, nothing that identifies a session.
+ */
+export const urlShape = (
+  url: string
+): { host: string; path: string; query: string } => {
+  if (!URL.canParse(url)) {
+    return { host: "unparsed", path: "", query: "" };
+  }
+  const { protocol, host, pathname, searchParams } = new URL(url);
+  return {
+    host: `${protocol}//${host}`,
+    path: pathname
+      .split("/")
+      .map((segment) => (/\d/u.test(segment) ? ":id" : segment))
+      .join("/")
+      .slice(0, 200),
+    query: [...new Set(searchParams.keys())].join(",").slice(0, 200),
+  };
+};
 
 /**
  * What is wrong with `url` as the MCP endpoint of Composio's session
@@ -62,10 +99,7 @@ export const sessionUrlProblem = (
   ) {
     return "host";
   }
-  if (
-    composioSessionPath.exec(pathname)?.groups?.id !==
-    encodeURIComponent(sessionId)
-  ) {
+  if (!isSessionPath(pathname, sessionId)) {
     return "path";
   }
   return searchParams.has("user_id") || searchParams.has("connected_account_id")
@@ -324,11 +358,12 @@ export const offeredToolNames = (
 export const composioServer = (env: Env, connection: Connection): McpServer => {
   const { server: url, composioSessionId: sessionId } = connection;
   const key = composioKey(env);
-  if (
-    sessionId === null ||
-    sessionUrlProblem(url, sessionId) !== undefined ||
-    key === undefined
-  ) {
+  const problem =
+    sessionId === null ? "session" : sessionUrlProblem(url, sessionId);
+  if (problem !== undefined || key === undefined) {
+    if (problem !== undefined) {
+      log.warn("composio.session_url_refused", { problem, ...urlShape(url) });
+    }
     throw connectErrors.create("connect.server_unavailable");
   }
   return mcpServer(url, async (request) => {

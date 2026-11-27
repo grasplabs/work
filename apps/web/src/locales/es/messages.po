@@ -4015,7 +4015,6 @@ msgstr "Vinculado a"
 msgid "Brain"
 msgstr "Cerebro"
 
-#: src/frame/site-header.tsx
 #: src/frame/ui-words.tsx
 msgid "Breadcrumb"
 msgstr "Ruta de navegación"
@@ -4208,8 +4207,6 @@ msgstr "No se puede ofrecer Ejecutar: {unread}"
 #: src/connections/http-connections.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/drafts/share-with-team.tsx
-#: src/frame/panels/head.tsx
-#: src/frame/panels/rename.tsx
 #: src/frame/ui-words.tsx
 #: src/inbox/decision-confirmation.tsx
 #: src/interview/transcript.tsx
@@ -6564,7 +6561,6 @@ msgstr "Puerta"
 msgid "Dots"
 msgstr "Puntos"
 
-#: src/frame/panels/rename.tsx
 #: src/frame/ui-words.tsx
 msgid "Double-click or press F2 to rename"
 msgstr "Haz doble clic o pulsa F2 para cambiar el nombre"
@@ -11289,8 +11285,6 @@ msgstr "Mi versión de la App no arrancó. Averigua por qué y arréglalo:"
 #: src/apps/field-editor.tsx
 #: src/connections/add-connector.tsx
 #: src/connections/http-connections.tsx
-#: src/frame/panels/head.tsx
-#: src/frame/panels/rename.tsx
 #: src/projects/project-dialog.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/routes/_shell.settings.profile.tsx
@@ -14079,10 +14073,6 @@ msgstr "Mantén pulsado: {words}"
 msgid "Press Enter to add it."
 msgstr "Pulsa Intro para añadirlo."
 
-#: src/frame/panels/head.tsx
-msgid "Press or press F2 to rename"
-msgstr "Pulsa o pulsa F2 para cambiar el nombre"
-
 #: src/frame/ui-words.tsx
 msgid "Press Space or Enter to pick it up, the arrow keys to move it, Space or Enter to put it down, or Escape to put it back."
 msgstr "Pulse Espacio o Intro para levantarlo, las flechas para moverlo, Espacio o Intro para soltarlo, o Escape para devolverlo a su sitio."
@@ -14947,7 +14937,6 @@ msgstr "Eliminando"
 #: src/chat/chat-window.tsx
 #: src/chat/sidebar-chats.tsx
 #: src/frame/panels/head.tsx
-#: src/frame/panels/rename.tsx
 #: src/frame/ui-words.tsx
 #: src/settings/teams.tsx
 msgid "Rename"
@@ -15675,8 +15664,7 @@ msgstr "Arena"
 #: src/apps/field-editor.tsx
 #: src/brain/goals-editor.tsx
 #: src/brain/skills-page.tsx
-#: src/frame/panels/head.tsx
-#: src/frame/panels/rename.tsx
+#: src/frame/ui-words.tsx
 #: src/interview/read-back-story.tsx
 #: src/projects/project-dialog.tsx
 #: src/settings/billing-card.tsx

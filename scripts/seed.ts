@@ -716,8 +716,20 @@ const seedChats = async (
     }
     // oxlint-disable-next-line no-await-in-loop -- one chat at a time
     await confirmAnsweredBy(api, chat);
+    // A chat as a page starts one, here by a file attached under its
+    // start (`ChatStart`), taken out again: the transcript is written
+    // into it below.
+    const id = crypto.randomUUID();
+    const key = crypto.randomUUID();
     // oxlint-disable-next-line no-await-in-loop -- one chat at a time
-    const { id } = await api.chats.create(chat.title);
+    const file = await api.chats.attachFile(
+      id,
+      { name: "start.txt", bytes: new TextEncoder().encode("Start.") },
+      key,
+      { key, title: chat.title }
+    );
+    // oxlint-disable-next-line no-await-in-loop -- one chat at a time
+    await api.chats.removeFile(id, file.id);
     const workspace = localObject("Workspace", "chats", id);
     try {
       writeTranscript(workspace, id, chat, now);

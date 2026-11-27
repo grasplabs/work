@@ -7,6 +7,7 @@ import { mockIdp } from "./idp.ts";
 import { saveInstructions } from "./instruction-saves.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { outcome, signedInApi, signIn } from "./sign-in.ts";
+import { startedThrough } from "./started-chats.ts";
 
 // Picking an agent for a chat in Grasp's own chat, over `/rpc`, as a
 // person's page reaches it. These start from the ways it can fail: an
@@ -141,19 +142,27 @@ describe("picking an agent for a chat", setUpTime, () => {
     const before = await chats.list();
     await expect(
       Promise.all([
-        outcome(chats.create("Hidden", hidden.id)),
-        outcome(chats.create("Paused", paused.id)),
-        outcome(chats.create("None", "agent-there-is-none")),
-        outcome(chats.create("Not an ID", "../organization")),
-        // @ts-expect-error -- what a page must not send
-        outcome(chats.create("Not a string", { id: hidden.id })),
+        outcome(startedThrough(chats, "Hidden", { agentId: hidden.id })),
+        outcome(startedThrough(chats, "Paused", { agentId: paused.id })),
+        outcome(
+          startedThrough(chats, "None", { agentId: "agent-there-is-none" })
+        ),
+        outcome(
+          startedThrough(chats, "Not an ID", { agentId: "../organization" })
+        ),
+        outcome(
+          startedThrough(chats, "Not a string", {
+            // @ts-expect-error -- what a page must not send
+            agentId: { id: hidden.id },
+          })
+        ),
       ])
     ).resolves.toStrictEqual([
       "agent.unknown",
       "agent.unknown",
       "agent.unknown",
       "agent.unknown",
-      "agent.unknown",
+      "agent.invalid_request",
     ]);
     await expect(chats.list()).resolves.toStrictEqual(before);
   });
@@ -165,9 +174,13 @@ describe("picking an agent for a chat", setUpTime, () => {
     await admin.api.connections.setAgentReach(claire.id, true, everyone);
 
     const { chats } = person.api;
-    const plain = await chats.create("Plain");
-    const named = await chats.create("Named first", chatAgentId);
-    const hers = await chats.create("Invoices", claire.id);
+    const plain = await startedThrough(chats, "Plain");
+    const named = await startedThrough(chats, "Named first", {
+      agentId: chatAgentId,
+    });
+    const hers = await startedThrough(chats, "Invoices", {
+      agentId: claire.id,
+    });
     expect([plain.agentId, named.agentId, hers.agentId]).toStrictEqual([
       chatAgentId,
       chatAgentId,
@@ -193,7 +206,9 @@ describe("picking an agent for a chat", setUpTime, () => {
     await tell(admin, claire.id);
     await connections.setAgentReach(claire.id, true, everyone);
     const gateway = await fakeProvider(says("About invoices."));
-    const chat = await person.api.chats.create("Invoices", claire.id);
+    const chat = await startedThrough(person.api.chats, "Invoices", {
+      agentId: claire.id,
+    });
 
     await expect(
       outcome(person.api.chats.send(chat.id, { text: "Hi.", model }))
@@ -225,9 +240,15 @@ describe("picking an agent for a chat", setUpTime, () => {
     const claire = await made.api.connections.makeAgent(said());
     await made.api.connections.setAgentReach(claire.id, true, everyone);
     const before = {
-      made: await made.api.chats.create("Mine", claire.id),
-      admin: await admin.api.chats.create("Theirs", claire.id),
-      member: await member.api.chats.create("Hers", claire.id),
+      made: await startedThrough(made.api.chats, "Mine", {
+        agentId: claire.id,
+      }),
+      admin: await startedThrough(admin.api.chats, "Theirs", {
+        agentId: claire.id,
+      }),
+      member: await startedThrough(member.api.chats, "Hers", {
+        agentId: claire.id,
+      }),
     };
     // Set by another admin, it is still for the one who made it.
     await admin.api.connections.setAgentReach(claire.id, true, maker);
@@ -247,8 +268,12 @@ describe("picking an agent for a chat", setUpTime, () => {
     // answering in a chat made with it.
     await expect(
       Promise.all([
-        outcome(admin.api.chats.create("Again", claire.id)),
-        outcome(member.api.chats.create("Again", claire.id)),
+        outcome(
+          startedThrough(admin.api.chats, "Again", { agentId: claire.id })
+        ),
+        outcome(
+          startedThrough(member.api.chats, "Again", { agentId: claire.id })
+        ),
         outcome(admin.api.chats.send(before.admin.id, hi)),
         outcome(member.api.chats.send(before.member.id, hi)),
       ])
@@ -262,7 +287,9 @@ describe("picking an agent for a chat", setUpTime, () => {
     await expect(
       Promise.all([
         outcome(made.api.chats.send(before.made.id, hi)),
-        outcome(made.api.chats.create("Another", claire.id)),
+        outcome(
+          startedThrough(made.api.chats, "Another", { agentId: claire.id })
+        ),
       ])
     ).resolves.toStrictEqual(["ok", "ok"]);
     await vi.waitFor(() => {
@@ -343,12 +370,12 @@ describe("picking an agent for a chat", setUpTime, () => {
     const before = await chats.list();
     await expect(
       Promise.all([
-        outcome(chats.create("Unnamed")),
-        outcome(chats.create("Named", chatAgentId)),
+        outcome(startedThrough(chats, "Unnamed")),
+        outcome(startedThrough(chats, "Named", { agentId: chatAgentId })),
       ])
     ).resolves.toStrictEqual(["agent.paused", "agent.paused"]);
     await expect(chats.list()).resolves.toStrictEqual(before);
     await admin.api.connections.setAgentPaused(chatAgentId, false);
-    await expect(outcome(chats.create("Back"))).resolves.toBe("ok");
+    await expect(outcome(startedThrough(chats, "Back"))).resolves.toBe("ok");
   });
 });

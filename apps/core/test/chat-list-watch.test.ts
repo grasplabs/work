@@ -4,18 +4,20 @@ import type {
   ChatSummary,
 } from "@grasp-os/shared/chat";
 import { chatIdSchema } from "@grasp-os/shared/ids";
+import { RpcStub } from "capnweb";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { ChatListWatch } from "../src/chat-list-watch.ts";
-import { personalWorkspaceId } from "../src/chats-rpc.ts";
+import { ChatsRpc, personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { sessionRecheckMs } from "../src/session-check.ts";
 import { model, pausedReply, says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { callAuth, openRpc, signedInApi } from "./sign-in.ts";
+import { startedChat } from "./started-chats.ts";
 
 // A person's list of chats, pushed as it changes (`chats.watchList`), as
 // the sidebar and the chats window follow it. The ways it can fail come
@@ -65,6 +67,43 @@ const followList = async (chats: Person["api"]["chats"]) => {
   };
 };
 
+/**
+ * `someone`'s chats as their connection reaches them, its session read by
+ * `check` (the connection's own reads it from the session store): a
+ * follower of their list over it, and how to fail its next readings, as
+ * the store failing a moment (a network error, a deploy) fails them.
+ */
+const listOverFlakySession = async (someone: Person) => {
+  const identity = await someone.api.whoami();
+  let failing = 0;
+  const chats = new ChatsRpc(env, async () => {
+    if (failing > 0) {
+      failing -= 1;
+      throw new Error("D1_ERROR: Network connection lost.");
+    }
+    return await Promise.resolve(identity);
+  });
+  const titles: string[][] = [];
+  // The page's callback as core gets it, a stub, whose calls core never
+  // waits on.
+  // oxlint-disable-next-line typescript/no-misused-promises, typescript/strict-void-return -- see above
+  const onUpdate: (update: ChatListUpdate) => void = new RpcStub(
+    (update: ChatListUpdate) => {
+      const before = update.full ? [] : (titles.at(-1) ?? []);
+      titles.push([...before, ...update.chats.map(({ title }) => title)]);
+    }
+  );
+  await chats.watchList(onUpdate);
+  return {
+    /** The titles the follower has now. */
+    titles: () => titles.at(-1) ?? [],
+    /** Fails the session's next `times` readings. */
+    fail: (times: number) => {
+      failing = times;
+    },
+  };
+};
+
 /** Waits until `check` holds of what the follower has. */
 const until = async (check: () => void) => {
   await vi.waitFor(check, { timeout: 10_000 });
@@ -75,7 +114,7 @@ describe("a person's list of chats", () => {
     const ann = await person();
     const { reply, release } = pausedReply(says("Here it is."), 1);
     await fakeProvider(reply);
-    const invoices = await ann.api.chats.create("Invoices");
+    const invoices = await startedChat(ann, "Invoices");
     const follower = await followList(ann.api.chats);
     await until(() => {
       expect(follower.rows()).toStrictEqual([
@@ -84,7 +123,7 @@ describe("a person's list of chats", () => {
     });
     expect(follower.updates[0]?.full).toBeTruthy();
 
-    const travel = await ann.api.chats.create("Travel");
+    const travel = await startedChat(ann, "Travel");
     await until(() => {
       expect(follower.rows().map(({ title }) => title)).toStrictEqual([
         "Travel",
@@ -136,7 +175,7 @@ describe("a person's list of chats", () => {
       2
     );
     await fakeProvider(reply);
-    const chat = await ann.api.chats.create("Streaming");
+    const chat = await startedChat(ann, "Streaming");
     const follower = await followList(ann.api.chats);
     await until(() => {
       expect(follower.updates).toHaveLength(1);
@@ -164,7 +203,7 @@ describe("a person's list of chats", () => {
   it("shows a read on another device at once, and a chat asked in there", async () => {
     const ann = await person();
     await fakeProvider(says("Done."), says("Again."));
-    const chat = await ann.api.chats.create("Shared between devices");
+    const chat = await startedChat(ann, "Shared between devices");
     const follower = await followList(ann.api.chats);
     const phone = await deviceOf(ann);
     await phone.chats.send(chat.id, { text: "From the phone.", model });
@@ -183,7 +222,7 @@ describe("a person's list of chats", () => {
   it("starts whole again after a dropped connection, with what changed meanwhile, nothing missed or twice", async () => {
     const ann = await person();
     const laptop = await deviceOf(ann);
-    const first = await laptop.chats.create("First");
+    const first = await startedChat(ann, "First");
     const away = await followList(laptop.chats);
     await until(() => {
       expect(away.rows()).toHaveLength(1);
@@ -191,9 +230,9 @@ describe("a person's list of chats", () => {
     laptop.socket.close();
 
     // Three changes while the laptop is away.
-    await ann.api.chats.create("Second");
+    await startedChat(ann, "Second");
     await ann.api.chats.rename(first.id, "First, renamed");
-    await ann.api.chats.create("Third");
+    await startedChat(ann, "Third");
 
     const back = await deviceOf(ann);
     const resumed = await followList(back.chats);
@@ -214,8 +253,8 @@ describe("a person's list of chats", () => {
     await until(() => {
       expect(follower.updates).toHaveLength(1);
     });
-    await bob.api.chats.create("Bob's own");
-    const own = await ann.api.chats.create("Ann's own");
+    await startedChat(bob, "Bob's own");
+    const own = await startedChat(ann, "Ann's own");
     await until(() => {
       expect(follower.rows().map(({ title }) => title)).toStrictEqual([
         "Ann's own",
@@ -256,7 +295,7 @@ describe("a person's list of chats", () => {
   it("is taken up again when its person's object resets mid-watch, as a deploy resets it, the chat's watch too, with nothing missed", async () => {
     const ann = await person();
     await fakeProvider(says("Still here."));
-    const chat = await ann.api.chats.create("Before the reset");
+    const chat = await startedChat(ann, "Before the reset");
     const list = await followList(ann.api.chats);
     const messages: ChatMessage[] = [];
     await ann.api.chats.watch(chat.id, null, (update) => {
@@ -275,7 +314,7 @@ describe("a person's list of chats", () => {
     });
 
     // After the reset, the browser's connection still open.
-    await ann.api.chats.create("After the reset");
+    await startedChat(ann, "After the reset");
     await ann.api.chats.send(chat.id, { text: "Still there?", model });
     await vi.waitFor(
       () => {
@@ -289,6 +328,37 @@ describe("a person's list of chats", () => {
             .map(({ text }) => text)
             .filter((text) => text !== "")
         ).toStrictEqual(["Still there?", "Still here."]);
+      },
+      { timeout: 20_000 }
+    );
+  }, 30_000);
+
+  it("keeps coming when the session can't be read a moment, as a push goes out or as it is taken up again after a reset", async () => {
+    const ann = await person();
+    const follower = await listOverFlakySession(ann);
+    await until(() => {
+      expect(follower.titles()).toStrictEqual([]);
+    });
+    // The session store fails as a chat made on another device goes out.
+    follower.fail(1);
+    await startedChat(ann, "Made meanwhile");
+    await until(() => {
+      expect(follower.titles()).toContain("Made meanwhile");
+    });
+    // And as the watch is taken up again after the object reset.
+    follower.fail(1);
+    await runInDurableObject(
+      workspace(env, personalWorkspaceId(ann.userId)),
+      (_instance, state) => {
+        state.abort("Reset by the test");
+      }
+    ).catch(() => {
+      // Aborting fails the call that aborted: that is the reset.
+    });
+    await startedChat(ann, "Made after the reset");
+    await vi.waitFor(
+      () => {
+        expect(follower.titles()).toContain("Made after the reset");
       },
       { timeout: 20_000 }
     );

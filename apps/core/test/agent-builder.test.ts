@@ -17,6 +17,7 @@ import {
   signedInApi,
   staffPerson,
 } from "./sign-in.ts";
+import { startedChat, startedThrough } from "./started-chats.ts";
 
 // The agent builder over `/rpc`, as an admin's page reaches it. These
 // start from the ways it can fail: an agent that answers or acts before
@@ -266,7 +267,7 @@ describe("the agent builder", setUpTime, () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
     const gateway = await fakeProvider(says("Back."));
-    const chat = await member.api.chats.create("Paused");
+    const chat = await startedChat(member, "Paused");
     await admin.api.connections.setAgentPaused(chatAgentId, true);
     await expect(
       outcome(member.api.chats.send(chat.id, { text: "Hi.", model }))
@@ -452,7 +453,9 @@ describe("the agent builder", setUpTime, () => {
       personId: member.userId,
       opening: "Look.",
     });
-    const chat = await member.api.chats.create("With Claire", id);
+    const chat = await startedThrough(member.api.chats, "With Claire", {
+      agentId: id,
+    });
 
     const events = await auditedDuring(async () => {
       await admin.api.connections.deleteAgent(id);
@@ -490,7 +493,7 @@ describe("the agent builder", setUpTime, () => {
     await expect(
       Promise.all([
         outcome(admin.api.connections.makeAgent(said())),
-        outcome(member.api.chats.create("Again", id)),
+        outcome(startedThrough(member.api.chats, "Again", { agentId: id })),
         outcome(admin.api.connections.deleteAgent(id)),
         outcome(admin.api.connections.setAgentPaused(id, false)),
       ])
@@ -534,8 +537,8 @@ describe("the agent builder", setUpTime, () => {
     const { id } = await admin.api.connections.makeAgent(said({ model: own }));
     await admin.api.connections.setAgentReach(id, true, { who: "everyone" });
     const [withAgent, withFirst] = await Promise.all([
-      member.api.chats.create("With Claire", id),
-      member.api.chats.create("With the first"),
+      startedThrough(member.api.chats, "With Claire", { agentId: id }),
+      startedChat(member, "With the first"),
     ]);
 
     await member.api.chats.send(withAgent.id, { text: "Hi.", model });

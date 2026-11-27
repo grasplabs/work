@@ -1,5 +1,8 @@
 import type { Identity } from "@grasp-os/shared/rpc";
-import { AppShellCard } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
+import {
+  AppShellCard,
+  AppShellContent,
+} from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
 import {
   SidebarProvider,
   SidebarTrigger,
@@ -111,32 +114,6 @@ const styles = stylex.create({
   // (#2503's shell, frame/panels/panels.tsx), which is the card's end
   // margin when no panel stands there.
   card: { marginInlineEnd: 0 },
-  // Room under a page that fills the card while the dock stands over its
-  // foot, as #2503's shell keeps it (its `roomForDock`): the page's foot is
-  // as tall as the dock, its inset from the card's foot and the gap above
-  // it, in place of the page's usual room (never less). Such a page (an
-  // App's workspace, a workflow) keeps that usual room inside itself
-  // (`space8`, the shell's room below), so the frame adds only the rest.
-  roomForDock: (height: number) => ({
-    paddingBlockEnd: `max(0px, calc(${height}px + ${space["4"]} + ${space["6"]} - ${space["8"]}))`,
-  }),
-  // The page, under the banner, as AppShellContent lays it: it scrolls up
-  // and down only, what is wider than the card is cut at its edge. Laid
-  // out down the card, at least as tall as it, as the pages expect (Chat's
-  // start fills it). The product's own, not AppShellContent, for the room
-  // it keeps under a page that fills the card while the dock stands over
-  // its foot (`roomForDock`): AppShellContent takes layout alone (registry
-  // gap of 27 Nov 2026, "AppShellContent: room under the page").
-  page: {
-    display: "flex",
-    flexDirection: "column",
-    boxSizing: "border-box",
-    height: "100%",
-    minHeight: 0,
-    overflowX: "clip",
-    overflowY: "auto",
-    scrollbarWidth: "none",
-  },
   // Under the chat lying over it (full screen, or for want of room), the
   // card spans the room beside the sidebar, its margins in, edge to edge on
   // a phone: the ground the chat stands on (#2503's `cardCovered`).
@@ -288,17 +265,10 @@ export const AppFrame = ({
       }
       style={[panels !== undefined && styles.card, covered && styles.spans]}
     >
-      <PageWithPanel chatButtonRoom={chatBeside}>
-        <div
-          data-slot="app-shell-page"
-          ref={page}
-          {...stylex.props(
-            styles.page,
-            dockHeight !== null && styles.roomForDock(dockHeight)
-          )}
-        >
+      <PageWithPanel chatButtonRoom={chatBeside} dockHeight={dockHeight}>
+        <AppShellContent ref={page}>
           <InFrame value>{children}</InFrame>
-        </div>
+        </AppShellContent>
       </PageWithPanel>
     </AppShellCard>
   );

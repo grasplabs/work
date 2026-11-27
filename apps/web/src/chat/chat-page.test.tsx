@@ -754,6 +754,21 @@ describe("a chat's own page", () => {
     });
   });
 
+  it("gives the text the focus when the keys press the Stop beside Send, which goes as the answer stops", async () => {
+    await opened("chat-a", undefined, answeringWithQueued);
+    await settled();
+    await typed("Spain?");
+    const stop = buttonLabelled("Stop");
+    act(() => {
+      stop?.focus();
+      // As the keys press it: a click with no pointer count (`detail` 0).
+      stop?.click();
+    });
+    await settled();
+
+    expect(document.activeElement).toBe(box());
+  });
+
   it("draws a question sent while the answer is written once, as queued, before and after core queues it", async () => {
     const taken = Promise.withResolvers<boolean>();
     let update: ((next: ChatUpdate) => void) | undefined;

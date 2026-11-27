@@ -1,6 +1,6 @@
 "use client";
 
-// shadcn's chart, on theme tokens only. Upstream writes each series' colour
+// The stock chart, on theme tokens only. Upstream writes each series' colour
 // into a `<style>` element as `--color-<key>` and colours the tooltip and
 // legend markers with inline styles. Here a series' colour is one of the
 // theme's chart tokens: marks take it as `fill={chartColor("chart-1")}`, and
@@ -14,14 +14,13 @@ import type { TooltipValueType } from "recharts";
 const INITIAL_DIMENSION = { width: 320, height: 200 } as const;
 type TooltipNameType = number | string;
 
-/** The theme's chart colours, darkest first. */
+/** The theme's chart colours. */
 const chartColors = [
   "chart-1",
   "chart-2",
   "chart-3",
   "chart-4",
   "chart-5",
-  "chart-6",
 ] as const;
 
 export type ChartColor = (typeof chartColors)[number];
@@ -35,7 +34,6 @@ const markerColors = {
   "chart-3": "border-chart-3 bg-chart-3",
   "chart-4": "border-chart-4 bg-chart-4",
   "chart-5": "border-chart-5 bg-chart-5",
-  "chart-6": "border-chart-6 bg-chart-6",
 } as const satisfies Record<ChartColor, string>;
 
 /** The token a mark's colour names, when it is `chartColor(token)`. */
@@ -96,8 +94,6 @@ function ChartContainer({
 
   // Upstream hides the outline of the chart's surface, which takes focus
   // for keyboard use (recharts' accessibility layer); here it shows a ring.
-  // Recharts draws a chart once it has measured its room, a moment after the
-  // page: the chart fades in then, by its opacity alone.
   return (
     // oxlint-disable-next-line react/jsx-no-constructed-context-values -- compiled
     <ChartContext.Provider value={contextValue}>
@@ -105,7 +101,7 @@ function ChartContainer({
         data-slot="chart"
         data-chart={chartId}
         className={cn(
-          "[&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground [&_.recharts-cartesian-grid_line[stroke='#ccc']]:stroke-border/50 [&_.recharts-curve.recharts-tooltip-cursor]:stroke-border [&_.recharts-polar-grid_[stroke='#ccc']]:stroke-border [&_.recharts-radial-bar-background-sector]:fill-muted [&_.recharts-rectangle.recharts-tooltip-cursor]:fill-muted [&_.recharts-reference-line_[stroke='#ccc']]:stroke-border [&_.recharts-surface:focus-visible]:outline-ring flex aspect-video justify-center text-xs [&_.recharts-dot[stroke='#fff']]:stroke-transparent [&_.recharts-layer]:outline-hidden [&_.recharts-sector]:outline-hidden [&_.recharts-sector[stroke='#fff']]:stroke-transparent [&_.recharts-surface]:outline-hidden [&_.recharts-surface:focus-visible]:outline-2 [&_.recharts-surface:focus-visible]:outline-solid [&_.recharts-wrapper]:transition-opacity [&_.recharts-wrapper]:duration-200 motion-reduce:[&_.recharts-wrapper]:transition-none [&_.recharts-wrapper]:starting:opacity-0",
+          "[&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground [&_.recharts-cartesian-grid_line[stroke='#ccc']]:stroke-border/50 [&_.recharts-curve.recharts-tooltip-cursor]:stroke-border [&_.recharts-polar-grid_[stroke='#ccc']]:stroke-border [&_.recharts-radial-bar-background-sector]:fill-muted [&_.recharts-rectangle.recharts-tooltip-cursor]:fill-muted [&_.recharts-reference-line_[stroke='#ccc']]:stroke-border [&_.recharts-surface:focus-visible]:outline-ring flex aspect-video justify-center text-xs [&_.recharts-dot[stroke='#fff']]:stroke-transparent [&_.recharts-layer]:outline-hidden [&_.recharts-sector]:outline-hidden [&_.recharts-sector[stroke='#fff']]:stroke-transparent [&_.recharts-surface]:outline-hidden [&_.recharts-surface:focus-visible]:outline-2 [&_.recharts-surface:focus-visible]:outline-solid",
           className
         )}
         {...props}
@@ -309,7 +305,7 @@ function ChartTooltipContent({
     <div
       {...htmlPropsOf(props)}
       className={cn(
-        "border-border/50 bg-background shadow-lifted grid min-w-32 items-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs",
+        "border-border/50 bg-background grid min-w-32 items-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs shadow-xl",
         className
       )}
     >

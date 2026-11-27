@@ -43,8 +43,7 @@ function ScrollArea({
       >
         {children}
       </ScrollAreaPrimitive.Viewport>
-      {/* No scrollbar of its own: Grasp draws none anywhere. A page that
-          wants one adds a ScrollBar beside the content. */}
+      <ScrollBar />
       <ScrollAreaPrimitive.Corner />
     </ScrollAreaPrimitive.Root>
   );

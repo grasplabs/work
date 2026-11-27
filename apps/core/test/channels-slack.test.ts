@@ -54,6 +54,7 @@ import {
   writesNote,
 } from "./notes-app.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
+import { startedThrough } from "./started-chats.ts";
 import {
   memberAnsweredBy,
   messageFrom as teamsMessageFrom,
@@ -561,7 +562,7 @@ describe("a linked person's question in Slack", () => {
     );
     // A conversation in a chat app is never a chat in Grasp: each
     // person's list holds only what they started in Grasp itself.
-    await api.chats.create("Leave questions");
+    await startedThrough(api.chats, "Leave questions");
     expect({
       // Posted once, whole.
       slack: slackPosts.some(

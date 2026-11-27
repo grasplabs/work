@@ -488,7 +488,7 @@ describe("the design system's class checks", { timeout: 60_000 }, () => {
       checked.diagnostics.map((diagnostic) => summary(diagnostic))
     ).toStrictEqual([
       expect.stringContaining(
-        'src/routes/index.tsx:44:47 design/no-restyle error: "rounded-full" is not allowed on <Button>: <Button> owns its shape. Pick one of its variants instead: variant (default, outline, secondary, ghost, destructive, link, hint, ask, highlight); size (default, xs, sm, lg, xl, icon, icon-xs, icon-sm, icon-lg, inline).'
+        'src/routes/index.tsx:44:47 design/no-restyle error: "rounded-full" is not allowed on <Button>: <Button> owns its shape. Pick one of its variants instead: variant (default, outline, secondary, ghost, destructive, link); size (default, xs, sm, lg, icon, icon-xs, icon-sm, icon-lg).'
       ),
       expect.stringContaining(
         'src/routes/index.tsx:44:60 design/no-restyle error: "px-8" is not allowed on <Button>: <Button> owns its spacing.'
@@ -502,7 +502,7 @@ describe("the design system's class checks", { timeout: 60_000 }, () => {
         "src/components/kit-classes.tsx": `import { cn } from "@grasp-os/app-kit/lib/utils";
 
 export const KitClasses = ({ on }: { on: boolean }) => (
-  <p className={cn("flex animate-in fade-in ease-house type-display group", on && "itmes-center")}>
+  <p className={cn("flex animate-in fade-in no-scrollbar data-open:flex group", on && "itmes-center")}>
     Kit
   </p>
 );
@@ -526,9 +526,9 @@ export const Tone = ({ on }: { on: boolean }) => (
       })
     );
 
-    // The theme's \`ease-house\`, tw-animate-css's \`animate-in\` and
-    // \`fade-in\` and the kit's own \`type-display\` are classes the kit
-    // has, and \`group\` marks an element for its children's variants.
+    // tw-animate-css's \`animate-in\` and \`fade-in\`, and the stock
+    // stylesheet's \`no-scrollbar\` and \`data-open\` variant, are classes the
+    // kit has, and \`group\` marks an element for its children's variants.
     expect(
       checked.diagnostics.map(({ rule, message, fix }) => ({
         rule,

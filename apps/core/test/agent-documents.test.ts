@@ -17,6 +17,7 @@ import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
+import { startedThrough } from "./started-chats.ts";
 
 // An agent's documents: an admin gives an agent a file, core keeps its
 // text, and the agent is told it by name and reads it in the chats it
@@ -208,7 +209,9 @@ describe("an agent's documents", slow, () => {
     const code =
       "export default async (self, env) => (await env.chat.documents()).length;";
     const provider = await fakeProvider(codeStep(code), says("Done."));
-    const chat = await admin.api.chats.create("With Claire", claire.id);
+    const chat = await startedThrough(admin.api.chats, "With Claire", {
+      agentId: claire.id,
+    });
     await admin.api.chats.send(chat.id, { text: "What do you have?", model });
     await settled(admin, chat.id);
     const [counted] = await codeResults(objectOf(admin), chat.id);
@@ -287,10 +290,14 @@ describe("an agent's documents", slow, () => {
       says("I have no such document.")
     );
 
-    const hers = await ann.api.chats.create("With Claire", claire.id);
+    const hers = await startedThrough(ann.api.chats, "With Claire", {
+      agentId: claire.id,
+    });
     await ann.api.chats.send(hers.id, { text: "Who signs?", model });
     await settled(ann, hers.id);
-    const theirs = await ann.api.chats.create("With Other", other.id);
+    const theirs = await startedThrough(ann.api.chats, "With Other", {
+      agentId: other.id,
+    });
     await ann.api.chats.send(theirs.id, { text: "Who signs?", model });
     await settled(ann, theirs.id);
 

@@ -45,6 +45,7 @@ import { closeWhenTestEnds } from "./open-sockets.ts";
 import { fullScan } from "./query-plans.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { callAuth, openRpc, outcome, signedInApi } from "./sign-in.ts";
+import { startedChat, startedThrough } from "./started-chats.ts";
 import { connectDb } from "./test-env.ts";
 
 /** An ISO 8601 time, as a reply keeps when it was said. */
@@ -243,8 +244,8 @@ const usedOf = (usage: ChatReplyUsage | undefined) => {
 describe("chats", () => {
   it("are kept per person: made, listed newest first, renamed and deleted", async () => {
     const ann = await person();
-    const first = await ann.chats.create("Invoices");
-    const second = await ann.chats.create("  Travel  ");
+    const first = await startedChat(ann, "Invoices");
+    const second = await startedThrough(ann.chats, "  Travel  ");
     await ann.chats.rename(first.id, "Invoices of May");
 
     await expect(ann.chats.list()).resolves.toMatchObject([
@@ -253,10 +254,10 @@ describe("chats", () => {
     ]);
     await expect(
       Promise.all([
-        outcome(ann.chats.create(" ")),
+        outcome(startedThrough(ann.chats, " ")),
         outcome(ann.chats.rename(first.id, "x".repeat(201))),
       ])
-    ).resolves.toStrictEqual(["agent.invalid_title", "agent.invalid_title"]);
+    ).resolves.toStrictEqual(["agent.invalid_request", "agent.invalid_title"]);
 
     await ann.chats.remove(first.id);
     await expect(ann.chats.list()).resolves.toMatchObject([{ id: second.id }]);
@@ -268,8 +269,8 @@ describe("chats", () => {
   it("are archived by their person alone: out of the list, listed when asked, opened as ever, and back once unarchived, each recorded once", async () => {
     const ann = await person();
     const ben = await person();
-    const kept = await ann.chats.create("Kept");
-    const old = await ann.chats.create("Old trip");
+    const kept = await startedChat(ann, "Kept");
+    const old = await startedChat(ann, "Old trip");
 
     await ann.chats.archive(old.id);
     // Archiving it again changes nothing, and records nothing more.
@@ -353,9 +354,9 @@ describe("chats", () => {
         role: "user",
       });
     }
-    const filed = await ann.chats.create("Accruals");
-    const kept = await ann.chats.create("Lunch");
-    const cys = await cy.chats.create("Elsewhere");
+    const filed = await startedChat(ann, "Accruals");
+    const kept = await startedChat(ann, "Lunch");
+    const cys = await startedChat(cy, "Elsewhere");
 
     await ann.chats.setProject(filed.id, project);
     // Filing it again changes nothing, and records nothing more.
@@ -485,13 +486,13 @@ describe("chats", () => {
         role: "user",
       });
     }
-    const open = await dee.chats.create("Accruals");
-    const done = await dee.chats.create("Last year's close");
+    const open = await startedChat(dee, "Accruals");
+    const done = await startedChat(dee, "Last year's close");
     await dee.chats.setProject(open.id, first.id);
     await dee.chats.setProject(done.id, first.id);
     await dee.chats.archive(done.id);
     // Archived too, but in no project: never in a project's archived list.
-    const loose = await dee.chats.create("Old notes");
+    const loose = await startedChat(dee, "Old notes");
     await dee.chats.archive(loose.id);
     const inFirst = {
       listed: await dee.chats.list({ project: first.id }),
@@ -556,7 +557,7 @@ describe("chats", () => {
     const ann = await person();
     const { reply, release } = pausedReply(says("Here it is."), 3);
     await answering(ann, reply);
-    const chat = await ann.chats.create("Away");
+    const chat = await startedChat(ann, "Away");
     const follower = await follow(ann.chats, chat.id);
     const before = await ann.chats.list();
 
@@ -589,7 +590,7 @@ describe("chats", () => {
     const ann = await person();
     const ben = await person();
     await answering(ann, says("Here it is."), says("And here is more."));
-    const chat = await ann.chats.create("Away");
+    const chat = await startedChat(ann, "Away");
     const follower = await follow(ann.chats, chat.id);
     /** The last message the chat stored, the recall's steps too. */
     const lastId = () =>
@@ -661,7 +662,7 @@ describe("chats", () => {
   it("are read only up to the newest message the page shows, what came since still unread", async () => {
     const ann = await person();
     await answering(ann, says("First."), says("Second."));
-    const chat = await ann.chats.create("Behind");
+    const chat = await startedChat(ann, "Behind");
     const follower = await follow(ann.chats, chat.id);
     await ann.chats.send(chat.id, { text: "One?", model });
     await settled(follower);
@@ -701,7 +702,7 @@ describe("chats", () => {
   it("count as read when made before chats kept where their person read to, until they are next read", async () => {
     const ann = await person();
     await answering(ann, says("Here it is."));
-    const chat = await ann.chats.create("From before");
+    const chat = await startedChat(ann, "From before");
     const follower = await follow(ann.chats, chat.id);
     await ann.chats.send(chat.id, { text: "Find the contract.", model });
     await settled(follower);
@@ -725,8 +726,8 @@ describe("chats", () => {
 
   it("are listed by their latest message: a chat just asked in comes first, before its question shows", async () => {
     const ann = await person();
-    const older = await ann.chats.create("Invoices");
-    const newer = await ann.chats.create("Travel");
+    const older = await startedChat(ann, "Invoices");
+    const newer = await startedChat(ann, "Travel");
     // Before any message, each is as active as it is old.
     const made = await ann.chats.list();
     expect(new Map(made.map(({ id, lastAt }) => [id, lastAt]))).toStrictEqual(
@@ -799,10 +800,10 @@ describe("chats", () => {
     let chat = "";
     let other = "";
     let held: string[] = [];
-    const { id: benChat } = await ben.chats.create("Ben's");
+    const { id: benChat } = await startedChat(ben, "Ben's");
     const bens = await holdMail(ben, benChat);
-    ({ id: chat } = await ann.chats.create("Invoices for Ben"));
-    ({ id: other } = await ann.chats.create("Other"));
+    ({ id: chat } = await startedChat(ann, "Invoices for Ben"));
+    ({ id: other } = await startedChat(ann, "Other"));
     await ann.chats.rename(chat, "Invoices of May");
     held = [
       await holdMail(ann, chat),
@@ -895,7 +896,7 @@ describe("chats", () => {
   it("reject every write a deleted chat's agent holds, however many newer ones wait elsewhere", async () => {
     const ann = await person();
     const workspaceId = personalWorkspaceId(ann.userId);
-    const chat = await ann.chats.create("Old writes");
+    const chat = await startedChat(ann, "Old writes");
     const elsewhere = crypto.randomUUID();
     /** A held write of Ann's from chat `chatId`, held `at`, as connect keeps one. */
     const held = (chatId: string, at: number) => {
@@ -963,7 +964,7 @@ describe("chats", () => {
       ),
       reply
     );
-    const chat = await ann.chats.create("Held");
+    const chat = await startedChat(ann, "Held");
     const follower = await follow(ann.chats, chat.id);
     await ann.chats.send(chat.id, { text: "Send Ben the invoice.", model });
 
@@ -1020,7 +1021,7 @@ describe("chats", () => {
       ),
       says("They wait for you.")
     );
-    const chat = await ann.chats.create("Outcomes");
+    const chat = await startedChat(ann, "Outcomes");
     const follower = await follow(ann.chats, chat.id);
     await ann.chats.send(chat.id, { text: "Send Ben the invoices.", model });
     await settled(follower);
@@ -1149,7 +1150,7 @@ describe("chats", () => {
       ),
       says("It waits for you.")
     );
-    const chat = await ann.chats.create("Raced");
+    const chat = await startedChat(ann, "Raced");
     const follower = await follow(ann.chats, chat.id);
     await ann.chats.send(chat.id, { text: "Send Ben the mail.", model });
     await settled(follower);
@@ -1226,7 +1227,7 @@ describe("chats", () => {
     const ann = await person();
     const ben = await person();
     const gateway = await answering(ann, says("Hi, Ann."));
-    const chat = await ann.chats.create("Mine");
+    const chat = await startedChat(ann, "Mine");
 
     await expect(ben.chats.list()).resolves.toStrictEqual([]);
     await expect(
@@ -1268,7 +1269,7 @@ describe("chats", () => {
     async (_case, answer) => {
       const ann = await person();
       await answering(ann, answer);
-      const chat = await ann.chats.create("Usage");
+      const chat = await startedChat(ann, "Usage");
       const follower = await follow(ann.chats, chat.id);
 
       await ann.chats.send(chat.id, { text: "Hi.", model });
@@ -1305,7 +1306,7 @@ describe("chats", () => {
   it("show no usage for a reply that used nothing: the provider refused it", async () => {
     const ann = await person();
     await answering(ann, { status: 400, errorType: "invalid_request_error" });
-    const chat = await ann.chats.create("Refused");
+    const chat = await startedChat(ann, "Refused");
     const follower = await follow(ann.chats, chat.id);
 
     await ann.chats.send(chat.id, { text: "Hi.", model });
@@ -1344,7 +1345,7 @@ describe("chats", () => {
       }
     );
     const failedReply = async (question: string) => {
-      const chat = await ann.chats.create(question);
+      const chat = await startedChat(ann, question);
       const follower = await follow(ann.chats, chat.id);
       await ann.chats.send(chat.id, { text: question, model });
       await settled(follower);
@@ -1384,7 +1385,7 @@ describe("chats", () => {
     const ann = await person();
     const { reply, release } = pausedReply(says("Two plus two is four."), 9);
     await answering(ann, codeStep("export default async () => 2 + 2;"), reply);
-    const chat = await ann.chats.create("Sums");
+    const chat = await startedChat(ann, "Sums");
     const follower = await follow(ann.chats, chat.id);
 
     await ann.chats.send(chat.id, { text: "What is 2 + 2?", model });
@@ -1454,7 +1455,7 @@ describe("chats", () => {
       14
     );
     await answering(ann, reply);
-    const chat = await ann.chats.create("Resume");
+    const chat = await startedChat(ann, "Resume");
     const before = await follow(ann.chats, chat.id);
     await ann.chats.send(chat.id, { text: "Tell me.", model });
     await vi.waitFor(
@@ -1504,7 +1505,7 @@ describe("chats", () => {
     const ann = await person();
     const { reply, release } = pausedReply(says("Still here."), 2);
     await answering(ann, says("Kept."), reply);
-    const chat = await ann.chats.create("Durable");
+    const chat = await startedChat(ann, "Durable");
     const first = await follow(ann.chats, chat.id);
     await ann.chats.send(chat.id, { text: "Keep this.", model });
     await settled(first);
@@ -1567,7 +1568,7 @@ describe("chats", () => {
   it("take a question sent again with its key once, and one refused before it started again", async () => {
     const ann = await person();
     await answering(ann, says("Noted."), says("Again."), says("Here."));
-    const chat = await ann.chats.create("Repeated");
+    const chat = await startedChat(ann, "Repeated");
     const follower = await follow(ann.chats, chat.id);
     const key = crypto.randomUUID();
     const refusedKey = crypto.randomUUID();
@@ -1614,7 +1615,7 @@ describe("chats", () => {
       expect(follower.messages().at(-1)?.text).toBe("Again.");
     });
     // Another chat's key says nothing of a question here.
-    const other = await ann.chats.create("Elsewhere");
+    const other = await startedChat(ann, "Elsewhere");
     await expect(outcome(ann.chats.send(other.id, question))).resolves.toBe(
       "agent.invalid_question"
     );
@@ -1639,52 +1640,11 @@ describe("chats", () => {
     ).resolves.toBe("agent.invalid_question");
   });
 
-  it("are made once for a key, however often the page asks", async () => {
-    const ann = await person();
-    const ben = await person();
-    const key = crypto.randomUUID();
-    const made = await ann.chats.create("Travel", undefined, undefined, key);
-    // Nor is the agent a repeat names looked up again: gone since, it
-    // would refuse only a new chat.
-    await expect(
-      ann.chats.create("Travel", crypto.randomUUID(), undefined, key)
-    ).resolves.toStrictEqual(made);
-    const listed = await ann.chats.list();
-    // Archived since, a repeat answers it as archived, as its summary does.
-    await ann.chats.archive(made.id);
-    const repeated = await ann.chats.create(
-      "Travel",
-      undefined,
-      undefined,
-      key
-    );
-    const summary = await ann.chats.summary(made.id);
-    expect({
-      listed: listed.length,
-      repeated,
-      archived: summary.archived,
-    }).toStrictEqual({
-      listed: 1,
-      repeated: { ...made, archived: true },
-      archived: true,
-    });
-    // Someone else's same key is their own chat.
-    const other = await ben.chats.create("Travel", undefined, undefined, key);
-    expect(other.id).not.toBe(made.id);
-    // Deleted, its key is free again.
-    await ann.chats.remove(made.id);
-    const next = await ann.chats.create("Travel", undefined, undefined, key);
-    expect(next.id).not.toBe(made.id);
-    await expect(
-      outcome(ann.chats.create("Travel", undefined, undefined, "again"))
-    ).resolves.toBe("agent.invalid_request");
-  });
-
   it("keep what their person thought of an answer, for that person alone", async () => {
     const ann = await person();
     const ben = await person();
     await answering(ann, says("Noted."));
-    const chat = await ann.chats.create("Rated");
+    const chat = await startedChat(ann, "Rated");
     const follower = await follow(ann.chats, chat.id);
     await ann.chats.send(chat.id, { text: "Any news?", model });
     await settled(follower);
@@ -1718,7 +1678,7 @@ describe("chats", () => {
     await ann.chats.rate(chat.id, answer.id, null);
 
     // Only an answer, only of that chat, only by its person.
-    const elsewhere = await ann.chats.create("Elsewhere");
+    const elsewhere = await startedChat(ann, "Elsewhere");
     await expect(
       Promise.all([
         outcome(ann.chats.rate(chat.id, question.id, { value: "up" })),
@@ -1757,7 +1717,7 @@ describe("chats", () => {
   it("take a question while their agent works, to queue (chat-queued.test.ts), and aren't deleted under it", async () => {
     const ann = await person();
     await answering(ann, { hang: true });
-    const chat = await ann.chats.create("Busy");
+    const chat = await startedChat(ann, "Busy");
     const follower = await follow(ann.chats, chat.id);
     await ann.chats.send(chat.id, { text: "First.", model });
 
@@ -1778,7 +1738,7 @@ describe("chats", () => {
   it("refuse a question that can't start before taking it", async () => {
     const ann = await person();
     const gateway = await answering(ann, says("Never."));
-    const chat = await ann.chats.create("Refused");
+    const chat = await startedChat(ann, "Refused");
 
     await expect(
       Promise.all([
@@ -1817,7 +1777,7 @@ describe("chats", () => {
   it("take no turn for an agent an admin paused, and take turns again once it is back on", async () => {
     const ann = await person();
     const gateway = await answering(ann, says("Back."));
-    const chat = await ann.chats.create("Paused");
+    const chat = await startedChat(ann, "Paused");
     await keepAgent({ name: "Stephen", state: "paused" });
     try {
       await expect(
@@ -1844,7 +1804,7 @@ describe("chats", () => {
       says("Hello."),
       says("Hello.")
     );
-    const shipped = await ann.chats.create("As shipped");
+    const shipped = await startedChat(ann, "As shipped");
     const first = await follow(ann.chats, shipped.id);
     await ann.chats.send(shipped.id, { text: "Hi.", model });
     await settled(first);
@@ -1854,7 +1814,7 @@ describe("chats", () => {
     const told = { scope: "agent", agentId: chatAgentId } as const;
     /** What the model was asked in a new chat's first turn. */
     const askedInNewChat = async (index: number): Promise<string> => {
-      const chat = await ann.chats.create("As changed");
+      const chat = await startedChat(ann, "As changed");
       const follower = await follow(ann.chats, chat.id);
       await ann.chats.send(chat.id, { text: "Hi.", model });
       await settled(follower);
@@ -1900,7 +1860,7 @@ describe("chats", () => {
         pause: { until: thinking.promise },
       },
     });
-    const chat = await ann.chats.create("Sums");
+    const chat = await startedChat(ann, "Sums");
     const follower = await follow(ann.chats, chat.id);
 
     await ann.chats.send(chat.id, {
@@ -1949,7 +1909,7 @@ describe("chats", () => {
   it("show no thinking for an answer the model wrote without it", async () => {
     const ann = await person();
     await answering(ann, says("Four."));
-    const chat = await ann.chats.create("Quick");
+    const chat = await startedChat(ann, "Quick");
     const follower = await follow(ann.chats, chat.id);
     await ann.chats.send(chat.id, { text: "What is 2 + 2?", model });
     await settled(follower);
@@ -1973,7 +1933,7 @@ describe("chats", () => {
       await answering(ann, reply);
       const restore = await setObjectEnv(objectOf(ann), vars);
       try {
-        const chat = await ann.chats.create("Failed");
+        const chat = await startedChat(ann, "Failed");
         const follower = await follow(ann.chats, chat.id);
         await ann.chats.send(chat.id, { text: "Look it up.", model });
         await settled(follower);
@@ -1999,7 +1959,7 @@ describe("chats", () => {
       },
       says("Here it is.")
     );
-    const chat = await ann.chats.create("Busy");
+    const chat = await startedChat(ann, "Busy");
     const follower = await follow(ann.chats, chat.id);
 
     await ann.chats.send(chat.id, { text: "Anything?", model });
@@ -2019,7 +1979,7 @@ describe("chats", () => {
     const ann = await person();
     const { reply, release } = pausedReply(says("Done in a while."), 4);
     await answering(ann, reply);
-    const chat = await ann.chats.create("Kept up");
+    const chat = await startedChat(ann, "Kept up");
     const follower = await follow(ann.chats, chat.id);
     await ann.chats.send(chat.id, { text: "Take your time.", model });
     await vi.waitFor(
@@ -2068,10 +2028,10 @@ describe("chats", () => {
   it("are each person's own object's: one person's watches and restarts leave another's chats be", async () => {
     const ann = await person();
     const ben = await person();
-    const annChat = await ann.chats.create("Ann's");
+    const annChat = await startedChat(ann, "Ann's");
     const { reply, release } = pausedReply(says("Still answering Ben."), 5);
     await answering(ben, reply);
-    const benChat = await ben.chats.create("Ben's");
+    const benChat = await startedChat(ben, "Ben's");
     const benSees = await follow(ben.chats, benChat.id);
     await ben.chats.send(benChat.id, { text: "Go on.", model });
     await vi.waitFor(
@@ -2133,18 +2093,18 @@ describe("chats", () => {
         )
       );
     }
-    await expect(outcome(ann.chats.create("One more"))).resolves.toBe(
+    await expect(outcome(startedChat(ann, "One more"))).resolves.toBe(
       "agent.too_many_chats"
     );
     // Another person makes theirs as ever.
     const ben = await person();
-    await expect(outcome(ben.chats.create("Mine"))).resolves.toBe("ok");
+    await expect(outcome(startedChat(ben, "Mine"))).resolves.toBe("ok");
   });
 
   it("aren't deleted while a question is being taken, and take none while being deleted", async () => {
     const ann = await person();
     await answering(ann, says("Hi."));
-    const chat = await ann.chats.create("Racing");
+    const chat = await startedChat(ann, "Racing");
     const by = { type: "person" as const, userId: ann.userId };
     const annAsConnect = await personOf(env, await ann.api.whoami());
     // Deleted the moment a question is taken, before it awaits anything.
@@ -2227,7 +2187,7 @@ describe("chats", () => {
       );
     let chat = { id: "" };
     try {
-      chat = await ann.chats.create("While it's out");
+      chat = await startedChat(ann, "While it's out");
       await ann.chats.rename(chat.id, "Still out");
       await ann.chats.remove(chat.id);
       // The changes are made; their events wait in the object.
@@ -2260,7 +2220,7 @@ describe("chats", () => {
 
   it("free a watch's slot when the page's callback fails", async () => {
     const ann = await person();
-    const chat = await ann.chats.create("Failing page");
+    const chat = await startedChat(ann, "Failing page");
     let failed = 0;
     /** Ten watches whose page fails every push, then a watch that works. */
     const failingRound = async (): Promise<void> => {
@@ -2298,7 +2258,7 @@ describe("chats", () => {
     const ann = await person();
     const { reply, release } = pausedReply(says("Too late for you."), 3);
     await answering(ann, reply);
-    const chat = await ann.chats.create("Signed out");
+    const chat = await startedChat(ann, "Signed out");
     const follower = await follow(ann.chats, chat.id);
     await ann.chats.send(chat.id, { text: "Tell me.", model });
     await vi.waitFor(
@@ -2337,7 +2297,7 @@ describe("chats", () => {
 
   it("are followed by at most 10 watches per connection", async () => {
     const ann = await person();
-    const chat = await ann.chats.create("Watched");
+    const chat = await startedChat(ann, "Watched");
     const watches = await Promise.all(
       Array.from({ length: 10 }, async () => await follow(ann.chats, chat.id))
     );
@@ -2351,7 +2311,7 @@ describe("chats", () => {
 
   it("free their slots in their person's object once the page that followed them closes", async () => {
     const ann = await person();
-    const chat = await ann.chats.create("Reloaded");
+    const chat = await startedChat(ann, "Reloaded");
     // Pages that each followed the chat and closed without letting go, as
     // many watches as the object keeps at once: a person who reloaded
     // over and over, or opened and shut tabs.

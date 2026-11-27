@@ -18,6 +18,7 @@ import { mockIdp } from "./idp.ts";
 import { fakeProvider, fakeProviderFor } from "./model-provider.ts";
 import type { FakeProvider, ProviderReply } from "./model-provider.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
+import { startedChat } from "./started-chats.ts";
 
 // A new chat's title: named after the start of its first question (its
 // seed), then, as its first turn begins, from that question by the
@@ -46,16 +47,22 @@ const until = async (check: () => unknown, timeout = 10_000) => {
  */
 const followList = async ({ api }: Person) => {
   const rows = new Map<string, ChatSummary>();
+  /** The title each chat was first listed with. */
+  const first = new Map<string, string>();
   await api.chats.watchList((update) => {
     if (update.full) {
       rows.clear();
     }
     for (const row of update.chats) {
       rows.set(row.id, row);
+      if (!first.has(row.id)) {
+        first.set(row.id, row.title);
+      }
     }
   });
   return {
     title: (chat: Pick<ChatSummary, "id">) => rows.get(chat.id)?.title,
+    firstTitle: (chat: Pick<ChatSummary, "id">) => first.get(chat.id),
     /** Whether its answer came: the turn ended, with news to read. */
     answered: (chat: Pick<ChatSummary, "id">) =>
       rows.get(chat.id)?.running === false &&
@@ -65,8 +72,14 @@ const followList = async ({ api }: Person) => {
 
 /** A new chat of `someone`'s, asked `question`, as the page asks one. */
 const askNew = async ({ api }: Person, question: string, asked = model) => {
-  const chat = await api.chats.create(seedTitleOf(question));
-  await api.chats.send(chat.id, { text: question, model: asked });
+  const chat = { id: crypto.randomUUID() };
+  const key = crypto.randomUUID();
+  await api.chats.send(chat.id, {
+    text: question,
+    model: asked,
+    key,
+    start: { key, title: seedTitleOf(question) },
+  });
   return chat;
 };
 
@@ -110,7 +123,9 @@ describe("a new chat's title", () => {
 
     const chat = await askNew(ann, question);
 
-    expect(chat.title).toBe(seedTitleOf(question));
+    await until(() => {
+      expect(list.firstTitle(chat)).toBe(seedTitleOf(question));
+    });
     await until(() => {
       expect(list.title(chat)).toBe("Quarterly travel budget");
     });
@@ -285,7 +300,7 @@ describe("a new chat's title", () => {
   it("is the only way the small model goes when the admins didn't choose it: a turn that names it is refused", async () => {
     const ann = await person();
     const provider = await fakeProvider(says("Here it is."));
-    const chat = await ann.api.chats.create("Questions");
+    const chat = await startedChat(ann, "Questions");
 
     const refused = await outcome(
       ann.api.chats.send(chat.id, {
@@ -376,7 +391,7 @@ describe("a new chat's title", () => {
       });
     try {
       const question = "What changed in the supplier contract?";
-      const chat = await ann.api.chats.create(seedTitleOf(question));
+      const chat = await startedChat(ann, seedTitleOf(question));
       const refused = await outcome(
         ann.api.chats.send(chat.id, {
           text: question,

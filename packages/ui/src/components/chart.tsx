@@ -19,6 +19,7 @@
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
+import { renderElement } from "@ui-sdk/react/primitive";
 import {
   Fragment,
   createContext,
@@ -33,6 +34,7 @@ import type {
   Dispatch,
   KeyboardEvent,
   PointerEvent,
+  ReactElement,
   ReactNode,
   SetStateAction,
 } from "react";
@@ -86,6 +88,7 @@ import {
   DITHER_GEOMETRY,
   DITHER_LEVELS,
   ownValue,
+  safeHref,
 } from "../lib/utils";
 import type { DitherTexture, LayoutStyle } from "../lib/utils";
 import { motionVars } from "../lib/vars.stylex";
@@ -126,6 +129,7 @@ import type {
   SparkPoint,
   SparkShape,
 } from "./chart-math";
+import { Link } from "./link";
 
 export type { ChartSankeyLink, ChartSankeyNode } from "./chart-math";
 
@@ -2408,7 +2412,8 @@ const useWidth = (): [number, (element: Element | null) => () => void] => {
 // bar starts, above it, and wraps by the word on a narrow screen, never cut; each value stands at the
 // row's end beside its bar. No axis: the words carry the numbers. A second series is drawn muted
 // under the first (last year under this year), named on the first row. It is a list: a screen
-// reader reads each name and value.
+// reader reads each name and value. With `rowLink` a row's name is a link to the thing it is, each
+// a stop for Tab in the rows' order.
 
 /** Every prop a ChartBarList takes. */
 export interface ChartBarListProps {
@@ -2435,6 +2440,18 @@ export interface ChartBarListProps {
   sortOrder?: "descending" | "none";
   /** Writes a value as people read it ("€12.4k", "−3%"). */
   valueFormatter?: (value: number) => string;
+  /**
+   * Where a row's name leads, as a link to the thing the row is: its `href` (an address, or a path
+   * on this site), or a router's link as `render` (`render: <Link to="/teams/$id" params={…} />`),
+   * which takes the name as its words. `href` is checked (`safeHref`, paths on this site allowed):
+   * a row it gives nothing, or an address that is not safe, is its name alone. A `render` element
+   * is the caller's own and keeps its own address, unchecked.
+   */
+  rowLink?: (
+    row: Readonly<Row>
+  ) =>
+    | { href?: string; render?: ReactElement<Record<string, unknown>> }
+    | undefined;
   /** Layout only: its width and where it sits. */
   style?: LayoutStyle;
 }
@@ -2463,6 +2480,9 @@ const listStyles = stylex.create({
     margin: 0,
     padding: 0,
     listStyle: "none",
+    // The rows stand one under another, so a linked name has no control beside it in a row: its
+    // finger's target takes its whole width either side, though the row before holds a link too.
+    "--tap-room-inline": size.tapTarget,
   },
   row: {
     display: "grid",
@@ -2617,6 +2637,26 @@ const Track = ({
   );
 };
 
+/** A row's name: a link where `rowLink` leads it somewhere safe, else its words. */
+const nameOf = (
+  row: Row,
+  nameKey: string,
+  rowLink: ChartBarListProps["rowLink"]
+): ReactNode => {
+  const name = row[nameKey];
+  const to = rowLink?.(row);
+  const href = safeHref(to?.href, { relative: true }) ?? undefined;
+  if (to?.render === undefined && href === undefined) {
+    return name;
+  }
+  // A link on its own line, Link's `plain`: it also takes a finger's whole target.
+  return (
+    <Link asChild variant="plain">
+      {renderElement("a", { href, children: name }, to?.render)}
+    </Link>
+  );
+};
+
 interface BarRowProps {
   chart: string;
   row: Row;
@@ -2628,6 +2668,7 @@ interface BarRowProps {
   width: number;
   texture: DitherTexture | null;
   valueFormatter: (value: number) => string;
+  rowLink: ChartBarListProps["rowLink"];
   watch: ((element: Element | null) => () => void) | undefined;
 }
 
@@ -2642,16 +2683,18 @@ const BarRow = ({
   width,
   texture,
   valueFormatter,
+  rowLink,
   watch,
 }: BarRowProps) => {
   const [first = ""] = keys;
   const track = { chart, extent, width, texture };
+  const name = nameOf(row, nameKey, rowLink);
   // One series: the name and the value on one line, the bar under them across the whole row.
   if (keys.length < 2) {
     return (
       <li {...stylex.props(listStyles.row, listStyles.single)}>
         <span {...stylex.props(listStyles.name, listStyles.nameBeside)}>
-          {row[nameKey]}
+          {name}
         </span>
         <span {...stylex.props(listStyles.value)}>
           {valueFormatter(valueOf(row, first))}
@@ -2672,7 +2715,7 @@ const BarRow = ({
   // where the eye starts; a screen reader hears them on every row.
   return (
     <li {...stylex.props(listStyles.row)}>
-      <span {...stylex.props(listStyles.name)}>{row[nameKey]}</span>
+      <span {...stylex.props(listStyles.name)}>{name}</span>
       {keys.map((key, place) => (
         <Fragment key={key}>
           {/* On a narrow chart the first row names each bar above it, so the names never squeeze the bars. */}
@@ -2722,6 +2765,7 @@ export const ChartBarList = ({
   pattern = "none",
   sortOrder = "descending",
   valueFormatter = plainNumber,
+  rowLink,
   style,
 }: ChartBarListProps) => {
   const chart = useChartId();
@@ -2762,6 +2806,7 @@ export const ChartBarList = ({
             width={width}
             texture={texture}
             valueFormatter={valueFormatter}
+            rowLink={rowLink}
             watch={watch}
           />
         ))}

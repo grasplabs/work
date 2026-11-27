@@ -599,6 +599,33 @@ describe("renaming a recent chat from its row", () => {
     });
   });
 
+  it("draws an unread chat's title in the bold weight while its dot shows, and goes back to the regular weight once it is read or works again", async () => {
+    const { push } = await shownWith({
+      chats: [
+        { ...chatNamed("chat-1", "Month-end"), unread: true },
+        chatNamed("chat-2", "Travel costs"),
+      ],
+    });
+    // The row's words in the bold weight (the sidebar row's `unread`).
+    const bold = (chatId: string) =>
+      linkIn(itemOf(chatId)).dataset.unread === "true";
+    await vi.waitFor(() => {
+      expect({ unread: bold("chat-1"), read: bold("chat-2") }).toStrictEqual({
+        unread: true,
+        read: false,
+      });
+    });
+
+    // Asked in again: the Working mark takes the dot's place, and the title
+    // its regular weight.
+    await push({ ...chatNamed("chat-1", "Month-end", true), unread: true });
+    expect(bold("chat-1")).toBeFalsy();
+
+    // Read: no dot, nor the bold weight.
+    await push(chatNamed("chat-1", "Month-end"));
+    expect(bold("chat-1")).toBeFalsy();
+  });
+
   it("shows no dot on the chat open beside the page, and shows it again once that chat is closed to its bar", async () => {
     const chats = {
       watchList: listOf([{ ...chatNamed("chat-1", "Month-end"), unread: true }])

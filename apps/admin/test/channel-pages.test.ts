@@ -118,8 +118,9 @@ describe("the release channels on the Platform page", () => {
     const text = textOf(html);
 
     expect({
-      stable: text.includes("1 of 2 up to date"),
-      edge: text.includes("0 of 1 up to date"),
+      // Each channel's meter, its reading said in words.
+      stable: html.includes('aria-valuetext="1 of 2 up to date"'),
+      edge: html.includes('aria-valuetext="0 of 1 up to date"'),
       // No company follows Beta: no count, a line that says so.
       beta: text.includes("No company follows it."),
       // Each company of a channel, where it stands.

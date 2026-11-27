@@ -11,14 +11,7 @@ import {
   FieldLegend,
   FieldSet,
 } from "@grasp-os/app-kit/components/field";
-import { Inline } from "@grasp-os/app-kit/components/inline";
 import { Input } from "@grasp-os/app-kit/components/input";
-import {
-  PageHeader,
-  PageHeaderContent,
-  PageHeaderDescription,
-  PageHeaderTitle,
-} from "@grasp-os/app-kit/components/page-header";
 import {
   Select,
   SelectContent,
@@ -26,7 +19,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@grasp-os/app-kit/components/select";
-import { Stack } from "@grasp-os/app-kit/components/stack";
 import { Switch } from "@grasp-os/app-kit/components/switch";
 import { Textarea } from "@grasp-os/app-kit/components/textarea";
 
@@ -37,15 +29,13 @@ const terms = [
 ];
 
 export const DetailFormExample = () => (
-  <Stack gap="lg">
-    <PageHeader>
-      <PageHeaderContent>
-        <PageHeaderTitle>Acme Corp</PageHeaderTitle>
-        <PageHeaderDescription>
-          Customer details and billing.
-        </PageHeaderDescription>
-      </PageHeaderContent>
-    </PageHeader>
+  <div className="flex flex-col gap-6">
+    <header className="flex flex-col gap-1">
+      <h2 className="text-2xl font-semibold tracking-tight">Acme Corp</h2>
+      <p className="text-muted-foreground text-sm">
+        Customer details and billing.
+      </p>
+    </header>
     <form>
       <FieldGroup>
         <FieldSet>
@@ -102,13 +92,13 @@ export const DetailFormExample = () => (
             </FieldDescription>
           </Field>
         </FieldSet>
-        <Inline justify="end">
+        <div className="flex flex-wrap justify-end gap-2">
           <Button variant="outline" type="button">
             Cancel
           </Button>
           <Button type="submit">Save</Button>
-        </Inline>
+        </div>
       </FieldGroup>
     </form>
-  </Stack>
+  </div>
 );

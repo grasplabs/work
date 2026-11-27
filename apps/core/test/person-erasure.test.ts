@@ -56,6 +56,7 @@ import {
   uniqueLetters,
 } from "./sign-in.ts";
 import { sayForAdmin, stillKept } from "./spoken.ts";
+import { startedChat } from "./started-chats.ts";
 import { connectDb } from "./test-env.ts";
 import { publishDefinition } from "./workflow-publishing.ts";
 
@@ -3464,7 +3465,7 @@ describe("erasing a person", () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "builder");
     const other = await signedInApi(idp, "user");
-    const theirs = await person.api.chats.create("Theirs");
+    const theirs = await startedChat(person, "Theirs");
     // A picture they pasted there, kept whole in their workspace.
     const picture = await person.api.chats.attachFile(theirs.id, {
       name: "Image 1",
@@ -3480,7 +3481,7 @@ describe("erasing a person", () => {
         0x3b,
       ]),
     });
-    const kept = await other.api.chats.create("Someone else's");
+    const kept = await startedChat(other, "Someone else's");
     // Who was in a chat on a chat platform, as each chat's agent reads it:
     // one of their own, and someone else's they were in.
     const audience = env.DB.prepare(
@@ -3556,7 +3557,7 @@ describe("erasing a person", () => {
     await runInDurableObject(stub, (instance) => {
       Object.assign(envOf(instance), { AUDIT_LOG: failing });
     });
-    const chat = await person.api.chats.create("Made while the log was out");
+    const chat = await startedChat(person, "Made while the log was out");
     // A turn's capture, still to go to the Brain.
     await runInDurableObject(stub, (_instance, state) => {
       state.storage.sql.exec(

@@ -709,6 +709,8 @@ const styles = stylex.create({
     },
   },
   quiet: { fontWeight: font.weightNormal },
+  // Something there not seen yet: its words in the semibold weight, over its variant's.
+  unread: { fontWeight: font.weightSemibold },
   // A button that is only its icon (a search in the head, the trigger): round, the icon button's
   // size, a finger's on a touch screen.
   icon: {
@@ -1074,10 +1076,6 @@ const providers = new Set<HTMLElement>();
 /** Whether this provider answers the keys: the one holding focus, else the first on the page. */
 const answers = (element: HTMLElement | null) => {
   const active = document.activeElement;
-  if (active instanceof HTMLElement && active.isContentEditable) {
-    // In rich text the same keys make text bold.
-    return false;
-  }
   const all = [
     ...document.querySelectorAll<HTMLElement>('[data-slot="sidebar-wrapper"]'),
   ].filter((each) => providers.has(each));
@@ -1180,7 +1178,9 @@ export interface SidebarProviderProps {
   storageKey?: string;
   /**
    * The keys that fold and open it from anywhere on the page: `mod` is Cmd on a Mac and Ctrl
-   * elsewhere. `false` turns them off. Not in rich text, where the same keys make text bold.
+   * elsewhere. `false` turns them off. In rich text too, unless the editor handles the keys itself
+   * (it binds them for bold and marks them handled, `preventDefault`), as every shortcut of UI
+   * SDK's is passed over once handled.
    * @default "mod+b"
    */
   keyboardShortcut?: string | false;
@@ -2078,6 +2078,14 @@ export interface SidebarMenuButtonProps extends SlotPartProps, Own<"button"> {
    * @default "default"
    */
   variant?: "default" | "quiet" | "outline";
+  /**
+   * Something there the person has not seen yet (an unread chat): its words in the semibold
+   * weight, over its variant's, as a mail list draws unread mail. Marked `data-unread`. The
+   * weight is only seen, never heard: say "Unread" in words in the row too, as AppShellNav's
+   * unread dot does; the button adds no words of its own.
+   * @default false
+   */
+  unread?: boolean;
 }
 
 /** A place: a link (with `asChild`) or a button, with its icon and its words. */
@@ -2088,6 +2096,7 @@ export const SidebarMenuButton = ({
   tooltip,
   size: sized = "default",
   variant = "default",
+  unread = false,
   style,
   ...rest
 }: SidebarMenuButtonProps) => {
@@ -2096,6 +2105,7 @@ export const SidebarMenuButton = ({
     "data-sidebar": "menu-button",
     "data-size": sized,
     "data-active": isActive ? "true" : undefined,
+    "data-unread": unread ? "true" : undefined,
     "aria-current": isActive ? "page" : undefined,
     ...stylex.props(
       styles.button,
@@ -2104,6 +2114,7 @@ export const SidebarMenuButton = ({
       sized === "icon" && styles.icon,
       variant === "outline" && styles.outline,
       variant === "quiet" && styles.quiet,
+      unread && styles.unread,
       isActive && styles.active,
       focusRingInset,
       style
