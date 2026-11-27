@@ -198,8 +198,15 @@ export const ChatConversation = ({
         agents={offered?.agents}
         chatId={chatId}
         compact={compact}
+        // As soon as the chat's view is there: kept from before, its line
+        // comes as core says where they read to; else the watch's first
+        // update says it at once (unread.ts). Or a question sent from here
+        // is on its way: drawn at once.
         loaded={
-          newLine.decided || failure !== undefined || pending !== undefined
+          newLine.decided ||
+          view.loaded ||
+          failure !== undefined ||
+          pending !== undefined
         }
         messages={view.messages}
         newLineBefore={newLine.before}

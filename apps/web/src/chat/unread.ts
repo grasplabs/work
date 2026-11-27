@@ -68,12 +68,14 @@ const lineOf = (
     messages: readonly ChatMessage[];
     running: boolean;
     loaded: boolean;
+    stale?: boolean;
     resuming?: boolean;
   },
   seenUpTo: number | null | false | undefined
 ): { before: number | null; read: number } | undefined => {
-  // Behind after a dropped connection: decided once the chat is current.
-  if (!view.loaded || view.resuming === true) {
+  // A kept view says nothing of what came since, nor one behind after a
+  // dropped connection: the chat as core has it now decides.
+  if (!view.loaded || view.stale === true || view.resuming === true) {
     return undefined;
   }
   if (view.running) {
@@ -100,18 +102,19 @@ const seenUpToFor = ({
   reply,
   count,
   decided,
-  view,
+  watched,
 }: {
   reply: { count: number; seenUpTo: number | null | false } | undefined;
   count: number;
   /** Whether a line was decided already. */
   decided: boolean;
-  view: { seenUpTo?: number | null };
+  /** Where core's watch said they had read to (`seenUpTo`). */
+  watched: number | null | undefined;
 }): number | null | false | undefined => {
   if (reply?.count === count) {
     return reply.seenUpTo;
   }
-  return decided ? undefined : view.seenUpTo;
+  return decided ? undefined : watched;
 };
 
 /** The tab's watch of chat `id` is told it was read up to `upTo`. */
@@ -150,6 +153,8 @@ export const useNewLine = (
     loaded: boolean;
     /** Where core's watch said they had read to as the tab began to follow it. */
     seenUpTo?: number | null;
+    /** Whether it is the tab's last view of the chat, not core's yet. */
+    stale?: boolean;
     /** Whether the tab follows it again after a dropped connection, not heard back yet. */
     resuming?: boolean;
   },
@@ -160,21 +165,26 @@ export const useNewLine = (
   // Each time it is looked at again (opened again, or its tab shown
   // again) counts up: a reply core gives an earlier opening never decides
   // a later one's line. Whether this one is only the tab shown again.
+  // Whether it opened on the tab's kept view of the chat (chat-watch.ts):
+  // the mark then went out before the watch began, and only its answer
+  // says where they had read to.
   const [opening, setOpening] = useState({
     count: 0,
     looking,
     seen,
     byTab: false,
+    fromKept: view.stale === true,
   });
   if (opening.looking !== looking) {
     setOpening({
+      ...opening,
       count: looking ? opening.count + 1 : opening.count,
       looking,
       seen,
       byTab: seen === opening.seen,
     });
   }
-  const { count, byTab } = opening;
+  const { count, byTab, fromKept } = opening;
   // Where core said they had read to, for the opening that asked: a
   // number or null, or `false` when it couldn't say.
   const [reply, setReply] = useState<{
@@ -209,10 +219,11 @@ export const useNewLine = (
     }
   );
   // Only once the page has the chat's messages, and has them as they are
-  // now (not following it again after a dropped connection, when what came
-  // meanwhile isn't there yet): a watch core refused (too many open, say)
-  // shows nothing, so nothing is read.
-  const loaded = view.loaded && view.resuming !== true;
+  // now: not the tab's kept view (chat-watch.ts), nor following it again
+  // after a dropped connection, when what came meanwhile isn't there yet.
+  // A watch core refused (too many open, say) shows nothing, so nothing
+  // is read.
+  const loaded = view.loaded && view.stale !== true && view.resuming !== true;
   /** Whether the chat is being followed again after a dropped connection now. */
   const behind = useEffectEvent((): boolean => view.resuming === true);
   useEffect(() => {
@@ -249,7 +260,7 @@ export const useNewLine = (
     reply,
     count,
     decided: line !== undefined,
-    view,
+    watched: fromKept ? undefined : view.seenUpTo,
   });
   const next = line?.count === count ? undefined : lineOf(view, known);
   if (next !== undefined) {
