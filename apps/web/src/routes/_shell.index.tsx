@@ -20,12 +20,18 @@ import { loadFromCore } from "../load-from-core.tsx";
 // ⌘K window away (chat/chat-switcher.tsx).
 
 const Chat = () => {
-  const { make, project, agent } = Route.useSearch();
+  const {
+    make,
+    project,
+    agent,
+    opportunity: opportunityId,
+  } = Route.useSearch();
   const { ideas, opportunity } = Route.useLoaderData();
   return (
     <ChatStart
       agent={agent}
       opportunity={opportunity}
+      opportunityId={opportunityId}
       // Another agent named starts afresh with it.
       key={agent}
       ideas={ideas}

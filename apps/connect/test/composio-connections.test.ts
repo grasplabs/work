@@ -274,6 +274,23 @@ describe("connecting a Composio toolkit", () => {
     await expect(events()).resolves.toStrictEqual([]);
   });
 
+  it("refuses a tool Composio doesn't tag read-only allowed as a read, connecting and changing tools, and makes nothing", async () => {
+    const admin = someone("admin");
+    const untaggedRead = [
+      "HUBSPOT_LIST_CONTACTS",
+      { name: "HUBSPOT_CREATE_CONTACT", read: true },
+    ];
+    const started = await outcome(start(admin, { tools: untaggedRead }));
+    const writes = composioWrites();
+    const connectionId = await connectHubSpot(admin);
+    const changed = await outcome(change(admin, connectionId, untaggedRead));
+    expect({ started, writes, changed }).toStrictEqual({
+      started: "connection.invalid",
+      writes: [],
+      changed: "connection.invalid",
+    });
+  });
+
   it("is refused for a toolkit Composio holds no app for, recorded, and makes nothing at Composio", async () => {
     const admin = someone("admin");
     await expect(
@@ -1145,15 +1162,6 @@ describe("changing what a connected Composio toolkit may do", () => {
       event: event?.detail,
       came: namesIn(recorded, "connection.tools.added"),
       went: namesIn(recorded, "connection.tools.removed"),
-      // Marked a read on the admin's word alone: named.
-      named: recorded
-        .filter(({ action }) => action === "connection.tools.read_tools")
-        .map(
-          ({ detail }) =>
-            Object.values(detail).filter(
-              (value) => value === "HUBSPOT_LIST_CONTACTS"
-            ).length
-        ),
     }).toMatchObject({
       changed: { tools: ["HUBSPOT_LIST_CONTACTS", "HUBSPOT_UPDATE_CONTACT"] },
       stored: [
@@ -1171,7 +1179,6 @@ describe("changing what a connected Composio toolkit may do", () => {
         added: 1,
         removed: 1,
       },
-      named: [1],
       // Who allowed which tool, and took which away, by name.
       came: ["HUBSPOT_UPDATE_CONTACT"],
       went: ["HUBSPOT_CREATE_CONTACT"],

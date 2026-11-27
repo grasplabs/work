@@ -86,31 +86,6 @@ export const columnEntryOf = (column: string, title: string): string => {
     : column.slice(column.lastIndexOf("<a", at), column.indexOf("</a>", at));
 };
 
-/** What an Integrations section says, part by part. */
-export const integrationsOf = ({
-  status,
-  html,
-}: {
-  status: number;
-  html: string;
-}) => ({
-  status,
-  nothing: html.includes("Nothing connected yet</h2>"),
-  waits: html.includes("Grasp waits on the company’s own admin."),
-  connected: html.includes("What the company connected</h2>"),
-  notReported: html.includes(
-    "The company’s own Grasp doesn’t report what it connected yet."
-  ),
-  stillToConnect: html.includes("Still to connect</h2>"),
-  needsNotReported: html.includes(
-    "The company’s own Grasp doesn’t report what its workflows need yet."
-  ),
-  source: html.includes(
-    "What the company connected: the company’s own Grasp doesn’t hold it yet. What its workflows still need connected: from Composio, once it is connected."
-  ),
-  toCome: html.includes("This section isn’t in the admin yet."),
-});
-
 /** Each section as an organization not read shows it. */
 export const unread = (state: string[]) =>
   orgSections

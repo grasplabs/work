@@ -1,28 +1,45 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@grasp-os/app-kit/components/collapsible";
 /**
- * An organization's Contract, ported from the prototype (grasplabs/prototype
- * `components/admin/org-contract.tsx`), a tab of its Details: the
- * agreements that have to be in place before anyone is interviewed, which
- * staff change here until the team is told (agreements.tsx), and billing.
- * The agreements are core's own. Core holds no contract's terms, so the
- * tab shows none; the seats taken stand with the members.
+ * An organization's Contract, a tab of its Details, set on the page as
+ * Grasp Work sets one: the agreements that have to be in place before
+ * anyone is interviewed, which staff change here until the team is told
+ * (agreements.tsx), and billing. The agreements are core's own. Core
+ * holds no contract's terms, so the tab shows none; the seats taken stand
+ * with the members.
  *
- * Billing is Stripe's (src/billing/billing.ts): how the company pays, what
- * is open or overdue, what it paid last and when the next invoice comes,
- * and its invoices as Stripe has them, once someone at Grasp linked it to
- * its customer there; until then, or without Stripe's key, it says so.
+ * Billing is Stripe's (src/billing/billing.ts): what is open or overdue,
+ * what it paid last and when the next invoice comes as figures, how the
+ * company pays, and its invoices as Stripe has them, once someone at
+ * Grasp linked it to its customer there; until then, or without Stripe's
+ * key, it says so.
  */
-import { cn } from "@grasp-os/app-kit/lib/utils";
 import type { AgreementView } from "@grasp-os/shared/admin/admin-account";
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import type { Agreed } from "@grasp-os/shared/admin/onboarding-admin";
 import { present } from "@grasp-os/shared/admin/present";
-import { CheckIcon, ChevronDownIcon } from "lucide-react";
+import { Badge } from "@grasp-os/ui/components/badge";
+import type { BadgeVariant } from "@grasp-os/ui/components/badge";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@grasp-os/ui/components/collapsible";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { KeyValueList } from "@grasp-os/ui/components/key-value";
+import { Link } from "@grasp-os/ui/components/link";
+import {
+  Section as Part,
+  SectionHeader,
+} from "@grasp-os/ui/components/section-header";
+import { Stat, StatGroup } from "@grasp-os/ui/components/stat";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
 import type {
@@ -34,9 +51,13 @@ import type {
 import type { StripeReadError } from "../billing/stripe.ts";
 import { AgreementsAction } from "./agreements.tsx";
 import { useOrganization } from "./organization.tsx";
-import { Section } from "./section.tsx";
 import { StripeLink } from "./stripe-link.tsx";
 import { addSecretStep, formatDate, formatList, money } from "./words.ts";
+
+const styles = stylex.create({
+  parts: { display: "flex", flexDirection: "column", gap: space["10"] },
+  part: { display: "flex", flexDirection: "column", gap: space["6"] },
+});
 
 /** One for one, many for the rest. */
 const plural = (count: number, one: string, other: string): string =>
@@ -62,25 +83,10 @@ const others = [
   { name: "Stripe", what: "Invoices and payments." },
 ] as const;
 
-/** One line of a part: what it is on the left, how it stands on the right. */
-const Line = ({ label, children }: { label: string; children: ReactNode }) => (
-  <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t px-5 py-3">
-    <dt className="text-muted-foreground">{label}</dt>
-    {/* Beside its label however long it is, rather than on a line of its own pushed to the right. */}
-    <dd className="min-w-0 flex-1 text-right">{children}</dd>
-  </div>
-);
-
-/** Something in place. */
-const Done = ({ children }: { children: ReactNode }) => (
-  <span className="text-muted-foreground flex items-center gap-1.5">
-    <CheckIcon aria-hidden className="text-status-agreed size-4 flex-none" />
-    {children}
-  </span>
-);
-
-/** How one agreement stands, as the prototype says it. */
-const Stands = ({ agreement }: { agreement: AgreementView }) => {
+/** How one agreement stands, in a line, and as a mark: green once in place, amber while open. */
+const standsOf = (
+  agreement: AgreementView
+): { line: string; mark: string; tone: BadgeVariant } => {
   const on = present(agreement.on) ? formatDate(agreement.on) : "";
   const by = agreement.by ?? "";
   if (agreement.state === "signed") {
@@ -93,16 +99,14 @@ const Stands = ({ agreement }: { agreement: AgreementView }) => {
         ? `Said yes on ${on}, through ${by}`
         : `Signed on ${on}, by ${by}`;
     }
-    return <Done>{line}</Done>;
+    return { line, mark: council ? "Said yes" : "In place", tone: "success" };
   }
   if (agreement.state === "none") {
-    return <span className="text-muted-foreground">No works council</span>;
+    return { line: "No works council", mark: "None", tone: "default" };
   }
-  return (
-    <span className="text-status-attention">
-      {agreement.state === "waiting" ? "Still deciding" : "Not signed yet"}
-    </span>
-  );
+  const line =
+    agreement.state === "waiting" ? "Still deciding" : "Not signed yet";
+  return { line, mark: line, tone: "warning" };
 };
 
 /** The agreements that have to be in place before anyone is invited, and who else handles the data. */
@@ -129,72 +133,66 @@ const Agreements = ({
     description = `Without all three, nobody is invited. ${open} ${plural(open, "is", "are")} still open.`;
   }
   return (
-    <Section
-      action={action}
-      description={description}
-      id="contract-agreements"
-      title="Agreed before the first interview"
-    >
-      <ul className="flex flex-col">
-        {view.agreements.map((agreement) => {
-          const paper = [
-            present(agreement.version)
-              ? `Version ${agreement.version} of Grasp’s own text`
-              : "",
-            agreement.file ?? "",
-          ].filter((part) => part !== "");
-          return (
-            <li
-              className="flex flex-col gap-0.5 border-t px-5 py-3"
-              key={agreement.what}
-            >
-              <span>{agreementWords[agreement.what]}</span>
-              <span className="text-xs">
-                {recorded ? (
-                  <Stands agreement={agreement} />
-                ) : (
-                  <span className="text-status-attention">
-                    Not recorded yet
-                  </span>
-                )}
-              </span>
-              {paper.length > 0 ? (
-                <span className="text-muted-foreground truncate text-xs">
-                  {paper.join(" · ")}
-                </span>
-              ) : null}
-            </li>
-          );
-        })}
-      </ul>
-      <div className="border-t">
-        <Collapsible>
-          <CollapsibleTrigger
-            render={
-              <Button className="mx-3 my-2" size="sm" variant="outline" />
-            }
-          >
-            Who else handles the data
-            <ChevronDownIcon
-              className="transition-transform in-data-panel-open:rotate-180"
-              data-icon="inline-end"
-            />
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <ul className="grid gap-x-8 gap-y-2 px-5 pb-4 sm:grid-cols-2">
-              {others.map((other) => (
-                <li className="flex flex-col" key={other.name}>
-                  <span>{other.name}</span>
-                  <span className="text-muted-foreground text-xs">
-                    {other.what}
-                  </span>
-                </li>
-              ))}
-            </ul>
+    <Part aria-labelledby="contract-agreements">
+      <SectionHeader
+        actions={action}
+        description={description}
+        id="contract-agreements"
+        size="sm"
+        title="Agreed before the first interview"
+        variant="group"
+      />
+      <div {...stylex.props(styles.part)}>
+        <ItemGroup aria-labelledby="contract-agreements" separated>
+          {view.agreements.map((agreement) => {
+            const stands = recorded
+              ? standsOf(agreement)
+              : {
+                  line: "Not recorded yet",
+                  mark: "Not recorded yet",
+                  tone: "warning" as const,
+                };
+            const paper = [
+              // Said once: in the mark alone when the line says no more.
+              stands.line === stands.mark ? "" : stands.line,
+              present(agreement.version)
+                ? `Version ${agreement.version} of Grasp’s own text`
+                : "",
+              agreement.file ?? "",
+            ].filter((part) => part !== "");
+            return (
+              <Item key={agreement.what}>
+                <ItemContent>
+                  <ItemTitle>{agreementWords[agreement.what]}</ItemTitle>
+                  <ItemDescription>{paper.join(" · ")}</ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <Badge dot variant={stands.tone}>
+                    {stands.mark}
+                  </Badge>
+                </ItemActions>
+              </Item>
+            );
+          })}
+        </ItemGroup>
+        <Collapsible fitContent>
+          <CollapsibleTrigger>Who else handles the data</CollapsibleTrigger>
+          <CollapsibleContent asChild>
+            <div>
+              <KeyValueList
+                divided
+                items={others.map((other) => ({
+                  id: other.name,
+                  label: other.name,
+                  value: other.what,
+                }))}
+                orientation="horizontal"
+              />
+            </div>
           </CollapsibleContent>
         </Collapsible>
       </div>
-    </Section>
+    </Part>
   );
 };
 
@@ -253,64 +251,68 @@ const paysWords = (pays: BillingAccount["pays"]): string => {
     : `It is sent each invoice, to pay within ${pays.daysToPay} ${plural(pays.daysToPay, "day", "days")}`;
 };
 
-/** When the next invoice comes, or that none does. */
-const nextWords = (subscription: BillingAccount["subscription"]): string => {
+/** The next invoice as a figure: what it comes to and when, or that none comes, and why. */
+const nextFigure = (
+  subscription: BillingAccount["subscription"]
+): { value: string; change: string } => {
   if (subscription === null) {
-    return "None: no subscription runs";
+    return { value: "None", change: "No subscription runs" };
   }
   if (subscription.next !== null) {
     const { on, amount } = subscription.next;
     return amount === null
-      ? formatDate(on)
-      : `${money(amount.amount, amount.currency)} on ${formatDate(on)}, before tax`;
+      ? { value: formatDate(on), change: "Its amount isn’t known yet" }
+      : {
+          value: money(amount.amount, amount.currency),
+          change: `On ${formatDate(on)}, before tax`,
+        };
   }
-  return subscription.ends === null
-    ? `None: the subscription is ${subscription.status.replaceAll("_", " ")}`
-    : `None: the subscription ends on ${formatDate(subscription.ends)}`;
+  return {
+    value: "None",
+    change:
+      subscription.ends === null
+        ? `The subscription is ${subscription.status.replaceAll("_", " ")}`
+        : `The subscription ends on ${formatDate(subscription.ends)}`,
+  };
 };
 
-/** What Stripe says of the company, line by line. */
-const BillingLines = ({
-  account,
-  customerId,
-}: {
-  account: BillingAccount;
-  customerId: string;
-}) => (
-  <dl>
-    <Line label="Customer in Stripe">
-      <a
-        className="hover:text-foreground underline underline-offset-4"
-        href={account.url}
-        rel="noreferrer"
-        target="_blank"
-      >
-        {account.name ?? customerId}
-      </a>
-    </Line>
-    <Line label="How it pays">{paysWords(account.pays)}</Line>
-    <Line label="Open">
-      {account.open.count === 0
-        ? "Nothing"
-        : `${moneyOf(account.open.amount)}, ${account.open.count} ${plural(account.open.count, "invoice", "invoices")}`}
-    </Line>
-    <Line label="Overdue">
-      {account.overdue.count === 0 || account.overdue.since === null ? (
-        "Nothing"
-      ) : (
-        <span className="text-status-attention">
-          {`${moneyOf(account.overdue.amount)}, due since ${formatDate(account.overdue.since)}`}
-        </span>
-      )}
-    </Line>
-    <Line label="Last paid">
-      {account.lastPaid === null
-        ? "Nothing yet"
-        : `${money(account.lastPaid.amount.amount, account.lastPaid.amount.currency)} on ${formatDate(account.lastPaid.on)}`}
-    </Line>
-    <Line label="Next invoice">{nextWords(account.subscription)}</Line>
-  </dl>
-);
+/** What Stripe says the company owes, paid and is billed next, as figures. */
+const BillingFigures = ({ account }: { account: BillingAccount }) => {
+  const { open, overdue, lastPaid, subscription } = account;
+  return (
+    <StatGroup aria-label="Its billing" columns={4}>
+      <Stat
+        change={
+          open.count === 0
+            ? "Nothing to pay"
+            : `${open.count} ${plural(open.count, "invoice", "invoices")}`
+        }
+        label="Open"
+        value={open.count === 0 ? "Nothing" : moneyOf(open.amount)}
+      />
+      <Stat
+        change={
+          overdue.count === 0 || overdue.since === null
+            ? "None"
+            : `Due since ${formatDate(overdue.since)}`
+        }
+        label="Overdue"
+        value={overdue.count === 0 ? "Nothing" : moneyOf(overdue.amount)}
+        variant={overdue.count === 0 ? "default" : "warning"}
+      />
+      <Stat
+        change={lastPaid === null ? "Nothing yet" : formatDate(lastPaid.on)}
+        label="Last paid"
+        value={
+          lastPaid === null
+            ? "Nothing"
+            : money(lastPaid.amount.amount, lastPaid.amount.currency)
+        }
+      />
+      <Stat label="Next invoice" {...nextFigure(subscription)} />
+    </StatGroup>
+  );
+};
 
 /**
  * Billing: what Stripe says the company pays and whether it is paid, and
@@ -325,19 +327,43 @@ const BillingPart = ({
 }) => {
   const customerId = billing.state === "not_linked" ? null : billing.customerId;
   return (
-    <Section
-      description={billingLine(billing)}
-      id="contract-billing"
-      title="Billing"
-    >
-      {billing.state === "read" ? (
-        <BillingLines
-          account={billing.account}
-          customerId={billing.customerId}
-        />
-      ) : null}
-      <StripeLink clientId={clientId} customerId={customerId} />
-    </Section>
+    <Part aria-labelledby="contract-billing">
+      <SectionHeader
+        description={billingLine(billing)}
+        id="contract-billing"
+        size="sm"
+        title="Billing"
+        variant="group"
+      />
+      <div {...stylex.props(styles.part)}>
+        {billing.state === "read" ? (
+          <>
+            <BillingFigures account={billing.account} />
+            <KeyValueList
+              divided
+              items={[
+                {
+                  id: "customer",
+                  label: "Customer in Stripe",
+                  value: (
+                    <Link external href={billing.account.url}>
+                      {billing.account.name ?? billing.customerId}
+                    </Link>
+                  ),
+                },
+                {
+                  id: "pays",
+                  label: "How it pays",
+                  value: paysWords(billing.account.pays),
+                },
+              ]}
+              orientation="horizontal"
+            />
+          </>
+        ) : null}
+        <StripeLink clientId={clientId} customerId={customerId} />
+      </div>
+    </Part>
   );
 };
 
@@ -351,6 +377,16 @@ const invoiceStatusWords: Record<BillingInvoice["status"], string> = {
   draft: "Draft",
 };
 
+/** How an invoice stands, as its mark: amber while it is to be paid. */
+const invoiceTones: Record<BillingInvoice["status"], BadgeVariant> = {
+  paid: "success",
+  open: "warning",
+  overdue: "warning",
+  void: "default",
+  uncollectible: "default",
+  draft: "outline",
+};
+
 /** The invoices as Stripe has them, the newest first. */
 const StripeInvoices = ({ account }: { account: BillingAccount }) => {
   const { invoices, open } = account;
@@ -362,40 +398,34 @@ const StripeInvoices = ({ account }: { account: BillingAccount }) => {
         : `From Stripe, the latest ${invoices.length}. All are paid.`;
   }
   return (
-    <Section description={description} id="contract-invoices" title="Invoices">
+    <Part aria-labelledby="contract-invoices">
+      <SectionHeader
+        description={description}
+        id="contract-invoices"
+        size="sm"
+        title="Invoices"
+        variant="group"
+      />
       {invoices.length > 0 ? (
-        <ul className="flex flex-col">
+        <ItemGroup aria-labelledby="contract-invoices" separated>
           {invoices.map((invoice) => (
-            <li
-              className="flex items-baseline justify-between gap-x-6 border-t px-5 py-2.5"
-              key={invoice.number}
-            >
-              <span className="flex min-w-0 flex-wrap items-baseline gap-x-3">
-                <span className="tabular-nums">{invoice.number}</span>
-                <span className="text-muted-foreground text-xs">
-                  {formatDate(invoice.date)}
-                </span>
-              </span>
-              <span className="flex items-baseline gap-x-6">
-                <span className="tabular-nums">
-                  {money(invoice.amount, invoice.currency)}
-                </span>
-                <span
-                  className={cn(
-                    "w-20 text-right text-xs",
-                    invoice.status === "open" || invoice.status === "overdue"
-                      ? "text-status-attention"
-                      : "text-muted-foreground"
-                  )}
-                >
+            <Item key={invoice.number} size="sm">
+              <ItemContent>
+                <ItemTitle>{invoice.number}</ItemTitle>
+                <ItemDescription>
+                  {`${formatDate(invoice.date)} · ${money(invoice.amount, invoice.currency)}`}
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <Badge variant={invoiceTones[invoice.status]}>
                   {invoiceStatusWords[invoice.status]}
-                </span>
-              </span>
-            </li>
+                </Badge>
+              </ItemActions>
+            </Item>
           ))}
-        </ul>
+        </ItemGroup>
       ) : null}
-    </Section>
+    </Part>
   );
 };
 
@@ -406,7 +436,7 @@ export const OrgContract = () => {
   const recorded = admin.snapshot.agreements !== null;
   const { billing } = admin;
   return (
-    <>
+    <div {...stylex.props(styles.parts)}>
       <Agreements
         action={
           <AgreementsAction
@@ -422,6 +452,6 @@ export const OrgContract = () => {
       {billing.state === "read" ? (
         <StripeInvoices account={billing.account} />
       ) : null}
-    </>
+    </div>
   );
 };

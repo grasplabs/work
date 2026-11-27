@@ -2,6 +2,7 @@ import { connectErrors } from "@grasp-os/shared/connect";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { fakeComposioServer } from "./composio-api.ts";
 import {
   addConnection,
   agentFor,
@@ -12,7 +13,6 @@ import {
   serverUrl,
 } from "./connect.ts";
 import type { Call } from "./connect.ts";
-import { fakeMcpServer } from "./mcp-server.ts";
 import { claimedAgo } from "./tool-calls.ts";
 
 // A side effect happens once per idempotency key, however often the call is
@@ -30,84 +30,89 @@ let forwardImage = false;
 /** Holds `mail.archive` until the test lets it finish. */
 let archiveDone: Promise<unknown> = Promise.resolve();
 
-const server = fakeMcpServer(serverUrl, [
-  {
-    name: "mail.send",
-    run: ({ to }) => {
-      sent += 1;
-      return { output: { messageId: `sent-${sent}`, to } };
+const server = fakeComposioServer(
+  serverUrl,
+  [
+    {
+      name: "mail.send",
+      run: ({ to }) => {
+        sent += 1;
+        return { output: { messageId: `sent-${sent}`, to } };
+      },
     },
-  },
-  {
-    name: "mail.relay",
-    run: () => {
-      if (forwardText !== undefined) {
-        return {
-          output: {},
-          content: [
-            { type: "text", text: forwardText },
-            ...(forwardImage
-              ? [
-                  {
-                    type: "image" as const,
-                    data: "aGVsbG8=",
-                    mimeType: "image/png",
-                  },
-                ]
-              : []),
-          ],
-          isError: true,
-        };
-      }
-      return forwardError === undefined
-        ? { output: { forwarded: true } }
-        : { output: forwardError, isError: true };
+    {
+      name: "mail.relay",
+      readOnly: true,
+      run: () => {
+        if (forwardText !== undefined) {
+          return {
+            output: {},
+            content: [
+              { type: "text", text: forwardText },
+              ...(forwardImage
+                ? [
+                    {
+                      type: "image" as const,
+                      data: "aGVsbG8=",
+                      mimeType: "image/png",
+                    },
+                  ]
+                : []),
+            ],
+            isError: true,
+          };
+        }
+        return forwardError === undefined
+          ? { output: { forwarded: true } }
+          : { output: forwardError, isError: true };
+      },
     },
-  },
-  {
-    name: "mail.bounce",
-    // Says it did nothing, as only a native connector is believed.
-    run: () => ({
-      output: { error: "Rate limited" },
-      isError: true,
-      notPerformed: true,
-    }),
-  },
-  {
-    name: "mail.unsure",
-    // Says it can't tell whether it acted.
-    run: () => ({
-      output: { error: "Gateway timeout" },
-      isError: true,
-      outcomeUnknown: true,
-    }),
-  },
-  {
-    name: "mail.mixed",
-    // Says both: that it did nothing, and that its outcome is unknown.
-    run: () => ({
-      output: { error: "Unsure" },
-      isError: true,
-      notPerformed: true,
-      outcomeUnknown: true,
-    }),
-  },
-  {
-    name: "mail.archive",
-    run: async () => {
-      await archiveDone;
-      return { output: { archived: true } };
+    {
+      name: "mail.bounce",
+      // Says it did nothing, as only a native connector is believed.
+      run: () => ({
+        output: { error: "Rate limited" },
+        isError: true,
+        notPerformed: true,
+      }),
     },
-  },
-  {
-    name: "mail.draft",
-    run: () => ({ output: { draftId: "draft-1" } }),
-  },
-  {
-    name: "mail.export",
-    run: () => ({ output: { text: "x".repeat(200 * 1024) } }),
-  },
-]);
+    {
+      name: "mail.unsure",
+      // Says it can't tell whether it acted.
+      run: () => ({
+        output: { error: "Gateway timeout" },
+        isError: true,
+        outcomeUnknown: true,
+      }),
+    },
+    {
+      name: "mail.mixed",
+      // Says both: that it did nothing, and that its outcome is unknown.
+      run: () => ({
+        output: { error: "Unsure" },
+        isError: true,
+        notPerformed: true,
+        outcomeUnknown: true,
+      }),
+    },
+    {
+      name: "mail.archive",
+      run: async () => {
+        await archiveDone;
+        return { output: { archived: true } };
+      },
+    },
+    {
+      name: "mail.draft",
+      run: () => ({ output: { draftId: "draft-1" } }),
+    },
+    {
+      name: "mail.export",
+      run: () => ({ output: { text: "x".repeat(200 * 1024) } }),
+    },
+  ],
+  "mail"
+);
 
 const anna = agentFor("user-anna");
 

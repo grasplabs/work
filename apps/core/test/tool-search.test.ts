@@ -35,7 +35,7 @@ const idp = mockIdp();
 /** Thousands of tools listed and ranked, on a slow CI machine. */
 const setUpTime = { timeout: 120_000 };
 
-/** A tool of the fake Composio's toolkit `bulk`, each a read (connect's test/fixtures/composio-classes.ts). */
+/** A tool of the fake Composio's toolkit `bulk`, each allowed as a read. */
 const bulkTool = (index: number): string => `BULK_TOOL_${index}`;
 
 /** Most tools an admin may allow on one Composio connection. */
@@ -122,7 +122,7 @@ describe("a chat's tool search", setUpTime, () => {
         connection: holder?.id,
         action: needle,
         summary: "",
-        class: "read-company",
+        class: "read-own",
         input: "unknown",
       },
       matches: 1,
@@ -629,8 +629,13 @@ describe("a chat's tool search", setUpTime, () => {
       ),
       says("I can only search.")
     );
-    // Reaching others is off for everyone: sending mail is too.
+    // Reaching others is off for everyone, and so is changing the
+    // company's things: sending mail, through the native suite or a
+    // toolkit's tool allowed as a change, is off too.
     await admin.api.connections.setToolClass("reach-others", { who: "nobody" });
+    await admin.api.connections.setToolClass("change-company", {
+      who: "nobody",
+    });
 
     await chat.ask("Send Ben the invoice.");
 

@@ -31,13 +31,11 @@ import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { toolkitsWithoutCopies } from "#composio-classes";
-
 import { requirePointedResource } from "./app-pointers.ts";
 import { changeOf } from "./changes.ts";
 import type { CallChange } from "./changes.ts";
 import {
-  allowedTool,
+  allowedToolNow,
   composioServer,
   usableConnection,
 } from "./connections.ts";
@@ -318,8 +316,7 @@ const toolFor = async (
  * tool comes from its manifest, and its server (an isolate, with the
  * connection's token for its egress) is only opened once the call passed
  * every check. A Composio server is asked for its tools, and only for one
- * its admin allowed and Grasp classed, which is what its class and the
- * admin's rule say it is.
+ * its admin allowed, which is what the admin's rule says it is.
  */
 const actionFor = async (
   env: Env,
@@ -396,11 +393,17 @@ const actionFor = async (
       openLookup: open,
     };
   }
-  // Only a tool the admin allowed and Grasp classed, asked for before
-  // anything goes out, and taken to be what its class and the admin say.
-  const rule = allowedTool(connection, action);
+  // Only a tool the admin allowed, asked for before anything goes out:
+  // a read only if Composio tags it read-only now too.
+  const rule = await allowedToolNow(env, connection, action);
   if (rule === undefined) {
     throw connectErrors.create("connect.action_not_found");
+  }
+  // Core let it through as the class it read (`connectionOwners`), and held
+  // it to pointers only as a read: one Composio's tag made otherwise since
+  // is refused, so a read core took for a change never runs unpointed.
+  if (claims.toolClass !== undefined && claims.toolClass !== rule.class) {
+    throw connectErrors.create("connect.class_changed");
   }
   const server = composioServer(env, connection);
   const tool = composioTool(await toolFor(server, action), rule);
@@ -702,22 +705,19 @@ const requireAllowedEffect = (
 
 /**
  * Whether core may keep what a read answered as sources in the Brain
- * (`ConnectResult.keep`): never anything from a toolkit whose provider's
- * terms forbid copies. A native connector's or an HTTP connection's only
- * when its server named the items it read (a name `withProvenance` makes
- * up from the tool is no item); a toolkit's whatever it named, as core
- * keeps its whole answer as one source, keyed by the call (GRA-1845). An
- * error answer goes back as `connect.action_failed`, never as a result.
+ * (`ConnectResult.keep`). A native connector's or an HTTP connection's
+ * only when its server named the items it read (a name `withProvenance`
+ * makes up from the tool is no item); a toolkit's whatever it named, as
+ * core keeps its whole answer as one source, keyed by the call (GRA-1845).
+ * An error answer goes back as `connect.action_failed`, never as a result.
  */
 const keepOf = (
-  connection: Pick<Connection, "serverKind" | "provider">,
+  connection: Pick<Connection, "serverKind">,
   answered: McpToolResult
-): ConnectResult["keep"] => {
-  if (connection.serverKind === "composio") {
-    return toolkitsWithoutCopies.has(connection.provider) ? undefined : true;
-  }
-  return answered.provenance.length > 0 ? true : undefined;
-};
+): ConnectResult["keep"] =>
+  connection.serverKind === "composio" || answered.provenance.length > 0
+    ? true
+    : undefined;
 
 /** One call of a read, its answer as the tool gave it. */
 const readOnce = async (

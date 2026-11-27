@@ -51,7 +51,6 @@ import { ComposioError, composioKey, composioRequest } from "./composio.ts";
 import {
   auditRefusal,
   connectionEvent,
-  namesEventsMax,
   packedNames,
 } from "./connection-audit.ts";
 import { isComposioServerUrl } from "./connections.ts";
@@ -455,9 +454,7 @@ const refuseUnlessAdmin = async (
  * The tools of an allowlist the admin marked as reads, by name: they run
  * unheld and without a key. The consent and connect events record how many
  * beside the `toolsHash`, and the consent names them in a few events of
- * their own (`connection.consent.read_tools`; `packedNames`), those
- * Composio didn't tag read-only first (`hinted: false`): one marked without
- * the hint is the admin's word alone.
+ * their own (`connection.consent.read_tools`; `packedNames`).
  */
 const readToolsOf = (tools: readonly (string | ComposioToolRule)[]): string[] =>
   tools.flatMap((tool) =>
@@ -478,19 +475,20 @@ const choiceOf = (tools: readonly (string | ComposioToolRule)[]): string =>
 
 /**
  * Whether every one of `tools` is one of `toolkit`'s, each held to a
- * resource only by one of its own input properties: a name that matches
- * nothing would be an entry that silently allows nothing, or holds
- * nothing. One of `kept`, entries the connection allows already, passes
- * as it is though the toolkit no longer has it: it is kept, not added, so
- * a tool Composio retired never blocks a change. With the names Composio
- * says only read (`hinted`).
+ * resource only by one of its own input properties, and allowed as a read
+ * only if Composio tags it read-only: a name that matches nothing would be
+ * an entry that silently allows nothing, or holds nothing, and a read of a
+ * tool Composio doesn't call read-only would run a change without asking.
+ * One of `kept`, entries the connection allows already, passes as it is
+ * though the toolkit no longer has it: it is kept, not added, so a tool
+ * Composio retired never blocks a change (a call takes it for a change).
  */
 const checkedTools = async (
   key: string,
   toolkit: string,
   tools: readonly (string | ComposioToolRule)[],
   kept: readonly (string | ComposioToolRule)[] = []
-): Promise<{ fits: boolean; hinted: ReadonlySet<string> }> => {
+): Promise<boolean> => {
   const toolkitTools = await composioTools(key, toolkit);
   const inputsOf = new Map(
     toolkitTools.map(({ name, inputs }) => [name, inputs])
@@ -499,23 +497,27 @@ const checkedTools = async (
     toolkitTools.flatMap(({ name, readOnly }) => (readOnly ? [name] : []))
   );
   const keptEntries = new Set(kept.map((tool) => JSON.stringify(tool)));
-  const fits = tools.every((tool) => {
+  return tools.every((tool) => {
     const inputs = inputsOf.get(composioToolName(tool));
     if (inputs === undefined) {
       return keptEntries.has(JSON.stringify(tool));
     }
-    const resource = typeof tool === "string" ? undefined : tool.resource;
-    return resource === undefined || inputs.includes(resource);
+    if (typeof tool === "string") {
+      return true;
+    }
+    const { resource } = tool;
+    return (
+      (resource === undefined || inputs.includes(resource)) &&
+      (tool.read !== true || hinted.has(tool.name))
+    );
   });
-  return { fits, hinted };
 };
 
 /**
  * The events of an admin's consent to connecting `toolkit` with `tools`:
  * the consent, with the hash of the text they consented to (`consent`),
- * and the read tools by name (`connection.consent.read_tools`), those
- * Composio didn't tag read-only (`hinted`) first. `detail` goes in the
- * consent's own.
+ * and the read tools by name (`connection.consent.read_tools`). `detail`
+ * goes in the consent's own.
  */
 const consentEvents = async (
   person: ConnectionPerson,
@@ -523,37 +525,19 @@ const consentEvents = async (
     toolkit,
     flowId,
     tools,
-    hinted,
     consent,
     detail = {},
   }: {
     toolkit: string;
     flowId: string;
     tools: readonly (string | ComposioToolRule)[];
-    hinted: ReadonlySet<string>;
     consent: string;
     detail?: Record<string, AuditDetailValue>;
   }
 ): Promise<[AuditEntry, ...AuditEntry[]]> => {
   const readTools = readToolsOf(tools);
-  const unhinted = readTools.filter((tool) => !hinted.has(tool));
-  // The unhinted first, so they are the ones named if names are cut off.
-  const named = packedNames(unhinted);
-  const namedHinted = packedNames(
-    readTools.filter((tool) => hinted.has(tool)),
-    namesEventsMax - named.details.length
-  );
-  const unnamed = [...named.rest, ...namedHinted.rest];
-  const namesOf = (details: Record<string, string>[], wasHinted: boolean) =>
-    details.map((names, index) =>
-      connectionEvent(person, "connection.consent.read_tools", undefined, {
-        ...detailOf(toolkit),
-        flowId,
-        hinted: wasHinted,
-        part: index + 1,
-        ...names,
-      })
-    );
+  const named = packedNames(readTools);
+  const unnamed = named.rest;
   return [
     connectionEvent(person, "connection.consent", undefined, {
       ...detailOf(toolkit),
@@ -565,7 +549,6 @@ const consentEvents = async (
       toolsHash: await sha256Hex(JSON.stringify(tools)),
       toolCount: tools.length,
       readCount: readTools.length,
-      unhintedReadCount: unhinted.length,
       // Only when names were cut off: how many, and their hash.
       ...(unnamed.length === 0
         ? {}
@@ -574,8 +557,14 @@ const consentEvents = async (
             unnamedReadHash: await sha256Hex(unnamed.join(",")),
           }),
     }),
-    ...namesOf(named.details, false),
-    ...namesOf(namedHinted.details, true),
+    ...named.details.map((names, index) =>
+      connectionEvent(person, "connection.consent.read_tools", undefined, {
+        ...detailOf(toolkit),
+        flowId,
+        part: index + 1,
+        ...names,
+      })
+    ),
   ];
 };
 
@@ -696,8 +685,7 @@ export const startToolkitConnection = async (
   }
   // Only tools the toolkit has, each held to a resource only by one of its
   // own input properties (`checkedTools`).
-  const { fits, hinted } = await checkedTools(key, toolkit, tools);
-  if (!fits) {
+  if (!(await checkedTools(key, toolkit, tools))) {
     throw connectionErrors.create("connection.invalid");
   }
 
@@ -769,7 +757,6 @@ export const startToolkitConnection = async (
         toolkit,
         flowId,
         tools,
-        hinted,
         consent: composioConsentText,
       }),
       [
@@ -1459,7 +1446,7 @@ export const connectToolkitWithKey = async (
     throw error;
   }
   const val = valuesFor(auth.fields, values);
-  const { fits, hinted } = await checkedTools(key, toolkit, tools);
+  const fits = await checkedTools(key, toolkit, tools);
   if (val === undefined || !fits) {
     throw connectionErrors.create("connection.invalid");
   }
@@ -1537,7 +1524,6 @@ export const connectToolkitWithKey = async (
       toolkit,
       flowId,
       tools,
-      hinted,
       consent: composioKeyConsentText,
       detail: { scheme: auth.scheme, fields: fieldNames },
     });
@@ -2019,7 +2005,7 @@ const checkedChange = async (
     previous: readonly (string | ComposioToolRule)[];
   },
   failed: (reason: string, outcome: "refused" | "failed") => Promise<void>
-): Promise<Awaited<ReturnType<typeof checkedTools>>> => {
+): Promise<boolean> => {
   if (choiceOf(expected) !== choiceOf(previous)) {
     await failed("connection.tools_changed", "refused");
     throw connectionErrors.create("connection.tools_changed");
@@ -2044,9 +2030,8 @@ const checkedChange = async (
  * in between, Composio is set back to what connect holds and the change
  * is refused (`connection.tools_changed`). So connect never allows a tool
  * Composio wasn't told of, and a lost race leaves no wider list. Audited
- * with the lists' hashes and counts, the tools newly marked as reads that
- * Composio doesn't call read-only named, as consenting names them; a
- * held action of a tool taken away is dropped. The tools it allows now.
+ * with the lists' hashes and counts; a held action of a tool taken away is
+ * dropped. The tools it allows now.
  */
 export const changeToolkitTools = async (
   env: Env,
@@ -2093,7 +2078,7 @@ export const changeToolkitTools = async (
     throw connectionErrors.create("connection.provider_unavailable");
   }
   const previous = composioToolsSchema.parse(JSON.parse(before));
-  const { fits, hinted } = await checkedChange(
+  const fits = await checkedChange(
     { key, toolkit, tools, expected, previous },
     failed
   );
@@ -2158,13 +2143,7 @@ export const changeToolkitTools = async (
     throw connectionErrors.create("connection.provider_refused");
   }
   const previousNames = new Set(previous.map(composioToolName));
-  const previousReads = new Set(readToolsOf(previous));
   const readTools = readToolsOf(tools);
-  // Newly marked as reads without Composio's hint: the admin's word alone,
-  // named, as consenting names them.
-  const named = packedNames(
-    readTools.filter((tool) => !previousReads.has(tool) && !hinted.has(tool))
-  );
   const addedNames = names.filter((name) => !previousNames.has(name));
   const removedNames = [...previousNames].filter(
     (name) => !names.includes(name)
@@ -2174,17 +2153,12 @@ export const changeToolkitTools = async (
   const addedPacked = packedNames(addedNames);
   const removedPacked = packedNames(removedNames);
   const partsOf = (
-    action:
-      | "connection.tools.added"
-      | "connection.tools.removed"
-      | "connection.tools.read_tools",
-    details: readonly Record<string, string>[],
-    extra: Record<string, boolean> = {}
+    action: "connection.tools.added" | "connection.tools.removed",
+    details: readonly Record<string, string>[]
   ) =>
     details.map((part, index) =>
       connectionEvent(person, action, row.id, {
         ...detail,
-        ...extra,
         part: index + 1,
         ...part,
       })
@@ -2192,7 +2166,6 @@ export const changeToolkitTools = async (
   const namedEntries = [
     ...partsOf("connection.tools.added", addedPacked.details),
     ...partsOf("connection.tools.removed", removedPacked.details),
-    ...partsOf("connection.tools.read_tools", named.details, { hinted: false }),
   ];
   const updatedAt = new Date();
   // Only while the list is still the one read.
@@ -2216,7 +2189,6 @@ export const changeToolkitTools = async (
           removed: removedNames.length,
           unnamedAdded: addedPacked.rest.length,
           unnamedRemoved: removedPacked.rest.length,
-          unnamedReads: named.rest.length,
         }),
         from: connections,
         where: stillRead,

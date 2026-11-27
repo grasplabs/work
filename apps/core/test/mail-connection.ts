@@ -139,7 +139,7 @@ export const mailConnection = async (
     owner,
     audience = "nobody",
   }: {
-    /** The toolkit it is of, as connect's review classes it. */
+    /** Its toolkit, whose read-only tools test/composio-api.ts lists. */
     provider?: string;
     /** The person whose own connection it is: none for a shared one. */
     owner?: string;

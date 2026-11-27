@@ -387,7 +387,6 @@ export const rememberTool = (
       'When the person says something of theirs you saved or recalled no longer holds (it changed, they changed their mind, it was wrong: "it\'s sushi now" after "I love pizza"), name those memories in `replaces`: they stay as history, no longer in use, and the person can undo it. Something that sits beside them ("I also like sushi") replaces nothing: leave `replaces` out.',
     ].join("\n"),
     parameters,
-    executionMode: "sequential",
     execute: async (input, { callId }, { abortSignal }) => {
       if (isNamedMe(input.about)) {
         throw new Error(namedMe);

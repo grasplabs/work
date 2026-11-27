@@ -53,12 +53,16 @@ test("staff create an organization in three fields, and watch it set itself up",
   ).toBeVisible();
   await expect(steps.getByText("Inviting admins")).toBeVisible();
   // Its storage made by itself, with nobody clicking anything: its line
-  // says so, or every step is done already and they fold into one line.
+  // says so, or every step is done already and its facts say so.
   await expect(
     steps
       .getByRole("listitem")
       .filter({ hasText: "Creating its databases and file storage" })
       .getByText("Done")
-      .or(page.getByRole("region", { name: "Set up: every step is done" }))
+      .or(
+        page
+          .getByRole("region", { name: "How it stands" })
+          .getByText(/^Every step done/u)
+      )
   ).toBeVisible({ timeout: stepMs });
 });

@@ -353,7 +353,7 @@ describe("a chat's connections", setUpTime, () => {
         listed: [
           {
             name: "MAIL",
-            tools: { "reach-others": 1, "read-company": 1 },
+            tools: { "change-company": 1, "read-company": 1 },
           },
         ],
         mail: { messages: ["invoice-1"] },
@@ -1032,7 +1032,7 @@ describe("a person's own connections in their own chat", setUpTime, () => {
           name: mail.id,
           account: null,
           resource: null,
-          tools: { "read-company": 1 },
+          tools: { "read-own": 1 },
         })
       ),
       read: read?.text.includes(`${marker}-1`),
@@ -1082,7 +1082,7 @@ describe("a person's own connections in their own chat", setUpTime, () => {
           name: mail.id,
           account: null,
           resource: null,
-          tools: { "read-company": 1 },
+          tools: { "read-own": 1 },
         })
       ),
       held: sent?.text,
@@ -1263,7 +1263,7 @@ describe(
             name: mail.id,
             account: null,
             resource: null,
-            tools: { "reach-others": 1, "read-company": 1 },
+            tools: { "change-company": 1, "read-company": 1 },
           })
         ),
         read: read?.text.includes(`${marker}-1`),
