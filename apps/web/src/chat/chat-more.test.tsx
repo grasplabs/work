@@ -16,7 +16,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { PanelTitle } from "../frame/panels/head.tsx";
-import { activeChat, setActiveChat } from "./active-chat.ts";
+import { activeChat, forgetActiveChats, setActiveChat } from "./active-chat.ts";
 import { ChatMoreMenu, useRenameChat } from "./chat-more.tsx";
 
 // The open chat's name at the head of its panel and its menu, against
@@ -288,8 +288,9 @@ describe("the open chat's menu", () => {
     });
     root = undefined;
     // The tab's watch of a chat stops a moment after its last reader goes:
-    // the next test follows the same chat afresh.
+    // the next test follows the same chat afresh, nothing kept of it.
     await settled();
+    forgetActiveChats();
     copied = [];
     setActiveChat(undefined);
     document.body.replaceChildren();

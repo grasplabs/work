@@ -58,6 +58,11 @@ export interface ChatView {
    */
   seenUpTo?: number | null;
   /**
+   * Whether it is the tab's last view of the chat (chat-watch.ts), shown
+   * until its watch's first update replaces it.
+   */
+  stale?: boolean;
+  /**
    * Whether the tab follows it again after a dropped connection and has
    * heard nothing yet since: what it shows may be behind.
    */

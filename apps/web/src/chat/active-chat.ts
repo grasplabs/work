@@ -3,6 +3,7 @@ import { useSyncExternalStore } from "react";
 import { forgetCardGround } from "../brain/thinking/card-ground.ts";
 import { forgetThinking } from "../brain/thinking/log.ts";
 import { resetChatLayout } from "./chat-layout.ts";
+import { forgetKeptViews } from "./chat-watch.ts";
 
 // The person's open chats in this tab: `chat`, the one Grasp's chat
 // carries on from page to page (global-chat.tsx), so what is asked there
@@ -123,11 +124,13 @@ export const forgetChat = (chatId: string): void => {
 };
 
 /**
- * Forgets every open chat, what the tab saw and read of their thinking
+ * Forgets every open chat, the views the tab kept of chats
+ * (chat-watch.ts), what it saw and read of their thinking
  * (brain/thinking/log.ts, card-ground.ts), and where the chat was open
  * (chat-layout.ts): they were the person's who signed out.
  */
 export const forgetActiveChats = (): void => {
+  forgetKeptViews();
   forgetThinking();
   forgetCardGround();
   resetChatLayout();
