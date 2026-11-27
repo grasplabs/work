@@ -1,3 +1,4 @@
+import { actorOf } from "@grasp-os/shared/audit";
 import {
   chatFileMaxBytes,
   chatFilePath,
@@ -625,6 +626,36 @@ describe("files attached to a question", slow, () => {
     await expect(
       outcome(ann.api.chats.attachFile(chat.id, plan, "again"))
     ).resolves.toBe("agent.invalid_request");
+  });
+
+  it("are attached once for a key two calls carry at once, each past core's look for a repeat before either was kept", async () => {
+    const ann = await signedInApi(idp, "user");
+    const chat = await ann.api.chats.create("At once");
+    const key = crypto.randomUUID();
+    const plan = {
+      name: "plan.md",
+      type: "md",
+      bytes: 6,
+      text: "# Plan",
+    } as const;
+
+    // As core hands both over once each found no file for the key and
+    // read its bytes (chats-rpc.ts): the object takes one, then the other.
+    const [first, second] = await runInDurableObject(
+      objectOf(ann),
+      (instance) => {
+        const by = actorOf({ userId: ann.userId, staff: false });
+        return [
+          instance.attachFile(chat.id, ann.userId, plan, by, key),
+          instance.attachFile(chat.id, ann.userId, plan, by, key),
+        ];
+      }
+    );
+
+    expect({
+      same: first !== undefined && second?.id === first.id,
+      kept: await keptFiles(ann),
+    }).toStrictEqual({ same: true, kept: 1 });
   });
 
   it("are their chat's person's alone, carried by one question, and go with the chat", async () => {
