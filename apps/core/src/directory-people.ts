@@ -32,7 +32,7 @@ import {
 } from "./db/core/schema.ts";
 import { groupStatements, mappedGroupsRead } from "./directory-group-reads.ts";
 import type { GroupRead } from "./directory-group-reads.ts";
-import { suspensionStatements } from "./directory-suspensions.ts";
+import { suspendedAt, suspensionStatements } from "./directory-suspensions.ts";
 import {
   jsonValuesOf,
   keptIn,
@@ -47,6 +47,7 @@ import {
 } from "./directory-ties.ts";
 import type { DirectoryKind } from "./directory-ties.ts";
 import { subjectHashOf, subjectKeyVersion } from "./erased-people.ts";
+import { identityChanged } from "./identity-changes.ts";
 import { connectionOf } from "./onboarding/directory.ts";
 
 // The organization's directory, read once a day (GRA-2056, slice 1; the
@@ -519,6 +520,9 @@ const apply = async (
       claimed
     ),
   ]);
+  // Whom the read suspended now: signed out in its batch, their open
+  // connections close (identity-changes.ts).
+  identityChanged(env, await suspendedAt(env, startedAt));
   await tellKept(env, keptIn(results[1 + own.length + placing.revocation]));
 };
 

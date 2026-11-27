@@ -44,6 +44,8 @@ export interface UpstreamWatch {
    * gone or refused).
    */
   deliver: (frame: unknown) => Promise<void>;
+  /** The socket opened: the first time, or again after it closed. */
+  opened?: () => void;
   /** The object ended the watch for good, with this close code (`watchEnds`). */
   ended: (code: number) => void;
   /** What the first open's refusal is thrown as (the object answered no socket). */
@@ -183,6 +185,7 @@ export const followObject = async (
     opened.addEventListener("error", () => {
       lost(1006);
     });
+    watch.opened?.();
     return opened;
   };
 

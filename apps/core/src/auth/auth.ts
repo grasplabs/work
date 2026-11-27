@@ -63,6 +63,7 @@ import {
   isErasedSubject,
   subjectsOf,
 } from "../erased-people.ts";
+import { identityChanged } from "../identity-changes.ts";
 import { mayComeIn, memberMayBeIn, staffMayStay } from "../onboarding/gate.ts";
 import { onboardingStore } from "../onboarding/store.ts";
 import { keepSignInAddress } from "../source-readers.ts";
@@ -1360,6 +1361,16 @@ const createAuth = (
             }
           },
         },
+        // Signing out (and any other session Better Auth ends): the open
+        // connections of that person read their sessions again now, so
+        // the tab signed out of closes in their other tabs too
+        // (identity-changes.ts).
+        delete: {
+          // oxlint-disable-next-line require-await
+          after: async (session) => {
+            identityChanged(env, [session.userId]);
+          },
+        },
       },
     },
     hooks: {
@@ -1462,7 +1473,14 @@ const createAuth = (
               false
             );
           },
+          // Their teams are part of who they are: their open connections
+          // answer with the new ones from the next call (identity-changes.ts).
+          // oxlint-disable-next-line require-await
+          afterAddTeamMember: async ({ teamMember }) => {
+            identityChanged(env, [teamMember.userId]);
+          },
           afterRemoveTeamMember: async ({ teamMember }) => {
+            identityChanged(env, [teamMember.userId]);
             await teamAccessMayHaveDropped(env, teamMember.teamId, [
               teamMember.userId,
             ]);

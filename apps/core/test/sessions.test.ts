@@ -4,6 +4,8 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { workspace } from "../src/durable-objects.ts";
+import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import { sessionEndedCloseCode } from "../src/rpc.ts";
 import { recheckedEvery, sessionRecheckMs } from "../src/session-check.ts";
 import { mockIdp } from "./idp.ts";
@@ -18,6 +20,7 @@ import {
   outcome,
   routed,
   signedIn,
+  untilConnected,
   whoami,
 } from "./sign-in.ts";
 
@@ -119,92 +122,217 @@ describe("sessions end", () => {
       },
     },
     {
-      how: "signed out",
+      how: "signed out in another tab",
       end: async (phone: string) => {
         const signedOut = await callAuth("/sign-out", phone, {});
         return signedOut.ok;
       },
     },
   ])(
-    "on an open connection too, within a few seconds, when $how: its calls are refused, it closes, idle or not, and can't be opened again",
+    "on an open connection too, at once, when $how: it closes, busy or idle, its calls are refused, and it can't be opened again",
     async ({ end }) => {
       const person = entraPerson(acmeTenant);
       const laptop = await signedIn(idp, "microsoft", person);
       const phone = await signedIn(idp, "microsoft", person);
-      // Held from before the connections open, so their rechecks keep it.
-      // It goes on with real time too, so the close a refusal schedules
-      // comes on its own; only the window is skipped.
-      vi.useFakeTimers({
-        toFake: ["Date", "setTimeout", "clearTimeout"],
-        shouldAdvanceTime: true,
-      });
-      try {
-        const busy = await openRpc(phone);
-        const idle = await openRpc(phone);
-        using session = busy.core.authenticate();
-        // Read late in the first window (a second before its end, as real
-        // time moves the clock too): the busy connection's reading then
-        // holds most of a window past the idle one's.
-        await vi.advanceTimersByTimeAsync(sessionRecheckMs - 1000);
-        await expect(session.whoami()).resolves.toMatchObject({
-          email: person.email,
-        });
+      const busy = await openRpc(phone);
+      const idle = await openRpc(phone);
+      using session = busy.core.authenticate();
+      const { userId } = await session.whoami();
+      await untilConnected(userId, 2);
 
-        await expect(end(phone, laptop)).resolves.toBeTruthy();
-        await vi.advanceTimersByTimeAsync(sessionRecheckMs);
+      await expect(end(phone, laptop)).resolves.toBeTruthy();
 
-        // Both closed by their own recheck, without a call: within a window
-        // of the session ending, however late the last reading was.
-        await expect(
-          Promise.all([busy.closed, idle.closed])
-        ).resolves.toStrictEqual([
-          sessionEndedCloseCode,
-          sessionEndedCloseCode,
-        ]);
-        await expect(session.whoami()).rejects.toBeInstanceOf(Error);
-        await expect(outcome(whoami(phone))).resolves.toBe(
-          "auth.unauthenticated"
-        );
-      } finally {
-        vi.useRealTimers();
-      }
+      // Told by the person's object, not found by a timer: the clock stands
+      // still here, so no reading runs out.
+      await expect(
+        Promise.all([busy.closed, idle.closed])
+      ).resolves.toStrictEqual([sessionEndedCloseCode, sessionEndedCloseCode]);
+      await expect(session.whoami()).rejects.toBeInstanceOf(Error);
+      await expect(outcome(whoami(phone))).resolves.toBe(
+        "auth.unauthenticated"
+      );
     }
   );
 
-  it("close an open connection from its own request, even when another object's request runs its recheck", async () => {
-    const reads = { sessions: 0 };
-    const counted = { ...env, DB: countingSessionReads(env.DB, reads) };
+  it("reach nothing more on a connection whose telling was lost, once its reading is a few seconds old", async () => {
     const person = entraPerson(acmeTenant);
-    const laptop = await signedIn(idp, "microsoft", person);
     const phone = await signedIn(idp, "microsoft", person);
-    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
-    let connection: Awaited<ReturnType<typeof openRpc>>;
-    let readElsewhere: number;
+    const { userId } = await whoami(phone);
+    const connection = await openRpc(phone);
+    await untilConnected(userId, 1);
+    using session = connection.core.authenticate();
+    vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
     try {
-      connection = await openRpc(phone, { coreEnv: counted });
-      await endOtherSessions(laptop);
-      // The clock moves on inside another Durable Object's request, where
-      // the connection's recheck timer then runs: workerd refuses any I/O
-      // there on a socket another request opened.
-      const before = reads.sessions;
-      await runInDurableObject(
-        env.CHAT_STATE.getByName(crypto.randomUUID()),
-        async () => {
-          await vi.advanceTimersByTimeAsync(sessionRecheckMs);
-        }
-      );
-      readElsewhere = reads.sessions - before;
+      await session.whoami();
+      // Ended with nothing told, as a telling lost on its way.
+      await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?")
+        .bind(userId)
+        .run();
+      // Within its reading's window it still answers from that reading.
+      const within = await session.whoami();
+
+      vi.setSystemTime(Date.now() + sessionRecheckMs);
+
+      expect({
+        within,
+        after: await outcome(session.whoami()),
+        closed: await connection.closed,
+      }).toMatchObject({
+        within: { userId },
+        after: "auth.unauthenticated",
+        closed: sessionEndedCloseCode,
+      });
     } finally {
       vi.useRealTimers();
     }
-    expect(readElsewhere).toBe(0);
-    // Its next call, in the connection's own request, is refused and
-    // closes it.
-    using session = connection.core.authenticate();
-    await expect(outcome(session.whoami())).resolves.toBe(
-      "auth.unauthenticated"
+  });
+
+  it("reach nothing more on a connection told before its socket to the person's object opened", async () => {
+    const person = entraPerson(acmeTenant);
+    const phone = await signedIn(idp, "microsoft", person);
+    const { userId } = await whoami(phone);
+    await untilConnected(userId, 0);
+    // The person's object holds off the connection's socket while the
+    // connection reads, its session ends, and the telling finds no socket.
+    // Let go of by the test through memory they share (one isolate): the
+    // object waits on its own clock, as a promise of the test's wouldn't
+    // wake it.
+    const held = { now: true, started: false };
+    const holding = runInDurableObject(
+      workspace(env, personalWorkspaceId(userId)),
+      async (_instance, state) => {
+        await state.blockConcurrencyWhile(async () => {
+          held.started = true;
+          while (held.now) {
+            // oxlint-disable-next-line no-await-in-loop -- until let go of
+            await scheduler.wait(10);
+          }
+        });
+      }
     );
-    await expect(connection.closed).resolves.toBe(sessionEndedCloseCode);
+    await vi.waitFor(() => {
+      expect(held.started).toBeTruthy();
+    });
+    const connection = await openRpc(phone);
+    using session = connection.core.authenticate();
+    const before = await session.whoami();
+    await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?")
+      .bind(userId)
+      .run();
+    held.now = false;
+    await holding;
+    await untilConnected(userId, 1);
+
+    // Its reading came before the socket: read again, though it is young.
+    expect({
+      before,
+      after: await outcome(session.whoami()),
+      closed: await connection.closed,
+    }).toMatchObject({
+      before: { userId },
+      after: "auth.unauthenticated",
+      closed: sessionEndedCloseCode,
+    });
+  });
+
+  it("refuse a connection's calls while the database can't be read, without closing it, and answer once it can", async () => {
+    const person = entraPerson(acmeTenant);
+    const phone = await signedIn(idp, "microsoft", person);
+    const away = { now: false };
+    const flaky = {
+      ...env,
+      DB: new Proxy(env.DB, {
+        get: (target, property) => {
+          if (property === "prepare" && away.now) {
+            return () => {
+              throw new Error("D1 is away.");
+            };
+          }
+          const value: unknown = Reflect.get(target, property);
+          return typeof value === "function"
+            ? (...args: unknown[]): unknown =>
+                Reflect.apply(value, target, args)
+            : value;
+        },
+      }),
+    };
+    const connection = await openRpc(phone, { coreEnv: flaky });
+    using session = connection.core.authenticate();
+    const { userId } = await session.whoami();
+    await untilConnected(userId, 1);
+    vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+    try {
+      away.now = true;
+      vi.setSystemTime(Date.now() + sessionRecheckMs);
+      const refused = await outcome(session.whoami());
+      away.now = false;
+      const open = await Promise.race([
+        connection.closed.then(() => false),
+        scheduler.wait(200).then(() => true),
+      ]);
+
+      expect({
+        refused,
+        open,
+        after: await session.whoami(),
+      }).toMatchObject({
+        refused: "internal.unexpected",
+        open: true,
+        after: { userId },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("close an open connection as the session's own time runs out, with nothing told", async () => {
+    const person = entraPerson(acmeTenant);
+    vi.useFakeTimers({
+      toFake: ["Date", "setTimeout", "clearTimeout"],
+      shouldAdvanceTime: true,
+    });
+    try {
+      const phone = await signedIn(idp, "microsoft", person);
+      const connection = await openRpc(phone);
+      using session = connection.core.authenticate();
+      await session.whoami();
+
+      await vi.advanceTimersByTimeAsync(12 * hour);
+
+      await expect(connection.closed).resolves.toBe(sessionEndedCloseCode);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("are not read for an idle connection, however long it stays open", async () => {
+    const reads = { sessions: 0 };
+    const counted = { ...env, DB: countingSessionReads(env.DB, reads) };
+    const phone = await signedIn(idp, "microsoft", entraPerson(acmeTenant));
+    const { userId } = await whoami(phone);
+    vi.useFakeTimers({
+      toFake: ["Date", "setTimeout", "clearTimeout"],
+      shouldAdvanceTime: true,
+    });
+    try {
+      const { closed } = await openRpc(phone, { coreEnv: counted });
+      await untilConnected(userId, 1);
+      const opened = reads.sessions;
+      await vi.advanceTimersByTimeAsync(60 * sessionRecheckMs);
+      const later = reads.sessions;
+      const open = await Promise.race([
+        closed.then(() => false),
+        scheduler.wait(50).then(() => true),
+      ]);
+
+      expect({ opened, later, open }).toStrictEqual({
+        opened: 1,
+        later: 1,
+        open: true,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("are no longer read for a connection once it has closed, whatever happens to them later", async () => {

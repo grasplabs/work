@@ -9,12 +9,14 @@ import { routerSecretHeader } from "@grasp-os/shared/router";
 import type { CoreApi } from "@grasp-os/shared/rpc";
 import type { EndedSession } from "@grasp-os/shared/sign-in";
 import { newWebSocketRpcSession } from "capnweb";
-import { createExecutionContext } from "cloudflare:test";
+import { createExecutionContext, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { vi } from "vite-plus/test";
+import { expect, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { workspace } from "../src/durable-objects.ts";
 import worker from "../src/index.ts";
+import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import { sessionRecheckMs } from "../src/session-check.ts";
 import { eventsAfter, logHead } from "./audit-events.ts";
 import type { Claims, Idp } from "./idp.ts";
@@ -298,6 +300,25 @@ export const letSessionRecheckPass = (): Disposable => {
       vi.useRealTimers();
     },
   };
+};
+
+/**
+ * Waits until `count` connections of `userId`'s hold their socket to the
+ * person's object (person-connections.ts): what tells them their session
+ * may have ended.
+ */
+export const untilConnected = async (
+  userId: string,
+  count: number
+): Promise<void> => {
+  const object = workspace(env, personalWorkspaceId(userId));
+  await vi.waitFor(async () => {
+    const held = await runInDurableObject(
+      object,
+      (_instance, state) => state.getWebSockets("connection").length
+    );
+    expect(held).toBe(count);
+  });
 };
 
 /** Who the session behind `cookie` is, on a connection of its own. */

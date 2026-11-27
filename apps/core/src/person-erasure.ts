@@ -91,6 +91,7 @@ import {
   subjectsOf,
 } from "./erased-people.ts";
 import { dropHeldStarts } from "./held-starts.ts";
+import { identityChanged } from "./identity-changes.ts";
 import { eraseOnboardingAccount } from "./onboarding/new-brain.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 import type { ErasureAreaName } from "./person-erasure-inventory.ts";
@@ -321,6 +322,7 @@ const identity: ErasureStep = {
         )`
       ),
     ]);
+    identityChanged(env, [userId]);
   },
 };
 

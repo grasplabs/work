@@ -1,5 +1,6 @@
 import {
   authErrors,
+  internalErrors,
   isExpectedError,
   requestErrors,
   toOpaqueError,
@@ -12,8 +13,11 @@ import type { RpcAccountingLimits } from "@grasp-os/shared/rpc-accounting";
 import { RpcSession, WebSocketTransport } from "capnweb";
 
 import { oidcProviders, providerIds, signInConfig } from "./auth/config.ts";
+import { workspace } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
 import { connectionSession } from "./guest-access.ts";
+import { recheckFrameSchema } from "./person-connections.ts";
+import { personalWorkspaceId } from "./personal-workspace.ts";
 import {
   coreRpcAccounting,
   CoreRpcTarget,
@@ -22,6 +26,7 @@ import {
 } from "./rpc-target.ts";
 import { recheckedEvery, sessionRecheckMs } from "./session-check.ts";
 import { SessionRpc } from "./session-rpc.ts";
+import { followObject } from "./upstream.ts";
 
 /** What the frontend reaches over `/rpc`, signed in or not. */
 export class CoreRpc extends CoreRpcTarget implements CoreApi {
@@ -99,20 +104,57 @@ interface ConnectionSession {
   connectedAs: Identity;
   /** The session the cookie held: the same for as long as the connection is open. */
   sessionId: string;
+  /** When that session ends. */
+  expiresAt: Date;
 }
 
 /**
+ * When a connection's session ends by itself: the session's end, or a
+ * staff session's window closing first.
+ */
+const endsAt = (env: Env, person: Identity, expiresAt: Date): number => {
+  const until = person.staff
+    ? Date.parse(signInConfig(env)?.staff?.until ?? "")
+    : Number.NaN;
+  return Number.isNaN(until)
+    ? expiresAt.getTime()
+    : Math.min(until, expiresAt.getTime());
+};
+
+/**
  * The signed-in API of one connection. Its check is the one place that
- * reads who is behind the connection: at most every `sessionRecheckMs`,
- * shared by every call and every push meanwhile, and on a timer as often,
- * so an idle connection doesn't stay open on an ended session either.
- * Once the session no longer holds (revoked, expired, removed from the
- * organization, staff window closed), it refuses and closes the
- * connection. What each call may do (its role, its App) is still checked
- * by the call, against the identity this hands it.
+ * reads who is behind the connection, and it reads only when asked: by a
+ * call, or by a push about to reach the page, once the latest reading is
+ * older than `sessionRecheckMs`, shared by every call and push meanwhile.
+ * An idle connection reads nothing. Once the session no longer holds
+ * (revoked, expired, removed from the organization, staff window closed),
+ * it refuses and closes the connection. What each call may do (its role,
+ * its App) is still checked by the call, against the identity this hands
+ * it.
+ *
+ * Whatever ends the session or changes who they are tells their object
+ * (identity-changes.ts), which tells this connection over its socket to
+ * the object (person-connections.ts): it reads at once, so a signed-out or
+ * removed person's tab closes within about a second, idle or not, and a
+ * new role or team holds from the next call. The session's own end needs
+ * no telling: a timer closes the connection then. Threat model, and how
+ * each is closed:
+ *
+ * - A telling lost on its way (the object out of reach, the writer gone
+ *   after its commit): nothing more reaches the page, call or push,
+ *   without a reading at most `sessionRecheckMs` old, as before tellings.
+ * - A telling sent before the connection's socket to the object opened (a
+ *   revocation just after the upgrade read the session), or while it was
+ *   down: every reading taken before the socket opened (again) is dropped
+ *   then, so the next call or push reads anew.
+ * - The database away for a moment: the reading fails, which refuses the
+ *   call or holds the push, and is read again at the next; it never
+ *   counts as signed out, and never lets anything through unread.
+ * - A telling forged, late or twice: it only makes the connection read;
+ *   its own session decides.
  */
 const sessionApi = (
-  { env, headers, connectedAs, sessionId }: ConnectionSession,
+  { env, headers, connectedAs, sessionId, expiresAt }: ConnectionSession,
   server: WebSocket
 ): SessionRpc => {
   /**
@@ -134,37 +176,9 @@ const sessionApi = (
       server.close(sessionEndedCloseCode, "Session ended");
     }
   };
-  let ended = false;
-  let recheck: ReturnType<typeof setTimeout> | undefined;
-  /**
-   * Has the timer read again as the latest reading runs out, whether or
-   * not a call asks first: so an ended session closes the connection
-   * within one window, used or idle, and a busy connection still reads
-   * once a window. The timer goes with the connection.
-   */
-  const recheckWhenDue = (run: () => Promise<void>): void => {
-    clearTimeout(recheck);
-    if (!ended) {
-      recheck = setTimeout(() => {
-        if (!ended && openHere()) {
-          void run();
-        }
-      }, sessionRecheckMs);
-    }
-  };
-  const checkQuietly = async (): Promise<void> => {
-    try {
-      // oxlint-disable-next-line no-use-before-define -- the check and its timer start each other; this runs only once both exist
-      await check();
-    } catch {
-      // An ended session has closed the connection; a reading that failed
-      // is made again at the next tick or call.
-    }
-  };
   const check = recheckedEvery(
     sessionRecheckMs,
     async (): Promise<Identity> => {
-      recheckWhenDue(checkQuietly);
       // A guest's too: each namespace answers them as nobody but for
       // what guest-access.ts opens to them (session-rpc.ts).
       const signedIn = await connectionSession(env, headers);
@@ -177,12 +191,64 @@ const sessionApi = (
       return identity;
     }
   );
-  // The upgrade has just read the session: the next reading is due a
-  // window on.
-  recheckWhenDue(checkQuietly);
+  /** Reads the session now: told to, or closes the connection if it ended. */
+  const readNow = async (): Promise<void> => {
+    check.forget();
+    try {
+      await check();
+    } catch {
+      // An ended session has closed the connection; a reading that failed
+      // is made again at the next call or push.
+    }
+  };
+  // The session's own end, which nothing tells.
+  const expiry = setTimeout(
+    close,
+    endsAt(env, connectedAs, expiresAt) - Date.now()
+  );
+  let closed = false;
+  let following: Disposable | undefined;
+  const follow = async (): Promise<void> => {
+    try {
+      const followed = await followObject({
+        open: async () =>
+          await workspace(env, personalWorkspaceId(connectedAs.userId)).fetch(
+            `https://person/connection?${new URLSearchParams({ person: connectedAs.userId }).toString()}`,
+            { headers: { Upgrade: "websocket" } }
+          ),
+        deliver: async (frame) => {
+          if (recheckFrameSchema.safeParse(frame).success) {
+            await readNow();
+          }
+        },
+        // A telling may have come before the socket was there: whatever was
+        // read until now is read again when it is next needed.
+        opened: () => {
+          check.forget();
+        },
+        ended: () => {
+          // Let go of past the object's bound: this connection reads its
+          // session as often as any, without the telling's speed.
+        },
+        refused: () => internalErrors.create("internal.unexpected"),
+        logged: { purpose: "connection" },
+      });
+      if (closed) {
+        followed[Symbol.dispose]();
+        return;
+      }
+      following = followed;
+    } catch (error) {
+      // Without it the connection still reads its session before every
+      // call and push; only the telling's speed is lost.
+      log.warn("rpc.person_unfollowed", errorFields(error));
+    }
+  };
+  void follow();
   const end = (): void => {
-    ended = true;
-    clearTimeout(recheck);
+    closed = true;
+    clearTimeout(expiry);
+    following?.[Symbol.dispose]();
   };
   server.addEventListener("close", end);
   server.addEventListener("error", end);
@@ -209,6 +275,7 @@ const browserConnection = async (
           headers,
           connectedAs: signedIn.person,
           sessionId: signedIn.sessionId,
+          expiresAt: signedIn.expiresAt,
         },
         server
       )
@@ -291,8 +358,9 @@ export const serveRpc = (
  * invocation for as long as the socket is open; hibernation applies once RPC
  * is routed to a Durable Object.
  *
- * The session cookie is checked when the connection opens, and again every
- * few seconds for as long as it is open (`sessionApi`).
+ * The session cookie is checked when the connection opens, and again
+ * before a call or a push once that reading is a few seconds old, or at
+ * once when the person's object says it may have ended (`sessionApi`).
  */
 export const rpcResponse = async (
   request: Request,

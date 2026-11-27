@@ -221,6 +221,12 @@ import type { InstructionContext } from "./instruction-files.ts";
 import { chatTurnPurpose } from "./model-spend.ts";
 import { modelSettings, models } from "./models.ts";
 import type { OutsideTextNote } from "./outside-text.ts";
+import {
+  acceptConnection,
+  connectionClosed,
+  connectionSpoke,
+  recheckConnections,
+} from "./person-connections.ts";
 import type { WorkContext } from "./restricted.ts";
 import { outsideReadOf } from "./ungranted-reads.ts";
 import { retireUnseen } from "./unseen-memories.ts";
@@ -6516,6 +6522,37 @@ export class Workspace extends DurableObject<Env> {
       )
       .toArray();
     return row?.chars ?? 0;
+  }
+
+  /**
+   * A connection of the person's opens its socket to their object
+   * (person-connections.ts): what tells it to read its session again.
+   */
+  override fetch(request: Request): Response {
+    return acceptConnection(
+      this.ctx,
+      request,
+      new URL(request.url).searchParams.get("person") ?? ""
+    );
+  }
+
+  /**
+   * The person's session or who they are may have changed (signed out,
+   * removed, a new role or team; identity-changes.ts): every connection of
+   * theirs reads its session again now.
+   */
+  identityChanged(): void {
+    recheckConnections(this.ctx);
+  }
+
+  // oxlint-disable-next-line class-methods-use-this -- the Hibernation API's handler
+  override webSocketMessage(socket: WebSocket): void {
+    connectionSpoke(socket);
+  }
+
+  // oxlint-disable-next-line class-methods-use-this -- the Hibernation API's handler
+  override webSocketClose(socket: WebSocket, code: number): void {
+    connectionClosed(socket, code);
   }
 
   #transcript(chatId: ChatId): Message[] {

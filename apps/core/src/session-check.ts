@@ -58,11 +58,22 @@ export const fullAccess = (check: SessionCheck): SessionCheck =>
   );
 
 /**
- * How long one reading of who is behind a connection holds. It is read
- * again at most this often, whatever the connection does (rpc.ts): a
- * revoked or expired session, a removal, a changed role or team, or a
- * closed staff window reaches an open connection within this long, its
- * calls and what is pushed to it alike. A new connection always reads now.
+ * How long one reading of who is behind a connection holds: a call, or a
+ * push about to reach the page, reads again once the latest reading is
+ * older than this, and nothing reads on a timer (rpc.ts). So a revoked or
+ * expired session, a removal, a changed role or team, or a closed staff
+ * window reaches whatever a connection still asks or is sent within this
+ * long, even when the telling that makes it about a second
+ * (identity-changes.ts) is lost; an idle connection reads nothing, and the
+ * database's load follows the connections that are in use.
+ *
+ * What it costs: at most one reading (about four queries) per five seconds
+ * per connection in use. A streaming answer is in use; a tab left open is
+ * not. Raise it only with a measurement that shows tellings arrive (a
+ * staging count of `identity.untold` against revocations made) and that
+ * these readings weigh on the database (D1's queries per second); the
+ * bound it gives is the most a lost telling lets a person keep getting.
+ * A new connection always reads now.
  */
 export const sessionRecheckMs = 5000;
 
