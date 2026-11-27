@@ -1,22 +1,40 @@
-import { Avatar, AvatarFallback } from "@grasp-os/app-kit/components/avatar";
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@grasp-os/app-kit/components/tabs";
 import { CONTACT_ROLES } from "@grasp-os/shared/admin/onboarding-admin";
 import type { ContactRole } from "@grasp-os/shared/admin/onboarding-admin";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { MailIcon, UserIcon } from "lucide-react";
+import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+} from "@grasp-os/ui/components/empty";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { KeyValueList } from "@grasp-os/ui/components/key-value";
+import { Link } from "@grasp-os/ui/components/link";
+import {
+  Section as Part,
+  SectionHeader,
+} from "@grasp-os/ui/components/section-header";
+import { TabsLink, TabsNav } from "@grasp-os/ui/components/tabs";
+import { Text } from "@grasp-os/ui/components/text";
+import { CircleUserIcon, Icon, MailIcon } from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
+import { createFileRoute, Link as RouterLink } from "@tanstack/react-router";
+import type { ReactNode } from "react";
 
 import { AttioLink } from "../../../admin/attio-link.tsx";
 import { OrgContract } from "../../../admin/org-contract.tsx";
 import { OrgMembers } from "../../../admin/org-members.tsx";
 import { useOrganization } from "../../../admin/organization.tsx";
-import { Section } from "../../../admin/section.tsx";
 import { sourceNames } from "../../../admin/sections.ts";
 import {
   addSecretStep,
@@ -28,18 +46,24 @@ import type { AttioReadError } from "../../../crm/attio.ts";
 import type { Crm, CrmDeal, CrmRecords } from "../../../crm/crm.ts";
 
 /**
- * An organization's Details, as the prototype has them
- * (grasplabs/prototype `components/admin/org-details.tsx` and the Attio
- * panel of `source-panels.tsx`): who Grasp deals with there, one for each
- * thing, the company as Grasp's Attio has it with its people and deals,
- * the calls with it, and its papers. Its contract and its members are
- * tabs beside them (org-contract.tsx, org-members.tsx).
+ * An organization's Details, set on the page as Grasp Work sets one, its
+ * tab in the address: who Grasp deals with there, one for each thing, the
+ * company as Grasp's Attio has it with its people and deals, the calls
+ * with it, and its papers. Its contract and its members are tabs beside
+ * them (org-contract.tsx, org-members.tsx).
  *
- * Read only: the prototype corrects the papers and the contacts here, but
- * the company's own Grasp takes nothing from the admin yet, so nothing
- * here can be changed. Where the model has nothing, because core doesn't
- * hold it yet, each part says so rather than show anything made up.
+ * Read only but for linking it in Attio: the company's own Grasp takes
+ * nothing from the admin yet, so its papers and contacts can't be changed
+ * here. Where the model has nothing, because core doesn't hold it yet,
+ * each part says so rather than show anything made up.
  */
+
+const styles = stylex.create({
+  // The tabs, then the tab's parts a step further apart than the lines within each.
+  page: { display: "flex", flexDirection: "column", gap: space["8"] },
+  parts: { display: "flex", flexDirection: "column", gap: space["10"] },
+  part: { display: "flex", flexDirection: "column", gap: space["6"] },
+});
 
 /** Each contact by what they are there for, and what that is. */
 const contactWords: Record<ContactRole, { label: string; what: string }> = {
@@ -55,93 +79,110 @@ const contactWords: Record<ContactRole, { label: string; what: string }> = {
   },
 };
 
-/** "Eva Bakker" becomes "EB"; lowercase particles such as "de" are skipped. */
-const initialsOf = (name: string): string =>
-  name
-    .split(" ")
-    .filter(
-      (part) => part !== "" && part.startsWith(part.charAt(0).toUpperCase())
-    )
-    .map((part) => part.charAt(0))
-    .slice(0, 2)
-    .join("") || name.charAt(0).toUpperCase();
-
-/** What the company does and where, once that is known: a line, no card of its own. */
+/** What the company does and where, once that is known: a line, no part of its own. */
 const About = () => {
   const { org } = useOrganization().view;
   const about = [org.about, org.place]
     .filter((part) => part !== "")
     .join(" · ");
-  return about === "" ? null : <p className="text-muted-foreground">{about}</p>;
+  return about === "" ? null : <Text color="muted">{about}</Text>;
 };
+
+/** A part of the page: its title, a line under it and its source, over what it holds. */
+const DetailsPart = ({
+  id,
+  title,
+  description,
+  source,
+  children,
+}: {
+  id: string;
+  title: string;
+  description: string;
+  /** The outside system it comes from, beside its title. */
+  source?: string;
+  children: ReactNode;
+}) => (
+  <Part aria-labelledby={id}>
+    <SectionHeader
+      badge={
+        source === undefined ? undefined : (
+          <Badge variant="outline">{source}</Badge>
+        )
+      }
+      description={description}
+      id={id}
+      size="sm"
+      title={title}
+      variant="group"
+    />
+    <div {...stylex.props(styles.part)}>{children}</div>
+  </Part>
+);
+
+/** A line in a part, for what it has none of yet. */
+const Quiet = ({ children }: { children: ReactNode }) => (
+  <Empty align="start" size="sm">
+    <EmptyHeader>
+      <EmptyDescription>{children}</EmptyDescription>
+    </EmptyHeader>
+  </Empty>
+);
 
 /** Who Grasp deals with there: one person for each thing, or what that one is for. */
 const Contacts = () => {
   const { view } = useOrganization();
   return (
-    <Section
+    <DetailsPart
       description="One person for each thing. The interviews are with everyone else, and never show here."
+      id="contacts"
       title="Who Grasp deals with"
     >
-      <ul className="bg-border grid gap-px border-t sm:grid-cols-2">
+      <ItemGroup aria-labelledby="contacts" separated>
         {CONTACT_ROLES.map((role) => {
           const contact = view.contacts[role];
           const { label, what } = contactWords[role];
           return (
-            <li
-              className="bg-card flex items-start justify-between gap-3 px-5 py-3.5"
-              key={role}
-            >
-              <div className="flex min-w-0 items-start gap-3">
+            <Item key={role}>
+              <ItemMedia>
                 {contact ? (
-                  <Avatar>
-                    <AvatarFallback>{initialsOf(contact.name)}</AvatarFallback>
+                  <Avatar decorative name={contact.name}>
+                    <AvatarFallback />
                   </Avatar>
                 ) : (
                   // Nobody yet: a quiet place for a person, never an outline that reads as something that failed to load.
-                  <span
-                    aria-hidden
-                    className="bg-muted text-muted-foreground flex size-8 flex-none items-center justify-center rounded-full"
-                  >
-                    <UserIcon className="size-4" />
-                  </span>
+                  <Icon icon={CircleUserIcon} />
                 )}
-                <div className="flex min-w-0 flex-col">
-                  <span className="text-muted-foreground text-xs">{label}</span>
-                  {contact ? (
-                    <>
-                      <span className="truncate">{contact.name}</span>
-                      <span className="text-muted-foreground truncate text-xs">
-                        {[contact.title, contact.email]
-                          .filter((part) => part !== "")
-                          .join(" · ")}
-                      </span>
-                    </>
-                  ) : (
-                    <span className="text-muted-foreground">{what}</span>
-                  )}
-                </div>
-              </div>
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>{contact ? contact.name : label}</ItemTitle>
+                <ItemDescription>
+                  {contact
+                    ? [label, contact.title, contact.email]
+                        .filter((part) => part !== "")
+                        .join(" · ")
+                    : what}
+                </ItemDescription>
+              </ItemContent>
               {contact && contact.email !== "" ? (
-                <Button
-                  nativeButton={false}
-                  render={
-                    <a
-                      aria-label={`Write to ${contact.name}`}
-                      href={`mailto:${contact.email}`}
-                    />
-                  }
-                  size="icon-sm"
-                  variant="outline"
-                >
-                  <MailIcon />
-                </Button>
+                <ItemActions>
+                  <Button
+                    aria-label={`Write to ${contact.name}`}
+                    asChild
+                    size="icon-sm"
+                    variant="outline"
+                  >
+                    <a href={`mailto:${contact.email}`}>
+                      <Icon icon={MailIcon} />
+                    </a>
+                  </Button>
+                </ItemActions>
               ) : null}
-            </li>
+            </Item>
           );
         })}
-      </ul>
-    </Section>
+      </ItemGroup>
+    </DetailsPart>
   );
 };
 
@@ -188,50 +229,46 @@ const Calls = () => {
   const deal = records === null ? undefined : mainDeal(records.deals);
   const fromNotes = records?.calls?.from === "notes";
   return (
-    <Section
+    <DetailsPart
       description={
         fromNotes
           ? "Every call with the company, from its notes in Attio."
           : "Every call with the company, with who was in it."
       }
-      action={<Badge variant="outline">{sourceNames.attio}</Badge>}
+      id="calls"
+      source={sourceNames.attio}
       title="Calls"
     >
       {deal === undefined ? null : (
-        <p className="text-muted-foreground border-t px-5 py-3">
+        <Text color="muted" size="sm">
           {[deal.name, deal.stage?.title ?? "", deal.owner ?? ""]
             .filter((part) => part !== "")
             .join(" · ")}
-        </p>
+        </Text>
       )}
       {calls.length === 0 ? (
-        <p className="text-muted-foreground border-t px-5 py-3">
-          {noCallsLine(crm)}
-        </p>
+        <Quiet>{noCallsLine(crm)}</Quiet>
       ) : (
-        <ul className="flex flex-col">
+        <ItemGroup aria-labelledby="calls" separated>
           {calls.map((call, index) => (
-            <li
-              className="grid grid-cols-1 gap-x-6 gap-y-0.5 border-t px-5 py-3 sm:grid-cols-[8rem_minmax(0,1fr)]"
+            <Item
               // Two calls can share a day and a title; their order is the newest first.
               key={`${call.on}-${call.title}-${index}`}
+              size="sm"
             >
-              <span className="text-muted-foreground tabular-nums">
-                {formatDate(call.on)}
-              </span>
-              <span className="flex min-w-0 flex-col">
-                <span>{call.title || "A call with no title"}</span>
-                {call.with.length === 0 ? null : (
-                  <span className="text-muted-foreground text-xs">
-                    {`With ${formatList(call.with)}`}
-                  </span>
-                )}
-              </span>
-            </li>
+              <ItemContent>
+                <ItemTitle>{call.title || "A call with no title"}</ItemTitle>
+                <ItemDescription>
+                  {call.with.length === 0
+                    ? formatDate(call.on)
+                    : `${formatDate(call.on)} · With ${formatList(call.with)}`}
+                </ItemDescription>
+              </ItemContent>
+            </Item>
           ))}
-        </ul>
+        </ItemGroup>
       )}
-    </Section>
+    </DetailsPart>
   );
 };
 
@@ -265,16 +302,6 @@ const crmLine = (crm: Crm): string => {
   }
 };
 
-/** One line of what Attio says: its label, and what stands there. */
-const CrmLine = ({ label, value }: { label: string; value: string }) => (
-  <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t px-5 py-3">
-    <dt className="text-muted-foreground">{label}</dt>
-    <dd className={value === "" ? "text-muted-foreground" : undefined}>
-      {value === "" ? "Not known" : value}
-    </dd>
-  </div>
-);
-
 /** A deal in a line: its stage, what it is worth, and who owns it. */
 const dealWords = (deal: CrmDeal): string =>
   [
@@ -287,75 +314,87 @@ const dealWords = (deal: CrmDeal): string =>
     .filter((part) => part !== "")
     .join(" · ");
 
+/** A name or line of Attio's, or that it says none. */
+const knownOr = (value: string): string => (value === "" ? "Not known" : value);
+
 /** What Attio says of the company: its record, its deals and its people. */
 const CrmRecordLines = ({ records }: { records: CrmRecords }) => {
   const { company, deals, people } = records;
   return (
     <>
-      <dl>
-        <CrmLine label="Name in Attio" value={company.name ?? ""} />
-        <CrmLine label="Domains" value={formatList(company.domains)} />
-        <CrmLine label="Categories" value={formatList(company.categories)} />
-        <CrmLine label="Employees" value={company.employeeRange ?? ""} />
-      </dl>
+      <KeyValueList
+        divided
+        items={[
+          {
+            id: "name",
+            label: "Name in Attio",
+            value: knownOr(company.name ?? ""),
+          },
+          {
+            id: "domains",
+            label: "Domains",
+            value: knownOr(formatList(company.domains)),
+          },
+          {
+            id: "categories",
+            label: "Categories",
+            value: knownOr(formatList(company.categories)),
+          },
+          {
+            id: "employees",
+            label: "Employees",
+            value: knownOr(company.employeeRange ?? ""),
+          },
+        ]}
+        orientation="horizontal"
+      />
       {company.url === null ? null : (
-        <p className="border-t px-5 py-3">
-          <a
-            className="hover:text-foreground underline underline-offset-4"
-            href={company.url}
-            rel="noreferrer"
-            target="_blank"
-          >
+        <Text size="sm">
+          <Link external href={company.url}>
             Open it in Attio
-          </a>
-        </p>
+          </Link>
+        </Text>
       )}
-      <h3 className="text-muted-foreground border-t px-5 pt-3 pb-1 text-xs">
-        Deals
-      </h3>
-      {deals.length === 0 ? (
-        <p className="text-muted-foreground px-5 pb-3">None in Attio.</p>
-      ) : (
-        <ul className="flex flex-col">
-          {deals.map((deal, index) => (
-            <li
-              className="flex flex-wrap items-baseline justify-between gap-x-6 px-5 py-2"
+      <Part aria-labelledby="deals">
+        <SectionHeader id="deals" size="sm" title="Deals" variant="group" />
+        {deals.length === 0 ? (
+          <Quiet>None in Attio.</Quiet>
+        ) : (
+          <ItemGroup aria-labelledby="deals" separated>
+            {deals.map((deal, index) => (
               // Two deals can share a name; their order is Attio's.
-              key={`${deal.name}-${index}`}
-            >
-              <span className="truncate">
-                {deal.name || "A deal with no name"}
-              </span>
-              <span className="text-muted-foreground text-xs">
-                {dealWords(deal)}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-      <h3 className="text-muted-foreground border-t px-5 pt-3 pb-1 text-xs">
-        People
-      </h3>
-      {people.length === 0 ? (
-        <p className="text-muted-foreground px-5 pb-3">None in Attio.</p>
-      ) : (
-        <ul className="flex flex-col">
-          {people.map((person, index) => (
-            <li
-              className="flex flex-wrap items-baseline justify-between gap-x-6 px-5 py-2"
+              <Item key={`${deal.name}-${index}`} size="sm">
+                <ItemContent>
+                  <ItemTitle>{deal.name || "A deal with no name"}</ItemTitle>
+                  <ItemDescription>{dealWords(deal)}</ItemDescription>
+                </ItemContent>
+              </Item>
+            ))}
+          </ItemGroup>
+        )}
+      </Part>
+      <Part aria-labelledby="people">
+        <SectionHeader id="people" size="sm" title="People" variant="group" />
+        {people.length === 0 ? (
+          <Quiet>None in Attio.</Quiet>
+        ) : (
+          <ItemGroup aria-labelledby="people" separated>
+            {people.map((person, index) => (
               // Two people can share a name.
-              key={`${person.name}-${index}`}
-            >
-              <span className="truncate">{person.name || "No name"}</span>
-              <span className="text-muted-foreground truncate text-xs">
-                {[person.title, person.email]
-                  .filter((part) => part !== "")
-                  .join(" · ")}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
+              <Item key={`${person.name}-${index}`} size="sm">
+                <ItemContent>
+                  <ItemTitle>{person.name || "No name"}</ItemTitle>
+                  <ItemDescription>
+                    {[person.title, person.email]
+                      .filter((part) => part !== "")
+                      .join(" · ")}
+                  </ItemDescription>
+                </ItemContent>
+              </Item>
+            ))}
+          </ItemGroup>
+        )}
+      </Part>
     </>
   );
 };
@@ -370,70 +409,55 @@ const CrmPart = () => {
   const { crm } = admin;
   const recordId = crm.state === "not_linked" ? null : crm.recordId;
   return (
-    <Section
+    <DetailsPart
       description={crmLine(crm)}
-      action={<Badge variant="outline">{sourceNames.attio}</Badge>}
+      id="crm"
+      source={sourceNames.attio}
       title="In the CRM"
     >
       {crm.state === "read" ? <CrmRecordLines records={crm.records} /> : null}
       <AttioLink clientId={admin.client.id} recordId={recordId} />
-    </Section>
+    </DetailsPart>
   );
 };
 
-/** One line of the papers: what it is, and what stands there, or that nothing does yet. */
-const Paper = ({
-  label,
-  value,
-  wide = false,
-}: {
-  label: string;
-  value: string | string[];
-  wide?: boolean;
-}) => {
+/** One line of the papers, or that nothing stands there yet; an address's lines one after the other. */
+const paperOf = (label: string, value: string | string[]) => {
   const lines = (typeof value === "string" ? [value] : value).filter(
     (line) => line !== ""
   );
-  return (
-    <div
-      className={
-        wide ? "flex flex-col gap-1 sm:col-span-2" : "flex flex-col gap-1"
-      }
-    >
-      <dt className="text-muted-foreground text-xs">{label}</dt>
-      <dd className={lines.length === 0 ? "text-muted-foreground" : undefined}>
-        {lines.length === 0
-          ? "Not known yet"
-          : lines.map((line) => (
-              <span className="block" key={line}>
-                {line}
-              </span>
-            ))}
-      </dd>
-    </div>
-  );
+  return {
+    id: label,
+    label,
+    value: lines.length === 0 ? "Not known yet" : lines.join(", "),
+  };
 };
 
 /** Its papers: as it stands on the contract and on every invoice. */
 const Papers = () => {
   const { company, unknown } = useOrganization().view;
   return (
-    <Section
+    <DetailsPart
       description="As it stands on the contract and on every invoice."
+      id="papers"
       title="Its papers"
     >
-      <dl className="grid gap-5 border-t px-5 py-5 sm:grid-cols-2">
-        {/* Without a contract, the model's name for it is only the company's own. */}
-        <Paper
-          label="Name on the contract"
-          value={unknown.contract ? "" : company.legalName}
-        />
-        <Paper label="Website" value={company.url} />
-        <Paper label="Company register number" value={company.register} />
-        <Paper label="VAT number" value={company.vat} />
-        <Paper label="Address" value={company.address} wide />
-      </dl>
-    </Section>
+      <KeyValueList
+        divided
+        items={[
+          // Without a contract, the model's name for it is only the company's own.
+          paperOf(
+            "Name on the contract",
+            unknown.contract ? "" : company.legalName
+          ),
+          paperOf("Website", company.url),
+          paperOf("Company register number", company.register),
+          paperOf("VAT number", company.vat),
+          paperOf("Address", company.address),
+        ]}
+        orientation="horizontal"
+      />
+    </DetailsPart>
   );
 };
 
@@ -451,47 +475,54 @@ interface DetailsSearch {
   tab?: Exclude<DetailTab, "details">;
 }
 
+/** One tab: a link to the Details with its search, as each tab has its own address. */
+const TabLink = ({
+  clientId,
+  tab,
+  current,
+}: {
+  clientId: string;
+  tab: DetailTab;
+  current: boolean;
+}) => (
+  <TabsLink asChild current={current}>
+    <RouterLink
+      params={{ clientId }}
+      search={tab === "details" ? {} : { tab }}
+      to="/organizations/$clientId/details"
+    >
+      {tabWords[tab]}
+    </RouterLink>
+  </TabsLink>
+);
+
 const Details = () => {
   const { tab = "details" } = Route.useSearch();
-  const navigate = useNavigate({ from: Route.fullPath });
+  const { clientId } = Route.useParams();
   return (
-    <Tabs
-      onValueChange={(value: string) => {
-        const chosen = detailTabs.find((each) => each === value);
-        void navigate({
-          search:
-            chosen === undefined || chosen === "details" ? {} : { tab: chosen },
-        });
-      }}
-      value={tab}
-    >
-      <TabsList aria-label="Details" variant="line">
+    <div {...stylex.props(styles.page)}>
+      <TabsNav aria-label="Details" variant="line">
         {detailTabs.map((each) => (
-          <TabsTrigger className="flex-none" key={each} value={each}>
-            {tabWords[each]}
-          </TabsTrigger>
+          <TabLink
+            clientId={clientId}
+            current={each === tab}
+            key={each}
+            tab={each}
+          />
         ))}
-      </TabsList>
-      <TabsContent value="details">
-        <div className="mt-4 flex flex-col gap-6">
+      </TabsNav>
+      {tab === "details" ? (
+        <div {...stylex.props(styles.parts)}>
           <About />
           <Contacts />
           <CrmPart />
           <Calls />
           <Papers />
         </div>
-      </TabsContent>
-      <TabsContent value="contract">
-        <div className="mt-4 flex flex-col gap-6">
-          <OrgContract />
-        </div>
-      </TabsContent>
-      <TabsContent value="members">
-        <div className="mt-4 flex flex-col gap-6">
-          <OrgMembers />
-        </div>
-      </TabsContent>
-    </Tabs>
+      ) : null}
+      {tab === "contract" ? <OrgContract /> : null}
+      {tab === "members" ? <OrgMembers /> : null}
+    </div>
   );
 };
 

@@ -1,11 +1,40 @@
-import { Avatar, AvatarFallback } from "@grasp-os/app-kit/components/avatar";
+/**
+ * Everyone in the company's platform, a tab of its Details, as Grasp Work
+ * lists people: how many seats are taken and where its members stand in a
+ * few figures, then each member a row (a card on a phone) with their
+ * email, where they stand and their role; a row writes to them.
+ *
+ * Core sends its members once they made their account, so nobody here
+ * is still invited, and it doesn't say which of them is Grasp's own
+ * staff. Nor are the prototype's invitation, role change and taking
+ * access away here: the admin can't do those in a company's Grasp.
+ */
 import type { MemberView } from "@grasp-os/shared/admin/admin-account";
 import type { MemberRole } from "@grasp-os/shared/admin/onboarding-admin";
-import { MailIcon } from "lucide-react";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@grasp-os/ui/components/empty";
+import {
+  Section as Part,
+  SectionHeader,
+} from "@grasp-os/ui/components/section-header";
+import { Stat, StatGroup } from "@grasp-os/ui/components/stat";
+import { UsersIcon } from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 
+import { DataRows } from "./data-rows.tsx";
+import type { DataColumn, RowLook } from "./data-rows.tsx";
 import { useOrganization } from "./organization.tsx";
-import { Section } from "./section.tsx";
-import { formatDate } from "./words.ts";
+import { formatDate, plural } from "./words.ts";
+
+const styles = stylex.create({
+  parts: { display: "flex", flexDirection: "column", gap: space["10"] },
+});
 
 /** A role in the platform, as the company's own Members page says it. */
 const roleWords: Record<MemberRole, string> = {
@@ -36,92 +65,106 @@ const standsLine = (member: MemberView): string => {
     : `In since ${joined}, last in on ${formatDate(member.seen)}`;
 };
 
-/** A capitalised name's first letters, at most two: "Anna de Vries" is "AV". */
-const initialsOf = (name: string): string =>
-  name
-    .split(" ")
-    .map((part) => part.charAt(0))
-    .filter((first) => first !== "" && first === first.toUpperCase())
-    .slice(0, 2)
-    .join("");
+/** A member by name, or by their email while they have none. */
+const nameOf = (member: MemberView): string =>
+  member.name === "" ? member.email : member.name;
 
-/** One member a row: who they are, where they stand, and their role; on a narrow screen, under each other. */
-const MemberRow = ({ member }: { member: MemberView }) => {
-  const name = member.name === "" ? member.email : member.name;
-  const gone = member.state === "removed";
-  const under = [member.name === "" ? "" : member.email, member.title]
+/** Their email under a name, with their title; nothing for someone known by their email alone. */
+const aboutOf = (member: MemberView): string | null => {
+  const about = [member.name === "" ? "" : member.email, member.title]
     .filter((part) => part !== "")
     .join(" · ");
-  return (
-    <li className="flex flex-col gap-x-4 gap-y-2 border-t px-5 py-3 @2xl:flex-row @2xl:items-center">
-      <span className="flex min-w-0 flex-1 items-center gap-3">
-        <Avatar>
-          <AvatarFallback>
-            {/* Someone known only by their email has no initials to show. */}
-            {member.name === "" ? <MailIcon aria-hidden /> : initialsOf(name)}
-          </AvatarFallback>
-        </Avatar>
-        <span className="flex min-w-0 flex-col">
-          <span
-            className={
-              gone
-                ? "text-muted-foreground decoration-border truncate line-through"
-                : "truncate"
-            }
-          >
-            {name}
-          </span>
-          {under === "" ? null : (
-            <span className="text-muted-foreground truncate text-xs">
-              {under}
-            </span>
-          )}
-        </span>
-      </span>
-      <span className="text-muted-foreground min-w-0 @2xl:w-56 @2xl:flex-none @5xl:w-72">
-        {standsLine(member)}
-      </span>
-      <span className="@2xl:w-24 @2xl:flex-none @2xl:text-right">
-        <span className="sr-only">Role: </span>
-        {roleWords[member.role]}
-      </span>
-    </li>
-  );
+  return about === "" ? null : about;
 };
 
-/**
- * Everyone in the company's platform, as the prototype shows them
- * (grasplabs/prototype `components/admin/org-members.tsx`), a tab of its
- * Details: how many seats are taken, then each member with where they
- * stand and their role.
- *
- * Core sends its members once they made their account, so nobody here
- * is still invited, and it doesn't say which of them is Grasp's own
- * staff. Nor are the prototype's invitation, role change and taking
- * access away here: the admin can't do those in a company's Grasp.
- */
+const columns: readonly DataColumn<MemberView>[] = [
+  {
+    id: "about",
+    head: "Email",
+    cell: (member) => aboutOf(member) ?? "",
+    fact: aboutOf,
+  },
+  { id: "stands", head: "Where they stand", cell: standsLine, wrap: true },
+  { id: "role", head: "Role", cell: (member) => roleWords[member.role] },
+];
+
+/** A row writes to the member, as their email is all the admin has of them. */
+const memberLink = (member: MemberView, look: RowLook) => (
+  <a
+    aria-label={`Write to ${nameOf(member)}`}
+    href={`mailto:${member.email}`}
+    {...look}
+  />
+);
+
+const memberKey = (member: MemberView): string => member.id;
+
+/** How many there are by where they stand. */
+const countOf = (
+  members: readonly MemberView[],
+  state: MemberView["state"]
+): number => members.filter((member) => member.state === state).length;
+
+/** An organization's Members: its seats and where its people stand, then each of them. */
 export const OrgMembers = () => {
   const { view } = useOrganization();
   const { members, seats } = view;
-  // A contract not known yet gives no number of seats either.
-  const taken = view.unknown.contract
-    ? `${seats.used} ${seats.used === 1 ? "seat" : "seats"} taken`
-    : `${seats.used} of ${seats.of} seats taken`;
+  if (members.length === 0) {
+    return (
+      <Empty>
+        <EmptyHeader>
+          <EmptyMedia icon={UsersIcon} variant="icon" />
+          <EmptyTitle level={2}>Nobody has made an account yet.</EmptyTitle>
+          <EmptyDescription>
+            Each member is here, with where they stand and their role, once they
+            made their account in the company’s Grasp.
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
+  }
+  const ready = countOf(members, "ready");
+  const removed = countOf(members, "removed");
+  const notIn = [
+    ready === 0 ? "" : `${ready} ready for when Grasp opens`,
+    removed === 0 ? "" : `${removed} with access taken away`,
+  ].filter((part) => part !== "");
   return (
-    <Section description={taken} title="Members">
-      {members.length === 0 ? (
-        <p className="text-muted-foreground border-t px-5 py-4">
-          Nobody has made an account yet.
-        </p>
-      ) : (
-        <div className="@container">
-          <ul className="flex flex-col">
-            {members.map((member) => (
-              <MemberRow key={member.id} member={member} />
-            ))}
-          </ul>
-        </div>
-      )}
-    </Section>
+    <div {...stylex.props(styles.parts)}>
+      <StatGroup aria-label="Its members" columns={2}>
+        <Stat
+          // A contract not known yet gives no number of seats either.
+          change={
+            view.unknown.contract
+              ? "No contract known yet"
+              : `of ${seats.of} on its contract`
+          }
+          label="Seats taken"
+          value={String(seats.used)}
+        />
+        <Stat
+          change={notIn.length === 0 ? "Everyone" : notIn.join(", ")}
+          label="In Grasp"
+          value={String(countOf(members, "active"))}
+        />
+      </StatGroup>
+      <Part aria-labelledby="members">
+        <SectionHeader
+          id="members"
+          size="sm"
+          title={`${members.length} ${plural(members.length, "member", "members")}`}
+          variant="group"
+        />
+        <DataRows
+          columns={columns}
+          label="Its members"
+          link={memberLink}
+          name={nameOf}
+          nameHead="Member"
+          rowKey={memberKey}
+          rows={members}
+        />
+      </Part>
+    </div>
   );
 };
