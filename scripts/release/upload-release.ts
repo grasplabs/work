@@ -31,9 +31,14 @@
  * the id to `commits/<sha>`, so a commit's manifest is only ever at the
  * id its marker names: a re-run of the commit's publish reads the marker
  * and that one manifest, and publishes nothing again when the manifest is
- * the commit's. No other manifest is read: past a listing page per 1,000
- * releases of the month, a publish asks the same of the bucket however
- * many releases it holds.
+ * the commit's. The marker is written only over the one last read or
+ * written (its ETag), or only if absent, so two runs of one commit, or a
+ * late write of its own, never leave it naming a lost id. No other
+ * manifest is read: past a listing page per 1,000 releases of the month,
+ * a publish asks the same of the bucket however many releases it holds.
+ * It publishes only while the commit is main's head (--head, which CI
+ * asks GitHub for right before): a re-run of a push main has moved past
+ * publishes nothing, rather than an older commit under a newer id.
  * Without it (Promote release) the release keeps the id it has.
  *
  * With --dry-run it verifies the release and says what it would upload,
@@ -41,7 +46,7 @@
  *
  * Env: R2_ENDPOINT (https://<account id>.eu.r2.cloudflarestorage.com),
  *      R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
- * Usage: vp run release:upload --release <dir> [--assign-id] [--dry-run]
+ * Usage: vp run release:upload --release <dir> [--assign-id --head <sha>] [--dry-run]
  */
 import { createHash } from "node:crypto";
 import path from "node:path";
@@ -51,6 +56,7 @@ import {
   commitKey,
   manifestKey,
   mapConcurrently,
+  releaseManifestSchema,
   storedModelFileProblem,
 } from "@grasp-os/shared/release";
 import type { StoredModelFile } from "@grasp-os/shared/release";
@@ -59,15 +65,11 @@ import {
   releaseIdSchema,
   releaseMonthPrefix,
 } from "@grasp-os/shared/release-id";
-import { z } from "zod";
 
 import { stampReleaseId } from "./assign-lib.ts";
 import { REQUESTS_AT_ONCE, releasesBucketFromEnv } from "./bucket-lib.ts";
 import type { ReleasesBucket } from "./bucket-lib.ts";
 import { verifyRelease } from "./manifest-lib.ts";
-
-/** What a published manifest is read for when looking for a commit's release. */
-const publishedCommitSchema = z.object({ commit: z.string() });
 
 const HTTP_NOT_FOUND = 404;
 const HTTP_PRECONDITION_FAILED = 412;
@@ -81,11 +83,15 @@ const { values: args } = parseArgs({
   options: {
     release: { type: "string" },
     "assign-id": { type: "boolean", default: false },
+    head: { type: "string" },
     "dry-run": { type: "boolean", default: false },
   },
 });
 if (args.release === undefined) {
   throw new Error("--release <dir> is required");
+}
+if (args["assign-id"] && !args["dry-run"] && args.head === undefined) {
+  throw new Error("--assign-id needs --head <main's head commit>");
 }
 const releaseDir = path.resolve(args.release);
 
@@ -302,7 +308,12 @@ const publishAsBuilt = async (bucket: ReleasesBucket): Promise<void> => {
   console.info(`Published ${published}`);
 };
 
-/** Whether release `id`'s manifest is published, and is `manifest.commit`'s. */
+/**
+ * Whether release `id`'s manifest is published, and is a release manifest
+ * of `manifest.commit` under that id. An earlier attempt's, of another
+ * build of the commit, counts: its blobs went up before it, and this
+ * run's own new blobs are then left for no release to name.
+ */
 const isThisCommits = async (
   bucket: ReleasesBucket,
   id: string
@@ -314,65 +325,124 @@ const isThisCommits = async (
   if (!published.ok) {
     throw new Error(`GET ${manifestKey(id)}: ${published.status}`);
   }
-  const { commit } = publishedCommitSchema.parse(await published.json());
-  return commit === manifest.commit;
+  let stored: unknown;
+  try {
+    stored = JSON.parse(await published.text());
+  } catch {
+    return false;
+  }
+  const parsed = releaseManifestSchema.safeParse(stored);
+  return (
+    parsed.success &&
+    parsed.data.releaseId === id &&
+    parsed.data.commit === manifest.commit
+  );
 };
 
-/**
- * The release `manifest.commit` was published as already, if it was: the
- * id its marker (`commits/<sha>`) names, once that id's manifest is the
- * commit's. An attempt that stopped between its marker and its manifest,
- * or lost the id to another publish, left a marker whose id isn't.
- */
-const publishedAs = async (
+/** Where this commit's marker is: the id of the release it's published as. */
+const markerKey = commitKey(manifest.commit);
+
+/** The commit's marker as the bucket holds it: the id it names, and its ETag. */
+interface Marker {
+  id: string;
+  etag: string;
+}
+
+const etagOf = (response: Response, what: string): string => {
+  const etag = response.headers.get("etag");
+  if (etag === null) {
+    throw new Error(`${what} ${markerKey}: no ETag`);
+  }
+  return etag;
+};
+
+/** The commit's marker; undefined when there's none. */
+const readMarker = async (
   bucket: ReleasesBucket
-): Promise<string | undefined> => {
-  const marker = commitKey(manifest.commit);
-  const named = await bucket.fetch(bucket.url(marker));
+): Promise<Marker | undefined> => {
+  const named = await bucket.fetch(bucket.url(markerKey));
   if (named.status === HTTP_NOT_FOUND) {
     return undefined;
   }
   if (!named.ok) {
-    throw new Error(`GET ${marker}: ${named.status}`);
+    throw new Error(`GET ${markerKey}: ${named.status}`);
   }
   const text = await named.text();
-  const id = releaseIdSchema.parse(text.trim());
-  return (await isThisCommits(bucket, id)) ? id : undefined;
+  return { id: releaseIdSchema.parse(text.trim()), etag: etagOf(named, "GET") };
+};
+
+/**
+ * Writes `id` to the commit's marker, only over the marker this publish
+ * last read or wrote (`etag`), or only if absent when it found none.
+ * Resolves with the new ETag, or with the id the commit is published as
+ * when another run of the commit changed the marker meanwhile and that
+ * id's manifest is the commit's. Changed to the same id, the marker is
+ * this write's own (its answer lost) or a twin run's on the same id, whose
+ * claim this one's then meets: either way it goes on to the claim.
+ */
+const writeMarker = async (
+  bucket: ReleasesBucket,
+  id: string,
+  etag: string | undefined
+): Promise<{ etag: string } | { publishedAs: string }> => {
+  const bytes = Buffer.from(`${id}\n`);
+  const put = await bucket.fetch(bucket.url(markerKey), {
+    method: "PUT",
+    body: bytes,
+    headers: {
+      "Content-Type": "text/plain",
+      "x-amz-checksum-sha256": sha256Base64(bytes),
+      ...(etag === undefined ? { "If-None-Match": "*" } : { "If-Match": etag }),
+    },
+  });
+  if (put.ok) {
+    return { etag: etagOf(put, "PUT") };
+  }
+  if (put.status !== HTTP_PRECONDITION_FAILED) {
+    throw new Error(`PUT ${markerKey}: ${put.status} ${await put.text()}`);
+  }
+  const now = await readMarker(bucket);
+  if (now?.id === id) {
+    return { etag: now.etag };
+  }
+  if (now !== undefined && (await isThisCommits(bucket, now.id))) {
+    return { publishedAs: now.id };
+  }
+  throw new Error(
+    `${markerKey} changed under this publish (it names ${now?.id ?? "nothing"}): another publish of ${manifest.commit} is under way; nothing published`
+  );
 };
 
 /**
  * Publishes the release under the next id of the month (CI's publish):
- * each attempt names its id in the commit's marker, then claims it by
- * writing the manifest only if absent, and moves on to the next id when
- * another publish has it.
+ * each attempt names its id in the commit's marker (over `etag`, the
+ * marker as read before the upload), then claims it by writing the
+ * manifest only if absent, and moves on to the next id when another
+ * publish has it.
  */
-const publishWithNextId = async (bucket: ReleasesBucket): Promise<void> => {
-  const marker = commitKey(manifest.commit);
+const publishWithNextId = async (
+  bucket: ReleasesBucket,
+  etag: string | undefined
+): Promise<void> => {
   const now = new Date();
   const taken = new Set(await bucket.listIds(releaseMonthPrefix(now)));
+  let markerTag = etag;
   for (let attempt = 1; attempt <= MAX_ID_ATTEMPTS; attempt += 1) {
     const id = nextReleaseId(taken, now);
     taken.add(id);
     const stamped = stampReleaseId(manifestBytes, id);
     const published = manifestKey(id);
     // The marker first, so the commit's manifest is only ever at the id
-    // its marker names (`publishedAs`). Replaced, not written only if
-    // absent: only this commit's publish writes it, and GitHub runs one
-    // attempt of a run at a time, in the workflow's one-at-a-time group.
-    const markerBytes = Buffer.from(`${id}\n`);
+    // its marker names.
     // oxlint-disable-next-line no-await-in-loop -- one id at a time, until one is ours
-    const named = await bucket.fetch(bucket.url(marker), {
-      method: "PUT",
-      body: markerBytes,
-      headers: {
-        "Content-Type": "text/plain",
-        "x-amz-checksum-sha256": sha256Base64(markerBytes),
-      },
-    });
-    if (!named.ok) {
-      // oxlint-disable-next-line no-await-in-loop -- once, on the way out
-      throw new Error(`PUT ${marker}: ${named.status} ${await named.text()}`);
+    const named = await writeMarker(bucket, id, markerTag);
+    if ("publishedAs" in named) {
+      console.warn(
+        `::warning::${manifest.commit} was published meanwhile, as release ${named.publishedAs}, by another run; nothing published again`
+      );
+      return;
     }
+    markerTag = named.etag;
     // The manifest is the claim, only if absent. Found there already, it's
     // this commit's when an earlier try or attempt put it there: a lost
     // answer, or a build of the same commit, whose bytes may differ.
@@ -403,9 +473,19 @@ if (args["dry-run"]) {
       ? `Dry run: release ${manifest.releaseId} verified; would upload whichever of its ${blobs.size} blobs R2 lacks, then publish it as the month's next release`
       : `Dry run: release ${manifest.releaseId} verified; would upload whichever of its ${blobs.size} blobs R2 lacks, then ${manifestKey(manifest.releaseId)}`
   );
+} else if (args["assign-id"] && args.head !== manifest.commit) {
+  // Main has moved on since this run started: the newer push publishes
+  // its own release, which carries this commit's changes.
+  console.info(
+    `::notice::Not publishing ${manifest.commit}: main's head is ${String(args.head)} now, which publishes its own release`
+  );
 } else {
   const bucket = releasesBucketFromEnv();
-  const earlier = args["assign-id"] ? await publishedAs(bucket) : undefined;
+  const marker = args["assign-id"] ? await readMarker(bucket) : undefined;
+  const earlier =
+    marker !== undefined && (await isThisCommits(bucket, marker.id))
+      ? marker.id
+      : undefined;
   if (earlier === undefined) {
     // Before anything is uploaded, the files the directory doesn't carry;
     // after, every one, as the import will check them.
@@ -416,7 +496,7 @@ if (args["dry-run"]) {
     await uploadBlobs(bucket);
     await assertModelFilesStored(bucket, manifest.modelFiles);
     await (args["assign-id"]
-      ? publishWithNextId(bucket)
+      ? publishWithNextId(bucket, marker?.etag)
       : publishAsBuilt(bucket));
   } else {
     // A re-run of the commit's publish: the release it published stands.

@@ -1,8 +1,9 @@
 /**
  * upload-release.ts run as CI runs it, against a stand-in for R2's S3 API
  * (the outside system) that stores objects in memory and, as R2 does,
- * honours `If-None-Match: *`, checks `x-amz-checksum-sha256` on a PUT and
- * reports it on a HEAD with checksum mode on. It can fail a request as a
+ * honours `If-None-Match: *` and `If-Match` on an object's ETag (its
+ * bytes' MD5, as for a single-part PUT), checks `x-amz-checksum-sha256` on
+ * a PUT and reports it on a HEAD with checksum mode on. It can fail a request as a
  * network does: drop the connection unanswered, or answer 500, before or
  * after doing what was asked.
  */
@@ -76,16 +77,22 @@ const storedManifest = z.object({ releaseId: z.string(), commit: z.string() });
 const sha256Base64 = (bytes: Uint8Array): string =>
   createHash("sha256").update(bytes).digest("base64");
 
+/** An object's ETag as R2 gives one for a single-part PUT: its bytes' MD5, quoted. */
+const etagOf = (bytes: Uint8Array): string =>
+  `"${createHash("md5").update(bytes).digest("hex")}"`;
+
 /**
  * How the stand-in fails one request for a key instead of answering it:
  * `drop` closes the connection unanswered, as a reset does; `500` answers
  * 500; `cut` sends the answer's headers and half its body, then closes
  * the connection (`after` implied). `after` does what was asked first (a
  * PUT stores), so only the answer is lost. `meanwhile` runs before the
- * failure: another writer.
+ * failure: another writer. `method`, when set, is the only method it
+ * meets; it waits for that one.
  */
 interface Fault {
   answer: "drop" | "500" | "cut";
+  method?: string;
   after?: boolean;
   meanwhile?: () => void;
 }
@@ -211,7 +218,9 @@ const headHeaders = (
 ): Record<string, string | number> => {
   const checksum = bucket.checksums.get(key);
   return {
-    ...(stored === undefined ? {} : { "content-length": stored.byteLength }),
+    ...(stored === undefined
+      ? {}
+      : { "content-length": stored.byteLength, etag: etagOf(stored) }),
     ...(checksum !== undefined &&
     request.headers["x-amz-checksum-mode"] === "ENABLED"
       ? { "x-amz-checksum-sha256": checksum }
@@ -246,13 +255,18 @@ const serveObject = async (
   if (request.method === "GET") {
     return stored === undefined
       ? { status: HTTP_NOT_FOUND }
-      : { status: HTTP_OK, body: stored };
+      : { status: HTTP_OK, headers: { etag: etagOf(stored) }, body: stored };
   }
   const body = await buffer(request);
   if (bucket.failingPuts.delete(key)) {
     return { status: HTTP_BAD_REQUEST };
   }
-  if (request.headers["if-none-match"] === "*" && stored !== undefined) {
+  const ifMatch = request.headers["if-match"];
+  if (
+    (request.headers["if-none-match"] === "*" && stored !== undefined) ||
+    (ifMatch !== undefined &&
+      (stored === undefined || ifMatch !== etagOf(stored)))
+  ) {
     return { status: HTTP_PRECONDITION_FAILED };
   }
   const checksum = request.headers["x-amz-checksum-sha256"];
@@ -264,7 +278,7 @@ const serveObject = async (
     bucket.checksums.set(key, checksum);
   }
   bucket.puts.push(key);
-  return { status: HTTP_OK };
+  return { status: HTTP_OK, headers: { etag: etagOf(body) } };
 };
 
 /** Sends `answer`, or fails it as `fault` says. */
@@ -307,7 +321,11 @@ const handle = async (
     return;
   }
   bucket.requests.push(`${request.method ?? ""} ${key}`);
-  const fault = bucket.faults.get(key)?.shift();
+  const [next] = bucket.faults.get(key) ?? [];
+  const fault =
+    next?.method === undefined || next.method === request.method
+      ? bucket.faults.get(key)?.shift()
+      : undefined;
   fault?.meanwhile?.();
   const served =
     fault === undefined || fault.after === true || fault.answer === "cut";
@@ -317,6 +335,25 @@ const handle = async (
   const answer = served ? await serveObject(bucket, key, request) : undefined;
   send(response, answer, fault);
 };
+
+/**
+ * A published manifest of release `id` for `commit`, from another build
+ * than the tests' own: the fixture's blobs, built at another time.
+ */
+const manifestOf = (id: string, commit: string): Buffer =>
+  Buffer.from(
+    JSON.stringify(
+      generateManifest(
+        {
+          ...info,
+          releaseId: id,
+          commit,
+          createdAt: "2026-02-02T00:00:00.000Z",
+        },
+        fixture
+      )
+    )
+  );
 
 /** The requests among `requests` that aren't a listing's page. */
 const beyondListing = (requests: string[]): number =>
@@ -551,8 +588,18 @@ describe("publishing a release", () => {
     return built;
   };
 
-  const publish = async (built: string): Promise<string> =>
-    await run([SCRIPT, "--release", built, "--assign-id"], {
+  /** The commit a release directory `buildOf` made was built from. */
+  const commitOf = (built: string): string =>
+    storedManifest.parse(
+      JSON.parse(readFileSync(path.join(built, "manifest.json"), "utf-8"))
+    ).commit;
+
+  /** Publishes as CI does, main's head being `head`: the build's own commit unless said. */
+  const publish = async (
+    built: string,
+    head = commitOf(built)
+  ): Promise<string> =>
+    await run([SCRIPT, "--release", built, "--assign-id", "--head", head], {
       PATH: process.env.PATH,
       R2_ENDPOINT: endpoint,
       R2_BUCKET: BUCKET,
@@ -620,7 +667,7 @@ describe("publishing a release", () => {
   it("never gives publishes running at once the same id", async () => {
     const commits = ["3", "4", "5"].map((digit) => digit.repeat(40));
     const dirs = commits.map(buildOf);
-    await Promise.all(dirs.map(publish));
+    await Promise.all(dirs.map(async (built) => await publish(built)));
 
     const releases = publishedReleases();
     expect(new Set(releases.map(({ id }) => id)).size).toBe(commits.length);
@@ -710,9 +757,7 @@ describe("publishing a release", () => {
   it("takes a manifest of its commit from another build, found at the id it claims, for its release", async () => {
     const month = releaseMonthPrefix(new Date());
     const commit = "e".repeat(40);
-    const earlier = Buffer.from(
-      JSON.stringify({ releaseId: `${month}1`, commit })
-    );
+    const earlier = manifestOf(`${month}1`, commit);
     bucket.writtenAfterList.set(`releases/${month}1/manifest.json`, earlier);
     const stdout = await publish(buildOf(commit));
 
@@ -727,6 +772,118 @@ describe("publishing a release", () => {
       marker: `${month}1\n`,
       published: true,
     });
+  });
+
+  it("publishes nothing once main has moved on from its commit", async () => {
+    const stdout = await publish(buildOf("2".repeat(40)), "3".repeat(40));
+
+    expect({
+      notice: stdout.includes(`main's head is ${"3".repeat(40)} now`),
+      puts: bucket.puts,
+      releases: publishedReleases(),
+    }).toStrictEqual({ notice: true, puts: [], releases: [] });
+  });
+
+  it("publishes under a new id when another commit took the id its marker named before the re-run", async () => {
+    const month = releaseMonthPrefix(new Date());
+    const commit = "4".repeat(40);
+    const claim = `releases/${month}1/manifest.json`;
+    bucket.failingPuts.add(claim);
+    await outcomeOf(publish(buildOf(commit)));
+    bucket.objects.set(claim, manifestOf(`${month}1`, "f".repeat(40)));
+    await publish(buildOf(commit));
+
+    expect({
+      releases: publishedReleases().map(
+        ({ id, commit: stored }) => `${id} ${String(stored)}`
+      ),
+      marker: bucket.objects.get(commitKey(commit))?.toString(),
+    }).toStrictEqual({
+      releases: [`${month}1 ${"f".repeat(40)}`, `${month}2 ${commit}`],
+      marker: `${month}2\n`,
+    });
+  });
+
+  it("goes on to its claim when its marker write took but the answer was lost", async () => {
+    const month = releaseMonthPrefix(new Date());
+    const commit = "5".repeat(40);
+    bucket.faults.set(commitKey(commit), [
+      { answer: "drop", method: "PUT", after: true },
+    ]);
+    const stdout = await publish(buildOf(commit));
+
+    expect({
+      releases: publishedReleases().map(({ id }) => id),
+      marker: bucket.objects.get(commitKey(commit))?.toString(),
+      published: stdout.includes(`release ${month}1`),
+    }).toStrictEqual({
+      releases: [`${month}1`],
+      marker: `${month}1\n`,
+      published: true,
+    });
+  });
+
+  /**
+   * Has another run of `commit` write its marker, naming `id`, and, when
+   * `withManifest`, its manifest, right before this run's first marker
+   * write reaches the bucket.
+   */
+  const interleaveTwin = (
+    commit: string,
+    id: string,
+    withManifest: boolean
+  ): void => {
+    bucket.faults.set(commitKey(commit), [
+      {
+        answer: "drop",
+        method: "PUT",
+        after: true,
+        meanwhile: () => {
+          bucket.objects.set(commitKey(commit), Buffer.from(`${id}\n`));
+          if (withManifest) {
+            bucket.objects.set(
+              `releases/${id}/manifest.json`,
+              manifestOf(id, commit)
+            );
+          }
+        },
+      },
+    ]);
+  };
+
+  it("publishes a commit once when another run of it names the same id and claims it first", async () => {
+    const month = releaseMonthPrefix(new Date());
+    const commit = "6".repeat(40);
+    interleaveTwin(commit, `${month}1`, true);
+    await publish(buildOf(commit));
+
+    expect(publishedReleases().map(({ id }) => id)).toStrictEqual([
+      `${month}1`,
+    ]);
+  });
+
+  it("stops as published when another run of its commit published it under another id meanwhile", async () => {
+    const month = releaseMonthPrefix(new Date());
+    const commit = "7".repeat(40);
+    interleaveTwin(commit, `${month}5`, true);
+    const stdout = await publish(buildOf(commit));
+
+    expect({
+      releases: publishedReleases().map(({ id }) => id),
+      said: stdout.includes("Published"),
+    }).toStrictEqual({ releases: [`${month}5`], said: false });
+  });
+
+  it("publishes nothing while another run of its commit holds the marker for an id it hasn't claimed yet", async () => {
+    const month = releaseMonthPrefix(new Date());
+    const commit = "8".repeat(40);
+    interleaveTwin(commit, `${month}5`, false);
+    const outcome = await outcomeOf(publish(buildOf(commit)));
+
+    expect({
+      refused: outcome.includes("another publish of"),
+      releases: publishedReleases(),
+    }).toStrictEqual({ refused: true, releases: [] });
   });
 
   it("leaves another publish's manifest as it is when a retried claim finds the id taken, and takes the next", async () => {
