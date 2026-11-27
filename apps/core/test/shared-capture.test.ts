@@ -165,7 +165,7 @@ const sharedMail = async (): Promise<string> => {
   const now = Date.now();
   await connectDb()
     .prepare(
-      "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tools, created_at, updated_at) VALUES (?, 'mail', 'shared', NULL, 'active', 'composio', 'https://mail.test/mcp', ?, ?, ?)"
+      "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, composio_session_id, tools, created_at, updated_at) VALUES (?, 'mail', 'shared', NULL, 'active', 'composio', 'https://mail.test/mcp', 'trs_fixture', ?, ?, ?)"
     )
     .bind(id, JSON.stringify([{ name: "mail.search", read: true }]), now, now)
     .run();

@@ -72,10 +72,10 @@ const cleaningUp = async (env: Env, ownerUserId: string): Promise<boolean> => {
     .select({ id: composioCleanups.id })
     .from(composioCleanups)
     .where(
-      sql`${composioCleanups.serverId} IN (
-        SELECT ${connections.composioServerId} FROM ${connections}
+      sql`${composioCleanups.sessionId} IN (
+        SELECT ${connections.composioSessionId} FROM ${connections}
         WHERE ${theirConnections(ownerUserId)}
-          AND ${connections.composioServerId} IS NOT NULL
+          AND ${connections.composioSessionId} IS NOT NULL
       )`
     )
     .limit(1);

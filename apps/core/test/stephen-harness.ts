@@ -259,11 +259,12 @@ const crmConnection = async (): Promise<string> => {
   const now = Date.now();
   await connectDb()
     .prepare(
-      "INSERT INTO connections (id, provider, scope, status, server_kind, server, tools, created_at, updated_at) VALUES (?, 'hubspot', 'shared', 'active', 'composio', ?, ?, ?, ?)"
+      "INSERT INTO connections (id, provider, scope, status, server_kind, server, composio_session_id, tools, created_at, updated_at) VALUES (?, 'hubspot', 'shared', 'active', 'composio', ?, ?, ?, ?, ?)"
     )
     .bind(
       id,
       mailServerUrl(name),
+      name,
       JSON.stringify([{ name: crmTools.read, read: true }, crmTools.change]),
       now,
       now

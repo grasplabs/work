@@ -72,7 +72,7 @@ const connection = async (owner: string | null = null): Promise<string> => {
   const now = Date.now();
   await connectDb()
     .prepare(
-      "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, 'hubspot', ?, ?, 'active', 'composio', 'hubspot', ?, ?)"
+      "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, composio_session_id, created_at, updated_at) VALUES (?, 'hubspot', ?, ?, 'active', 'composio', 'hubspot', 'trs_fixture', ?, ?)"
     )
     .bind(id, owner === null ? "shared" : "personal", owner, now, now)
     .run();
@@ -828,7 +828,7 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
     const now = Date.now();
     await connectDb()
       .prepare(
-        "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, 'hubspot', 'shared', NULL, 'active', 'composio', 'hubspot', ?, ?)"
+        "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, composio_session_id, created_at, updated_at) VALUES (?, 'hubspot', 'shared', NULL, 'active', 'composio', 'hubspot', 'trs_fixture', ?, ?)"
       )
       .bind(longest, now, now)
       .run();

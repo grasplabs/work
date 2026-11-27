@@ -296,7 +296,7 @@ describe("connecting a Composio toolkit with a key", () => {
     expect(heldAtComposio()).toStrictEqual({
       authConfigs: 1,
       accounts: 1,
-      servers: 1,
+      sessions: 1,
     });
   });
 
@@ -475,7 +475,7 @@ describe("connecting a Composio toolkit with a key", () => {
     // Both get past everything before making their server, then go on.
     let arrived = 0;
     const both = Promise.withResolvers<boolean>();
-    composio.state.serverGate = async () => {
+    composio.state.sessionGate = async () => {
       arrived += 1;
       if (arrived === 2) {
         both.resolve(true);
@@ -486,7 +486,7 @@ describe("connecting a Composio toolkit with a key", () => {
       outcome(connectWithKey(admin)),
       outcome(connectWithKey(admin)),
     ]);
-    composio.state.serverGate = undefined;
+    composio.state.sessionGate = undefined;
     // And once one is there, another connect makes nothing.
     const writes = composioWrites().length;
     const again = await outcome(connectWithKey(admin));
@@ -512,10 +512,54 @@ describe("connecting a Composio toolkit with a key", () => {
       again: "connection.already_connected",
       madeAgain: 0,
       live: 1,
-      held: { authConfigs: 1, accounts: 1, servers: 1 },
+      held: { authConfigs: 1, accounts: 1, sessions: 1 },
       cleanups: 0,
       connected: 1,
       consents: 1,
+    });
+  });
+
+  it("connects again after the move to sessions, in place of the connection made before, whose account and auth config are deleted at Composio", async () => {
+    const admin = someone("admin");
+    const legacy = await connectWithKey(admin);
+    const before = await stored(legacy);
+    // As a connection made through the legacy route stands after the
+    // migration: no session, needing to be connected again.
+    await env.DB.prepare(
+      "UPDATE connections SET status = 'needs_reauth', composio_session_id = NULL, server = ? WHERE id = ?"
+    )
+      .bind(
+        "https://backend.composio.dev/v3/mcp/legacy?connected_account_id=ca_1",
+        legacy
+      )
+      .run();
+    composio.state.holds.sessions.clear();
+
+    const again = await connectWithKey(admin);
+    const { results: live } = await env.DB.prepare(
+      "SELECT id, status FROM connections WHERE id IN (?, ?) ORDER BY created_at"
+    )
+      .bind(legacy, again)
+      .all<{ id: string; status: string }>();
+    expect({
+      live: live.map(({ id, status }) => [
+        new Map([
+          [legacy, "legacy"],
+          [again, "again"],
+        ]).get(id) ?? id,
+        status,
+      ]),
+      oldAccount: composio.state.holds.accounts.has(before?.accountId ?? ""),
+      held: heldAtComposio(),
+      cleanups: await cleanupsLeft(),
+    }).toStrictEqual({
+      live: [
+        ["legacy", "disconnected"],
+        ["again", "active"],
+      ],
+      oldAccount: false,
+      held: { authConfigs: 1, accounts: 1, sessions: 1 },
+      cleanups: 0,
     });
   });
 

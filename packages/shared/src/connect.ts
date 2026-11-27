@@ -480,15 +480,17 @@ export type FlowReturn = z.input<typeof flowReturnSchema>;
  * - `<step>:<how>`: a request failed. The step is making the auth config
  *   (`auth_config`), the hosted link (`link`) or, with a key, the
  *   connected account (`account`), all while starting; or, finishing,
- *   reading the account (`read`), making its MCP server (`server`) or that
- *   server's URL (`url`). How is `unanswered` (no answer in time),
- *   `unreadable` (an answer connect can't read) or `http_<status>`, with
- *   Composio's number for the error after it when its answer gave one
+ *   reading the account (`read`) or making its Composio session
+ *   (`session`). How is `unanswered` (no answer in time), `unreadable`
+ *   (an answer connect can't read) or `http_<status>`, with Composio's
+ *   number for the error after it when its answer gave one
  *   (`http_403:1234`): a stable code, never its message.
- * - `url:<problem>`: the server URL Composio made isn't one connect calls:
- *   not exactly one (`count`), not Composio's MCP host (`host`), not this
- *   server's path (`path`), not exactly this account (`account`), or for
- *   a user (`user`).
+ * - `session:config`: the session Composio made isn't the one asked for:
+ *   for another user or account, or with Composio's own tools for
+ *   connecting or searching switched on.
+ * - `url:<problem>`: the session's MCP URL isn't one connect calls: not
+ *   Composio's API host (`host`), not this session's path (`path`), or
+ *   naming a user or account of its own (`user`).
  */
 export const composioReasonSchema = z.union([
   z.enum([
@@ -502,16 +504,15 @@ export const composioReasonSchema = z.union([
     "mismatch:id",
     "mismatch:toolkit",
     "mismatch:auth_config",
-    "url:count",
+    "session:config",
     "url:host",
     "url:path",
-    "url:account",
     "url:user",
   ]),
   z
     .string()
     .regex(
-      /^(?:auth_config|link|account|read|server|url):(?:unanswered|unreadable|http_[1-5]\d\d(?::\d{1,6})?)$/u
+      /^(?:auth_config|link|account|read|session):(?:unanswered|unreadable|http_[1-5]\d\d(?::\d{1,6})?)$/u
     ),
 ]);
 export type ComposioReason = z.infer<typeof composioReasonSchema>;
@@ -2938,6 +2939,8 @@ export const connectionErrors = defineErrorFamily({
     "That origin can't be approved: it must be an https origin whose name leads only to public internet addresses.",
   "connection.tools_changed":
     "Someone changed this connection's tools at the same time. Look at them again and make your change once more.",
+  "connection.no_tools":
+    "None of the tools chosen is one Grasp runs, so nothing was changed. Allow at least one other tool.",
   "connection.server_refused":
     "That server can't be added: its address must be an https URL with a name, not an IP address, that leads only to public internet addresses.",
   "connection.sign_in_unsupported":

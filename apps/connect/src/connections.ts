@@ -30,26 +30,67 @@ import { keptToolClasses } from "./tool-rules.ts";
 export type Connection = typeof connections.$inferSelect;
 
 /**
- * Where Composio serves the MCP servers it creates: `composio.mcp.generate`
- * returns `https://backend.composio.dev/v3/mcp/<server id>?user_id=...`.
+ * Where Composio serves a session's MCP endpoint: on its API host, at the
+ * session's own path (`POST /tool_router/session` answers
+ * `https://backend.composio.dev/api/v3/tool_router/session/<id>/mcp`).
  */
 const composioMcpHost = "backend.composio.dev";
-const composioMcpPath = "/v3/mcp/";
+const composioSessionPath =
+  /^\/api\/v3(?:\.1)?\/tool_router\/session\/(?<id>[^/]+)\/mcp$/u;
 
 /**
- * A Composio server's URL, as stored: HTTPS on Composio's MCP host, and
- * never with credentials in it (connect's key is added per call, in a
- * header). Anything else is never called, whatever the registry says.
+ * What is wrong with `url` as the MCP endpoint of Composio's session
+ * `sessionId`, if anything: connect calls only HTTPS on Composio's API
+ * host, without credentials in it (connect's key is added per call, in a
+ * header), at exactly that session's path, and never one naming a user or
+ * an account of its own.
  */
-const composioUrlSchema = z.url({ protocol: /^https$/u }).refine((url) => {
-  const { host, pathname, username, password } = new URL(url);
-  return (
-    host === composioMcpHost &&
-    pathname.startsWith(composioMcpPath) &&
-    username === "" &&
-    password === ""
-  );
-});
+export const sessionUrlProblem = (
+  url: string,
+  sessionId: string
+): "host" | "path" | "user" | undefined => {
+  if (!URL.canParse(url)) {
+    return "host";
+  }
+  const { protocol, host, pathname, username, password, searchParams } =
+    new URL(url);
+  if (
+    protocol !== "https:" ||
+    host !== composioMcpHost ||
+    username !== "" ||
+    password !== ""
+  ) {
+    return "host";
+  }
+  if (
+    composioSessionPath.exec(pathname)?.groups?.id !==
+    encodeURIComponent(sessionId)
+  ) {
+    return "path";
+  }
+  return searchParams.has("user_id") || searchParams.has("connected_account_id")
+    ? "user"
+    : undefined;
+};
+
+/**
+ * A connection's status as connect takes it: a Composio connection with
+ * no session (made through Composio's legacy MCP servers, before sessions,
+ * which no release calls) needs connecting again, whatever its row says.
+ * Migration 0044 marks those it finds; one made by the release before
+ * while the migration ran, or after a deploy failed and was retried,
+ * reads "active" still, and is taken for what it is here.
+ */
+export const statusOf = <Status extends Connection["status"]>(
+  connection: Pick<Connection, "serverKind" | "composioSessionId"> & {
+    status: Status;
+  }
+): Status | "needs_reauth" =>
+  connection.status === "active" &&
+  connection.serverKind === "composio" &&
+  connection.composioSessionId === null
+    ? "needs_reauth"
+    : connection.status;
 
 /**
  * The connection a call may use: it exists, it is someone's personal
@@ -78,15 +119,11 @@ export const usableConnection = async (
   ) {
     throw connectErrors.create("connect.not_owner");
   }
-  if (connection.status !== "active") {
+  if (statusOf(connection) !== "active") {
     throw connectErrors.create("connect.connection_inactive");
   }
   return connection;
 };
-
-/** Whether `url` is one connect would call as a Composio server. */
-export const isComposioServerUrl = (url: string): boolean =>
-  composioUrlSchema.safeParse(url).success;
 
 /** A tool the admin allowed, as stored: its name, or its rule. */
 type StoredTool = z.output<typeof composioToolsSchema>[number];
@@ -279,17 +316,22 @@ export const offeredToolNames = (
   );
 
 /**
- * The Composio MCP server behind the connection, if its URL is one, with
- * connect's Composio key on each request (Composio requires it), and
- * never while the key is unset.
+ * The MCP endpoint of the Composio session behind the connection, if its
+ * URL is that session's (`sessionUrlProblem`), with connect's Composio key
+ * on each request (Composio requires it), and never while the key is
+ * unset.
  */
 export const composioServer = (env: Env, connection: Connection): McpServer => {
-  const url = composioUrlSchema.safeParse(connection.server);
+  const { server: url, composioSessionId: sessionId } = connection;
   const key = composioKey(env);
-  if (!url.success || key === undefined) {
+  if (
+    sessionId === null ||
+    sessionUrlProblem(url, sessionId) !== undefined ||
+    key === undefined
+  ) {
     throw connectErrors.create("connect.server_unavailable");
   }
-  return mcpServer(url.data, async (request) => {
+  return mcpServer(url, async (request) => {
     const headers = new Headers(request.headers);
     headers.set("x-api-key", key);
     return await fetch(new Request(request, { headers }));
@@ -339,6 +381,7 @@ export const connectionOwners = async (
       id: connections.id,
       ownerUserId: connections.ownerUserId,
       status: connections.status,
+      composioSessionId: connections.composioSessionId,
       source: connections.serverKind,
       provider: connections.provider,
       accountId: connections.accountId,
@@ -371,8 +414,20 @@ export const connectionOwners = async (
     )
   );
   return rows.map(
-    ({ accountAddresses, accountSenders, tools, scope, ...row }) => ({
+    ({
+      accountAddresses,
+      accountSenders,
+      tools,
+      scope,
+      composioSessionId,
+      ...row
+    }) => ({
       ...row,
+      status: statusOf({
+        status: row.status,
+        serverKind: row.source,
+        composioSessionId,
+      }),
       accountAddresses: accountAddresses ?? [],
       accountSenders: accountSenders ?? [],
       ...(row.source === "composio" && {

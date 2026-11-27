@@ -670,7 +670,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
 
       expect(tested).toStrictEqual({
         ok: true,
-        model: "anthropic/claude-haiku-4-5",
+        model: "anthropic/claude-haiku-5-5",
       });
       expect([used.text, replaced.text, removed]).toStrictEqual([
         "Hello.",
@@ -760,7 +760,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
       expect(
         events.find(({ action }) => action === "model.call")
       ).toMatchObject({
-        model: { provider: "anthropic", model: "claude-haiku-4-5" },
+        model: { provider: "anthropic", model: "claude-haiku-5-5" },
         detail: {
           purpose: "ai_provider.test",
           transport: "connect",

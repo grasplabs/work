@@ -115,6 +115,17 @@ export const chatTitleMaxLength = 200;
 export const chatTitleSchema = z.string().trim().min(1).max(chatTitleMaxLength);
 
 /**
+ * A new chat's first title, its seed: the start of its first question,
+ * which the page names the chat with as it makes it. Core names it anew
+ * from that question in the background, only while it is still this
+ * (core's chat-titles.ts).
+ */
+export const seedTitleOf = (question: string): string => {
+  const line = question.trim().split("\n")[0] ?? "";
+  return line.length > 80 ? `${line.slice(0, 79)}…` : line;
+};
+
+/**
  * One of the company's agents as a person who may talk to it sees it:
  * enough to pick it and to show who answers, never its instructions.
  */
