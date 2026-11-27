@@ -36,6 +36,7 @@ import {
 } from "./settings.ts";
 import type { SettingsErrorCode } from "./settings.ts";
 import { getClientSetup } from "./setup.ts";
+import { clientSummaries } from "./summary.ts";
 import { clientTeamsPackage } from "./teams-package.ts";
 
 const clientSchema = z.object({ clientId: z.string().min(1) });
@@ -92,23 +93,31 @@ export const fetchClientLive = createServerFn({ method: "GET" })
   });
 
 /**
+ * Every client's summary (`clientSummaries`): counts and dates only, for
+ * the sidebar and the Inbox. No core audits it, as it names nobody; but a
+ * core from before the summary is read in full instead, as staff, which its
+ * audit log records, as before the summary: a POST, for the reasons
+ * `fetchClientAdmins` is.
+ */
+export const fetchClientSummaries = createServerFn({ method: "POST" }).handler(
+  async ({ context }) => await clientSummaries(env, context.staff)
+);
+
+/**
  * Every client's admin snapshot, as its core answers the verified staff
  * member asking (whom its audit log records), or as not reachable since it
- * last answered (`clientAdmins`), but those in `except`: the one whose
- * page is open, which that page reads on its own (`fetchClientAdmin`).
+ * last answered (`clientAdmins`): for the pages that show what only the
+ * snapshot holds (Home, Apps asked for, Stephen Lab, Ask Grasp), never for
+ * the frame, which reads summaries (`fetchClientSummaries`).
  * A POST, though it reads: it keeps when each core answered, and every
  * core's audit log records the read, as staff opening it, which a page
  * elsewhere mustn't make happen: Start's CSRF check (src/start.ts) refuses
  * any call another site could send, GET or POST.
  */
-export const fetchClientAdmins = createServerFn({ method: "POST" })
-  .validator(z.object({ except: z.array(z.string().min(1)).max(1) }).optional())
-  .handler(
-    async ({ data, context }) =>
-      await clientAdmins(env, context.staff, defaultAdminReadOptions, {
-        except: data?.except,
-      })
-  );
+export const fetchClientAdmins = createServerFn({ method: "POST" }).handler(
+  async ({ context }) =>
+    await clientAdmins(env, context.staff, defaultAdminReadOptions)
+);
 
 /**
  * One client's admin snapshot, as its core answers the verified staff
@@ -119,9 +128,12 @@ export const fetchClientAdmins = createServerFn({ method: "POST" })
 export const fetchClientAdmin = createServerFn({ method: "POST" })
   .validator(clientSchema)
   .handler(async ({ data, context }): Promise<ClientAdmin | null> => {
-    const [admin] = await clientAdmins(env, context.staff, pageReadOptions, {
-      only: data.clientId,
-    });
+    const [admin] = await clientAdmins(
+      env,
+      context.staff,
+      pageReadOptions,
+      data.clientId
+    );
     return admin ?? null;
   });
 

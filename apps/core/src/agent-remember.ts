@@ -362,8 +362,11 @@ const notTheirWords =
 
 /**
  * The tool for one turn of `scope`'s chat, which the person's message
- * `said` started: only in the person's own chat, in Grasp's app or their
- * direct message on a chat app, in a turn they started. `answering` gives
+ * started: only in the person's own chat, in Grasp's app or their direct
+ * message on a chat app, in a turn they started. `said` reads what they
+ * said in the turn when a save is checked: that message, and those they
+ * sent while it ran, which it took in (chat-harness.ts `queueQuestion`).
+ * `answering` gives
  * the agent's last words before it as the turn's model is given them,
  * read when a save is checked: what the chat may no longer read never
  * reaches the check (chat-harness.ts).
@@ -371,7 +374,7 @@ const notTheirWords =
 export const rememberTool = (
   env: Env,
   scope: Omit<AgentScope, "runId">,
-  said: string,
+  said: () => Promise<string>,
   answering: () => string | undefined
 ) =>
   defineTool<typeof parameters, ChatSavedMemory>({
@@ -384,12 +387,12 @@ export const rememberTool = (
       'When the person says something of theirs you saved or recalled no longer holds (it changed, they changed their mind, it was wrong: "it\'s sushi now" after "I love pizza"), name those memories in `replaces`: they stay as history, no longer in use, and the person can undo it. Something that sits beside them ("I also like sushi") replaces nothing: leave `replaces` out.',
     ].join("\n"),
     parameters,
-    executionMode: "sequential",
     execute: async (input, { callId }, { abortSignal }) => {
       if (isNamedMe(input.about)) {
         throw new Error(namedMe);
       }
-      if (!isTheirWords(said, input.quote)) {
+      const words = await said();
+      if (!isTheirWords(words, input.quote)) {
         throw new Error(notTheirWords);
       }
       const about = await subjectOf(env, scope.personId, input.about);
@@ -409,7 +412,7 @@ export const rememberTool = (
       const stated = await statedByThem(
         env,
         scope,
-        { said, answering: answering() },
+        { said: words, answering: answering() },
         about.subject,
         input,
         replaced

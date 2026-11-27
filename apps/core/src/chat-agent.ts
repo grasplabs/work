@@ -1,3 +1,4 @@
+import { awaitWithContext } from "@earendil-works/chord/context";
 import type { Context } from "@earendil-works/chord/context";
 import type { ImageContent, Message, UserMessage } from "@earendil-works/pi-ai";
 import {
@@ -200,11 +201,15 @@ const startsTurn = (entry: EntryRecord): boolean => {
 };
 
 // A question carries what the recall before it found (`recallForTurn` in
-// turn-recall.ts) as a part of its own, headed by the recall's run: pi
-// takes nothing between an input and the run's first request, and the run
-// is what a revocation withholds it by, as a code step's result.
+// turn-recall.ts) as a part of its own, in a `<recall>` tag that names the
+// recall's run: pi takes nothing between an input and the run's first
+// request, and the run is what a revocation withholds it by, as a code
+// step's result. A tag, as Anthropic and OpenAI advise for context handed
+// to a model, so it reads as structure, never as a label to write into the
+// answer.
 
-const recallPattern = /^\[Recall (?<run>[^\]\s]+)\]\n/u;
+const recallPattern =
+  /^<recall run="(?<run>[^"\s]+)">\n(?<text>[\s\S]*)\n<\/recall>$/u;
 
 /** The run the recall in `part` was, if it is one. */
 const recallRunOf = (part: {
@@ -242,7 +247,7 @@ export const questionContent = (
     : [
         {
           type: "text" as const,
-          text: `[Recall ${recall.runId}]\n${recall.text}`,
+          text: `<recall run="${recall.runId}">\n${recall.text}\n</recall>`,
         },
       ]),
 ];
@@ -262,11 +267,12 @@ export const recallTextOf = (message: UserMessage): string | undefined => {
     return undefined;
   }
   for (const part of message.content) {
-    if (part.type === "text") {
-      const header = recallPattern.exec(part.text);
-      if (header !== null) {
-        return part.text.slice(header[0].length);
-      }
+    const text =
+      part.type === "text"
+        ? recallPattern.exec(part.text)?.groups?.text
+        : undefined;
+    if (text !== undefined) {
+      return text;
     }
   }
   return undefined;
@@ -731,6 +737,101 @@ const withPictures = async (
 };
 
 /**
+ * Most calls of one round that run at once: the rest wait for a slot, in
+ * the order the model made them. pi starts every call of a parallel round
+ * at once, with no bound of its own. Each read here holds a run open in
+ * the Workspace and calls on other objects and services (the draft, the
+ * brain's stores), and a Worker invocation keeps at most six connections
+ * waiting for an answer, queueing the rest: four leaves the turn's own
+ * calls room. A round of more reads than this is rare; Claude Code bounds
+ * its read-only calls the same way, at ten.
+ */
+const readsAtOnce = 4;
+
+/** Slots for at most `most` holders at once, handed out in the order asked. */
+class Slots {
+  #free: number;
+  readonly #waiting: PromiseWithResolvers<true>[] = [];
+
+  constructor(most: number) {
+    this.#free = most;
+  }
+
+  /**
+   * Resolves once the caller holds a slot, which it gives back with
+   * `release`; rejects, holding none, once `context` is cancelled first.
+   */
+  async take(context: Context): Promise<void> {
+    if (this.#free > 0) {
+      this.#free -= 1;
+      return;
+    }
+    const turn = Promise.withResolvers<true>();
+    this.#waiting.push(turn);
+    try {
+      await awaitWithContext(turn.promise, context);
+    } catch (error) {
+      const at = this.#waiting.indexOf(turn);
+      if (at === -1) {
+        // Handed a slot as it was stopped: the next caller takes it.
+        this.release();
+      } else {
+        this.#waiting.splice(at, 1);
+      }
+      throw error;
+    }
+  }
+
+  release(): void {
+    const first = this.#waiting.shift();
+    if (first === undefined) {
+      this.#free += 1;
+    } else {
+      first.resolve(true);
+    }
+  }
+}
+
+/**
+ * The turn's tools as pi runs them. A tool that declares
+ * `executionMode: "parallel"` only reads, and is independent of every
+ * other call: it writes nothing, never waits for the person, never ends
+ * the turn and changes nothing of it. A round of such calls alone runs
+ * them together, at most {@link readsAtOnce} at once. Every other tool is
+ * sequential, whatever it declares, and makes its whole round one call at
+ * a time, as pi has it ("One sequential call makes its whole round
+ * sequential"): a write never runs beside a read that should see it, nor
+ * two code runs, each an isolate of its own, beside each other. pi places
+ * every round's results after its call in call order, however the calls
+ * finished.
+ */
+const roundTools = (tools: readonly ToolRegistration[]): ToolRegistration[] => {
+  const slots = new Slots(readsAtOnce);
+  return tools.map((tool) =>
+    tool.executionMode === "parallel"
+      ? {
+          ...tool,
+          execute: async (args, api, context) => {
+            await slots.take(context);
+            try {
+              // A call still under way when the turn stops ends with it, its
+              // slot given back: a dedicated tool's run is closed by then
+              // (agent-tools.ts `callAs`), so nothing it still does is
+              // admitted or handed on.
+              return await awaitWithContext(
+                tool.execute(args, api, context),
+                context
+              );
+            } finally {
+              slots.release();
+            }
+          },
+        }
+      : { ...tool, executionMode: "sequential" as const }
+  );
+};
+
+/**
  * A chat's agent for one turn, as a pi-durable extension: the instructions
  * and the chat's sections (each tagged by itself, as the model has always
  * read them), `executeCode` in our locked isolate, `readApi`, the docs'
@@ -779,7 +880,7 @@ export const chatAgent = (agent: ChatAgent): Extension => {
   ];
   return defineExtension({
     name: chatAgentName(scope.chatId),
-    tools,
+    tools: roundTools(tools),
     sections: sectionsOf({ apis, context: agent.context, plans }).map(
       ({ name, text }) => section(name, () => text ?? undefined, { tag: false })
     ),

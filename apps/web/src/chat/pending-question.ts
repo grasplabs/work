@@ -1,4 +1,8 @@
-import type { ChatMessage, ChatSummary } from "@grasp-os/shared/chat";
+import type {
+  ChatMessage,
+  ChatQueued,
+  ChatSummary,
+} from "@grasp-os/shared/chat";
 import { useEffect, useId, useSyncExternalStore } from "react";
 
 import type { BoxMention } from "./mentions.tsx";
@@ -36,6 +40,11 @@ export interface PendingQuestion {
   after: number | undefined;
   /** When it was sent, as this browser's clock says. */
   at: string;
+  /**
+   * Sent while the agent answered: core queues it behind that answer
+   * (`ChatUpdate.queued`), so it is drawn as queued, not answered yet.
+   */
+  queues: boolean;
   /**
    * The box that sent it: only that box takes it back if it fails, or,
    * once that box is gone, the one that shows its chat.
@@ -133,28 +142,37 @@ export const takesBack = (
   typeof question.state === "object" &&
   (question.owner === owner || !boxes.has(question.owner));
 
-/** Whether core's copy of `question` is in `messages`: the first question after it. */
+/**
+ * Whether core has its own copy of `question`: queued behind the answer
+ * being written, in its words, or in `messages`, the first question after
+ * it (when where it went isn't known, the last question, in its words).
+ */
 export const taken = (
   question: PendingQuestion,
-  messages: readonly ChatMessage[]
+  messages: readonly ChatMessage[],
+  queued: readonly ChatQueued[] = []
 ): boolean => {
   const { after } = question;
+  if (queued.some(({ text }) => text === question.text)) {
+    return true;
+  }
   return after === undefined
     ? messages.findLast(({ role }) => role === "user")?.text === question.text
     : messages.some(({ id, role }) => role === "user" && id > after);
 };
 
 /**
- * The question to draw in a chat of `messages`: one on its way, or taken,
- * until core's copy of it is there.
+ * The question to draw in a chat of `messages` and `queued`: one on its
+ * way, or taken, until core's copy of it is there, so it is drawn once.
  */
 export const shownPending = (
   question: PendingQuestion | undefined,
-  messages: readonly ChatMessage[]
+  messages: readonly ChatMessage[],
+  queued: readonly ChatQueued[] = []
 ): PendingQuestion | undefined =>
   question === undefined ||
   typeof question.state === "object" ||
-  taken(question, messages)
+  taken(question, messages, queued)
     ? undefined
     : question;
 

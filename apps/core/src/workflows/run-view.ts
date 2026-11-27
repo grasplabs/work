@@ -59,6 +59,17 @@ export const scopeOf = (
 });
 
 /**
+ * Every run of `workflows`, whoever it acts for: the company's own counts
+ * (core's admin-summary.ts), never a person's view.
+ */
+export const everyRun = (workflows: readonly string[]): RunScope => ({
+  workflows,
+  ownWorkflows: [],
+  // Read only with `ownWorkflows`, which holds none.
+  principal: "",
+});
+
+/**
  * The independent workflows `by` has a role in (`listWorkflowResources`),
  * and the runs of them they see.
  */

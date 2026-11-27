@@ -2,15 +2,24 @@
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { describe, expect, it } from "vite-plus/test";
 
-import { answeredAdmin, gridRow, lineOf, openAdmin } from "../../test/app.tsx";
+import {
+  act,
+  answeredAdmin,
+  answeredSummary,
+  FailedError,
+  gridRow,
+  lineOf,
+  openAdmin,
+  settle,
+} from "../../test/app.tsx";
 import type { Answers } from "../../test/app.tsx";
 import {
   emptyAdminSnapshot,
   readySnapshot,
   toldSnapshot,
 } from "../../test/snapshots.ts";
+import type { ClientSummary } from "../clients/summary.ts";
 import type { Crm } from "../crm/crm.ts";
-import { formatDate } from "./words.ts";
 
 // An organization's page: its column of sections, its overview and what
 // they say of its plan and agreements, as its core's snapshot reads. The
@@ -64,6 +73,10 @@ const waitsMark = /\d+ things? needs? Grasp/u;
 const notYetRead = (text: string): boolean =>
   text.includes("doesn’t hold it yet") || text.includes("once it is connected");
 
+/** A live organization's figures on its overview, as text. */
+const figuresOf = (root: Element): string =>
+  root.querySelector('[aria-label="How it is doing"]')?.textContent ?? "";
+
 /** The part of the page titled `title`. */
 const partOf = (root: Element, title: string): Element | undefined =>
   [...root.querySelectorAll("section")].find(
@@ -102,7 +115,8 @@ describe("an organization's page", () => {
           .every((at, i) => at === positions[i]),
       onOverview: entryOf(container, "Overview")?.getAttribute("aria-current"),
       title: container.querySelector("main h1")?.textContent,
-      known: text.includes("85% known. Ready for Grasp’s go"),
+      // Its standing, over every section.
+      standing: text.includes("Waiting for the go"),
       waits: ["Steps", "Details", "Interviews"].map((title) =>
         waitsMark.test(
           entryOf(container, title)?.closest("li")?.textContent ?? ""
@@ -117,7 +131,7 @@ describe("an organization's page", () => {
       inOrder: true,
       onOverview: "page",
       title: "Acme",
-      known: true,
+      standing: true,
       waits: [true, false, false],
       source: false,
       needs: [true, false],
@@ -151,39 +165,106 @@ describe("an organization's page", () => {
     ).toStrictEqual(["Main Street"]);
   });
 
-  it("says the interviews closed on the last day their links worked", async () => {
-    const snapshot = toldSnapshot("Closed", {
-      days: 5,
-      daysIn: 10,
-      leadTalked: true,
-    });
-    // Five days from day 0: the links worked until the fifth, day 4.
-    const last = new Date(`${snapshot.plan?.start ?? ""}T12:00:00Z`);
-    last.setUTCDate(last.getUTCDate() + 4);
+  it("says an organization whose interviews closed short is at risk, and how long ago they closed", async () => {
+    // Five days of interviews, told ten days ago: over, little known.
+    const { container } = await openAcme(
+      "",
+      toldSnapshot("Closed", { days: 5, daysIn: 10, leadTalked: true })
+    );
 
-    const { container } = await openAcme("", snapshot);
-
-    expect(statusOf(container)).toContain(
-      `The interviews closed on ${formatDate(last.toISOString().slice(0, 10))}`
+    expect(statusOf(container)).toMatch(
+      /At risk.*The interviews closed 5 days ago/u
     );
   });
 
-  it("sends what needs Grasp at a paused organization to its steps", async () => {
+  it("counts the interviews' day and the risk as core does, so the page and Home agree", async () => {
+    // Told ten days ago: core's day 11 of 14, three quarters gone with
+    // less known than an even pace towards 80% (63%) gives.
+    const told = toldSnapshot("Behind", {
+      days: 14,
+      daysIn: 10,
+      leadTalked: true,
+    });
+    const { container } = await openAcme("", {
+      ...told,
+      gate: { ...told.gate, known: 40 },
+    });
+
+    expect(statusOf(container)).toMatch(/At risk.*Day 11 of 14/u);
+  });
+
+  it("calls an organization live while its gate is open, though Grasp never gave a go", async () => {
+    const ready = readySnapshot("Acme");
+    const { container } = await openAcme("", {
+      ...ready,
+      // A deployment that started open: no go recorded, no first
+      // conversation brought in.
+      gate: { ...ready.gate, open: true, openedAt: null },
+      kickoff: null,
+    });
+    const next =
+      container.querySelector('section[aria-labelledby="next"]')?.textContent ??
+      "";
+
+    expect({
+      live: statusOf(container).includes("LiveOpen, without interviews"),
+      onboarding: ["Give the go", "Bring in the conversation"].some((words) =>
+        next.includes(words)
+      ),
+    }).toStrictEqual({ live: true, onboarding: false });
+  });
+
+  it("leads with what its own platform needs, settled on its Setup, before anything its core says", async () => {
+    const failing = gridRow({
+      id: "acme",
+      name: "Acme",
+      rollout: {
+        failed: { releaseId: "2026.11.20-1", error: null },
+        behind: 0,
+        channelStopped: null,
+      },
+    });
+    const { container } = await openAdmin("/organizations/acme", {
+      fetchClientGrid: [failing],
+      fetchClientAdmin: answeredAdmin({
+        client: failing,
+        snapshot: readySnapshot("Acme"),
+      }),
+      ...setupAnswers,
+    });
+    const next = container.querySelector('section[aria-labelledby="next"]');
+
+    expect({
+      deploy: next?.textContent?.includes("Its deploy of 2026.11.20-1 failed"),
+      action: next?.querySelector('a[href="/organizations/acme/setup"]')
+        ?.textContent,
+      goAfter: (
+        partOf(container, "What else needs Grasp")?.textContent ?? ""
+      ).includes("The company comes in once Grasp gives its go."),
+    }).toStrictEqual({
+      deploy: true,
+      action: "Open its Setup",
+      goAfter: true,
+    });
+  });
+
+  it("leads a paused organization's overview with resuming its interviews, on its steps", async () => {
     const { container } = await openAcme("", {
       ...toldSnapshot("Paused", { days: 14, daysIn: 3, leadTalked: true }),
       paused: true,
     });
-    const item = [...container.querySelectorAll("main li")].find((each) =>
-      each.textContent?.includes("The interviews are paused")
-    );
+    const next = container.querySelector('section[aria-labelledby="next"]');
+    const action = next?.querySelector('a[href="/organizations/acme/steps"]');
 
     expect({
-      paused: item !== undefined,
-      toSteps:
-        item?.querySelector('a[href="/organizations/acme/steps"]') !==
-          undefined &&
-        item?.querySelector('a[href="/organizations/acme/steps"]') !== null,
-    }).toStrictEqual({ paused: true, toSteps: true });
+      paused: next?.textContent?.includes("The interviews are paused"),
+      waits: next?.textContent?.includes("Waiting on Grasp"),
+      action: action?.textContent,
+    }).toStrictEqual({
+      paused: true,
+      waits: true,
+      action: "Resume the interviews",
+    });
   });
 
   it("shows a section under its own path, titled, saying only where what isn't read yet will come from", async () => {
@@ -328,69 +409,246 @@ describe("an organization's page", () => {
 });
 
 describe("an organization's overview", () => {
-  it("lists what needs Grasp, the most pressing first, each opening the section it is settled in", async () => {
+  it("leads with what comes next and who it waits on, then lists what else needs Grasp, each opening where it is settled", async () => {
     const { container, text } = await openAcme("", readySnapshot("Acme"));
-    const needs = partOf(container, "Needs Grasp");
-    const said = needs?.textContent ?? "";
-    // The go and both agreements; a contract core doesn't hold is nothing to settle.
-    const lines = [
-      "The company comes in once Grasp gives its go.",
-      "The agreement on handling data is not signed yet.",
-      "The company has not signed off its look at the risks yet.",
-    ];
+    const next =
+      container.querySelector('section[aria-labelledby="next"]')?.textContent ??
+      "";
+    const more = partOf(container, "What else needs Grasp");
+    const rows = [...(more?.querySelectorAll("a") ?? [])].map((link) => [
+      link.textContent ?? "",
+      link.getAttribute("href"),
+    ]);
 
     expect({
-      needs: lines.map((line) => said.includes(line)),
-      mostPressingFirst: lines
-        .map((line) => said.indexOf(line))
-        .every((at, index, all) => index === 0 || at > (all[index - 1] ?? 0)),
-      contract: said.includes("The contract is still being written."),
-      opensSteps:
-        needs?.querySelector('a[href="/organizations/acme/steps"]') !==
-          undefined &&
-        needs?.querySelector('a[href="/organizations/acme/steps"]') !== null,
-      ported: !text().includes("This section isn’t in the admin yet."),
+      next: [
+        "The company comes in once Grasp gives its go.",
+        "Waiting on Grasp",
+        "Give the go",
+      ].map((words) => next.includes(words)),
+      more: rows.map(([, href]) => href),
+      waits:
+        (more?.textContent ?? "").split("Waiting on the company").length - 1,
+      lines: [
+        "The agreement on handling data is not signed yet.",
+        "The company has not signed off its look at the risks yet.",
+      ].map((line) => (more?.textContent ?? "").includes(line)),
+      // A contract core doesn't hold is nothing to settle.
+      contract: text().includes("The contract is still being written."),
     }).toStrictEqual({
-      needs: [true, true, true],
-      mostPressingFirst: true,
+      next: [true, true, true],
+      more: ["/organizations/acme/steps", "/organizations/acme/steps"],
+      waits: 2,
+      lines: [true, true],
       contract: false,
-      opensSteps: true,
-      ported: true,
     });
   });
 
-  it("briefs the next call with where the company stands, leaving what to bring up to what needs Grasp beside it", async () => {
-    const { container } = await openAcme("", readySnapshot("Acme"));
-    const brief = partOf(container, "Before the next call")?.textContent ?? "";
+  it("says how a live company uses Grasp from its summary: people active last week, a few as 1–4, and its runs", async () => {
+    const ready = readySnapshot("Acme");
+    const openedAt = new Date(Date.parse(ready.now) - 7 * 86_400_000);
+    const live = answeredAdmin({
+      client: acme,
+      snapshot: {
+        ...ready,
+        gate: { ...ready.gate, open: true, openedAt: openedAt.toISOString() },
+      },
+    });
+    const usedBy = (people: (number | "1–4")[]): ClientSummary => {
+      const summary = answeredSummary({ client: acme });
+      if (summary.state !== "answered") {
+        throw new Error("Expected an answered summary");
+      }
+      return {
+        ...summary,
+        summary: {
+          ...summary.summary,
+          activity: {
+            runs: [{ day: ready.now.slice(0, 10), done: 12, failed: 2 }],
+            workflowsLive: 3,
+            appsLive: 2,
+            agentsOn: 1,
+            activePeople: people.map((count, at) => ({
+              week: `2026-11-${String(2 + 7 * at).padStart(2, "0")}`,
+              people: count,
+            })),
+          },
+        },
+      };
+    };
+    const open = async (summary: ClientSummary) =>
+      await openAdmin("/organizations/acme", {
+        fetchClientGrid: [acme],
+        fetchClientAdmin: live,
+        fetchClientSummaries: [summary],
+        ...setupAnswers,
+      });
+    const many = await open(usedBy([4, 6, 2]));
+    const manyFigures = figuresOf(many.container);
+    const few = await open(usedBy([6, "1–4", 2]));
 
     expect({
-      stands: brief.includes("Agreed."),
-      prepares: brief.includes("Prepare the call with Grasp"),
-      // What needs Grasp stands once, in its own list.
-      bringUp: brief.includes("The company comes in once Grasp gives its go."),
-      // Core gives how much is known without its parts, and no drawn work.
-      notKnownYet: brief.includes("Not known yet"),
-      couldDoMore: brief.includes("Where Grasp could do more"),
-    }).toStrictEqual({
-      stands: true,
-      prepares: true,
-      bringUp: false,
-      notKnownYet: false,
-      couldDoMore: false,
+      many: [
+        "People active last week6of 0 members, +2 on the week before",
+        "Runs, last 7 days142 failed",
+        "Workflows live31 agent on",
+      ].map((words) => manyFigures.includes(words)),
+      few: figuresOf(few.container).includes(
+        "People active last week1–4of 0 members"
+      ),
+      // The chart says a week of a few as such.
+      chart: few.main().includes("In 1 week, 1 to 4."),
+    }).toStrictEqual({ many: [true, true, true], few: true, chart: true });
+  });
+
+  it("says how a company uses Grasp isn't shared once it ended Grasp's staff access", async () => {
+    const ready = readySnapshot("Acme");
+    const summary = answeredSummary({ client: acme });
+    const { container } = await openAdmin("/organizations/acme", {
+      fetchClientGrid: [acme],
+      fetchClientAdmin: answeredAdmin({
+        client: acme,
+        snapshot: {
+          ...ready,
+          gate: { ...ready.gate, open: true, openedAt: ready.now },
+        },
+      }),
+      fetchClientSummaries: [
+        summary.state === "answered"
+          ? { ...summary, summary: { ...summary.summary, activity: null } }
+          : summary,
+      ],
+      ...setupAnswers,
+    });
+    expect(figuresOf(container).match(/Not shared/gu)?.length).toBe(4);
+  });
+
+  it("asks again for what failed on the overview when staff read the page again, and says a missing Grasp AI figure isn't reported", async () => {
+    let asked = 0;
+    const { container } = await openAdmin("/organizations/acme", {
+      fetchClientGrid: [acme],
+      fetchClientAdmin: answeredAdmin({
+        client: acme,
+        snapshot: readySnapshot("Acme"),
+      }),
+      ...setupAnswers,
+      // Its core fails the first time, then answers without a Grasp AI figure.
+      fetchClientAiStatus: () => {
+        asked += 1;
+        if (asked === 1) {
+          throw new FailedError();
+        }
+        return { providers: [] };
+      },
+    });
+    const figure = () =>
+      [...container.querySelectorAll("main li")].find((item) =>
+        item.textContent?.startsWith("Grasp AI this month")
+      )?.textContent;
+    const first = figure();
+    const again = [
+      ...container.querySelectorAll<HTMLButtonElement>("main button"),
+    ].find((button) => button.textContent === "Read again");
+    await act(() => {
+      again?.click();
+    });
+    await settle();
+
+    expect({ first, after: figure() }).toStrictEqual({
+      first: "Grasp AI this monthNot readIts core didn’t answer",
+      after:
+        "Grasp AI this monthNot reportedOn its own key, or its release doesn’t report it",
     });
   });
 
-  it("once the company is open, briefs it as open", async () => {
+  it("says a connection Composio couldn't be asked about isn't checked, never that all work", async () => {
     const ready = readySnapshot("Acme");
-    const weekAgo = new Date(Date.parse(ready.now) - 7 * 86_400_000);
-    const { container } = await openAcme("", {
-      ...ready,
-      gate: { ...ready.gate, open: true, openedAt: weekAgo.toISOString() },
+    const { container } = await openAdmin("/organizations/acme", {
+      fetchClientGrid: [acme],
+      fetchClientAdmin: answeredAdmin({
+        client: acme,
+        snapshot: {
+          ...ready,
+          gate: { ...ready.gate, open: true, openedAt: ready.now },
+          integrations: {
+            connected: [
+              {
+                source: "composio",
+                provider: "exact",
+                state: "unread",
+                hidden: false,
+                connectedBy: null,
+                connectedAt: ready.now,
+                account: null,
+                tools: null,
+              },
+            ],
+            personal: [],
+            needed: [],
+            requests: [],
+          },
+        },
+      }),
+      ...setupAnswers,
     });
 
-    expect(partOf(container, "Before the next call")?.textContent).toContain(
-      "Open since the go"
+    expect(figuresOf(container)).toContain(
+      "Connectors working0 of 11 not checked now"
     );
+  });
+
+  it("lists what staff and the admin did lately, from the admin's own record", async () => {
+    const at = new Date();
+    const { container } = await openAdmin("/organizations/acme", {
+      fetchClientGrid: [acme],
+      fetchClientAdmin: answeredAdmin({
+        client: acme,
+        snapshot: readySnapshot("Acme"),
+      }),
+      ...setupAnswers,
+      fetchClientSetup: {
+        history: [
+          {
+            id: "1",
+            at,
+            actor: "system",
+            action: "deploy.done",
+            target: "2026.11.20-1",
+            detail: null,
+          },
+          {
+            id: "2",
+            at,
+            actor: "system",
+            action: "provision.progress",
+            target: null,
+            detail: null,
+          },
+          {
+            id: "3",
+            at,
+            actor: "staff@grasp.test",
+            action: "client.create",
+            target: null,
+            detail: null,
+          },
+        ],
+      },
+    });
+    const recent = partOf(container, "Recent activity")?.textContent ?? "";
+
+    expect({
+      deploy: recent.includes("Its deploy of 2026.11.20-1 is live."),
+      byItself: recent.includes("Grasp, by itself"),
+      added: recent.includes("Added it.staff@grasp.test"),
+      // How far a setting up is goes on its Setup's history alone.
+      progress: recent.includes("provision.progress"),
+    }).toStrictEqual({
+      deploy: true,
+      byItself: true,
+      added: true,
+      progress: false,
+    });
   });
 
   it("counts the interviews' days to the company's own plan", async () => {

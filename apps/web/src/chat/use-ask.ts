@@ -158,6 +158,11 @@ export const useAsk = (
   // The chat what is typed belongs to, and the chat a question asked here
   // made: the box is that one's still once it opens.
   const [draftOf, setDraftOf] = useState(chatId);
+  // The chat the box is now, for what comes back after an await.
+  const boxOf = useRef(chatId);
+  useEffect(() => {
+    boxOf.current = chatId;
+  }, [chatId]);
   const [made, setMade] = useState<string>();
   if (chatId !== draftOf) {
     setDraftOf(chatId);
@@ -175,7 +180,7 @@ export const useAsk = (
   const owner = useBoxOwner();
   const pendingHere = pendingKey(chatId, slot);
   const here = usePending(pendingHere);
-  const { messages, loaded } = useFollowedChat(chatId).view;
+  const { messages, loaded, queued, running } = useFollowedChat(chatId).view;
   // A question from the box that failed to send comes back into it, which
   // says why: the box that sent it, or, once that one is gone (Chat's
   // start, after it opened the chat's page), the one that shows its chat.
@@ -207,11 +212,11 @@ export const useAsk = (
     if (
       here !== undefined &&
       (takesBack(here, owner) ||
-        (here.state === "sent" && taken(here, messages)))
+        (here.state === "sent" && taken(here, messages, queued)))
     ) {
       clearPending(pendingHere, here);
     }
-  }, [here, owner, messages, pendingHere]);
+  }, [here, owner, messages, queued, pendingHere]);
   // Another box's question on its way into this chat (Chat's start, which
   // opened it): this one waits for it, so the two never pass each other.
   const otherOnItsWay = here?.state === "sending" && here.owner !== owner;
@@ -297,6 +302,7 @@ export const useAsk = (
       after:
         chatId === undefined || loaded ? (messages.at(-1)?.id ?? 0) : undefined,
       at: new Date().toISOString(),
+      queues: running,
       owner,
       fromBox,
       state: "sending",
@@ -401,8 +407,30 @@ export const useAsk = (
     }
     return true;
   };
+  // A stop drops what was queued behind the answer (core's `cancel` says
+  // which): it comes back into the box, the oldest first and before what
+  // is typed there, as Codex hands queued messages back on an interrupt,
+  // to send again or let go. Only while the box is still that chat's.
   const stop = async (id: string): Promise<void> => {
-    await run(async (session) => await session.chats.cancel(id));
+    const ended = await run(async (session) => await session.chats.cancel(id));
+    if (
+      ended === undefined ||
+      ended === false ||
+      ended.dropped.length === 0 ||
+      boxOf.current !== id
+    ) {
+      return;
+    }
+    const { dropped } = ended;
+    setText((now) =>
+      [...dropped, now].filter((each) => each.trim() !== "").join("\n\n")
+    );
+  };
+  /** Has the agent take the questions queued behind its answer at once. */
+  const sendNow = async (id: string): Promise<void> => {
+    await run(async (session) => {
+      await session.chats.sendNow(id);
+    });
   };
   return {
     composer: {
@@ -444,5 +472,6 @@ export const useAsk = (
           }),
     },
     ask,
+    sendNow,
   };
 };

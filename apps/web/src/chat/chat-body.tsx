@@ -153,6 +153,7 @@ export const ChatConversation = ({
     failure,
     empty,
     ask,
+    sendNow,
     composer,
     offered,
     sourceNames,
@@ -162,7 +163,8 @@ export const ChatConversation = ({
   // The question on its way here, drawn at once.
   const pending = shownPending(
     usePending(pendingKey(chatId, chat.slot)),
-    view.messages
+    view.messages,
+    view.queued
   );
   // A subject's chat, while core finds it, or why it gave none.
   if (finding.searching || finding.failure !== undefined) {
@@ -212,6 +214,10 @@ export const ChatConversation = ({
         }}
         output={view.output}
         partial={view.partial}
+        queued={view.queued}
+        onSendNow={() => {
+          void sendNow(chatId);
+        }}
         checking={view.checking}
         modelWait={view.waiting}
         running={view.running}

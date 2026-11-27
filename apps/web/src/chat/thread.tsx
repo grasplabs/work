@@ -6,6 +6,7 @@ import type {
   ChatMessage,
   ChatOutput,
   ChatPartial,
+  ChatQueued,
   ChatReasoning,
   ChatToolCall,
   ChatToolEvent,
@@ -571,6 +572,14 @@ type Row =
   | { kind: "pending"; id: string; at?: undefined; question: PendingQuestion }
   | AnswerTurn
   | { kind: "after"; id: string; at?: undefined; children: ReactNode }
+  | {
+      kind: "queued";
+      id: string;
+      at?: undefined;
+      text: string;
+      /** Only on the newest: has Grasp take them all now. */
+      onSendNow: (() => void) | undefined;
+    }
   | { kind: "new"; id: string; at?: undefined }
   | {
       kind: "day";
@@ -883,6 +892,37 @@ const Question = ({
     </Message>
   );
 };
+
+/**
+ * A question sent while Grasp works that it hasn't taken yet, at the
+ * thread's end, as T3 Code and Claude Code list theirs: the person's own
+ * words in an outlined bubble, as it isn't asked yet, saying it is queued.
+ * On the newest, Send now (Claude Code's and T3 Code's) has Grasp take
+ * them all at once.
+ */
+const QueuedQuestion = ({
+  row: { text, onSendNow },
+}: {
+  row: Extract<Row, { kind: "queued" }>;
+}) => (
+  <Message align="end">
+    <MessageContent>
+      <Bubble align="end" variant="outline">
+        <BubbleContent>{text}</BubbleContent>
+      </Bubble>
+      <MessageFooter>
+        <Text color="muted" size="sm">
+          <Trans>Queued</Trans>
+        </Text>
+        {onSendNow === undefined ? null : (
+          <Button onClick={onSendNow} size="sm" variant="ghost">
+            <Trans>Send now</Trans>
+          </Button>
+        )}
+      </MessageFooter>
+    </MessageContent>
+  </Message>
+);
 
 /** Everything an answer is drawn from, beyond its own replies. */
 interface AnswerContext extends StepContext {
@@ -1355,6 +1395,9 @@ const AnswerRow = ({
 /** Where the page passes no calls of the chat's code. */
 const noTools: readonly ChatToolEvent[] = [];
 
+/** Where nothing is queued. */
+const noQueued: readonly ChatQueued[] = [];
+
 /** Where the page passes no agents. */
 const noAgents: readonly ChatAgent[] = [];
 
@@ -1387,34 +1430,62 @@ export const answerAgentsOf = (
 const loadingPairs = ["first", "second"] as const;
 
 /**
- * `rows` with the question on its way after them, as the last question,
- * and the answer Grasp works on (`live`, from `partial`) after it: never
- * under the answer before, while core's copy of the question is on its way.
+ * Whether Grasp's live answer goes with the messages above: always, but
+ * while the question on its way is the one it answers.
  */
-const withPending = (
+const answersAbove = (
+  running: boolean,
+  pending: PendingQuestion | undefined
+): boolean => running && (pending === undefined || pending.queues);
+
+/** What the thread shows after its messages, as a row, if anything. */
+const afterRow = (children: ReactNode): Row | undefined =>
+  children === undefined || children === null
+    ? undefined
+    : { kind: "after", id: "after", children };
+
+/**
+ * The thread's rows after its messages: the question on its way, as the
+ * last question, and the answer Grasp works on (`live`, from `partial`)
+ * after it, never under the answer before while core's copy of the
+ * question is on its way; then what is queued behind the answer, and the
+ * question on its way among them when it was sent while Grasp answered;
+ * then what the thread shows after (`after`).
+ */
+const withLast = (
   rows: Row[],
   pending: PendingQuestion | undefined,
-  live: { running: boolean; partial: ChatPartial | null }
+  live: { running: boolean; partial: ChatPartial | null },
+  queuedRows: Row[],
+  after: Row | undefined
 ): Row[] => {
+  const ending = after === undefined ? [] : [after];
   if (pending === undefined) {
-    return rows;
+    return [...rows, ...queuedRows, ...ending];
+  }
+  if (pending.queues) {
+    const waiting: Row = {
+      kind: "queued",
+      id: "pending",
+      text: pending.text,
+      onSendNow: undefined,
+    };
+    return [...rows, ...queuedRows, waiting, ...ending];
   }
   const asked: Row = { kind: "pending", id: "pending", question: pending };
-  if (!live.running) {
-    return [...rows, asked];
-  }
-  return [
-    ...rows,
-    asked,
-    {
-      kind: "answer",
-      id: "answering",
-      at: undefined,
-      replies: [],
-      partial: live.partial,
-      live: true,
-    },
-  ];
+  const answering: Row[] = live.running
+    ? [
+        {
+          kind: "answer",
+          id: "answering",
+          at: undefined,
+          replies: [],
+          partial: live.partial,
+          live: true,
+        },
+      ]
+    : [];
+  return [...rows, asked, ...answering, ...queuedRows, ...ending];
 };
 
 /** The question on its way as the person's bubble shows it. */
@@ -1437,6 +1508,8 @@ export const ChatThread = ({
   output,
   partial,
   running,
+  queued = noQueued,
+  onSendNow,
   checking = false,
   modelWait = null,
   tools = noTools,
@@ -1464,6 +1537,10 @@ export const ChatThread = ({
   partial: ChatPartial | null;
   /** Whether the agent is working on the chat now. */
   running: boolean;
+  /** The questions sent meanwhile that it hasn't taken yet, oldest first. */
+  queued?: readonly ChatQueued[];
+  /** Has the agent take the queued questions at once, while it works. */
+  onSendNow?: () => void;
   /** Whether its turn checks the drafts it wrote now, past its answer. */
   checking?: boolean;
   /**
@@ -1519,7 +1596,7 @@ export const ChatThread = ({
   const inBrain = useLocation({
     select: ({ pathname }) => pathname === "/brain" || pathname === "/brain/",
   });
-  const rows = rowsOf(messages, shown, running && pending === undefined);
+  const rows = rowsOf(messages, shown, answersAbove(running, pending));
   const liveRow = rows.findLast(
     (row): row is AnswerTurn => row.kind === "answer" && row.live
   );
@@ -1622,16 +1699,20 @@ export const ChatThread = ({
         turn.id === lastAnswerRow?.id && !turn.live ? sources : undefined,
     };
   };
-  const lined = withPending(
+  const logId = useId();
+  const waitingRows: Row[] = queued.map(({ id, text }, index) => ({
+    kind: "queued",
+    id: `queued:${id}`,
+    text,
+    onSendNow: running && index === queued.length - 1 ? onSendNow : undefined,
+  }));
+  const items = withLast(
     withNewLine(withDayLines(rows), newLineBefore),
     pending,
-    { running, partial: shown }
+    { running, partial: shown },
+    waitingRows,
+    afterRow(children)
   );
-  const logId = useId();
-  const items: Row[] =
-    children === undefined || children === null
-      ? lined
-      : [...lined, { kind: "after", id: "after", children }];
   const column: { style?: LayoutStyle } = compact
     ? {}
     : { style: styles.column };
@@ -1668,6 +1749,9 @@ export const ChatThread = ({
                         ) : null}
                         {row.kind === "answer" ? (
                           <AnswerRow context={contextOf(row)} turn={row} />
+                        ) : null}
+                        {row.kind === "queued" ? (
+                          <QueuedQuestion row={row} />
                         ) : null}
                         {row.kind === "after" ? row.children : null}
                         {row.kind === "new" ? <NewLine /> : null}

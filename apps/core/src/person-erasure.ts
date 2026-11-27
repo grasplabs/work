@@ -23,6 +23,7 @@ import { z } from "zod";
 
 import { dropOwnAgentsOf } from "./agent-builder.ts";
 import { dropAgentWakesFor } from "./agent-wakes.ts";
+import { auditLog } from "./audit-log.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import {
   activeMember,
@@ -190,8 +191,9 @@ const erasedEmail = (userId: string): string =>
 /**
  * Their identity: their email (the address `users` keeps becomes one that
  * reaches nobody, and names nobody), whether it was verified, their
- * picture, every sign-in account and every session, and a guest's
- * sign-in code. Their name and ID stay.
+ * picture, every sign-in account and every session, a guest's sign-in
+ * code, and the weeks the audit log counts them active in. Their name and
+ * ID stay.
  * What each account named them by stays as a keyed hash, written in the
  * batch that deletes the accounts, so there is never a moment when neither
  * keeps them out. Only the accounts whose subjects were hashed go: one
@@ -264,6 +266,10 @@ const identity: ErasureStep = {
         ...(user === undefined ? [] : [user.email]),
       ],
     });
+    // The weeks they were active in, as the admin's summary counts them
+    // (the audit log's `active_weeks`): before the area is complete, so a
+    // log that doesn't answer leaves it pending.
+    await auditLog(env).forgetPerson(userId);
     const subjects = new Set(
       held.flatMap((account) => subjectsOf(account, directoryProviderId))
     );

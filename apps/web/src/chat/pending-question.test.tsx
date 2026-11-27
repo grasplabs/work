@@ -30,6 +30,7 @@ const pending: PendingQuestion = {
   files: [],
   after: 2,
   at,
+  queues: false,
   owner: "start",
   fromBox: true,
   state: "sending",
