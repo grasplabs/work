@@ -16,8 +16,8 @@
   },
   {
     "path": "src/components/calendar.tsx",
-    "reason": "The two String.raw class strings move out of the component: the React Compiler can't compile a tagged template whose raw text differs from its value.",
-    "test": "packages/app-kit/vite.browser.config.ts"
+    "reason": "The day button gets the ref its focus effect reads, which upstream never attaches, so the arrow keys move focus from day to day; and the two String.raw class strings move out of the component, as the React Compiler can't compile a tagged template whose raw text differs from its value.",
+    "test": "packages/app-kit/test/kit.browser.test.tsx"
   },
   {
     "path": "src/components/toast.tsx",

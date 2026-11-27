@@ -461,6 +461,12 @@ export const rewriteImports = (
       imported.app.add(module);
       return module;
     }
+    // The kit's own module before an approved package of the same name:
+    // the kit's chart and a page's charts share one recharts, never a copy
+    // the App approved besides.
+    if (!isRelative(specifier) && allowed.has(specifier)) {
+      return kitModule(kitModuleName(specifier));
+    }
     const approved = packageModuleIn(files, specifier);
     if (approved !== undefined) {
       imported.app.add(approved);

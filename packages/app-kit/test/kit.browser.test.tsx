@@ -290,6 +290,12 @@ const focus = (locator: Locator): void => {
   }
 };
 
+/** The day the focused calendar button stands for. */
+const focusedDay = (): string | undefined =>
+  document.activeElement instanceof HTMLElement
+    ? document.activeElement.dataset.day
+    : undefined;
+
 /** Keyboard behaviour particular to a component, checked on its page. */
 const keyboardChecks: Record<string, () => Promise<void>> = {
   // A vertical group moves with the up and down arrows, which only works
@@ -301,6 +307,15 @@ const keyboardChecks: Record<string, () => Promise<void>> = {
     await expect
       .element(alignment.getByRole("button", { name: "Center" }))
       .toHaveFocus();
+  },
+  // The arrow keys move the focus from day to day: the day button has the
+  // ref its focus effect needs.
+  calendar: async () => {
+    const days = page.getByRole("grid").getByRole("button");
+    focus(days.nth(10));
+    const from = focusedDay();
+    await userEvent.keyboard("{ArrowRight}");
+    await expect.poll(focusedDay).not.toBe(from);
   },
   // A single value is one thumb.
   slider: async () => {

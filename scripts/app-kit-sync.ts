@@ -106,11 +106,10 @@ const run = (command: string, args: readonly string[]): void => {
 const update = (): boolean => {
   const pin = readPin();
   const changes = readChanges();
-  const kept = new Map(
-    changes.map((change) => [
-      change.path,
-      readFileSync(path.join(kit, change.path)),
-    ])
+  // Every file the CLI may write, as it is: all of it goes back if the
+  // install fails, and the listed files go back once it is done.
+  const before = new Map(
+    presentFiles().map((file) => [file, readFileSync(path.join(kit, file))])
   );
   const outside = ["package.json", "components.json"].map((file) => ({
     file,
@@ -120,6 +119,7 @@ const update = (): boolean => {
   const lock = readFileSync(lockfile);
   const preset = pin.style.replace(/^base-/u, "");
   const cli = path.join(kit, "node_modules", ".bin", "shadcn");
+  let installed = false;
   try {
     writeFileSync(path.join(kit, "src/styles.css"), '@import "tailwindcss";\n');
     run(cli, [
@@ -145,15 +145,24 @@ const update = (): boolean => {
         .map((file) => [file, sha256(readFileSync(path.join(kit, file)))])
     );
     writeFileSync(pinPath, `${JSON.stringify({ ...pin, files }, null, 2)}\n`);
-    for (const [file, bytes] of kept) {
+    for (const { path: file } of changes) {
       const full = path.join(kit, file);
       copyFileSync(full, `${full}.registry`);
-      writeFileSync(full, bytes);
       console.info(
         `Carry ${file}'s change over to ${file}.registry, then delete it.`
       );
     }
+    installed = true;
   } finally {
+    const restored = installed
+      ? changes.map((change) => change.path)
+      : [...before.keys()];
+    for (const file of restored) {
+      const bytes = before.get(file);
+      if (bytes !== undefined) {
+        writeFileSync(path.join(kit, file), bytes);
+      }
+    }
     for (const { file, bytes } of outside) {
       writeFileSync(path.join(kit, file), bytes);
     }

@@ -203,6 +203,10 @@ function CalendarDayButton({
 
   return (
     <Button
+      // Grasp: the ref the focus effect needs, which upstream never attaches,
+      // so the keyboard's focus follows the focused day
+      // (packages/app-kit/local-changes.json).
+      ref={ref}
       variant="ghost"
       size="icon"
       data-day={day.date.toLocaleDateString(locale?.code)}
