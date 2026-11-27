@@ -1,7 +1,7 @@
 import { stillDeletingAtMostMs } from "@grasp-os/brain-next/contract";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { storeIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
+import { storeIdSchema } from "@grasp-os/shared/ids";
 import { interviewProgressSchema } from "@grasp-os/shared/interview-links";
 import type { ErasureArea } from "@grasp-os/shared/members";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
@@ -580,7 +580,7 @@ const keptKey = async (
         ]),
   ]);
   if (personId !== undefined) {
-    const workspaceId = workspaceIdSchema.parse(crypto.randomUUID());
+    const workspaceId = personalWorkspaceId(personId);
     const agentId = `agent-${crypto.randomUUID()}`;
     const chat = await workspace(env, workspaceId).createChat(
       "Questions",

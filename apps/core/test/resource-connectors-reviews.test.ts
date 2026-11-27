@@ -1,3 +1,4 @@
+import { chatIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -5,6 +6,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { permissions as permissionRows } from "../src/db/core/schema.ts";
 import { confirmPendingAction } from "../src/pending-actions.ts";
+import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import { reviewResourceBindings } from "../src/resource-bindings.ts";
 import { commitApp } from "./apps.ts";
 import { mockIdpWith } from "./idp.ts";
@@ -234,7 +236,8 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       await db.insert(permissionRows).values({
         ...granted,
         id: crypto.randomUUID(),
-        chatId: crypto.randomUUID(),
+        workspaceId: personalWorkspaceId(granted.requestedBy),
+        chatId: chatIdSchema.parse(crypto.randomUUID()),
       });
     }
     expect({

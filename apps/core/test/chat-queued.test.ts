@@ -465,7 +465,11 @@ describe("a question sent while the agent answers", slow, () => {
       again.reply,
       says("Second.")
     );
-    const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
+    const session = () =>
+      chatSession(env, {
+        workspaceId: id,
+        chatId: chatIdSchema.parse(chat.id),
+      });
     // As the chat's Workspace hands its turn over (`ChatSession.run`).
     const request = {
       turnId: "turn-a",
@@ -546,7 +550,11 @@ describe("a question sent while the agent answers", slow, () => {
       says("Answered."),
       says("Answered.")
     );
-    const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
+    const session = () =>
+      chatSession(env, {
+        workspaceId: id,
+        chatId: chatIdSchema.parse(chat.id),
+      });
     const request = {
       turnId: "turn-now",
       sentAt: Date.now(),
@@ -608,7 +616,11 @@ describe("a question sent while the agent answers", slow, () => {
     const { userId } = await signedInWithRole(idp, "user");
     const { id, chat } = await chatOf(userId);
     const provider = await fakeProviderFor([model], { hang: true });
-    const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
+    const session = () =>
+      chatSession(env, {
+        workspaceId: id,
+        chatId: chatIdSchema.parse(chat.id),
+      });
     const woken = session()
       .run({
         turnId: "turn-wake",
@@ -721,11 +733,17 @@ describe("a question sent while the agent answers", slow, () => {
       // Both objects restart: nothing waits on the turn any more, and the
       // chat's object takes it up again on its own.
       await restart(workspace(env, id));
-      const session = chatSession(env, id, chatIdSchema.parse(chat.id));
+      const session = chatSession(env, {
+        workspaceId: id,
+        chatId: chatIdSchema.parse(chat.id),
+      });
       await restart(session);
       // Its heartbeat wakes it, as the platform's alarm does.
       await runDurableObjectAlarm(
-        chatSession(env, id, chatIdSchema.parse(chat.id))
+        chatSession(env, {
+          workspaceId: id,
+          chatId: chatIdSchema.parse(chat.id),
+        })
       );
       const tab = await follow(ann, chat.id);
       await vi.waitFor(

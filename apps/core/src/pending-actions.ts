@@ -275,7 +275,11 @@ const tellChat = async (
       );
     });
   } catch (error) {
-    log.warn("chat.held_outcome_failed", { chatId, ...errorFields(error) });
+    log.warn("chat.held_outcome_failed", {
+      workspaceId,
+      chatId,
+      ...errorFields(error),
+    });
   }
 };
 

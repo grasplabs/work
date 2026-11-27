@@ -1,5 +1,4 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
-import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -8,6 +7,7 @@ import { withheldResponse, withheldResult } from "../src/agent.ts";
 import { addSource } from "../src/brain-next.ts";
 import type { SourceReaders } from "../src/brain-next.ts";
 import { workspace } from "../src/durable-objects.ts";
+import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import { newTeam } from "./admin-teams.ts";
 import {
   chatOf,
@@ -74,7 +74,7 @@ const modelCalls = (events: AuditEvent[]) =>
 describe("a chat's history", setUpTime, () => {
   it("makes no chat for an agent whose ID isn't a plain identifier", async () => {
     const person = await newPerson();
-    const stub = workspace(env, workspaceIdSchema.parse(crypto.randomUUID()));
+    const stub = workspace(env, personalWorkspaceId(person.userId));
     // What no agent core names looks like: it would reach into another
     // agent's memory path.
     await expect(

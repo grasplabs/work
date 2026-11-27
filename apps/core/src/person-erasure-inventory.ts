@@ -104,9 +104,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.channel_links": { erased: "channels" },
   "core.channel_conversations": { erased: "channels" },
   "core.chat_workflow_offers": { erased: "channels" },
-  // Whose each chat's ID is, IDs only: kept, so no erasure frees an ID
-  // for someone else's chat to take (what core keeps by a chat's ID).
-  "core.chat_ids": { kept: "keeps each chat's ID taken, by IDs only" },
+  // Written only by the release before (chat IDs taken company-wide), IDs
+  // only: kept until the contract migration drops it.
+  "core.chat_ids": { kept: "a chat ID's owner, by IDs only, until dropped" },
   // A shared chat's audience is the company's, but the rows of the chats
   // in their own workspace go with it.
   "core.chat_audiences": { erased: "workspace" },
@@ -197,7 +197,8 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // Spend is recorded by ID: a person's usage is keyed by their user ID,
   // never their name or address.
   "core.model_usage": { kept: "accounting, by ID" },
-  // A turn's times and counts, by its chat's ID: no person's ID, name or
+  // A turn's times and counts, by its chat's ref, whose workspace is its
+  // person's by ID (`person:<id>`), as a usage row names them: no name or
   // words, swept with the usage rows (model-usage.ts).
   "core.chat_turns": { kept: "accounting of a chat's turns, by ID" },
   "core.provider_health": noPerson,
@@ -515,6 +516,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // pi-durable keeps it in tables of its own (`pi_`, no schema of ours):
   // the workspace area erases every one of its chats' (`erasePerson`).
   "workspace.chats": { erased: "workspace" },
+  // The IDs of their deleted chats, kept so none is taken again: in their
+  // own object alone, erased with it.
+  "workspace.deleted_chats": { erased: "workspace" },
   "workspace.dashboards": { erased: "workspace" },
   "workspace.custom_widgets": { erased: "workspace" },
   "workspace.dashboard_widgets": { erased: "workspace" },

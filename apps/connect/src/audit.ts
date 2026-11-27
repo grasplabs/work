@@ -264,6 +264,10 @@ const callerOf = (
     subjectType: authority.subject.type,
     subjectId: codeSubjectId(authority.subject),
     ...(context?.type === "workflowRun" ? { run: context.runId } : {}),
+    // Which chat an agent called from: its workspace and its ID there.
+    ...(context?.type === "chat"
+      ? { workspace: context.workspaceId, chat: context.chatId }
+      : {}),
   };
 };
 
@@ -342,11 +346,6 @@ export const auditCall = async (
   add("sideEffect", sideEffect);
   // Only when it is: from a context that had read restricted data.
   add("restricted", claims?.restricted === true ? true : undefined);
-  // Which chat of its workspace an agent called from.
-  add(
-    "chat",
-    claims?.context?.type === "chat" ? claims.context.chatId : undefined
-  );
   add("reason", reason);
   // Only when it is: a repeat answered from the earlier call's outcome.
   add("replayed", record.replayed === true ? true : undefined);

@@ -2,6 +2,7 @@ import { brainOf, personalBrainOf } from "@grasp-os/brain-next/contract";
 import { agentErrors } from "@grasp-os/shared/agent";
 import { auditProvenanceMaxItems } from "@grasp-os/shared/audit";
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import { chatIdSchema } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
@@ -163,7 +164,7 @@ const erasedWhole = async (
 const dropRoster = async (chatId: string) => {
   await drizzle(env.DB)
     .delete(chatAudiences)
-    .where(eq(chatAudiences.chatId, chatId));
+    .where(eq(chatAudiences.chatId, chatIdSchema.parse(chatId)));
 };
 
 /** A new team of `personId`'s: its readers, and its group as the Brain names it. */

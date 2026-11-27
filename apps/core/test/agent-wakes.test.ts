@@ -197,7 +197,13 @@ describe("an agent's wake-ups", setUpTime, () => {
       "Look for invoices that are overdue and say which."
     );
 
-    // The next day's fire goes into the same chat.
+    // The next day's fire goes into the same chat, also as the release
+    // before keeps it, with the chat's ID and no workspace (`SET chat_id`).
+    await env.DB.prepare(
+      "UPDATE agent_wakes SET workspace_id = NULL WHERE id = ?"
+    )
+      .bind(made.id)
+      .run();
     await startDueAgentWakes(env, new Date(due.getTime() + dayMs));
     await expect(settledChats(person)).resolves.toHaveLength(1);
     expect(gateway.requests).toHaveLength(2);

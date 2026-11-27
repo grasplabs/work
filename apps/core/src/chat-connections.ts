@@ -9,7 +9,7 @@ import type {
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { httpActionsOf } from "@grasp-os/shared/http-connections";
 import { permissionIdSchema } from "@grasp-os/shared/ids";
-import type { ChatId } from "@grasp-os/shared/ids";
+import type { ChatRef } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   permissionErrors,
@@ -18,7 +18,7 @@ import {
 import type { Permission } from "@grasp-os/shared/permissions";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -32,6 +32,7 @@ import {
 } from "./audit-outbox.ts";
 import { activeMember } from "./auth/auth.ts";
 import { memberOf } from "./auth/identity.ts";
+import { chatRefOf, ofChat, workspaceOfRow } from "./chat-ref.ts";
 import {
   offeredAmong,
   offeredConnections,
@@ -59,9 +60,11 @@ import {
 // never asked for: its one audience, which an admin chose, decides who
 // uses it in every chat, with no grant (ungranted-reads.ts, GRA-2322).
 // The grant is an ordinary permission of the chat's agent that holds
-// only in that chat and only for that person (`chat_id`, `requested_by`;
-// `holdsIn` in permissions.ts), so every call is checked, signed and
-// audited as any other, connect still refuses a personal connection to
+// only in that chat and only for that person: its `chat_id`, its
+// `requested_by` the person the call acts for, and its `workspace_id`
+// that person's own, which the call's chat's is (`holdsIn` in
+// permissions.ts), so every call is checked, signed and audited as any
+// other, connect still refuses a personal connection to
 // anyone but its owner, and every write from chat is still held for the
 // person to confirm.
 //
@@ -255,6 +258,7 @@ const waitingChanged = async (env: Env, scope: AgentScope): Promise<void> => {
     });
   } catch (error) {
     log.warn("chat.held_push_failed", {
+      workspaceId: scope.workspaceId,
       chatId: scope.chatId,
       ...errorFields(error),
     });
@@ -365,17 +369,14 @@ export const askableConnections = async (
 const whyNotStored = async (
   env: Env,
   {
-    chatId,
-    requestedBy,
+    chat,
     agentId,
     objectId,
     resource,
     actions,
     binding,
   }: {
-    chatId: string;
-    /** Whose chat it is: a chat's requests are its person's alone. */
-    requestedBy: string;
+    chat: ChatRef;
     agentId: string;
     objectId: string;
     resource: string | null;
@@ -390,8 +391,7 @@ const whyNotStored = async (
       .from(permissions)
       .where(
         and(
-          eq(permissions.chatId, chatId),
-          eq(permissions.requestedBy, requestedBy),
+          ofChat(permissions, chat, permissions.requestedBy),
           eq(permissions.status, "revoked"),
           eq(permissions.objectId, objectId),
           resource === null
@@ -522,7 +522,7 @@ export const askInChat = async (
       workspaceId: scope.workspaceId,
       chatId: scope.chatId,
     },
-    chatId: scope.chatId,
+    ...chatRefOf(scope),
     reason,
     personal: true,
   };
@@ -531,8 +531,8 @@ export const askInChat = async (
   const insert = insertWhere(
     db,
     row,
-    sql`(SELECT count(*) FROM ${permissions} WHERE chat_id = ${row.chatId} AND requested_by = ${row.requestedBy} AND status = 'requested') < ${maxWaitingRequests}
-      AND NOT EXISTS (SELECT 1 FROM ${permissions} WHERE chat_id = ${row.chatId} AND requested_by = ${row.requestedBy} AND status = 'revoked' AND object_id = ${row.objectId} AND resource IS ${row.resource} AND actions = ${row.actions})
+    sql`(SELECT count(*) FROM ${permissions} WHERE ${ofChat(permissions, scope, permissions.requestedBy)} AND status = 'requested') < ${maxWaitingRequests}
+      AND NOT EXISTS (SELECT 1 FROM ${permissions} WHERE ${ofChat(permissions, scope, permissions.requestedBy)} AND status = 'revoked' AND object_id = ${row.objectId} AND resource IS ${row.resource} AND actions = ${row.actions})
       AND NOT EXISTS (SELECT 1 FROM ${permissions} WHERE subject_type = 'agent' AND subject_id = ${row.subjectId} AND binding = ${binding} AND chat_id IS NULL AND status <> 'revoked')`
   );
   try {
@@ -561,8 +561,7 @@ export const askInChat = async (
   }
   if ((await findRow(env, row.id)) === undefined) {
     throw await whyNotStored(env, {
-      chatId: scope.chatId,
-      requestedBy: scope.personId,
+      chat: scope,
       agentId: scope.agentId,
       objectId: row.objectId,
       resource: row.resource,
@@ -575,22 +574,21 @@ export const askInChat = async (
 };
 
 /**
- * The requests of `by`'s own chat `chatId` that wait, oldest first, as its
+ * The requests of `by`'s own chat `chat` that wait, oldest first, as its
  * page shows them. The caller has checked the chat is theirs.
  */
 export const chatRequests = async (
   env: Env,
   by: Identity,
-  chatId: ChatId
+  chat: ChatRef
 ): Promise<ChatConnectionRequest[]> => {
   const rows = await drizzle(env.DB)
     .select()
     .from(permissions)
     .where(
       and(
-        eq(permissions.chatId, chatId),
-        eq(permissions.status, "requested"),
-        eq(permissions.requestedBy, by.userId)
+        ofChat(permissions, chat, permissions.requestedBy),
+        eq(permissions.status, "requested")
       )
     )
     .orderBy(asc(permissions.requestedAt), asc(permissions.id));
@@ -617,7 +615,7 @@ export const chatRequests = async (
 };
 
 /**
- * Grants or denies request `id` of `by`'s own chat `chatId` (the caller has
+ * Grants or denies request `id` of `by`'s own chat `chat` (the caller has
  * checked the chat is theirs), as it was asked for: granting only a
  * request for their own personal connection, still connected and offered,
  * under a name nothing that holds everywhere has. Only from waiting, in one
@@ -629,7 +627,7 @@ export const chatRequests = async (
 const decide = async (
   env: Env,
   by: Identity,
-  chatId: ChatId,
+  chat: ChatRef,
   id: string | undefined,
   decision: Decision
 ): Promise<Permission> => {
@@ -640,7 +638,8 @@ const decide = async (
   const found = id === undefined ? undefined : await findRow(env, id);
   if (
     found === undefined ||
-    found.chatId !== chatId ||
+    workspaceOfRow(found.workspaceId, found.requestedBy) !== chat.workspaceId ||
+    found.chatId !== chat.chatId ||
     found.requestedBy !== by.userId ||
     !found.personal
   ) {
@@ -669,7 +668,7 @@ const decide = async (
         and(
           eq(permissions.id, found.id),
           eq(permissions.status, "requested"),
-          eq(permissions.chatId, chatId),
+          ofChat(permissions, chat, permissions.requestedBy),
           eq(permissions.requestedBy, by.userId),
           activeMember(by.userId),
           granting ? noBindingClash : undefined
@@ -702,7 +701,7 @@ const decide = async (
 export const decideInChat = async (
   env: Env,
   by: Identity,
-  chatId: ChatId,
+  chat: ChatRef,
   id: unknown,
   decision: Decision
 ): Promise<Permission> => {
@@ -711,7 +710,7 @@ export const decideInChat = async (
     return await decide(
       env,
       by,
-      chatId,
+      chat,
       parsed.success ? parsed.data : undefined,
       decision
     );
@@ -723,7 +722,8 @@ export const decideInChat = async (
         ? { target: { type: "permission", id: parsed.data } }
         : {}),
       detail: {
-        chat: chatId,
+        workspace: chat.workspaceId,
+        chat: chat.chatId,
         outcome: "refused",
         reason: isExpectedError(error) ? error.code : "internal.unexpected",
       },
@@ -733,26 +733,26 @@ export const decideInChat = async (
 };
 
 /**
- * Revokes every chat's own permission `of` selects (a person's chat's, as
- * it is deleted, or all a person's, as they are removed), waiting or
- * granted, each audited with `why`, by `by`: none outlives its chat or
- * its person. Always by the person whose chat it is too, never by a chat's
- * ID alone. How many it revoked.
+ * Revokes every chat's own permission `of` selects (chat `of.chat`'s, as
+ * it is deleted, or all of person `of.requestedBy`'s chats', as they are
+ * removed), waiting or granted, each audited with `why`, by `by`: none
+ * outlives its chat or its person. How many it revoked.
  */
 export const revokeChatPermissions = async (
   env: Env,
-  of: { requestedBy: string; chatId?: string },
+  of: { chat: ChatRef } | { requestedBy: string },
   by: { userId: string | null; actor: AuditActor },
   why: "chat_deleted" | "person_removed"
 ): Promise<number> => {
   const db = drizzle(env.DB);
   const live = inArray(permissions.status, ["requested", "active"]);
-  const selected: SQL | undefined = and(
-    eq(permissions.requestedBy, of.requestedBy),
-    of.chatId === undefined
-      ? sql`${permissions.chatId} IS NOT NULL`
-      : eq(permissions.chatId, of.chatId)
-  );
+  const selected: SQL | undefined =
+    "chat" in of
+      ? ofChat(permissions, of.chat, permissions.requestedBy)
+      : and(
+          eq(permissions.requestedBy, of.requestedBy),
+          isNotNull(permissions.chatId)
+        );
   const rows = await db.select().from(permissions).where(and(selected, live));
   const now = new Date();
   const [first, ...rest] = rows.flatMap((row) => [

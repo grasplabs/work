@@ -433,7 +433,6 @@ const answerOne = async (
       await countSignal(env, platform, signal);
     }
     await settle({
-      chatId: null,
       ended: endOfLine[line],
       calls: [],
     });
@@ -442,6 +441,7 @@ const answerOne = async (
   }
   stopTyping();
   const { chatId, answer, calls, remembered } = asked;
+  const chat = { workspaceId: personalWorkspaceId(userId), chatId };
   // The memories the turn saved, each on its notice, under what it ended in.
   const notices = async () => {
     await postRemembered(
@@ -458,7 +458,6 @@ const answerOne = async (
     log.warn("channel.turn_failed", { platform, outcome: answer.outcome });
     await countSignal(env, platform, "failed");
     await settle({
-      chatId,
       ended: endOfTurn(answer.outcome),
       calls,
     });
@@ -478,17 +477,12 @@ const answerOne = async (
     await heardRequest(env, requestId, { calls });
   }
   const recorded = async () => {
-    await settle({ chatId, ended: "answered", calls }, final);
+    await settle({ ended: "answered", calls }, final);
   };
   // The starts the turn offered, each on its card, under the answer, each
   // kept with this request so a press on it is this request's.
   const offers = quietly("offers", async () => {
-    await postOffers(
-      env,
-      thread,
-      { chatId, userId, requestId, platform },
-      locale
-    );
+    await postOffers(env, thread, { chat, requestId, platform }, locale);
   });
   // Timed to the answer the person has, as they wait for it.
   const timed = async () => {
@@ -516,7 +510,7 @@ const answerOne = async (
   const held = quietly("held", async () => {
     const writes = await turnHeldWrites(
       env,
-      { userId, chatId, platform, locale },
+      { chat, userId, platform, locale },
       since
     );
     if (writes.length === 0) {

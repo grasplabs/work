@@ -181,7 +181,7 @@ export class WorkflowBuildApi extends WorkerEntrypoint<Env, AgentScope> {
   async #writer(): Promise<ChatWriter> {
     const { workspaceId, chatId, runId } = this.ctx.props;
     const run = await workspace(this.env, workspaceId).codeRunOf(chatId, runId);
-    return { chatId, ...run };
+    return { workspaceId, chatId, ...run };
   }
 
   /**

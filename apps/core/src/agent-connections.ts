@@ -696,6 +696,7 @@ const heldInChat = async (env: Env, scope: AgentScope): Promise<void> => {
     });
   } catch (error) {
     log.warn("chat.held_push_failed", {
+      workspaceId: scope.workspaceId,
       chatId: scope.chatId,
       ...errorFields(error),
     });

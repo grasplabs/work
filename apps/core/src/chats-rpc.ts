@@ -41,7 +41,7 @@ import type {
 } from "@grasp-os/shared/chat";
 import type { DependencyRequest } from "@grasp-os/shared/dependencies";
 import { chatIdSchema } from "@grasp-os/shared/ids";
-import type { ChatId } from "@grasp-os/shared/ids";
+import type { ChatId, ChatRef } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { ModelEffort, ModelEfforts } from "@grasp-os/shared/models";
 import { requireBuilder } from "@grasp-os/shared/roles";
@@ -506,7 +506,11 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       return await this.#chatsOf(person.userId).subjectChat(
         person.userId,
         { kind, id },
-        await chatsWorkedOn(this.#env, { kind, id }, person.userId)
+        await chatsWorkedOn(
+          this.#env,
+          { kind, id },
+          personalWorkspaceId(person.userId)
+        )
       );
     });
   }
@@ -776,6 +780,10 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     return await withPerson(this.#check, async (person) => {
       requireBuilder(person);
       const id = await this.#idOf(chatId);
+      const chat = {
+        workspaceId: personalWorkspaceId(person.userId),
+        chatId: id,
+      };
       const parsed = buildSchema.safeParse(build);
       if (!parsed.success) {
         throw agentErrors.create("agent.invalid_request");
@@ -816,7 +824,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
               // Known as made at once: a filing that fails leaves it made.
               made.app = { id: app.id, name: app.name };
               await keptInChat(this.#env, appKind, app.id, person.userId, {
-                chatId: id,
+                ...chat,
                 turnId: null,
                 callId,
               });
@@ -847,7 +855,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
                 workflowKind,
                 workflow.id,
                 person.userId,
-                { chatId: id, turnId: null, callId }
+                { ...chat, turnId: null, callId }
               );
               return workflow;
             },
@@ -1313,16 +1321,20 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     return await withPerson(
       this.#check,
       async ({ userId }) =>
-        await chatWork(this.#env, userId, await this.#ownChat(userId, chatId))
+        await chatWork(this.#env, await this.#ownChat(userId, chatId))
     );
   }
 
   /** The person's own chat `chatId`, or refused as if there were none. */
-  async #ownChat(userId: string, chatId: unknown): Promise<ChatId> {
-    return await this.#chatsOf(userId).requireChat(
-      await this.#idOf(chatId),
-      userId
-    );
+  /** `userId`'s own chat `chatId`, by its ref: refused as none otherwise. */
+  async #ownChat(userId: string, chatId: unknown): Promise<ChatRef> {
+    return {
+      workspaceId: personalWorkspaceId(userId),
+      chatId: await this.#chatsOf(userId).requireChat(
+        await this.#idOf(chatId),
+        userId
+      ),
+    };
   }
 
   /**
@@ -1335,7 +1347,6 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       async (person) =>
         await chatPackageRequests(
           this.#env,
-          person.userId,
           await this.#ownChat(person.userId, chatId)
         )
     );

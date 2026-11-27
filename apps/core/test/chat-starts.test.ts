@@ -20,10 +20,11 @@ import { startedChat } from "./started-chats.ts";
 // A chat the page names itself, which the question that starts it makes
 // (`ChatQuestion.start`), as T3 Code and the AI SDK's chat template name
 // a new thread in the browser. The ways it can fail come first: a start
-// takes over a chat already there (someone else's, or the person's own),
-// says whether an ID is anyone's, makes a chat twice (a retry, two tabs at
-// once, a restart in between), makes one past the person's most, or a
-// read of the new chat on the same connection finds none yet.
+// takes over a chat already there (the person's own, or a deleted one),
+// touches or shows another person's chat with the same ID, says whether
+// an ID is anyone's, makes a chat twice (a retry, two tabs at once, a
+// restart in between), makes one past the person's most, or a read of the
+// new chat on the same connection finds none yet.
 
 const idp = mockIdp();
 
@@ -80,16 +81,6 @@ const said = (messages: readonly ChatMessage[]) =>
 const titlesOf = async (chats: Person["api"]["chats"]): Promise<string[]> => {
   const listed = await chats.list();
   return listed.map(({ title }) => title).toSorted();
-};
-
-/** What `chat_ids` holds for each of `ids`: whose, and by which start. */
-const takenIds = async (...ids: string[]) => {
-  const { results } = await env.DB.prepare(
-    `SELECT id, person_id AS personId, request_key AS key FROM chat_ids WHERE id IN (${ids.map(() => "?").join(", ")}) ORDER BY id`
-  )
-    .bind(...ids)
-    .all<{ id: string; personId: string; key: string | null }>();
-  return results;
 };
 
 /** Waits until `check` holds. */
@@ -259,13 +250,16 @@ describe("a chat a page starts", () => {
     });
   });
 
-  it("refuses an ID someone else's chat has as it refuses one that isn't an ID, saying nothing of theirs and leaving it be", async () => {
+  it("makes the person a chat of their own under an ID another person's chat has, which neither sees nor changes, and refuses a read of one they have not as it refuses one that isn't an ID", async () => {
     const ann = await person();
     const ben = await person();
-    await fakeProvider(says("Ben's answer."));
-    const bens = crypto.randomUUID();
-    const benStart = startOf("Ben's");
-    await ben.api.chats.send(bens, startingWith(benStart));
+    await fakeProvider(says("Ben's answer."), says("Ann's answer."));
+    const shared = crypto.randomUUID();
+    await ben.api.chats.send(shared, startingWith(startOf("Ben's")));
+    const benFollows = await follow(ben.api.chats, shared);
+    await until(() => {
+      expect(said(benFollows.messages()).at(-1)?.text).toBe("Ben's answer.");
+    });
     const deleted = await startedChat(ben, "Ben's deleted");
     await ben.api.chats.remove(deleted.id);
     // A chat core named itself (a chat app's conversation, a wake-up's).
@@ -276,52 +270,59 @@ describe("a chat a page starts", () => {
       undefined,
       "teams"
     );
-    const benFollows = await follow(ben.api.chats, bens);
+    // Ann reads none of them: each as an ID nobody has, or no ID at all.
+    const reads = {
+      bens: await outcome(ann.api.chats.summary(shared)),
+      deleted: await outcome(ann.api.chats.summary(deleted.id)),
+      corenamed: await outcome(ann.api.chats.summary(corenamed.id)),
+      nobodys: await outcome(ann.api.chats.summary(crypto.randomUUID())),
+      notAnId: await outcome(ann.api.chats.summary("not-a-uuid")),
+    };
+    // Ann names chats of her own under the same IDs, Ben's deleted one's
+    // included: hers, in her own object.
+    await ann.api.chats.send(shared, startingWith(startOf("Ann's")));
+    await ann.api.chats.attachFile(
+      deleted.id,
+      { name: "a.txt", bytes: new TextEncoder().encode("A") },
+      crypto.randomUUID(),
+      startOf("Ann's second")
+    );
+    const annFollows = await follow(ann.api.chats, shared);
     await until(() => {
-      expect(said(benFollows.messages()).at(-1)?.text).toBe("Ben's answer.");
+      expect(said(annFollows.messages()).at(-1)?.text).toBe("Ann's answer.");
     });
-    const takenBefore = await takenIds(bens, deleted.id, corenamed.id);
+
     expect({
-      taken: await outcome(
-        ann.api.chats.send(bens, startingWith(startOf("Mine now")))
-      ),
-      deleted: await outcome(
-        ann.api.chats.send(deleted.id, startingWith(startOf("Mine now")))
-      ),
-      corenamed: await outcome(
-        ann.api.chats.send(corenamed.id, startingWith(startOf("Mine now")))
-      ),
-      // With Ben's own start key too, as if Ann had seen it.
-      key: await outcome(
-        ann.api.chats.send(
-          bens,
-          startingWith({ ...startOf("Mine now"), key: benStart.key })
-        )
-      ),
+      reads,
       notAnId: await outcome(
-        ann.api.chats.send("not-a-uuid", startingWith(startOf("Mine now")))
+        ann.api.chats.send("not-a-uuid", startingWith(startOf("Odd")))
       ),
-      unknown: await outcome(ann.api.chats.summary(bens)),
-      annListed: await ann.api.chats.list(),
-      bensNow: await titlesOf(ben.api.chats),
+      anns: await titlesOf(ann.api.chats),
+      annSays: said(annFollows.messages()),
+      bens: await titlesOf(ben.api.chats),
+      benSays: said(benFollows.messages()),
+      bensDeleted: await outcome(ben.api.chats.summary(deleted.id)),
     }).toStrictEqual({
-      taken: "agent.chat_not_found",
-      deleted: "agent.chat_not_found",
-      corenamed: "agent.chat_not_found",
-      key: "agent.chat_not_found",
+      reads: {
+        bens: "agent.chat_not_found",
+        deleted: "agent.chat_not_found",
+        corenamed: "agent.chat_not_found",
+        nobodys: "agent.chat_not_found",
+        notAnId: "agent.chat_not_found",
+      },
       notAnId: "agent.chat_not_found",
-      unknown: "agent.chat_not_found",
-      annListed: [],
-      bensNow: ["Ben's"],
+      anns: ["Ann's", "Ann's second"],
+      annSays: [
+        { role: "user", text: "Where are we?" },
+        { role: "assistant", text: "Ann's answer." },
+      ],
+      bens: ["Ben's"],
+      benSays: [
+        { role: "user", text: "Where are we?" },
+        { role: "assistant", text: "Ben's answer." },
+      ],
+      bensDeleted: "agent.chat_not_found",
     });
-    // Nothing of Ann's is taken, nor is anything of Ben's changed.
-    await expect(
-      takenIds(bens, deleted.id, corenamed.id)
-    ).resolves.toStrictEqual(takenBefore);
-    expect(said(benFollows.messages())).toStrictEqual([
-      { role: "user", text: "Where are we?" },
-      { role: "assistant", text: "Ben's answer." },
-    ]);
   });
 
   it("is made once its object restarted between making it and taking its first question", async () => {
@@ -346,21 +347,6 @@ describe("a chat a page starts", () => {
       ...startingWith(start, "What's the plan?"),
       files: [file.id],
     });
-    // A start whose ID was taken just before the object restarted, the
-    // chat not made yet: its repeat makes it.
-    const cut = crypto.randomUUID();
-    const cutStart = startOf("Cut short");
-    await env.DB.prepare(
-      "INSERT INTO chat_ids (id, person_id, request_key, created_at) VALUES (?, ?, ?, ?)"
-    )
-      .bind(cut, ann.userId, cutStart.key, Date.now())
-      .run();
-    await ann.api.chats.attachFile(
-      cut,
-      { name: "notes.txt", bytes: new TextEncoder().encode("Notes.") },
-      crypto.randomUUID(),
-      cutStart
-    );
     const follower = await follow(ann.api.chats, chatId);
     await until(() => {
       expect(said(follower.messages()).at(-1)?.text).toBe("After the restart.");
@@ -373,7 +359,7 @@ describe("a chat a page starts", () => {
         { role: "user", text: "What's the plan?" },
         { role: "assistant", text: "After the restart." },
       ],
-      listed: ["Cut short", "Restarted"],
+      listed: ["Restarted"],
     });
   });
 
@@ -402,21 +388,42 @@ describe("a chat a page starts", () => {
       listed: [],
     });
     const kept = objectOf(ann);
+    const old: string[] = [];
     for (let batch = 0; batch < maxChatsPerPerson / 50; batch += 1) {
       // oxlint-disable-next-line no-await-in-loop -- a batch at a time
-      await Promise.all(
+      const made = await Promise.all(
         Array.from(
           { length: 50 },
           async () => await kept.createChat("Old", ann.userId, chatAgentId)
         )
       );
+      old.push(...made.map(({ id }) => id));
     }
     const oneMore = crypto.randomUUID();
-    await expect(
-      outcome(ann.api.chats.send(oneMore, startingWith(startOf("One more"))))
-    ).resolves.toBe("agent.too_many_chats");
-    // Refused before its ID is taken: it is free for the person later.
-    await expect(takenIds(oneMore)).resolves.toStrictEqual([]);
+    const start = startOf("One more");
+    const refused = await outcome(
+      ann.api.chats.attachFile(
+        oneMore,
+        { name: "a.txt", bytes: new TextEncoder().encode("A") },
+        crypto.randomUUID(),
+        start
+      )
+    );
+    // Refused before anything is kept of it: once there is room, the same
+    // start makes it.
+    await ann.api.chats.remove(old[0] ?? "");
+    const again = await outcome(
+      ann.api.chats.attachFile(
+        oneMore,
+        { name: "a.txt", bytes: new TextEncoder().encode("A") },
+        crypto.randomUUID(),
+        start
+      )
+    );
+    expect({ refused, again }).toStrictEqual({
+      refused: "agent.too_many_chats",
+      again: "ok",
+    });
   });
 
   it("is named by a lower-case UUID of a version, never by the nil or the max UUID, nor another spelling of one", async () => {
@@ -437,11 +444,9 @@ describe("a chat a page starts", () => {
 
     expect({
       outcomes,
-      taken: await takenIds(...ids),
       listed: await ann.api.chats.list(),
     }).toStrictEqual({
       outcomes: ids.map(() => "agent.chat_not_found"),
-      taken: [],
       listed: [],
     });
   });
@@ -478,96 +483,6 @@ describe("a chat a page starts", () => {
         { role: "assistant", text: "Now it goes." },
       ],
       listed: ["Refused first"],
-    });
-  });
-
-  it("leaves another person's grants, held starts and requests alone when a chat under an ID of theirs that was never taken is deleted", async () => {
-    const ann = await person();
-    const ben = await person();
-    // Ann's chat from before chat IDs were taken company-wide: no row.
-    const anns = await startedChat(ann, "Ann's");
-    await env.DB.prepare("DELETE FROM chat_ids WHERE id = ?")
-      .bind(anns.id)
-      .run();
-    const now = Date.now();
-    const grant = (id: string, status: string, by: string) =>
-      env.DB.prepare(
-        `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at, granted_at, chat_id, personal)
-         VALUES (?, 'agent', ?, 'connection', 'mail-1', '["read"]', ?, ?, ?, ?, ?, ?, 1)`
-      ).bind(
-        id,
-        chatAgentId,
-        `mail_${id.slice(0, 6)}`,
-        status,
-        by,
-        now,
-        now,
-        anns.id
-      );
-    const workflow = crypto.randomUUID();
-    await env.DB.batch([
-      grant(crypto.randomUUID(), "active", ann.userId),
-      grant(crypto.randomUUID(), "requested", ann.userId),
-      env.DB.prepare(
-        "INSERT INTO workflow_resources (id, name, owner_id, created_at) VALUES (?, ?, ?, ?)"
-      ).bind(workflow, `held-${workflow.slice(0, 6)}`, ann.userId, now),
-      env.DB.prepare(
-        `INSERT INTO agent_held_starts (id, workspace_id, chat_id, agent_id, person_id, workflow_resource_id, input, input_hash, key, created_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, '{}', 'hash', 'start-1', ?, ?)`
-      ).bind(
-        crypto.randomUUID(),
-        personalWorkspaceId(ann.userId),
-        anns.id,
-        chatAgentId,
-        ann.userId,
-        workflow,
-        now,
-        now + 86_400_000
-      ),
-    ]);
-    const annsRows = async () => {
-      const [granted, held] = await Promise.all([
-        env.DB.prepare(
-          "SELECT status FROM permissions WHERE chat_id = ? AND requested_by = ? ORDER BY status"
-        )
-          .bind(anns.id, ann.userId)
-          .all<{ status: string }>(),
-        env.DB.prepare(
-          "SELECT key FROM agent_held_starts WHERE chat_id = ? AND person_id = ?"
-        )
-          .bind(anns.id, ann.userId)
-          .all<{ key: string }>(),
-      ]);
-      return { granted: granted.results, held: held.results };
-    };
-    const before = await annsRows();
-    // Ben names a chat of his own under that ID, which nobody had taken,
-    // then deletes it.
-    await ben.api.chats.attachFile(
-      anns.id,
-      { name: "b.txt", bytes: new TextEncoder().encode("B") },
-      crypto.randomUUID(),
-      startOf("Ben's under Ann's ID")
-    );
-    await ben.api.chats.remove(anns.id);
-
-    expect({
-      before,
-      after: await annsRows(),
-      // Ben's retired row; Ann's chat is still hers.
-      taken: await takenIds(anns.id),
-      annsChat: await ann.api.chats.summary(anns.id),
-    }).toMatchObject({
-      before: {
-        granted: [{ status: "active" }, { status: "requested" }],
-        held: [{ key: "start-1" }],
-      },
-      after: {
-        granted: [{ status: "active" }, { status: "requested" }],
-        held: [{ key: "start-1" }],
-      },
-      taken: [{ id: anns.id, personId: ben.userId, key: null }],
-      annsChat: { title: "Ann's" },
     });
   });
 });

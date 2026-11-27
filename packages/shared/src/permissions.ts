@@ -5,7 +5,7 @@ import { defineErrorFamily } from "./errors.ts";
 import {
   agentIdSchema,
   appIdSchema,
-  chatIdSchema,
+  chatRefSchema,
   connectionIdSchema,
   identifierMaxLength,
   identifierSchema,
@@ -13,9 +13,8 @@ import {
   teamIdSchema,
   triggerIdSchema,
   workflowResourceIdSchema,
-  workspaceIdSchema,
 } from "./ids.ts";
-import type { PermissionId } from "./ids.ts";
+import type { ChatRef, PermissionId } from "./ids.ts";
 import { stableIdPattern } from "./store-limits.ts";
 import type { TriggerSummary } from "./workflow-triggers.ts";
 
@@ -556,14 +555,13 @@ export interface Permission {
    */
   requestedVia: AgentProposer | null;
   /**
-   * The ID of the one chat it holds in, for `requestedBy` alone: a shared
-   * connection the chat's agent asked for there, which an admin grants.
-   * It goes with the chat. (A chat's request for its person's own
-   * personal connection is theirs alone to see and decide: it is never
-   * listed here.) Null for a permission that holds wherever its App or
-   * agent works.
+   * The one chat it holds in, `requestedBy`'s: a shared connection the
+   * chat's agent asked for there, which an admin grants. It goes with the
+   * chat. (A chat's request for its person's own personal connection is
+   * theirs alone to see and decide: it is never listed here.) Null for a
+   * permission that holds wherever its App or agent works.
    */
-  chat: string | null;
+  chat: ChatRef | null;
   /**
    * For a live trigger holding it, what the trigger is (its kind and what
    * starts it), so whoever decides it knows which trigger asks. Absent for
@@ -681,11 +679,7 @@ export type Authority = z.infer<typeof authoritySchema>;
  * like the authority.
  */
 export const workContextSchema = z.discriminatedUnion("type", [
-  z.strictObject({
-    type: z.literal("chat"),
-    workspaceId: workspaceIdSchema,
-    chatId: chatIdSchema,
-  }),
+  chatRefSchema.extend({ type: z.literal("chat") }),
   z.strictObject({ type: z.literal("app"), appId: appIdSchema }),
   z.strictObject({
     type: z.literal("workflowRun"),
