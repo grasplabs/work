@@ -597,18 +597,6 @@ importers:
       '@earendil-works/pi-ai':
         specifier: 'catalog:'
         version: 1.6.1(@modelcontextprotocol/sdk@1.32.2(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.6.7))(@smithy/signature-v4@5.7.3)(google-auth-library@10.9.1(supports-color@10.2.2))(supports-color@10.2.2)(undici@8.13.1)(ws@8.21.3)(zod@4.6.7)
-      '@fontsource-variable/geist':
-        specifier: 'catalog:'
-        version: 5.2.8
-      '@fontsource-variable/jetbrains-mono':
-        specifier: 'catalog:'
-        version: 5.3.0
-      '@fontsource-variable/newsreader':
-        specifier: 'catalog:'
-        version: 5.3.0
-      '@grasp-os/app-kit':
-        specifier: workspace:*
-        version: link:../../packages/app-kit
       '@grasp-os/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -648,9 +636,6 @@ importers:
       livekit-client:
         specifier: 'catalog:'
         version: 2.25.0(@types/dom-mediacapture-record@1.0.22)
-      lucide-react:
-        specifier: 'catalog:'
-        version: 1.47.0(react@19.3.0)
       mime:
         specifier: 'catalog:'
         version: 4.1.2
@@ -682,9 +667,6 @@ importers:
       '@stylexjs/unplugin':
         specifier: 'catalog:'
         version: 0.19.2(supports-color@10.2.2)(unplugin@2.3.11)
-      '@tailwindcss/vite':
-        specifier: 'catalog:'
-        version: 4.3.3(@voidzero-dev/vite-plus-core@0.3.3(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))
       '@types/react':
         specifier: 'catalog:'
         version: 19.3.0
@@ -712,9 +694,6 @@ importers:
       seroval:
         specifier: 'catalog:'
         version: 1.7.5
-      tailwindcss:
-        specifier: 'catalog:'
-        version: 4.3.3
       vite-plus:
         specifier: 'catalog:'
         version: 0.3.3(@opentelemetry/api@1.9.1)(@types/node@26.6.2)(@vitest/browser-playwright@4.1.11)(esbuild@0.28.2)(happy-dom@21.0.4)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1)

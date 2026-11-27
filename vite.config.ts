@@ -107,9 +107,9 @@ const brainModuleImports = {
     "Only the modules the Brain's permission harness probes import src/brain-next.ts: add this one to apps/core/test/brain-next-modules.ts, with its surface in brainSurfaces (test/brain-next-surfaces.ts).",
 };
 
-// apps/web draws with Damsko alone (AGENTS.md, Design): nothing of the old
-// kit, Lucide or Tailwind. Its tests of the kit's App page parts
-// (src/app-kit) are tests, which may import anything.
+// apps/web and apps/admin draw with Damsko alone (AGENTS.md, Design):
+// nothing of the old kit, Lucide or Tailwind. The frontend's tests of the
+// kit's App page parts (src/app-kit) are tests, which may import anything.
 const oldDesignImports = {
   group: [
     "@grasp-os/app-kit",
@@ -121,7 +121,7 @@ const oldDesignImports = {
     "@tailwindcss/**",
   ],
   message:
-    "apps/web draws with Damsko: components from @grasp-os/ui/components, icons from @grasp-os/ui/lib/icons, styles in StyleX with Damsko's tokens.",
+    "apps/web and apps/admin draw with Damsko: components from @grasp-os/ui/components, icons from @grasp-os/ui/lib/icons, styles in StyleX with Damsko's tokens.",
 };
 
 // Test through real interfaces; mock only outside systems, at their
@@ -438,6 +438,18 @@ export default defineConfig({
                 oldDesignImports,
               ],
             },
+          ],
+          "grasp/no-class-strings": "error",
+        },
+      },
+      {
+        // The admin draws with Damsko alone too: the old design's imports
+        // refused, and no class list written out.
+        files: ["apps/admin/src/**"],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            { patterns: [brainStoreImports, oldDesignImports] },
           ],
           "grasp/no-class-strings": "error",
         },
