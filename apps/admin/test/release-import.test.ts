@@ -1,5 +1,6 @@
 import {
   assetKey,
+  blobsOf,
   manifestKey,
   moduleKey,
   sha256OfBytes,
@@ -15,14 +16,15 @@ import {
   auditEvents,
   channels,
   releaseImportFailures,
+  releaseImportProgress,
   releases,
 } from "../src/db/schema.ts";
 import {
   importReleases,
-  MAX_IMPORTS_PER_RUN,
+  MAX_RELEASES_PER_RUN,
   MAX_MANIFEST_BYTES,
   MAX_BLOBS_PER_RELEASE,
-  MAX_READS_PER_RUN,
+  MAX_REQUESTS_PER_RUN,
 } from "../src/releases/import.ts";
 import type { ImportStore } from "../src/releases/import.ts";
 import { channelReleases } from "../src/rollout/targets.ts";
@@ -60,6 +62,14 @@ const failureRow = async (id: string) => {
   return row;
 };
 
+const progressRow = async (id: string) => {
+  const [row] = await db
+    .select()
+    .from(releaseImportProgress)
+    .where(eq(releaseImportProgress.releaseId, id));
+  return row;
+};
+
 const MINUTE = 60 * 1000;
 
 /** `minutes` from now: a later run, past a failed release's wait. */
@@ -81,18 +91,33 @@ const runImport = async (
   }
 };
 
-/** `env.RELEASES`, counting the reads of each key. */
-const countingStore = () => {
+const tally = (counts: Map<string, number>, key: string): void => {
+  counts.set(key, (counts.get(key) ?? 0) + 1);
+};
+
+/**
+ * `env.RELEASES`, counting the reads and the heads of each key, R2 failing
+ * a read of `failing` as long as `failing.times` lasts (Infinity: always).
+ */
+const countingStore = (failing?: { key: string; times: number }) => {
   const reads = new Map<string, number>();
+  const heads = new Map<string, number>();
   const store: ImportStore = {
     list: async (options) => await env.RELEASES.list(options),
-    head: async (key: string) => await env.RELEASES.head(key),
+    head: async (key: string) => {
+      tally(heads, key);
+      return await env.RELEASES.head(key);
+    },
     get: async (key: string) => {
-      reads.set(key, (reads.get(key) ?? 0) + 1);
+      tally(reads, key);
+      if (failing !== undefined && key === failing.key && failing.times > 0) {
+        failing.times -= 1;
+        throw new Error("We encountered an internal error. Please try again.");
+      }
       return await env.RELEASES.get(key);
     },
   };
-  return { store, reads };
+  return { store, reads, heads };
 };
 
 /** Where a release's one static asset is stored. */
@@ -108,13 +133,20 @@ const assetOf = (release: TestRelease): string => {
 const sameSizeOther = (text: string): string =>
   text.replaceAll(/[0-9a-f]/gu, (char) => (char === "0" ? "1" : "0"));
 
-/** A release of about as many blobs as one built from main today. */
-/** 700 static assets of `token`'s own: as many blobs as a release from main. */
-const largeAssets = (token: string): Record<string, string> =>
+/**
+ * 1,150 static assets, each of `token`'s own but those at the indexes
+ * `others` names, which are `other`'s: with a release's modules and
+ * migrations, about as many blobs as a release built from main today
+ * (1,163).
+ */
+const largeAssets = (
+  token: string,
+  { other = token, others = 0 }: { other?: string; others?: number } = {}
+): Record<string, string> =>
   Object.fromEntries(
-    Array.from({ length: 700 }, (_, index) => [
+    Array.from({ length: 1150 }, (_, index) => [
       `/asset-${index}.txt`,
-      `${token} ${index}`,
+      `${index < others ? other : token} ${index}`,
     ])
   );
 
@@ -122,14 +154,16 @@ const largeAssets = (token: string): Record<string, string> =>
 const largeRelease = async (notes: string) =>
   await publishRelease({ notes, assets: largeAssets(crypto.randomUUID()) });
 
+/** The admin's every-minute cron, at minute `minute` of an hour: every fifth its tick. */
+const cronAt = (minute: number) =>
+  createScheduledController({
+    cron: "* * * * *",
+    scheduledTime: Date.UTC(2026, 10, 27, 12, minute),
+  });
+
 /** Every read `reads` counted, the manifests' included. */
 const allReads = (reads: ReadonlyMap<string, number>): number =>
   [...reads.values()].reduce((sum, count) => sum + count, 0);
-
-const blobReadsOf = (reads: ReadonlyMap<string, number>): number[] =>
-  [...reads]
-    .filter(([key]) => key.startsWith("blobs/"))
-    .map(([, count]) => count);
 
 describe("importing releases", () => {
   it("records a published release once its blobs verify, and audits it", async () => {
@@ -380,10 +414,10 @@ CREATE TABLE t (id TEXT);`,
     const { store, reads } = countingStore();
     const attempts = () => reads.get(manifestKey(broken)) ?? 0;
 
-    // Attempts at 0; the first wait is five minutes, so again at 6; the
-    // second is ten, so again at 17, not at 15.
+    // Attempts at 0; the first wait is 50 seconds, up to the next run, so
+    // again at 1.5; the second is 100 seconds, so again at 4, not at 3.
     const seen: number[] = [];
-    for (const minutes of [0, 4, 6, 15, 17]) {
+    for (const minutes of [0, 0.5, 1.5, 3, 4]) {
       // oxlint-disable-next-line no-await-in-loop -- runs in order
       await runImport(store, { now: inMinutes(minutes) });
       seen.push(attempts());
@@ -399,9 +433,9 @@ CREATE TABLE t (id TEXT);`,
     ]);
   });
 
-  it("imports an older release past newer ones that are broken", async () => {
+  it("tries a bounded number of releases a run, broken ones too, and reaches an older good one while they wait", async () => {
     const good = await publishRelease({ notes: "feat(core): older and good" });
-    const broken = Array.from({ length: MAX_IMPORTS_PER_RUN + 1 }, () =>
+    const broken = Array.from({ length: MAX_RELEASES_PER_RUN + 1 }, () =>
       nextReleaseId()
     );
     await Promise.all(
@@ -410,10 +444,22 @@ CREATE TABLE t (id TEXT);`,
       )
     );
 
-    const result = await runImport();
+    const first = await runImport();
+    const second = await runImport();
 
-    expect(result.failed).toStrictEqual(expect.arrayContaining(broken));
-    expect(result.imported).toContain(good.id);
+    expect({
+      // The newest first, as many as a run tries.
+      firstFailed: first.failed,
+      firstImported: first.imported.includes(good.id),
+      // Those wait for their next attempt: the rest go on.
+      secondFailed: second.failed,
+      secondImported: second.imported.includes(good.id),
+    }).toStrictEqual({
+      firstFailed: broken.slice(1).toReversed(),
+      firstImported: false,
+      secondFailed: broken.slice(0, 1),
+      secondImported: true,
+    });
   });
 
   it("refuses a manifest that names another release, or isn't a manifest", async () => {
@@ -446,7 +492,7 @@ CREATE TABLE t (id TEXT);`,
 
   it("imports the newest releases first, the rest on the next run", async () => {
     const published = [];
-    for (let count = 0; count <= MAX_IMPORTS_PER_RUN; count += 1) {
+    for (let count = 0; count <= MAX_RELEASES_PER_RUN; count += 1) {
       // oxlint-disable-next-line no-await-in-loop -- in order, oldest first
       published.push(await publishRelease({ notes: `feat(core): ${count}` }));
     }
@@ -512,10 +558,10 @@ CREATE TABLE t (id TEXT);`,
 
     await Promise.all([runImport(store, { now }), runImport(store, { now })]);
 
-    // The second attempt's wait is ten minutes.
+    // The second attempt's wait is 100 seconds.
     await expect(failureRow(broken)).resolves.toMatchObject({
       attempts: 2,
-      nextAttemptAt: new Date(now.getTime() + 10 * MINUTE),
+      nextAttemptAt: new Date(now.getTime() + 100 * 1000),
     });
     const events = await eventsFor("release.import_failed", broken);
     const details = events.map((event) => event.detail ?? "");
@@ -548,10 +594,10 @@ CREATE TABLE t (id TEXT);`,
     ).toStrictEqual([]);
   });
 
-  it("stops a run before a release whose reads don't fit, and imports it next run", async () => {
-    // Each release reads a third of the budget and a little more: a run
-    // has room for two.
-    const assetCount = Math.floor(MAX_READS_PER_RUN / 3);
+  it("stops a run in a release its requests don't cover, and imports it next run", async () => {
+    // Each release costs a third of a run's requests to R2 and a little
+    // more, read whole or by heads alike: a run has room for two.
+    const assetCount = Math.floor(MAX_REQUESTS_PER_RUN / 3);
     const token = crypto.randomUUID();
     const assets = Object.fromEntries(
       Array.from({ length: assetCount }, (_, index) => [
@@ -585,49 +631,315 @@ CREATE TABLE t (id TEXT);`,
     expect(second.imported).toContain(oldest);
   });
 
-  it("imports a release of 700 blobs a batch a run, reading each blob once", async () => {
-    const release = await largeRelease("feat(core): 700 blobs");
-    const { store, reads } = countingStore();
+  it("imports a release in one run, and one sharing most of its blobs by reading only its new ones", async () => {
+    const token = crypto.randomUUID();
+    const first = await publishRelease({
+      notes: "feat(core): first of two",
+      assets: largeAssets(token),
+    });
+    const { store, reads, heads } = countingStore();
 
-    const first = await runImport(store);
-    // Every read of the run, each manifest's and blob's alike.
-    const readFirst = allReads(reads);
-    const second = await runImport(store);
-    const readSecond = allReads(reads) - readFirst;
-    const blobReads = blobReadsOf(reads);
+    const firstRun = await runImport(store);
+    const firstReads = allReads(reads);
+    const firstHeads = allReads(heads);
+    // As a merge changes it: 76 of its blobs new, as main's last did.
+    const second = await publishRelease({
+      notes: "feat(core): second of two",
+      assets: largeAssets(token, { other: crypto.randomUUID(), others: 76 }),
+    });
+    const fresh = [...second.blobs.keys()].filter(
+      (key) => !first.blobs.has(key)
+    );
+    const secondRun = await runImport(store);
 
     expect({
-      first: first.imported.includes(release.id),
-      firstFailed: first.failed.includes(release.id),
-      firstWithinReads: readFirst <= MAX_READS_PER_RUN,
-      secondWithinReads: readSecond <= MAX_READS_PER_RUN,
-      second: second.imported.includes(release.id),
-      everyBlobOnce: blobReads.every((count) => count === 1),
-      blobs: blobReads.length,
+      blobs: first.blobs.size,
+      firstImported: firstRun.imported.includes(first.id),
+      // Its manifest and each blob, read once: nothing imported holds them.
+      firstRequests: firstReads + firstHeads,
+      secondImported: secondRun.imported.includes(second.id),
+      fresh: fresh.length,
+      // Its manifest and its new blobs read; the rest by their heads alone.
+      secondReads: allReads(reads) - firstReads,
+      freshReadOnce: fresh.every((key) => reads.get(key) === 1),
+      secondHeads: allReads(heads) - firstHeads,
     }).toStrictEqual({
-      first: false,
-      firstFailed: false,
-      firstWithinReads: true,
-      secondWithinReads: true,
-      second: true,
-      everyBlobOnce: true,
-      blobs: release.blobs.size,
+      blobs: 1154,
+      firstImported: true,
+      firstRequests: 1155,
+      secondImported: true,
+      fresh: 76,
+      secondReads: 77,
+      freshReadOnce: true,
+      secondHeads: 1154 - 76,
     });
-    await expect(importEvents(release.id)).resolves.toHaveLength(1);
+    expect(firstReads + firstHeads).toBeLessThanOrEqual(MAX_REQUESTS_PER_RUN);
+    await expect(importEvents(second.id)).resolves.toHaveLength(1);
   });
 
-  it("checks a release from its first blob again once its manifest was replaced partway", async () => {
+  it("refuses a release whose blob an imported release names but the bucket no longer holds as it was", async () => {
+    const token = crypto.randomUUID();
+    const imported = await publishRelease({
+      notes: "feat(core): imported",
+      core: `export default { shared: "${token}" };`,
+      assets: { "/a.txt": `a ${token}`, "/b.txt": `b ${token}` },
+    });
+    await runImport();
+    const [gone, resized] = Object.values(imported.manifest.assets).map(
+      ({ r2Key }) => r2Key
+    );
+    const [module] = imported.manifest.workers.core?.modules ?? [];
+    if (gone === undefined || resized === undefined || module === undefined) {
+      throw new Error("expected two assets and a core module");
+    }
+    // Each later release shares one blob of the imported release that the
+    // bucket then changes (the deleted file, the resized file, the core
+    // module), with a core module and a static file of its own besides,
+    // all stored as CI stores them; the bucket changes after.
+    const shared = `export default { shared: "${token}" };`;
+    const specs: [string, Record<string, string>, string | undefined][] = [
+      ["missing", { "/a.txt": `a ${token}` }, undefined],
+      ["other size", { "/b.txt": `b ${token}` }, undefined],
+      ["other hash", {}, shared],
+    ];
+    const sharing = await Promise.all(
+      specs.map(async ([notes, assets, core]) => {
+        const release = await buildRelease({
+          notes: `feat(core): ${notes}`,
+          core: core ?? `export default { own: "${notes} ${token}" };`,
+          assets: { ...assets, "/own.txt": `${notes} ${token}` },
+        });
+        await putBlobs(release);
+        return release;
+      })
+    );
+    const [missing, otherSize, otherHash] = sharing;
+    if (
+      missing === undefined ||
+      otherSize === undefined ||
+      otherHash === undefined
+    ) {
+      throw new Error("expected three releases");
+    }
+    await env.RELEASES.delete(gone);
+    await env.RELEASES.put(resized, `b ${token} and more`);
+    // Other bytes of the same size, stored with their own SHA-256.
+    const replaced = sameSizeOther(
+      new TextDecoder().decode(imported.blobs.get(module.r2Key))
+    );
+    await env.RELEASES.put(module.r2Key, replaced, {
+      sha256: await sha256OfBytes(new TextEncoder().encode(replaced)),
+    });
+    await Promise.all(sharing.map(putManifest));
+    const { store, reads } = countingStore();
+
+    const result = await runImport(store);
+
+    const refused = [missing.id, otherSize.id, otherHash.id];
+    expect({
+      failed: refused.every((id) => result.failed.includes(id)),
+      saved: await Promise.all(refused.map(releaseRow)),
+      // Found out by its head: never read.
+      moduleRead: reads.get(module.r2Key),
+    }).toStrictEqual({
+      failed: true,
+      saved: [undefined, undefined, undefined],
+      moduleRead: undefined,
+    });
+  });
+
+  it("reads a blob the imported release checked again where another manifest serves it under another extension", async () => {
+    const token = crypto.randomUUID();
+    const imported = await publishRelease({
+      notes: "feat(core): served as script",
+      assets: { "/a.js": `a ${token}` },
+    });
+    await runImport();
+    const [key] = Object.keys(imported.manifest.assets).map(assetKey);
+    // The same blob, at the same key and size, now said to be a stylesheet:
+    // its content key takes the extension, so it isn't one.
+    const renamed = nextReleaseId();
+    await putManifest({
+      ...imported,
+      id: renamed,
+      manifestText: imported.manifestText
+        .replace(`"releaseId": "${imported.id}"`, `"releaseId": "${renamed}"`)
+        .replace('"/a.js"', '"/a.css"'),
+    });
+    const { store, reads } = countingStore();
+
+    const result = await runImport(store);
+
+    expect({
+      failed: result.failed.includes(renamed),
+      read: reads.get(key ?? ""),
+    }).toStrictEqual({ failed: true, read: 1 });
+  });
+
+  it("tries a read R2 fails again, and imports the release in the same run", async () => {
+    const release = await largeRelease("feat(core): a read fails twice");
+    const [, key] = blobsOf(release.manifest).map((blob) => blob.key);
+    if (key === undefined) {
+      throw new Error("expected blobs");
+    }
+    const { store, reads } = countingStore({ key, times: 2 });
+
+    const result = await runImport(store);
+
+    expect({
+      imported: result.imported.includes(release.id),
+      reads: reads.get(key),
+      failure: await failureRow(release.id),
+    }).toStrictEqual({ imported: true, reads: 3, failure: undefined });
+  });
+
+  it("fails a release whose read R2 keeps failing, audited, and goes on from that blob at its next attempt", async () => {
+    const release = await largeRelease("feat(core): a read keeps failing");
+    const order = blobsOf(release.manifest).map((blob) => blob.key);
+    const at = 600;
+    const key = order[at] ?? "";
+    const failing = { key, times: Number.POSITIVE_INFINITY };
+    const { store, reads } = countingStore(failing);
+
+    const first = await runImport(store);
+    const triedFirst = reads.get(key);
+    const audited = await eventsFor("release.import_failed", release.id);
+    failing.times = 0;
+    const second = await runImport(store, { now: inMinutes(2) });
+
+    expect({
+      failed: first.failed.includes(release.id),
+      audited: audited.map((event) => event.detail),
+      // Tried once and again after each of its waits.
+      triedFirst,
+      imported: second.imported.includes(release.id),
+      // Every blob before it checked once, over both attempts.
+      beforeOnce: order.slice(0, at).every((each) => reads.get(each) === 1),
+      itAgain: reads.get(key),
+      saved: (await releaseRow(release.id)) !== undefined,
+    }).toStrictEqual({
+      failed: true,
+      audited: [JSON.stringify({ attempts: 1 })],
+      triedFirst: 4,
+      imported: true,
+      beforeOnce: true,
+      itAgain: 5,
+      saved: true,
+    });
+  });
+
+  it("leaves nothing of an attempt behind once a run beside it imported the release", async () => {
+    const release = await largeRelease("feat(core): imported beside");
+    // In its second batch, so the first batch's progress is on record.
+    const key = blobsOf(release.manifest).map((blob) => blob.key)[300] ?? "";
+    const { promise: reached, resolve: reach } =
+      Promise.withResolvers<boolean>();
+    const { promise: importedBeside, resolve: imported } =
+      Promise.withResolvers<boolean>();
+    // R2 fails the slow run at that blob, each time, once the other run
+    // imported the release.
+    const slow: ImportStore = {
+      list: async (options) => await env.RELEASES.list(options),
+      head: async (blob: string) => await env.RELEASES.head(blob),
+      get: async (blob: string) => {
+        if (blob.startsWith("blobs/")) {
+          reach(true);
+        }
+        if (blob === key) {
+          await importedBeside;
+          throw new Error(
+            "We encountered an internal error. Please try again."
+          );
+        }
+        return await env.RELEASES.get(blob);
+      },
+    };
+
+    const slowRun = runImport(slow);
+    await reached;
+    // Past the slow run's attempt, which makes the next wait.
+    const besideRun = await runImport(env.RELEASES, { now: inMinutes(2) });
+    imported(true);
+    const slowResult = await slowRun;
+    const [failure, progress, failedEvents, imports] = await Promise.all([
+      failureRow(release.id),
+      progressRow(release.id),
+      eventsFor("release.import_failed", release.id),
+      importEvents(release.id),
+    ]);
+
+    expect({
+      beside: besideRun.imported.includes(release.id),
+      slowFailed: slowResult.failed.includes(release.id),
+      failure,
+      progress,
+      failedEvents: failedEvents.length,
+      imports: imports.length,
+    }).toStrictEqual({
+      beside: true,
+      slowFailed: true,
+      failure: undefined,
+      progress: undefined,
+      failedEvents: 0,
+      imports: 1,
+    });
+  });
+
+  it("goes on from the batches a run that died recorded, once its attempt's wait is over", async () => {
+    const release = await largeRelease("feat(core): a run dies");
+    const order = blobsOf(release.manifest).map((blob) => blob.key);
+    const key = order[600] ?? "";
+    const { store, reads } = countingStore();
+    // The run dies at that blob, never answered: nothing after it runs.
+    const { promise: never } = Promise.withResolvers<never>();
+    const dying: ImportStore = {
+      ...store,
+      get: async (blob: string) =>
+        blob === key ? await never : await store.get(blob),
+    };
+
+    void runImport(dying);
+    await vi.waitFor(
+      async () => {
+        const progress = await progressRow(release.id);
+        expect(progress?.verifiedBlobs).toBe(500);
+      },
+      { timeout: 20_000, interval: 50 }
+    );
+    const atOnce = await runImport(store);
+    const waiting = await failureRow(release.id);
+    const later = await runImport(store, { now: inMinutes(2) });
+
+    expect({
+      // Its attempt counted before the run died: the next waits.
+      triedAtOnce: atOnce.imported.includes(release.id),
+      attempts: waiting?.attempts,
+      imported: later.imported.includes(release.id),
+      // The two batches on record aren't read again.
+      recordedOnce: order.slice(0, 500).every((each) => reads.get(each) === 1),
+    }).toStrictEqual({
+      triedAtOnce: false,
+      attempts: 1,
+      imported: true,
+      recordedOnce: true,
+    });
+  });
+
+  it("checks a release from its first blob again once its manifest was replaced after a failed attempt", async () => {
     const assets = largeAssets(crypto.randomUUID());
     const release = await publishRelease({
       notes: "feat(core): before",
       assets,
     });
-    const { store, reads } = countingStore();
+    const order = blobsOf(release.manifest).map((blob) => blob.key);
+    // Its last static file: blobs no other release names.
+    const last = order.findLast((key) => key.startsWith("blobs/assets/"));
+    const failing = { key: last ?? "", times: Number.POSITIVE_INFINITY };
+    const { store, reads } = countingStore(failing);
     const first = await runImport(store);
-    // The blobs the first run checked, before the manifest changed.
-    const checked = [...release.blobs.keys()].filter(
-      (key) => (reads.get(key) ?? 0) === 1
-    );
+    // The blobs the first attempt checked, before the manifest changed.
+    const checked = order.filter((key) => reads.get(key) === 1);
+    failing.times = 0;
     // Another manifest under the same id: the same blobs, another note.
     const replaced = await buildRelease(
       { notes: "feat(core): after", assets },
@@ -635,51 +947,51 @@ CREATE TABLE t (id TEXT);`,
     );
     await putManifest(replaced);
 
-    const second = await runImport(store);
-    const third = await runImport(store);
+    const second = await runImport(store, { now: inMinutes(2) });
     const row = await releaseRow(release.id);
 
     expect({
-      first: first.imported.includes(release.id),
+      first: first.failed.includes(release.id),
       checkedSome: checked.length > 0,
-      // Each read again, so checked from the start, and not imported yet.
+      // Each read again: checked from the start.
       readAgain: checked.every((key) => reads.get(key) === 2),
       second: second.imported.includes(release.id),
-      third: third.imported.includes(release.id),
       note: row?.manifest.includes("feat(core): after"),
     }).toStrictEqual({
-      first: false,
+      first: true,
       checkedSome: true,
       readAgain: true,
-      second: false,
-      third: true,
+      second: true,
       note: true,
     });
   });
 
-  it("fails a large release on a blob in a later batch, and checks it from its first blob next attempt", async () => {
-    const release = await largeRelease("feat(core): 700 blobs, one broken");
-    const [lastKey, lastBytes] = [...release.blobs].at(-1) ?? [];
-    if (lastKey === undefined || lastBytes === undefined) {
-      throw new Error("expected a blob");
+  it("imports the releases after one that doesn't verify", async () => {
+    const broken = await buildRelease({
+      notes: "feat(core): broken, before",
+      core: `export default { broken: "${crypto.randomUUID()}" };`,
+    });
+    await putBlobs(broken);
+    const [module] = broken.manifest.workers.core?.modules ?? [];
+    if (module === undefined) {
+      throw new Error("expected a core module");
     }
-    await env.RELEASES.put(
-      lastKey,
-      sameSizeOther(new TextDecoder().decode(lastBytes))
-    );
+    await env.RELEASES.put(module.r2Key, "not the module");
+    await putManifest(broken);
+    const next = await publishRelease({ notes: "feat(core): after broken" });
 
     const first = await runImport();
+    const later = await publishRelease({ notes: "feat(core): later still" });
     const second = await runImport();
-    expect(second.failed).toContain(release.id);
-    expect(first.failed).not.toContain(release.id);
 
-    await env.RELEASES.put(lastKey, lastBytes);
-    const { store, reads } = countingStore();
-    await runImport(store, { now: inMinutes(10) });
-    const third = await runImport(store, { now: inMinutes(10) });
-
-    expect(third.imported).toContain(release.id);
-    expect(blobReadsOf(reads)).toHaveLength(release.blobs.size);
+    expect({
+      next: first.imported.includes(next.id),
+      broken: first.failed.includes(broken.id),
+      later: second.imported.includes(later.id),
+    }).toStrictEqual({ next: true, broken: true, later: true });
+    await expect(
+      eventsFor("release.import_failed", broken.id)
+    ).resolves.toHaveLength(1);
   });
 
   it("reads the whole listing, a page at a time", async () => {
@@ -762,14 +1074,13 @@ CREATE TABLE t (id TEXT);`,
     });
   });
 
-  it("runs on the admin's cron", async () => {
-    const release = await publishRelease({ notes: "feat(core): cron" });
+  it("runs on the admin's cron, every minute and on its five-minute tick", async () => {
+    const minute = await publishRelease({ notes: "feat(core): minute" });
+    await worker.scheduled(cronAt(1), env);
+    const tick = await publishRelease({ notes: "feat(core): tick" });
+    await worker.scheduled(cronAt(5), env);
 
-    await worker.scheduled(
-      createScheduledController({ cron: "*/5 * * * *" }),
-      env
-    );
-
-    await expect(releaseRow(release.id)).resolves.toBeDefined();
+    await expect(releaseRow(minute.id)).resolves.toBeDefined();
+    await expect(releaseRow(tick.id)).resolves.toBeDefined();
   });
 });

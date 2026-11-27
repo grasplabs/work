@@ -463,10 +463,12 @@ describe("provisioning that heals itself", () => {
       },
     });
 
+    // The cron's tick, every fifth minute: the next one from now.
+    const tick = 5 * 60 * 1000;
     await worker.scheduled?.(
       {
-        cron: "*/5 * * * *",
-        scheduledTime: Date.now(),
+        cron: "* * * * *",
+        scheduledTime: Math.ceil(Date.now() / tick) * tick,
         noRetry: () => {},
       },
       { ...env, RELEASES: failing }

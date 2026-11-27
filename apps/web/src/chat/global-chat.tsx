@@ -417,9 +417,7 @@ export const useChatAbout = (subject: Subject | undefined, name: string) => {
     running,
     busy: running || (ours && chat.view.checking),
     built:
-      ours &&
-      subject !== undefined &&
-      answeredAfterBuild(chat.view.messages, subject),
+      ours && subject !== undefined && answeredAfterBuild(chat.view, subject),
     worked: chat.view.worked,
     title: ours ? chat.summary?.title : undefined,
   };

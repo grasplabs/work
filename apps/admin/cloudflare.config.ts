@@ -20,6 +20,7 @@ export default defineConfig((ctx) => ({
       SECRETS_STORE_ID: process.env.SECRETS_STORE_ID,
       ROUTER_HOSTS_ID: process.env.ROUTER_HOSTS_ID,
       STORED_SECRETS: process.env.STORED_SECRETS,
+      QUEUES: process.env.QUEUES,
     }
   ),
 }));

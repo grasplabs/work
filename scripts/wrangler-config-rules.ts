@@ -22,6 +22,7 @@ import {
   adminDatabaseName,
   clientsNamespace,
   platformWorkerName,
+  releaseManifestsQueueName,
   releasesBucketName,
   storeSecretName,
   adminHost,
@@ -217,6 +218,13 @@ const stageNameErrors = (
         "the releases bucket",
         field(bucket, "bucket_name"),
         releasesBucketName(stage)
+      );
+    }
+    for (const consumer of list(field(field(config, "queues"), "consumers"))) {
+      expect(
+        "the release manifests' queue",
+        field(consumer, "queue"),
+        releaseManifestsQueueName(stage)
       );
     }
   }

@@ -9,7 +9,8 @@ import { cfWorker } from "../apps/admin/cf-worker.ts";
 // The admin's Worker as cf deploys it (apps/admin/cf-worker.ts), from the
 // real apps/admin/wrangler.jsonc: each stage's names, what a deploy
 // looked up filled in, optional secrets the store lacks left out, a
-// required one stopping it, and the settings keep_vars used to keep.
+// required one stopping it, a queue the account lacks not consumed, and
+// the settings keep_vars used to keep.
 
 /** The admin's real wrangler.jsonc. */
 const wranglerText = readFileSync(
@@ -57,6 +58,21 @@ const deployed = {
   ROUTER_HOSTS_ID: "hosts-1",
   STORED_SECRETS: everySecret,
 };
+
+/** The queues `worker` consumes. */
+const consumers = (worker: ReturnType<typeof cfWorker>) =>
+  worker.triggers?.filter((each) => each.type === "queue");
+
+/** The admin's consumer of queue `name`, as cf takes it. */
+const consumer = (name: string) => [
+  {
+    type: "queue",
+    name,
+    maxBatchTimeout: 0,
+    maxConcurrency: 1,
+    maxRetries: 0,
+  },
+];
 
 describe("the admin's Worker for cf", () => {
   it("names every resource for its stage, from the stage's view of wrangler.jsonc", () => {
@@ -212,6 +228,31 @@ describe("the admin's Worker for cf", () => {
     }).toStrictEqual({
       production: "grasp-admin",
       staging: "grasp-admin-staging",
+    });
+  });
+
+  it("consumes each stage's release manifests' queue once the account has it, and keeps the CPU limit", () => {
+    const queues = "grasp-release-manifests,grasp-release-manifests-staging";
+    expect({
+      production: consumers(
+        cfWorker(wranglerText, "production", { ...deployed, QUEUES: queues })
+      ),
+      staging: consumers(
+        cfWorker(wranglerText, "staging", { ...deployed, QUEUES: queues })
+      ),
+      // Not made yet: left out, as a deploy naming it stops.
+      missing: consumers(
+        cfWorker(wranglerText, "staging", { ...deployed, QUEUES: "" })
+      ),
+      // A build passes no QUEUES: the consumer stays.
+      build: consumers(cfWorker(wranglerText, "staging", {})),
+      limits: cfWorker(wranglerText, "staging", deployed).limits,
+    }).toStrictEqual({
+      production: consumer("grasp-release-manifests"),
+      staging: consumer("grasp-release-manifests-staging"),
+      missing: [],
+      build: consumer("grasp-release-manifests-staging"),
+      limits: { cpuMs: 120_000 },
     });
   });
 

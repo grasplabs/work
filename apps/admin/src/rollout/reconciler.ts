@@ -13,7 +13,7 @@
  * (src/rollout/channels.ts).
  *
  * One tick at a time: a tick acts only while it holds the reconciler's
- * lease (`takeLease`), so the count of deploys out and the check for a
+ * lease (src/db/lease.ts), so the count of deploys out and the check for a
  * failure are one runner's, and ticks that overlap never start more than
  * `parallelDeploys` between them. While a tick runs, deploys can end but
  * none start but its own, so its count can only be high; a failure can
@@ -32,10 +32,11 @@
  */
 import "@tanstack/react-start/server-only";
 import { log } from "@grasp-os/shared/log";
-import { and, asc, count, eq, gt, lte, sql } from "drizzle-orm";
+import { and, asc, count, eq, gt, sql } from "drizzle-orm";
 
 import { adminDatabase, auditIfChanged } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
+import { withLease } from "../db/lease.ts";
 import {
   channels,
   clientDeploys,
@@ -44,7 +45,6 @@ import {
   clientRuns,
   clients,
   clientWorkers,
-  reconcilerLease,
 } from "../db/schema.ts";
 import { clientDomain } from "../deploy/context.ts";
 import { errorCode } from "../deploy/errors.ts";
@@ -71,13 +71,6 @@ import { channelReleases, deliveredShared } from "./targets.ts";
 
 /** How many clients a tick reads at once. */
 const pageSize = 200;
-
-/**
- * How long a tick's lease lasts: the longest a cron invocation runs, so a
- * tick never outlives it. A tick that dies without giving it back holds
- * the reconciler up until then.
- */
-const leaseMs = 15 * 60 * 1000;
 
 /**
  * The one release every Worker of the client runs, as SQL: null when it
@@ -539,44 +532,6 @@ const reconcileChannels = async (
   await recordStopped(db, stopped);
 };
 
-/** The one lease's id. */
-const leaseId = "reconciler";
-
-/**
- * Takes the reconciler's lease for tick `holder`, and returns whether it
- * did: one statement, so of ticks at once one gets it, and only from no
- * one or a holder whose lease expired.
- */
-const takeLease = async (
-  db: AdminDatabase,
-  holder: string
-): Promise<boolean> => {
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + leaseMs);
-  const taken = await db
-    .insert(reconcilerLease)
-    .values({ id: leaseId, holder, expiresAt })
-    .onConflictDoUpdate({
-      target: reconcilerLease.id,
-      set: { holder, expiresAt },
-      setWhere: lte(reconcilerLease.expiresAt, now),
-    })
-    .returning({ holder: reconcilerLease.holder });
-  return taken.length > 0;
-};
-
-/** Gives tick `holder`'s lease back: only while it's still its own. */
-const giveLeaseBack = async (
-  db: AdminDatabase,
-  holder: string
-): Promise<void> => {
-  await db
-    .delete(reconcilerLease)
-    .where(
-      and(eq(reconcilerLease.id, leaseId), eq(reconcilerLease.holder, holder))
-    );
-};
-
 /**
  * The reconciler's tick: every channel (`reconcileChannels`), while it
  * holds the lease. Nothing while another tick holds it, or while the
@@ -587,15 +542,9 @@ export const reconcile = async (env: Env): Promise<void> => {
     return;
   }
   const db = adminDatabase(env.DB);
-  const holder = crypto.randomUUID();
-  if (!(await takeLease(db, holder))) {
-    return;
-  }
-  try {
+  await withLease(db, "reconciler", async () => {
     const releases = await channelReleases(db);
     const desired = await desiredShared(env);
     await reconcileChannels(env, releases, desired);
-  } finally {
-    await giveLeaseBack(db, holder);
-  }
+  });
 };

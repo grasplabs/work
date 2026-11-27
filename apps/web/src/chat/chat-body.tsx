@@ -18,6 +18,7 @@ import { notLoadedText } from "../load-from-core.tsx";
 import { AgentName, agentModelOf } from "./agent-choice.tsx";
 import { AskOrCompose } from "./asked-questions.tsx";
 import { BuildsFailure, workOf } from "./builds.tsx";
+import { useOlder } from "./chat-watch.ts";
 import { FailureLine } from "./failure-line.tsx";
 import type { GlobalChat } from "./global-chat.tsx";
 import { pendingCard } from "./make-card.tsx";
@@ -160,6 +161,8 @@ export const ChatConversation = ({
   } = chat;
   // Read as it opens here; the New line over what the person hadn't seen.
   const newLine = useNewLine(chatId, view, seen);
+  // Its earlier messages, read as the person scrolls back to them.
+  const older = useOlder(chatId);
   // The question on its way here, drawn at once.
   const pending = shownPending(usePending(chatId), view.messages, view.queued);
   // A subject's chat, while core finds it, or why it gave none.
@@ -206,6 +209,7 @@ export const ChatConversation = ({
         }
         messages={view.messages}
         newLineBefore={newLine.before}
+        older={older}
         pending={pending}
         // Ask again goes as its answer is drawn anew: the person is taken
         // to the box, not left on the page.

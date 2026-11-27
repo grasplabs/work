@@ -89,12 +89,46 @@
     { "tag": "v2", "new_sqlite_classes": ["AdminRuns"] },
     { "tag": "v3", "deleted_classes": ["ChatState"] },
   ],
-  // Imports newly published releases (src/releases/import.ts) every 5
-  // minutes; every hour, watches Stephen at every client
-  // (src/clients/watch.ts, `watchCron`).
+  // Every minute, imports newly published releases (src/releases/import.ts),
+  // should the queue below not bring one, and every fifth minute runs the
+  // rest of the admin's tick after it (src/server.ts): retention, the
+  // reconciler and provisioning; every hour, watches Stephen at every
+  // client (src/clients/watch.ts, `watchCron`).
   "triggers": {
-    "crons": ["*/5 * * * *", "45 * * * *"],
+    "crons": ["* * * * *", "45 * * * *"],
   },
+  // R2 says on this queue when a manifest is written under releases/ in
+  // the releases bucket, and the admin imports at once (src/server.ts),
+  // one batch at a time, without waiting to fill one, and none retried:
+  // the cron imports within a minute anyway. Each stage's queue
+  // and its bucket's event notification are made by hand, once, in the EU
+  // (`-staging` after each name for staging):
+  //   wrangler queues create grasp-release-manifests --jurisdiction eu
+  //   wrangler r2 bucket notification create grasp-releases --jurisdiction eu
+  //     --event-type object-create --prefix releases/ --suffix /manifest.json
+  //     --queue grasp-release-manifests
+  // A deploy leaves the consumer out while the account has no such queue
+  // (cf-worker.ts): the cron imports alone. Listing queues and attaching a
+  // consumer take only Workers Scripts Write, which the deploy has.
+  "queues": {
+    "consumers": [
+      {
+        "queue": "grasp-release-manifests",
+        "max_batch_timeout": 0,
+        "max_concurrency": 1,
+        "max_retries": 0,
+      },
+    ],
+  },
+  // CPU time per invocation, as waiting on R2 and D1 doesn't count: the
+  // import hashes the blobs a release adds, about 20 MB a merge, but every
+  // blob of a release no earlier import holds (96 MB today, in a run of up
+  // to four: MAX_REQUESTS_PER_RUN) on a stage's first import. That measured
+  // about 1.5 s a release in workerd; 2 minutes, of the 5 the Workers Paid
+  // plan allows over its 30-second default (developers.cloudflare.com/
+  // workers/platform/limits/, "CPU time", read 27 Nov 2026), leaves a
+  // margin of ten and more for slower machines and larger releases.
+  "limits": { "cpu_ms": 120000 },
   // The router's hostname map, which a deploy writes (src/deploy/router.ts).
   // scripts/cloudflare-account-setup.ts creates it as grasp-router-hosts
   // (-staging in staging, @grasp-os/shared/names); `deploy`
@@ -271,6 +305,16 @@
           "jurisdiction": "eu",
         },
       ],
+      "queues": {
+        "consumers": [
+          {
+            "queue": "grasp-release-manifests-staging",
+            "max_batch_timeout": 0,
+            "max_concurrency": 1,
+            "max_retries": 0,
+          },
+        ],
+      },
       "ratelimits": [
         {
           "name": "ADMIN_MCP_RATE_LIMIT",
