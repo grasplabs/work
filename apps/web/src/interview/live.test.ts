@@ -8,7 +8,7 @@ import {
   vi,
 } from "vite-plus/test";
 
-import { joinAgent } from "./live.ts";
+import { joinAgent, notThemFunction } from "./live.ts";
 import type { LiveHandlers, LiveSegment, StartAgent } from "./live.ts";
 
 // The live interview with the ElevenLabs agent (live.ts, `joinAgent`),
@@ -78,6 +78,9 @@ const joined = async (textOnly = false) => {
     },
     finished: () => {
       ends.push("finished");
+    },
+    notThem: () => {
+      ends.push("notThem");
     },
     failed: () => {
       ends.push("failed");
@@ -260,5 +263,21 @@ describe("the live interview with the ElevenLabs agent", () => {
     second.options.onMessage?.(lineOf("agent", "Hi Tim."));
     second.options.onDisconnect?.({ reason: "user" });
     expect(second.ends).toStrictEqual(["ended"]);
+  });
+
+  it("ends as not them when he heard it isn't the person, however the call ends", async () => {
+    const hungUp = await joined();
+    hungUp.options.onMessage?.(lineOf("agent", "Hi Tim."));
+    await hungUp.options.clientTools?.[notThemFunction]?.({});
+    hungUp.options.onDisconnect?.({ reason: "agent" });
+    expect(hungUp.ends).toStrictEqual(["notThem"]);
+    const kept = await joined();
+    kept.options.onMessage?.(lineOf("agent", "Hi Tim."));
+    await kept.options.clientTools?.[notThemFunction]?.({});
+    kept.options.onModeChange?.({ mode: "speaking" });
+    kept.options.onModeChange?.({ mode: "listening" });
+    // The agent never hangs up: once his last line is said, the page ends it.
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(kept.ends).toStrictEqual(["notThem"]);
   });
 });

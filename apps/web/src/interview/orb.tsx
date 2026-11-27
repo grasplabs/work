@@ -54,12 +54,13 @@ const poseOf = (doing: Doing, asleep: boolean): FigureState => {
  */
 const hisLevel = (heard: number, at: number): number => {
   if (heard > 0.01) {
-    return Math.min(1, heard * 1.6);
+    return Math.min(1, heard * 2.2);
   }
-  // Syllables, about five a second, in phrases that rise and fall.
-  const syllable = Math.abs(Math.sin(at / 100));
-  const phrase = 0.55 + 0.45 * Math.sin(at / 900);
-  return 0.2 + 0.45 * syllable * phrase;
+  // Syllables, about five a second, in phrases that rise and fall, with a breath now and then.
+  const syllable = Math.abs(Math.sin(at / 100)) ** 0.6;
+  const phrase = 0.5 + 0.5 * Math.sin(at / 900);
+  const breath = Math.sin(at / 2300) > 0.85 ? 0.3 : 1;
+  return (0.25 + 0.75 * syllable * phrase) * breath;
 };
 
 /** What the orb on the stage shows now: the one orb there is, read by its figure every frame. */

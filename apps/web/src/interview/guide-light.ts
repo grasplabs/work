@@ -1,32 +1,21 @@
-// The guide's mark (guide.tsx): a fine line of the system's dither round
-// the one control Stephen is telling about, on a canvas over the whole
-// window that never catches a press. Bayer's 4×4, 2px squares on a 3px
-// pitch, as the header's texture and the voice's hill: one row a little
-// apart from the control, thinned by the threshold so it reads as a quiet
-// dotted outline, and one fainter row outside it so its edge is soft. No
-// glow, no fill: the control itself stays as it is. Aimed at the next
-// control, the outline glides there and takes its shape on the way; aimed
-// at nothing, it fades. With reduced motion it jumps. Read from the page at
-// each frame (where the control is, in what colour), never through React.
-import { BAYER_MATRIX } from "@grasp-os/ui/lib/utils";
+// The guide's mark (guide.tsx): an even, dotted outline round the one
+// control Stephen is telling about, on a canvas over the whole window that
+// never catches a press. Square dots of the system's pixel, evenly spaced
+// along the control's own rounded shape a little apart from it, so its
+// corners are as clean as its sides. No glow, no fill: the control stays as
+// it is. Aimed at the next control, the outline there fades in where it is
+// while the one before fades out: it never travels across the screen (the
+// owner's ask, 2026-11-27). With reduced motion it simply shows. Read from
+// the page at each frame (where the control is, in what colour), never
+// through React.
 
-/** The grid: one square every PITCH pixels, DOT across. */
-const PITCH = 3;
+/** A dot, and the distance from one dot to the next along the outline, in px. */
 const DOT = 2;
-/** The clear gap kept round the control, the outline's row, the faint row outside it, in px. */
-const GAP = 4;
-const LINE = 3;
-const EDGE = 3;
-/** How much of each row is lit: the outline, and its soft edge. */
-const LINE_LEVEL = 0.62;
-const EDGE_LEVEL = 0.2;
-/** How quickly the outline follows to the next control, and fades in or out: a time constant, in ms. */
-const FOLLOW_MS = 120;
-const FADE_MS = 200;
-
-/** Bayer's threshold for a cell, 0 to 1: the system's one dither. */
-const threshold = (column: number, row: number): number =>
-  ((BAYER_MATRIX[row % 4]?.[column % 4] ?? 7.5) + 0.5) / 16;
+const SPACING = 6;
+/** The clear gap kept round the control, in px. */
+const GAP = 5;
+/** How quickly an outline fades in or out: a time constant, in ms. */
+const FADE_MS = 140;
 
 interface Box {
   x: number;
@@ -34,19 +23,6 @@ interface Box {
   w: number;
   h: number;
 }
-
-/** How far a point lies outside a rounded box (negative inside). */
-const outside = (px: number, py: number, box: Box, radius: number): number => {
-  const cx = box.x + box.w / 2;
-  const cy = box.y + box.h / 2;
-  const qx = Math.abs(px - cx) - box.w / 2 + radius;
-  const qy = Math.abs(py - cy) - box.h / 2 + radius;
-  return (
-    Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) +
-    Math.min(Math.max(qx, qy), 0) -
-    radius
-  );
-};
 
 const boxOf = (element: Element): Box | null => {
   const rect = element.getBoundingClientRect();
@@ -57,6 +33,68 @@ const boxOf = (element: Element): Box | null => {
 
 const approach = (from: number, to: number, step: number): number =>
   from + (to - from) * step;
+
+/** The point `at` px along a rounded box's edge, clockwise from its top left corner's end. */
+const pointOn = (box: Box, radius: number, at: number): [number, number] => {
+  const straightW = box.w - 2 * radius;
+  const straightH = box.h - 2 * radius;
+  const arc = (Math.PI / 2) * radius;
+  const corner = (
+    cx: number,
+    cy: number,
+    from: number,
+    along: number
+  ): [number, number] => {
+    const angle = from + (along / Math.max(arc, 0.001)) * (Math.PI / 2);
+    return [cx + radius * Math.cos(angle), cy + radius * Math.sin(angle)];
+  };
+  let left = at;
+  const right = box.x + box.w;
+  const bottom = box.y + box.h;
+  if (left < straightW) {
+    return [box.x + radius + left, box.y];
+  }
+  left -= straightW;
+  if (left < arc) {
+    return corner(right - radius, box.y + radius, -Math.PI / 2, left);
+  }
+  left -= arc;
+  if (left < straightH) {
+    return [right, box.y + radius + left];
+  }
+  left -= straightH;
+  if (left < arc) {
+    return corner(right - radius, bottom - radius, 0, left);
+  }
+  left -= arc;
+  if (left < straightW) {
+    return [right - radius - left, bottom];
+  }
+  left -= straightW;
+  if (left < arc) {
+    return corner(box.x + radius, bottom - radius, Math.PI / 2, left);
+  }
+  left -= arc;
+  if (left < straightH) {
+    return [box.x, bottom - radius - left];
+  }
+  left -= straightH;
+  return corner(box.x + radius, box.y + radius, Math.PI, left);
+};
+
+/** A control's corner radius as it is drawn, in px. */
+const radiusOf = (element: Element): number =>
+  Number(
+    /^[\d.]+/u.exec(getComputedStyle(element).borderTopLeftRadius)?.[0] ?? 0
+  );
+
+/** An outline: round which control, how its corner is drawn, how much it shows. */
+interface Mark {
+  target: Element;
+  radius: number;
+  box: Box | null;
+  alpha: number;
+}
 
 export interface Light {
   /** Where the outline goes: a control, or nowhere (it fades). */
@@ -75,9 +113,9 @@ export const startLight = (
   still: boolean
 ): Light => {
   const context = canvas.getContext("2d");
-  let target: Element | null = null;
-  let shown: Box | null = null;
-  let alpha = 0;
+  /** The outline aimed at now, and those fading out. */
+  let current: Mark | null = null;
+  let leaving: Mark[] = [];
   let last = performance.now();
   let frame = 0;
   let paint = "";
@@ -96,30 +134,33 @@ export const startLight = (
     return ratio;
   };
 
-  const paintBox = (box: Box, strength: number): void => {
-    if (context === null) {
+  /** Its dots, evenly along the control's shape, `GAP` out from it. */
+  const paintMark = (mark: Mark, ratio: number): void => {
+    if (context === null || mark.box === null || mark.alpha < 0.01) {
       return;
     }
-    const radius = Math.min(box.h / 2, box.w / 2, 12);
-    const reach = GAP + LINE + EDGE;
+    const box = {
+      x: mark.box.x - GAP,
+      y: mark.box.y - GAP,
+      w: mark.box.w + 2 * GAP,
+      h: mark.box.h + 2 * GAP,
+    };
+    const radius = Math.min(mark.radius + GAP, box.w / 2, box.h / 2);
+    const length =
+      2 * (box.w - 2 * radius) +
+      2 * (box.h - 2 * radius) +
+      2 * Math.PI * radius;
+    const count = Math.max(4, Math.round(length / SPACING));
+    context.globalAlpha = mark.alpha;
     context.fillStyle = paint;
-    const fromColumn = Math.max(0, Math.floor((box.x - reach) / PITCH));
-    const toColumn = Math.ceil((box.x + box.w + reach) / PITCH);
-    const fromRow = Math.max(0, Math.floor((box.y - reach) / PITCH));
-    const toRow = Math.ceil((box.y + box.h + reach) / PITCH);
-    for (let row = fromRow; row <= toRow; row += 1) {
-      for (let column = fromColumn; column <= toColumn; column += 1) {
-        const x = column * PITCH;
-        const y = row * PITCH;
-        const away = outside(x + DOT / 2, y + DOT / 2, box, radius) - GAP;
-        if (away >= 0 && away < LINE + EDGE) {
-          const level = (away < LINE ? LINE_LEVEL : EDGE_LEVEL) * strength;
-          if (level > threshold(column, row)) {
-            context.fillRect(x, y, DOT, DOT);
-          }
-        }
-      }
+    for (let dot = 0; dot < count; dot += 1) {
+      const [x, y] = pointOn(box, radius, (dot * length) / count);
+      // On whole device pixels: every dot as crisp as the next.
+      const px = Math.round((x - DOT / 2) * ratio) / ratio;
+      const py = Math.round((y - DOT / 2) * ratio) / ratio;
+      context.fillRect(px, py, DOT, DOT);
     }
+    context.globalAlpha = 1;
   };
 
   const draw = (now: number): void => {
@@ -130,33 +171,30 @@ export const startLight = (
     const ratio = fit();
     const dt = Math.min(80, now - last);
     last = now;
-    const aimed = target === null ? null : boxOf(target);
-    // Follows the control as it is now: a layout that moves takes the outline with it.
-    if (aimed !== null) {
-      if (shown === null || still || alpha < 0.02) {
-        shown = { ...aimed };
-      } else {
-        const step = 1 - Math.exp(-dt / FOLLOW_MS);
-        shown = {
-          x: approach(shown.x, aimed.x, step),
-          y: approach(shown.y, aimed.y, step),
-          w: approach(shown.w, aimed.w, step),
-          h: approach(shown.h, aimed.h, step),
-        };
-      }
+    const step = still ? 1 : 1 - Math.exp(-dt / FADE_MS);
+    // Each stays round its control as it is now: a layout that moves takes it along.
+    for (const mark of [...leaving, ...(current === null ? [] : [current])]) {
+      mark.box = boxOf(mark.target) ?? mark.box;
     }
-    const wanted = aimed === null ? 0 : 1;
-    alpha = still
-      ? wanted
-      : approach(alpha, wanted, 1 - Math.exp(-dt / FADE_MS));
+    if (current !== null) {
+      current.alpha = approach(current.alpha, 1, step);
+    }
+    for (const mark of leaving) {
+      mark.alpha = approach(mark.alpha, 0, step);
+    }
+    leaving = leaving.filter((mark) => mark.alpha >= 0.01);
     if (now - paintAt > 400) {
       paint = colour();
       paintAt = now;
     }
-    const key =
-      shown === null
-        ? "none"
-        : `${shown.x.toFixed(1)},${shown.y.toFixed(1)},${shown.w.toFixed(1)},${shown.h.toFixed(1)},${alpha.toFixed(3)},${paint}`;
+    const marks = [...leaving, ...(current === null ? [] : [current])];
+    const key = `${paint}|${marks
+      .map(({ box, alpha }) =>
+        box === null
+          ? "-"
+          : `${box.x.toFixed(1)},${box.y.toFixed(1)},${box.w.toFixed(1)},${box.h.toFixed(1)},${alpha.toFixed(3)}`
+      )
+      .join(";")}`;
     // Nothing moved: nothing to draw again.
     if (key === drawn) {
       return;
@@ -164,15 +202,29 @@ export const startLight = (
     drawn = key;
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, window.innerWidth, window.innerHeight);
-    if (shown !== null && alpha >= 0.01) {
-      paintBox(shown, alpha);
+    for (const mark of marks) {
+      paintMark(mark, ratio);
     }
   };
 
   frame = requestAnimationFrame(draw);
   return {
     aim: (next) => {
-      target = next;
+      if (next === current?.target) {
+        return;
+      }
+      if (current !== null) {
+        leaving = [...leaving, current];
+      }
+      current =
+        next === null
+          ? null
+          : {
+              target: next,
+              radius: radiusOf(next),
+              box: boxOf(next),
+              alpha: 0,
+            };
     },
     stop: () => {
       cancelAnimationFrame(frame);

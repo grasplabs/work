@@ -128,6 +128,7 @@ export const Composer = ({
   onSend,
   onTalk,
   onTyping,
+  onType,
 }: {
   placeholder: string;
   /** They chose to talk, not to type. */
@@ -144,6 +145,8 @@ export const Composer = ({
   onTalk: () => void;
   /** They are typing: whoever they talk with waits for it. */
   onTyping: () => void;
+  /** They chose to type instead, beyond this line too (in the guide, for the conversation after it). */
+  onType?: () => void;
 }) => {
   const { t } = useLingui();
   // Whether something is typed: the card is spoken only while the box is empty.
@@ -217,6 +220,7 @@ export const Composer = ({
             doing={doing}
             onType={() => {
               setTyping(line);
+              onType?.();
             }}
           />
         ) : (

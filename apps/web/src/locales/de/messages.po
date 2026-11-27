@@ -17254,6 +17254,10 @@ msgstr "Stephen hat den Faden verloren. Sag es bitte noch einmal."
 msgid "Stephen outside Grasp"
 msgstr "Stephen außerhalb von Grasp"
 
+#: src/interview/page.tsx
+msgid "Stephen stopped, because this conversation is meant for {name}. Are you {name}? Then open the link again to carry on."
+msgstr "Stephen hat aufgehört, weil dieses Gespräch für {name} gedacht ist. Bist du {name}? Dann öffne den Link noch einmal, um weiterzumachen."
+
 #: src/agents/agent-brief.ts
 #: src/onboarding/calm-frame.tsx
 msgid "Steps"
@@ -18946,6 +18950,10 @@ msgstr "Dieser Chat hat private oder eingeschränkte Daten gelesen: Dies kann si
 #: src/onboarding/place-picker.tsx
 msgid "This connection needs to be connected again."
 msgstr "Diese Verbindung muss erneut hergestellt werden."
+
+#: src/interview/page.tsx
+msgid "This conversation is for {name}."
+msgstr "Dieses Gespräch ist für {name}."
 
 #: src/inbox/report-view.tsx
 msgid "This couldn't be read when the report was made."

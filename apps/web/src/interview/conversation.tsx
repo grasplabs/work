@@ -300,6 +300,18 @@ const TurnTrouble = () => {
   );
 };
 
+/** In the guide, they choose to type in the conversation after it. */
+const chooseType = (): void => {
+  update((now) => ({ ...now, mode: "type" }));
+  keepNow();
+};
+
+/** In the guide, they choose to talk in the conversation after it after all. */
+const chooseTalk = (): void => {
+  update((now) => ({ ...now, mode: "talk" }));
+  keepNow();
+};
+
 /** The box at the bottom, with what they must know about saving over it. */
 const AnswerBox = ({
   reading,
@@ -328,7 +340,10 @@ const AnswerBox = ({
         line={loop.saying}
         names={words.tag}
         onSend={sendTyped}
-        onTalk={onTalk}
+        // In the guide, what they choose is for the conversation after it: typed, it opens
+        // without sound and with the box to type in; talking again, out loud.
+        onTalk={guiding ? chooseTalk : onTalk}
+        {...(guiding ? { onType: chooseType } : {})}
         onTyping={typingNow}
         placeholder={
           reading ? t`Type what is missing, or yes` : t`Type your answer…`

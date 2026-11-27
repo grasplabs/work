@@ -45,7 +45,13 @@ import {
   useInterviewer,
   useProgress,
 } from "./kept.ts";
-import { setLoopName, setLoopWords, startLoop, stopLoop } from "./loop.ts";
+import {
+  setLoopName,
+  setLoopWords,
+  startLoop,
+  stopLoop,
+  useNotThem,
+} from "./loop.ts";
 import { reachMic } from "./mic.ts";
 import {
   begun,
@@ -512,6 +518,24 @@ const Thanks = ({ name, readOnly }: { name: string; readOnly: boolean }) => {
 };
 
 /**
+ * Stephen heard it isn't the person the link is for, said so and ended the
+ * conversation: never an error, and nothing to try again; the one it is
+ * for carries on by opening the link again.
+ */
+const NotThem = ({ name }: { name: string }) => {
+  const { t } = useLingui();
+  return (
+    <Page>
+      <Words
+        line={t`Stephen stopped, because this conversation is meant for ${name}. Are you ${name}? Then open the link again to carry on.`}
+        live
+        title={t`This conversation is for ${name}.`}
+      />
+    </Page>
+  );
+};
+
+/**
  * What stands once the interview is deleted, withdrawn from, over, or only
  * read now that the link's 7 days are over (also when they had gone back
  * in to add something); nothing while it is none of these.
@@ -679,20 +703,28 @@ const useTalkingAt = (progress: InterviewProgress, talking: boolean) => {
 const stillTakes = (session: OpenSession, withdrawn: boolean): boolean =>
   !(withdrawn || session.closed || session.readOnly);
 
+/** Whether they are in the conversation now: not held (paused, or it ended), and the link takes it. */
+const inTalkNow = (
+  progress: InterviewProgress,
+  held: boolean,
+  takes: boolean
+): boolean => inConversation(progress) && !held && takes;
+
 /** The interview on the link, held on this device. */
 export const InterviewPage = ({ session }: { session: OpenSession }) => {
   const progress = useProgress();
+  const notThem = useNotThem();
   const [stopped, setStopped] = useState(false);
   const { deleted, removingDeleted, deleteFailed, remove } = useDeleting();
   const { withdrawn, removing, withdrawFailed, withdraw } =
     useWithdrawing(session);
   const closes = formatDay(session.closes);
   const { readOnly } = session;
-  const talking =
-    inConversation(progress) &&
-    !stopped &&
-    stillTakes(session, withdrawn) &&
-    deleted === "no";
+  const talking = inTalkNow(
+    progress,
+    stopped || notThem,
+    stillTakes(session, withdrawn) && deleted === "no"
+  );
   const { reading, guiding, asking } = useTalkingAt(progress, talking);
   const { left, timeUp } = useClock(progress, asking);
 
@@ -753,6 +785,8 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
   let stage: ReactNode;
   if (ended !== null) {
     stage = ended;
+  } else if (notThem) {
+    stage = <NotThem name={session.name} />;
   } else if (stopped) {
     // Paused where they were, on the same stage: his orb falls asleep, and the box is a button to go on.
     stage = (

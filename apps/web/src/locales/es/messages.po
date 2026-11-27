@@ -17254,6 +17254,10 @@ msgstr "Stephen ha perdido el hilo. Dilo una vez más."
 msgid "Stephen outside Grasp"
 msgstr "Stephen fuera de Grasp"
 
+#: src/interview/page.tsx
+msgid "Stephen stopped, because this conversation is meant for {name}. Are you {name}? Then open the link again to carry on."
+msgstr "Stephen se ha detenido porque esta conversación es para {name}. ¿Eres {name}? Abre el enlace de nuevo para continuar."
+
 #: src/agents/agent-brief.ts
 #: src/onboarding/calm-frame.tsx
 msgid "Steps"
@@ -18946,6 +18950,10 @@ msgstr "Este chat leyó datos privados o restringidos: esto puede enviarlos fuer
 #: src/onboarding/place-picker.tsx
 msgid "This connection needs to be connected again."
 msgstr "Esta conexión tiene que volver a conectarse."
+
+#: src/interview/page.tsx
+msgid "This conversation is for {name}."
+msgstr "Esta conversación es para {name}."
 
 #: src/inbox/report-view.tsx
 msgid "This couldn't be read when the report was made."

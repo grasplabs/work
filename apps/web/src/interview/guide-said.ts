@@ -1,13 +1,13 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 
+import { reachedNow } from "./speech.ts";
+
 // What Stephen says in the quick guide (guide.tsx), for the transcript:
-// each step's words come in as he says them, at the pace of speech, and
+// each step's words come in as he says them, word by word with his voice
+// (the line's own timings, speech.ts), never ahead of it, and
 // stay at the top of the transcript for as long as the page is open. They
 // are kept on this page only, never with the conversation: the guide is
 // how the screen works, not part of what they tell him.
-
-/** How fast his words come in, in characters a second: the pace of the stage (loop.ts). */
-const charsPerSecond = 15;
 
 interface Step {
   text: string;
@@ -15,6 +15,8 @@ interface Step {
   at: number;
   /** What stood of it when he was stopped part way (a pause): it stays while he says it again. */
   kept: string;
+  /** Said to its end: all of it stands. */
+  done: boolean;
 }
 
 /** What he said, by the step he said it at: a step said again, in another language, says it anew. */
@@ -33,7 +35,12 @@ export const guideSays = (place: number, text: string): void => {
   const was = next[place];
   // The same words again, after a pause: what stood of them stays, and the rest comes as he says it.
   const kept = was?.text === text ? was.kept : "";
-  next[place] = { text, at: performance.now(), kept };
+  next[place] = {
+    text,
+    at: performance.now(),
+    kept,
+    done: was?.done === true && was.text === text,
+  };
   // Steps skipped (a control that isn't on screen) leave no gap.
   steps = next;
   told();
@@ -59,23 +66,37 @@ const subscribe = (listener: () => void): (() => void) => {
 };
 const snapshot = (): (Step | undefined)[] => steps;
 
-/** As much of `text` as is said `ms` after he began, to the end of its last whole word. */
-const saidBy = (text: string, ms: number): string => {
-  const count = Math.floor((ms / 1000) * charsPerSecond);
-  if (count >= text.length) {
-    return text;
+/** `text` up to `count` characters, to the end of the word that reaches. */
+const toWordEnd = (text: string, count: number): string => {
+  if (count <= 0) {
+    return "";
   }
-  const cut = text.lastIndexOf(" ", count);
-  return cut <= 0 ? "" : text.slice(0, cut);
+  const end = text.indexOf(" ", count);
+  return end === -1 ? text : text.slice(0, end);
 };
 
-/** What stands of `step` at `now`: what was kept of it, or more once he says more. */
+/** What stands of `step` at `now`: what was kept of it, or more as his voice says more. */
 const shownOf = (step: Step, now: number): string => {
+  if (step.done) {
+    return step.text;
+  }
   if (step.at === -Infinity) {
     return step.kept;
   }
-  const said = saidBy(step.text, now - step.at);
+  const said = toWordEnd(step.text, reachedNow(step.text, now));
   return said.length > step.kept.length ? said : step.kept;
+};
+
+/** He said the step at `place` to its end: all of it stands. */
+export const guideDone = (place: number): void => {
+  const step = steps[place];
+  if (step === undefined || step.done) {
+    return;
+  }
+  const next = [...steps];
+  next[place] = { ...step, done: true };
+  steps = next;
+  told();
 };
 
 /**

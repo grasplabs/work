@@ -873,6 +873,26 @@ export const voiceLevel = (): number => {
   return Math.min(1, Math.sqrt(sum / Math.max(1, samples.length)) * 6);
 };
 
+/**
+ * How many characters of the line being said are reached at `now` (on
+ * the page's clock), from its words' own timings: -1 when `text` isn't
+ * the line being said.
+ */
+export const reachedNow = (text: string, now: number): number => {
+  const being = lineNow();
+  if (being === null || being.text !== text) {
+    return -1;
+  }
+  const since = now - being.began;
+  let reached = 0;
+  for (const { after, reached: at } of being.schedule) {
+    if (after <= since && at > reached) {
+      reached = at;
+    }
+  }
+  return reached;
+};
+
 /** The line being said, if any. */
 export const useSaying = (): SaidLine | null =>
   useSyncExternalStore(subscribe, lineNow, lineNow);

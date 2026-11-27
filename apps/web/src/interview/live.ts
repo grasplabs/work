@@ -63,6 +63,11 @@ export interface LiveHandlers {
   /** Stephen ended it himself after his goodbye: the read-back follows. */
   finished: () => void;
   /**
+   * Stephen heard it isn't the person the link is for, said so, and the
+   * conversation ended (`notThemFunction`): nothing of it is theirs to keep.
+   */
+  notThem: () => void;
+  /**
    * It began, but Stephen never said his first line: the provider refused
    * part of it, or said nothing in time. The session is closed already.
    */
@@ -112,6 +117,16 @@ const firstLineMs = 10_000;
 
 /** What a client tool answers ElevenLabs: that the page took it. */
 const tookIt = "ok";
+
+/**
+ * The agent's client tool for whoever isn't the person the link is for:
+ * it calls it, says it can't go on with them, and ends the call.
+ */
+export const notThemFunction = "not_the_person";
+/** After his last line to them, how long until the page ends it if the agent hasn't, in ms. */
+const notThemAfterMs = 1500;
+/** However it goes, how long after he knew until it is ended, in ms. */
+const notThemAtMostMs = 20_000;
 
 /**
  * How long their words as our ear heard them stay over the box once no
@@ -250,6 +265,10 @@ export const joinAgent = async (
       said.splice(0, said.length - interviewLimits.lines);
     }
   };
+  /** He heard it isn't them: once he has said so, it ends, and the page says why. */
+  let notThem = false;
+  let endNotThem: (() => void) | null = null;
+  let notThemTimer: number | undefined;
   try {
     const startSession = start ?? (await loadAgentSdk());
     const conversation = await startSession({
@@ -278,6 +297,16 @@ export const joinAgent = async (
           }
           return tookIt;
         },
+        // Not the person the link is for: he says so, and it ends, never as a failure.
+        [notThemFunction]: () => {
+          if (!closed && !notThem) {
+            notThem = true;
+            notThemTimer = window.setTimeout(() => {
+              endNotThem?.();
+            }, notThemAtMostMs);
+          }
+          return tookIt;
+        },
       },
       onStatusChange: ({ status }) => {
         if (!closed && status === "connecting") {
@@ -288,6 +317,13 @@ export const joinAgent = async (
         // Without sound he never speaks: what he does follows his lines (`onMessage`).
         if (!closed && !textOnly) {
           on.doing(mode === "speaking" ? "speaking" : "listening");
+        }
+        // His last line to whoever isn't them is said: if the agent doesn't end it, the page does.
+        if (!closed && notThem && mode === "listening") {
+          window.clearTimeout(notThemTimer);
+          notThemTimer = window.setTimeout(() => {
+            endNotThem?.();
+          }, notThemAfterMs);
         }
       },
       onIncomingEvent: (event: unknown) => {
@@ -379,6 +415,12 @@ export const joinAgent = async (
       onDisconnect: (details) => {
         if (!closed) {
           closed = true;
+          window.clearTimeout(notThemTimer);
+          if (notThem) {
+            // Not them: it ends here, however it ended.
+            on.notThem();
+            return;
+          }
           if (begun && details.reason === "agent") {
             // He said goodbye and ended it: the interview is through.
             on.finished();
@@ -399,6 +441,14 @@ export const joinAgent = async (
       } catch {
         // Nothing more to let go of: the agent ends it by itself.
       }
+    };
+    endNotThem = () => {
+      if (closed) {
+        return;
+      }
+      window.clearTimeout(notThemTimer);
+      void close();
+      on.notThem();
     };
     // Who they are, and where they left off: the agent's own prompt does the rest.
     const context = [join.context, opening.note ?? ""]

@@ -6,19 +6,9 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { RefObject } from "react";
 
-import {
-  Arrow,
-  arrowCell,
-  arrowCells,
-  bezier,
-  easeInOut,
-  frames,
-  isStill,
-  wait,
-} from "../onboarding/pixel-cursor.tsx";
-import type { Point } from "../onboarding/pixel-cursor.tsx";
+import { isStill, wait } from "../onboarding/pixel-cursor.tsx";
 import { startLight } from "./guide-light.ts";
-import { guideHeld, guideSays, guideStarts } from "./guide-said.ts";
+import { guideDone, guideHeld, guideSays, guideStarts } from "./guide-said.ts";
 import { keepNow, linkNow, update, useInterviewer } from "./kept.ts";
 import { loopFirstName } from "./loop.ts";
 import { StephenOrb } from "./orb.tsx";
@@ -26,14 +16,13 @@ import { prepare, say, stopSpeaking, useSaying } from "./speech.ts";
 
 // The guide before the first question: a quick walk round for whoever has
 // never talked to an AI, once, after they agreed and before Stephen asks
-// anything. Nothing to press: it plays by itself. Stephen's pixel cursor
-// (the one he points with in the setup) moves over the window to each real
-// control in turn while he says what it is for, and a fine dotted line of
-// the system's dither settles round it (guide-light.ts): the answer box,
-// "type instead", the language, the transcript and the pause. On the stage,
-// where his questions will stand, a short line says the same in a few
-// words. Each step lasts as long as he takes to say it; then the cursor
-// goes and the conversation starts. Every control stays live meanwhile: a
+// anything. Nothing to press: it plays by itself. Each real control in turn
+// lights up where it is, with an even dotted outline (guide-light.ts),
+// while he says what it is for: the answer box, "type instead", the
+// language, the transcript and the pause. Nothing travels across the
+// window (the owner's ask, 2026-11-27). On the stage stands his orb, as in
+// the conversation, and his words come into the transcript. Each step
+// lasts as long as he takes to say it; then the conversation starts. Every control stays live meanwhile: a
 // language picked during it changes the guide's words, and he says the
 // step he is on again in it. Seen once on this device for this link, and
 // never once anything is said.
@@ -64,25 +53,6 @@ const styles = stylex.create({
   },
   // Where the outline's colour is read from: the system's mint, as it stands in light or dark.
   paint: { display: "none", color: colors.mint },
-  // His cursor: over everything, never in the way of a press, moved a frame at a time.
-  cursor: {
-    position: "fixed",
-    insetBlockStart: 0,
-    insetInlineStart: 0,
-    zIndex: 4,
-    pointerEvents: "none",
-    opacity: 0,
-    willChange: "transform",
-    color: colors.primary,
-    transitionProperty: { default: "opacity", [media.reducedMotion]: "none" },
-    transitionDuration: "240ms",
-    display: { default: "block", [media.forcedColors]: "none" },
-  },
-  cursorOn: { opacity: 1 },
-  arrow: {
-    display: "block",
-    filter: "drop-shadow(1px 1px 0 rgb(0 0 0 / 0.12))",
-  },
   guide: {
     display: "flex",
     flexDirection: "column",
@@ -222,20 +192,11 @@ const targetOn = (spot: Spot): Element | null => {
   return rect.width > 0 && rect.height > 0 ? element : null;
 };
 
-/** Where the cursor's tip rests on a control: a little into it, as a hand points. */
-const pointOn = (element: Element): Point => {
-  const rect = element.getBoundingClientRect();
-  return {
-    x: rect.left + Math.min(rect.width * 0.5, 40 + rect.width * 0.12),
-    y: rect.top + rect.height * 0.55,
-  };
-};
-
 /** How long a step may last at most, however its line is said: it never hangs. */
 const longestMs = (spoken: string): number =>
   4000 + spoken.split(/\s+/u).length * 520;
 
-/** How long, at least, the cursor rests on a control once there. */
+/** How long, at least, a control stays lit once he has told about it. */
 const restMs = 900;
 /** The breath between two steps. */
 const apartMs = 380;
@@ -265,41 +226,6 @@ const orGone = async (
   await Promise.race([promise, gone.promise]);
 };
 
-/** Moves `cursor` from where it is to `to`, on a hand's curve; at once under reduced motion. */
-const moveTo = async (
-  cursor: HTMLElement,
-  from: Point,
-  to: Point,
-  signal: AbortSignal
-): Promise<void> => {
-  const place = (at: Point): void => {
-    cursor.style.transform = `translate3d(${at.x.toFixed(1)}px, ${at.y.toFixed(1)}px, 0)`;
-  };
-  const far = Math.hypot(to.x - from.x, to.y - from.y);
-  if (isStill() || far < 2) {
-    place(to);
-    return;
-  }
-  // A slight arc, as a wrist moves, never a straight rail.
-  const bend = Math.min(80, far * 0.18);
-  const c1 = {
-    x: from.x + (to.x - from.x) * 0.3,
-    y: from.y + (to.y - from.y) * 0.3 - bend,
-  };
-  const c2 = {
-    x: from.x + (to.x - from.x) * 0.75,
-    y: from.y + (to.y - from.y) * 0.75 - bend * 0.4,
-  };
-  const ms = Math.min(1100, 420 + far * 0.6);
-  try {
-    await frames(ms, signal, (t) => {
-      place(bezier(from, c1, c2, to, easeInOut(t)));
-    });
-  } catch {
-    // Stopped on the way: the walk goes no further.
-  }
-};
-
 /** Done with the guide: the minutes count from here, not from the yes. */
 const guidedNowOn = (): void => {
   setGuided(true);
@@ -313,16 +239,13 @@ const guidedNowOn = (): void => {
 interface Held {
   canvas: RefObject<HTMLCanvasElement | null>;
   paint: RefObject<HTMLSpanElement | null>;
-  cursor: RefObject<HTMLDivElement | null>;
   wordsNow: RefObject<Record<Spot, { shown: string; spoken: string }>>;
   /** Where the walk is, as far as it went before: read as it starts. */
   atNow: RefObject<number>;
-  cursorAt: RefObject<Point | null>;
-  /** Tells where it is now: the step, and where the cursor rests. */
-  onMoved: (at: number, cursor: Point | null) => void;
+  /** Tells which step it is on now. */
+  onMoved: (at: number) => void;
   speaker: Interviewer;
   setAt: (at: number) => void;
-  setShownCursor: (shown: boolean) => void;
 }
 
 /**
@@ -332,19 +255,15 @@ interface Held {
 const Walk = ({
   canvas,
   paint,
-  cursor,
   wordsNow,
   atNow,
-  cursorAt,
   onMoved,
   speaker,
   setAt,
-  setShownCursor,
 }: Held) => {
   useEffect(() => {
     const drawn = canvas.current;
-    const pointer = cursor.current;
-    if (drawn === null || pointer === null) {
+    if (drawn === null) {
       return () => {
         stopSpeaking();
       };
@@ -369,7 +288,7 @@ const Walk = ({
         if (target === null && spot !== "ready") {
           continue;
         }
-        onMoved(place, cursorAt.current);
+        onMoved(place);
         setAt(place);
         const { spoken } = wordsNow.current[spot];
         const next = spots[place + 1];
@@ -383,20 +302,8 @@ const Walk = ({
           say(spoken, voicing),
           pause(longestMs(spoken), signal),
         ]);
-        if (target !== null) {
-          const to = pointOn(target);
-          // It comes in from the stage, under the line on screen, the first time.
-          const stage = drawn.parentElement?.getBoundingClientRect();
-          const from = cursorAt.current ?? {
-            x: stage === undefined ? to.x : stage.left + stage.width / 2,
-            y: stage === undefined ? to.y : stage.bottom + 24,
-          };
-          setShownCursor(true);
-          // oxlint-disable-next-line no-await-in-loop -- one step after the other, as he says them
-          await moveTo(pointer, from, to, signal);
-          onMoved(place, to);
-          light.aim(target);
-        }
+        // The control he tells about lights up where it is: nothing travels to it.
+        light.aim(target);
         const ended = async (): Promise<void> => {
           await Promise.all([said, pause(restMs, signal)]);
           await pause(apartMs, signal);
@@ -406,10 +313,10 @@ const Walk = ({
         if (signal.aborted) {
           return;
         }
+        guideDone(place);
       }
       light.aim(null);
-      setShownCursor(false);
-      // The cursor fades before the conversation starts.
+      // The outline fades before the conversation starts.
       await pause(260, signal);
       if (!signal.aborted) {
         through = true;
@@ -426,23 +333,12 @@ const Walk = ({
         guideHeld();
       }
     };
-  }, [
-    canvas,
-    paint,
-    cursor,
-    wordsNow,
-    atNow,
-    cursorAt,
-    onMoved,
-    speaker,
-    setAt,
-    setShownCursor,
-  ]);
+  }, [canvas, paint, wordsNow, atNow, onMoved, speaker, setAt]);
   return null;
 };
 
 /**
- * The guide, on the stage in the questions' place, with his cursor and the
+ * The guide, on the stage in the questions' place, with his orb and the
  * outline over the window. It plays by itself and, once through, starts
  * the conversation.
  */
@@ -451,59 +347,38 @@ export const Guide = () => {
   const words = useGuideWords(loopFirstName());
   const speaker = useInterviewer();
   const [at, setAt] = useState(() => reachedThisVisit);
-  const [shownCursor, setShownCursor] = useState(false);
   const canvas = useRef<HTMLCanvasElement>(null);
   const paint = useRef<HTMLSpanElement>(null);
-  const cursor = useRef<HTMLDivElement>(null);
-  // Read by the walk as it goes: the words as they stand now, where it is, where the cursor is.
+  // Read by the walk as it goes: the words as they stand now, and where it is.
   const wordsNow = useRef(words);
   useEffect(() => {
     wordsNow.current = words;
   });
   const atNow = useRef(reachedThisVisit);
-  const cursorAt = useRef<Point | null>(null);
 
   const saying = useSaying();
   const spot = spots[at] ?? "ready";
   const step = at + 1;
   const total = spots.length;
   return (
-    // His own cursor is the guide's here: the field doesn't also come to what it points at.
+    // The guide shows the way here: the field doesn't also come to the controls it lights.
     <div data-field="still" {...stylex.props(styles.guide)}>
       {/* Again from the step it is on when the language changes, so he says it in the new one. */}
       <Walk
         atNow={atNow}
         canvas={canvas}
-        cursor={cursor}
-        cursorAt={cursorAt}
-        onMoved={(place, point) => {
+        onMoved={(place) => {
           atNow.current = place;
           reachedThisVisit = place;
-          cursorAt.current = point;
         }}
         key={i18n.locale}
         paint={paint}
         setAt={setAt}
-        setShownCursor={setShownCursor}
         speaker={speaker}
         wordsNow={wordsNow}
       />
       <span ref={paint} {...stylex.props(styles.paint)} />
       <canvas aria-hidden="true" ref={canvas} {...stylex.props(styles.light)} />
-      <div
-        aria-hidden="true"
-        ref={cursor}
-        {...stylex.props(styles.cursor, shownCursor && styles.cursorOn)}
-      >
-        <svg
-          height={arrowCells.length * arrowCell}
-          shapeRendering="crispEdges"
-          width={10 * arrowCell}
-          {...stylex.props(styles.arrow)}
-        >
-          <Arrow />
-        </svg>
-      </div>
       {/* His orb in the middle, as in the conversation after it: what he says is in the transcript. */}
       <StephenOrb doing={saying === null ? "idle" : "speaking"} />
       <span {...stylex.props(visuallyHidden)}>

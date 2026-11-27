@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 // reduced motion, the whole line stands at once.
 
 /** The time it takes to catch up with what has come: a burst is spread over about this long, in ms. */
-const CATCH_UP = 300;
+const CATCH_UP = 180;
 
 /** Runs `step` once a frame with the share of CATCH_UP since the last one; returns what stops it. */
 const everyFrame = (step: (share: number) => void): (() => void) => {

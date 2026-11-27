@@ -179,7 +179,7 @@ const TAU_ALIVE = 0.16;
 const TAU_SLEEP = 0.9;
 /** How fast an alive orb's surface turns at a pose's speed of 1, in radians a second, and how much faster his voice makes it. */
 const SPIN = 0.3;
-const SPIN_VOICE = 1.1;
+const SPIN_VOICE = 2.4;
 const nearestAngle = (from: number, to: number) =>
   to + Math.round((from - to) / TAU) * TAU;
 
@@ -958,10 +958,13 @@ const aliveNow = (body: Body): Pose => {
   const breath = sleep * 0.07 * Math.sin((body.since * TAU) / 5.5);
   return {
     ...now,
-    key: now.key * (1 + 0.18 * voice + breath),
-    gloss: now.gloss + 0.15 * voice,
-    rim: now.rim + 0.12 * voice,
-    glow: now.glow + 0.16 * voice,
+    // His voice shows plainly: the light swells with each word and the rim and glow come up
+    // with it, while his size stays as it is (the owner's asks, 2026-11-27).
+    key: now.key * (1 + 0.5 * voice + breath),
+    gloss: now.gloss + 0.35 * voice,
+    rim: now.rim + 0.32 * voice,
+    glow: now.glow + 0.42 * voice,
+    az: now.az + 0.35 * voice,
   };
 };
 

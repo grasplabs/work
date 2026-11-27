@@ -1235,30 +1235,54 @@ let liveCount = 0;
 const restMs = 900;
 /**
  * How fast his words come on the stage while he speaks in a session, in
- * characters a second: the session tells his text ahead of his voice and
- * not where his voice is in it, so his words follow the pace of speech.
+ * characters a second of his voice: the session tells his text ahead of
+ * his voice and not where his voice is in it, so his words follow the
+ * voice as it is heard: on at the pace of speech while it sounds, barely
+ * on in the breath between two sentences, so they neither run ahead of
+ * him nor fall behind (the owner's ask, 2026-11-27).
  */
-const spokenCharsPerSecond = 15;
+const spokenCharsPerSecond = 17;
+/** How much of that pace goes on while his voice is quiet, in a breath between words or sentences. */
+const quietPace = 0.25;
+/** How loud his voice must be to count as heard, 0 to 1, and how long it counts as heard after, in ms. */
+const voicedLevel = 0.03;
+const voicedHoldMs = 180;
 /** When his voice began in the line on the stage; null while he doesn't speak. */
 let liveSpokeAt: number | null = null;
+/** How far his voice is in the line on the stage, in characters, and when that was last moved on. */
+let liveReached = 0;
+let liveTickAt = 0;
+let liveHeardAt = -Infinity;
 /** Whether his voice has begun in the line on the stage. */
 let hisVoiced = false;
 /** His line as told before his voice began in it: shown once it does. */
 let hisUnseen: string | null = null;
 let livePacing: number | undefined;
 
-/** His words come on the stage at the pace of his voice, from when it began. */
+/** His words come on the stage at the pace of his voice as it is heard. */
 const paceHis = (): void => {
   if (liveSpokeAt === null) {
     return;
   }
-  const reached = Math.floor(
-    ((performance.now() - liveSpokeAt) / 1000) * spokenCharsPerSecond
-  );
-  const at = Math.min(reached, state.line.length);
+  const now = performance.now();
+  const dt = Math.min(200, now - liveTickAt);
+  liveTickAt = now;
+  if ((live?.levels().his ?? 0) > voicedLevel) {
+    liveHeardAt = now;
+  }
+  const pace = now - liveHeardAt < voicedHoldMs ? 1 : quietPace;
+  liveReached += (dt / 1000) * spokenCharsPerSecond * pace;
+  const at = Math.min(Math.floor(liveReached), state.line.length);
   if (at !== state.from) {
     set({ from: at });
   }
+};
+
+/** From `at` characters into the line on the stage, his words follow his voice on. */
+const paceFrom = (at: number): void => {
+  liveReached = at;
+  liveTickAt = performance.now();
+  liveHeardAt = liveTickAt;
 };
 
 /** His voice began (`true`) or stopped: his words follow it, or all stand. */
@@ -1270,7 +1294,8 @@ const paceLive = (speaks: boolean): void => {
     return;
   }
   // Back to a line he had begun: on from where its words were.
-  liveSpokeAt = performance.now() - (state.from / spokenCharsPerSecond) * 1000;
+  liveSpokeAt = performance.now();
+  paceFrom(state.from);
   hisVoiced = true;
   if (hisUnseen !== null) {
     set({ line: hisUnseen, from: 0, ahead: null });
@@ -1488,6 +1513,7 @@ const liveSegment = ({ id, from, text, final }: LiveSegment): void => {
     hisVoiced = liveSpokeAt !== null;
     if (liveSpokeAt !== null) {
       liveSpokeAt = performance.now();
+      paceFrom(0);
     }
   }
   asked = heardText.endsWith("?");
@@ -1611,6 +1637,29 @@ const left = async (quick: boolean): Promise<void> => {
   }
   await session.close();
 };
+
+/** The conversation ended as it wasn't the person the link is for; kept for this page only. */
+let notThemNow = false;
+const notThemListeners = new Set<() => void>();
+const setNotThem = (value: boolean): void => {
+  notThemNow = value;
+  for (const listener of notThemListeners) {
+    listener();
+  }
+};
+const onNotThem = (listener: () => void): (() => void) => {
+  notThemListeners.add(listener);
+  return () => {
+    notThemListeners.delete(listener);
+  };
+};
+/** Whether Stephen ended the conversation as it wasn't the person the link is for. */
+export const useNotThem = (): boolean =>
+  useSyncExternalStore(
+    onNotThem,
+    () => notThemNow,
+    () => false
+  );
 
 /** Leaves the session (`left`), and has whoever opens the next one wait until it is left. */
 const leaveLive = async ({ quick = false } = {}): Promise<void> => {
@@ -1813,6 +1862,15 @@ const handlersFor = (count: number): Parameters<typeof joinLive>[1] => {
         // It dropped: what was said is kept and written down, and they are told, with a way to go on.
         void leaveLive();
         notOpened(words.dropped, true);
+      }
+    },
+    notThem: () => {
+      if (mine()) {
+        // Not the person the link is for: it ends here, said on a screen of its own (page.tsx).
+        void leaveLive({ quick: true });
+        rest();
+        show("idle", { line: "", said: null, sign: null });
+        setNotThem(true);
       }
     },
     finished: () => {
