@@ -1,6 +1,5 @@
 import type { Interviewer } from "@grasp-os/shared/onboarding";
-import { Heading } from "@grasp-os/ui/components/heading";
-import { fadeIn, visuallyHidden } from "@grasp-os/ui/lib/styles";
+import { visuallyHidden } from "@grasp-os/ui/lib/styles";
 import { colors, media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -22,7 +21,8 @@ import { startLight } from "./guide-light.ts";
 import { guideHeld, guideSays, guideStarts } from "./guide-said.ts";
 import { keepNow, linkNow, update, useInterviewer } from "./kept.ts";
 import { loopFirstName } from "./loop.ts";
-import { prepare, say, stopSpeaking } from "./speech.ts";
+import { StephenOrb } from "./orb.tsx";
+import { prepare, say, stopSpeaking, useSaying } from "./speech.ts";
 
 // The guide before the first question: a quick walk round for whoever has
 // never talked to an AI, once, after they agreed and before Stephen asks
@@ -463,6 +463,7 @@ export const Guide = () => {
   const atNow = useRef(reachedThisVisit);
   const cursorAt = useRef<Point | null>(null);
 
+  const saying = useSaying();
   const spot = spots[at] ?? "ready";
   const step = at + 1;
   const total = spots.length;
@@ -503,6 +504,8 @@ export const Guide = () => {
           <Arrow />
         </svg>
       </div>
+      {/* His orb in the middle, as in the conversation after it: what he says is in the transcript. */}
+      <StephenOrb doing={saying === null ? "idle" : "speaking"} />
       <span {...stylex.props(visuallyHidden)}>
         {t`Step ${step} of ${total}`}
       </span>
@@ -514,11 +517,9 @@ export const Guide = () => {
           />
         ))}
       </div>
-      <div aria-live="polite" key={spot} {...stylex.props(fadeIn)}>
-        <Heading level={1} size="xl">
-          {words[spot].shown}
-        </Heading>
-      </div>
+      <h1 aria-live="polite" key={spot} {...stylex.props(visuallyHidden)}>
+        {words[spot].shown}
+      </h1>
     </div>
   );
 };

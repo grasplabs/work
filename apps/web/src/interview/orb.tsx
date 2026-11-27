@@ -5,6 +5,7 @@ import { AgentFigure } from "../agents/figure/agent-figure.tsx";
 import type { FigureState } from "../agents/figure/body.ts";
 import type { AgentFigureLook } from "../agents/figure/look.ts";
 import { liveLevels, useLoop } from "./loop.ts";
+import { voiceLevel } from "./speech.ts";
 
 // Stephen on the stage while they talk: his orb, the one the agents' pages
 // draw (agents/figure), large, in the middle where his question stood, and
@@ -74,7 +75,9 @@ const voiceNow = (): number => {
   }
   const levels = liveLevels();
   if (shown.doing === "speaking") {
-    return hisLevel(levels.his, performance.now()) * lights.his;
+    // In the session, or a line said outside one (the guide), as it is heard.
+    const heard = Math.max(levels.his, voiceLevel());
+    return hisLevel(heard, performance.now()) * lights.his;
   }
   if (shown.doing === "listening") {
     return Math.min(1, levels.theirs * 1.6) * lights.theirs;
@@ -82,9 +85,20 @@ const voiceNow = (): number => {
   return 0;
 };
 
-/** His orb in the middle of the stage, alive to the conversation; `asleep` while paused. */
-export const StephenOrb = ({ asleep = false }: { asleep?: boolean }) => {
-  const { doing } = useLoop();
+/**
+ * His orb in the middle of the stage, alive to the conversation; `asleep`
+ * while paused. `doing`, where it isn't the conversation's (the guide
+ * before it), is what he does there.
+ */
+export const StephenOrb = ({
+  asleep = false,
+  doing: own,
+}: {
+  asleep?: boolean;
+  doing?: Doing;
+}) => {
+  const loop = useLoop();
+  const doing = own ?? loop.doing;
   useEffect(() => {
     shown.doing = doing;
     shown.asleep = asleep;
