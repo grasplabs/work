@@ -152,6 +152,13 @@ export interface VoiceSessionJoin {
    * begins. Its prompt and first line are its own.
    */
   context: string;
+  /**
+   * The agent's dynamic variables core knows (its prompt's `{{company}}`,
+   * `{{team_phrase}}`, `{{interview_kind_phrase}}`, `{{work_phrase}}`,
+   * `{{language}}`): the page adds the ones it knows (`{{opening}}`,
+   * `{{first_name}}`, `{{minutes_used}}`).
+   */
+  variables: Record<string, string>;
   /** What the page sends back with each answer and the close. */
   pass: string;
 }

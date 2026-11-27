@@ -22,6 +22,8 @@ import { z } from "zod";
 import { signInConfig } from "../auth/config.ts";
 import { identify } from "../auth/identity.ts";
 import { errorResponse } from "../errors.ts";
+import { models } from "../models.ts";
+import { platformAi } from "../platform-ai.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { keepLine, keptLine, storedKeyOf } from "../speech-cache.ts";
 import type { SpokenKey } from "../speech-cache.ts";
@@ -349,7 +351,15 @@ const say = async ({
   const audience = asked.link === undefined ? "onboarding" : "interview";
   const speech = speechOf(audience);
   const model = speechModelOf(audience);
-  const voice = speech.voices[asked.speaker];
+  // Stephen in an interview speaks as the agent does, its voice as its dashboard sets it now
+  // (read from the agent); the voice fixed in code when it can't be read.
+  const agentVoice =
+    audience === "interview" && asked.speaker === "stephen"
+      ? await models(env).agentVoice(
+          `${platformAi.agent.provider}/${platformAi.agent.id}`
+        )
+      : undefined;
+  const voice = agentVoice ?? speech.voices[asked.speaker];
   // An interview's page reads its lines as a stream: a line is made
   // whole, then sent as that stream's one piece and its words.
   const streamed = asked.stream && audience === "interview";

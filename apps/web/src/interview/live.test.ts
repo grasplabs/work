@@ -89,6 +89,7 @@ const joined = async (textOnly = false) => {
       conversationToken: "token",
       location: "eu-residency",
       context: "You are talking with Tim.",
+      variables: { company: "Acme" },
       pass: "pass",
     },
     on,
@@ -126,6 +127,8 @@ describe("the live interview with the ElevenLabs agent", () => {
   it("sends no overrides, and tells the agent who it talks with, once, as it starts", async () => {
     const { options, started } = await joined();
     expect(options.overrides).toBeUndefined();
+    // What core knows of who they are fills the agent's own placeholders.
+    expect(options.dynamicVariables).toStrictEqual({ company: "Acme" });
     expect(options.stripAudioTags).toBeTruthy();
     expect(started.updates).toStrictEqual(["You are talking with Tim."]);
   });

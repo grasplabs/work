@@ -249,6 +249,11 @@ describe("an interview as a live conversation", { timeout: 60_000 }, () => {
           result.joined.context.startsWith(
             "You are talking with Oli, from Ops"
           ) && result.joined.context.endsWith("They chose to talk in English."),
+        // The agent's placeholders, filled: the company as the deployment names it.
+        variables: {
+          ...result.joined.variables,
+          company: typeof result.joined.variables.company,
+        },
         pass: typeof result.joined.pass,
       },
       keyHandedBack: JSON.stringify(result).includes(platformElevenLabsKey),
@@ -276,6 +281,15 @@ describe("an interview as a live conversation", { timeout: 60_000 }, () => {
         conversationToken: "conversation-token-not-a-key",
         location: "eu-residency",
         context: true,
+        variables: {
+          company: "string",
+          team_phrase: "from Ops",
+          interview_kind_phrase:
+            "an interview with an employee about their own work",
+          work_phrase:
+            "Take the piece that repeats most and costs them most time.",
+          language: "English",
+        },
         pass: "string",
       },
       keyHandedBack: false,

@@ -740,7 +740,7 @@ describe("AI providers in connect", () => {
       });
     });
 
-    it("asks for a conversation token of Grasp's ElevenLabs agent with Grasp's key alone, by GET, at its one path with the agent's ID as its one query", async () => {
+    it("asks for a conversation token of Grasp's ElevenLabs agent, or reads how it is set up, with Grasp's key alone, by GET, at their one path each", async () => {
       const elevenKey = "test-platform-elevenlabs-key-0001";
       const withKey = connect({ ELEVENLABS_API_KEY: elevenKey });
       const host = "api.eu.residency.elevenlabs.io";
@@ -787,6 +787,27 @@ describe("AI providers in connect", () => {
             await grant()
           )
         ),
+        // How the agent is set up (its voice), at its one path with no query, and nothing below it.
+        setup: refusalOf(
+          await withKey.modelFetch(
+            toElevenLabs(`https://${host}/v1/convai/agents/${agent}`),
+            await grant()
+          )
+        ),
+        setupQuery: refusalOf(
+          await withKey.modelFetch(
+            toElevenLabs(`https://${host}/v1/convai/agents/${agent}?x=1`),
+            await grant()
+          )
+        ),
+        setupBelow: refusalOf(
+          await withKey.modelFetch(
+            toElevenLabs(
+              `https://${host}/v1/convai/agents/${agent}/simulate-conversation`
+            ),
+            await grant()
+          )
+        ),
         // Only the GET its grant names, and never on a grant for a POST.
         otherMethod: refusalOf(
           await withKey.modelFetch(
@@ -829,6 +850,9 @@ describe("AI providers in connect", () => {
           more: "endpoint",
           notAnAgent: "endpoint",
           elsewhere: "endpoint",
+          setup: "sent",
+          setupQuery: "endpoint",
+          setupBelow: "endpoint",
           otherMethod: "method",
           postGrant: "method",
           organization: "no_credential",
@@ -838,6 +862,12 @@ describe("AI providers in connect", () => {
             method: "GET",
             host,
             path: `/v1/convai/conversation/token?agent_id=${agent}`,
+            key: elevenKey,
+          },
+          {
+            method: "GET",
+            host,
+            path: `/v1/convai/agents/${agent}`,
             key: elevenKey,
           },
         ],

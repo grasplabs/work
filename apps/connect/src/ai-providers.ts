@@ -1,4 +1,5 @@
 import {
+  agentConfigPath,
   agentTokenQuery,
   aiCredentialPlaceholder,
   aiGrantHeader,
@@ -554,7 +555,8 @@ const isModelEndpoint = (
 
 /**
  * Whether `url` asks for a conversation token of one of the provider's
- * agents (`agentTokens`), with the agent's ID as its one query: a GET, on
+ * agents (`agentTokens`), with the agent's ID as its one query, or reads
+ * how one of them is set up (`agentConfigPath`, no query): a GET, on
  * Grasp's own key alone.
  */
 const isAgentTokenEndpoint = (
@@ -563,12 +565,17 @@ const isAgentTokenEndpoint = (
   method: string
 ): boolean => {
   const { agentTokens } = aiProviders[claims.provider];
+  if (
+    agentTokens === undefined ||
+    claims.credential !== "platform" ||
+    method !== "GET"
+  ) {
+    return false;
+  }
+  // Its conversation token, or how the agent is set up (its voice): one path each, nothing more.
   return (
-    agentTokens !== undefined &&
-    claims.credential === "platform" &&
-    method === "GET" &&
-    url.pathname === agentTokens &&
-    agentTokenQuery.test(url.search)
+    (url.pathname === agentTokens && agentTokenQuery.test(url.search)) ||
+    (agentConfigPath.test(url.pathname) && url.search === "")
   );
 };
 

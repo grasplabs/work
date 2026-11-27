@@ -187,13 +187,8 @@ const loadAgentSdk = async (): Promise<StartAgent> => {
 export interface AgentOpening {
   variables: Record<string, string>;
   note: string | null;
-  /**
-   * On a resume, his first line in place of the agent's own opener: the one
-   * override the agent allows (Security, Overrides, First message).
-   */
-  firstLine: string | null;
 }
-const noOpening: AgentOpening = { variables: {}, note: null, firstLine: null };
+const noOpening: AgentOpening = { variables: {}, note: null };
 
 export const joinAgent = async (
   join: VoiceSessionJoin,
@@ -266,11 +261,9 @@ export const joinAgent = async (
       ...(join.location === "eu-residency" ? euResidency : {}),
       // The agent's own prompt stands; its first line too, but on a resume. Who they are comes as context.
       stripAudioTags: true,
-      // Not overrides: slots the agent's own first line and prompt leave open, each with its placeholder there.
-      dynamicVariables: opening.variables,
-      ...(opening.firstLine === null
-        ? {}
-        : { overrides: { agent: { firstMessage: opening.firstLine } } }),
+      // Not overrides, which the agent refuses: slots its own first line ({{opening}}) and prompt
+      // leave open, each with its placeholder there. What core knows, then what the page knows.
+      dynamicVariables: { ...join.variables, ...opening.variables },
       clientTools: {
         // He goes to another part: the page follows; the notes hear of it from the page.
         [partFunction]: (parameters: unknown) => {

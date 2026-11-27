@@ -20,6 +20,7 @@ import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/e
 import { isContextOverflow } from "@earendil-works/pi-ai/utils/overflow";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import {
+  agentConfigPath,
   agentTokenQuery,
   aiProviderIdSchema,
   aiProviders,
@@ -3524,6 +3525,67 @@ const largestConversed: ConversedRecord = {
   status: 599,
 };
 
+/** How long the voice an agent was read with stands before it is read again, in ms. */
+const agentVoiceMs = 10 * 60_000;
+/** The voice each agent was read with, and when, in this isolate. */
+const agentVoices = new Map<string, { voice: string; at: number }>();
+
+const agentSetupSchema = z.object({
+  conversation_config: z.object({
+    tts: z.object({ voice_id: z.string().regex(voiceIdPattern) }),
+  }),
+});
+
+/**
+ * The voice one of Grasp's own agents speaks with, as its dashboard sets
+ * it: read from the agent through connect with Grasp's key (no model is
+ * called, nothing is said), and kept a few minutes. Undefined when it
+ * can't be read; the caller keeps the voice fixed in code.
+ */
+const agentVoice = async (
+  env: Env,
+  model: string
+): Promise<string | undefined> => {
+  const ref = parseAgentRef(model);
+  if (ref === undefined) {
+    return undefined;
+  }
+  const path = `/v1/convai/agents/${ref.id}`;
+  const kept = agentVoices.get(model);
+  if (kept !== undefined && Date.now() - kept.at < agentVoiceMs) {
+    return kept.voice;
+  }
+  const target = platformTargetOf(env, await routesOrFailed(env), ref.provider);
+  if (typeof target === "string" || !agentConfigPath.test(path)) {
+    return kept?.voice;
+  }
+  try {
+    const answered = await connectRequest(
+      env,
+      target,
+      path,
+      { method: "GET", headers: { accept: "application/json" } },
+      {
+        providerRequest: crypto.randomUUID(),
+        endsAt: Date.now() + agentTokenRequestMs,
+      }
+    );
+    const setup = agentSetupSchema.safeParse(
+      answered.ok ? await answered.json() : null
+    );
+    if (!setup.success) {
+      log.warn("model.agent_voice_unread", { status: answered.status });
+      return kept?.voice;
+    }
+    const voice = setup.data.conversation_config.tts.voice_id;
+    agentVoices.set(model, { voice, at: Date.now() });
+    return voice;
+  } catch (error) {
+    log.warn("model.agent_voice_unread", errorFields(error));
+    return kept?.voice;
+  }
+};
+
 /**
  * Opens a conversation with one of Grasp's own voice agents through the
  * gateway: asks its provider for a conversation token with Grasp's key,
@@ -3826,4 +3888,10 @@ export const models = (env: Env) => ({
     call: ConversingCall,
     signal?: AbortSignal
   ): Promise<Response> => await openConversation(env, call, signal),
+  /**
+   * The voice one of Grasp's own agents speaks with (`agentVoice`), as its
+   * dashboard sets it; undefined when it can't be read.
+   */
+  agentVoice: async (model: string): Promise<string | undefined> =>
+    await agentVoice(env, model),
 });

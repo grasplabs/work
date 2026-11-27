@@ -499,6 +499,8 @@ const voiceJoinSchema = z.object({
   conversationToken: z.string().min(1),
   location: z.enum(["eu-residency", "us"]),
   context: z.string(),
+  // An older core sends none: the agent's placeholders stand.
+  variables: z.record(z.string(), z.string()).default({}),
   pass: z.string().min(1),
 }) satisfies z.ZodType<VoiceSessionJoin>;
 

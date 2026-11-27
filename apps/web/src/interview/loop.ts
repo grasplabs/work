@@ -534,24 +534,29 @@ export const setLoopName = (name: string, lead = false): void => {
  * variables): his opening, new or coming back, and their name. Without
  * a name the agent's own opening stands.
  */
-const openingFor = (told: LoopWords, back: boolean): AgentOpening => {
+const openingFor = (
+  told: LoopWords,
+  back: boolean,
+  minutes: number
+): AgentOpening => {
+  const known = {
+    ...(firstName === "" ? {} : { first_name: firstName }),
+    // The minutes before this conversation: the agent counts its own on top.
+    minutes_used: String(Math.floor(minutes)),
+  };
   if (back) {
+    // His first line is the agent's own, `{{opening}}`: back, it asks only whether they're ready.
     return {
-      variables: {
-        opening: told.welcomeBack,
-        ...(firstName === "" ? {} : { first_name: firstName }),
-      },
+      variables: { opening: told.welcomeBack, ...known },
       note: told.backNote,
-      firstLine: told.welcomeBack,
     };
   }
   return {
     variables:
       firstName === ""
-        ? {}
-        : { opening: told.opening(firstName, leads), first_name: firstName },
+        ? known
+        : { opening: told.opening(firstName, leads), ...known },
     note: null,
-    firstLine: null,
   };
 };
 
@@ -1911,7 +1916,7 @@ const converse = async (): Promise<void> => {
     handlersFor(count),
     liveTextOnly,
     // Back after a pause or a reload: no new hello, just whether they're ready to go on.
-    openingFor(told, before.length > 0)
+    openingFor(told, before.length > 0, minutesAt(now, Date.now()))
   );
   if (!on || liveCount !== count) {
     if (joined !== null && !isRefused(joined)) {

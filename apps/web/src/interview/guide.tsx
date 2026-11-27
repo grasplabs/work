@@ -19,7 +19,7 @@ import {
 } from "../onboarding/pixel-cursor.tsx";
 import type { Point } from "../onboarding/pixel-cursor.tsx";
 import { startLight } from "./guide-light.ts";
-import { guideForgotten, guideSays } from "./guide-said.ts";
+import { guideHeld, guideSays, guideStarts } from "./guide-said.ts";
 import { keepNow, linkNow, update, useInterviewer } from "./kept.ts";
 import { loopFirstName } from "./loop.ts";
 import { prepare, say, stopSpeaking } from "./speech.ts";
@@ -358,11 +358,11 @@ const Walk = ({
       isStill()
     );
     const voicing = { speaker, tone: "warm, relaxed" } as const;
+    // Through to its end: all he said stands as said.
+    let through = false;
     const walk = async (): Promise<void> => {
-      if (atNow.current === 0) {
-        // From the top: what he said of it before goes.
-        guideForgotten();
-      }
+      // What he said of other words goes; what he said of these stays, back from a pause.
+      guideStarts(spots.map((spot) => wordsNow.current[spot].spoken));
       for (let place = atNow.current; place < spots.length; place += 1) {
         const spot = spots[place] ?? "ready";
         const target = targetOn(spot);
@@ -412,6 +412,7 @@ const Walk = ({
       // The cursor fades before the conversation starts.
       await pause(260, signal);
       if (!signal.aborted) {
+        through = true;
         guidedNowOn();
       }
     };
@@ -420,6 +421,10 @@ const Walk = ({
       stopper.abort();
       light.stop();
       stopSpeaking();
+      // Stopped part way (paused, or another language): his words stand where his voice stopped.
+      if (!through) {
+        guideHeld();
+      }
     };
   }, [
     canvas,

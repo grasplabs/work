@@ -267,6 +267,15 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
  */
 export const agentTokenQuery = /^\?agent_id=agent_[A-Za-z0-9]{1,64}$/u;
 
+/**
+ * Where one of Grasp's own voice agents is read, at a provider with agents
+ * (`agentTokens`): a GET with no query, for what the agent is set up with
+ * (core reads its voice, so all Stephen says outside the conversation is
+ * in the same voice). Only ElevenLabs's path; on Grasp's own key alone.
+ */
+export const agentConfigPath =
+  /^\/v1\/convai\/agents\/agent_[A-Za-z0-9]{1,64}$/u;
+
 /** The host a fixed provider's requests go to; none for a custom endpoint. */
 export const aiProviderHost = (provider: AiProviderId): string | undefined => {
   const [base] = Object.values(aiProviders[provider].baseUrls);

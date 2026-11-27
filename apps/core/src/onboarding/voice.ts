@@ -272,6 +272,38 @@ const agentContextOf = (
   ].join("\n");
 
 /**
+ * The agent's dynamic variables core knows, filled into its prompt: who
+ * it talks with, what kind of interview, what to look at first, and the
+ * language. Each has a placeholder in the agent's dashboard; these are
+ * the real values. Words for its prompt, in English, as the prompt is.
+ */
+const agentVariablesOf = (
+  context: TurnContext,
+  company: string,
+  asked: Extract<InterviewVoiceRequest, { action: "open" }>
+): Record<string, string> => {
+  const lead = context.kind === "lead";
+  const team = context.team.trim();
+  const work = context.work.trim();
+  let teamPhrase = team === "" ? "from their team" : `from ${team}`;
+  if (lead) {
+    teamPhrase = team === "" ? "who leads a team" : `who leads ${team}`;
+  }
+  return {
+    company: company === "" ? "your company" : company,
+    team_phrase: teamPhrase,
+    interview_kind_phrase: lead
+      ? "an interview with a team lead about the work of their whole team"
+      : "an interview with an employee about their own work",
+    work_phrase:
+      work !== "" && context.lead !== null && context.lead.trim() !== ""
+        ? `${context.lead.trim()} told you they handle ${work}: check that first.`
+        : "Take the piece that repeats most and costs them most time.",
+    language: NAMED[asked.locale],
+  };
+};
+
+/**
  * Opens a conversation with Grasp's ElevenLabs agent, and answers the
  * page what it starts it with: a token for it, asked with Grasp's key
  * through the gateway, and what the agent is told as it begins
@@ -367,6 +399,7 @@ const open = async (
       asked,
       asked.event === "start" ? [] : asked.before
     ),
+    variables: agentVariablesOf(context, company, asked),
     pass: await passOf(env, {
       link: secretMark,
       account,
