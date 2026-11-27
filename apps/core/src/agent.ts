@@ -193,7 +193,6 @@ export const askQuestions = (most: number = chatAskLimits.questions) =>
       }
       return ask.data;
     },
-    executionMode: "sequential",
     execute: async () =>
       await Promise.resolve({
         output: [
@@ -275,7 +274,6 @@ export const proposePlan = () =>
       }
       return plan.data;
     },
-    executionMode: "sequential",
     execute: async () =>
       await Promise.resolve({
         output: [
@@ -371,7 +369,6 @@ export const draftAgent = (
       }
       return draft.data;
     },
-    executionMode: "sequential",
     execute: async () =>
       await Promise.resolve({
         output: [
@@ -422,7 +419,6 @@ export const draftAgentChange = (drafts: "company" | "own") =>
       }
       return change.data;
     },
-    executionMode: "sequential",
     execute: async () =>
       await Promise.resolve({
         output: [
@@ -1054,7 +1050,6 @@ export const executeCode = ({
       "Runs a JavaScript module in a sandbox with no network, with the chat's APIs as `env`: `self` is null and `ctx` holds nothing you need, and helper functions in the module are fine. Returns what its default export returns, as JSON, with what it logs and anything it throws.",
     parameters: codeParameters,
     prepareArguments: codeInput,
-    executionMode: "sequential",
     execute: async ({ code }, { callId }, { abortSignal }) => {
       const { runId, run, readFrom } = await runOpen(
         { apis, scope, runs, loader, sandbox, codeTimeoutMs },
