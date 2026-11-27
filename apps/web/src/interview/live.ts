@@ -88,11 +88,13 @@ export interface Live {
    */
   hush: (hushed: boolean) => void;
   /**
-   * Their words as our own ear hears them while they talk, stretch by
-   * stretch (`ended` once it fell quiet): shown until the agent's own
-   * words for their turn come.
+   * Their words as our own ear's live line sends them while they talk
+   * (its `words`): all heard since the last settled words, or those
+   * settled now. Shown over the box as they come, through every pause and
+   * however long they talk, until the agent's own words for their turn
+   * come; what they say after that is the next turn's.
    */
-  overheard: (stretch: number, text: string, ended: boolean) => void;
+  overheard: (text: string, settled: boolean) => void;
   /** How loud he is and how loud they are, 0 to 1, as the conversation hears it now. */
   levels: () => { his: number; theirs: number };
   /** Ends the conversation; again does nothing. */
@@ -112,10 +114,22 @@ const firstLineMs = 10_000;
 const tookIt = "ok";
 
 /**
- * How long their words as our ear heard them stay over the box once they
- * fell quiet, if the agent never takes them up as their turn, in ms.
+ * How long their words as our ear heard them stay over the box once no
+ * more came, if the agent never takes them up as their turn, in ms.
  */
 const overheardMs = 6000;
+
+/** The words of `text` past as many as `before` has: its last word may have grown since, and is still old. */
+const after = (text: string, before: string): string => {
+  const old = before.split(/\s+/u).filter((word) => word !== "").length;
+  return old === 0
+    ? text
+    : text
+        .split(/\s+/u)
+        .filter((word) => word !== "")
+        .slice(old)
+        .join(" ");
+};
 
 /** What starts a conversation with the agent: the SDK's own, loaded once it is needed (`loadAgentSdk`). */
 export type StartAgent = (
@@ -183,10 +197,17 @@ export const joinAgent = async (
   let begun = false;
   /** Ends a conversation his first line never came in: set once it began. */
   let fail: ((why: string) => void) | null = null;
-  /** Our own ear's stretches of their turn now, not yet taken up by the agent's own words for it. */
-  const overheardNow = new Map<number, string>();
-  /** Stretches the agent's words for a turn stood in for: whatever still comes of them is old. */
-  const takenUp = new Set<number>();
+  /**
+   * Our own ear's words for their turn now, not yet taken up by the
+   * agent's own words for it: those settled, and those still coming. The
+   * line's words since its last settled ones carry on from what the agent
+   * took up already (`takenSoFar`): that much of them is old.
+   */
+  let overheardSettled = "";
+  let overheardComing = "";
+  let comingRaw = "";
+  let takenSoFar = "";
+  let overheardQuiet = 0;
   /** Whether the agent streams their words as they talk (its `tentative_user_transcript` event). */
   let streamsTheirs = false;
   /** Their turn's words as our ear heard them so far, over the box. */
@@ -194,9 +215,18 @@ export const joinAgent = async (
     on.segment({
       id: `you-${theirs}`,
       from: "person",
-      text: [...overheardNow.values()].join(" "),
+      text: [overheardSettled, overheardComing]
+        .filter((part) => part !== "")
+        .join(" "),
       final: false,
     });
+  };
+  /** The agent took their turn up: what our ear heard of it so far is old. */
+  const takeUpOverheard = (): void => {
+    takenSoFar = comingRaw;
+    overheardSettled = "";
+    overheardComing = "";
+    window.clearTimeout(overheardQuiet);
   };
   const keep = (line: VoiceLine): void => {
     said.push({
@@ -288,10 +318,7 @@ export const joinAgent = async (
           }
           keep({ from: "person", text: message });
           // The agent's words for their turn stand in for what our ear heard of it.
-          for (const stretch of overheardNow.keys()) {
-            takenUp.add(stretch);
-          }
-          overheardNow.clear();
+          takeUpOverheard();
           on.segment({
             id: `you-${theirs}`,
             from: "person",
@@ -378,27 +405,33 @@ export const joinAgent = async (
       pass: join.pass,
       textOnly,
       said: () => [...said],
-      overheard: (stretch, text, ended) => {
-        if (closed || streamsTheirs || takenUp.has(stretch)) {
+      overheard: (text, settled) => {
+        if (closed || streamsTheirs) {
           return;
         }
-        if (text.trim() !== "") {
-          overheardNow.set(stretch, text.trim());
-          showOverheard();
+        const raw = text.trim();
+        const fresh = after(raw, takenSoFar);
+        if (settled) {
+          // These words are settled: the next come afresh, and nothing of them is old any more.
+          takenSoFar = "";
+          comingRaw = "";
+          overheardComing = "";
+          overheardSettled = [overheardSettled, fresh]
+            .filter((part) => part !== "")
+            .join(" ");
+        } else {
+          comingRaw = raw;
+          overheardComing = fresh;
         }
-        if (ended) {
-          // Heard by us, but never taken up as their turn (a cough, the room): gone again after a while.
-          window.setTimeout(() => {
-            if (
-              !closed &&
-              !takenUp.has(stretch) &&
-              overheardNow.delete(stretch)
-            ) {
-              takenUp.add(stretch);
-              showOverheard();
-            }
-          }, overheardMs);
-        }
+        showOverheard();
+        // Heard by us, but never taken up as their turn (a cough, the room): gone again a while after the last word.
+        window.clearTimeout(overheardQuiet);
+        overheardQuiet = window.setTimeout(() => {
+          if (!closed && (overheardSettled !== "" || overheardComing !== "")) {
+            takeUpOverheard();
+            showOverheard();
+          }
+        }, overheardMs);
       },
       levels: () =>
         closed

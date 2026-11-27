@@ -48,6 +48,8 @@ export interface Placed {
   place: number;
   /** It starts a turn: the one before was the other's, or there was none. */
   starts: boolean;
+  /** His line as far as he has said it, while he says it: not to be removed yet. */
+  saying?: boolean;
 }
 
 /** A screen without a resting pointer: the bin can't wait for one, so it stays, quietly. */
@@ -134,8 +136,16 @@ const styles = stylex.create({
     maskSize: "3px 3px",
   },
   chatHisText: { gridColumn: "1" },
-  // The bubble's tools, side by side, shown as the bin is.
-  tools: { display: "inline-flex", alignItems: "center" },
+  // The bubble's tools, side by side, shown as the bin is: never squeezed by a long bubble, and
+  // at its foot, where a long one ends, a little apart from it.
+  tools: {
+    display: "inline-flex",
+    alignItems: "center",
+    flexShrink: 0,
+    gap: space["1"],
+    alignSelf: "flex-end",
+    paddingBlockEnd: space["1"],
+  },
   editing: {
     display: "flex",
     flexDirection: "column",
@@ -170,10 +180,11 @@ const styles = stylex.create({
     display: "flex",
     flexDirection: "row-reverse",
     alignItems: "center",
-    gap: space["1"],
+    gap: space["2"],
     paddingInlineStart: "15%",
   },
   bubble: {
+    minWidth: 0,
     paddingInline: space["4"],
     paddingBlock: space["2"],
     borderRadius: radius.xl,
@@ -347,7 +358,9 @@ export const ScriptLine = ({
     <div {...stylex.props(styles.scriptRow, lineRow)}>
       <span>{placed.starts ? <Who stephen={stephen} who={who} /> : null}</span>
       <Words line={placed.line} />
-      <BinFor line={placed.line} onRemove={onRemove} who={who} />
+      {placed.saying === true ? null : (
+        <BinFor line={placed.line} onRemove={onRemove} who={who} />
+      )}
     </div>
   );
 };
@@ -506,7 +519,9 @@ export const ChatLine = ({
           </div>
         ) : null}
         <Words extra={styles.chatHisText} line={placed.line} />
-        <BinFor line={placed.line} onRemove={onRemove} who={who} />
+        {placed.saying === true ? null : (
+          <BinFor line={placed.line} onRemove={onRemove} who={who} />
+        )}
       </div>
     );
   }
@@ -579,13 +594,15 @@ export const QaExchange = ({
             extra={stephen ? styles.question : styles.answer}
             line={placed.line}
           />
-          <BinFor
-            line={placed.line}
-            onRemove={() => {
-              onRemove(placed.place);
-            }}
-            who={who}
-          />
+          {placed.saying === true ? null : (
+            <BinFor
+              line={placed.line}
+              onRemove={() => {
+                onRemove(placed.place);
+              }}
+              who={who}
+            />
+          )}
         </div>
       );
     })}

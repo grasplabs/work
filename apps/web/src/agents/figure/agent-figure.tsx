@@ -139,6 +139,15 @@ export interface AgentFigureProps {
    * @default true at icon, xs and sm, false above
    */
   still?: boolean;
+  /**
+   * Stephen alive in a conversation, without his eye: his orb turns, faster as he listens, thinks
+   * and speaks, a thought goes round it while he thinks, his light follows `voiceOf`, and he
+   * eases into each pose, slowest into sleep. Set once, as it mounts.
+   * @default false
+   */
+  alive?: boolean;
+  /** How loud the voice an alive figure follows is now, 0 to 1: asked every frame. Set once, as it mounts. */
+  voiceOf?: () => number;
   /** Its name, when nothing beside it says it: then an image with that name. Left out, it is decoration. */
   "aria-label"?: string;
   /** Where it sits. */
@@ -152,6 +161,8 @@ export const AgentFigure = ({
   state = "idle",
   follow: followGiven,
   still: stillGiven,
+  alive = false,
+  voiceOf,
   "aria-label": label,
   style,
 }: AgentFigureProps) => {
@@ -160,7 +171,7 @@ export const AgentFigure = ({
   const canvas = useRef<HTMLCanvasElement>(null);
   const [live, setLive] = useState<LiveFigure | null>(null);
   // Mounted once per size; a new look or pose reaches the live figure without mounting it again.
-  const firstSeen = useRef({ look, state });
+  const firstSeen = useRef({ look, state, alive, voiceOf });
   useEffect(() => {
     const element = canvas.current;
     const first = firstSeen.current;
@@ -176,6 +187,8 @@ export const AgentFigure = ({
       seed: seedOf(first.look),
       still,
       eye: first.look.eye === true,
+      alive: first.alive,
+      ...(first.voiceOf === undefined ? {} : { voiceOf: first.voiceOf }),
     });
     setLive(made);
     return () => {

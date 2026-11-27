@@ -42,6 +42,13 @@ export interface LiveLineOptions {
   link?: { secret: string };
   /** What is heard so far of the stretch being sent, all of it, every time there is more. */
   onPartial: (text: string) => void;
+  /**
+   * Every word core sends, as it sends it, whichever stretch it is of:
+   * all heard since the last settled words (`settled` false), or those
+   * settled now (`settled` true), after which the next start afresh. For
+   * whoever only shows what is said as it is said, through every pause.
+   */
+  onWords?: (text: string, settled: boolean) => void;
   /** The line is listening, or not any more. */
   onLive: (live: boolean) => void;
   /**
@@ -179,6 +186,7 @@ export const openLiveLine = (options: LiveLineOptions): LiveLine => {
       }, keepMs);
       options.onLive(true);
     } else if (message.type === "partial") {
+      options.onWords?.(message.text, false);
       // While the words of the stretch before are still to come, these are still of that one.
       if (sending && owed.length === 0) {
         options.onPartial(both(settled, message.text));
@@ -186,6 +194,7 @@ export const openLiveLine = (options: LiveLineOptions): LiveLine => {
     } else if (message.type === "error") {
       options.onRefused?.(message.code);
     } else if (message.type === "final") {
+      options.onWords?.(message.text, true);
       const entry = owed.shift();
       if (entry !== undefined) {
         entry.take(message.text);

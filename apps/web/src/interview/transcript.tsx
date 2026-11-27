@@ -26,6 +26,8 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
 
 import { useInterviewer } from "./kept.ts";
+import { useLoop } from "./loop.ts";
+import type { LoopState } from "./loop.ts";
 import { soundIsOn } from "./speech.ts";
 import {
   ChatLine,
@@ -105,28 +107,95 @@ const RemoveLine = ({
   );
 };
 
-/** The lines where they stand, each told whether it starts a turn. */
-const placedOf = (lines: InterviewLine[]): Placed[] =>
+/** The lines where they stand, each told whether it starts a turn; `saying` is the place of his line as he says it. */
+const placedOf = (lines: InterviewLine[], saying: number | null): Placed[] =>
   lines.map((line, place) => ({
     line,
     place,
     starts: place === 0 || lines[place - 1]?.from !== line.from,
+    saying: place === saying,
   }));
+
+/** As much of a line as is said, `count` characters, to the end of its last whole word. */
+const saidOf = (text: string, count: number): string => {
+  if (count >= text.length) {
+    return text;
+  }
+  const cut = text.lastIndexOf(" ", count);
+  return cut <= 0 ? "" : text.slice(0, cut);
+};
+
+/**
+ * The transcript as far as he has said it: his line comes in word by word
+ * with his voice, as on the stage. One the session told ahead of his voice
+ * isn't there until he begins it; one he says that isn't written down yet
+ * is there as far as he got.
+ */
+const saidSoFar = (
+  lines: InterviewLine[],
+  loop: Pick<LoopState, "doing" | "line" | "from" | "ahead" | "telling">
+): { lines: InterviewLine[]; saying: number | null } => {
+  const last = lines.at(-1);
+  const his = last?.from === "stephen" && last.removed !== true ? last : null;
+  if (
+    loop.ahead !== null &&
+    loop.ahead !== "" &&
+    his?.text.endsWith(loop.ahead) === true
+  ) {
+    const said = saidOf(his.text, his.text.length - loop.ahead.length);
+    return said === ""
+      ? { lines: lines.slice(0, -1), saying: null }
+      : {
+          lines: [...lines.slice(0, -1), { ...his, text: said }],
+          saying: lines.length - 1,
+        };
+  }
+  if (
+    loop.doing !== "speaking" ||
+    loop.telling !== null ||
+    loop.line === "" ||
+    loop.from >= loop.line.length
+  ) {
+    return { lines, saying: null };
+  }
+  if (his?.text.endsWith(loop.line) === true) {
+    const said = saidOf(
+      his.text,
+      his.text.length - loop.line.length + loop.from
+    );
+    return said === ""
+      ? { lines: lines.slice(0, -1), saying: null }
+      : {
+          lines: [...lines.slice(0, -1), { ...his, text: said }],
+          saying: lines.length - 1,
+        };
+  }
+  const said = saidOf(loop.line, loop.from);
+  if (said === "") {
+    return { lines, saying: null };
+  }
+  return {
+    lines: [...lines, { from: "stephen", text: said }],
+    saying: lines.length,
+  };
+};
 
 /** The rows of the transcript in its look, each scrolled to as it comes. */
 const Rows = ({
   look,
   lines,
+  saying,
   onRemove,
   onEdit,
 }: {
   look: TranscriptLook;
   lines: InterviewLine[];
+  saying: number | null;
   onRemove: (place: number) => void;
   onEdit: (place: number, text: string) => void;
 }) => {
   const who = interviewerNames[useInterviewer()];
-  const placed = placedOf(lines);
+  const placed = placedOf(lines, saying);
   if (look === "c") {
     return exchangesOf(placed).map((exchange, index) => {
       const first = exchange.lines[0]?.place ?? index;
@@ -210,19 +279,21 @@ export const Transcript = ({
   const look = useTranscriptLook();
   const interviewer = useInterviewer();
   useHisNewLinesSaid(alone, lines);
+  const loop = useLoop();
   if (!open) {
     return null;
   }
+  const shown = saidSoFar(lines, loop);
   return (
     <aside
       aria-label={t`Transcript`}
       id={transcriptId}
       {...stylex.props(styles.aside, fadeIn)}
     >
-      {look === "c" && lines.length > 0 ? (
+      {look === "c" && shown.lines.length > 0 ? (
         <QaLegend who={interviewerNames[interviewer]} />
       ) : null}
-      {lines.length === 0 ? (
+      {shown.lines.length === 0 ? (
         <Text color="muted">{t`Nothing said yet.`}</Text>
       ) : (
         <div {...stylex.props(styles.thread)}>
@@ -231,12 +302,13 @@ export const Transcript = ({
               <MessageScrollerViewport aria-label={t`Transcript`}>
                 <MessageScrollerContent>
                   <Rows
-                    lines={lines}
+                    lines={shown.lines}
                     look={look}
                     onEdit={onEdit}
                     onRemove={(place) => {
                       setRemoving(place);
                     }}
+                    saying={shown.saying}
                   />
                 </MessageScrollerContent>
               </MessageScrollerViewport>

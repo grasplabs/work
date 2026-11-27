@@ -140,6 +140,12 @@ export interface LoopState {
   sign: DotSign | null;
   /** The conversation can't go on: why, for the bar at the top, never as his line. */
   trouble: LoopTrouble | null;
+  /**
+   * His line as the session told it, ahead of his voice, which hasn't begun
+   * in it yet: in the transcript already, but not to be seen there until he
+   * says it.
+   */
+  ahead: string | null;
 }
 
 /** What happens in the conversation, as it is told on `window` (`loopEventName`). */
@@ -189,6 +195,7 @@ const idle: LoopState = {
   talking: false,
   sign: null,
   trouble: null,
+  ahead: null,
 };
 
 let state: LoopState = idle;
@@ -956,6 +963,10 @@ const heardBy =
         // The ear falls back to recordings by itself: nothing changes here.
         break;
       }
+      case "words": {
+        // The floor goes by stretches: their partials and finals above.
+        break;
+      }
       default: {
         event satisfies never;
       }
@@ -1224,7 +1235,7 @@ const paceLive = (speaks: boolean): void => {
   liveSpokeAt = performance.now() - (state.from / spokenCharsPerSecond) * 1000;
   hisVoiced = true;
   if (hisUnseen !== null) {
-    set({ line: hisUnseen, from: 0 });
+    set({ line: hisUnseen, from: 0, ahead: null });
     hisUnseen = null;
   }
   livePacing = window.setInterval(paceHis, 60);
@@ -1425,6 +1436,11 @@ const liveSegment = ({ id, from, text, final }: LiveSegment): void => {
   if (heardText === "") {
     return;
   }
+  if (liveResting.length > 0) {
+    // He answers what they said: it stands in the transcript before his answer, never after it.
+    keepResting();
+    showHeard();
+  }
   if (hisStretch !== id) {
     hisStretch = id;
     sayingCount += 1;
@@ -1444,6 +1460,7 @@ const liveSegment = ({ id, from, text, final }: LiveSegment): void => {
   } else {
     // Told ahead of his voice: it comes on the stage as he starts to say it.
     hisUnseen = heardText;
+    set({ ahead: heardText });
   }
   if (final) {
     hisStretch = null;
@@ -1457,6 +1474,11 @@ const liveSegment = ({ id, from, text, final }: LiveSegment): void => {
 /** What he does, as the session says it. */
 const liveDoing = (doing: LiveDoing): void => {
   if (doing === "speaking") {
+    if (liveResting.length > 0) {
+      // His voice answers what they said: it goes to the transcript first.
+      keepResting();
+      showHeard();
+    }
     show("speaking");
     paceLive(true);
     // His voice plays as the agent sends it: when they talk over him, the agent
@@ -1530,6 +1552,7 @@ const left = async (quick: boolean): Promise<void> => {
   hisWords = "";
   hisVoiced = false;
   hisUnseen = null;
+  set({ ahead: null });
   liveReadsBack = false;
   if (session === null) {
     return;
@@ -1648,6 +1671,19 @@ const eventOf = (
   return switched ? "language" : "resume";
 };
 
+/** How often the session is told they are still talking, at most, in ms: the agent holds back a moment each time. */
+const stillTalkingMs = 900;
+let toldTalkingAt = 0;
+
+/** Tells the session they are still talking, at most every `stillTalkingMs`. */
+const stillTalking = (session: Live): void => {
+  const now = performance.now();
+  if (now - toldTalkingAt >= stillTalkingMs) {
+    toldTalkingAt = now;
+    session.typing();
+  }
+};
+
 /**
  * Our own ear beside a session that only says their words once their turn
  * is over (the ElevenLabs agent): what it hears while they talk stands over
@@ -1665,6 +1701,8 @@ const overhearLive = async (session: Live, count: number): Promise<void> => {
     link,
     // While he speaks, only a voice that stays is theirs: his own, from the speaker, never.
     wary: () => state.doing === "speaking",
+    // It only shows their words: the session hears their answer, so nothing is written down from a recording.
+    recordings: false,
   });
   if (opened === null) {
     return;
@@ -1678,12 +1716,16 @@ const overhearLive = async (session: Live, count: number): Promise<void> => {
     if (liveEar !== opened) {
       return;
     }
-    if (event.type === "partial") {
-      overheard(event.stretch, event.text, false);
-    } else if (event.type === "final") {
-      overheard(event.stretch, event.text, true);
-    } else if (event.type === "unheard") {
-      overheard(event.stretch, "", true);
+    if (event.type === "words") {
+      overheard(event.text, event.settled);
+    }
+    if (
+      (event.type === "stretch-start" || event.type === "words") &&
+      opened.talking &&
+      state.doing !== "speaking"
+    ) {
+      // They are talking: he waits, rather than taking a breath of theirs for the end of their turn.
+      stillTalking(session);
     }
   });
 };

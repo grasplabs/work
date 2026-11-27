@@ -40,6 +40,12 @@ export interface EarOptions {
    * voice that stays is a stretch (`steadyLeastMs`), as it stops him.
    */
   wary?: () => boolean;
+  /**
+   * Whether a stretch whose words didn't come over the live line is written
+   * down from its recording. Not for an ear that only shows what is said.
+   * @default true
+   */
+  recordings?: boolean;
 }
 
 /** What an ear hears, in the order it hears it: for each stretch `stretch-start`, `partial`s, `stretch-end`, then `final` or `unheard`. */
@@ -60,7 +66,13 @@ export type EarEvent =
   /** A closed stretch couldn't be written down: it failed, or the link heard all it may today. */
   | { type: "unheard"; stretch: number; reason: "failed" | "limited" }
   /** The live line came up or went down; meanwhile stretches are written down from their recordings. */
-  | { type: "line"; live: boolean };
+  | { type: "line"; live: boolean }
+  /**
+   * Words as the live line sends them, whatever stretch they are of: all
+   * heard since the last settled words, or those settled now (`settled`),
+   * after which the next start afresh. Nothing is lost between stretches.
+   */
+  | { type: "words"; text: string; settled: boolean };
 
 /** Listening, until closed. */
 export interface Ear {
@@ -217,12 +229,18 @@ export const openEar = async (options: EarOptions): Promise<Ear | null> => {
     onLive: (live) => {
       tell({ type: "line", live });
     },
+    onWords: (text, settled) => {
+      if (!deaf) {
+        tell({ type: "words", text, settled });
+      }
+    },
   });
+  const recordings = options.recordings !== false;
 
   /** A new recording, through the microphone as it is now. */
   const restart = (): void => {
     stopRecording(recording);
-    const from = micStream();
+    const from = recordings ? micStream() : null;
     recording = from === null ? null : record(from);
   };
 
@@ -333,7 +351,7 @@ export const openEar = async (options: EarOptions): Promise<Ear | null> => {
     }
     const now = performance.now();
     // The microphone changed: a recording through the old one is no use.
-    if (recording?.from !== micStream()) {
+    if (recordings && recording?.from !== micStream()) {
       restart();
     }
     const at = stretch;

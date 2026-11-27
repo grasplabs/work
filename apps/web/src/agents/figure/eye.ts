@@ -70,6 +70,8 @@ const moods: Record<FigureState, Mood> = {
     blink: 0.32,
   },
   done: { glance: 0.05, every: [1, 2], blink: 0.22 },
+  // Telling: at you, with the small glances of someone talking.
+  speaking: { glance: 0.05, every: [0.8, 1.6], blink: 0.2 },
 };
 
 /** The spring the gaze rides on: it settles in about 300ms, overshooting a little. */
@@ -91,6 +93,7 @@ const warmth: Record<FigureState, number> = {
   listening: 0.06,
   thinking: 0,
   done: 0.1,
+  speaking: 0.14,
 };
 
 /** The smile a state rests at, for a still picture. */

@@ -196,7 +196,8 @@ const AskedLine = ({ question }: { question: string }) => (
  * glance (the owner's ask, 2026-11-26). A line that asks nothing is shown
  * whole.
  */
-const Asking = () => {
+const Asking = ({ paused = false }: { paused?: boolean }) => {
+  const { t } = useLingui();
   const loop = useLoop();
   const { mode } = useProgress();
   const saidOf = useSaidOf(loop.line);
@@ -213,6 +214,17 @@ const Asking = () => {
   // is in the transcript beside it (the owner's ask, 2026-11-26). Typing, nobody hears him: his
   // question stands under it, to be read.
   const talking = mode === "talk";
+  if (paused) {
+    // Paused where it stood: the same orb falls asleep, and one word under it says so.
+    return (
+      <div aria-live="polite" {...stylex.props(styles.question)}>
+        <StephenOrb asleep />
+        <div {...stylex.props(fadeIn)}>
+          <Text color="muted" size="sm">{t`Paused`}</Text>
+        </div>
+      </div>
+    );
+  }
   return (
     <div {...stylex.props(styles.question)}>
       <StephenOrb />
@@ -344,6 +356,8 @@ export const Conversation = ({
   transcript,
   alone,
   onTalk,
+  paused = false,
+  onResume,
 }: {
   reading: boolean;
   /** The quick look round before the first question, in the questions' place (guide.tsx). */
@@ -351,29 +365,50 @@ export const Conversation = ({
   transcript: boolean;
   alone: boolean;
   onTalk: () => void;
+  /**
+   * Paused, in place (the owner's asks, 2026-11-26 and 27): his orb falls
+   * asleep where it stood, slowly, one word under it says so, and the box at
+   * the foot is a quiet button to go on. Nothing else moves: the transcript
+   * stays as it was, what was said is kept, and the clock waits.
+   */
+  paused?: boolean;
+  onResume?: () => void;
 }) => {
+  const { t } = useLingui();
   const progress = useProgress();
   // The foot again for each part, and once what they changed is sent.
   const sent = progress.lines.filter(({ from }) => from === "person").length;
   const answer = reading ? `reading-${partAt(progress).at}-${sent}` : "asking";
   // The box comes back in the read-back once they want to change something there.
   const [changingAt, setChangingAt] = useState<string | null>(null);
-  const footed = reading && changingAt !== answer;
+  const footed = reading && !paused && changingAt !== answer;
   return (
     <>
       <TurnTrouble />
       <Room alone={alone} transcript={transcript}>
         <div {...stylex.props(styles.stage)}>
-          {reading ? (
+          {reading && !paused ? (
             <ReadBack />
           ) : (
             <>
               <div aria-hidden="true" {...stylex.props(styles.lead)} />
-              {guiding ? <Guide /> : <Asking />}
+              {guiding && !paused ? <Guide /> : <Asking paused={paused} />}
             </>
           )}
         </div>
-        {footed ? null : (
+        {paused ? (
+          <div {...stylex.props(styles.composer, fadeIn)}>
+            <Button
+              onClick={onResume}
+              size="lg"
+              style={styles.resume}
+              variant="secondary"
+            >
+              {t`Resume`}
+            </Button>
+          </div>
+        ) : null}
+        {footed || paused ? null : (
           <AnswerBox
             guiding={guiding}
             // Afresh once the guide is done, with the cursor in the box for whoever types.
@@ -392,36 +427,6 @@ export const Conversation = ({
         />
       ) : null}
     </>
-  );
-};
-
-/**
- * Paused, in place (the owner's ask, 2026-11-26): his orb sleeps where it
- * stood, one word under it says so, and the box at the foot is a quiet
- * button to go on. Nothing else: what was said is kept, and the clock waits.
- */
-export const PausedConversation = ({ onResume }: { onResume: () => void }) => {
-  const { t } = useLingui();
-  return (
-    <Room alone={false} transcript={false}>
-      <div {...stylex.props(styles.stage)}>
-        <div aria-hidden="true" {...stylex.props(styles.lead)} />
-        <div aria-live="polite" {...stylex.props(styles.question)}>
-          <StephenOrb asleep />
-          <Text color="muted" size="sm">{t`Paused`}</Text>
-        </div>
-      </div>
-      <div {...stylex.props(styles.composer)}>
-        <Button
-          onClick={onResume}
-          size="lg"
-          style={styles.resume}
-          variant="secondary"
-        >
-          {t`Resume`}
-        </Button>
-      </div>
-    </Room>
   );
 };
 

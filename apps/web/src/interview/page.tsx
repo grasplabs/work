@@ -26,12 +26,7 @@ import {
 import type { OpenSession } from "./api.ts";
 import { Page, Words } from "./calm.tsx";
 import { Closed, DeleteInterview } from "./closed.tsx";
-import {
-  besideQuery,
-  Conversation,
-  PausedConversation,
-  TimeUp,
-} from "./conversation.tsx";
+import { besideQuery, Conversation, TimeUp } from "./conversation.tsx";
 import {
   Countdown,
   secondsLeft,
@@ -567,6 +562,8 @@ const Talking = ({
   timeUp,
   transcript,
   alone,
+  paused = false,
+  onResume,
 }: {
   name: string;
   reading: boolean;
@@ -575,8 +572,11 @@ const Talking = ({
   timeUp: boolean;
   transcript: boolean;
   alone: boolean;
+  /** Paused where they were: his orb falls asleep in place, and the box is a button to go on. */
+  paused?: boolean;
+  onResume?: () => void;
 }) =>
-  timeUp ? (
+  timeUp && !paused ? (
     <TimeUp name={name} onReadBack={readBackNow} />
   ) : (
     <Conversation
@@ -585,13 +585,12 @@ const Talking = ({
       onTalk={() => {
         void talkAgain();
       }}
+      {...(onResume === undefined ? {} : { onResume })}
+      paused={paused}
       reading={reading}
       transcript={transcript}
     />
   );
-
-/** Which screen it is, as far as pausing and coming back fade from one to the next. */
-const sceneOf = (stopped: boolean): string => (stopped ? "paused" : "on");
 
 /**
  * Every screen but the conversation stands on Stephen's field; the
@@ -678,8 +677,10 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
   useEffect(() => (running ? runLoop() : undefined), [running]);
   // The header's tools for talking are there from the guide on, which tells about them.
   const talkTools = running || guiding;
-  const { transcript, setTranscript, floating, alone } =
-    useTranscript(talkTools);
+  // Paused, the transcript stays as it was, where it was: only his orb falls asleep.
+  const { transcript, setTranscript, floating, alone } = useTranscript(
+    talkTools || stopped
+  );
   const canDelete =
     deleted !== "yes" &&
     deletable(progress, session.closed || withdrawn, readOnly);
@@ -724,13 +725,20 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
   if (ended !== null) {
     stage = ended;
   } else if (stopped) {
-    // Paused where they were: his orb asleep, and the box a button to go on.
+    // Paused where they were, on the same stage: his orb falls asleep, and the box is a button to go on.
     stage = (
-      <PausedConversation
+      <Talking
+        alone={alone}
+        guiding={false}
+        name={session.name}
         onResume={() => {
           carryOn();
           setStopped(false);
         }}
+        paused
+        reading={false}
+        timeUp={false}
+        transcript={floating}
       />
     );
   } else if (progress.person === "completed" && progress.told) {
@@ -766,8 +774,6 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
         />
       }
       pose={poseOf(stage, reading)}
-      // Pausing and coming back fade from one screen to the next, as the field moves.
-      scene={sceneOf(stopped)}
       strip={!reading}
     >
       {stage}
