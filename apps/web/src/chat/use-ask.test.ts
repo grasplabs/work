@@ -28,7 +28,27 @@ const unsent = {
 
 describe("asking again after a question failed to send", () => {
   it("goes with the key it failed with when asked with all the same", () => {
-    expect(questionKeyFor(unsent, askedWith({ ...asked }))).toBe("key-1");
+    expect(
+      questionKeyFor(unsent, asked.question, askedWith({ ...asked }))
+    ).toBe("key-1");
+  });
+
+  it("goes with the key of a question taken back from another box while its words are the same, whatever else this box asks it with", () => {
+    const takenBack = {
+      key: "key-2",
+      question: "Who owes us?",
+      asked: undefined,
+    };
+
+    expect({
+      same: questionKeyFor(
+        takenBack,
+        "Who owes us?",
+        askedWith({ ...asked, chatId: "chat-1" })
+      ),
+      other:
+        questionKeyFor(takenBack, "Who else?", askedWith(asked)) === "key-2",
+    }).toStrictEqual({ same: "key-2", other: false });
   });
 
   it("goes with a new key once anything it is asked with changed", () => {
@@ -40,10 +60,11 @@ describe("asking again after a question failed to send", () => {
       { effort: "high" },
       { files: ["file-1", "file-2"] },
       { mentions: [{ kind: "agent", id: "claire" }] },
-    ].map((changed) =>
-      questionKeyFor(unsent, askedWith({ ...asked, ...changed }))
-    );
-    keys.push(questionKeyFor(null, unsent.asked));
+    ].map((changed) => {
+      const now = { ...asked, ...changed };
+      return questionKeyFor(unsent, now.question, askedWith(now));
+    });
+    keys.push(questionKeyFor(null, asked.question, unsent.asked));
     expect(keys).not.toContain("key-1");
     expect(new Set(keys).size).toBe(keys.length);
   });

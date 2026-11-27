@@ -45,6 +45,8 @@ export interface PendingQuestion {
    * (`ChatUpdate.queued`), so it is drawn as queued, not answered yet.
    */
   queues: boolean;
+  /** The key it went with (`ChatQuestion.key`): the same question again goes with it. */
+  key: string;
   /**
    * The box that sent it: only that box takes it back if it fails, or,
    * once that box is gone, the one that shows its chat.

@@ -790,6 +790,7 @@ describe(ChatThread, () => {
         after: 2,
         at,
         queues: false,
+        key: "key-1",
         owner: "box",
         fromBox: true,
         state: "sending",

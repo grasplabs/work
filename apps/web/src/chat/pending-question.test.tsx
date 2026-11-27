@@ -31,6 +31,7 @@ const pending: PendingQuestion = {
   after: 2,
   at,
   queues: false,
+  key: "key-1",
   owner: "start",
   fromBox: true,
   state: "sending",
