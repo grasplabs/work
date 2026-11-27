@@ -147,13 +147,25 @@ const OpenChatHead = ({
 }) => {
   const { sourceNames, retitle } = useGlobalChat();
   const { actions, dialog } = useChatMenu({ chat, sourceNames });
-  const rename = useRenameChat(chat.id, retitle);
+  const {
+    onRename: handleRename,
+    maxLength,
+    errorText,
+  } = useRenameChat(chat.id, retitle);
   return (
     <>
       <Head
         expanded={expanded}
         menu={[...fresh, ...actions]}
-        title={<PanelTitle onRename={rename}>{chat.title}</PanelTitle>}
+        title={
+          <PanelTitle
+            onRename={handleRename}
+            renameErrorText={errorText}
+            renameMaxLength={maxLength}
+          >
+            {chat.title}
+          </PanelTitle>
+        }
       />
       {dialog}
     </>

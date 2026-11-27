@@ -507,8 +507,10 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       index: (current, count) => t`${current}/${count}`,
     },
     inlineEdit: {
+      cancel: t`Cancel`,
       edit: t({ message: "Edit", context: "edit a value in place" }),
       error: t`Could not save`,
+      save: t`Save`,
       saved: (value) => t`Changed to ${value}`,
     },
     input: {

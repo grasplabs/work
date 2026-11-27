@@ -568,10 +568,14 @@ export interface I18nCatalog {
     index: (current: number, count: number) => string;
   };
   inlineEdit: {
+    /** The popup's button that closes it and keeps the value. */
+    cancel: string;
     /** Said after the text: that a press opens it to be changed. */
     edit: string;
     /** Under the field when the save failed; the words typed are kept. */
     error: string;
+    /** The popup's button that saves the new value. */
+    save: string;
     /** What a screen reader hears once the new value is saved. */
     saved: (value: string) => string;
   };
@@ -1377,8 +1381,10 @@ const english: I18nCatalog = {
     index: (current, count) => `${current}/${count}`,
   },
   inlineEdit: {
+    cancel: "Cancel",
     edit: "Edit",
     error: "Could not save",
+    save: "Save",
     saved: (value: string) => `Changed to ${value}`,
   },
   input: {

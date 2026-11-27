@@ -68,7 +68,7 @@ export const CopyButton = ({
     disabled,
     // The copy, then the caller's handler with what was copied, only when it is on the clipboard;
     // a failed copy rejects, so UI SDK's Button (and an agent's press) hears that it failed. A press
-    // while the result still shows copies nothing.
+    // while "Copied" still shows copies nothing; after a failed copy a press copies again.
     onClick: async () => {
       const result = await copy.run();
       if (result.ok) {

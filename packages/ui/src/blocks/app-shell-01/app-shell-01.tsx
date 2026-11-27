@@ -67,6 +67,7 @@ import {
 import { breadcrumbVars } from "../../components/breadcrumb.stylex";
 import { Button } from "../../components/button";
 import { InlineEdit } from "../../components/inline-edit";
+import type { InlineEditVariant } from "../../components/inline-edit";
 import { pageBandVars } from "../../components/page-header.stylex";
 import {
   ResizableHandle,
@@ -872,8 +873,22 @@ export interface AppShellHeaderProps {
   breadcrumb?: readonly AppShellCrumb[];
   /** The page's name: the last step. */
   title?: string;
-  /** Renames the page in place (InlineEdit): a press on the title, Enter or F2. Keep the name in your state. */
-  onRename?: (name: string) => void;
+  /**
+   * Renames the page (InlineEdit): a press on the title, Enter or F2 opens its field. Runs with the
+   * new name, trimmed, when it is not empty and differs; keep the name in your state. Return a
+   * promise and the field waits, read only, and stays open with the words typed if it rejects.
+   */
+  onRename?: (name: string) => unknown;
+  /**
+   * Where the title's field opens: `inline` in the title's place, `popup` in a small popup under
+   * it, titled "Rename", with Cancel and Save.
+   * @default "inline"
+   */
+  renameVariant?: InlineEditVariant;
+  /** The most a new name may hold, counted as the browser's `maxlength` counts (UTF-16 code units). */
+  renameMaxLength?: number;
+  /** Said under the field when the rename fails ("That name is taken"), in place of the catalogue's words. */
+  renameErrorText?: string;
   /** Whether the title's field is open, when you keep it (a menu's Rename opens it): pass it with `onRenamingChange`. */
   renaming?: boolean;
   /** Runs when the title's field opens or closes. */
@@ -999,6 +1014,9 @@ export const AppShellHeader = ({
   breadcrumb = NO_STEPS,
   title,
   onRename,
+  renameVariant,
+  renameMaxLength,
+  renameErrorText,
   renaming,
   onRenamingChange,
   trailing,
@@ -1015,6 +1033,9 @@ export const AppShellHeader = ({
         aria-label={words.appShell.rename}
         value={title}
         onSubmit={onRename}
+        variant={renameVariant}
+        maxLength={renameMaxLength}
+        errorText={renameErrorText}
         editing={renaming}
         onEditingChange={onRenamingChange}
       />

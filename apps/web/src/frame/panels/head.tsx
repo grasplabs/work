@@ -1,14 +1,7 @@
 import { Button } from "@grasp-os/ui/components/button";
 import { DropdownMenuMore } from "@grasp-os/ui/components/dropdown-menu";
 import type { DropdownMenuMoreItem } from "@grasp-os/ui/components/dropdown-menu";
-import { Input } from "@grasp-os/ui/components/input";
-import {
-  Popover,
-  PopoverAnchor,
-  PopoverContent,
-  PopoverFooter,
-  PopoverTitle,
-} from "@grasp-os/ui/components/popover";
+import { InlineEdit } from "@grasp-os/ui/components/inline-edit";
 import {
   AppWindowIcon,
   ArrowUpRightIcon,
@@ -38,14 +31,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type {
-  KeyboardEvent,
-  MouseEvent,
-  PointerEvent as ReactPointerEvent,
-  ReactElement,
-  ReactNode,
-  SubmitEvent,
-} from "react";
+import type { ReactElement, ReactNode } from "react";
 
 import { PanelPlaceContext } from "./float-window.tsx";
 import type { PanelPlacement } from "./float-window.tsx";
@@ -130,7 +116,6 @@ const styles = stylex.create({
   },
   // The words at their own width, so the name's box can tell when they outgrow it.
   words: { display: "inline-block" },
-  field: { display: "flex", flexDirection: "column", gap: space["3"] },
   // The panel's body: the page's room under the head's line (the page's own padding above its words
   // under the bar), so the hairline keeps clear space on both sides, and the page's room at its sides.
   // It scrolls with no bar of its own (the product's rule), its words going under the line, cut at
@@ -450,8 +435,15 @@ export const PanelBody = ({ children, fill = false }: PanelBodyProps) => {
 export interface PanelTitleProps {
   /** The panel's name, as it stands now ("New chat"). */
   children: string;
-  /** Runs with the new name when the person renames it; without it, the name cannot be renamed. */
-  onRename?: (name: string) => void;
+  /**
+   * Runs with the new name when the person renames it; without it, the name cannot be renamed. A
+   * promise holds the popup open while it works, and open with the words typed if it rejects.
+   */
+  onRename?: (name: string) => unknown;
+  /** The most a new name may hold. */
+  renameMaxLength?: number;
+  /** Said under the field when the rename fails. */
+  renameErrorText?: string;
 }
 
 /** Watches whether the name runs past its room: its box, and its words, which grow with a new name.
@@ -469,25 +461,24 @@ const watchFit = (element: HTMLElement, setOver: (over: boolean) => void) => {
   };
 };
 
-/** How far a press may travel and still be a press, not a move: a few pixels. */
-const MOVED = 4;
-
-/** Whether a key on the name opens the rename: F2, or Enter as on any button. */
-const opensRename = (event: KeyboardEvent<HTMLElement>) =>
-  event.key === "F2" || event.key === "Enter";
-
-/** The panel's name in its head: one line, faded at its end, renamed in a small popup. */
-export const PanelTitle = ({ children, onRename }: PanelTitleProps) => {
+/**
+ * The panel's name in its head: one line, faded at its end, renamed in a small popup
+ * (InlineEdit's `popup`). The name is the floating window's handle too, so a press on it moves the
+ * window and never opens the rename: the head's Rename item, F2 or Enter do.
+ */
+export const PanelTitle = ({
+  children,
+  onRename,
+  renameMaxLength,
+  renameErrorText,
+}: PanelTitleProps) => {
   const { t } = useLingui();
   const { handleMovePress } = use(PanelPlaceContext);
-  const hint = useId();
   const [element, setElement] = useState<HTMLElement | null>(null);
-  const setButton = (button: HTMLButtonElement | null) => {
-    setElement(button);
-  };
   const [over, setOver] = useState(false);
-  const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState(children);
+  const [editing, setEditing] = useState(false);
+  // Set by a pointer's press on the name: the rename its click would open stays shut.
+  const pressed = useRef(false);
   useEffect(
     () =>
       element === null || typeof ResizeObserver === "undefined"
@@ -496,117 +487,71 @@ export const PanelTitle = ({ children, onRename }: PanelTitleProps) => {
     [element]
   );
   const canRename = onRename !== undefined;
-  const start = () => {
-    setDraft(children);
-    setOpen(true);
-  };
   // The head's Rename item: each press of it opens the field once.
   const asked = use(RenameAsked);
   const [seenAsk, setSeenAsk] = useState(asked);
   if (asked !== seenAsk) {
     setSeenAsk(asked);
     if (canRename) {
-      setDraft(children);
-      setOpen(true);
+      setEditing(true);
     }
   }
-  // A press renames, unless it moved a floating window: where it went down, to tell the two apart.
-  const pressedAt = useRef<{ x: number; y: number } | null>(null);
-  const handlePointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    pressedAt.current = { x: event.clientX, y: event.clientY };
-    handleMovePress?.(event);
-  };
-  const handleClick = (event: MouseEvent<HTMLButtonElement>) => {
-    const from = pressedAt.current;
-    pressedAt.current = null;
-    // A key's click (Enter) is the key handler's; only a pointer's press that stayed put renames here.
-    if (
-      from === null ||
-      Math.hypot(event.clientX - from.x, event.clientY - from.y) > MOVED
-    ) {
-      return;
-    }
-    start();
-  };
-  const save = (event: SubmitEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const name = draft.trim();
-    if (name !== "" && name !== children) {
-      onRename?.(name);
-    }
-    setOpen(false);
-  };
-  const look = stylex.props(
-    styles.name,
-    over && styles.fades,
-    canRename && styles.renamable,
-    canRename && styles.takesPresses,
-    canRename && focusRing
+  const look = stylex.props(styles.name, over && styles.fades);
+  const words = (
+    <span
+      ref={setElement}
+      data-slot="app-shell-panel-title"
+      title={over ? children : undefined}
+      {...look}
+    >
+      <span {...stylex.props(styles.words)}>{children}</span>
+    </span>
   );
-  const words = <span {...stylex.props(styles.words)}>{children}</span>;
-  const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (opensRename(event)) {
-      event.preventDefault();
-      event.stopPropagation();
-      start();
-    }
-  };
   if (!canRename) {
-    return (
-      <span
-        ref={setElement}
-        data-slot="app-shell-panel-title"
-        title={over ? children : undefined}
-        {...look}
-      >
-        {words}
-      </span>
-    );
+    return words;
   }
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      {/* A press on the name renames it, unless the press moved a floating window (the head's
-          handle lies under it); so do a double-click, F2 and Enter. */}
-      <PopoverAnchor asChild>
-        <button
-          ref={setButton}
-          type="button"
-          data-slot="app-shell-panel-title"
-          title={over ? children : undefined}
-          aria-haspopup="dialog"
-          aria-describedby={hint}
-          onClick={handleClick}
-          onDoubleClick={start}
-          onKeyDown={handleKeyDown}
-          onPointerDown={handlePointerDown}
-          {...look}
-        >
-          {words}
-        </button>
-      </PopoverAnchor>
-      <span id={hint} {...stylex.props(visuallyHidden)}>
-        {t`Press or press F2 to rename`}
-      </span>
-      <PopoverContent align="start" side="bottom">
-        <form onSubmit={save} {...stylex.props(styles.field)}>
-          <PopoverTitle>{t`Rename`}</PopoverTitle>
-          <Input aria-label={t`Name`} onValueChange={setDraft} value={draft} />
-          <PopoverFooter>
-            <Button
-              onClick={() => {
-                setOpen(false);
-              }}
-              size="sm"
-              variant="ghost"
-            >
-              {t`Cancel`}
-            </Button>
-            <Button size="sm" type="submit">
-              {t`Save`}
-            </Button>
-          </PopoverFooter>
-        </form>
-      </PopoverContent>
-    </Popover>
+    // The name's presses: a pointer's goes to the head's handle (a floating window moves by its
+    // name too) and opens nothing; a key (F2, Enter) opens it. Only the name's own: the popup's
+    // presses reach here too, through React's tree.
+    <span
+      onKeyDownCapture={() => {
+        pressed.current = false;
+      }}
+      onPointerDown={(event) => {
+        if (
+          event.target instanceof Node &&
+          event.currentTarget.contains(event.target)
+        ) {
+          pressed.current = true;
+          handleMovePress?.(event);
+        }
+      }}
+      {...stylex.props(styles.renamable, styles.takesPresses)}
+    >
+      <InlineEdit
+        aria-label={t`Rename`}
+        editing={editing}
+        onEditingChange={(next) => {
+          // A pointer's press on the name moves the window: it opens nothing.
+          const byPointer = pressed.current;
+          pressed.current = false;
+          if (!(next && byPointer)) {
+            setEditing(next);
+          }
+        }}
+        onSubmit={onRename}
+        value={children}
+        variant="popup"
+        {...(renameMaxLength === undefined
+          ? {}
+          : { maxLength: renameMaxLength })}
+        {...(renameErrorText === undefined
+          ? {}
+          : { errorText: renameErrorText })}
+      >
+        {words}
+      </InlineEdit>
+    </span>
   );
 };
