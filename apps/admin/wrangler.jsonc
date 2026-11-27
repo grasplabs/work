@@ -268,6 +268,16 @@
       "store_id": "account-secrets-store",
       "secret_name": "ATTIO_READ_KEY",
     },
+    // The Discord webhook the admin's alerts go to (src/alerts/senders.ts),
+    // which names the channel and is its credential: the admin's alone,
+    // never stored in its database or shown on a page. Optional: added to
+    // the stage's 1Password Environment, it's bound at the next Deploy
+    // platform; until then, the Discord channel says it isn't set up.
+    {
+      "binding": "DISCORD_ALERTS_WEBHOOK",
+      "store_id": "account-secrets-store",
+      "secret_name": "DISCORD_ALERTS_WEBHOOK",
+    },
   ],
   // Staging (`wrangler deploy --env staging`, deploy-platform with stage
   // staging): every name from @grasp-os/shared/names with -staging appended,
@@ -435,6 +445,11 @@
           "binding": "ATTIO_READ_KEY",
           "store_id": "account-secrets-store",
           "secret_name": "ATTIO_READ_KEY_STAGING",
+        },
+        {
+          "binding": "DISCORD_ALERTS_WEBHOOK",
+          "store_id": "account-secrets-store",
+          "secret_name": "DISCORD_ALERTS_WEBHOOK_STAGING",
         },
       ],
     },

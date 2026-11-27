@@ -2,7 +2,7 @@
  * Platform's own places, as its pages link them: its overview (the
  * channels, the companies that need a look and what Grasp's own AI costs),
  * every release the admin imported, the offboarded clients, and its
- * maintenance (shared secrets, and what staff did).
+ * maintenance (alerts, shared secrets, and what staff did).
  */
 import { TabsLink, TabsNav } from "@grasp-os/ui/components/tabs";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";

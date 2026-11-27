@@ -231,6 +231,43 @@ describe("the admin's Worker for cf", () => {
     });
   });
 
+  it("binds the alert mail only once the deploy passes who it's from and its one mailbox, to those alone", () => {
+    const mail = {
+      ALERTS_MAIL_FROM: "alerts@mail.grasp.test",
+      ALERTS_MAIL_TO: "ops@grasp.test",
+    };
+    const configured = cfWorker(wranglerText, "staging", {
+      ...deployed,
+      ...mail,
+    });
+    expect({
+      binding: bindingOf(configured, "ALERTS_MAIL"),
+      from: bindingOf(configured, "ALERTS_MAIL_FROM")?.value,
+      to: bindingOf(configured, "ALERTS_MAIL_TO")?.value,
+      onlyFrom: bindingOf(
+        cfWorker(wranglerText, "staging", {
+          ...deployed,
+          ALERTS_MAIL_FROM: mail.ALERTS_MAIL_FROM,
+        }),
+        "ALERTS_MAIL"
+      ),
+      unset: bindingOf(
+        cfWorker(wranglerText, "production", deployed),
+        "ALERTS_MAIL"
+      ),
+    }).toStrictEqual({
+      binding: {
+        type: "send-email",
+        destinationAddress: "ops@grasp.test",
+        allowedSenderAddresses: ["alerts@mail.grasp.test"],
+      },
+      from: "alerts@mail.grasp.test",
+      to: "ops@grasp.test",
+      onlyFrom: undefined,
+      unset: undefined,
+    });
+  });
+
   it("consumes each stage's release manifests' queue once the account has it, and keeps the CPU limit", () => {
     const queues = "grasp-release-manifests,grasp-release-manifests-staging";
     expect({

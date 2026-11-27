@@ -4,7 +4,7 @@
  * the store and binds them, by binding name in either stage: the admin's
  * apps' OAuth clients, Grasp's AI provider keys (until one is there, the
  * platform AI features that need it say they aren't configured yet),
- * Stripe and Attio (apps/admin/wrangler.jsonc). A deploy before they're in the store
+ * Stripe, Attio and the alerts' Discord webhook (apps/admin/wrangler.jsonc). A deploy before they're in the store
  * leaves them unbound, so the store alone doesn't reach the Worker.
  *
  * A module of its own that imports nothing, so a config loaded by Vite's
@@ -22,4 +22,5 @@ export const optionalSecrets: ReadonlySet<string> = new Set([
   "ELEVENLABS_API_KEY",
   "STRIPE_RESTRICTED_KEY",
   "ATTIO_READ_KEY",
+  "DISCORD_ALERTS_WEBHOOK",
 ]);
