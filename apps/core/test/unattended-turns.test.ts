@@ -152,7 +152,7 @@ describe("a turn nobody was there for", setUpTime, () => {
     const inTeams = await chat.stub.createChat(
       "From Teams",
       person.userId,
-      chat.id,
+      chat.agent.agentId,
       undefined,
       "teams"
     );

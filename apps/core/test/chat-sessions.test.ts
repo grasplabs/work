@@ -1342,10 +1342,17 @@ const restoreFixture = async (
   { id, chat, personId }: Awaited<ReturnType<typeof chatOf>>
 ): Promise<void> => {
   const { ids, objects } = piFixtureSchema.parse(fixture);
+  // The workspace and its agent by what names them first: a fixture may
+  // have one ID for both, as a test's workspace once was its agent's.
+  // (in JSON kept inside a JSON string, its quotes escaped).
+  const named: Record<string, string> = {
+    [String.raw`workspaceId\":\"${ids.workspaceId}`]: String.raw`workspaceId\":\"${id}`,
+    [String.raw`agentId\":\"${ids.agentId}`]: String.raw`agentId\":\"${chat.agentId}`,
+  };
   const now: Record<string, string> = {
-    [ids.workspaceId]: id,
     [ids.chatId]: chat.id,
     [ids.personId]: personId,
+    [ids.workspaceId]: id,
     [ids.agentId]: chat.agentId,
   };
   const swapped = (value: string | number | null) => {
@@ -1353,7 +1360,10 @@ const restoreFixture = async (
       return value;
     }
     let text = value;
-    for (const [was, is] of Object.entries(now)) {
+    for (const [was, is] of [
+      ...Object.entries(named),
+      ...Object.entries(now),
+    ]) {
       text = text.replaceAll(was, is);
     }
     return text;

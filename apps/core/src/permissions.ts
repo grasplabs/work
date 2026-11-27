@@ -270,7 +270,7 @@ export interface Where {
  * Two bound values for a chat, the chat's ID and the person, the
  * workspace's prefix inlined: a start's admission inlines this once per
  * grant it rechecks, in one statement already at D1's limit of bound
- * values (workflow-starts.ts, `startBoundValuesMax`).
+ * values (`d1BoundValuesMax`, workflow-app-starts.test.ts).
  */
 const holdsIn = ({ context, onBehalfOf }: Where = {}): SQL =>
   context?.type === "chat" &&
