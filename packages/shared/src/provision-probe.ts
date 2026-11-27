@@ -10,8 +10,10 @@ import { z } from "zod";
 // every public request it forwards, so it alone says nothing of who asks.
 //
 // The answer carries no secret, no resource id and nothing a client's
-// people entered: core's and connect's version ids, the client id the admin deployed, and
-// binding and task names from core's own code, each with a yes or no.
+// people entered: core's and connect's version ids, the release and the
+// client id the admin deployed, the last migration of each database (a
+// file name from core's own release), and binding and task names from
+// core's own code, each with a yes or no.
 
 /** Where the admin asks. Behind the router-secret check. */
 export const provisionProbePath = "/platform/probe";
@@ -54,8 +56,12 @@ export const clockRegistrationSchema = z.strictObject({
 });
 export type ClockRegistration = z.infer<typeof clockRegistrationSchema>;
 
-/** What core answers the probe with. */
-export const provisionProbeSchema = z.strictObject({
+/**
+ * What core answers the probe with. A field this admin doesn't know is
+ * dropped, not refused: client releases reach production apart from the
+ * admin, so a core newer than the admin may answer more than it reads.
+ */
+export const provisionProbeSchema = z.object({
   /** The version answering (version metadata); null where there is none. */
   version: z.string().nullable(),
   /**
@@ -68,6 +74,21 @@ export const provisionProbeSchema = z.strictObject({
   connectVersion: z.string().nullable().optional(),
   /** The client id its deploy set (`CLIENT_ID`); null where none is set. */
   clientId: z.string().nullable(),
+  /**
+   * The release this version runs, as its deploy named it
+   * (`PLATFORM_CHANGE`, @grasp-os/shared/platform-change); null where its
+   * deploy named none. Absent from a core of a release from before it,
+   * which the admin may still roll a client back to.
+   */
+  release: z.string().nullable().optional(),
+  /**
+   * Each D1 database core binds, by binding: the name of the last
+   * migration applied to it (its last row in `d1_migrations`), null where
+   * none is or it didn't answer. The admin holds it to the last migration
+   * the release lists for that database. Absent from a core of a release
+   * from before it, as `release` is.
+   */
+  schema: z.record(z.string(), z.string().nullable()).optional(),
   /**
    * Each private binding, by name: whether it answered a no-op call.
    * Connect's own are `connect.<name>`, as connect answered core.
