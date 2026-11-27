@@ -76,7 +76,7 @@ import {
   SearchIcon,
   UnderlineIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 const ButtonDemo = () => (
   <div className="flex flex-wrap gap-2">
@@ -279,10 +279,13 @@ const priorities = [
 /** One question; its answer said back once submitted, in the page. */
 const QuestionnaireDemo = () => {
   const [answered, setAnswered] = useState<string | null>(null);
+  // A page's own ref, which the kit's frame fix keeps working beside.
+  const form = useRef<HTMLFormElement>(null);
   return (
     <div className="flex flex-col gap-4">
       <Questionnaire
         defaultItem="priority"
+        ref={form}
         items={priorities}
         onSubmit={(event) => {
           event.preventDefault();

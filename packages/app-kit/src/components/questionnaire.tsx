@@ -28,13 +28,22 @@ function submitsInPage(form: HTMLFormElement | null) {
 
 function Questionnaire({
   className,
+  ref,
   ...props
 }: React.ComponentProps<typeof QuestionnairePrimitive.Root>) {
   return (
     <QuestionnairePrimitive.Root
       data-slot="questionnaire"
       className={cn("flex w-full min-w-0 flex-col gap-4", className)}
-      ref={submitsInPage}
+      ref={(form: HTMLFormElement | null) => {
+        submitsInPage(form)
+        if (typeof ref === "function") {
+          return ref(form)
+        }
+        if (ref) {
+          ref.current = form
+        }
+      }}
       {...props}
     />
   )

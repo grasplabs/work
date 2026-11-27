@@ -133,9 +133,16 @@ const update = (): boolean => {
     // init points the `ui` alias at a folder of its own; the kit's are flat.
     writeFileSync(path.join(kit, "components.json"), outside[1]?.bytes ?? "");
     run(cli, ["add", "--all", "--overwrite", "--yes"]);
+    // What the CLI wrote: the files it pinned before and the ones it added,
+    // never a file of the kit's that was there unpinned, which `check`
+    // goes on refusing.
     const files = Object.fromEntries(
       presentFiles()
-        .filter((file) => !pin.own.includes(file))
+        .filter(
+          (file) =>
+            !pin.own.includes(file) &&
+            (Object.hasOwn(pin.files, file) || !before.has(file))
+        )
         .toSorted()
         .map((file) => [file, sha256(readFileSync(path.join(kit, file)))])
     );
