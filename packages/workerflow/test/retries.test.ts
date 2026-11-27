@@ -190,9 +190,16 @@ describe("a step that fails", () => {
           caught: { name: "FlakyError", message: `attempt ${last} failed` },
         },
       });
+      // Each attempt is told the failures before it, the cut-off not one.
       expect(
-        effectsOf(id, "flaky").map((effect) => effect.attempt)
-      ).toStrictEqual(Array.from({ length: last }, (_, index) => index + 1));
+        effectsOf(id, "flaky").map(({ attempt, failedAttempts }) => [
+          attempt,
+          failedAttempts,
+        ])
+      ).toStrictEqual([
+        [1, 0],
+        ...Array.from({ length: limit + 1 }, (_, index) => [index + 2, index]),
+      ]);
       expect(journal.attempts.map((attempt) => attempt.ended)).toStrictEqual([
         "superseded",
         ...Array.from({ length: limit + 1 }, () => "failed"),

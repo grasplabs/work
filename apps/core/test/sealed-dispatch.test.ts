@@ -229,7 +229,11 @@ const journalingEngine = (): Engine & { evictAfter?: string } => {
         const key = `key:${name}`;
         leases.add(`${attempt}:${key}`);
         try {
-          const value = await fn({ attempt, idempotencyKey: key });
+          const value = await fn({
+            attempt,
+            failedAttempts: attempt - 1,
+            idempotencyKey: key,
+          });
           if (engine.evictAfter === name) {
             throw new Error("The activation was evicted");
           }

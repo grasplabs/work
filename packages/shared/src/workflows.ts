@@ -74,7 +74,7 @@ export const workflowErrors = defineErrorFamily({
   "workflow.too_many_steps":
     "This run has taken as many steps as a workflow run may: split the work over more runs.",
   "workflow.too_many_attempts":
-    "This step has been tried as many times as a step may be, its first attempt included.",
+    "This step has failed as many times as a step may.",
   "workflow.lineage_limit":
     "This workflow run, with the runs it started, has reached a limit it may have: how many steps a run takes, how deep its runs nest, how many runs it starts, how long its steps run in all, how many calls its steps make, or how old it is. No more of it can be admitted.",
   "workflow.between_steps_limit":

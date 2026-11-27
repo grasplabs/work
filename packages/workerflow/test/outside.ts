@@ -10,6 +10,8 @@ export interface Effect {
   label: string;
   key: string;
   attempt: number;
+  /** For a step's effect: its attempt's `failedAttempts`. */
+  failedAttempts?: number;
   /** What the outside system answered with. */
   receipt: string;
   /** When it arrived. */
@@ -114,6 +116,7 @@ export const effect = async (
     label,
     key: context.idempotencyKey,
     attempt: context.attempt,
+    failedAttempts: context.failedAttempts,
     receipt,
     at: Date.now(),
     order: tick(),

@@ -39,6 +39,7 @@ const attemptOf = (key: string, ms = 60_000) => ({
   key,
   step: key,
   number: 1,
+  failedAttempts: 0,
   generation: 100,
   deadline: Date.now() + ms,
 });

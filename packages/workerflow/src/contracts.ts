@@ -69,6 +69,13 @@ export interface WorkflowStepContext<
    */
   readonly attempt: number;
   /**
+   * How many of this step's attempts before this one failed or timed out:
+   * what its retries and its backoff count. The others before it were cut
+   * off. Should this attempt fail, it is retried only while this is below
+   * `config.retries.limit`.
+   */
+  readonly failedAttempts: number;
+  /**
    * The same for every attempt at this step occurrence, and different for
    * every other step and run. An attempt that timed out or was cut off may
    * still have had its effect, late: the next attempt goes out with the

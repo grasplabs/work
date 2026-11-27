@@ -469,6 +469,7 @@ export const late = async (
       {
         key: `late:${unique()}`,
         number: 1,
+        failedAttempts: 0,
         generation,
         deadline: Date.now() + 60_000,
       }
