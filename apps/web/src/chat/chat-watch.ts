@@ -1,11 +1,18 @@
+import type { ChatMessage } from "@grasp-os/shared/chat";
 import { useRouteContext } from "@tanstack/react-router";
 import { useSyncExternalStore } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { useCore } from "../use-core.ts";
 import { chatMade, startOf, whenTried } from "./chat-starts.ts";
-import { applyUpdate, emptyView, followChat } from "./follow-chat.ts";
+import {
+  applyUpdate,
+  emptyView,
+  followChat,
+  withOlder,
+} from "./follow-chat.ts";
 import type { ChatView } from "./follow-chat.ts";
+import type { ThreadOlder } from "./thread.tsx";
 
 // One watch per chat per tab, whoever shows it: the chat page and the chat
 // dock on every other page read the same chat from the same watch
@@ -27,11 +34,18 @@ export interface FollowedChat {
    * following stopped.
    */
   gone?: boolean;
+  /** Whether an older page is being read now (`readOlder`). */
+  readingOlder?: boolean;
+  /** Whether the last read of an older page failed: pressed again, it goes again. */
+  olderFailed?: boolean;
 }
 
 interface Watch {
+  core: CoreConnection;
   state: FollowedChat;
   listeners: Set<() => void>;
+  /** The read of an older page under way (`readOlder`), if one is. */
+  older?: Promise<void>;
   /** Stops following it; set once following has started. */
   stop?: () => void;
   /** Whether its view is a kept one, which the first update replaces. */
@@ -104,6 +118,88 @@ export const readTo = (chatId: string, id: number): void => {
 };
 
 /**
+ * Reads the page of chat `chatId` before the first message the tab has of
+ * it (`ChatsApi.history`) into its watch's view, one read at a time: what
+ * the thread asks for as the person scrolls back. Resolves once it is in,
+ * or failed (`olderFailed`); nothing while the chat isn't shown, or has
+ * nothing older.
+ */
+export const readOlder = async (chatId: string): Promise<void> => {
+  const watch = watches.get(chatId);
+  if (watch === undefined) {
+    return;
+  }
+  const reading = watch.older;
+  if (reading !== undefined) {
+    await reading;
+    return;
+  }
+  const { view } = watch.state;
+  const before = view.messages[0]?.id;
+  if (!view.loaded || !view.older || before === undefined) {
+    return;
+  }
+  const read = async (): Promise<void> => {
+    changed(watch, { ...watch.state, readingOlder: true, olderFailed: false });
+    try {
+      const page = await watch.core.withSession(
+        async (session) => await session.chats.history(chatId, before)
+      );
+      changed(watch, {
+        ...watch.state,
+        view: withOlder(watch.state.view, before, page),
+        readingOlder: false,
+      });
+    } catch {
+      changed(watch, {
+        ...watch.state,
+        readingOlder: false,
+        olderFailed: true,
+      });
+    } finally {
+      watch.older = undefined;
+    }
+  };
+  watch.older = read();
+  await watch.older;
+};
+
+/**
+ * Chat `chatId` whole, as a copy or an export of it needs: the tab's view
+ * of it, its earlier pages read before it (`ChatsApi.history`), never put
+ * into the view the thread draws, which keeps only what the person read
+ * back to. None when a read failed or the chat isn't shown.
+ */
+export const readWhole = async (
+  chatId: string
+): Promise<ChatView | undefined> => {
+  const watch = watches.get(chatId);
+  if (watch === undefined) {
+    return undefined;
+  }
+  const { view } = watch.state;
+  // Each page read, the latest first: the oldest last.
+  const pages: (readonly ChatMessage[])[] = [view.messages];
+  let { older } = view;
+  try {
+    for (let before = view.messages[0]?.id; older && before !== undefined;) {
+      const upTo = before;
+      // oxlint-disable-next-line no-await-in-loop -- a page at a time, each before the last
+      const page = await watch.core.withSession(
+        async (session) => await session.chats.history(chatId, upTo)
+      );
+      const earlier = page.messages.filter(({ id }) => id < upTo);
+      pages.push(earlier);
+      ({ older } = page);
+      before = earlier[0]?.id;
+    }
+  } catch {
+    return undefined;
+  }
+  return { ...view, messages: pages.toReversed().flat(), older: false };
+};
+
+/**
  * One subscribe function per chat (and connection), so React keeps its
  * subscription from render to render rather than letting go and taking it
  * again; let go of with the watch.
@@ -129,6 +225,7 @@ const subscribe = (
   if (watch === undefined) {
     const last = kept.get(key);
     const started: Watch = {
+      core,
       state: last ?? notStarted,
       listeners: new Set(),
       kept: last !== undefined,
@@ -232,4 +329,23 @@ export const useFollowedChat = (chatId: string | undefined): FollowedChat => {
           kept.get(keptKey(identity?.userId ?? "", chatId)) ??
           notStarted)
   );
+};
+
+/**
+ * What chat `chatId`'s thread needs of its earlier messages, while the tab
+ * hasn't read them all (`ChatView.older`, `readOlder`); none else.
+ */
+export const useOlder = (
+  chatId: string | undefined
+): ThreadOlder | undefined => {
+  const { view, readingOlder, olderFailed } = useFollowedChat(chatId);
+  return chatId === undefined || !view.older
+    ? undefined
+    : {
+        reading: readingOlder === true,
+        failed: olderFailed === true,
+        onRead: () => {
+          void readOlder(chatId);
+        },
+      };
 };

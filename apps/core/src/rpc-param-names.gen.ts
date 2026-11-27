@@ -159,6 +159,7 @@ export const rpcParamNames: ParamNames = {
     "forSubject": ["subject"],
     "grantConnection": ["chatId","id"],
     "heldCalls": ["chatId","after"],
+    "history": ["chatId","before"],
     "list": ["options"],
     "makeDraftedAgent": ["chatId","make"],
     "markRead": ["chatId","upTo"],

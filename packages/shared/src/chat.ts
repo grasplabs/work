@@ -1216,14 +1216,43 @@ export interface ChatQueued {
   text: string;
 }
 
+/** What a Build it made: an App or a workflow, by ID. */
+export interface ChatMade {
+  kind: "app" | "workflow";
+  id: string;
+}
+
+/**
+ * The most messages a page of a chat's history holds (`ChatsApi.watch`'s
+ * first update, `ChatsApi.history`), give or take the rest of a turn: a
+ * page starts at a question, never in the middle of its answer. A short
+ * chat is one page.
+ */
+export const chatHistoryPage = 40;
+
 /**
  * What changed in a chat since the last update: the messages stored since,
  * and the chat as it is now. The first update of a `watch` catches up: the
  * messages after the one it named, what the agent is writing then, and
- * the chat's provenance.
+ * the chat's provenance. Watched from the start (`after` null), it carries
+ * the newest page of the chat (`chatHistoryPage`), or everything the person
+ * hasn't seen if that goes further back, and says whether there is more
+ * before it (`older`), which `history` reads a page at a time.
  */
 export interface ChatUpdate {
   messages: ChatMessage[];
+  /**
+   * In the first update of a watch from the start only: whether the chat
+   * has messages before the first one it carries.
+   */
+  older?: boolean;
+  /**
+   * In the first update of a watch from the start only: what each Build it
+   * of the chat made whose turn its agent answered, the last Build it of
+   * each, read from the whole chat, whichever page holds it. After that,
+   * the page reads it from the messages that come.
+   */
+  answeredBuilds?: ChatMade[];
   /**
    * What the response being written gained (`applyPartial`); `null`
    * between responses.
@@ -1363,6 +1392,14 @@ export interface ChatQuestion {
    * question goes, in the same call, never one there already.
    */
   start?: ChatStart;
+}
+
+/** A page of a chat's history, before a message the page has (`ChatsApi.history`). */
+export interface ChatHistoryPage {
+  /** Oldest first: at most a page (`chatHistoryPage`), from a question on. */
+  messages: ChatMessage[];
+  /** Whether the chat has messages before the first of these. */
+  older: boolean;
 }
 
 /**
@@ -1643,15 +1680,21 @@ export interface ChatsApi {
   declineHeldCall: (chatId: string, id: string) => Promise<void>;
   /**
    * Follows the chat: `onUpdate` gets the messages after the one with ID
-   * `after` (all of them for `null`) and what the agent is writing, then
-   * every change. Watching again with the last message seen resumes after
-   * a lost connection; with `null`, after a reload.
+   * `after` (for `null`, the newest page, `ChatUpdate.older`) and what the
+   * agent is writing, then every change. Watching again with the last
+   * message seen resumes after a lost connection, sending only what came
+   * since; with `null`, after a reload.
    */
   watch: (
     chatId: string,
     after: number | null,
     onUpdate: (update: ChatUpdate) => void
   ) => Promise<ChatSubscriptionApi>;
+  /**
+   * The page of the chat's messages before the one with ID `before`, as
+   * `watch` sends them: what the page reads as the person scrolls back.
+   */
+  history: (chatId: string, before: number) => Promise<ChatHistoryPage>;
   /**
    * Follows the person's list of chats, as `list` gives it: `onUpdate`
    * gets the whole list, then what changes in it, as it changes, from

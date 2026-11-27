@@ -6583,6 +6583,14 @@ msgstr "Eerdere mail in dezelfde thread."
 msgid "Earlier mail, notes and files about the people and the topic."
 msgstr "Eerdere mail, notities en bestanden over de mensen en het onderwerp."
 
+#: src/chat/thread.tsx
+msgid "Earlier messages"
+msgstr "Eerdere berichten"
+
+#: src/chat/thread.tsx
+msgid "Earlier messages didn't load. Try again"
+msgstr "Eerdere berichten zijn niet geladen. Probeer het opnieuw"
+
 #: src/agents/agent-templates.ts
 msgid "Earlier reminders and replies from the client in the mailbox."
 msgstr "Eerdere herinneringen en antwoorden van de klant in de mailbox."
@@ -10244,6 +10252,10 @@ msgstr "{many} laden"
 #: src/connections/integrations-skeleton.tsx
 msgid "Loading connectors"
 msgstr "Connectoren laden"
+
+#: src/chat/thread.tsx
+msgid "Loading earlier messages…"
+msgstr "Eerdere berichten laden…"
 
 #: src/frame/ui-words.tsx
 msgid "Loading more {many}"

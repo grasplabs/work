@@ -25,12 +25,13 @@ import {
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
 import { CoreTimeoutError, timeoutMs } from "../core.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { examplesFor } from "../make/examples.ts";
 import { activeChat, forgetActiveChats } from "./active-chat.ts";
+import { preloadThread } from "./chat-body.tsx";
 import { ChatPage } from "./chat-page.tsx";
 import { ChatStart } from "./chat-start.tsx";
 import type { MakeIdeas } from "./chat-start.tsx";
@@ -351,6 +352,12 @@ const pick = async (title: string): Promise<void> => {
 };
 
 describe("Chat's page from Make something", () => {
+  // The thread's code, which the chat's page a question opens draws: in
+  // before any test, as the app loads it ahead, never within a test's time.
+  beforeAll(async () => {
+    await preloadThread();
+  }, 60_000);
+
   afterEach(() => {
     act(() => {
       root?.unmount();
@@ -793,15 +800,8 @@ describe("Chat's page from Make something", () => {
       box().closest("form")?.requestSubmit();
       await Promise.resolve();
     });
-    // Core hasn't taken it yet: the chat's page shows it already, once the
-    // thread's code is in (loaded ahead in the app).
-    await vi.waitFor(
-      async () => {
-        await settled();
-        expect(document.querySelector("article")).not.toBeNull();
-      },
-      { timeout: 15_000 }
-    );
+    // Core hasn't taken it yet: the chat's page shows it already.
+    await settled();
     const meanwhile = {
       page: path().startsWith("/chats/"),
       shown: document.body.textContent.includes("What waits on me today?"),
