@@ -4,7 +4,6 @@ import { cloudflare } from "@cloudflare/vite-plugin";
 import type { PluginConfig } from "@cloudflare/vite-plugin";
 import babel from "@rolldown/plugin-babel";
 import stylex from "@stylexjs/unplugin/vite";
-import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { bindings } from "cf/config";
@@ -78,7 +77,6 @@ export const adminPlugins = (worker: PluginConfig = {}) => [
   // Fail the build on anything the React Compiler can't compile, instead
   // of silently shipping it uncompiled.
   babel({ presets: [reactCompilerPreset({ panicThreshold: "all_errors" })] }),
-  tailwindcss(),
   {
     name: "grasp-admin-build",
     config: () => ({
