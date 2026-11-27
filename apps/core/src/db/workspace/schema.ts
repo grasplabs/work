@@ -1,3 +1,4 @@
+import type { AuditActor } from "@grasp-os/shared/audit";
 /**
  * Workspace Durable Object SQLite: chats, agent state, and its person's
  * email preferences. Migrates itself on first wake-up after a release.
@@ -8,6 +9,7 @@ import type {
   ChatMakeKind,
   ChatPictureType,
 } from "@grasp-os/shared/chat";
+import type { ConnectionPerson } from "@grasp-os/shared/connect";
 import type { ChatId } from "@grasp-os/shared/ids";
 import { sql } from "drizzle-orm";
 import {
@@ -891,3 +893,27 @@ export const chatRequestKeys = sqliteTable(
     index("chat_request_keys_at").on(table.at),
   ]
 );
+
+/**
+ * A chat being deleted (`deleteChat`): written first, with what the
+ * deletion needs to finish (who asked, as connect knows them, and as the
+ * record names them), so the chat is hidden at once and takes nothing
+ * more, and the object's alarm finishes each step until it is gone
+ * (`#finishDelete`), whoever asked waiting or not. Goes with the chat's
+ * row, in the same transaction.
+ */
+export const chatDeletes = sqliteTable("chat_deletes", {
+  chatId: text("chat_id").$type<ChatId>().primaryKey(),
+  /** The person, as connect takes them (`ConnectionPerson`). */
+  person: text({ mode: "json" }).$type<ConnectionPerson>().notNull(),
+  /** Who deleted it, as the record names them (`AuditActor`). */
+  actor: text({ mode: "json" }).$type<AuditActor>().notNull(),
+  /** Whether it is recorded as `chat.deleted`, or by its action once. */
+  audited: integer({ mode: "boolean" }).notNull(),
+  /** The writes connect rejected for it so far, for the record. */
+  declined: integer().notNull().default(0),
+  /** Tries that failed so far, for the next one's pause. */
+  attempts: integer().notNull().default(0),
+  /** When the alarm tries it again. */
+  nextAt: integer("next_at", { mode: "timestamp_ms" }).notNull(),
+});

@@ -1,4 +1,4 @@
-import { DataGrid } from "@grasp-os/app-kit/components/data-grid";
+import { DataTable } from "@grasp-os/app-kit/components/data-table";
 import { Skeleton } from "@grasp-os/app-kit/components/skeleton";
 import {
   paginationOptionsValidator,
@@ -15,9 +15,9 @@ import { GraspProvider } from "@grasp-os/runtime/react";
 import { useState, useSyncExternalStore } from "react";
 import type { ComponentType } from "react";
 
-// The data grid over a stand-in App: its query answers a fixed list of
+// The data table over a stand-in App: its query answers a fixed list of
 // people from memory, searched and filtered as an App's query would, so
-// the kit's tests see the grid working without a host behind it.
+// the kit's tests see the data table working without a host behind it.
 
 const person = v.object({
   _id: v.string(),
@@ -115,7 +115,7 @@ const noChange = (): (() => void) => () => {
   // Whether this is a browser never changes.
 };
 
-const DataGridDemo = () => {
+const DataTableDemo = () => {
   // One client for the demo's life.
   // oxlint-disable-next-line react/hook-use-state -- see above
   const [client] = useState(demoClient);
@@ -131,7 +131,7 @@ const DataGridDemo = () => {
   }
   return (
     <GraspProvider client={client}>
-      <DataGrid
+      <DataTable
         args={({ search, filters }) => ({ search, team: filters.team })}
         bulkActions={[{ label: "Archive", onSelect: () => null }]}
         columns={[
@@ -149,6 +149,6 @@ const DataGridDemo = () => {
   );
 };
 
-export const dataGridDemos: Record<string, ComponentType> = {
-  "data-grid": DataGridDemo,
+export const dataTableDemos: Record<string, ComponentType> = {
+  "data-table": DataTableDemo,
 };

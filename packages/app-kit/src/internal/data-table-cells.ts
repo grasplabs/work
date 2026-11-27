@@ -1,9 +1,9 @@
 import { currencyDecimals } from "@grasp-os/runtime/app";
 import type { ValueDescriptor } from "@grasp-os/runtime/forms";
 
-import type { DataGridText } from "./data-grid-text.ts";
+import type { DataTableText } from "./data-table-text.ts";
 
-// How a grid's cells show and edit a field: by what the query declares the
+// How a data table's cells show and edit a field: by what the query declares the
 // field is (its `returns`, a page of records), never by guessing from the
 // value. A moment is a date, a file a file, money an amount in its
 // currency; a nullable number is edited as a number and cleared to null.
@@ -84,7 +84,7 @@ const shownMoney = (value: unknown, language: string): string => {
 };
 
 /** A value with nothing declared of it (a field the query doesn't declare). */
-const shownUndeclared = (value: unknown, text: DataGridText): string => {
+const shownUndeclared = (value: unknown, text: DataTableText): string => {
   if (typeof value === "string") {
     return value;
   }
@@ -142,7 +142,7 @@ const shownDuration = (ms: number, language: string): string => {
 const shownFields = (
   value: unknown,
   fieldOf: (name: string) => ValueDescriptor | undefined,
-  text: DataGridText,
+  text: DataTableText,
   language: string
 ): string =>
   isRecord(value)
@@ -160,7 +160,7 @@ const shownFields = (
 /** How a cell shows a value of one kind of field: what it is shown with. */
 interface Showing {
   readonly descriptor: ValueDescriptor;
-  readonly text: DataGridText;
+  readonly text: DataTableText;
   readonly language: string;
   readonly day: boolean;
 }
@@ -244,7 +244,7 @@ const showers: Readonly<
 export const shownCell = (
   value: unknown,
   descriptor: ValueDescriptor | undefined,
-  text: DataGridText,
+  text: DataTableText,
   language: string,
   day = false
 ): string => {
@@ -332,7 +332,7 @@ export const parsedDraft = (
   draft: string,
   kind: EditorKind,
   descriptor: ValueDescriptor | undefined,
-  text: DataGridText
+  text: DataTableText
 ): { readonly value: unknown } | { readonly problem: string } => {
   const nullable = descriptor?.nullable === true;
   if (kind === "text" || kind === "boolean") {

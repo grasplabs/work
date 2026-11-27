@@ -35,6 +35,7 @@ import {
 } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { deletesOf, finishDeletesNow } from "./chat-deletes.ts";
 import { connectionIn } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { saveInstructions } from "./instruction-saves.ts";
@@ -2151,14 +2152,243 @@ describe("chats", () => {
       const asking = outcome(
         instance.send(chat.id, ann.userId, { text: "Quick!", model })
       );
-      return { asked: await asking, declined: await deleting };
+      await deleting;
+      return await asking;
     });
-    expect(racing).toStrictEqual({
-      asked: "agent.chat_not_found",
-      declined: 1,
-    });
+    expect(racing).toBe("agent.chat_not_found");
     await expect(ann.api.pendingActions.list()).resolves.toStrictEqual([]);
     await expect(ann.chats.list()).resolves.toStrictEqual([]);
+  });
+
+  it("finish deleting by themselves from the alarm after a restart cut a delete short, a second delete meanwhile doing nothing more, recorded once", async () => {
+    const ann = await person();
+    await answering(ann, says("Hi."));
+    const chat = await startedChat(ann, "Going");
+    const kept = objectOf(ann);
+    // Connect out of reach for the first try. Objects may share the
+    // tests' env: this is the binding to put back.
+    const realConnect: unknown = await runInDurableObject(kept, (instance) => {
+      const was: unknown = Reflect.get(envOf(instance), "CONNECT");
+      Reflect.set(envOf(instance), "CONNECT", {
+        declineChatActions: () => {
+          throw new Error("Connect is out of reach");
+        },
+      });
+      return was;
+    });
+    await ann.chats.remove(chat.id);
+    const hidden = await ann.chats.list();
+    // A restart, with connect back; then a second delete.
+    await runInDurableObject(kept, (instance, state) => {
+      Reflect.set(envOf(instance), "CONNECT", realConnect);
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+    // The object's stub broke with the restart: a new one, as a page's
+    // next call would have.
+    const woken = objectOf(ann);
+    const annAsConnect = await personOf(env, await ann.api.whoami());
+    const again = await outcome(
+      woken.deleteChat(chat.id, ann.userId, annAsConnect, {
+        type: "person",
+        userId: ann.userId,
+      })
+    );
+    const waiting = await deletesOf(woken);
+    await finishDeletesNow(woken);
+
+    const recorded = await vi.waitFor(
+      async () => {
+        const all = await allEvents();
+        const deleted = all.filter(
+          ({ action, target }) =>
+            action === "chat.deleted" && target?.id === chat.id
+        );
+        expect(deleted).toHaveLength(1);
+        return deleted;
+      },
+      { timeout: 10_000 }
+    );
+    const rows = await runInDurableObject(woken, (_instance, state) =>
+      state.storage.sql
+        .exec<{ count: number }>(
+          "SELECT count(*) AS count FROM chats WHERE id = ?",
+          chat.id
+        )
+        .one()
+    );
+    expect({
+      hidden,
+      again,
+      waiting,
+      left: await deletesOf(woken),
+      rows,
+      recorded: recorded.map(({ detail }) => detail.declined),
+    }).toStrictEqual({
+      hidden: [],
+      again: "ok",
+      waiting: [{ chatId: chat.id, attempts: 1 }],
+      left: [],
+      rows: { count: 0 },
+      recorded: [0],
+    });
+  });
+
+  it("finish a deletion whose wake-up a restart lost, from the alarm the object sets as it starts again", async () => {
+    const ann = await person();
+    const kept = objectOf(ann);
+    const { id } = await kept.createChat("Going", ann.userId, chatAgentId);
+    const annAsConnect = await personOf(env, await ann.api.whoami());
+    // Marked, and the object stopped before its alarm was set.
+    await runInDurableObject(kept, async (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO chat_deletes (chat_id, person, actor, audited, next_at) VALUES (?, ?, ?, 1, ?)",
+        id,
+        JSON.stringify(annAsConnect),
+        JSON.stringify({ type: "person", userId: ann.userId }),
+        Date.now()
+      );
+      await state.storage.deleteAlarm();
+    });
+    await runInDurableObject(kept, (_instance, state) => {
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+    // Anything that wakes it: here, its person's list.
+    await expect(ann.chats.list()).resolves.toStrictEqual([]);
+    await vi.waitFor(
+      async () => {
+        await expect(deletesOf(objectOf(ann))).resolves.toStrictEqual([]);
+      },
+      { timeout: 10_000 }
+    );
+  });
+
+  it("finish a deletion whose chat's row is gone already, and keep its ID taken", async () => {
+    const ann = await person();
+    const kept = objectOf(ann);
+    const id = crypto.randomUUID();
+    const annAsConnect = await personOf(env, await ann.api.whoami());
+    // A mark with no row, as a release before this one could leave.
+    await runInDurableObject(kept, async (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO chat_deletes (chat_id, person, actor, audited, next_at) VALUES (?, ?, ?, 1, ?)",
+        id,
+        JSON.stringify(annAsConnect),
+        JSON.stringify({ type: "person", userId: ann.userId }),
+        Date.now()
+      );
+      await state.storage.setAlarm(Date.now() + 60_000);
+    });
+    await finishDeletesNow(kept);
+    const taken = await runInDurableObject(kept, (_instance, state) =>
+      state.storage.sql
+        .exec<{ count: number }>(
+          "SELECT count(*) AS count FROM deleted_chats WHERE id = ?",
+          id
+        )
+        .one()
+    );
+    expect({ left: await deletesOf(kept), taken }).toStrictEqual({
+      left: [],
+      taken: { count: 1 },
+    });
+  });
+
+  it("leave nothing of a deletion that finishes after their person's erasure wiped the object", async () => {
+    const ann = await person();
+    await answering(ann, says("Hi."));
+    const chat = await startedChat(ann, "Going");
+    const kept = objectOf(ann);
+    // Set inside the Workspace object, read here: plain memory, no I/O.
+    const at = { connect: false };
+    const gate = Promise.withResolvers<boolean>();
+    // Connect holds the deletion until the erasure is through. Objects may
+    // share the tests' env: this is the binding to put back.
+    const realConnect: unknown = await runInDurableObject(kept, (instance) => {
+      const was: unknown = Reflect.get(envOf(instance), "CONNECT");
+      if (typeof was !== "object" || was === null) {
+        throw new TypeError("The Workspace object has no connect binding");
+      }
+      Reflect.set(
+        envOf(instance),
+        "CONNECT",
+        new Proxy(was, {
+          get: (target, key): unknown =>
+            key === "declineChatActions"
+              ? async () => {
+                  at.connect = true;
+                  await gate.promise;
+                  return 0;
+                }
+              : Reflect.get(target, key),
+        })
+      );
+      return was;
+    });
+    try {
+      const deleting = ann.chats.remove(chat.id);
+      await vi.waitFor(
+        () => {
+          expect(at.connect).toBeTruthy();
+        },
+        { timeout: 15_000, interval: 20 }
+      );
+      await kept.erasePerson(ann.userId);
+      gate.resolve(true);
+      await deleting;
+    } finally {
+      await runInDurableObject(objectOf(ann), (instance) => {
+        Reflect.set(envOf(instance), "CONNECT", realConnect);
+      });
+    }
+    const left = await runInDurableObject(objectOf(ann), (_instance, state) =>
+      state.storage.sql
+        .exec<{ taken: number; recorded: number }>(
+          "SELECT (SELECT count(*) FROM deleted_chats) AS taken, (SELECT count(*) FROM audit_outbox WHERE event LIKE '%chat.deleted%') AS recorded"
+        )
+        .one()
+    );
+    expect(left).toStrictEqual({ taken: 0, recorded: 0 });
+  });
+
+  it("finish at most a few deletions an alarm, and wake again at once for the rest", async () => {
+    const ann = await person();
+    const kept = objectOf(ann);
+    const ids = await Promise.all(
+      Array.from({ length: 12 }, async () => {
+        const made = await kept.createChat("Old", ann.userId, chatAgentId);
+        return made.id;
+      })
+    );
+    // Marked as a delete would, each due now: none tried yet. One alarm,
+    // and what it left read in the same event, before the next can run.
+    const annAsConnect = await personOf(env, await ann.api.whoami());
+    const afterOne = await runInDurableObject(kept, async (instance, state) => {
+      for (const id of ids) {
+        state.storage.sql.exec(
+          "INSERT INTO chat_deletes (chat_id, person, actor, audited, next_at) VALUES (?, ?, ?, 1, 0)",
+          id,
+          JSON.stringify(annAsConnect),
+          JSON.stringify({ type: "person", userId: ann.userId })
+        );
+      }
+      await instance.alarm();
+      const left = state.storage.sql
+        .exec<{ count: number }>("SELECT count(*) AS count FROM chat_deletes")
+        .one().count;
+      return left;
+    });
+    await vi.waitFor(
+      async () => {
+        await expect(deletesOf(kept)).resolves.toStrictEqual([]);
+      },
+      { timeout: 10_000 }
+    );
+    // The rest went by the alarm the first set again, with no other.
+    expect(afterOne).toBe(2);
   });
 
   it("record chats made, renamed and deleted while the audit log is out, once it's back, exactly once", async () => {

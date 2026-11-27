@@ -519,6 +519,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // The IDs of their deleted chats, kept so none is taken again: in their
   // own object alone, erased with it.
   "workspace.deleted_chats": { erased: "workspace" },
+  // A chat being deleted, with who asked, as connect knows them: goes
+  // with the chat, or with the whole object.
+  "workspace.chat_deletes": { erased: "workspace" },
   "workspace.dashboards": { erased: "workspace" },
   "workspace.custom_widgets": { erased: "workspace" },
   "workspace.dashboard_widgets": { erased: "workspace" },
@@ -1030,6 +1033,7 @@ export const reviewedPersonColumns: Readonly<
   "onboarding.people": ["email"],
   "onboarding.readbacks": ["person"],
   "onboarding.referrals": ["person"],
+  "workspace.chat_deletes": ["actor", "person"],
   "workspace.chats": ["person_id"],
   "workspace.custom_widgets": ["person_id"],
   "workspace.dashboard_widgets": ["person_id"],

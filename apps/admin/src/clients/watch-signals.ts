@@ -1,7 +1,8 @@
 /**
  * What the admin's watch reads of a client's Stephen, and each signal's
  * bar (src/clients/watch.ts): plain, so the client's Setup can say which
- * are over theirs too.
+ * are over theirs too. With them, the organization's size, which a
+ * rollout reaches organizations in order of, smallest first.
  */
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { z } from "zod";
@@ -23,6 +24,12 @@ export const watchedSignalsSchema = z.object({
   companyAgain: z.int(),
   /** People's own connections that need a new sign-in. */
   personalAgain: z.int(),
+  /**
+   * The organization's size: the people on its roster. Absent where it
+   * holds no roster yet, and from a read kept before the watch counted
+   * them; a rollout counts an unknown size as 0.
+   */
+  people: z.int().optional(),
 });
 export type WatchedSignals = z.infer<typeof watchedSignalsSchema>;
 
@@ -116,5 +123,8 @@ export const signalsOf = (snapshot: AdminSnapshot): WatchedSignals | null => {
       0,
     personalAgain:
       integrations?.personal.reduce((sum, { again }) => sum + again, 0) ?? 0,
+    ...(snapshot.roster === null
+      ? {}
+      : { people: snapshot.roster.people.length }),
   };
 };

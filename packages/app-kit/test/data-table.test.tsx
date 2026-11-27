@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
-import { DataGrid } from "@grasp-os/app-kit/components/data-grid";
-import type { DataGridState } from "@grasp-os/app-kit/components/data-grid";
+import { DataTable } from "@grasp-os/app-kit/components/data-table";
+import type { DataTableState } from "@grasp-os/app-kit/components/data-table";
 import {
   paginationOptionsValidator,
   paginationResultValidator,
@@ -27,7 +27,7 @@ import {
 } from "./test-host.tsx";
 import type { Answer, Sent } from "./test-host.tsx";
 
-// The data grid an App page shows its records in, against a real session
+// The data table an App page shows its records in, against a real session
 // client: what it asks the App's query for (the page size, then more on
 // Load more; the search, sort and filters the person chose), how it shows
 // and edits each field as the query declares it, what it does with the
@@ -96,7 +96,7 @@ const scorePerson = reference(
 );
 
 const idOf = (index: number): Id<"people"> =>
-  // SAFETY: the form of the store's IDs; the grid reads it as a key.
+  // SAFETY: the form of the store's IDs; the data table reads it as a key.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   `01890000-0000-7000-8000-00000000000${index}` as Id<"people">;
 
@@ -129,7 +129,7 @@ const people = ["Ada", "Grace", "Linus", "Margaret", "Ken"].map(
 type Person = (typeof people)[number];
 
 /** The query's arguments for what the person did, as a page hands them on. */
-const argsOf = ({ search, sort, filters }: DataGridState<Person>) => {
+const argsOf = ({ search, sort, filters }: DataTableState<Person>) => {
   let order: "name" | "-name" | undefined;
   if (sort?.field === "name") {
     order = sort.direction === "asc" ? "name" : "-name";
@@ -151,7 +151,7 @@ const hostOf = (
 /** An archive that does nothing, and succeeds. */
 const archived = (): null => null;
 
-const PeopleGrid = ({
+const PeopleTable = ({
   selected,
   opened,
   archive = archived,
@@ -166,7 +166,7 @@ const PeopleGrid = ({
   const renew = useMutation(renewPerson);
   const reward = useMutation(rewardPerson);
   return (
-    <DataGrid
+    <DataTable
       args={argsOf}
       bulkActions={[
         {
@@ -223,10 +223,10 @@ const PeopleGrid = ({
   );
 };
 
-/** The grid, its actions recording into nothing a test reads. */
-const grid = <PeopleGrid opened={[]} selected={[]} />;
+/** The data table, its actions recording into nothing a test reads. */
+const peopleTable = <PeopleTable opened={[]} selected={[]} />;
 
-/** The names in the grid's rows, in order. */
+/** The names in the data table's rows, in order. */
 const names = (): string[] =>
   [...document.querySelectorAll("tbody tr")].map(
     (row) => row.querySelectorAll("td")[1]?.textContent?.trim() ?? ""
@@ -244,10 +244,10 @@ const press = async (element: HTMLElement, key: string): Promise<void> => {
   await settle();
 };
 
-describe("a data grid", () => {
+describe("a data table", () => {
   it("reads its first page, and more on Load more", async () => {
     const { client, reads } = hostOf();
-    await rendered(client, grid);
+    await rendered(client, peopleTable);
     const first = { names: names(), read: reads.at(-1) };
     await click(find("button", "Load more"));
     const second = { names: names(), page: reads.at(-1)?.pagination };
@@ -274,7 +274,7 @@ describe("a data grid", () => {
 
   it("hands the query the search, sort and filter the person chose", async () => {
     const { client, reads } = hostOf();
-    await rendered(client, grid);
+    await rendered(client, peopleTable);
     const asked: unknown[] = [];
     await typeInto(named("Search"), " gra ");
     // Not on each key: once typing settles.
@@ -308,7 +308,7 @@ describe("a data grid", () => {
 
   it("shows each field as the query declares it", async () => {
     const { client } = hostOf();
-    await rendered(client, grid);
+    await rendered(client, peopleTable);
     const cells = [...(document.querySelector("tbody tr")?.children ?? [])]
       .map((cell) => cell.textContent?.trim())
       .slice(1, -1);
@@ -338,7 +338,7 @@ describe("a data grid", () => {
         ? { failed: "people.locked", message: "Ada's record is locked." }
         : { value: null }
     );
-    await rendered(client, grid);
+    await rendered(client, peopleTable);
     await click(named("Edit Name for Ada"));
     await typeInto(named("Edit Name for Ada"), "Ada Lovelace");
     await leave(named("Edit Name for Ada"));
@@ -372,7 +372,7 @@ describe("a data grid", () => {
 
   it("saves on Enter and drops the edit on Escape, back on the cell either way", async () => {
     const { client, calls } = hostOf();
-    await rendered(client, grid);
+    await rendered(client, peopleTable);
     await click(named("Edit Name for Grace"));
     await typeInto(named("Edit Name for Grace"), "Grace Hopper");
     await press(named("Edit Name for Grace"), "Escape");
@@ -399,7 +399,7 @@ describe("a data grid", () => {
 
   it("edits a nullable number as a number, and clears it to null", async () => {
     const { client, calls } = hostOf();
-    await rendered(client, grid);
+    await rendered(client, peopleTable);
     await click(named("Edit Score for Ada"));
     const editor = valueOf(named("Edit Score for Ada"));
     const type = editor.getAttribute("type");
@@ -419,7 +419,7 @@ describe("a data grid", () => {
 
   it("edits a day as that day, in UTC, wherever the person is", async () => {
     const { client, calls } = hostOf();
-    await rendered(client, grid);
+    await rendered(client, peopleTable);
     await click(named("Edit Renews for Ada"));
     const editor = valueOf(named("Edit Renews for Ada"));
     const shown = { type: editor.getAttribute("type"), value: editor.value };
@@ -433,7 +433,7 @@ describe("a data grid", () => {
 
   it("leaves out an optional number the person cleared, where a required one says it needs a value", async () => {
     const { client, calls } = hostOf();
-    await rendered(client, grid);
+    await rendered(client, peopleTable);
     await click(named("Edit Bonus for Ada"));
     await typeInto(named("Edit Bonus for Ada"), "");
     await press(named("Edit Bonus for Ada"), "Enter");
@@ -451,7 +451,7 @@ describe("a data grid", () => {
 
   it("starts the selection afresh when the list is read for other arguments", async () => {
     const { client } = hostOf();
-    await rendered(client, grid);
+    await rendered(client, peopleTable);
     await click(named("Select Ada"));
     await typeInto(named("Team"), "support");
     await typeInto(named("Team"), "");
@@ -467,7 +467,7 @@ describe("a data grid", () => {
       failed: "people.full",
       message: "Support is full.",
     }));
-    await rendered(client, grid);
+    await rendered(client, peopleTable);
     await click(named("Edit Team for Ada"));
     await typeInto(named("Edit Team for Ada"), "support");
     await leave(named("Edit Team for Ada"));
@@ -479,7 +479,7 @@ describe("a data grid", () => {
     const selected: string[][] = [];
     const opened: string[] = [];
     const { client } = hostOf();
-    await rendered(client, <PeopleGrid opened={opened} selected={selected} />);
+    await rendered(client, <PeopleTable opened={opened} selected={selected} />);
     await click(named("Select Grace"));
     const count = find('[aria-label="Selected rows"] span').textContent;
     await click(find("button", "Archive"));
@@ -502,7 +502,7 @@ describe("a data grid", () => {
     const { client } = hostOf();
     await rendered(
       client,
-      <PeopleGrid
+      <PeopleTable
         archive={() => {
           throw new Error("Archiving is paused.");
         }}
@@ -520,7 +520,7 @@ describe("a data grid", () => {
 
   it("hides the columns the person hides", async () => {
     const { client } = hostOf();
-    await rendered(client, grid);
+    await rendered(client, peopleTable);
     const before = find("thead").textContent;
     await click(find("button", "Columns"));
     await click(find('[role="menuitemcheckbox"]', "Active"));
@@ -532,7 +532,7 @@ describe("a data grid", () => {
 
   it("says when there is nothing, and when nothing matches", async () => {
     const { client } = hostOf(undefined, []);
-    await rendered(client, grid);
+    await rendered(client, peopleTable);
     const nothing = find("tbody").textContent;
     await typeInto(named("Team"), "sales");
     expect({ nothing, noMatches: find("tbody").textContent }).toStrictEqual({
@@ -544,7 +544,7 @@ describe("a data grid", () => {
   it("shows placeholder rows while its first page loads", async () => {
     // A host that hasn't answered: the first page is still loading.
     const { client } = testHost(() => "pending");
-    await rendered(client, grid);
+    await rendered(client, peopleTable);
     expect(find("table").getAttribute("aria-busy")).toBe("true");
     expect(document.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(3);
   });
@@ -556,7 +556,7 @@ describe("a data grid", () => {
         ? { failed: "people.unavailable", message: "The directory is down." }
         : pageOf(people, sent.pagination)
     );
-    await rendered(client, grid);
+    await rendered(client, peopleTable);
     expect(find('[role="alert"]').textContent).toContain(
       "The directory is down."
     );

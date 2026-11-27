@@ -4,7 +4,9 @@
  * (src/clients/admin.ts), whose `stephen` counts core keeps of how he
  * fared in the chat apps over the last day (core's
  * src/channels/signals.ts), and whose integrations say which connections
- * need a new sign-in. Counts only: nothing anyone wrote, nor who.
+ * need a new sign-in, and how many people are on its roster, the size a
+ * rollout orders organizations by. Counts only: nothing anyone wrote, nor
+ * who.
  *
  * What the watch read last is kept (`client_watch`) for the client's
  * Setup to show, a line a signal, each over its bar marked

@@ -264,6 +264,106 @@ export const Route = createFileRoute("/all")({ component: All });
     ).toStrictEqual([]);
   });
 
+  it("builds the registry's chart, aspect ratio and toggle group as their docs use them, in the theme's font", async () => {
+    // recharts from the kit, a series' colour through the chart's config,
+    // and the props upstream passes as inline styles: none refused.
+    const built = await buildPages(
+      env,
+      {
+        "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+import { AspectRatio } from "@grasp-os/app-kit/components/aspect-ratio";
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@grasp-os/app-kit/components/chart";
+import type { ChartConfig } from "@grasp-os/app-kit/components/chart";
+import { ToggleGroup, ToggleGroupItem } from "@grasp-os/app-kit/components/toggle-group";
+import { Bar, BarChart, CartesianGrid, XAxis } from "recharts";
+
+const data = [{ month: "May", desktop: 186 }, { month: "June", desktop: 305 }];
+const chartConfig = { desktop: { label: "Desktop", color: "var(--chart-1)" } } satisfies ChartConfig;
+
+function Charts() {
+  return (
+    <main className="flex flex-col gap-4 p-6">
+      <ChartContainer config={chartConfig} className="min-h-50 w-full">
+        <BarChart accessibilityLayer data={data}>
+          <CartesianGrid vertical={false} />
+          <XAxis dataKey="month" />
+          <ChartTooltip content={<ChartTooltipContent />} />
+          <Bar dataKey="desktop" fill="var(--color-desktop)" radius={4} />
+        </BarChart>
+      </ChartContainer>
+      <AspectRatio ratio={16 / 9}>
+        <p>Wide</p>
+      </AspectRatio>
+      <ToggleGroup spacing={2}>
+        <ToggleGroupItem value="a">A</ToggleGroupItem>
+      </ToggleGroup>
+    </main>
+  );
+}
+export const Route = createFileRoute("/")({ component: Charts });
+`,
+      },
+      "app-test"
+    );
+    if (!built.ok) {
+      throw new Error(JSON.stringify(built.diagnostics, null, 2));
+    }
+
+    expect(built.diagnostics).toStrictEqual([]);
+    expect(kitModulesOf(built)).toStrictEqual(
+      expect.arrayContaining(["recharts.js"])
+    );
+    // Geist's Latin face, as a data: URL: the frame takes fonts no other way.
+    expect(built.css).toContain("font-family: 'Geist Variable';");
+    expect(built.css).toContain("url(data:font/woff2;base64,");
+  });
+
+  it("builds a code block whose highlighter loads its language's grammar from the kit", async () => {
+    const built = await buildPages(
+      env,
+      {
+        "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+import { CodeBlock, CodeBlockContent, CodeBlockLine } from "@grasp-os/app-kit/components/code-block";
+import { useHighlightedCode } from "@grasp-os/app-kit/hooks/use-highlighted-code";
+
+const source = "const total = 1 + 2;";
+
+function Code() {
+  const lines = useHighlightedCode(source, "ts");
+  return (
+    <CodeBlock>
+      <CodeBlockContent>
+        {lines.map((line, index) => (
+          <CodeBlockLine key={index}>{line}</CodeBlockLine>
+        ))}
+      </CodeBlockContent>
+    </CodeBlock>
+  );
+}
+export const Route = createFileRoute("/")({ component: Code });
+`,
+      },
+      "app-test"
+    );
+    if (!built.ok) {
+      throw new Error(JSON.stringify(built.diagnostics, null, 2));
+    }
+    // The grammar is a module of the kit's that the highlighter imports when
+    // a block first shows the language: in the page's closure, so its frame
+    // can load it.
+    const modules = kitModulesOf(built);
+    expect(built.diagnostics).toStrictEqual([]);
+    expect(modules).toStrictEqual(
+      expect.arrayContaining([
+        "@grasp-os~app-kit~hooks~use-highlighted-code.js",
+      ])
+    );
+    const { modules: kit } = await kitModules(env.ASSETS);
+    expect(
+      modules.some((name) => (kit[name] ?? "").includes("TypeScript"))
+    ).toBeTruthy();
+  });
+
   it("has the classes of the kit modules an App loads in its CSS, not the catalog's", async () => {
     // The sidebar's width, a class only the sidebar has.
     const sidebarClass = "w-\\(--sidebar-width\\)";

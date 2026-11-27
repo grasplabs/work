@@ -890,7 +890,7 @@ export const Route = createFileRoute("/")({ component: Notes });
     ).resolves.toStrictEqual([expect.stringContaining('"owner"')]);
   });
 
-  it("builds a page of a data grid and a field for every kind of value, typed by what each binds", async () => {
+  it("builds a page of a data table and a field for every kind of value, typed by what each binds", async () => {
     const tasks = testApp(
       {
         name: "Tasks",
@@ -975,9 +975,8 @@ export const rename = mutation({
     );
     const tasksPage = `import { createFileRoute } from "@tanstack/react-router";
 import { useForm, useMutation } from "@grasp-os/sdk/react";
-import { DataGrid } from "@grasp-os/app-kit/components/data-grid";
-import { RichText } from "@grasp-os/app-kit/components/rich-text";
-import { CheckboxField, DateField, FileField, Form, FormError, MultiSelectField, NumberField, RelationField, RichTextField, SelectField, SubmitButton, TextField } from "@grasp-os/app-kit/form";
+import { DataTable } from "@grasp-os/app-kit/components/data-table";
+import { CheckboxField, DateField, FileField, Form, FormError, MultiSelectField, NumberField, RelationField, SelectField, SubmitButton, TextareaField, TextField } from "@grasp-os/app-kit/form";
 import { api, permissions } from "@server/_generated/api";
 
 function Tasks() {
@@ -988,14 +987,13 @@ function Tasks() {
   });
   return (
     <main className="flex flex-col gap-6 p-6">
-      <DataGrid
+      <DataTable
         label="Tasks"
         query={api.tasks.list}
         args={({ search, filters }) => ({ search, status: filters.status })}
         columns={[
           { field: "title", sortable: true, edit: async (task, title) => await rename({ id: task._id, title }) },
           { field: "status", filter: { open: "Open", done: "Done" } },
-          { field: "notes", cell: (task) => <RichText value={task.notes} /> },
           { field: "due", day: true },
         ]}
         search="Search tasks"
@@ -1010,12 +1008,11 @@ function Tasks() {
         <DateField form={form} label="Due" name="due" />
         <CheckboxField form={form} label="Urgent" name="urgent" />
         <RelationField form={form} label="Owner" name="owner" query={api.tasks.people} args={(search) => ({ search })} lookup={{ query: api.tasks.person, args: (id) => ({ id }) }} optionLabel={(person) => person.name} />
-        <RichTextField form={form} label="Notes" name="notes" />
+        <TextareaField form={form} label="Notes" name="notes" />
         <FileField form={form} label="Brief" name="brief" resource={permissions.files} />
         <FormError form={form} />
         <SubmitButton form={form}>Add task</SubmitButton>
       </Form>
-      <RichText links={permissions.links} value="See [the plan](https://example.com/plan)." />
     </main>
   );
 }

@@ -23,6 +23,8 @@
     "check:runtime-boundary": "node scripts/check-runtime-boundary.ts",
     "check:snowball": "node scripts/brain-snowball.ts --check",
     "check:ui": "node scripts/ui-sync.ts check",
+    "check:app-kit": "node scripts/app-kit-sync.ts check",
+    "app-kit:update": "node scripts/app-kit-sync.ts update",
     "ui:update": "node scripts/ui-sync.ts update",
     "ui:propose": "node scripts/ui-sync.ts propose",
     "github:setup": "node scripts/github-setup.ts",

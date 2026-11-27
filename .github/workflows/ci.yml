@@ -36,7 +36,8 @@
 # the tests (which projects a change reaches) cost 45 s on every run's
 # critical path (November 2026). A nightly run on main runs it all again:
 # the only full run a merge an admin makes outside the queue gets. When it
-# fails, it opens an issue (nightly-alert, below).
+# fails, it opens an issue (alert, below), as a push to main that fails
+# does.
 name: CI
 
 on:
@@ -172,6 +173,9 @@ jobs:
       # packages/ui against Damsko at its pinned commit, fetched from
       # GitHub (scripts/ui-sync.ts).
       - run: vp run check:ui
+      # packages/app-kit against the registry's files it pins by hash, but
+      # for its listed changes; no network (scripts/app-kit-sync.ts).
+      - run: vp run check:app-kit
       - run: vp run -r typegen && vp run -r db:generate && vp run -r i18n:extract
       - run: git diff --exit-code && test -z "$(git status --porcelain)"
 
@@ -1062,38 +1066,68 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-  # When the nightly full run fails, an issue says so: nobody watches the
-  # Actions tab at 02:17, and a merge an admin makes outside the queue
-  # gets only a pull request's fast checks, so this run is where its tests
-  # first run. One open issue at a time: a later failure comments on it.
-  # Only the nightly run, and not when it was cancelled.
-  nightly-alert:
-    name: nightly-alert
-    needs: check
-    if: failure() && github.event_name == 'schedule'
+  # When main's CI fails, an issue says so, as nobody watches the Actions
+  # tab: one issue for the pushes, which build, deploy and publish each
+  # merge (a failure holds every later release back from staging), and one
+  # for the nightly full run (at 02:17, and the first run of the tests of
+  # a merge an admin makes outside the queue). The issue opens at the first
+  # failure, which notifies the repository's watchers; a later failure
+  # only rewrites its body to the latest run, which notifies nobody, so a
+  # red main says so once, not once a merge; and the first run that passes
+  # closes it with a comment, which notifies whoever follows the issue.
+  # A push passes once it publishes its release. Only a push that is
+  # still main's head, asked here, changes the issue: the newest push says
+  # how main is, and a re-run of one main has moved past, which may pass
+  # without publishing (release:upload, --head), says nothing. Nor does a
+  # cancelled run, in which this job doesn't run; a job cancelled in a run
+  # that wasn't, as one that ran out of time is, failed. Pushes run one at a
+  # time (the run's concurrency group), so two never open an issue each.
+  # The issues are listed without search, which can lag behind a new one,
+  # and only this job's count: anyone may open an issue with its title.
+  alert:
+    name: alert
+    needs: [check, release, deploy-platform, publish-release, test-caches]
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && contains(fromJSON('["push", "schedule"]'), github.event_name) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       actions: read
+      contents: read
       issues: write
     steps:
       - run: |
           set -euo pipefail
-          title="Nightly CI failed on main"
-          failed=$(gh run view "$RUN_ID" --json jobs --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "cancelled") | select(.name != "check") | "- \(.name)"')
-          green=$(gh run list --workflow ci.yml --event schedule --branch main --status success --limit 1 --json headSha --jq '.[0].headSha // empty')
-          range="no green nightly run to compare with"
-          [ -z "$green" ] || range="$SERVER/$GH_REPO/compare/$green...$GITHUB_SHA"
-          printf 'Run: %s\n\nFailed jobs:\n%s\n\nCommits since the last green nightly run: %s\n' \
-            "$SERVER/$GH_REPO/actions/runs/$RUN_ID" "${failed:-"- (none listed)"}" "$range" > body.md
-          issue=$(gh issue list --state open --search "in:title \"$title\"" --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty")
-          if [ -n "$issue" ]; then
-            gh issue comment "$issue" --body-file body.md
-          else
-            gh issue create --title "$title" --body-file body.md
+          case "$EVENT" in
+            push) title="CI on main failed" passing=publish-release ;;
+            schedule) title="Nightly CI failed on main" passing=check ;;
+          esac
+          if [ "$EVENT" = push ] && [ "$(gh api "repos/$GH_REPO/commits/main" --jq .sha)" != "$GITHUB_SHA" ]; then
+            echo "::notice::main has moved past $GITHUB_SHA: the newer push's run says how main is"
+            exit 0
+          fi
+          run="$SERVER/$GH_REPO/actions/runs/$RUN_ID"
+          failed=$(jq -r 'any(.[]; .result == "failure" or .result == "cancelled")' <<< "$NEEDS")
+          passed=$(jq -r --arg job "$passing" '.[$job].result == "success"' <<< "$NEEDS")
+          issue=$(gh issue list --state open --limit 1000 --json number,title,author --jq "map(select(.title == \"$title\" and .author.login == \"app/github-actions\")) | .[0].number // empty")
+          if [ "$failed" = true ]; then
+            jobs=$(gh run view "$RUN_ID" --json jobs --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "cancelled") | select(.name != "check") | "- \(.name)"')
+            green=$(gh run list --workflow ci.yml --event "$EVENT" --branch main --status success --limit 1 --json headSha --jq '.[0].headSha // empty')
+            range="no green run to compare with"
+            [ -z "$green" ] || range="$SERVER/$GH_REPO/compare/$green...$GITHUB_SHA"
+            printf 'Latest failed run: %s\n\nFailed jobs:\n%s\n\nCommits since the last green run: %s\n\nThis issue closes by itself when a run passes again.\n' \
+              "$run" "${jobs:-"- (none listed)"}" "$range" > body.md
+            if [ -n "$issue" ]; then
+              gh issue edit "$issue" --body-file body.md
+            else
+              gh issue create --title "$title" --body-file body.md
+            fi
+          elif [ "$passed" = true ] && [ -n "$issue" ]; then
+            gh issue close "$issue" --comment "Passing again: $run"
           fi
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
           SERVER: ${{ github.server_url }}
+          EVENT: ${{ github.event_name }}
+          NEEDS: ${{ toJSON(needs) }}

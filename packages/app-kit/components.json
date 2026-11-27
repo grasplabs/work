@@ -1,20 +1,25 @@
 {
   "$schema": "https://ui.shadcn.com/schema.json",
-  "style": "base-vega",
+  "style": "base-nova",
   "rsc": false,
   "tsx": true,
   "tailwind": {
     "config": "",
     "css": "src/styles.css",
     "baseColor": "neutral",
-    "cssVariables": true
+    "cssVariables": true,
+    "prefix": ""
   },
   "iconLibrary": "lucide",
+  "rtl": false,
   "aliases": {
     "components": "@grasp-os/app-kit/components",
     "utils": "@grasp-os/app-kit/lib/utils",
-    "hooks": "@grasp-os/app-kit/hooks",
+    "ui": "@grasp-os/app-kit/components",
     "lib": "@grasp-os/app-kit/lib",
-    "ui": "@grasp-os/app-kit/components"
-  }
+    "hooks": "@grasp-os/app-kit/hooks"
+  },
+  "menuColor": "default",
+  "menuAccent": "subtle",
+  "registries": {}
 }

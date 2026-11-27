@@ -49,6 +49,7 @@
     "modern-tar": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
+    "recharts": "catalog:",
     "resolve.exports": "catalog:",
     "tailwindcss": "catalog:"
   },

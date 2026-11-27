@@ -10,6 +10,12 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 import type { Locator } from "vite-plus/test/browser";
 
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarProvider,
+  SidebarTrigger,
+} from "../src/components/sidebar.tsx";
 import { demos } from "./catalog/demos.ts";
 import { loadExample } from "./catalog/examples.ts";
 import type { ExampleName } from "./catalog/examples.ts";
@@ -20,6 +26,7 @@ import {
   phone,
 } from "./catalog/overlays.ts";
 import type { Overlay, Target } from "./catalog/overlays.ts";
+import { submissionRefused } from "./frame-refusals.ts";
 
 // Every component in the UI kit, and every example of composing them,
 // rendered under a page heading in a real Chromium: each has names for its
@@ -284,6 +291,12 @@ const focus = (locator: Locator): void => {
   }
 };
 
+/** The day the focused calendar button stands for. */
+const focusedDay = (): string | undefined =>
+  document.activeElement instanceof HTMLElement
+    ? document.activeElement.dataset.day
+    : undefined;
+
 /** Keyboard behaviour particular to a component, checked on its page. */
 const keyboardChecks: Record<string, () => Promise<void>> = {
   // A vertical group moves with the up and down arrows, which only works
@@ -296,27 +309,14 @@ const keyboardChecks: Record<string, () => Promise<void>> = {
       .element(alignment.getByRole("button", { name: "Center" }))
       .toHaveFocus();
   },
-  // Arrow keys in a field inside a slide move the cursor, not the slide;
-  // a vertical carousel moves with ArrowDown.
-  carousel: async () => {
-    const note = page.getByRole("textbox", { name: "First slide note" });
-    focus(note);
-    await userEvent.keyboard("{End}");
-    await userEvent.keyboard("{ArrowLeft}");
-    const input = note.element();
-    expect(input instanceof HTMLInputElement && input.selectionStart).toBe(3);
-    await expect
-      .element(page.getByRole("button", { name: "Previous slide" }))
-      .toBeDisabled();
-    await expect
-      .element(page.getByRole("button", { name: "Next slide" }))
-      .toBeEnabled();
-
-    focus(page.getByRole("button", { name: "Next card" }));
-    await userEvent.keyboard("{ArrowDown}");
-    await expect
-      .element(page.getByRole("button", { name: "Previous card" }))
-      .toBeEnabled();
+  // The arrow keys move the focus from day to day: the day button has the
+  // ref its focus effect needs.
+  calendar: async () => {
+    const days = page.getByRole("grid").getByRole("button");
+    focus(days.nth(10));
+    const from = focusedDay();
+    await userEvent.keyboard("{ArrowRight}");
+    await expect.poll(focusedDay).not.toBe(from);
   },
   // A single value is one thumb.
   slider: async () => {
@@ -324,6 +324,24 @@ const keyboardChecks: Record<string, () => Promise<void>> = {
       .poll(() => page.getByRole("main").getByRole("slider").elements().length)
       .toBe(1);
   },
+};
+
+/** The chart demo's first bar. */
+const chartBar = (): Element | null =>
+  document.querySelector("[data-slot=chart] .recharts-bar-rectangle path");
+
+/** What an App page's frame does on any read or write of document.cookie. */
+const cookieRefused = (): never => {
+  throw new DOMException(
+    "The document is sandboxed and lacks the 'allow-same-origin' flag.",
+    "SecurityError"
+  );
+};
+
+/** Whether the sidebar is expanded or collapsed. */
+const sidebarState = (): string | undefined => {
+  const sidebar = document.querySelector("[data-slot=sidebar][data-state]");
+  return sidebar instanceof HTMLElement ? sidebar.dataset.state : undefined;
 };
 
 const bodyBackground = (): string =>
@@ -378,13 +396,13 @@ describe("the UI kit", () => {
     }
   );
 
-  it("data-grid narrows its rows by the search and the team filter, as its query is asked", async () => {
+  it("data-table narrows its rows by the search and the team filter, as its query is asked", async () => {
     await page.viewport(desktop.width, desktop.height);
-    const { "data-grid": DataGrid } = demos;
-    if (DataGrid === undefined) {
-      throw new Error("No data-grid demo");
+    const { "data-table": DataTable } = demos;
+    if (DataTable === undefined) {
+      throw new Error("No data-table demo");
     }
-    render("data-grid", DataGrid);
+    render("data-table", DataTable);
     const main = page.getByRole("main");
     const shown = (name: string) =>
       main.getByRole("cell", { name, exact: true }).elements().length > 0;
@@ -400,5 +418,129 @@ describe("the UI kit", () => {
     await expect
       .poll(() => ({ ada: shown("Ada"), grace: shown("Grace") }))
       .toStrictEqual({ ada: false, grace: true });
+  });
+
+  // What an App page's frame refuses (core's security-headers.ts,
+  // pageFramePolicy): innerHTML, under Trusted Types with no policy, and
+  // cookies, in its opaque origin. Each refusal is made here as the frame
+  // makes it, a throw, around the kit's changes that avoid it
+  // (packages/app-kit/local-changes.json).
+  it("chart colours its series from its config without innerHTML, as an App's frame allows", async () => {
+    const innerHtml = Object.getOwnPropertyDescriptor(
+      Element.prototype,
+      "innerHTML"
+    );
+    Object.defineProperty(Element.prototype, "innerHTML", {
+      configurable: true,
+      get(this: Element): string {
+        const read: unknown = innerHtml?.get?.call(this);
+        return typeof read === "string" ? read : "";
+      },
+      set: () => {
+        throw new TypeError("This document requires 'TrustedHTML' assignment.");
+      },
+    });
+    try {
+      await page.viewport(desktop.width, desktop.height);
+      const { chart: Chart } = demos;
+      if (Chart === undefined) {
+        throw new Error("No chart demo");
+      }
+      render("chart", Chart);
+      await expect.poll(chartBar).not.toBeNull();
+      const probe = document.createElement("span");
+      probe.style.color = "var(--chart-1)";
+      document.body.append(probe);
+      const expected = getComputedStyle(probe).color;
+      const element = chartBar();
+      expect(element === null ? "" : getComputedStyle(element).fill).toBe(
+        expected
+      );
+    } finally {
+      if (innerHtml !== undefined) {
+        Object.defineProperty(Element.prototype, "innerHTML", innerHtml);
+      }
+    }
+  });
+
+  it("sidebar opens and closes without a cookie, as an App's frame allows", async () => {
+    const cookie = Object.getOwnPropertyDescriptor(
+      Document.prototype,
+      "cookie"
+    );
+    Object.defineProperty(Document.prototype, "cookie", {
+      configurable: true,
+      get: cookieRefused,
+      set: cookieRefused,
+    });
+    const errors: unknown[] = [];
+    const onError = (event: ErrorEvent) => {
+      errors.push(event.error);
+      event.preventDefault();
+    };
+    window.addEventListener("error", onError);
+    try {
+      await page.viewport(desktop.width, desktop.height);
+      render("sidebar", () => (
+        <SidebarProvider>
+          <Sidebar collapsible="offcanvas">
+            <SidebarContent>Pages</SidebarContent>
+          </Sidebar>
+          <SidebarTrigger />
+        </SidebarProvider>
+      ));
+      expect(sidebarState()).toBe("expanded");
+      await userEvent.click(
+        page.getByRole("button", { name: "Toggle Sidebar" })
+      );
+      await expect.poll(sidebarState).toBe("collapsed");
+      expect(errors).toStrictEqual([]);
+    } finally {
+      window.removeEventListener("error", onError);
+      if (cookie !== undefined) {
+        Object.defineProperty(Document.prototype, "cookie", cookie);
+      }
+    }
+  });
+
+  it("questionnaire finishes with its onSubmit though nothing submits a form, as in an App's frame", async () => {
+    window.addEventListener("submit", submissionRefused, true);
+    try {
+      await page.viewport(desktop.width, desktop.height);
+      const { questionnaire: Questionnaire } = demos;
+      if (Questionnaire === undefined) {
+        throw new Error("No questionnaire demo");
+      }
+      render("questionnaire", Questionnaire);
+      await userEvent.click(page.getByRole("radio", { name: "Cost" }));
+      await userEvent.click(page.getByRole("button", { name: "Save answer" }));
+      await expect
+        .element(page.getByRole("status", { name: "Answer" }))
+        .toHaveTextContent("cost");
+    } finally {
+      window.removeEventListener("submit", submissionRefused, true);
+    }
+  });
+
+  it("questionnaire keeps its onSubmit from running while a required question is unanswered", async () => {
+    window.addEventListener("submit", submissionRefused, true);
+    try {
+      await page.viewport(desktop.width, desktop.height);
+      const { questionnaire: Questionnaire } = demos;
+      if (Questionnaire === undefined) {
+        throw new Error("No questionnaire demo");
+      }
+      render("questionnaire", Questionnaire);
+      await userEvent.click(page.getByRole("button", { name: "Save answer" }));
+      // Its own checks ran (the error shows), and its onSubmit didn't.
+      await expect
+        .element(page.getByText("Choose an answer to continue."))
+        .toBeVisible();
+      await expect
+        .element(page.getByRole("status", { name: "Answer" }))
+        .toHaveTextContent("Not answered");
+    } finally {
+      window.removeEventListener("submit", submissionRefused, true);
+    }
   });
 });

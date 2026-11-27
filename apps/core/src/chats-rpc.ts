@@ -616,10 +616,10 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   }
 
   /**
-   * Deletes the chat once its agent isn't working on it, rejecting first
-   * every write it holds, so none is left that nobody can decide: a
-   * failure there leaves the chat as it was, to delete again. The object
-   * does it all (`deleteChat`), taking no question meanwhile.
+   * Deletes the chat once its agent isn't working on it: gone from the
+   * person's surfaces at once, taking no question, while its object
+   * finishes every step by itself (`deleteChat`), the writes it holds
+   * rejected among them, so none is left that nobody can decide.
    */
   async remove(chatId: string): Promise<void> {
     await withPerson(this.#check, async (person) => {

@@ -243,7 +243,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@grasp-os/app-kit/components/card";
-import { DataGrid } from "@grasp-os/app-kit/components/data-grid";
+import { DataTable } from "@grasp-os/app-kit/components/data-table";
 import { api } from "@server/_generated/api";
 import { createFileRoute } from "@tanstack/react-router";
 
@@ -274,7 +274,7 @@ const Board = () => {
           </Card>
         ))}
       </div>
-      <DataGrid
+      <DataTable
         args={() => ({})}
         columns={[
           ${columns.join(",\n          ")},

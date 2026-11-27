@@ -14,6 +14,7 @@ import { workspace } from "../src/durable-objects.ts";
 import { maxChatsPerPerson } from "../src/workspace.ts";
 import { codeStep, model, pausedReply, says } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
+import { deletesOf, finishDeletesNow } from "./chat-deletes.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { fakeProvider, fakeProviderFor } from "./model-provider.ts";
@@ -449,38 +450,50 @@ describe("a conversation with the agent in Teams", setUpTime, () => {
     });
   });
 
-  it("stays when a step after its Brain part fails, and the next click deletes it", async () => {
-    const { api, userId, teams } = await member(idp, says("Noted."));
+  it("is gone at once when a step after its Brain part fails, and finishes by itself once the step works", async () => {
+    const { api, userId, teams } = await member(
+      idp,
+      says("Noted."),
+      says("Noted anew.")
+    );
     await post(messageFrom(teams, { text: "Hello." }));
+    const [first] = await conversationsOf(userId);
+    const stub = workspace(env, personalWorkspaceId(userId));
     const putBack = await connectOutOfReach(userId);
 
-    const refused = await outcome(api.channelAccounts.forgetConversations());
-    const stayed = await conversationsOf(userId);
+    const forgotten = await api.channelAccounts.forgetConversations();
+    const failing = await deletesOf(stub);
     await putBack();
-    const again = await api.channelAccounts.forgetConversations();
+    // The next message there, before the alarm tries it again, starts a
+    // conversation anew.
+    await post(messageFrom(teams, { text: "Hello again." }));
+    const meanwhile = await conversationsOf(userId);
+    await finishDeletesNow(stub);
 
     await vi.waitFor(
       async () => {
-        await expect(deletionsBy(userId)).resolves.toHaveLength(2);
+        await expect(deletionsBy(userId)).resolves.toHaveLength(1);
       },
       { timeout: 15_000, interval: 200 }
     );
     const recorded = await deletionsBy(userId);
+    const left = await conversationsOf(userId);
     expect({
-      refused: refused === "ok" ? "deleted" : "refused",
-      stayed: stayed.length,
-      again,
-      left: await conversationsOf(userId),
+      forgotten,
+      failing,
+      meanwhile: meanwhile.length,
+      left: left.length,
+      firstLeft: left.includes(first ?? ""),
+      deletes: await deletesOf(stub),
       recorded: recorded.map(({ deleted, failed }) => ({ deleted, failed })),
     }).toStrictEqual({
-      refused: "refused",
-      stayed: 1,
-      again: 1,
-      left: [],
-      recorded: [
-        { deleted: 0, failed: 1 },
-        { deleted: 1, failed: 0 },
-      ],
+      forgotten: 1,
+      failing: [{ chatId: first, attempts: 1 }],
+      meanwhile: 2,
+      left: 1,
+      firstLeft: false,
+      deletes: [],
+      recorded: [{ deleted: 1, failed: 0 }],
     });
   });
 

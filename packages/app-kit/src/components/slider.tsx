@@ -1,5 +1,5 @@
-import { Slider as SliderPrimitive } from "@base-ui/react/slider";
-import { cn } from "@grasp-os/app-kit/lib/utils";
+import { Slider as SliderPrimitive } from "@base-ui/react/slider"
+import { cn } from "cn"
 
 function Slider({
   className,
@@ -9,15 +9,10 @@ function Slider({
   max = 100,
   ...props
 }: SliderPrimitive.Root.Props) {
-  // One thumb per value: a range has two, a single value one. Upstream
-  // counts only arrays, so a single number got two thumbs.
-  const given = value ?? defaultValue;
-  let _values: readonly number[] = [min, max];
-  if (typeof given === "number") {
-    _values = [given];
-  } else if (given !== undefined) {
-    _values = given;
-  }
+  // Grasp: a single number is one thumb (packages/app-kit/local-changes.json).
+  const given = value ?? defaultValue
+  const _values =
+    typeof given === "number" ? [given] : (given ?? [min, max])
 
   return (
     <SliderPrimitive.Root
@@ -33,7 +28,7 @@ function Slider({
       <SliderPrimitive.Control className="relative flex w-full touch-none items-center select-none data-disabled:opacity-50 data-vertical:h-full data-vertical:min-h-40 data-vertical:w-auto data-vertical:flex-col">
         <SliderPrimitive.Track
           data-slot="slider-track"
-          className="bg-muted relative grow overflow-hidden rounded-full select-none data-horizontal:h-1.5 data-horizontal:w-full data-vertical:h-full data-vertical:w-1.5"
+          className="relative grow overflow-hidden rounded-full bg-muted select-none data-horizontal:h-1 data-horizontal:w-full data-vertical:h-full data-vertical:w-1"
         >
           <SliderPrimitive.Indicator
             data-slot="slider-range"
@@ -44,12 +39,12 @@ function Slider({
           <SliderPrimitive.Thumb
             data-slot="slider-thumb"
             key={index}
-            className="border-primary ring-ring/50 block size-4 shrink-0 rounded-full border bg-white shadow-sm transition-[color,box-shadow] select-none hover:ring-4 focus-visible:ring-4 focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50"
+            className="relative block size-3 shrink-0 rounded-full border border-ring bg-white ring-ring/50 transition-[color,box-shadow] select-none after:absolute after:-inset-2 hover:ring-3 focus-visible:ring-3 focus-visible:outline-hidden active:ring-3 disabled:pointer-events-none disabled:opacity-50"
           />
         ))}
       </SliderPrimitive.Control>
     </SliderPrimitive.Root>
-  );
+  )
 }
 
-export { Slider };
+export { Slider }

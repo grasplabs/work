@@ -14,18 +14,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@grasp-os/app-kit/components/dropdown-menu";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "@grasp-os/app-kit/components/empty";
 import { Input } from "@grasp-os/app-kit/components/input";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@grasp-os/app-kit/components/input-group";
 import {
   NativeSelect,
   NativeSelectOption,
@@ -56,9 +45,8 @@ import {
   ArrowDownIcon,
   ArrowUpDownIcon,
   ArrowUpIcon,
-  Columns3Icon,
+  ChevronDownIcon,
   MoreHorizontalIcon,
-  SearchIcon,
 } from "lucide-react";
 import { useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -69,18 +57,18 @@ import {
   parsedDraft,
   recordFieldsOf,
   shownCell,
-} from "../internal/data-grid-cells.ts";
-import type { EditorKind } from "../internal/data-grid-cells.ts";
-import { dataGridTexts } from "../internal/data-grid-text.ts";
-import type { DataGridText } from "../internal/data-grid-text.ts";
+} from "../internal/data-table-cells.ts";
+import type { EditorKind } from "../internal/data-table-cells.ts";
+import { dataTableTexts } from "../internal/data-table-text.ts";
+import type { DataTableText } from "../internal/data-table-text.ts";
 import { documentLanguage, pageText } from "../internal/language.ts";
 import { QueryBoundary } from "../internal/query-boundary.tsx";
 
-export type { DataGridText } from "../internal/data-grid-text.ts";
+export type { DataTableText } from "../internal/data-table-text.ts";
 
 // A table of an App's records, read page by page from one of its queries
 // (`usePaginatedQuery`): what a page would otherwise wire by hand around
-// `Table`. The grid owns what a person does to the table (search, sort,
+// `Table`. The data table owns what a person does to the table (search, sort,
 // filters, which columns show, which rows are selected) and hands the
 // first three to the query through `args`, so the App's query does the
 // searching, sorting and filtering on the server, over every record, not
@@ -91,16 +79,16 @@ export type { DataGridText } from "../internal/data-grid-text.ts";
 // What could go wrong, and how it is closed:
 // - A search per keystroke: the search settles before it reaches `args`.
 // - A bulk action on rows no longer shown, or on the wrong ones: rows are
-//   selected by their `_id` (a grid with bulk actions needs one), and the
+//   selected by their `_id` (a data table with bulk actions needs one), and the
 //   selection is of the rows loaded now; a row gone from the list drops out.
 // - An inline edit saved twice, or lost: one save at a time per cell; a
 //   failure keeps the editor open with what was typed, and says why.
 // - An action failing unseen: a row's or bulk action's failure is shown
 //   above the table, as an edit's is in its cell.
-// - A failed query blanking the page: the grid shows the failure in its
+// - A failed query blanking the page: the data table shows the failure in its
 //   place, with Try again, and the search and filters stay usable.
 
-/** A query a grid reads its records with: one that answers pages. */
+/** A query a data table reads its records with: one that answers pages. */
 type AnyQuery = FunctionReference<"query">;
 
 /** Which way a sorted column runs. */
@@ -116,7 +104,7 @@ type FilterValue<Value> = Extract<Value, string>;
  * What the person did to the table that the query answers for, typed by
  * the records `Row`: hand it on to the query's arguments as it takes them.
  */
-export interface DataGridState<Row> {
+export interface DataTableState<Row> {
   /** What the person searched for, once they stopped typing; "" for nothing. */
   readonly search: string;
   /** The column sorted by, if any. */
@@ -129,8 +117,8 @@ export interface DataGridState<Row> {
   };
 }
 
-/** The same, as the grid keeps it, of any record. */
-interface GridState {
+/** The same, as the data table keeps it, of any record. */
+interface TableState {
   readonly search: string;
   readonly sort:
     | { readonly field: string; readonly direction: SortDirection }
@@ -157,7 +145,7 @@ type EditValue<Value> = Value extends { readonly __tableName: string }
             ? null
             : never;
 
-/** A record the grid can tell apart from the others whatever moves: one with an `_id`. */
+/** A record the data table can tell apart from the others whatever moves: one with an `_id`. */
 interface KeyedRow {
   readonly _id: string;
 }
@@ -209,12 +197,12 @@ interface ColumnOf<Row, Name extends FieldOf<Row>> {
 }
 
 /** A column: a field's name alone, or how it shows. */
-export type DataGridColumn<Row> =
+export type DataTableColumn<Row> =
   | FieldOf<Row>
   | { [Name in FieldOf<Row>]: ColumnOf<Row, Name> }[FieldOf<Row>];
 
 /** Something the person can do to one row, from its menu. */
-export interface DataGridRowAction<Row> {
+export interface DataTableRowAction<Row> {
   readonly label: string;
   /** Its rejection is shown above the table. */
   readonly onSelect: (row: Row) => unknown;
@@ -222,7 +210,7 @@ export interface DataGridRowAction<Row> {
 }
 
 /** Something the person can do to the selected rows at once. */
-export interface DataGridBulkAction<Row> {
+export interface DataTableBulkAction<Row> {
   readonly label: string;
   /**
    * Called with the selected rows; the selection clears once it resolves,
@@ -232,7 +220,7 @@ export interface DataGridBulkAction<Row> {
   readonly destructive?: boolean;
 }
 
-/** What every column of a grid is, read from its spec and the query. */
+/** What every column of a data table is, read from its spec and the query. */
 interface ReadColumn<Row> {
   readonly field: FieldOf<Row>;
   readonly label: string;
@@ -261,7 +249,7 @@ const labelOfField = (field: string): string => {
 };
 
 const readColumn = <Row,>(
-  spec: DataGridColumn<Row>,
+  spec: DataTableColumn<Row>,
   fields: Readonly<Record<string, ValueDescriptor>>
 ): ReadColumn<Row> => {
   const field = typeof spec === "string" ? spec : spec.field;
@@ -312,9 +300,9 @@ const valueOf = (row: unknown, field: string): unknown =>
 
 /** The next sort when the person picks a column's heading: up, down, then none. */
 const nextSort = (
-  sort: GridState["sort"],
+  sort: TableState["sort"],
   field: string
-): GridState["sort"] => {
+): TableState["sort"] => {
   if (sort?.field !== field) {
     return { field, direction: "asc" };
   }
@@ -322,7 +310,7 @@ const nextSort = (
 };
 
 /** Why something failed, as a person reads it: its own message, if it has one. */
-const messageOf = (error: unknown, text: DataGridText): string =>
+const messageOf = (error: unknown, text: DataTableText): string =>
   error instanceof Error && error.message !== ""
     ? error.message
     : text.actionFailed;
@@ -335,7 +323,7 @@ const CellValue = <Row,>({
 }: {
   row: Row;
   column: ReadColumn<Row>;
-  text: DataGridText;
+  text: DataTableText;
 }): ReactNode => {
   if (column.cell !== undefined) {
     return column.cell(row);
@@ -371,7 +359,7 @@ const EditableCell = <Row,>({
   rowLabel: string;
   column: ReadColumn<Row>;
   kind: EditorKind;
-  text: DataGridText;
+  text: DataTableText;
 }): React.JSX.Element => {
   const value = valueOf(row, column.field);
   const { descriptor } = column;
@@ -547,7 +535,7 @@ const RowCell = <Row,>({
   row: Row;
   rowLabel: string;
   column: ReadColumn<Row>;
-  text: DataGridText;
+  text: DataTableText;
 }): React.JSX.Element => {
   const kind = editorKindOf(column.descriptor, column.day);
   // Only a record with an `_id` is edited: one without has no key that
@@ -571,25 +559,25 @@ const RowCell = <Row,>({
   );
 };
 
-/** What the rows of a grid take. */
+/** What the rows of a data table take. */
 interface RowsProps<Reference extends AnyQuery> {
   readonly label: string;
   readonly query: Reference;
   readonly args: PaginatedArgsOf<Reference> | "skip";
   readonly pageSize: number;
   readonly columns: readonly ReadColumn<PageItemOf<Reference>>[];
-  readonly rowActions: readonly DataGridRowAction<PageItemOf<Reference>>[];
-  readonly bulkActions: readonly DataGridBulkAction<PageItemOf<Reference>>[];
-  readonly state: GridState;
+  readonly rowActions: readonly DataTableRowAction<PageItemOf<Reference>>[];
+  readonly bulkActions: readonly DataTableBulkAction<PageItemOf<Reference>>[];
+  readonly state: TableState;
   readonly onSort: (field: string) => void;
   readonly narrowed: boolean;
   readonly empty: ReactNode;
-  readonly text: DataGridText;
+  readonly text: DataTableText;
 }
 
 /** How a sorted heading says its order to assistive technology. */
 const ariaSortOf = (
-  state: GridState,
+  state: TableState,
   field: string
 ): "ascending" | "descending" | "none" => {
   if (state.sort?.field !== field) {
@@ -602,7 +590,7 @@ const SortIcon = ({
   state,
   field,
 }: {
-  state: GridState;
+  state: TableState;
   field: string;
 }): React.JSX.Element => {
   const sort = ariaSortOf(state, field);
@@ -626,7 +614,7 @@ const rowLabelOf = <Row,>(
   row: Row,
   index: number,
   first: ReadColumn<Row> | undefined,
-  text: DataGridText
+  text: DataTableText
 ): string => {
   const shown =
     first === undefined
@@ -641,8 +629,8 @@ const rowLabelOf = <Row,>(
   return shown === "" ? `#${index + 1}` : shown;
 };
 
-/** The grid's rows: read from the query, with the selection and Load more. */
-const GridRows = <Reference extends AnyQuery>({
+/** The data table's rows: read from the query, with the selection and Load more. */
+const DataTableRows = <Reference extends AnyQuery>({
   label,
   query,
   args,
@@ -710,17 +698,14 @@ const GridRows = <Reference extends AnyQuery>({
       </TableRow>
     ));
   } else if (rows.length === 0) {
+    // As the registry's data table says it has no rows: one cell across.
     body = (
       <TableRow>
-        <TableCell colSpan={width}>
-          <Empty>
-            <EmptyHeader>
-              <EmptyTitle>{narrowed ? text.noMatches : text.empty}</EmptyTitle>
-              {empty === undefined ? null : (
-                <EmptyDescription>{empty}</EmptyDescription>
-              )}
-            </EmptyHeader>
-          </Empty>
+        <TableCell className="h-24 text-center" colSpan={width}>
+          {narrowed ? text.noMatches : text.empty}
+          {empty === undefined ? null : (
+            <span className="text-muted-foreground block">{empty}</span>
+          )}
         </TableCell>
       </TableRow>
     );
@@ -836,66 +821,70 @@ const GridRows = <Reference extends AnyQuery>({
           ))}
         </div>
       ) : null}
-      <Table aria-busy={list.isLoading}>
-        <TableCaption>{label}</TableCaption>
-        <TableHeader>
-          <TableRow>
-            {selectable ? (
-              <TableHead>
-                <Checkbox
-                  aria-label={text.selectAll}
-                  checked={allChosen}
-                  disabled={selectableRows.length === 0}
-                  indeterminate={chosen.length > 0 && !allChosen}
-                  onCheckedChange={(checked) => {
-                    setSelected(
-                      new Set(
-                        checked
-                          ? selectableRows.flatMap(({ id }) =>
-                              id === undefined ? [] : [id]
-                            )
-                          : []
-                      )
-                    );
-                  }}
-                />
-              </TableHead>
-            ) : null}
-            {columns.map((column) => (
-              <TableHead
-                aria-sort={
-                  column.sortable ? ariaSortOf(state, column.field) : undefined
-                }
-                key={column.field}
-              >
-                {column.sortable ? (
-                  <Button
-                    onClick={() => {
-                      onSort(column.field);
+      {/* In a bordered box of its own, as the registry's data table. */}
+      <div className="overflow-hidden rounded-md border">
+        <Table aria-busy={list.isLoading}>
+          <TableCaption className="sr-only">{label}</TableCaption>
+          <TableHeader>
+            <TableRow>
+              {selectable ? (
+                <TableHead>
+                  <Checkbox
+                    aria-label={text.selectAll}
+                    checked={allChosen}
+                    disabled={selectableRows.length === 0}
+                    indeterminate={chosen.length > 0 && !allChosen}
+                    onCheckedChange={(checked) => {
+                      setSelected(
+                        new Set(
+                          checked
+                            ? selectableRows.flatMap(({ id }) =>
+                                id === undefined ? [] : [id]
+                              )
+                            : []
+                        )
+                      );
                     }}
-                    size="sm"
-                    type="button"
-                    variant="ghost"
-                  >
-                    {column.label}
-                    <SortIcon field={column.field} state={state} />
-                  </Button>
-                ) : (
-                  column.label
-                )}
-              </TableHead>
-            ))}
-            {rowActions.length > 0 ? (
-              <TableHead>
-                <span className="sr-only">{text.actions}</span>
-              </TableHead>
-            ) : null}
-          </TableRow>
-        </TableHeader>
-        <TableBody>{body}</TableBody>
-      </Table>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-muted-foreground text-sm" role="status">
+                  />
+                </TableHead>
+              ) : null}
+              {columns.map((column) => (
+                <TableHead
+                  aria-sort={
+                    column.sortable
+                      ? ariaSortOf(state, column.field)
+                      : undefined
+                  }
+                  key={column.field}
+                >
+                  {column.sortable ? (
+                    <Button
+                      onClick={() => {
+                        onSort(column.field);
+                      }}
+                      type="button"
+                      variant="ghost"
+                    >
+                      {column.label}
+                      <SortIcon field={column.field} state={state} />
+                    </Button>
+                  ) : (
+                    column.label
+                  )}
+                </TableHead>
+              ))}
+              {rowActions.length > 0 ? (
+                <TableHead>
+                  <span className="sr-only">{text.actions}</span>
+                </TableHead>
+              ) : null}
+            </TableRow>
+          </TableHeader>
+          <TableBody>{body}</TableBody>
+        </Table>
+      </div>
+      <div className="flex items-center justify-end gap-2">
+        <span className="text-muted-foreground flex-1 text-sm" role="status">
           {loadingFirst ? null : text.shown(rows.length)}
         </span>
         {list.hasMore ? (
@@ -908,11 +897,12 @@ const GridRows = <Reference extends AnyQuery>({
                   await list.loadMore();
                 } catch {
                   // The list's own failure, which it throws while
-                  // rendering, to the grid's boundary.
+                  // rendering, to the data table's boundary.
                 }
               };
               void more();
             }}
+            size="sm"
             type="button"
             variant="outline"
           >
@@ -925,15 +915,15 @@ const GridRows = <Reference extends AnyQuery>({
   );
 };
 
-/** The grid's failure, in place of its rows, and a way to read it again. */
-const GridFailure = ({
+/** The data table's failure, in place of its rows, and a way to read it again. */
+const DataTableFailure = ({
   error,
   again,
   text,
 }: {
   error: unknown;
   again: () => void;
-  text: DataGridText;
+  text: DataTableText;
 }): React.JSX.Element => {
   const retryFailed = useRetryFailed();
   return (
@@ -962,18 +952,18 @@ const GridFailure = ({
 /** How long typing settles before a search reaches the query. */
 const searchSettleMs = 300;
 
-/** The bulk actions a grid of `Row` takes: only of rows it can select by `_id`. */
+/** The bulk actions a data table of `Row` takes: only of rows it can select by `_id`. */
 type BulkActionsOf<Row> = [Row] extends [KeyedRow]
-  ? readonly DataGridBulkAction<Row>[]
+  ? readonly DataTableBulkAction<Row>[]
   : never;
 
-/** The row actions a grid of `Row` takes: only of rows it knows by `_id`. */
+/** The row actions a data table of `Row` takes: only of rows it knows by `_id`. */
 type RowActionsOf<Row> = [Row] extends [KeyedRow]
-  ? readonly DataGridRowAction<Row>[]
+  ? readonly DataTableRowAction<Row>[]
   : never;
 
-/** What a data grid takes. */
-export interface DataGridProps<Reference extends AnyQuery> {
+/** What a data table takes. */
+export interface DataTableProps<Reference extends AnyQuery> {
   /** What the table is, as its caption says. */
   readonly label: string;
   /** The App's query that answers the records, a page at a time. */
@@ -984,16 +974,16 @@ export interface DataGridProps<Reference extends AnyQuery> {
    * takes them. A change starts the list again.
    */
   readonly args: (
-    state: DataGridState<PageItemOf<Reference>>
+    state: DataTableState<PageItemOf<Reference>>
   ) => PaginatedArgsOf<Reference> | "skip";
   /** Its columns, in order: a field's name, or how it shows. */
-  readonly columns: readonly DataGridColumn<PageItemOf<Reference>>[];
+  readonly columns: readonly DataTableColumn<PageItemOf<Reference>>[];
   /** How many records it loads first, and more by: 1 to 100. */
   readonly pageSize?: number;
   /** Shows a search box; its text is the box's placeholder. */
   readonly search?: string;
   /** The sort it starts with. */
-  readonly initialSort?: DataGridState<PageItemOf<Reference>>["sort"];
+  readonly initialSort?: DataTableState<PageItemOf<Reference>>["sort"];
   /** What a row's menu offers: the records must have an `_id`. */
   readonly rowActions?: RowActionsOf<PageItemOf<Reference>>;
   /**
@@ -1004,7 +994,7 @@ export interface DataGridProps<Reference extends AnyQuery> {
   /** What it says, besides its title, when there are no records. */
   readonly empty?: ReactNode;
   /** What it says, in the page's language (the page's otherwise). */
-  readonly text?: Partial<DataGridText>;
+  readonly text?: Partial<DataTableText>;
 }
 
 const noActions: readonly never[] = [];
@@ -1017,7 +1007,7 @@ const noActions: readonly never[] = [];
  * field as the query declares it.
  *
  * ```tsx
- * <DataGrid
+ * <DataTable
  *   label="Customers"
  *   query={api.customers.list}
  *   args={({ search, sort, filters }) => ({
@@ -1038,7 +1028,7 @@ const noActions: readonly never[] = [];
  * />
  * ```
  */
-export const DataGrid = <Reference extends AnyQuery>({
+export const DataTable = <Reference extends AnyQuery>({
   label,
   query,
   args,
@@ -1050,26 +1040,26 @@ export const DataGrid = <Reference extends AnyQuery>({
   bulkActions,
   empty,
   text: ownText,
-}: DataGridProps<Reference>): React.JSX.Element => {
+}: DataTableProps<Reference>): React.JSX.Element => {
   // SAFETY: `BulkActionsOf` and `RowActionsOf` admit actions only of rows
   // with an `_id`, which are the rows these are.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const bulk = (bulkActions ?? noActions) as readonly DataGridBulkAction<
+  const bulk = (bulkActions ?? noActions) as readonly DataTableBulkAction<
     PageItemOf<Reference>
   >[];
   // SAFETY: as above.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const menu = (rowActions ?? noActions) as readonly DataGridRowAction<
+  const menu = (rowActions ?? noActions) as readonly DataTableRowAction<
     PageItemOf<Reference>
   >[];
 
-  const text: DataGridText = { ...pageText(dataGridTexts), ...ownText };
+  const text: DataTableText = { ...pageText(dataTableTexts), ...ownText };
   const client = useClient();
   const fields = recordFieldsOf(declaredReturns(client, query));
   const columns = specs.map((spec) => readColumn(spec, fields));
   const [typed, setTyped] = useState("");
   const search = useSettled(typed, searchSettleMs);
-  const [sort, setSort] = useState<GridState["sort"]>(initialSort);
+  const [sort, setSort] = useState<TableState["sort"]>(initialSort);
   const [filters, setFilters] = useState<Readonly<Record<string, string>>>({});
   const [hidden, setHidden] = useState<ReadonlySet<string>>(
     () =>
@@ -1077,32 +1067,28 @@ export const DataGrid = <Reference extends AnyQuery>({
         columns.filter((column) => column.hidden).map(({ field }) => field)
       )
   );
-  const state: GridState = { search: search.trim(), sort, filters };
+  const state: TableState = { search: search.trim(), sort, filters };
   const shown = columns.filter((column) => !hidden.has(column.field));
   const filtered = columns.filter((column) => column.filter !== undefined);
   const narrowed = state.search !== "" || Object.keys(filters).length > 0;
   // SAFETY: the sort names a column's field, and each filter one of its
   // column's `filter` values, which are the field's own (`FilterValue`).
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const listArgs = args(state as DataGridState<PageItemOf<Reference>>);
+  const listArgs = args(state as DataTableState<PageItemOf<Reference>>);
   return (
-    <div className="flex flex-col gap-3" data-slot="data-grid">
+    <div className="flex flex-col gap-3" data-slot="data-table">
       <div className="flex flex-wrap items-center gap-2">
         {searchPlaceholder === undefined ? null : (
-          <InputGroup className="max-w-sm">
-            <InputGroupAddon>
-              <SearchIcon aria-hidden />
-            </InputGroupAddon>
-            <InputGroupInput
-              aria-label={text.search}
-              onChange={(event) => {
-                setTyped(event.target.value);
-              }}
-              placeholder={searchPlaceholder}
-              type="search"
-              value={typed}
-            />
-          </InputGroup>
+          <Input
+            aria-label={text.search}
+            className="max-w-sm"
+            onChange={(event) => {
+              setTyped(event.target.value);
+            }}
+            placeholder={searchPlaceholder}
+            type="search"
+            value={typed}
+          />
         )}
         {filtered.map((column) => (
           <NativeSelect
@@ -1134,9 +1120,11 @@ export const DataGrid = <Reference extends AnyQuery>({
           </NativeSelect>
         ))}
         <DropdownMenu>
-          <DropdownMenuTrigger render={<Button variant="outline" />}>
-            <Columns3Icon aria-hidden />
+          <DropdownMenuTrigger
+            render={<Button className="ml-auto" variant="outline" />}
+          >
             {text.columns}
+            <ChevronDownIcon aria-hidden />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuGroup>
@@ -1164,11 +1152,11 @@ export const DataGrid = <Reference extends AnyQuery>({
       </div>
       <QueryBoundary
         renderFailure={(error, again) => (
-          <GridFailure again={again} error={error} text={text} />
+          <DataTableFailure again={again} error={error} text={text} />
         )}
         reading={JSON.stringify(listArgs)}
       >
-        <GridRows
+        <DataTableRows
           args={listArgs}
           // Other arguments, another list: its selection starts empty.
           key={JSON.stringify(listArgs)}

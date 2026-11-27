@@ -85,8 +85,8 @@ import {
   stageOfNamespace,
 } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
-import { readsChatsOf } from "@grasp-os/shared/release";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
+import { canMove } from "@grasp-os/shared/release-apply";
 import { deriveRouterSecret } from "@grasp-os/shared/router";
 import { and, eq, gt, isNotNull, isNull, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -225,7 +225,7 @@ export const provisionOperationErrorCodes = [
   /**
    * A rollback past a release that changed how chats are stored: the
    * release before can't read the chats the client stores since
-   * (`readsChatsOf`). Also what a failed probe's rollback stops with.
+   * (`canMove`). Also what a failed probe's rollback stops with.
    */
   "rollback_past_chat_storage",
   /**
@@ -519,29 +519,10 @@ export const provisionOf = async (db: AdminDatabase, clientId: string) =>
     .get();
 
 /**
- * The first Worker whose last Durable Object migration (`ran`, by Worker)
- * `to` doesn't have: going to `to` would take its script back past a
- * migration it ran. None when `to` has every one.
- */
-const behindMigration = (
-  ran: Readonly<Record<string, string | null>>,
-  to: ReleaseManifest
-): string | undefined =>
-  Object.entries(ran).find(
-    ([name, tag]) =>
-      tag !== null &&
-      !(
-        to.workers[name]?.durableObjectMigrations.some(
-          (step) => step.tag === tag
-        ) ?? false
-      )
-  )?.[0];
-
-/**
  * Throws unless the client of `operation` may go to `target` (a rollback
- * when `rollback`): both imported, `target` with every Durable Object
- * migration a script ran, and reading every chat the client stores
- * (`readsChatsOf`). What a script ran is what it was observed at
+ * when `rollback`): both imported, and the move allowed (`canMove`):
+ * `target` with every Durable Object migration a script ran, and reading
+ * every chat the client stores. What a script ran is what it was observed at
  * (`migrated`); a Worker never observed counts at the last migration of
  * the release the operation has, which may have reached it. The chats
  * are read as the operation's release stores them, whether or not its
@@ -588,14 +569,14 @@ const assertCanGo = async (
     ),
     ...observedTags,
   };
-  const behind = behindMigration(ran, to);
-  if (behind !== undefined) {
+  const refusal = canMove(from, to, { migrated: ran });
+  if (refusal?.reason === "behind_migration") {
     throw new ProvisionOperationError(
       rollback ? "rollback_past_migration" : "release_behind_migration",
-      `${behind} ran a Durable Object migration ${target} doesn't have`
+      `${refusal.worker} ran a Durable Object migration ${target} doesn't have`
     );
   }
-  if (!readsChatsOf(to, from)) {
+  if (refusal?.reason === "behind_chat_storage") {
     throw new ProvisionOperationError(
       rollback ? "rollback_past_chat_storage" : "release_behind_chat_storage",
       `${target} can't read the chats ${running} stores`
