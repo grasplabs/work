@@ -334,7 +334,19 @@ const BoxTools = ({
         {running && typed && stop !== undefined ? (
           <Button
             aria-label={t({ message: "Stop", context: "stop an answer" })}
-            onClick={stop}
+            onClick={(event) => {
+              // It goes as the answer stops, and the focus with it: pressed
+              // by the keys, the text takes it, as PromptInputSubmit's Stop
+              // gives it; a tap leaves a phone's keyboard down.
+              const text =
+                event.detail === 0
+                  ? event.currentTarget
+                      .closest("form")
+                      ?.querySelector<HTMLElement>("[contenteditable=true]")
+                  : undefined;
+              stop();
+              text?.focus();
+            }}
             size="icon-sm"
           >
             <Icon icon={SquareIcon} />
