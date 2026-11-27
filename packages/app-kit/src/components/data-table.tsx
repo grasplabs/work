@@ -179,8 +179,8 @@ interface ColumnOf<Row, Name extends FieldOf<Row>> {
   readonly day?: boolean;
   /**
    * How a cell shows the record; as the query declares the field
-   * otherwise. Formatted text (Markdown) shows with `RichText`:
-   * `cell: (row) => <RichText value={row.notes} />`.
+   * otherwise. Formatted text (Markdown) shows with `Markdown`:
+   * `cell: (row) => <Markdown>{row.notes}</Markdown>`.
    */
   readonly cell?: (row: Row) => ReactNode;
   /**
@@ -1018,7 +1018,7 @@ const noActions: readonly never[] = [];
  *   columns={[
  *     { field: "name", sortable: true, edit: async (row, name) => await rename({ id: row._id, name }) },
  *     { field: "status", filter: { active: "Active", archived: "Archived" } },
- *     { field: "notes", cell: (row) => <RichText value={row.notes} /> },
+ *     { field: "notes", cell: (row) => <Markdown>{row.notes}</Markdown> },
  *     { field: "renewsOn", day: true },
  *     "_createdAt",
  *   ]}

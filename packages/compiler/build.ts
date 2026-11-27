@@ -430,6 +430,42 @@ export default m;`;
 });
 
 /**
+ * Packages whose `browser` build touches the DOM, by the build without it.
+ * A kit module must load without a document: wherever it is evaluated
+ * before a page exists (a check in a worker, a page's module graph before
+ * its frame renders), a module that reads `document` at load fails, and
+ * every page that imports it with it. Markdown's entity decoder
+ * (`decode-named-character-reference`, under the Markdown's Streamdown)
+ * makes an element at load and decodes with `innerHTML`, which an App
+ * page's frame refuses (Trusted Types with no policy); its own build
+ * decodes from a table instead.
+ */
+const loadsWithoutDom: Readonly<Record<string, string>> = {
+  "decode-named-character-reference": "index.js",
+};
+
+/** Resolves each of `loadsWithoutDom` to its build that needs no DOM. */
+const withoutDomAtLoad: Plugin = {
+  name: "kit-without-dom-at-load",
+  enforce: "pre",
+  async resolveId(source, importer, options) {
+    const file = Object.hasOwn(loadsWithoutDom, source)
+      ? loadsWithoutDom[source]
+      : undefined;
+    if (file === undefined) {
+      return null;
+    }
+    const resolved = await this.resolve(source, importer, {
+      ...options,
+      skipSelf: true,
+    });
+    return resolved === null
+      ? null
+      : { ...resolved, id: path.join(path.dirname(resolved.id), file) };
+  },
+};
+
+/**
  * The kit's files that opt a component out of the React Compiler, each for
  * a library the compiler lists as incompatible (AGENTS.md). None does.
  */
@@ -526,9 +562,19 @@ const assertSinglePackages = (sources: FlatModules["sources"]): void => {
 };
 
 /**
- * Tailwind class candidates in the kit's own sources, by the module each
- * source was built into (`Kit.moduleCandidates`). Every source must be in a
- * module: one that isn't would lose its classes without a word.
+ * The built files of the kit's dependencies that draw with Tailwind's
+ * classes themselves, as their docs have an app's stylesheet name them
+ * (`@source "../node_modules/streamdown/dist/*.js"`): Streamdown, under
+ * the kit's Markdown.
+ */
+const classSource = /\/node_modules\/streamdown\/dist\/[^/]+\.js$/u;
+
+/**
+ * Tailwind class candidates in the kit's own sources and in `classSource`,
+ * by the module each file was built into (`Kit.moduleCandidates`): a page
+ * gets a dependency's classes only with the module that draws with it.
+ * Every own source must be in a module: one that isn't would lose its
+ * classes without a word.
  */
 const candidatesByModule = (
   sources: FlatModules["sources"]
@@ -538,7 +584,10 @@ const candidatesByModule = (
   const candidates: Record<string, string[]> = {};
   for (const [name, files] of Object.entries(sources)) {
     const mine = files.filter((file) => own.has(file));
-    const found = mine.flatMap((file) => extractCandidates(readText(file)));
+    const found = [
+      ...mine,
+      ...files.filter((file) => classSource.test(file)),
+    ].flatMap((file) => extractCandidates(readText(file)));
     if (found.length > 0) {
       candidates[name] = [...new Set(found)].toSorted();
     }
@@ -578,6 +627,7 @@ const buildKitModules = async (
     plugins: [
       reactEntries(preview ? "development" : "production"),
       reactCompiler,
+      withoutDomAtLoad,
     ],
     build: {
       write: false,

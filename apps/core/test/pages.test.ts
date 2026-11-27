@@ -364,6 +364,50 @@ export const Route = createFileRoute("/")({ component: Code });
     ).toBeTruthy();
   });
 
+  it("builds a model's answer in Markdown with Streamdown's classes, which a page without it doesn't carry", async () => {
+    const built = await buildPages(
+      env,
+      {
+        "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+import { Bubble, BubbleContent } from "@grasp-os/app-kit/components/bubble";
+import { Markdown } from "@grasp-os/app-kit/components/markdown";
+import { Message, MessageContent } from "@grasp-os/app-kit/components/message";
+
+const answer = "Two are **overdue**:\\n\\n| Supplier | Days |\\n| --- | --- |\\n| Noord | 3 |\\n\\n\`\`\`ts\\nconst late = 3;\\n\`\`\`\\n";
+
+function Answer() {
+  return (
+    <Message>
+      <MessageContent>
+        <Bubble variant="ghost">
+          <BubbleContent>
+            <Markdown isAnimating={false}>{answer}</Markdown>
+          </BubbleContent>
+        </Bubble>
+      </MessageContent>
+    </Message>
+  );
+}
+export const Route = createFileRoute("/")({ component: Answer });
+`,
+      },
+      "app-test"
+    );
+    const without = await buildPages(env, sampleApp, "app-test");
+    if (!built.ok || !without.ok) {
+      throw new Error(JSON.stringify(built.diagnostics, null, 2));
+    }
+    // The table's frame, a class only Streamdown draws with.
+    const tableFrame = ".divide-border";
+
+    expect(built.diagnostics).toStrictEqual([]);
+    expect(kitModulesOf(built)).toStrictEqual(
+      expect.arrayContaining(["@grasp-os~app-kit~components~markdown.js"])
+    );
+    expect(built.css).toContain(tableFrame);
+    expect(without.css).not.toContain(tableFrame);
+  });
+
   it("has the classes of the kit modules an App loads in its CSS, not the catalog's", async () => {
     // The sidebar's width, a class only the sidebar has.
     const sidebarClass = "w-\\(--sidebar-width\\)";

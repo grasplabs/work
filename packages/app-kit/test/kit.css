@@ -7,3 +7,6 @@
 
 @source "./catalog";
 @source "../src";
+/* The classes Streamdown draws the Markdown with, as the compiler gives a
+   page that imports it (packages/compiler/build.ts, classSource). */
+@source "../node_modules/streamdown/dist";

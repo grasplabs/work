@@ -43,5 +43,10 @@
     "path": "src/components/questionnaire.tsx",
     "reason": "Its last step completes in an App page's frame, which submits no form and fires no submit event: the form's requestSubmit() fires the submit event itself, and the submit button calls it on its click, so the questionnaire's checks and onSubmit run.",
     "test": "packages/app-kit/test/kit.browser.test.tsx"
+  },
+  {
+    "path": "src/components/markdown.tsx",
+    "reason": "Upstream's Markdown (apps/v4/components/markdown.tsx), kit-own as no registry item installs it. Raw HTML in a model's answer shows as the text it is: Streamdown's rehype plugins run without rehype-raw, which would parse it into elements. A link shows its words with its address beside them: an App page's frame opens no window and goes nowhere, so Streamdown's link, a button whose dialog opens or copies the address, would do nothing.",
+    "test": "packages/app-kit/test/markdown.browser.test.tsx"
   }
 ]

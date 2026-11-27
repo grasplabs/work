@@ -1637,6 +1637,12 @@ const buildDeclaration = `/**
  *   shown. It shows its own empty, loading and failed states.
  *   \`<DataTable label="Tasks" query={api.tasks.list} args={({ search, sort, filters }) => ({ search, status: filters.status, titleOrder: sort?.field === "title" ? sort.direction : undefined })} columns={[{ field: "title", sortable: true, edit: async (task, title) => await rename({ id: task._id, title }) }, { field: "status", filter: { open: "Open", done: "Done" } }, { field: "due", day: true }]} search="Search tasks" rowActions={[{ label: "Open", onSelect: async (task) => await navigate({ to: "/tasks/$taskId", params: { taskId: task._id } }) }]} />\`
  *   (\`navigate\` is \`useNavigate()\` from \`@tanstack/react-router\`)
+ * - A model's answer (an action's \`ctx.ai.generate\`) is \`<Markdown>\`
+ *   (\`@grasp-os/app-kit/components/markdown\`) in a \`<Bubble variant="ghost">\`
+ *   inside a \`Message\`, the person's words in a plain \`Bubble\`, as the
+ *   registry's message-markdown example shows; text still growing takes
+ *   \`isAnimating\` while it does. HTML in the text shows as text, a link as
+ *   its words and address, and no image from another server loads.
  * - A kit component takes layout classes alone where a page calls it
  *   (margin, size, position, flex and grid placement, text alignment):
  *   never a class of look, not even where the registry's docs show one
