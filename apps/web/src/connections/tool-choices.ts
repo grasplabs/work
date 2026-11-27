@@ -123,12 +123,12 @@ export const changeableConnectionOf = (
  * An app's tools as the app parts (app/) draw them: each in plain
  * words, reading where its provider says it only reads, and what Grasp
  * may do with it through `connection`. A Composio connection allows the
- * tools its admin chose, each as its rule says: connect runs a tool its
- * rule calls a read without asking, whatever the provider's hint, so one
- * reads here too; a native one allows every tool; with none, nothing is
- * allowed. A tool the connection allows that the toolkit no longer offers
- * comes last, under `goneGroup`, as its rule says, so it can still be
- * taken away.
+ * tools its admin chose, each as its rule says, but connect runs a tool
+ * as a read only while Composio says it only reads: a read saved of any
+ * other tool is a write here too. A native one allows every tool; with
+ * none, nothing is allowed. A tool the connection allows that the toolkit
+ * no longer offers comes last, under `goneGroup`, as a write, which is
+ * how connect runs it, so it can still be taken away.
  */
 export const appToolsOf = (
   tools: readonly CatalogTool[],
@@ -151,58 +151,65 @@ export const appToolsOf = (
     if (rule === undefined) {
       return "never";
     }
-    return rule.read ? "read" : "write";
+    // Only a tool Composio says only reads is a read: a read saved of any
+    // other is a write, as connect takes it.
+    return rule.read && tool.readOnly ? "read" : "write";
   };
-  const savedRead = (name: string): boolean =>
-    allowed?.some((rule) => rule.name === name && rule.read) ?? false;
   const listed = tools.map((tool): AppTool => ({
     id: tool.name,
     name: toolWords(tool.name, integration.id),
     ...(tool.description === null ? {} : { description: tool.description }),
-    kind: tool.readOnly || savedRead(tool.name) ? "read" : "write",
+    kind: tool.readOnly ? "read" : "write",
     choice: choiceOf(tool),
   }));
   const offered = new Set(tools.map(({ name }) => name));
   const gone = (allowed ?? [])
     .filter(({ name }) => !offered.has(name))
-    .map(({ name, read }): AppTool => ({
+    .map(({ name }): AppTool => ({
       id: name,
       name: toolWords(name, integration.id),
-      kind: read ? "read" : "write",
-      choice: read ? "read" : "write",
+      kind: "write",
+      choice: "write",
       group: goneGroup,
     }));
   return [...listed, ...gone];
 };
 
 /**
- * `allowed` after a change from the app's page: a tool set to Never is
- * taken away, one set to Read or Write is allowed as that, keeping its
- * resource rule. Tools the change doesn't name stay as they were, and so
- * does a tool the toolkit no longer offers (not in `offered`) unless it is
+ * `allowed` after a change from the app's page, of the toolkit's `tools`:
+ * a tool set to Never is taken away, one set to Read or Write is allowed
+ * as that, keeping its resource rule. Only a tool Composio says only
+ * reads (`CatalogTool.readOnly`) is allowed as a read: connect refuses a
+ * read of any other, so a read saved of one before is sent as a write,
+ * whatever the change names. Other tools the change doesn't name stay as
+ * they were, and so does a tool the toolkit no longer offers unless it is
  * taken away: connect keeps such a tool only with its rule unchanged.
  */
 export const withChoices = (
   allowed: readonly AllowedTool[],
   changes: readonly { id: string; choice: AppToolChoice }[],
-  offered: ReadonlySet<string>
+  tools: readonly CatalogTool[]
 ): AllowedTool[] => {
   const next = new Map(changes.map(({ id, choice }) => [id, choice]));
+  const readOnly = new Map(tools.map((tool) => [tool.name, tool.readOnly]));
   const kept = allowed.flatMap((tool) => {
     const choice = next.get(tool.name);
-    if (choice === undefined) {
-      return [tool];
-    }
     if (choice === "never") {
       return [];
     }
-    return offered.has(tool.name)
-      ? [{ ...tool, read: choice === "read" }]
-      : [tool];
+    const reads = readOnly.get(tool.name);
+    if (reads === undefined) {
+      return [tool];
+    }
+    const read = choice === undefined ? tool.read : choice === "read";
+    return [{ ...tool, read: read && reads }];
   });
   const known = new Set(allowed.map(({ name }) => name));
   const added = changes
     .filter(({ id, choice }) => choice !== "never" && !known.has(id))
-    .map(({ id, choice }) => ({ name: id, read: choice === "read" }));
+    .map(({ id, choice }) => ({
+      name: id,
+      read: choice === "read" && readOnly.get(id) === true,
+    }));
   return [...kept, ...added];
 };

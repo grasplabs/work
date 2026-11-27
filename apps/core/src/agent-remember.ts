@@ -1,6 +1,7 @@
-import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { Type } from "@earendil-works/pi-ai";
-import type { Message, Static } from "@earendil-works/pi-ai";
+import type { Message } from "@earendil-works/pi-ai";
+import { defineTool } from "@earendil-works/pi-durable";
+import { arr, lit, obj, opt, str, union } from "@earendil-works/pi-schema";
+import type { Static } from "@earendil-works/pi-schema";
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import type {
   BrainEntityKind,
@@ -20,6 +21,7 @@ import {
   ownWordAs,
 } from "./brain-next.ts";
 import type { Remembered } from "./brain-next.ts";
+import { resultLimits } from "./code-mode.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
 
 // The agent remembers on its own (GRA-1814, the plan's decision 13): in a
@@ -62,80 +64,74 @@ const oneOf = <const T extends string>(
   values: readonly T[],
   description: string
 ) =>
-  Type.Union(
-    values.map((value) => Type.Literal(value)),
+  union(
+    values.map((value) => lit(value)),
     { description }
   );
 
-const parameters = Type.Object(
-  {
-    about: Type.Union(
-      [
-        Type.Literal("me", {
-          description: "The person you are talking with.",
+const parameters = obj({
+  about: union(
+    [
+      lit("me", {
+        description: "The person you are talking with.",
+      }),
+      obj({
+        kind: oneOf(memoryChoices.kinds, "What it is."),
+        name: str({
+          minLength: 1,
+          maxLength: memoryChoices.valueMaxLength,
+          description:
+            'Its name. For the person you are talking with, use "me" as `about` instead, never an entity named "me".',
         }),
-        Type.Object(
-          {
-            kind: oneOf(memoryChoices.kinds, "What it is."),
-            name: Type.String({
-              minLength: 1,
-              maxLength: memoryChoices.valueMaxLength,
-              description:
-                'Its name. For the person you are talking with, use "me" as `about` instead, never an entity named "me".',
-            }),
-            id: Type.Optional(
-              Type.String({
-                format: "uuid",
-                description:
-                  "Its id from an earlier save, so this memory joins the same one.",
-              })
-            ),
-          },
-          { additionalProperties: false }
+        id: opt(
+          str({
+            format: "uuid",
+            description:
+              "Its id from an earlier save, so this memory joins the same one.",
+          })
         ),
-      ],
-      { description: "Who or what it is about." }
-    ),
-    attribute: Type.Optional(
-      oneOf(
-        memoryChoices.attributes,
-        'What it says of them, one their kind has: for "me", "role", "responsibility", "expertise", "preference" or "instruction"; for a customer "status", "renewal_date", "next_step"… Leave it out when none fits.'
-      )
-    ),
-    value: Type.Optional(
-      Type.String({
-        minLength: 1,
-        maxLength: memoryChoices.valueMaxLength,
-        description: "The attribute's value, short.",
-      })
-    ),
-    type: oneOf(
-      memoryChoices.types,
-      'A fact, a decision, how they want things ("preference") or how you should work for them ("instruction").'
-    ),
-    statement: Type.String({
+      }),
+    ],
+    { description: "Who or what it is about." }
+  ),
+  attribute: opt(
+    oneOf(
+      memoryChoices.attributes,
+      'What it says of them, one their kind has: for "me", "role", "responsibility", "expertise", "preference" or "instruction"; for a customer "status", "renewal_date", "next_step"… Leave it out when none fits.'
+    )
+  ),
+  value: opt(
+    str({
       minLength: 1,
-      maxLength: memoryChoices.statementMaxLength,
+      maxLength: memoryChoices.valueMaxLength,
+      description: "The attribute's value, short.",
+    })
+  ),
+  type: oneOf(
+    memoryChoices.types,
+    'A fact, a decision, how they want things ("preference") or how you should work for them ("instruction").'
+  ),
+  statement: str({
+    minLength: 1,
+    maxLength: memoryChoices.statementMaxLength,
+    description:
+      "What to remember, as one plain sentence in their language. They see it.",
+  }),
+  quote: str({
+    minLength: 1,
+    maxLength: memoryChoices.quoteMaxLength,
+    description:
+      "Their own words it rests on, copied exactly from their last message.",
+  }),
+  replaces: opt(
+    arr(str({ format: "uuid" }), {
+      minItems: 1,
+      maxItems: memoryChoices.replacesMax,
       description:
-        "What to remember, as one plain sentence in their language. They see it.",
-    }),
-    quote: Type.String({
-      minLength: 1,
-      maxLength: memoryChoices.quoteMaxLength,
-      description:
-        "Their own words it rests on, copied exactly from their last message.",
-    }),
-    replaces: Type.Optional(
-      Type.Array(Type.String({ format: "uuid" }), {
-        minItems: 1,
-        maxItems: memoryChoices.replacesMax,
-        description:
-          "The ids of their own earlier memories about the same subject that this one replaces, from your earlier saves' answers or what was recalled as theirs: only when they say those no longer hold.",
-      })
-    ),
-  },
-  { additionalProperties: false }
-);
+        "The ids of their own earlier memories about the same subject that this one replaces, from your earlier saves' answers or what was recalled as theirs: only when they say those no longer hold.",
+    })
+  ),
+});
 
 type Proposed = Static<typeof parameters>;
 
@@ -366,8 +362,11 @@ const notTheirWords =
 
 /**
  * The tool for one turn of `scope`'s chat, which the person's message
- * `said` started: only in the person's own chat, in Grasp's app or their
- * direct message on a chat app, in a turn they started. `answering` gives
+ * started: only in the person's own chat, in Grasp's app or their direct
+ * message on a chat app, in a turn they started. `said` reads what they
+ * said in the turn when a save is checked: that message, and those they
+ * sent while it ran, which it took in (chat-harness.ts `queueQuestion`).
+ * `answering` gives
  * the agent's last words before it as the turn's model is given them,
  * read when a save is checked: what the chat may no longer read never
  * reaches the check (chat-harness.ts).
@@ -375,82 +374,74 @@ const notTheirWords =
 export const rememberTool = (
   env: Env,
   scope: Omit<AgentScope, "runId">,
-  said: string,
+  said: () => Promise<string>,
   answering: () => string | undefined
-): AgentTool<typeof parameters, ChatSavedMemory> => ({
-  name: rememberName,
-  label: "Remember",
-  description: [
-    "Keeps something the person told you that will still matter in their later chats: a lasting fact about them, their work or the people and things they deal with, a decision, or how they want you to work. It is kept as their own word, for them alone; they see a notice of it and can undo it.",
-    "Memory is for what helps you help them next time. Most messages hold nothing worth keeping, so save rarely, and never what only matters to this chat.",
-    `A save replaces what you saved before only when it names the same subject (the person as "me", or another by the id an earlier save answered) and an attribute that holds one value. These attributes hold many values side by side, so a save adds beside the earlier ones: ${memoryChoices.manyValueAttributes.join(", ")}. Another person or thing named only by its name is a new one: name one you saved before by its id.`,
-    'When the person says something of theirs you saved or recalled no longer holds (it changed, they changed their mind, it was wrong: "it\'s sushi now" after "I love pizza"), name those memories in `replaces`: they stay as history, no longer in use, and the person can undo it. Something that sits beside them ("I also like sushi") replaces nothing: leave `replaces` out.',
-  ].join("\n"),
-  parameters,
-  executionMode: "sequential",
-  execute: async (toolCallId, input, signal) => {
-    if (isNamedMe(input.about)) {
-      throw new Error(namedMe);
-    }
-    if (!isTheirWords(said, input.quote)) {
-      throw new Error(notTheirWords);
-    }
-    const about = await subjectOf(env, scope.personId, input.about);
-    if (about === null) {
-      throw new Error(unknownEntity);
-    }
-    // Each memory once, however often the call names it.
-    const replaces =
-      input.replaces === undefined ? undefined : [...new Set(input.replaces)];
-    const replaced =
-      replaces === undefined
-        ? []
-        : await replacedOf(env, scope.personId, about.entity, replaces);
-    if (replaced === null) {
-      throw new Error(notTheirMemory);
-    }
-    const stated = await statedByThem(
-      env,
-      scope,
-      { said, answering: answering() },
-      about.subject,
-      input,
-      replaced
-    );
-    if (!stated) {
-      throw new Error(notTheirWords);
-    }
-    signal?.throwIfAborted();
-    const saved = await rememberFor(
-      env,
-      {
-        person: scope.personId,
-        actor: delegateActorOf(chatAuthority(scope), scope.via),
-        target: { type: "chat", id: scope.chatId },
-      },
-      {
-        change: `chat:${scope.chatId}:${toolCallId}`,
-        about: about.entity,
-        ...(input.attribute === undefined
-          ? {}
-          : { attribute: input.attribute }),
-        ...(input.value === undefined ? {} : { value: input.value }),
-        type: input.type,
-        statement: input.statement,
-        quote: input.quote,
-        ...(replaces === undefined ? {} : { replaces }),
+) =>
+  defineTool<typeof parameters, ChatSavedMemory>({
+    name: rememberName,
+    outputLimits: resultLimits,
+    description: [
+      "Keeps something the person told you that will still matter in their later chats: a lasting fact about them, their work or the people and things they deal with, a decision, or how they want you to work. It is kept as their own word, for them alone; they see a notice of it and can undo it.",
+      "Memory is for what helps you help them next time. Most messages hold nothing worth keeping, so save rarely, and never what only matters to this chat.",
+      `A save replaces what you saved before only when it names the same subject (the person as "me", or another by the id an earlier save answered) and an attribute that holds one value. These attributes hold many values side by side, so a save adds beside the earlier ones: ${memoryChoices.manyValueAttributes.join(", ")}. Another person or thing named only by its name is a new one: name one you saved before by its id.`,
+      'When the person says something of theirs you saved or recalled no longer holds (it changed, they changed their mind, it was wrong: "it\'s sushi now" after "I love pizza"), name those memories in `replaces`: they stay as history, no longer in use, and the person can undo it. Something that sits beside them ("I also like sushi") replaces nothing: leave `replaces` out.',
+    ].join("\n"),
+    parameters,
+    execute: async (input, { callId }, { abortSignal }) => {
+      if (isNamedMe(input.about)) {
+        throw new Error(namedMe);
       }
-    );
-    return {
-      content: [
+      const words = await said();
+      if (!isTheirWords(words, input.quote)) {
+        throw new Error(notTheirWords);
+      }
+      const about = await subjectOf(env, scope.personId, input.about);
+      if (about === null) {
+        throw new Error(unknownEntity);
+      }
+      // Each memory once, however often the call names it.
+      const replaces =
+        input.replaces === undefined ? undefined : [...new Set(input.replaces)];
+      const replaced =
+        replaces === undefined
+          ? []
+          : await replacedOf(env, scope.personId, about.entity, replaces);
+      if (replaced === null) {
+        throw new Error(notTheirMemory);
+      }
+      const stated = await statedByThem(
+        env,
+        scope,
+        { said: words, answering: answering() },
+        about.subject,
+        input,
+        replaced
+      );
+      if (!stated) {
+        throw new Error(notTheirWords);
+      }
+      abortSignal?.throwIfAborted();
+      const saved = await rememberFor(
+        env,
         {
-          type: "text",
-          text: `Saved as the memory with id ${saved.memory}, about the entity with id ${saved.entity}: give the entity's id to name it again, and the memory's to replace it. The person sees a notice of it and can undo it.`,
+          person: scope.personId,
+          actor: delegateActorOf(chatAuthority(scope), scope.via),
+          target: { type: "chat", id: scope.chatId },
         },
-      ],
-      // What the store kept, as the notice shows it: never the call's own
-      // fields, so the person sees what was saved.
-      details: {
+        {
+          change: `chat:${scope.chatId}:${callId}`,
+          about: about.entity,
+          ...(input.attribute === undefined
+            ? {}
+            : { attribute: input.attribute }),
+          ...(input.value === undefined ? {} : { value: input.value }),
+          type: input.type,
+          statement: input.statement,
+          quote: input.quote,
+          ...(replaces === undefined ? {} : { replaces }),
+        }
+      );
+      const details: ChatSavedMemory = {
         memory: saved.memory,
         type: saved.kept.type,
         statement: saved.kept.statement,
@@ -459,7 +450,17 @@ export const rememberTool = (
         ...("self" in about.subject ? {} : { about: about.subject.name }),
         // What it replaced, as the store holds it.
         ...(replaced.length === 0 ? {} : { replaced }),
-      },
-    };
-  },
-});
+      };
+      return {
+        output: [
+          {
+            type: "text" as const,
+            text: `Saved as the memory with id ${saved.memory}, about the entity with id ${saved.entity}: give the entity's id to name it again, and the memory's to replace it. The person sees a notice of it and can undo it.`,
+          },
+        ],
+        // What the store kept, as the notice shows it: never the call's own
+        // fields, so the person sees what was saved.
+        details,
+      };
+    },
+  });

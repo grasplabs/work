@@ -2085,10 +2085,6 @@ msgstr "Un equipo sin responsable recibe sus enlaces el primer día, y pregunto 
 msgid "A tick: yes or no"
 msgstr "Una casilla: sí o no"
 
-#: src/connections/connect-dialog.tsx
-msgid "A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's Read or Write to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
-msgstr "Una herramienta activada empieza en Lectura donde Composio dice que solo lee; Grasp no lo comprueba. Una herramienta de Lectura se ejecuta sin preguntar. La llamada a una herramienta de Escritura desde el chat, o de una persona que usa una aplicación, espera a que esa persona la confirme; la ejecución de un flujo de trabajo la hace como uno de sus pasos. Pulsa Lectura o Escritura en una herramienta para cambiarla. Marca una herramienta como Lectura solo si no cambia nada: si está mal marcada, cambia cosas sin preguntar."
-
 #: src/apps/field-kinds.tsx
 msgid "A type the App's code declares"
 msgstr "Un tipo que declara el código de la App"
@@ -12631,6 +12627,10 @@ msgstr "Por ahora solo {owner}."
 msgid "Only {person} can say whether it happened."
 msgstr "Solo {person} puede decir si ocurrió."
 
+#: src/connections/connect-dialog.tsx
+msgid "Only a tool Composio says only reads can be Read, and it starts as Read when switched on; any other tool is Write. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a Read tool's Read or Write to change it."
+msgstr "Solo una herramienta que según Composio solo lee puede ser Lectura, y empieza como Lectura al activarla; cualquier otra herramienta es Escritura. Una herramienta de Lectura se ejecuta sin preguntar. Una llamada a una herramienta de Escritura desde un chat, o de alguien que usa una App, espera a que esa persona la confirme; la ejecución de un flujo de trabajo la hace como uno de sus pasos. Pulsa Lectura o Escritura de una herramienta de Lectura para cambiarlo."
+
 #: src/settings/use-team-change.ts
 msgid "Only admins can change teams."
 msgstr "Solo los administradores pueden cambiar los equipos."
@@ -13912,6 +13912,10 @@ msgstr "Pregunta"
 #: src/frame/ui-words.tsx
 msgid "Question {current} of {total}"
 msgstr "Pregunta {current} de {total}"
+
+#: src/chat/thread.tsx
+msgid "Queued"
+msgstr "En cola"
 
 #: src/agents/setup/thinking-step.tsx
 msgid "Quick and careful. Good for most jobs."
@@ -15673,6 +15677,10 @@ msgstr "Enviar invitaciones"
 msgid "Send it when"
 msgstr "Enviarlo cuando"
 
+#: src/chat/thread.tsx
+msgid "Send now"
+msgstr "Enviar ahora"
+
 #: src/settings/event-sources.tsx
 msgid "Send one event"
 msgstr "Enviar un evento"
@@ -16850,6 +16858,7 @@ msgctxt "stop a workflow's run"
 msgid "Stop"
 msgstr "Detener"
 
+#: src/chat/composer.tsx
 #: src/frame/ui-words.tsx
 msgctxt "stop an answer"
 msgid "Stop"

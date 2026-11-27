@@ -397,17 +397,20 @@ const peopleStat = (
   };
 };
 
-/** What troubles its connections, in a few words: stopped, and waiting for a sign-in. */
+/** What troubles its connections, in a few words: stopped, waiting for a sign-in, not checked now. */
 const connectorTrouble = ({
   stopped,
   again,
+  unread,
 }: {
   stopped: number;
   again: number;
+  unread: number;
 }): string => {
   const parts = [
     stopped > 0 ? `${stopped} stopped` : null,
     again > 0 ? `${again} to sign in again` : null,
+    unread > 0 ? `${unread} not checked now` : null,
   ].filter((part) => part !== null);
   return parts.length === 0 ? "All working" : capitalized(parts.join(", "));
 };
@@ -415,19 +418,27 @@ const connectorTrouble = ({
 /** Its company connections that work, of all of them, how many stopped, and how many wait for a sign-in. */
 const connectorCounts = (
   organization: AnsweredOrganization
-): { works: number; all: number; stopped: number; again: number } | null => {
+): {
+  works: number;
+  all: number;
+  stopped: number;
+  again: number;
+  unread: number;
+} | null => {
   const { integrations } = organization.admin.snapshot;
   if (integrations === null) {
     return null;
   }
   const { connected } = integrations;
-  const count = (state: "works" | "again" | "stopped") =>
+  const count = (state: (typeof connected)[number]["state"]) =>
     connected.filter((each) => each.state === state).length;
   return {
     works: count("works"),
     all: connected.length,
     stopped: count("stopped"),
     again: count("again"),
+    // Composio couldn't be asked about these now.
+    unread: count("unread"),
   };
 };
 

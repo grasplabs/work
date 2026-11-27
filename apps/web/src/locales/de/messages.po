@@ -2085,10 +2085,6 @@ msgstr "Ein Team ohne Teamleitung bekommt seine Links am ersten Tag, und ich fra
 msgid "A tick: yes or no"
 msgstr "Ein Häkchen: ja oder nein"
 
-#: src/connections/connect-dialog.tsx
-msgid "A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's Read or Write to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
-msgstr "Ein eingeschaltetes Tool beginnt mit Lesen, wo Composio angibt, dass es nur liest; Grasp prüft das nicht. Ein Tool mit Lesen läuft ohne Nachfrage. Ein Aufruf eines Tools mit Schreiben aus dem Chat oder von einer Person, die eine App nutzt, wartet, bis diese Person ihn bestätigt; ein Workflow-Lauf führt ihn als einen seiner Schritte aus. Drücken Sie bei einem Tool auf Lesen oder Schreiben, um das zu ändern. Setzen Sie ein Tool nur auf Lesen, wenn es nichts ändert: Falsch markiert, ändert es Dinge ohne Nachfrage."
-
 #: src/apps/field-kinds.tsx
 msgid "A type the App's code declares"
 msgstr "Ein Typ, den der Code der App festlegt"
@@ -12631,6 +12627,10 @@ msgstr "Bisher nur {owner}."
 msgid "Only {person} can say whether it happened."
 msgstr "Nur {person} kann sagen, ob es passiert ist."
 
+#: src/connections/connect-dialog.tsx
+msgid "Only a tool Composio says only reads can be Read, and it starts as Read when switched on; any other tool is Write. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a Read tool's Read or Write to change it."
+msgstr "Nur ein Tool, das laut Composio nur liest, kann Lesen sein, und es beginnt als Lesen, wenn es eingeschaltet wird; jedes andere Tool ist Schreiben. Ein Lesen-Tool läuft, ohne zu fragen. Ein Aufruf eines Schreiben-Tools aus einem Chat oder von einer Person, die eine App nutzt, wartet darauf, dass diese Person ihn bestätigt; ein Lauf eines Workflows führt ihn als einen seiner Schritte aus. Drücke Lesen oder Schreiben eines Lesen-Tools, um es zu ändern."
+
 #: src/settings/use-team-change.ts
 msgid "Only admins can change teams."
 msgstr "Nur Admins können Teams ändern."
@@ -13912,6 +13912,10 @@ msgstr "Frage"
 #: src/frame/ui-words.tsx
 msgid "Question {current} of {total}"
 msgstr "Frage {current} von {total}"
+
+#: src/chat/thread.tsx
+msgid "Queued"
+msgstr "In der Warteschlange"
 
 #: src/agents/setup/thinking-step.tsx
 msgid "Quick and careful. Good for most jobs."
@@ -15673,6 +15677,10 @@ msgstr "Einladungen senden"
 msgid "Send it when"
 msgstr "Senden, wenn"
 
+#: src/chat/thread.tsx
+msgid "Send now"
+msgstr "Jetzt senden"
+
 #: src/settings/event-sources.tsx
 msgid "Send one event"
 msgstr "Ein Event senden"
@@ -16850,6 +16858,7 @@ msgctxt "stop a workflow's run"
 msgid "Stop"
 msgstr "Stoppen"
 
+#: src/chat/composer.tsx
 #: src/frame/ui-words.tsx
 msgctxt "stop an answer"
 msgid "Stop"

@@ -224,6 +224,55 @@ export const releaseManifestSchema = z.object({
 
 export type ReleaseManifest = z.infer<typeof releaseManifestSchema>;
 
+/**
+ * The package that stores core's chats: pi-durable keeps a chat's records
+ * in its Durable Object, each record at a version of its own, and a later
+ * minor may write versions an earlier one refuses to read (Pi 1.6 did:
+ * `pi.live` 3, `pi.tool` 4 and `pi.generation` 3, none of which Pi 1.4
+ * opens). Chord and pi-schema are pinned with it, and move with it.
+ */
+const chatStorePackage = "@earendil-works/pi-durable";
+
+/** A release's major and minor of pi-durable, as `packages` records it; null when it names none. */
+const chatStorageOf = (
+  manifest: ReleaseManifest
+): readonly [number, number] | null => {
+  const [major, minor] = (manifest.packages[chatStorePackage] ?? "")
+    .split(".")
+    .map(Number);
+  return major === undefined ||
+    minor === undefined ||
+    !Number.isInteger(major) ||
+    !Number.isInteger(minor)
+    ? null
+    : [major, minor];
+};
+
+/**
+ * Whether a client on release `to` still opens every chat its core stored
+ * on release `from`: `to` runs at least `from`'s major and minor of
+ * pi-durable. A patch never changes how chats are stored, and every minor
+ * may, so each new minor is a boundary a client never goes back across.
+ * Read from what every manifest has recorded since the first, the
+ * installed versions of its packages, so it holds for releases imported
+ * before this rule too. A release that names no pi-durable counts as
+ * storing no chats, and one that names it never goes to one without it.
+ */
+export const readsChatsOf = (
+  to: ReleaseManifest,
+  from: ReleaseManifest
+): boolean => {
+  const stored = chatStorageOf(from);
+  if (stored === null) {
+    return true;
+  }
+  const reads = chatStorageOf(to);
+  if (reads === null) {
+    return false;
+  }
+  return reads[0] === stored[0] ? reads[1] >= stored[1] : reads[0] > stored[0];
+};
+
 /** Where a Worker module is stored, in the release directory and in R2. */
 export const moduleKey = (hash: string): string => `blobs/modules/${hash}`;
 /** Where a D1 migration is stored. */

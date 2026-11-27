@@ -136,6 +136,7 @@ export const ChatConversation = ({
     failure,
     empty,
     ask,
+    sendNow,
     composer,
     offered,
     sourceNames,
@@ -186,6 +187,10 @@ export const ChatConversation = ({
         }}
         output={view.output}
         partial={view.partial}
+        queued={view.queued}
+        onSendNow={() => {
+          void sendNow(chatId);
+        }}
         checking={view.checking}
         modelWait={view.waiting}
         running={view.running}
@@ -279,6 +284,7 @@ export const ChatFooter = ({
     retry,
     summary,
     offered,
+    box,
   } = chat;
   const work = workOf(builds);
   const unavailable = unavailableText(modelsUnavailable);
@@ -333,9 +339,11 @@ export const ChatFooter = ({
         style={styles.box}
         label={words.title}
         onAnswer={async (text) => await ask(text)}
-        // The box's editor takes its placeholder as it starts: another
-        // starts it afresh, with the text it holds.
-        key={placeholder}
+        // The box's editor takes its placeholder and its words as it
+        // starts: another placeholder, or another chat's draft (whose
+        // mentions may differ in the same words), starts it afresh; the
+        // chat a question made from this draft keeps it, and its cursor.
+        key={`${box} ${placeholder}`}
         placeholder={placeholder}
         running={view.running}
       />

@@ -1377,6 +1377,25 @@ export const codeStyles = stylex.create({
   },
 });
 
+// ---- Syntax colours ------------------------------------------------------------------------------
+//
+// Damsko's colour for each kind of run in code, by the names code-block-highlight.ts gives runs:
+// CodeBlock's code and DiffViewer's lines.
+//
+//   <span {...stylex.props(syntaxStyles[run.tone])}>{run.text}</span>
+
+export const syntaxStyles = stylex.create({
+  keyword: { color: colors.syntaxKeyword },
+  string: { color: colors.syntaxString },
+  constant: { color: colors.syntaxConstant },
+  comment: { color: colors.syntaxComment, fontStyle: "italic" },
+  function: { color: colors.syntaxFunction },
+  punctuation: { color: colors.syntaxPunctuation },
+  attribute: { color: colors.syntaxAttribute },
+  inserted: { color: colors.syntaxInserted },
+  deleted: { color: colors.syntaxDeleted },
+});
+
 const tileStyles = stylex.create({
   edge: {
     boxShadow: size.borderStrong,

@@ -401,7 +401,7 @@ describe("changing what Grasp may do in a connected app", () => {
     ]);
   });
 
-  it("shows a tool its rule lets run without asking as Read, whether or not the toolkit still hints or offers it", async () => {
+  it("shows a read saved of a tool Composio doesn't say only reads, or no longer offers, as Write, and sends it as one with any change", async () => {
     const reads = {
       ...connection,
       tools: [
@@ -409,21 +409,44 @@ describe("changing what Grasp may do in a connected app", () => {
         "HUBSPOT_CREATE_NOTE",
         "HUBSPOT_ARCHIVED_TOOL",
       ],
-      // Connect runs these without asking, whatever Composio's hint says.
+      // Saved before connect refused a read of a tool Composio doesn't
+      // tag read-only: connect runs these two as writes.
       readTools: [
         "HUBSPOT_LIST_CONTACTS",
         "HUBSPOT_CREATE_NOTE",
         "HUBSPOT_ARCHIVED_TOOL",
       ],
     };
-    await shown(reads);
+    const sent = await shown(reads);
     await openGroup("Notes");
     await openGroup("Other");
-
-    expect({
+    const words = {
       unhinted: wordsOf(choiceOf("Create note") ?? document.body),
       retired: wordsOf(choiceOf("Archived tool") ?? document.body),
-    }).toStrictEqual({ unhinted: "Read", retired: "Read" });
+    };
+    await pick("Delete note", "Write");
+
+    expect({ words, sent }).toStrictEqual({
+      words: { unhinted: "Write", retired: "Write" },
+      sent: [
+        {
+          connectionId: "connection-1",
+          tools: [
+            { name: "HUBSPOT_LIST_CONTACTS", read: true },
+            "HUBSPOT_CREATE_NOTE",
+            // Kept as it was: connect keeps a tool no longer offered only
+            // with its rule unchanged, and runs it as a write.
+            { name: "HUBSPOT_ARCHIVED_TOOL", read: true },
+            "HUBSPOT_DELETE_NOTE",
+          ],
+          expected: [
+            { name: "HUBSPOT_LIST_CONTACTS", read: true },
+            { name: "HUBSPOT_CREATE_NOTE", read: true },
+            { name: "HUBSPOT_ARCHIVED_TOOL", read: true },
+          ],
+        },
+      ],
+    });
   });
 
   it("names a workflow that uses it by the name people gave it, and follows it in the app on a plain press", async () => {

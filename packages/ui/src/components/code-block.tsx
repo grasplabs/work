@@ -43,6 +43,7 @@ import {
   codeStyles,
   focusCarrier,
   scrollbarHidden,
+  syntaxStyles,
   visuallyHidden,
 } from "../lib/styles";
 import {
@@ -67,11 +68,10 @@ import {
   newReading,
   noEngine,
   plainLines,
-  stopReading,
   watchEngine,
   writtenLines,
 } from "./code-block-highlight";
-import type { Line, Tone } from "./code-block-highlight";
+import type { Line, Run } from "./code-block-highlight";
 import { codeBlockVars } from "./code-block.stylex";
 import { CopyButton } from "./copy-button";
 import { Spinner } from "./spinner";
@@ -477,17 +477,6 @@ const styles = stylex.create({
   scripted: {
     display: { default: "flex", [NO_SCRIPT]: "none" },
   },
-
-  // The colours of the highlighting.
-  keyword: { color: colors.syntaxKeyword },
-  string: { color: colors.syntaxString },
-  constant: { color: colors.syntaxConstant },
-  comment: { color: colors.syntaxComment, fontStyle: "italic" },
-  function: { color: colors.syntaxFunction },
-  punctuation: { color: colors.syntaxPunctuation },
-  attribute: { color: colors.syntaxAttribute },
-  inserted: { color: colors.syntaxInserted },
-  deleted: { color: colors.syntaxDeleted },
 });
 
 const dynamic = stylex.create({
@@ -500,19 +489,6 @@ const dynamic = stylex.create({
     counterReset: `code-block-line ${before}`,
   }),
 });
-
-/** Each of Damsko's syntax colours (code-block-highlight.ts names which a run takes). */
-const tones: Record<Tone, stylex.StyleXStyles> = {
-  keyword: styles.keyword,
-  string: styles.string,
-  constant: styles.constant,
-  comment: styles.comment,
-  function: styles.function,
-  punctuation: styles.punctuation,
-  attribute: styles.attribute,
-  inserted: styles.inserted,
-  deleted: styles.deleted,
-};
 
 /**
  * At most this many lines are drawn while the block is open (and before the page is live, or with
@@ -546,12 +522,6 @@ const useLinesOf = (
   const engine = useSyncExternalStore(watchEngine, currentEngine, noEngine);
   // oxlint-disable-next-line react/hook-use-state -- made once, never replaced
   const [reading] = useState(newReading);
-  useEffect(
-    () => () => {
-      stopReading(reading);
-    },
-    [reading]
-  );
   if (engine === null || code === "") {
     return plainLines(code, most);
   }
@@ -682,7 +652,7 @@ const useBlock = (part: string): Block => {
  * A line's runs, each in its colour. A component of its own, so the compiler keeps what it drew for
  * as long as the line is the same object (code-block-highlight.ts keeps it one while the code is
  * written and once it is done): a line already coloured is never drawn again while later lines
- * are coloured or more code comes in.
+ * are coloured or more code comes in. DiffViewer draws its runs the same way (its colouredText).
  */
 const LineRuns = ({ line }: { line: Line }) => (
   <>
@@ -692,7 +662,7 @@ const LineRuns = ({ line }: { line: Line }) => (
         run.text
       ) : (
         // A run has no id; its place in the line is its key, and runs never reorder.
-        <span key={at} {...stylex.props(tones[run.tone])}>
+        <span key={at} {...stylex.props(syntaxStyles[run.tone])}>
           {run.text}
         </span>
       )
@@ -724,6 +694,37 @@ export const useHighlightedCode = (
       <LineRuns key={index} line={line} />
     )
   );
+
+/** One run of highlighted code: its text, and the syntax colour it takes (a key of lib's `syntaxStyles`), none for the code's own. */
+export type HighlightedToken = Run;
+
+// A part given no language never loads the lexers.
+const unwatched = () => () => {
+  // Nothing was watched; nothing to stop.
+};
+
+/**
+ * `code` read in `language` by CodeBlock's lexers, whole, for a part that draws code its own way
+ * (DiffViewer's lines): its lines, each a list of runs in their syntax colours. null with no
+ * language, until the lexers have loaded (the first call loads them), where they cannot, and for a
+ * language they do not know. The code is read again only when it changes.
+ */
+export const useHighlightedTokens = (
+  code: string,
+  language: string | undefined
+): readonly (readonly HighlightedToken[])[] | null => {
+  const engine = useSyncExternalStore(
+    language === undefined ? unwatched : watchEngine,
+    currentEngine,
+    noEngine
+  );
+  // oxlint-disable-next-line react/hook-use-state -- made once, never replaced
+  const [reading] = useState(newReading);
+  if (engine === null || language === undefined) {
+    return null;
+  }
+  return doneLines(reading, engine, code, language, Number.POSITIVE_INFINITY);
+};
 
 /** Code, highlighted, with its title and language over it, a copy button, and Show more when it is long. */
 export const CodeBlock = ({
