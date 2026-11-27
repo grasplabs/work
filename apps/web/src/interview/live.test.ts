@@ -277,7 +277,21 @@ describe("the live interview with the ElevenLabs agent", () => {
     kept.options.onModeChange?.({ mode: "speaking" });
     kept.options.onModeChange?.({ mode: "listening" });
     // The agent never hangs up: once his last line is said, the page ends it.
-    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(3000);
     expect(kept.ends).toStrictEqual(["notThem"]);
+  });
+
+  it("keeps him speaking through a breath mid-sentence, and listens once he stays quiet", async () => {
+    const { options, poses } = await joined();
+    options.onModeChange?.({ mode: "speaking" });
+    options.onModeChange?.({ mode: "listening" });
+    await vi.advanceTimersByTimeAsync(300);
+    options.onModeChange?.({ mode: "speaking" });
+    expect(poses.at(-1)).toBe("speaking");
+    options.onModeChange?.({ mode: "listening" });
+    await vi.advanceTimersByTimeAsync(800);
+    expect(poses.filter((pose) => pose === "listening")).toStrictEqual([
+      "listening",
+    ]);
   });
 });

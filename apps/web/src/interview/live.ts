@@ -123,6 +123,8 @@ const tookIt = "ok";
  * it calls it, says it can't go on with them, and ends the call.
  */
 export const notThemFunction = "not_the_person";
+/** How long the agent must stay quiet before his turn counts as over, in ms: his breaths mid-sentence are shorter. */
+const turnEndsMs = 700;
 /** After his last line to them, how long until the page ends it if the agent hasn't, in ms. */
 const notThemAfterMs = 1500;
 /** However it goes, how long after he knew until it is ended, in ms. */
@@ -269,6 +271,8 @@ export const joinAgent = async (
   let notThem = false;
   let endNotThem: (() => void) | null = null;
   let notThemTimer: number | undefined;
+  /** His turn ends once the agent has been quiet this long, not at each breath. */
+  let listeningSoon: number | undefined;
   try {
     const startSession = start ?? (await loadAgentSdk());
     const conversation = await startSession({
@@ -314,17 +318,31 @@ export const joinAgent = async (
         }
       },
       onModeChange: ({ mode }) => {
-        // Without sound he never speaks: what he does follows his lines (`onMessage`).
-        if (!closed && !textOnly) {
-          on.doing(mode === "speaking" ? "speaking" : "listening");
+        window.clearTimeout(listeningSoon);
+        if (closed || mode === "speaking") {
+          // Without sound he never speaks: what he does follows his lines (`onMessage`).
+          if (!closed && !textOnly) {
+            on.doing("speaking");
+          }
+          return;
         }
-        // His last line to whoever isn't them is said: if the agent doesn't end it, the page does.
-        if (!closed && notThem && mode === "listening") {
-          window.clearTimeout(notThemTimer);
-          notThemTimer = window.setTimeout(() => {
-            endNotThem?.();
-          }, notThemAfterMs);
-        }
+        // A breath in the middle of what he says isn't the end of his turn: only a silence
+        // that lasts is (the owner's ask, 2026-11-27).
+        listeningSoon = window.setTimeout(() => {
+          if (closed) {
+            return;
+          }
+          if (!textOnly) {
+            on.doing("listening");
+          }
+          // His last line to whoever isn't them is said: if the agent doesn't end it, the page does.
+          if (notThem) {
+            window.clearTimeout(notThemTimer);
+            notThemTimer = window.setTimeout(() => {
+              endNotThem?.();
+            }, notThemAfterMs);
+          }
+        }, turnEndsMs);
       },
       onIncomingEvent: (event: unknown) => {
         // Their words as they are heard, before the agent settles on them.
