@@ -256,6 +256,16 @@ describe("the admin's Worker for cf", () => {
     });
   });
 
+  it("defers its runs' code updates in both stages, as upload metadata cf deploys with", () => {
+    const deferred = {
+      metadata: { code_update_strategy: { mode: "deferred", max_delay: 900 } },
+    };
+    expect({
+      production: cfWorker(wranglerText, "production", deployed).unsafe,
+      staging: cfWorker(wranglerText, "staging", deployed).unsafe,
+    }).toStrictEqual({ production: deferred, staging: deferred });
+  });
+
   it("takes every setting from the stage's vars in wrangler.jsonc", () => {
     const settings = (stage: "production" | "staging") => {
       const worker = cfWorker(wranglerText, stage, deployed);
