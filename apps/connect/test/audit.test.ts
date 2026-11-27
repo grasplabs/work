@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { fakeComposioServer } from "./composio-api.ts";
 import {
   addConnection,
   agentFor,
@@ -12,7 +13,6 @@ import {
   serverUrl,
 } from "./connect.ts";
 import type { Call } from "./connect.ts";
-import { fakeMcpServer } from "./mcp-server.ts";
 
 // Every call to connect is in the audit log: who made it and for whom, on
 // which connection, which action, which resources it read, and how it
@@ -25,32 +25,36 @@ const manyMessages = Array.from(
     `AAMkAGI2TG93AAA-${String(index).padStart(3, "0")}-${"x".repeat(100)}`
 );
 
-const server = fakeMcpServer(serverUrl, [
-  {
-    name: "mail.list",
-    readOnly: true,
-    run: ({ many }) => {
-      const messages = many === true ? manyMessages : ["message-1"];
-      return {
-        output: { subject: "Quarterly numbers, confidential" },
-        provenance: messages,
-      };
+const server = fakeComposioServer(
+  serverUrl,
+  [
+    {
+      name: "mail.list",
+      readOnly: true,
+      run: ({ many }) => {
+        const messages = many === true ? manyMessages : ["message-1"];
+        return {
+          output: { subject: "Quarterly numbers, confidential" },
+          provenance: messages,
+        };
+      },
     },
-  },
-  {
-    name: "mail.open",
-    readOnly: true,
-    run: () => ({
-      output: { error: "The message is too large to open" },
-      provenance: ["message-9"],
-      isError: true,
-    }),
-  },
-  {
-    name: "mail.send",
-    run: () => ({ output: { messageId: "sent-1" } }),
-  },
-]);
+    {
+      name: "mail.open",
+      readOnly: true,
+      run: () => ({
+        output: { error: "The message is too large to open" },
+        provenance: ["message-9"],
+        isError: true,
+      }),
+    },
+    {
+      name: "mail.send",
+      run: () => ({ output: { messageId: "sent-1" } }),
+    },
+  ],
+  "mail"
+);
 
 const audit = auditEvents();
 

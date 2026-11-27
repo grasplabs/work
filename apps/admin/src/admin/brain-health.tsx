@@ -20,21 +20,6 @@
  * that got through, the erasure counters, and the engine's rebuilds.
  */
 
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@grasp-os/app-kit/components/collapsible";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/app-kit/components/table";
 import {
   brainSearchWays,
   brainSteps,
@@ -51,16 +36,37 @@ import type {
   BrainSyncPhase,
   BrainWithoutMeaningReason,
 } from "@grasp-os/shared/brain-report";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@grasp-os/ui/components/collapsible";
+import { ItemGroup } from "@grasp-os/ui/components/item";
+import { StatGroup } from "@grasp-os/ui/components/stat";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@grasp-os/ui/components/table";
+import { colors, font, space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import { Await, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
+import type { ReactNode } from "react";
 
 import { brainActionFn } from "../clients/brain-functions.ts";
 import { thenRefresh } from "../use-action.ts";
 import { agoWords } from "./ai-status-words.ts";
 import { BrainErasureLookupSection } from "./brain-erasure-lookup.tsx";
 import type { BrainRead } from "./brain-loads.ts";
-import { Figure } from "./parts.tsx";
-import { EmptySection, Section, SectionRow } from "./section.tsx";
+import { EmptyPart, PagePart } from "./page-part.tsx";
+import { PartRow, PartRows } from "./part-rows.tsx";
 import {
   dollars,
   formatList,
@@ -70,6 +76,36 @@ import {
   tokens,
   whole,
 } from "./words.ts";
+
+const styles = stylex.create({
+  figure: { fontVariantNumeric: "tabular-nums" },
+  muted: { color: colors.mutedForeground },
+  // A cell of two lines: what it is, and a quiet line under it.
+  lines: { display: "flex", flexDirection: "column", gap: "2px" },
+  // The same, its lines at the cell's end.
+  linesEnd: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: space["1"],
+  },
+  small: { fontSize: font.textXs, color: colors.mutedForeground },
+  mono: { fontFamily: font.mono, fontSize: font.textXs },
+  // A row's badge beside its button.
+  pair: { display: "flex", alignItems: "center", gap: space["3"] },
+});
+
+/**
+ * Rows folded under a panel's Details, edge to edge as its other rows. Kept
+ * on the page while folded: found by the page's search.
+ */
+const FoldedRows = ({ children }: { children: ReactNode }) => (
+  <CollapsibleContent asChild>
+    <div>
+      <ItemGroup separated>{children}</ItemGroup>
+    </div>
+  </CollapsibleContent>
+);
 
 /** What an action did, as staff read it: its kind's line when done. */
 const doneWords: Readonly<Record<BrainAction["type"], string>> = {
@@ -232,52 +268,48 @@ const Figures = ({ report }: { report: BrainReport }) => {
   const [only] = queue.waiting.length === 1 ? queue.waiting : [];
   const kind = only === undefined ? "" : `${only.kind}: `;
   return (
-    <section
+    <StatGroup
       aria-label="The Brain at work"
-      className="overflow-hidden rounded-xl border"
-    >
-      <div className="bg-border grid grid-cols-2 gap-px lg:grid-cols-4">
-        <Figure
-          label="Waiting"
-          sub={
+      items={[
+        {
+          label: "Waiting",
+          value: whole(waiting),
+          change:
             waiting === 0
               ? `${whole(queue.running)} running`
-              : `${kind}oldest added ${agoWords(oldest, now)}, ${whole(queue.running)} running`
-          }
-          value={whole(waiting)}
-        />
-        <Figure
-          attention={queue.parkedCount > 0}
-          label="Parked"
-          sub={
-            queue.parkedCount > 0
-              ? "Failed too often: requeue below once the cause is fixed"
-              : undefined
-          }
-          value={whole(queue.parkedCount)}
-        />
-        <Figure
-          attention={near}
-          label="Store"
-          sub={
-            near
-              ? `Near its limit of ${sizeWords(store.limitBytes)}: writes fail once it is full`
-              : `${formatPercent(store.bytes / store.limitBytes)} of ${sizeWords(store.limitBytes)}`
-          }
-          value={sizeWords(store.bytes)}
-        />
-        <Figure
-          attention={ledger.replay !== "through"}
-          label="Erasure ledger"
-          sub={
-            ledger.replay === "through"
-              ? undefined
-              : "The Brain answers nothing until it is read through"
-          }
-          value={replayWords[ledger.replay]}
-        />
-      </div>
-    </section>
+              : `${kind}oldest added ${agoWords(oldest, now)}, ${whole(queue.running)} running`,
+        },
+        {
+          label: "Parked",
+          value: whole(queue.parkedCount),
+          ...(queue.parkedCount > 0
+            ? {
+                change:
+                  "Failed too often: requeue below once the cause is fixed",
+                variant: "warning" as const,
+              }
+            : {}),
+        },
+        {
+          label: "Store",
+          value: sizeWords(store.bytes),
+          change: near
+            ? `Near its limit of ${sizeWords(store.limitBytes)}: writes fail once it is full`
+            : `${formatPercent(store.bytes / store.limitBytes)} of ${sizeWords(store.limitBytes)}`,
+          variant: near ? "warning" : "default",
+        },
+        {
+          label: "Erasure ledger",
+          value: replayWords[ledger.replay],
+          ...(ledger.replay === "through"
+            ? {}
+            : {
+                change: "The Brain answers nothing until it is read through",
+                variant: "warning" as const,
+              }),
+        },
+      ]}
+    />
   );
 };
 
@@ -294,56 +326,54 @@ const Waiting = ({ report }: { report: BrainReport }) => {
     return null;
   }
   return (
-    <Section title="Queue">
-      {pause === null ? null : (
-        <SectionRow
-          description={`Since ${agoWords(Date.parse(pause.since), now)}: ${pauseWords[pause.reason] ?? pause.reason}. It tries again ${inWords(Date.parse(pause.until), now)}.`}
-          label="Waiting for the model"
-        >
-          <Badge variant="attention">Paused</Badge>
-        </SectionRow>
+    <PagePart title="Queue">
+      {pause === null && queue.overdue === 0 ? null : (
+        <PartRows>
+          {pause === null ? null : (
+            <PartRow
+              description={`Since ${agoWords(Date.parse(pause.since), now)}: ${pauseWords[pause.reason] ?? pause.reason}. It tries again ${inWords(Date.parse(pause.until), now)}.`}
+              label="Waiting for the model"
+            >
+              <Badge variant="warning">Paused</Badge>
+            </PartRow>
+          )}
+          {queue.overdue > 0 ? (
+            <PartRow
+              description="Their handlers ran past their time and still hold a slot each."
+              label="Running past their time"
+            >
+              <Badge variant="warning">{whole(queue.overdue)}</Badge>
+            </PartRow>
+          ) : null}
+        </PartRows>
       )}
-      {queue.overdue > 0 ? (
-        <SectionRow
-          description="Their handlers ran past their time and still hold a slot each."
-          label="Running past their time"
-        >
-          <Badge variant="attention">{whole(queue.overdue)}</Badge>
-        </SectionRow>
-      ) : null}
       {kinds ? (
-        <div className="border-t">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead variant="card">Kind</TableHead>
-                <TableHead className="text-right" variant="card">
-                  Waiting
-                </TableHead>
-                <TableHead className="text-right" variant="card">
-                  Oldest added
-                </TableHead>
+        <Table aria-label="Waiting by kind">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Kind</TableHead>
+              <TableHead align="end">Waiting</TableHead>
+              <TableHead align="end">Oldest added</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {queue.waiting.map(({ kind, count, oldestAddedAt }) => (
+              <TableRow key={kind}>
+                <TableCell>
+                  <span {...stylex.props(styles.figure)}>{kind}</span>
+                </TableCell>
+                <TableCell align="end">
+                  <span {...stylex.props(styles.figure)}>{whole(count)}</span>
+                </TableCell>
+                <TableCell align="end">
+                  {agoWords(Date.parse(oldestAddedAt), now)}
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {queue.waiting.map(({ kind, count, oldestAddedAt }) => (
-                <TableRow key={kind}>
-                  <TableCell variant="card">
-                    <span className="tabular-nums">{kind}</span>
-                  </TableCell>
-                  <TableCell className="text-right" variant="card">
-                    <span className="tabular-nums">{whole(count)}</span>
-                  </TableCell>
-                  <TableCell className="text-right" variant="card">
-                    {agoWords(Date.parse(oldestAddedAt), now)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+            ))}
+          </TableBody>
+        </Table>
       ) : null}
-    </Section>
+    </PagePart>
   );
 };
 
@@ -365,74 +395,66 @@ const Parked = ({
       ? ` The latest ${whole(parked.length)} of ${whole(parkedCount)} show.`
       : "";
   return (
-    <Section
+    <PagePart
       description={`Items that failed too often. Each comes back by itself a day later, up to three times; requeue one to run it now.${shown}`}
       title="Parked"
     >
-      <div className="border-t">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead variant="card">Kind</TableHead>
-              <TableHead variant="card">Last error</TableHead>
-              <TableHead className="text-right" variant="card">
-                Attempts
-              </TableHead>
-              <TableHead className="text-right" variant="card">
-                Parked
-              </TableHead>
-              <TableHead className="text-right" variant="card">
-                <span className="sr-only">Requeue</span>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {parked.map((item) => (
-              <TableRow key={item.item}>
-                <TableCell variant="card">
-                  <span className="tabular-nums">{item.kind}</span>
-                </TableCell>
-                <TableCell className="whitespace-normal" variant="card">
-                  <span className="flex flex-col gap-0.5">
-                    <span>{item.message}</span>
-                    <span className="text-muted-foreground text-xs">
-                      {item.error}
+      <Table aria-label="Parked items">
+        <TableHeader>
+          <TableRow>
+            <TableHead>Kind</TableHead>
+            <TableHead>Last error</TableHead>
+            <TableHead align="end">Attempts</TableHead>
+            <TableHead align="end">Parked</TableHead>
+            <TableHead align="end" aria-label="Requeue" />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {parked.map((item) => (
+            <TableRow key={item.item}>
+              <TableCell>
+                <span {...stylex.props(styles.figure)}>{item.kind}</span>
+              </TableCell>
+              <TableCell wrap>
+                <span {...stylex.props(styles.lines)}>
+                  <span>{item.message}</span>
+                  <span {...stylex.props(styles.small)}>{item.error}</span>
+                </span>
+              </TableCell>
+              <TableCell align="end">
+                <span {...stylex.props(styles.figure)}>
+                  {whole(item.attempts)}
+                </span>
+              </TableCell>
+              <TableCell align="end">
+                <span {...stylex.props(styles.linesEnd)}>
+                  <span>{agoWords(Date.parse(item.parkedAt), now)}</span>
+                  {item.final ? (
+                    <Badge variant="warning">For good</Badge>
+                  ) : (
+                    <span {...stylex.props(styles.small)}>
+                      {`${whole(item.parks)} ${plural(item.parks, "time", "times")}`}
                     </span>
-                  </span>
-                </TableCell>
-                <TableCell className="text-right" variant="card">
-                  <span className="tabular-nums">{whole(item.attempts)}</span>
-                </TableCell>
-                <TableCell className="text-right" variant="card">
-                  <span className="flex flex-col items-end gap-0.5">
-                    <span>{agoWords(Date.parse(item.parkedAt), now)}</span>
-                    {item.final ? (
-                      <Badge variant="attention">For good</Badge>
-                    ) : (
-                      <span className="text-muted-foreground text-xs">
-                        {`${whole(item.parks)} ${plural(item.parks, "time", "times")}`}
-                      </span>
-                    )}
-                  </span>
-                </TableCell>
-                <TableCell className="text-right" variant="card">
-                  <Button
-                    disabled={busy}
-                    onClick={() => {
-                      act({ type: "requeue", item: item.item });
-                    }}
-                    size="sm"
-                    variant="outline"
-                  >
-                    Requeue
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    </Section>
+                  )}
+                </span>
+              </TableCell>
+              <TableCell align="end">
+                <Button
+                  disabled={busy}
+                  onClick={() => {
+                    act({ type: "requeue", item: item.item });
+                  }}
+                  size="sm"
+                  variant="outline"
+                >
+                  Requeue
+                </Button>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </PagePart>
   );
 };
 
@@ -452,26 +474,27 @@ const Engine = ({
   const rebuilding = report.words === "rebuilding";
   return (
     <Collapsible defaultOpen={rebuilding || embedding.rebuilding}>
-      <Section
+      <PagePart
         action={
-          <CollapsibleTrigger render={<Button size="sm" variant="outline" />}>
-            Details
+          <CollapsibleTrigger asChild>
+            <Button size="sm" variant="outline">
+              Details
+            </Button>
           </CollapsibleTrigger>
         }
         description="Its word indexes and its embedding, and the rebuild of each."
         title="Engine"
       >
-        {/* Kept on the page while folded: found by the page's search. */}
-        <CollapsibleContent keepMounted>
-          <SectionRow
+        <FoldedRows>
+          <PartRow
             description="What recall finds words by. A rebuild rewrites every passage's words from its text, 200 a minute; recall goes on meanwhile."
             label="Word indexes"
           >
-            <span className="flex items-center gap-3">
+            <span {...stylex.props(styles.pair)}>
               {rebuilding ? (
                 <Badge>Rebuilding</Badge>
               ) : (
-                <Badge variant="passed">Current</Badge>
+                <Badge variant="success">Current</Badge>
               )}
               <Button
                 disabled={busy || rebuilding}
@@ -484,33 +507,35 @@ const Engine = ({
                 Rebuild
               </Button>
             </span>
-          </SectionRow>
+          </PartRow>
           {embedding.model === null ? (
-            <SectionRow label="Embedding">
-              <span className="text-muted-foreground">
+            <PartRow label="Embedding">
+              <span {...stylex.props(styles.muted)}>
                 No embedding model runs yet, so the Brain recalls by words
                 alone.
               </span>
-            </SectionRow>
+            </PartRow>
           ) : (
-            <>
-              <SectionRow label="Embedding model">
-                <span className="tabular-nums">{embedding.model}</span>
-              </SectionRow>
-              <SectionRow label="Embedded">
-                <span className="tabular-nums">
+            [
+              <PartRow key="model" label="Embedding model">
+                <span {...stylex.props(styles.figure)}>{embedding.model}</span>
+              </PartRow>,
+              <PartRow key="embedded" label="Embedded">
+                <span {...stylex.props(styles.figure)}>
                   {`${whole(embedding.embedded)} of ${whole(embedding.chunks)} ${plural(embedding.chunks, "passage", "passages")}`}
                 </span>
-              </SectionRow>
-              <SectionRow
+              </PartRow>,
+              <PartRow
                 description="Passages the model can't embed: found by words only, until a re-embed."
+                key="passed"
                 label="Passed over"
               >
-                <span className="tabular-nums">
+                <span {...stylex.props(styles.figure)}>
                   {whole(embedding.passedOver)}
                 </span>
-              </SectionRow>
-              <SectionRow
+              </PartRow>,
+              <PartRow
+                key="rebuild"
                 description={
                   embedding.rebuilding && report.queue.parkedCount > 0
                     ? "It waits on what it put on the queue, parked items included: see Parked above. Once the embedders work again, re-embed to put them back now."
@@ -518,11 +543,11 @@ const Engine = ({
                 }
                 label="Embedding's rebuild"
               >
-                <span className="flex items-center gap-3">
+                <span {...stylex.props(styles.pair)}>
                   {embedding.rebuilding ? (
                     <Badge>Under way</Badge>
                   ) : (
-                    <Badge variant="passed">Done</Badge>
+                    <Badge variant="success">Done</Badge>
                   )}
                   <Button
                     disabled={busy}
@@ -535,11 +560,11 @@ const Engine = ({
                     Re-embed
                   </Button>
                 </span>
-              </SectionRow>
-            </>
+              </PartRow>,
+            ]
           )}
-        </CollapsibleContent>
-      </Section>
+        </FoldedRows>
+      </PagePart>
     </Collapsible>
   );
 };
@@ -548,76 +573,68 @@ const Engine = ({
 const Recall = ({ report }: { report: BrainReport }) => {
   const { recall } = report;
   return (
-    <Section
+    <PagePart
       description={`Since the store last started, ${agoWords(Date.parse(recall.since), Date.parse(report.now))}. A recall searches by each way the question has something for.`}
       title="Recall"
     >
-      <div className="border-t">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead variant="card">Way</TableHead>
-              <TableHead className="text-right" variant="card">
-                Recalls
-              </TableHead>
-              <TableHead className="text-right" variant="card">
-                Failed
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {brainSearchWays.map((way) => {
-              const counts = recall.ways[way];
-              if (counts === undefined) {
-                // A core of an older release, on a slower channel, doesn't send it.
-                return (
-                  <TableRow key={way}>
-                    <TableCell variant="card">{wayWords[way]}</TableCell>
-                    <TableCell
-                      className="text-right"
-                      colSpan={2}
-                      variant="card"
-                    >
-                      Not available yet
-                    </TableCell>
-                  </TableRow>
-                );
-              }
+      <Table aria-label="Recall by each way">
+        <TableHeader>
+          <TableRow>
+            <TableHead>Way</TableHead>
+            <TableHead align="end">Recalls</TableHead>
+            <TableHead align="end">Failed</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {brainSearchWays.map((way) => {
+            const counts = recall.ways[way];
+            if (counts === undefined) {
+              // A core of an older release, on a slower channel, doesn't send it.
               return (
                 <TableRow key={way}>
-                  <TableCell variant="card">{wayWords[way]}</TableCell>
-                  <TableCell className="text-right" variant="card">
-                    <span className="tabular-nums">
-                      {whole(counts.recalls)}
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-right" variant="card">
-                    {counts.failed > 0 ? (
-                      <Badge variant="attention">{whole(counts.failed)}</Badge>
-                    ) : (
-                      <span className="tabular-nums">0</span>
-                    )}
+                  <TableCell>{wayWords[way]}</TableCell>
+                  <TableCell align="end" colSpan={2}>
+                    Not available yet
                   </TableCell>
                 </TableRow>
               );
-            })}
-          </TableBody>
-        </Table>
-      </div>
-      <SectionRow
-        description="Recalls that went by words and exact parts alone because the embedding model failed, was too slow or had no files, or gave a vector the Brain couldn't use."
-        label="Without meaning"
-      >
-        <span className="tabular-nums">
-          {formatList(
-            brainWithoutMeaningReasons.map(
-              (reason) =>
-                `${whole(recall.withoutMeaning[reason])} ${withoutMeaningWords[reason]}`
-            )
-          )}
-        </span>
-      </SectionRow>
-    </Section>
+            }
+            return (
+              <TableRow key={way}>
+                <TableCell>{wayWords[way]}</TableCell>
+                <TableCell align="end">
+                  <span {...stylex.props(styles.figure)}>
+                    {whole(counts.recalls)}
+                  </span>
+                </TableCell>
+                <TableCell align="end">
+                  {counts.failed > 0 ? (
+                    <Badge variant="warning">{whole(counts.failed)}</Badge>
+                  ) : (
+                    <span {...stylex.props(styles.figure)}>0</span>
+                  )}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+      <PartRows>
+        <PartRow
+          description="Recalls that went by words and exact parts alone because the embedding model failed, was too slow or had no files, or gave a vector the Brain couldn't use."
+          label="Without meaning"
+        >
+          <span {...stylex.props(styles.figure)}>
+            {formatList(
+              brainWithoutMeaningReasons.map(
+                (reason) =>
+                  `${whole(recall.withoutMeaning[reason])} ${withoutMeaningWords[reason]}`
+              )
+            )}
+          </span>
+        </PartRow>
+      </PartRows>
+    </PagePart>
   );
 };
 
@@ -631,72 +648,70 @@ const ModelSpend = ({ report }: { report: BrainReport }) => {
   if (spend === undefined) {
     // A core of an older release, on a slower channel, doesn't send it.
     return (
-      <Section title="Model spend">
-        <SectionRow label="Not available yet">
-          <span>This client’s release doesn’t report model spend yet.</span>
-        </SectionRow>
-      </Section>
+      <PagePart title="Model spend">
+        <PartRows>
+          <PartRow label="Not available yet">
+            <span>This client’s release doesn’t report model spend yet.</span>
+          </PartRow>
+        </PartRows>
+      </PagePart>
     );
   }
   const month = formatMonth(spend.month);
   return (
-    <Section
+    <PagePart
       description={`${month}, as the model gateway recorded each answered call, at the providers’ list prices: on the client’s own keys, their provider’s invoice is the bill.`}
       title="Model spend"
     >
       {spend.purposes.length === 0 ? (
-        <SectionRow label={`No model calls in ${month}`}>
-          <span className="tabular-nums">{dollars(0)}</span>
-        </SectionRow>
+        <PartRows>
+          <PartRow label={`No model calls in ${month}`}>
+            <span {...stylex.props(styles.figure)}>{dollars(0)}</span>
+          </PartRow>
+        </PartRows>
       ) : (
-        <div className="border-t">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead variant="card">Purpose</TableHead>
-                <TableHead className="text-right" variant="card">
-                  Calls
-                </TableHead>
-                <TableHead className="text-right" variant="card">
-                  Tokens in
-                </TableHead>
-                <TableHead className="text-right" variant="card">
-                  Tokens out
-                </TableHead>
-                <TableHead className="text-right" variant="card">
-                  Cost
-                </TableHead>
+        <Table aria-label="Model spend by purpose">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Purpose</TableHead>
+              <TableHead align="end">Calls</TableHead>
+              <TableHead align="end">Tokens in</TableHead>
+              <TableHead align="end">Tokens out</TableHead>
+              <TableHead align="end">Cost</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {spend.purposes.map((used) => (
+              <TableRow key={used.purpose}>
+                <TableCell>
+                  <code>{used.purpose}</code>
+                </TableCell>
+                <TableCell align="end">
+                  <span {...stylex.props(styles.figure)}>
+                    {whole(used.calls)}
+                  </span>
+                </TableCell>
+                <TableCell align="end">
+                  <span {...stylex.props(styles.figure)}>
+                    {tokens(used.inputTokens)}
+                  </span>
+                </TableCell>
+                <TableCell align="end">
+                  <span {...stylex.props(styles.figure)}>
+                    {tokens(used.outputTokens)}
+                  </span>
+                </TableCell>
+                <TableCell align="end">
+                  <span {...stylex.props(styles.figure)}>
+                    {dollars(used.cost)}
+                  </span>
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {spend.purposes.map((used) => (
-                <TableRow key={used.purpose}>
-                  <TableCell variant="card">
-                    <code>{used.purpose}</code>
-                  </TableCell>
-                  <TableCell className="text-right" variant="card">
-                    <span className="tabular-nums">{whole(used.calls)}</span>
-                  </TableCell>
-                  <TableCell className="text-right" variant="card">
-                    <span className="tabular-nums">
-                      {tokens(used.inputTokens)}
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-right" variant="card">
-                    <span className="tabular-nums">
-                      {tokens(used.outputTokens)}
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-right" variant="card">
-                    <span className="tabular-nums">{dollars(used.cost)}</span>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+            ))}
+          </TableBody>
+        </Table>
       )}
-    </Section>
+    </PagePart>
   );
 };
 
@@ -710,53 +725,59 @@ const Ledger = ({ report }: { report: BrainReport }) => {
   const { unwritten } = ledger.source;
   return (
     <Collapsible defaultOpen={unwritten > 0}>
-      <Section
+      <PagePart
         action={
-          <CollapsibleTrigger render={<Button size="sm" variant="outline" />}>
-            Details
+          <CollapsibleTrigger asChild>
+            <Button size="sm" variant="outline">
+              Details
+            </Button>
           </CollapsibleTrigger>
         }
         description="Every erasure, counted: never which, or when."
         title="Erasures"
       >
-        <SectionRow
-          description="Erased sources, whole, with their ledger entry written."
-          label="In the ledger"
-        >
-          <span className="flex items-center gap-3">
-            {unwritten > 0 ? (
-              <Badge variant="attention">
-                {`${whole(unwritten)} not yet written`}
-              </Badge>
-            ) : null}
-            <span className="tabular-nums">
-              {`${whole(ledger.source.written)} ${plural(ledger.source.written, "source", "sources")}`}
+        <PartRows>
+          <PartRow
+            description="Erased sources, whole, with their ledger entry written."
+            label="In the ledger"
+          >
+            <span {...stylex.props(styles.pair)}>
+              {unwritten > 0 ? (
+                <Badge variant="warning">
+                  {`${whole(unwritten)} not yet written`}
+                </Badge>
+              ) : null}
+              <span {...stylex.props(styles.figure)}>
+                {`${whole(ledger.source.written)} ${plural(ledger.source.written, "source", "sources")}`}
+              </span>
             </span>
-          </span>
-        </SectionRow>
-        <CollapsibleContent keepMounted>
-          <SectionRow
+          </PartRow>
+        </PartRows>
+        <FoldedRows>
+          <PartRow
             description="Erased and hidden, their ledger entry still to write: each tick tries again."
             label="Not yet written"
           >
-            <span className="tabular-nums">{whole(unwritten)}</span>
-          </SectionRow>
-          <SectionRow
+            <span {...stylex.props(styles.figure)}>{whole(unwritten)}</span>
+          </PartRow>
+          <PartRow
             description="Hidden already; the tick deletes what they held a batch at a time."
             label="Still being deleted"
           >
-            <span className="tabular-nums">{whole(ledger.erasing)}</span>
-          </SectionRow>
-          <SectionRow
+            <span {...stylex.props(styles.figure)}>
+              {whole(ledger.erasing)}
+            </span>
+          </PartRow>
+          <PartRow
             description="Sources with versions kept but none current, so nobody can read them: what a replay can leave."
             label="Sources without a current version"
           >
-            <span className="tabular-nums">
+            <span {...stylex.props(styles.figure)}>
               {whole(ledger.sourcesWithoutCurrent)}
             </span>
-          </SectionRow>
-          <SectionRow label="By reason">
-            <span className="tabular-nums">
+          </PartRow>
+          <PartRow label="By reason">
+            <span {...stylex.props(styles.figure)}>
               {formatList(
                 reasonOrder.map(
                   (reason) =>
@@ -764,9 +785,9 @@ const Ledger = ({ report }: { report: BrainReport }) => {
                 )
               )}
             </span>
-          </SectionRow>
-        </CollapsibleContent>
-      </Section>
+          </PartRow>
+        </FoldedRows>
+      </PagePart>
     </Collapsible>
   );
 };
@@ -780,7 +801,7 @@ const Steps = ({ report }: { report: BrainReport }) => {
     return failed === null || failed === undefined ? [] : [{ step, failed }];
   });
   return (
-    <Section
+    <PagePart
       description={
         failing.length > 0
           ? "A failure shows until a later tick gets through."
@@ -788,20 +809,22 @@ const Steps = ({ report }: { report: BrainReport }) => {
       }
       title="Upkeep"
     >
-      {failing.length === 0 ? (
-        <SectionRow label="Every step of its upkeep got through">
-          <Badge variant="passed">Fine</Badge>
-        </SectionRow>
-      ) : (
-        failing.map(({ step, failed }) => (
-          <SectionRow key={step} label={stepWords[step]}>
-            <Badge variant="attention">
-              {`${failed.reason === "timed_out" ? "Timed out" : "Failed"} ${agoWords(Date.parse(failed.at), now)}`}
-            </Badge>
-          </SectionRow>
-        ))
-      )}
-    </Section>
+      <PartRows>
+        {failing.length === 0 ? (
+          <PartRow label="Every step of its upkeep got through">
+            <Badge variant="success">Fine</Badge>
+          </PartRow>
+        ) : (
+          failing.map(({ step, failed }) => (
+            <PartRow key={step} label={stepWords[step]}>
+              <Badge variant="warning">
+                {`${failed.reason === "timed_out" ? "Timed out" : "Failed"} ${agoWords(Date.parse(failed.at), now)}`}
+              </Badge>
+            </PartRow>
+          ))
+        )}
+      </PartRows>
+    </PagePart>
   );
 };
 
@@ -818,71 +841,75 @@ const OwnStores = ({ report }: { report: BrainReport }) => {
   if (own === undefined) {
     // A core of an older release, on a slower channel, doesn't send them.
     return (
-      <Section description={description} title="People's own stores">
-        <SectionRow label="Not available yet">
-          <span>
-            This client’s release doesn’t report people’s own stores yet.
-          </span>
-        </SectionRow>
-      </Section>
+      <PagePart description={description} title="People's own stores">
+        <PartRows>
+          <PartRow label="Not available yet">
+            <span>
+              This client’s release doesn’t report people’s own stores yet.
+            </span>
+          </PartRow>
+        </PartRows>
+      </PagePart>
     );
   }
   const people = `${whole(own.stores)} ${plural(own.stores, "person", "people")}`;
   return (
-    <Section description={description} title="People's own stores">
-      <SectionRow
-        description="Stores holding anything, as their own upkeep last found them."
-        label="Stores"
-      >
-        <span className="tabular-nums">{people}</span>
-      </SectionRow>
-      <SectionRow
-        description={
-          own.oldestWaitingAt === null
-            ? undefined
-            : `Oldest added ${agoWords(Date.parse(own.oldestWaitingAt), now)}.`
-        }
-        label="Waiting"
-      >
-        <span className="tabular-nums">{whole(own.waiting)}</span>
-      </SectionRow>
-      <SectionRow
-        description="Failed too often in someone's store; they come back by themselves unless parked for good."
-        label="Parked"
-      >
-        {own.parked > 0 ? (
-          <Badge variant="attention">{whole(own.parked)}</Badge>
-        ) : (
-          <span className="tabular-nums">{whole(own.parked)}</span>
-        )}
-      </SectionRow>
-      <SectionRow
-        description="Stores whose last upkeep failed a step, waits for the model, or hasn't read its erasure ledger through."
-        label="Failing"
-      >
-        {own.failing > 0 ? (
-          <Badge variant="attention">{whole(own.failing)}</Badge>
-        ) : (
-          <Badge variant="passed">None</Badge>
-        )}
-      </SectionRow>
-      <SectionRow
-        description="Stores whose passages aren't all embedded by the current model yet."
-        label="Embedding not done"
-      >
-        <span className="tabular-nums">{whole(own.notRebuilt)}</span>
-      </SectionRow>
-      <SectionRow
-        description="Stores near what one store holds: writes fail once one is full."
-        label="Near the limit"
-      >
-        {own.nearLimit > 0 ? (
-          <Badge variant="attention">{whole(own.nearLimit)}</Badge>
-        ) : (
-          <span className="tabular-nums">{whole(own.nearLimit)}</span>
-        )}
-      </SectionRow>
-    </Section>
+    <PagePart description={description} title="People's own stores">
+      <PartRows>
+        <PartRow
+          description="Stores holding anything, as their own upkeep last found them."
+          label="Stores"
+        >
+          <span {...stylex.props(styles.figure)}>{people}</span>
+        </PartRow>
+        <PartRow
+          description={
+            own.oldestWaitingAt === null
+              ? undefined
+              : `Oldest added ${agoWords(Date.parse(own.oldestWaitingAt), now)}.`
+          }
+          label="Waiting"
+        >
+          <span {...stylex.props(styles.figure)}>{whole(own.waiting)}</span>
+        </PartRow>
+        <PartRow
+          description="Failed too often in someone's store; they come back by themselves unless parked for good."
+          label="Parked"
+        >
+          {own.parked > 0 ? (
+            <Badge variant="warning">{whole(own.parked)}</Badge>
+          ) : (
+            <span {...stylex.props(styles.figure)}>{whole(own.parked)}</span>
+          )}
+        </PartRow>
+        <PartRow
+          description="Stores whose last upkeep failed a step, waits for the model, or hasn't read its erasure ledger through."
+          label="Failing"
+        >
+          {own.failing > 0 ? (
+            <Badge variant="warning">{whole(own.failing)}</Badge>
+          ) : (
+            <Badge variant="success">None</Badge>
+          )}
+        </PartRow>
+        <PartRow
+          description="Stores whose passages aren't all embedded by the current model yet."
+          label="Embedding not done"
+        >
+          <span {...stylex.props(styles.figure)}>{whole(own.notRebuilt)}</span>
+        </PartRow>
+        <PartRow
+          description="Stores near what one store holds: writes fail once one is full."
+          label="Near the limit"
+        >
+          {own.nearLimit > 0 ? (
+            <Badge variant="warning">{whole(own.nearLimit)}</Badge>
+          ) : (
+            <span {...stylex.props(styles.figure)}>{whole(own.nearLimit)}</span>
+          )}
+        </PartRow>
+      </PartRows>
+    </PagePart>
   );
 };
 
@@ -900,18 +927,18 @@ const needsSomeone = (row: BrainSyncConnection): boolean =>
 /** Where one synced connection stands: what needs someone in amber, else fine. */
 const SyncState = ({ row, now }: { row: BrainSyncConnection; now: number }) => {
   if (!needsSomeone(row)) {
-    return <Badge variant="passed">Fine</Badge>;
+    return <Badge variant="success">Fine</Badge>;
   }
   return (
-    <span className="flex flex-col items-end gap-1">
-      {row.failing ? <Badge variant="attention">Failing</Badge> : null}
+    <span {...stylex.props(styles.linesEnd)}>
+      {row.failing ? <Badge variant="warning">Failing</Badge> : null}
       {row.behindSince === null ? null : (
-        <Badge variant="attention">
+        <Badge variant="warning">
           {`Behind since ${agoWords(Date.parse(row.behindSince), now)}`}
         </Badge>
       )}
       {row.relistOverdue ? (
-        <Badge variant="attention">Relist past its day</Badge>
+        <Badge variant="warning">Relist past its day</Badge>
       ) : null}
     </span>
   );
@@ -919,69 +946,63 @@ const SyncState = ({ row, now }: { row: BrainSyncConnection; now: number }) => {
 
 /** Synced connections in a table, each row one sync of one connection. */
 const SyncTable = ({
+  label,
   rows,
   now,
 }: {
+  label: string;
   rows: readonly BrainSyncConnection[];
   now: number;
 }) => (
-  <div className="border-t">
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead variant="card">Sync</TableHead>
-          <TableHead className="text-right" variant="card">
-            Items
-          </TableHead>
-          <TableHead className="text-right" variant="card">
-            Last synced
-          </TableHead>
-          <TableHead variant="card">Latest error</TableHead>
-          <TableHead className="text-right" variant="card">
-            State
-          </TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((row) => (
-          <TableRow key={`${row.connection} ${row.feed}`}>
-            <TableCell className="whitespace-normal" variant="card">
-              <span className="flex flex-col gap-0.5">
-                <span>{`${row.provider} · ${row.feed}`}</span>
-                <span className="text-muted-foreground text-xs">
-                  <span className="font-mono">{row.connection}</span>
-                  {` · ${phaseWords[row.phase]}`}
+  <Table aria-label={label}>
+    <TableHeader>
+      <TableRow>
+        <TableHead>Sync</TableHead>
+        <TableHead align="end">Items</TableHead>
+        <TableHead align="end">Last synced</TableHead>
+        <TableHead>Latest error</TableHead>
+        <TableHead align="end">State</TableHead>
+      </TableRow>
+    </TableHeader>
+    <TableBody>
+      {rows.map((row) => (
+        <TableRow key={`${row.connection} ${row.feed}`}>
+          <TableCell wrap>
+            <span {...stylex.props(styles.lines)}>
+              <span>{`${row.provider} · ${row.feed}`}</span>
+              <span {...stylex.props(styles.small)}>
+                <span {...stylex.props(styles.mono)}>{row.connection}</span>
+                {` · ${phaseWords[row.phase]}`}
+              </span>
+            </span>
+          </TableCell>
+          <TableCell align="end">
+            <span {...stylex.props(styles.figure)}>{whole(row.items)}</span>
+          </TableCell>
+          <TableCell align="end">
+            {row.syncedAt === null
+              ? "Never"
+              : agoWords(Date.parse(row.syncedAt), now)}
+          </TableCell>
+          <TableCell>
+            {row.error === null ? (
+              <span {...stylex.props(styles.muted)}>None</span>
+            ) : (
+              <span {...stylex.props(styles.lines)}>
+                <span {...stylex.props(styles.mono)}>{row.error.code}</span>
+                <span {...stylex.props(styles.small)}>
+                  {agoWords(Date.parse(row.error.at), now)}
                 </span>
               </span>
-            </TableCell>
-            <TableCell className="text-right" variant="card">
-              <span className="tabular-nums">{whole(row.items)}</span>
-            </TableCell>
-            <TableCell className="text-right" variant="card">
-              {row.syncedAt === null
-                ? "Never"
-                : agoWords(Date.parse(row.syncedAt), now)}
-            </TableCell>
-            <TableCell variant="card">
-              {row.error === null ? (
-                <span className="text-muted-foreground">None</span>
-              ) : (
-                <span className="flex flex-col gap-0.5">
-                  <span className="font-mono text-xs">{row.error.code}</span>
-                  <span className="text-muted-foreground text-xs">
-                    {agoWords(Date.parse(row.error.at), now)}
-                  </span>
-                </span>
-              )}
-            </TableCell>
-            <TableCell className="text-right" variant="card">
-              <SyncState now={now} row={row} />
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  </div>
+            )}
+          </TableCell>
+          <TableCell align="end">
+            <SyncState now={now} row={row} />
+          </TableCell>
+        </TableRow>
+      ))}
+    </TableBody>
+  </Table>
 );
 
 /**
@@ -998,69 +1019,87 @@ const Synced = ({ report }: { report: BrainReport }) => {
   if (connections === undefined) {
     // A core of an older release, on a slower channel, doesn't send them.
     return (
-      <Section description={description} title="Synced connections">
-        <SectionRow label="Not available yet">
-          <span>
-            This client’s release doesn’t report its synced connections yet.
-          </span>
-        </SectionRow>
-      </Section>
+      <PagePart description={description} title="Synced connections">
+        <PartRows>
+          <PartRow label="Not available yet">
+            <span>
+              This client’s release doesn’t report its synced connections yet.
+            </span>
+          </PartRow>
+        </PartRows>
+      </PagePart>
     );
   }
   if (connections.length === 0) {
     return (
-      <Section description={description} title="Synced connections">
-        <SectionRow label="Connections">
-          <span className="text-muted-foreground">None syncs yet</span>
-        </SectionRow>
-      </Section>
+      <PagePart description={description} title="Synced connections">
+        <PartRows>
+          <PartRow label="Connections">
+            <span {...stylex.props(styles.muted)}>None syncs yet</span>
+          </PartRow>
+        </PartRows>
+      </PagePart>
     );
   }
   const attention = connections.filter((row) => needsSomeone(row));
   const fine = connections.filter((row) => !needsSomeone(row));
   return (
     <Collapsible>
-      <Section
+      <PagePart
         action={
           fine.length > 0 && attention.length > 0 ? (
-            <CollapsibleTrigger render={<Button size="sm" variant="outline" />}>
-              Details
+            <CollapsibleTrigger asChild>
+              <Button size="sm" variant="outline">
+                Details
+              </Button>
             </CollapsibleTrigger>
           ) : undefined
         }
         description={description}
         title="Synced connections"
       >
-        <SectionRow
-          description="Failing, behind (a run of the clock went by without reading it), or its daily relist past its day."
-          label="Need someone"
-        >
-          {attention.length > 0 ? (
-            <Badge variant="attention">
-              {`${whole(attention.length)} of ${whole(connections.length)}`}
-            </Badge>
-          ) : (
-            <Badge variant="passed">None</Badge>
-          )}
-        </SectionRow>
+        <PartRows>
+          <PartRow
+            description="Failing, behind (a run of the clock went by without reading it), or its daily relist past its day."
+            label="Need someone"
+          >
+            {attention.length > 0 ? (
+              <Badge variant="warning">
+                {`${whole(attention.length)} of ${whole(connections.length)}`}
+              </Badge>
+            ) : (
+              <Badge variant="success">None</Badge>
+            )}
+          </PartRow>
+        </PartRows>
         {attention.length > 0 ? (
-          <SyncTable now={now} rows={attention} />
+          <SyncTable
+            label="Synced connections that need someone"
+            now={now}
+            rows={attention}
+          />
         ) : (
-          <SyncTable now={now} rows={fine} />
+          <SyncTable label="Synced connections" now={now} rows={fine} />
         )}
         {attention.length > 0 && fine.length > 0 ? (
-          <CollapsibleContent keepMounted>
-            <SyncTable now={now} rows={fine} />
+          <CollapsibleContent asChild>
+            <div>
+              <SyncTable
+                label="Synced connections that are fine"
+                now={now}
+                rows={fine}
+              />
+            </div>
           </CollapsibleContent>
         ) : null}
-      </Section>
+      </PagePart>
     </Collapsible>
   );
 };
 
 /** While the section waits for its core, or hasn't asked it (a preload). */
 const Reading = () => (
-  <EmptySection>Reading how its Brain is doing from its core…</EmptySection>
+  <EmptyPart>Reading how its Brain is doing from its core…</EmptyPart>
 );
 
 /** The Brain at work, or why it isn't shown. */
@@ -1072,10 +1111,10 @@ const Report = ({ acting, read }: { acting: Acting; read: BrainRead }) => {
   const { report } = read;
   if (report === null) {
     return (
-      <EmptySection>
+      <EmptyPart>
         The company’s Grasp didn’t answer how its Brain is doing. Open the
         section again to ask once more.
-      </EmptySection>
+      </EmptyPart>
     );
   }
   return (
@@ -1109,16 +1148,12 @@ export const BrainHealth = ({
   return (
     <>
       {said === null ? null : (
-        <p
-          className={
-            said.wrong
-              ? "text-destructive text-sm"
-              : "text-muted-foreground text-sm"
-          }
-          role={said.wrong ? "alert" : "status"}
+        <Alert
+          appearance="subtle"
+          variant={said.wrong ? "destructive" : "default"}
         >
-          {said.text}
-        </p>
+          <AlertDescription>{said.text}</AlertDescription>
+        </Alert>
       )}
       <Await fallback={<Reading />} promise={read}>
         {(answered) => <Report acting={{ busy, act }} read={answered} />}

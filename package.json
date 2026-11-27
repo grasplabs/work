@@ -42,7 +42,6 @@
     "model-files": "node scripts/model-files.ts",
     "package:definition": "node scripts/package-definition.ts",
     "parity": "node scripts/parity/run.ts",
-    "composio:review": "node scripts/composio-review.ts",
     "lab": "node scripts/lab/run.ts"
   },
   "devDependencies": {

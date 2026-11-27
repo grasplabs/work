@@ -289,6 +289,58 @@ describe("an app's panel", () => {
     });
   });
 
+  it("sets every one of a toolkit's 120 tools at once, then keeps a change made to one tool after it", async () => {
+    const many: CatalogTool[] = Array.from({ length: 120 }, (_, index) => ({
+      name:
+        index < 60
+          ? `HUBSPOT_LIST_THINGS_${index}`
+          : `HUBSPOT_UPDATE_THING_${index}`,
+      description: null,
+      inputs: [],
+      readOnly: index < 60,
+    }));
+    const sent = await opened("hubspot", [], person(), {
+      catalogTools: async () => await Promise.resolve(many),
+    });
+    await press(buttons("Connect")[0]);
+    // Every read at once, from the one control above the tools.
+    await press(
+      document.querySelector('[aria-label="What Grasp may do: All tools"]')
+    );
+    await press(
+      [...document.querySelectorAll('[role="option"]')].find((each) =>
+        each.textContent.startsWith("Read")
+      )
+    );
+    // Then one change allowed on its own, in its group.
+    for (const group of dialogOf("Connect HubSpot")?.querySelectorAll(
+      '[data-slot="app-group"] button[aria-expanded="false"][aria-controls]:not([role="combobox"])'
+    ) ?? []) {
+      // oxlint-disable-next-line no-await-in-loop -- one group at a time
+      await press(group);
+    }
+    await press(
+      document.querySelector(
+        '[aria-label="What Grasp may do: Update thing 77"]'
+      )
+    );
+    await press(
+      [...document.querySelectorAll('[role="option"]')].find((each) =>
+        each.textContent.startsWith("Write")
+      )
+    );
+    await press(dialogAction("Connect"));
+
+    const [first] = sent;
+    const chosen = first !== undefined && "tools" in first ? first.tools : [];
+    expect({
+      reads: chosen.filter(
+        (tool) => typeof tool !== "string" && tool.read === true
+      ).length,
+      changes: chosen.filter((tool) => typeof tool === "string"),
+    }).toStrictEqual({ reads: 60, changes: ["HUBSPOT_UPDATE_THING_77"] });
+  });
+
   it("has an admin connect a stopped toolkit again from what it allowed, disconnecting nothing", async () => {
     const stopped: ListedConnection = {
       id: "c-hubspot",

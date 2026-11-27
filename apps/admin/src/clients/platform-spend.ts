@@ -10,10 +10,7 @@
 import "@tanstack/react-start/server-only";
 import { eq } from "drizzle-orm";
 
-import {
-  monthSpendOf,
-  topOrganizationsMost,
-} from "../admin/platform-spend-sums.ts";
+import { monthSpendOf } from "../admin/platform-spend-sums.ts";
 import type { PlatformSpend } from "../admin/platform-spend-sums.ts";
 import { adminDatabase } from "../db/act.ts";
 import { clients } from "../db/schema.ts";
@@ -29,8 +26,9 @@ const periodOf = (now: Date, monthsBack: number): string =>
 /**
  * Every active organization's, read from its core now, a few at a time,
  * each within its deadline: summed for the admin's own this month and last
- * (a core whose clock reads another month adds nothing to it), with the
- * organizations that cost the most this month, then last.
+ * (a core whose clock reads another month adds nothing to it), with each
+ * organization's, the dearest this month first, then last, and its own
+ * AI on Grasp's key against its limit.
  */
 export const platformSpend = async (
   env: Env,
@@ -53,42 +51,50 @@ export const platformSpend = async (
   const reported = reports.flatMap(({ client, report }) =>
     report?.platformSpend === undefined
       ? []
-      : [{ client, spend: report.platformSpend }]
+      : [
+          {
+            client,
+            spend: report.platformSpend,
+            graspAi: report.graspAi ?? null,
+          },
+        ]
   );
   const months = reported.flatMap(({ spend }) => [
     spend.thisMonth,
     spend.lastMonth,
   ]);
-  const top = reported
-    .flatMap(({ client, spend: reportedSpend }) => {
+  const byOrganization = reported
+    .map(({ client, spend: reportedSpend, graspAi }) => {
       const own = [reportedSpend.thisMonth, reportedSpend.lastMonth];
-      const spend = {
+      return {
         clientId: client.id,
         name: client.name,
         thisMonth: monthSpendOf(thisPeriod, own).micros,
         lastMonth: monthSpendOf(lastPeriod, own).micros,
+        graspAi:
+          graspAi === null
+            ? null
+            : { spent: graspAi.spentMicros, limit: graspAi.limitMicros },
       };
-      return spend.thisMonth + spend.lastMonth > 0 ? [spend] : [];
     })
     .toSorted(
       (one, other) =>
         other.thisMonth - one.thisMonth ||
         other.lastMonth - one.lastMonth ||
         one.name.localeCompare(other.name)
-    )
-    .slice(0, topOrganizationsMost);
+    );
   return {
     thisMonth: monthSpendOf(thisPeriod, months),
     lastMonth: monthSpendOf(lastPeriod, months),
-    top,
+    byOrganization,
     organizations: active.length,
     unread: reports
       .filter(({ report }) => report === null)
-      .map(({ client }) => client.name),
+      .map(({ client }) => ({ clientId: client.id, name: client.name })),
     unreported: reports
       .filter(
         ({ report }) => report !== null && report.platformSpend === undefined
       )
-      .map(({ client }) => client.name),
+      .map(({ client }) => ({ clientId: client.id, name: client.name })),
   };
 };

@@ -21,8 +21,9 @@ import type { AllowedTool } from "./tool-choices.ts";
 /**
  * One tool of a toolkit, as a row of Damsko's Item: a switch to allow
  * it, and what it may do: Never while it is off, Read when it only reads,
- * Write when it changes things. An allowed tool's Read or Write is a
- * button that switches it between the two (tool-choices.ts). The switch's
+ * Write when it changes things. An allowed tool Composio says only reads
+ * has a button that switches it between Read and Write (tool-choices.ts);
+ * any other is Write, as connect takes it. The switch's
  * label is the tool's name, said to a screen reader; the row's title shows
  * it.
  */
@@ -61,7 +62,14 @@ export const ToolChoice = ({
           <Badge icon={LockIcon}>
             {t({ message: "Never", context: "what a tool may do" })}
           </Badge>
-        ) : (
+        ) : null}
+        {/* Only a tool Composio says only reads can be Read: any other writes. */}
+        {choice !== undefined && !tool.readOnly ? (
+          <Badge icon={PencilIcon}>
+            {t({ message: "Write", context: "what a tool may do" })}
+          </Badge>
+        ) : null}
+        {choice === undefined || !tool.readOnly ? null : (
           <Button
             aria-label={
               choice.read

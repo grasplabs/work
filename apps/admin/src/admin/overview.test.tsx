@@ -1,3 +1,4 @@
+import type { AdminSummary } from "@grasp-os/shared/admin-summary";
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vite-plus/test";
 
@@ -9,6 +10,7 @@ import {
   openAdmin,
   settle,
   summaryOf,
+  until,
 } from "../../test/app.tsx";
 import type { Answers } from "../../test/app.tsx";
 import {
@@ -19,11 +21,13 @@ import {
 } from "../../test/snapshots.ts";
 import type { ClientAdmin } from "../clients/admin.ts";
 import type { GridRow } from "../clients/grid.ts";
+import type { ClientSummary } from "../clients/summary.ts";
+import type { PlatformSpend } from "./platform-spend-sums.ts";
 
-// The admin's frame and its overview: the sidebar, the table of apps
-// asked for, the list of organizations and today's list, from the grid
-// and what each core answered (test/admin-pages.test.ts: what the Worker
-// reads of them).
+// The admin's frame and its Home: the sidebar, the table of apps asked
+// for, and Home's figures, what needs Grasp and every organization, from
+// the grid and each organization's summary (test/admin-pages.test.ts:
+// what the Worker reads of them).
 
 const row = (id: string, overrides: Partial<GridRow> = {}): GridRow =>
   gridRow({
@@ -57,6 +61,7 @@ const frameOf = (
   fetchClientAdmins: admins,
   fetchClientSummaries: admins.map((admin) => summaryOf(admin)),
   fetchReadiness: { checks: [], blocking: 0 },
+  fetchPlatformSpend: null,
   ...more,
 });
 
@@ -387,260 +392,501 @@ describe("the admin's frame", () => {
   });
 });
 
-describe("the admin's overview", () => {
-  it("lists every organization: one that answered with where it stands and what needs Grasp, one that didn't with why and no numbers", async () => {
-    const acme = row("acme");
-    const down = row("down");
-    const waiting = row("waiting", { status: "provisioning", hostname: null });
-    const { container, main } = await openAdmin(
-      "/",
-      frameOf(
-        [acme, down, waiting],
-        [
-          answeredAdmin({ client: acme, snapshot: readySnapshot("Acme") }),
-          unread(down, "timeout"),
-          unread(waiting, "not_deployed"),
-        ],
+/** A summary whose onboarding and use are as given, the rest nothing begun. */
+const summaryWith = (
+  client: GridRow,
+  onboarding: Partial<AdminSummary["onboarding"]>,
+  more: Partial<AdminSummary> = {}
+): ClientSummary => {
+  const base = answeredSummary({ client });
+  if (base.state !== "answered") {
+    throw new Error("Expected an answered summary");
+  }
+  return {
+    ...base,
+    summary: {
+      ...base.summary,
+      onboarding: { ...base.summary.onboarding, open: false, ...onboarding },
+      ...more,
+    },
+  };
+};
+
+/** How a company uses Grasp, as its summary shares it: 30 days of runs, and 8 weeks of people. */
+const used = ({
+  done = 0,
+  failed = 0,
+  people = [],
+}: {
+  done?: number;
+  failed?: number;
+  people?: (number | "1–4")[];
+}): NonNullable<AdminSummary["activity"]> => ({
+  runs: Array.from({ length: 30 }, (_, at) => ({
+    day: daysAgo(29 - at).slice(0, 10),
+    // Every run on the last day, today: in the last seven days.
+    done: at === 29 ? done : 0,
+    failed: at === 29 ? failed : 0,
+  })),
+  workflowsLive: 3,
+  appsLive: 2,
+  agentsOn: 1,
+  activePeople: people.map((count, at) => ({
+    week: daysAgo((people.length - 1 - at) * 7).slice(0, 10),
+    people: count,
+  })),
+});
+
+/** One month of what Grasp's AI cost, in all. */
+const month = (period: string, micros: number) => ({
+  period,
+  micros,
+  byFeature: [],
+  byModel: [],
+});
+
+/** What Grasp's AI cost on its keys: each organization's, none in all unless given. */
+const spendOf = (
+  byOrganization: PlatformSpend["byOrganization"],
+  months: { thisMonth?: number; lastMonth?: number } = {},
+  unreported: PlatformSpend["unreported"] = []
+): PlatformSpend => ({
+  thisMonth: month("2026-11", months.thisMonth ?? 0),
+  lastMonth: month("2026-10", months.lastMonth ?? 0),
+  byOrganization,
+  organizations: byOrganization.length,
+  unread: [],
+  unreported,
+});
+
+/** The text of Home's figure labelled `label`. */
+const figureOf = (root: Element, label: string): string =>
+  [...root.querySelectorAll('[aria-label="How Grasp is doing"] *')].find(
+    (element) => element.textContent === label
+  )?.parentElement?.parentElement?.textContent ?? "";
+
+describe("Home", () => {
+  it("says how every organization stands from its summary alone, each row opening it, and reads no organization's snapshot", async () => {
+    const live = row("live", { name: "Live Co" });
+    const talking = row("talking", { name: "Talking Co" });
+    const down = row("down", { name: "Down Co" });
+    const waiting = row("waiting", {
+      name: "Waiting Co",
+      status: "provisioning",
+      hostname: null,
+    });
+    const older = row("older", { name: "Older Co" });
+    const { container, calls } = await openAdmin("/", {
+      fetchClientGrid: [live, talking, down, waiting, older],
+      fetchClientSummaries: [
+        summaryWith(
+          live,
+          {
+            stage: "open",
+            open: true,
+            known: 86,
+            openedAt: daysAgo(21),
+          },
+          { activity: used({ done: 40, failed: 3, people: [6, 8, 7] }) }
+        ),
+        summaryWith(
+          talking,
+          { stage: "interviews", day: 4, days: 14, known: 30, told: true },
+          { activity: used({ people: ["1–4", "1–4", 0] }) }
+        ),
+        { client: down, state: "unreachable" },
+        { client: waiting, state: "not_deployed" },
         {
-          // Acme's summary: its core counts three things needing Grasp.
-          fetchClientSummaries: [
-            summaryOf(answeredAdmin({ client: acme }), [
-              { kind: "go", count: 1 },
-              { kind: "agreement", count: 2 },
-            ]),
-            summaryOf(unread(down, "timeout")),
-            summaryOf(unread(waiting, "not_deployed")),
-          ],
-        }
-      )
-    );
-    const page = container.querySelector("main");
-    const acmeRow = rowText(container, acme.id);
-    const downRow = rowText(container, down.id);
-    const waitingRow = rowText(container, waiting.id);
-    const tileOf = (label: string) =>
-      [...(page?.querySelectorAll("span") ?? [])]
-        .find((span) => span.textContent === label)
-        ?.closest("div")?.textContent ?? "";
+          client: older,
+          state: "older",
+          admin: answeredAdmin({ client: older }),
+        },
+      ],
+      fetchPlatformSpend: null,
+    });
+    const rowOf = (id: string) => rowText(container, id);
 
     expect({
-      title: page?.querySelector("h1")?.textContent,
-      acme: [
-        "Agreed",
-        "Not signed yet",
-        "85% known. Ready for Grasp’s go",
-        "Not known yet",
-      ].map((text) => acmeRow.includes(text)),
-      acmeNeeds: container
-        .querySelector(`main table a[href="/organizations/acme"]`)
+      title: container.querySelector("main h1")?.textContent,
+      live: [
+        "Live",
+        "For 21 days",
+        "3 workflows live",
+        "40 runs",
+        "3 failed",
+        "8 active last week",
+      ].map((text) => rowOf("live").includes(text)),
+      talking: [
+        "Interviews",
+        "Day 4 of 14",
+        "30% of 80% known",
+        "No runs",
+        "1–4 active last week",
+      ].map((text) => rowOf("talking").includes(text)),
+      down: ["Not answering", "Its core didn’t answer", "Not read now"].map(
+        (text) => rowOf("down").includes(text)
+      ),
+      waiting: ["Being set up", "Not deployed yet", "Not set up yet"].map(
+        (text) => rowOf("waiting").includes(text)
+      ),
+      older: ["Update to see counts", "Update to see"].map((text) =>
+        rowOf("older").includes(text)
+      ),
+      figures: {
+        live: figureOf(container, "Live"),
+        onboarding: figureOf(container, "Onboarding"),
+        ai: figureOf(container, "Grasp AI this month"),
+      },
+      snapshots: calls.filter(({ fn }) => fn.startsWith("fetchClientAdmin"))
+        .length,
+    }).toStrictEqual({
+      title: "Home",
+      live: [true, true, true, true, true, true],
+      talking: [true, true, true, true, true],
+      down: [true, true, true],
+      waiting: [true, true, true],
+      older: [true, true],
+      figures: {
+        live: "Live1of 5 organizations",
+        onboarding: "Onboarding1None at risk",
+        ai: "Grasp AI this monthNot readIts cores couldn’t be read now",
+      },
+      snapshots: 0,
+    });
+  });
+
+  it("says an organization is at risk when its interviews closed short, or three quarters of their days are gone with less known than an even pace gives", async () => {
+    const companies: [string, Partial<AdminSummary["onboarding"]>][] = [
+      // 11 of 14 days gone: an even pace towards 80% gives 63% by now.
+      ["behind", { stage: "interviews", day: 11, days: 14, known: 40 }],
+      // 10 of 14: not three quarters yet.
+      ["early", { stage: "interviews", day: 10, days: 14, known: 10 }],
+      // 11 of 14 with 70% known: ahead of the pace.
+      ["ahead", { stage: "interviews", day: 11, days: 14, known: 70 }],
+      // Over at 55% of 80%: core's `ready` is true once they are over.
+      ["short", { stage: "waiting", known: 55, ready: true }],
+      ["ready", { stage: "waiting", known: 85, ready: true }],
+    ];
+    const { container } = await openAdmin("/", {
+      fetchClientGrid: companies.map(([id]) => row(id)),
+      fetchClientSummaries: companies.map(([id, onboarding]) =>
+        summaryWith(row(id), { told: true, ...onboarding })
+      ),
+      fetchPlatformSpend: null,
+    });
+    const state = (id: string) =>
+      container
+        .querySelector(`main table a[href="/organizations/${id}"]`)
         ?.closest("tr")
-        ?.querySelector(".text-status-attention.tabular-nums")?.textContent,
-      acmeNamed: acmeRow.includes(acme.name),
-      goToGive: main().includes(
-        "85% of what Grasp needs is known: enough to open at 80%. The company comes in once Grasp gives its go."
-      ),
-      noTranscript: !main().includes("Bring in the first conversation"),
-      down: {
-        named: downRow.includes(down.name),
-        why: downRow.includes("Unreachable"),
-        numbers: ["% known", "Being written", "€"].some((text) =>
-          downRow.includes(text)
+        ?.querySelectorAll("td")[0]?.textContent ?? "";
+
+    expect({
+      states: companies.map(([id]) => state(id)),
+      onboarding: figureOf(container, "Onboarding"),
+    }).toStrictEqual({
+      states: [
+        "At riskDay 11 of 14",
+        "InterviewsDay 10 of 14",
+        "InterviewsDay 11 of 14",
+        "At riskClosed at 55% of 80%",
+        "Waiting for the goEnough is known",
+      ],
+      onboarding: "Onboarding52 at risk",
+    });
+  });
+
+  it("says how a company uses Grasp only while it shares it: after it ended Grasp's staff access, not shared", async () => {
+    const sharing = row("sharing", { name: "Sharing Co" });
+    const ended = row("ended", { name: "Ended Co" });
+    const { container } = await openAdmin("/", {
+      fetchClientGrid: [sharing, ended],
+      fetchClientSummaries: [
+        summaryWith(
+          sharing,
+          { stage: "open", open: true, openedAt: daysAgo(3) },
+          { activity: used({ done: 12, people: [0, 9, 2] }) }
         ),
-      },
-      waiting: {
-        named: waitingRow.includes(waiting.name),
-        why: waitingRow.includes("Not deployed"),
-        numbers: ["% known", "Being written", "€"].some((text) =>
-          waitingRow.includes(text)
+        summaryWith(
+          ended,
+          { stage: "open", open: true, openedAt: daysAgo(3) },
+          { activity: null, asked: null }
         ),
-      },
-      counted: main().includes(
-        "Counted from the 1 that answered now: 2 didn’t, and aren’t in these numbers."
+      ],
+      fetchPlatformSpend: null,
+    });
+
+    // Below 84rem each is a card: the same words.
+    const cards =
+      container.querySelector('main ul[aria-label="Organizations"]')
+        ?.textContent ?? "";
+
+    expect({
+      cards: [
+        cards.includes("12 runs, 0 failed; 9 active last week"),
+        cards.includes("Progress 3 workflows live, 2 Apps, 1 agent on"),
+        cards.includes("Use, 7 days Not shared"),
+      ],
+      sharing: ["3 workflows live", "12 runs", "9 active last week"].map(
+        (text) => rowText(container, "sharing").includes(text)
       ),
-      unknownSums: ["Under contract", "Hours a week freed"].map((label) =>
-        tileOf(label).includes("—")
-      ),
-      acmeCount: sidebarEntry(container, acme.name)?.textContent?.includes(
-        "3 things need Grasp"
+      ended: rowText(container, "ended").match(/Not shared/gu)?.length,
+      endedCounts: ["workflows live", "runs", "active last week"].some((text) =>
+        rowText(container, "ended").includes(text)
       ),
     }).toStrictEqual({
-      title: "Organizations",
-      acme: [true, true, true, true],
-      acmeNeeds: "3",
-      acmeNamed: true,
-      goToGive: true,
-      noTranscript: true,
-      down: { named: true, why: true, numbers: false },
-      waiting: { named: true, why: true, numbers: false },
-      counted: true,
-      unknownSums: [true, false],
-      acmeCount: true,
+      cards: [true, true, true],
+      sharing: [true, true, true],
+      ended: 2,
+      endedCounts: false,
     });
   });
 
-  it("says when Grasp paused the interviews, and marks where Grasp opens even at the last dot", async () => {
-    const paused = row("paused");
-    const told = toldSnapshot("Paused", {
-      days: 14,
-      daysIn: 3,
-      leadTalked: true,
-    });
-    const { container, main } = await openAdmin(
-      "/",
-      frameOf(
-        [paused],
-        [
-          answeredAdmin({
-            client: paused,
-            snapshot: {
-              ...told,
-              paused: true,
-              gate: { ...told.gate, threshold: 98 },
-            },
-          }),
-        ]
-      )
-    );
-    const tableRow = container
-      .querySelector(`main table a[href="/organizations/paused"]`)
-      ?.closest("tr");
-
-    expect({
-      paused: main().includes(
-        "The interviews are paused: nobody can open or finish theirs until Grasp resumes them."
-      ),
-      // The one mark where Grasp opens, after the last of the dots.
-      marks: tableRow?.querySelectorAll(".h-3\\.5.w-px").length,
-    }).toStrictEqual({ paused: true, marks: 1 });
-  });
-
-  it("puts every organization's most pressing need in today's list before any one's next", async () => {
-    // Three needs each: nine, past the eight the list shows.
-    const companies = ["Acme", "Birch", "Cobalt"].map((name) => ({
-      name,
-      row: row(name.toLowerCase(), { name }),
-    }));
-    const { container } = await openAdmin(
-      "/",
-      frameOf(
-        companies.map(({ row: each }) => each),
-        companies.map(({ name, row: each }) =>
-          answeredAdmin({ client: each, snapshot: readySnapshot(name) })
-        )
-      )
-    );
-    const opens = [
-      ...container.querySelectorAll(
-        'section[aria-label="Needs Grasp today"] li a'
-      ),
-    ].map((link) => link.getAttribute("aria-label") ?? "");
-
-    expect(
-      companies.map(({ name }, index) =>
-        (opens[index] ?? "").startsWith(`Open at ${name}:`)
-      )
-    ).toStrictEqual([true, true, true]);
-  });
-
-  it("puts a live organization's failed deploy and its falling behind first in today's list, each opening its Setup", async () => {
-    const releaseId = "2026.11.20-1";
-    const failing = row("failing", {
-      name: "Failing",
+  it("says how each organization's platform runs, and when core hasn't counted last week's people yet", async () => {
+    const open = { stage: "open", open: true, openedAt: daysAgo(5) } as const;
+    const failed = row("failed", {
       rollout: {
-        failed: { releaseId, error: "attempt_lost: core" },
-        behind: 3,
+        failed: { releaseId: "2026.11.20-1", error: null },
+        behind: 0,
         channelStopped: null,
       },
     });
-    const current = row("current", { name: "Current" });
-    const { container } = await openAdmin(
-      "/",
-      frameOf(
-        [failing, current],
-        [
-          answeredAdmin({
-            client: failing,
-            snapshot: readySnapshot("Failing"),
-          }),
-          answeredAdmin({
-            client: current,
-            snapshot: readySnapshot("Current"),
-          }),
-        ]
-      )
-    );
-    const today = container.querySelector(
-      'section[aria-label="Needs Grasp today"]'
-    );
-    const items = [...(today?.querySelectorAll("li") ?? [])].map((item) => ({
-      text: item.textContent ?? "",
-      setup: [...item.querySelectorAll("a")].some((link) =>
-        (link.getAttribute("href") ?? "").endsWith("/setup")
+    const behind = row("behind", {
+      rollout: { failed: null, behind: 2, channelStopped: null },
+    });
+    const rows = [
+      row("unread"),
+      row("stopped"),
+      row("again"),
+      failed,
+      behind,
+      row("fine"),
+    ];
+    const connectors: Record<string, AdminSummary["connectors"]> = {
+      unread: null,
+      stopped: { works: 2, again: 0, stopped: 1 },
+      again: { works: 1, again: 2, stopped: 0 },
+    };
+    const { container } = await openAdmin("/", {
+      fetchClientGrid: rows,
+      fetchClientSummaries: rows.map((client) =>
+        summaryWith(client, open, {
+          connectors: Object.hasOwn(connectors, client.id)
+            ? (connectors[client.id] ?? null)
+            : { works: 1, again: 0, stopped: 0 },
+          // One week counted: the release that counts them is a week old.
+          activity: used({ people: [7] }),
+        })
       ),
-    }));
-    const at = (name: string) =>
-      items.filter(({ text }) => text.includes(name));
+      fetchPlatformSpend: null,
+    });
+    const health = (id: string) =>
+      container
+        .querySelector(`main table a[href="/organizations/${id}"]`)
+        ?.closest("tr")
+        ?.querySelectorAll("td")[4]?.textContent;
 
     expect({
-      failing: at("Failing")
-        .slice(0, 2)
-        .map(({ text, setup }) => ({
-          deploy: text.includes(
-            `Its deploy of ${releaseId} failed (attempt_lost: core). Retry it on its Setup once what stopped it is fixed.`
-          ),
-          behind: text.includes(
-            "It runs 3 releases behind the one it should. Look at its Setup."
-          ),
-          setup,
-        })),
-      current: at("Current").some(({ setup }) => setup),
+      health: rows.map(({ id }) => health(id)),
+      people: rowText(container, "fine").includes(
+        "Active people not counted yet"
+      ),
     }).toStrictEqual({
-      failing: [
-        { deploy: true, behind: false, setup: true },
-        { deploy: false, behind: true, setup: true },
+      health: [
+        "Connectors not read",
+        "1 connector stopped",
+        "2 connectors wait for a sign-in",
+        "Last deploy failed",
+        "2 releases behind",
+        "Running",
       ],
-      current: false,
+      people: true,
     });
+  });
+
+  it("lists what needs Grasp as rows that open where each is settled, every organization's first before any one's next, and the rest in the Inbox", async () => {
+    const failing = row("failing", {
+      name: "Failing",
+      rollout: {
+        failed: { releaseId: "2026.11.20-1", error: null },
+        behind: 0,
+        channelStopped: null,
+      },
+    });
+    const birch = row("birch", { name: "Birch" });
+    const cobalt = row("cobalt", { name: "Cobalt" });
+    const needs: AdminSummary["needs"] = [
+      { kind: "go", count: 1 },
+      { kind: "lead", count: 2 },
+      { kind: "read", count: 1 },
+    ];
+    const { container } = await openAdmin("/", {
+      fetchClientGrid: [failing, birch, cobalt],
+      fetchClientSummaries: [failing, birch, cobalt].map((client) =>
+        summaryWith(client, { stage: "waiting", ready: true }, { needs })
+      ),
+      fetchPlatformSpend: null,
+    });
+    const list = container.querySelector('[aria-label="Needs Grasp"]');
+    const items = [...(list?.querySelectorAll("a") ?? [])].map((link) => [
+      link.textContent ?? "",
+      link.getAttribute("href"),
+    ]);
+
+    expect({
+      first: items.slice(0, 3).map(([text]) => text),
+      hrefs: items.slice(0, 4).map(([, href]) => href),
+      shown: items.length,
+      more: container
+        .querySelector("main")
+        ?.textContent?.includes("4 more in the sidebar’s Inbox."),
+      needs: figureOf(container, "Needs Grasp"),
+    }).toStrictEqual({
+      first: [
+        expect.stringContaining("Its deploy of 2026.11.20-1 failed"),
+        // Birch's and Cobalt's, as their links say (hrefs).
+        "Ready for Grasp’s go",
+        "Ready for Grasp’s go",
+      ],
+      hrefs: [
+        "/organizations/failing/setup",
+        "/organizations/birch/steps",
+        "/organizations/cobalt/steps",
+        "/organizations/failing/steps",
+      ],
+      shown: 6,
+      more: true,
+      needs: "Needs Grasp13at 3 organizations",
+    });
+  });
+
+  it("says what Grasp's AI cost this month against last, and each organization's use of it against its limit", async () => {
+    const near = row("near", { name: "Near Co" });
+    const own = row("own", { name: "Own Co" });
+    const old = row("old", { name: "Old Co" });
+    const { container } = await openAdmin("/", {
+      fetchClientGrid: [near, own, old],
+      fetchClientSummaries: [near, own, old].map((client) =>
+        summaryWith(client, { stage: "open", open: true, openedAt: daysAgo(9) })
+      ),
+      fetchPlatformSpend: spendOf(
+        [
+          {
+            clientId: "near",
+            name: "Near Co",
+            // Its own AI, and $30 of transcription.
+            thisMonth: 221_000_000,
+            lastMonth: 42_000_000,
+            graspAi: { spent: 191_000_000, limit: 200_000_000 },
+          },
+          {
+            clientId: "own",
+            name: "Own Co",
+            thisMonth: 0,
+            lastMonth: 0,
+            graspAi: null,
+          },
+        ],
+        { thisMonth: 221_000_000, lastMonth: 100_000_000 },
+        // Its release doesn't report what AI cost.
+        [{ clientId: "old", name: "Old Co" }]
+      ),
+    });
+
+    expect({
+      figure: figureOf(container, "Grasp AI this month"),
+      near: ["$221 on Grasp’s keys", "Its AI $191 of $200"].every((text) =>
+        rowText(container, "near").includes(text)
+      ),
+      own: rowText(container, "own").includes("No limit reported"),
+      old: rowText(container, "old").includes("Not reported by its release"),
+    }).toStrictEqual({
+      figure:
+        "Grasp AI this month$221$100 last month · 1 near its limit · 1 not counted",
+      near: true,
+      own: true,
+      old: true,
+    });
+  });
+
+  it("reads what Grasp's AI cost once Home is opened after a link to it was pointed at, never saying it couldn't be read", async () => {
+    const live = row("live");
+    const { router, container } = await openAdmin("/platform/releases", {
+      fetchClientGrid: [live],
+      fetchClientSummaries: [
+        summaryWith(live, { stage: "open", open: true, openedAt: daysAgo(2) }),
+      ],
+      fetchReleases: { releases: [], older: null, channelsOn: {} },
+      fetchPlatformSpend: spendOf([], { thisMonth: 12_000_000 }),
+    });
+    await act(async () => {
+      await router.preloadRoute({ to: "/" });
+    });
+    await act(async () => {
+      await router.navigate({ to: "/" });
+    });
+    await settle();
+
+    expect(figureOf(container, "Grasp AI this month")).toBe(
+      "Grasp AI this month$12$0 last month"
+    );
+  });
+
+  it("shows every organization while what Grasp's AI cost is still being read, that alone said to be reading", async () => {
+    const live = row("live", { name: "Live Co" });
+    const held = Promise.withResolvers<null>();
+    const { container } = await openAdmin(
+      "/",
+      {
+        fetchClientGrid: [live],
+        fetchClientSummaries: [
+          summaryWith(live, {
+            stage: "open",
+            open: true,
+            openedAt: daysAgo(4),
+          }),
+        ],
+        // Every core is still being asked: never answered here.
+        fetchPlatformSpend: async () => await held.promise,
+      },
+      { rest: false }
+    );
+    await until(() => rowText(container, "live") !== "");
+
+    expect({
+      row: rowText(container, "live").includes("Reading…"),
+      live: figureOf(container, "Live"),
+      // Its label over a placeholder: no figure yet.
+      ai: container
+        .querySelector('[aria-label="How Grasp is doing"]')
+        ?.textContent?.endsWith("Grasp AI this month"),
+    }).toStrictEqual({
+      row: true,
+      live: "Live1of 1 organization",
+      ai: true,
+    });
+  });
+
+  it("says plainly when there is nothing: no organizations yet, and nothing that needs Grasp", async () => {
+    const empty = await openAdmin("/", { fetchPlatformSpend: null });
+    const emptyMain = empty.main();
+    const calm = row("calm");
+    const quiet = await openAdmin("/", {
+      fetchClientGrid: [calm],
+      fetchClientSummaries: [
+        summaryWith(calm, { stage: "open", open: true, openedAt: null }),
+      ],
+      fetchPlatformSpend: null,
+    });
+
+    expect({
+      none: emptyMain.includes("No organizations yet"),
+      nothing: quiet.main().includes("Nothing needs Grasp now"),
+      next: rowText(quiet.container, "calm").includes("Nothing waits"),
+    }).toStrictEqual({ none: true, nothing: true, next: true });
   });
 });
 
-describe("the overview's counts and filters", () => {
-  it("counts only leads who talked, and the days of each company's own plan", async () => {
-    const waiting = row("waiting");
-    const talking = row("talking");
-    const { container } = await openAdmin(
-      "/",
-      frameOf(
-        [waiting, talking],
-        [
-          answeredAdmin({
-            client: waiting,
-            snapshot: toldSnapshot("Waiting", {
-              days: 21,
-              daysIn: 3,
-              leadTalked: false,
-            }),
-          }),
-          answeredAdmin({
-            client: talking,
-            snapshot: toldSnapshot("Talking", {
-              days: 21,
-              daysIn: 3,
-              leadTalked: true,
-            }),
-          }),
-        ]
-      )
-    );
-
-    expect({
-      // Tom's link went out without Lisa: she still hasn't talked.
-      waiting: rowText(container, "waiting").includes("0 of 1 talked"),
-      // Three weeks, as its plan has it.
-      talking: rowText(container, "talking").includes(" of 21. "),
-    }).toStrictEqual({ waiting: true, talking: true });
-  });
-
+describe("an organization's page and a new one", () => {
   it("counts an organization's days to its own plan over its page", async () => {
     const company = row("company");
     const admin = answeredAdmin({
@@ -660,33 +906,6 @@ describe("the overview's counts and filters", () => {
     expect(container.querySelector("main")?.textContent).toMatch(
       /Day \d+ of 21/u
     );
-  });
-
-  it("shows only the organizations in a phase when one is chosen", async () => {
-    const acme = row("acme");
-    const empty = row("empty");
-    const waiting = row("waiting", { status: "provisioning", hostname: null });
-    const answers = frameOf(
-      [acme, empty, waiting],
-      [
-        answeredAdmin({ client: acme, snapshot: readySnapshot("Acme") }),
-        answeredAdmin({ client: empty }),
-        unread(waiting, "not_deployed"),
-      ]
-    );
-    const listed = (root: Element) =>
-      ["acme", "empty", "waiting"].map((id) => rowText(root, id) !== "");
-    const ready = await openAdmin("/?phase=ready", answers);
-    const readyRows = listed(ready.container);
-    const agreements = await openAdmin("/?phase=agreements", answers);
-
-    expect({
-      ready: readyRows,
-      agreements: listed(agreements.container),
-    }).toStrictEqual({
-      ready: [true, false, false],
-      agreements: [false, true, false],
-    });
   });
 
   it("opens an organization the admin knows, even one named like one of the admin's places", async () => {
@@ -717,7 +936,7 @@ describe("the overview's counts and filters", () => {
     }).toStrictEqual({ known: acme.name, named: platform.name });
   });
 
-  it("offers to add an organization from the overview, asking its name, web address, email domain, first admin and hosting", async () => {
+  it("offers to add an organization from Home, asking its name, web address, email domain, first admin and hosting", async () => {
     const overview = await openAdmin("/", frameOf([], []));
     const link =
       overview.container.querySelector('a[href="/new-organization"]') !== null;

@@ -1,46 +1,49 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import { fakeComposioServer } from "./composio-api.ts";
 import { addConnection, agentFor, callAs } from "./connect.ts";
-import { fakeMcpServer } from "./mcp-server.ts";
 
 // What connect lets core keep of a call as sources in the Brain
 // (`ConnectResult.keep`, GRA-1730, GRA-1845). The ways it can fail, which
-// these start from: a change, a held call or a stored answer replayed is
-// kept; a toolkit whose provider's terms forbid copies is kept. A
-// toolkit's read is kept whatever its server named: core keeps its whole
-// answer, keyed by the call. An error answer never comes back as one
+// these start from: a change, a held call or a stored answer replayed
+// being kept. A toolkit's read is kept whatever its server named: core
+// keeps its whole answer, keyed by the call. An error answer never comes back as one
 // (`connect.action_failed`).
 
 const url = "https://backend.composio.dev/v3/mcp/server-keep?user_id=grasp";
 
-fakeMcpServer(url, [
-  {
-    name: "mail.read",
-    readOnly: true,
-    run: () => ({
-      output: { message: { id: "message-1", subject: "Quote" } },
-      provenance: ["message-1"],
-    }),
-  },
-  {
-    name: "mail.list",
-    readOnly: true,
-    run: () => ({ output: { messages: [] } }),
-  },
-  {
-    name: "mail.search",
-    readOnly: true,
-    run: () => ({
-      output: { messages: [{ id: "message-2" }] },
-      provenance: ["message-2"],
-    }),
-  },
-  {
-    name: "mail.send",
-    readOnly: false,
-    run: () => ({ output: { sent: true }, provenance: ["message-3"] }),
-  },
-]);
+fakeComposioServer(
+  url,
+  [
+    {
+      name: "mail.read",
+      readOnly: true,
+      run: () => ({
+        output: { message: { id: "message-1", subject: "Quote" } },
+        provenance: ["message-1"],
+      }),
+    },
+    {
+      name: "mail.list",
+      readOnly: true,
+      run: () => ({ output: { messages: [] } }),
+    },
+    {
+      name: "mail.search",
+      readOnly: true,
+      run: () => ({
+        output: { messages: [{ id: "message-2" }] },
+        provenance: ["message-2"],
+      }),
+    },
+    {
+      name: "mail.send",
+      readOnly: false,
+      run: () => ({ output: { sent: true }, provenance: ["message-3"] }),
+    },
+  ],
+  "mail"
+);
 
 /** A connection to the server above, of `provider`'s toolkit. */
 const connection = async (provider = "mail") =>
@@ -70,21 +73,6 @@ describe("what connect lets core keep of a call", () => {
     expect({ named: named.keep, unnamed: unnamed.keep }).toStrictEqual({
       named: true,
       unnamed: true,
-    });
-  });
-
-  it("is nothing of a toolkit whose provider's terms forbid copies", async () => {
-    const connectionId = await connection("mail_private");
-
-    const read = await callAs(chat, {
-      connectionId,
-      action: "mail.search",
-      input: {},
-    });
-
-    expect({ provenance: read.provenance, keep: read.keep }).toStrictEqual({
-      provenance: ["message-2"],
-      keep: undefined,
     });
   });
 

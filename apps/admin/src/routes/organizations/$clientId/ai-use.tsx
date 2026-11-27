@@ -1,23 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { AiUse } from "../../../admin/ai-use.tsx";
-import { OrganizationPlatformSpend } from "../../../admin/platform-spend.tsx";
 import { fetchClientAiStatus } from "../../../clients/functions.ts";
 
-const AiUsePage = () => {
-  const { aiStatus } = Route.useLoaderData();
-  return (
-    <>
-      <AiUse />
-      <OrganizationPlatformSpend status={aiStatus} />
-    </>
-  );
-};
+const AiUsePage = () => <AiUse aiStatus={Route.useLoaderData().aiStatus} />;
 
 /**
- * An organization's AI use: what it took, what that cost, and what did it;
- * then what Grasp's own AI features cost on Grasp's keys for it, read from
- * its core now (src/admin/platform-spend.tsx).
+ * An organization's AI use (src/admin/ai-use.tsx): what it took, what
+ * that cost, and what did it; then what Grasp's own AI features cost on
+ * Grasp's keys for it, read from its core now.
  */
 export const Route = createFileRoute("/organizations/$clientId/ai-use")({
   loader: ({ params }) => {

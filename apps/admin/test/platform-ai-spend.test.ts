@@ -1,4 +1,7 @@
-import type { PlatformSpendRow } from "@grasp-os/shared/ai-status-report";
+import type {
+  AiStatusReport,
+  PlatformSpendRow,
+} from "@grasp-os/shared/ai-status-report";
 import { env } from "cloudflare:workers";
 import { ne } from "drizzle-orm";
 import { createElement } from "react";
@@ -33,12 +36,16 @@ mockAccess();
 
 const db = adminDatabase(env.DB);
 
-/** A live organization named `name`, whose core reports `spend` on Grasp's keys. */
+/**
+ * A live organization named `name`, whose core reports `spend` on Grasp's
+ * keys, and its own AI on Grasp's key against its limit when it runs on it.
+ */
 const liveClient = async (
   name: string,
   spend:
     | { thisMonth?: PlatformSpendRow[]; lastMonth?: PlatformSpendRow[] }
-    | "unreported"
+    | "unreported",
+  graspAi?: AiStatusReport["graspAi"]
 ) => {
   const release = await placedRelease("feat(core): platform AI spend");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
@@ -48,7 +55,7 @@ const liveClient = async (
     signIn: null,
   });
   core.admin = emptyAdminSnapshot(name);
-  core.ai = aiStatusOf([], spend);
+  core.ai = { ...aiStatusOf([], spend), graspAi };
   return clientId;
 };
 
@@ -78,6 +85,39 @@ const tableText = (html: string, label: string): string => {
         .replaceAll(/<[^>]+>/gu, " ")
         .replaceAll(/\s+/gu, " ")
         .trim();
+};
+
+/** Markup as its words, its tags left out. */
+const words = (part: string) =>
+  part
+    .replaceAll(/<[^>]+>/gu, " ")
+    .replaceAll(/\s+/gu, " ")
+    .trim();
+
+/**
+ * The bars named `label` (a split of one organization's spend, this month
+ * over last) on a page: their months as their name says them, then each
+ * row's name with this month's and last month's amounts.
+ */
+const barsText = (html: string, label: string): string[] => {
+  const at = html.indexOf(`>${label}, `);
+  if (at === -1) {
+    return [];
+  }
+  const figure = html.slice(at + 1, html.indexOf("</figure>", at));
+  const rows = figure
+    .split("<li")
+    .slice(1)
+    .map((row) => {
+      const name = words(
+        row.slice(
+          row.indexOf(">", row.indexOf("<span")) + 1,
+          row.indexOf("</span>")
+        )
+      );
+      return [name, ...(words(row).match(/\$[\d,.]+/gu) ?? [])].join(" ");
+    });
+  return [words(figure.slice(0, figure.indexOf("</span>"))), ...rows];
 };
 
 /** "2026-10" as the pages say it: "Oct 2026". */
@@ -133,16 +173,36 @@ describe("what Grasp's own AI features cost", () => {
     ];
 
     expect({
-      byFeature: tableText(html, "By feature"),
-      byModel: tableText(html, "By model"),
+      // This month's and last month's in all, as figures.
+      inAll: words(
+        html.slice(
+          html.indexOf('aria-label="Grasp’s own AI features in short"'),
+          html.indexOf("</ul>", html.indexOf("own AI features in short"))
+        )
+      )
+        .replace(/^[^>]*>/u, "")
+        .trim(),
+      byFeature: barsText(html, "By feature"),
+      byModel: barsText(html, "By model"),
       dollars: html.includes("US dollars at list prices"),
       // Nothing to cap or change.
       controls: ["<input", "<select", "<button"].some((tag) =>
         html.slice(html.indexOf("Grasp’s own AI features")).includes(tag)
       ),
     }).toStrictEqual({
-      byFeature: `By feature ${thisMonth} ${lastMonth} Transcription $2.00 $0.00 Document conversion $1.25 $0.00 Speech $0.30 $0.50`,
-      byModel: `By model ${thisMonth} ${lastMonth} OpenAI gpt-4o-transcribe $2.00 $0.00 OpenAI gpt-5.4-mini $1.25 $0.00 Mistral AI voxtral-mini-tts-3-0 $0.30 $0.50`,
+      inAll: `${thisMonth} $3.55 ${lastMonth} $0.50`,
+      byFeature: [
+        `By feature, ${thisMonth} and ${lastMonth}`,
+        "Transcription $2.00 $0.00",
+        "Document conversion $1.25 $0.00",
+        "Speech $0.30 $0.50",
+      ],
+      byModel: [
+        `By model, ${thisMonth} and ${lastMonth}`,
+        "OpenAI gpt-4o-transcribe $2.00 $0.00",
+        "OpenAI gpt-5.4-mini $1.25 $0.00",
+        "Mistral AI voxtral-mini-tts-3-0 $0.30 $0.50",
+      ],
       dollars: true,
       controls: false,
     });
@@ -159,8 +219,8 @@ describe("what Grasp's own AI features cost", () => {
     expect({
       saysUnreported: own.html.includes("Not reported by this release"),
       sum: spend.thisMonth.micros,
-      unread: spend.unread,
-      unreported: spend.unreported,
+      unread: spend.unread.map(({ name }) => name),
+      unreported: spend.unreported.map(({ name }) => name),
       platformSays: platform.html.includes(
         "Not reported by their release, so not in these sums: Oudegracht."
       ),
@@ -176,18 +236,22 @@ describe("what Grasp's own AI features cost", () => {
   it("sums every active organization's on Platform → AI, this month and last, with those that cost the most this month first and none that cost nothing", async () => {
     const thisPeriod = monthBack(0);
     const lastPeriod = monthBack(1);
-    await liveClient("Acme", {
-      thisMonth: [
-        conversion(1_250_000),
-        speech(300_000),
-        transcription(2_000_000),
-      ],
-      lastMonth: [speech(500_000)],
-    });
+    await liveClient(
+      "Acme",
+      {
+        thisMonth: [
+          conversion(1_250_000),
+          speech(300_000),
+          transcription(2_000_000),
+        ],
+        lastMonth: [speech(500_000)],
+      },
+      { spentMicros: 3_000_000, limitMicros: 200_000_000, reached: false }
+    );
     // Nothing this month: after every organization that spent this month.
     await liveClient("Brightline", { lastMonth: [conversion(9_000_000)] });
     await liveClient("Calder", { thisMonth: [transcription(5_000_000)] });
-    // Nothing either month: not listed.
+    // Nothing either month: last, and not in the table of those that cost the most.
     await liveClient("Dunmore", {});
 
     const spend = await callServerFn(fetchPlatformSpend);
@@ -200,14 +264,17 @@ describe("what Grasp's own AI features cost", () => {
     expect({
       thisMonth: spend.thisMonth,
       lastMonth: spend.lastMonth,
-      top: spend.top.map(({ name, thisMonth: now, lastMonth: before }) => ({
-        name,
-        now,
-        before,
-      })),
+      each: spend.byOrganization.map(
+        ({ name, thisMonth: now, lastMonth: before, graspAi }) => ({
+          name,
+          now,
+          before,
+          graspAi,
+        })
+      ),
       organizations: spend.organizations,
-      unread: spend.unread,
-      unreported: spend.unreported,
+      unread: spend.unread.map(({ name }) => name),
+      unreported: spend.unreported.map(({ name }) => name),
       shown: tableText(html, "Top organizations"),
     }).toStrictEqual({
       thisMonth: {
@@ -236,10 +303,17 @@ describe("what Grasp's own AI features cost", () => {
           { model: "mistral/voxtral-mini-tts-3-0", micros: 500_000 },
         ],
       },
-      top: [
-        { name: "Calder", now: 5_000_000, before: 0 },
-        { name: "Acme", now: 3_550_000, before: 500_000 },
-        { name: "Brightline", now: 0, before: 9_000_000 },
+      each: [
+        { name: "Calder", now: 5_000_000, before: 0, graspAi: null },
+        {
+          name: "Acme",
+          now: 3_550_000,
+          before: 500_000,
+          // Its own AI on Grasp's key against its limit.
+          graspAi: { spent: 3_000_000, limit: 200_000_000 },
+        },
+        { name: "Brightline", now: 0, before: 9_000_000, graspAi: null },
+        { name: "Dunmore", now: 0, before: 0, graspAi: null },
       ],
       organizations: 4,
       unread: [],

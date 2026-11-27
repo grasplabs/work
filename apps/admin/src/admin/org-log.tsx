@@ -6,30 +6,37 @@
  * who came in, each workflow going live), and what a person at Grasp did by
  * hand in this admin. It can be narrowed by what an entry is about, who
  * did it, a team, a day, words in it, or to what went wrong only; a chart
- * shows how busy each day was once the log is long (`chartFrom`). The entries are the model's (`logItemsOf`,
- * `logDays`, `logHours`).
+ * shows how busy each day was, by who did it, once the log is long
+ * (`chartFrom`), and a day is picked by pressing its bar. The entries are
+ * the model's (`logItemsOf`, `logDays`, `logHours`).
  *
  * Not here, as the prototype has it: what the prototype's Worker noted with
  * its time (each link, each interview, each drawing), which core's snapshot
  * doesn't carry; and exporting what is shown.
  */
 
-import { Button } from "@grasp-os/app-kit/components/button";
 import {
-  Bar,
-  BarChart,
-  CartesianGrid,
+  LOG_ACTORS,
+  LOG_TOPICS,
+  logDays,
+  logHours,
+  logItemsOf,
+} from "@grasp-os/shared/admin/admin-log";
+import type { LogItem } from "@grasp-os/shared/admin/admin-log";
+import type { AdminView } from "@grasp-os/shared/admin/admin-view";
+import { peopleOf } from "@grasp-os/shared/admin/onboarding-admin";
+import type { TrailEntry } from "@grasp-os/shared/admin/trail";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  ChartBar,
   ChartContainer,
+  ChartGrid,
+  ChartLegend,
   ChartTooltip,
-  ChartTooltipContent,
-  XAxis,
-  YAxis,
-  chartColor,
-} from "@grasp-os/app-kit/components/chart";
-import type {
-  ChartColor,
-  ChartConfig,
-} from "@grasp-os/app-kit/components/chart";
+  ChartXAxis,
+  ChartYAxis,
+} from "@grasp-os/ui/components/chart";
+import type { ChartConfig } from "@grasp-os/ui/components/chart";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -38,35 +45,27 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@grasp-os/app-kit/components/dropdown-menu";
+} from "@grasp-os/ui/components/dropdown-menu";
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
-} from "@grasp-os/app-kit/components/input-group";
-import { cn } from "@grasp-os/app-kit/lib/utils";
+} from "@grasp-os/ui/components/input-group";
+import { Text } from "@grasp-os/ui/components/text";
 import {
-  LOG_ACTORS,
-  LOG_TOPICS,
-  logDays,
-  logHours,
-  logItemsOf,
-} from "@grasp-os/shared/admin/admin-log";
-import type { LogActor, LogItem } from "@grasp-os/shared/admin/admin-log";
-import type { AdminView } from "@grasp-os/shared/admin/admin-view";
-import { peopleOf } from "@grasp-os/shared/admin/onboarding-admin";
-import type { TrailEntry } from "@grasp-os/shared/admin/trail";
-import {
-  ListFilterIcon,
+  Icon,
   SearchIcon,
+  SlidersHorizontalIcon,
   TriangleAlertIcon,
   XIcon,
-} from "lucide-react";
+} from "@grasp-os/ui/lib/icons";
+import { colors, font, space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
 import { actorWords, logLine, topicWords } from "./log-words.ts";
-import { Attention } from "./parts.tsx";
-import { Section } from "./section.tsx";
+import { Attention } from "./marks.tsx";
+import { PagePart } from "./page-part.tsx";
 import { formatDate } from "./words.ts";
 
 /** How many entries the list shows before it asks to show more. */
@@ -78,37 +77,102 @@ const chartFrom = 30;
 /** What two entries saying the same thing may lie apart and still be one. */
 const sameMinuteMs = 60_000;
 
-/** Each of who did it in the chart's own shade. */
-const actorColors: Record<LogActor, ChartColor> = {
-  grasp: "chart-1",
-  company: "chart-3",
-  person: "chart-4",
-  itself: "chart-2",
-};
-
-/** The same shades, for the legend under the chart. */
-const swatches: Record<LogActor, string> = {
-  grasp: "bg-chart-1",
-  company: "bg-chart-3",
-  person: "bg-chart-4",
-  itself: "bg-chart-2",
-};
-
-const chartConfig: ChartConfig = Object.fromEntries(
-  LOG_ACTORS.map((actor) => [
-    actor,
-    { label: actorWords[actor], color: actorColors[actor] },
-  ])
+/** Who did it, each a part of a day's bar, in the chart's tones in this order. */
+const busyConfig: ChartConfig = Object.fromEntries(
+  LOG_ACTORS.map((actor) => [actor, { label: actorWords[actor] }])
 );
+
+/** A page too narrow for the count beside the tools. */
+const narrow = "@media (max-width: 39.99rem)";
+
+/** The width under which who did it is left out of each entry's row. */
+const wide = "@container (min-width: 42rem)";
+
+const styles = stylex.create({
+  bar: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: space["3"],
+  },
+  // Said to a screen reader everywhere, shown only where there is room.
+  count: {
+    fontVariantNumeric: "tabular-nums",
+    position: { default: null, [narrow]: "absolute" },
+    width: { default: null, [narrow]: 1 },
+    height: { default: null, [narrow]: 1 },
+    overflow: { default: null, [narrow]: "hidden" },
+    clipPath: { default: null, [narrow]: "inset(50%)" },
+    whiteSpace: { default: null, [narrow]: "nowrap" },
+  },
+  tools: {
+    display: "flex",
+    minWidth: 0,
+    flexGrow: 1,
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: space["2"],
+  },
+  search: {
+    minWidth: 0,
+    flexGrow: { default: 1, "@media (min-width: 40rem)": 0 },
+    flexBasis: { default: "10rem", "@media (min-width: 40rem)": "auto" },
+    width: { default: null, "@media (min-width: 40rem)": "14rem" },
+  },
+  entries: {
+    display: "flex",
+    flexDirection: "column",
+    containerType: "inline-size",
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  entry: {
+    display: "flex",
+    alignItems: "baseline",
+    columnGap: space["4"],
+    paddingBlock: space["2"],
+    paddingInline: space["5"],
+    borderTopWidth: 1,
+    borderTopStyle: "solid",
+    borderTopColor: colors.border,
+    fontFamily: font.sans,
+    fontSize: font.textSm,
+    color: colors.foreground,
+  },
+  when: {
+    width: "9rem",
+    flexShrink: 0,
+    color: colors.mutedForeground,
+    fontSize: font.textXs,
+    fontVariantNumeric: "tabular-nums",
+  },
+  date: { display: "inline-block", width: "6rem" },
+  what: { minWidth: 0, flexGrow: 1 },
+  who: {
+    display: { default: "none", [wide]: "block" },
+    width: "12rem",
+    flexShrink: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    textAlign: "end",
+    color: colors.mutedForeground,
+    fontSize: font.textXs,
+  },
+  more: { display: "flex", justifyContent: "center" },
+});
 
 const two = (value: number): string => String(value).padStart(2, "0");
 
 /** The time of a moment, in UTC as the admin's other times are. */
 const timeOf = (at: number): string => new Date(at).toISOString().slice(11, 16);
 
-/** "2026-10-14" as "14 Oct", for under the chart. */
-const shortDate = (day: string): string =>
-  formatDate(day).split(" ").slice(0, 2).join(" ");
+/** "14 Oct 2026" as "14 Oct", along the chart's foot. */
+const shortDate = (said: string | number): string =>
+  String(said).split(" ").slice(0, 2).join(" ");
 
 /** `count` entries, in words. */
 const entriesWords = (count: number): string =>
@@ -140,7 +204,22 @@ const saidOf = (items: LogItem[]): Said[] =>
       return each.text !== "" && !same;
     });
 
-/** How busy each day was, or each hour of a log that is one day long. */
+/** How many entries a day's or an hour's row holds, whoever did them. */
+const entriesIn = (row: Record<string, unknown>): number => {
+  let entries = 0;
+  for (const actor of LOG_ACTORS) {
+    entries += Number(row[actor] ?? 0);
+  }
+  return entries;
+};
+
+/** What each of who did it did in a day's or an hour's row. */
+const countsOf = (row: Record<string, unknown>): Record<string, number> =>
+  Object.fromEntries(
+    LOG_ACTORS.map((actor) => [actor, Number(row[actor] ?? 0)])
+  );
+
+/** How busy each day was, or each hour of a log that is one day long, by who did it. */
 const BusyChart = ({
   items,
   day,
@@ -153,105 +232,66 @@ const BusyChart = ({
   const days = logDays(items);
   // A log of one day is drawn by the hour.
   const hourly = days.length === 1 && items.some((item) => item.at !== null);
-  const description = hourly
-    ? "Everything so far happened on one day: here by the hour (UTC)."
-    : "Press a day to see only that day.";
+  // Each row as it is read ("14 Oct 2026", "09:00"), with who did how much.
+  const data = hourly
+    ? logHours(items).map((row) => ({
+        at: `${two(row.hour)}:00`,
+        ...countsOf(row),
+      }))
+    : days.map((row) => ({ at: formatDate(row.day), ...countsOf(row) }));
+  let busiest: { at: string; entries: number } | undefined;
+  for (const row of data) {
+    const entries = entriesIn(row);
+    if (busiest === undefined || entries > busiest.entries) {
+      busiest = { at: row.at, entries };
+    }
+  }
+  const picked = days.findIndex((each) => each.day === day);
   return (
-    <Section description={description} title="What happened, by who did it">
-      <div className="border-t px-3 pt-4 pb-2">
-        <ChartContainer
-          className="aspect-auto h-44 w-full"
-          config={chartConfig}
-        >
-          {hourly ? (
-            <BarChart data={logHours(items)}>
-              <CartesianGrid vertical={false} />
-              <XAxis
-                axisLine={false}
-                dataKey="hour"
-                tickFormatter={(hour: number) => `${two(hour)}:00`}
-                tickLine={false}
-                ticks={[0, 6, 12, 18, 23]}
-              />
-              <YAxis
-                allowDecimals={false}
-                axisLine={false}
-                tickLine={false}
-                width={28}
-              />
-              <ChartTooltip content={<ChartTooltipContent />} />
-              {LOG_ACTORS.map((actor) => (
-                <Bar
-                  dataKey={actor}
-                  fill={chartColor(actorColors[actor])}
-                  isAnimationActive={false}
-                  key={actor}
-                  maxBarSize={28}
-                  stackId="hour"
-                />
-              ))}
-            </BarChart>
-          ) : (
-            <BarChart
-              data={days}
-              onClick={(state) => {
-                const label = state?.activeLabel;
-                if (typeof label === "string") {
-                  onDay(day === label ? null : label);
-                }
-              }}
-            >
-              <CartesianGrid vertical={false} />
-              <XAxis
-                axisLine={false}
-                dataKey="day"
-                minTickGap={24}
-                tickFormatter={shortDate}
-                tickLine={false}
-              />
-              <YAxis
-                allowDecimals={false}
-                axisLine={false}
-                tickLine={false}
-                width={28}
-              />
-              <ChartTooltip
-                content={
-                  <ChartTooltipContent
-                    labelFormatter={(label) =>
-                      typeof label === "string" ? formatDate(label) : ""
-                    }
-                  />
-                }
-              />
-              {LOG_ACTORS.map((actor) => (
-                <Bar
-                  className="cursor-pointer"
-                  dataKey={actor}
-                  fill={chartColor(actorColors[actor])}
-                  isAnimationActive={false}
-                  key={actor}
-                  maxBarSize={28}
-                  stackId="day"
-                />
-              ))}
-            </BarChart>
-          )}
-        </ChartContainer>
-        {/* Its own legend, so it wraps where the page is narrow. */}
-        <ul className="text-muted-foreground flex flex-wrap justify-center gap-x-4 gap-y-1 px-2 pt-3 pb-1 text-xs">
-          {LOG_ACTORS.map((actor) => (
-            <li className="flex items-center gap-1.5" key={actor}>
-              <span
-                aria-hidden
-                className={cn("size-2 flex-none rounded-xs", swatches[actor])}
-              />
-              {actorWords[actor]}
-            </li>
-          ))}
-        </ul>
-      </div>
-    </Section>
+    <PagePart
+      description={
+        hourly
+          ? "Everything so far happened on one day: here by the hour (UTC)."
+          : "Press a day to see only that day."
+      }
+      title="What happened, by who did it"
+    >
+      <ChartContainer
+        aria-label={hourly ? "Entries by the hour" : "Entries by day"}
+        config={busyConfig}
+        data={data}
+        height={176}
+        summary={
+          busiest === undefined
+            ? "Nothing yet."
+            : `The busiest: ${entriesWords(busiest.entries)} ${hourly ? "at" : "on"} ${busiest.at}.`
+        }
+        xKey="at"
+        {...(hourly
+          ? {}
+          : {
+              // Pressing the day shown alone shows every day again.
+              onRowClick: (_row: unknown, index: number) => {
+                const pressed = days[index]?.day ?? null;
+                onDay(pressed === day ? null : pressed);
+              },
+              selectedIndex: picked === -1 ? null : picked,
+            })}
+      >
+        <ChartGrid />
+        <ChartXAxis valueFormatter={hourly ? undefined : shortDate} />
+        <ChartYAxis width={28} />
+        {LOG_ACTORS.map((actor) => (
+          <ChartBar
+            dataKey={actor}
+            key={actor}
+            stackId={hourly ? "hour" : "day"}
+          />
+        ))}
+        <ChartTooltip />
+        <ChartLegend />
+      </ChartContainer>
+    </PagePart>
   );
 };
 
@@ -277,11 +317,13 @@ const FilterMenu = ({
   const shown = facets.filter((facet) => facet.options.length > 0);
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger render={<Button size="sm" variant="outline" />}>
-        <ListFilterIcon data-icon="inline-start" />
-        {chosen === 0 ? "Filter" : `Filter (${chosen})`}
+      <DropdownMenuTrigger asChild>
+        <Button size="sm" variant="outline">
+          <Icon icon={SlidersHorizontalIcon} />
+          {chosen === 0 ? "Filter" : `Filter (${chosen})`}
+        </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-60">
+      <DropdownMenuContent align="end">
         {shown.map((facet, index) => (
           <DropdownMenuGroup key={facet.key}>
             {index > 0 ? <DropdownMenuSeparator /> : null}
@@ -300,10 +342,7 @@ const FilterMenu = ({
                   );
                 }}
               >
-                <span className="min-w-0 flex-1 truncate">{option.label}</span>
-                <span className="text-muted-foreground text-xs tabular-nums">
-                  {option.count}
-                </span>
+                {`${option.label} (${option.count})`}
               </DropdownMenuCheckboxItem>
             ))}
           </DropdownMenuGroup>
@@ -412,10 +451,11 @@ export const OrgLog = ({
     },
   ];
 
+  const charted = all.length > chartFrom;
   return (
     <>
-      {/* Only a long log is charted: a short one is read as it is. The chart keeps every day in view while one is picked, so another can be picked from it. */}
-      {all.length > chartFrom ? (
+      {/* Only a long log is charted: a short one is read as it is. The chart keeps every day in view while one is picked, so another can be picked. */}
+      {charted ? (
         <BusyChart
           day={day}
           items={all
@@ -424,17 +464,16 @@ export const OrgLog = ({
           onDay={setDay}
         />
       ) : null}
-      <section className="bg-card overflow-hidden rounded-xl border">
-        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
-          <span
-            aria-live="polite"
-            className="text-muted-foreground tabular-nums max-sm:sr-only"
-          >
-            {narrowed
-              ? `${shown.length} of ${all.length} entries`
-              : entriesWords(all.length)}
-          </span>
-          <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
+      <section aria-label="Every entry">
+        <div {...stylex.props(styles.bar)}>
+          <Text color="muted">
+            <span aria-live="polite" {...stylex.props(styles.count)}>
+              {narrowed
+                ? `${shown.length} of ${all.length} entries`
+                : entriesWords(all.length)}
+            </span>
+          </Text>
+          <div {...stylex.props(styles.tools)}>
             {day === null ? null : (
               <Button
                 aria-label="Show every day again"
@@ -445,7 +484,7 @@ export const OrgLog = ({
                 variant="secondary"
               >
                 {formatDate(day)}
-                <XIcon data-icon="inline-end" />
+                <Icon icon={XIcon} />
               </Button>
             )}
             {wrong > 0 ? (
@@ -457,25 +496,23 @@ export const OrgLog = ({
                 size="sm"
                 variant={problems ? "secondary" : "outline"}
               >
-                <TriangleAlertIcon data-icon="inline-start" />
+                <Icon icon={TriangleAlertIcon} />
                 {wrong} went wrong
               </Button>
             ) : null}
-            <div className="min-w-0 flex-1 basis-40 sm:w-56 sm:flex-none sm:basis-auto">
-              <InputGroup>
-                <InputGroupInput
-                  aria-label="Search the log"
-                  onChange={(event) => {
-                    setQuery(event.target.value);
-                  }}
-                  placeholder="Search: a name, a team, a word"
-                  value={query}
-                />
-                <InputGroupAddon>
-                  <SearchIcon />
-                </InputGroupAddon>
-              </InputGroup>
-            </div>
+            <InputGroup style={styles.search}>
+              <InputGroupAddon>
+                <Icon icon={SearchIcon} />
+              </InputGroupAddon>
+              <InputGroupInput
+                aria-label="Search the log"
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                }}
+                placeholder="Search: a name, a team, a word"
+                value={query}
+              />
+            </InputGroup>
             <FilterMenu
               facets={facets}
               onChange={(key, values) => {
@@ -486,29 +523,26 @@ export const OrgLog = ({
           </div>
         </div>
         {shown.length === 0 ? (
-          <p className="text-muted-foreground border-t px-5 py-4">
+          <Text color="muted">
             {all.length === 0 ? "Nothing yet." : "Nothing matches."}
-          </p>
+          </Text>
         ) : (
-          <ol className="@container flex flex-col">
+          <ol {...stylex.props(styles.entries)}>
             {listed.map(({ item, text }, index) => (
-              <li
-                className="flex items-baseline gap-x-4 border-t px-5 py-2"
-                key={item.key}
-              >
+              <li key={item.key} {...stylex.props(styles.entry)}>
                 {/* Its day, said once: on the first entry of each day. */}
-                <span className="text-muted-foreground w-36 flex-none text-xs tabular-nums">
-                  <span className="inline-block w-24">
+                <span {...stylex.props(styles.when)}>
+                  <span {...stylex.props(styles.date)}>
                     {listed[index - 1]?.item.on === item.on
                       ? ""
                       : formatDate(item.on)}
                   </span>
                   {item.at === null ? "" : timeOf(item.at)}
                 </span>
-                <span className="min-w-0 flex-1">
+                <span {...stylex.props(styles.what)}>
                   {item.problem ? <Attention>{text}</Attention> : text}
                 </span>
-                <span className="text-muted-foreground hidden w-48 flex-none truncate text-right text-xs @2xl:block">
+                <span {...stylex.props(styles.who)}>
                   {item.actor === "person" && item.person !== undefined
                     ? (people.find((each) => each.id === item.person)?.name ??
                       actorWords.person)
@@ -519,7 +553,7 @@ export const OrgLog = ({
           </ol>
         )}
         {shown.length > limit ? (
-          <div className="flex justify-center border-t px-5 py-3">
+          <div {...stylex.props(styles.more)}>
             <Button
               onClick={() => {
                 setLimit(limit + page);
