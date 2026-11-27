@@ -1,4 +1,8 @@
-import type { ChatListUpdate, ChatSummary } from "@grasp-os/shared/chat";
+import type {
+  ChatListUpdate,
+  ChatMessage,
+  ChatSummary,
+} from "@grasp-os/shared/chat";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -247,4 +251,45 @@ describe("a person's list of chats", () => {
       vi.useRealTimers();
     }
   });
+
+  it("is taken up again when its person's object resets mid-watch, as a deploy resets it, the chat's watch too, with nothing missed", async () => {
+    const ann = await person();
+    await fakeProvider(says("Still here."));
+    const chat = await ann.api.chats.create("Before the reset");
+    const list = await followList(ann.api.chats);
+    const messages: ChatMessage[] = [];
+    await ann.api.chats.watch(chat.id, null, (update) => {
+      messages.push(...update.messages);
+    });
+    await until(() => {
+      expect(list.rows()).toHaveLength(1);
+    });
+    await runInDurableObject(
+      workspace(env, personalWorkspaceId(ann.userId)),
+      (_instance, state) => {
+        state.abort("Reset by the test");
+      }
+    ).catch(() => {
+      // Aborting fails the call that aborted: that is the reset.
+    });
+
+    // After the reset, the browser's connection still open.
+    await ann.api.chats.create("After the reset");
+    await ann.api.chats.send(chat.id, { text: "Still there?", model });
+    await vi.waitFor(
+      () => {
+        expect(list.rows().map(({ title }) => title)).toStrictEqual([
+          "Before the reset",
+          "After the reset",
+        ]);
+        expect(
+          messages
+            .filter(({ role }) => role === "user" || role === "assistant")
+            .map(({ text }) => text)
+            .filter((text) => text !== "")
+        ).toStrictEqual(["Still there?", "Still here."]);
+      },
+      { timeout: 20_000 }
+    );
+  }, 30_000);
 });
