@@ -31,6 +31,7 @@ const pending: PendingQuestion = {
   after: 2,
   at,
   queues: false,
+  alreadyQueued: 0,
   key: "key-1",
   owner: "start",
   fromBox: true,
@@ -90,6 +91,16 @@ describe("the question on its way", () => {
         asked(3, "And last month?"),
       ]),
     }).toStrictEqual({ history: unknown, taken: undefined });
+  });
+
+  it("sent in the words of a question queued already, is drawn until core queues it too", () => {
+    const again = { ...pending, queues: true, alreadyQueued: 1 };
+    const older = { id: "7", text: "Yes" };
+
+    expect({
+      older: shownPending(again, [], [older]),
+      both: shownPending(again, [], [older, { id: "8", text: "Yes" }]),
+    }).toStrictEqual({ older: again, both: undefined });
   });
 
   it("is taken back by the box that sent it while it is on the page, and by the box showing its chat once it is gone", () => {

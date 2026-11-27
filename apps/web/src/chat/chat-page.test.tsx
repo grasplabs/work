@@ -31,6 +31,7 @@ import { activeChat, setActiveChat } from "./active-chat.ts";
 import { LoadedChatPage } from "./chat-page.tsx";
 import { GlobalChatProvider, useGlobalChat } from "./global-chat.tsx";
 import type { GlobalChat } from "./global-chat.tsx";
+import { setPending } from "./pending-question.ts";
 import { typeInPrompt } from "./test-typing.ts";
 
 // A chat's own page, read as its route reads it, against core's chats
@@ -454,6 +455,40 @@ describe("a chat's own page", () => {
         agentErrors.create("agent.invalid_question").message,
       ],
     });
+  });
+
+  it("takes back a chat's refused question with its own files alone, none of the chat it came from", async () => {
+    const { router } = await opened("chat-a");
+    await act(async () => {
+      seen.chat?.composer.onAttach?.([new File(["a"], "from-a.csv")]);
+      await Promise.resolve();
+    });
+    setPending("chat-b", {
+      text: "And B?",
+      mentions: [],
+      files: [{ id: "file-b", file: new File(["b"], "for-b.csv") }],
+      after: 0,
+      at: "2026-11-01T08:00:00.000Z",
+      queues: false,
+      alreadyQueued: 0,
+      key: "key-b",
+      owner: "a box no longer here",
+      fromBox: true,
+      state: { failed: "Refused." },
+    });
+
+    await act(async () => {
+      await router.navigate({
+        to: "/chats/$chatId",
+        params: { chatId: "chat-b" },
+      });
+    });
+    await settled();
+
+    expect({
+      box: box()?.textContent,
+      files: seen.chat?.composer.files.map(({ name }) => name),
+    }).toStrictEqual({ box: "And B?", files: ["for-b.csv"] });
   });
 
   it("says why a read that failed did, with Try again, and gives no box to ask in", async () => {

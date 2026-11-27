@@ -45,6 +45,11 @@ export interface PendingQuestion {
    * (`ChatUpdate.queued`), so it is drawn as queued, not answered yet.
    */
   queues: boolean;
+  /**
+   * How many questions in its words were queued already when it was sent:
+   * core's copy is one more.
+   */
+  alreadyQueued: number;
   /** The key it went with (`ChatQuestion.key`): the same question again goes with it. */
   key: string;
   /**
@@ -155,7 +160,10 @@ export const taken = (
   queued: readonly ChatQueued[] = []
 ): boolean => {
   const { after } = question;
-  if (queued.some(({ text }) => text === question.text)) {
+  if (
+    queued.filter(({ text }) => text === question.text).length >
+    question.alreadyQueued
+  ) {
     return true;
   }
   return after === undefined
