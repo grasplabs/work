@@ -2061,6 +2061,26 @@ export const changeLine = (id: string, was: string, now: string): void => {
 };
 
 /**
+ * The read-back, once the conversation before is left and everything said
+ * in it is written down: the summary misses none of their last answer.
+ */
+const readBackWhenWritten = async (): Promise<void> => {
+  show("thinking");
+  await leaving;
+  const done = await written();
+  if (!on) {
+    return;
+  }
+  if (!done) {
+    notWritten(() => {
+      void readBackWhenWritten();
+    });
+    return;
+  }
+  void readPart();
+};
+
+/**
  * The conversation begins, or goes on where it was: with nothing said, his
  * first line; back on the link, where they were; in the read-back, the part
  * they are at.
@@ -2085,7 +2105,7 @@ export const startLoop = (): void => {
   if (isReading(now)) {
     // He reads back here, and hears their answer with his own ears.
     happen({ type: "voice", at: performance.now(), on: now.mode === "talk" });
-    void readPart();
+    void readBackWhenWritten();
     return;
   }
   void converse();
