@@ -2,7 +2,9 @@
  * upload-release.ts run as CI runs it, against a stand-in for R2's S3 API
  * (the outside system) that stores objects in memory and, as R2 does,
  * honours `If-None-Match: *`, checks `x-amz-checksum-sha256` on a PUT and
- * reports it on a HEAD with checksum mode on.
+ * reports it on a HEAD with checksum mode on. It can fail a request as a
+ * network does: drop the connection unanswered, or answer 500, before or
+ * after doing what was asked.
  */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -66,12 +68,25 @@ const manifest = generateManifest(info, fixture);
 const published = `releases/${manifest.releaseId}/manifest.json`;
 
 const HTTP_BAD_REQUEST = 400;
+const HTTP_SERVER_ERROR = 500;
 
 /** What the tests read of a published manifest. */
 const storedManifest = z.object({ releaseId: z.string(), commit: z.string() });
 
 const sha256Base64 = (bytes: Uint8Array): string =>
   createHash("sha256").update(bytes).digest("base64");
+
+/**
+ * How the stand-in fails one request for a key instead of answering it:
+ * `drop` closes the connection unanswered, as a reset does; `500` answers
+ * 500. `after` does what was asked first (a PUT stores), so only the
+ * answer is lost. `meanwhile` runs before the failure: another writer.
+ */
+interface Fault {
+  answer: "drop" | "500";
+  after?: boolean;
+  meanwhile?: () => void;
+}
 
 /**
  * Objects by key, the SHA-256 each was stored with (if any), every PUT that
@@ -87,6 +102,10 @@ interface Bucket {
   writtenAfterList: Map<string, Buffer>;
   /** Keys whose next PUT is refused, as R2 failing a write for good (a 5xx is retried). */
   failingPuts: Set<string>;
+  /** The failures each key's next requests meet, in turn, whatever their method. */
+  faults: Map<string, Fault[]>;
+  /** Every request answered or failed, as `<method> <key>`, a listing as `LIST <prefix>`. */
+  requests: string[];
 }
 
 const emptyBucket = (): Bucket => ({
@@ -96,6 +115,8 @@ const emptyBucket = (): Bucket => ({
   writtenAfterHead: new Map(),
   writtenAfterList: new Map(),
   failingPuts: new Set(),
+  faults: new Map(),
+  requests: [],
 });
 
 /**
@@ -112,15 +133,34 @@ const bucketWithModel = (): Bucket => {
   return bucket;
 };
 
-/** A ListObjectsV2 by `/` of the keys under `prefix`, in one page. */
-const listing = (bucket: Bucket, prefix: string): string => {
-  const ids = new Set(
-    [...bucket.objects.keys()]
-      .filter((key) => key.startsWith(prefix))
-      .map((key) => key.slice(0, key.indexOf("/", "releases/".length) + 1))
-      .filter((key) => key.length > 0)
-  );
-  return `<ListBucketResult><IsTruncated>false</IsTruncated>${[...ids]
+/** Most keys or prefixes in one page of a listing, as R2 answers. */
+const LISTING_PAGE = 1000;
+
+/**
+ * A page of a ListObjectsV2 by `/` of the keys under `prefix`: the one
+ * after `token` (where the previous page stopped), or the first.
+ */
+const listing = (
+  bucket: Bucket,
+  prefix: string,
+  token: string | null
+): string => {
+  const ids = [
+    ...new Set(
+      [...bucket.objects.keys()]
+        .filter((key) => key.startsWith(prefix))
+        .map((key) => key.slice(0, key.indexOf("/", "releases/".length) + 1))
+        .filter((key) => key.length > 0)
+    ),
+  ];
+  const from = Number(token ?? "0");
+  const next = from + LISTING_PAGE < ids.length ? from + LISTING_PAGE : null;
+  return `<ListBucketResult><IsTruncated>${String(next !== null)}</IsTruncated>${
+    next === null
+      ? ""
+      : `<NextContinuationToken>${next}</NextContinuationToken>`
+  }${ids
+    .slice(from, from + LISTING_PAGE)
     .map((id) => `<CommonPrefixes><Prefix>${id}</Prefix></CommonPrefixes>`)
     .join("")}</ListBucketResult>`;
 };
@@ -140,7 +180,16 @@ const answeredListing = (
     return false;
   }
   const query = new URLSearchParams(url.slice(url.indexOf("?") + 1));
-  response.writeHead(HTTP_OK).end(listing(bucket, query.get("prefix") ?? ""));
+  bucket.requests.push(`LIST ${query.get("prefix") ?? ""}`);
+  response
+    .writeHead(HTTP_OK)
+    .end(
+      listing(
+        bucket,
+        query.get("prefix") ?? "",
+        query.get("continuation-token")
+      )
+    );
   for (const [key, bytes] of bucket.writtenAfterList) {
     bucket.objects.set(key, bytes);
   }
@@ -155,9 +204,9 @@ const answeredListing = (
 const headHeaders = (
   bucket: Bucket,
   key: string,
-  request: IncomingMessage
+  request: IncomingMessage,
+  stored: Buffer | undefined
 ): Record<string, string | number> => {
-  const stored = bucket.objects.get(key);
   const checksum = bucket.checksums.get(key);
   return {
     ...(stored === undefined ? {} : { "content-length": stored.byteLength }),
@@ -166,6 +215,54 @@ const headHeaders = (
       ? { "x-amz-checksum-sha256": checksum }
       : {}),
   };
+};
+
+/** An answer the stand-in sends, unless a fault loses it. */
+interface Answer {
+  status: number;
+  headers?: Record<string, string | number>;
+  body?: Buffer;
+}
+
+/** Does what `request` asks of `key`, as R2 does: its answer. */
+const serveObject = async (
+  bucket: Bucket,
+  key: string,
+  request: IncomingMessage
+): Promise<Answer> => {
+  const stored = bucket.objects.get(key);
+  if (request.method === "HEAD") {
+    const other = bucket.writtenAfterHead.get(key);
+    if (other !== undefined && stored === undefined) {
+      bucket.objects.set(key, other);
+    }
+    return {
+      status: stored === undefined ? HTTP_NOT_FOUND : HTTP_OK,
+      headers: headHeaders(bucket, key, request, stored),
+    };
+  }
+  if (request.method === "GET") {
+    return stored === undefined
+      ? { status: HTTP_NOT_FOUND }
+      : { status: HTTP_OK, body: stored };
+  }
+  const body = await buffer(request);
+  if (bucket.failingPuts.delete(key)) {
+    return { status: HTTP_BAD_REQUEST };
+  }
+  if (request.headers["if-none-match"] === "*" && stored !== undefined) {
+    return { status: HTTP_PRECONDITION_FAILED };
+  }
+  const checksum = request.headers["x-amz-checksum-sha256"];
+  if (typeof checksum === "string" && checksum !== sha256Base64(body)) {
+    return { status: HTTP_BAD_REQUEST };
+  }
+  bucket.objects.set(key, body);
+  if (typeof checksum === "string") {
+    bucket.checksums.set(key, checksum);
+  }
+  bucket.puts.push(key);
+  return { status: HTTP_OK };
 };
 
 const handle = async (
@@ -183,46 +280,28 @@ const handle = async (
     response.writeHead(HTTP_NOT_FOUND).end();
     return;
   }
-  const stored = bucket.objects.get(key);
-  if (request.method === "HEAD") {
-    response
-      .writeHead(
-        stored === undefined ? HTTP_NOT_FOUND : HTTP_OK,
-        headHeaders(bucket, key, request)
-      )
-      .end();
-    const other = bucket.writtenAfterHead.get(key);
-    if (other !== undefined && stored === undefined) {
-      bucket.objects.set(key, other);
-    }
-    return;
+  bucket.requests.push(`${request.method ?? ""} ${key}`);
+  const fault = bucket.faults.get(key)?.shift();
+  fault?.meanwhile?.();
+  if (fault !== undefined && fault.after !== true) {
+    await buffer(request);
   }
-  if (request.method === "GET") {
-    response.writeHead(stored === undefined ? HTTP_NOT_FOUND : HTTP_OK);
-    response.end(stored);
-    return;
+  const answer =
+    fault === undefined || fault.after === true
+      ? await serveObject(bucket, key, request)
+      : undefined;
+  if (fault?.answer === "drop") {
+    response.socket?.destroy();
+  } else if (fault?.answer === "500") {
+    response.writeHead(HTTP_SERVER_ERROR).end();
+  } else if (answer !== undefined) {
+    response.writeHead(answer.status, answer.headers).end(answer.body);
   }
-  const body = await buffer(request);
-  if (bucket.failingPuts.delete(key)) {
-    response.writeHead(HTTP_BAD_REQUEST).end();
-    return;
-  }
-  if (request.headers["if-none-match"] === "*" && stored !== undefined) {
-    response.writeHead(HTTP_PRECONDITION_FAILED).end();
-    return;
-  }
-  const checksum = request.headers["x-amz-checksum-sha256"];
-  if (typeof checksum === "string" && checksum !== sha256Base64(body)) {
-    response.writeHead(HTTP_BAD_REQUEST).end();
-    return;
-  }
-  bucket.objects.set(key, body);
-  if (typeof checksum === "string") {
-    bucket.checksums.set(key, checksum);
-  }
-  bucket.puts.push(key);
-  response.writeHead(HTTP_OK).end();
 };
+
+/** The requests among `requests` that aren't a listing's page. */
+const beyondListing = (requests: string[]): number =>
+  requests.filter((request) => !request.startsWith("LIST ")).length;
 
 describe("publishing a release", () => {
   let dir = "";
@@ -505,15 +584,15 @@ describe("publishing a release", () => {
 
   it("takes the next id when another publish claims one between its listing and its write", async () => {
     const month = releaseMonthPrefix(new Date());
-    bucket.writtenAfterList.set(
-      `releases/${month}1/manifest.json`,
-      Buffer.from("another publish's")
+    const others = Buffer.from(
+      JSON.stringify({ releaseId: `${month}1`, commit: "f".repeat(40) })
     );
+    bucket.writtenAfterList.set(`releases/${month}1/manifest.json`, others);
     await publish(buildOf("1".repeat(40)));
 
     expect(
-      bucket.objects.get(`releases/${month}1/manifest.json`)?.toString()
-    ).toBe("another publish's");
+      bucket.objects.get(`releases/${month}1/manifest.json`)
+    ).toStrictEqual(others);
     expect(bucket.objects.get(commitKey("1".repeat(40)))?.toString()).toBe(
       `${month}2\n`
     );
@@ -544,23 +623,189 @@ describe("publishing a release", () => {
     expect(stdout).not.toContain("Published");
   });
 
-  it("marks, rather than publishes again, a commit whose publish stopped between its manifest and its marker", async () => {
+  it("publishes a commit once when its earlier publish stopped after naming its id, before its manifest", async () => {
     const month = releaseMonthPrefix(new Date());
     const commit = "7".repeat(40);
-    bucket.failingPuts.add(commitKey(commit));
+    bucket.failingPuts.add(`releases/${month}1/manifest.json`);
     const stopped = await outcomeOf(publish(buildOf(commit)));
     const rerun = await publish(buildOf(commit));
 
     expect({
-      stopped: stopped.includes(`PUT ${commitKey(commit)}: 400`),
+      stopped: stopped.includes(`PUT releases/${month}1/manifest.json: 400`),
       releases: publishedReleases().map(({ id }) => id),
       marker: bucket.objects.get(commitKey(commit))?.toString(),
-      published: rerun.includes("Published"),
+      published: rerun.includes(`Published releases/${month}1/manifest.json`),
     }).toStrictEqual({
       stopped: true,
       releases: [`${month}1`],
       marker: `${month}1\n`,
+      published: true,
+    });
+  });
+
+  it("publishes nothing again for a commit whose earlier publish stored its manifest but never heard back", async () => {
+    const month = releaseMonthPrefix(new Date());
+    const commit = "8".repeat(40);
+    const claim = `releases/${month}1/manifest.json`;
+    bucket.faults.set(
+      claim,
+      Array.from({ length: 5 }, () => ({ answer: "drop", after: true }))
+    );
+    const stopped = await outcomeOf(publish(buildOf(commit)));
+    const rerun = await publish(buildOf(commit));
+
+    expect({
+      stopped: stopped.includes(`PUT ${claim}`) && stopped.includes("5 tries"),
+      releases: publishedReleases().map(
+        ({ id, commit: stored }) => `${id} ${String(stored)}`
+      ),
+      published: rerun.includes("Published"),
+    }).toStrictEqual({
+      stopped: true,
+      releases: [`${month}1 ${commit}`],
       published: false,
+    });
+  });
+
+  it.each(["drop", "500"] as const)(
+    "takes a manifest it stored for its own when the answer is lost (%s), not for a failure or another id",
+    async (answer) => {
+      const month = releaseMonthPrefix(new Date());
+      const commit = "9".repeat(40);
+      const claim = `releases/${month}1/manifest.json`;
+      bucket.faults.set(claim, [{ answer, after: true }]);
+      const stdout = await publish(buildOf(commit));
+
+      expect({
+        releases: publishedReleases().map(({ id }) => id),
+        marker: bucket.objects.get(commitKey(commit))?.toString(),
+        published: stdout.includes(`Published ${claim}`),
+      }).toStrictEqual({
+        releases: [`${month}1`],
+        marker: `${month}1\n`,
+        published: true,
+      });
+    }
+  );
+
+  it("takes a manifest of its commit from another build, found at the id it claims, for its release", async () => {
+    const month = releaseMonthPrefix(new Date());
+    const commit = "e".repeat(40);
+    const earlier = Buffer.from(
+      JSON.stringify({ releaseId: `${month}1`, commit })
+    );
+    bucket.writtenAfterList.set(`releases/${month}1/manifest.json`, earlier);
+    const stdout = await publish(buildOf(commit));
+
+    expect({
+      releases: publishedReleases().map(({ id }) => id),
+      stored: bucket.objects.get(`releases/${month}1/manifest.json`),
+      marker: bucket.objects.get(commitKey(commit))?.toString(),
+      published: stdout.includes(`release ${month}1`),
+    }).toStrictEqual({
+      releases: [`${month}1`],
+      stored: earlier,
+      marker: `${month}1\n`,
+      published: true,
+    });
+  });
+
+  it("leaves another publish's manifest as it is when a retried claim finds the id taken, and takes the next", async () => {
+    const month = releaseMonthPrefix(new Date());
+    const claim = `releases/${month}1/manifest.json`;
+    const others = Buffer.from(
+      JSON.stringify({ releaseId: `${month}1`, commit: "f".repeat(40) })
+    );
+    bucket.faults.set(claim, [
+      {
+        answer: "drop",
+        meanwhile: () => {
+          bucket.objects.set(claim, others);
+          bucket.checksums.set(claim, sha256Base64(others));
+        },
+      },
+    ]);
+    await publish(buildOf("a".repeat(40)));
+
+    expect({
+      first: bucket.objects.get(claim),
+      marker: bucket.objects.get(commitKey("a".repeat(40)))?.toString(),
+      releases: publishedReleases().map(
+        ({ id, commit }) => `${id} ${String(commit)}`
+      ),
+    }).toStrictEqual({
+      first: others,
+      marker: `${month}2\n`,
+      releases: [`${month}1 ${"f".repeat(40)}`, `${month}2 ${"a".repeat(40)}`],
+    });
+  });
+
+  it("sends a request again when the network drops it or R2 answers 500, then publishes", async () => {
+    const { key } = coreModule();
+    const marker = commitKey("b".repeat(40));
+    bucket.faults.set(key, [{ answer: "drop" }, { answer: "500" }]);
+    bucket.faults.set(marker, [{ answer: "drop" }]);
+    const stdout = await publish(buildOf("b".repeat(40)));
+
+    expect({
+      published: stdout.includes("Published"),
+      blobStored: bucket.objects.has(key),
+      faultsLeft: [...bucket.faults.values()].flat().length,
+    }).toStrictEqual({ published: true, blobStored: true, faultsLeft: 0 });
+  });
+
+  it("gives up on a request after 5 tries, publishing nothing", async () => {
+    const { key } = coreModule();
+    bucket.faults.set(
+      key,
+      Array.from({ length: 5 }, () => ({ answer: "drop" }))
+    );
+    const outcome = await outcomeOf(publish(buildOf("c".repeat(40))));
+
+    expect({
+      failed: outcome.includes(`HEAD ${key}`) && outcome.includes("5 tries"),
+      tries: bucket.requests.filter((request) => request === `HEAD ${key}`)
+        .length,
+      releases: publishedReleases(),
+    }).toStrictEqual({ failed: true, tries: 5, releases: [] });
+  });
+
+  it("asks the same of the bucket however many releases it holds, but a listing page per 1,000 of the month's: none of their manifests is read", async () => {
+    const now = new Date();
+    const month = releaseMonthPrefix(now);
+    const before = releaseMonthPrefix(
+      new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))
+    );
+    const commit = "d".repeat(40);
+    await publish(buildOf(commit));
+    const alone = [...bucket.requests];
+
+    const history = bucketWithModel();
+    for (const [prefix, count] of [
+      [month, 3000],
+      [before, 2000],
+    ] as const) {
+      for (let n = 1; n <= count; n += 1) {
+        history.objects.set(
+          `releases/${prefix}${n}/manifest.json`,
+          Buffer.from(JSON.stringify({ commit: String(n).padStart(40, "0") }))
+        );
+      }
+    }
+    await serve(history);
+    await publish(buildOf(commit));
+
+    // Past one listing page per 1,000 of the month's releases, nothing
+    // more is asked; the month before's are never listed.
+    expect({
+      requests: beyondListing(bucket.requests),
+      listings: bucket.requests.filter((request) => request.startsWith("LIST "))
+        .length,
+      id: bucket.objects.get(commitKey(commit))?.toString(),
+    }).toStrictEqual({
+      requests: beyondListing(alone),
+      listings: 3,
+      id: `${month}3001\n`,
     });
   });
 
