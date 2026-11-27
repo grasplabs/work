@@ -1252,6 +1252,10 @@ export class Workspace extends DurableObject<Env> {
     super(ctx, env);
     migrateOnWake(ctx, migrations);
     this.#closeInterruptedRuns();
+    // A deletion marked before a restart that cut its wake-up short.
+    void ctx.blockConcurrencyWhile(async () => {
+      await this.#armDeletes();
+    });
   }
 
   /**
@@ -5749,7 +5753,7 @@ export class Workspace extends DurableObject<Env> {
     }
     const chat = this.#graspChat(chatId, personId);
     this.#markDeleting([chat.id], person, by, true);
-    await this.#alarmBy(Date.now() + deleteRetryMs.first);
+    await this.#armDeletes();
     await this.#tryDelete(chat.id);
   }
 
@@ -5802,7 +5806,7 @@ export class Workspace extends DurableObject<Env> {
     });
     this.#deliverAudit();
     if (going.length > 0) {
-      await this.#alarmBy(Date.now() + deleteRetryMs.first);
+      await this.#armDeletes();
       await Promise.all(
         going.map(async (id) => {
           await this.#tryDelete(id);
@@ -5862,6 +5866,32 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * Wakes the object when the next deletion under way is due
+   * (`chatDeletes`). Called once deletions are marked, and as the object
+   * starts, so a mark kept is never left without a wake-up: a restart
+   * between the two arms it as the object starts again, and an alarm that
+   * can't be written resets the object, which does the same.
+   */
+  async #armDeletes(): Promise<void> {
+    const next = this.#db
+      .select({ nextAt: chatDeletes.nextAt })
+      .from(chatDeletes)
+      .orderBy(asc(chatDeletes.nextAt))
+      .limit(1)
+      .get();
+    if (next === undefined) {
+      return;
+    }
+    try {
+      await this.#alarmBy(Math.max(next.nextAt.getTime(), Date.now()));
+    } catch {
+      this.ctx.abort(
+        "The alarm that finishes a chat's deletion could not be set."
+      );
+    }
+  }
+
+  /**
    * Finishes every deletion due (`chatDeletes`), at most
    * {@link deletesPerAlarm} at a time, and wakes the object again for
    * what is left: at once for more due, else when the next is.
@@ -5882,15 +5912,7 @@ export class Workspace extends DurableObject<Env> {
       // oxlint-disable-next-line no-await-in-loop -- one at a time, few subrequests each
       await this.#tryDelete(chatId);
     }
-    const next = this.#db
-      .select({ nextAt: chatDeletes.nextAt })
-      .from(chatDeletes)
-      .orderBy(asc(chatDeletes.nextAt))
-      .limit(1)
-      .get();
-    if (next !== undefined) {
-      await this.#alarmBy(Math.max(next.nextAt.getTime(), Date.now()));
-    }
+    await this.#armDeletes();
   }
 
   /**
@@ -5923,7 +5945,7 @@ export class Workspace extends DurableObject<Env> {
         attempts,
         ...errorFields(error),
       });
-      await this.#alarmBy(nextAt);
+      await this.#armDeletes();
     }
   }
 

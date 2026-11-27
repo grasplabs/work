@@ -2235,6 +2235,37 @@ describe("chats", () => {
     });
   });
 
+  it("finish a deletion whose wake-up a restart lost, from the alarm the object sets as it starts again", async () => {
+    const ann = await person();
+    const kept = objectOf(ann);
+    const { id } = await kept.createChat("Going", ann.userId, chatAgentId);
+    const annAsConnect = await personOf(env, await ann.api.whoami());
+    // Marked, and the object stopped before its alarm was set.
+    await runInDurableObject(kept, async (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO chat_deletes (chat_id, person, actor, audited, next_at) VALUES (?, ?, ?, 1, ?)",
+        id,
+        JSON.stringify(annAsConnect),
+        JSON.stringify({ type: "person", userId: ann.userId }),
+        Date.now()
+      );
+      await state.storage.deleteAlarm();
+    });
+    await runInDurableObject(kept, (_instance, state) => {
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+    // Anything that wakes it: here, its person's list.
+    await expect(ann.chats.list()).resolves.toStrictEqual([]);
+    await vi.waitFor(
+      async () => {
+        await expect(deletesOf(objectOf(ann))).resolves.toStrictEqual([]);
+      },
+      { timeout: 10_000 }
+    );
+  });
+
   it("finish at most a few deletions an alarm, and wake again at once for the rest", async () => {
     const ann = await person();
     const kept = objectOf(ann);
