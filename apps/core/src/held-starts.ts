@@ -287,8 +287,10 @@ export const holdStart = async (
     outboxedIfChanged(db, entry),
   ]);
   const held = await db.select().from(agentHeldStarts).where(byKey).get();
+  // Taken under the key and gone since (its chat deleted meanwhile): as
+  // any start that is held no more.
   if (held === undefined) {
-    throw new Error(`No held start under chat ${scope.chatId}'s key`);
+    throw workflowResourceErrors.create("workflow.start_held_gone");
   }
   return standingOf(held, now);
 };

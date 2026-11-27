@@ -288,6 +288,43 @@ const textEveryMs = 300;
 const requestKeyMs = 24 * 60 * 60 * 1000;
 
 /**
+ * The longest a chat's ID is waited for (`takeChatId`, in `createChat`),
+ * while nothing else in the person's object runs: well within the 30
+ * seconds after which the runtime resets an object that holds everything
+ * off, and its turns with it.
+ */
+const chatIdTakeMs = 10_000;
+
+/**
+ * Waits for `taking`, the take of a chat's ID, at most
+ * {@link chatIdTakeMs}: past it, refused as core can't now, and the take
+ * may still land, its row an ID no chat has, which a repeat of the same
+ * start takes again. Rejects only with its own error or that refusal.
+ */
+const takenInTime = async (taking: Promise<void>): Promise<void> => {
+  const settled = (async (): Promise<{ error: unknown } | undefined> => {
+    try {
+      await taking;
+      return undefined;
+    } catch (error) {
+      return { error };
+    }
+  })();
+  const late = Promise.withResolvers<"late">();
+  const timer = setTimeout(() => {
+    late.resolve("late");
+  }, chatIdTakeMs);
+  const outcome = await Promise.race([settled, late.promise]);
+  clearTimeout(timer);
+  if (outcome === "late") {
+    throw internalErrors.create("internal.unexpected");
+  }
+  if (outcome !== undefined) {
+    throw outcome.error;
+  }
+};
+
+/**
  * The ID a page names a chat it starts by (`ChatStart`): a UUID as
  * browsers make one, lower case, of a version (1 to 8) and RFC 9562's
  * variant, so never the nil or the max UUID, nor two spellings of one.
@@ -1565,7 +1602,8 @@ export class Workspace extends DurableObject<Env> {
     // nothing else in this object runs during: two messages of a chat
     // app's conversation at once make one chat, two starts of one chat at
     // once make it once, and no chat is made, nor used, before its ID is
-    // taken. Nothing thrown inside: a refusal there would reset the object.
+    // taken. Nothing thrown inside: a refusal there would reset the object,
+    // and the take is waited for a bounded time (`takenInTime`).
     const made = await this.ctx.blockConcurrencyWhile(
       async (): Promise<{ chat: Chat; made: boolean } | { error: unknown }> => {
         try {
@@ -1591,7 +1629,9 @@ export class Workspace extends DurableObject<Env> {
           if (channel === "web") {
             this.requireRoomForChat(personId);
           }
-          await takeChatId(this.env, id, personId, named?.key ?? null);
+          await takenInTime(
+            takeChatId(this.env, id, personId, named?.key ?? null)
+          );
           return {
             chat: this.ctx.storage.transactionSync(() => {
               if (by !== undefined) {

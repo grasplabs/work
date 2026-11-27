@@ -999,12 +999,19 @@ export const permissions = sqliteTable(
     index("permissions_object_idx").on(table.objectType, table.objectId),
     // A binding name is one stub in the subject's env, so it is unique
     // among the permissions that aren't revoked: those that hold anywhere,
-    // and within each chat, those that hold in it alone.
+    // and within each person's chat, those that hold in it alone (a chat's
+    // ID with whose chat it is, never the ID alone).
     uniqueIndex("permissions_live_binding_idx")
       .on(table.subjectType, table.subjectId, table.binding)
       .where(sql`status <> 'revoked' AND chat_id IS NULL`),
     uniqueIndex("permissions_live_chat_binding_idx")
-      .on(table.chatId, table.subjectType, table.subjectId, table.binding)
+      .on(
+        table.chatId,
+        table.requestedBy,
+        table.subjectType,
+        table.subjectId,
+        table.binding
+      )
       .where(sql`status <> 'revoked' AND chat_id IS NOT NULL`),
   ]
 );
@@ -5531,7 +5538,13 @@ export const agentHeldStarts = sqliteTable(
     refusal: text(),
   },
   (table) => [
-    uniqueIndex("agent_held_starts_key").on(table.chatId, table.key),
+    // A key is the agent's own within its chat, a chat being its ID in its
+    // Workspace object, never the ID alone.
+    uniqueIndex("agent_held_starts_key").on(
+      table.workspaceId,
+      table.chatId,
+      table.key
+    ),
     // A person's starts that wait.
     index("agent_held_starts_person")
       .on(table.personId, table.createdAt)
