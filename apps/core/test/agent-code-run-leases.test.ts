@@ -2,7 +2,6 @@ import piDurable from "@earendil-works/pi-durable/package.json" with { type: "js
 import { agentErrors } from "@grasp-os/shared/agent";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
-import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { codeRuntime, sourceHash } from "../src/code-mode.ts";
@@ -17,6 +16,7 @@ import {
 import {
   chatsWith,
   refusalsIn,
+  revokedRow,
   runRecords,
   toolCallIds,
   withRevocationReads,
@@ -32,34 +32,6 @@ import { signedInApi } from "./sign-in.ts";
 const idp = mockIdp();
 
 const { newChat } = chatsWith(idp);
-
-/**
- * A revoked permission of `agentId`, stored as a revocation leaves one:
- * granted before, or (`granted: false`) a request declined before anyone
- * granted it; held everywhere, or in one chat.
- */
-const revokedRow = async (
-  agentId: string,
-  { granted, chatId }: { granted: boolean; chatId: string | null }
-) => {
-  await env.DB.prepare(
-    `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
-      actions, binding, status, requested_by, requested_at, granted_by, granted_at,
-      revoked_by, revoked_at, chat_id)
-     VALUES (?, 'agent', ?, 'collection', ?, '["read"]', ?, 'revoked', 'test', 0, ?, ?, 'test', ?, ?)`
-  )
-    .bind(
-      crypto.randomUUID(),
-      agentId,
-      crypto.randomUUID(),
-      `R${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`.toUpperCase(),
-      granted ? "test" : null,
-      granted ? 0 : null,
-      Date.now(),
-      chatId
-    )
-    .run();
-};
 
 describe("chat agent code run leases", () => {
   it("keeps a record of every run: its call, its module's hash, the agent and runtime it ran on, and how it ended", async () => {

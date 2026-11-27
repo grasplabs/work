@@ -6,6 +6,13 @@ import { readingFileOf, signOf } from "./sign.ts";
 
 const step = (callId: string) => ({ callId, code: "return 1;" });
 const nothingRan = () => false;
+/** A read the answer called, as the thread shows it. */
+const toolRead = (callId: string) => ({
+  callId,
+  tool: "searchBrain",
+  codeBefore: 0,
+  input: {},
+});
 
 describe("what Grasp is doing", () => {
   it("reads the workspace before any answer shows", () => {
@@ -57,6 +64,18 @@ describe("what Grasp is doing", () => {
         ran: nothingRan,
       })
     ).toBe("thinking");
+  });
+
+  it("works while any read of its last answer runs, though the last ended first", () => {
+    const replies = [
+      { code: [], tools: [toolRead("a"), toolRead("b"), toolRead("c")] },
+    ];
+    expect(
+      signOf({ partial: null, replies, ran: (callId) => callId === "c" })
+    ).toBe("working");
+    expect(signOf({ partial: null, replies, ran: () => true })).toBe(
+      "thinking"
+    );
   });
 });
 
