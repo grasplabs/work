@@ -2031,6 +2031,67 @@ describe("changing what a connected Composio toolkit may do", () => {
     });
   });
 
+  it("swaps every tool the toolkit still has for others beside a retired one, narrowing nothing first", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    await env.DB.prepare("UPDATE connections SET tools = ? WHERE id = ?")
+      .bind(
+        JSON.stringify(["HUBSPOT_RETIRED_TOOL", "HUBSPOT_LIST_CONTACTS"]),
+        connectionId
+      )
+      .run();
+    const end = await outcome(
+      change(admin, connectionId, [
+        "HUBSPOT_RETIRED_TOOL",
+        "HUBSPOT_UPDATE_CONTACT",
+      ])
+    );
+    expect({
+      end,
+      stored: await toolsNow(connectionId),
+      composio: sessionTools(),
+    }).toStrictEqual({
+      end: "ok",
+      stored: JSON.stringify([
+        "HUBSPOT_RETIRED_TOOL",
+        "HUBSPOT_UPDATE_CONTACT",
+      ]),
+      composio: [["HUBSPOT_UPDATE_CONTACT"]],
+    });
+  });
+
+  it("marks a change that narrowed nothing first out of sync with its write, so a reconcile that never ran is still repaired", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    // The change's reconcile can't count a send, as if it never ran.
+    await env.DB.prepare(
+      "CREATE TRIGGER refuse_sends BEFORE INSERT ON composio_tool_sends BEGIN SELECT RAISE(ABORT, 'refused'); END"
+    ).run();
+    let end: string;
+    try {
+      end = await outcome(
+        change(admin, connectionId, ["HUBSPOT_UPDATE_CONTACT"])
+      );
+    } finally {
+      await env.DB.prepare("DROP TRIGGER IF EXISTS refuse_sends").run();
+    }
+    const marked = await outOfSync(connectionId);
+    await clockReconciles();
+    expect({
+      end,
+      stored: await toolsNow(connectionId),
+      marked,
+      repaired: !(await outOfSync(connectionId)),
+      composio: sessionTools(),
+    }).toStrictEqual({
+      end: "ok",
+      stored: JSON.stringify(["HUBSPOT_UPDATE_CONTACT"]),
+      marked: true,
+      repaired: true,
+      composio: [["HUBSPOT_UPDATE_CONTACT"]],
+    });
+  });
+
   it("marks a connection whose Composio couldn't be brought in line, and the clock does it later", async () => {
     const admin = someone("admin");
     const connectionId = await connectHubSpot(admin);

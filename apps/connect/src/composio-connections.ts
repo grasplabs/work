@@ -45,7 +45,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { recordEvents, recordEventsIf } from "./audit.ts";
+import { guardedEvent, recordEvents, recordEventsIf } from "./audit.ts";
 import { composioEntry, composioTools, keyAuthOf } from "./catalog.ts";
 import { ComposioError, composioKey, composioRequest } from "./composio.ts";
 import {
@@ -1346,6 +1346,54 @@ const sessionMismatch = (
 };
 
 /**
+ * What follows taking over `replaced`, a connection made before sessions,
+ * once the new connection is stored (`serveAndStore`), only if this one
+ * disconnected it (its cleanup row `cleanupId` is there): the actions
+ * held for it, which can no longer run, are dropped, and its account and
+ * auth config deleted at Composio, or left recorded for the clock. Never
+ * thrown: the new connection stands, whatever becomes of this.
+ */
+const afterReplacing = async (
+  env: Env,
+  person: ConnectionPerson,
+  replaced: {
+    id: string;
+    accountId: string | null;
+    authConfigId: string | null;
+  },
+  cleanupId: string
+): Promise<void> => {
+  try {
+    const db = drizzle(env.DB);
+    const ours = await db
+      .select({ id: composioCleanups.id })
+      .from(composioCleanups)
+      .where(eq(composioCleanups.id, cleanupId))
+      .get();
+    if (ours === undefined) {
+      return;
+    }
+    await dropPendingActions(
+      env,
+      eq(pendingActions.connectionId, replaced.id),
+      "connection.disconnected",
+      person
+    );
+    await carryOutCleanup(
+      env,
+      cleanupId,
+      {
+        connectedAccountId: replaced.accountId,
+        authConfigId: replaced.authConfigId,
+      },
+      null
+    );
+  } catch (error) {
+    log.warn("composio.replaced_cleanup_failed", errorFields(error));
+  }
+};
+
+/**
  * Serves the connected account `account`, settled active
  * (`settledAccount`), as a connection of `person`'s: makes its Composio
  * session (`sessionBodyOf`, noted in `made` and in its cleanup row),
@@ -1413,57 +1461,51 @@ const serveAndStore = async (
   // legacy MCP server stays at Composio: connect's key can't delete it.
   const replaced = await legacyToReplace(db, account.toolkit);
   const replacedCleanup = crypto.randomUUID();
-  const [first, ...more] = events(connectionId);
   try {
-    await recordEvents(
-      env,
-      [
-        first,
-        ...more,
-        ...(replaced === undefined
-          ? []
-          : [
+    await recordEvents(env, events(connectionId), [
+      // The connection takes over what the cleanup row held.
+      db
+        .delete(composioCleanups)
+        .where(eq(composioCleanups.id, account.flowId)),
+      // Recorded only by the one that disconnects it, should two
+      // connections of the toolkit be stored at once, each with its own.
+      ...(replaced === undefined
+        ? []
+        : [
+            guardedEvent(
+              db,
               connectionEvent(person, "connection.disconnect", replaced.id, {
                 ...detailOf(account.toolkit),
                 outcome: "ok",
                 tokenHolder: "composio",
                 replacedBy: connectionId,
               }),
-            ]),
-      ],
-      [
-        // The connection takes over what the cleanup row held.
-        db
-          .delete(composioCleanups)
-          .where(eq(composioCleanups.id, account.flowId)),
-        ...(replaced === undefined
-          ? []
-          : [
-              disconnectCleanup(db, replacedCleanup, isLegacyOf(replaced.id)),
-              db
-                .update(connections)
-                .set({ status: "disconnected", updatedAt: now })
-                .where(isLegacyOf(replaced.id)),
-            ]),
-        db.insert(connections).values({
-          id: connectionId,
-          provider: account.toolkit,
-          scope: "shared",
-          ownerUserId: null,
-          status: "active",
-          serverKind: "composio",
-          server: url,
-          accountId: account.connectedAccountId,
-          connectedBy: person.userId,
-          composioSessionId: sessionId,
-          composioAuthConfigId: account.authConfigId,
-          composioAuth: auth,
-          tools: account.tools,
-          createdAt: now,
-          updatedAt: now,
-        }),
-      ]
-    );
+              { from: connections, where: isLegacyOf(replaced.id) }
+            ),
+            disconnectCleanup(db, replacedCleanup, isLegacyOf(replaced.id)),
+            db
+              .update(connections)
+              .set({ status: "disconnected", updatedAt: now })
+              .where(isLegacyOf(replaced.id)),
+          ]),
+      db.insert(connections).values({
+        id: connectionId,
+        provider: account.toolkit,
+        scope: "shared",
+        ownerUserId: null,
+        status: "active",
+        serverKind: "composio",
+        server: url,
+        accountId: account.connectedAccountId,
+        connectedBy: person.userId,
+        composioSessionId: sessionId,
+        composioAuthConfigId: account.authConfigId,
+        composioAuth: auth,
+        tools: account.tools,
+        createdAt: now,
+        updatedAt: now,
+      }),
+    ]);
   } catch (error) {
     // A key connection is its toolkit's one live one (the schema's
     // `connections_key_toolkit_idx`): of two stored at once, one fails
@@ -1474,23 +1516,7 @@ const serveAndStore = async (
     throw error;
   }
   if (replaced !== undefined) {
-    // What was held for the one replaced can no longer run; what it held
-    // at Composio goes, or stays recorded for the clock (`replacedCleanup`).
-    await dropPendingActions(
-      env,
-      eq(pendingActions.connectionId, replaced.id),
-      "connection.disconnected",
-      person
-    );
-    await carryOutCleanup(
-      env,
-      replacedCleanup,
-      {
-        connectedAccountId: replaced.accountId,
-        authConfigId: replaced.authConfigId,
-      },
-      null
-    );
+    await afterReplacing(env, person, replaced, replacedCleanup);
   }
   return connectionId;
 };
@@ -2372,13 +2398,26 @@ const checkedChange = async (
 };
 
 /**
+ * Whether the tools of connection `row` can be changed: an active shared
+ * Composio connection with its session, account and list.
+ */
+const isChangeable = (row: Connection): boolean =>
+  row.serverKind === "composio" &&
+  row.scope === "shared" &&
+  row.status === "active" &&
+  row.composioSessionId !== null &&
+  row.accountId !== null &&
+  row.tools !== null;
+
+/**
  * Tells Composio's session `at` of connection `connectionId` only the
  * tools both `previous` and `tools` allow, before connect writes `tools`
  * (`changeToolkitTools`). A change that keeps none of them has nothing to
- * narrow to, and an empty list may be every tool at Composio: then the
+ * narrow to (of the tools the toolkit still has, as the session takes
+ * them), and an empty list may be every tool at Composio: then the
  * session keeps its tools until the widening after the write, connect
  * refusing the ones it no longer allows meanwhile, as it refuses every
- * tool it doesn't allow.
+ * tool it doesn't allow. Whether it sent one.
  */
 const narrowFirst = async (
   db: ReturnType<typeof drizzle>,
@@ -2387,12 +2426,16 @@ const narrowFirst = async (
   connectionId: string,
   previous: readonly (string | ComposioToolRule)[],
   tools: readonly (string | ComposioToolRule)[]
-): Promise<void> => {
+): Promise<boolean> => {
   const kept = new Set(previous.map(composioToolName));
   const narrowed = tools.filter((tool) => kept.has(composioToolName(tool)));
-  if (offeredToolNames({ tools: JSON.stringify(narrowed) }).length > 0) {
-    await sendTools(db, key, at, connectionId, narrowed);
+  // As the session would take it: of the tools the toolkit still has.
+  const listed = await stillListed(key, at.toolkit, narrowed);
+  if (offeredToolNames({ tools: JSON.stringify(listed) }).length === 0) {
+    return false;
   }
+  await sendTools(db, key, at, connectionId, narrowed);
+  return true;
 };
 
 /**
@@ -2422,15 +2465,7 @@ export const changeToolkitTools = async (
     .from(connections)
     .where(eq(connections.id, connectionId))
     .get();
-  const changeable =
-    row !== undefined &&
-    row.serverKind === "composio" &&
-    row.scope === "shared" &&
-    row.status === "active" &&
-    row.composioSessionId !== null &&
-    row.accountId !== null &&
-    row.tools !== null;
-  if (!changeable) {
+  if (row === undefined || !isChangeable(row)) {
     throw connectErrors.create("connect.connection_not_found");
   }
   const { provider: toolkit } = row;
@@ -2503,8 +2538,9 @@ export const changeToolkitTools = async (
   // only the tools both lists allow; the ones this adds reach it only once
   // connect holds them (the reconcile below). Composio may lag connect,
   // never lead it.
+  let narrowed: boolean;
   try {
-    await narrowFirst(db, key, at, row.id, previous, tools);
+    narrowed = await narrowFirst(db, key, at, row.id, previous, tools);
   } catch (error) {
     // Composio may have taken the narrowing all the same (an answer lost
     // or unreadable): brought back to connect's list, which is unchanged,
@@ -2572,7 +2608,16 @@ export const changeToolkitTools = async (
         writes: [
           db
             .update(connections)
-            .set({ tools: stored, updatedAt })
+            .set({
+              tools: stored,
+              updatedAt,
+              // Out of sync from the write on when nothing narrowed
+              // Composio first (`narrowFirst`): a crash before the
+              // reconcile below leaves it for the clock to send.
+              ...(narrowed
+                ? {}
+                : { toolsSentSeq: sql`${connections.toolsSentSeq} + 1` }),
+            })
             .where(stillRead),
         ],
       },
