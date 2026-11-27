@@ -600,7 +600,7 @@ describe("a chat's tool search", setUpTime, () => {
     });
   });
 
-  it("shows and counts only the tools whose class is on for the person", async () => {
+  it("shows and counts only the tools whose class is on for the person, and a toolkit's as its admin allowed them", async () => {
     const [person, admin] = await Promise.all([
       signedInApi(idp, "user"),
       signedInApi(idp, "admin"),
@@ -630,8 +630,9 @@ describe("a chat's tool search", setUpTime, () => {
       says("I can only search.")
     );
     // Reaching others is off for everyone, and so is changing the
-    // company's things: sending mail, through the native suite or a
-    // toolkit's tool allowed as a change, is off too.
+    // company's things: sending mail through the native suite is off. A
+    // toolkit's tool allowed as a change follows its admin's list, not
+    // the switches (composio-reach.test.ts): there, and held when called.
     await admin.api.connections.setToolClass("reach-others", { who: "nobody" });
     await admin.api.connections.setToolClass("change-company", {
       who: "nobody",
@@ -647,15 +648,13 @@ describe("a chat's tool search", setUpTime, () => {
           name: mail.id,
           account: null,
           resource: null,
-          tools: { "read-company": 1 },
+          tools: { "read-company": 1, "change-company": 1 },
         },
       ],
-      found: ["mail.search"],
-      sends: 0,
-      declared: [
-        `// ${JSON.stringify(mail.id)} has no action "mail.send" this chat may call or ask for.`,
-        "/**",
-      ],
+      // The toolkit's send is found and described beside its search.
+      found: ["mail.send", "mail.search"],
+      sends: 1,
+      declared: ["/**", "/**"],
     });
   });
 });

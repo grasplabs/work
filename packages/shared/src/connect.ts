@@ -3187,9 +3187,9 @@ export const connectErrors = defineErrorFamily({
   "connect.agent_app_off":
     "This agent doesn't have this app. Whoever manages it can add the app on its page.",
   "connect.class_off":
-    "Your company hasn't turned this kind of action on for you, so it wasn't done. An admin can turn it on.",
+    "Your company hasn't turned this kind of action on for you, so it wasn't done. An admin turns it on in Grasp, on the company's first agent's page under What he may do (for another agent, on that agent's page). There, for Microsoft 365, Google Workspace, shared mailboxes and apps added by their URL: a change of the company's things is Change the company's, a message to other people is Reach others, and reading the company's mailboxes, calendars and files is Read the company's; a turn nobody was there for never sends a message to other people through them.",
   "connect.class_unknown":
-    "It isn't known what kind of action this is, so it wasn't done.",
+    "It isn't known what kind of action this is, so it wasn't done: a tool of an app its admin didn't allow, or set to Never (each tool's Never, Read or Write, on the app's page in Grasp under Connectors), or one Grasp doesn't know.",
   "connect.class_changed":
     "The app now describes this action as another kind than when it was checked, so it wasn't done. Try again.",
   "connect.tool_blocked":
@@ -3197,7 +3197,9 @@ export const connectErrors = defineErrorFamily({
   "connect.never":
     "Grasp never deletes, shares, forwards, sets rules or settings, or pays, whatever is allowed, so it wasn't done.",
   "connect.app_not_pointed":
-    "Your company hasn't pointed Grasp at this app for you, so it wasn't read. An admin can.",
+    "Your company hasn't pointed Grasp at this app for you, so it wasn't read. An admin chooses whose chats read in it in Grasp, on the app's page under Connectors, in its Access card.",
+  "connect.app_reads_limited":
+    "An admin limited whose chats Grasp reads in this app for, and you aren't among them, so it wasn't read. Only an admin can change that.",
   "connect.resource_not_pointed":
     "Your company pointed Grasp at other parts of this app for you, not this one, so it wasn't read.",
   "connect.http_refused":
