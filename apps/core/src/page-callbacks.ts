@@ -1,7 +1,9 @@
+import { isExpectedError } from "@grasp-os/shared/errors";
 import { jsonBytes } from "@grasp-os/shared/pages";
 import { RpcStub } from "capnweb";
 
 import { holdsBigInt, isPlainData } from "./plain-data.ts";
+import type { SessionCheck } from "./session-check.ts";
 
 // Callbacks a page passes over `/rpc` for an object to keep and call later:
 // a page's for its App (pages-rpc.ts), a chat page's for the chat's
@@ -9,8 +11,33 @@ import { holdsBigInt, isPlainData } from "./plain-data.ts";
 // plain data on and nothing back, and that checks before each push that
 // the person may still have it.
 
-/** Whether the person may still get a callback's pushes, read now. */
+/**
+ * Whether the person may still get a callback's pushes, read now: false
+ * once they may not. Throws when it couldn't be read (the session store
+ * out of reach a moment): that push fails, the callback stays.
+ */
 export type StillOpen = () => Promise<boolean>;
+
+/**
+ * Whether the connection's session `check` still holds, as a `StillOpen`:
+ * false once it refuses (signed out, ended, no longer let in: an expected
+ * error, which also closes the connection); a reading that failed for any
+ * other reason (the session store out of reach, an object resetting as a
+ * deploy resets it) is thrown, never taken for a sign-out.
+ */
+export const stillOpenWhile =
+  (check: SessionCheck): StillOpen =>
+  async () => {
+    try {
+      await check();
+      return true;
+    } catch (error) {
+      if (isExpectedError(error)) {
+        return false;
+      }
+      throw error;
+    }
+  };
 
 /** A function (or object) of the page's, which the object may only call. */
 export type PageCallback = RpcStub<(value: unknown) => unknown>;
@@ -36,11 +63,13 @@ export interface Refusals {
  * value is), never a way into the object, and
  * gives it nothing back from the page. It's released by the runtime once
  * the object lets it go, or by its owner; releasing it twice does nothing.
- * Releasing it releases the page's stub too, which tells the page to
- * subscribe again. Before each push, `stillOpen` checks the person may
- * still have it; once they may not, it releases itself and refuses the
- * push, and every one after. `released`, if given, is called once it's
- * released, however that happened.
+ * Releasing it releases the page's stub too. Before each push,
+ * `stillOpen` checks the person may still have it; once they may not, it
+ * releases itself and refuses the push, and every one after. A check
+ * that couldn't be read fails that push alone: the object drops its
+ * watcher, and whoever follows for the page watches again (chats-rpc.ts,
+ * `#follow`). `released`, if given, is called once it's released, however
+ * that happened.
  */
 export const callbackFor = (
   stub: PageCallback,

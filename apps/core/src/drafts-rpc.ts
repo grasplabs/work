@@ -26,7 +26,7 @@ import {
   restoreCheckpoint,
 } from "./drafts.ts";
 import { draftWatch } from "./durable-objects.ts";
-import { callbackFor, isStub } from "./page-callbacks.ts";
+import { callbackFor, isStub, stillOpenWhile } from "./page-callbacks.ts";
 import type { StillOpen } from "./page-callbacks.ts";
 import { check as checkDraft, kinds, publish, subjectOf } from "./publish.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
@@ -95,14 +95,7 @@ export class DraftsRpc extends CoreRpcTarget implements DraftsApi {
     super();
     this.#env = env;
     this.#check = check;
-    this.#stillOpen = async () => {
-      try {
-        await check();
-        return true;
-      } catch {
-        return false;
-      }
-    };
+    this.#stillOpen = stillOpenWhile(check);
   }
 
   /** Whether `by` builds `subject` now. */
