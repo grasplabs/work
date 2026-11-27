@@ -14,7 +14,9 @@
 // save (`errorText`, or the catalogue's words). `validate` refuses a value before it is sent, in the
 // words it returns. A screen reader hears the result once (`inlineEdit.saved`, or the error).
 //
-// `variant="popup"` keeps the text where it stands and opens the field in a small Popover beside
+// Inline, the field takes the text's place and a line under it says "Working" or why a save failed:
+// the row it stands in grows by that line. In a row of a fixed height (a bar, a panel's head) use
+// `variant="popup"`, which keeps the text where it stands and opens the field in a small Popover beside
 // it, titled by `aria-label`, with Cancel and Save (a page's or a panel's title, renamed without
 // the field taking the title's room). The same rules: Enter or Save saves, Escape or Cancel keeps
 // the value, a press outside keeps it too; it stays open while a save works or after one failed.

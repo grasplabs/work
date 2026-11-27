@@ -132,6 +132,32 @@ export const workerAssets = (
       }));
 
 /**
+ * When a Worker's live Durable Objects take up the code an upload brings:
+ * each runs its current code until it hibernates (no request, event, timer,
+ * pending call or standard WebSocket left), and is reset onto the new code
+ * only if it is still busy `max_delay` seconds after the upload. So a chat
+ * answering as a deploy lands finishes its turn on the code it began with,
+ * an idle object takes the new code while it sleeps, and its hibernated
+ * WebSockets stay connected. Cloudflare defers by 300 s by default; 900 s
+ * is the longest the platform keeps an object up for one pending operation
+ * and the alarm's wall time (15 minutes), so any turn segment the platform
+ * would carry finishes on the old code, and the mix of versions in one
+ * client lasts no longer than that. A turn longer than that resets and
+ * picks up where it stored. Code must hold for that mix: the D1 schema the
+ * deploy migrated first is read by objects still on the code before it.
+ *
+ * A deployment's setting, not the Worker's (it "does not carry over between
+ * deployments"): an upload to a dispatch namespace deploys at once, so it
+ * rides in every upload's metadata, a rotation's and a settings apply's
+ * re-upload too, or that deploy falls back to the default. One setting
+ * covers every class of the Worker.
+ */
+export const durableObjectCodeUpdate = {
+  mode: "deferred",
+  max_delay: 900,
+} as const;
+
+/**
  * What `worker` of `manifest` is uploaded as, `bindings` rendered already:
  * a placed client's, mapped onto its inventory (src/hosting/inventory.ts),
  * its mail locked (`lockMailSender`). Its metadata on the release's
@@ -176,6 +202,7 @@ export const renderedWorkerUpload = (
       })),
     ],
     observability: worker.observability,
+    code_update_strategy: durableObjectCodeUpdate,
     ...(worker.assets === undefined
       ? {}
       : { assets: { config: worker.assets.config } }),
