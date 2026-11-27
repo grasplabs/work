@@ -26,10 +26,10 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
-import { Flag } from "../frame/flag.tsx";
-import { languageOptions } from "../frame/language-options.ts";
 import { TopError } from "../frame/top-error.tsx";
 import { chooseLocale } from "../i18n.ts";
+import { LanguageCards } from "../onboarding/language-cards.tsx";
+import { smoothly } from "../onboarding/smoothly.ts";
 import { Actions, Page, Quiet, Words } from "./calm.tsx";
 import { budgetMinutes } from "./countdown.tsx";
 import { DitherOver } from "./frame.tsx";
@@ -111,26 +111,13 @@ const styles = stylex.create({
     color: colors.mutedForeground,
     textWrap: "pretty",
   },
-  // The languages to talk in: side by side where they fit, each its flag and its own name.
-  languages: {
-    borderWidth: 0,
-    margin: 0,
-    padding: 0,
-    minWidth: 0,
-    display: "flex",
-    flexWrap: "wrap",
-    justifyContent: "center",
-    gap: space["3"],
-    maxWidth: "40rem",
+  // The language screen: higher, so its five cards fit a laptop's window whole, as in the setup.
+  columnCards: {
+    gap: space["6"],
+    paddingBlockStart: { default: "3vh", [media.sm]: "4vh", [media.lg]: "6vh" },
   },
-  hidden: {
-    position: "absolute",
-    width: 1,
-    height: 1,
-    overflow: "hidden",
-    clipPath: "inset(50%)",
-    whiteSpace: "nowrap",
-  },
+  // The setup's language cards, as wide as its column (onboarding/calm-frame.tsx).
+  cards: { width: "100%", maxWidth: "40rem" },
   // The one button: the whole width on a phone, its own width on a wider window.
   agree: { width: { default: "100%", [media.sm]: "auto" } },
   agreeRoom: {
@@ -273,8 +260,8 @@ const Answers = ({
 
 /** The start: one decision, centred. */
 /**
- * The very first screen: the language they want to talk in, each named in
- * its own words with its flag. A press chooses it and goes on to the
+ * The very first screen: the language they want to talk in, on the setup's
+ * own language cards (onboarding/language-cards.tsx). A press chooses it and goes on to the
  * welcome in it; the header keeps the picker for later.
  */
 export const PickLanguage = ({
@@ -288,7 +275,7 @@ export const PickLanguage = ({
   /** Called once the language is in place, when the page is still the same one. */
   onChosen: () => void;
 }) => {
-  const { t, i18n } = useLingui();
+  const { t } = useLingui();
   const title = useTitleSize();
   const lines = (
     name === ""
@@ -299,7 +286,7 @@ would you like to talk in?`
   ).split("\n");
   return (
     <div {...stylex.props(styles.page)}>
-      <div {...stylex.props(styles.column)}>
+      <div {...stylex.props(styles.column, styles.columnCards)}>
         <Heading level={1} size={title.size} style={styles.title}>
           {lines.map((line, at) => (
             <span
@@ -315,29 +302,19 @@ would you like to talk in?`
             </span>
           ))}
         </Heading>
-        <fieldset {...stylex.props(styles.languages)}>
-          <legend
-            {...stylex.props(styles.hidden)}
-          >{t`Choose your language`}</legend>
-          {languageOptions.map(({ code, name: own, flag }) => (
-            <Button
-              aria-pressed={i18n.locale === code}
-              key={code}
-              onClick={() => {
-                onPicked();
-                void (async () => {
-                  await chooseLocale(code);
-                  onChosen();
-                })();
-              }}
-              size="lg"
-              variant={i18n.locale === code ? "secondary" : "outline"}
-            >
-              <Flag flag={flag} />
-              <span lang={code}>{own}</span>
-            </Button>
-          ))}
-        </fieldset>
+        <div {...stylex.props(styles.cards)}>
+          <LanguageCards
+            chosen={null}
+            onPick={(code) => {
+              onPicked();
+              // The language and the welcome in it arrive together, in one quiet fade, as in the setup.
+              void smoothly(async () => {
+                await chooseLocale(code);
+                onChosen();
+              });
+            }}
+          />
+        </div>
       </div>
     </div>
   );

@@ -4790,7 +4790,6 @@ msgstr "Elige qué puede hacer Grasp en {app} y luego inicia sesión allí."
 msgid "Choose your AI"
 msgstr "Elige tu IA"
 
-#: src/interview/start.tsx
 #: src/onboarding/language-choice.tsx
 msgid "Choose your language"
 msgstr "Elige tu idioma"
@@ -8767,7 +8766,8 @@ msgstr "Hola {name}, soy Stephen. Empezaremos con tu trabajo en general y luego 
 #: src/interview/start.tsx
 msgid "Hi {name}, which language\n"
 "would you like to talk in?"
-msgstr "Hola {name}, ¿en qué idioma\nquieres hablar?"
+msgstr "Hola {name}, ¿en qué idioma\n"
+"quieres hablar?"
 
 #: src/onboarding/team-step.tsx
 msgid "Hi everyone,"
@@ -8788,7 +8788,8 @@ msgstr "Hola, soy Stephen. Tus administradores todavía lo están preparando tod
 #: src/interview/start.tsx
 msgid "Hi, which language\n"
 "would you like to talk in?"
-msgstr "Hola, ¿en qué idioma\nquieres hablar?"
+msgstr "Hola, ¿en qué idioma\n"
+"quieres hablar?"
 
 #: src/brain/opportunities-page.tsx
 msgctxt "opportunities hidden for every admin"

@@ -4790,7 +4790,6 @@ msgstr "Kies wat Grasp in {app} mag doen en meld je daarna daar aan."
 msgid "Choose your AI"
 msgstr "Kies je AI"
 
-#: src/interview/start.tsx
 #: src/onboarding/language-choice.tsx
 msgid "Choose your language"
 msgstr "Kies je taal"
@@ -8767,7 +8766,8 @@ msgstr "Hoi {name}, ik ben Stephen. We beginnen met je werk in grote lijnen, en 
 #: src/interview/start.tsx
 msgid "Hi {name}, which language\n"
 "would you like to talk in?"
-msgstr "Hoi {name}, in welke taal\nwil je het gesprek voeren?"
+msgstr "Hoi {name}, in welke taal\n"
+"wil je het gesprek voeren?"
 
 #: src/onboarding/team-step.tsx
 msgid "Hi everyone,"
@@ -8788,7 +8788,8 @@ msgstr "Hoi, ik ben Stephen. Je admins zijn nog bezig om alles voor je klaar te 
 #: src/interview/start.tsx
 msgid "Hi, which language\n"
 "would you like to talk in?"
-msgstr "Hoi, in welke taal\nwil je het gesprek voeren?"
+msgstr "Hoi, in welke taal\n"
+"wil je het gesprek voeren?"
 
 #: src/brain/opportunities-page.tsx
 msgctxt "opportunities hidden for every admin"

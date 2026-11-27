@@ -4790,7 +4790,6 @@ msgstr "Choose what Grasp may do in {app}, then sign in there."
 msgid "Choose your AI"
 msgstr "Choose your AI"
 
-#: src/interview/start.tsx
 #: src/onboarding/language-choice.tsx
 msgid "Choose your language"
 msgstr "Choose your language"
