@@ -82,9 +82,12 @@ const start = (core: CoreConnection): Watch => {
       await session.chats.watchList((update) => {
         changed(started, applyListUpdate(started.list, update));
       }),
+    // Only once the person's session ended: anything else is tried
+    // again, as nothing reads the list otherwise.
     (failure) => {
       changed(started, { ...started.list, failure });
-    }
+    },
+    { untilSignedOut: true }
   );
   return started;
 };

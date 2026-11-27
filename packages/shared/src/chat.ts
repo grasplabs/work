@@ -1446,15 +1446,18 @@ export interface ChatsApi {
   /** Renames one of the person's chats. */
   rename: (chatId: string, title: string) => Promise<void>;
   /**
-   * Marks one of the person's chats seen up to its latest message, while
-   * it is open in front of them: no answer in it is `unread` then. Answers
-   * the last message they had seen before, which the page draws its New
-   * line after: 0 when they had seen none, null for a chat made before
-   * chats kept it, which counts as read. It only moves forward, so a
-   * device that shows less never takes it back. Not audited: it changes
-   * nothing but where the person has read to.
+   * Marks one of the person's chats seen up to its latest message, or up
+   * to message `upTo`, the newest the page shows, where that is older:
+   * what came since, the page hasn't shown yet (it is following the chat
+   * again after a dropped connection). While it is open in front of them:
+   * no answer it showed is `unread` then. Answers the last message they
+   * had seen before, which the page draws its New line after: 0 when they
+   * had seen none, null for a chat made before chats kept it, which counts
+   * as read. It only moves forward, so a device that shows less never
+   * takes it back. Not audited: it changes nothing but where the person
+   * has read to.
    */
-  markRead: (chatId: string) => Promise<number | null>;
+  markRead: (chatId: string, upTo?: number) => Promise<number | null>;
   /**
    * Archives one of the person's chats: out of `list`, kept whole, opened
    * and asked in as ever. Nothing where it is archived already.
