@@ -22,19 +22,14 @@ import {
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
-import {
-  use,
-  useEffect,
-  useEffectEvent,
-  useRef,
-  useSyncExternalStore,
-} from "react";
+import { use, useEffect, useEffectEvent, useRef } from "react";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 
 import { Backdrop } from "../chat/backdrop/backdrop.tsx";
-import type { CoreConnection, CoreReach } from "../core-connection.ts";
+import type { CoreReach } from "../core-connection.ts";
 import { notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { useCoreReach } from "../use-core-reach.ts";
 import { useCore } from "../use-core.ts";
 import { InFrame } from "./in-frame.ts";
 import { pageRoom } from "./page.styles.ts";
@@ -456,29 +451,6 @@ export const PageFailed = ({
         </p>
       )}
     </Backdrop>
-  );
-};
-
-const noWatching = () => () => {
-  // Nothing to stop.
-};
-
-/**
- * Whether Grasp can be reached, as the tab's connection finds it, kept
- * current; none where the page has no connection to ask (a stand-in in a
- * test), so no line is said that isn't known.
- */
-const useCoreReach = (): CoreReach | undefined => {
-  // Read as what it may be: a router with no context, or a test's
-  // stand-in, has none to ask.
-  const context:
-    | { core?: Partial<Pick<CoreConnection, "reach" | "watchReach">> }
-    | undefined = useRouter().options.context;
-  const core = context?.core ?? {};
-  const known = typeof core.watchReach === "function";
-  return useSyncExternalStore(
-    (changed) => core.watchReach?.(changed) ?? noWatching(),
-    () => (known ? core.reach : undefined)
   );
 };
 

@@ -1,0 +1,916 @@
+/**
+ * The admin's Home, composed as Grasp Work composes a page: four figures
+ * that say how Grasp is doing, what needs Grasp as rows that open where
+ * each is settled, where every organization is on its way to working in
+ * Grasp, every organization in one table (cards below 84rem, as the
+ * product's Workflows), and the runs every organization made. Drawn from
+ * each organization's summary alone (counts and dates, which no core
+ * audits) and what Grasp's AI cost on its keys: no person, nothing anyone
+ * wrote, and no organization's snapshot read.
+ */
+import type { AdminSummary } from "@grasp-os/shared/admin-summary";
+import { Badge } from "@grasp-os/ui/components/badge";
+import type { BadgeVariant } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  ChartBar,
+  ChartBarList,
+  ChartContainer,
+  ChartGrid,
+  ChartLegend,
+  ChartTooltip,
+  ChartXAxis,
+  ChartYAxis,
+} from "@grasp-os/ui/components/chart";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@grasp-os/ui/components/empty";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { Progress } from "@grasp-os/ui/components/progress";
+import { SectionHeader } from "@grasp-os/ui/components/section-header";
+import { Stat, StatGroup } from "@grasp-os/ui/components/stat";
+import { CircleCheckIcon, Icon, PlusIcon } from "@grasp-os/ui/lib/icons";
+import { colors, font, space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
+import { Link } from "@tanstack/react-router";
+import { Suspense } from "react";
+import type { ReactElement } from "react";
+
+import type { ClientSummary } from "../clients/summary.ts";
+import { DataRows } from "./data-rows.tsx";
+import type { DataColumn, RowLook } from "./data-rows.tsx";
+import { LoadingFigure } from "./figures.tsx";
+import { needCount, summaryNeedsOf } from "./needs.ts";
+import type { OrgNeed } from "./needs.ts";
+import { microsPerDollar } from "./platform-spend-sums.ts";
+import type {
+  OrganizationSpend,
+  PlatformSpend,
+} from "./platform-spend-sums.ts";
+import { sectionTo } from "./sections.ts";
+import { useSettled } from "./settled.tsx";
+import type { Deferred } from "./settled.tsx";
+import {
+  phaseOf,
+  phases,
+  standingOf,
+  standingTones,
+  standingWords,
+  whereWords,
+} from "./standing.ts";
+import type { Phase, Standing } from "./standing.ts";
+import { formatDay, plural } from "./words.ts";
+
+const WIDE = "@media (width >= 64rem)";
+
+const styles = stylex.create({
+  // What needs Grasp beside where everyone is, on a wide window.
+  pair: {
+    display: "grid",
+    gap: space["6"],
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      [WIDE]: "minmax(0, 3fr) minmax(0, 2fr)",
+    },
+    alignItems: "start",
+  },
+  part: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["3"],
+    minWidth: 0,
+  },
+  cell: { display: "grid", justifyItems: "start", rowGap: space["1"] },
+  quiet: {
+    color: colors.mutedForeground,
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+  },
+  failed: { color: colors.destructive },
+  meter: { display: "grid", gap: space["1"], minWidth: "7rem" },
+  clamp: {
+    display: "-webkit-box",
+    WebkitBoxOrient: "vertical",
+    WebkitLineClamp: 2,
+    overflow: "hidden",
+  },
+});
+
+/** At most this many of what needs Grasp on Home: the rest is in the sidebar's Inbox. */
+const needsShown = 6;
+
+/** From this share of its limit on, an organization's AI use is near it. */
+const nearShare = 0.8;
+
+/** The days of runs the table counts, today's included. */
+const weekDays = 7;
+
+/** What Grasp's AI cost, once read: each organization's, or null when it couldn't be. */
+type Spend = PlatformSpend | null;
+
+/** What Grasp's AI cost as Home's loader has it: undefined while it isn't asked yet (a preload). */
+type SpendRead = Deferred<Spend> | undefined;
+
+/** One organization as Home says it. */
+interface Row {
+  entry: ClientSummary;
+  id: string;
+  name: string;
+  standing: Standing;
+  /** Its summary, while its core answers one. */
+  summary: AdminSummary | null;
+  needs: OrgNeed[];
+}
+
+/** Dollars, whole: what a month of AI cost, said at a glance. */
+const wholeDollars = new Intl.NumberFormat("en", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 0,
+});
+const dollarsOf = (micros: number): string =>
+  wholeDollars.format(micros / microsPerDollar);
+
+const rowOf = (entry: ClientSummary): Row => ({
+  entry,
+  id: entry.client.id,
+  name: entry.client.name,
+  standing: standingOf(entry),
+  summary: entry.state === "answered" ? entry.summary : null,
+  needs: summaryNeedsOf(entry),
+});
+
+/** Organization `row`'s AI spend, as its core reported it, if it did. */
+const spendOf = (
+  spend: PlatformSpend,
+  row: Row
+): OrganizationSpend | undefined =>
+  spend.byOrganization.find(({ clientId }) => clientId === row.id);
+
+/** What spend shows until it is read: words for a cell, a figure's own skeleton. */
+const Reading = () => <span {...stylex.props(styles.quiet)}>Reading…</span>;
+
+const SpendSettled = ({
+  spend,
+  children,
+}: {
+  spend: Deferred<Spend>;
+  children: (spend: Spend) => ReactElement | string;
+}) => children(useSettled(spend));
+
+/**
+ * What Grasp's AI cost, in its own place once read: every core is asked,
+ * so the rest of Home never waits on it. `fallback` until then.
+ */
+const WithSpend = ({
+  spend,
+  fallback,
+  children,
+}: {
+  spend: SpendRead;
+  fallback: ReactElement | string;
+  children: (spend: Spend) => ReactElement | string;
+}) =>
+  spend === undefined ? (
+    fallback
+  ) : (
+    <Suspense fallback={fallback}>
+      <SpendSettled spend={spend}>{children}</SpendSettled>
+    </Suspense>
+  );
+
+/** The order the table lists them in: what goes wrong or waits on Grasp first, live last. */
+const order: Readonly<Record<Standing, number>> = {
+  at_risk: 0,
+  unreachable: 1,
+  waiting: 2,
+  older: 3,
+  interviews: 4,
+  setting_up: 5,
+  not_deployed: 6,
+  live: 7,
+};
+
+/** How a company uses Grasp, while its summary shares it. */
+type Activity = NonNullable<AdminSummary["activity"]>;
+
+/** Its runs of the last seven days. */
+const weekOf = (activity: Activity): { done: number; failed: number } => {
+  const week = activity.runs.slice(-weekDays);
+  return {
+    done: week.reduce((sum, day) => sum + day.done, 0),
+    failed: week.reduce((sum, day) => sum + day.failed, 0),
+  };
+};
+
+/** Why a figure of a row isn't there, in words: never a bare dash. */
+const missingWords = (row: Row): string => {
+  switch (row.entry.state) {
+    case "older": {
+      return "Update to see";
+    }
+    case "not_deployed": {
+      return "Not set up yet";
+    }
+    case "unreachable": {
+      return "Not read now";
+    }
+    case "answered": {
+      // Its summary is in, without how it uses Grasp: it ended Grasp's staff access.
+      return "Not shared";
+    }
+    default: {
+      return row.entry satisfies never;
+    }
+  }
+};
+
+/** Its AI on Grasp's key at or past `nearShare` of its limit. */
+const nearLimit = (spend: OrganizationSpend | undefined): boolean =>
+  spend?.graspAi !== null &&
+  spend?.graspAi !== undefined &&
+  spend.graspAi.limit > 0 &&
+  spend.graspAi.spent >= spend.graspAi.limit * nearShare;
+
+/**
+ * Grasp's AI this month so far, beside last month's, and how many
+ * organizations are near their limit; those whose core didn't report it
+ * aren't in it, and it says how many.
+ */
+const AiFigure = ({ rows, spend }: { rows: Row[]; spend: Spend }) => {
+  if (spend === null) {
+    return (
+      <Stat
+        change="Its cores couldn’t be read now"
+        label="Grasp AI this month"
+        value="Not read"
+      />
+    );
+  }
+  const near = rows.filter((row) => nearLimit(spendOf(spend, row))).length;
+  const unread = spend.unread.length + spend.unreported.length;
+  if (spend.byOrganization.length === 0 && unread > 0) {
+    return (
+      <Stat
+        change={`${unread} not counted`}
+        label="Grasp AI this month"
+        value="Not read"
+      />
+    );
+  }
+  return (
+    <Stat
+      // Last month in full beside this month so far: never a share of a
+      // month against a whole one.
+      change={[
+        `${dollarsOf(spend.lastMonth.micros)} last month`,
+        near > 0 ? `${near} near ${plural(near, "its", "their")} limit` : null,
+        unread > 0 ? `${unread} not counted` : null,
+      ]
+        .filter((part) => part !== null)
+        .join(" · ")}
+      label="Grasp AI this month"
+      value={dollarsOf(spend.thisMonth.micros)}
+      {...(near > 0 ? { variant: "warning" as const } : {})}
+    />
+  );
+};
+
+const Figures = ({ rows, spend }: { rows: Row[]; spend: SpendRead }) => {
+  const live = rows.filter(({ standing }) => standing === "live").length;
+  const onboarding = rows.filter(
+    ({ summary }) => summary !== null && phaseOf(summary.onboarding) !== "live"
+  );
+  const risky = onboarding.filter(
+    ({ standing }) => standing === "at_risk"
+  ).length;
+  const needing = rows.filter(({ needs }) => needs.length > 0);
+  const needs = needing.reduce((sum, row) => sum + needCount(row.needs), 0);
+  return (
+    <StatGroup aria-label="How Grasp is doing" columns={4}>
+      <Stat
+        change={`of ${rows.length} ${plural(rows.length, "organization", "organizations")}`}
+        label="Live"
+        value={String(live)}
+      />
+      <Stat
+        change={risky === 0 ? "None at risk" : `${risky} at risk`}
+        label="Onboarding"
+        value={String(onboarding.length)}
+        {...(risky > 0 ? { variant: "destructive" as const } : {})}
+      />
+      <Stat
+        change={
+          needing.length === 0
+            ? "Nothing waits on Grasp"
+            : `at ${needing.length} ${plural(needing.length, "organization", "organizations")}`
+        }
+        label="Needs Grasp"
+        value={String(needs)}
+        {...(needs > 0 ? { variant: "warning" as const } : {})}
+      />
+      <WithSpend
+        fallback={<LoadingFigure label="Grasp AI this month" />}
+        spend={spend}
+      >
+        {(read) => <AiFigure rows={rows} spend={read} />}
+      </WithSpend>
+    </StatGroup>
+  );
+};
+
+/** A need's line, with how many of it where there are more than one. */
+const needText = ({ text, count }: OrgNeed): string =>
+  count > 1 ? `${text} (${count})` : text;
+
+const NeedsGrasp = ({ rows }: { rows: Row[] }) => {
+  // Each organization's most pressing first, then each one's next, in turn,
+  // so the first few can't fill the list before the rest are heard.
+  const deepest = Math.max(0, ...rows.map(({ needs }) => needs.length));
+  const all = Array.from({ length: deepest }, (_, rank) =>
+    rows.flatMap((row) => {
+      const need = row.needs[rank];
+      return need === undefined ? [] : [{ row, need }];
+    })
+  ).flat();
+  const more = all.length - needsShown;
+  return (
+    <section {...stylex.props(styles.part)}>
+      <SectionHeader
+        headingLevel={2}
+        size="sm"
+        title="Needs Grasp"
+        variant="group"
+      />
+      {all.length === 0 ? (
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia icon={CircleCheckIcon} />
+            <EmptyTitle>Nothing needs Grasp now</EmptyTitle>
+            <EmptyDescription>
+              What waits on Grasp at an organization shows here, and in the
+              sidebar’s Inbox.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : (
+        <ItemGroup aria-label="Needs Grasp" separated>
+          {all.slice(0, needsShown).map(({ row, need }, at) => (
+            // The same line can stand twice at one older core, for two teams.
+            <Item asChild key={`${row.id}-${String(at)}`} size="sm">
+              <Link
+                params={{ clientId: row.id }}
+                search={need.search}
+                to={sectionTo[need.section]}
+              >
+                <ItemContent>
+                  <ItemTitle>{needText(need)}</ItemTitle>
+                  <ItemDescription>{row.name}</ItemDescription>
+                </ItemContent>
+              </Link>
+            </Item>
+          ))}
+        </ItemGroup>
+      )}
+      {more > 0 ? (
+        <span {...stylex.props(styles.quiet)}>
+          {`${more} more in the sidebar’s Inbox.`}
+        </span>
+      ) : null}
+    </section>
+  );
+};
+
+const phaseWords: Readonly<Record<Phase, string>> = {
+  setting_up: standingWords.setting_up,
+  interviews: standingWords.interviews,
+  waiting: standingWords.waiting,
+  live: standingWords.live,
+};
+
+const Funnel = ({ rows }: { rows: Row[] }) => {
+  const read = rows.flatMap(({ summary }) =>
+    summary === null ? [] : [phaseOf(summary.onboarding)]
+  );
+  const data = phases.map((phase) => ({
+    phase: phaseWords[phase],
+    organizations: read.filter((each) => each === phase).length,
+  }));
+  const unread = rows.length - read.length;
+  return (
+    <section {...stylex.props(styles.part)}>
+      <SectionHeader
+        headingLevel={2}
+        size="sm"
+        title="Where everyone is"
+        variant="group"
+      />
+      <ChartBarList
+        aria-label="Organizations by where they are"
+        config={{ organizations: { label: "Organizations" } }}
+        data={data}
+        nameKey="phase"
+        pattern="dither-dots"
+        sortOrder="none"
+        summary={`${read.length} ${plural(read.length, "organization", "organizations")}, from setting up to live.`}
+      />
+      {unread > 0 ? (
+        <span {...stylex.props(styles.quiet)}>
+          {`${unread} more ${plural(unread, "isn’t", "aren’t")} counted here: not set up, not answering or on an older release.`}
+        </span>
+      ) : null}
+    </section>
+  );
+};
+
+/** Every organization's runs, day by day, the last 30 days: those that share them. */
+const runsByDay = (rows: readonly Row[]) => {
+  const days = new Map<string, { day: string; done: number; failed: number }>();
+  for (const { summary } of rows) {
+    for (const { day, done, failed } of summary?.activity?.runs ?? []) {
+      const at = days.get(day) ?? { day, done: 0, failed: 0 };
+      days.set(day, { day, done: at.done + done, failed: at.failed + failed });
+    }
+  }
+  return [...days.values()]
+    .toSorted((one, other) => one.day.localeCompare(other.day))
+    .map((each) => ({ ...each, day: formatDay(each.day) }));
+};
+
+/** What the runs chart says over it: how many, or why there are none to draw. */
+const runsLine = (sharing: number, done: number, failed: number): string => {
+  if (sharing === 0) {
+    return "No organization’s runs are counted: none shares them now.";
+  }
+  const at = `at the ${sharing} ${plural(sharing, "organization", "organizations")} that share their runs`;
+  if (done + failed === 0) {
+    return `No workflow ran in the last 30 days, ${at}.`;
+  }
+  const share = Math.round((failed / (done + failed)) * 1000) / 10;
+  return `${done} done and ${failed} failed (${share}%) in the last 30 days, ${at}.`;
+};
+
+const Runs = ({ rows }: { rows: Row[] }) => {
+  const data = runsByDay(rows);
+  const sharing = rows.filter(
+    ({ summary }) =>
+      summary?.activity !== null && summary?.activity !== undefined
+  ).length;
+  const done = data.reduce((sum, day) => sum + day.done, 0);
+  const failed = data.reduce((sum, day) => sum + day.failed, 0);
+  return (
+    <section {...stylex.props(styles.part)}>
+      <SectionHeader
+        description={runsLine(sharing, done, failed)}
+        headingLevel={2}
+        size="sm"
+        title="Workflow runs"
+        variant="group"
+      />
+      {done + failed === 0 ? null : (
+        <ChartContainer
+          aria-label="Workflow runs per day"
+          config={{ done: { label: "Done" }, failed: { label: "Failed" } }}
+          data={data}
+          height={220}
+          summary={`${done} runs done and ${failed} failed over the last 30 days.`}
+          xKey="day"
+        >
+          <ChartGrid />
+          <ChartXAxis />
+          <ChartYAxis />
+          <ChartBar dataKey="done" pattern="dither-pixels" />
+          <ChartBar dataKey="failed" />
+          <ChartTooltip />
+          <ChartLegend />
+        </ChartContainer>
+      )}
+    </section>
+  );
+};
+
+/** Why its summary isn't read, under how it stands. */
+const unreadLines: Readonly<
+  Record<Exclude<ClientSummary["state"], "answered">, string>
+> = {
+  older: "Its release is older",
+  not_deployed: "Not deployed yet",
+  unreachable: "Its core didn’t answer",
+};
+
+/** How it stands: a toned dot and its word, over where it is within it. */
+const State = ({ row }: { row: Row }) => (
+  <span {...stylex.props(styles.cell)}>
+    <Badge dot variant={standingTones[row.standing]}>
+      {standingWords[row.standing]}
+    </Badge>
+    <span {...stylex.props(styles.quiet)}>
+      {row.entry.state === "answered"
+        ? whereWords(row.entry.summary)
+        : unreadLines[row.entry.state]}
+    </span>
+  </span>
+);
+
+/**
+ * How far it has come: how much Grasp knows against what it opens at
+ * while it onboards; once live, what runs there.
+ */
+const Progressed = ({ row }: { row: Row }) => {
+  const { summary } = row;
+  if (summary === null) {
+    return <span {...stylex.props(styles.quiet)}>{missingWords(row)}</span>;
+  }
+  const { known, threshold } = summary.onboarding;
+  if (phaseOf(summary.onboarding) !== "live") {
+    return (
+      <span {...stylex.props(styles.meter)}>
+        <Progress
+          aria-label={`${row.name}: ${known}% known, opens at ${threshold}%`}
+          value={known}
+          variant={row.standing === "at_risk" ? "destructive" : "default"}
+        />
+        <span
+          {...stylex.props(styles.quiet)}
+        >{`${known}% of ${threshold}% known`}</span>
+      </span>
+    );
+  }
+  const { activity } = summary;
+  if (activity === null) {
+    return <span {...stylex.props(styles.quiet)}>{missingWords(row)}</span>;
+  }
+  const { workflowsLive, appsLive, agentsOn } = activity;
+  return (
+    <span {...stylex.props(styles.cell)}>
+      <span>{`${workflowsLive} ${plural(workflowsLive, "workflow", "workflows")} live`}</span>
+      <span {...stylex.props(styles.quiet)}>
+        {`${appsLive} ${plural(appsLive, "App", "Apps")}, ${agentsOn} ${plural(agentsOn, "agent", "agents")} on`}
+      </span>
+    </span>
+  );
+};
+
+/** How far it has come, in words, for a card (`Progressed`). */
+const progressWords = (row: Row): string => {
+  const { summary } = row;
+  if (summary === null) {
+    return missingWords(row);
+  }
+  const { known, threshold } = summary.onboarding;
+  if (phaseOf(summary.onboarding) !== "live") {
+    return `${known}% of ${threshold}% known`;
+  }
+  const { activity } = summary;
+  if (activity === null) {
+    return missingWords(row);
+  }
+  const { workflowsLive, appsLive, agentsOn } = activity;
+  return `${workflowsLive} ${plural(workflowsLive, "workflow", "workflows")} live, ${appsLive} ${plural(appsLive, "App", "Apps")}, ${agentsOn} ${plural(agentsOn, "agent", "agents")} on`;
+};
+
+/** What it waits on first, and how many more, in words, for a card (`Next`). */
+const nextWords = (row: Row): string => {
+  const [first] = row.needs;
+  if (first === undefined) {
+    return "Nothing waits on Grasp";
+  }
+  const more = needCount(row.needs) - first.count;
+  return more > 0 ? `${needText(first)}, and ${more} more` : needText(first);
+};
+
+/** Why its AI spend isn't there: not set up, its release doesn't report it, or not read. */
+const unspentWords = (row: Row, spend: Spend): string => {
+  if (row.entry.state === "not_deployed") {
+    return missingWords(row);
+  }
+  return spend?.unreported.some(({ clientId }) => clientId === row.id) === true
+    ? "Not reported by its release"
+    : "Not read now";
+};
+
+/** Its AI on Grasp's key this month against its limit, or why that isn't there. */
+const Ai = ({ row, spend }: { row: Row; spend: Spend }) => {
+  const own = spend === null ? undefined : spendOf(spend, row);
+  if (own === undefined) {
+    return (
+      <span {...stylex.props(styles.quiet)}>{unspentWords(row, spend)}</span>
+    );
+  }
+  const { graspAi } = own;
+  // What Grasp's keys cost for it, as the figure adds it up: its own AI on
+  // Grasp's key and Grasp's features alike.
+  const spent = `${dollarsOf(own.thisMonth)} on Grasp’s keys`;
+  if (graspAi === null || graspAi.limit === 0) {
+    // On its own key, or a release that doesn't report the limit.
+    return (
+      <span {...stylex.props(styles.cell)}>
+        <span>{spent}</span>
+        <span {...stylex.props(styles.quiet)}>No limit reported</span>
+      </span>
+    );
+  }
+  const share = Math.min(
+    100,
+    Math.round((graspAi.spent / graspAi.limit) * 100)
+  );
+  return (
+    <span {...stylex.props(styles.meter)}>
+      <span>{spent}</span>
+      <Progress
+        aria-label={`${row.name}: its own AI at ${share}% of its limit`}
+        value={share}
+        variant={nearLimit(own) ? "warning" : "default"}
+      />
+      <span
+        {...stylex.props(styles.quiet)}
+      >{`Its AI ${dollarsOf(graspAi.spent)} of ${dollarsOf(graspAi.limit)}`}</span>
+    </span>
+  );
+};
+
+/** Its AI in words, for a card. */
+const aiWords = (row: Row, spend: Spend): string => {
+  const own = spend === null ? undefined : spendOf(spend, row);
+  if (own === undefined) {
+    return unspentWords(row, spend);
+  }
+  const spent = `${dollarsOf(own.thisMonth)} on Grasp’s keys`;
+  return own.graspAi === null || own.graspAi.limit === 0
+    ? `${spent}, no limit reported`
+    : `${spent}; its AI ${dollarsOf(own.graspAi.spent)} of ${dollarsOf(own.graspAi.limit)}`;
+};
+
+/**
+ * How many people did something themselves last week (the last whole
+ * week, core's next to last), in a line: "8 active last week", "1–4" as
+ * core sends 1 to 4, "Nobody"; or that core hasn't counted that week yet.
+ * Only for a summary that shares how the company uses Grasp.
+ */
+const peopleLine = (activity: Activity): string => {
+  const people = activity.activePeople.at(-2)?.people;
+  if (people === undefined) {
+    return "Active people not counted yet";
+  }
+  return `${people === 0 ? "Nobody" : String(people)} active last week`;
+};
+
+/**
+ * How it is used: its runs of the last seven days, what failed in red,
+ * over how many people did something themselves last week.
+ */
+const Use = ({ row }: { row: Row }) => {
+  const activity = row.summary?.activity;
+  if (activity === null || activity === undefined) {
+    return <span {...stylex.props(styles.quiet)}>{missingWords(row)}</span>;
+  }
+  const week = weekOf(activity);
+  const runs = week.done + week.failed;
+  return (
+    <span {...stylex.props(styles.cell)}>
+      <span>
+        {runs === 0
+          ? "No runs"
+          : `${week.done} ${plural(week.done, "run", "runs")}`}
+        {week.failed > 0 ? (
+          <span {...stylex.props(styles.failed)}>
+            {`, ${week.failed} failed`}
+          </span>
+        ) : null}
+      </span>
+      <span {...stylex.props(styles.quiet)}>{peopleLine(activity)}</span>
+    </span>
+  );
+};
+
+/** How its platform runs: a toned dot and a few words. */
+const healthOf = (row: Row): { tone: BadgeVariant; words: string } => {
+  const { client } = row.entry;
+  if (row.entry.state === "unreachable") {
+    return { tone: "destructive", words: "Core not answering" };
+  }
+  if (row.entry.state === "not_deployed") {
+    return client.setup?.state === "needs_attention"
+      ? { tone: "destructive", words: "Setup needs a person" }
+      : { tone: "default", words: "Being set up" };
+  }
+  if (client.rollout.failed !== null) {
+    return { tone: "destructive", words: "Last deploy failed" };
+  }
+  const connectors = row.summary?.connectors;
+  if (connectors === null) {
+    // Connect didn't answer its core.
+    return { tone: "warning", words: "Connectors not read" };
+  }
+  if (connectors !== undefined) {
+    if (connectors.stopped > 0) {
+      return {
+        tone: "destructive",
+        words: `${connectors.stopped} ${plural(connectors.stopped, "connector", "connectors")} stopped`,
+      };
+    }
+    if (connectors.again > 0) {
+      return {
+        tone: "warning",
+        words: `${connectors.again} ${plural(connectors.again, "connector waits", "connectors wait")} for a sign-in`,
+      };
+    }
+  }
+  if (client.rollout.behind > 0) {
+    return {
+      tone: "warning",
+      words: `${client.rollout.behind} ${plural(client.rollout.behind, "release", "releases")} behind`,
+    };
+  }
+  return {
+    tone: "success",
+    words: "Running",
+  };
+};
+
+const Health = ({ row }: { row: Row }) => {
+  const { tone, words } = healthOf(row);
+  return (
+    <Badge dot variant={tone}>
+      {words}
+    </Badge>
+  );
+};
+
+/** What it waits on first, and how many more. */
+const Next = ({ row }: { row: Row }) => {
+  const [first] = row.needs;
+  if (first === undefined) {
+    return <span {...stylex.props(styles.quiet)}>Nothing waits</span>;
+  }
+  const more = needCount(row.needs) - first.count;
+  return (
+    <span {...stylex.props(styles.cell)}>
+      <span {...stylex.props(styles.clamp)}>{needText(first)}</span>
+      {more > 0 ? (
+        <span {...stylex.props(styles.quiet)}>{`and ${more} more`}</span>
+      ) : null}
+    </span>
+  );
+};
+
+/** Its use in a line, for a card: runs, what failed, and last week's people. */
+const usageWords = (row: Row): string => {
+  const activity = row.summary?.activity;
+  if (activity === null || activity === undefined) {
+    return missingWords(row);
+  }
+  const week = weekOf(activity);
+  const runs =
+    week.done + week.failed === 0
+      ? "No runs"
+      : `${week.done} ${plural(week.done, "run", "runs")}, ${week.failed} failed`;
+  return `${runs}; ${peopleLine(activity)}`;
+};
+
+/** The table's columns, each the same fact on a card: what Grasp's AI cost fills in apart. */
+const organizationColumns = (spend: SpendRead): DataColumn<Row>[] => [
+  {
+    id: "state",
+    head: "State",
+    cell: (row) => <State row={row} />,
+    // Under its name on a card.
+    fact: () => null,
+  },
+  {
+    id: "progress",
+    head: "Progress",
+    cell: (row) => <Progressed row={row} />,
+    fact: progressWords,
+  },
+  {
+    id: "use",
+    head: "Use, 7 days",
+    cell: (row) => <Use row={row} />,
+    fact: usageWords,
+  },
+  {
+    id: "ai",
+    head: "Grasp AI",
+    cell: (row) => (
+      <WithSpend fallback={<Reading />} spend={spend}>
+        {(read) => <Ai row={row} spend={read} />}
+      </WithSpend>
+    ),
+    fact: (row) => (
+      <WithSpend fallback="Reading…" spend={spend}>
+        {(read) => aiWords(row, read)}
+      </WithSpend>
+    ),
+  },
+  {
+    id: "health",
+    head: "Health",
+    cell: (row) => <Health row={row} />,
+    fact: (row) => healthOf(row).words,
+  },
+  {
+    id: "next",
+    head: "Next",
+    cell: (row) => <Next row={row} />,
+    wrap: true,
+    fact: nextWords,
+  },
+];
+
+/** How a row and a card open their organization. */
+const organizationLink = (row: Row, look: RowLook) => (
+  <Link {...look} params={{ clientId: row.id }} to="/organizations/$clientId" />
+);
+
+/** How it stands, under its name on a card. */
+const organizationLead = (row: Row) => <State row={row} />;
+
+const organizationName = (row: Row): string => row.name;
+
+const organizationKey = (row: Row): string => row.id;
+
+const Organizations = ({ rows, spend }: { rows: Row[]; spend: SpendRead }) => (
+  <section {...stylex.props(styles.part)}>
+    <SectionHeader
+      headingLevel={2}
+      size="sm"
+      title="Organizations"
+      variant="group"
+    />
+    <DataRows
+      columns={organizationColumns(spend)}
+      label="Organizations"
+      lead={organizationLead}
+      link={organizationLink}
+      name={organizationName}
+      nameHead="Organization"
+      rowKey={organizationKey}
+      rows={rows}
+    />
+  </section>
+);
+
+/** Everything Home shows below its heading, once the summaries are in. */
+export const HomeBody = ({
+  summaries,
+  spend,
+}: {
+  summaries: readonly ClientSummary[];
+  /** Read from every core apart: each part that shows it fills in once it is in. */
+  spend: SpendRead;
+}) => {
+  const rows = summaries
+    .map(rowOf)
+    .toSorted(
+      (one, other) =>
+        order[one.standing] - order[other.standing] ||
+        needCount(other.needs) - needCount(one.needs) ||
+        one.name.localeCompare(other.name)
+    );
+  if (rows.length === 0) {
+    return (
+      <Empty>
+        <EmptyHeader>
+          <EmptyMedia icon={PlusIcon} />
+          <EmptyTitle>No organizations yet</EmptyTitle>
+          <EmptyDescription>
+            Add the first company with Grasp: its own platform is set up, and
+            its onboarding starts from here.
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
+  }
+  return (
+    <>
+      <Figures rows={rows} spend={spend} />
+      <div {...stylex.props(styles.pair)}>
+        <NeedsGrasp rows={rows} />
+        <Funnel rows={rows} />
+      </div>
+      <Organizations rows={rows} spend={spend} />
+      <Runs rows={rows} />
+    </>
+  );
+};
+
+/** Home's one action. */
+export const NewOrganization = () => (
+  <Button asChild size="sm">
+    <Link to="/new-organization">
+      <Icon icon={PlusIcon} />
+      New organization
+    </Link>
+  </Button>
+);

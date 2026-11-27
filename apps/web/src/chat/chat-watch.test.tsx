@@ -1,6 +1,4 @@
 // @vitest-environment happy-dom
-import { setTimeout as sleep } from "node:timers/promises";
-
 import type { ChatMessage, ChatUpdate } from "@grasp-os/shared/chat";
 import {
   createMemoryHistory,
@@ -44,12 +42,9 @@ const drew = (name: string, line: ReturnType<typeof useNewLine>): void => {
   lines[name] = [...(lines[name] ?? []), line];
 };
 
-/** The chat the views show. */
-let shownChat = "chat-1";
-
 const View = ({ name }: { name: string }) => {
-  const { view } = useFollowedChat(shownChat);
-  drew(name, useNewLine(shownChat, view, true));
+  const { view } = useFollowedChat("chat-1");
+  drew(name, useNewLine("chat-1", view, true));
   return null;
 };
 
@@ -70,38 +65,6 @@ const Page = () => {
   return shown.map((name) => <View key={name} name={name} />);
 };
 
-/** Shows `next` views of the chat. */
-const showViews = async (next: string[]) => {
-  views = next;
-  await act(async () => {
-    for (const listener of listeners) {
-      listener();
-    }
-    await Promise.resolve();
-  });
-};
-
-/** The views against a core whose chats are `chats`. */
-const opened = async (chats: object) => {
-  const core = {
-    withSession: async <T,>(
-      run: (session: { chats: object }) => Promise<T>
-    ): Promise<T> => await run({ chats }),
-  };
-  const router = createRouter({
-    routeTree: createRootRoute({ component: Page }),
-    history: createMemoryHistory(),
-    context: { core },
-  });
-  const host = document.createElement("div");
-  document.body.append(host);
-  await act(async () => {
-    root = createRoot(host);
-    root.render(<RouterProvider router={router} />);
-    await router.load();
-  });
-};
-
 describe("a chat shown twice from one watch", () => {
   afterEach(() => {
     act(() => {
@@ -111,7 +74,7 @@ describe("a chat shown twice from one watch", () => {
   });
 
   it("draws no New line in a second view over what the person read in the first", async () => {
-    const markRead = vi.fn<(chatId: string) => Promise<number>>(
+    const markRead = vi.fn<(chatId: string, upTo?: number) => Promise<number>>(
       async () => await Promise.resolve(0)
     );
     const chats = {
@@ -152,7 +115,7 @@ describe("a chat shown twice from one watch", () => {
       await router.load();
     });
     await vi.waitFor(() => {
-      expect(markRead).toHaveBeenCalledWith("chat-1");
+      expect(markRead).toHaveBeenCalledWith("chat-1", 2);
     });
     await act(async () => {
       await Promise.resolve();
@@ -173,102 +136,5 @@ describe("a chat shown twice from one watch", () => {
       page: { decided: true, before: 2 },
       dock: { decided: true, before: undefined },
     });
-  });
-
-  it("draws the New line over an answer that ended while the chat wasn't shown, coming back to the view the tab kept of it", async () => {
-    shownChat = "chat-2";
-    let watches = 0;
-    let readUpTo = 0;
-    const markRead = vi.fn<(chatId: string) => Promise<number>>(async () => {
-      const before = readUpTo;
-      // Core marks the latest it has: the question, then the answer.
-      readUpTo = watches === 1 ? 1 : 2;
-      return await Promise.resolve(before);
-    });
-    const chats = {
-      watch: async (
-        _chatId: string,
-        _after: number | null,
-        onUpdate: (update: ChatUpdate) => void
-      ) => {
-        watches += 1;
-        // Left while the answer was written; back once it was done.
-        onUpdate({
-          messages: watches === 1 ? messages.slice(0, 1) : messages,
-          partial: null,
-          running: watches === 1,
-          stopped: null,
-          held: 0,
-          worked: 0,
-          seenUpTo: readUpTo,
-        });
-        return await Promise.withResolvers<never>().promise;
-      },
-      markRead,
-    };
-    views = ["first"];
-    await opened(chats);
-    await vi.waitFor(() => {
-      expect(markRead).toHaveBeenCalledOnce();
-    });
-    await showViews([]);
-    // Its watch stops a moment after; the tab keeps its view.
-    await act(async () => {
-      await sleep(10);
-    });
-    await showViews(["back"]);
-    await vi.waitFor(() => {
-      expect(lines.back?.at(-1)).toStrictEqual({ decided: true, before: 2 });
-    });
-  });
-
-  it("marks nothing read from the view the tab kept of a chat, only once core's view of it is there", async () => {
-    shownChat = "chat-3";
-    let watches = 0;
-    const markRead = vi.fn<(chatId: string) => Promise<number>>(
-      async () => await Promise.resolve(0)
-    );
-    const chats = {
-      watch: async (
-        _chatId: string,
-        _after: number | null,
-        onUpdate: (update: ChatUpdate) => void
-      ) => {
-        watches += 1;
-        // Coming back, core's watch hasn't answered yet.
-        if (watches > 1) {
-          return await Promise.withResolvers<never>().promise;
-        }
-        onUpdate({
-          messages,
-          partial: null,
-          running: false,
-          stopped: null,
-          held: 0,
-          worked: 0,
-          seenUpTo: 2,
-        });
-        return await Promise.withResolvers<never>().promise;
-      },
-      markRead,
-    };
-    views = ["first"];
-    await opened(chats);
-    await vi.waitFor(() => {
-      expect(markRead).toHaveBeenCalledOnce();
-    });
-    await showViews([]);
-    await act(async () => {
-      await sleep(10);
-    });
-    await showViews(["again"]);
-    await act(async () => {
-      await sleep(10);
-    });
-
-    expect({
-      shown: lines.again?.length !== undefined,
-      marks: markRead.mock.calls.length,
-    }).toStrictEqual({ shown: true, marks: 1 });
   });
 });

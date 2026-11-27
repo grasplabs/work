@@ -1,9 +1,14 @@
-import type { ChatListUpdate, ChatSummary } from "@grasp-os/shared/chat";
+import type {
+  ChatListUpdate,
+  ChatMessage,
+  ChatSummary,
+} from "@grasp-os/shared/chat";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { ChatListWatch } from "../src/chat-list-watch.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { sessionRecheckMs } from "../src/session-check.ts";
@@ -246,5 +251,72 @@ describe("a person's list of chats", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("is taken up again when its person's object resets mid-watch, as a deploy resets it, the chat's watch too, with nothing missed", async () => {
+    const ann = await person();
+    await fakeProvider(says("Still here."));
+    const chat = await ann.api.chats.create("Before the reset");
+    const list = await followList(ann.api.chats);
+    const messages: ChatMessage[] = [];
+    await ann.api.chats.watch(chat.id, null, (update) => {
+      messages.push(...update.messages);
+    });
+    await until(() => {
+      expect(list.rows()).toHaveLength(1);
+    });
+    await runInDurableObject(
+      workspace(env, personalWorkspaceId(ann.userId)),
+      (_instance, state) => {
+        state.abort("Reset by the test");
+      }
+    ).catch(() => {
+      // Aborting fails the call that aborted: that is the reset.
+    });
+
+    // After the reset, the browser's connection still open.
+    await ann.api.chats.create("After the reset");
+    await ann.api.chats.send(chat.id, { text: "Still there?", model });
+    await vi.waitFor(
+      () => {
+        expect(list.rows().map(({ title }) => title)).toStrictEqual([
+          "Before the reset",
+          "After the reset",
+        ]);
+        expect(
+          messages
+            .filter(({ role }) => role === "user" || role === "assistant")
+            .map(({ text }) => text)
+            .filter((text) => text !== "")
+        ).toStrictEqual(["Still there?", "Still here."]);
+      },
+      { timeout: 20_000 }
+    );
+  }, 30_000);
+
+  it("drops a watcher whose push failed and lets go of its listener, which core then watches again with (as after a reset)", async () => {
+    let calls = 0;
+    let letGo = 0;
+    const listener = Object.assign(
+      async (): Promise<void> => {
+        calls += 1;
+        await Promise.reject(new Error("The push didn't reach core"));
+      },
+      {
+        [Symbol.dispose]: () => {
+          letGo += 1;
+        },
+      }
+    );
+    const dropped = Promise.withResolvers<boolean>();
+    // As the Workspace object keeps it: dropped means let go of.
+    const watch: ChatListWatch = new ChatListWatch(listener, "person-1", () => {
+      watch[Symbol.dispose]();
+      dropped.resolve(true);
+    });
+    watch.push({ chats: [], archived: 0 });
+    await dropped.promise;
+
+    expect({ calls, letGo }).toStrictEqual({ calls: 1, letGo: 1 });
   });
 });

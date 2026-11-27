@@ -8,7 +8,6 @@ import {
   use,
   useEffect,
   useEffectEvent,
-  useRef,
   useSyncExternalStore,
 } from "react";
 import type { ReactNode } from "react";
@@ -243,7 +242,7 @@ const useGlobalChatValue = () => {
   // What each question is about: the page's subject, on the box's bar.
   const subject = useQuestionSubject(slot);
   const { view, failure, gone } = useFollowedChat(chatId);
-  const { composer, ask, sendNow } = useAsk(
+  const { composer, ask, box, sendNow } = useAsk(
     chatId,
     offered?.models,
     offered?.efforts,
@@ -310,6 +309,8 @@ const useGlobalChatValue = () => {
     /** Before anything is asked: a chat not made yet, or one made empty. */
     empty: chatId === undefined || (view.loaded && view.messages.length === 0),
     composer,
+    /** Which draft the box shows, which starts its editor afresh. */
+    box,
     ask,
     /** Has the agent take the questions queued behind its answer at once. */
     sendNow,

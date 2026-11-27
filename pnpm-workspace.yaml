@@ -63,16 +63,16 @@ catalog:
   mdast-util-from-markdown: 2.1.0
   # Damsko's Markdown (packages/ui): tables, task lists and the rest of
   # GitHub's flavour, on the parser above; maths, read by its micromark
-  # and mdast extensions and drawn by KaTeX; Mermaid, which draws a
-  # diagram fence; and remend, which makes the end of an answer still
-  # being written whole, at the versions Damsko pins. KaTeX and Mermaid
-  # load only with an answer that has a formula or a diagram.
+  # and mdast extensions and drawn by KaTeX; Pele, which draws a diagram
+  # fence (Mermaid's syntax) as SVG; and remend, which makes the end of an
+  # answer still being written whole, at the versions Damsko pins. KaTeX
+  # and Pele load only with an answer that has a formula or a diagram.
   katex: 0.18.10
   mdast-util-gfm: 3.1.0
   mdast-util-math: 3.0.0
-  mermaid: 12.2.0
   micromark-extension-gfm: 3.0.0
   micromark-extension-math: 3.1.0
+  pele: 1.13.0
   remend: 1.5.0
   "@types/mdast": 4.0.4
   # Reads the built pages for the hashes of their inline code (apps/docs),

@@ -127,7 +127,6 @@ export const showThinking = (readBrain: () => Promise<ThinkingBrain>) => {
       "Name only teams, statements and workflows that are in the brain. Call it once per move, in order, then answer in words. It never answers for you.",
     ].join("\n"),
     parameters,
-    executionMode: "sequential",
     execute: async (input) => {
       brain ??= readBrain();
       let read: ThinkingBrain;

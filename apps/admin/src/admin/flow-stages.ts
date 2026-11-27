@@ -46,13 +46,20 @@ export const stagesIn = (flow?: OnboardingFlow): Stage[] => {
  * leads and the interviews in Interviews. Their step goes there: the
  * section, and its tab where that isn't its first.
  */
-export const opensElsewhere = {
+const opensElsewhere = {
   agreed: { section: "details", search: { tab: "contract" } },
   leads: { section: "interviews", search: { tab: "people" } },
   interviews: { section: "interviews", search: {} },
 } as const satisfies Partial<
   Record<Stage, { section: OrgSection; search: { tab?: string } }>
 >;
+
+const isElsewhere = (stage: Stage): stage is keyof typeof opensElsewhere =>
+  Object.hasOwn(opensElsewhere, stage);
+
+/** Where a step another section shows goes: its section and tab; none for a step that opens here. */
+export const elsewhereOf = (stage: Stage) =>
+  isElsewhere(stage) ? opensElsewhere[stage] : undefined;
 
 /**
  * The step that is open, of those that open here: the one `asked` for
@@ -65,7 +72,7 @@ export const stageShown = (
   asked: Stage,
   statuses: Record<Stage, StageStatus>
 ): Stage => {
-  const here = shown.filter((stage) => !(stage in opensElsewhere));
+  const here = shown.filter((stage) => elsewhereOf(stage) === undefined);
   const after = shown.includes(asked)
     ? here.find((stage) => STAGES.indexOf(stage) > STAGES.indexOf(asked))
     : undefined;

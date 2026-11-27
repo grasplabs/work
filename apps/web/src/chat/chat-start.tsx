@@ -15,6 +15,7 @@ import {
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Await, useRouteContext, useRouter } from "@tanstack/react-router";
+import type { AnyRoute } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
 import { briefOf, useStartFrom } from "../brain/opportunity-drafts.ts";
@@ -194,6 +195,29 @@ export const ideasOf = async (
 };
 
 /**
+ * The draft a start with a purpose keeps (use-ask.ts `draft`): an
+ * opportunity's brief's, Make something's, an agent's Chat's, each its
+ * own; none for plain Chat's start, which keeps the person's next chat's.
+ */
+const startDraft = ({
+  opportunityId,
+  make,
+  agent,
+}: {
+  opportunityId: string | undefined;
+  make: ChatMake | undefined;
+  agent: string | undefined;
+}): { draft?: string } => {
+  if (opportunityId !== undefined) {
+    return { draft: `opportunity.${opportunityId}` };
+  }
+  if (make !== undefined) {
+    return { draft: `make.${make.kind}` };
+  }
+  return agent === undefined ? {} : { draft: `agent.${agent}` };
+};
+
+/**
  * Asks in a new chat, which opens full screen over the page; from Make
  * something (`make`), with `ideas` to start from, the chat made with what
  * to make. The agent `agent` names (the Agents page's "Chat") is mentioned
@@ -205,6 +229,7 @@ export const ChatStart = ({
   ideas,
   agent,
   opportunity,
+  opportunityId,
 }: {
   /** Only an App or a workflow: Make something starts no agent's setup. */
   make: (ChatMake & { kind: ChatPlanKind }) | undefined;
@@ -212,6 +237,8 @@ export const ChatStart = ({
   agent?: string | undefined;
   /** The opportunity whose brief the box starts with, once read. */
   opportunity?: Promise<Loaded<Opportunity | undefined>> | undefined;
+  /** That opportunity's ID, whose draft the box keeps. */
+  opportunityId?: string | undefined;
 }) => {
   const { t, i18n } = useLingui();
   const { offered, modelsUnavailable, retry } = useGlobalChat();
@@ -233,13 +260,29 @@ export const ChatStart = ({
     offered?.efforts,
     undefined,
     {
-      // The chat's own page (chat-link.ts), the question already in it.
-      onAsked: (chatId) => {
+      // The chat's own page (chat-link.ts), as soon as the chat is there,
+      // the question shown in it as it goes.
+      onChat: (chatId) => {
         goToChat(chatId);
       },
       ...(make === undefined ? {} : { make }),
+      ...startDraft({ opportunityId, make, agent }),
     }
   );
+  // The chat's page, which a question here opens, is loaded ahead: its
+  // route's code and the conversation's, so the question shows the moment
+  // its chat is made.
+  const router = useRouter();
+  useEffect(() => {
+    // A router without the chat's page (a test's) has nothing to load.
+    const chatPage = new Map<string, AnyRoute>(
+      Object.entries(router.routesById)
+    ).get("/_shell/chats/$chatId");
+    if (chatPage !== undefined) {
+      void router.loadRouteChunk(chatPage);
+    }
+    void preloadThread();
+  }, [router]);
   // The agent the address names, mentioned in the box once the person's
   // agents are read: only one they may ask, and only into an empty box.
   const mentioned = useRef(false);
@@ -269,10 +312,11 @@ export const ChatStart = ({
       { kind: "agent", id: named.id, label: named.name, trigger: "@" },
     ]);
   }, [named, typed, onText, onMentions]);
-  // The opportunity's brief, once read, fills the box.
+  // The opportunity's brief, once read, fills the box, unless the person
+  // left a draft of it (edited) to come back to.
   const kind = make?.kind;
   useStartFrom(opportunity, (read) => {
-    if (kind !== undefined) {
+    if (kind !== undefined && typed === "") {
       onText(briefOf(read, kind, i18n));
     }
   });

@@ -148,7 +148,7 @@ import type {
   TurnStop,
 } from "./chat-harness.ts";
 import { ChatListWatch } from "./chat-list-watch.ts";
-import type { ChatListListener } from "./chat-list-watch.ts";
+import type { ChatList, ChatListListener } from "./chat-list-watch.ts";
 import {
   chatMessageOf,
   partialOf,
@@ -1193,6 +1193,22 @@ export class Workspace extends DurableObject<Env> {
   #listTold = false;
 
   /**
+   * Where each chat stood before the questions sent in it still being
+   * taken moved it up (`#askedIn`), when those are, and every time such a
+   * question moved it to.
+   */
+  readonly #asking = new Map<
+    ChatId,
+    { stood: Date; taking: Set<number>; moves: Set<number> }
+  >();
+
+  /** Who follows their list of chats (`watchChats`), by watch ID. */
+  readonly #listWatchers = new Map<string, ChatListWatch>();
+
+  /** Whether the list's watchers are told already this tick (`#listChanged`). */
+  #listTold = false;
+
+  /**
    * Bumped whenever a chat's agent writes an App's draft, so its watchers
    * read what it worked on again (`draftWritten`). In memory only.
    */
@@ -1249,7 +1265,12 @@ export class Workspace extends DurableObject<Env> {
       .where(eq(chats.id, chatId))
       .run();
     this.#keepSaid(chatId, stored.id, message);
-    this.#listChanged();
+    // A step's result changes nothing the list shows that the answer
+    // around it won't: no title, read or working state, and its chat
+    // moved up as it was asked in.
+    if (message.role !== "toolResult") {
+      this.#listChanged();
+    }
     return stored;
   }
 
@@ -3048,16 +3069,16 @@ export class Workspace extends DurableObject<Env> {
     // Asked: first in its person's list now, as Send was pressed, not once
     // the question is shown (`#store`), which waits on the chat's object
     // and may take seconds; back where it was if it is refused.
-    const asked = new Date();
-    this.#movedTo(chat.id, asked);
-    void this.#takeQuestion(chat, question, started, key);
+    const asked = this.#askedIn(chat.id);
+    void this.#takeQuestion(chat, question, started);
     try {
       await started.promise;
       if (key !== undefined) {
         this.#keepRequest("send", key, chat.id);
       }
+      this.#settledAsk(chat.id, asked, true);
     } catch (error) {
-      this.#movedTo(chat.id, chat.lastAt, asked);
+      this.#settledAsk(chat.id, asked, false);
       throw error;
     } finally {
       if (key !== undefined) {
@@ -3066,6 +3087,55 @@ export class Workspace extends DurableObject<Env> {
     }
     // The alarm keeps the object up until the turn ends (`alarm`).
     await this.#alarmBy(Date.now());
+  }
+
+  /**
+   * Moves chat `chatId` up its person's list as a question is sent in it
+   * (`send`), keeping where it stood before the first of those still
+   * being taken: what a refused one puts it back to. Answers when.
+   */
+  #askedIn(chatId: ChatId): Date {
+    const asked = new Date();
+    const asking = this.#asking.get(chatId) ?? {
+      stood: this.#chat(chatId).lastAt,
+      taking: new Set<number>(),
+      moves: new Set<number>(),
+    };
+    asking.taking.add(asked.getTime());
+    asking.moves.add(asked.getTime());
+    this.#asking.set(chatId, asking);
+    this.#movedTo(chatId, asked);
+    return asked;
+  }
+
+  /**
+   * The question sent in chat `chatId` at `asked` was taken, or refused.
+   * Taken, the chat was asked in then: where it stands from now on. Once
+   * none is still being taken, a chat no question since moved (its last
+   * activity still one of theirs) goes back to where it stood.
+   */
+  #settledAsk(chatId: ChatId, asked: Date, taken: boolean): void {
+    const asking = this.#asking.get(chatId);
+    if (asking === undefined) {
+      return;
+    }
+    asking.taking.delete(asked.getTime());
+    if (taken) {
+      asking.stood = asked;
+    }
+    if (asking.taking.size > 0) {
+      return;
+    }
+    this.#asking.delete(chatId);
+    const { lastAt } = this.#chat(chatId);
+    // Last moved by a refused question: back where it stood. One a
+    // message or a note moved since stays where that put it.
+    if (
+      asking.moves.has(lastAt.getTime()) &&
+      lastAt.getTime() !== asking.stood.getTime()
+    ) {
+      this.#movedTo(chatId, asking.stood, lastAt);
+    }
   }
 
   /**
@@ -4979,24 +5049,33 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Marks `personId`'s chat `chatId` seen up to its latest message
+   * Marks `personId`'s chat `chatId` seen up to its latest message, or
+   * to `upTo`, the newest the page shows, where that is older
    * (`ChatsApi.markRead`), never back: a page that shows less, on another
    * device, leaves it where a newer one put it. The last message they had
    * seen before: 0 for none, null for a chat made before chats kept it,
    * which counts as read. Only their own chat in Grasp
    * (`#graspChat`): anyone else's is refused as if there were none.
    */
-  markChatRead(chatId: unknown, personId: string): number | null {
+  markChatRead(
+    chatId: unknown,
+    personId: string,
+    upTo?: number
+  ): number | null {
     const chat = this.#graspChat(chatId, personId);
     const latest = this.#db
       .select({ id: sql<number | null>`max(${chatMessages.id})` })
       .from(chatMessages)
       .where(eq(chatMessages.chatId, chat.id))
       .get()?.id;
-    if (typeof latest === "number" && latest > (chat.readUpTo ?? 0)) {
+    const seen =
+      typeof latest === "number" && upTo !== undefined
+        ? Math.min(latest, upTo)
+        : latest;
+    if (typeof seen === "number" && seen > (chat.readUpTo ?? 0)) {
       this.#db
         .update(chats)
-        .set({ readUpTo: latest })
+        .set({ readUpTo: seen })
         .where(eq(chats.id, chat.id))
         .run();
       this.#listChanged();
@@ -5748,18 +5827,11 @@ export class Workspace extends DurableObject<Env> {
   watchChats(personId: string, listener: ChatListListener): string {
     this.#requireRoomToWatch();
     const watchId = crypto.randomUUID();
-    const watch = new ChatListWatch(
-      listener.dup(),
-      () => ({
-        chats: this.chats(personId),
-        archived: this.#archivedCount(personId),
-      }),
-      () => {
-        this.unwatchChats(watchId);
-      }
-    );
+    const watch = new ChatListWatch(listener.dup(), personId, () => {
+      this.unwatchChats(watchId);
+    });
     this.#listWatchers.set(watchId, watch);
-    watch.push();
+    watch.push(this.#listOf(personId));
     return watchId;
   }
 
@@ -5783,10 +5855,22 @@ export class Workspace extends DurableObject<Env> {
     this.#listTold = true;
     queueMicrotask(() => {
       this.#listTold = false;
+      // Read once for each person followed, whoever many follow it.
+      const lists = new Map<string, ChatList>();
       for (const watch of this.#listWatchers.values()) {
-        watch.push();
+        const list = lists.get(watch.personId) ?? this.#listOf(watch.personId);
+        lists.set(watch.personId, list);
+        watch.push(list);
       }
     });
+  }
+
+  /** `personId`'s list as its watchers follow it: what `chats` gives, and how many they archived. */
+  #listOf(personId: string): ChatList {
+    return {
+      chats: this.chats(personId),
+      archived: this.#archivedCount(personId),
+    };
   }
 
   /** How many chats `personId` archived. */

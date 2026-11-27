@@ -99,14 +99,14 @@ const opened = async (
   shownChat.state = { view, seen };
   lines.length = 0;
   let latestMarked: number | null = seenUpTo;
-  const markRead = vi.fn<(chatId: string) => Promise<number | null>>(
-    async (chatId) => {
-      await (hold ? Promise.withResolvers<never>().promise : Promise.resolve());
-      const before = latestMarked;
-      latestMarked = shownChat.state.view.messages.at(-1)?.id ?? before;
-      return chatId === "chat-1" ? before : null;
-    }
-  );
+  const markRead = vi.fn<
+    (chatId: string, upTo?: number) => Promise<number | null>
+  >(async (chatId) => {
+    await (hold ? Promise.withResolvers<never>().promise : Promise.resolve());
+    const before = latestMarked;
+    latestMarked = shownChat.state.view.messages.at(-1)?.id ?? before;
+    return chatId === "chat-1" ? before : null;
+  });
   const session = { chats: { markRead } };
   const core = {
     withSession: async <T,>(
@@ -199,7 +199,7 @@ describe("where the person has read a chat to", () => {
       marks: chat.markRead.mock.calls,
     }).toStrictEqual({
       first: { decided: false, before: undefined },
-      marks: [["chat-1"]],
+      marks: [["chat-1", 4]],
     });
   });
 
@@ -219,7 +219,7 @@ describe("where the person has read a chat to", () => {
       marks: chat.markRead.mock.calls,
     }).toStrictEqual({
       line: { decided: true, before: 4 },
-      marks: [["chat-1"]],
+      marks: [["chat-1", 4]],
     });
   });
 

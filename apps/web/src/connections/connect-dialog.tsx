@@ -885,7 +885,7 @@ const ComposioFlow = ({
       <Progress steps={steps} />
       <Step state={steps[0].state} title={steps[0].title}>
         <Text color="muted" size="sm">
-          {t`A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's Read or Write to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking.`}
+          {t`Only a tool Composio says only reads can be Read, and it starts as Read when switched on; any other tool is Write. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a Read tool's Read or Write to change it.`}
         </Text>
         {listed === undefined ? <LoadingLines /> : null}
         {listed === undefined || listed.state === "ready" ? null : (

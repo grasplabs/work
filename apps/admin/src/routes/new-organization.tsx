@@ -1,19 +1,22 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Card } from "@grasp-os/app-kit/components/card";
+import type { FlowPreset } from "@grasp-os/shared/onboarding-flow";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   Field,
   FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
-} from "@grasp-os/app-kit/components/field";
-import { Input } from "@grasp-os/app-kit/components/input";
+} from "@grasp-os/ui/components/field";
+import { Input } from "@grasp-os/ui/components/input";
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
-} from "@grasp-os/app-kit/components/input-group";
-import type { FlowPreset } from "@grasp-os/shared/onboarding-flow";
+} from "@grasp-os/ui/components/input-group";
+import { Text } from "@grasp-os/ui/components/text";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import {
   createFileRoute,
   Link,
@@ -39,6 +42,18 @@ import {
 import type { DetectedSignIn } from "../provision/sign-in-detect.ts";
 import { useProvisionAction } from "../provision/use-action.ts";
 import { InvalidFieldError } from "../use-action.ts";
+
+const styles = stylex.create({
+  // The form in a measure a field can be read at, its parts apart.
+  form: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["6"],
+    maxWidth: "36rem",
+  },
+  domains: { display: "flex", flexDirection: "column", gap: space["2"] },
+  buttons: { display: "flex", alignItems: "center", gap: space["2"] },
+});
 
 /** How long typing pauses before the address or domain is looked up. */
 const lookupPauseMs = 400;
@@ -153,7 +168,9 @@ const SignInLine = ({
   }
   if (choice?.by !== "hand" && detected === null) {
     return (
-      <p className="text-muted-foreground text-sm">Finding how they sign in…</p>
+      <Text color="muted" size="sm">
+        Finding how they sign in…
+      </Text>
     );
   }
   if (
@@ -162,7 +179,7 @@ const SignInLine = ({
     detected.provider !== null
   ) {
     return (
-      <p className="text-sm">
+      <Text color="default" size="sm">
         {`Sign-in: ${providerWords[detected.provider]} `}
         <Button
           onClick={() => {
@@ -178,7 +195,7 @@ const SignInLine = ({
         >
           change
         </Button>
-      </p>
+      </Text>
     );
   }
   const hand =
@@ -187,13 +204,12 @@ const SignInLine = ({
       : { by: "hand" as const, provider: "google" as const, value: "" };
   return (
     <Field>
-      <FieldLabel htmlFor="org-sign-in">
+      <FieldLabel>
         {hand.provider === "google"
           ? "Google Workspace primary domain"
           : "Microsoft Entra tenant id"}
       </FieldLabel>
       <Input
-        id="org-sign-in"
         onChange={(event) => {
           onChoose({ ...hand, value: event.currentTarget.value });
         }}
@@ -339,148 +355,149 @@ const NewOrganization = () => {
       description="Grasp sets it up as soon as you create it."
       title="New organization"
     >
-      <Card variant="panel">
-        <form
-          className="flex flex-col gap-6 px-5 py-5 *:max-w-xl"
-          onSubmit={(event) => {
-            event.preventDefault();
-            create();
-          }}
-        >
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="org-name">Name</FieldLabel>
-              <Input
-                autoComplete="organization"
-                id="org-name"
-                maxLength={100}
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          create();
+        }}
+        {...stylex.props(styles.form)}
+      >
+        <FieldGroup>
+          <Field>
+            <FieldLabel>Name</FieldLabel>
+            <Input
+              autoComplete="organization"
+              maxLength={100}
+              onChange={(event) => {
+                setName(event.currentTarget.value);
+              }}
+              required
+              value={name}
+            />
+          </Field>
+          <Field data-invalid={addressProblem !== null}>
+            <FieldLabel>Web address</FieldLabel>
+            <InputGroup>
+              <InputGroupInput
+                autoCapitalize="none"
+                maxLength={maxClientIdLength}
                 onChange={(event) => {
-                  setName(event.currentTarget.value);
+                  setAddress(event.currentTarget.value.toLowerCase());
                 }}
                 required
-                value={name}
+                spellCheck={false}
+                value={clientId}
+              />
+              <InputGroupAddon align="inline-end">
+                {`.${clientDomain ?? "…"}`}
+              </InputGroupAddon>
+            </InputGroup>
+            {addressProblem === null ? (
+              <FieldDescription>
+                Where its people open Grasp. It can&apos;t change later.
+              </FieldDescription>
+            ) : (
+              <FieldError>{addressProblem}</FieldError>
+            )}
+          </Field>
+          <div {...stylex.props(styles.domains)}>
+            <Field>
+              <FieldLabel>Company email domain</FieldLabel>
+              <Input
+                autoCapitalize="none"
+                onChange={(event) => {
+                  const next = event.currentTarget.value;
+                  setDomains(
+                    domains.map((each, at) => (at === 0 ? next : each))
+                  );
+                  setChoice(null);
+                }}
+                placeholder="acme.com"
+                required
+                spellCheck={false}
+                value={domains[0] ?? ""}
               />
             </Field>
-            <Field data-invalid={addressProblem !== null}>
-              <FieldLabel htmlFor="org-address">Web address</FieldLabel>
-              <InputGroup>
-                <InputGroupInput
-                  aria-describedby="org-address-hint"
-                  aria-invalid={addressProblem !== null}
-                  autoCapitalize="none"
-                  id="org-address"
-                  maxLength={maxClientIdLength}
-                  onChange={(event) => {
-                    setAddress(event.currentTarget.value.toLowerCase());
-                  }}
-                  required
-                  spellCheck={false}
-                  value={clientId}
-                />
-                <InputGroupAddon align="inline-end" id="org-address-hint">
-                  {`.${clientDomain ?? "…"}`}
-                </InputGroupAddon>
-              </InputGroup>
-              {addressProblem === null ? (
-                <FieldDescription>
-                  Where its people open Grasp. It can&apos;t change later.
-                </FieldDescription>
-              ) : (
-                <FieldError>{addressProblem}</FieldError>
-              )}
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="org-domain-0">
-                Company email domain
-              </FieldLabel>
-              {domains.map((domain, index) => (
+            {domains.slice(1).map((domain, at) => {
+              const index = at + 1;
+              return (
                 <Input
-                  aria-label={index === 0 ? undefined : "Another email domain"}
+                  aria-label="Another email domain"
                   autoCapitalize="none"
-                  id={`org-domain-${index}`}
                   // The fields are added and never reordered: their place is their identity.
                   key={index}
                   onChange={(event) => {
                     const next = event.currentTarget.value;
                     setDomains(
-                      domains.map((each, at) => (at === index ? next : each))
+                      domains.map((each, place) =>
+                        place === index ? next : each
+                      )
                     );
-                    if (index === 0) {
-                      setChoice(null);
-                    }
                   }}
-                  placeholder={index === 0 ? "acme.com" : "acme.de"}
-                  required={index === 0}
+                  placeholder="acme.de"
                   spellCheck={false}
                   value={domain}
                 />
-              ))}
-              <div>
-                <Button
-                  onClick={() => {
-                    setDomains([...domains, ""]);
-                  }}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  Add another domain
-                </Button>
-              </div>
-              <SignInLine
-                choice={choice}
-                detected={detected}
-                domain={firstDomain}
-                onChoose={setChoice}
-                onRetry={() => {
-                  setLookupAttempt((attempt) => attempt + 1);
+              );
+            })}
+            <div>
+              <Button
+                onClick={() => {
+                  setDomains([...domains, ""]);
                 }}
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="org-admin">
-                First admin&apos;s email
-              </FieldLabel>
-              <Input
-                autoCapitalize="none"
-                id="org-admin"
-                onChange={(event) => {
-                  setAdmin(event.currentTarget.value);
-                }}
-                required
-                spellCheck={false}
-                type="email"
-                value={adminEmail}
-              />
-              <FieldDescription>
-                They become its admin when they first sign in.
-              </FieldDescription>
-            </Field>
-            <HostingChoice onChange={setHosting} value={hosting} />
-            {/* Grasp sets up only what it hosts: an organization on its own premises gets no flow from here. */}
-            {hosting.hosting === "grasp_cloud" ? (
-              <OnboardingChoice onChange={setOnboarding} value={onboarding} />
-            ) : null}
-          </FieldGroup>
-          {failure === null ? null : (
-            <p className="text-destructive text-sm" role="alert">
-              {failure}
-            </p>
-          )}
-          <div className="flex items-center gap-2">
-            <Button disabled={busy || addressProblem !== null} type="submit">
-              Create organization
-            </Button>
-            <Button
-              nativeButton={false}
-              render={<Link to="/" />}
-              variant="outline"
-            >
-              Cancel
-            </Button>
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Add another domain
+              </Button>
+            </div>
+            <SignInLine
+              choice={choice}
+              detected={detected}
+              domain={firstDomain}
+              onChoose={setChoice}
+              onRetry={() => {
+                setLookupAttempt((attempt) => attempt + 1);
+              }}
+            />
           </div>
-        </form>
-      </Card>
+          <Field>
+            <FieldLabel>First admin&apos;s email</FieldLabel>
+            <Input
+              autoCapitalize="none"
+              onChange={(event) => {
+                setAdmin(event.currentTarget.value);
+              }}
+              required
+              spellCheck={false}
+              type="email"
+              value={adminEmail}
+            />
+            <FieldDescription>
+              They become its admin when they first sign in.
+            </FieldDescription>
+          </Field>
+        </FieldGroup>
+        <HostingChoice onChange={setHosting} value={hosting} />
+        {/* Grasp sets up only what it hosts: an organization on its own premises gets no flow from here. */}
+        {hosting.hosting === "grasp_cloud" ? (
+          <OnboardingChoice onChange={setOnboarding} value={onboarding} />
+        ) : null}
+        {failure === null ? null : (
+          <Alert appearance="subtle" variant="destructive">
+            <AlertDescription>{failure}</AlertDescription>
+          </Alert>
+        )}
+        <div {...stylex.props(styles.buttons)}>
+          <Button disabled={busy || addressProblem !== null} type="submit">
+            Create organization
+          </Button>
+          <Button asChild variant="outline">
+            <Link to="/">Cancel</Link>
+          </Button>
+        </div>
+      </form>
     </AdminPage>
   );
 };

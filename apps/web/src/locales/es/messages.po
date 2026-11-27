@@ -1679,6 +1679,11 @@ msgstr "{triggers, plural, one {# disparador, y ejecutar a mano.} other {# dispa
 msgid "{uninterviewed} of {total} not interviewed yet"
 msgstr "{uninterviewed} de {total} aún sin entrevistar"
 
+#. Connections a step read from that the page has no name for, as the last item of the list in “Read from {sources}”.
+#: src/chat/answer-steps.tsx
+msgid "{unknown, plural, one {a connection} other {# connections}}"
+msgstr "{unknown, plural, one {una conexión} other {# conexiones}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{unnamed} of {total} seen in use, never named"
 msgstr "{unnamed} de {total} vistas en uso, nunca nombradas"
@@ -2084,10 +2089,6 @@ msgstr "Un equipo sin responsable recibe sus enlaces el primer día, y pregunto 
 #: src/apps/field-kinds.tsx
 msgid "A tick: yes or no"
 msgstr "Una casilla: sí o no"
-
-#: src/connections/connect-dialog.tsx
-msgid "A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's Read or Write to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
-msgstr "Una herramienta activada empieza en Lectura donde Composio dice que solo lee; Grasp no lo comprueba. Una herramienta de Lectura se ejecuta sin preguntar. La llamada a una herramienta de Escritura desde el chat, o de una persona que usa una aplicación, espera a que esa persona la confirme; la ejecución de un flujo de trabajo la hace como uno de sus pasos. Pulsa Lectura o Escritura en una herramienta para cambiarla. Marca una herramienta como Lectura solo si no cambia nada: si está mal marcada, cambia cosas sin preguntar."
 
 #: src/apps/field-kinds.tsx
 msgid "A type the App's code declares"
@@ -10293,6 +10294,11 @@ msgstr "Ubicación"
 msgid "Log in"
 msgstr "Iniciar sesión"
 
+#: src/chat/answer-steps.tsx
+msgctxt "what a code step logged"
+msgid "Logged"
+msgstr "Registrado"
+
 #: src/settings/org-card.tsx
 msgid "Logo"
 msgstr "Logo"
@@ -12635,6 +12641,10 @@ msgstr "Por ahora solo {owner}."
 msgid "Only {person} can say whether it happened."
 msgstr "Solo {person} puede decir si ocurrió."
 
+#: src/connections/connect-dialog.tsx
+msgid "Only a tool Composio says only reads can be Read, and it starts as Read when switched on; any other tool is Write. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a Read tool's Read or Write to change it."
+msgstr "Solo una herramienta que según Composio solo lee puede ser Lectura, y empieza como Lectura al activarla; cualquier otra herramienta es Escritura. Una herramienta de Lectura se ejecuta sin preguntar. Una llamada a una herramienta de Escritura desde un chat, o de alguien que usa una App, espera a que esa persona la confirme; la ejecución de un flujo de trabajo la hace como uno de sus pasos. Pulsa Lectura o Escritura de una herramienta de Lectura para cambiarlo."
+
 #: src/settings/use-team-change.ts
 msgid "Only admins can change teams."
 msgstr "Solo los administradores pueden cambiar los equipos."
@@ -13270,6 +13280,10 @@ msgstr "Parte {n} de {parts}: {label}"
 #: src/routes/_shell.brain.sections.$sectionId.tsx
 msgid "Part of the brain not found"
 msgstr "Parte del brain no encontrada"
+
+#: src/chat/answer-steps.tsx
+msgid "Part of what came back was left out, to fit what the model reads."
+msgstr "Se omitió parte de lo que se devolvió, para que quepa en lo que lee el modelo."
 
 #: src/inbox/outcome-details.tsx
 msgid "Part of what was sent is cut short above. Show it all, or exactly what was sent, before you say it didn't happen."
@@ -14037,6 +14051,11 @@ msgstr "Leído de"
 msgid "Read from {name} on {readOn}"
 msgstr "Leído de {name} el {readOn}"
 
+#. The outside systems a step of the answer read from; {sources} is their names, as a list.
+#: src/chat/answer-steps.tsx
+msgid "Read from {sources}"
+msgstr "Leído de {sources}"
+
 #: src/brain/sources-page.tsx
 msgctxt "a source of the Brain"
 msgid "Read from a shared connection"
@@ -14248,6 +14267,10 @@ msgstr "Volver a conectar"
 #: src/projects/project-view.tsx
 msgid "Reconnect it so the Apps and workflows that use it work again."
 msgstr "Vuelve a conectarlo para que las Apps y los flujos de trabajo que lo usan funcionen de nuevo."
+
+#: src/chat/composer.tsx
+msgid "Reconnecting to Grasp…"
+msgstr "Volviendo a conectar con Grasp…"
 
 #: src/apps/app-data.tsx
 msgid "record"
