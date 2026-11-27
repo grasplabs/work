@@ -12,11 +12,21 @@ import { CoreRpcTarget } from "./rpc-target.ts";
  */
 export class Subscription extends CoreRpcTarget implements SubscriptionApi {
   readonly #release: () => Promise<void>;
+  readonly #endedBy: () => "displaced" | null;
   #released = false;
 
-  constructor(release: () => Promise<void>) {
+  /** `endedBy`: why core let go of it by itself, once it did (`SubscriptionApi.endedBy`). */
+  constructor(
+    release: () => Promise<void>,
+    endedBy: () => "displaced" | null = () => null
+  ) {
     super();
     this.#release = release;
+    this.#endedBy = endedBy;
+  }
+
+  async endedBy(): Promise<"displaced" | null> {
+    return await Promise.resolve(this.#endedBy());
   }
 
   async release(): Promise<void> {

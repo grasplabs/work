@@ -399,6 +399,13 @@ export type AppVersionPush =
  */
 export interface SubscriptionApi {
   release: () => Promise<void>;
+  /**
+   * Why core let go of it, once it did by itself: `displaced` when the
+   * person follows the same thing in more places than core keeps, which
+   * the page follows again only on the person's next look (following
+   * again at once would push out their next oldest). Null otherwise.
+   */
+  endedBy: () => Promise<"displaced" | null>;
 }
 
 /**
