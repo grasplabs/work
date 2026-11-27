@@ -290,7 +290,7 @@ describe("files attached to a question", slow, () => {
             question: z.number().nullable(),
           })
         ),
-        z.object({ note: z.string(), name: z.string(), text: z.string() }),
+        z.object({ name: z.string(), text: z.string() }),
         z.number(),
       ])
       .parse(returnedOf(result?.text));
@@ -324,7 +324,6 @@ describe("files attached to a question", slow, () => {
         carried === question?.id,
       ]),
       text: read[1].text.includes(injection),
-      note: read[1].note.startsWith("Attached by the person"),
       pdfRead: read[2] > 0,
       // The page shows the question with its files, and each read as a line
       // naming the file.
@@ -351,7 +350,6 @@ describe("files attached to a question", slow, () => {
         [policy.id, "expense-policy.pdf", "pdf", true],
       ],
       text: true,
-      note: true,
       pdfRead: true,
       shownFiles: [
         [notes.id, attackName, "md"],

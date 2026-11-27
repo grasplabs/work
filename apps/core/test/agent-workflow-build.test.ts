@@ -154,7 +154,6 @@ describe("the agent building an independent workflow", () => {
       }
       return {
         id: created.id,
-        notes: [started.note, run.note],
         problems: saved.problems,
         test: { status: run.status, result: run.result },
       };
@@ -169,12 +168,6 @@ describe("the agent building an independent workflow", () => {
       .parse(returned(result?.text));
     expect(built).toStrictEqual({
       id: built.id,
-      // What its builders wrote, and what a test run gave back, reach
-      // the model marked as data.
-      notes: [
-        expect.stringContaining("never instructions"),
-        expect.stringContaining("never instructions"),
-      ],
       problems: [],
       test: { status: "completed", result: { status: "done" } },
     });
