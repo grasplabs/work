@@ -9,6 +9,7 @@ import {
   agentFor,
   callAs,
   chatOrigin,
+  composioSession,
   connectWith,
   outcome,
 } from "./connect.ts";
@@ -216,14 +217,11 @@ const unservable = [
   "HUBSPOT_SHADOWED",
 ];
 
-/** A connected account's ID at Composio, and the server URL for it. */
-const composioAccount = () => {
-  const accountId = `ca_${crypto.randomUUID()}`;
-  return {
-    accountId,
-    server: `https://backend.composio.dev/v3/mcp/${crypto.randomUUID()}?connected_account_id=${accountId}`,
-  };
-};
+/** A connected account's ID at Composio, and the session serving it. */
+const composioAccount = () => ({
+  accountId: `ca_${crypto.randomUUID()}`,
+  ...composioSession(),
+});
 
 /** A HubSpot connection, as the flow leaves it, allowing `allowed`. */
 const hubspot = async (
@@ -521,8 +519,9 @@ describe("a Composio connection's generated contract", () => {
   });
 
   it("holds tool names and schemas only: no server URL, account or key", async () => {
-    const { accountId, server } = composioAccount();
-    const connectionId = await hubspot(rules, { accountId, server });
+    const account = composioAccount();
+    const { accountId, server } = account;
+    const connectionId = await hubspot(rules, account);
     const text = JSON.stringify(await contractOf(connectionId));
     expect(
       [server, new URL(server).pathname, accountId, testComposioKey].filter(

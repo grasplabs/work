@@ -18,10 +18,10 @@ import {
 
 describe("Composio's tool list through crashes", () => {
   it("keeps two changes and the clock's reconcile in step, crashing anywhere", async () => {
-    const { admin, connectionId, serverId } = await setUp();
+    const { admin, connectionId, sessionId } = await setUp();
     const wrong = await drawnWalks(
       connectionId,
-      serverId,
+      sessionId,
       {
         a: changeTo(admin, connectionId, ["HUBSPOT_LIST_CONTACTS"]),
         r: async (actorEnv) => {

@@ -33,9 +33,20 @@ import { acmeDomain, acmeTenant } from "./provider-config.ts";
 
 type ConnectionRow = typeof connections.$inferInsert;
 
+/**
+ * A Composio session as connect stores it for a connection: its ID, and
+ * its MCP endpoint, as Composio answers it (`<api>/tool_router/session/<id>/mcp`).
+ */
+export const composioSession = (id = `trs_${crypto.randomUUID()}`) => ({
+  composioSessionId: id,
+  server: `https://backend.composio.dev/api/v3/tool_router/session/${id}/mcp`,
+});
+
+/** The session behind the test connections. */
+const mailSession = composioSession("trs_mail");
+
 /** The URL of the MCP server behind the test connections. */
-export const serverUrl =
-  "https://backend.composio.dev/v3/mcp/server-mail?user_id=grasp";
+export const serverUrl = mailSession.server;
 
 /**
  * The tools an admin allowed on the test connections: every tool the
@@ -73,7 +84,7 @@ export const addConnection = async (
       scope: "shared",
       status: "active",
       serverKind: "composio",
-      server: serverUrl,
+      ...mailSession,
       tools: JSON.stringify(allowedTools),
       createdAt: now,
       updatedAt: now,

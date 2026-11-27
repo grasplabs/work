@@ -257,23 +257,57 @@ const deployerCheck = async (
   }
 };
 
+/** Composio's API, as connect calls it (connect's src/composio.ts). */
+const composioApi = "https://backend.composio.dev/api/v3.1";
+
 /**
- * Composio's MCP servers, as connect makes one for each Composio
- * connection (connect's src/composio-connections.ts): what the key needs
- * besides auth configs and connected accounts.
+ * Each permission area of Composio's scoped project keys a Composio
+ * connection needs to read, by a read of one item it allows (Composio's
+ * "Scoped Project API Key" routes): auth configs and connected accounts,
+ * which connecting makes and disconnecting deletes, and sessions, one of
+ * which serves each connection.
  */
-const composioMcpServers = "https://backend.composio.dev/api/v3.1/mcp/servers";
+const composioAreas = [
+  ["Auth configs", "/auth_configs?limit=1"],
+  ["Connected accounts", "/connected_accounts?limit=1"],
+  ["Session management", "/session_configs?limit=1"],
+] as const;
+
+/**
+ * What the key needs, in the words of Composio's dashboard: writing what
+ * a connection makes, running its tools through the session (which only a
+ * call can show), and reading toolkits and their tools for the catalog.
+ */
+const composioNeeds =
+  "Auth configs, Connected accounts and Session management each Read and write, Session tool execution Write only, and Toolkits and Tools Read only; MCP (Legacy) isn't needed";
 
 /** The Composio check, but for its status and words. */
 const composioLine = { id: "composio", title: "Composio key", required: false };
 
+/** Composio's status for a read at `path` with `key`; undefined for none. */
+const composioStatus = async (
+  key: string,
+  path: string
+): Promise<number | undefined> => {
+  try {
+    const response = await fetch(`${composioApi}${path}`, {
+      headers: { "x-api-key": key, accept: "application/json" },
+      redirect: "manual",
+      signal: AbortSignal.timeout(reachTimeoutMs),
+    });
+    await response.body?.cancel();
+    return response.status;
+  } catch {
+    return undefined;
+  }
+};
+
 /**
- * Whether the Composio key every organization gets may use Composio's
- * MCP servers, which connecting a toolkit makes: a scoped project key
- * without Composio's "MCP (Legacy)" permission is refused there (403), and
- * every Composio connection ends as `server:http_403`. Read with a list of
- * one, so nothing is made; a key that may only read them still passes
- * here, and shows at the connection.
+ * Whether the Composio key every organization gets may read what a
+ * Composio connection needs (`composioAreas`), each with a list of one, so
+ * nothing is made: a scoped project key without one of those permissions
+ * is refused there (401 or 403), as every Composio connection then is. A
+ * key that may only read passes here, and shows at the connection.
  */
 const composioCheck = async (
   envOf: Env,
@@ -286,40 +320,35 @@ const composioCheck = async (
       words: "Checked once COMPOSIO_API_KEY is in Secrets Store.",
     };
   }
-  let status: number | undefined;
-  try {
-    const response = await fetch(`${composioMcpServers}?limit=1`, {
-      headers: {
-        "x-api-key": await storeSecret(envOf, "COMPOSIO_API_KEY"),
-        accept: "application/json",
-      },
-      redirect: "manual",
-      signal: AbortSignal.timeout(reachTimeoutMs),
-    });
-    ({ status } = response);
-    await response.body?.cancel();
-  } catch {
-    status = undefined;
-  }
-  if (status !== undefined && status >= 200 && status < 300) {
-    return {
-      ...composioLine,
-      status: "ready",
-      words:
-        "Composio's key reaches its MCP servers. Connecting a toolkit makes one, so the key needs MCP (Legacy) with Read and write, as well as Auth configs and Connected accounts with Read and write.",
-    };
-  }
-  if (status === 401 || status === 403) {
+  const key = await storeSecret(envOf, "COMPOSIO_API_KEY");
+  const read = await Promise.all(
+    composioAreas.map(async ([area, path]) => ({
+      area,
+      status: await composioStatus(key, path),
+    }))
+  );
+  const refused = read.filter(({ status }) => status === 401 || status === 403);
+  if (refused.length > 0) {
     return {
       ...composioLine,
       status: "blocked",
-      words: `Composio refuses this key its MCP servers (${status}), so every Composio connection fails at server:http_${status}. In Composio's dashboard, give the project a default API key, or a scoped one with MCP (Legacy), Auth configs and Connected accounts each Read and write and Toolkits and Tools Read only, put it in the stage's 1Password Environment as COMPOSIO_API_KEY, then run Deploy platform and redeploy the organizations, so their connect gets it.`,
+      words: `Composio refuses this key ${refused.map(({ area, status }) => `${area} (${status})`).join(", ")}, so every Composio connection fails. In Composio's dashboard, give the project a default API key, or a scoped one with ${composioNeeds}, put it in the stage's 1Password Environment as COMPOSIO_API_KEY, then run Deploy platform and redeploy the organizations, so their connect gets it.`,
+    };
+  }
+  const unread = read.find(
+    ({ status }) => status === undefined || status < 200 || status >= 300
+  );
+  if (unread !== undefined) {
+    return {
+      ...composioLine,
+      status: "blocked",
+      words: `Composio couldn't be asked whether this key reads ${unread.area} (${unread.status ?? "no answer"}). Check again shortly.`,
     };
   }
   return {
     ...composioLine,
-    status: "blocked",
-    words: `Composio couldn't be asked whether this key reaches its MCP servers (${status ?? "no answer"}). Check again shortly.`,
+    status: "ready",
+    words: `Composio's key reads what a Composio connection needs. It needs ${composioNeeds}.`,
   };
 };
 

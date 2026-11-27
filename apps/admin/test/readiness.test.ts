@@ -158,23 +158,36 @@ describe("Platform's Readiness", () => {
     }).toStrictEqual({ deployer: "blocked", deployerWords: true });
   });
 
-  it("names a Composio key Composio refuses its MCP servers, what it needs and where to set it, and asks with the shared key alone", async () => {
-    cloudflare.composio.mcp = "forbidden";
+  it("names each permission a Composio connection needs that Composio refuses the key, what to give it and where, asking with the shared key alone", async () => {
+    cloudflare.composio.refused = new Set(["session_configs"]);
 
     const read = await withVars(production, readiness);
+    cloudflare.composio.refused = new Set();
+    const ready = await withVars(production, readiness);
 
     expect({
       composio: statuses(read).composio,
       words: wordsOf(read, "composio"),
-      keys: cloudflare.composio.keys,
+      asked: cloudflare.composio.paths.toSorted(),
+      keys: [...new Set(cloudflare.composio.keys)],
       // An optional feature: onboarding isn't held by it.
-      blocking: read.checks.find(({ id }) => id === "composio")?.required,
+      required: read.checks.find(({ id }) => id === "composio")?.required,
+      ready: statuses(ready).composio,
     }).toStrictEqual({
       composio: "blocked",
       words:
-        "Composio refuses this key its MCP servers (403), so every Composio connection fails at server:http_403. In Composio's dashboard, give the project a default API key, or a scoped one with MCP (Legacy), Auth configs and Connected accounts each Read and write and Toolkits and Tools Read only, put it in the stage's 1Password Environment as COMPOSIO_API_KEY, then run Deploy platform and redeploy the organizations, so their connect gets it.",
+        "Composio refuses this key Session management (403), so every Composio connection fails. In Composio's dashboard, give the project a default API key, or a scoped one with Auth configs, Connected accounts and Session management each Read and write, Session tool execution Write only, and Toolkits and Tools Read only; MCP (Legacy) isn't needed, put it in the stage's 1Password Environment as COMPOSIO_API_KEY, then run Deploy platform and redeploy the organizations, so their connect gets it.",
+      asked: [
+        "auth_configs?limit=1",
+        "auth_configs?limit=1",
+        "connected_accounts?limit=1",
+        "connected_accounts?limit=1",
+        "session_configs?limit=1",
+        "session_configs?limit=1",
+      ],
       keys: ["composio-key"],
-      blocking: false,
+      required: false,
+      ready: "ready",
     });
   });
 

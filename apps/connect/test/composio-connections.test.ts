@@ -9,12 +9,14 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { log } from "@grasp-os/shared/log";
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { forgetComposioCatalog } from "../src/catalog.ts";
 import {
   changeToolkitTools,
   reconcileUnsyncedTools,
 } from "../src/composio-connections.ts";
+import { sessionUrlBase } from "./composio-api.ts";
 import type { FakeAccount } from "./composio-api.ts";
 import {
   afterMinutes,
@@ -35,7 +37,7 @@ import {
   namesIn,
   nothingHeld,
   outOfSync,
-  serverTools,
+  sessionTools,
   shownTools,
   start,
   stored,
@@ -45,6 +47,7 @@ import {
 } from "./composio-connections-harness.ts";
 import type { Start } from "./composio-connections-harness.ts";
 import {
+  addConnection,
   agentFor,
   callAs,
   clientOrigin,
@@ -167,26 +170,39 @@ describe("connecting a Composio toolkit", () => {
     ).toStrictEqual([{ toolkit: "hubspot", managed: true, marked: true }]);
   });
 
-  it("makes one shared connection, to a server scoped to its auth config, its account and the allowed tools", async () => {
+  it("makes one shared connection, served by a session pinned to its one account of this deployment's user, with only the allowed tools and none of Composio's own", async () => {
     const admin = someone("admin");
     const connectionId = await connectHubSpot(admin);
-    const { servers, accounts } = composio.state.holds;
-    const [serverId = ""] = servers.keys();
+    const { sessions, accounts } = composio.state.holds;
+    const [sessionId = ""] = sessions.keys();
     const [accountId = ""] = accounts.keys();
-    const server = servers.get(serverId);
+    const session = sessions.get(sessionId);
     const account = accounts.get(accountId);
     await expect(stored(connectionId)).resolves.toStrictEqual({
       provider: "hubspot",
       scope: "shared",
       serverKind: "composio",
-      server: `https://backend.composio.dev/v3/mcp/${serverId}?connected_account_id=${accountId}`,
+      server: `https://backend.composio.dev/api/v3/tool_router/session/${sessionId}/mcp`,
       accountId,
-      serverId,
+      sessionId,
       tools: JSON.stringify(allowed),
     });
-    expect(server).toMatchObject({
-      authConfigIds: [account?.authConfigId],
+    expect(session).toMatchObject({
+      userId: new URL(clientOrigin).host,
+      toolkits: ["hubspot"],
+      authConfigs: { hubspot: account?.authConfigId },
+      connectedAccounts: { hubspot: [accountId] },
       allowedTools: allowed,
+      body: {
+        manage_connections: { enable: false },
+        workbench: { enable: false },
+        proxy_execute: { enable: false },
+        multi_account: { enable: false },
+        instant: false,
+        preload: { tools: "all" },
+        search: { enable: false },
+        execute: { enable_multi_execute: false },
+      },
     });
     const listed = await exports.default.listConnections(someone());
     expect(listed.find(({ id }) => id === connectionId)).toMatchObject({
@@ -347,7 +363,7 @@ describe("connecting a Composio toolkit", () => {
     expect(heldAtComposio()).toStrictEqual({
       authConfigs: 0,
       accounts: 0,
-      servers: 0,
+      sessions: 0,
     });
   });
 
@@ -376,7 +392,7 @@ describe("connecting a Composio toolkit", () => {
       readAgain: accountReads > 1,
     }).toStrictEqual({
       finished: "ok",
-      held: { authConfigs: 1, accounts: 1, servers: 1 },
+      held: { authConfigs: 1, accounts: 1, sessions: 1 },
       connections: 1,
       readAgain: true,
     });
@@ -520,41 +536,58 @@ describe("connecting a Composio toolkit", () => {
       // A key without Composio's MCP permission: no use starting again,
       // and Composio's number for it, never its message, names why.
       {
-        why: "server:http_403:1001",
+        why: "session:http_403:1001",
         ended: forbidden,
         before: () => {
           composio.state.failingFor = {
-            prefix: "POST /mcp/servers",
+            prefix: "POST /tool_router/session",
             times: 1,
             status: 403,
           };
         },
       },
       {
-        why: "url:http_401",
+        why: "session:http_401",
         ended: forbidden,
         before: () => {
           composio.state.failingFor = {
-            prefix: "POST /mcp/servers/generate",
+            prefix: "POST /tool_router/session",
             times: 1,
             status: 401,
           };
         },
       },
       {
-        why: "url:http_422",
+        why: "session:http_422",
         before: () => {
           composio.state.failingFor = {
-            prefix: "POST /mcp/servers/generate",
+            prefix: "POST /tool_router/session",
             times: 1,
             status: 422,
           };
         },
       },
       {
+        why: "session:config",
+        before: () => {
+          composio.state.answeredConfig = (config) => ({
+            ...config,
+            user_id: "someone-else.example",
+          });
+        },
+      },
+      {
         why: "url:host",
         before: () => {
-          composio.state.serverUrlBase = "https://mcp.attacker.example/v3/mcp/";
+          composio.state.sessionUrlBase =
+            "https://mcp.attacker.example/api/v3/tool_router/session/";
+        },
+      },
+      {
+        why: "url:path",
+        before: () => {
+          composio.state.sessionUrlBase =
+            "https://backend.composio.dev/api/v3/connected_accounts/";
         },
       },
     ];
@@ -567,7 +600,8 @@ describe("connecting a Composio toolkit", () => {
       // oxlint-disable-next-line no-await-in-loop -- one flow at a time
       endings.push(await endingOf(back(admin, callback)));
       composio.state.failingFor = undefined;
-      composio.state.serverUrlBase = "https://backend.composio.dev/v3/mcp/";
+      composio.state.answeredConfig = undefined;
+      composio.state.sessionUrlBase = sessionUrlBase;
     }
     const recorded = await events();
     const audited = recorded
@@ -629,7 +663,7 @@ describe("connecting a Composio toolkit", () => {
 
   it("stores nothing, and deletes what it made, when Composio fails on the way", async () => {
     const admin = someone("admin");
-    const failures = ["POST /mcp/servers", "POST /mcp/servers/generate"];
+    const failures = ["POST /tool_router/session"];
     for (const failing of failures) {
       const { callback } = composio.authorize(
         // oxlint-disable-next-line no-await-in-loop -- one flow at a time
@@ -644,7 +678,7 @@ describe("connecting a Composio toolkit", () => {
     expect(heldAtComposio()).toStrictEqual({
       authConfigs: 0,
       accounts: 0,
-      servers: 0,
+      sessions: 0,
     });
     const listed = await exports.default.listConnections(admin);
     expect(
@@ -652,14 +686,15 @@ describe("connecting a Composio toolkit", () => {
     ).toStrictEqual([]);
   });
 
-  it("doesn't store a server Composio says is anywhere but its MCP host", async () => {
+  it("doesn't store a session Composio says is anywhere but its own API host", async () => {
     const admin = someone("admin");
     const { callback } = composio.authorize(await start(admin));
-    composio.state.serverUrlBase = "https://mcp.attacker.example/v3/mcp/";
+    composio.state.sessionUrlBase =
+      "https://mcp.attacker.example/api/v3/tool_router/session/";
     await expect(outcome(back(admin, callback))).resolves.toBe(
       "connection.provider_refused"
     );
-    expect(heldAtComposio().servers).toBe(0);
+    expect(heldAtComposio().sessions).toBe(0);
   });
 
   it("drops a flow nobody finished in time, and what it made at Composio", async () => {
@@ -671,7 +706,7 @@ describe("connecting a Composio toolkit", () => {
     expect(heldAtComposio()).toStrictEqual({
       authConfigs: 0,
       accounts: 0,
-      servers: 0,
+      sessions: 0,
     });
     await expect(outcome(back(admin, callback))).resolves.toBe(
       "connection.flow_invalid"
@@ -751,7 +786,7 @@ describe("connecting a Composio toolkit", () => {
     });
   });
 
-  it("finds by its marker a server whose ID it couldn't record and couldn't delete at once", async () => {
+  it("leaves nothing reachable of a session whose ID it couldn't record and couldn't delete at once: its account and auth config go by the marker", async () => {
     const admin = someone("admin");
     const { callback } = composio.authorize(await start(admin));
     composio.state.failing = "DELETE /";
@@ -770,8 +805,10 @@ describe("connecting a Composio toolkit", () => {
       after: { held: heldAtComposio(), cleanups: await cleanupsLeft() },
     }).toStrictEqual({
       failed: true,
-      kept: { authConfigs: 1, accounts: 1, servers: 1 },
-      after: { held: nothingHeld, cleanups: 0 },
+      kept: { authConfigs: 1, accounts: 1, sessions: 1 },
+      // A session has no name to find it by: it stays, pinned to an
+      // account that is gone, so it reaches nothing.
+      after: { held: { ...nothingHeld, sessions: 1 }, cleanups: 0 },
     });
   });
 
@@ -815,21 +852,90 @@ describe("connecting a Composio toolkit", () => {
     });
   });
 
-  it("stores no server URL for another account, or for no one account", async () => {
+  it("stores no session Composio made for another user or account, without stating its pin or tools, with other tools or toolkits, or with any of its own tools on, and deletes it", async () => {
     const admin = someone("admin");
+    const answers: ((
+      config: Record<string, unknown>
+    ) => Record<string, unknown>)[] = [
+      (config) => ({ ...config, user_id: "someone-else.example" }),
+      (config) => ({
+        ...config,
+        connected_accounts: { hubspot: ["ca_someone_else"] },
+      }),
+      (config) => ({
+        ...config,
+        connected_accounts: { hubspot: ["ca_a", "ca_b"] },
+      }),
+      (config) => ({ ...config, manage_connections: { enabled: true } }),
+      (config) => ({ ...config, search: { enable: true } }),
+      (config) => ({ ...config, workbench: { enable: true } }),
+      (config) => ({ ...config, proxy_execute: { enable: true } }),
+      (config) => ({ ...config, instant: {} }),
+      // The pin unstated: nothing then keeps it to its one account.
+      (config) => {
+        const { connected_accounts: _pin, ...rest } = config;
+        return rest;
+      },
+      (config) => ({ ...config, connected_accounts: null }),
+      (config) => ({
+        ...config,
+        connected_accounts: { hubspot: [], salesforce: ["ca_other"] },
+      }),
+      (config) => ({ ...config, execute: { enable_multi_execute: true } }),
+      (config) => ({ ...config, multi_account: { enable: true } }),
+      // Its tools unstated, other than asked, or a denylist.
+      (config) => {
+        const { tools: _tools, ...rest } = config;
+        return rest;
+      },
+      (config) => ({ ...config, tools: null }),
+      (config) => ({
+        ...config,
+        tools: { hubspot: { enabled: ["HUBSPOT_UPDATE_CONTACT"] } },
+      }),
+      (config) => ({ ...config, tools: { hubspot: { enabled: [] } } }),
+      (config) => ({ ...config, tools: { hubspot: { disabled: ["X"] } } }),
+      (config) => ({ ...config, toolkits: { enabled: ["hubspot", "gmail"] } }),
+      (config) => ({ ...config, toolkits: { disabled: ["gmail"] } }),
+    ];
     const ends = [];
-    for (const accountInUrl of ["other", "none"] as const) {
+    for (const answer of answers) {
       // oxlint-disable-next-line no-await-in-loop -- one flow at a time
       const { callback } = composio.authorize(await start(admin));
-      composio.state.accountInUrl = accountInUrl;
+      composio.state.answeredConfig = answer;
       // oxlint-disable-next-line no-await-in-loop -- one flow at a time
-      ends.push(await outcome(back(admin, callback)));
-      composio.state.accountInUrl = "own";
+      ends.push(await endingOf(back(admin, callback)));
+      composio.state.answeredConfig = undefined;
     }
     expect({ ends, held: heldAtComposio() }).toStrictEqual({
-      ends: ["connection.provider_refused", "connection.provider_refused"],
+      ends: answers.map(() => [
+        "connection.provider_refused",
+        "session:config",
+      ]),
       held: nothingHeld,
     });
+  });
+
+  it("stores a session Composio answers with its switches unset or null, and its lists as requests write them", async () => {
+    const admin = someone("admin");
+    const { callback } = composio.authorize(await start(admin));
+    composio.state.answeredConfig = (config) => ({
+      ...config,
+      toolkits: ["hubspot"],
+      tools: { hubspot: { enable: allowed } },
+      manage_connections: null,
+      search: { enable: null },
+      workbench: null,
+      proxy_execute: null,
+      multi_account: null,
+      execute: null,
+      instant: null,
+    });
+    try {
+      await expect(outcome(back(admin, callback))).resolves.toBe("ok");
+    } finally {
+      composio.state.answeredConfig = undefined;
+    }
   });
 
   it("reads the role again when the admin comes back: someone no longer an admin can't finish", async () => {
@@ -904,8 +1010,184 @@ describe("connecting a Composio toolkit", () => {
     expect(heldAtComposio()).toStrictEqual({
       authConfigs: 0,
       accounts: 0,
-      servers: 0,
+      sessions: 0,
     });
+  });
+});
+
+/**
+ * Migration 0044's statements on stored data, as the release that adds
+ * sessions runs them once: its columns are there already in tests.
+ */
+const migrateStoredData = async (): Promise<void> => {
+  const migrations = z
+    .array(z.object({ name: z.string(), queries: z.array(z.string()) }))
+    .parse(Reflect.get(env, "CONNECT_MIGRATIONS"));
+  const queries =
+    migrations
+      .find(({ name }) => name.startsWith("0044_"))
+      ?.queries.filter((query) => /^UPDATE /mu.test(query)) ?? [];
+  expect(queries).toHaveLength(3);
+  for (const query of queries) {
+    // oxlint-disable-next-line no-await-in-loop -- in order, as a migration runs
+    await env.DB.prepare(query).run();
+  }
+};
+
+/** The clock's reconcile, past the wait after any failures so far. */
+const clockReconciles = async (): Promise<void> => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(Date.now() + 3 * 60 * 60 * 1000);
+    await reconcileUnsyncedTools(env);
+  } finally {
+    vi.useRealTimers();
+  }
+};
+
+/** How many tool changes connect sent Composio's sessions so far. */
+const patches = () =>
+  composio.state.requests.filter(({ method }) => method === "PATCH").length;
+
+/** A connection as the legacy route stored it: a server, no session. */
+const legacyConnection = async (status: "active" | "disconnected") =>
+  await addConnection({
+    provider: "hubspot",
+    status,
+    server: `https://backend.composio.dev/v3/mcp/${crypto.randomUUID()}?connected_account_id=ca_legacy`,
+    composioServerId: crypto.randomUUID(),
+    composioSessionId: null,
+    accountId: "ca_legacy",
+    composioAuthConfigId: "ac_legacy",
+    tools: JSON.stringify(allowed),
+  });
+
+/** How connection `id` stands: its status, legacy server and update. */
+const standing = async (id: string) =>
+  await env.DB.prepare(
+    "SELECT status, composio_server_id AS serverId, updated_at AS updatedAt FROM connections WHERE id = ?"
+  )
+    .bind(id)
+    .first<{ status: string; serverId: string | null; updatedAt: number }>();
+
+describe("a Composio connection made through Composio's legacy MCP servers", () => {
+  it("asks to be connected again, once, keeps no legacy server, takes no call, and connecting again makes a session in its place, deleting its account and auth config", async () => {
+    const admin = someone("admin");
+    const current = await connectHubSpot(admin);
+    const legacy = await legacyConnection("active");
+    const gone = await legacyConnection("disconnected");
+    await env.DB.prepare(
+      "INSERT INTO composio_cleanups (id, server_id, attempts, retry_at, created_at) VALUES (?, ?, 0, ?, ?)"
+    )
+      .bind(crypto.randomUUID(), "legacy-server", Date.now(), Date.now())
+      .run();
+
+    await migrateStoredData();
+    const once = await standing(legacy);
+    await migrateStoredData();
+    const twice = await standing(legacy);
+    const listed = await exports.default.listConnections(admin);
+    const called = await outcome(
+      callAs(agentFor("user-anna"), call(legacy, "HUBSPOT_LIST_CONTACTS"))
+    );
+    // Connecting again, as the Connectors page offers it: a new connection,
+    // served by a session, in the stopped one's place.
+    const deletesBefore = composio.state.requests.length;
+    const again = await connectHubSpot(admin);
+    await runMaintenance();
+    const legacyNow = await standing(legacy);
+    const deleted = composio.state.requests
+      .slice(deletesBefore)
+      .filter(({ method }) => method === "DELETE")
+      .map(({ path }) => path);
+    const recordedNow = await events();
+    const replacedEvent = recordedNow.find(
+      ({ action, target }) =>
+        action === "connection.disconnect" && target?.id === legacy
+    );
+    const goneNow = await standing(gone);
+    const currentNow = await standing(current);
+    const againStored = await stored(again);
+    const againNow = await standing(again);
+
+    expect({
+      once: { status: once?.status, serverId: once?.serverId },
+      // Its second run finds nothing to change: not even its time.
+      twice: twice?.updatedAt === once?.updatedAt,
+      gone: goneNow?.status,
+      current: currentNow?.status,
+      listed: listed.find(({ id }) => id === legacy)?.status,
+      called,
+      again: {
+        stored: againStored?.sessionId.startsWith("trs_"),
+        status: againNow?.status,
+      },
+      replaced: legacyNow?.status,
+      replacedBy: replacedEvent?.detail.replacedBy,
+      deleted,
+      cleanups: await cleanupsLeft(),
+    }).toStrictEqual({
+      once: { status: "needs_reauth", serverId: null },
+      twice: true,
+      gone: "disconnected",
+      current: "active",
+      listed: "needs_reauth",
+      called: "connect.connection_inactive",
+      again: { stored: true, status: "active" },
+      replaced: "disconnected",
+      replacedBy: again,
+      // Its account and auth config: never its legacy server, which
+      // connect's key can't reach.
+      deleted: ["/connected_accounts/ca_legacy", "/auth_configs/ac_legacy"],
+      cleanups: 0,
+    });
+  });
+
+  it("asks to be connected again and takes no call while it reads active still, as one made while the migration ran", async () => {
+    const admin = someone("admin");
+    // The migration had run before the release before made it.
+    const legacy = await legacyConnection("active");
+    const listed = await exports.default.listConnections(admin);
+    const owners = await exports.default.connectionOwners([legacy]);
+    expect({
+      listed: listed.find(({ id }) => id === legacy)?.status,
+      owner: owners[0]?.status,
+      called: await outcome(
+        callAs(agentFor("user-anna"), call(legacy, "HUBSPOT_LIST_CONTACTS"))
+      ),
+      changed: await outcome(change(admin, legacy, allowed)),
+      requests: composio.state.mcp.requests,
+    }).toStrictEqual({
+      listed: "needs_reauth",
+      owner: "needs_reauth",
+      called: "connect.connection_inactive",
+      changed: "connect.connection_not_found",
+      requests: 0,
+    });
+  });
+
+  it("is disconnected without asking Composio's legacy API anything, deleting its account and auth config", async () => {
+    const admin = someone("admin");
+    const { callback, account } = composio.authorize(await start(admin));
+    const { connectionId } = await back(admin, callback);
+    // As a connection made by the legacy route stands after the migration.
+    await env.DB.prepare(
+      "UPDATE connections SET status = 'needs_reauth', composio_session_id = NULL, server = ? WHERE id = ?"
+    )
+      .bind(
+        "https://backend.composio.dev/v3/mcp/legacy?connected_account_id=ca_1",
+        connectionId
+      )
+      .run();
+    composio.state.holds.sessions.clear();
+
+    await exports.default.disconnect({ person: admin, connectionId });
+
+    expect({
+      held: heldAtComposio(),
+      account: [...composio.state.holds.accounts.values()].includes(account),
+      cleanups: await cleanupsLeft(),
+    }).toStrictEqual({ held: nothingHeld, account: false, cleanups: 0 });
   });
 });
 
@@ -1055,7 +1337,7 @@ describe("a Composio connection", () => {
       ),
     }).toStrictEqual({
       failed: true,
-      held: { authConfigs: 1, accounts: 1, servers: 1 },
+      held: { authConfigs: 1, accounts: 1, sessions: 1 },
       calls: "ok",
     });
   });
@@ -1096,7 +1378,7 @@ describe("a Composio connection", () => {
       states: [active, failed, unanswered, gone, keyless].map(
         ({ composio: state }) => state
       ),
-      leaked: [held?.server, held?.serverId, accountId].filter(
+      leaked: [held?.server, held?.sessionId, accountId].filter(
         (secret) =>
           secret !== undefined &&
           secret !== "" &&
@@ -1128,7 +1410,7 @@ describe("a Composio connection", () => {
 
 const serverOf = async (connectionId: string) => {
   const row = await stored(connectionId);
-  return row?.serverId ?? "";
+  return row?.sessionId ?? "";
 };
 
 describe("changing what a connected Composio toolkit may do", () => {
@@ -1151,7 +1433,7 @@ describe("changing what a connected Composio toolkit may do", () => {
     expect({
       changed,
       stored: storedNow,
-      composio: serverTools(),
+      composio: sessionTools(),
       update: await outcome(
         callAs(workflow, call(connectionId, "HUBSPOT_UPDATE_CONTACT"))
       ),
@@ -1182,6 +1464,128 @@ describe("changing what a connected Composio toolkit may do", () => {
       // Who allowed which tool, and took which away, by name.
       came: ["HUBSPOT_UPDATE_CONTACT"],
       went: ["HUBSPOT_CREATE_CONTACT"],
+    });
+  });
+
+  it("stops the connection and changes nothing when Composio answers a change with a session wider than asked", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    const before = await toolsNow(connectionId);
+    // Another account pinned, as Composio answers the change.
+    composio.state.answeredConfig = (config) => ({
+      ...config,
+      connected_accounts: { hubspot: ["ca_someone_else"] },
+    });
+    let end: string;
+    try {
+      end = await outcome(
+        change(admin, connectionId, [
+          "HUBSPOT_LIST_CONTACTS",
+          "HUBSPOT_UPDATE_CONTACT",
+        ])
+      );
+    } finally {
+      composio.state.answeredConfig = undefined;
+    }
+    const listed = await exports.default.listConnections(admin);
+    const sentBefore = patches();
+    // Nothing more is sent to it, the clock's reconcile included.
+    await clockReconciles();
+    expect({
+      end,
+      unchanged: (await toolsNow(connectionId)) === before,
+      listed: listed.find(({ id }) => id === connectionId)?.status,
+      called: await outcome(
+        callAs(workflow, call(connectionId, "HUBSPOT_LIST_CONTACTS"))
+      ),
+      sent: patches() - sentBefore,
+    }).toStrictEqual({
+      end: "connection.provider_refused",
+      unchanged: true,
+      listed: "needs_reauth",
+      called: "connect.connection_inactive",
+      sent: 0,
+    });
+  });
+
+  it("refuses a change Composio answers with other tools than asked, keeping the connection, out of sync until the clock brings Composio in line", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    const before = await toolsNow(connectionId);
+    composio.state.answeredConfig = (config) => ({
+      ...config,
+      tools: { hubspot: { enabled: ["HUBSPOT_UPDATE_CONTACT"] } },
+    });
+    let end: string;
+    try {
+      end = await outcome(
+        change(admin, connectionId, [
+          "HUBSPOT_LIST_CONTACTS",
+          "HUBSPOT_UPDATE_CONTACT",
+        ])
+      );
+    } finally {
+      composio.state.answeredConfig = undefined;
+    }
+    const marked = await outOfSync(connectionId);
+    const listed = await exports.default.listConnections(admin);
+    await clockReconciles();
+    expect({
+      end,
+      unchanged: (await toolsNow(connectionId)) === before,
+      listed: listed.find(({ id }) => id === connectionId)?.status,
+      marked,
+      repaired: !(await outOfSync(connectionId)),
+      composio: sessionTools(),
+    }).toStrictEqual({
+      end: "connection.provider_refused",
+      unchanged: true,
+      listed: "active",
+      marked: true,
+      repaired: true,
+      composio: [allowed],
+    });
+  });
+
+  it("never sends Composio an empty tool list: a change keeping none of the tools goes straight to its new list", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    const end = await outcome(
+      change(admin, connectionId, ["HUBSPOT_UPDATE_CONTACT"])
+    );
+    expect({ end, composio: sessionTools() }).toStrictEqual({
+      end: "ok",
+      composio: [["HUBSPOT_UPDATE_CONTACT"]],
+    });
+  });
+
+  it("refuses connecting, or a change, that leaves no tool Grasp runs, and sends Composio nothing", async () => {
+    const admin = someone("admin");
+    const started = await outcome(
+      start(admin, { tools: ["HUBSPOT_DELETE_CONTACT"] })
+    );
+    const writes = composioWrites();
+    const connectionId = await connectHubSpot(admin);
+    const patchesBefore = patches();
+    const changed = await outcome(
+      change(admin, connectionId, ["HUBSPOT_DELETE_CONTACT"])
+    );
+    const recorded = await events();
+    expect({
+      started,
+      writes,
+      changed,
+      patches: patches() - patchesBefore,
+      reason: recorded.find(
+        ({ action, detail }) =>
+          action === "connection.tools" && detail.outcome === "refused"
+      )?.detail.reason,
+    }).toStrictEqual({
+      started: "connection.no_tools",
+      writes: [],
+      changed: "connection.no_tools",
+      patches: 0,
+      reason: "connection.no_tools",
     });
   });
 
@@ -1307,9 +1711,13 @@ describe("changing what a connected Composio toolkit may do", () => {
     const admin = someone("admin");
     const connectionId = await connectHubSpot(admin);
     const before = await toolsNow(connectionId);
-    composio.state.failing = "PATCH /mcp/";
+    composio.state.failing = "PATCH /tool_router/session/";
     const end = await outcome(
-      change(admin, connectionId, ["HUBSPOT_UPDATE_CONTACT"])
+      change(admin, connectionId, [
+        // One tool kept, so the change narrows Composio first.
+        "HUBSPOT_CREATE_CONTACT",
+        "HUBSPOT_UPDATE_CONTACT",
+      ])
     );
     const recorded = await events();
 
@@ -1339,10 +1747,14 @@ describe("changing what a connected Composio toolkit may do", () => {
         .bind(JSON.stringify(["HUBSPOT_LIST_CONTACTS"]), connectionId)
         .run();
       // And Composio takes no update after this one.
-      composio.state.failing = "PATCH /mcp/";
+      composio.state.failing = "PATCH /tool_router/session/";
     };
     const end = await outcome(
-      change(admin, connectionId, ["HUBSPOT_UPDATE_CONTACT"])
+      change(admin, connectionId, [
+        // One tool kept, so the change narrows Composio first.
+        "HUBSPOT_CREATE_CONTACT",
+        "HUBSPOT_UPDATE_CONTACT",
+      ])
     );
     const recorded = await events();
 
@@ -1374,7 +1786,11 @@ describe("changing what a connected Composio toolkit may do", () => {
     let end: string;
     try {
       end = await outcome(
-        change(admin, connectionId, ["HUBSPOT_UPDATE_CONTACT"])
+        change(admin, connectionId, [
+          // One tool kept, so the change narrows Composio first.
+          "HUBSPOT_CREATE_CONTACT",
+          "HUBSPOT_UPDATE_CONTACT",
+        ])
       );
     } finally {
       broken.mockRestore();
@@ -1408,14 +1824,18 @@ describe("changing what a connected Composio toolkit may do", () => {
         .run();
     };
     const end = await outcome(
-      change(admin, connectionId, ["HUBSPOT_UPDATE_CONTACT"])
+      change(admin, connectionId, [
+        // One tool kept, so the change narrows Composio first.
+        "HUBSPOT_CREATE_CONTACT",
+        "HUBSPOT_UPDATE_CONTACT",
+      ])
     );
     const afterwards = await events();
 
     expect({
       end,
       stored: await toolsNow(connectionId),
-      composio: serverTools(),
+      composio: sessionTools(),
       ok: afterwards.filter(
         ({ action, detail }) =>
           action === "connection.tools" && detail.outcome === "ok"
@@ -1443,7 +1863,7 @@ describe("changing what a connected Composio toolkit may do", () => {
         await env.DB.prepare("UPDATE connections SET tools = ? WHERE id = ?")
           .bind(JSON.stringify(newest), connectionId)
           .run();
-        for (const server of composio.state.holds.servers.values()) {
+        for (const server of composio.state.holds.sessions.values()) {
           server.allowedTools = newest;
         }
       };
@@ -1455,7 +1875,7 @@ describe("changing what a connected Composio toolkit may do", () => {
     expect({
       end,
       stored: await toolsNow(connectionId),
-      composio: serverTools(),
+      composio: sessionTools(),
     }).toStrictEqual({
       end: "connection.tools_changed",
       stored: JSON.stringify(newest),
@@ -1476,7 +1896,11 @@ describe("changing what a connected Composio toolkit may do", () => {
     let end: string;
     try {
       end = await outcome(
-        change(admin, connectionId, ["HUBSPOT_UPDATE_CONTACT"])
+        change(admin, connectionId, [
+          // One tool kept, so the change narrows Composio first.
+          "HUBSPOT_CREATE_CONTACT",
+          "HUBSPOT_UPDATE_CONTACT",
+        ])
       );
     } finally {
       await env.DB.prepare("DROP TRIGGER IF EXISTS refuse_tools").run();
@@ -1486,7 +1910,7 @@ describe("changing what a connected Composio toolkit may do", () => {
     expect({
       failed: end !== "ok",
       unchanged: (await toolsNow(connectionId)) === before,
-      composio: serverTools(),
+      composio: sessionTools(),
       reasons: recorded
         .filter(({ action }) => action === "connection.tools")
         .map(({ detail }) => [detail.outcome, detail.reason]),
@@ -1557,7 +1981,7 @@ describe("changing what a connected Composio toolkit may do", () => {
     // What Composio allows after the first update, the one before connect's write.
     composio.state.beforeUpdate = async () => {
       composio.state.beforeUpdate = async () => {
-        beforeWrite = serverTools();
+        beforeWrite = sessionTools();
         await Promise.resolve();
       };
       await Promise.resolve();
@@ -1567,7 +1991,7 @@ describe("changing what a connected Composio toolkit may do", () => {
       "HUBSPOT_UPDATE_CONTACT",
     ]);
 
-    expect({ beforeWrite, after: serverTools() }).toStrictEqual({
+    expect({ beforeWrite, after: sessionTools() }).toStrictEqual({
       beforeWrite: [["HUBSPOT_LIST_CONTACTS"]],
       after: [["HUBSPOT_LIST_CONTACTS", "HUBSPOT_UPDATE_CONTACT"]],
     });
@@ -1607,12 +2031,73 @@ describe("changing what a connected Composio toolkit may do", () => {
     });
   });
 
+  it("swaps every tool the toolkit still has for others beside a retired one, narrowing nothing first", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    await env.DB.prepare("UPDATE connections SET tools = ? WHERE id = ?")
+      .bind(
+        JSON.stringify(["HUBSPOT_RETIRED_TOOL", "HUBSPOT_LIST_CONTACTS"]),
+        connectionId
+      )
+      .run();
+    const end = await outcome(
+      change(admin, connectionId, [
+        "HUBSPOT_RETIRED_TOOL",
+        "HUBSPOT_UPDATE_CONTACT",
+      ])
+    );
+    expect({
+      end,
+      stored: await toolsNow(connectionId),
+      composio: sessionTools(),
+    }).toStrictEqual({
+      end: "ok",
+      stored: JSON.stringify([
+        "HUBSPOT_RETIRED_TOOL",
+        "HUBSPOT_UPDATE_CONTACT",
+      ]),
+      composio: [["HUBSPOT_UPDATE_CONTACT"]],
+    });
+  });
+
+  it("marks a change that narrowed nothing first out of sync with its write, so a reconcile that never ran is still repaired", async () => {
+    const admin = someone("admin");
+    const connectionId = await connectHubSpot(admin);
+    // The change's reconcile can't count a send, as if it never ran.
+    await env.DB.prepare(
+      "CREATE TRIGGER refuse_sends BEFORE INSERT ON composio_tool_sends BEGIN SELECT RAISE(ABORT, 'refused'); END"
+    ).run();
+    let end: string;
+    try {
+      end = await outcome(
+        change(admin, connectionId, ["HUBSPOT_UPDATE_CONTACT"])
+      );
+    } finally {
+      await env.DB.prepare("DROP TRIGGER IF EXISTS refuse_sends").run();
+    }
+    const marked = await outOfSync(connectionId);
+    await clockReconciles();
+    expect({
+      end,
+      stored: await toolsNow(connectionId),
+      marked,
+      repaired: !(await outOfSync(connectionId)),
+      composio: sessionTools(),
+    }).toStrictEqual({
+      end: "ok",
+      stored: JSON.stringify(["HUBSPOT_UPDATE_CONTACT"]),
+      marked: true,
+      repaired: true,
+      composio: [["HUBSPOT_UPDATE_CONTACT"]],
+    });
+  });
+
   it("marks a connection whose Composio couldn't be brought in line, and the clock does it later", async () => {
     const admin = someone("admin");
     const connectionId = await connectHubSpot(admin);
     // Composio takes the narrowed update, then none for a while.
     composio.state.beforeUpdate = async () => {
-      composio.state.failing = "PATCH /mcp/";
+      composio.state.failing = "PATCH /tool_router/session/";
       await Promise.resolve();
     };
     await change(admin, connectionId, [
@@ -1632,7 +2117,7 @@ describe("changing what a connected Composio toolkit may do", () => {
       vi.useRealTimers();
     }
 
-    expect({ marked, composio: serverTools(), still }).toStrictEqual({
+    expect({ marked, composio: sessionTools(), still }).toStrictEqual({
       marked: true,
       composio: [["HUBSPOT_LIST_CONTACTS", "HUBSPOT_UPDATE_CONTACT"]],
       still: false,
@@ -1676,9 +2161,9 @@ describe("changing what a connected Composio toolkit may do", () => {
     const newest = marked[20] ?? "";
     for (const connectionId of failing) {
       // oxlint-disable-next-line no-await-in-loop -- one connection at a time
-      composio.state.holds.servers.delete(await serverOf(connectionId));
+      composio.state.holds.sessions.delete(await serverOf(connectionId));
     }
-    const newestServer = composio.state.holds.servers.get(
+    const newestServer = composio.state.holds.sessions.get(
       await serverOf(newest)
     );
     const lagging = [...(newestServer?.allowedTools ?? [])];

@@ -40,6 +40,8 @@ export const composio = fakeComposioApi(
         },
         { slug: "HUBSPOT_CREATE_CONTACT" },
         { slug: "HUBSPOT_UPDATE_CONTACT" },
+        // One Grasp never runs, by its name (`isNeverTool`).
+        { slug: "HUBSPOT_DELETE_CONTACT" },
         // On its way out: never allowed.
         { slug: "HUBSPOT_EXPORT_CONTACTS", isDeprecated: true },
       ],
@@ -227,7 +229,7 @@ export const connectHubSpot = async (
 /** The connection as connect's registry holds it. */
 export const stored = async (connectionId: string) =>
   await env.DB.prepare(
-    "SELECT provider, scope, server_kind AS serverKind, server, account_id AS accountId, composio_server_id AS serverId, tools FROM connections WHERE id = ?"
+    "SELECT provider, scope, server_kind AS serverKind, server, account_id AS accountId, composio_session_id AS sessionId, tools FROM connections WHERE id = ?"
   )
     .bind(connectionId)
     .first<{
@@ -236,7 +238,7 @@ export const stored = async (connectionId: string) =>
       serverKind: string;
       server: string;
       accountId: string;
-      serverId: string;
+      sessionId: string;
       tools: string;
     }>();
 
@@ -244,11 +246,11 @@ export const stored = async (connectionId: string) =>
 export const heldAtComposio = () => ({
   authConfigs: composio.state.holds.authConfigs.size,
   accounts: composio.state.holds.accounts.size,
-  servers: composio.state.holds.servers.size,
+  sessions: composio.state.holds.sessions.size,
 });
 
 /** Nothing connect made is left at Composio. */
-export const nothingHeld = { authConfigs: 0, accounts: 0, servers: 0 };
+export const nothingHeld = { authConfigs: 0, accounts: 0, sessions: 0 };
 
 /** Runs `run` as if `minutes` had passed. */
 export const afterMinutes = async (
@@ -374,9 +376,9 @@ export const change = async (
     expected: expected ?? (await shownTools(connectionId)),
   });
 
-/** The allowlist of the one server connect made at Composio. */
-export const serverTools = () =>
-  [...composio.state.holds.servers.values()].map(
+/** The tools each session connect made at Composio allows. */
+export const sessionTools = () =>
+  [...composio.state.holds.sessions.values()].map(
     ({ allowedTools }) => allowedTools
   );
 
@@ -503,9 +505,9 @@ export const connectNames = async (connectionId: string): Promise<string[]> => {
   return kept.map((tool) => (typeof tool === "string" ? tool : tool.name));
 };
 
-/** Whether Composio's server `serverId` allows what connect holds. */
-export const inStep = async (connectionId: string, serverId: string) => {
-  const atComposio = composio.state.holds.servers.get(serverId);
+/** Whether Composio's session `sessionId` allows what connect holds. */
+export const inStep = async (connectionId: string, sessionId: string) => {
+  const atComposio = composio.state.holds.sessions.get(sessionId);
   const names = await connectNames(connectionId);
   return (
     JSON.stringify([...(atComposio?.allowedTools ?? [])].toSorted()) ===
@@ -520,7 +522,7 @@ export const inStep = async (connectionId: string, serverId: string) => {
  */
 export const walked = async (
   connectionId: string,
-  serverId: string,
+  sessionId: string,
   actors: Actors,
   walk: readonly string[]
 ): Promise<{ wrong: string[]; movable: string[] }> => {
@@ -530,7 +532,7 @@ export const walked = async (
     ).bind(JSON.stringify(allowed), connectionId),
     env.DB.prepare("DELETE FROM composio_tool_sends"),
   ]);
-  const server = composio.state.holds.servers.get(serverId);
+  const server = composio.state.holds.sessions.get(sessionId);
   if (server !== undefined) {
     server.allowedTools = [...allowed];
   }
@@ -589,7 +591,7 @@ export const walked = async (
       await promise;
       moving = undefined;
       // oxlint-disable-next-line no-await-in-loop -- checked after each move
-      const differs = !(await inStep(connectionId, serverId));
+      const differs = !(await inStep(connectionId, sessionId));
       // oxlint-disable-next-line no-await-in-loop -- checked after each move
       if (differs && !(await outOfSync(connectionId))) {
         wrong.push(`differs unmarked after ${walk.join(" ")}`);
@@ -607,7 +609,7 @@ export const walked = async (
     } finally {
       vi.useRealTimers();
     }
-    if (!(await inStep(connectionId, serverId))) {
+    if (!(await inStep(connectionId, sessionId))) {
       wrong.push(`never repaired after ${walk.join(" ")}`);
     }
     if (await outOfSync(connectionId)) {
@@ -651,7 +653,7 @@ export interface Draw {
  */
 export const drawnWalks = async (
   connectionId: string,
-  serverId: string,
+  sessionId: string,
   actors: Actors,
   { fixed, seed, count, longest }: Draw
 ): Promise<string[]> => {
@@ -672,7 +674,7 @@ export const drawnWalks = async (
   const wrong: string[] = [];
   for (const walk of [...fixed, ...drawn]) {
     // oxlint-disable-next-line no-await-in-loop -- each walk on its own
-    const result = await walked(connectionId, serverId, actors, walk);
+    const result = await walked(connectionId, sessionId, actors, walk);
     wrong.push(...result.wrong);
   }
   return wrong;
@@ -681,7 +683,7 @@ export const drawnWalks = async (
 /** Every walk of `actors`, each actor crashing anywhere or finishing. */
 export const everyWalk = async (
   connectionId: string,
-  serverId: string,
+  sessionId: string,
   actors: Actors
 ): Promise<string[]> => {
   const wrong: string[] = [];
@@ -690,7 +692,7 @@ export const everyWalk = async (
   while (pending.length > 0) {
     const walk = pending.pop() ?? [];
     // oxlint-disable-next-line no-await-in-loop -- each walk on its own
-    const result = await walked(connectionId, serverId, actors, walk);
+    const result = await walked(connectionId, sessionId, actors, walk);
     wrong.push(...result.wrong);
     for (const actor of result.movable) {
       pending.push([...walk, actor]);
@@ -719,5 +721,5 @@ export const setUp = async () => {
     .bind(connectionId)
     .run();
   const row = await stored(connectionId);
-  return { admin, connectionId, serverId: row?.serverId ?? "" };
+  return { admin, connectionId, sessionId: row?.sessionId ?? "" };
 };
