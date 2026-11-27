@@ -1,7 +1,9 @@
+import { chatIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 
 import { memberOf } from "../src/auth/identity.ts";
 import type { DraftWriter } from "../src/drafts.ts";
+import { personalWorkspaceId } from "../src/personal-workspace.ts";
 
 /**
  * The agent of `person`'s chat `chatId` writing a draft for them, in turn
@@ -20,5 +22,13 @@ export const agentWriting = async (
   if (by === undefined) {
     throw new Error("No such member.");
   }
-  return { by, chat: { chatId, turnId, callId } };
+  return {
+    by,
+    chat: {
+      workspaceId: personalWorkspaceId(person.userId),
+      chatId: chatIdSchema.parse(chatId),
+      turnId,
+      callId,
+    },
+  };
 };

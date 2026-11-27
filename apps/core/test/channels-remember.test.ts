@@ -587,11 +587,10 @@ describe("a memory whose notice the person can't see in Teams", () => {
     // restarts: the turn is set up again, refused, and throws.
     await connectModels(`k-${unique()}`, ["mistral/mistral-large-latest"]);
     await restarted(
-      chatSession(
-        env,
-        personalWorkspaceId(ann.userId),
-        chatIdSchema.parse(chatId)
-      )
+      chatSession(env, {
+        workspaceId: personalWorkspaceId(ann.userId),
+        chatId: chatIdSchema.parse(chatId),
+      })
     );
     await posted;
     next.release();

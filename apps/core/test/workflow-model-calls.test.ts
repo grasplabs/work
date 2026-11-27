@@ -14,6 +14,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { revokePermission } from "../src/permissions.ts";
+import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import { createTriggerResource } from "../src/trigger-resources.ts";
 import { revokeWorkflowBinding } from "../src/workflow-bindings.ts";
 import { workflowDefinition } from "../src/workflow-resources.ts";
@@ -486,9 +487,15 @@ describe("model calls", () => {
     // Another person's grant to the agent, in a chat of theirs: it never
     // holds for Ada's run.
     await env.DB.prepare(
-      "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, resource, actions, binding, status, requested_by, requested_at, granted_by, granted_at, chat_id, personal) SELECT ?, subject_type, subject_id, object_type, object_id, resource, actions, binding || '_CHAT', 'active', ?, requested_at, granted_by, granted_at, ?, personal FROM permissions WHERE id = ?"
+      "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, resource, actions, binding, status, requested_by, requested_at, granted_by, granted_at, workspace_id, chat_id, personal) SELECT ?, subject_type, subject_id, object_type, object_id, resource, actions, binding || '_CHAT', 'active', ?, requested_at, granted_by, granted_at, ?, ?, personal FROM permissions WHERE id = ?"
     )
-      .bind(crypto.randomUUID(), admin.userId, crypto.randomUUID(), agentGrant)
+      .bind(
+        crypto.randomUUID(),
+        admin.userId,
+        personalWorkspaceId(admin.userId),
+        crypto.randomUUID(),
+        agentGrant
+      )
       .run();
     // Each run sleeps before its call: each start stands.
     for (const grant of [triggerGrant, appGrant, agentGrant]) {

@@ -122,6 +122,19 @@ export const chats = sqliteTable(
 );
 
 /**
+ * The ID of every chat deleted here, kept for good: an ID is taken once in
+ * this object (workspace.ts, `createChat`), so a page that names a new
+ * chat (`ChatStart`) never names one under a deleted chat's ID, and
+ * nothing still kept of that chat under its ref (its revoked grants, its
+ * draft checkpoints, what its runs read, its turns' records, its audit
+ * events) is ever taken for a new chat's. Goes only with the whole object
+ * (`erasePerson`).
+ */
+export const deletedChats = sqliteTable("deleted_chats", {
+  id: text().$type<ChatId>().primaryKey(),
+});
+
+/**
  * A chat's transcript, in order: the agent's messages as pi shapes them
  * (system, user, assistant and tool results), as JSON. A message is stored
  * when the loop finishes it, so a turn cut short keeps its finished steps.

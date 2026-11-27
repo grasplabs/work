@@ -544,9 +544,12 @@ describe("chat agent after a restart", () => {
       .bind(personId)
       .run();
     // The turn is set up again as the object wakes, for a person who left.
-    await runInDurableObject(chatSession(env, id, chat.id), (_, state) => {
-      state.abort("Restarted by the test");
-    }).catch(() => {
+    await runInDurableObject(
+      chatSession(env, { workspaceId: id, chatId: chat.id }),
+      (_, state) => {
+        state.abort("Restarted by the test");
+      }
+    ).catch(() => {
       // Aborting fails the call that aborted: that is the restart.
     });
 
@@ -605,7 +608,7 @@ describe("chat agent after a restart", () => {
       { timeout: 10_000 }
     );
     // The chat's object restarts mid-step, as a crash would cut it short.
-    const session = chatSession(env, id, chat.id);
+    const session = chatSession(env, { workspaceId: id, chatId: chat.id });
     await runInDurableObject(session, (_instance, state) => {
       state.abort("Restarted by the test");
     }).catch(() => {
@@ -616,7 +619,9 @@ describe("chat agent after a restart", () => {
     const woken = await restart(id);
     const { running } = await woken.chatSummary(chat.id, personId);
     // Its heartbeat alarm picks the turn up again, if it hasn't yet.
-    await runDurableObjectAlarm(chatSession(env, id, chat.id));
+    await runDurableObjectAlarm(
+      chatSession(env, { workspaceId: id, chatId: chat.id })
+    );
     answer.release();
     await vi.waitFor(
       async () => {
@@ -667,15 +672,18 @@ describe("chat agent after a restart", () => {
     // The Workspace first, so nothing asks for the turn again, then the
     // chat's object, mid-step.
     const woken = await restart(id);
-    await runInDurableObject(chatSession(env, id, chat.id), (_, state) => {
-      state.abort("Restarted by the test");
-    }).catch(() => {
+    await runInDurableObject(
+      chatSession(env, { workspaceId: id, chatId: chat.id }),
+      (_, state) => {
+        state.abort("Restarted by the test");
+      }
+    ).catch(() => {
       // Aborting fails the call that aborted: that is the restart.
     });
     // The chat's object resets under the note's own call too, as one that
     // opens cold under load can: the note is made again, and told.
     await runInDurableObject(
-      chatSession(env, id, chat.id),
+      chatSession(env, { workspaceId: id, chatId: chat.id }),
       (instance, state) => {
         // On the class, as a call reaches its methods there, and only once:
         // the object that starts again has the method as it is.

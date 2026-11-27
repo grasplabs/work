@@ -8,7 +8,7 @@ import type { AuditDetailValue, AuditEntry } from "@grasp-os/shared/audit";
 import type { ChatChannel, ChatToolOutcome } from "@grasp-os/shared/chat";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { connectionIdSchema, identifierSchema } from "@grasp-os/shared/ids";
-import type { ChatId, WorkspaceId } from "@grasp-os/shared/ids";
+import type { ChatRef } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   authoritySchema,
@@ -21,6 +21,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { keepAuditEvent } from "./audit-outbox.ts";
+import { ofChat } from "./chat-ref.ts";
 import {
   toolReasonMaxChars,
   toolSummaryEntriesMax,
@@ -36,15 +37,12 @@ import type { WorkContext } from "./restricted.ts";
 // the stub but never read or change them.
 
 /** Whom and where an agent's code acts for, as core sets it. */
-export interface AgentScope {
-  /** The Workspace object that holds the chat. */
-  workspaceId: WorkspaceId;
+export interface AgentScope extends ChatRef {
   /**
    * The agent that acts, as the chat stored it: the organization's agent
    * admins grant to, whichever object holds the chat (a person's own, say).
    */
   agentId: string;
-  chatId: ChatId;
   /** The person the chat belongs to, whom the agent acts for. */
   personId: string;
   /**
@@ -403,6 +401,7 @@ export const recordToolCall = async (
     );
   } catch (error) {
     log.warn("agent.tool_event_unkept", {
+      workspaceId: scope.workspaceId,
       chatId: scope.chatId,
       method,
       ...errorFields(error),
@@ -437,11 +436,7 @@ export const auditToolCall = async (
  */
 export const revokedSince = async (
   env: Env,
-  {
-    agentId,
-    chatId,
-    personId,
-  }: Pick<AgentScope, "agentId" | "chatId" | "personId">,
+  scope: Pick<AgentScope, "agentId" | "workspaceId" | "chatId">,
   since: number
 ): Promise<boolean> => {
   const [revoked] = await drizzle(env.DB)
@@ -450,7 +445,7 @@ export const revokedSince = async (
     .where(
       and(
         eq(permissions.subjectType, "agent"),
-        eq(permissions.subjectId, agentId),
+        eq(permissions.subjectId, scope.agentId),
         eq(permissions.status, "revoked"),
         // From the millisecond the run opened, that one included. No
         // margin before it: a revocation just before a run opened is in
@@ -464,14 +459,10 @@ export const revokedSince = async (
         // decision in chat-connections.ts), so only a request declined
         // before anyone granted it is revoked without one.
         isNotNull(permissions.grantedAt),
-        // A chat's own permission is its person's alone, never another
-        // chat's under the same ID.
+        // A chat's own permission holds in that chat alone.
         or(
           isNull(permissions.chatId),
-          and(
-            eq(permissions.chatId, chatId),
-            eq(permissions.requestedBy, personId)
-          )
+          ofChat(permissions, scope, permissions.requestedBy)
         )
       )
     )

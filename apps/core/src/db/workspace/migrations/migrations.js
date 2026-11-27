@@ -45,6 +45,7 @@ import m0042 from './0042_chat_read_up_to.sql';
 import m0043 from './0043_code_run_outside_text.sql';
 import m0044 from './0044_needy_toad_men.sql';
 import m0045 from './0045_chat_request_file.sql';
+import m0046 from './0046_deleted_chats.sql';
 
   export default {
     journal,
@@ -94,7 +95,8 @@ m0041,
 m0042,
 m0043,
 m0044,
-m0045
+m0045,
+m0046
     }
   }
   

@@ -173,7 +173,10 @@ describe("the agent building an independent workflow", () => {
     });
     // Its edit is the chat's work, waiting in the draft for the person to
     // publish: the workflow's live version is still the person's.
-    const worked = await chatWork(env, chat.personId, chat.chat.id);
+    const worked = await chatWork(env, {
+      workspaceId: chat.id,
+      chatId: chat.chat.id,
+    });
     const draft = await person.api.drafts.get({
       kind: "workflow",
       id: made.id,

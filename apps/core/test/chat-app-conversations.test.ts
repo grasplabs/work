@@ -1,3 +1,4 @@
+import { chatIdSchema } from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -619,7 +620,8 @@ describe("a conversation with the agent in Teams", setUpTime, () => {
     }
     // As Build it, or its agent's write, keeps the chat that worked on it.
     await keepMadeInChat(env, appKind, appId, userId, {
-      chatId: conversation,
+      workspaceId: personalWorkspaceId(userId),
+      chatId: chatIdSchema.parse(conversation),
       turnId: null,
       callId: null,
     });

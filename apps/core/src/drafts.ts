@@ -4,6 +4,7 @@ import type { ChatWork } from "@grasp-os/shared/chat";
 import { draftErrors } from "@grasp-os/shared/drafts";
 import type { Draft, DraftCheckpoint, Version } from "@grasp-os/shared/drafts";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import type { ChatId, ChatRef, WorkspaceId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { nextReleaseId, releaseMonthPrefix } from "@grasp-os/shared/release-id";
@@ -26,6 +27,7 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxed, outboxedWhere } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
+import { ofChat, workspaceOf, workspaceOfRow } from "./chat-ref.ts";
 import {
   appVersions,
   draftBlobs,
@@ -37,6 +39,7 @@ import {
 } from "./db/core/schema.ts";
 import { notNullFailed } from "./db/d1.ts";
 import { draftWatch } from "./durable-objects.ts";
+import { personalWorkspacePrefix } from "./personal-workspace.ts";
 
 // The draft of an App or a workflow (GRA-1665): one per subject, in core's
 // database, shared by everyone who builds it and by their chats' agents
@@ -156,8 +159,7 @@ export interface DraftKind {
 }
 
 /** The chat whose agent writes a draft: in which turn and code step. */
-export interface ChatWriter {
-  chatId: string;
+export interface ChatWriter extends ChatRef {
   turnId: string | null;
   callId: string | null;
 }
@@ -496,7 +498,9 @@ const latestCheckpoint = async (
   | {
       number: number;
       revision: number;
-      chatId: string | null;
+      personId: string;
+      workspaceId: WorkspaceId | null;
+      chatId: ChatId | null;
       turnId: string | null;
       held: string[];
     }
@@ -506,6 +510,8 @@ const latestCheckpoint = async (
     .select({
       number: draftCheckpoints.number,
       revision: draftCheckpoints.revision,
+      personId: draftCheckpoints.personId,
+      workspaceId: draftCheckpoints.workspaceId,
       chatId: draftCheckpoints.chatId,
       turnId: draftCheckpoints.turnId,
     })
@@ -536,7 +542,8 @@ const latestCheckpoint = async (
 /** Who wrote a checkpoint, as its row records it. */
 interface CheckpointAuthor {
   personId: string;
-  chatId: string | null;
+  workspaceId: WorkspaceId | null;
+  chatId: ChatId | null;
   turnId: string | null;
   callId: string | null;
   restoredFrom?: number;
@@ -545,6 +552,7 @@ interface CheckpointAuthor {
 /** A person's own, outside any chat. */
 const ownAuthor = (by: Pick<Acting, "userId">): CheckpointAuthor => ({
   personId: by.userId,
+  workspaceId: null,
   chatId: null,
   turnId: null,
   callId: null,
@@ -637,6 +645,10 @@ const keepCheckpoint = async (
     latest !== undefined &&
     author.turnId !== null &&
     latest.turnId === author.turnId &&
+    (latest.chatId === null
+      ? null
+      : workspaceOfRow(latest.workspaceId, latest.personId)) ===
+      author.workspaceId &&
     latest.chatId === author.chatId &&
     latest.revision === read;
   const number = amends ? latest.number : (latest?.number ?? 0) + 1;
@@ -987,7 +999,7 @@ export const emptyDraftStatements = async (
     db
       .insert(draftCheckpoints)
       .select(
-        sql`SELECT ${kind}, ${id}, COALESCE((SELECT MAX(number) FROM draft_checkpoints WHERE ${ofDraft}), 0) + 1, (SELECT revision FROM drafts WHERE ${ofDraft}), ${base}, NULL, ${contentHash}, ${by.userId}, NULL, NULL, NULL, NULL, ${at.getTime()} WHERE ${emptied} AND ${unkept}`
+        sql`SELECT ${kind}, ${id}, COALESCE((SELECT MAX(number) FROM draft_checkpoints WHERE ${ofDraft}), 0) + 1, (SELECT revision FROM drafts WHERE ${ofDraft}), ${base}, NULL, ${contentHash}, ${by.userId}, NULL, NULL, NULL, NULL, NULL, ${at.getTime()} WHERE ${emptied} AND ${unkept}`
       ),
   ];
 };
@@ -1312,14 +1324,13 @@ export const rebaseDraft = async (
 };
 
 /**
- * The subjects whose drafts `personId`'s chat `chatId`'s agent wrote in
- * turn `turnId`: those with a checkpoint of that turn's, kept with the
- * draft, so a restart forgets none.
+ * The subjects whose drafts chat `chat`'s agent wrote in turn `turnId`:
+ * those with a checkpoint of that turn's, kept with the draft, so a
+ * restart forgets none.
  */
 export const turnSubjects = async (
   env: Env,
-  personId: string,
-  chatId: string,
+  chat: ChatRef,
   turnId: string
 ): Promise<Subject[]> => {
   const rows = await drizzle(env.DB)
@@ -1330,8 +1341,7 @@ export const turnSubjects = async (
     .from(draftCheckpoints)
     .where(
       and(
-        eq(draftCheckpoints.personId, personId),
-        eq(draftCheckpoints.chatId, chatId),
+        ofChat(draftCheckpoints, chat, draftCheckpoints.personId),
         eq(draftCheckpoints.turnId, turnId)
       )
     )
@@ -1340,15 +1350,13 @@ export const turnSubjects = async (
 };
 
 /**
- * What `personId`'s chat `chatId` worked on, the most recently first: each
- * subject with a checkpoint naming the chat (its agent's writes, and what
- * its Build it made, `keepMadeInChat`), at its latest one. By the person
- * whose chat it is too, never by a chat's ID alone.
+ * What chat `chat` worked on, the most recently first: each subject with
+ * a checkpoint naming the chat (its agent's writes, and what its Build it
+ * made, `keepMadeInChat`), at its latest one.
  */
 export const chatWork = async (
   env: Env,
-  personId: string,
-  chatId: string
+  chat: ChatRef
 ): Promise<ChatWork[]> => {
   const rows = await drizzle(env.DB)
     .select({
@@ -1360,9 +1368,8 @@ export const chatWork = async (
     .from(draftCheckpoints)
     .where(
       and(
-        eq(draftCheckpoints.personId, personId),
-        eq(draftCheckpoints.chatId, chatId),
-        sql`${draftCheckpoints.number} = (SELECT MAX(number) FROM draft_checkpoints AS own WHERE own.subject_kind = ${draftCheckpoints.subjectKind} AND own.subject_id = ${draftCheckpoints.subjectId} AND own.chat_id = ${chatId} AND own.person_id = ${personId})`
+        ofChat(draftCheckpoints, chat, draftCheckpoints.personId),
+        sql`${draftCheckpoints.number} = (SELECT MAX(number) FROM draft_checkpoints AS own WHERE own.subject_kind = ${draftCheckpoints.subjectKind} AND own.subject_id = ${draftCheckpoints.subjectId} AND own.chat_id = ${chat.chatId} AND COALESCE(own.workspace_id, ${personalWorkspacePrefix} || own.person_id) = ${chat.workspaceId})`
       )
     )
     .orderBy(desc(draftCheckpoints.createdAt))
@@ -1376,23 +1383,23 @@ export const chatWork = async (
 };
 
 /**
- * The chats of `personId`'s that worked on `subject`, whose agent wrote
- * its draft or whose Build it made it (`keepMadeInChat`): those a
- * checkpoint names, for the subject's page to carry on in
+ * The chats of workspace `workspaceId`'s that worked on `subject`, whose
+ * agent wrote its draft or whose Build it made it (`keepMadeInChat`):
+ * those a checkpoint names, for the subject's page to carry on in
  * (`ChatsApi.forSubject`).
  */
 export const chatsWorkedOn = async (
   env: Env,
   subject: Subject,
-  personId: string
-): Promise<string[]> => {
+  workspaceId: WorkspaceId
+): Promise<ChatId[]> => {
   const rows = await drizzle(env.DB)
     .selectDistinct({ chatId: draftCheckpoints.chatId })
     .from(draftCheckpoints)
     .where(
       and(
         ofSubject(draftCheckpoints, subject),
-        eq(draftCheckpoints.personId, personId)
+        sql`${workspaceOf(draftCheckpoints, draftCheckpoints.personId)} = ${workspaceId}`
       )
     )
     .all();

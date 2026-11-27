@@ -79,6 +79,7 @@ import {
 import type { Audience } from "./chat-audiences.ts";
 import { coreMessageProvider, shownBuiltSchema } from "./chat-messages.ts";
 import type { ShownBuilt } from "./chat-messages.ts";
+import { chatRefOf } from "./chat-ref.ts";
 import { codeTimeoutMs } from "./code-mode.ts";
 import { callObject, workspace } from "./durable-objects.ts";
 import { allInOrder } from "./in-order.ts";
@@ -996,7 +997,7 @@ const recordOf = (
     pace.resumed || at === undefined ? null : Math.max(0, at - sentAt);
   return {
     id: request.turnId,
-    chatId: scope.chatId,
+    ...chatRefOf(scope),
     surface: scope.unattended === true ? "wake" : (scope.via ?? "web"),
     model: question.model,
     effort: question.effort ?? null,

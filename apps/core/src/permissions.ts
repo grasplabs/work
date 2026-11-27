@@ -6,11 +6,7 @@ import type {
 } from "@grasp-os/shared/audit";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import { connectorEventActions } from "@grasp-os/shared/connect";
-import {
-  appIdSchema,
-  permissionIdSchema,
-  workspaceIdSchema,
-} from "@grasp-os/shared/ids";
+import { appIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, PermissionId, TriggerId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
@@ -71,6 +67,7 @@ import { activeMember, organizationId } from "./auth/auth.ts";
 import { memberRole } from "./auth/identity.ts";
 import type { Acting } from "./auth/identity.ts";
 import { storedTeamsOf, unreadableTeam } from "./brain-grant-teams.ts";
+import { ofChat, workspaceOfRow } from "./chat-ref.ts";
 import { madeSensitiveByGrant, widenedByGrant } from "./data-policy.ts";
 import type { Grantee } from "./data-policy.ts";
 import {
@@ -238,7 +235,13 @@ export const toPermission = (row: Row): Permission => ({
   revokedBy: row.revokedBy,
   revokedAt: row.revokedAt?.toISOString() ?? null,
   requestedVia: row.requestedVia ?? null,
-  chat: row.chatId,
+  chat:
+    row.chatId === null
+      ? null
+      : {
+          workspaceId: workspaceOfRow(row.workspaceId, row.requestedBy),
+          chatId: row.chatId,
+        },
 });
 
 /** Where a check runs: the context, and the person it acts for. */
@@ -256,7 +259,7 @@ export interface Where {
  */
 const holdsIn = ({ context, onBehalfOf }: Where = {}): SQL =>
   context?.type === "chat" && onBehalfOf !== undefined
-    ? sql`(${permissions.chatId} IS NULL OR (${permissions.chatId} = ${context.chatId} AND ${permissions.requestedBy} = ${onBehalfOf}))`
+    ? sql`(${permissions.chatId} IS NULL OR (${ofChat(permissions, context, permissions.requestedBy)} AND ${permissions.requestedBy} = ${onBehalfOf}))`
     : isNull(permissions.chatId);
 
 /**
@@ -322,7 +325,9 @@ const auditDetail = ({
     binding,
     // A chat's own permission: which chat, as its person's other events
     // name it.
-    ...(chat === null ? {} : { chat }),
+    ...(chat === null
+      ? {}
+      : { workspace: chat.workspaceId, chat: chat.chatId }),
   };
 };
 
@@ -1016,6 +1021,7 @@ export const requestPermission = async (
     revokedAt: null,
     requestedVia: by.via ?? null,
     personal: false,
+    workspaceId: null,
     chatId: null,
     reason: null,
   };
@@ -1150,6 +1156,7 @@ const requestsOf = (
     revokedAt: null,
     requestedVia: by.via ?? null,
     personal: false,
+    workspaceId: null,
     chatId: null,
     reason: null,
   }));
@@ -1263,24 +1270,23 @@ export const tellChat = async (
   permission: Permission,
   decision: "granted" | "denied"
 ): Promise<void> => {
-  const { chat: chatId, requestedVia } = permission;
-  if (chatId === null || requestedVia === null) {
+  const { chat } = permission;
+  if (chat === null) {
     return;
   }
   try {
-    const workspaceId = workspaceIdSchema.parse(requestedVia.workspaceId);
     // Again on a stub of its own should the object reset under the call: a
     // second notice of the same decision tells the agent nothing new.
     await callObject(async () => {
-      await workspace(env, workspaceId).connectionDecided(
-        chatId,
+      await workspace(env, chat.workspaceId).connectionDecided(
+        chat.chatId,
         permission.requestedBy,
         { binding: permission.binding, decision }
       );
     });
   } catch (error) {
     log.warn("chat.connection_decided_failed", {
-      chatId,
+      ...chat,
       ...errorFields(error),
     });
   }
