@@ -171,6 +171,8 @@ export const useNewLine = (
   // meanwhile isn't there yet): a watch core refused (too many open, say)
   // shows nothing, so nothing is read.
   const loaded = view.loaded && view.resuming !== true;
+  /** Whether the chat is being followed again after a dropped connection now. */
+  const behind = useEffectEvent((): boolean => view.resuming === true);
   useEffect(() => {
     if (
       chatId === undefined ||
@@ -185,9 +187,10 @@ export const useNewLine = (
       try {
         setReply({ count, seenUpTo: await mark(chatId) });
       } catch (error) {
-        // The connection dropped on the way: asked again once the chat is
-        // followed again. Refused: no line, and the chat stays unread.
-        if (isConnectionFailure(error)) {
+        // The connection dropped on the way, and the chat is being
+        // followed again: asked again once it is. Else no line, and the
+        // chat stays unread.
+        if (isConnectionFailure(error) && behind()) {
           asked.current = -1;
           return;
         }
