@@ -11,10 +11,12 @@ import type { Subject } from "@grasp-os/shared/subject";
 import { useRouteContext } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 
+import type { CoreConnection } from "../core-connection.ts";
 import { CoreTimeoutError, isConnectionFailure, timeoutMs } from "../core.ts";
 import type { Session } from "../core.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useHoldHeartbeat } from "../use-core-reach.ts";
+import { useCore } from "../use-core.ts";
 import { activeChat, setActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
 import type { Problem, StopNote } from "./dictation.ts";
@@ -60,22 +62,36 @@ const problemOf = (file: File): string | undefined => {
   return undefined;
 };
 
+/** Whether `error` is the connection breaking, not core's answer nor the browser's. */
+const broke = (error: unknown): boolean =>
+  isConnectionFailure(error) && !(error instanceof DOMException);
+
 /**
- * `asking`, where a connection that broke on the way says Grasp can't be
- * reached: a socket's own words ("Peer closed WebSocket") are nobody's to
- * read, and whether the question got there is core's to say once it is
- * back (its key, `questionKeyFor`). A file the browser couldn't read (moved
- * since it was added) says so itself.
+ * `asking`, asked once more on the next connection when the one it went
+ * on broke, or was let go of as dead (`CoreConnection.keepAlive`), which
+ * may have been wrong: with the same key, core takes it once either way,
+ * so a reconnect costs the person nothing. Broken again, it says Grasp
+ * can't be reached: a socket's own words ("Peer closed WebSocket") are
+ * nobody's to read. A file the browser couldn't read (moved since it was
+ * added) says so itself.
  */
 const reaching =
-  <T>(asking: (session: Session) => Promise<T>) =>
+  <T>(
+    core: Pick<CoreConnection, "withSession">,
+    asking: (session: Session) => Promise<T>
+  ) =>
   async (session: Session): Promise<T> => {
     try {
       return await asking(session);
     } catch (error) {
-      throw isConnectionFailure(error) && !(error instanceof DOMException)
-        ? new CoreTimeoutError(timeoutMs)
-        : error;
+      if (!broke(error)) {
+        throw error;
+      }
+    }
+    try {
+      return await core.withSession(asking);
+    } catch (error) {
+      throw broke(error) ? new CoreTimeoutError(timeoutMs) : error;
     }
   };
 
@@ -201,6 +217,7 @@ export const useAsk = (
   { onAsked, subject, make, agentId, running = false }: AskOptions = noOptions
 ) => {
   const { identity } = useRouteContext({ from: "/_shell" });
+  const core = useCore();
   const { busy, failure, run } = useCoreAction();
   const reconnecting = useReconnecting(busy || running);
   const holdHeartbeat = useHoldHeartbeat();
@@ -341,7 +358,7 @@ export const useAsk = (
       });
       return askedIn;
     };
-    const sent = await run(reaching(asking));
+    const sent = await run(reaching(core, asking));
     sending.current = false;
     if (sent === undefined) {
       // The box keeps the question and says why it wasn't sent.

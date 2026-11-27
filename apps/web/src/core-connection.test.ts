@@ -20,7 +20,7 @@ import {
   shellStatus,
   signOut,
 } from "./core-connection.ts";
-import type { SessionEnded } from "./core-connection.ts";
+import type { HostCheck, SessionEnded } from "./core-connection.ts";
 import { CoreTimeoutError } from "./core.ts";
 import { tabLink } from "./pages/tab-link.ts";
 import { keepChatLink, pendingChatLink } from "./settings/chat-link.ts";
@@ -67,6 +67,11 @@ interface Fake {
  * signed in, in turn, the last for every connection after.
  */
 const tab = (answers: Answer[]) => {
+  /** Whether the tab is in front, and what a fresh request to core finds. */
+  const page: { visible: boolean; host: HostCheck } = {
+    visible: true,
+    host: "answers",
+  };
   const opened: Fake[] = [];
   const ended: string[] = [];
   /** What the tab asked core, by name, on any connection. */
@@ -149,9 +154,12 @@ const tab = (answers: Answer[]) => {
       back = onBack;
       offline = onOffline;
     },
+    clock: { now: () => Date.now(), visible: () => page.visible },
+    checkHost: async () => await Promise.resolve(page.host),
   });
   return {
     core,
+    page,
     opened,
     ended,
     asked,
@@ -482,7 +490,7 @@ describe("the tab's one connection to core", () => {
 
     // The network dies under it: nothing answers, nothing closes.
     opened[0]?.silence();
-    await vi.advanceTimersByTimeAsync(heartbeatMs + 5000);
+    await vi.advanceTimersByTimeAsync(heartbeatMs + 5000 + 250);
     const noticed = opened[0]?.disposed;
     await vi.advanceTimersByTimeAsync(1);
     // Connected again, and still kept alive on the new connection.
@@ -502,6 +510,43 @@ describe("the tab's one connection to core", () => {
       noticed: true,
       again: { opened: 2, reach: "reachable" },
       afterLettingGo: 0,
+    });
+  });
+
+  it("lets no frozen or hidden tab, nor core too busy to answer, look like a dead socket, and lets go of one that is", async () => {
+    const { core, page, opened } = tab([one, one]);
+    await core.session();
+    const letGo = core.keepAlive();
+    await vi.advanceTimersByTimeAsync(0);
+    opened[0]?.silence();
+    // The page stands still for a minute (a frozen tab, a stalled
+    // machine): no time passes for it, however long the clock jumps.
+    for (let stall = 0; stall < 10; stall += 1) {
+      vi.setSystemTime(Date.now() + 60_000);
+      // oxlint-disable-next-line no-await-in-loop -- one stall after another
+      await vi.advanceTimersByTimeAsync(250);
+    }
+    const frozen = opened[0]?.disposed;
+    // In the back: nothing counts.
+    page.visible = false;
+    await vi.advanceTimersByTimeAsync(60_000);
+    const hidden = opened[0]?.disposed;
+    // In front, its ping unanswered, but core doesn't answer a fresh
+    // request either: busy, not dead.
+    page.visible = true;
+    page.host = "busy";
+    await vi.advanceTimersByTimeAsync(20_000);
+    const busy = opened[0]?.disposed;
+    // Core answers a fresh request while the socket says nothing: dead.
+    page.host = "answers";
+    await vi.advanceTimersByTimeAsync(heartbeatMs + 5000 + 250);
+    letGo();
+
+    expect({ frozen, hidden, busy, dead: opened[0]?.disposed }).toStrictEqual({
+      frozen: false,
+      hidden: false,
+      busy: false,
+      dead: true,
     });
   });
 

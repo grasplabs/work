@@ -510,10 +510,41 @@ describe("Chat's page from Make something", () => {
     });
   });
 
+  it("asks again on the next connection when the one a question went on broke, saying nothing, and core takes it once", async () => {
+    const { asked, keys } = await shown(undefined, undefined, {
+      // Let go of as dead (maybe wrongly) while it went.
+      sends: [new Error("Peer closed WebSocket: 1006")],
+    });
+
+    await act(async () => {
+      typeInPrompt(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({
+      notes: notes(),
+      sent: asked.filter((each) => each.startsWith("send ")),
+      sameKey: new Set(keys.map((each) => each.split(" ")[1])).size,
+    }).toStrictEqual({
+      notes: [],
+      sent: ["send chat-1 What waits on me today?"],
+      sameKey: 1,
+    });
+  });
+
   it("keeps a question that couldn't reach Grasp, says so, and sends it again as the same question, which core takes once", async () => {
     const { asked, keys } = await shown(undefined, undefined, {
-      // The socket broke on the way: its own words are nobody's to read.
-      sends: [new Error("Peer closed WebSocket: 1006")],
+      // The socket broke on the way, and again on the next: its own words
+      // are nobody's to read.
+      sends: [
+        new Error("Peer closed WebSocket: 1006"),
+        new Error("Peer closed WebSocket: 1006"),
+      ],
     });
 
     await act(async () => {
@@ -534,7 +565,7 @@ describe("Chat's page from Make something", () => {
 
     expect({
       failed,
-      asked,
+      sent: asked.filter((each) => each.startsWith("send ")),
       sameKey: new Set(keys.map((each) => each.split(" ")[1])).size,
     }).toStrictEqual({
       failed: {
@@ -544,26 +575,19 @@ describe("Chat's page from Make something", () => {
           "Grasp can't be reached right now. Try again in a moment.",
         ],
       },
-      // Made again with the same key, which core answers with the chat
-      // the first try made.
-      asked: [
-        "create What waits on me today? null",
-        "create What waits on me today? null",
-        "send chat-1 What waits on me today?",
-      ],
+      // Each try made the chat again with the same key, which core
+      // answers with the chat the first made, and sent it with the same.
+      sent: ["send chat-1 What waits on me today?"],
       sameKey: 1,
     });
-    expect(keys.map((each) => each.split(" ")[0])).toStrictEqual([
-      "create",
-      "send",
-      "create",
-      "send",
-    ]);
   });
 
   it("sends a question that failed as a new one once its words were changed, even back to the same words", async () => {
     const { keys } = await shown(undefined, undefined, {
-      sends: [new Error("Peer closed WebSocket: 1006")],
+      sends: [
+        new Error("Peer closed WebSocket: 1006"),
+        new Error("Peer closed WebSocket: 1006"),
+      ],
     });
     // The box's words, each time all of them anew.
     const write = async (words: string) => {
@@ -587,6 +611,7 @@ describe("Chat's page from Make something", () => {
     await ask("Yes");
 
     const sent = keys.filter((each) => each.startsWith("send "));
+    // Two tries of the first, one of the second.
     expect(new Set(sent).size).toBe(2);
   });
 

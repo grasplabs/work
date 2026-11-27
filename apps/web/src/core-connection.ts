@@ -11,6 +11,7 @@ import {
   isTransient,
   reconnectDelay,
   retrying,
+  timeoutMs,
   unlessAborted,
   withTimeout,
 } from "./core.ts";
@@ -135,7 +136,55 @@ export interface CoreConnectionOptions {
    * goes offline: never in tests.
    */
   watchPage?: (back: () => void, offline: () => void) => void;
+  /**
+   * Whether the page's clock runs for the heartbeat now: its time, and
+   * whether the tab is in front. A stand-in in tests.
+   */
+  clock?: PageClock;
+  /** Asks core over a fresh request whether it answers: a stand-in in tests. */
+  checkHost?: () => Promise<HostCheck>;
 }
+
+/** The page's time, and whether the tab is in front, for the heartbeat. */
+export interface PageClock {
+  now: () => number;
+  visible: () => boolean;
+}
+
+/**
+ * What a fresh request to core says while the socket says nothing: it
+ * answers (the socket alone is dead), the network fails it (nothing can
+ * reach core), or it waits too (core is busy, as a stalled machine is,
+ * which says nothing of the socket).
+ */
+export type HostCheck = "answers" | "unreachable" | "busy";
+
+const pageClock: PageClock = {
+  now: () => performance.now(),
+  visible: () => document.visibilityState === "visible",
+};
+
+/**
+ * Asks core over plain HTTP, beside the socket: `/rpc` answers a request
+ * that isn't a socket's at once, with a refusal, which is all it needs.
+ */
+const fetchHost = async (): Promise<HostCheck> => {
+  try {
+    await withTimeout(fetch("/rpc", { cache: "no-store" }));
+    return "answers";
+  } catch (error) {
+    return error instanceof CoreTimeoutError ? "busy" : "unreachable";
+  }
+};
+
+/**
+ * How often the heartbeat looks at its clock while a ping waits; a gap
+ * between two looks longer than {@link stallMs} is time the page stood
+ * still (a tab the browser froze or throttled, a machine too busy to run
+ * it), which never counts towards a ping's wait.
+ */
+const tickMs = 250;
+const stallMs = 1000;
 
 /**
  * The tab's one connection to core (spec 11.2), which everything the page
@@ -179,6 +228,8 @@ export class CoreConnection {
   readonly #onSessionEnded: () => void;
   readonly #connectCore: () => RpcStub<CoreApi>;
   readonly #watchPage: (back: () => void, offline: () => void) => void;
+  readonly #clock: PageClock;
+  readonly #checkHost: () => Promise<HostCheck>;
   #closed = false;
   /** Refuses whoever waits for a connection once the connection closed. */
   readonly #closing = new AbortController();
@@ -210,10 +261,14 @@ export class CoreConnection {
     onSessionEnded,
     connect = connectCore,
     watchPage = onPageBack,
+    clock = pageClock,
+    checkHost = fetchHost,
   }: CoreConnectionOptions) {
     this.#onSessionEnded = onSessionEnded;
     this.#connectCore = connect;
     this.#watchPage = watchPage;
+    this.#clock = clock;
+    this.#checkHost = checkHost;
   }
 
   /** Whether core answers, as the connection last found ({@link CoreReach}). */
@@ -320,8 +375,12 @@ export class CoreConnection {
     this.#keptAlive += 1;
     if (this.#keptAlive === 1) {
       void this.#probe();
+      // Only while the tab is in front: one in the back is checked as it
+      // comes back (`#back`).
       this.#heartbeat = setInterval(() => {
-        void this.#probe();
+        if (this.#clock.visible()) {
+          void this.#probe();
+        }
       }, heartbeatMs);
     }
     let held = true;
@@ -593,22 +652,67 @@ export class CoreConnection {
     void this.#probe();
   }
 
+  /**
+   * Asks the open connection whether it still answers, and lets it go only
+   * when it is dead, never when the page or core merely stood still, as
+   * T3 Code checks a silent socket: its ping unanswered for `timeoutMs` of
+   * the page running in front ({@link answersWithin}), and then a fresh
+   * request to core answered, or failed by the network, while the socket
+   * still says nothing. Core too busy to answer either leaves it be.
+   */
   async #probe(): Promise<void> {
     const api = this.#live;
     if (api === undefined) {
       return;
     }
     const holds = this.#holds;
-    try {
-      // Behind a large message, a ping waits as long as a slow upload may
-      // take, so a socket that died while one went is still let go of.
-      await withTimeout(api.ping(), this.#held > 0 ? heldPingMs : undefined);
-    } catch {
+    // Behind a large message, a ping waits as long as a slow upload may
+    // take, so a socket that died while one went is still let go of.
+    const pinged = this.#answersWithin(
+      api.ping(),
+      this.#held > 0 ? heldPingMs : timeoutMs
+    );
+    if (
+      (await pinged) ||
       // Behind a large message that went out meanwhile, a ping is late,
       // not lost.
-      if (this.#holds === holds) {
-        this.#drop(api);
+      this.#holds !== holds ||
+      this.#live !== api ||
+      (await this.#checkHost()) === "busy"
+    ) {
+      return;
+    }
+    this.#drop(api);
+  }
+
+  /**
+   * Whether `asked` settles before `ms` of the page running in front have
+   * passed: time in the back, and time the page stood still, don't count.
+   */
+  async #answersWithin(asked: Promise<unknown>, ms: number): Promise<boolean> {
+    const answer = Promise.withResolvers<boolean>();
+    const hear = async (): Promise<void> => {
+      await settled(asked);
+      answer.resolve(true);
+    };
+    void hear();
+    let waited = 0;
+    let last = this.#clock.now();
+    const looking = setInterval(() => {
+      const now = this.#clock.now();
+      const gap = now - last;
+      last = now;
+      if (this.#clock.visible() && gap <= stallMs) {
+        waited += gap;
       }
+      if (waited >= ms) {
+        answer.resolve(false);
+      }
+    }, tickMs);
+    try {
+      return await answer.promise;
+    } finally {
+      clearInterval(looking);
     }
   }
 
