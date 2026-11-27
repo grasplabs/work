@@ -180,7 +180,7 @@ describe("Platform's overview at a glance", () => {
       failed: main().includes("Its last deploy failed (39.01.10)."),
     }).toStrictEqual({
       cores: "Cores answering2 of 31 not answering",
-      look: "Need a look21 deploy failed and 1 not answering",
+      look: "Need a look21 deploy failed and 1 not read",
       listed: ["Bolt", "Cork"],
       failed: true,
     });

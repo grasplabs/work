@@ -168,8 +168,9 @@ const NeedsFigure = ({ looked }: { looked: Looked[] }) => {
       count(({ needs }) => needs.some((need) => need.kind === kind), words)
     ),
     ...count(
+      // Its version wasn't read (`standingOf` reads drift): its core may well answer.
       ({ needs, standing }) => needs.length === 0 && standing === "unread",
-      "not answering"
+      "not read"
     ),
     ...count(
       ({ needs, standing }) => needs.length === 0 && standing === "setup",
@@ -200,13 +201,13 @@ const lookLine = (live: Live): string | undefined => {
     : undefined;
 };
 
-/** What a company needs first, or, read and not answering, that it wasn't read. */
+/** What a company needs first; with no need, that it is being set up or that what it runs wasn't read. */
 const lookWords = ({ needs, standing }: Looked): string => {
   const [first] = needs;
   if (first === undefined) {
     return standing === "setup"
       ? "Being set up."
-      : "Its account didn’t answer.";
+      : "What it runs couldn’t be read just now.";
   }
   return needWords(first);
 };
