@@ -520,10 +520,15 @@ const apply = async (
       claimed
     ),
   ]);
-  // Whom the read suspended now: signed out in its batch, their open
-  // connections close (identity-changes.ts).
-  identityChanged(env, await suspendedAt(env, startedAt));
   await tellKept(env, keptIn(results[1 + own.length + placing.revocation]));
+  // Whom the read suspended now: signed out in its batch, their open
+  // connections close (identity-changes.ts). The read landed whatever
+  // comes of this; a connection reads its session within seconds anyway.
+  try {
+    identityChanged(env, await suspendedAt(env, startedAt));
+  } catch (error) {
+    log.warn("directory.suspensions_untold", errorFields(error));
+  }
 };
 
 /**

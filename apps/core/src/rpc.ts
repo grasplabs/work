@@ -213,7 +213,7 @@ const sessionApi = (
       const followed = await followObject({
         open: async () =>
           await workspace(env, personalWorkspaceId(connectedAs.userId)).fetch(
-            `https://person/connection?${new URLSearchParams({ person: connectedAs.userId }).toString()}`,
+            "https://person/connection",
             { headers: { Upgrade: "websocket" } }
           ),
         deliver: async (frame) => {

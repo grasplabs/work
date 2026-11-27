@@ -38,9 +38,6 @@ const connectionTag = "connection";
  */
 const maxConnections = 50;
 
-/** What a connection's socket carries through hibernation: whose, and since when. */
-const connectionSchema = personWatcherSchema;
-
 /** What a connection is told: read your session again now. */
 export const recheckFrame = { recheck: true } as const;
 
@@ -56,11 +53,14 @@ export const acceptConnection = (
   request: Request,
   personId: string
 ): Response => {
-  if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+  if (
+    request.headers.get("Upgrade")?.toLowerCase() !== "websocket" ||
+    personId === ""
+  ) {
     return new Response(null, { status: 400 });
   }
   makeRoom(
-    watchersOf(ctx, connectionSchema, connectionTag),
+    watchersOf(ctx, personWatcherSchema, connectionTag),
     personId,
     maxConnections
   );
@@ -70,7 +70,11 @@ export const acceptConnection = (
 
 /** Tells every connection of the person to read its session again now. */
 export const recheckConnections = (ctx: DurableObjectState): void => {
-  for (const { socket } of watchersOf(ctx, connectionSchema, connectionTag)) {
+  for (const { socket } of watchersOf(
+    ctx,
+    personWatcherSchema,
+    connectionTag
+  )) {
     sendFrame(socket, recheckFrame);
   }
 };

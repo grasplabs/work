@@ -2,11 +2,14 @@ import { guestRole } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { workspace } from "../src/durable-objects.ts";
+import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import { sessionEndedCloseCode } from "../src/rpc.ts";
 import { newTeam } from "./admin-teams.ts";
 import { mockIdp } from "./idp.ts";
 import {
   callAuth,
+  countingSessionReads,
   openRpc,
   outcome,
   signedInApi,
@@ -124,19 +127,30 @@ describe("an open connection, as an admin changes who its person is", () => {
     await expect(connection.closed).resolves.toBe(sessionEndedCloseCode);
   });
 
-  it("leaves someone else's open, whoever is removed", async () => {
+  it("tells nobody else's connection, whoever is removed: theirs reads nothing", async () => {
     const admin = await signedInApi(idp, "admin");
     const leaving = await signedInApi(idp, "user");
     const staying = await signedInApi(idp, "user");
-    await staying.api.whoami();
-    await untilConnected(staying.userId, 1);
+    const reads = { sessions: 0 };
+    const connection = await openRpc(staying.session, {
+      coreEnv: { ...env, DB: countingSessionReads(env.DB, reads) },
+    });
+    await untilConnected(staying.userId, 2);
     using _clock = heldClock();
+    const before = reads.sessions;
 
     await admin.api.members.remove(leaving.userId);
     await expect(leaving.closed).resolves.toBe(sessionEndedCloseCode);
+    // Their own person's object was told: had theirs been, it would have
+    // read by now.
+    await workspace(env, personalWorkspaceId(leaving.userId)).identityChanged();
 
-    await expect(staying.api.whoami()).resolves.toMatchObject({
-      userId: staying.userId,
-    });
+    expect({
+      read: reads.sessions - before,
+      open: await Promise.race([
+        connection.closed.then(() => false),
+        scheduler.wait(100).then(() => true),
+      ]),
+    }).toStrictEqual({ read: 0, open: true });
   });
 });

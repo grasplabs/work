@@ -537,11 +537,14 @@ const revokeMemberSessions = async (
       memberEntry(by, "member.sessions.revoked", membership.id, target)
     ),
   ]);
-  identityChanged(env, [target]);
   // Nothing ended: they had no session, or the admin no longer is one.
-  if (ended.length === 0 && !(await stillAdmin(env, by.userId))) {
-    throw refusal(by, roleErrors.create("role.forbidden"));
+  if (ended.length === 0) {
+    if (!(await stillAdmin(env, by.userId))) {
+      throw refusal(by, roleErrors.create("role.forbidden"));
+    }
+    return;
   }
+  identityChanged(env, [target]);
 };
 
 /**

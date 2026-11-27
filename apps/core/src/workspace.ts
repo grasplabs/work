@@ -230,6 +230,7 @@ import {
   connectionSpoke,
   recheckConnections,
 } from "./person-connections.ts";
+import { personOfWorkspace } from "./personal-workspace.ts";
 import type { WorkContext } from "./restricted.ts";
 import { outsideReadOf } from "./ungranted-reads.ts";
 import { retireUnseen } from "./unseen-memories.ts";
@@ -6709,7 +6710,7 @@ export class Workspace extends DurableObject<Env> {
     return acceptConnection(
       this.ctx,
       request,
-      new URL(request.url).searchParams.get("person") ?? ""
+      personOfWorkspace(this.ctx.id.name) ?? ""
     );
   }
 
