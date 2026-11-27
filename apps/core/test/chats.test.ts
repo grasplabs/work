@@ -2266,6 +2266,94 @@ describe("chats", () => {
     );
   });
 
+  it("finish a deletion whose chat's row is gone already, and keep its ID taken", async () => {
+    const ann = await person();
+    const kept = objectOf(ann);
+    const id = crypto.randomUUID();
+    const annAsConnect = await personOf(env, await ann.api.whoami());
+    // A mark with no row, as a release before this one could leave.
+    await runInDurableObject(kept, async (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO chat_deletes (chat_id, person, actor, audited, next_at) VALUES (?, ?, ?, 1, ?)",
+        id,
+        JSON.stringify(annAsConnect),
+        JSON.stringify({ type: "person", userId: ann.userId }),
+        Date.now()
+      );
+      await state.storage.setAlarm(Date.now() + 60_000);
+    });
+    await finishDeletesNow(kept);
+    const taken = await runInDurableObject(kept, (_instance, state) =>
+      state.storage.sql
+        .exec<{ count: number }>(
+          "SELECT count(*) AS count FROM deleted_chats WHERE id = ?",
+          id
+        )
+        .one()
+    );
+    expect({ left: await deletesOf(kept), taken }).toStrictEqual({
+      left: [],
+      taken: { count: 1 },
+    });
+  });
+
+  it("leave nothing of a deletion that finishes after their person's erasure wiped the object", async () => {
+    const ann = await person();
+    await answering(ann, says("Hi."));
+    const chat = await startedChat(ann, "Going");
+    const kept = objectOf(ann);
+    // Set inside the Workspace object, read here: plain memory, no I/O.
+    const at = { connect: false };
+    const gate = Promise.withResolvers<boolean>();
+    // Connect holds the deletion until the erasure is through. Objects may
+    // share the tests' env: this is the binding to put back.
+    const realConnect: unknown = await runInDurableObject(kept, (instance) => {
+      const was: unknown = Reflect.get(envOf(instance), "CONNECT");
+      if (typeof was !== "object" || was === null) {
+        throw new TypeError("The Workspace object has no connect binding");
+      }
+      Reflect.set(
+        envOf(instance),
+        "CONNECT",
+        new Proxy(was, {
+          get: (target, key): unknown =>
+            key === "declineChatActions"
+              ? async () => {
+                  at.connect = true;
+                  await gate.promise;
+                  return 0;
+                }
+              : Reflect.get(target, key),
+        })
+      );
+      return was;
+    });
+    try {
+      const deleting = ann.chats.remove(chat.id);
+      await vi.waitFor(
+        () => {
+          expect(at.connect).toBeTruthy();
+        },
+        { timeout: 15_000, interval: 20 }
+      );
+      await kept.erasePerson(ann.userId);
+      gate.resolve(true);
+      await deleting;
+    } finally {
+      await runInDurableObject(objectOf(ann), (instance) => {
+        Reflect.set(envOf(instance), "CONNECT", realConnect);
+      });
+    }
+    const left = await runInDurableObject(objectOf(ann), (_instance, state) =>
+      state.storage.sql
+        .exec<{ taken: number; recorded: number }>(
+          "SELECT (SELECT count(*) FROM deleted_chats) AS taken, (SELECT count(*) FROM audit_outbox WHERE event LIKE '%chat.deleted%') AS recorded"
+        )
+        .one()
+    );
+    expect(left).toStrictEqual({ taken: 0, recorded: 0 });
+  });
+
   it("finish at most a few deletions an alarm, and wake again at once for the rest", async () => {
     const ann = await person();
     const kept = objectOf(ann);

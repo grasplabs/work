@@ -771,6 +771,12 @@ const deleteRetryMs = { first: 5000, most: 15 * 60 * 1000 };
 const deleteRetryAfter = (attempts: number): number =>
   Math.min(deleteRetryMs.first * 2 ** (attempts - 1), deleteRetryMs.most);
 
+/**
+ * Tries of a deletion that fail before each further failure is logged as
+ * an error, not a warning: about an hour and a half of retries.
+ */
+const deleteAttemptsBeforeError = 10;
+
 /** Deletions one alarm finishes at most: each takes a few subrequests. */
 const deletesPerAlarm = 10;
 
@@ -5939,12 +5945,17 @@ export class Workspace extends DurableObject<Env> {
         .set({ attempts, nextAt: new Date(nextAt) })
         .where(eq(chatDeletes.chatId, id))
         .run();
-      log.warn("chat.delete_failed", {
-        workspace: this.ctx.id.name,
-        chatId: id,
-        attempts,
-        ...errorFields(error),
-      });
+      // Logged as an error once it keeps failing, for alerting; tried
+      // again all the same.
+      (attempts >= deleteAttemptsBeforeError ? log.error : log.warn)(
+        "chat.delete_failed",
+        {
+          workspace: this.ctx.id.name,
+          chatId: id,
+          attempts,
+          ...errorFields(error),
+        }
+      );
       await this.#armDeletes();
     }
   }
@@ -5980,16 +5991,19 @@ export class Workspace extends DurableObject<Env> {
       .from(chatDeletes)
       .where(eq(chatDeletes.chatId, id))
       .get();
-    const chat = this.#db
-      .select({ personId: chats.personId })
-      .from(chats)
-      .where(eq(chats.id, id))
-      .get();
-    if (marked === undefined || chat === undefined) {
+    if (marked === undefined) {
       return;
     }
     const { person, actor: by, audited } = marked;
-    const { personId } = chat;
+    // The chat's row may be gone already (a release before this one
+    // deleted it and left the mark): what lives outside goes all the same,
+    // for the person the mark names, and the mark with it.
+    const personId =
+      this.#db
+        .select({ personId: chats.personId })
+        .from(chats)
+        .where(eq(chats.id, id))
+        .get()?.personId ?? person.userId;
     await eraseChat(this.env, personId, id);
     const ref = this.#refOf(id);
     const declined = await this.env.CONNECT.declineChatActions({
@@ -6017,7 +6031,17 @@ export class Workspace extends DurableObject<Env> {
       await session.erase();
     });
     // Their rows go with it below.
-    this.ctx.storage.transactionSync(() => {
+    const finished = this.ctx.storage.transactionSync(() => {
+      // Nothing more once the mark is gone: its person's erasure wiped the
+      // object meanwhile, and nothing of the chat may come back into it.
+      const { declined: total } = this.#db
+        .delete(chatDeletes)
+        .where(eq(chatDeletes.chatId, id))
+        .returning({ declined: chatDeletes.declined })
+        .get() ?? { declined: undefined };
+      if (total === undefined) {
+        return false;
+      }
       this.#db
         .delete(brainCaptureIntents)
         .where(eq(brainCaptureIntents.evidenceId, id))
@@ -6063,11 +6087,6 @@ export class Workspace extends DurableObject<Env> {
         .delete(chatRequestKeys)
         .where(eq(chatRequestKeys.chatId, id))
         .run();
-      const { declined: total } = this.#db
-        .delete(chatDeletes)
-        .where(eq(chatDeletes.chatId, id))
-        .returning({ declined: chatDeletes.declined })
-        .get() ?? { declined };
       this.#db.delete(chats).where(eq(chats.id, id)).run();
       // Its ID stays taken here for good (`createChat`).
       this.#db.insert(deletedChats).values({ id }).onConflictDoNothing().run();
@@ -6080,7 +6099,11 @@ export class Workspace extends DurableObject<Env> {
       if (audited) {
         this.#outboxed(by, "chat.deleted", id, { declined: total });
       }
+      return true;
     });
+    if (!finished) {
+      return;
+    }
     this.#deliverAudit();
     this.#stopped.delete(id);
     this.#provenanceVersions.delete(id);
