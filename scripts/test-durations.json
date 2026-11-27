@@ -2,8 +2,6 @@
   "@grasp-os/app-kit test/catalog.test.ts": 7.3,
   "@grasp-os/app-kit test/components.test.tsx": 0.5,
   "@grasp-os/app-kit test/data-grid-money.test.ts": 0.1,
-  "@grasp-os/app-kit test/prompt-bar.test.tsx": 0.3,
-  "@grasp-os/app-kit test/prompt-editor.test.tsx": 1.1,
   "@grasp-os/app-kit test/rich-text-marks.test.ts": 0.1,
   "@grasp-os/app-kit test/rich-text.test.tsx": 0.8,
   "@grasp-os/app-kit test/row-ends.test.ts": 0.1,

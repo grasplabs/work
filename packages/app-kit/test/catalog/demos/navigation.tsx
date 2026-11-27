@@ -1,6 +1,5 @@
-import { BrandHeader } from "@grasp-os/app-kit/components/brand-header";
 // Demos of the kit's navigation components and the command palette. One
-// per component, for the dev-only gallery and its accessibility checks
+// per component, for the kit's accessibility checks
 // (test/kit.browser.test.tsx).
 import {
   Breadcrumb,
@@ -19,11 +18,6 @@ import {
   CommandList,
 } from "@grasp-os/app-kit/components/command";
 import {
-  FileTree,
-  FileTreeFile,
-  FileTreeFolder,
-} from "@grasp-os/app-kit/components/file-tree";
-import {
   NavigationMenu,
   NavigationMenuContent,
   NavigationMenuItem,
@@ -31,14 +25,6 @@ import {
   NavigationMenuList,
   NavigationMenuTrigger,
 } from "@grasp-os/app-kit/components/navigation-menu";
-import {
-  PageSidebar,
-  PageSidebarBody,
-  PageSidebarTop,
-  PageSidebarRailButton,
-  PageSidebarRailDivider,
-  PageSidebarRailExpand,
-} from "@grasp-os/app-kit/components/page-sidebar";
 import {
   Pagination,
   PaginationContent,
@@ -52,21 +38,18 @@ import {
   SidebarContent,
   SidebarGroup,
   SidebarGroupLabel,
-  SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
 } from "@grasp-os/app-kit/components/sidebar";
-import { SiteHeader } from "@grasp-os/app-kit/components/site-header";
 import {
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
 } from "@grasp-os/app-kit/components/tabs";
-import { BookOpenIcon, FileCodeIcon, MessagesSquareIcon } from "lucide-react";
-import { useState } from "react";
+import { BookOpenIcon, MessagesSquareIcon } from "lucide-react";
 
 const BreadcrumbDemo = () => (
   <Breadcrumb>
@@ -166,77 +149,6 @@ const SidebarDemo = () => (
   </SidebarProvider>
 );
 
-const BrandHeaderDemo = () => (
-  <SidebarProvider className="min-h-0">
-    <div className="overflow-hidden rounded-lg border">
-      <Sidebar collapsible="none">
-        <SidebarHeader>
-          <BrandHeader subtitle="Grasp" title="Acme" />
-        </SidebarHeader>
-      </Sidebar>
-    </div>
-  </SidebarProvider>
-);
-
-const SiteHeaderDemo = () => (
-  <SidebarProvider className="min-h-0">
-    <div className="w-full overflow-hidden rounded-lg border">
-      <SiteHeader
-        crumbs={[
-          {
-            label: "Knowledge",
-            // Its text is the crumb's label, which the header puts inside it.
-            link: <a aria-label="Knowledge" href="#knowledge" />,
-          },
-          { label: "Policies" },
-        ]}
-        triggerLabel="Show or hide the sidebar"
-      />
-    </div>
-  </SidebarProvider>
-);
-
-const PageSidebarDemo = () => {
-  const [folded, setFolded] = useState(false);
-  return (
-    <div className="flex h-64 overflow-hidden rounded-lg border">
-      <PageSidebar folded={folded} label="Knowledge">
-        {folded ? (
-          <>
-            <PageSidebarRailExpand
-              label="Expand the sidebar"
-              onExpand={() => {
-                setFolded(false);
-              }}
-            />
-            <PageSidebarRailDivider />
-            <PageSidebarRailButton active label="Policies">
-              <BookOpenIcon />
-            </PageSidebarRailButton>
-          </>
-        ) : (
-          <>
-            <PageSidebarTop
-              fold={{
-                label: "Fold the sidebar",
-                onFold: () => {
-                  setFolded(true);
-                },
-              }}
-            >
-              <span className="font-medium">Knowledge</span>
-            </PageSidebarTop>
-            <PageSidebarBody>
-              <span>Policies</span>
-              <span>Handbook</span>
-            </PageSidebarBody>
-          </>
-        )}
-      </PageSidebar>
-    </div>
-  );
-};
-
 const TabsDemo = () => (
   <Tabs defaultValue="account">
     <TabsList>
@@ -252,46 +164,11 @@ const TabsDemo = () => (
   </Tabs>
 );
 
-const FileTreeDemo = () => {
-  const [open, setOpen] = useState("server/invoices.ts");
-  const file = (path: string, name: string) => (
-    <FileTreeFile
-      active={open === path}
-      icon={<FileCodeIcon />}
-      onClick={() => {
-        setOpen(path);
-      }}
-    >
-      {name}
-    </FileTreeFile>
-  );
-  return (
-    <nav aria-label="Files" className="w-56">
-      <FileTree>
-        <FileTreeFolder defaultOpen name="server">
-          {file("server/invoices.ts", "invoices.ts")}
-          {file("server/schema.ts", "schema.ts")}
-        </FileTreeFolder>
-        <FileTreeFolder name="src">
-          <FileTreeFolder name="routes">
-            {file("src/routes/index.tsx", "index.tsx")}
-          </FileTreeFolder>
-        </FileTreeFolder>
-        {file("grasp.config.ts", "grasp.config.ts")}
-      </FileTree>
-    </nav>
-  );
-};
-
 export const navigationDemos = {
-  "brand-header": BrandHeaderDemo,
   breadcrumb: BreadcrumbDemo,
   command: CommandDemo,
-  "file-tree": FileTreeDemo,
   "navigation-menu": NavigationMenuDemo,
-  "page-sidebar": PageSidebarDemo,
   pagination: PaginationDemo,
   sidebar: SidebarDemo,
-  "site-header": SiteHeaderDemo,
   tabs: TabsDemo,
 };

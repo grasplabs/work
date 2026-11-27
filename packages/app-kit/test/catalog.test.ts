@@ -5,14 +5,14 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
-import { demos } from "../catalog/demos.ts";
-import { loadExample } from "../catalog/examples.ts";
-import { overlayNames } from "../catalog/overlays.ts";
+import { demos } from "./catalog/demos.ts";
+import { loadExample } from "./catalog/examples.ts";
+import { overlayNames } from "./catalog/overlays.ts";
 
-// The dev-only gallery (apps/web, `/kit`) against what the kit really
-// ships: pages import `@grasp-os/app-kit/components/<name>`, one module per
-// file of the components directory, and each has a demo there; each file
-// of the examples directory loads by its name.
+// The demos and examples the kit's tests render, against what the kit
+// really ships: pages import `@grasp-os/app-kit/components/<name>`, one
+// module per file of the components directory, and each has a demo there;
+// each file of the examples directory loads by its name.
 
 /** The names of the `.tsx` modules in `dir`, tests aside. */
 const modulesIn = (dir: string): string[] =>
@@ -51,7 +51,7 @@ describe("the kit's overlays", () => {
 describe("the kit's examples", () => {
   it("loads each example file by its name, and it renders (a smoke test)", async () => {
     expect(Object.keys(loadExample).toSorted()).toStrictEqual(
-      modulesIn("../catalog/examples")
+      modulesIn("catalog/examples")
     );
     for (const [name, load] of Object.entries(loadExample)) {
       // oxlint-disable-next-line no-await-in-loop -- one example at a time keeps a failure readable
