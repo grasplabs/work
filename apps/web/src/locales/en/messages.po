@@ -1679,6 +1679,11 @@ msgstr "{triggers, plural, one {# trigger, and Run by hand.} other {# triggers, 
 msgid "{uninterviewed} of {total} not interviewed yet"
 msgstr "{uninterviewed} of {total} not interviewed yet"
 
+#. Connections a step read from that the page has no name for, as the last item of the list in “Read from {sources}”.
+#: src/chat/answer-steps.tsx
+msgid "{unknown, plural, one {a connection} other {# connections}}"
+msgstr "{unknown, plural, one {a connection} other {# connections}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{unnamed} of {total} seen in use, never named"
 msgstr "{unnamed} of {total} seen in use, never named"
@@ -10289,6 +10294,11 @@ msgstr "Location"
 msgid "Log in"
 msgstr "Log in"
 
+#: src/chat/answer-steps.tsx
+msgctxt "what a code step logged"
+msgid "Logged"
+msgstr "Logged"
+
 #: src/settings/org-card.tsx
 msgid "Logo"
 msgstr "Logo"
@@ -13267,6 +13277,10 @@ msgstr "Part {n} of {parts}: {label}"
 msgid "Part of the brain not found"
 msgstr "Part of the brain not found"
 
+#: src/chat/answer-steps.tsx
+msgid "Part of what came back was left out, to fit what the model reads."
+msgstr "Part of what came back was left out, to fit what the model reads."
+
 #: src/inbox/outcome-details.tsx
 msgid "Part of what was sent is cut short above. Show it all, or exactly what was sent, before you say it didn't happen."
 msgstr "Part of what was sent is cut short above. Show it all, or exactly what was sent, before you say it didn't happen."
@@ -14032,6 +14046,11 @@ msgstr "Read from"
 #: src/brain/sources-page.tsx
 msgid "Read from {name} on {readOn}"
 msgstr "Read from {name} on {readOn}"
+
+#. The outside systems a step of the answer read from; {sources} is their names, as a list.
+#: src/chat/answer-steps.tsx
+msgid "Read from {sources}"
+msgstr "Read from {sources}"
 
 #: src/brain/sources-page.tsx
 msgctxt "a source of the Brain"
