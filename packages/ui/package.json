@@ -13,6 +13,7 @@
     "./components/markdown/*": null,
     "./components/*.stylex": "./src/components/*.stylex.ts",
     "./components/*": "./src/components/*.tsx",
+    "./blocks/*.stylex": "./src/blocks/*.stylex.ts",
     "./blocks/*": "./src/blocks/*.tsx",
     "./lib/i18n": "./src/lib/i18n.tsx",
     "./lib/menu": "./src/lib/menu.tsx",

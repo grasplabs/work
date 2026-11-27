@@ -1,4 +1,5 @@
 import { isMemberAdmin } from "@grasp-os/shared/roles";
+import { AppShellPage } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
 import { Alert, AlertTitle } from "@grasp-os/ui/components/alert";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -23,7 +24,6 @@ import type { Integration } from "../connections/integrations.ts";
 import { PartNotLoaded } from "../connections/part-not-loaded.tsx";
 import { IntegrationsIcon } from "../frame/integrations-icon.tsx";
 import { NotFound, PageNotLoaded } from "../frame/page-states.tsx";
-import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -132,7 +132,7 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
           { label: integration.name },
         ]}
       />
-      <Page>
+      <AppShellPage>
         <ConnectedDialog
           again={again || returned.again}
           app={integration.name}
@@ -167,7 +167,7 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
             tools={blockable}
           />
         </IntegrationAppPage>
-      </Page>
+      </AppShellPage>
     </>
   );
 };

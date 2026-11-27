@@ -1,9 +1,10 @@
+import type { AppShellNavRow } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01-sidebar";
 import { CalendarIcon, LockIcon, StickyNoteIcon } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
 import { Link, useMatch } from "@tanstack/react-router";
 
-import type { SidebarRow, SidebarSection } from "../frame/sidebar.tsx";
+import type { SidebarSection } from "../frame/sidebar.tsx";
 import { wakesOn } from "./agent-facts.tsx";
 import { AgentFigure } from "./figure/agent-figure.tsx";
 import { lookOf } from "./figure/look.ts";
@@ -42,13 +43,16 @@ export const useAgentSection = (): SidebarSection | undefined => {
   const own = agent.ownerId !== null;
   const tab = agentTabOf(match.search.tab);
   const scheduled = wakesOn(read.managed?.wakes[agent.id] ?? []).length;
-  const row = (value: AgentTab, label: string, icon: IconData): SidebarRow => ({
+  const row = (
+    value: AgentTab,
+    label: string,
+    icon: IconData
+  ): AppShellNavRow => ({
     id: value,
     label,
     icon,
-    render: (look) => (
+    render: (
       <Link
-        {...look}
         params={{ agent: agent.id }}
         replace
         search={{ tab: value }}
@@ -63,20 +67,23 @@ export const useAgentSection = (): SidebarSection | undefined => {
     mark: <AgentFigure look={lookOf(agent)} size="icon" />,
     navLabel: t`${name}'s pages`,
     // Its name opens its overview: no Overview row of its own.
-    home: (look) => (
+    home: (lead, title) => (
       <Link
-        {...look}
         params={{ agent: agent.id }}
         replace
         search={{}}
         to="/agents/$agent"
-      />
+      >
+        {lead}
+        {title}
+      </Link>
     ),
     // A tab its own agent hasn't is its overview, as its page shows it.
     homeCurrent: tab === "overview" || (own && tab !== "instructions"),
-    back: { label: t`Back`, render: (look) => <Link {...look} to="/agents" /> },
+    back: { label: t`Back`, link: <Link to="/agents" /> },
     groups: [
       {
+        id: "pages",
         rows: [
           row("instructions", t`Instructions`, StickyNoteIcon),
           ...(own

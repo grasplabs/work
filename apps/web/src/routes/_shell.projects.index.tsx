@@ -1,5 +1,6 @@
 import type { ProjectSummary } from "@grasp-os/shared/projects";
 import { canBuild } from "@grasp-os/shared/roles";
+import { AppShellPage } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Empty,
@@ -26,7 +27,6 @@ import { useState } from "react";
 
 import { PageNotLoaded } from "../frame/page-states.tsx";
 import { pageText } from "../frame/page-text.ts";
-import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import { projectCountsWords } from "../projects/project-counts.tsx";
@@ -92,7 +92,7 @@ const Projects = () => {
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Projects` }]} />
-      <Page>
+      <AppShellPage>
         <div {...stylex.props(pageText.text)}>
           <PageHeader
             {...(builds && page.data.length > 0 ? { actions: make } : {})}
@@ -115,7 +115,7 @@ const Projects = () => {
             </ItemGroup>
           )}
         </div>
-      </Page>
+      </AppShellPage>
       <ProjectDialog
         onDone={(projectId) => {
           void navigate({ to: "/projects/$projectId", params: { projectId } });
@@ -138,9 +138,9 @@ const ProjectsPending = () => {
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Projects` }]} />
-      <Page>
+      <AppShellPage>
         <ProjectsSkeleton rows={8} />
-      </Page>
+      </AppShellPage>
     </>
   );
 };

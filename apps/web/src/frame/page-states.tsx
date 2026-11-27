@@ -1,4 +1,8 @@
 import { expectedMessageOf } from "@grasp-os/shared/errors";
+import {
+  AppShellPage,
+  AppShellPageSkeleton,
+} from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Empty,
@@ -32,7 +36,6 @@ import type { Loaded } from "../load-from-core.tsx";
 import { useCoreReach } from "../use-core-reach.ts";
 import { useCore } from "../use-core.ts";
 import { InFrame } from "./in-frame.ts";
-import { pageRoom } from "./page.styles.ts";
 import { SiteHeader } from "./site-header.tsx";
 import type { Crumb } from "./site-header.tsx";
 
@@ -151,19 +154,6 @@ const styles = stylex.create({
   },
   line: { width: "100%" },
   lastLine: { width: "66%" },
-  loading: {
-    display: "flex",
-    flexDirection: "column",
-    gap: space["6"],
-    padding: space["6"],
-  },
-  heading: {
-    display: "flex",
-    flexDirection: "column",
-    gap: space["2"],
-  },
-  title: { width: "12rem", maxWidth: "100%" },
-  description: { width: "18rem", maxWidth: "100%" },
 });
 
 // How every page finds nothing, fails and loads, the same on each, on
@@ -184,16 +174,20 @@ const Place = ({
   children,
 }: {
   crumbs: readonly Crumb[];
-  /** Whether it keeps the page's room round it in the card (`pageRoom`), so it stands in the middle of that; a page that failed has the whole card. */
+  /** Whether it stands in the page's room in the card (AppShellPage), in the middle of that; a page that failed has the whole card. */
   room?: boolean;
   children: ReactNode;
 }) =>
   use(InFrame) ? (
     <>
       <SiteHeader crumbs={crumbs} />
-      <div {...stylex.props(styles.inFrame, room && pageRoom.room)}>
-        {children}
-      </div>
+      {room ? (
+        <AppShellPage>
+          <div {...stylex.props(styles.inFrame)}>{children}</div>
+        </AppShellPage>
+      ) : (
+        <div {...stylex.props(styles.inFrame)}>{children}</div>
+      )}
     </>
   ) : (
     <main {...stylex.props(styles.alone)}>{children}</main>
@@ -711,8 +705,8 @@ export const LoadingLines = ({ lines = 3 }: { lines?: number }) => {
 
 /**
  * What a page in the frame shows while a slow read comes: the header and
- * the pages' usual layout (a heading, a line under it, then its content,
- * from the page's top left) as skeletons. Each page under the shell whose
+ * the pages' usual layout (a heading, a line under it, then its content)
+ * as skeletons in the page's room (AppShellPageSkeleton). Each page under the shell whose
  * address alone decides what it reads names it as its `pendingComponent`.
  * Not the shell itself, so while it asks who is in again after core was
  * out of reach, what it showed stays; and not a page that reads again as
@@ -722,12 +716,6 @@ export const LoadingLines = ({ lines = 3 }: { lines?: number }) => {
 export const PageLoading = () => (
   <>
     <SiteHeader crumbs={[]} />
-    <div {...stylex.props(styles.loading)}>
-      <div {...stylex.props(styles.heading)}>
-        <Skeleton size="lg" style={styles.title} />
-        <Skeleton size="default" style={styles.description} />
-      </div>
-      <LoadingLines lines={4} />
-    </div>
+    <AppShellPageSkeleton />
   </>
 );

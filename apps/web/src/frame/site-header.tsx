@@ -1,3 +1,4 @@
+import { AppShellHeader } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -20,8 +21,8 @@ import {
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
-import { Fragment, useLayoutEffect, useRef, useSyncExternalStore } from "react";
-import type { ReactNode } from "react";
+import { Fragment, useSyncExternalStore } from "react";
+import type { ReactElement, ReactNode } from "react";
 
 import type { RegionId } from "../brain/brain-atlas.ts";
 import { useShownPresence } from "../chat/global-chat.tsx";
@@ -94,66 +95,38 @@ const CrumbName = ({ crumb }: { crumb: Crumb }) => {
   );
 };
 
-/** A router link's look: none (Damsko's BreadcrumbLink gives it), or the phone trail's. */
-type LinkLook = Partial<ReturnType<typeof stylex.props>>;
+/** A router link's look and words: none (the bar gives them), or the product's bar's. */
+type LinkLook = Partial<ReturnType<typeof stylex.props>> & {
+  children?: ReactNode;
+};
 
-/** Where a crumb leads, as a router link holding its name. */
-const CrumbLink = ({
-  crumb,
-  look,
-}: {
-  crumb: Extract<Crumb, { to: string }>;
-  look?: LinkLook;
-}) => {
-  const { label } = crumb;
+/** Where a crumb leads, as a router link: given `look`, with it and its words. */
+const crumbLink = (
+  crumb: Extract<Crumb, { to: string }>,
+  look: LinkLook = {}
+): ReactElement<Record<string, unknown>> => {
   // A place on the brain's atlas: a region, a folder in it, a note there.
   if ("search" in crumb) {
-    return (
-      <Link search={crumb.search} to="/brain" {...look}>
-        {label}
-      </Link>
-    );
+    return <Link search={crumb.search} to="/brain" {...look} />;
   }
   if (!("params" in crumb)) {
-    return (
-      <Link to={crumb.to} {...look}>
-        {label}
-      </Link>
-    );
+    return <Link to={crumb.to} {...look} />;
   }
   if (crumb.to === "/workflows/$workflow") {
-    return (
-      <Link params={crumb.params} to="/workflows/$workflow" {...look}>
-        {label}
-      </Link>
-    );
+    return <Link params={crumb.params} to="/workflows/$workflow" {...look} />;
   }
   if (crumb.to === "/projects/$projectId") {
-    return (
-      <Link params={crumb.params} to="/projects/$projectId" {...look}>
-        {label}
-      </Link>
-    );
+    return <Link params={crumb.params} to="/projects/$projectId" {...look} />;
   }
   if (crumb.to === "/brain/$noteId") {
-    return (
-      <Link params={crumb.params} to="/brain/$noteId" {...look}>
-        {label}
-      </Link>
-    );
+    return <Link params={crumb.params} to="/brain/$noteId" {...look} />;
   }
   if (crumb.to === "/brain/sections/$sectionId") {
     return (
-      <Link params={crumb.params} to="/brain/sections/$sectionId" {...look}>
-        {label}
-      </Link>
+      <Link params={crumb.params} to="/brain/sections/$sectionId" {...look} />
     );
   }
-  return (
-    <Link params={crumb.params} to="/apps/$app" {...look}>
-      {label}
-    </Link>
-  );
+  return <Link params={crumb.params} to="/apps/$app" {...look} />;
 };
 
 /**
@@ -401,10 +374,10 @@ const PhoneTrail = ({
         {step === undefined ? null : (
           <li ref={watchStep} {...stylex.props(styles.phoneStep)}>
             {"to" in step ? (
-              <CrumbLink
-                crumb={step}
-                look={stylex.props(styles.phoneLink, focusRingText)}
-              />
+              crumbLink(step, {
+                ...stylex.props(styles.phoneLink, focusRingText),
+                children: step.label,
+              })
             ) : (
               // A step that leads nowhere (Settings) in the page's look, as
               // #2503's bar draws a crumb without a link (`CrumbStep`).
@@ -432,107 +405,39 @@ const PhoneTrail = ({
 };
 
 /**
- * The bar above every signed-in page, the one way a page heads itself, so
- * the frame changes every page's bar here: Damsko's SidebarTrigger at its
- * start while the sidebar is away (folded, or a sheet on a narrow window;
- * otherwise the sidebar's head holds it), then where the page is (Damsko's
- * Breadcrumb, its steps parted by a slash, as the product's bar has them;
- * on a phone the page and the step before it, `PhoneTrail`), with where its
- * subject stands after it (`trailing`), and at its end the page's actions.
- * It is app-shell-01's header, drawn by the page: the block draws its own
- * from props (the crumbs, the title, the actions), which the pages here
- * draw themselves.
+ * The bar of a page whose own name is renamed in place, in a small popup
+ * with a field (panels/rename.tsx), as #2503's shell has it: the product's
+ * own bar, drawn as AppShellHeader draws it, because AppShellHeader renames
+ * its title only inline (registry gap of 27 Nov 2026, "AppShellHeader: a
+ * title renamed in a popup"). The fold at its start while the sidebar is
+ * away (folded, or a sheet on a narrow window); Damsko's SidebarProvider
+ * hands focus on to the sidebar's own fold when this one goes.
  */
-export const SiteHeader = ({
+const RenamingBar = ({
   crumbs,
   actions,
   trailing,
 }: {
   crumbs: readonly Crumb[];
   actions?: ReactNode;
-  /**
-   * Where its subject stands, an item of the row after the crumbs: one
-   * that gives way where the bar is narrow takes no room, nor the gap
-   * before it, once it has (`display: none`), so the crumbs keep it.
-   */
   trailing?: ReactNode;
 }) => {
   const { t } = useLingui();
   const { state, isMobile } = useSidebar();
-  // Room for the chat's button wherever the chat stands beside the page,
-  // docked about its subject too, as #2503's bar keeps it (app-shell's
-  // `data-shell-panels`).
   const { placements } = useShownPresence();
   const chatFloats =
     placements.includes("floating") || placements.includes("docked");
   const away = isMobile || state === "collapsed";
   const phone = usePhone();
   const last = crumbs.length - 1;
-  const bar = useRef<HTMLElement>(null);
-  // This bar's trigger opened the sidebar (pressed, or held focus as the
-  // shortcut opened it) and went as it did: focus goes on to the fold in
-  // the sidebar's head, and never stays on the page. Until Damsko's
-  // SidebarProvider does this itself (the registry gap "the sidebar gives
-  // no focus back when it opens from a trigger that then goes"); then this
-  // goes.
-  const handing = useRef(false);
-  useLayoutEffect(() => {
-    if (away || !handing.current) {
-      return () => {
-        // Nothing to hand on.
-      };
-    }
-    handing.current = false;
-    const sidebar = bar.current
-      ?.closest('[data-slot="sidebar-wrapper"]')
-      ?.querySelector<HTMLElement>('[data-slot="sidebar-container"]');
-    const fold = sidebar?.querySelector<HTMLElement>(
-      '[data-slot="sidebar-trigger"]'
-    );
-    let left = false;
-    // Hidden until it has slid in (none of it with reduced motion): the
-    // fold takes focus once the sidebar's own transitions are over, done
-    // or cut off, unless it is folded again first.
-    const slid = Promise.allSettled(
-      (sidebar?.getAnimations() ?? []).map(
-        async ({ finished }) => await finished
-      )
-    );
-    const handOn = async () => {
-      await slid;
-      if (!left) {
-        fold?.focus();
-      }
-    };
-    void handOn();
-    return () => {
-      left = true;
-    };
-  }, [away]);
   return (
     <header
-      data-slot="site-header"
-      // The trigger holding focus, as the shortcut may open the sidebar.
-      onBlur={() => {
-        handing.current = false;
-      }}
-      onFocus={({ target }) => {
-        handing.current =
-          !isMobile && target.dataset.slot === "sidebar-trigger";
-      }}
-      ref={bar}
+      data-slot="app-shell-header"
       {...stylex.props(styles.bar, chatFloats && styles.roomForChat)}
     >
       {away ? (
         <span {...stylex.props(styles.triggerInk)}>
-          <SidebarTrigger
-            aria-label={t`Show or hide the sidebar`}
-            style={styles.trigger}
-            onClick={() => {
-              // The sheet takes focus itself, and gives it back on closing.
-              handing.current = !isMobile;
-            }}
-          />
+          <SidebarTrigger style={styles.trigger} />
         </span>
       ) : null}
       <div {...stylex.props(styles.where)}>
@@ -552,7 +457,7 @@ export const SiteHeader = ({
                   <BreadcrumbItem>
                     {index !== last && "to" in crumb ? (
                       <BreadcrumbLink asChild>
-                        <CrumbLink crumb={crumb} />
+                        {crumbLink(crumb, { children: crumb.label })}
                       </BreadcrumbLink>
                     ) : (
                       <BreadcrumbPage>
@@ -571,5 +476,48 @@ export const SiteHeader = ({
         <div {...stylex.props(styles.actions)}>{actions}</div>
       )}
     </header>
+  );
+};
+
+/**
+ * The bar above every signed-in page, the one way a page heads itself:
+ * Damsko's AppShellHeader, with the page's crumbs (the last is the page
+ * itself), where its subject stands after them (`trailing`), and at its
+ * end the page's actions. A page whose own name renames in place keeps the
+ * product's bar (`RenamingBar`).
+ */
+export const SiteHeader = ({
+  crumbs,
+  actions,
+  trailing,
+}: {
+  crumbs: readonly Crumb[];
+  actions?: ReactNode;
+  /**
+   * Where its subject stands, an item of the row after the crumbs: one
+   * that gives way where the bar is narrow takes no room, nor the gap
+   * before it, once it has (`display: none`), so the crumbs keep it.
+   */
+  trailing?: ReactNode;
+}) => {
+  const page = crumbs.at(-1);
+  if (page !== undefined && "onRename" in page && page.onRename !== undefined) {
+    return (
+      <RenamingBar actions={actions} crumbs={crumbs} trailing={trailing} />
+    );
+  }
+  return (
+    <AppShellHeader
+      actions={actions}
+      breadcrumb={crumbs
+        .slice(0, -1)
+        .map((crumb) =>
+          "to" in crumb
+            ? { label: crumb.label, render: crumbLink(crumb) }
+            : { label: crumb.label }
+        )}
+      title={page?.label}
+      trailing={trailing}
+    />
   );
 };

@@ -1,5 +1,12 @@
 import type { SidebarApp } from "@grasp-os/shared/pages";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { AppShellSidebar } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
+import {
+  AppShellNav,
+  AppShellNavEmpty,
+  AppShellSwitch,
+} from "@grasp-os/ui/blocks/app-shell-01/app-shell-01-sidebar";
+import type { AppShellNavGroup } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01-sidebar";
 import { useSidebar } from "@grasp-os/ui/components/sidebar";
 import {
   AppWindowIcon,
@@ -39,12 +46,11 @@ import type { InboxItem } from "../inbox/items.ts";
 import { useInboxGroups, useWaitingItems } from "../inbox/sidebar-inbox.tsx";
 import { appSplat } from "../pages/app-address.ts";
 import { groupedSectionsFor } from "../settings/sections.ts";
-import { shortcutLabel } from "../shortcuts.ts";
 import { useWorkflowsWaiting } from "../workflows/nav-item.tsx";
 import { GraspMark } from "./grasp-mark.ts";
 import { PersonMenu } from "./person-menu.tsx";
-import { FrameSidebar } from "./sidebar.tsx";
-import type { SidebarGroupEntry, SidebarSection } from "./sidebar.tsx";
+import { FrameLevels } from "./sidebar.tsx";
+import type { SidebarSection } from "./sidebar.tsx";
 import { useSidebarApps } from "./surface-nav.tsx";
 import { useWayOut, WayOut } from "./way-out.tsx";
 import type { Outside } from "./way-out.tsx";
@@ -93,31 +99,29 @@ const fromAppsGroup = (
   apps: readonly SidebarApp[],
   label: string,
   isCurrent: (app: string) => boolean
-): SidebarGroupEntry[] =>
+): AppShellNavGroup[] =>
   apps.length === 0
     ? []
     : [
         {
+          id: "from-apps",
           label,
           rows: apps.map((app) => ({
             id: app.app,
             label: app.name,
             icon: AppWindowIcon,
-            render: (look) => (
-              <Link {...look} params={{ app: app.app }} to="/apps/$app" />
-            ),
+            render: <Link params={{ app: app.app }} to="/apps/$app" />,
             current: isCurrent(app.app),
             rows: app.entries.map((entry) => {
               const splat = appSplat(entry.path);
               return {
                 id: entry.path,
                 label: entry.title,
-                render: (look) =>
+                render:
                   splat === "" ? (
-                    <Link {...look} params={{ app: app.app }} to="/apps/$app" />
+                    <Link params={{ app: app.app }} to="/apps/$app" />
                   ) : (
                     <Link
-                      {...look}
                       params={{ app: app.app, _splat: splat }}
                       to="/apps/$app/pages/$"
                     />
@@ -141,7 +145,7 @@ const useGroups = ({
   view: SidebarView;
   waitingItems: readonly InboxItem[] | undefined;
   chats: Pick<ReturnType<typeof useRecentChats>, "rows" | "more">;
-}): SidebarGroupEntry[] => {
+}): AppShellNavGroup[] => {
   const { t } = useLingui();
   const matchRoute = useMatchRoute();
   const inbox = useInboxGroups(waitingItems);
@@ -154,55 +158,55 @@ const useGroups = ({
     to: "/" | "/brain" | "/apps" | "/workflows" | "/agents" | "/connectors",
     fuzzy = true
   ) => matchRoute({ to, fuzzy }) !== false;
-  const sections: SidebarGroupEntry = {
+  const sections: AppShellNavGroup = {
     id: "sections",
     rows: [
       {
         id: "chat",
         label: t`Chat`,
         icon: MessageSquareIcon,
-        render: (look) => <Link {...look} to="/" />,
+        render: <Link to="/" />,
         current: at("/", false),
       },
       {
         id: "brain",
         label: t`Brain`,
         icon: BrainIcon,
-        render: (look) => <Link {...look} to="/brain" />,
+        render: <Link to="/brain" />,
         current: at("/brain"),
       },
       {
         id: "apps",
         label: t`Apps`,
         icon: LayoutDashboardIcon,
-        render: (look) => <Link {...look} to="/apps" />,
+        render: <Link to="/apps" />,
         current: at("/apps"),
       },
       {
         id: "workflows",
         label: t`Workflows`,
         icon: RepeatIcon,
-        render: (look) => <Link {...look} to="/workflows" />,
+        render: <Link to="/workflows" />,
         current: at("/workflows"),
         ...(workflowsWaiting === undefined
           ? {}
           : {
               count: workflowsWaiting,
-              countLabel: workflowsWaitingLabel(workflowsWaiting),
+              countText: workflowsWaitingLabel(workflowsWaiting),
             }),
       },
       {
         id: "agents",
         label: t`Agents`,
         icon: UserSparklesIcon,
-        render: (look) => <Link {...look} to="/agents" />,
+        render: <Link to="/agents" />,
         current: at("/agents"),
       },
       {
         id: "integrations",
         label: t`Connectors`,
         icon: CableIcon,
-        render: (look) => <Link {...look} to="/connectors" />,
+        render: <Link to="/connectors" />,
         current: at("/connectors"),
       },
     ],
@@ -210,7 +214,7 @@ const useGroups = ({
   // The person's recent chats: a group of their own under the sections,
   // named, its label folding the list away; the way to every chat after
   // them, the chats window.
-  const recent: SidebarGroupEntry[] =
+  const recent: AppShellNavGroup[] =
     chats.rows.length === 0
       ? []
       : [
@@ -251,11 +255,13 @@ const useSettingsSection = (
     id: "settings",
     title: t`Settings`,
     icon: SettingsIcon,
-    home: (look) => <Link {...look} to="/settings" />,
-    back: {
-      label: t`Back`,
-      render: (look) => <WayOut {...look} outside={outside} />,
-    },
+    home: (lead, title) => (
+      <Link to="/settings">
+        {lead}
+        {title}
+      </Link>
+    ),
+    back: { label: t`Back`, link: <WayOut outside={outside} /> },
     groups: groupedSectionsFor(identity).map(({ group, sections }) => ({
       id: group.id,
       label: i18n._(group.title),
@@ -263,7 +269,7 @@ const useSettingsSection = (
         id: href,
         label: i18n._(label),
         icon,
-        render: (look) => <Link {...look} to={href} />,
+        render: <Link to={href} />,
         current: pathname.startsWith(href),
       })),
     })),
@@ -332,13 +338,21 @@ export const AppSidebar = ({
       }),
     [router, setOpenMobile]
   );
+  const rows = (
+    <AppShellNav
+      aria-label={view === "inbox" ? t`Inbox` : t`Main`}
+      groups={groups}
+    >
+      {/* Said only once core has said so: while it can't be read, the view
+          stays blank rather than claim nothing waits. */}
+      {view === "inbox" && waitingItems !== undefined && groups.length === 0 ? (
+        <AppShellNavEmpty>{t`Nothing waits for you.`}</AppShellNavEmpty>
+      ) : null}
+    </AppShellNav>
+  );
   return (
     <>
-      <FrameSidebar
-        aria-label={t`Sidebar`}
-        closeLabel={t`Close`}
-        foldLabel={t`Show or hide the sidebar`}
-        groups={groups}
+      <AppShellSidebar
         mark={
           // The mark is the way home: the chat's start, on the Home view.
           <Link
@@ -351,34 +365,26 @@ export const AppSidebar = ({
             <Icon icon={GraspMark} label="Grasp" />
           </Link>
         }
-        navLabel={view === "inbox" ? t`Inbox` : t`Main`}
-        profile={<PersonMenu core={core} identity={identity} />}
-        {...(section === undefined ? {} : { section })}
-        {...(searching
-          ? {
-              search: {
-                label: t`Search chats`,
-                shortcut: shortcutLabel(chatsKey),
-                onSearch: () => {
-                  openChats(true);
-                },
-              },
-              tabs: [
-                { value: "home", label: t`Home`, icon: HouseIcon },
-                {
-                  value: "inbox",
-                  label: t`Inbox`,
-                  icon: BellIcon,
-                  // The red dot on the bell: something waits for the person.
-                  count: waiting ?? 0,
-                  countLabel: thingsWaiting(waiting ?? 0),
-                },
-              ],
-              tab: view,
+        // The chats window. Its keys are the switcher's own, which close it
+        // again too (chat/chat-switcher.tsx): the button shows them.
+        listenToSearchShortcut={false}
+        searchShortcut={`mod+${chatsKey}`}
+        onSearch={
+          searching
+            ? () => {
+                openChats(true);
+              }
+            : undefined
+        }
+      >
+        <FrameLevels section={section}>
+          {searching ? (
+            <AppShellSwitch
+              aria-label={t`Views`}
               // The switch is the one way in to the Inbox: choosing it opens
               // the Inbox's page too, so there is something to see even when
               // nothing waits and the view has no row to press.
-              onTabChange: (next: string) => {
+              onValueChange={(next) => {
                 if (!isView(next)) {
                   return;
                 }
@@ -386,16 +392,28 @@ export const AppSidebar = ({
                 if (next === "inbox") {
                   void openInbox();
                 }
-              },
-              tabsLabel: t`Views`,
-              // Said only once core has said so: while it can't be read,
-              // the view stays blank rather than claim nothing waits.
-              ...(view === "inbox" && waitingItems !== undefined
-                ? { empty: t`Nothing waits for you.` }
-                : {}),
-            }
-          : {})}
-      />
+              }}
+              tabs={[
+                { value: "home", label: t`Home`, icon: HouseIcon },
+                {
+                  value: "inbox",
+                  label: t`Inbox`,
+                  icon: BellIcon,
+                  // The red dot on the bell: something waits for the person.
+                  count: waiting ?? 0,
+                  countText: thingsWaiting(waiting ?? 0),
+                },
+              ]}
+              value={view}
+            >
+              {rows}
+            </AppShellSwitch>
+          ) : (
+            rows
+          )}
+        </FrameLevels>
+        <PersonMenu core={core} identity={identity} />
+      </AppShellSidebar>
       {chats.dialog}
     </>
   );

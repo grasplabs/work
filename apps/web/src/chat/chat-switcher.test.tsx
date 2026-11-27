@@ -335,6 +335,27 @@ describe("the chats window", () => {
     });
   });
 
+  it("opens with ⌘K from rich text such as the chat's box, which binds no ⌘K of its own", async () => {
+    await shown(async () => await Promise.resolve([]));
+    const editor = document.createElement("div");
+    editor.contentEditable = "true";
+    document.body.append(editor);
+    editor.focus();
+
+    await act(async () => {
+      editor.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true })
+      );
+      await Promise.resolve();
+    });
+    await vi.waitFor(
+      () => {
+        expect(rows().length).toBeGreaterThan(0);
+      },
+      { timeout: openMs }
+    );
+  });
+
   it("closes again with the same keys", async () => {
     await shown(async () => await Promise.resolve([]));
     await openWindow({ key: "k", ctrlKey: true });

@@ -1,4 +1,5 @@
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { AppShellNavRow } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01-sidebar";
 import {
   AppWindowIcon,
   CableIcon,
@@ -17,11 +18,7 @@ import type { IconData } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
 import { Link, useMatch, useNavigate } from "@tanstack/react-router";
 
-import type {
-  SidebarRow,
-  SidebarSection,
-  SidebarSectionViews,
-} from "../frame/sidebar.tsx";
+import type { SidebarSection, SidebarSectionViews } from "../frame/sidebar.tsx";
 import { ProcessTile } from "../workflows/business-process.tsx";
 import { buildsApp } from "./app-role.ts";
 import type { WorkspaceView } from "./app-workspace.tsx";
@@ -85,13 +82,12 @@ export const useAppSection = (
     each: WorkspaceView,
     label: string,
     icon: IconData
-  ): SidebarRow => ({
+  ): AppShellNavRow => ({
     id: each,
     label,
     icon,
-    render: (look) => (
+    render: (
       <Link
-        {...look}
         params={{ app: app.id }}
         replace
         search={{
@@ -138,21 +134,19 @@ export const useAppSection = (
     ...(view === "preview" ? { views: widthViews } : {}),
     back: {
       label: t`Apps`,
-      render: (look) => <Link {...look} to="/apps" />,
+      link: <Link to="/apps" />,
     },
     // Back and its name as one press: the name opens the App itself, its preview.
-    home: (look) => (
-      <Link
-        {...look}
-        params={{ app: app.id }}
-        replace
-        search={held}
-        to="/apps/$app"
-      />
+    home: (lead, title) => (
+      <Link params={{ app: app.id }} replace search={held} to="/apps/$app">
+        {lead}
+        {title}
+      </Link>
     ),
     homeCurrent: view === "preview",
     groups: [
       {
+        id: "views",
         rows: [
           viewRow(
             "code",
@@ -167,14 +161,14 @@ export const useAppSection = (
         ],
       },
       {
+        id: "settings",
         label: t({ message: "Settings", context: "an app's workspace view" }),
         rows: sections.map((each) => ({
           id: each,
           label: i18n._(sectionLabels[each]),
           icon: sectionIcons[each],
-          render: (look) => (
+          render: (
             <Link
-              {...look}
               params={{ app: app.id }}
               replace
               search={{ ...held, view: "settings", section: each }}

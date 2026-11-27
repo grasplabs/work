@@ -7,6 +7,7 @@ import type {
 import type { ChatAgent } from "@grasp-os/shared/chat";
 import type { Member } from "@grasp-os/shared/members";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
+import { AppShellPage } from "@grasp-os/ui/blocks/app-shell-01/app-shell-01";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -31,7 +32,6 @@ import type { ReactNode } from "react";
 import { modelName } from "../chat/composer.tsx";
 import { formatDollars } from "../format.ts";
 import { pageText } from "../frame/page-text.ts";
-import { Page } from "../frame/page.tsx";
 import { AgentCard, agentCardStyles } from "./agent-card.tsx";
 import type { AgentCardFact } from "./agent-card.tsx";
 import { nextWakeAt, useAudienceLine, wakesOn } from "./agent-facts.tsx";
@@ -464,7 +464,7 @@ export const AgentsOverview = ({
       />
     );
   return (
-    <Page>
+    <AppShellPage>
       <div {...stylex.props(pageText.text)}>
         <PageHeader actions={newAgent} title={t`Agents`} />
         {none ? (
@@ -498,6 +498,6 @@ export const AgentsOverview = ({
         {/* Without tabs, what an admin keeps of the company stands under the cards. */}
         {none || managed === undefined ? company : null}
       </div>
-    </Page>
+    </AppShellPage>
   );
 };

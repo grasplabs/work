@@ -1,6 +1,10 @@
 import type { ChatSummary } from "@grasp-os/shared/chat";
 import { chatTitleSchema } from "@grasp-os/shared/chat";
-import { useSidebar } from "@grasp-os/ui/components/sidebar";
+import type {
+  AppShellNavMore,
+  AppShellNavRow,
+  AppShellRowAction,
+} from "@grasp-os/ui/blocks/app-shell-01/app-shell-01-sidebar";
 import { toast } from "@grasp-os/ui/components/toast";
 import {
   ArchiveIcon,
@@ -14,7 +18,6 @@ import { Link, useMatchRoute, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-import type { RowAction, SidebarMore, SidebarRow } from "../frame/sidebar.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { chatLink, useGoToChat } from "./chat-link.ts";
 import { useChatList } from "./chat-list.ts";
@@ -85,32 +88,30 @@ export const useRecentChats = ({
   enabled,
 }: {
   enabled: boolean;
-}): { rows: SidebarRow[]; more: SidebarMore; dialog: ReactNode } => {
+}): { rows: AppShellNavRow[]; more: AppShellNavMore; dialog: ReactNode } => {
   const { t } = useLingui();
   const { chats } = useChatList(enabled);
   const matchRoute = useMatchRoute();
   const goToChat = useGoToChat();
   const openChats = useChatsWindow();
-  const { setOpenMobile } = useSidebar();
   const changes = useRowChanges();
   const beside = useChatOpenBeside();
   const [deleting, setDeleting] = useState<ChatSummary>();
-  // The window doesn't navigate, so the phone's sheet would stay over it: it goes first.
-  const more: SidebarMore = {
+  // The window doesn't navigate: the row, a button, closes the phone's sheet itself.
+  const more: AppShellNavMore = {
     label: t`All chats`,
     onClick: () => {
-      setOpenMobile(false);
       openChats(true);
     },
   };
-  const actions: RowAction[] = [
+  const actions: AppShellRowAction[] = [
     { value: "open", label: t`Open`, icon: ArrowRightIcon },
-    { value: "rename", label: t`Rename`, icon: PencilIcon },
+    { value: "rename", label: t`Rename`, icon: PencilIcon, rename: true },
     { value: "archive", label: t`Archive`, icon: ArchiveIcon },
     "separator",
-    { value: "delete", label: t`Delete`, icon: TrashIcon, danger: true },
+    { value: "delete", label: t`Delete`, icon: TrashIcon, destructive: true },
   ];
-  const rows = chats.slice(0, recentCount).map((chat): SidebarRow => {
+  const rows = chats.slice(0, recentCount).map((chat): AppShellNavRow => {
     const { title } = chat;
     const current = matchRoute(chatLink(chat.id)) !== false;
     return {
@@ -119,20 +120,15 @@ export const useRecentChats = ({
       // In the regular weight, as "All chats" under them is.
       quiet: true,
       // The chat's own page (chat-link.ts), marked while it is open.
-      render: (look) => <Link {...look} {...chatLink(chat.id)} />,
+      render: <Link {...chatLink(chat.id)} />,
       current,
       // Its agent is still answering: the Working mark at the row's end.
       working: chat.running,
-      workingLabel: t`Answering`,
       // Answered while the person wasn't looking (chat/unread.ts): a dot,
       // never on the chat open in front of them, on its page or beside
       // this one, which is read as it ends.
       unread: chat.unread && !current && chat.id !== beside,
-      unreadLabel: t`Unread`,
       actions,
-      actionsLabel: t`More for ${title}`,
-      renameLabel: t`Rename ${title}`,
-      renameHint: t`Double-click or press F2 to rename`,
       onAction: (value) => {
         if (value === "open") {
           goToChat(chat.id);

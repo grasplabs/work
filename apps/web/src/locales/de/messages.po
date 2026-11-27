@@ -3086,7 +3086,6 @@ msgstr "Beantwortet: {question}"
 msgid "Answered: {title}"
 msgstr "Beantwortet: {title}"
 
-#: src/chat/sidebar-chats.tsx
 #: src/frame/ui-words.tsx
 msgid "Answering"
 msgstr "Antwortet"
@@ -4768,7 +4767,6 @@ msgstr "Klippen"
 #: src/connections/connected-dialog.tsx
 #: src/connections/connection-list.tsx
 #: src/connections/request-app-dialog.tsx
-#: src/frame/app-sidebar.tsx
 #: src/frame/panels/head.tsx
 #: src/frame/ui-words.tsx
 #: src/interview/destination.tsx
@@ -6380,7 +6378,6 @@ msgstr "Tür"
 msgid "Dots"
 msgstr "Punkte"
 
-#: src/chat/sidebar-chats.tsx
 #: src/frame/panels/rename.tsx
 #: src/frame/ui-words.tsx
 msgid "Double-click or press F2 to rename"
@@ -10853,7 +10850,6 @@ msgstr "Mehr für {label}"
 msgid "More for {name}"
 msgstr "Mehr zu {name}"
 
-#: src/chat/sidebar-chats.tsx
 #: src/projects/project-view.tsx
 msgid "More for {title}"
 msgstr "Mehr zu {title}"
@@ -14598,10 +14594,6 @@ msgstr "Umbenennen"
 msgid "Rename {name}"
 msgstr "{name} umbenennen"
 
-#: src/chat/sidebar-chats.tsx
-msgid "Rename {title}"
-msgstr "{title} umbenennen"
-
 #: src/chat/chat-window.tsx
 msgid "Rename chat"
 msgstr "Chat umbenennen"
@@ -15513,7 +15505,6 @@ msgid "Search apps"
 msgstr "Apps suchen"
 
 #: src/chat/chat-window.tsx
-#: src/frame/app-sidebar.tsx
 #: src/frame/ui-words.tsx
 msgid "Search chats"
 msgstr "Chats durchsuchen"
@@ -16124,9 +16115,6 @@ msgstr "Chat ein- oder ausblenden"
 msgid "Show or hide the panel"
 msgstr "Bereich ein- oder ausblenden"
 
-#: src/frame/app-frame.tsx
-#: src/frame/app-sidebar.tsx
-#: src/frame/site-header.tsx
 #: src/frame/ui-words.tsx
 msgid "Show or hide the sidebar"
 msgstr "Seitenleiste ein- oder ausblenden"
@@ -16191,7 +16179,6 @@ msgstr "Der erste Teil dieses Laufs wird angezeigt"
 msgid "Shown with the App. It opens the App to nobody: who may use it is who it is shared with."
 msgstr "Wird mit der App angezeigt. Es öffnet die App für niemanden: Nutzen darf sie, mit wem sie geteilt ist."
 
-#: src/frame/app-sidebar.tsx
 #: src/frame/ui-words.tsx
 msgid "Sidebar"
 msgstr "Seitenleiste"
@@ -19214,7 +19201,6 @@ msgstr "Die Verknüpfung eines Chat-App-Kontos aufgehoben"
 msgid "Unpin"
 msgstr "Lösen"
 
-#: src/chat/sidebar-chats.tsx
 #: src/frame/ui-words.tsx
 msgid "Unread"
 msgstr "Ungelesen"
