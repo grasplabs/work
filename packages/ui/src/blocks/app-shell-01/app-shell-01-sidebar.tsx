@@ -761,7 +761,8 @@ export interface AppShellNavRow extends AppShellNavSubRow {
   working?: boolean;
   /**
    * Something there not seen yet: a small dot at the row's end, where the Working mark stands,
-   * which wins while both hold; said as `appShell.unread`.
+   * which wins while both hold; said as `appShell.unread`. While the dot shows, its name is in
+   * the semibold weight.
    */
   unread?: boolean;
   /**
@@ -1212,6 +1213,8 @@ const RowButton = ({
     // While it is renamed: drawn under the field, out of reach.
     inert: inert || undefined,
     variant: row.quiet === true ? ("quiet" as const) : undefined,
+    // Its dot shows: its name stands out too.
+    unread: row.unread === true && row.working !== true,
     isActive: row.current === true,
   };
   const { isMobile, setOpenMobile } = useSidebar();

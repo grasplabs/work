@@ -1,1 +1,14 @@
-[]
+[
+  {
+    "path": "src/components/sidebar.tsx",
+    "reason": "SidebarMenuButton's unread: its words in the semibold weight, for something not seen yet",
+    "since": "2026-11-27",
+    "pullRequest": "https://github.com/grasplabs/damsko/pull/106"
+  },
+  {
+    "path": "src/blocks/app-shell-01/app-shell-01-sidebar.tsx",
+    "reason": "An unread row, its dot showing, draws its name in the semibold weight",
+    "since": "2026-11-27",
+    "pullRequest": "https://github.com/grasplabs/damsko/pull/106"
+  }
+]
