@@ -207,10 +207,9 @@ const fakePageSize = 2;
 
 /**
  * Where Composio serves a session's MCP endpoint: `<base><session id>/mcp`,
- * on its API host (`POST /tool_router/session`'s `mcp.url`).
+ * on its API host, as a live `POST /tool_router/session` answers `mcp.url`.
  */
-export const sessionUrlBase =
-  "https://backend.composio.dev/api/v3/tool_router/session/";
+export const sessionUrlBase = "https://backend.composio.dev/tool_router/";
 
 /** Where Composio's legacy API served the MCP servers it made. */
 const legacyMcpBase = "https://backend.composio.dev/v3/mcp/";
