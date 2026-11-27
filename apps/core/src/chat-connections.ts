@@ -366,6 +366,7 @@ const whyNotStored = async (
   env: Env,
   {
     chatId,
+    requestedBy,
     agentId,
     objectId,
     resource,
@@ -373,6 +374,8 @@ const whyNotStored = async (
     binding,
   }: {
     chatId: string;
+    /** Whose chat it is: a chat's requests are its person's alone. */
+    requestedBy: string;
     agentId: string;
     objectId: string;
     resource: string | null;
@@ -388,6 +391,7 @@ const whyNotStored = async (
       .where(
         and(
           eq(permissions.chatId, chatId),
+          eq(permissions.requestedBy, requestedBy),
           eq(permissions.status, "revoked"),
           eq(permissions.objectId, objectId),
           resource === null
@@ -527,8 +531,8 @@ export const askInChat = async (
   const insert = insertWhere(
     db,
     row,
-    sql`(SELECT count(*) FROM ${permissions} WHERE chat_id = ${row.chatId} AND status = 'requested') < ${maxWaitingRequests}
-      AND NOT EXISTS (SELECT 1 FROM ${permissions} WHERE chat_id = ${row.chatId} AND status = 'revoked' AND object_id = ${row.objectId} AND resource IS ${row.resource} AND actions = ${row.actions})
+    sql`(SELECT count(*) FROM ${permissions} WHERE chat_id = ${row.chatId} AND requested_by = ${row.requestedBy} AND status = 'requested') < ${maxWaitingRequests}
+      AND NOT EXISTS (SELECT 1 FROM ${permissions} WHERE chat_id = ${row.chatId} AND requested_by = ${row.requestedBy} AND status = 'revoked' AND object_id = ${row.objectId} AND resource IS ${row.resource} AND actions = ${row.actions})
       AND NOT EXISTS (SELECT 1 FROM ${permissions} WHERE subject_type = 'agent' AND subject_id = ${row.subjectId} AND binding = ${binding} AND chat_id IS NULL AND status <> 'revoked')`
   );
   try {
@@ -558,6 +562,7 @@ export const askInChat = async (
   if ((await findRow(env, row.id)) === undefined) {
     throw await whyNotStored(env, {
       chatId: scope.chatId,
+      requestedBy: scope.personId,
       agentId: scope.agentId,
       objectId: row.objectId,
       resource: row.resource,
@@ -728,26 +733,26 @@ export const decideInChat = async (
 };
 
 /**
- * Revokes every chat's own permission `of` selects (a chat's, as it is
- * deleted, or a person's, as they are removed), waiting or granted, each
- * audited with `why`, by `by`: none outlives its chat or its person. How
- * many it revoked.
+ * Revokes every chat's own permission `of` selects (a person's chat's, as
+ * it is deleted, or all a person's, as they are removed), waiting or
+ * granted, each audited with `why`, by `by`: none outlives its chat or
+ * its person. Always by the person whose chat it is too, never by a chat's
+ * ID alone. How many it revoked.
  */
 export const revokeChatPermissions = async (
   env: Env,
-  of: { chatId: string } | { requestedBy: string },
+  of: { requestedBy: string; chatId?: string },
   by: { userId: string | null; actor: AuditActor },
   why: "chat_deleted" | "person_removed"
 ): Promise<number> => {
   const db = drizzle(env.DB);
   const live = inArray(permissions.status, ["requested", "active"]);
-  const selected: SQL | undefined =
-    "chatId" in of
-      ? eq(permissions.chatId, of.chatId)
-      : and(
-          eq(permissions.requestedBy, of.requestedBy),
-          sql`${permissions.chatId} IS NOT NULL`
-        );
+  const selected: SQL | undefined = and(
+    eq(permissions.requestedBy, of.requestedBy),
+    of.chatId === undefined
+      ? sql`${permissions.chatId} IS NOT NULL`
+      : eq(permissions.chatId, of.chatId)
+  );
   const rows = await db.select().from(permissions).where(and(selected, live));
   const now = new Date();
   const [first, ...rest] = rows.flatMap((row) => [

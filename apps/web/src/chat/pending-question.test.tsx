@@ -115,18 +115,19 @@ describe("the question on its way", () => {
     const start = boxOnPage();
     const question = { ...refused, owner: start.owner };
     const whileThere = {
-      sender: takesBack(question, start.owner),
-      chatPage: takesBack(question, "chat-page"),
+      sender: takesBack(question, start.owner, true),
+      chatPage: takesBack(question, "chat-page", true),
     };
     start.leave();
 
     expect({
       whileThere,
-      gone: takesBack(question, "chat-page"),
-      onItsWay: takesBack({ ...pending, owner: "gone" }, "chat-page"),
+      gone: takesBack(question, "chat-page", false),
+      onItsWay: takesBack({ ...pending, owner: "gone" }, "chat-page", false),
       askedForThePerson: takesBack(
         { ...refused, owner: "gone", fromBox: false },
-        "chat-page"
+        "chat-page",
+        false
       ),
     }).toStrictEqual({
       whileThere: { sender: true, chatPage: false },

@@ -16,6 +16,7 @@ import { loadFrame, modulePartsOf } from "./page-frames.ts";
 import type { Framed } from "./page-frames.ts";
 import { failure } from "./sealed-apps.ts";
 import { signedInApi } from "./sign-in.ts";
+import { startedChat } from "./started-chats.ts";
 
 // A draft is one per App, shared by every builder of the App and by the
 // agents of their chats (drafts.ts). Each agent turn's writes are one
@@ -98,7 +99,7 @@ const deskOf = async (owner: Person): Promise<AppId> => {
 
 /** A new chat of `person`'s. */
 const chatOf = async (person: Person): Promise<ChatId> => {
-  const chat = await person.api.chats.create("Build");
+  const chat = await startedChat(person, "Build");
   return chatIdSchema.parse(chat.id);
 };
 

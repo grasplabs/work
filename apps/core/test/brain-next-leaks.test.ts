@@ -83,6 +83,7 @@ import { noProducers } from "./no-producers.ts";
 import { carrying } from "./platform-providers.ts";
 import { acmeTenant, otherTenant } from "./sign-in-config.ts";
 import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
+import { startedChat } from "./started-chats.ts";
 import { holdsNothing } from "./stored-skills.ts";
 import {
   member as teamsMember,
@@ -1337,7 +1338,7 @@ describe(
       await ended(holderMember, workflow.id, runId);
       const runSource: SourceRef = { producer: "run", id: runId ?? "" };
       await answeringProvider(() => says(`${sharedWord} ${answerMarker}`));
-      const chat = await holderApi.api.chats.create("Questions");
+      const chat = await startedChat(holderApi, "Questions");
       await workspace(env, personalWorkspaceId(holder)).ask(
         chatIdSchema.parse(chat.id),
         { text: `${sharedWord} ${askedMarker}?`, model: testModel }

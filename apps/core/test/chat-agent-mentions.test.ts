@@ -7,6 +7,7 @@ import { mockIdp } from "./idp.ts";
 import { saveInstructions } from "./instruction-saves.ts";
 import { answeringProvider, fakeProvider } from "./model-provider.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
+import { startedChat } from "./started-chats.ts";
 
 // Agents mentioned in a question (`ChatQuestion.mentions`, kind `agent`):
 // each agent the person addresses answers in turn, as itself. These start
@@ -89,7 +90,7 @@ describe("agents mentioned in a question", slow, () => {
       says("Pat: nobody is on leave."),
       says("Pat again.")
     );
-    const chat = await ann.api.chats.create("Monday");
+    const chat = await startedChat(ann, "Monday");
     const followed = await follow(ann, chat.id);
 
     await ann.api.chats.send(chat.id, {
@@ -167,7 +168,7 @@ describe("agents mentioned in a question", slow, () => {
       }),
       says("Pat: nothing more.")
     );
-    const chat = await ann.api.chats.create("Monday");
+    const chat = await startedChat(ann, "Monday");
 
     await ann.api.chats.send(chat.id, {
       text: "@Claire @Pat what should I know this week?",
@@ -206,7 +207,7 @@ describe("agents mentioned in a question", slow, () => {
       }
       return says("Pat should not answer.");
     });
-    const chat = await ann.api.chats.create("Monday");
+    const chat = await startedChat(ann, "Monday");
     const updates: ChatUpdate[] = [];
     await ann.api.chats.watch(chat.id, null, (update) => {
       updates.push(update);
@@ -258,7 +259,7 @@ describe("agents mentioned in a question", slow, () => {
       modelRole: null,
     });
     const provider = await fakeProvider(says("Should not be asked."));
-    const chat = await ann.api.chats.create("Monday");
+    const chat = await startedChat(ann, "Monday");
 
     const tried = async (id: string) =>
       await outcome(

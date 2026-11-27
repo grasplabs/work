@@ -26,6 +26,7 @@ import {
   whoami,
   withSignIn,
 } from "./sign-in.ts";
+import { startedThrough } from "./started-chats.ts";
 
 // Grasp's staff on a client's deployment (GRA-306; Nick, 2026-11-01): a
 // staff sign-in is for managing a deployment, never for acting inside the
@@ -173,7 +174,7 @@ describe("a Grasp staff session, whatever its scope", () => {
 
     expect({
       run: await outcome(api.workflowResources.start(workflow, startOf())),
-      chat: await outcome(api.chats.create("Check")),
+      chat: await outcome(startedThrough(api.chats, "Check")),
       send: await outcome(
         api.chats.send(crypto.randomUUID(), { text: "Hi", model: "any" })
       ),

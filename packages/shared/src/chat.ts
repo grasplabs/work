@@ -771,7 +771,7 @@ export type ChatMakeKind = (typeof chatMakeKinds)[number];
 
 /**
  * What "Make something" (or New agent's "Set up through chat") started a
- * chat to make, which the chat keeps (`ChatsApi.create`): an App, a
+ * chat to make, which the chat keeps (`ChatStart.make`): an App, a
  * workflow or an agent, and, for an App or a workflow, the project what
  * Build it makes goes in, shared with everyone in it. An agent is the
  * company's, in no project.
@@ -785,6 +785,30 @@ export const chatMakeSchema = z
     message: "An agent is made in no project",
   });
 export type ChatMake = z.infer<typeof chatMakeSchema>;
+
+/**
+ * A chat the page starts (`ChatQuestion.start`): the page names it, by a
+ * UUID of its own as its ID, and the question that starts it makes it,
+ * as T3 Code and the AI SDK's chat template name a new thread in the
+ * browser. Its page opens, and shows the question, before core answered.
+ * `key`, a UUID the page makes for starting it, makes it once: a repeat
+ * (sent again on a new connection, from a second tab) finds the chat it
+ * made. An ID core has already, anyone's (a chat's, or a deleted one's),
+ * or a key another start made a chat with, is `agent.chat_not_found`:
+ * a start never takes over a chat. With the agent `agentId`, one of
+ * `ChatsApi.agents()`, or the company's first agent; an agent the person
+ * may not talk to is `agent.unknown`. From "Make something", with what to
+ * make (`make`), which it keeps; from New agent's "Set up through chat",
+ * `{ kind: "agent" }`, only for the company's own admins (`role.forbidden`
+ * for anyone else, Grasp staff among them).
+ */
+export const chatStartSchema = z.strictObject({
+  key: z.uuid(),
+  title: chatTitleSchema,
+  agentId: z.string().min(1).max(256).optional(),
+  make: chatMakeSchema.optional(),
+});
+export type ChatStart = z.infer<typeof chatStartSchema>;
 
 /**
  * A connection a part of a plan needs to do what it says (sending mail
@@ -1334,6 +1358,11 @@ export interface ChatQuestion {
    * workflow they have a role in, a member of the organization.
    */
   mentions?: ChatMention[];
+  /**
+   * The chat it starts, which the page named (`ChatStart`): made as the
+   * question goes, in the same call, never one there already.
+   */
+  start?: ChatStart;
 }
 
 /**
@@ -1430,24 +1459,6 @@ export interface ChatsApi {
    */
   agents: () => Promise<ChatAgent[]>;
   /**
-   * Makes a chat with the agent `agentId`, one of `agents()`, or with
-   * the company's first agent when none is named. An agent the person may
-   * not talk to is `agent.unknown`, as one the company doesn't have. From
-   * "Make something", with what to make (`make`), which it keeps; from New
-   * agent's "Set up through chat", `{ kind: "agent" }`, only for the
-   * company's own admins (`role.forbidden` for anyone else, Grasp staff
-   * among them): the chat asks, drafts the agent, and makes it on Make it
-   * (`makeDraftedAgent`). With
-   * `key`, a UUID the page makes for this chat, a repeat within a day
-   * answers the chat the first call made and makes none.
-   */
-  create: (
-    title: string,
-    agentId?: string,
-    make?: ChatMake,
-    key?: string
-  ) => Promise<ChatSummary>;
-  /**
    * The person's chat for an App or a workflow, where its agent changes it
    * with them: the one that last worked on it, or null while none did,
    * when the next question asked about it starts one. Only for someone
@@ -1503,12 +1514,14 @@ export interface ChatsApi {
    * Audited. With `key`, a UUID the page makes for this file in this
    * chat, a repeat within a day, as a page sends when its connection
    * broke before it heard the answer, answers the file the first call
-   * attached and attaches none.
+   * attached and attaches none. With `start`, for a question that starts
+   * its chat (`ChatQuestion.start`), the same start makes the chat first.
    */
   attachFile: (
     chatId: string,
     file: ChatFileInput,
-    key?: string
+    key?: string,
+    start?: ChatStart
   ) => Promise<ChatFile>;
   /**
    * Removes a file attached to the chat that no question carries yet,
@@ -1524,7 +1537,10 @@ export interface ChatsApi {
    * watching. One sent while the agent works on another is queued
    * (`ChatUpdate.queued`): the agent takes it once its current step ends,
    * in the same turn and with the same model, and answers both in order.
-   * Not one that addresses another agent (`mentions`): `agent.busy`.
+   * Not one that addresses another agent (`mentions`): `agent.busy`. One
+   * that starts its chat (`start`) makes it first; a read of that chat on
+   * the same connection sent after it (`watch`, `summary`) waits until it
+   * is made, so the page follows it at once.
    */
   send: (chatId: string, question: ChatQuestion) => Promise<void>;
   /**

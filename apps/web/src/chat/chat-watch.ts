@@ -3,6 +3,7 @@ import { useSyncExternalStore } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { useCore } from "../use-core.ts";
+import { chatMade, startOf, whenTried } from "./chat-starts.ts";
 import { applyUpdate, emptyView, followChat } from "./follow-chat.ts";
 import type { ChatView } from "./follow-chat.ts";
 
@@ -133,29 +134,40 @@ const subscribe = (
       kept: last !== undefined,
     };
     watches.set(chatId, started);
-    started.stop = followChat(
-      core,
-      chatId,
-      (update) => {
-        // The first update holds the whole chat: it replaces a kept view.
-        const from = started.kept ? emptyView : started.state.view;
-        started.kept = false;
-        changed(started, {
-          ...started.state,
-          view: applyUpdate(from, update),
-        });
-      },
-      (failure, gone) => {
-        changed(started, { ...started.state, failure, gone });
-      },
-      // Behind until the watch answers again (`applyUpdate` clears it).
-      () => {
-        changed(started, {
-          ...started.state,
-          view: { ...started.state.view, resuming: true },
-        });
-      }
-    );
+    const begin = (): void => {
+      started.stop = followChat(
+        core,
+        chatId,
+        (update) => {
+          // Followed: the chat is there, whoever made it.
+          chatMade(chatId);
+          // The first update holds the whole chat: it replaces a kept view.
+          const from = started.kept ? emptyView : started.state.view;
+          started.kept = false;
+          changed(started, {
+            ...started.state,
+            view: applyUpdate(from, update),
+          });
+        },
+        (failure, gone) => {
+          // A chat this tab is starting isn't made yet: looked for again
+          // once its question is done, taken or not.
+          if (gone && startOf(chatId) !== undefined) {
+            started.stop = whenTried(chatId, begin);
+            return;
+          }
+          changed(started, { ...started.state, failure, gone });
+        },
+        // Behind until the watch answers again (`applyUpdate` clears it).
+        () => {
+          changed(started, {
+            ...started.state,
+            view: { ...started.state.view, resuming: true },
+          });
+        }
+      );
+    };
+    begin();
     watch = started;
   }
   const followed = watch;

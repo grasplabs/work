@@ -4,6 +4,7 @@ import type { Page } from "@playwright/test";
 import { execute } from "./connections-seed.ts";
 import { test } from "./csp.ts";
 import { modelScripts, monthEndCloseLast } from "./model-scripts.ts";
+import { askInNewChat, emptyChat } from "./new-chats.ts";
 import { apiOf, peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
 import { e2eModel } from "./stack.ts";
@@ -466,11 +467,12 @@ test("a person comes back to a chat that answered while they were away, sees its
   // nowhere open: core marked none of it seen.
   const { core, api } = apiOf(user);
   try {
-    const chat = await api.chats.create(title);
-    await api.chats.send(chat.id, {
-      text: `${modelScripts.answersAtLength.opener} (${title})`,
-      model: e2eModel,
-    });
+    const chat = {
+      id: await askInNewChat(api, title, {
+        text: `${modelScripts.answersAtLength.opener} (${title})`,
+        model: e2eModel,
+      }),
+    };
     await expect
       .poll(async () => await api.chats.summary(chat.id), { timeout: 30_000 })
       .toMatchObject({ running: false, unread: true });
@@ -515,8 +517,8 @@ test("a person's list follows what happens elsewhere: a chat answered in the bac
   const newer = `Travel ${tag}`;
   const { core, api } = apiOf(user);
   try {
-    const first = await api.chats.create(older);
-    await api.chats.create(newer);
+    const first = { id: await emptyChat(api, older) };
+    await emptyChat(api, newer);
     await page.goto("/apps");
     const sidebar = page.getByRole("navigation", { name: "Main" });
     const titles = sidebar

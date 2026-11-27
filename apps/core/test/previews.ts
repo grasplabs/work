@@ -33,6 +33,7 @@ import { agentWriting } from "./draft-writers.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { routed } from "./sign-in.ts";
 import type { signedInApi } from "./sign-in.ts";
+import { startedChat } from "./started-chats.ts";
 
 // An App's preview of its one shared draft, as a test drives it
 // (draft-runs.ts, app-preview.ts): the draft written as a chat's agent
@@ -59,7 +60,7 @@ export const chatWithDraft = async (
   app: AppId,
   changes: TestSource
 ) => {
-  const chat = await person.api.chats.create("Build");
+  const chat = await startedChat(person, "Build");
   const chatId = chatIdSchema.parse(chat.id);
   const write = async (
     written: TestSource,
