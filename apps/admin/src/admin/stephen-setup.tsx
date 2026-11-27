@@ -6,25 +6,6 @@
  * back leaves what the first conversation suggests.
  */
 
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/app-kit/components/dialog";
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-} from "@grasp-os/app-kit/components/field";
-import { Textarea } from "@grasp-os/app-kit/components/textarea";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/app-kit/components/toggle-group";
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { interviewLocales } from "@grasp-os/shared/onboarding";
 import type { InterviewLocale } from "@grasp-os/shared/onboarding";
@@ -35,11 +16,57 @@ import {
   stephenTermMaxLength,
   stephenTermsMax,
 } from "@grasp-os/shared/onboarding-staff";
-import { PencilIcon, RotateCcwIcon } from "lucide-react";
-import { useId, useState } from "react";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@grasp-os/ui/components/dialog";
+import {
+  Field,
+  FieldDescription,
+  FieldLabel,
+} from "@grasp-os/ui/components/field";
+import { Textarea } from "@grasp-os/ui/components/textarea";
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@grasp-os/ui/components/toggle-group";
+import { Icon, PencilIcon, UndoIcon } from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
+import { useState } from "react";
 
 import { CommandFailure, useCommand } from "./commands.tsx";
-import { Attention } from "./parts.tsx";
+
+const styles = stylex.create({
+  form: { display: "flex", flexDirection: "column", gap: space["5"] },
+  // The dialog's form holds its body and footer: it shrinks with the
+  // dialog so its body scrolls and its buttons stay in sight.
+  dialogForm: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+  },
+  actions: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: space["1"],
+  },
+  buttons: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["2"],
+  },
+});
 
 /** Stephen's setup as the snapshot has it. */
 export type SetupRead = AdminSnapshot["setup"];
@@ -91,8 +118,6 @@ const SetupDialog = ({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) => {
-  const limitsId = useId();
-  const termsId = useId();
   const { busy, failure, give } = useCommand(clientId);
   const [languages, setLanguages] = useState<string[]>(setup.setup.languages);
   const [limits, setLimits] = useState(setup.setup.limits.join("\n"));
@@ -118,7 +143,7 @@ const SetupDialog = ({
   };
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>How Stephen is set up</DialogTitle>
           <DialogDescription>
@@ -126,71 +151,59 @@ const SetupDialog = ({
           </DialogDescription>
         </DialogHeader>
         <form
-          className="flex flex-col gap-5"
+          {...stylex.props(styles.dialogForm)}
           onSubmit={(event) => {
             event.preventDefault();
             void save();
           }}
         >
-          <Field>
-            <FieldLabel>Languages he interviews in</FieldLabel>
-            <ToggleGroup
-              aria-label="Languages he interviews in"
-              multiple
-              onValueChange={(value: string[]) => {
-                setLanguages(value);
-              }}
-              size="sm"
-              spacing={1}
-              value={languages}
-              variant="outline"
-            >
-              {interviewLocales.map((locale) => (
-                <ToggleGroupItem key={locale} value={locale}>
-                  {languageNames.of(locale) ?? locale}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
-            <FieldDescription>
-              Someone chooses their own language when they open their link.
-            </FieldDescription>
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={limitsId}>What he leaves alone</FieldLabel>
-            <Textarea
-              id={limitsId}
-              onChange={(event) => {
-                setLimits(event.target.value);
-              }}
-              rows={4}
-              value={limits}
-            />
-            <FieldDescription>
-              One a line. He doesn’t ask about it, and moves on when somebody
-              brings it up.
-            </FieldDescription>
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={termsId}>Words he has to know</FieldLabel>
-            <Textarea
-              id={termsId}
-              onChange={(event) => {
-                setTerms(event.target.value);
-              }}
-              rows={4}
-              value={terms}
-            />
-            <FieldDescription>
-              One a line: tools, products and the company’s own words, so he
-              hears them right.
-            </FieldDescription>
-          </Field>
-          {problem === null ? null : (
-            <p>
-              <Attention>{problem}</Attention>
-            </p>
-          )}
-          <CommandFailure failure={failure} />
+          <DialogBody>
+            <div {...stylex.props(styles.form)}>
+              <Field>
+                <FieldLabel>Languages he interviews in</FieldLabel>
+                <ToggleGroup
+                  aria-label="Languages he interviews in"
+                  multiple
+                  onValueChange={(value) => {
+                    setLanguages(value);
+                  }}
+                  size="sm"
+                  value={languages}
+                >
+                  {interviewLocales.map((locale) => (
+                    <ToggleGroupItem key={locale} value={locale}>
+                      {languageNames.of(locale) ?? locale}
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+                <FieldDescription>
+                  Someone chooses their own language when they open their link.
+                </FieldDescription>
+              </Field>
+              <Field>
+                <FieldLabel>What he leaves alone</FieldLabel>
+                <Textarea onValueChange={setLimits} rows={4} value={limits} />
+                <FieldDescription>
+                  One a line. He doesn’t ask about it, and moves on when
+                  somebody brings it up.
+                </FieldDescription>
+              </Field>
+              <Field>
+                <FieldLabel>Words he has to know</FieldLabel>
+                <Textarea onValueChange={setTerms} rows={4} value={terms} />
+                <FieldDescription>
+                  One a line: tools, products and the company’s own words, so he
+                  hears them right.
+                </FieldDescription>
+              </Field>
+              {problem === null ? null : (
+                <Alert live="polite" variant="warning">
+                  <AlertDescription>{problem}</AlertDescription>
+                </Alert>
+              )}
+              <CommandFailure failure={failure} />
+            </div>
+          </DialogBody>
           <DialogFooter>
             <Button disabled={busy || problem !== null} type="submit">
               Save
@@ -213,8 +226,8 @@ export const SetupActions = ({
   const [open, setOpen] = useState(false);
   const back = useCommand(clientId);
   return (
-    <div className="flex flex-col items-end gap-1">
-      <div className="flex flex-wrap items-center gap-2">
+    <div {...stylex.props(styles.actions)}>
+      <div {...stylex.props(styles.buttons)}>
         {setup.changed ? (
           <Button
             disabled={back.busy}
@@ -227,7 +240,7 @@ export const SetupActions = ({
             size="sm"
             variant="outline"
           >
-            <RotateCcwIcon data-icon="inline-start" />
+            <Icon icon={UndoIcon} />
             As the first conversation suggests
           </Button>
         ) : null}
@@ -238,7 +251,7 @@ export const SetupActions = ({
           size="sm"
           variant="outline"
         >
-          <PencilIcon data-icon="inline-start" />
+          <Icon icon={PencilIcon} />
           Change
         </Button>
       </div>

@@ -7,7 +7,9 @@
  * connect asked it to send the browser back to, with `status=success` and
  * the `connected_account_id` appended, as Composio's redirect does; a key
  * it takes is
- * {@link acmeCrmKey} alone.
+ * {@link acmeCrmKey} alone. It also lists the toolkits of the tests'
+ * connections to a mail provider's server (test/mail-server.ts), so
+ * connect can tell which of their tools Composio tags read-only.
  * Imported by vite.config.ts (Node) and the tests (workerd), so it only
  * holds data.
  */
@@ -21,7 +23,7 @@ export const composioToolkits = [
     composio_managed_auth_schemes: ["OAUTH2"],
     meta: {
       categories: [{ id: "crm", name: "CRM" }],
-      tools_count: 2,
+      tools_count: 4,
       description:
         "HubSpot is a CRM platform for marketing, sales and service. It brings teams together.",
       logo: "https://logos.composio.dev/api/hubspot",
@@ -43,7 +45,52 @@ export const composioToolkits = [
     composio_managed_auth_schemes: [],
     meta: { categories: [{ id: "crm", name: "CRM" }], tools_count: 1 },
   },
+  // The toolkits of the tests' connections to a mail provider's server
+  // (test/mail-connection.ts), each holding the tools of `taggedTools`.
+  ...["mail", "mail_own", "crm", "bulk"].map((slug) => ({
+    slug,
+    name: slug,
+    composio_managed_auth_schemes: ["OAUTH2"],
+    meta: { categories: [], tools_count: 1 },
+  })),
 ];
+
+/** The tests' `bulk` tools, each read-only (test/tool-search.test.ts). */
+const bulkTools = [
+  ...Array.from({ length: 3000 }, (_, index) => `BULK_TOOL_${index}`),
+  "BULK_FIND_SHIPMENT",
+  ...Array.from({ length: 21 }, (_, index) => `BULK_QUOKKA_READ_${index}`),
+  "BULK_WOMBAT_READ_0",
+  "BULK_WOMBAT_READ_1",
+];
+
+/** The mail toolkits' tools Composio tags read-only, and the rest. */
+const mailReads = [
+  "mail.search",
+  "mail.read",
+  "mail.others",
+  "MAIL_SEARCH",
+  "MAIL_READ",
+];
+const mailChanges = ["mail.send", "MAIL_SEND", "MAIL_REPLY"];
+
+/**
+ * Each toolkit's tools: those Composio tags read-only (`readOnlyHint`),
+ * which the tests allow as reads, and the rest, listed without the tag.
+ * Connect runs a tool as a read only if Composio tags it so.
+ */
+const taggedTools: Record<string, { reads: string[]; changes: string[] }> = {
+  // With the CRM's tools in Stephen's eval (fixtures/stephen-world.ts).
+  hubspot: {
+    reads: ["HUBSPOT_LIST_CONTACTS", "HUBSPOT_SEARCH_NOTES"],
+    changes: ["HUBSPOT_CREATE_CONTACT", "HUBSPOT_UPDATE_DEAL"],
+  },
+  acme_crm: { reads: [], changes: ["ACME_CRM_LIST_DEALS"] },
+  mail: { reads: mailReads, changes: mailChanges },
+  mail_own: { reads: mailReads, changes: mailChanges },
+  crm: { reads: ["CRM_LIST_CONTACTS"], changes: [] },
+  bulk: { reads: bulkTools, changes: [] },
+};
 
 /** The one key Acme CRM's provider accepts. */
 export const acmeCrmKey = "acme-crm-test-key";
@@ -78,12 +125,6 @@ const acmeCrmDetail = {
   ],
 };
 
-/** HubSpot's tools, as Composio's API lists them. */
-export const composioTools = [
-  "HUBSPOT_LIST_CONTACTS",
-  "HUBSPOT_CREATE_CONTACT",
-];
-
 /** HubSpot's logo, as Composio's logo host serves it. */
 export const hubspotLogo =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><script>parent.stolen = document.cookie</script><rect width="1" height="1"/></svg>';
@@ -112,9 +153,14 @@ const composioApi = async (request, url) => {
     return Response.json(${JSON.stringify(acmeCrmDetail)});
   }
   if (route === "/tools") {
-    const toolkit = url.searchParams.get("toolkit_slug");
-    const tools = toolkit === "hubspot" ? ${JSON.stringify(composioTools)} : toolkit === "acme_crm" ? ["ACME_CRM_LIST_DEALS"] : [];
-    return Response.json({ items: tools.map((slug) => ({ slug })), next_cursor: null });
+    const tools = ${JSON.stringify(taggedTools)}[url.searchParams.get("toolkit_slug")] ?? { reads: [], changes: [] };
+    return Response.json({
+      items: [
+        ...tools.reads.map((slug) => ({ slug, tags: ["readOnlyHint"] })),
+        ...tools.changes.map((slug) => ({ slug })),
+      ],
+      next_cursor: null,
+    });
   }
   if (request.method === "POST" && route === "/auth_configs") {
     const { toolkit } = await request.json();

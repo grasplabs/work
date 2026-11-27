@@ -39,22 +39,17 @@ import {
 import { Progress } from "@grasp-os/ui/components/progress";
 import { SectionHeader } from "@grasp-os/ui/components/section-header";
 import { Stat, StatGroup } from "@grasp-os/ui/components/stat";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/ui/components/table";
 import { CircleCheckIcon, Icon, PlusIcon } from "@grasp-os/ui/lib/icons";
 import { colors, font, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
 import { Suspense } from "react";
-import type { ReactElement, ReactNode } from "react";
+import type { ReactElement } from "react";
 
 import type { ClientSummary } from "../clients/summary.ts";
+import { DataRows } from "./data-rows.tsx";
+import type { DataColumn, RowLook } from "./data-rows.tsx";
+import { LoadingFigure } from "./figures.tsx";
 import { needCount, summaryNeedsOf } from "./needs.ts";
 import type { OrgNeed } from "./needs.ts";
 import { microsPerDollar } from "./platform-spend-sums.ts";
@@ -62,7 +57,6 @@ import type {
   OrganizationSpend,
   PlatformSpend,
 } from "./platform-spend-sums.ts";
-import { rowTarget } from "./row-target.ts";
 import { sectionTo } from "./sections.ts";
 import { useSettled } from "./settled.tsx";
 import type { Deferred } from "./settled.tsx";
@@ -77,12 +71,9 @@ import {
 import type { Phase, Standing } from "./standing.ts";
 import { formatDay, plural } from "./words.ts";
 
-const STACKED = "@media (width < 84rem)";
 const WIDE = "@media (width >= 64rem)";
 
 const styles = stylex.create({
-  table: { display: { default: "block", [STACKED]: "none" } },
-  cards: { display: { default: "none", [STACKED]: "block" } },
   // What needs Grasp beside where everyone is, on a wide window.
   pair: {
     display: "grid",
@@ -107,22 +98,6 @@ const styles = stylex.create({
   },
   failed: { color: colors.destructive },
   meter: { display: "grid", gap: space["1"], minWidth: "7rem" },
-  card: {
-    display: "grid",
-    justifyItems: "start",
-    rowGap: space["2"],
-    marginBlockStart: space["1"],
-  },
-  facts: {
-    display: "flex",
-    flexWrap: "wrap",
-    columnGap: space["4"],
-    rowGap: space["1"],
-    color: colors.foreground,
-    fontSize: font.textSm,
-    lineHeight: font.textSmLine,
-  },
-  label: { color: colors.mutedForeground },
   clamp: {
     display: "-webkit-box",
     WebkitBoxOrient: "vertical",
@@ -345,9 +320,7 @@ const Figures = ({ rows, spend }: { rows: Row[]; spend: SpendRead }) => {
         {...(needs > 0 ? { variant: "warning" as const } : {})}
       />
       <WithSpend
-        fallback={
-          <Stat change="" label="Grasp AI this month" loading value="" />
-        }
+        fallback={<LoadingFigure label="Grasp AI this month" />}
         spend={spend}
       >
         {(read) => <AiFigure rows={rows} spend={read} />}
@@ -792,7 +765,7 @@ const Next = ({ row }: { row: Row }) => {
 };
 
 /** Its use in a line, for a card: runs, what failed, and last week's people. */
-const useWords = (row: Row): string => {
+const usageWords = (row: Row): string => {
   const activity = row.summary?.activity;
   if (activity === null || activity === undefined) {
     return missingWords(row);
@@ -805,74 +778,67 @@ const useWords = (row: Row): string => {
   return `${runs}; ${peopleLine(activity)}`;
 };
 
-/** One fact on a card: its quiet label, then its value. */
-const Fact = ({ label, children }: { label: string; children: ReactNode }) => (
-  <span>
-    <span {...stylex.props(styles.label)}>{label}</span> {children}
-  </span>
-);
-
-const OrganizationRow = ({ row, spend }: { row: Row; spend: SpendRead }) => (
-  <TableRow interactive>
-    <TableCell rowHeader wrap>
-      <Link
-        data-row-target=""
-        params={{ clientId: row.id }}
-        to="/organizations/$clientId"
-        {...stylex.props(rowTarget)}
-      >
-        {row.name}
-      </Link>
-    </TableCell>
-    <TableCell>
-      <State row={row} />
-    </TableCell>
-    <TableCell>
-      <Progressed row={row} />
-    </TableCell>
-    <TableCell>
-      <Use row={row} />
-    </TableCell>
-    <TableCell>
+/** The table's columns, each the same fact on a card: what Grasp's AI cost fills in apart. */
+const organizationColumns = (spend: SpendRead): DataColumn<Row>[] => [
+  {
+    id: "state",
+    head: "State",
+    cell: (row) => <State row={row} />,
+    // Under its name on a card.
+    fact: () => null,
+  },
+  {
+    id: "progress",
+    head: "Progress",
+    cell: (row) => <Progressed row={row} />,
+    fact: progressWords,
+  },
+  {
+    id: "use",
+    head: "Use, 7 days",
+    cell: (row) => <Use row={row} />,
+    fact: usageWords,
+  },
+  {
+    id: "ai",
+    head: "Grasp AI",
+    cell: (row) => (
       <WithSpend fallback={<Reading />} spend={spend}>
         {(read) => <Ai row={row} spend={read} />}
       </WithSpend>
-    </TableCell>
-    <TableCell>
-      <Health row={row} />
-    </TableCell>
-    <TableCell wrap>
-      <Next row={row} />
-    </TableCell>
-  </TableRow>
+    ),
+    fact: (row) => (
+      <WithSpend fallback="Reading…" spend={spend}>
+        {(read) => aiWords(row, read)}
+      </WithSpend>
+    ),
+  },
+  {
+    id: "health",
+    head: "Health",
+    cell: (row) => <Health row={row} />,
+    fact: (row) => healthOf(row).words,
+  },
+  {
+    id: "next",
+    head: "Next",
+    cell: (row) => <Next row={row} />,
+    wrap: true,
+    fact: nextWords,
+  },
+];
+
+/** How a row and a card open their organization. */
+const organizationLink = (row: Row, look: RowLook) => (
+  <Link {...look} params={{ clientId: row.id }} to="/organizations/$clientId" />
 );
 
-/** One organization as a card, below 84rem: its name, how it stands, then its facts. */
-const OrganizationCard = ({ row, spend }: { row: Row; spend: SpendRead }) => (
-  <Item asChild>
-    <Link params={{ clientId: row.id }} to="/organizations/$clientId">
-      <ItemContent>
-        <ItemTitle>{row.name}</ItemTitle>
-        <ItemDescription>
-          <span {...stylex.props(styles.card)}>
-            <State row={row} />
-            <span {...stylex.props(styles.facts)}>
-              <Fact label="Progress">{progressWords(row)}</Fact>
-              <Fact label="Health">{healthOf(row).words}</Fact>
-              <Fact label="Last 7 days">{useWords(row)}</Fact>
-              <Fact label="Grasp AI">
-                <WithSpend fallback="Reading…" spend={spend}>
-                  {(read) => aiWords(row, read)}
-                </WithSpend>
-              </Fact>
-              <Fact label="Next">{nextWords(row)}</Fact>
-            </span>
-          </span>
-        </ItemDescription>
-      </ItemContent>
-    </Link>
-  </Item>
-);
+/** How it stands, under its name on a card. */
+const organizationLead = (row: Row) => <State row={row} />;
+
+const organizationName = (row: Row): string => row.name;
+
+const organizationKey = (row: Row): string => row.id;
 
 const Organizations = ({ rows, spend }: { rows: Row[]; spend: SpendRead }) => (
   <section {...stylex.props(styles.part)}>
@@ -882,33 +848,16 @@ const Organizations = ({ rows, spend }: { rows: Row[]; spend: SpendRead }) => (
       title="Organizations"
       variant="group"
     />
-    <div {...stylex.props(styles.table)}>
-      <Table aria-label="Organizations" density="comfortable">
-        <TableHeader>
-          <TableRow>
-            <TableHead>Organization</TableHead>
-            <TableHead>State</TableHead>
-            <TableHead>Progress</TableHead>
-            <TableHead>Use, 7 days</TableHead>
-            <TableHead>Grasp AI</TableHead>
-            <TableHead>Health</TableHead>
-            <TableHead>Next</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map((row) => (
-            <OrganizationRow key={row.id} row={row} spend={spend} />
-          ))}
-        </TableBody>
-      </Table>
-    </div>
-    <div {...stylex.props(styles.cards)}>
-      <ItemGroup aria-label="Organizations" separated>
-        {rows.map((row) => (
-          <OrganizationCard key={row.id} row={row} spend={spend} />
-        ))}
-      </ItemGroup>
-    </div>
+    <DataRows
+      columns={organizationColumns(spend)}
+      label="Organizations"
+      lead={organizationLead}
+      link={organizationLink}
+      name={organizationName}
+      nameHead="Organization"
+      rowKey={organizationKey}
+      rows={rows}
+    />
   </section>
 );
 

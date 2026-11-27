@@ -5,19 +5,38 @@
  * domain (src/crm/link.ts). Saved, audited, and the admin read again, so
  * Details shows what Attio says of the company just linked.
  */
-import { Button } from "@grasp-os/app-kit/components/button";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   Field,
   FieldDescription,
   FieldLabel,
-} from "@grasp-os/app-kit/components/field";
-import { Input } from "@grasp-os/app-kit/components/input";
+} from "@grasp-os/ui/components/field";
+import { Input } from "@grasp-os/ui/components/input";
+import { size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
 
 import { setAttioCompanyFn } from "../crm/functions.ts";
 import type { AttioLinkChange } from "../crm/functions.ts";
 import type { AttioLinkErrorCode } from "../crm/link.ts";
 import { thenRefresh, useAction } from "../use-action.ts";
+
+const styles = stylex.create({
+  // The form in a measure a field can be read at.
+  form: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["3"],
+    maxWidth: size.formWidth,
+  },
+  buttons: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["3"],
+  },
+});
 
 /** What staff read when linking is refused, by its code. */
 const refusals: Readonly<Record<AttioLinkErrorCode, string>> = {
@@ -52,7 +71,7 @@ export const AttioLink = ({
   };
   return (
     <form
-      className="flex flex-col gap-3 border-t px-5 py-4 *:max-w-xl"
+      {...stylex.props(styles.form)}
       onSubmit={(event) => {
         event.preventDefault();
         const value = new FormData(event.currentTarget).get("recordId");
@@ -60,12 +79,9 @@ export const AttioLink = ({
       }}
     >
       <Field>
-        <FieldLabel htmlFor={`attio-${clientId}`}>
-          Its company in Attio
-        </FieldLabel>
+        <FieldLabel>Its company in Attio</FieldLabel>
         <Input
           defaultValue={recordId ?? ""}
-          id={`attio-${clientId}`}
           // Keyed by the link: the field starts again from it after a save.
           key={recordId ?? ""}
           maxLength={36}
@@ -78,7 +94,7 @@ export const AttioLink = ({
           it is this company: its people and deals show here.
         </FieldDescription>
       </Field>
-      <div className="flex flex-wrap items-center gap-3">
+      <div {...stylex.props(styles.buttons)}>
         <Button disabled={busy} size="sm" type="submit" variant="outline">
           {recordId === null ? "Link" : "Save"}
         </Button>
@@ -95,12 +111,12 @@ export const AttioLink = ({
             Unlink
           </Button>
         )}
-        {failure === null ? null : (
-          <p className="text-destructive text-sm" role="alert">
-            {failure}
-          </p>
-        )}
       </div>
+      {failure === null ? null : (
+        <Alert appearance="subtle" variant="destructive">
+          <AlertDescription>{failure}</AlertDescription>
+        </Alert>
+      )}
     </form>
   );
 };

@@ -218,6 +218,7 @@ const shown = async (
             ? undefined
             : Promise.resolve({ state: "ready", data: from })
         }
+        opportunityId={from === undefined ? undefined : "opportunity-1"}
       />
     ),
   });
@@ -351,6 +352,27 @@ describe("Chat's page from Make something", () => {
     });
   });
 
+  it("starts an opportunity's box with the draft the person left of its brief, and leaves Make something's own draft alone", async () => {
+    localStorage.setItem(
+      "grasp.chat.draft.user-1.new.opportunity.opportunity-1",
+      JSON.stringify({ text: "My own take on the brief", mentions: [] })
+    );
+    localStorage.setItem(
+      "grasp.chat.draft.user-1.new.make.workflow",
+      JSON.stringify({ text: "A workflow of my own", mentions: [] })
+    );
+    await shown({ kind: "workflow" }, undefined, { from: opportunity });
+    await settled();
+
+    expect({
+      box: box().textContent,
+      make: localStorage.getItem("grasp.chat.draft.user-1.new.make.workflow"),
+    }).toStrictEqual({
+      box: "My own take on the brief",
+      make: JSON.stringify({ text: "A workflow of my own", mentions: [] }),
+    });
+  });
+
   it("starts the box with the brief of an opportunity an admin drafts, and asks nothing until it is sent", async () => {
     const { asked } = await shown({ kind: "workflow" }, undefined, {
       from: opportunity,
@@ -478,6 +500,41 @@ describe("Chat's page from Make something", () => {
         "create What waits on me today? null",
         "send chat-1 What waits on me today?",
       ],
+    });
+  });
+
+  it("keeps what is typed for a new chat when the page is left or loaded again, and lets it go once sent", async () => {
+    await shown();
+    await act(async () => {
+      typeInPrompt(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+    // Away and back: the page is made anew, as after a reload.
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    const { asked } = await shown();
+    const back = box().textContent;
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({
+      back,
+      asked,
+      kept: Object.keys(localStorage).filter((key) =>
+        key.startsWith("grasp.chat.draft.")
+      ),
+    }).toStrictEqual({
+      back: "What waits on me today?",
+      asked: [
+        "create What waits on me today? null",
+        "send chat-1 What waits on me today?",
+      ],
+      kept: [],
     });
   });
 
@@ -782,6 +839,37 @@ describe("Chat's page from Make something", () => {
         "create @Claire Which invoices are late? null with agent-2",
         'send chat-1 @Claire Which invoices are late? [{"kind":"agent","id":"agent-2"}]',
       ],
+    });
+  });
+
+  it("mentions the agent the address names even over a new chat's draft the person left, which stays theirs", async () => {
+    localStorage.setItem(
+      "grasp.chat.draft.user-1.new.chat",
+      JSON.stringify({ text: "Half a question", mentions: [] })
+    );
+    const { asked } = await shown(undefined, undefined, {
+      agents: [agent("claire", "Claire")],
+      named: "claire",
+    });
+    await act(async () => {
+      typeInPrompt(box(), "Who owes us?");
+      await Promise.resolve();
+    });
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({
+      asked,
+      left: localStorage.getItem("grasp.chat.draft.user-1.new.chat"),
+    }).toStrictEqual({
+      asked: [
+        "create @Claire Who owes us? null with claire",
+        'send chat-1 @Claire Who owes us? [{"kind":"agent","id":"claire"}]',
+      ],
+      left: JSON.stringify({ text: "Half a question", mentions: [] }),
     });
   });
 

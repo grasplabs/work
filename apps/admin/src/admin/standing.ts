@@ -1,9 +1,12 @@
 /**
  * Where an organization stands, from its summary (core's admin-summary.ts,
  * counts and dates only): the phase of its onboarding, whether it is at
- * risk, and its standing in one word, for Home. Pure.
+ * risk, and its standing in one word, for Home and, from the snapshot by
+ * the same rule, an organization's own page. Pure.
  */
 import type { AdminSummary } from "@grasp-os/shared/admin-summary";
+import type { AdminView } from "@grasp-os/shared/admin/admin-view";
+import { listenDays } from "@grasp-os/shared/admin/onboarding-admin";
 import type { BadgeVariant } from "@grasp-os/ui/components/badge";
 
 import type { ClientSummary } from "../clients/summary.ts";
@@ -73,23 +76,43 @@ export const phaseOf = ({ stage }: Onboarding): Phase => {
  */
 const lateShare = 0.75;
 
+/** Where the interviews stand, for whether they are behind. */
+interface Pace {
+  /** Their days are over. */
+  closed: boolean;
+  day: number | null;
+  days: number | null;
+  known: number;
+  threshold: number;
+}
+
 /**
- * At risk: the interviews closed short of what it opens at (waiting for
- * the go with less known than its threshold: core's `ready` is true once
- * they are over, whatever is known), or three quarters of their days are
- * gone and less is known than an even pace towards the threshold would
- * give by now.
+ * Behind: the interviews closed short of what it opens at (over with less
+ * known than its threshold), or three quarters of their days are gone and
+ * less is known than an even pace towards the threshold would give by now.
  */
-const atRisk = (onboarding: Onboarding): boolean => {
-  const { stage, day, days, known, threshold } = onboarding;
-  if (stage === "waiting") {
+const behind = ({ closed, day, days, known, threshold }: Pace): boolean => {
+  if (closed) {
     return known < threshold;
   }
-  if (stage !== "interviews" || day === null || days === null) {
+  if (day === null || days === null) {
     return false;
   }
   const share = day / days;
   return share >= lateShare && known < threshold * share;
+};
+
+/**
+ * At risk, from its summary: its interviews are behind. Waiting for the go
+ * is the interviews over or enough known (core's `ready` is true once they
+ * are over, whatever is known), so waiting counts as closed.
+ */
+const atRisk = (onboarding: Onboarding): boolean => {
+  const { stage } = onboarding;
+  if (stage !== "waiting" && stage !== "interviews") {
+    return false;
+  }
+  return behind({ ...onboarding, closed: stage === "waiting" });
 };
 
 /** How organization `entry` stands now. */
@@ -101,14 +124,54 @@ export const standingOf = (entry: ClientSummary): Standing => {
   return atRisk(onboarding) ? "at_risk" : phaseOf(onboarding);
 };
 
+/**
+ * The day of its interviews as core counts it, from 1 on the day they
+ * start (the summary's `day`); the admin's view counts from 0. Null once
+ * they are over.
+ */
+export const interviewDay = (
+  view: Pick<AdminView, "closed" | "day">
+): number | null => (view.closed ? null : view.day + 1);
+
+/**
+ * How an organization whose core answered stands, from the admin's view
+ * of its snapshot, by the same rules as its summary's: live while its gate
+ * is open (`gateOpen`, as core's stage says it, whether or not Grasp gave
+ * a go: a deployment can start open), enough known is waiting for the go,
+ * the team told is the interviews, at risk while they are behind.
+ */
+export const standingOfView = (
+  view: AdminView,
+  gateOpen: boolean
+): Standing => {
+  if (view.open || gateOpen) {
+    return "live";
+  }
+  if (view.knowledge.ready) {
+    return "waiting";
+  }
+  if (!view.told) {
+    return "setting_up";
+  }
+  return behind({
+    closed: view.closed,
+    day: interviewDay(view),
+    days: listenDays(view.org),
+    known: view.knowledge.percent,
+    threshold: view.knowledge.threshold,
+  })
+    ? "at_risk"
+    : "interviews";
+};
+
 const dayMs = 86_400_000;
 
 /** Whole days from `from` to `to`, never fewer than none. */
-const daysBetween = (from: string, to: string): number =>
+export const daysBetween = (from: string, to: string): number =>
   Math.max(0, Math.floor((Date.parse(to) - Date.parse(from)) / dayMs));
 
 /** "today", "1 day", "9 days". */
-const dayCount = (days: number): string => {
+export const dayCount = (days: number): string => {
   if (days === 0) {
     return "today";
   }

@@ -2085,10 +2085,6 @@ msgstr "Une équipe sans responsable reçoit ses liens le premier jour, et je de
 msgid "A tick: yes or no"
 msgstr "Une case : oui ou non"
 
-#: src/connections/connect-dialog.tsx
-msgid "A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's Read or Write to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
-msgstr "Un outil activé commence en Lecture là où Composio indique qu'il ne fait que lire ; Grasp ne le vérifie pas. Un outil en Lecture s'exécute sans demander. L'appel d'un outil en Écriture depuis le chat, ou par une personne qui utilise une application, attend que cette personne le confirme ; l'exécution d'un workflow le fait comme l'une de ses étapes. Appuyez sur Lecture ou Écriture d'un outil pour le changer. Ne mettez un outil en Lecture que s'il ne modifie rien : mal marqué, il modifie des choses sans demander."
-
 #: src/apps/field-kinds.tsx
 msgid "A type the App's code declares"
 msgstr "Un type que déclare le code de l’App"
@@ -12630,6 +12626,10 @@ msgstr "Pour l’instant, seulement {owner}."
 #: src/inbox/item-detail.tsx
 msgid "Only {person} can say whether it happened."
 msgstr "Seul·e {person} peut dire si cela a eu lieu."
+
+#: src/connections/connect-dialog.tsx
+msgid "Only a tool Composio says only reads can be Read, and it starts as Read when switched on; any other tool is Write. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a Read tool's Read or Write to change it."
+msgstr "Seul un outil dont Composio dit qu'il ne fait que lire peut être Lecture, et il commence en Lecture une fois activé ; tout autre outil est Écriture. Un outil en Lecture s'exécute sans demander. Un appel d'un outil en Écriture depuis un chat, ou par une personne utilisant une App, attend que cette personne le confirme ; l'exécution d'un workflow le fait comme l'une de ses étapes. Appuyez sur Lecture ou Écriture d'un outil en Lecture pour le changer."
 
 #: src/settings/use-team-change.ts
 msgid "Only admins can change teams."

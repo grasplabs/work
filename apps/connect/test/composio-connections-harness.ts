@@ -33,7 +33,11 @@ export const composio = fakeComposioApi(
       slug: "hubspot",
       name: "HubSpot",
       tools: [
-        { slug: "HUBSPOT_LIST_CONTACTS", inputs: ["pipeline"] },
+        {
+          slug: "HUBSPOT_LIST_CONTACTS",
+          inputs: ["pipeline"],
+          tags: ["readOnlyHint"],
+        },
         { slug: "HUBSPOT_CREATE_CONTACT" },
         { slug: "HUBSPOT_UPDATE_CONTACT" },
         // On its way out: never allowed.

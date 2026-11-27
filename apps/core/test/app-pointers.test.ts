@@ -201,7 +201,10 @@ describe("a company app", setUpTime, () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "user");
     const mail = await mailApp(admin);
-    await admin.api.connections.setToolClass("reach-others", { who: "nobody" });
+    // A Composio tool allowed by name alone changes the company's things.
+    await admin.api.connections.setToolClass("change-company", {
+      who: "nobody",
+    });
 
     const chat = await chatUsing(admin, person.userId, mail.id);
     await expect(chat()).resolves.toBe(

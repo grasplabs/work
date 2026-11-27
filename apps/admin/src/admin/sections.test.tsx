@@ -85,14 +85,8 @@ const integrationsOf = (root: Element) => {
   return {
     nothing: headings.has("Nothing connected yet"),
     waits: main.includes("Grasp waits on the company’s own admin."),
-    connected: headings.has("What the company connected"),
-    notReported: main.includes(
-      "The company’s own Grasp doesn’t report what it connected yet."
-    ),
-    stillToConnect: headings.has("Still to connect"),
-    needsNotReported: main.includes(
-      "The company’s own Grasp doesn’t report what its workflows need yet."
-    ),
+    notReported: headings.has("Its connections aren’t reported"),
+    asked: headings.has("Asked of Grasp"),
     source: main.includes(
       "What the company connected: the company’s own Grasp doesn’t hold it yet. What its workflows still need connected: from Composio, once it is connected."
     ),
@@ -100,11 +94,24 @@ const integrationsOf = (root: Element) => {
   };
 };
 
-/** The text of the list item naming `name`. */
-const memberOf = (root: Element, name: string): string =>
-  [...root.querySelectorAll("main li")].find((each) =>
-    [...each.querySelectorAll("span")].some((span) => span.textContent === name)
-  )?.textContent ?? "";
+/** The facts of the member named `name`, as their row in the members' table says them. */
+const memberOf = (root: Element, name: string): string[] => {
+  const row = [...root.querySelectorAll("main tr")].find(
+    (each) => each.querySelector("th")?.textContent === name
+  );
+  return [...(row?.querySelectorAll("td") ?? [])].map(
+    (cell) => cell.textContent ?? ""
+  );
+};
+
+/** The members' figure labelled `label`: its value, then what it says under it. */
+const memberFigureOf = (root: Element, label: string): string[] => {
+  const name = [...root.querySelectorAll('[aria-label="Its members"] p')].find(
+    (element) => element.textContent === label
+  );
+  const figures = name?.parentElement?.nextElementSibling;
+  return [...(figures?.children ?? [])].map((part) => part.textContent ?? "");
+};
 
 /** A client whose core doesn't answer now (`error`), never having answered. */
 const unread = (
@@ -146,22 +153,25 @@ const sectionOf = async (
     title:
       container.querySelector("main h1")?.textContent ===
       (section === "overview" ? client.name : sectionWords[section].title),
-    // Its sections in the sidebar's level, and over each one where to see
-    // why it isn't read.
+    // Its sections in the sidebar's level, and over each one how it
+    // stands: not answering, or being set up.
     column:
       (column?.includes("Details") ?? false) &&
-      page.includes("Not read now: see its Setup"),
+      ["Not answering", "Being set up"].some((words) => page.includes(words)),
     failed: page.includes("This couldn’t be shown"),
-    fromCore: ["Needs Grasp", "% known", "From the company"].some((words) =>
-      page.includes(words)
-    ),
+    fromCore: [
+      "What else needs Grasp",
+      "People active last week",
+      "Talked",
+      "From the company",
+    ].some((words) => page.includes(words)),
     toSetup:
       container.querySelector(
         `main a[href="/organizations/${client.id}/setup"]`
       ) !== null,
     state: [
       "isn’t set up yet",
-      "See its Setup progress",
+      "See how its setting up goes",
       "’s Grasp didn’t answer",
       "Try again",
     ].filter((words) => page.includes(words)),
@@ -185,32 +195,24 @@ describe("an organization's integrations, workflows and members", () => {
     {
       when: "before it signed in",
       snapshot: emptyAdminSnapshot("Before"),
-      says: {
-        nothing: true,
-        waits: true,
-        connected: false,
-        notReported: false,
-      },
+      says: { nothing: true, waits: true, notReported: false },
     },
     {
       when: "once it signed in",
       snapshot: signedIn(emptyAdminSnapshot("Signed")),
-      says: {
-        nothing: false,
-        waits: false,
-        connected: true,
-        notReported: true,
-      },
+      says: { nothing: false, waits: false, notReported: true },
     },
   ])(
-    "shows what a company connected only once it signed in ($when), says core doesn't report its connections yet, and that what is still to connect comes from Composio",
+    "shows nothing connected before a company signed in, and that core doesn't report its connections once it has ($when), with the apps it asked Grasp for either way",
     async ({ snapshot, says }) => {
-      const { container } = await openAcme("/connectors", snapshot);
+      const { container } = await openAcme("/connectors", {
+        ...snapshot,
+        asked: [{ id: "asked-1", name: "Exact Online", askedAt: daysAgo(2) }],
+      });
 
       expect(integrationsOf(container)).toStrictEqual({
         ...says,
-        stillToConnect: true,
-        needsNotReported: true,
+        asked: true,
         source: true,
         toCome: false,
       });
@@ -263,11 +265,10 @@ describe("an organization's integrations, workflows and members", () => {
     const page = integrations.main();
 
     expect({
-      drive: page.includes(
-        `Connected by Anna de Vries on ${formatDate(daysAgo(3))}.`
-      ),
-      microsoft: page.includes("4 people connected their own"),
-      again: page.includes("1 needs signing in again"),
+      drive: page.includes(`${formatDate(daysAgo(3))}, by Anna de Vries`),
+      tools: page.includes("1 tool its admin allowed"),
+      microsoft: page.includes("4 people"),
+      again: page.includes("1 to sign in again"),
       // Core sends the toolkit's slug, not the catalog's name for it.
       hubspot: page.includes("Hubspot"),
       forCrmSync: page.includes("For CRM sync"),
@@ -278,6 +279,7 @@ describe("an organization's integrations, workflows and members", () => {
       notReported: page.includes("doesn’t report"),
     }).toStrictEqual({
       drive: true,
+      tools: true,
       microsoft: true,
       again: true,
       hubspot: true,
@@ -328,12 +330,17 @@ describe("an organization's integrations, workflows and members", () => {
       anna: memberOf(closed.container, "Anna de Vries"),
       ben: memberOf(closed.container, "Ben Okafor").includes("Builder"),
       // No contract is known, so only the seats taken are counted.
-      seats: closed.main().includes("2 seats taken"),
+      seats: memberFigureOf(closed.container, "Seats taken"),
+      // A row writes to the member.
+      writes: closed.container
+        .querySelector('main a[aria-label="Write to Anna de Vries"]')
+        ?.getAttribute("href"),
       toCome: closed.main().includes("This section isn’t in the admin yet."),
     }).toStrictEqual({
-      anna: `AVAnna de Vriesanna@acme.testReady since ${joined}Role: Admin`,
+      anna: ["anna@acme.test", `Ready since ${joined}`, "Admin"],
       ben: true,
-      seats: true,
+      seats: ["2", "No contract known yet"],
+      writes: "mailto:anna@acme.test",
       toCome: false,
     });
   });
@@ -345,9 +352,11 @@ describe("an organization's integrations, workflows and members", () => {
       gate: { ...empty.gate, open: true, openedAt: empty.now },
     });
 
-    expect(memberOf(open.container, "Anna de Vries")).toBe(
-      `AVAnna de Vriesanna@acme.testIn since ${joined}Role: Admin`
-    );
+    expect(memberOf(open.container, "Anna de Vries")).toStrictEqual([
+      "anna@acme.test",
+      `In since ${joined}`,
+      "Admin",
+    ]);
   });
 
   it("says when nobody of an organization has made an account yet", async () => {
@@ -373,7 +382,7 @@ describe("an organization's sections without its core", () => {
       which: "one not deployed yet",
       client: waitingRow,
       admin: waitingAdmin,
-      state: ["isn’t set up yet", "See its Setup progress"],
+      state: ["isn’t set up yet", "See how its setting up goes"],
     },
   ];
 

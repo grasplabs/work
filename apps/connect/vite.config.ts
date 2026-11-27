@@ -2,10 +2,7 @@ import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
 import { defineProject } from "vite-plus";
 
 import { startCompanyNetwork } from "./test/company-network-fake.ts";
-import {
-  testComposioClassesFile,
-  testConnectorsFile,
-} from "./test/global-setup.ts";
+import { testConnectorsFile } from "./test/global-setup.ts";
 import {
   appClients,
   clients,
@@ -69,8 +66,6 @@ export default defineProject({
       // The tests' connectors: the release's and the sample one (see the
       // setup).
       "#connectors": testConnectorsFile,
-      // The classes of the fake Composio's tools, for the release's.
-      "#composio-classes": testComposioClassesFile,
     },
   },
   test: {

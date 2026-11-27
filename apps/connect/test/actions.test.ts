@@ -2,6 +2,7 @@ import { connectErrors } from "@grasp-os/shared/connect";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { fakeComposioServer } from "./composio-api.ts";
 import {
   addConnection,
   agentFor,
@@ -43,6 +44,7 @@ const tools: FakeTool[] = [
   },
   {
     name: "mail.search",
+    readOnly: true,
     run: ({ query }) =>
       query === ""
         ? { output: { error: "An empty query" }, isError: true }
@@ -50,7 +52,7 @@ const tools: FakeTool[] = [
   },
 ];
 
-const server = fakeMcpServer(serverUrl, tools);
+const server = fakeComposioServer(serverUrl, tools, "mail");
 
 const anna = agentFor("user-anna");
 const ben = agentFor("user-ben");

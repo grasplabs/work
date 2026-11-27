@@ -50,9 +50,9 @@ const liveClient = async (snapshot: AdminSnapshot) => {
 /** A link into the company's own Grasp, to its audit trail. */
 const toItsAuditTrail = /href="https:\/\/[^"/]+\/settings\/audit"/u;
 
-/** The part of a page titled `title`: from its label to its end. */
-const sectionOf = (html: string, title: string): string => {
-  const at = html.indexOf(`aria-label="${title}"`);
+/** The part of a page whose heading's id is `id`: from the region it names to its end. */
+const sectionOf = (html: string, id: string): string => {
+  const at = html.indexOf(`aria-labelledby="${id}"`);
   return at === -1 ? "" : html.slice(at, html.indexOf("</section>", at));
 };
 
@@ -82,8 +82,9 @@ describe("an organization's Setup", () => {
     const settings = {
       html: (await setupPage(acme.clientId, "settings")) ?? "",
     };
-    const header = textOf(sectionOf(status.html, "How it stands"));
-    const workers = textOf(sectionOf(status.html, "Its Workers"));
+    const header = textOf(sectionOf(status.html, "stands"));
+    const workers = textOf(sectionOf(status.html, "workers"));
+    const kept = textOf(sectionOf(status.html, "kept"));
 
     expect({
       header: [
@@ -95,7 +96,7 @@ describe("an organization's Setup", () => {
         "Its activity",
       ].map((text) => header.includes(text)),
       // Its activity is the audit trail in its own Grasp.
-      activity: toItsAuditTrail.test(sectionOf(status.html, "How it stands")),
+      activity: toItsAuditTrail.test(sectionOf(status.html, "stands")),
       // Nothing of it is left to the old client pages.
       toOldPages: status.html.includes('href="/clients/'),
       // Nothing needs a look on a company that runs the newest release.
@@ -104,33 +105,31 @@ describe("an organization's Setup", () => {
       // something is off: nothing of them before.
       numbers: status.html.includes("Its platform in numbers"),
       // What runs in its account, and under it what its deploys keep there.
-      workers: [
+      workers: workers.includes("Read what runs"),
+      kept: [
         "grasp-os-core",
         "grasp-os-connect",
         "grasp-os-files",
         "grasp-os-audit-archive",
-        "Read what runs",
-      ].map((text) => workers.includes(text)),
+      ].map((text) => kept.includes(text)),
       // No AI Gateway runs for it any more: its AI is its own provider's.
-      gateway: workers.includes("AI Gateway"),
+      gateway: `${workers}${kept}`.includes("AI Gateway"),
       history: {
-        kept: history.html.includes('aria-label="Its history"'),
+        kept: history.html.includes('aria-labelledby="history"'),
         settingUp: history.html.includes("Setting it up"),
       },
       releases: {
         follows: releases.html.includes("Follows its channel"),
-        runs: textOf(sectionOf(releases.html, "Recent releases")).includes(
-          acme.release
-        ),
+        runs: textOf(sectionOf(releases.html, "recent")).includes(acme.release),
         runsThis: releases.html.includes("Runs this"),
         shouldRun: releases.html.includes("No release on its channel yet"),
         lastDeploy: releases.html.includes("None yet"),
         // Only the newest are listed, and the whole list is a link away.
-        allReleases: sectionOf(releases.html, "Recent releases").includes(
+        allReleases: sectionOf(releases.html, "recent").includes(
           'href="/platform/releases"'
         ),
       },
-      settings: textOf(sectionOf(settings.html, "Its secrets")).includes(
+      settings: textOf(sectionOf(settings.html, "secrets")).includes(
         "Generation1Last rotatedNeverLiveYes"
       ),
     }).toStrictEqual({
@@ -139,7 +138,8 @@ describe("an organization's Setup", () => {
       toOldPages: false,
       needs: false,
       numbers: false,
-      workers: [true, true, true, true, true],
+      workers: true,
+      kept: [true, true, true, true],
       gateway: false,
       history: { kept: true, settingUp: false },
       releases: {
@@ -180,31 +180,31 @@ describe("an organization's Setup", () => {
     const settings = {
       html: (await setupPage(acme.clientId, "settings")) ?? "",
     };
-    const needs = textOf(sectionOf(status.html, "What needs a look"));
+    const needs = textOf(sectionOf(status.html, "needs"));
     const lines = [
       `Its deploy of ${beta.id} failed`,
       "New secrets wait to reach it",
     ];
-    const done = textOf(sectionOf(history.html, "Its history"));
+    const done = textOf(sectionOf(history.html, "history"));
 
     expect({
-      standing: textOf(sectionOf(status.html, "How it stands")).includes(
+      standing: textOf(sectionOf(status.html, "stands")).includes(
         "Needs a look"
       ),
       needs: lines.map((line) => needs.includes(line)),
       inOrder: lines
         .map((line) => needs.indexOf(line))
         .every((at, index, all) => index === 0 || at > (all[index - 1] ?? 0)),
-      channel: textOf(sectionOf(status.html, "How it stands")).includes("Beta"),
+      channel: textOf(sectionOf(status.html, "stands")).includes("Beta"),
       done: ["Moved it to Beta.", "Rotated its secrets.", staff.email].map(
         (text) => done.includes(text)
       ),
       // Said in words, never as the log names it.
       created: done.includes("client.create"),
-      secretsLive: textOf(sectionOf(settings.html, "Its secrets")).includes(
+      secretsLive: textOf(sectionOf(settings.html, "secrets")).includes(
         "Generation2"
       ),
-      waiting: textOf(sectionOf(settings.html, "Its secrets")).includes(
+      waiting: textOf(sectionOf(settings.html, "secrets")).includes(
         "LiveWith the next deploy"
       ),
     }).toStrictEqual({
@@ -328,7 +328,7 @@ describe("an organization's Setup", () => {
     ];
 
     const sectionFor = async (clientId: string): Promise<string> =>
-      sectionOf((await setupPage(clientId)) ?? "", "AI");
+      sectionOf((await setupPage(clientId)) ?? "", "ai");
     const sections: string[] = [];
     for (const { clientId } of shown) {
       // oxlint-disable-next-line no-await-in-loop -- one page at a time
@@ -336,11 +336,11 @@ describe("an organization's Setup", () => {
     }
     const lines = sections.map(textOf);
     const expected = [
-      "AI: OpenAI connected · working · last used 5 min ago",
-      "AI: OpenAI connected · refusing the key since ",
-      "AI: OpenAI connected · not answering since ",
-      "AI: OpenAI connected · limiting requests since ",
-      "AI: not connected yet",
+      "Its own providerOpenAI connected · working · last used 5 min ago",
+      "Its own providerOpenAI connected · refusing the key since ",
+      "Its own providerOpenAI connected · not answering since ",
+      "Its own providerOpenAI connected · limiting requests since ",
+      "Its own providernot connected yet",
     ];
 
     expect({
@@ -373,8 +373,8 @@ describe("an organization's Setup", () => {
 
     const html = (await setupPage(client.clientId)) ?? "";
 
-    expect(textOf(sectionOf(html, "AI"))).toContain(
-      "AI: OpenAI connected · working · last used 5 min ago"
+    expect(textOf(sectionOf(html, "ai"))).toContain(
+      "Its own providerOpenAI connected · working · last used 5 min ago"
     );
   });
 
@@ -384,8 +384,8 @@ describe("an organization's Setup", () => {
 
     const html = (await setupPage(client.clientId)) ?? "";
 
-    expect(textOf(sectionOf(html, "AI"))).toContain(
-      "AI: couldn’t be read just now."
+    expect(textOf(sectionOf(html, "ai"))).toContain(
+      "Its own providercouldn’t be read just now."
     );
   });
 
@@ -401,7 +401,7 @@ describe("an organization's Setup", () => {
     const unknown = await setupPage("client-unknown");
 
     expect({
-      channel: textOf(sectionOf(shown, "How it stands")).includes("Edge"),
+      channel: textOf(sectionOf(shown, "stands")).includes("Edge"),
       unknown,
     }).toStrictEqual({ channel: true, unknown: null });
   });

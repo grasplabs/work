@@ -11,29 +11,35 @@
  * drift, shared secrets), as the admin's grid read it.
  */
 
+import { fromBase64Url } from "@grasp-os/shared/encoding";
 import {
-  Alert,
-  AlertAction,
-  AlertDescription,
-} from "@grasp-os/app-kit/components/alert";
-import { Button } from "@grasp-os/app-kit/components/button";
-import { CardContent } from "@grasp-os/app-kit/components/card";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@grasp-os/ui/components/alert-dialog";
+import { Button } from "@grasp-os/ui/components/button";
+import { DatePicker } from "@grasp-os/ui/components/date-picker";
 import {
   Field,
   FieldDescription,
   FieldGroup,
   FieldLabel,
-} from "@grasp-os/app-kit/components/field";
-import { Input } from "@grasp-os/app-kit/components/input";
+} from "@grasp-os/ui/components/field";
+import { Input, SecretInput } from "@grasp-os/ui/components/input";
 import {
   NativeSelect,
   NativeSelectOption,
-} from "@grasp-os/app-kit/components/native-select";
-import { fromBase64Url } from "@grasp-os/shared/encoding";
+} from "@grasp-os/ui/components/native-select";
+import { Text } from "@grasp-os/ui/components/text";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import { TriangleAlertIcon } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
 
 import {
   applySettingsFn,
@@ -63,8 +69,13 @@ import type { ClientDriftState } from "../rollout/drift.ts";
 import { pinClientFn, setChannelFn } from "../rollout/functions.ts";
 import { useRolloutAction } from "../rollout/use-action.ts";
 import { thenRefresh } from "../use-action.ts";
-import { Section } from "./section.tsx";
-import { Facts, Failure } from "./setup-parts.tsx";
+import { Actions, Facts, Failure, FormStack, Group } from "./setup-parts.tsx";
+import type { Fact } from "./setup-parts.tsx";
+
+const styles = stylex.create({
+  // As wide as its longest choice, beside its buttons.
+  days: { width: "8rem" },
+});
 
 /** Reads the page again after a change: whatever it shows, read anew. */
 export type Refresh = () => Promise<void>;
@@ -112,19 +123,16 @@ export const PinRelease = ({
     );
   };
   return (
-    <form
-      className="flex flex-col gap-3"
+    <FormStack
       onSubmit={(event) => {
         event.preventDefault();
         pin(textOf(new FormData(event.currentTarget), "releaseId"));
       }}
     >
       <Field>
-        <FieldLabel htmlFor="setup-pin">Pin it to</FieldLabel>
+        <FieldLabel>Pin it to</FieldLabel>
         <NativeSelect
-          className="w-full"
           defaultValue={pinned ?? releases[0]?.id ?? ""}
-          id="setup-pin"
           // Keyed by the pin: it starts again from the one read after each change.
           key={pinned ?? ""}
           name="releaseId"
@@ -141,7 +149,7 @@ export const PinRelease = ({
             : `Pinned to ${pinned}: promotions skip it. Unpinned, it goes to its channel's release.`}
         </FieldDescription>
       </Field>
-      <div className="flex flex-wrap items-center gap-2">
+      <Actions>
         <Button
           disabled={busy || releases.length === 0}
           size="sm"
@@ -163,8 +171,8 @@ export const PinRelease = ({
           </Button>
         )}
         <Failure failure={failure} />
-      </div>
-    </form>
+      </Actions>
+    </FormStack>
   );
 };
 
@@ -180,8 +188,7 @@ export const ChannelChange = ({
 }) => {
   const { busy, failure, run } = useRolloutAction();
   return (
-    <form
-      className="flex flex-col gap-3"
+    <FormStack
       onSubmit={(event) => {
         event.preventDefault();
         const next = channelIds.find(
@@ -202,11 +209,9 @@ export const ChannelChange = ({
       }}
     >
       <Field>
-        <FieldLabel htmlFor="setup-channel">Channel</FieldLabel>
+        <FieldLabel>Channel</FieldLabel>
         <NativeSelect
-          className="max-w-48"
           defaultValue={channel}
-          id="setup-channel"
           // Keyed by the channel: it starts again from the one read after each change.
           key={channel}
           name="channel"
@@ -223,13 +228,13 @@ export const ChannelChange = ({
           release, unless it&apos;s pinned.
         </FieldDescription>
       </Field>
-      <div className="flex flex-wrap items-center gap-3">
+      <Actions>
         <Button disabled={busy} size="sm" type="submit" variant="outline">
           Save channel
         </Button>
         <Failure failure={failure} />
-      </div>
-    </form>
+      </Actions>
+    </FormStack>
   );
 };
 
@@ -247,8 +252,7 @@ export const SignInChange = ({
 }) => {
   const { busy, failure, run } = useSettingsAction();
   return (
-    <form
-      className="flex flex-col gap-4 border-t px-5 py-4 *:max-w-xl"
+    <FormStack
       onSubmit={(event) => {
         event.preventDefault();
         const form = new FormData(event.currentTarget);
@@ -266,15 +270,15 @@ export const SignInChange = ({
     >
       {/* Keyed by what was read: the fields start again from it after a save. */}
       <FieldGroup key={JSON.stringify(signIn)}>
-        <SignInFields current={signIn} idPrefix="setup-sign-in" />
+        <SignInFields current={signIn} />
       </FieldGroup>
-      <div className="flex flex-wrap items-center gap-3">
+      <Actions>
         <Button disabled={busy} size="sm" type="submit" variant="outline">
           Save sign-in
         </Button>
         <Failure failure={failure} />
-      </div>
-    </form>
+      </Actions>
+    </FormStack>
   );
 };
 
@@ -336,22 +340,43 @@ export const StaffWindowChange = ({
         ]}
       />
       {canChange ? (
-        <div className="flex flex-col gap-3 border-t px-5 py-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <NativeSelect
-              aria-label="How long"
-              disabled={busy}
-              onChange={(event) => {
-                setDays(event.currentTarget.value);
-              }}
-              value={days}
-            >
-              {["1", "2", "3", "7"].map((each) => (
-                <NativeSelectOption key={each} value={each}>
-                  {each === "1" ? "1 day" : `${each} days`}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
+        <Actions>
+          <NativeSelect
+            aria-label="How long"
+            disabled={busy}
+            onChange={(event) => {
+              setDays(event.currentTarget.value);
+            }}
+            size="sm"
+            style={styles.days}
+            value={days}
+          >
+            {["1", "2", "3", "7"].map((each) => (
+              <NativeSelectOption key={each} value={each}>
+                {each === "1" ? "1 day" : `${each} days`}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+          <Button
+            disabled={busy}
+            onClick={() => {
+              void run(
+                async () =>
+                  await thenRefresh(
+                    async () =>
+                      await openStaffWindowFn({
+                        data: { clientId, days: Number(days) },
+                      }),
+                    refresh
+                  )
+              );
+            }}
+            size="sm"
+            variant="outline"
+          >
+            {setup.open ? "Open it again from now" : "Open a staff window"}
+          </Button>
+          {window === null ? null : (
             <Button
               disabled={busy}
               onClick={() => {
@@ -359,40 +384,19 @@ export const StaffWindowChange = ({
                   async () =>
                     await thenRefresh(
                       async () =>
-                        await openStaffWindowFn({
-                          data: { clientId, days: Number(days) },
-                        }),
+                        await closeStaffWindowFn({ data: { clientId } }),
                       refresh
                     )
                 );
               }}
               size="sm"
-              variant={setup.open ? "outline" : "default"}
+              variant="outline"
             >
-              {setup.open ? "Open it again from now" : "Open a staff window"}
+              Close it
             </Button>
-            {window === null ? null : (
-              <Button
-                disabled={busy}
-                onClick={() => {
-                  void run(
-                    async () =>
-                      await thenRefresh(
-                        async () =>
-                          await closeStaffWindowFn({ data: { clientId } }),
-                        refresh
-                      )
-                  );
-                }}
-                size="sm"
-                variant="outline"
-              >
-                Close it
-              </Button>
-            )}
-            <Failure failure={failure} />
-          </div>
-        </div>
+          )}
+          <Failure failure={failure} />
+        </Actions>
       ) : null}
     </>
   );
@@ -412,7 +416,10 @@ const pendingWords = (
   return "Sign-in changed since its last deploy: apply it now, or its next release carries it.";
 };
 
-/** What waits for its next deploy, and applying its settings now. */
+/**
+ * What waits for its next deploy, and applying its settings now: the
+ * tab's one primary action while a change waits.
+ */
 export const ApplySettings = ({
   clientId,
   active,
@@ -428,10 +435,10 @@ export const ApplySettings = ({
 }) => {
   const { busy, failure, run } = useSettingsAction();
   return (
-    <CardContent>
-      <p>{pendingWords(configPending, pinned)}</p>
+    <>
+      <Text>{pendingWords(configPending, pinned)}</Text>
       {active ? (
-        <div className="flex flex-wrap items-center gap-3">
+        <Actions>
           <Button
             disabled={busy}
             onClick={() => {
@@ -448,13 +455,13 @@ export const ApplySettings = ({
           >
             Apply settings now
           </Button>
-          <span className="text-muted-foreground">
+          <Text as="span" color="muted" size="sm">
             Deploys the release it runs, live at once.
-          </span>
+          </Text>
           <Failure failure={failure} />
-        </div>
+        </Actions>
       ) : null}
-    </CardContent>
+    </>
   );
 };
 
@@ -474,8 +481,7 @@ export const TeamsBotChange = ({
 }) => {
   const { busy, failure, run } = useSettingsAction();
   return (
-    <form
-      className="flex flex-col gap-4 border-t px-5 py-4 *:max-w-xl"
+    <FormStack
       onSubmit={(event) => {
         event.preventDefault();
         const form = new FormData(event.currentTarget);
@@ -501,12 +507,11 @@ export const TeamsBotChange = ({
       {/* Keyed by what was read: the fields start again from it after a save. */}
       <FieldGroup key={JSON.stringify(bot)}>
         <Field>
-          <FieldLabel htmlFor="setup-teams-bot-app">App id</FieldLabel>
+          <FieldLabel>App id</FieldLabel>
           <Input
             autoComplete="off"
-            className="max-w-md"
             defaultValue={bot?.appId ?? ""}
-            id="setup-teams-bot-app"
+            mono
             name="appId"
             required
             spellCheck={false}
@@ -517,12 +522,11 @@ export const TeamsBotChange = ({
           </FieldDescription>
         </Field>
         <Field>
-          <FieldLabel htmlFor="setup-teams-bot-tenant">Tenant</FieldLabel>
+          <FieldLabel>Tenant</FieldLabel>
           <Input
             autoComplete="off"
-            className="max-w-md"
             defaultValue={bot?.tenantId ?? ""}
-            id="setup-teams-bot-tenant"
+            mono
             name="tenantId"
             required
             spellCheck={false}
@@ -532,23 +536,18 @@ export const TeamsBotChange = ({
           </FieldDescription>
         </Field>
         <Field>
-          <FieldLabel htmlFor="setup-teams-bot-expiry">
-            Secret expires on
-          </FieldLabel>
-          <Input
-            className="max-w-xs"
-            defaultValue={bot?.secretExpiresOn ?? ""}
-            id="setup-teams-bot-expiry"
+          <FieldLabel>Secret expires on</FieldLabel>
+          <DatePicker
+            defaultValue={bot?.secretExpiresOn}
             name="secretExpiresOn"
             required
-            type="date"
           />
           <FieldDescription>
             As Entra shows it beside the client secret.
           </FieldDescription>
         </Field>
       </FieldGroup>
-      <div className="flex flex-wrap items-center gap-3">
+      <Actions>
         <Button disabled={busy} size="sm" type="submit" variant="outline">
           Save bot
         </Button>
@@ -573,8 +572,8 @@ export const TeamsBotChange = ({
           </Button>
         )}
         <Failure failure={failure} />
-      </div>
-    </form>
+      </Actions>
+    </FormStack>
   );
 };
 
@@ -612,7 +611,7 @@ export const TeamsPackageDownload = ({ clientId }: { clientId: string }) => {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   return (
-    <div className="flex flex-wrap items-center gap-3">
+    <Actions>
       <Button
         disabled={busy}
         onClick={() => {
@@ -629,15 +628,17 @@ export const TeamsPackageDownload = ({ clientId }: { clientId: string }) => {
       >
         Download app package
       </Button>
-      <span className="text-muted-foreground">
+      <Text as="span" color="muted" size="sm">
         For its IT to upload in the Teams admin center, under Manage apps.
-      </span>
-      {failed ? (
-        <span className="text-destructive">
-          The package couldn&apos;t be made: read the page again and retry.
-        </span>
-      ) : null}
-    </div>
+      </Text>
+      <Failure
+        failure={
+          failed
+            ? "The package couldn't be made: read the page again and retry."
+            : null
+        }
+      />
+    </Actions>
   );
 };
 
@@ -664,10 +665,8 @@ export const SealedSecretChange = ({
   refresh: Refresh;
 }) => {
   const { busy, failure, run } = useSettingsAction();
-  const id = `setup-${name.toLowerCase().replaceAll("_", "-")}`;
   return (
-    <form
-      className="flex flex-col gap-3 border-t px-5 py-4 *:max-w-xl"
+    <FormStack
       onSubmit={(event) => {
         event.preventDefault();
         const form = event.currentTarget;
@@ -686,29 +685,19 @@ export const SealedSecretChange = ({
       }}
     >
       <Field>
-        <FieldLabel htmlFor={id}>
-          {set ? `New ${label.toLowerCase()}` : label}
-        </FieldLabel>
-        <Input
-          autoComplete="off"
-          className="max-w-md"
-          id={id}
-          name="value"
-          required
-          spellCheck={false}
-          type="password"
-        />
+        <FieldLabel>{set ? `New ${label.toLowerCase()}` : label}</FieldLabel>
+        <SecretInput name="value" required spellCheck={false} />
         <FieldDescription>{description}</FieldDescription>
       </Field>
-      <div className="flex flex-wrap items-center gap-3">
+      <Actions>
         <Button disabled={busy} size="sm" type="submit" variant="outline">
           {set
             ? `Replace ${label.toLowerCase()}`
             : `Set ${label.toLowerCase()}`}
         </Button>
         <Failure failure={failure} />
-      </div>
-    </form>
+      </Actions>
+    </FormStack>
   );
 };
 
@@ -725,10 +714,8 @@ export const RotateSecrets = ({
   refresh: Refresh;
 }) => {
   const { busy, failure, run } = useSettingsAction();
-  const [confirming, setConfirming] = useState(false);
   const [notRotated, setNotRotated] = useState(false);
   const rotate = () => {
-    setConfirming(false);
     void run(async () => {
       const result = await thenRefresh(
         async () => await rotateSecretsFn({ data: { clientId } }),
@@ -739,59 +726,45 @@ export const RotateSecrets = ({
     });
   };
   return (
-    <CardContent>
-      {confirming ? (
-        <Alert variant="destructive">
-          <TriangleAlertIcon aria-hidden />
-          <AlertDescription>
-            <p>
-              Its people all sign in again once the next deploy makes the new
-              secrets live.
-            </p>
-          </AlertDescription>
-          <AlertAction placement="below">
-            <Button
-              disabled={busy}
-              onClick={rotate}
-              size="sm"
-              variant="destructive"
-            >
-              Rotate them
-            </Button>
-            <Button
-              onClick={() => {
-                setConfirming(false);
-              }}
-              size="sm"
-              variant="outline"
-            >
-              Keep them
-            </Button>
-          </AlertAction>
-        </Alert>
-      ) : (
-        <div className="flex flex-wrap items-center gap-3">
+    <Actions>
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
           <Button
             disabled={busy}
             onClick={() => {
               setNotRotated(false);
-              setConfirming(true);
             }}
             size="sm"
             variant="outline"
           >
             Rotate secrets
           </Button>
-          <Failure failure={failure} />
-          {notRotated ? (
-            <p className="text-destructive" role="alert">
-              Not rotated: its last rotation isn&apos;t live yet, or went live
-              less than a week ago.
-            </p>
-          ) : null}
-        </div>
-      )}
-    </CardContent>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Rotate its secrets?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Its people all sign in again once the next deploy makes the new
+              secrets live.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep them</AlertDialogCancel>
+            <AlertDialogAction onClick={rotate} variant="destructive">
+              Rotate them
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <Failure failure={failure} />
+      <Failure
+        failure={
+          notRotated
+            ? "Not rotated: its last rotation isn't live yet, or went live less than a week ago."
+            : null
+        }
+      />
+    </Actions>
   );
 };
 
@@ -824,9 +797,7 @@ const sharedWords = (current: boolean | null): string => {
 type LiveRead = LiveStatus | "failed" | null;
 
 /** Its account's live numbers as facts. */
-const liveRows = (
-  live: LiveStatus
-): { label: string; value: ReactNode; attention?: boolean }[] => [
+const liveRows = (live: LiveStatus): Fact[] => [
   {
     label: "Reach",
     value: reachWords[live.reach],
@@ -858,7 +829,7 @@ const readLive = async (clientId: string): Promise<LiveRead> => {
  * grid read it: whether the router reaches its core, its drift, whether
  * it runs the shared secrets. Said only when one of them is off: a
  * company that is reachable, in sync and current is "Healthy" in its
- * header already. Its Setup gives it a new key once what it runs
+ * facts already. Its Setup gives it a new key once what it runs
  * changed, so it is read again after a deploy.
  */
 export const LiveNumbers = ({ clientId }: { clientId: string }) => {
@@ -881,8 +852,8 @@ export const LiveNumbers = ({ clientId }: { clientId: string }) => {
   }
   const rows = liveRows(live);
   return rows.some(({ attention }) => attention === true) ? (
-    <Section title="Its platform in numbers">
+    <Group id="numbers" title="Its platform in numbers">
       <Facts rows={rows} />
-    </Section>
+    </Group>
   ) : null;
 };

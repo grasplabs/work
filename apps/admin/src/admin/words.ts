@@ -14,6 +14,7 @@ import {
   mayInvite,
 } from "@grasp-os/shared/admin/onboarding-admin";
 import type {
+  ContractState,
   KnowledgeSource,
   LinkState,
   Need,
@@ -21,6 +22,8 @@ import type {
   Settler,
   Stage,
 } from "@grasp-os/shared/admin/onboarding-admin";
+
+import { interviewDay } from "./standing.ts";
 
 const months = [
   "Jan",
@@ -176,6 +179,13 @@ export const workflowWords: Record<WorkflowState, string> = {
   blocked: "Waits on an answer",
 };
 
+/** Where a contract stands. */
+export const contractWords: Record<ContractState, string> = {
+  draft: "Being written",
+  sent: "Sent, not signed",
+  signed: "Signed",
+};
+
 /** What each source of what Grasp knows about a company is (`knowledge-words.ts`). */
 export const knowledgeWords: Record<KnowledgeSource, string> = {
   vision: "The first conversation and the research",
@@ -263,7 +273,7 @@ const interviewsLine = (view: OrgView): string => {
     return `Closed. ${talked} of ${view.asked} talked`;
   }
   return view.told
-    ? `Day ${view.day} of ${days}. ${talked} of ${view.asked} talked`
+    ? `Day ${interviewDay(view) ?? days} of ${days}. ${talked} of ${view.asked} talked`
     : `${days === 14 ? "Two weeks" : `${days} days`}, from the day the team is told`;
 };
 

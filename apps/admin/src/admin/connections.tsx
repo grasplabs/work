@@ -1,27 +1,19 @@
 /**
- * What a company connected, and what its workflows and chats still need,
- * as its core's snapshot says it (`integrations`), ported from the
- * prototype (grasplabs/prototype `components/admin/org-integrations.tsx`,
- * and `NeededPanel` in `components/admin/source-panels.tsx`). Only what
- * core sends: an app's name as its catalog says it isn't in the snapshot,
- * so a Composio toolkit is named after its slug.
+ * The words for what a company connected, and what its workflows and
+ * chats still need, as its core's snapshot says it (`integrations`), for
+ * its Connectors (src/admin/connectors.tsx) and the workflows waiting on
+ * a connection. Only what core sends: an app's name as its catalog says
+ * it isn't in the snapshot, so a Composio toolkit is named after its slug.
  */
 
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
 import type {
-  AdminAppAsked,
   AdminConnection,
   AdminIntegrations,
   AdminNeeded,
 } from "@grasp-os/shared/admin-snapshot";
-import { Link } from "@tanstack/react-router";
-import { ArrowRightIcon } from "lucide-react";
 
-import { appKey } from "./integrations-asked.ts";
-import { Attention, Done } from "./parts.tsx";
-import { sourceNames } from "./sections.ts";
-import { formatDate, formatList, plural } from "./words.ts";
+import { Attention } from "./parts.tsx";
+import { plural } from "./words.ts";
 
 /** The native connectors, by name. */
 const nativeNames: Record<string, string> = {
@@ -49,7 +41,7 @@ export const appName = ({
 };
 
 /** How a connection stands, in words. */
-const connectionWords: Record<AdminConnection["state"], string> = {
+export const connectionWords: Record<AdminConnection["state"], string> = {
   works: "Works",
   again: "Needs signing in again",
   stopped: "Stopped at Composio",
@@ -65,97 +57,12 @@ export const needWords: Record<AdminNeeded["state"], string> = {
 };
 
 /** What Grasp may do there, as the connection says it. */
-const accessOf = (connection: AdminConnection): string => {
+export const accessOf = (connection: AdminConnection): string => {
   if (connection.tools === null) {
     return connection.account ?? "Its own account";
   }
   const count = connection.tools.length;
   return `${count} ${plural(count, "tool", "tools")} its admin allowed`;
-};
-
-/** One shared connection: what it is, who connected it and when, and how it stands. */
-const ConnectedRow = ({ connection }: { connection: AdminConnection }) => {
-  const name = appName(connection);
-  const since = formatDate(connection.connectedAt);
-  const by = connection.connectedBy;
-  return (
-    <li className="grid items-center gap-x-6 gap-y-2 border-t px-5 py-3 lg:grid-cols-[minmax(0,15rem)_minmax(0,1fr)_minmax(0,14rem)]">
-      <span className="flex min-w-0 flex-col">
-        <span className="truncate">{name}</span>
-        <span className="text-muted-foreground text-xs">
-          {connection.source === "composio" ? sourceNames.composio : "Grasp"}
-          {connection.hidden ? ", hidden from its people" : ""}
-        </span>
-      </span>
-      <span className="flex min-w-0 flex-col">
-        <span>{accessOf(connection)}</span>
-        <span className="text-muted-foreground text-xs">
-          {by === null
-            ? `Connected on ${since}.`
-            : `Connected by ${by} on ${since}.`}
-        </span>
-      </span>
-      <span className="flex flex-col items-start lg:items-end">
-        {connection.state === "works" ? (
-          <Done>{connectionWords.works}</Done>
-        ) : (
-          <span className="text-status-attention lg:text-right">
-            {connectionWords[connection.state]}
-          </span>
-        )}
-      </span>
-    </li>
-  );
-};
-
-/** The company's shared connections, then its people's own, counted by app. */
-export const ConnectedRows = ({
-  integrations,
-}: {
-  integrations: AdminIntegrations;
-}) => {
-  const { connected, personal } = integrations;
-  if (connected.length === 0 && personal.length === 0) {
-    return (
-      <p className="text-muted-foreground border-t px-5 py-4">
-        Nothing connected yet beyond its sign-in.
-      </p>
-    );
-  }
-  return (
-    <ul className="flex flex-col">
-      {connected.map((connection) => (
-        <ConnectedRow
-          connection={connection}
-          key={`${connection.source}:${connection.provider}:${connection.connectedAt}`}
-        />
-      ))}
-      {personal.map((app) => {
-        const name = appName(app);
-        const { people, again } = app;
-        return (
-          <li
-            className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 border-t px-5 py-3"
-            key={`${app.source}:${app.provider}`}
-          >
-            <span className="flex min-w-0 flex-col">
-              <span>{name}</span>
-              <span className="text-muted-foreground text-xs">
-                {`${people} ${plural(people, "person", "people")} connected their own`}
-              </span>
-            </span>
-            {again === 0 ? (
-              <Done>{connectionWords.works}</Done>
-            ) : (
-              <span className="text-status-attention">
-                {`${again} ${plural(again, "needs", "need")} signing in again`}
-              </span>
-            )}
-          </li>
-        );
-      })}
-    </ul>
-  );
 };
 
 /** An app the workflows need, with the workflows that need it and why. */
@@ -172,7 +79,7 @@ interface NeededApp {
  * workflow that needs it. A binding no connection was approved for names
  * no app; the Workflows section lists it.
  */
-const neededApps = (needed: readonly AdminNeeded[]): NeededApp[] => {
+export const neededApps = (needed: readonly AdminNeeded[]): NeededApp[] => {
   const apps = new Map<string, NeededApp>();
   for (const need of needed) {
     if (need.app === null) {
@@ -194,71 +101,12 @@ const neededApps = (needed: readonly AdminNeeded[]): NeededApp[] => {
 };
 
 /** Who a chat's request waits on, in words. */
-const decidedByWords: Record<
+export const decidedByWords: Record<
   AdminIntegrations["requests"][number]["decidedBy"],
   string
 > = {
   person: "the person in the chat",
   admin: "the company’s admin",
-};
-
-/** What the workflows need that isn't connected, and what chats asked for that waits. */
-export const StillToConnectRows = ({
-  integrations,
-}: {
-  integrations: AdminIntegrations;
-}) => {
-  const apps = neededApps(integrations.needed);
-  const { requests } = integrations;
-  if (apps.length === 0 && requests.length === 0) {
-    return (
-      <p className="text-muted-foreground border-t px-5 py-4">
-        Every app the workflows need is connected.
-      </p>
-    );
-  }
-  return (
-    <ul className="flex flex-col">
-      {apps.map((app) => {
-        const workflows = formatList(app.workflows);
-        return (
-          <li
-            className="flex items-center gap-3 border-t px-5 py-3"
-            key={app.key}
-          >
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span>{app.name}</span>
-              <span className="text-muted-foreground text-xs">
-                {`For ${workflows}`}
-              </span>
-            </span>
-            <span className="text-status-attention flex-none text-xs">
-              {needWords[app.state]}
-            </span>
-          </li>
-        );
-      })}
-      {requests.map((request) => {
-        const name = appName(request);
-        const { waiting } = request;
-        const since = formatDate(request.since);
-        return (
-          <li
-            className="flex items-center gap-3 border-t px-5 py-3"
-            key={`${request.source}:${request.provider}:${request.decidedBy}`}
-          >
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span>{name}</span>
-              <span className="text-muted-foreground text-xs">
-                {`Asked for in ${waiting} ${plural(waiting, "chat", "chats")} since ${since}, waiting on ${decidedByWords[request.decidedBy]}`}
-              </span>
-            </span>
-            <Badge variant="outline">Asked for</Badge>
-          </li>
-        );
-      })}
-    </ul>
-  );
 };
 
 /** One workflow, and each of its bindings no working connection serves. */
@@ -326,37 +174,3 @@ export const WaitingOnConnectionsRows = ({
     </ul>
   );
 };
-
-/**
- * The apps the company asked Grasp to add, as Composio's catalog doesn't
- * have them: each with when it asked, and the way to it on Apps asked
- * for, which lists it once for every company that asked.
- */
-export const AskedOfGraspRows = ({
-  asked,
-}: {
-  asked: readonly AdminAppAsked[];
-}) => (
-  <ul className="flex flex-col">
-    {asked.map((app) => (
-      <li className="flex items-center gap-3 border-t px-5 py-3" key={app.id}>
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span>{app.name}</span>
-          <span className="text-muted-foreground text-xs">
-            {`Asked for on ${formatDate(app.askedAt)}, as Composio doesn’t have it`}
-          </span>
-        </span>
-        <Button
-          aria-label={`Asked of Grasp: open ${app.name} on Apps asked for`}
-          nativeButton={false}
-          render={<Link search={{ app: appKey(app.name) }} to="/connectors" />}
-          size="sm"
-          variant="outline"
-        >
-          Asked of Grasp
-          <ArrowRightIcon data-icon="inline-end" />
-        </Button>
-      </li>
-    ))}
-  </ul>
-);

@@ -43,7 +43,7 @@ test("what staff type in a Setup stays as its core's answer comes in", async ({
   await expect(field).toBeVisible();
   // The Setup runs, and takes what is typed, before the answer is in.
   await page.waitForFunction(() => {
-    const input = document.querySelector("#setup-sign-in-entra");
+    const input = document.querySelector('input[name="entraTenantId"]');
     return (
       input !== null &&
       Object.keys(input).some((key) => key.startsWith("__reactFiber"))
