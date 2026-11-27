@@ -26,7 +26,7 @@ const encoder = new TextEncoder();
 
 /**
  * A test release's packages with core on pi-durable `version`, whose minor
- * is how it stores chats (`readsChatsOf`).
+ * is how it stores chats (`canMove`, @grasp-os/shared/release-apply).
  */
 export const onPi = (version: string) => ({
   packages: { "@earendil-works/pi-durable": version },
