@@ -74,6 +74,25 @@ export const sessionUrlProblem = (
 };
 
 /**
+ * A connection's status as connect takes it: a Composio connection with
+ * no session (made through Composio's legacy MCP servers, before sessions,
+ * which no release calls) needs connecting again, whatever its row says.
+ * Migration 0044 marks those it finds; one made by the release before
+ * while the migration ran, or after a deploy failed and was retried,
+ * reads "active" still, and is taken for what it is here.
+ */
+export const statusOf = <Status extends Connection["status"]>(
+  connection: Pick<Connection, "serverKind" | "composioSessionId"> & {
+    status: Status;
+  }
+): Status | "needs_reauth" =>
+  connection.status === "active" &&
+  connection.serverKind === "composio" &&
+  connection.composioSessionId === null
+    ? "needs_reauth"
+    : connection.status;
+
+/**
  * The connection a call may use: it exists, it is someone's personal
  * connection only if the call acts for that person, and it is active. Never
  * more than the person (R5): a personal connection holds one person's own
@@ -100,7 +119,7 @@ export const usableConnection = async (
   ) {
     throw connectErrors.create("connect.not_owner");
   }
-  if (connection.status !== "active") {
+  if (statusOf(connection) !== "active") {
     throw connectErrors.create("connect.connection_inactive");
   }
   return connection;
@@ -362,6 +381,7 @@ export const connectionOwners = async (
       id: connections.id,
       ownerUserId: connections.ownerUserId,
       status: connections.status,
+      composioSessionId: connections.composioSessionId,
       source: connections.serverKind,
       provider: connections.provider,
       accountId: connections.accountId,
@@ -394,8 +414,20 @@ export const connectionOwners = async (
     )
   );
   return rows.map(
-    ({ accountAddresses, accountSenders, tools, scope, ...row }) => ({
+    ({
+      accountAddresses,
+      accountSenders,
+      tools,
+      scope,
+      composioSessionId,
+      ...row
+    }) => ({
       ...row,
+      status: statusOf({
+        status: row.status,
+        serverKind: row.source,
+        composioSessionId,
+      }),
       accountAddresses: accountAddresses ?? [],
       accountSenders: accountSenders ?? [],
       ...(row.source === "composio" && {

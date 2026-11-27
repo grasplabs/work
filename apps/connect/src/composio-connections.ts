@@ -120,25 +120,62 @@ const connectedAccountSchema = z.object({
   auth_config: z.object({ id: idSchema }),
 });
 
+/** A switch of a session's config: `null` where Composio sends it is unset. */
+const switchSchema = (name: "enable" | "enabled") =>
+  z
+    .object({ [name]: z.boolean().nullish() })
+    .nullish()
+    .transform((value) => value?.[name] === true);
+
 /**
  * What Composio answers to making or changing a session, as far as
- * connect reads it (`POST /tool_router/session`): its ID, its MCP
- * endpoint, and the config it holds, which must be the one asked for.
+ * connect reads it (`POST` and `PATCH /tool_router/session`): its ID, its
+ * MCP endpoint, and the config it holds, which must be the one asked for
+ * (`sessionMismatch`). A switch Composio sends as `null` is off; the pin
+ * and the tools it must state.
  */
 const sessionSchema = z.object({
   session_id: idSchema,
   mcp: z.object({ url: z.string() }),
   config: z.object({
     user_id: z.string(),
-    connected_accounts: z.record(z.string(), z.array(z.string())).optional(),
-    manage_connections: z
-      .object({ enabled: z.boolean().optional() })
-      .optional(),
-    search: z.object({ enable: z.boolean().optional() }).optional(),
-    workbench: z.object({ enable: z.boolean().optional() }).optional(),
-    proxy_execute: z.object({ enable: z.boolean() }).optional(),
+    toolkits: z.unknown().optional(),
+    tools: z.record(z.string(), z.unknown()).nullish(),
+    connected_accounts: z.record(z.string(), z.array(z.string())).nullish(),
+    manage_connections: switchSchema("enabled"),
+    search: switchSchema("enable"),
+    workbench: switchSchema("enable"),
+    proxy_execute: switchSchema("enable"),
+    multi_account: switchSchema("enable"),
+    execute: z
+      .object({ enable_multi_execute: z.boolean().nullish() })
+      .nullish()
+      .transform((value) => value?.enable_multi_execute === true),
     instant: z.unknown().optional(),
   }),
+});
+
+/**
+ * The tools a session serves of `tools`: exactly those connect offers
+ * (`offeredToolNames`: those the admin allowed, but for what Grasp never
+ * runs). Whether each runs as a read or a change stays connect's to decide
+ * on every call (`allowedToolNow`), whatever the session says of it.
+ * Throws `connection.no_tools` for none: Composio may take an empty list
+ * for every tool, so a session is never made or changed with one.
+ */
+const sessionToolNames = (
+  tools: readonly (string | ComposioToolRule)[]
+): string[] => {
+  const names = offeredToolNames({ tools: JSON.stringify(tools) });
+  if (names.length === 0) {
+    throw connectionErrors.create("connection.no_tools");
+  }
+  return names;
+};
+
+/** The tool config of a session of `toolkit` serving `names` alone. */
+const sessionToolsOf = (toolkit: string, names: readonly string[]) => ({
+  [toolkit]: { enable: [...names] },
 });
 
 /** What Composio answers to a deletion: whatever it is, it's not read. */
@@ -310,6 +347,35 @@ const idsOf = (left: readonly Target[]) => {
 
 /** The first wait before trying a failed cleanup again. */
 const firstRetryMs = 60 * 1000;
+
+/**
+ * The cleanup of a Composio connection being disconnected: an insert of
+ * its session, account and auth config into `composio_cleanups` as `id`,
+ * only while `stillConnected` matches it, for the same transaction that
+ * marks it disconnected (src/oauth.ts). Calls stop with that transaction,
+ * whatever becomes of the deletion at Composio after it.
+ */
+export const disconnectCleanup = (
+  db: DrizzleD1Database,
+  id: string,
+  stillConnected: SQL
+) =>
+  db.insert(composioCleanups).select(
+    db
+      .select({
+        id: sql<string>`${id}`.as("id"),
+        serverId: sql<string | null>`NULL`.as("server_id"),
+        connectedAccountId: connections.accountId,
+        authConfigId: connections.composioAuthConfigId,
+        sessionId: connections.composioSessionId,
+        marker: sql<string | null>`NULL`.as("marker"),
+        attempts: sql<number>`0`.as("attempts"),
+        retryAt: sql<Date>`${Date.now() + firstRetryMs}`.as("retry_at"),
+        createdAt: sql<Date>`${Date.now()}`.as("created_at"),
+      })
+      .from(connections)
+      .where(stillConnected)
+  );
 
 /**
  * When the clock may start on a cleanup recorded while a start or a
@@ -704,6 +770,8 @@ export const startToolkitConnection = async (
   if (!(await checkedTools(key, toolkit, tools))) {
     throw connectionErrors.create("connection.invalid");
   }
+  // At least one tool its session can serve (`sessionToolNames`).
+  sessionToolNames(tools);
 
   const state = randomToken();
   const stateHash = await sha256Hex(state);
@@ -923,7 +991,12 @@ export const purgeExpiredToolkitFlows = async (env: Env): Promise<void> => {
   await handOverFlows(env, "expires_at <= ?", [now], now);
 };
 
-/** Whether `toolkit` has a shared Composio connection that isn't disconnected. */
+/**
+ * Whether `toolkit` has a shared Composio connection that isn't
+ * disconnected and has a session: one without (made before sessions,
+ * `statusOf`) is taken over by the next connection of its toolkit
+ * (`legacyToReplace`), so it doesn't stand in the way of one.
+ */
 const hasLiveShared = async (env: Env, toolkit: string): Promise<boolean> => {
   const [live] = await drizzle(env.DB)
     .select({ id: connections.id })
@@ -933,12 +1006,47 @@ const hasLiveShared = async (env: Env, toolkit: string): Promise<boolean> => {
         eq(connections.provider, toolkit),
         eq(connections.serverKind, "composio"),
         eq(connections.scope, "shared"),
-        ne(connections.status, "disconnected")
+        ne(connections.status, "disconnected"),
+        isNotNull(connections.composioSessionId)
       )
     )
     .limit(1);
   return live !== undefined;
 };
+
+/** Where a connection made before sessions still stands (`legacyToReplace`). */
+const isLegacyOf = (id: string) =>
+  sql`${connections.id} = ${id} AND ${connections.status} <> 'disconnected' AND ${connections.composioSessionId} IS NULL`;
+
+/**
+ * The shared connection of `toolkit` made before sessions (`statusOf`)
+ * that a new one of the toolkit takes the place of, if any: the oldest,
+ * so each connecting again takes over one, as the Connectors page takes a
+ * working connection of a toolkit to stand for a stopped one (Composio
+ * never says which account a connection is).
+ */
+const legacyToReplace = async (
+  db: ReturnType<typeof drizzle>,
+  toolkit: string
+) =>
+  await db
+    .select({
+      id: connections.id,
+      accountId: connections.accountId,
+      authConfigId: connections.composioAuthConfigId,
+    })
+    .from(connections)
+    .where(
+      and(
+        eq(connections.provider, toolkit),
+        eq(connections.serverKind, "composio"),
+        eq(connections.scope, "shared"),
+        ne(connections.status, "disconnected"),
+        isNull(connections.composioSessionId)
+      )
+    )
+    .orderBy(asc(connections.createdAt), asc(connections.id))
+    .get();
 
 /**
  * Composio's statuses of an account whose auth it is still completing: its
@@ -1107,22 +1215,6 @@ interface Made {
 }
 
 /**
- * The tool config of a session of `toolkit` that serves exactly the tools
- * connect offers of `tools` (`offeredToolNames`: those the admin allowed,
- * but for what Grasp never runs) and no other (`tools.<toolkit>.enable`).
- * Whether each runs as a read or a change stays connect's to decide on
- * every call (`allowedToolNow`), whatever the session says of it.
- */
-const sessionToolsOf = (
-  toolkit: string,
-  tools: readonly (string | ComposioToolRule)[]
-) => ({
-  [toolkit]: {
-    enable: offeredToolNames({ tools: JSON.stringify(tools) }),
-  },
-});
-
-/**
  * What connect asks of the session that serves `account`, as Composio's
  * session API takes it (`POST /tool_router/session`): this deployment's
  * user, the one toolkit, its auth config, exactly that connected account
@@ -1134,15 +1226,12 @@ const sessionToolsOf = (
  * of Composio's own), and more than one account. As the direct-tools
  * preset of Composio's SDK sends it, with the rest switched off by name.
  */
-const sessionBodyOf = (
-  account: Made,
-  tools: readonly (string | ComposioToolRule)[]
-) => ({
+const sessionBodyOf = (account: Made, names: readonly string[]) => ({
   user_id: account.composioUserId,
   toolkits: { enable: [account.toolkit] },
   auth_configs: { [account.toolkit]: account.authConfigId },
   connected_accounts: { [account.toolkit]: [account.connectedAccountId] },
-  tools: sessionToolsOf(account.toolkit, tools),
+  tools: sessionToolsOf(account.toolkit, names),
   manage_connections: { enable: false },
   workbench: { enable: false },
   proxy_execute: { enable: false },
@@ -1154,36 +1243,113 @@ const sessionBodyOf = (
 });
 
 /**
- * Whether the session Composio made holds the config asked of it: for
- * the account's user, pinning that one account (when it says), and none of
- * Composio's own tools switched on.
+ * The allowlist Composio echoes in a session's config: as
+ * `{ enabled: [...] }` (its answers' word), `{ enable: [...] }` (its
+ * requests'), or the list itself. None for anything else, such as a
+ * denylist (`disabled`), which allows what it doesn't name.
  */
-const isSessionAsked = (
+const enabledOf = (value: unknown): string[] | undefined => {
+  let list: unknown = value;
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    const fields = new Map<string, unknown>(Object.entries(value));
+    const disabled: unknown = fields.get("disabled") ?? fields.get("disable");
+    const denies = Array.isArray(disabled)
+      ? disabled.length > 0
+      : disabled !== undefined && disabled !== null;
+    if (denies) {
+      return undefined;
+    }
+    list = fields.get("enabled") ?? fields.get("enable");
+  }
+  return Array.isArray(list) &&
+    list.every((each): each is string => typeof each === "string")
+    ? list
+    : undefined;
+};
+
+/** Whether `list` holds exactly `names`, in any order. */
+const sameNames = (
+  list: readonly string[] | undefined,
+  names: readonly string[]
+): boolean =>
+  list !== undefined &&
+  list.length === names.length &&
+  new Set(list).size === names.length &&
+  names.every((name) => list.includes(name));
+
+/**
+ * Whether `byToolkit` is stated, for `toolkit` alone, with exactly
+ * `names` allowed (`enabledOf`).
+ */
+const onlyFor = (
+  byToolkit: Record<string, unknown> | null | undefined,
+  toolkit: string,
+  names: readonly string[]
+): boolean =>
+  byToolkit !== null &&
+  byToolkit !== undefined &&
+  Object.keys(byToolkit).length === 1 &&
+  sameNames(enabledOf(byToolkit[toolkit]), names);
+
+/** Whether every one of Composio's own tools is off in a session's config. */
+const allOff = (config: z.infer<typeof sessionSchema>["config"]): boolean =>
+  !config.manage_connections &&
+  !config.search &&
+  !config.execute &&
+  !config.workbench &&
+  !config.proxy_execute &&
+  !config.multi_account &&
+  (config.instant === undefined ||
+    config.instant === null ||
+    config.instant === false);
+
+/** What a session of one connection must hold (`sessionMismatch`). */
+interface SessionAsked {
+  /** Its Composio user: checked where connect made it, unknown after. */
+  userId: string | undefined;
+  toolkit: string;
+  connectedAccountId: string;
+  /** The tools it serves (`sessionToolNames`). */
+  tools: readonly string[];
+}
+
+/**
+ * How the session config Composio answered isn't the one asked, if it
+ * isn't. `"session"`: it isn't for the account's user, doesn't pin
+ * exactly that one account of the toolkit (which Composio must state: the
+ * pin alone keeps two connections of one toolkit apart, every account
+ * being this deployment's user's), names another toolkit, or has one of
+ * Composio's own tools on (connection management, search, multi-execute,
+ * the workbench, proxy execution, more than one account, instant usage):
+ * what connect's own checks on a call can't hold. `"tools"`: it doesn't
+ * state exactly the tools asked of that toolkit alone; connect still runs
+ * only the tools it allows, whatever the session serves.
+ */
+const sessionMismatch = (
   { config }: z.infer<typeof sessionSchema>,
-  account: Made
-): boolean => {
-  const pinned = config.connected_accounts;
-  const pinnedRight =
-    pinned === undefined ||
-    (Object.keys(pinned).length === 1 &&
-      pinned[account.toolkit]?.length === 1 &&
-      pinned[account.toolkit]?.[0] === account.connectedAccountId);
-  return (
-    config.user_id === account.composioUserId &&
-    pinnedRight &&
-    config.manage_connections?.enabled !== true &&
-    config.search?.enable !== true &&
-    config.workbench?.enable !== true &&
-    config.proxy_execute?.enable !== true &&
-    (config.instant === undefined || config.instant === false)
-  );
+  asked: SessionAsked
+): "session" | "tools" | undefined => {
+  const { toolkit } = asked;
+  const toolkitsRight =
+    config.toolkits === undefined ||
+    config.toolkits === null ||
+    sameNames(enabledOf(config.toolkits), [toolkit]);
+  const sessionRight =
+    (asked.userId === undefined || config.user_id === asked.userId) &&
+    onlyFor(config.connected_accounts, toolkit, [asked.connectedAccountId]) &&
+    toolkitsRight &&
+    allOff(config);
+  if (!sessionRight) {
+    return "session";
+  }
+  return onlyFor(config.tools, toolkit, asked.tools) ? undefined : "tools";
 };
 
 /**
  * Serves the connected account `account`, settled active
  * (`settledAccount`), as a connection of `person`'s: makes its Composio
  * session (`sessionBodyOf`, noted in `made` and in its cleanup row),
- * checks Composio made the one asked (`isSessionAsked`) with an MCP URL
+ * checks Composio made the one asked (`sessionMismatch`) with an MCP URL
  * connect calls (`sessionUrlProblem`), and stores the connection with that
  * URL, with `events` for its ID in the same batch, which also clears the
  * cleanup row. The connection's ID. Throws {@link ComposioError} when
@@ -1198,14 +1364,16 @@ const serveAndStore = async (
   events: (connectionId: string) => [AuditEntry, ...AuditEntry[]],
   auth: "managed" | "key"
 ): Promise<string> => {
-  const tools = composioToolsSchema.parse(JSON.parse(account.tools));
+  const names = sessionToolNames(
+    composioToolsSchema.parse(JSON.parse(account.tools))
+  );
   const session = await atStep(
     "session",
     async () =>
       await composioRequest(key, {
         method: "POST",
         path: "/tool_router/session",
-        body: sessionBodyOf(account, tools),
+        body: sessionBodyOf(account, names),
         schema: sessionSchema,
       })
   );
@@ -1215,7 +1383,13 @@ const serveAndStore = async (
     .update(composioCleanups)
     .set({ sessionId })
     .where(eq(composioCleanups.id, account.flowId));
-  if (!isSessionAsked(session, account)) {
+  const mismatch = sessionMismatch(session, {
+    userId: account.composioUserId,
+    toolkit: account.toolkit,
+    connectedAccountId: account.connectedAccountId,
+    tools: names,
+  });
+  if (mismatch !== undefined) {
     const error = new ComposioError("Composio's session isn't the one asked");
     failureReasons.set(error, "session:config");
     throw error;
@@ -1232,30 +1406,64 @@ const serveAndStore = async (
   const connectionId = crypto.randomUUID();
   const now = new Date();
   const db = drizzle(env.DB);
+  // A connection of the toolkit made before sessions is disconnected as
+  // this one is stored, in the same transaction (before it, so a key
+  // toolkit's one live connection is this one), its account and auth
+  // config deleted at Composio after, as a disconnect deletes them. Its
+  // legacy MCP server stays at Composio: connect's key can't delete it.
+  const replaced = await legacyToReplace(db, account.toolkit);
+  const replacedCleanup = crypto.randomUUID();
+  const [first, ...more] = events(connectionId);
   try {
-    await recordEvents(env, events(connectionId), [
-      // The connection takes over what the cleanup row held.
-      db
-        .delete(composioCleanups)
-        .where(eq(composioCleanups.id, account.flowId)),
-      db.insert(connections).values({
-        id: connectionId,
-        provider: account.toolkit,
-        scope: "shared",
-        ownerUserId: null,
-        status: "active",
-        serverKind: "composio",
-        server: url,
-        accountId: account.connectedAccountId,
-        connectedBy: person.userId,
-        composioSessionId: sessionId,
-        composioAuthConfigId: account.authConfigId,
-        composioAuth: auth,
-        tools: account.tools,
-        createdAt: now,
-        updatedAt: now,
-      }),
-    ]);
+    await recordEvents(
+      env,
+      [
+        first,
+        ...more,
+        ...(replaced === undefined
+          ? []
+          : [
+              connectionEvent(person, "connection.disconnect", replaced.id, {
+                ...detailOf(account.toolkit),
+                outcome: "ok",
+                tokenHolder: "composio",
+                replacedBy: connectionId,
+              }),
+            ]),
+      ],
+      [
+        // The connection takes over what the cleanup row held.
+        db
+          .delete(composioCleanups)
+          .where(eq(composioCleanups.id, account.flowId)),
+        ...(replaced === undefined
+          ? []
+          : [
+              disconnectCleanup(db, replacedCleanup, isLegacyOf(replaced.id)),
+              db
+                .update(connections)
+                .set({ status: "disconnected", updatedAt: now })
+                .where(isLegacyOf(replaced.id)),
+            ]),
+        db.insert(connections).values({
+          id: connectionId,
+          provider: account.toolkit,
+          scope: "shared",
+          ownerUserId: null,
+          status: "active",
+          serverKind: "composio",
+          server: url,
+          accountId: account.connectedAccountId,
+          connectedBy: person.userId,
+          composioSessionId: sessionId,
+          composioAuthConfigId: account.authConfigId,
+          composioAuth: auth,
+          tools: account.tools,
+          createdAt: now,
+          updatedAt: now,
+        }),
+      ]
+    );
   } catch (error) {
     // A key connection is its toolkit's one live one (the schema's
     // `connections_key_toolkit_idx`): of two stored at once, one fails
@@ -1264,6 +1472,25 @@ const serveAndStore = async (
       throw connectionErrors.create("connection.already_connected");
     }
     throw error;
+  }
+  if (replaced !== undefined) {
+    // What was held for the one replaced can no longer run; what it held
+    // at Composio goes, or stays recorded for the clock (`replacedCleanup`).
+    await dropPendingActions(
+      env,
+      eq(pendingActions.connectionId, replaced.id),
+      "connection.disconnected",
+      person
+    );
+    await carryOutCleanup(
+      env,
+      replacedCleanup,
+      {
+        connectedAccountId: replaced.accountId,
+        authConfigId: replaced.authConfigId,
+      },
+      null
+    );
   }
   return connectionId;
 };
@@ -1508,6 +1735,8 @@ export const connectToolkitWithKey = async (
   if (val === undefined || !fits) {
     throw connectionErrors.create("connection.invalid");
   }
+  // At least one tool its session can serve (`sessionToolNames`).
+  sessionToolNames(tools);
   // Its one shared connection is there already: nothing is made. Two
   // connects at once both pass this; storing keeps one (`serveAndStore`).
   if (await hasLiveShared(env, toolkit)) {
@@ -1700,35 +1929,6 @@ export const composioAccountStates = async (
 };
 
 /**
- * The cleanup of a Composio connection being disconnected: an insert of
- * its session, account and auth config into `composio_cleanups` as `id`,
- * only while `stillConnected` matches it, for the same transaction that
- * marks it disconnected (src/oauth.ts). Calls stop with that transaction,
- * whatever becomes of the deletion at Composio after it.
- */
-export const disconnectCleanup = (
-  db: DrizzleD1Database,
-  id: string,
-  stillConnected: SQL
-) =>
-  db.insert(composioCleanups).select(
-    db
-      .select({
-        id: sql<string>`${id}`.as("id"),
-        serverId: sql<string | null>`NULL`.as("server_id"),
-        connectedAccountId: connections.accountId,
-        authConfigId: connections.composioAuthConfigId,
-        sessionId: connections.composioSessionId,
-        marker: sql<string | null>`NULL`.as("marker"),
-        attempts: sql<number>`0`.as("attempts"),
-        retryAt: sql<Date>`${Date.now() + firstRetryMs}`.as("retry_at"),
-        createdAt: sql<Date>`${Date.now()}`.as("created_at"),
-      })
-      .from(connections)
-      .where(stillConnected)
-  );
-
-/**
  * Deletes a disconnected Composio connection's session, account and auth
  * config at Composio, which deletes its tokens there, as the cleanup row
  * `id` its disconnect recorded says; the row keeps what can't be deleted
@@ -1750,10 +1950,11 @@ export const revokeAtComposio = async (
     null
   );
 
-/** Where tools go: a connection's session, and its toolkit. */
+/** Where tools go: a connection's session, its toolkit and pinned account. */
 interface ToolsAt {
   sessionId: string;
   toolkit: string;
+  connectedAccountId: string;
 }
 
 /**
@@ -1781,24 +1982,58 @@ const stillListed = async (
 };
 
 /**
- * Sets the tools Composio's session `sessionId` allows of `toolkit` to
- * `tools` it still has (`stillListed`), and no other
+ * Sets the tools Composio's session `at` serves to `names` alone
  * (`PATCH /tool_router/session/{id}`): what the PATCH leaves out, its
- * pinned account and the tools switched off, stays.
+ * pinned account and the tools switched off, stays. Composio's answer
+ * must hold the session as asked (`sessionMismatch`, but for its user,
+ * which a PATCH doesn't send), or the send is refused (`session:config`),
+ * leaving the connection out of sync for the reconcile (another send of
+ * connect's may have landed in between). One that pins another account,
+ * names another toolkit or has one of Composio's own tools on is a
+ * session wider than connect can hold: connection `connectionId` is
+ * stopped as well (`needs_reauth`), so no call goes to that session, none
+ * of its tools are sent to it again, and it is offered to be connected
+ * again, which makes a new session in its place.
  */
 const setSessionTools = async (
+  db: ReturnType<typeof drizzle>,
   key: string,
-  { sessionId, toolkit }: ToolsAt,
-  tools: readonly (string | ComposioToolRule)[]
+  at: ToolsAt,
+  connectionId: string,
+  names: readonly string[]
 ): Promise<void> => {
-  await composioRequest(key, {
+  const session = await composioRequest(key, {
     method: "PATCH",
-    path: `/tool_router/session/${encodeURIComponent(sessionId)}`,
-    body: {
-      tools: sessionToolsOf(toolkit, await stillListed(key, toolkit, tools)),
-    },
-    schema: z.unknown(),
+    path: `/tool_router/session/${encodeURIComponent(at.sessionId)}`,
+    body: { tools: sessionToolsOf(at.toolkit, names) },
+    schema: sessionSchema,
   });
+  const mismatch =
+    session.session_id === at.sessionId
+      ? sessionMismatch(session, {
+          userId: undefined,
+          toolkit: at.toolkit,
+          connectedAccountId: at.connectedAccountId,
+          tools: names,
+        })
+      : "session";
+  if (mismatch === undefined) {
+    return;
+  }
+  if (mismatch === "session") {
+    await db
+      .update(connections)
+      .set({ status: "needs_reauth", updatedAt: new Date() })
+      .where(
+        and(eq(connections.id, connectionId), eq(connections.status, "active"))
+      );
+    log.warn("composio.session_changed_wider", { toolkit: at.toolkit });
+  }
+  const error = new ComposioError("Composio's session isn't the one asked", {
+    status: 200,
+  });
+  failureReasons.set(error, "session:config");
+  throw error;
 };
 
 /**
@@ -1836,6 +2071,9 @@ const sendTools = async (
   connectionId: string,
   tools: readonly (string | ComposioToolRule)[]
 ): Promise<Send> => {
+  // What the session is to serve, before anything is counted or sent:
+  // never none (`sessionToolNames`).
+  const names = sessionToolNames(await stillListed(key, at.toolkit, tools));
   const now = Date.now();
   // Counted, kept as unanswered, and the earlier unanswered read, in one
   // batch: no count without its row.
@@ -1885,7 +2123,7 @@ const sendTools = async (
       );
   };
   try {
-    await setSessionTools(key, at, tools);
+    await setSessionTools(db, key, at, connectionId, names);
   } catch (error) {
     // Composio answered, refusing: this send lands nowhere later. One it
     // never answered stays kept.
@@ -1916,11 +2154,15 @@ const reconciled = async (
   at: ToolsAt,
   connectionId: string
 ): Promise<(Send & { tools: string }) | undefined> => {
+  // Only while it is active: a connection stopped meanwhile (a session
+  // answered wider than asked, `setSessionTools`) is sent nothing more.
   const listNow = async (): Promise<string | undefined> => {
     const now = await db
       .select({ tools: connections.tools })
       .from(connections)
-      .where(eq(connections.id, connectionId))
+      .where(
+        and(eq(connections.id, connectionId), eq(connections.status, "active"))
+      )
       .get();
     return now?.tools ?? undefined;
   };
@@ -2057,6 +2299,7 @@ export const reconcileUnsyncedTools = async (env: Env): Promise<void> => {
       id: connections.id,
       sessionId: connections.composioSessionId,
       toolkit: connections.provider,
+      connectedAccountId: connections.accountId,
     })
     .from(connections)
     .where(
@@ -2074,12 +2317,13 @@ export const reconcileUnsyncedTools = async (env: Env): Promise<void> => {
     // SQLite sorts nulls first: never tried before tried.
     .orderBy(asc(connections.toolsSyncRetryAt), asc(connections.id))
     .limit(unsyncedPerRun);
-  for (const { id, sessionId, toolkit } of marked) {
-    if (sessionId === null) {
+  for (const { id, sessionId, toolkit, connectedAccountId } of marked) {
+    if (sessionId === null || connectedAccountId === null) {
       continue;
     }
+    const at = { sessionId, toolkit, connectedAccountId };
     // oxlint-disable-next-line no-await-in-loop -- one connection at a time
-    if (!(await reconcileAndSettle(db, key, { sessionId, toolkit }, id))) {
+    if (!(await reconcileAndSettle(db, key, at, id))) {
       log.warn("composio.tools_still_unsynced", { connectionId: id });
     }
   }
@@ -2111,6 +2355,11 @@ const checkedChange = async (
     await failed("connection.tools_changed", "refused");
     throw connectionErrors.create("connection.tools_changed");
   }
+  // At least one tool its session can serve (`sessionToolNames`).
+  if (offeredToolNames({ tools: JSON.stringify(tools) }).length === 0) {
+    await failed("connection.no_tools", "refused");
+    throw connectionErrors.create("connection.no_tools");
+  }
   try {
     return await checkedTools(key, toolkit, tools, previous);
   } catch (error) {
@@ -2119,6 +2368,30 @@ const checkedChange = async (
       "failed"
     );
     throw error;
+  }
+};
+
+/**
+ * Tells Composio's session `at` of connection `connectionId` only the
+ * tools both `previous` and `tools` allow, before connect writes `tools`
+ * (`changeToolkitTools`). A change that keeps none of them has nothing to
+ * narrow to, and an empty list may be every tool at Composio: then the
+ * session keeps its tools until the widening after the write, connect
+ * refusing the ones it no longer allows meanwhile, as it refuses every
+ * tool it doesn't allow.
+ */
+const narrowFirst = async (
+  db: ReturnType<typeof drizzle>,
+  key: string,
+  at: ToolsAt,
+  connectionId: string,
+  previous: readonly (string | ComposioToolRule)[],
+  tools: readonly (string | ComposioToolRule)[]
+): Promise<void> => {
+  const kept = new Set(previous.map(composioToolName));
+  const narrowed = tools.filter((tool) => kept.has(composioToolName(tool)));
+  if (offeredToolNames({ tools: JSON.stringify(narrowed) }).length > 0) {
+    await sendTools(db, key, at, connectionId, narrowed);
   }
 };
 
@@ -2155,6 +2428,7 @@ export const changeToolkitTools = async (
     row.scope === "shared" &&
     row.status === "active" &&
     row.composioSessionId !== null &&
+    row.accountId !== null &&
     row.tools !== null;
   if (!changeable) {
     throw connectErrors.create("connect.connection_not_found");
@@ -2163,6 +2437,7 @@ export const changeToolkitTools = async (
   const at: ToolsAt = {
     sessionId: row.composioSessionId ?? "",
     toolkit,
+    connectedAccountId: row.accountId ?? "",
   };
   const before = row.tools ?? "[]";
   await refuseUnlessAdmin(env, person, toolkit, "connection.tools", row.id);
@@ -2228,10 +2503,8 @@ export const changeToolkitTools = async (
   // only the tools both lists allow; the ones this adds reach it only once
   // connect holds them (the reconcile below). Composio may lag connect,
   // never lead it.
-  const kept = new Set(previous.map(composioToolName));
-  const narrowed = tools.filter((tool) => kept.has(composioToolName(tool)));
   try {
-    await sendTools(db, key, at, row.id, narrowed);
+    await narrowFirst(db, key, at, row.id, previous, tools);
   } catch (error) {
     // Composio may have taken the narrowing all the same (an answer lost
     // or unreadable): brought back to connect's list, which is unchanged,

@@ -40,6 +40,8 @@ export const composio = fakeComposioApi(
         },
         { slug: "HUBSPOT_CREATE_CONTACT" },
         { slug: "HUBSPOT_UPDATE_CONTACT" },
+        // One Grasp never runs, by its name (`isNeverTool`).
+        { slug: "HUBSPOT_DELETE_CONTACT" },
         // On its way out: never allowed.
         { slug: "HUBSPOT_EXPORT_CONTACTS", isDeprecated: true },
       ],

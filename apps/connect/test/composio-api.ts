@@ -665,7 +665,9 @@ export const fakeComposioApi = (
 
   /**
    * The tools `tools` (a session's `tools`) enable of `toolkit`, if each is
-   * one of the toolkit's, as Composio requires: `undefined` when one isn't.
+   * one of the toolkit's, as Composio requires: `undefined` when one isn't,
+   * or when it enables none, which Composio may take for every tool, and
+   * connect never sends.
    */
   const enabledTools = (
     tools: unknown,
@@ -677,7 +679,9 @@ export const fakeComposioApi = (
         .find(({ slug }) => slug === toolkit)
         ?.tools.map(({ slug }) => slug)
     );
-    return names.every((name) => known.has(name)) ? names : undefined;
+    return names.length > 0 && names.every((name) => known.has(name))
+      ? names
+      : undefined;
   };
 
   /**

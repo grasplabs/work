@@ -210,13 +210,20 @@ const composioApi = async (request, url) => {
         session_id: id,
         mcp: { type: "http", url: "https://backend.composio.dev/api/v3/tool_router/session/" + id + "/mcp" },
         tool_router_tools: [],
+        // As Composio echoes it: its answers' words for the lists.
         config: {
           user_id: body.user_id,
+          toolkits: { enabled: body.toolkits?.enable ?? [] },
           connected_accounts: body.connected_accounts,
+          tools: Object.fromEntries(
+            Object.entries(body.tools ?? {}).map(([toolkit, tools]) => [toolkit, { enabled: tools.enable ?? [] }])
+          ),
           manage_connections: { enabled: body.manage_connections?.enable !== false },
           search: { enable: body.search?.enable !== false },
           workbench: { enable: body.workbench?.enable !== false },
           proxy_execute: { enable: body.proxy_execute?.enable === true },
+          multi_account: { enable: body.multi_account?.enable === true },
+          execute: { enable_multi_execute: body.execute?.enable_multi_execute !== false },
           instant: body.instant === false ? false : {},
         },
         config_version: 1,

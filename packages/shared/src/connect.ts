@@ -2918,6 +2918,8 @@ export const connectionErrors = defineErrorFamily({
     "That origin can't be approved: it must be an https origin whose name leads only to public internet addresses.",
   "connection.tools_changed":
     "Someone changed this connection's tools at the same time. Look at them again and make your change once more.",
+  "connection.no_tools":
+    "None of the tools chosen is one Grasp runs, so nothing was changed. Allow at least one other tool.",
   "connection.server_refused":
     "That server can't be added: its address must be an https URL with a name, not an IP address, that leads only to public internet addresses.",
   "connection.sign_in_unsupported":
